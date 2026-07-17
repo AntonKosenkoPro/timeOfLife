@@ -23,12 +23,18 @@ build/
 *.xcodeproj/project.xcworkspace/xcuserdata/
 *.xcworkspace/xcuserdata/
 
-### Swift Package Manager / Vapor backend
+### Swift Package Manager (legacy)
 .build/
 .swiftpm/
 Packages/
-# Backend is an executable app — its lockfile SHOULD be committed for reproducible builds.
-!backend/Package.resolved
+
+### Go backend
+/backend/bin/
+*.db
+*.db-journal
+*.out
+*.test
+# go.sum is committed for reproducible module builds.
 
 ### Env files (keep .env.example)
 .env
