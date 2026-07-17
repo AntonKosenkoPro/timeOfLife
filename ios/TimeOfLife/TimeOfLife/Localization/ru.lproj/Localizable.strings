@@ -1,0 +1,92 @@
+/* Time of Life — Russian */
+
+// App
+"app.name" = "Time of Life";
+
+// Auth flow
+"auth.welcome" = "Добро пожаловать";
+"auth.subtitle" = "Войдите или создайте аккаунт, чтобы продолжить.";
+
+// Sign in
+"signin.title" = "Вход";
+"signin.email" = "Эл. почта";
+"signin.password" = "Пароль";
+"signin.submit" = "Войти";
+"signin.forgotPassword" = "Забыли пароль?";
+"signin.noAccount" = "Нет аккаунта?";
+"signin.signUp" = "Регистрация";
+"signin.success" = "Вход выполнен";
+
+// Sign up
+"signup.title" = "Создать аккаунт";
+"signup.email" = "Эл. почта";
+"signup.password" = "Пароль";
+"signup.submit" = "Создать аккаунт";
+"signup.haveAccount" = "Уже есть аккаунт?";
+"signup.signin" = "Войти";
+"signup.success" = "Аккаунт создан. Проверьте почту для подтверждения.";
+
+// Forgot password
+"forgot.title" = "Сброс пароля";
+"forgot.email" = "Эл. почта";
+"forgot.submit" = "Отправить ссылку";
+"forgot.success" = "Если аккаунт существует, ссылка отправлена.";
+"forgot.back" = "Назад ко входу";
+
+// Reset password
+"reset.title" = "Новый пароль";
+"reset.password" = "Новый пароль";
+"reset.submit" = "Сбросить пароль";
+"reset.success" = "Пароль сброшен. Теперь можно войти.";
+
+// Verify email
+"verify.title" = "Подтверждение почты";
+"verify.token" = "Токен подтверждения";
+"verify.submit" = "Подтвердить";
+"verify.success" = "Почта подтверждена. Вы вошли в систему.";
+"verify.resend" = "Отправить письмо повторно";
+"verify.resent" = "Если аккаунт существует, новое письмо отправлено.";
+
+// Signed in
+"signedIn.title" = "Вход выполнен";
+"signedIn.email" = "Вы вошли как %@";
+"signedIn.logout" = "Выйти";
+"signedIn.placeholder" = "Трекинг времени скоро появится.";
+
+// Offline
+"offline.banner" = "Вы не в сети. Некоторые действия недоступны.";
+
+// Validation
+"validation.emailEmpty" = "Введите эл. почту.";
+"validation.emailInvalid" = "Введите корректную эл. почту.";
+"validation.emailTooLong" = "Слишком длинная эл. почта.";
+"validation.passwordEmpty" = "Введите пароль.";
+"validation.passwordTooShort" = "Пароль должен быть не короче 8 символов.";
+"validation.passwordTooLong" = "Пароль должен быть не длиннее 128 символов.";
+"validation.passwordNoLetter" = "Добавьте букву в пароль.";
+"validation.passwordNoDigit" = "Добавьте цифру в пароль.";
+"validation.passwordWhitespaceOnly" = "Пароль не может состоять только из пробелов.";
+
+// Server errors
+"error.email_taken" = "Аккаунт с такой почтой уже существует.";
+"error.weak_password" = "Пароль слишком слабый.";
+"error.invalid_body" = "Проверьте введённые данные.";
+"error.rate_limited" = "Слишком много попыток. Попробуйте позже.";
+"error.verify_token_invalid" = "Недействительная ссылка подтверждения.";
+"error.verify_token_expired" = "Срок действия ссылки подтверждения истёк.";
+"error.verify_token_used" = "Эта ссылка подтверждения уже использовалась.";
+"error.invalid_credentials" = "Неверная почта или пароль.";
+"error.email_not_verified" = "Подтвердите почту перед входом.";
+"error.invalid_refresh" = "Сессия истекла. Войдите снова.";
+"error.token_reuse" = "Сессия аннулирована. Войдите снова.";
+"error.token_expired" = "Сессия истекла. Войдите снова.";
+"error.reset_token_invalid" = "Недействительная ссылка сброса.";
+"error.reset_token_expired" = "Срок действия ссылки сброса истёк.";
+"error.reset_token_used" = "Эта ссылка сброса уже использовалась.";
+"error.offline" = "Вы не в сети.";
+"error.unknown" = "Что-то пошло не так. Попробуйте снова.";
+"error.unauthorized" = "Сессия истекла. Войдите снова.";
+
+// Apple sign in (deferred)
+"appleSignIn.title" = "Вход через Apple";
+"appleSignIn.comingSoon" = "Скоро";

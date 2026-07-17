@@ -6,7 +6,7 @@
 ._*
 
 # Custom folder icons
-Icon
+Icon
 
 # Volume root files
 .DocumentRevisions-V100
@@ -16,3 +16,25 @@ Icon
 .Trashes
 .VolumeIcon.icns
 .com.apple.timemachine.donotpresent
+### Xcode (iOS)
+DerivedData/
+build/
+*.xcodeproj/xcuserdata/
+*.xcodeproj/project.xcworkspace/xcuserdata/
+*.xcworkspace/xcuserdata/
+
+### Swift Package Manager / Vapor backend
+.build/
+.swiftpm/
+Packages/
+# Backend is an executable app — its lockfile SHOULD be committed for reproducible builds.
+!backend/Package.resolved
+
+### Env files (keep .env.example)
+.env
+.env.*
+!.env.example
+
+### Editor / OS
+.vscode/
+.idea/
