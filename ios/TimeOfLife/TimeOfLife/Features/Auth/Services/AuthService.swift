@@ -3,7 +3,7 @@ import Combine
 
 /// Orchestrates `AuthRepository` + `KeychainStoring` + `SessionCache` +
 /// `SessionStore`. Owns the token lifecycle: writes Keychain + cache on
-/// sign-in/verify, rotates on refresh, clears all on logout.
+/// OTP verify, rotates on refresh, clears all on logout.
 ///
 /// `restoreSession()`: reads Keychain+cache, attempts `/me` in background;
 /// on transient offline failure keeps the cached session (no logout on
@@ -29,35 +29,21 @@ final class AuthService: ObservableObject {
 
     // MARK: - Public API (called by ViewModels / RootView)
 
-    func signUp(email: String, password: String) async throws {
+    /// `POST /auth/otp/request`. Normalizes the email and caches it so the
+    /// OTP screen (and a magic-link deep link) knows which address is being
+    /// verified. Always 202 on success — no account enumeration.
+    func requestOtp(email: String) async throws {
         let normalized = AuthValidator.normalize(email: email)
-        _ = try await repository.signup(email: normalized, password: password)
-        // No tokens returned on signup; user must verify email. Cache email so
-        // the verify screen can pre-fill and resend knows where to send.
+        try await repository.requestOtp(email: normalized)
         sessionStore.setCachedEmail(normalized)
     }
 
-    func verifyEmail(token: String) async throws {
-        let session = try await repository.verifyEmail(token: token)
-        await persist(session: session)
-    }
-
-    func resendVerification(email: String) async throws {
-        try await repository.resendVerification(email: AuthValidator.normalize(email: email))
-    }
-
-    func signIn(email: String, password: String) async throws {
+    /// `POST /auth/otp/verify`. Persists the returned session (tokens →
+    /// Keychain, user → cache + SessionStore) on success.
+    func verifyOtp(email: String, code: String) async throws {
         let normalized = AuthValidator.normalize(email: email)
-        let session = try await repository.signin(email: normalized, password: password)
+        let session = try await repository.verifyOtp(email: normalized, code: code)
         await persist(session: session)
-    }
-
-    func requestPasswordReset(email: String) async throws {
-        try await repository.requestPasswordReset(email: AuthValidator.normalize(email: email))
-    }
-
-    func confirmPasswordReset(token: String, newPassword: String) async throws {
-        try await repository.confirmPasswordReset(token: token, newPassword: newPassword)
     }
 
     /// Reads Keychain + cache; if a refresh token exists, attempts `/me`.

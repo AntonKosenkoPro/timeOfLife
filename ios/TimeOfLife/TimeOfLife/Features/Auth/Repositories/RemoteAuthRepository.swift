@@ -10,33 +10,17 @@ final class RemoteAuthRepository: AuthRepository {
         self.client = client
     }
 
-    func signup(email: String, password: String) async throws -> SignupResponse {
-        try await client.send(
-            .post(method: .post, path: "\(basePath)/auth/signup",
-                  body: SignupRequest(email: email, password: password)),
-            as: SignupResponse.self
-        )
-    }
-
-    func verifyEmail(token: String) async throws -> AuthSession {
-        try await client.send(
-            .post(method: .post, path: "\(basePath)/auth/verify-email",
-                  body: VerifyEmailRequest(token: token)),
-            as: AuthSession.self
-        )
-    }
-
-    func resendVerification(email: String) async throws {
+    func requestOtp(email: String) async throws {
         try await client.sendVoid(
-            APIEndpoint(method: .post, path: "\(basePath)/auth/verify-email/resend",
-                        body: ResendRequest(email: email))
+            APIEndpoint(method: .post, path: "\(basePath)/auth/otp/request",
+                        body: OtpRequestRequest(email: email))
         )
     }
 
-    func signin(email: String, password: String) async throws -> AuthSession {
+    func verifyOtp(email: String, code: String) async throws -> AuthSession {
         try await client.send(
-            APIEndpoint(method: .post, path: "\(basePath)/auth/signin",
-                        body: SigninRequest(email: email, password: password)),
+            APIEndpoint(method: .post, path: "\(basePath)/auth/otp/verify",
+                        body: OtpVerifyRequest(email: email, code: code)),
             as: AuthSession.self
         )
     }
@@ -60,26 +44,5 @@ final class RemoteAuthRepository: AuthRepository {
             APIEndpoint.value(method: .get, path: "\(basePath)/auth/me", requiresAuth: true),
             as: UserDTO.self
         )
-    }
-
-    func requestPasswordReset(email: String) async throws {
-        try await client.sendVoid(
-            APIEndpoint(method: .post, path: "\(basePath)/password/reset-request",
-                        body: ResetRequestRequest(email: email))
-        )
-    }
-
-    func confirmPasswordReset(token: String, newPassword: String) async throws {
-        try await client.sendVoid(
-            APIEndpoint(method: .post, path: "\(basePath)/password/reset-confirm",
-                        body: ResetConfirmRequest(token: token, newPassword: newPassword))
-        )
-    }
-}
-
-private extension APIEndpoint {
-    /// Convenience to make the call sites above read clearly.
-    static func `post`(method: HTTPMethod, path: String, body: Encodable? = nil) -> APIEndpoint {
-        APIEndpoint(method: method, path: path, body: body)
     }
 }

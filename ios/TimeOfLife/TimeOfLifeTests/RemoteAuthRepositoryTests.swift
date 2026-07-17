@@ -10,48 +10,38 @@ struct RemoteAuthRepositoryTests {
         return (repo, mock)
     }
 
-    @Test("signup posts to /auth/signup with body")
-    func signupEndpoint() async throws {
+    @Test("requestOtp posts to /auth/otp/request with body")
+    func requestOtpEndpoint() async throws {
         let (repo, mock) = makeRepo()
-        mock.sendHandler = { _, _ in
-            SignupResponse(user: UserDTO(id: "u1", email: "a@b.com", emailVerified: false))
-        }
-        let resp = try await repo.signup(email: "a@b.com", password: "abcd1234")
-        #expect(resp.user.emailVerified == false)
+        mock.sendVoidHandler = { _ in }
+        try await repo.requestOtp(email: "a@b.com")
         let r = mock.received.first
         #expect(r?.method == .post)
-        #expect(r?.path == "/api/v1/auth/signup")
+        #expect(r?.path == "/api/v1/auth/otp/request")
         #expect(r?.requiresAuth == false)
         let body = r?.body
         #expect(body != nil)
-        let decoded = try JSONDecoder().decode(SignupRequest.self, from: body!)
+        let decoded = try JSONDecoder().decode(OtpRequestRequest.self, from: body!)
         #expect(decoded.email == "a@b.com")
-        #expect(decoded.password == "abcd1234")
     }
 
-    @Test("signin posts to /auth/signin")
-    func signinEndpoint() async throws {
+    @Test("verifyOtp posts to /auth/otp/verify with body")
+    func verifyOtpEndpoint() async throws {
         let (repo, mock) = makeRepo()
         mock.sendHandler = { _, _ in
             AuthSession(accessToken: "at", refreshToken: "rt",
                         user: UserDTO(id: "u1", email: "a@b.com", emailVerified: true))
         }
-        _ = try await repo.signin(email: "a@b.com", password: "abcd1234")
-        #expect(mock.received.first?.path == "/api/v1/auth/signin")
-    }
-
-    @Test("verifyEmail posts to /auth/verify-email")
-    func verifyEndpoint() async throws {
-        let (repo, mock) = makeRepo()
-        mock.sendHandler = { _, _ in
-            AuthSession(accessToken: "at", refreshToken: "rt",
-                        user: UserDTO(id: "u1", email: "a@b.com", emailVerified: true))
-        }
-        _ = try await repo.verifyEmail(token: "tok")
-        #expect(mock.received.first?.path == "/api/v1/auth/verify-email")
-        let body = mock.received.first?.body
-        let decoded = try JSONDecoder().decode(VerifyEmailRequest.self, from: body!)
-        #expect(decoded.token == "tok")
+        _ = try await repo.verifyOtp(email: "a@b.com", code: "123456")
+        let r = mock.received.first
+        #expect(r?.method == .post)
+        #expect(r?.path == "/api/v1/auth/otp/verify")
+        #expect(r?.requiresAuth == false)
+        let body = r?.body
+        #expect(body != nil)
+        let decoded = try JSONDecoder().decode(OtpVerifyRequest.self, from: body!)
+        #expect(decoded.email == "a@b.com")
+        #expect(decoded.code == "123456")
     }
 
     @Test("me is GET with auth")
@@ -76,26 +66,6 @@ struct RemoteAuthRepositoryTests {
         #expect(r?.requiresAuth == true)
     }
 
-    @Test("password reset-request posts to /password/reset-request")
-    func resetRequestEndpoint() async throws {
-        let (repo, mock) = makeRepo()
-        mock.sendVoidHandler = { _ in }
-        try await repo.requestPasswordReset(email: "a@b.com")
-        #expect(mock.received.first?.path == "/api/v1/password/reset-request")
-    }
-
-    @Test("password reset-confirm posts to /password/reset-confirm")
-    func resetConfirmEndpoint() async throws {
-        let (repo, mock) = makeRepo()
-        mock.sendVoidHandler = { _ in }
-        try await repo.confirmPasswordReset(token: "t", newPassword: "abcd1234")
-        let r = mock.received.first
-        #expect(r?.path == "/api/v1/password/reset-confirm")
-        let decoded = try JSONDecoder().decode(ResetConfirmRequest.self, from: r!.body!)
-        #expect(decoded.token == "t")
-        #expect(decoded.newPassword == "abcd1234")
-    }
-
     @Test("refresh posts to /auth/refresh")
     func refreshEndpoint() async throws {
         let (repo, mock) = makeRepo()
@@ -114,13 +84,13 @@ struct RemoteAuthRepositoryTests {
     func errorPropagation() async throws {
         let (repo, mock) = makeRepo()
         mock.sendHandler = { _, _ in
-            throw APIError.server(code: "invalid_credentials", message: "bad")
+            throw APIError.server(code: "invalid_otp", message: "bad")
         }
         do {
-            _ = try await repo.signin(email: "a@b.com", password: "abcd1234")
+            _ = try await repo.verifyOtp(email: "a@b.com", code: "123456")
             Issue.record("expected throw")
         } catch let error as APIError {
-            #expect(error.code == "invalid_credentials")
+            #expect(error.code == "invalid_otp")
         }
     }
 }

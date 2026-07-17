@@ -24,12 +24,6 @@ struct RootView: View {
             AuthFlowView()
         case .signedIn:
             SignedInView()
-        case .verifyingEmail(let token):
-            VerifyEmailView(vm: VerifyEmailViewModel(
-                service: container.authService,
-                connectivity: container.connectivity,
-                token: token
-            ))
         }
     }
 }

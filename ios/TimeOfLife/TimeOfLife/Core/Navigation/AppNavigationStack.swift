@@ -13,6 +13,13 @@ import SwiftUI
 final class AppNavigationStack: ObservableObject {
     @Published var path: [AppRoute] = []
 
+    /// Side channel for the `timeoflife://verify?code=…` magic link. The deep
+    /// link handler sets this just before pushing `.otpEntry`; `OtpEntryView`
+    /// consumes it on appear (and on change), pre-fills the code, and clears
+    /// it. Carrying the code in the route would bloat `AppRoute`, so this
+    /// stays here next to the path it interacts with.
+    @Published var pendingDeepLinkCode: String?
+
     init(path: [AppRoute] = []) {
         self.path = path
     }

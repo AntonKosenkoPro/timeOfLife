@@ -20,30 +20,31 @@ struct APIClientTests {
     @Test("decodes success body")
     func successDecode() async throws {
         URLProtocolStub.responseHandler = { request in
-            let body = #"{"user":{"id":"u1","email":"a@b.com","email_verified":false}}"#.data(using: .utf8)!
-            return (body, TestFactories.okResponse(request.url!, status: 201, body: body))
+            let body = #"{"access_token":"at","refresh_token":"rt","user":{"id":"u1","email":"a@b.com","email_verified":true}}"#.data(using: .utf8)!
+            return (body, TestFactories.okResponse(request.url!, status: 200, body: body))
         }
         let (client, _) = makeClient()
         let resp = try await client.send(
-            APIEndpoint(method: .post, path: "/api/v1/auth/signup",
-                        body: SignupRequest(email: "a@b.com", password: "abcd1234")),
-            as: SignupResponse.self
+            APIEndpoint(method: .post, path: "/api/v1/auth/otp/verify",
+                        body: OtpVerifyRequest(email: "a@b.com", code: "123456")),
+            as: AuthSession.self
         )
+        #expect(resp.accessToken == "at")
         #expect(resp.user.id == "u1")
-        #expect(resp.user.emailVerified == false)
+        #expect(resp.user.emailVerified == true)
     }
 
     @Test("decodes error envelope into APIError.server")
     func errorEnvelope() async throws {
         URLProtocolStub.responseHandler = { request in
-            try TestFactories.errorResponse(request.url!, status: 422, code: "email_taken", message: "taken")
+            try TestFactories.errorResponse(request.url!, status: 422, code: "invalid_otp", message: "wrong")
         }
         let (client, _) = makeClient()
         await #expect(throws: APIError.self) {
             _ = try await client.send(
-                APIEndpoint(method: .post, path: "/api/v1/auth/signup",
-                            body: SignupRequest(email: "a@b.com", password: "abcd1234")),
-                as: SignupResponse.self
+                APIEndpoint(method: .post, path: "/api/v1/auth/otp/verify",
+                            body: OtpVerifyRequest(email: "a@b.com", code: "123456")),
+                as: AuthSession.self
             )
         }
     }
@@ -118,5 +119,17 @@ struct APIClientTests {
         }
         let (client, _) = makeClient()
         try await client.sendVoid(APIEndpoint.value(method: .post, path: "/api/v1/auth/logout", requiresAuth: true))
+    }
+
+    @Test("202 with empty body is accepted by sendVoid (otp/request)")
+    func sendVoid202() async throws {
+        URLProtocolStub.responseHandler = { request in
+            (Data(), HTTPURLResponse(url: request.url!, statusCode: 202, httpVersion: "HTTP/1.1", headerFields: nil)!)
+        }
+        let (client, _) = makeClient()
+        try await client.sendVoid(
+            APIEndpoint(method: .post, path: "/api/v1/auth/otp/request",
+                        body: OtpRequestRequest(email: "a@b.com"))
+        )
     }
 }

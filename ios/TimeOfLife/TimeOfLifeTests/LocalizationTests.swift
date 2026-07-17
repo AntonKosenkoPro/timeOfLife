@@ -26,11 +26,9 @@ struct LocalizationTests {
     @Test("error codes resolve via ErrorLocalization")
     func errorCodesResolve() throws {
         let codes = [
-            "email_taken", "weak_password", "invalid_body", "rate_limited",
-            "verify_token_invalid", "verify_token_expired", "verify_token_used",
-            "invalid_credentials", "email_not_verified",
+            "invalid_body", "rate_limited",
+            "invalid_otp", "otp_expired", "otp_attempts_exceeded",
             "invalid_refresh", "token_reuse", "token_expired",
-            "reset_token_invalid", "reset_token_expired", "reset_token_used",
         ]
         for code in codes {
             let msg = L10n.text(in: .default, code: code)
@@ -46,9 +44,34 @@ struct LocalizationTests {
         #expect(!msg.isEmpty)
     }
 
+    /// Validation fragment keys used to build unified messages (U4) are not
+    /// enumerated in `L10n`, so they need their own parity check across en + ru.
+    @Test("validation fragment keys resolve in en + ru bundles")
+    func validationFragmentKeysResolve() throws {
+        let keys = [
+            "common.and",
+            "validation.emailEmpty",
+            "validation.email.prefix",
+            "validation.email.rule.invalid",
+            "validation.email.rule.tooLong",
+            "validation.otpEmpty",
+            "validation.otp.prefix",
+            "validation.otp.rule.invalid",
+        ]
+        let main = Bundle.main
+        for code in ["en", "ru"] {
+            let path = try #require(main.path(forResource: code, ofType: "lproj"))
+            let bundle = try #require(Bundle(path: path))
+            for key in keys {
+                let value = NSLocalizedString(key, bundle: bundle, comment: "")
+                #expect(value != key, "unresolved key \(key) in \(code)")
+                #expect(!value.isEmpty, "empty value for key \(key) in \(code)")
+            }
+        }
+    }
+
     /// All L10n cases, enumerated at runtime via the enum.
     private var l10nCases: [L10n] {
-        // L10n has no CaseIterable conformance by default; add it lazily.
         L10n.allCases
     }
 }
@@ -57,13 +80,8 @@ extension L10n: CaseIterable {
     public static var allCases: [L10n] {
         [
             .appName, .authWelcome, .authSubtitle,
-            .signinTitle, .signinEmail, .signinPassword, .signinSubmit,
-            .signinForgotPassword, .signinNoAccount, .signinSignUp, .signinSuccess,
-            .signupTitle, .signupEmail, .signupPassword, .signupSubmit,
-            .signupHaveAccount, .signupSignin, .signupSuccess,
-            .forgotTitle, .forgotEmail, .forgotSubmit, .forgotSuccess, .forgotBack,
-            .resetTitle, .resetPassword, .resetSubmit, .resetSuccess,
-            .verifyTitle, .verifyToken, .verifySubmit, .verifySuccess, .verifyResend, .verifyResent,
+            .emailEntryTitle, .emailEntryEmail, .emailEntrySubmit,
+            .otpTitle, .otpSentTo, .otpCode, .otpSubmit, .otpResend, .otpSuccess, .otpResent,
             .signedInTitle, .signedInEmail, .signedInLogout, .signedInPlaceholder,
             .offlineBanner,
             .appleSignInTitle, .appleSignInComingSoon,

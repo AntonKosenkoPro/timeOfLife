@@ -1,22 +1,20 @@
-# S4 / Swift runtime deploy image for the Time of Life backend.
+# S4 / Go runtime deploy image for the Time of Life backend.
 # Build:  docker build -t timeoflife-backend .
 # Run:    docker run --rm -p 8080:8080 --env-file .env timeoflife-backend
-FROM swift:6.0-bookworm AS build
-WORKDIR /app
+FROM golang:1.22-bookworm AS build
+WORKDIR /src
 # Cache dependencies first.
-COPY Package.swift ./
-RUN swift package resolve \
-    && cp -R .build/checkouts ./checkouts-cache || true
+COPY go.mod go.sum ./
+RUN go mod download
 # Copy source.
-COPY Sources ./Sources
-COPY Tests ./Tests
-# Build a release executable.
-RUN swift build -c release --static-swift-stdlib || swift build -c release
+COPY cmd ./cmd
+COPY internal ./internal
+# Build a static release binary named "server".
+RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/server ./cmd/server
 
-FROM swift:6.0-bookworm-slim AS run
+FROM gcr.io/distroless/static-debian12:nonroot AS run
 WORKDIR /app
-# Copy the built executable(s). The executable target is named "App".
-COPY --from=build /app/.build/release/App /usr/local/bin/app
-# Expose Vapor's default port.
+COPY --from=build /out/server /server
 EXPOSE 8080
-ENTRYPOINT ["app"]
+USER nonroot:nonroot
+ENTRYPOINT ["/server"]

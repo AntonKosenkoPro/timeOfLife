@@ -18,7 +18,7 @@ enum Theme {
 /// `ThemeManager` is the seam where a future setting could override it.
 @MainActor
 final class ThemeManager: ObservableObject {
-    @Published var colorScheme: ColorScheme? = nil // nil = follow system
+    @Published var colorScheme: ColorScheme? // nil = follow system
 
     init() {}
 }

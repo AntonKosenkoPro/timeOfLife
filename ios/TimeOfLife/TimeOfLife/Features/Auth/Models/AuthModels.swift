@@ -1,6 +1,6 @@
 import Foundation
 
-/// A signed-in user as returned by the API (signup, verify, signin, me).
+/// A signed-in user as returned by the API (verify, me).
 struct UserDTO: Codable, Equatable, Sendable {
     let id: String
     let email: String
@@ -12,12 +12,7 @@ struct UserDTO: Codable, Equatable, Sendable {
     }
 }
 
-/// Response body for `/auth/signup` — no tokens on signup, only the user.
-struct SignupResponse: Codable, Equatable, Sendable {
-    let user: UserDTO
-}
-
-/// Response body for `/auth/verify-email` and `/auth/signin`: tokens + user.
+/// Response body for `/auth/otp/verify` and `/auth/refresh`: tokens + user.
 struct AuthSession: Codable, Equatable, Sendable {
     let accessToken: String
     let refreshToken: String
@@ -31,38 +26,20 @@ struct AuthSession: Codable, Equatable, Sendable {
 }
 
 /// Request bodies — keep them tiny and explicit so tests can assert payloads.
-struct SignupRequest: Codable, Equatable, Sendable {
-    let email: String
-    let password: String
-}
-struct SigninRequest: Codable, Equatable, Sendable {
-    let email: String
-    let password: String
-}
-struct VerifyEmailRequest: Codable, Equatable, Sendable {
-    let token: String
-}
-struct ResendRequest: Codable, Equatable, Sendable {
-    let email: String
-}
-struct RefreshRequest: Codable, Equatable, Sendable {
-    let refreshToken: String
-    enum CodingKeys: String, CodingKey { case refreshToken = "refresh_token" }
-}
-struct ResetConfirmRequest: Codable, Equatable, Sendable {
-    let token: String
-    let newPassword: String
-    enum CodingKeys: String, CodingKey {
-        case token
-        case newPassword = "new_password"
-    }
-}
-struct ResetRequestRequest: Codable, Equatable, Sendable {
+
+/// `POST /auth/otp/request` body.
+struct OtpRequestRequest: Codable, Equatable, Sendable {
     let email: String
 }
 
-/// User-facing credentials (email only — never the password).
-struct Credentials: Equatable, Sendable {
+/// `POST /auth/otp/verify` body.
+struct OtpVerifyRequest: Codable, Equatable, Sendable {
     let email: String
-    let emailVerified: Bool
+    let code: String
+}
+
+/// `POST /auth/refresh` body.
+struct RefreshRequest: Codable, Equatable, Sendable {
+    let refreshToken: String
+    enum CodingKeys: String, CodingKey { case refreshToken = "refresh_token" }
 }

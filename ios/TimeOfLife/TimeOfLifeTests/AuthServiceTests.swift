@@ -16,37 +16,25 @@ struct AuthServiceTests {
         return (service, repo, keychain, cache, store)
     }
 
-    @Test("signUp caches email and writes no tokens")
-    func signUp() async throws {
+    @Test("requestOtp normalizes and caches email, writes no tokens")
+    func requestOtp() async throws {
         let (service, repo, keychain, _, store) = makeService()
-        try await service.signUp(email: "  Foo@Bar.com ", password: "abcd1234")
-        #expect(repo.calls == [.signup(email: "foo@bar.com", password: "abcd1234")])
+        try await service.requestOtp(email: "  Foo@Bar.com ")
+        #expect(repo.calls == [.requestOtp(email: "foo@bar.com")])
         #expect(await keychain.string(for: .accessToken) == nil)
         #expect(await keychain.string(for: .refreshToken) == nil)
         #expect(store.cachedEmail == "foo@bar.com")
     }
 
-    @Test("signIn writes access+refresh tokens and caches session")
-    func signIn() async throws {
-        let (service, _, keychain, cache, store) = makeService()
-        try await service.signIn(email: "a@b.com", password: "abcd1234")
+    @Test("verifyOtp persists access+refresh tokens and caches session")
+    func verifyOtp() async throws {
+        let (service, repo, keychain, cache, store) = makeService()
+        try await service.verifyOtp(email: "a@b.com", code: "123456")
+        #expect(repo.calls == [.verifyOtp(email: "a@b.com", code: "123456")])
         #expect(await keychain.string(for: .accessToken) == "at")
         #expect(await keychain.string(for: .refreshToken) == "rt")
         #expect(cache.load()?.email == "a@b.com")
         #expect(store.state == .signedIn(CachedSession(id: "u1", email: "a@b.com", emailVerified: true)))
-    }
-
-    @Test("verifyEmail persists session")
-    func verifyEmail() async throws {
-        let (service, _, keychain, _, store) = makeService()
-        try await service.verifyEmail(token: "tok")
-        #expect(await keychain.string(for: .accessToken) == "at")
-        #expect(await keychain.string(for: .refreshToken) == "rt")
-        if case .signedIn(let s) = store.state {
-            #expect(s.emailVerified == true)
-        } else {
-            Issue.record("expected signed in")
-        }
     }
 
     @Test("logout clears local state even if server call fails")

@@ -201,12 +201,17 @@ struct AnyCodable: Decodable, Encodable, Sendable {
 
     init(from decoder: Decoder) throws {
         let container = try decoder.singleValueContainer()
-        if container.decodeNil() { self.value = NSNull() }
-        else if let v = try? container.decode(String.self) { self.value = v }
-        else if let v = try? container.decode(Double.self) { self.value = v }
-        else if let v = try? container.decode(Bool.self) { self.value = v }
-        else if let v = try? container.decode([AnyCodable].self) { self.value = v.map { $0.value } }
-        else if let v = try? container.decode([String: AnyCodable].self) {
+        if container.decodeNil() {
+            self.value = NSNull()
+        } else if let v = try? container.decode(String.self) {
+            self.value = v
+        } else if let v = try? container.decode(Double.self) {
+            self.value = v
+        } else if let v = try? container.decode(Bool.self) {
+            self.value = v
+        } else if let v = try? container.decode([AnyCodable].self) {
+            self.value = v.map { $0.value }
+        } else if let v = try? container.decode([String: AnyCodable].self) {
             self.value = v.mapValues { $0.value }
         } else {
             self.value = NSNull()

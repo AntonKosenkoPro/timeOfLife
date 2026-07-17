@@ -9,45 +9,19 @@ enum L10n: String {
     case authWelcome = "auth.welcome"
     case authSubtitle = "auth.subtitle"
 
-    // Sign in
-    case signinTitle = "signin.title"
-    case signinEmail = "signin.email"
-    case signinPassword = "signin.password"
-    case signinSubmit = "signin.submit"
-    case signinForgotPassword = "signin.forgotPassword"
-    case signinNoAccount = "signin.noAccount"
-    case signinSignUp = "signin.signUp"
-    case signinSuccess = "signin.success"
+    // Email entry (passwordless)
+    case emailEntryTitle = "emailEntry.title"
+    case emailEntryEmail = "emailEntry.email"
+    case emailEntrySubmit = "emailEntry.submit"
 
-    // Sign up
-    case signupTitle = "signup.title"
-    case signupEmail = "signup.email"
-    case signupPassword = "signup.password"
-    case signupSubmit = "signup.submit"
-    case signupHaveAccount = "signup.haveAccount"
-    case signupSignin = "signup.signin"
-    case signupSuccess = "signup.success"
-
-    // Forgot
-    case forgotTitle = "forgot.title"
-    case forgotEmail = "forgot.email"
-    case forgotSubmit = "forgot.submit"
-    case forgotSuccess = "forgot.success"
-    case forgotBack = "forgot.back"
-
-    // Reset
-    case resetTitle = "reset.title"
-    case resetPassword = "reset.password"
-    case resetSubmit = "reset.submit"
-    case resetSuccess = "reset.success"
-
-    // Verify
-    case verifyTitle = "verify.title"
-    case verifyToken = "verify.token"
-    case verifySubmit = "verify.submit"
-    case verifySuccess = "verify.success"
-    case verifyResend = "verify.resend"
-    case verifyResent = "verify.resent"
+    // OTP entry
+    case otpTitle = "otp.title"
+    case otpSentTo = "otp.sentTo"
+    case otpCode = "otp.code"
+    case otpSubmit = "otp.submit"
+    case otpResend = "otp.resend"
+    case otpSuccess = "otp.success"
+    case otpResent = "otp.resent"
 
     // Signed in
     case signedInTitle = "signedIn.title"

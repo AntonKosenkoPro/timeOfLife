@@ -7,45 +7,19 @@
 "auth.welcome" = "Welcome";
 "auth.subtitle" = "Sign in or create an account to continue.";
 
-// Sign in
-"signin.title" = "Sign In";
-"signin.email" = "Email";
-"signin.password" = "Password";
-"signin.submit" = "Sign In";
-"signin.forgotPassword" = "Forgot password?";
-"signin.noAccount" = "Don't have an account?";
-"signin.signUp" = "Sign up";
-"signin.success" = "Signed in";
+// Email entry (passwordless: sign-in + sign-up collapse into email → OTP)
+"emailEntry.title" = "Sign In";
+"emailEntry.email" = "Email";
+"emailEntry.submit" = "Continue";
 
-// Sign up
-"signup.title" = "Create Account";
-"signup.email" = "Email";
-"signup.password" = "Password";
-"signup.submit" = "Create Account";
-"signup.haveAccount" = "Already have an account?";
-"signup.signin" = "Sign in";
-"signup.success" = "Account created. Check your email to verify.";
-
-// Forgot password
-"forgot.title" = "Reset Password";
-"forgot.email" = "Email";
-"forgot.submit" = "Send Reset Link";
-"forgot.success" = "If an account exists, a reset link has been sent.";
-"forgot.back" = "Back to sign in";
-
-// Reset password
-"reset.title" = "New Password";
-"reset.password" = "New Password";
-"reset.submit" = "Reset Password";
-"reset.success" = "Password reset. You can now sign in.";
-
-// Verify email
-"verify.title" = "Verify Email";
-"verify.token" = "Verification Token";
-"verify.submit" = "Verify";
-"verify.success" = "Email verified. You're signed in.";
-"verify.resend" = "Resend verification email";
-"verify.resent" = "If an account exists, a new verification email has been sent.";
+// OTP entry
+"otp.title" = "Enter Code";
+"otp.sentTo" = "Enter the 6-digit code sent to %@";
+"otp.code" = "Code";
+"otp.submit" = "Verify";
+"otp.resend" = "Resend code";
+"otp.success" = "Signed in";
+"otp.resent" = "A new code has been sent.";
 
 // Signed in
 "signedIn.title" = "Signed In";
@@ -56,33 +30,25 @@
 // Offline
 "offline.banner" = "You are offline. Some actions are unavailable.";
 
-// Validation
+// Validation (unified messages — Requirements U2/U4: one merged message per field)
+"common.and" = "and";
 "validation.emailEmpty" = "Email is required.";
-"validation.emailInvalid" = "Enter a valid email.";
-"validation.emailTooLong" = "Email is too long.";
-"validation.passwordEmpty" = "Password is required.";
-"validation.passwordTooShort" = "Password must be at least 8 characters.";
-"validation.passwordTooLong" = "Password must be at most 128 characters.";
-"validation.passwordNoLetter" = "Password must include a letter.";
-"validation.passwordNoDigit" = "Password must include a digit.";
-"validation.passwordWhitespaceOnly" = "Password cannot be only whitespace.";
+"validation.email.prefix" = "Email must";
+"validation.email.rule.invalid" = "be a valid email address";
+"validation.email.rule.tooLong" = "be at most 254 characters";
+"validation.otpEmpty" = "Enter the code.";
+"validation.otp.prefix" = "Code must";
+"validation.otp.rule.invalid" = "be a 6-digit code";
 
 // Server errors (mapped from error codes)
-"error.email_taken" = "An account with this email already exists.";
-"error.weak_password" = "Password is too weak.";
 "error.invalid_body" = "Please check your input.";
 "error.rate_limited" = "Too many attempts. Try again later.";
-"error.verify_token_invalid" = "Invalid verification link.";
-"error.verify_token_expired" = "This verification link has expired.";
-"error.verify_token_used" = "This verification link has already been used.";
-"error.invalid_credentials" = "Incorrect email or password.";
-"error.email_not_verified" = "Please verify your email before signing in.";
+"error.invalid_otp" = "Incorrect code. Try again.";
+"error.otp_expired" = "This code has expired. Request a new one.";
+"error.otp_attempts_exceeded" = "Too many attempts. Request a new code.";
 "error.invalid_refresh" = "Session expired. Please sign in again.";
 "error.token_reuse" = "Session invalidated for security. Please sign in again.";
 "error.token_expired" = "Session expired. Please sign in again.";
-"error.reset_token_invalid" = "Invalid reset link.";
-"error.reset_token_expired" = "This reset link has expired.";
-"error.reset_token_used" = "This reset link has already been used.";
 "error.offline" = "You are offline.";
 "error.unknown" = "Something went wrong. Please try again.";
 "error.unauthorized" = "Session expired. Please sign in again.";

@@ -11,7 +11,6 @@ final class SessionStore: ObservableObject {
     enum SessionState: Equatable {
         case signedOut
         case signedIn(CachedSession)
-        case verifyingEmail(token: String)
     }
 
     init() {}
@@ -24,10 +23,6 @@ final class SessionStore: ObservableObject {
     func setSignedOut() {
         state = .signedOut
         cachedEmail = nil
-    }
-
-    func setVerifying(token: String) {
-        state = .verifyingEmail(token: token)
     }
 
     func setCachedEmail(_ email: String?) {

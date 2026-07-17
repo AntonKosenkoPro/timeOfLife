@@ -1,8 +1,26 @@
 .DS_Store
-/.build
-/Packages
+
+# Go build artifacts
+/bin/
+/server
+*.exe
+*.test
+
+# Go workspace files
+/go.work
+/go.work.sum
+
+# SQLite databases (tests use :memory:, but guard local dev files)
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# Environment (keep .env.example tracked)
+.env
+
+# Editor / OS cruft
 xcuserdata/
 DerivedData/
-.swiftpm/configuration/registries.json
-.swiftpm/xcode/package.xcworkspace/contents.xcworkspacedata
+.swiftpm/
 .netrc

@@ -13,180 +13,145 @@ struct ViewModelTests {
         return (service, repo, Connectivity(), store)
     }
 
-    // MARK: - SignUp
+    // MARK: - EmailEntry
 
-    @Test("SignUpViewModel: client validation blocks submit")
-    func signUpValidation() async throws {
+    @Test("EmailEntryViewModel: client validation blocks submit")
+    func emailEntryValidation() async throws {
         let (service, repo, conn, _) = makeService()
-        let vm = SignUpViewModel(service: service, connectivity: conn)
+        let vm = EmailEntryViewModel(service: service, connectivity: conn)
         vm.email = "bad"
-        vm.password = "123"
         await vm.submit()
         #expect(repo.calls.isEmpty)
-        #expect(!vm.fieldErrors.email.isEmpty)
-        #expect(!vm.fieldErrors.password.isEmpty)
+        #expect(vm.fieldErrors.email != nil)
+        #expect(vm.fieldErrors.otp == nil)
         #expect(vm.isSubmitting == false)
     }
 
-    @Test("SignUpViewModel: offline disables submit")
-    func signUpOffline() async throws {
+    @Test("EmailEntryViewModel: offline disables submit")
+    func emailEntryOffline() async throws {
         let (service, repo, _, _) = makeService()
         let conn = Connectivity()
         conn.isConnected = false
-        let vm = SignUpViewModel(service: service, connectivity: conn)
+        let vm = EmailEntryViewModel(service: service, connectivity: conn)
         vm.email = "a@b.com"
-        vm.password = "abcd1234"
         await vm.submit()
         #expect(repo.calls.isEmpty)
         #expect(vm.submitError != nil)
     }
 
-    @Test("SignUpViewModel: success sets successMessage and calls onSuccess")
-    func signUpSuccess() async throws {
+    @Test("EmailEntryViewModel: success calls requestOtp, caches email, fires onSuccess")
+    func emailEntrySuccess() async throws {
         let (service, repo, _, store) = makeService()
-        let vm = SignUpViewModel(service: service, connectivity: Connectivity())
-        var called = false
-        vm.onSuccess = { called = true }
-        vm.email = "a@b.com"
-        vm.password = "abcd1234"
+        let vm = EmailEntryViewModel(service: service, connectivity: Connectivity())
+        var navigated: String?
+        vm.onSuccess = { navigated = $0 }
+        vm.email = "  Foo@Bar.com "
         await vm.submit()
-        #expect(repo.calls.first == .signup(email: "a@b.com", password: "abcd1234"))
+        #expect(repo.calls == [.requestOtp(email: "foo@bar.com")])
         #expect(vm.successMessage != nil)
-        #expect(called == true)
-        #expect(store.cachedEmail == "a@b.com")
+        #expect(navigated == "foo@bar.com")
+        #expect(store.cachedEmail == "foo@bar.com")
     }
 
-    @Test("SignUpViewModel: email_taken maps to field error")
-    func signUpEmailTaken() async throws {
+    @Test("EmailEntryViewModel: rate_limited maps to top-level error")
+    func emailEntryRateLimited() async throws {
         let repo = FakeAuthRepository()
-        repo.signupError = APIError.server(code: "email_taken", message: "taken")
+        repo.otpRequestError = APIError.server(code: "rate_limited", message: "slow")
         let (service, _, _, _) = makeService(repo: repo)
-        let vm = SignUpViewModel(service: service, connectivity: Connectivity())
+        let vm = EmailEntryViewModel(service: service, connectivity: Connectivity())
         vm.email = "a@b.com"
-        vm.password = "abcd1234"
-        await vm.submit()
-        #expect(!vm.fieldErrors.email.isEmpty)
-    }
-
-    // MARK: - SignIn
-
-    @Test("SignInViewModel: invalid_credentials maps to top-level error")
-    func signInInvalidCredentials() async throws {
-        let repo = FakeAuthRepository()
-        repo.signinError = APIError.server(code: "invalid_credentials", message: "bad")
-        let (service, _, _, _) = makeService(repo: repo)
-        let vm = SignInViewModel(service: service, connectivity: Connectivity())
-        vm.email = "a@b.com"
-        vm.password = "abcd1234"
         await vm.submit()
         #expect(vm.submitError != nil)
         #expect(vm.fieldErrors.isEmpty)
     }
 
-    @Test("SignInViewModel: email_not_verified shows server message")
-    func signInNotVerified() async throws {
-        let repo = FakeAuthRepository()
-        repo.signinError = APIError.server(code: "email_not_verified", message: "verify")
-        let (service, _, _, _) = makeService(repo: repo)
-        let vm = SignInViewModel(service: service, connectivity: Connectivity())
-        vm.email = "a@b.com"
-        vm.password = "abcd1234"
-        await vm.submit()
-        #expect(vm.submitError != nil)
+    // MARK: - OtpEntry
+
+    @Test("OtpEntryViewModel: invalid code blocks submit")
+    func otpEntryValidation() async throws {
+        let (service, repo, _, _) = makeService()
+        let vm = OtpEntryViewModel(service: service, connectivity: Connectivity(), email: "a@b.com")
+        vm.code = "12345"
+        await vm.verify()
+        #expect(repo.calls.isEmpty)
+        #expect(vm.fieldErrors.otp != nil)
     }
 
-    @Test("SignInViewModel: success signs in")
-    func signInSuccess() async throws {
-        let (service, _, _, store) = makeService()
-        let vm = SignInViewModel(service: service, connectivity: Connectivity())
-        vm.email = "a@b.com"
-        vm.password = "abcd1234"
-        await vm.submit()
+    @Test("OtpEntryViewModel: invalid_otp maps to field error")
+    func otpEntryInvalidOtp() async throws {
+        let repo = FakeAuthRepository()
+        repo.otpVerifyError = APIError.server(code: "invalid_otp", message: "wrong")
+        let (service, _, _, _) = makeService(repo: repo)
+        let vm = OtpEntryViewModel(service: service, connectivity: Connectivity(), email: "a@b.com")
+        vm.code = "123456"
+        await vm.verify()
+        #expect(repo.calls == [.verifyOtp(email: "a@b.com", code: "123456")])
+        #expect(vm.fieldErrors.otp != nil)
+        #expect(vm.submitError == nil)
+    }
+
+    @Test("OtpEntryViewModel: otp_expired maps to field error")
+    func otpEntryExpired() async throws {
+        let repo = FakeAuthRepository()
+        repo.otpVerifyError = APIError.server(code: "otp_expired", message: "old")
+        let (service, _, _, _) = makeService(repo: repo)
+        let vm = OtpEntryViewModel(service: service, connectivity: Connectivity(), email: "a@b.com")
+        vm.code = "123456"
+        await vm.verify()
+        #expect(vm.fieldErrors.otp != nil)
+    }
+
+    @Test("OtpEntryViewModel: otp_attempts_exceeded maps to top-level error")
+    func otpEntryAttemptsExceeded() async throws {
+        let repo = FakeAuthRepository()
+        repo.otpVerifyError = APIError.server(code: "otp_attempts_exceeded", message: "locked")
+        let (service, _, _, _) = makeService(repo: repo)
+        let vm = OtpEntryViewModel(service: service, connectivity: Connectivity(), email: "a@b.com")
+        vm.code = "123456"
+        await vm.verify()
+        #expect(vm.submitError != nil)
+        #expect(vm.fieldErrors.isEmpty)
+    }
+
+    @Test("OtpEntryViewModel: success verifies and signs in")
+    func otpEntrySuccess() async throws {
+        let (service, repo, _, store) = makeService()
+        let vm = OtpEntryViewModel(service: service, connectivity: Connectivity(), email: "a@b.com")
+        var called = false
+        vm.onSuccess = { called = true }
+        vm.code = "123456"
+        await vm.verify()
+        #expect(repo.calls == [.verifyOtp(email: "a@b.com", code: "123456")])
+        #expect(called == true)
         if case .signedIn = store.state {} else { Issue.record("expected signed in") }
     }
 
-    // MARK: - ForgotPassword
-
-    @Test("ForgotPasswordViewModel: always-202 success")
-    func forgotSuccess() async throws {
+    @Test("OtpEntryViewModel: resend calls requestOtp for the same email")
+    func otpEntryResend() async throws {
         let (service, repo, _, _) = makeService()
-        let vm = ForgotPasswordViewModel(service: service, connectivity: Connectivity())
-        vm.email = "a@b.com"
-        await vm.submit()
-        #expect(repo.calls == [.requestPasswordReset(email: "a@b.com")])
-        #expect(vm.successMessage != nil)
-    }
-
-    @Test("ForgotPasswordViewModel: invalid email blocks submit")
-    func forgotValidation() async throws {
-        let (service, repo, _, _) = makeService()
-        let vm = ForgotPasswordViewModel(service: service, connectivity: Connectivity())
-        vm.email = "bad"
-        await vm.submit()
-        #expect(repo.calls.isEmpty)
-        #expect(!vm.fieldErrors.email.isEmpty)
-    }
-
-    // MARK: - ResetPassword
-
-    @Test("ResetPasswordViewModel: weak_password maps to field error")
-    func resetWeakPassword() async throws {
-        let repo = FakeAuthRepository()
-        repo.resetConfirmError = APIError.server(code: "weak_password", message: "weak")
-        let (service, _, _, _) = makeService(repo: repo)
-        let vm = ResetPasswordViewModel(service: service, connectivity: Connectivity(), token: "tok")
-        vm.password = "abcd1234"
-        await vm.submit()
-        #expect(!vm.fieldErrors.password.isEmpty)
-    }
-
-    @Test("ResetPasswordViewModel: success")
-    func resetSuccess() async throws {
-        let (service, repo, _, _) = makeService()
-        let vm = ResetPasswordViewModel(service: service, connectivity: Connectivity(), token: "tok")
-        vm.password = "abcd1234"
-        await vm.submit()
-        #expect(repo.calls == [.confirmPasswordReset(token: "tok", newPassword: "abcd1234")])
-        #expect(vm.successMessage != nil)
-    }
-
-    @Test("ResetPasswordViewModel: validation blocks short password")
-    func resetValidation() async throws {
-        let (service, repo, _, _) = makeService()
-        let vm = ResetPasswordViewModel(service: service, connectivity: Connectivity(), token: "tok")
-        vm.password = "ab1"
-        await vm.submit()
-        #expect(repo.calls.isEmpty)
-        #expect(!vm.fieldErrors.password.isEmpty)
-    }
-
-    // MARK: - VerifyEmail
-
-    @Test("VerifyEmailViewModel: success verifies and signs in")
-    func verifySuccess() async throws {
-        let (service, repo, _, store) = makeService()
-        let vm = VerifyEmailViewModel(service: service, connectivity: Connectivity(), token: "tok")
-        await vm.submit()
-        #expect(repo.calls == [.verifyEmail(token: "tok")])
-        if case .signedIn = store.state {} else { Issue.record("expected signed in") }
-    }
-
-    @Test("VerifyEmailViewModel: empty token shows invalid message")
-    func verifyEmptyToken() async throws {
-        let (service, repo, _, _) = makeService()
-        let vm = VerifyEmailViewModel(service: service, connectivity: Connectivity(), token: "")
-        await vm.submit()
-        #expect(repo.calls.isEmpty)
-        #expect(vm.submitError != nil)
-    }
-
-    @Test("VerifyEmailViewModel: resend uses cached email")
-    func verifyResend() async throws {
-        let (service, repo, _, store) = makeService()
-        store.setCachedEmail("a@b.com")
-        let vm = VerifyEmailViewModel(service: service, connectivity: Connectivity(), token: "tok")
+        let vm = OtpEntryViewModel(service: service, connectivity: Connectivity(), email: "a@b.com")
         await vm.resend()
-        #expect(repo.calls == [.resendVerification(email: "a@b.com")])
+        #expect(repo.calls == [.requestOtp(email: "a@b.com")])
+        #expect(vm.successMessage != nil)
+    }
+
+    @Test("OtpEntryViewModel: autofill pre-fill via pendingDeepLinkCode + auto-submit")
+    func otpEntryAutofill() async throws {
+        let (service, repo, _, store) = makeService()
+        let nav = AppNavigationStack()
+        nav.pendingDeepLinkCode = "123456"
+        let vm = OtpEntryViewModel(service: service, connectivity: Connectivity(), email: "a@b.com")
+        // Simulate OtpEntryView.consumeDeepLinkCodeIfNeeded(): pre-fill code,
+        // clear the side channel, and auto-submit when email + code present.
+        let code = nav.pendingDeepLinkCode
+        nav.pendingDeepLinkCode = nil
+        if let code { vm.code = code }
+        if !vm.email.isEmpty && !vm.code.isEmpty {
+            await vm.verify()
+        }
+        #expect(code == "123456")
+        #expect(repo.calls == [.verifyOtp(email: "a@b.com", code: "123456")])
+        if case .signedIn = store.state {} else { Issue.record("expected signed in") }
     }
 
     // MARK: - Offline disabling
@@ -196,7 +161,7 @@ struct ViewModelTests {
         let (service, _, _, _) = makeService()
         let conn = Connectivity()
         conn.isConnected = false
-        let vm = SignInViewModel(service: service, connectivity: conn)
+        let vm = EmailEntryViewModel(service: service, connectivity: conn)
         #expect(vm.isOffline == true)
     }
 }

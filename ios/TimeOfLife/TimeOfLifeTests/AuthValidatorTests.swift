@@ -37,55 +37,93 @@ struct AuthValidatorTests {
         #expect(AuthValidator.normalize(email: "  Foo@Bar.COM ") == "foo@bar.com")
     }
 
-    // MARK: Password
+    // MARK: OTP (Requirements U1: exactly 6 digits)
 
-    @Test("empty password is invalid")
-    func emptyPassword() {
-        #expect(AuthValidator.validatePassword("") == [.passwordEmpty])
+    @Test("empty code is invalid")
+    func emptyCode() {
+        #expect(AuthValidator.validateOtpCode("") == [.otpEmpty])
+        #expect(AuthValidator.validateOtpCode("   ") == [.otpEmpty])
     }
 
-    @Test("whitespace-only password is rejected")
-    func whitespaceOnly() {
-        #expect(AuthValidator.validatePassword("        ").contains(.passwordWhitespaceOnly))
+    @Test("too-short code is invalid")
+    func shortCode() {
+        #expect(AuthValidator.validateOtpCode("12345").contains(.otpInvalid))
     }
 
-    @Test("too-short password")
-    func shortPassword() {
-        #expect(AuthValidator.validatePassword("ab1").contains(.passwordTooShort))
+    @Test("too-long code is invalid")
+    func longCode() {
+        #expect(AuthValidator.validateOtpCode("1234567").contains(.otpInvalid))
     }
 
-    @Test("too-long password")
-    func longPassword() {
-        let pw = String(repeating: "a1", count: 65) // 130 chars
-        #expect(AuthValidator.validatePassword(pw).contains(.passwordTooLong))
+    @Test("non-digit code is invalid")
+    func nonDigitCode() {
+        #expect(AuthValidator.validateOtpCode("abcdef").contains(.otpInvalid))
+        #expect(AuthValidator.validateOtpCode("12a456").contains(.otpInvalid))
     }
 
-    @Test("password missing a letter")
-    func noLetter() {
-        #expect(AuthValidator.validatePassword("12345678").contains(.passwordNoLetter))
-    }
-
-    @Test("password missing a digit")
-    func noDigit() {
-        #expect(AuthValidator.validatePassword("abcdefgh").contains(.passwordNoDigit))
-    }
-
-    @Test("valid password passes")
-    func validPassword() {
-        #expect(AuthValidator.validatePassword("abcd1234").isEmpty)
+    @Test("valid 6-digit code passes")
+    func validCode() {
+        #expect(AuthValidator.validateOtpCode("123456").isEmpty)
+        #expect(AuthValidator.validateOtpCode("000000").isEmpty)
     }
 
     @Test("combined validate maps to fields")
     func combinedFields() {
-        let r = AuthValidator.validate(email: "bad", password: "short1")
+        let r = AuthValidator.validate(email: "bad", code: "123")
         #expect(r[.email]?.contains(.emailInvalid) == true)
-        #expect(r[.password]?.contains(.passwordTooShort) == true)
+        #expect(r[.otp]?.contains(.otpInvalid) == true)
     }
 
-    @Test("combined validate with nil password only checks email")
+    @Test("combined validate with nil code only checks email")
     func combinedEmailOnly() {
-        let r = AuthValidator.validate(email: "", password: nil)
+        let r = AuthValidator.validate(email: "", code: nil)
         #expect(r[.email]?.contains(.emailEmpty) == true)
-        #expect(r[.password] == nil)
+        #expect(r[.otp] == nil)
+    }
+
+    // MARK: Unified messages (Requirements U4)
+
+    @Test("valid fields produce no message")
+    func unifiedNone() {
+        #expect(AuthValidator.unifiedEmailMessage([]) == nil)
+        #expect(AuthValidator.unifiedOtpMessage([]) == nil)
+    }
+
+    @Test("empty code yields a single 'required' message")
+    func unifiedEmptyCode() {
+        let msg = AuthValidator.unifiedOtpMessage([.otpEmpty])
+        #expect(msg != nil)
+        #expect(msg == NSLocalizedString("validation.otpEmpty", comment: ""))
+    }
+
+    @Test("invalid code yields a single unified message")
+    func unifiedInvalidCode() {
+        let expected = NSLocalizedString("validation.otp.prefix", comment: "") + " "
+            + NSLocalizedString("validation.otp.rule.invalid", comment: "") + "."
+        #expect(AuthValidator.unifiedOtpMessage([.otpInvalid]) == expected)
+        #expect(AuthValidator.unifiedOtpMessage([.otpInvalid, .otpEmpty]) == expected
+                || AuthValidator.unifiedOtpMessage([.otpInvalid, .otpEmpty]) == NSLocalizedString("validation.otpEmpty", comment: ""))
+    }
+
+    @Test("email invalid + too long collapse into one message")
+    func unifiedEmailMultipleRules() throws {
+        // 251 'a's + "@b.c" = 255 chars (>254 → too long) and the single-char
+        // TLD "c" makes it invalid — both rules fire at once.
+        let local = String(repeating: "a", count: 251)
+        let errors = AuthValidator.validateEmail("\(local)@b.c")
+        #expect(errors.contains(.emailTooLong))
+        #expect(errors.contains(.emailInvalid))
+        let msg = AuthValidator.unifiedEmailMessage(errors)
+        let message = try #require(msg)
+        #expect(message.contains(NSLocalizedString("validation.email.rule.invalid", comment: "")))
+        #expect(message.contains(NSLocalizedString("validation.email.rule.tooLong", comment: "")))
+    }
+
+    @Test("joinFragments grammar")
+    func joinFragments() {
+        let and = NSLocalizedString("common.and", comment: "")
+        #expect(AuthValidator.joinFragments(["A"]) == "A")
+        #expect(AuthValidator.joinFragments(["A", "B"]) == "A \(and) B")
+        #expect(AuthValidator.joinFragments(["A", "B", "C"]) == "A, B \(and) C")
     }
 }

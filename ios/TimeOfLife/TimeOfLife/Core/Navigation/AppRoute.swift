@@ -1,13 +1,11 @@
 import Foundation
 
-/// Routes the auth flow navigates to. Adding a route here is the only change
-/// needed to extend navigation; the polyfill (`AppNavigationStack`) binds
-/// these to views.
+/// Routes the auth flow navigates to. Passwordless: sign-up and sign-in
+/// collapse into email-entry → OTP-entry → signed-in. Adding a route here is
+/// the only change needed to extend navigation; the polyfill
+/// (`AppNavigationStack`) binds these to views.
 enum AppRoute: Hashable, Sendable {
-    case signIn
-    case signUp
-    case forgotPassword
-    case resetPassword(token: String)
-    case verifyEmail(token: String)
+    case emailEntry
+    case otpEntry(email: String)
     case signedIn
 }
