@@ -1,0 +1,22 @@
+version: "2"
+
+linters:
+  enable:
+    - govet
+    - staticcheck
+    - errcheck
+    - unused
+    - revive
+    - gocritic
+    - bodyclose
+    - nilerr
+    - misspell
+
+run:
+  go: "1.22"
+  timeout: 5m
+
+issues:
+  exclude-use-default: false
+  max-issues-per-linter: 0
+  max-same-issues: 0
