@@ -3,9 +3,11 @@
 Context for AI agents working in this repository. Read this first. (Requirements `Common.md` S7.)
 
 ## What this is
-**Time of Life** — a personal time-tracking iOS app. The repo currently contains only the **auth MVP**: **passwordless** email-OTP sign-up/sign-in. There is no time-tracking UI yet (`Requirements/FURPS/Timetracking.md` is an empty placeholder).
+**Time of Life** — a personal time-tracking iOS app. The repo contains the **auth MVP** (passwordless email-OTP sign-up/sign-in) and the first **time-tracking MVP** screen (start/stop timer with offline-first local persistence).
 
 Requirements live in `Requirements/FURPS/` (the FURPS+ table) and `Requirements/Usecases/` (use-case narratives). The auth requirements are `Requirements/FURPS/Sign-up_and_Sign-in.md`.
+
+The **design system** lives in `Design/` — see `Design/README.md`. All visual, component, and interaction decisions for iOS are specified there as Markdown so they can be implemented deterministically.
 
 ## Repo layout
 ```
@@ -21,9 +23,10 @@ backend/                 Go backend (chi + pgx/Postgres; sqlite for tests)
     ratelimit/           in-memory token bucket
     config/              env config (fail-fast JWT_SECRET ≥32 bytes)
 ios/TimeOfLife/          SwiftUI app (iOS 15+), XcodeGen-managed (project.yml)
-  TimeOfLife/Features/Auth/   passwordless flow: EmailEntry → OtpEntry → SignedIn
-  TimeOfLife/Core/            networking, keychain, reachability, theme, navigation, DI
-  TimeOfLife/Localization/    en + ru Localizable.strings + L10n enum
+  TimeOfLife/Features/Auth/        passwordless flow: EmailEntry → OtpEntry → SignedIn
+  TimeOfLife/Features/TimeTracking/  start/stop timer, TimeEntry model, TimerService + LocalTimerStore
+  TimeOfLife/Core/                 networking, keychain, reachability, theme, navigation, DI, design components
+  TimeOfLife/Localization/         en + ru Localizable.strings + L10n enum
 .github/workflows/       CI: backend.yml + ios.yml (mandatory on every PR)
 .golangci.yml            Go linters (run from backend/)
 ios/TimeOfLife/.swiftlint.yml   Swift linters (run from ios/TimeOfLife/)
@@ -83,7 +86,7 @@ On every iteration (feature/fix PR) the author MUST:
 1. Run both linters and fix every finding: `golangci-lint run` (backend), `swiftlint lint --strict` (iOS); `gofmt -l .` must be empty.
 2. Run both test suites green (`go test ./...`; `xcodebuild test`).
 3. Re-read the relevant `Requirements/FURPS/*.md` rows and confirm the change aligns; correct the requirements doc if rows conflict (see the passwordless correction as precedent).
-4. Update this `AGENTS.md` and the README if architecture/contract/run steps changed.
+4. Update this `AGENTS.md`, the README, and the relevant `Design/*.md` files if architecture/contract/run steps or visual design changed.
 5. Prefer reusing existing utilities/patterns over new code; remove dead code.
 
 ## CI (Requirements S6)
@@ -93,7 +96,8 @@ On every iteration (feature/fix PR) the author MUST:
 - **F2 Sign in with Apple** — stubbed in `ios/TimeOfLife/TimeOfLife/Features/AppleSignIn/` (`// DEFERRED: F2`); not wired into `AppContainer`.
 - **Kafka** — deferred (S1 names it but auth MVP doesn't need an MQ).
 - **Rate-limit store** — in-memory; swap for Redis before multi-instance deploy.
-- **Time tracking** — `Requirements/FURPS/Timetracking.md` is empty; not started.
+- **History/list UI for time entries** — local queue exists but no list view yet.
+- **Remote time-tracking endpoint** — backend endpoint not implemented; `StubTimerRepository` is used.
 - SwiftUI snapshot/on-device keychain tests — manual smoke checklist in README.
 
 ## Decisions log (precedents to respect)

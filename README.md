@@ -1,8 +1,8 @@
 # Time of Life
 
-A personal time-tracking app for iOS — minimal-effort tracking of where your time goes (widgets, shortcuts, integrations). This repository currently contains the **first MVP: authentication only** — **passwordless** email + OTP.
+A personal time-tracking app for iOS — minimal-effort tracking of where your time goes (widgets, shortcuts, integrations). This repository contains the **auth MVP** (passwordless email + OTP) and the first **time-tracking MVP** screen (start/stop timer with offline-first persistence).
 
-See [`Requirements/FURPS/`](Requirements/FURPS/) for the full requirements and [`AGENTS.md`](AGENTS.md) for context for AI agents. This MVP implements **F1** (passwordless email-OTP sign up/in) and the supporting infrastructure. **F2** (Sign in with Apple) is **deferred** and stubbed. **F3** (restore access by email) is subsumed by the OTP flow (no password to reset).
+See [`Requirements/FURPS/`](Requirements/FURPS/) for the full requirements, [`AGENTS.md`](AGENTS.md) for context for AI agents, and [`Design/`](Design/) for the text-based design system (colors, components, screen specs, and interaction patterns). This MVP implements **F1** (passwordless email-OTP sign up/in), the supporting infrastructure, and the first time-tracking use case. **F2** (Sign in with Apple) is **deferred** and stubbed. **F3** (restore access by email) is subsumed by the OTP flow (no password to reset).
 
 ## Architecture
 
@@ -18,6 +18,13 @@ ios/       SwiftUI app (iOS 15+) — MVVM + Repository, keychain token storage
 2. **Enter the code** (autofilled from the email via `.oneTimeCode`, or typed) → `POST /auth/otp/verify` → server marks the user verified and issues an access + refresh token pair. This proves email ownership, so there is no separate "verify email" step.
 3. **Magic link** `timeoflife://verify?code=…` (also in the email) opens the app and pre-fills + submits the code.
 4. **Refresh** with rotation: each refresh issues a new pair and revokes the old token; reuse of a revoked token revokes *all* the user's sessions (`token_reuse`).
+
+### Time tracking flow (MVP)
+1. **Signed-in home** shows the timer screen.
+2. **Start** an activity: type a name and tap **Start**.
+3. **Timer counts up** while running; the device stays awake.
+4. **Stop** saves the entry: online → saved locally and synced remotely; offline → queued locally and synced when connectivity returns.
+5. Entries are stored in `Application Support/TimeOfLife/timerQueue.json`.
 
 ### Security (R1)
 - **No passwords anywhere.** Accounts authenticate by proving email ownership via an OTP code (stored only as a **SHA-256 hash**, 10-min expiry, max 5 attempts).
@@ -72,7 +79,7 @@ open TimeOfLife.xcodeproj
 cd ios/TimeOfLife
 swiftlint lint --strict     # linters (S6); `--fix` autocorrects. Config: .swiftlint.yml
 xcodebuild -scheme TimeOfLife \
-  -destination 'platform=iOS Simulator,name=iPhone 17,OS=latest' test   # 59 tests, SwiftTesting
+  -destination 'platform=iOS Simulator,name=iPhone 17,OS=latest' test   # 111 tests, SwiftTesting
 ```
 Unit tests cover the email/OTP validators, deep-link parsing, the API client (incl. 401→refresh→retry and offline mapping via a URLProtocol stub), repositories, the AuthService (keychain/cache/restore-on-offline), and both view-models. Out of scope: SwiftUI snapshot tests and on-device keychain (see smoke checklist below).
 
