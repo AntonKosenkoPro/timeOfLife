@@ -15,6 +15,8 @@
 | S6    | Tests and linteers should be run on every GitHub pull request as a mandatory check.                                                                                     |         |
 | S7    | There should be AGENTS.md file containing all necessary information and context for AI agents effective work.                                                           |         |
 | S8    | There should be logging across all parts of the system                                                                                                                  |         |
+| S9    | There should be Figma-compatible Design Tokens to store all suitable design variable                                                                                    |         |
+| S10   | There should be OpenAPI documentation for every backend API                                                                                                             | ✅ `backend/api/openapi.yaml` (OpenAPI 3.0) |
 | +1    | Should work without website                                                                                                                                             |         |
 | +2    | Should work on iOS 15+ and support correctly all supported devices (correct layout, feature support)                                                                    |         |
 | +3    | Backend should use Golang                                                                                                                                               |         |

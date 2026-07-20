@@ -89,7 +89,25 @@ Unit tests cover the email/OTP validators, deep-link parsing, the API client (in
 - **Standards + revising process (S5):** code is kept minimal and standardized; every iteration runs linters + tests, re-checks the relevant `Requirements/FURPS/*.md` rows, and updates docs if the architecture changes (see `AGENTS.md`).
 - **AI agent context (S7):** [`AGENTS.md`](AGENTS.md) holds repo layout, build/test/run, the API contract, coding standards, the per-iteration revising process, and the decisions log.
 
+## Deployment
+
+The backend is deployed to a **Google Cloud Compute Engine VM** (`timeoflife-backend`, us-east1-b). The production stack runs via Docker Compose with three services: PostgreSQL 15, the Go backend, and Nginx (reverse proxy with Let's Encrypt SSL).
+
+### CI/CD
+On every push to `main` that touches `backend/`, the CI/CD pipeline (`.github/workflows/backend.yml`) runs lint + test, builds the Docker image, pushes to `ghcr.io`, and deploys to the VM.
+
+### Production URL
+`https://api.timeoflife.antonkosenko.pro`
+
+### Local production-like test
+```bash
+cd backend
+docker compose -f docker-compose.prod.yml up -d
+```
+
 ## API contract (`/api/v1`)
+
+**The authoritative API specification is [`backend/api/openapi.yaml`](backend/api/openapi.yaml) (OpenAPI 3.0, S10).** This table is a summary — always consult the OpenAPI spec for the full schema, error codes, and examples.
 
 Errors use a uniform envelope: `{ "error": { "code", "message", "details": {} } }`.
 
@@ -102,6 +120,13 @@ Errors use a uniform envelope: `{ "error": { "code", "message", "details": {} } 
 | GET  | `/auth/me` | (Bearer) | 200 `user{id,email,email_verified}` | (401) |
 
 ## Manual smoke checklist
+
+### Production deploy smoke test
+1. Push to `main` → CI/CD pipeline runs (check GitHub Actions).
+2. Pipeline builds Docker image, pushes to GHCR, deploys to VM.
+3. `curl -s https://api.timeoflife.antonkosenko.pro/health` → `{"status":"ok"}`
+4. `curl -s -X POST https://api.timeoflife.antonkosenko.pro/api/v1/auth/otp/request -H 'Content-Type: application/json' -d '{"email":"test@example.com"}'` → 202
+5. Check VM logs: `gcloud compute ssh timeoflife-backend --zone=us-east1-b --command="cd /opt/timeoflife && sudo docker compose logs backend --tail=20"`
 
 Backend (Docker Postgres running):
 1. `POST /api/v1/auth/otp/request` `{email}` → 202; console sender prints the code + magic link.
@@ -132,11 +157,12 @@ iOS (Simulator, backend running):
 | S1 Mainstream tech | ✅ Go (chi + PostgreSQL) backend; Kafka deferred |
 | S2 Native UI SDK | ✅ SwiftUI |
 | S3 Test coverage | ✅ Go tests ≥90% on handlers/services + 59 iOS unit tests; logic-layer ~100%; coverage gating documented |
-| S4 Run locally + cloud | ✅ docker-compose local, Dockerfile (Go multi-stage) for cloud deploy |
+| S4 Run locally + cloud | ✅ docker-compose local, Dockerfile (Go multi-stage) for cloud deploy; deployed to GCP Compute Engine VM |
 | S5 Minimal + standardized code, revising each iteration | ✅ `.editorconfig`; standards + per-iteration checklist in `AGENTS.md` |
 | S6 Linters + analyzers guarantee quality | ✅ `golangci-lint` + `swiftlint` + `.editorconfig`; both pass with zero findings |
 | S6 Tests + linters run on every GitHub PR (mandatory) | ✅ `.github/workflows/backend.yml` + `ios.yml` — mandatory PR checks |
 | S7 `AGENTS.md` for AI agents | ✅ `AGENTS.md` with repo layout, build/test/run, contract, standards, revising process |
+| S10 OpenAPI documentation for every backend API | ✅ [`backend/api/openapi.yaml`](backend/api/openapi.yaml) (OpenAPI 3.0) |
 | +1 No website | ✅ Magic-link deep link; pure mobile client + API |
 | +2 iOS 15+ all devices | ✅ Deployment target 15.0; nav polyfill for iOS 15; adaptive layouts |
 | +3 Backend in Golang | ✅ Go backend (replaced the earlier Swift/Vapor prototype) |

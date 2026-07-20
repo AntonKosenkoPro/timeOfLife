@@ -12,6 +12,7 @@ The **design system** lives in `Design/` — see `Design/README.md`. All visual,
 ## Repo layout
 ```
 backend/                 Go backend (chi + pgx/Postgres; sqlite for tests)
+  api/openapi.yaml      OpenAPI 3.0 spec (S10 — authoritative API contract)
   cmd/server/main.go     entrypoint (run() int pattern; os.Exit owns lifecycle)
   internal/
     auth/                token service (JWT + rotated refresh) + otp service
@@ -22,6 +23,11 @@ backend/                 Go backend (chi + pgx/Postgres; sqlite for tests)
     email/               Sender (console + mailgun) + localized bodies
     ratelimit/           in-memory token bucket
     config/              env config (fail-fast JWT_SECRET ≥32 bytes)
+  Dockerfile             Multi-stage Docker build (alpine)
+  docker-compose.yml     Local dev: PostgreSQL service
+  docker-compose.prod.yml Production: PostgreSQL + backend + nginx (SSL)
+  deploy.sh              CI/CD deploy script
+  Makefile               Common commands (build, test, lint, run, deploy)
 ios/TimeOfLife/          SwiftUI app (iOS 15+), XcodeGen-managed (project.yml)
   TimeOfLife/Features/Auth/        passwordless flow: EmailEntry → OtpEntry → SignedIn
   TimeOfLife/Features/TimeTracking/  start/stop timer, TimeEntry model, TimerService + LocalTimerStore
@@ -58,6 +64,9 @@ xcrun simctl openurl booted timeoflife://verify?code=123456
 ```
 
 ## API contract (`/api/v1`)
+
+**The authoritative API specification is [`backend/api/openapi.yaml`](backend/api/openapi.yaml) (OpenAPI 3.0, S10).** This table is a summary — always consult the OpenAPI spec for the full schema, error codes, and examples.
+
 Uniform error envelope: `{ "error": { "code": String, "message": String, "details": {} } }`.
 
 | Method | Path | Body | Success | Error codes |
@@ -68,7 +77,7 @@ Uniform error envelope: `{ "error": { "code": String, "message": String, "detail
 | POST | `/auth/logout` | (Bearer) | 204 | (401) |
 | GET  | `/auth/me` | (Bearer) | 200 `user` | (401) |
 
-The iOS `RemoteAuthRepository` mirrors these paths exactly. If you change an endpoint, change both sides.
+The iOS `RemoteAuthRepository` mirrors these paths exactly. If you change an endpoint, change both sides and update [`backend/api/openapi.yaml`](backend/api/openapi.yaml).
 
 ## Auth model (passwordless)
 Enter email → `otp/request` (always 202, account auto-created unverified) → server emails a 6-digit code → `otp/verify` → marks verified + issues JWT access (15 min) + rotated refresh. The OTP proves email ownership — there is no separate "verify email" step and no password anywhere (R1). OTP codes and refresh tokens are stored only as **SHA-256 hashes**; tokens live in the iOS **Keychain**. `otp/request` and `otp/verify` are rate-limited per IP+email. The email body puts the 6-digit code on its own line for iOS `.oneTimeCode` autofill (U5); the template is configurable via `OTP_EMAIL_TEMPLATE` and may need empirical tuning.
@@ -86,11 +95,40 @@ On every iteration (feature/fix PR) the author MUST:
 1. Run both linters and fix every finding: `golangci-lint run` (backend), `swiftlint lint --strict` (iOS); `gofmt -l .` must be empty.
 2. Run both test suites green (`go test ./...`; `xcodebuild test`).
 3. Re-read the relevant `Requirements/FURPS/*.md` rows and confirm the change aligns; correct the requirements doc if rows conflict (see the passwordless correction as precedent).
-4. Update this `AGENTS.md`, the README, and the relevant `Design/*.md` files if architecture/contract/run steps or visual design changed.
+4. Update this `AGENTS.md`, the README, the relevant `Design/*.md` files, and [`backend/api/openapi.yaml`](backend/api/openapi.yaml) if architecture/contract/run steps or visual design changed. The OpenAPI spec is the authoritative API contract — keep it in sync with the handlers.
 5. Prefer reusing existing utilities/patterns over new code; remove dead code.
 
 ## CI (Requirements S6)
 `.github/workflows/backend.yml` (Go: gofmt, go vet, golangci-lint, test + coverage) and `.github/workflows/ios.yml` (xcodegen, swiftlint, build, test) run on every PR and on pushes to `main`. Both are **mandatory** PR checks — a PR is not mergeable until both are green.
+
+## Deployment (S4)
+The backend is deployed to a **Google Cloud Compute Engine VM** (`timeoflife-backend`, us-east1-b). The production stack runs via Docker Compose:
+
+- **PostgreSQL 15** — database
+- **Backend** — Go API server (container image from GHCR)
+- **Nginx** — reverse proxy with SSL termination (Let's Encrypt)
+
+### CI/CD pipeline
+On every push to `main` that touches `backend/`, the CI/CD pipeline:
+1. Runs lint + test (same as PR checks)
+2. Builds the Docker image and pushes to `ghcr.io/antonkosenko/time-of-life/backend:latest`
+3. SSHs into the VM, pulls the new image, and restarts the backend container
+
+### Manual deploy
+```bash
+cd backend
+make deploy   # or push to main and let CI/CD handle it
+```
+
+### Production URL
+`https://api.timeoflife.antonkosenko.pro` (once DNS + SSL are configured)
+
+### Required GitHub Actions secrets
+| Secret | Description |
+|--------|-------------|
+| `VM_HOST` | VM external IP |
+| `VM_USER` | SSH user (`deploy`) |
+| `VM_SSH_KEY` | SSH private key for deployment |
 
 ## Deferred / out of scope
 - **F2 Sign in with Apple** — stubbed in `ios/TimeOfLife/TimeOfLife/Features/AppleSignIn/` (`// DEFERRED: F2`); not wired into `AppContainer`.
