@@ -1,0 +1,29 @@
+# EditorConfig — standardizes formatting across editors (Requirements S5/S6).
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 4
+
+# Go is gofmt-formatted with tabs.
+[*.{go,mod,sum}]
+indent_style = tab
+
+# YAML/JSON use 2-space indent.
+[*.{yml,yaml,json}]
+indent_size = 2
+
+# Swift uses 4-space indent (matches the Xcode project).
+[*.swift]
+indent_size = 4
+
+[Makefile]
+indent_style = tab
+
+# Markdown: preserve trailing whitespace (two-trailing-space line breaks).
+[*.{md,markdown}]
+trim_trailing_whitespace = false

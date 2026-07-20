@@ -1,0 +1,13 @@
+| Index | Requirement                                                                                                                | Comment                                                                                           |
+| ----- | -------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| F1    | Signing up and signing in with email only (confirmation with email OTP code)                                               | Passwordless                                                                                      |
+| F2    | Signing up and signing in with Apple                                                                                       | Registration via Apple                                                                            |
+| F3    | Ability to restore access by email                                                                                         | Passwordless — no password to reset; the email-OTP sign-in flow restores access                  |
+| U1    | Validation of email and OTP code should be present                                                                         | Email must be a valid address; OTP code must be exactly 6 digits.                                 |
+| U2    | Validation errors should be shown in the bottom of editors.                                                                |                                                                                                   |
+| U3    | Should support autofill (Hide my Email for the email field; OTP code autofill from email)                                 |                                                                                                   |
+| U4    | If there are several similar errors for the entry, one unified error should be present.                                    | [^1]                                                                                              |
+| U5    | OTP code from email should be autofilled.                                                                                  | We should find a template of OTP email message or make by trying different templates              |
+
+
+[^1]: Email is invalid. Email is too long. -> Email must be a valid email address and be at most 254 characters.

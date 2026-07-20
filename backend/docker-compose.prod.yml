@@ -1,0 +1,56 @@
+# Production docker-compose file for Time of Life backend.
+# Used by the CI/CD pipeline to deploy to the GCP VM.
+# Environment variables are loaded from .env (or set in the CI/CD environment).
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    restart: always
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: timeoflife
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    image: ghcr.io/antonkosenko/time-of-life/backend:latest
+    restart: always
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://postgres:${DB_PASSWORD}@postgres:5432/timeoflife?sslmode=disable
+      JWT_SECRET: ${JWT_SECRET}
+      EMAIL_BACKEND: ${EMAIL_BACKEND:-console}
+      PORT: "8080"
+      OTP_EXPIRY: ${OTP_EXPIRY:-10m}
+      OTP_MAX_ATTEMPTS: ${OTP_MAX_ATTEMPTS:-5}
+      MAILGUN_DOMAIN: ${MAILGUN_DOMAIN:-}
+      MAILGUN_API_KEY: ${MAILGUN_API_KEY:-}
+    expose:
+      - "8080"
+
+  nginx:
+    image: nginx:alpine
+    restart: always
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+      - certbot-data:/var/www/certbot
+      - certbot-certs:/etc/letsencrypt
+    depends_on:
+      - backend
+
+volumes:
+  pgdata:
+  certbot-data:
+  certbot-certs:

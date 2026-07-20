@@ -1,0 +1,434 @@
+openapi: "3.0.3"
+
+info:
+  title: Time of Life API
+  description: |
+    Backend API for the Time of Life personal time-tracking iOS app.
+
+    ## Auth flow (passwordless email-OTP)
+    1. **Request OTP** — `POST /auth/otp/request` with an email address. Always returns 202
+       (prevents user enumeration). The server upserts the user, generates a 6-digit code,
+       and sends it via email (console or Mailgun).
+    2. **Verify OTP** — `POST /auth/otp/verify` with the email and 6-digit code. On success,
+       returns a JWT access token (15 min TTL) and an opaque refresh token (7 day TTL).
+    3. **Refresh** — `POST /auth/refresh` with the refresh token. Issues a new token pair
+       and revokes the old one. Reuse of a revoked token revokes ALL user sessions.
+    4. **Logout** — `POST /auth/logout` with a Bearer access token. Revokes all sessions.
+    5. **Me** — `GET /auth/me` with a Bearer access token. Returns the user profile.
+
+    ## Security
+    - No passwords. OTP codes and refresh tokens are stored only as SHA-256 hashes.
+    - JWT access tokens use HS256 signing.
+    - Rate limiting: 3 req/min for OTP request, 5 req/min for OTP verify (per IP+email).
+    - User enumeration is prevented: `/auth/otp/request` always returns 202.
+
+  version: "1.0.0"
+  contact:
+    name: Anton Kosenko
+
+servers:
+  - url: http://localhost:8080
+    description: Local development
+  - url: https://api.timeoflife.example.com
+    description: Production
+
+paths:
+  /health:
+    get:
+      operationId: healthCheck
+      summary: Health check
+      description: Returns the server health status.
+      tags:
+        - Health
+      responses:
+        "200":
+          description: Server is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - status
+                properties:
+                  status:
+                    type: string
+                    enum: [ok]
+                    description: Health status
+              example:
+                status: ok
+
+  /api/v1/auth/otp/request:
+    post:
+      operationId: requestOTP
+      summary: Request an OTP code
+      description: |
+        Sends a 6-digit OTP code to the given email address. The user account is
+        created automatically if it does not exist. Always returns HTTP 202 to
+        prevent user enumeration — a 202 response does NOT guarantee that an email
+        was sent (internal errors are silently swallowed).
+      tags:
+        - Auth
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OtpRequest"
+            example:
+              email: user@example.com
+      responses:
+        "202":
+          description: Request accepted (email may or may not have been sent)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AcceptedResponse"
+        "400":
+          description: Invalid request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error:
+                  code: invalid_body
+                  message: Invalid request body
+        "429":
+          description: Rate limited (3 req/min per IP+email)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error:
+                  code: rate_limited
+                  message: Too many requests. Please try again later.
+
+  /api/v1/auth/otp/verify:
+    post:
+      operationId: verifyOTP
+      summary: Verify an OTP code
+      description: |
+        Verifies the 6-digit OTP code for the given email. On success, marks the
+        user as email-verified and returns a JWT access token + opaque refresh token.
+      tags:
+        - Auth
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OtpVerify"
+            example:
+              email: user@example.com
+              code: "123456"
+      responses:
+        "200":
+          description: OTP verified successfully — tokens issued
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthResponse"
+        "400":
+          description: Invalid request body (invalid email or code format)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error:
+                  code: invalid_body
+                  message: Invalid email or code
+        "401":
+          description: Invalid, expired, or exhausted OTP
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                invalid_otp:
+                  summary: Invalid code
+                  value:
+                    error:
+                      code: invalid_otp
+                      message: Invalid or expired code
+                otp_expired:
+                  summary: Code expired
+                  value:
+                    error:
+                      code: otp_expired
+                      message: Code has expired. Request a new one.
+                otp_attempts_exceeded:
+                  summary: Too many failed attempts
+                  value:
+                    error:
+                      code: otp_attempts_exceeded
+                      message: Too many incorrect attempts. Request a new code.
+        "429":
+          description: Rate limited (5 req/min per IP+email)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error:
+                  code: rate_limited
+                  message: Too many attempts. Please try again later.
+
+  /api/v1/auth/refresh:
+    post:
+      operationId: refreshToken
+      summary: Refresh access token
+      description: |
+        Exchanges a refresh token for a new access + refresh token pair.
+        The old refresh token is revoked. If a revoked token is presented,
+        all user sessions are invalidated (token reuse detection).
+      tags:
+        - Auth
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RefreshRequest"
+            example:
+              refresh_token: abc123...
+      responses:
+        "200":
+          description: Tokens refreshed successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthResponse"
+        "400":
+          description: Invalid request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error:
+                  code: invalid_body
+                  message: Refresh token is required
+        "401":
+          description: Invalid or revoked refresh token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                invalid_refresh:
+                  summary: Token not found
+                  value:
+                    error:
+                      code: invalid_refresh
+                      message: Invalid refresh token
+                token_reuse:
+                  summary: Token reuse detected
+                  value:
+                    error:
+                      code: token_reuse
+                      message: Token has been revoked. All sessions have been invalidated.
+
+  /api/v1/auth/logout:
+    post:
+      operationId: logout
+      summary: Logout
+      description: |
+        Revokes all refresh tokens for the authenticated user.
+        Requires a valid Bearer access token.
+      tags:
+        - Auth
+      security:
+        - BearerAuth: []
+      responses:
+        "204":
+          description: Logout successful — all sessions revoked
+        "401":
+          description: Missing or invalid access token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error:
+                  code: unauthorized
+                  message: Missing authorization header
+
+  /api/v1/auth/me:
+    get:
+      operationId: getCurrentUser
+      summary: Get current user
+      description: |
+        Returns the authenticated user's profile.
+        Requires a valid Bearer access token.
+      tags:
+        - Auth
+      security:
+        - BearerAuth: []
+      responses:
+        "200":
+          description: User profile
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - user
+                properties:
+                  user:
+                    $ref: "#/components/schemas/User"
+        "401":
+          description: Missing or invalid access token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error:
+                  code: unauthorized
+                  message: Invalid or expired access token
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: |
+        JWT access token obtained from `/auth/otp/verify` or `/auth/refresh`.
+        Format: `Authorization: Bearer <token>`
+
+  schemas:
+    # ---------- Request schemas ----------
+
+    OtpRequest:
+      type: object
+      description: Request body for requesting an OTP code.
+      required:
+        - email
+      properties:
+        email:
+          type: string
+          format: email
+          maxLength: 254
+          description: User's email address
+          example: user@example.com
+
+    OtpVerify:
+      type: object
+      description: Request body for verifying an OTP code.
+      required:
+        - email
+        - code
+      properties:
+        email:
+          type: string
+          format: email
+          maxLength: 254
+          description: User's email address
+          example: user@example.com
+        code:
+          type: string
+          minLength: 6
+          maxLength: 6
+          pattern: "^[0-9]{6}$"
+          description: 6-digit OTP code
+          example: "123456"
+
+    RefreshRequest:
+      type: object
+      description: Request body for refreshing tokens.
+      required:
+        - refresh_token
+      properties:
+        refresh_token:
+          type: string
+          description: Opaque refresh token (64 hex characters)
+          example: a1b2c3d4e5f6...
+
+    # ---------- Response schemas ----------
+
+    AuthResponse:
+      type: object
+      description: Successful authentication response with tokens and user info.
+      required:
+        - access_token
+        - refresh_token
+        - user
+      properties:
+        access_token:
+          type: string
+          description: JWT access token (HS256, 15 min TTL)
+          example: eyJhbGciOiJIUzI1NiIs...
+        refresh_token:
+          type: string
+          description: Opaque refresh token (64 hex chars, 7 day TTL)
+          example: a1b2c3d4e5f6...
+        user:
+          $ref: "#/components/schemas/User"
+
+    User:
+      type: object
+      description: User profile information.
+      required:
+        - id
+        - email
+        - email_verified
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: User's unique identifier
+          example: 550e8400-e29b-41d4-a716-446655440000
+        email:
+          type: string
+          format: email
+          description: User's email address
+          example: user@example.com
+        email_verified:
+          type: boolean
+          description: Whether the user's email has been verified via OTP
+          example: true
+
+    AcceptedResponse:
+      type: object
+      description: Generic accepted response (always returned by OTP request).
+      required:
+        - status
+      properties:
+        status:
+          type: string
+          enum: [accepted]
+          description: Always "accepted"
+      example:
+        status: accepted
+
+    # ---------- Error schemas ----------
+
+    ErrorResponse:
+      type: object
+      description: |
+        Uniform error envelope used by all endpoints.
+        The `details` field may contain additional context (e.g. validation errors).
+      required:
+        - error
+      properties:
+        error:
+          type: object
+          required:
+            - code
+            - message
+          properties:
+            code:
+              type: string
+              description: Machine-readable error code
+              example: invalid_body
+            message:
+              type: string
+              description: Human-readable error description
+              example: Invalid request body
+            details:
+              type: object
+              description: Optional additional error context
+              example: {}

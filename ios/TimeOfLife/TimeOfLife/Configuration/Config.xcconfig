@@ -1,0 +1,7 @@
+// Configuration settings file for Time of Life.
+// API base URL is injected via Info.plist so runtime code can read it.
+
+// xcconfig treats `//` as a comment, so we break it with an empty variable.
+// The $(EMPTY) reference expands to nothing, resulting in http://127.0.0.1:8080.
+EMPTY =
+API_BASE_URL = http:/$(EMPTY)/127.0.0.1:8080

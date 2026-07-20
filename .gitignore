@@ -6,7 +6,7 @@
 ._*
 
 # Custom folder icons
-Icon
+Icon
 
 # Volume root files
 .DocumentRevisions-V100
@@ -16,3 +16,31 @@ Icon
 .Trashes
 .VolumeIcon.icns
 .com.apple.timemachine.donotpresent
+### Xcode (iOS)
+DerivedData/
+build/
+*.xcodeproj/xcuserdata/
+*.xcodeproj/project.xcworkspace/xcuserdata/
+*.xcworkspace/xcuserdata/
+
+### Swift Package Manager (legacy)
+.build/
+.swiftpm/
+Packages/
+
+### Go backend
+/backend/bin/
+*.db
+*.db-journal
+*.out
+*.test
+# go.sum is committed for reproducible module builds.
+
+### Env files (keep .env.example)
+.env
+.env.*
+!.env.example
+
+### Editor / OS
+.vscode/
+.idea/
