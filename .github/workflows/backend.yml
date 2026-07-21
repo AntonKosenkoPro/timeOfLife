@@ -71,12 +71,18 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Set image tag
+        id: image
+        run: |
+          REPO="${{ github.repository }}"
+          echo "tag=ghcr.io/${REPO,,}/backend:latest" >> "$GITHUB_OUTPUT"
+
       - name: Build and push Docker image
         uses: docker/build-push-action@v6
         with:
           context: backend
           push: true
-          tags: ghcr.io/${{ github.repository }}/backend:latest
+          tags: ${{ steps.image.outputs.tag }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
