@@ -97,7 +97,9 @@ The backend is deployed to a **Google Cloud Compute Engine VM** (`timeoflife-bac
 On every push to `main` that touches `backend/`, the CI/CD pipeline (`.github/workflows/backend.yml`) runs lint + test, builds the Docker image, pushes to `ghcr.io`, and deploys to the VM.
 
 ### Production URL
-`https://api.timeoflife.antonkosenko.pro`
+`https://timeoflife-api.antonkosenko.pro`
+
+> **Hostname note:** the API lives at a single-label subdomain (`timeoflife-api.antonkosenko.pro`) rather than `api.timeoflife.antonkosenko.pro` so it is covered by Cloudflare's Universal SSL edge certificate (`*.antonkosenko.pro`). Deeper subdomains like `api.timeoflife.…` are *not* covered by Universal SSL and cause an edge TLS `handshake_failure` (alert 40).
 
 ### Local production-like test
 ```bash
@@ -124,8 +126,8 @@ Errors use a uniform envelope: `{ "error": { "code", "message", "details": {} } 
 ### Production deploy smoke test
 1. Push to `main` → CI/CD pipeline runs (check GitHub Actions).
 2. Pipeline builds Docker image, pushes to GHCR, deploys to VM.
-3. `curl -s https://api.timeoflife.antonkosenko.pro/health` → `{"status":"ok"}`
-4. `curl -s -X POST https://api.timeoflife.antonkosenko.pro/api/v1/auth/otp/request -H 'Content-Type: application/json' -d '{"email":"test@example.com"}'` → 202
+3. `curl -s https://timeoflife-api.antonkosenko.pro/health` → `{"status":"ok"}`
+4. `curl -s -X POST https://timeoflife-api.antonkosenko.pro/api/v1/auth/otp/request -H 'Content-Type: application/json' -d '{"email":"test@example.com"}'` → 202
 5. Check VM logs: `gcloud compute ssh timeoflife-backend --zone=us-east1-b --command="cd /opt/timeoflife && sudo docker compose logs backend --tail=20"`
 
 Backend (Docker Postgres running):
