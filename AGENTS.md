@@ -122,7 +122,7 @@ make deploy   # or push to main and let CI/CD handle it
 ```
 
 ### Production URL
-`https://api.timeoflife.antonkosenko.pro` (once DNS + SSL are configured)
+`https://timeoflife-api.antonkosenko.pro` (once DNS + SSL are configured)
 
 ### Required GitHub Actions secrets
 | Secret | Description |
