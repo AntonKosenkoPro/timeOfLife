@@ -26,6 +26,7 @@ backend/                 Go backend (chi + pgx/Postgres; sqlite for tests)
   Dockerfile             Multi-stage Docker build (alpine)
   docker-compose.yml     Local dev: PostgreSQL service
   docker-compose.prod.yml Production: PostgreSQL + backend + nginx (SSL)
+  nginx/                 Nginx configs (SSL termination, reverse proxy)
   deploy.sh              CI/CD deploy script
   Makefile               Common commands (build, test, lint, run, deploy)
 ios/TimeOfLife/          SwiftUI app (iOS 15+), XcodeGen-managed (project.yml)

@@ -6,10 +6,10 @@ set -euo pipefail
 
 # --- Configuration ---
 REGISTRY="${REGISTRY:-ghcr.io}"
-IMAGE_NAME="${IMAGE_NAME:-ghcr.io/antonkosenko/time-of-life-backend}"
+IMAGE_NAME="${IMAGE_NAME:-ghcr.io/antonkosenkopro/timeoflife/backend}"
 IMAGE_TAG="${IMAGE_TAG:-latest}"
 VM_HOST="${VM_HOST:-}"
-VM_USER="${VM_USER:-antonkosenko}"
+VM_USER="${VM_USER:-deploy}"
 SSH_KEY_PATH="${SSH_KEY_PATH:-/tmp/deploy_key}"
 
 # --- Build and push ---
@@ -32,22 +32,30 @@ if [ -n "$VM_HOST" ]; then
         SSH_OPTS="-o StrictHostKeyChecking=no"
     fi
 
+    # Copy compose and nginx configs to VM
+    echo "==> Copying config files to VM"
+    scp $SSH_OPTS docker-compose.prod.yml "${VM_USER}@${VM_HOST}:/opt/timeoflife/docker-compose.yml"
+    scp $SSH_OPTS -r nginx/ "${VM_USER}@${VM_HOST}:/opt/timeoflife/nginx/"
+
     # Deploy on the VM
     ssh $SSH_OPTS "${VM_USER}@${VM_HOST}" bash -s << 'REMOTE'
         set -euo pipefail
         cd /opt/timeoflife
 
+        # Log in to GHCR
+        echo "$GITHUB_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+
         # Pull the new image
         echo "==> Pulling new image"
-        sudo docker compose pull backend
+        docker compose pull backend
 
-        # Recreate the backend container
-        echo "==> Restarting backend"
-        sudo docker compose up -d --no-deps backend
+        # Recreate all services
+        echo "==> Restarting services"
+        docker compose up -d
 
         # Clean up old images
         echo "==> Cleaning up old images"
-        sudo docker image prune -f
+        docker image prune -f
 
         echo "==> Deployment complete"
 REMOTE
