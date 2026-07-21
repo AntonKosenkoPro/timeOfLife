@@ -97,6 +97,16 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+      - name: Copy compose and nginx configs to VM
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.VM_HOST }}
+          username: ${{ secrets.VM_USER }}
+          key: ${{ secrets.VM_SSH_KEY }}
+          source: "backend/docker-compose.prod.yml,backend/nginx"
+          target: "/opt/timeoflife"
+          strip_components: 1
+
       - name: Deploy to VM
         uses: appleboy/ssh-action@v1.2.0
         with:
@@ -107,14 +117,17 @@ jobs:
             set -euo pipefail
             cd /opt/timeoflife
 
+            # Use the production compose file
+            cp docker-compose.prod.yml docker-compose.yml
+
             # Log in to GHCR
             echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
 
             # Pull the new image
             docker compose pull backend
 
-            # Recreate the backend container
-            docker compose up -d --no-deps backend
+            # Recreate all services
+            docker compose up -d
 
             # Clean up old images
             docker image prune -f

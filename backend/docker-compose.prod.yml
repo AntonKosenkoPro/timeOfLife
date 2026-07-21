@@ -45,12 +45,14 @@ services:
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
       - ./nginx/conf.d:/etc/nginx/conf.d:ro
-      - certbot-data:/var/www/certbot
-      - certbot-certs:/etc/letsencrypt
+      - /etc/letsencrypt:/etc/letsencrypt:ro
     depends_on:
       - backend
 
 volumes:
   pgdata:
-  certbot-data:
-  certbot-certs:
+
+networks:
+  default:
+    name: timeoflife-net
+    external: true
