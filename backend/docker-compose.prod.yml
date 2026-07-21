@@ -19,7 +19,7 @@ services:
       retries: 5
 
   backend:
-    image: ghcr.io/antonkosenko/time-of-life/backend:latest
+    image: ghcr.io/antonkosenkopro/timeoflife/backend:latest
     restart: always
     depends_on:
       postgres:
