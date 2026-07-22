@@ -16,6 +16,12 @@ info:
     4. **Logout** — `POST /auth/logout` with a Bearer access token. Revokes all sessions.
     5. **Me** — `GET /auth/me` with a Bearer access token. Returns the user profile.
 
+    ## Auth flow (Sign in with Apple)
+    - **Apple** — `POST /auth/apple` with Apple's identity-token JWT (RS256). The server
+      verifies it against Apple's JWKS (iss/aud/exp) and upserts a user keyed by Apple's
+      stable `sub` claim, then issues the same access + refresh token pair as the OTP flow.
+      Config-gated: only registered when `APPLE_CLIENT_ID` is set.
+
     ## Security
     - No passwords. OTP codes and refresh tokens are stored only as SHA-256 hashes.
     - JWT access tokens use HS256 signing.
@@ -175,6 +181,77 @@ paths:
                   code: rate_limited
                   message: Too many attempts. Please try again later.
 
+  /api/v1/auth/apple:
+    post:
+      operationId: signInWithApple
+      summary: Sign in / register with Apple
+      description: |
+        Verifies Apple's identity-token JWT (RS256) against Apple's JWKS, validating the
+        issuer, audience (the app's Bundle ID), and expiry. Upserts a user keyed by Apple's
+        stable `sub` claim (Apple may withhold the email after the first authorization) and
+        returns the same access + refresh token pair as the OTP flow. Apple users are
+        considered email-verified.
+
+        This endpoint is only registered when the server is configured with
+        `APPLE_CLIENT_ID`; otherwise it returns HTTP 503 (`apple_not_configured`).
+      tags:
+        - Auth
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AppleSignInRequest"
+            example:
+              identity_token: eyJraWQiOi...id-token...
+      responses:
+        "200":
+          description: Apple sign-in successful — tokens issued
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthResponse"
+        "400":
+          description: Invalid request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error:
+                  code: invalid_body
+                  message: Identity token is required
+        "401":
+          description: Apple identity token failed verification
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error:
+                  code: invalid_apple_token
+                  message: Invalid Apple identity token
+        "429":
+          description: Rate limited (per IP)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error:
+                  code: rate_limited
+                  message: Too many requests. Please try again later.
+        "503":
+          description: Sign in with Apple is not configured on the server
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error:
+                  code: apple_not_configured
+                  message: Sign in with Apple is not configured
+
   /api/v1/auth/refresh:
     post:
       operationId: refreshToken
@@ -296,7 +373,7 @@ components:
       scheme: bearer
       bearerFormat: JWT
       description: |
-        JWT access token obtained from `/auth/otp/verify` or `/auth/refresh`.
+        JWT access token obtained from `/auth/otp/verify`, `/auth/apple`, or `/auth/refresh`.
         Format: `Authorization: Bearer <token>`
 
   schemas:
@@ -346,6 +423,19 @@ components:
           type: string
           description: Opaque refresh token (64 hex characters)
           example: a1b2c3d4e5f6...
+
+    AppleSignInRequest:
+      type: object
+      description: |
+        Request body for Sign in with Apple. The `identity_token` is the JWT Apple's
+        `ASAuthorizationAppleIDCredential.identityToken` returns (RS256, signed by Apple).
+      required:
+        - identity_token
+      properties:
+        identity_token:
+          type: string
+          description: Apple identity-token JWT.
+          example: eyJraWQiOi...id-token...
 
     # ---------- Response schemas ----------
 

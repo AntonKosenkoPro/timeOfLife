@@ -71,6 +71,14 @@ type Store interface {
 	// GetUserByID returns a user by their ID.
 	GetUserByID(ctx context.Context, userID string) (User, error)
 
+	// UpsertUserByAppleSubject upserts a user keyed by Apple's stable `sub`
+	// identifier. Apple users are considered email-verified. The email is
+	// persisted on first sign-in and left untouched on later sign-ins (Apple
+	// may omit it after the first authorization). May return an error if the
+	// email collides with an existing email-only account (account linking is a
+	// follow-up).
+	UpsertUserByAppleSubject(ctx context.Context, appleSubject, email string) (User, error)
+
 	// Close closes the database connection.
 	Close() error
 }

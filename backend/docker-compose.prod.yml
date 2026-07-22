@@ -31,8 +31,17 @@ services:
       PORT: "8080"
       OTP_EXPIRY: ${OTP_EXPIRY:-10m}
       OTP_MAX_ATTEMPTS: ${OTP_MAX_ATTEMPTS:-5}
+      OTP_EMAIL_TEMPLATE: ${OTP_EMAIL_TEMPLATE:-}
+      OTP_EMAIL_HTML_TEMPLATE: ${OTP_EMAIL_HTML_TEMPLATE:-}
       MAILGUN_DOMAIN: ${MAILGUN_DOMAIN:-}
       MAILGUN_API_KEY: ${MAILGUN_API_KEY:-}
+      MAILGUN_FROM: ${MAILGUN_FROM:-}
+      # AWS SES (real mail sender). Required when EMAIL_BACKEND=ses.
+      # Set EMAIL_BACKEND=ses only after SES is verified in production.
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+      AWS_REGION: ${AWS_REGION:-}
+      SES_FROM: ${SES_FROM:-}
     expose:
       - "8080"
 

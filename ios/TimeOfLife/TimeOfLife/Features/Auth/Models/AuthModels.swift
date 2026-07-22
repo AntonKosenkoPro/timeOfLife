@@ -43,3 +43,9 @@ struct RefreshRequest: Codable, Equatable, Sendable {
     let refreshToken: String
     enum CodingKeys: String, CodingKey { case refreshToken = "refresh_token" }
 }
+
+/// `POST /auth/apple` body. `identityToken` is Apple's RS256 identity-token JWT.
+struct AppleSignInRequest: Codable, Equatable, Sendable {
+    let identityToken: String
+    enum CodingKeys: String, CodingKey { case identityToken = "identity_token" }
+}

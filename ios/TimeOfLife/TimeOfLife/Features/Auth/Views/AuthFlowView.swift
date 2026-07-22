@@ -13,7 +13,9 @@ struct AuthFlowView: View {
                 case .emailEntry:
                     EmailEntryView(vm: EmailEntryViewModel(
                         service: container.authService,
-                        connectivity: container.connectivity
+                        connectivity: container.connectivity,
+                        appleService: container.appleService,
+                        sessionStore: container.sessionStore
                     ))
                 case .otpEntry(let email):
                     OtpEntryView(vm: OtpEntryViewModel(
@@ -33,7 +35,9 @@ struct AuthFlowView: View {
             root: {
                 EmailEntryView(vm: EmailEntryViewModel(
                     service: container.authService,
-                    connectivity: container.connectivity
+                    connectivity: container.connectivity,
+                    appleService: container.appleService,
+                    sessionStore: container.sessionStore
                 ))
             }
         )

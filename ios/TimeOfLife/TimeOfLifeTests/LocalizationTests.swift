@@ -125,7 +125,7 @@ struct LocalizationTests {
         // otpTitle, otpSentTo, otpCode, otpSubmit, otpResend, otpSuccess, otpResent,
         // signedInTitle, signedInEmail, signedInLogout, signedInPlaceholder,
         // offlineBanner,
-        // appleSignInTitle, appleSignInComingSoon,
+        // appleSignInTitle, appleSignInError,
         // timerTitle, timerActivityPlaceholder, timerStart, timerStop,
         // timerOfflineHint, timerEmptyActivityError
         #expect(l10nCases.count == 26)
@@ -140,7 +140,7 @@ extension L10n: CaseIterable {
             .otpTitle, .otpSentTo, .otpCode, .otpSubmit, .otpResend, .otpSuccess, .otpResent,
             .signedInTitle, .signedInEmail, .signedInLogout, .signedInPlaceholder,
             .offlineBanner,
-            .appleSignInTitle, .appleSignInComingSoon,
+            .appleSignInTitle, .appleSignInError,
             .timerTitle, .timerActivityPlaceholder, .timerStart, .timerStop,
             .timerOfflineHint, .timerEmptyActivityError,
         ]

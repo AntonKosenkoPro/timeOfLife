@@ -86,4 +86,23 @@ enum TestFactories {
     static func makeURL(_ path: String) -> URL {
         URL(string: "http://127.0.0.1:8080\(path)")!
     }
+
+    // MARK: - Service factories
+
+    /// Builds a wired-up `AuthService` with in-memory stores for view-model tests.
+    @MainActor
+    static func makeService(
+        repo: FakeAuthRepository = FakeAuthRepository()
+    ) -> (AuthService, FakeAuthRepository, Connectivity, SessionStore) {
+        let keychain = InMemoryKeychainStore()
+        let cache = SessionCache(defaults: UserDefaults(suiteName: UUID().uuidString)!)
+        let store = SessionStore()
+        let service = AuthService(
+            repository: repo,
+            keychain: keychain,
+            cache: cache,
+            sessionStore: store
+        )
+        return (service, repo, Connectivity(), store)
+    }
 }

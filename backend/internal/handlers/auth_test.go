@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/antonkosenko/time-of-life/backend/internal/apple"
 	"github.com/antonkosenko/time-of-life/backend/internal/auth"
 	"github.com/antonkosenko/time-of-life/backend/internal/db"
 	"github.com/antonkosenko/time-of-life/backend/internal/email"
@@ -34,6 +35,13 @@ func newTestStore(t *testing.T) *db.SQLiteStore {
 
 func newTestHandler(t *testing.T, store db.Store) *Handler {
 	t.Helper()
+	return newTestHandlerWithApple(t, store, nil)
+}
+
+// newTestHandlerWithApple is like newTestHandler but injects an Apple
+// identity-token verifier (nil disables the Apple endpoint).
+func newTestHandlerWithApple(t *testing.T, store db.Store, verifier apple.Verifier) *Handler {
+	t.Helper()
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelWarn}))
 	tokenService := auth.NewTokenService("test-secret-key-at-least-32-bytes!!", 15*time.Minute, 7*24*time.Hour)
 	otpService := auth.NewOTPService(10*time.Minute, 5)
@@ -41,11 +49,12 @@ func newTestHandler(t *testing.T, store db.Store) *Handler {
 	rateLimiter := &RateLimiterGroup{
 		OTPRequest: ratelimit.NewTokenBucket(100, 100, time.Minute),
 		OTPVerify:  ratelimit.NewTokenBucket(100, 100, time.Minute),
+		Apple:      ratelimit.NewTokenBucket(100, 100, time.Minute),
 	}
 	config := HandlerConfig{
 		AppURL: "timeoflife://",
 	}
-	return NewHandler(store, tokenService, otpService, emailSender, rateLimiter, config, logger)
+	return NewHandler(store, tokenService, otpService, emailSender, rateLimiter, verifier, config, logger)
 }
 
 func requestOTP(t *testing.T, h *Handler, email string) *httptest.ResponseRecorder {

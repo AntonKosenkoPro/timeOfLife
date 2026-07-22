@@ -227,3 +227,40 @@ func (s *SQLiteStore) GetUserByID(ctx context.Context, userID string) (User, err
 	u.CreatedAt, _ = time.Parse("2006-01-02 15:04:05", createdAt)
 	return u, nil
 }
+
+// UpsertUserByAppleSubject upserts a user keyed by Apple's stable `sub`.
+// INSERT OR IGNORE handles the "already exists" case; the user is then marked
+// verified and re-fetched. A pre-existing email-only account with the same
+// email causes the insert to be ignored without a matching apple_subject, and
+// the subsequent select returns no row (account linking is a follow-up).
+func (s *SQLiteStore) UpsertUserByAppleSubject(ctx context.Context, appleSubject, email string) (User, error) {
+	_, err := s.db.ExecContext(ctx, `
+		INSERT OR IGNORE INTO users (id, email, email_verified, created_at, apple_subject)
+		VALUES (?, ?, true, datetime('now'), ?)
+	`, uuidV7(), email, appleSubject)
+	if err != nil {
+		return User{}, fmt.Errorf("upsert apple user insert: %w", err)
+	}
+
+	if _, err := s.db.ExecContext(ctx, `
+		UPDATE users SET email_verified = true WHERE apple_subject = ?
+	`, appleSubject); err != nil {
+		return User{}, fmt.Errorf("upsert apple user verify: %w", err)
+	}
+
+	var u User
+	var createdAt string
+	err = s.db.QueryRowContext(ctx, `
+		SELECT id, email, email_verified, created_at
+		FROM users
+		WHERE apple_subject = ?
+	`, appleSubject).Scan(&u.ID, &u.Email, &u.EmailVerified, &createdAt)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return User{}, fmt.Errorf("upsert apple user: %w", ErrNotFound)
+		}
+		return User{}, fmt.Errorf("upsert apple user select: %w", err)
+	}
+	u.CreatedAt, _ = time.Parse("2006-01-02 15:04:05", createdAt)
+	return u, nil
+}

@@ -2,7 +2,7 @@
 
 A personal time-tracking app for iOS — minimal-effort tracking of where your time goes (widgets, shortcuts, integrations). This repository contains the **auth MVP** (passwordless email + OTP) and the first **time-tracking MVP** screen (start/stop timer with offline-first persistence).
 
-See [`Requirements/FURPS/`](Requirements/FURPS/) for the full requirements, [`AGENTS.md`](AGENTS.md) for context for AI agents, and [`Design/`](Design/) for the text-based design system (colors, components, screen specs, and interaction patterns). This MVP implements **F1** (passwordless email-OTP sign up/in), the supporting infrastructure, and the first time-tracking use case. **F2** (Sign in with Apple) is **deferred** and stubbed. **F3** (restore access by email) is subsumed by the OTP flow (no password to reset).
+See [`Requirements/FURPS/`](Requirements/FURPS/) for the full requirements, [`AGENTS.md`](AGENTS.md) for context for AI agents, and [`Design/`](Design/) for the text-based design system (colors, components, screen specs, and interaction patterns). This MVP implements **F1** (passwordless email-OTP sign up/in), **F2** (Sign in with Apple), the supporting infrastructure, and the first time-tracking use case. **F3** (restore access by email) is subsumed by the OTP flow (no password to reset).
 
 ## Architecture
 
@@ -18,6 +18,13 @@ ios/       SwiftUI app (iOS 15+) — MVVM + Repository, keychain token storage
 2. **Enter the code** (autofilled from the email via `.oneTimeCode`, or typed) → `POST /auth/otp/verify` → server marks the user verified and issues an access + refresh token pair. This proves email ownership, so there is no separate "verify email" step.
 3. **Magic link** `timeoflife://verify?code=…` (also in the email) opens the app and pre-fills + submits the code.
 4. **Refresh** with rotation: each refresh issues a new pair and revokes the old token; reuse of a revoked token revokes *all* the user's sessions (`token_reuse`).
+
+### Auth flow (Sign in with Apple)
+1. **Tap "Sign in with Apple"** on the email screen → the app requests an Apple identity token (`ASAuthorizationAppleIDProvider`, `.fullName`/`.email` scopes).
+2. **`POST /auth/apple`** `{ identity_token }` → the backend verifies Apple's RS256 JWT against Apple's JWKS (`iss`/`aud`=Bundle ID/`exp`), upserts a user keyed by Apple's stable `sub` claim, and issues the same access + refresh token pair as the OTP flow.
+3. The app persists the session and lands on the timer screen — same path as OTP sign-in.
+
+**Config-gated:** the backend registers `/auth/apple` only when `APPLE_CLIENT_ID` is set (the app's Bundle ID). The iOS button renders without the capability; the actual authorization requires the **Sign in with Apple** capability + a paid Apple Developer Program membership (see `project.yml` signing note). Account-deletion token revocation (App Store 5.1.1v) is a follow-up.
 
 ### Time tracking flow (MVP)
 1. **Signed-in home** shows the timer screen.
@@ -70,7 +77,8 @@ cd ios/TimeOfLife
 xcodegen generate           # regenerates TimeOfLife.xcodeproj from project.yml
 open TimeOfLife.xcodeproj
 ```
-- Debug `API_BASE_URL=http://127.0.0.1:8080` is set in `Config.xcconfig` — start the backend first.
+- `API_BASE_URL` is injected into `Info.plist` from a per-configuration xcconfig: `Config.Debug.xcconfig` → `http://127.0.0.1:8080` (start the backend first), `Config.Release.xcconfig` → `https://timeoflife-api.antonkosenko.pro` (production). ATS allows plain HTTP only to `127.0.0.1`; production is HTTPS so no ATS exception is needed.
+- Code signing is disabled in `project.yml` (no Apple Developer account required) so simulator and CI builds work out of the box. To ship via TestFlight/App Store later, set `DEVELOPMENT_TEAM` and enable distribution signing (see comment in `project.yml`).
 - On Simulator the host's `127.0.0.1` is reachable directly; a physical device needs your LAN IP instead.
 - Test the magic link: `xcrun simctl openurl booted timeoflife://verify?code=123456`
 
@@ -117,6 +125,7 @@ Errors use a uniform envelope: `{ "error": { "code", "message", "details": {} } 
 |---|---|---|---|---|
 | POST | `/auth/otp/request` | `{email}` | 202 (always) | `invalid_body`, `rate_limited` |
 | POST | `/auth/otp/verify` | `{email,code}` | 200 `{access_token,refresh_token,user{id,email,email_verified}}` | `invalid_otp`, `otp_expired`, `otp_attempts_exceeded`, `rate_limited`, `invalid_body` |
+| POST | `/auth/apple` | `{identity_token}` | 200 `{access_token,refresh_token,user}` | `invalid_body`, `invalid_apple_token`, `rate_limited`, `apple_not_configured` |
 | POST | `/auth/refresh` | `{refresh_token}` | 200 new pair | `invalid_refresh`, `token_reuse`, `token_expired` |
 | POST | `/auth/logout` | (Bearer) | 204 | (401) |
 | GET  | `/auth/me` | (Bearer) | 200 `user{id,email,email_verified}` | (401) |
@@ -175,7 +184,7 @@ iOS (Simulator, backend running):
 | Req | Status |
 |---|---|
 | F1 Passwordless email-OTP sign up/in | ✅ |
-| F2 Sign in with Apple | ⏳ Deferred — stubbed (`AppleSignInButton`/`AppleSignInService`, marked `// DEFERRED: F2`) |
+| F2 Sign in with Apple | ✅ Implemented — config-gated (`APPLE_CLIENT_ID`); requires the Apple capability + signing to run end-to-end |
 | F3 Restore access by email | ✅ Subsumed — the email-OTP sign-in flow restores access (no password to reset) |
 | U1 Email + OTP validation | ✅ Email format + ≤254 (mirrored backend + iOS `AuthValidator`); OTP exactly 6 digits |
 | U2 Errors below editors | ✅ Each field renders its single error directly beneath the editor (`FieldErrorLabel`) |
@@ -184,9 +193,9 @@ iOS (Simulator, backend running):
 | U5 OTP autofill from email | ✅ `.textContentType(.oneTimeCode)`; email body formats the code on its own line for iOS detection (template configurable via `OTP_EMAIL_TEMPLATE`; may need empirical tuning) |
 
 ## Deferred / out of scope for this MVP
-- **F2 Sign in with Apple** — stubbed only.
 - **Kafka** — deferred until event-driven needs arise.
 - **Rate-limit backing store** — in-memory now; Redis before multi-instance deploy.
 - **OTP email template** — current format targets iOS autofill detection; `OTP_EMAIL_TEMPLATE` makes it swappable for tuning.
 - **Multi-device session management UI** — `device_id` is captured but no list/revoke UI.
+- **Sign in with Apple follow-ups** — account-deletion token revocation via Apple `/auth/revoke` (App Store 5.1.1v), nonce replay defense, and Apple credential-state/revocation observation. The `POST /auth/apple` shape won't change when these land.
 - SwiftUI snapshot/UI tests and on-device keychain tests — covered by the manual smoke checklist.

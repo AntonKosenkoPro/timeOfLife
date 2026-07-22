@@ -223,6 +223,24 @@ func (s *PostgresStore) GetUserByID(ctx context.Context, userID string) (User, e
 	return u, nil
 }
 
+// UpsertUserByAppleSubject upserts a user keyed by Apple's stable `sub`.
+// The email is stored on first sign-in; on later sign-ins (ON CONFLICT) the
+// existing email is kept and the user is marked verified.
+func (s *PostgresStore) UpsertUserByAppleSubject(ctx context.Context, appleSubject, email string) (User, error) {
+	var u User
+	err := s.pool.QueryRow(ctx, `
+		INSERT INTO users (id, email, email_verified, created_at, apple_subject)
+		VALUES (gen_random_uuid(), $1, true, NOW(), $2)
+		ON CONFLICT (apple_subject) DO UPDATE
+			SET email_verified = true
+		RETURNING id, email, email_verified, created_at
+	`, email, appleSubject).Scan(&u.ID, &u.Email, &u.EmailVerified, &u.CreatedAt)
+	if err != nil {
+		return User{}, fmt.Errorf("upsert apple user: %w", err)
+	}
+	return u, nil
+}
+
 // Pool returns the underlying pgxpool.Pool for use by migrations.
 func (s *PostgresStore) Pool() *pgxpool.Pool {
 	return s.pool

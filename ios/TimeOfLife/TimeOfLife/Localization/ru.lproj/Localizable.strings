@@ -18,6 +18,7 @@
 "otp.code" = "Код";
 "otp.submit" = "Подтвердить";
 "otp.resend" = "Отправить код снова";
+"otp.resendCountdown" = "Отправить код через %d с";
 "otp.success" = "Вход выполнен";
 "otp.resent" = "Новый код отправлен.";
 
@@ -53,9 +54,9 @@
 "error.unknown" = "Что-то пошло не так. Попробуйте снова.";
 "error.unauthorized" = "Сессия истекла. Войдите снова.";
 
-// Apple sign in (deferred)
+// Apple sign in
 "appleSignIn.title" = "Вход через Apple";
-"appleSignIn.comingSoon" = "Скоро";
+"appleSignIn.error" = "Не удалось войти через Apple. Попробуйте снова.";
 
 // Timer
 "timer.title" = "Таймер";

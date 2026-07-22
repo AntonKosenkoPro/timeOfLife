@@ -2,6 +2,7 @@
 package server
 
 import (
+	"context"
 	"log/slog"
 	"net/http"
 	"time"
@@ -9,6 +10,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	chimw "github.com/go-chi/chi/v5/middleware"
 
+	"github.com/antonkosenko/time-of-life/backend/internal/apple"
 	"github.com/antonkosenko/time-of-life/backend/internal/auth"
 	"github.com/antonkosenko/time-of-life/backend/internal/config"
 	"github.com/antonkosenko/time-of-life/backend/internal/db"
@@ -19,12 +21,13 @@ import (
 
 // Dependencies holds all dependencies for the server.
 type Dependencies struct {
-	Store        db.Store
-	TokenService *auth.TokenService
-	OTPService   *auth.OTPService
-	EmailSender  email.Sender
-	RateLimiter  *handlers.RateLimiterGroup
-	HandlerCfg   handlers.HandlerConfig
+	Store         db.Store
+	TokenService  *auth.TokenService
+	OTPService    *auth.OTPService
+	EmailSender   email.Sender
+	RateLimiter   *handlers.RateLimiterGroup
+	AppleVerifier apple.Verifier
+	HandlerCfg    handlers.HandlerConfig
 }
 
 // NewDefaultDependencies creates a default set of dependencies from config and store.
@@ -42,7 +45,19 @@ func NewDefaultDependencies(cfg *config.Config, store db.Store) Dependencies {
 		cfg.OTPMaxAttempts,
 	)
 
-	emailSender := email.NewSender(logger)
+	emailSender := email.NewSender(email.SenderConfig{
+		Backend:              cfg.EmailBackend,
+		MailgunAPIKey:        cfg.MailgunAPIKey,
+		MailgunDomain:        cfg.MailgunDomain,
+		MailgunFrom:          cfg.MailgunFrom,
+		AWSAccessKeyID:       cfg.AWSAccessKeyID,
+		AWSSecretAccessKey:   cfg.AWSSecretAccessKey,
+		AWSRegion:            cfg.AWSRegion,
+		SESFrom:              cfg.SESFrom,
+		OTPEmailTextTemplate: cfg.OTPEmailTemplate,
+		OTPEmailHTMLTemplate: cfg.OTPEmailHTMLTemplate,
+		Logger:               logger,
+	})
 
 	rateLimiter := &handlers.RateLimiterGroup{
 		OTPRequest: ratelimit.OTPRequestLimit,
@@ -53,13 +68,27 @@ func NewDefaultDependencies(cfg *config.Config, store db.Store) Dependencies {
 		AppURL: "timeoflife://",
 	}
 
+	// Sign in with Apple is config-gated: only construct the JWKS verifier
+	// (and register its route) when APPLE_CLIENT_ID is set.
+	var appleVerifier apple.Verifier
+	if cfg.AppleClientID != "" {
+		v, err := apple.NewVerifier(context.Background(), cfg.AppleClientID, cfg.AppleJWKSURL)
+		if err != nil {
+			logger.Error("failed to create apple verifier; feature disabled", "error", err)
+		} else {
+			appleVerifier = v
+			rateLimiter.Apple = ratelimit.OTPRequestLimit
+		}
+	}
+
 	return Dependencies{
-		Store:        store,
-		TokenService: tokenService,
-		OTPService:   otpService,
-		EmailSender:  emailSender,
-		RateLimiter:  rateLimiter,
-		HandlerCfg:   handlerCfg,
+		Store:         store,
+		TokenService:  tokenService,
+		OTPService:    otpService,
+		EmailSender:   emailSender,
+		RateLimiter:   rateLimiter,
+		AppleVerifier: appleVerifier,
+		HandlerCfg:    handlerCfg,
 	}
 }
 
@@ -79,6 +108,7 @@ func New(_ *config.Config, deps Dependencies) *Server {
 		deps.OTPService,
 		deps.EmailSender,
 		deps.RateLimiter,
+		deps.AppleVerifier,
 		deps.HandlerCfg,
 		logger,
 	)
@@ -106,6 +136,10 @@ func New(_ *config.Config, deps Dependencies) *Server {
 			r.Post("/otp/request", h.RequestOTP)
 			r.Post("/otp/verify", h.VerifyOTP)
 			r.Post("/refresh", h.RefreshToken)
+			// Sign in with Apple is only registered when configured (verifier non-nil).
+			if deps.AppleVerifier != nil {
+				r.Post("/apple", h.AppleSignIn)
+			}
 			r.With(h.AuthMiddleware).Post("/logout", h.Logout)
 			r.With(h.AuthMiddleware).Get("/me", h.Me)
 		})

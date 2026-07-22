@@ -18,6 +18,7 @@
 "otp.code" = "Code";
 "otp.submit" = "Verify";
 "otp.resend" = "Resend code";
+"otp.resendCountdown" = "Resend code in %ds";
 "otp.success" = "Signed in";
 "otp.resent" = "A new code has been sent.";
 
@@ -53,9 +54,9 @@
 "error.unknown" = "Something went wrong. Please try again.";
 "error.unauthorized" = "Session expired. Please sign in again.";
 
-// Apple sign in (deferred)
+// Apple sign in
 "appleSignIn.title" = "Sign in with Apple";
-"appleSignIn.comingSoon" = "Coming soon";
+"appleSignIn.error" = "Sign in with Apple failed. Please try again.";
 
 // Timer
 "timer.title" = "Timer";

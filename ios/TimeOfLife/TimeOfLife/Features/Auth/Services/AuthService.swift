@@ -46,6 +46,13 @@ final class AuthService: ObservableObject {
         await persist(session: session)
     }
 
+    /// `POST /auth/apple`. Exchanges Apple's identity token for a session and
+    /// persists it (same path as `verifyOtp` → flips `SessionStore` → signed-in).
+    func signInWithApple(identityToken: String) async throws {
+        let session = try await repository.appleSignIn(identityToken: identityToken)
+        await persist(session: session)
+    }
+
     /// Reads Keychain + cache; if a refresh token exists, attempts `/me`.
     /// On transient offline failure keeps the cached session.
     func restoreSession() async {

@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/antonkosenko/time-of-life/backend/internal/apple"
 	"github.com/antonkosenko/time-of-life/backend/internal/auth"
 	"github.com/antonkosenko/time-of-life/backend/internal/db"
 	"github.com/antonkosenko/time-of-life/backend/internal/email"
@@ -26,39 +27,45 @@ type HandlerConfig struct {
 
 // Handler holds dependencies for all HTTP handlers.
 type Handler struct {
-	store        db.Store
-	tokenService *auth.TokenService
-	otpService   *auth.OTPService
-	emailSender  email.Sender
-	rateLimiter  *RateLimiterGroup
-	config       HandlerConfig
-	logger       *slog.Logger
+	store         db.Store
+	tokenService  *auth.TokenService
+	otpService    *auth.OTPService
+	emailSender   email.Sender
+	rateLimiter   *RateLimiterGroup
+	appleVerifier apple.Verifier
+	config        HandlerConfig
+	logger        *slog.Logger
 }
 
 // RateLimiterGroup holds the rate limiters used by the handlers.
 type RateLimiterGroup struct {
 	OTPRequest *ratelimit.TokenBucket
 	OTPVerify  *ratelimit.TokenBucket
+	Apple      *ratelimit.TokenBucket
 }
 
-// NewHandler creates a new Handler with the given dependencies.
+// NewHandler creates a new Handler with the given dependencies. appleVerifier
+// may be nil when Sign in with Apple is disabled (config-gated); in that case
+// the /auth/apple route is not registered.
 func NewHandler(
 	store db.Store,
 	tokenService *auth.TokenService,
 	otpService *auth.OTPService,
 	emailSender email.Sender,
 	rateLimiter *RateLimiterGroup,
+	appleVerifier apple.Verifier,
 	config HandlerConfig,
 	logger *slog.Logger,
 ) *Handler {
 	return &Handler{
-		store:        store,
-		tokenService: tokenService,
-		otpService:   otpService,
-		emailSender:  emailSender,
-		rateLimiter:  rateLimiter,
-		config:       config,
-		logger:       logger,
+		store:         store,
+		tokenService:  tokenService,
+		otpService:    otpService,
+		emailSender:   emailSender,
+		rateLimiter:   rateLimiter,
+		appleVerifier: appleVerifier,
+		config:        config,
+		logger:        logger,
 	}
 }
 
@@ -75,6 +82,10 @@ type otpVerifyReq struct {
 
 type refreshReq struct {
 	RefreshToken string `json:"refresh_token"`
+}
+
+type appleSignInReq struct {
+	IdentityToken string `json:"identity_token"`
 }
 
 type userResponse struct {
@@ -211,7 +222,8 @@ func (h *Handler) RequestOTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	magicLink := fmt.Sprintf("%s/auth/verify?code=%s", h.config.AppURL, code)
-	if err := h.emailSender.SendOTP(ctx, req.Email, code, magicLink); err != nil {
+	msg := email.NewOTPMessage(req.Email, code, magicLink)
+	if err := h.emailSender.Send(ctx, msg); err != nil {
 		h.logger.Error("failed to send OTP email", "error", err)
 	}
 
@@ -319,6 +331,91 @@ func (h *Handler) VerifyOTP(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "internal_error", "An internal error occurred", nil)
 		return
 	}
+
+	writeJSON(w, http.StatusOK, authResponse{
+		AccessToken:  accessToken,
+		RefreshToken: rawRefresh,
+		User: userResponse{
+			ID:            user.ID,
+			Email:         user.Email,
+			EmailVerified: true,
+		},
+	})
+}
+
+// AppleSignIn handles POST /auth/apple.
+// It verifies Apple's identity-token JWT, upserts the user by Apple's stable
+// `sub` identifier, and issues our own access + refresh tokens (the same
+// issuance path as VerifyOTP). Apple users are considered email-verified.
+func (h *Handler) AppleSignIn(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
+	if h.appleVerifier == nil {
+		writeError(w, http.StatusServiceUnavailable, "apple_not_configured",
+			"Sign in with Apple is not configured", nil)
+		return
+	}
+
+	var req appleSignInReq
+	if err := decodeJSON(r, &req); err != nil {
+		h.logger.Warn("invalid apple sign-in body", "error", err)
+		writeError(w, http.StatusBadRequest, "invalid_body", "Invalid request body", nil)
+		return
+	}
+
+	if req.IdentityToken == "" {
+		writeError(w, http.StatusBadRequest, "invalid_body", "Identity token is required", nil)
+		return
+	}
+
+	// Rate limit per IP.
+	ip := extractIP(r)
+	if h.rateLimiter.Apple != nil && !h.rateLimiter.Apple.Allow(ip) {
+		h.logger.Warn("apple sign-in rate limited", "ip", ip)
+		writeError(w, http.StatusTooManyRequests, "rate_limited",
+			"Too many requests. Please try again later.", nil)
+		return
+	}
+
+	claims, err := h.appleVerifier.Verify(ctx, req.IdentityToken)
+	if err != nil {
+		h.logger.Warn("apple identity token verification failed", "error", err)
+		writeError(w, http.StatusUnauthorized, "invalid_apple_token",
+			"Invalid Apple identity token", nil)
+		return
+	}
+
+	user, err := h.store.UpsertUserByAppleSubject(ctx, claims.Sub, claims.Email)
+	if err != nil {
+		h.logger.Error("failed to upsert apple user", "error", err)
+		writeError(w, http.StatusInternalServerError, "internal_error",
+			"An internal error occurred", nil)
+		return
+	}
+
+	// Issue tokens (same path as VerifyOTP).
+	accessToken, err := h.tokenService.CreateAccessToken(user.ID, user.Email)
+	if err != nil {
+		h.logger.Error("failed to create access token", "error", err)
+		writeError(w, http.StatusInternalServerError, "internal_error", "An internal error occurred", nil)
+		return
+	}
+
+	rawRefresh, refreshHash, err := h.tokenService.GenerateRefreshToken()
+	if err != nil {
+		h.logger.Error("failed to generate refresh token", "error", err)
+		writeError(w, http.StatusInternalServerError, "internal_error", "An internal error occurred", nil)
+		return
+	}
+
+	refreshExpiry := time.Now().Add(h.tokenService.RefreshTokenTTL())
+	if err := h.store.SaveRefreshToken(ctx, user.ID, refreshHash, "", refreshExpiry); err != nil {
+		h.logger.Error("failed to save refresh token", "error", err)
+		writeError(w, http.StatusInternalServerError, "internal_error", "An internal error occurred", nil)
+		return
+	}
+
+	h.logger.Info("apple user signed in", "userID", user.ID)
 
 	writeJSON(w, http.StatusOK, authResponse{
 		AccessToken:  accessToken,

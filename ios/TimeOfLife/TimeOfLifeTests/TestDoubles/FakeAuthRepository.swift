@@ -11,6 +11,7 @@ final class FakeAuthRepository: AuthRepository, @unchecked Sendable {
     enum Call: Equatable {
         case requestOtp(email: String)
         case verifyOtp(email: String, code: String)
+        case appleSignIn(identityToken: String)
         case refresh(refreshToken: String)
         case logout
         case me
@@ -36,6 +37,13 @@ final class FakeAuthRepository: AuthRepository, @unchecked Sendable {
         user: UserDTO(id: "u1", email: "a@b.com", emailVerified: true)
     )
 
+    /// Result returned by `appleSignIn` when no error is set.
+    var appleSignInResult = AuthSession(
+        accessToken: "at-apple",
+        refreshToken: "rt-apple",
+        user: UserDTO(id: "u-apple", email: "apple@privaterelay.appleid.com", emailVerified: true)
+    )
+
     /// Result returned by `refresh` when no error is set.
     var refreshResult = AuthSession(
         accessToken: "at2",
@@ -52,6 +60,8 @@ final class FakeAuthRepository: AuthRepository, @unchecked Sendable {
     var otpRequestError: Error?
     /// If set, `verifyOtp` throws this error.
     var otpVerifyError: Error?
+    /// If set, `appleSignIn` throws this error.
+    var appleSignInError: Error?
     /// If set, `refresh` throws this error.
     var refreshError: Error?
     /// If set, `logout` throws this error.
@@ -86,6 +96,12 @@ final class FakeAuthRepository: AuthRepository, @unchecked Sendable {
         )
     }
 
+    func appleSignIn(identityToken: String) async throws -> AuthSession {
+        record(.appleSignIn(identityToken: identityToken))
+        if let e = appleSignInError { throw e }
+        return appleSignInResult
+    }
+
     func refresh(refreshToken: String) async throws -> AuthSession {
         record(.refresh(refreshToken: refreshToken))
         if let e = refreshError { throw e }
@@ -109,6 +125,7 @@ final class FakeAuthRepository: AuthRepository, @unchecked Sendable {
         _calls.removeAll()
         otpRequestError = nil
         otpVerifyError = nil
+        appleSignInError = nil
         refreshError = nil
         logoutError = nil
         meError = nil

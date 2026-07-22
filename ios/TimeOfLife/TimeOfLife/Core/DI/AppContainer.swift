@@ -15,6 +15,7 @@ final class AppContainer: ObservableObject {
     let connectivity: Connectivity
     let themeManager: ThemeManager
     let authService: AuthService
+    let appleService: AppleSignInService
     let timerService: TimerService
 
     init(
@@ -28,6 +29,7 @@ final class AppContainer: ObservableObject {
         connectivity: Connectivity,
         themeManager: ThemeManager,
         authService: AuthService,
+        appleService: AppleSignInService,
         timerService: TimerService
     ) {
         self.baseURL = baseURL
@@ -40,6 +42,7 @@ final class AppContainer: ObservableObject {
         self.connectivity = connectivity
         self.themeManager = themeManager
         self.authService = authService
+        self.appleService = appleService
         self.timerService = timerService
     }
 
@@ -86,6 +89,8 @@ final class AppContainer: ObservableObject {
         )
         clientHolder.service = authService
 
+        let appleService = AppleSignInService()
+
         return AppContainer(
             baseURL: baseURL,
             apiClient: client,
@@ -97,6 +102,7 @@ final class AppContainer: ObservableObject {
             connectivity: connectivity,
             themeManager: themeManager,
             authService: authService,
+            appleService: appleService,
             timerService: timerService
         )
     }
