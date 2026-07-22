@@ -70,6 +70,7 @@
 		E24F159A9BB0CF9D4E072521 /* AppleSignInService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6ACB1A62C045903B76031A56 /* AppleSignInService.swift */; };
 		E6AF3F110377FDA3600636EE /* SessionCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = 715D8DD36825AF67A5E31466 /* SessionCache.swift */; };
 		EE6078DD5C3E9C5B8915AA2C /* ViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 56C811B6C467F25C06DD0178 /* ViewModelTests.swift */; };
+		A1B2C3D4E5F6A7B8C9D0E1F2 /* OtpEntryViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1E2D3C4B5A69788696A4B3C /* OtpEntryViewModelTests.swift */; };
 		F0DAC53BBE56C751F73C41EF /* AppleSignInServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2E1D96E0E511C17C7E3A7AF2 /* AppleSignInServiceTests.swift */; };
 		F2A0C0AA7831EEE284624BE5 /* EmptyState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 673BDAA21016DBD758DD3D7E /* EmptyState.swift */; };
 		F9DD38F86A930D2B6220B523 /* APIEndpoint.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC48D5C245EF1DD96F6F6004 /* APIEndpoint.swift */; };
@@ -105,6 +106,7 @@
 		5355A9F93DC1371ECF4AD5E0 /* ru.lproj */ = {isa = PBXFileReference; lastKnownFileType = folder; path = ru.lproj; sourceTree = "<group>"; };
 		54CED4A382185F01233F1DDE /* Theme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Theme.swift; sourceTree = "<group>"; };
 		56C811B6C467F25C06DD0178 /* ViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ViewModelTests.swift; sourceTree = "<group>"; };
+		F1E2D3C4B5A69788696A4B3C /* OtpEntryViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OtpEntryViewModelTests.swift; sourceTree = "<group>"; };
 		5CBC211B0937CFA93E95589C /* TimerService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimerService.swift; sourceTree = "<group>"; };
 		61B7982F3DBB72A719070CAD /* Haptics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Haptics.swift; sourceTree = "<group>"; };
 		64A921C11A07AD58634AEEB8 /* IconButton.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IconButton.swift; sourceTree = "<group>"; };
@@ -436,6 +438,7 @@
 				D9B8919EF27555C4F388E106 /* TimeFormatterTests.swift */,
 				6A683C275D64600D3CCD0230 /* TimerViewModelTests.swift */,
 				56C811B6C467F25C06DD0178 /* ViewModelTests.swift */,
+				F1E2D3C4B5A69788696A4B3C /* OtpEntryViewModelTests.swift */,
 			);
 			path = TimeOfLifeTests;
 			sourceTree = "<group>";
@@ -672,6 +675,7 @@
 				84456AD4EF8934541AB482C9 /* TimerViewModelTests.swift in Sources */,
 				2D54716C3A60788EF56400F4 /* URLProtocolStub.swift in Sources */,
 				EE6078DD5C3E9C5B8915AA2C /* ViewModelTests.swift in Sources */,
+				A1B2C3D4E5F6A7B8C9D0E1F2 /* OtpEntryViewModelTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
