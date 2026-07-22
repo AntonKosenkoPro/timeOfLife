@@ -12,6 +12,12 @@ on:
       - "backend/**"
   workflow_dispatch:
     inputs:
+      environment:
+        description: "Target environment to deploy to"
+        type: choice
+        options: [stage, prod]
+        default: stage
+        required: true
       skip_checks:
         description: "Skip lint + test (re-deploy only)"
         type: boolean
@@ -62,13 +68,15 @@ jobs:
         run: go tool cover -func=coverage.out | tail -1
 
   deploy:
+    # push to main auto-deploys to prod; workflow_dispatch deploys the chosen
+    # environment (default stage). Per-environment branch + reviewer gating is
+    # enforced in GitHub's Environment settings, not here.
     if: >
-      github.ref == 'refs/heads/main' && (
-        github.event_name == 'push' ||
-        github.event_name == 'workflow_dispatch'
-      )
+      github.event_name == 'push' ||
+      github.event_name == 'workflow_dispatch'
     needs: lint-and-test
     runs-on: ubuntu-latest
+    environment: ${{ github.event.inputs.environment || 'stage' }}
     steps:
       - uses: actions/checkout@v4
 
