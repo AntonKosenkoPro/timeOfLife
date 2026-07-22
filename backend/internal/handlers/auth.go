@@ -222,7 +222,8 @@ func (h *Handler) RequestOTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	magicLink := fmt.Sprintf("%s/auth/verify?code=%s", h.config.AppURL, code)
-	if err := h.emailSender.SendOTP(ctx, req.Email, code, magicLink); err != nil {
+	msg := email.NewOTPMessage(req.Email, code, magicLink)
+	if err := h.emailSender.Send(ctx, msg); err != nil {
 		h.logger.Error("failed to send OTP email", "error", err)
 	}
 

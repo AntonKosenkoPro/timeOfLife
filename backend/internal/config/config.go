@@ -12,15 +12,22 @@ import (
 
 // Config holds all application configuration.
 type Config struct {
-	DatabaseURL      string
-	JWTSecret        string
-	EmailBackend     string
-	Port             int
-	OTPExpiry        time.Duration
-	OTPMaxAttempts   int
-	OTPEmailTemplate string
-	MailgunDomain    string
-	MailgunAPIKey    string
+	DatabaseURL          string
+	JWTSecret            string
+	EmailBackend         string
+	Port                 int
+	OTPExpiry            time.Duration
+	OTPMaxAttempts       int
+	OTPEmailTemplate     string
+	OTPEmailHTMLTemplate string
+	MailgunDomain        string
+	MailgunAPIKey        string
+	MailgunFrom          string
+	// AWS SES (real mail sender). Required when EMAIL_BACKEND=ses.
+	AWSAccessKeyID     string
+	AWSSecretAccessKey string
+	AWSRegion          string
+	SESFrom            string
 	// Sign in with Apple (F2). Optional: empty AppleClientID disables the
 	// /auth/apple route and the iOS button. When set, it must be the app's
 	// Bundle ID — the `aud` claim Apple puts in the identity token for a
@@ -58,8 +65,8 @@ func Load() (*Config, error) {
 		return nil, requiredFieldError("EMAIL_BACKEND")
 	}
 	cfg.EmailBackend = strings.ToLower(cfg.EmailBackend)
-	if cfg.EmailBackend != "console" && cfg.EmailBackend != "mailgun" {
-		return nil, invalidFieldError("EMAIL_BACKEND", "console or mailgun")
+	if cfg.EmailBackend != "console" && cfg.EmailBackend != "mailgun" && cfg.EmailBackend != "ses" {
+		return nil, invalidFieldError("EMAIL_BACKEND", "console, mailgun or ses")
 	}
 
 	// Optional: PORT (default 8080)
@@ -98,12 +105,39 @@ func Load() (*Config, error) {
 		cfg.OTPMaxAttempts = a
 	}
 
-	// Optional: OTP_EMAIL_TEMPLATE
+	// Optional: OTP_EMAIL_TEMPLATE (text body) and OTP_EMAIL_HTML_TEMPLATE (HTML body).
+	// When empty, package-level defaults are used.
 	cfg.OTPEmailTemplate = os.Getenv("OTP_EMAIL_TEMPLATE")
+	cfg.OTPEmailHTMLTemplate = os.Getenv("OTP_EMAIL_HTML_TEMPLATE")
 
-	// Optional: MAILGUN_DOMAIN, MAILGUN_API_KEY
+	// Optional: MAILGUN_DOMAIN, MAILGUN_API_KEY, MAILGUN_FROM.
 	cfg.MailgunDomain = os.Getenv("MAILGUN_DOMAIN")
 	cfg.MailgunAPIKey = os.Getenv("MAILGUN_API_KEY")
+	cfg.MailgunFrom = os.Getenv("MAILGUN_FROM")
+
+	// Optional: AWS SES. Required when EMAIL_BACKEND=ses.
+	cfg.AWSAccessKeyID = os.Getenv("AWS_ACCESS_KEY_ID")
+	cfg.AWSSecretAccessKey = os.Getenv("AWS_SECRET_ACCESS_KEY")
+	cfg.AWSRegion = os.Getenv("AWS_REGION")
+	cfg.SESFrom = os.Getenv("SES_FROM")
+	if cfg.EmailBackend == "ses" {
+		var missing []string
+		if cfg.AWSAccessKeyID == "" {
+			missing = append(missing, "AWS_ACCESS_KEY_ID")
+		}
+		if cfg.AWSSecretAccessKey == "" {
+			missing = append(missing, "AWS_SECRET_ACCESS_KEY")
+		}
+		if cfg.AWSRegion == "" {
+			missing = append(missing, "AWS_REGION")
+		}
+		if cfg.SESFrom == "" {
+			missing = append(missing, "SES_FROM")
+		}
+		if len(missing) > 0 {
+			return nil, requiredFieldError(strings.Join(missing, ", "))
+		}
+	}
 
 	// Optional: Sign in with Apple. Empty APPLE_CLIENT_ID leaves the feature
 	// disabled (the /auth/apple route is not registered). When enabled, the
