@@ -72,11 +72,11 @@ struct OtpEntryView: View {
                 Button {
                     Task { await vm.resendOtp() }
                 } label: {
-                    Text(L10n.otpResend.text)
+                    Text(resendLabel)
                         .font(.subheadline)
-                        .foregroundStyle(Theme.accentPrimary)
+                        .foregroundStyle(resendColor)
                 }
-                .disabled(vm.isLoading)
+                .disabled(vm.isLoading || vm.resendCountdown > 0)
                 .accessibilityIdentifier("OtpResendButton")
             }
             .padding(.horizontal, Theme.screenHorizontalPadding)
@@ -86,6 +86,11 @@ struct OtpEntryView: View {
             .background(Theme.backgroundPrimary)
         }
         .onAppear {
+            // The OTP was already requested by the email form before this
+            // screen appeared, so arm the resend cooldown immediately — the
+            // Resend button must be disabled from the first appearance, not
+            // only after a manual resend.
+            vm.armInitialResendCooldown()
             // Consume a pending deep link before claiming focus: deep links
             // auto-submit, so we must not also focus the field (which would
             // dismiss and re-show the keyboard and race the submit).
@@ -123,6 +128,22 @@ struct OtpEntryView: View {
     private func submit() {
         isCodeFocused = false
         Task { await vm.submit() }
+    }
+
+    /// Label for the Resend button: shows the plain call-to-action while it is
+    /// tappable, and a live countdown while the client-side cooldown is active.
+    private var resendLabel: String {
+        if vm.resendCountdown > 0 {
+            return String(format: L10n.otpResendCountdown.text, vm.resendCountdown)
+        }
+        return L10n.otpResend.text
+    }
+
+    /// Dimmed appearance while the cooldown disables the button.
+    private var resendColor: Color {
+        vm.resendCountdown > 0
+            ? Theme.color(Theme.accentPrimary, alpha: 0.5)
+            : Theme.accentPrimary
     }
 }
 

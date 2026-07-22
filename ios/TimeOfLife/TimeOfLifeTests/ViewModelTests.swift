@@ -80,6 +80,26 @@ struct ViewModelTests {
         #expect(store.cachedEmail == "foo@bar.com")
     }
 
+    @Test("EmailEntryViewModel: email is restored from cached email on init")
+    func emailEntryRestoresCachedEmail() async throws {
+        let (service, _, conn, store) = makeService()
+        // Simulate the email form having already requested an OTP (which caches
+        // the normalized email) before the user navigates back to this screen.
+        store.setCachedEmail("foo@bar.com")
+
+        let vm = EmailEntryViewModel(service: service, connectivity: conn, sessionStore: store)
+
+        #expect(vm.email == "foo@bar.com")
+    }
+
+    @Test("EmailEntryViewModel: email stays empty when nothing is cached")
+    func emailEntryEmptyWhenNotCached() async throws {
+        let (service, _, conn, _) = makeService()
+        let vm = EmailEntryViewModel(service: service, connectivity: conn)
+
+        #expect(vm.email == "")
+    }
+
     @Test("EmailEntryViewModel: rate_limited error sets errorMessage")
     func emailEntryRateLimited() async throws {
         let repo = FakeAuthRepository()
@@ -256,6 +276,36 @@ struct ViewModelTests {
         #expect(vm.errorMessage == nil)
     }
 
+    @Test("OtpEntryViewModel: arming the initial cooldown disables resend on appear")
+    func otpEntryArmInitialCooldown() async throws {
+        let (service, _, conn, _) = makeService()
+        let vm = OtpEntryViewModel(service: service, connectivity: conn, email: "a@b.com")
+
+        // The OTP was already requested by the email form, so appearing here
+        // should arm the cooldown immediately — without a manual resend.
+        #expect(vm.resendCountdown == 0)
+        vm.armInitialResendCooldown()
+        #expect(vm.resendCountdown == OtpEntryViewModel.resendCooldownSeconds)
+
+        // Idempotent: a re-appearance must not restart the timer.
+        vm.armInitialResendCooldown()
+        #expect(vm.resendCountdown == OtpEntryViewModel.resendCooldownSeconds)
+    }
+
+    @Test("OtpEntryViewModel: armed cooldown blocks a manual resend")
+    func otpEntryArmInitialCooldownBlocksResend() async throws {
+        let (service, repo, conn, _) = makeService()
+        let vm = OtpEntryViewModel(service: service, connectivity: conn, email: "a@b.com")
+
+        vm.armInitialResendCooldown()
+        await vm.resendOtp()
+
+        // Cooldown was armed on appear, so the resend is rate-limited and never
+        // reaches the repo.
+        #expect(repo.calls.isEmpty)
+        #expect(vm.resendCountdown == OtpEntryViewModel.resendCooldownSeconds)
+    }
+
     @Test("OtpEntryViewModel: resendOtp shows error on failure")
     func otpEntryResendFailure() async throws {
         let repo = FakeAuthRepository()
@@ -266,6 +316,57 @@ struct ViewModelTests {
         await vm.resendOtp()
 
         #expect(vm.errorMessage != nil)
+    }
+
+    @Test("OtpEntryViewModel: successful resend starts the cooldown countdown")
+    func otpEntryResendStartsCooldown() async throws {
+        let (service, repo, conn, _) = makeService()
+        let vm = OtpEntryViewModel(service: service, connectivity: conn, email: "a@b.com")
+
+        await vm.resendOtp()
+
+        #expect(repo.calls == [.requestOtp(email: "a@b.com")])
+        #expect(vm.resendCountdown == OtpEntryViewModel.resendCooldownSeconds)
+    }
+
+    @Test("OtpEntryViewModel: resend is a no-op while the cooldown is active")
+    func otpEntryResendBlockedDuringCooldown() async throws {
+        let (service, repo, conn, _) = makeService()
+        let vm = OtpEntryViewModel(service: service, connectivity: conn, email: "a@b.com")
+
+        await vm.resendOtp()
+        // A successful resend arms the cooldown to its full duration synchronously,
+        // so a second immediate tap is rate-limited and never reaches the repo.
+        #expect(vm.resendCountdown == OtpEntryViewModel.resendCooldownSeconds)
+        await vm.resendOtp()
+
+        #expect(repo.calls == [.requestOtp(email: "a@b.com")])
+        #expect(vm.resendCountdown == OtpEntryViewModel.resendCooldownSeconds)
+    }
+
+    @Test("OtpEntryViewModel: failed resend does not start the cooldown")
+    func otpEntryResendFailureNoCooldown() async throws {
+        let repo = FakeAuthRepository()
+        repo.otpRequestError = APIError.server(code: "rate_limited", message: "Too many attempts.")
+        let (service, _, conn, _) = makeService(repo: repo)
+        let vm = OtpEntryViewModel(service: service, connectivity: conn, email: "a@b.com")
+
+        await vm.resendOtp()
+
+        #expect(vm.resendCountdown == 0)
+    }
+
+    @Test("OtpEntryViewModel: reset clears the cooldown")
+    func otpEntryResetClearsCooldown() async throws {
+        let (service, _, conn, _) = makeService()
+        let vm = OtpEntryViewModel(service: service, connectivity: conn, email: "a@b.com")
+
+        await vm.resendOtp()
+        #expect(vm.resendCountdown > 0)
+
+        vm.reset()
+
+        #expect(vm.resendCountdown == 0)
     }
 
     @Test("OtpEntryViewModel: handleDeepLinkCode pre-fills and auto-submits")

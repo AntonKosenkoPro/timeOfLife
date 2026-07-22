@@ -16,18 +16,27 @@ final class EmailEntryViewModel: ObservableObject {
     private let service: AuthService
     private let connectivity: Connectivity
     private let appleService: AppleSignInService
+    private let sessionStore: SessionStore
 
     /// `appleService` defaults to a real `AppleSignInService` so existing call
     /// sites (and previews) keep working; tests inject one wrapping a fake
-    /// `AppleAuthorizationProviding`.
+    /// `AppleAuthorizationProviding`. `sessionStore` defaults to a fresh store
+    /// but production injects the shared one so the email field can be
+    /// restored from `cachedEmail` when the user navigates back here from the
+    /// OTP screen (a fresh view model is created on each appearance).
     init(
         service: AuthService,
         connectivity: Connectivity,
-        appleService: AppleSignInService = AppleSignInService()
+        appleService: AppleSignInService = AppleSignInService(),
+        sessionStore: SessionStore = SessionStore()
     ) {
         self.service = service
         self.connectivity = connectivity
         self.appleService = appleService
+        self.sessionStore = sessionStore
+        if let cached = sessionStore.cachedEmail, !cached.isEmpty {
+            email = cached
+        }
     }
 
     /// Validates the email field and returns `true` if valid.
