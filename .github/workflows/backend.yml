@@ -136,11 +136,11 @@ jobs:
             cat > .env <<'ENVEOF'
             DB_PASSWORD=${{ secrets.DB_PASSWORD }}
             JWT_SECRET=${{ secrets.JWT_SECRET }}
-            EMAIL_BACKEND=${{ secrets.EMAIL_BACKEND }}
+            EMAIL_BACKEND=${{ vars.EMAIL_BACKEND }}
             AWS_ACCESS_KEY_ID=${{ secrets.AWS_ACCESS_KEY_ID }}
             AWS_SECRET_ACCESS_KEY=${{ secrets.AWS_SECRET_ACCESS_KEY }}
-            AWS_REGION=${{ secrets.AWS_REGION }}
-            SES_FROM=${{ secrets.SES_FROM }}
+            AWS_REGION=${{ vars.AWS_REGION }}
+            SES_FROM=${{ vars.SES_FROM }}
             APPLE_CLIENT_ID=${{ secrets.APPLE_CLIENT_ID }}
             ENVEOF
             chmod 600 .env
@@ -151,7 +151,9 @@ jobs:
             : "${DB_PASSWORD:?secret DB_PASSWORD is empty}"
             : "${JWT_SECRET:?secret JWT_SECRET is empty}"
             [ "${#JWT_SECRET}" -ge 32 ] || { echo "JWT_SECRET must be at least 32 bytes"; exit 1; }
-            : "${EMAIL_BACKEND:?secret EMAIL_BACKEND is empty}"
+            # EMAIL_BACKEND is a non-secret per-environment variable (vars.EMAIL_BACKEND),
+            # not a secret. Default to console when unset — compose also defaults to console.
+            EMAIL_BACKEND="${EMAIL_BACKEND:-console}"
             case "$EMAIL_BACKEND" in
               console|mailgun|ses) ;;
               *) echo "EMAIL_BACKEND '$EMAIL_BACKEND' is not one of console|mailgun|ses"; exit 1 ;;
