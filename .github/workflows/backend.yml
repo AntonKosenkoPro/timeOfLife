@@ -117,7 +117,45 @@ jobs:
             set -euo pipefail
             cd /opt/timeoflife
 
-            # Use the production compose file
+            # Back up the current .env before regenerating (recoverable, not authoritative).
+            [ -f .env ] && cp .env ".env.bak.$(date +%Y%m%d-%H%M%S)" || true
+
+            # Regenerate .env from GitHub Actions secrets. This is what makes redeploy
+            # self-healing: the secrets' source of truth is GitHub Actions, and every
+            # deploy rewrites a correct, complete .env on the VM.
+            # Quoted heredoc: GitHub substitutes ${{ secrets.* }} literals; the remote
+            # shell does no expansion, so values with $ or ` survive verbatim.
+            cat > .env <<'ENVEOF'
+            DB_PASSWORD=${{ secrets.DB_PASSWORD }}
+            JWT_SECRET=${{ secrets.JWT_SECRET }}
+            EMAIL_BACKEND=${{ secrets.EMAIL_BACKEND }}
+            AWS_ACCESS_KEY_ID=${{ secrets.AWS_ACCESS_KEY_ID }}
+            AWS_SECRET_ACCESS_KEY=${{ secrets.AWS_SECRET_ACCESS_KEY }}
+            AWS_REGION=${{ secrets.AWS_REGION }}
+            SES_FROM=${{ secrets.SES_FROM }}
+            APPLE_CLIENT_ID=${{ secrets.APPLE_CLIENT_ID }}
+            ENVEOF
+            chmod 600 .env
+
+            # Validate before bringing services up — fail loudly in CI instead of
+            # crashlooping on the VM with empty/missing config.
+            set -a; . ./.env; set +a
+            : "${DB_PASSWORD:?secret DB_PASSWORD is empty}"
+            : "${JWT_SECRET:?secret JWT_SECRET is empty}"
+            [ "${#JWT_SECRET}" -ge 32 ] || { echo "JWT_SECRET must be at least 32 bytes"; exit 1; }
+            : "${EMAIL_BACKEND:?secret EMAIL_BACKEND is empty}"
+            case "$EMAIL_BACKEND" in
+              console|mailgun|ses) ;;
+              *) echo "EMAIL_BACKEND '$EMAIL_BACKEND' is not one of console|mailgun|ses"; exit 1 ;;
+            esac
+            if [ "$EMAIL_BACKEND" = ses ]; then
+              : "${AWS_ACCESS_KEY_ID:?AWS_ACCESS_KEY_ID required when EMAIL_BACKEND=ses}"
+              : "${AWS_SECRET_ACCESS_KEY:?AWS_SECRET_ACCESS_KEY required when EMAIL_BACKEND=ses}"
+              : "${AWS_REGION:?AWS_REGION required when EMAIL_BACKEND=ses}"
+              : "${SES_FROM:?SES_FROM required when EMAIL_BACKEND=ses}"
+            fi
+
+            # Use the production compose file (local .env is read from this cwd).
             cp docker-compose.prod.yml docker-compose.yml
 
             # Log in to GHCR
