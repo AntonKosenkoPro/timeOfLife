@@ -25,6 +25,14 @@ final class RemoteAuthRepository: AuthRepository {
         )
     }
 
+    func appleSignIn(identityToken: String) async throws -> AuthSession {
+        try await client.send(
+            APIEndpoint(method: .post, path: "\(basePath)/auth/apple",
+                        body: AppleSignInRequest(identityToken: identityToken)),
+            as: AuthSession.self
+        )
+    }
+
     func refresh(refreshToken: String) async throws -> AuthSession {
         try await client.send(
             APIEndpoint(method: .post, path: "\(basePath)/auth/refresh",

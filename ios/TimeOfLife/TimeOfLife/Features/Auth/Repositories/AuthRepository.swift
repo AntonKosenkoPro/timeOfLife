@@ -9,6 +9,8 @@ protocol AuthRepository: Sendable {
     func requestOtp(email: String) async throws
     /// `POST /auth/otp/verify` — returns tokens + user on success.
     func verifyOtp(email: String, code: String) async throws -> AuthSession
+    /// `POST /auth/apple` — exchanges Apple's identity token for a session.
+    func appleSignIn(identityToken: String) async throws -> AuthSession
     /// `POST /auth/refresh` — rotates tokens.
     func refresh(refreshToken: String) async throws -> AuthSession
     /// `POST /auth/logout` (Bearer) — 204.

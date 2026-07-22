@@ -492,3 +492,69 @@ func TestSQLiteStore_GetValidOTP_ReturnsLatestOTP(t *testing.T) {
 		t.Errorf("expected latest OTP hash %q, got %q", "second-hash", otp.CodeHash)
 	}
 }
+
+func TestSQLiteStore_UpsertUserByAppleSubject_CreatesVerifiedUser(t *testing.T) {
+	store := setupTestStore(t)
+	defer func() { _ = store.Close() }()
+
+	ctx := context.Background()
+	user, err := store.UpsertUserByAppleSubject(ctx, "apple-sub-1", "relay@privaterelay.appleid.com")
+	if err != nil {
+		t.Fatalf("UpsertUserByAppleSubject failed: %v", err)
+	}
+	if user.ID == "" {
+		t.Fatal("expected non-empty user ID")
+	}
+	if user.Email != "relay@privaterelay.appleid.com" {
+		t.Errorf("expected relay email, got %q", user.Email)
+	}
+	if !user.EmailVerified {
+		t.Error("expected Apple user to be email-verified")
+	}
+}
+
+func TestSQLiteStore_UpsertUserByAppleSubject_IdempotentKeepsEmail(t *testing.T) {
+	store := setupTestStore(t)
+	defer func() { _ = store.Close() }()
+
+	ctx := context.Background()
+
+	first, err := store.UpsertUserByAppleSubject(ctx, "apple-sub-2", "real@example.com")
+	if err != nil {
+		t.Fatalf("first upsert failed: %v", err)
+	}
+
+	// Second sign-in with the same sub but no email — must reuse the same user
+	// and keep the originally stored email.
+	second, err := store.UpsertUserByAppleSubject(ctx, "apple-sub-2", "")
+	if err != nil {
+		t.Fatalf("second upsert failed: %v", err)
+	}
+	if second.ID != first.ID {
+		t.Errorf("expected same user ID: %q vs %q", first.ID, second.ID)
+	}
+	if second.Email != "real@example.com" {
+		t.Errorf("expected original email retained, got %q", second.Email)
+	}
+	if !second.EmailVerified {
+		t.Error("expected email_verified to remain true")
+	}
+}
+
+func TestSQLiteStore_UpsertUserByAppleSubject_DistinctSubjects(t *testing.T) {
+	store := setupTestStore(t)
+	defer func() { _ = store.Close() }()
+
+	ctx := context.Background()
+	u1, err := store.UpsertUserByAppleSubject(ctx, "sub-a", "a@example.com")
+	if err != nil {
+		t.Fatalf("upsert a failed: %v", err)
+	}
+	u2, err := store.UpsertUserByAppleSubject(ctx, "sub-b", "b@example.com")
+	if err != nil {
+		t.Fatalf("upsert b failed: %v", err)
+	}
+	if u1.ID == u2.ID {
+		t.Error("expected distinct users for distinct Apple subjects")
+	}
+}

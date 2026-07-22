@@ -1,10 +1,11 @@
 import Foundation
 import OSLog
 
-/// App-wide configuration sourced from `Info.plist` / `Config.xcconfig`.
+/// App-wide configuration sourced from `Info.plist` / the per-configuration xcconfig.
 ///
-/// `API_BASE_URL` is injected into `Info.plist` via the `Config.xcconfig`
-/// file and read here. The production build can point at a different host.
+/// `API_BASE_URL` is injected into `Info.plist` via `Config.Debug.xcconfig`
+/// (dev: `http://127.0.0.1:8080`) or `Config.Release.xcconfig`
+/// (prod: `https://timeoflife-api.antonkosenko.pro`) and read here.
 enum AppConfig {
     private static let defaultBaseURL = URL(string: "http://127.0.0.1:8080")!
 

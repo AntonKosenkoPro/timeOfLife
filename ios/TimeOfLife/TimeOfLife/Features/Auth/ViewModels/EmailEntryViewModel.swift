@@ -15,10 +15,19 @@ final class EmailEntryViewModel: ObservableObject {
 
     private let service: AuthService
     private let connectivity: Connectivity
+    private let appleService: AppleSignInService
 
-    init(service: AuthService, connectivity: Connectivity) {
+    /// `appleService` defaults to a real `AppleSignInService` so existing call
+    /// sites (and previews) keep working; tests inject one wrapping a fake
+    /// `AppleAuthorizationProviding`.
+    init(
+        service: AuthService,
+        connectivity: Connectivity,
+        appleService: AppleSignInService = AppleSignInService()
+    ) {
         self.service = service
         self.connectivity = connectivity
+        self.appleService = appleService
     }
 
     /// Validates the email field and returns `true` if valid.
@@ -59,5 +68,31 @@ final class EmailEntryViewModel: ObservableObject {
         isLoading = false
         isEmailSent = false
         errorMessage = nil
+    }
+
+    /// Initiates Sign in with Apple. Runs the Apple authorization, then exchanges
+    /// the identity token for a session via `AuthService`. Cancellation is silent
+    /// (no error banner); other failures surface `appleSignIn.error`.
+    func signInWithApple() async {
+        guard connectivity.isConnected else {
+            errorMessage = String.localized("error.offline")
+            return
+        }
+
+        isLoading = true
+        errorMessage = nil
+
+        do {
+            let credential = try await appleService.signIn()
+            try await service.signInWithApple(identityToken: credential.identityToken)
+        } catch AppleSignInError.canceled {
+            // User dismissed the Apple sheet — no error.
+        } catch let error as APIError {
+            errorMessage = ErrorLocalization.message(for: error)
+        } catch {
+            errorMessage = L10n.appleSignInError.text
+        }
+
+        isLoading = false
     }
 }

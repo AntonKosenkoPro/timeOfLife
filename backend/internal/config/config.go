@@ -21,6 +21,12 @@ type Config struct {
 	OTPEmailTemplate string
 	MailgunDomain    string
 	MailgunAPIKey    string
+	// Sign in with Apple (F2). Optional: empty AppleClientID disables the
+	// /auth/apple route and the iOS button. When set, it must be the app's
+	// Bundle ID — the `aud` claim Apple puts in the identity token for a
+	// native iOS app.
+	AppleClientID string
+	AppleJWKSURL  string
 }
 
 // Load reads configuration from environment variables.
@@ -98,6 +104,15 @@ func Load() (*Config, error) {
 	// Optional: MAILGUN_DOMAIN, MAILGUN_API_KEY
 	cfg.MailgunDomain = os.Getenv("MAILGUN_DOMAIN")
 	cfg.MailgunAPIKey = os.Getenv("MAILGUN_API_KEY")
+
+	// Optional: Sign in with Apple. Empty APPLE_CLIENT_ID leaves the feature
+	// disabled (the /auth/apple route is not registered). When enabled, the
+	// Apple identity token's `aud` claim for a native iOS app is the Bundle ID.
+	cfg.AppleClientID = os.Getenv("APPLE_CLIENT_ID")
+	cfg.AppleJWKSURL = os.Getenv("APPLE_JWKS_URL")
+	if cfg.AppleJWKSURL == "" {
+		cfg.AppleJWKSURL = "https://appleid.apple.com/auth/keys"
+	}
 
 	return cfg, nil
 }

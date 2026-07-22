@@ -8,7 +8,7 @@
          BreakpointExtensionID = "Xcode.Breakpoint.FileBreakpoint">
          <BreakpointContent
             uuid = "19B823D4-B513-4B32-B2C9-28996A368089"
-            shouldBeEnabled = "Yes"
+            shouldBeEnabled = "No"
             ignoreCount = "0"
             continueAfterRunningActions = "No"
             filePath = "TimeOfLife/Features/Auth/Repositories/RemoteAuthRepository.swift"
@@ -18,57 +18,13 @@
             endingLineNumber = "14"
             landmarkName = "requestOtp(email:)"
             landmarkType = "7">
-            <Locations>
-               <Location
-                  uuid = "19B823D4-B513-4B32-B2C9-28996A368089 - a0156addbe617197"
-                  shouldBeEnabled = "Yes"
-                  ignoreCount = "0"
-                  continueAfterRunningActions = "No"
-                  symbolName = "(1) suspend resume partial function for TimeOfLife.RemoteAuthRepository.requestOtp(email: Swift.String) async throws -&gt; ()"
-                  moduleName = "TimeOfLife.debug.dylib"
-                  usesParentBreakpointCondition = "Yes"
-                  urlString = "file:///Users/antonkosenko/work/timeOfLife/ios/TimeOfLife/TimeOfLife/Features/Auth/Repositories/RemoteAuthRepository.swift"
-                  startingColumnNumber = "9223372036854775807"
-                  endingColumnNumber = "9223372036854775807"
-                  startingLineNumber = "14"
-                  endingLineNumber = "14">
-               </Location>
-               <Location
-                  uuid = "19B823D4-B513-4B32-B2C9-28996A368089 - 5def79aa4c86979f"
-                  shouldBeEnabled = "Yes"
-                  ignoreCount = "0"
-                  continueAfterRunningActions = "No"
-                  symbolName = "(2) await resume partial function for TimeOfLife.RemoteAuthRepository.requestOtp(email: Swift.String) async throws -&gt; ()"
-                  moduleName = "TimeOfLife.debug.dylib"
-                  usesParentBreakpointCondition = "Yes"
-                  urlString = "file:///Users/antonkosenko/work/timeOfLife/ios/TimeOfLife/TimeOfLife/Features/Auth/Repositories/RemoteAuthRepository.swift"
-                  startingColumnNumber = "9223372036854775807"
-                  endingColumnNumber = "9223372036854775807"
-                  startingLineNumber = "14"
-                  endingLineNumber = "14">
-               </Location>
-               <Location
-                  uuid = "19B823D4-B513-4B32-B2C9-28996A368089 - b182f7b8a32f9790"
-                  shouldBeEnabled = "Yes"
-                  ignoreCount = "0"
-                  continueAfterRunningActions = "No"
-                  symbolName = "(4) suspend resume partial function for TimeOfLife.RemoteAuthRepository.requestOtp(email: Swift.String) async throws -&gt; ()"
-                  moduleName = "TimeOfLife.debug.dylib"
-                  usesParentBreakpointCondition = "Yes"
-                  urlString = "file:///Users/antonkosenko/work/timeOfLife/ios/TimeOfLife/TimeOfLife/Features/Auth/Repositories/RemoteAuthRepository.swift"
-                  startingColumnNumber = "9223372036854775807"
-                  endingColumnNumber = "9223372036854775807"
-                  startingLineNumber = "14"
-                  endingLineNumber = "14">
-               </Location>
-            </Locations>
          </BreakpointContent>
       </BreakpointProxy>
       <BreakpointProxy
          BreakpointExtensionID = "Xcode.Breakpoint.FileBreakpoint">
          <BreakpointContent
             uuid = "9172F011-E0C1-42A0-824B-747C566A4022"
-            shouldBeEnabled = "Yes"
+            shouldBeEnabled = "No"
             ignoreCount = "0"
             continueAfterRunningActions = "No"
             filePath = "TimeOfLife/Core/Networking/APIEndpoint.swift"
@@ -84,7 +40,7 @@
          BreakpointExtensionID = "Xcode.Breakpoint.FileBreakpoint">
          <BreakpointContent
             uuid = "E104A92B-54AF-482B-BFDC-D9EFAEF0B838"
-            shouldBeEnabled = "Yes"
+            shouldBeEnabled = "No"
             ignoreCount = "0"
             continueAfterRunningActions = "No"
             filePath = "TimeOfLife/Core/Networking/APIClient.swift"
@@ -94,57 +50,13 @@
             endingLineNumber = "73"
             landmarkName = "requestData(_:allowRetry:)"
             landmarkType = "7">
-            <Locations>
-               <Location
-                  uuid = "E104A92B-54AF-482B-BFDC-D9EFAEF0B838 - 3e1c61d24ba08c0c"
-                  shouldBeEnabled = "Yes"
-                  ignoreCount = "0"
-                  continueAfterRunningActions = "No"
-                  symbolName = "(1) suspend resume partial function for TimeOfLife.APIClient.requestData(_: TimeOfLife.APIEndpoint, allowRetry: Swift.Bool) async throws -&gt; Foundation.Data"
-                  moduleName = "TimeOfLife.debug.dylib"
-                  usesParentBreakpointCondition = "Yes"
-                  urlString = "file:///Users/antonkosenko/work/timeOfLife/ios/TimeOfLife/TimeOfLife/Core/Networking/APIClient.swift"
-                  startingColumnNumber = "9223372036854775807"
-                  endingColumnNumber = "9223372036854775807"
-                  startingLineNumber = "73"
-                  endingLineNumber = "73">
-               </Location>
-               <Location
-                  uuid = "E104A92B-54AF-482B-BFDC-D9EFAEF0B838 - f4780deaa5652f23"
-                  shouldBeEnabled = "Yes"
-                  ignoreCount = "0"
-                  continueAfterRunningActions = "No"
-                  symbolName = "(2) await resume partial function for TimeOfLife.APIClient.requestData(_: TimeOfLife.APIEndpoint, allowRetry: Swift.Bool) async throws -&gt; Foundation.Data"
-                  moduleName = "TimeOfLife.debug.dylib"
-                  usesParentBreakpointCondition = "Yes"
-                  urlString = "file:///Users/antonkosenko/work/timeOfLife/ios/TimeOfLife/TimeOfLife/Core/Networking/APIClient.swift"
-                  startingColumnNumber = "9223372036854775807"
-                  endingColumnNumber = "9223372036854775807"
-                  startingLineNumber = "73"
-                  endingLineNumber = "73">
-               </Location>
-               <Location
-                  uuid = "E104A92B-54AF-482B-BFDC-D9EFAEF0B838 - b5e0fdc937ee0408"
-                  shouldBeEnabled = "Yes"
-                  ignoreCount = "0"
-                  continueAfterRunningActions = "No"
-                  symbolName = "(5) suspend resume partial function for TimeOfLife.APIClient.requestData(_: TimeOfLife.APIEndpoint, allowRetry: Swift.Bool) async throws -&gt; Foundation.Data"
-                  moduleName = "TimeOfLife.debug.dylib"
-                  usesParentBreakpointCondition = "Yes"
-                  urlString = "file:///Users/antonkosenko/work/timeOfLife/ios/TimeOfLife/TimeOfLife/Core/Networking/APIClient.swift"
-                  startingColumnNumber = "9223372036854775807"
-                  endingColumnNumber = "9223372036854775807"
-                  startingLineNumber = "73"
-                  endingLineNumber = "73">
-               </Location>
-            </Locations>
          </BreakpointContent>
       </BreakpointProxy>
       <BreakpointProxy
          BreakpointExtensionID = "Xcode.Breakpoint.FileBreakpoint">
          <BreakpointContent
             uuid = "C3E5817F-F322-4C66-8184-66C0A075D4F5"
-            shouldBeEnabled = "Yes"
+            shouldBeEnabled = "No"
             ignoreCount = "0"
             continueAfterRunningActions = "No"
             filePath = "TimeOfLife/Core/Networking/APIClient.swift"

@@ -53,9 +53,9 @@
 "error.unknown" = "Something went wrong. Please try again.";
 "error.unauthorized" = "Session expired. Please sign in again.";
 
-// Apple sign in (deferred)
+// Apple sign in
 "appleSignIn.title" = "Sign in with Apple";
-"appleSignIn.comingSoon" = "Coming soon";
+"appleSignIn.error" = "Sign in with Apple failed. Please try again.";
 
 // Timer
 "timer.title" = "Timer";

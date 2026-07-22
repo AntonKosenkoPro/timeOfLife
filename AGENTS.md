@@ -2,6 +2,12 @@
 
 Context for AI agents working in this repository. Read this first. (Requirements `Common.md` S7.)
 
+## Flow recomendations
+
+- Plan every not obvious task (that will consume over 100k tokens per session)
+- Use subagents whenever it's suitable
+- Ask the user to start a new session if the current context overwhelms 200k tokens
+
 ## What this is
 **Time of Life** — a personal time-tracking iOS app. The repo contains the **auth MVP** (passwordless email-OTP sign-up/sign-in) and the first **time-tracking MVP** screen (start/stop timer with offline-first local persistence).
 
@@ -74,6 +80,7 @@ Uniform error envelope: `{ "error": { "code": String, "message": String, "detail
 |---|---|---|---|---|
 | POST | `/auth/otp/request` | `{email}` | 202 (always) | `invalid_body`, `rate_limited` |
 | POST | `/auth/otp/verify` | `{email,code}` | 200 `{access_token,refresh_token,user}` | `invalid_otp`, `otp_expired`, `otp_attempts_exceeded`, `rate_limited`, `invalid_body` |
+| POST | `/auth/apple` | `{identity_token}` | 200 `{access_token,refresh_token,user}` | `invalid_body`, `invalid_apple_token`, `rate_limited`, `apple_not_configured` |
 | POST | `/auth/refresh` | `{refresh_token}` | 200 new pair | `invalid_refresh`, `token_reuse`, `token_expired` |
 | POST | `/auth/logout` | (Bearer) | 204 | (401) |
 | GET  | `/auth/me` | (Bearer) | 200 `user` | (401) |
@@ -131,16 +138,32 @@ make deploy   # or push to main and let CI/CD handle it
 | `VM_USER` | SSH user (`deploy`) |
 | `VM_SSH_KEY` | SSH private key for deployment |
 
+### iOS production config
+`API_BASE_URL` is per build configuration, injected into `Info.plist` via xcconfig:
+- `Debug` → `Config.Debug.xcconfig` → `http://127.0.0.1:8080` (local backend; ATS allows plain HTTP to `127.0.0.1` only).
+- `Release` → `Config.Release.xcconfig` → `https://timeoflife-api.antonkosenko.pro` (production, HTTPS — no ATS exception needed).
+
+`AppConfig` reads it at runtime and falls back to the dev URL if missing/malformed. The unit tests run under `Debug`, so they keep asserting `127.0.0.1:8080`.
+
+Code signing is disabled in `project.yml` (`DEVELOPMENT_TEAM: ""`, `CODE_SIGNING_REQUIRED: NO`) so simulator/CI builds need no Apple Developer account. **TestFlight/App Store distribution is deferred** — to enable it later: set `DEVELOPMENT_TEAM`, switch `CODE_SIGNING_REQUIRED`/`CODE_SIGN_IDENTITY` to distribution values, supply a provisioning profile, and add a fastlane/gym archive + upload CI job (needs an App Store Connect API key secret). The comment in `project.yml` marks the exact lines.
+
 ## Deferred / out of scope
-- **F2 Sign in with Apple** — stubbed in `ios/TimeOfLife/TimeOfLife/Features/AppleSignIn/` (`// DEFERRED: F2`); not wired into `AppContainer`.
+- **Sign in with Apple follow-ups** — F2 itself is implemented (see below); still deferred: account-deletion token revocation via Apple `/auth/revoke` (App Store 5.1.1v, needs `.p8` + `APPLE_TEAM_ID`/`APPLE_KEY_ID`), nonce replay defense, and Apple credential-state/revocation observation on the client.
 - **Kafka** — deferred (S1 names it but auth MVP doesn't need an MQ).
 - **Rate-limit store** — in-memory; swap for Redis before multi-instance deploy.
 - **History/list UI for time entries** — local queue exists but no list view yet.
 - **Remote time-tracking endpoint** — backend endpoint not implemented; `StubTimerRepository` is used.
 - SwiftUI snapshot/on-device keychain tests — manual smoke checklist in README.
 
+## Sign in with Apple (F2)
+- iOS: `Features/AppleSignIn/` — `AppleSignInService` wraps an injectable `AppleAuthorizationProviding` (real `ASAuthorizationAppleIDProvider`-backed impl + a fake in tests). The `AppleSignInButton` (UIControl wrapper) triggers `EmailEntryViewModel.signInWithApple()`, which obtains Apple's identity token and posts it via `AuthService.signInWithApple` → `POST /auth/apple`. Success reuses `AuthService.persist` → `SessionStore` flips → `RootView` lands on the timer (no new navigation wiring).
+- Backend: `POST /api/v1/auth/apple` (`internal/handlers/auth.go` `AppleSignIn`) verifies Apple's RS256 identity-token JWT via `internal/apple` (JWKS fetched with `github.com/MicahParks/keyfunc/v3`, pinned `RS256`, `iss`/`aud`=Bundle ID/`exp`), upserts a user keyed by Apple's `sub` (`Store.UpsertUserByAppleSubject`, migration `002_apple.sql` adds `users.apple_subject`), and issues the same token pair as OTP verify.
+- **Config-gated**: the route is registered only when `APPLE_CLIENT_ID` is set (the app's Bundle ID — Apple puts the Bundle ID in the identity token's `aud` for a native app). Empty → feature off; the handler returns `apple_not_configured` (503) if hit directly. `APPLE_JWKS_URL` defaults to `https://appleid.apple.com/auth/keys`.
+- Running end-to-end requires the **Sign in with Apple** capability (entitlements file + portal App ID) and code signing enabled — both currently off. The code + unit tests (119) are green without them.
+
 ## Decisions log (precedents to respect)
 - Backend language is **Go** (+3); mobile is **Swift** (+4). Do not reintroduce Swift/Vapor in the backend.
 - Auth is **passwordless** — do not reintroduce passwords.
 - Tests use **SQLite in-memory** so they run without Docker (S4 local + cloud).
 - The Xcode project is **XcodeGen-managed** — edit source, then `xcodegen generate`; do not hand-edit the `.pbxproj`.
+- **Sign in with Apple** (F2) verifies Apple's RS256 identity-token JWT with `github.com/MicahParks/keyfunc/v3` (JWKS) on the backend and is **config-gated** by `APPLE_CLIENT_ID` (Bundle ID); it reuses the OTP session machinery rather than a separate token type. Account-deletion revocation is deferred (App Store 5.1.1v).

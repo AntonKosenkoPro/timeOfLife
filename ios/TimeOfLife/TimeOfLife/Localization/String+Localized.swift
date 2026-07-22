@@ -34,7 +34,7 @@ enum L10n: String {
 
     // Apple
     case appleSignInTitle = "appleSignIn.title"
-    case appleSignInComingSoon = "appleSignIn.comingSoon"
+    case appleSignInError = "appleSignIn.error"
 
     // Timer
     case timerTitle = "timer.title"

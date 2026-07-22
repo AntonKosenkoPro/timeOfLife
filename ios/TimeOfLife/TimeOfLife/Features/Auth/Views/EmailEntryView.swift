@@ -68,7 +68,10 @@ struct EmailEntryView: View {
                     action: submit
                 )
 
-                AppleSignInButton()
+                AppleSignInButton {
+                    isEmailFocused = false
+                    Task { await vm.signInWithApple() }
+                }
             }
             .padding(.horizontal, Theme.screenHorizontalPadding)
             .padding(.vertical, Theme.spacingSmall)
