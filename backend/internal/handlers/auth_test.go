@@ -287,3 +287,45 @@ func TestRefreshToken_EmptyToken(t *testing.T) {
 		t.Errorf("expected 400, got %d", w.Code)
 	}
 }
+
+func TestExtractIP_FromRemoteAddr(t *testing.T) {
+	tests := []struct {
+		name       string
+		remoteAddr string
+		want       string
+	}{
+		{"ipv4 with port", "127.0.0.1:1234", "127.0.0.1"},
+		{"ipv6 loopback with port", "[::1]:1234", "::1"},
+		{"ipv6 full with port", "[2001:db8::1]:443", "2001:db8::1"},
+		{"bare host no port", "203.0.113.7", "203.0.113.7"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, "/", nil)
+			req.RemoteAddr = tc.remoteAddr
+			if got := extractIP(req); got != tc.want {
+				t.Errorf("extractIP(%q) = %q, want %q", tc.remoteAddr, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestExtractIP_ForwardedHeadersPreferred(t *testing.T) {
+	t.Run("X-Forwarded-For wins", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodPost, "/", nil)
+		req.RemoteAddr = "127.0.0.1:1234"
+		req.Header.Set("X-Forwarded-For", "203.0.113.9")
+		req.Header.Set("X-Real-IP", "198.51.100.1")
+		if got := extractIP(req); got != "203.0.113.9" {
+			t.Errorf("got %q, want X-Forwarded-For value", got)
+		}
+	})
+	t.Run("X-Real-IP used when no X-Forwarded-For", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodPost, "/", nil)
+		req.RemoteAddr = "127.0.0.1:1234"
+		req.Header.Set("X-Real-IP", "198.51.100.1")
+		if got := extractIP(req); got != "198.51.100.1" {
+			t.Errorf("got %q, want X-Real-IP value", got)
+		}
+	})
+}

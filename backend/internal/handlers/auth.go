@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"regexp"
 	"strings"
@@ -221,7 +222,7 @@ func (h *Handler) RequestOTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	magicLink := fmt.Sprintf("%s/auth/verify?code=%s", h.config.AppURL, code)
+	magicLink := fmt.Sprintf("%sverify?code=%s", h.config.AppURL, code)
 	msg := email.NewOTPMessage(req.Email, code, magicLink)
 	if err := h.emailSender.Send(ctx, msg); err != nil {
 		h.logger.Error("failed to send OTP email", "error", err)
@@ -573,12 +574,13 @@ func extractIP(r *http.Request) string {
 	if realIP := r.Header.Get("X-Real-IP"); realIP != "" {
 		return realIP
 	}
-	// Remove port from RemoteAddr.
-	addr := r.RemoteAddr
-	if idx := strings.LastIndex(addr, ":"); idx != -1 {
-		return addr[:idx]
+	// Strip the port from RemoteAddr. Use net.SplitHostPort so IPv6 literals
+	// like "[::1]:1234" are handled correctly — strings.LastIndex(":") would
+	// split inside the IPv6 address and return a truncated, bogus host.
+	if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
+		return host
 	}
-	return addr
+	return r.RemoteAddr
 }
 
 func maskEmail(email string) string {
