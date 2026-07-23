@@ -75,6 +75,25 @@ final class FakeAuthRepository: AuthRepository, @unchecked Sendable {
         lock.lock(); _calls.append(call); lock.unlock()
     }
 
+    // MARK: - Refresh gate (single-flight testing)
+
+    private let gateLock = NSLock()
+    private var refreshWaiters: [CheckedContinuation<Void, Never>] = []
+
+    /// When true, `refresh` records its call then suspends until
+    /// `releaseRefreshGate()` is called. Used to test that concurrent
+    /// `performRefresh` calls coalesce into a single network refresh.
+    var refreshGateHeld = false
+
+    /// Resumes every `refresh` call suspended on the gate.
+    func releaseRefreshGate() {
+        gateLock.lock()
+        let waiters = refreshWaiters
+        refreshWaiters.removeAll()
+        gateLock.unlock()
+        for w in waiters { w.resume(returning: ()) }
+    }
+
     // MARK: - AuthRepository
 
     func requestOtp(email: String) async throws {
@@ -104,6 +123,13 @@ final class FakeAuthRepository: AuthRepository, @unchecked Sendable {
 
     func refresh(refreshToken: String) async throws -> AuthSession {
         record(.refresh(refreshToken: refreshToken))
+        if refreshGateHeld {
+            await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
+                gateLock.lock()
+                refreshWaiters.append(cont)
+                gateLock.unlock()
+            }
+        }
         if let e = refreshError { throw e }
         return refreshResult
     }

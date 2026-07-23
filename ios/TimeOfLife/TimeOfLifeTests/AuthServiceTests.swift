@@ -28,7 +28,7 @@ struct AuthServiceTests {
 
     @Test("requestOTP normalizes email, caches it, and writes no tokens on success")
     func requestOtpSuccess() async throws {
-        let (service, repo, keychain, _, store) = makeService()
+        let (service, repo, keychain, cache, store) = makeService()
 
         try await service.requestOtp(email: "  Foo@Bar.com ")
 
@@ -36,6 +36,8 @@ struct AuthServiceTests {
         #expect(await keychain.string(for: .accessToken) == nil)
         #expect(await keychain.string(for: .refreshToken) == nil)
         #expect(store.cachedEmail == "foo@bar.com")
+        // Pending email is persisted so a cold-launch magic link can resolve it.
+        #expect(cache.loadPendingEmail() == "foo@bar.com")
     }
 
     @Test("requestOTP propagates network failure")
@@ -68,6 +70,8 @@ struct AuthServiceTests {
                 CachedSession(id: "u1", email: "a@b.com", emailVerified: true)
             )
         )
+        // Signing in clears the pending OTP email — it is no longer relevant.
+        #expect(cache.loadPendingEmail() == nil)
     }
 
     @Test("verifyOTP propagates invalid code error")
@@ -255,6 +259,41 @@ struct AuthServiceTests {
         }
     }
 
+    @Test("performRefresh coalesces concurrent refreshes into one network call (single-flight)")
+    func performRefreshSingleFlight() async throws {
+        let (service, repo, _, _, _) = makeService(initialTokens: [.refreshToken: "rt"])
+        // Hold the refresh on the gate so the first call stays in-flight long
+        // enough for the second to arrive and have to join it.
+        repo.refreshGateHeld = true
+
+        func refreshCount(_ calls: [FakeAuthRepository.Call]) -> Int {
+            calls.filter { if case .refresh = $0 { return true }; return false }.count
+        }
+
+        // Start two refreshes concurrently.
+        async let a = service.performRefresh()
+        async let b = service.performRefresh()
+
+        // Wait until the in-flight refresh has recorded its single network call.
+        var polls = 0
+        while refreshCount(repo.calls) == 0 && polls < 500 {
+            try await Task.sleep(nanoseconds: 1_000_000)
+            polls += 1
+        }
+        // While the first refresh is still gated, only ONE network refresh
+        // must have happened — the second caller joined the in-flight task
+        // instead of starting its own (which would revoke the shared token).
+        #expect(refreshCount(repo.calls) == 1, "expected a single in-flight refresh, got \(refreshCount(repo.calls))")
+
+        repo.releaseRefreshGate()
+        let (tokenA, tokenB) = try await (a, b)
+
+        #expect(tokenA == "at2")
+        #expect(tokenB == "at2")
+        // Still exactly one network refresh after both callers complete.
+        #expect(refreshCount(repo.calls) == 1)
+    }
+
     // MARK: - handleDeepLink (via verifyOtp with stored email)
 
     @Test("verifyOtp uses the email passed from deep link handler")
@@ -280,5 +319,68 @@ struct AuthServiceTests {
                 CachedSession(id: "u1", email: "user@example.com", emailVerified: true)
             )
         )
+    }
+
+    // MARK: - Deep-link email resolution (cold launch)
+
+    @Test("resolveDeepLinkEmail returns the in-memory cached email when present")
+    func resolveDeepLinkEmailInMemory() async throws {
+        let (service, _, _, _, _) = makeService()
+        try await service.requestOtp(email: "warm@example.com")
+
+        #expect(service.resolveDeepLinkEmail() == "warm@example.com")
+    }
+
+    @Test("resolveDeepLinkEmail falls back to the persisted pending email on cold launch")
+    func resolveDeepLinkEmailColdLaunch() async throws {
+        // Simulate a cold launch: a fresh SessionStore (no in-memory cached
+        // email) but the pending email persisted by a prior requestOtp.
+        let cache = SessionCache(defaults: UserDefaults(suiteName: UUID().uuidString)!)
+        cache.savePendingEmail("cold@example.com")
+        let store = SessionStore()
+        let service = AuthService(
+            repository: FakeAuthRepository(),
+            keychain: InMemoryKeychainStore(),
+            cache: cache,
+            sessionStore: store
+        )
+
+        #expect(service.resolveDeepLinkEmail() == "cold@example.com")
+    }
+
+    @Test("resolveDeepLinkEmail returns empty when no email is available")
+    func resolveDeepLinkEmailEmpty() async throws {
+        let (service, _, _, _, _) = makeService()
+
+        #expect(service.resolveDeepLinkEmail().isEmpty)
+    }
+
+    @Test("restoreSession hydrates the pending email when not signed in")
+    func restoreSessionHydratesPendingEmail() async throws {
+        let cache = SessionCache(defaults: UserDefaults(suiteName: UUID().uuidString)!)
+        cache.savePendingEmail("pending@example.com")
+        let store = SessionStore()
+        let service = AuthService(
+            repository: FakeAuthRepository(),
+            keychain: InMemoryKeychainStore(),
+            cache: cache,
+            sessionStore: store
+        )
+
+        await service.restoreSession()
+
+        #expect(store.state == .signedOut)
+        #expect(store.cachedEmail == "pending@example.com")
+    }
+
+    @Test("logout clears the persisted pending email")
+    func logoutClearsPendingEmail() async throws {
+        let (service, _, _, cache, _) = makeService()
+        try await service.requestOtp(email: "go@example.com")
+        #expect(cache.loadPendingEmail() == "go@example.com")
+
+        await service.logout()
+
+        #expect(cache.loadPendingEmail() == nil)
     }
 }
