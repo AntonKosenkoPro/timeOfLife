@@ -14,51 +14,66 @@ struct OtpEntryView: View {
     @State private var consumedDeepLink = false
 
     var body: some View {
-        VStack(spacing: Theme.spacingLarge) {
-            Spacer()
+        // `GeometryReader` + `ScrollView` engages SwiftUI's automatic keyboard
+        // avoidance on iOS 15 (a bare `VStack` is not avoided, so on iPhone SE
+        // 1st gen the pinned Verify/Resend bar was covered by the keyboard).
+        // The `minHeight` keeps the content vertically centered when it fits
+        // and lets it scroll when it overflows on short screens — the long
+        // "Enter the 6-digit code sent to …" subtitle (especially in RU) no
+        // longer gets clipped.
+        GeometryReader { proxy in
+            ScrollView {
+                VStack(spacing: Theme.spacingLarge) {
+                    Spacer(minLength: 0)
 
-            Text(L10n.otpTitle.text)
-                .font(.title.bold())
-                .foregroundStyle(Theme.textPrimary)
-                .multilineTextAlignment(.center)
+                    Text(L10n.otpTitle.text)
+                        .font(.title.bold())
+                        .foregroundStyle(Theme.textPrimary)
+                        .multilineTextAlignment(.center)
 
-            Text(String(format: L10n.otpSentTo.text, vm.email))
-                .font(.subheadline)
-                .foregroundStyle(Theme.textSecondary)
-                .multilineTextAlignment(.center)
+                    Text(String(format: L10n.otpSentTo.text, vm.email))
+                        .font(.subheadline)
+                        .foregroundStyle(Theme.textSecondary)
+                        .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
 
-            Spacer().frame(height: Theme.spacingSmall)
+                    Spacer().frame(height: Theme.spacingSmall)
 
-            TextFieldWithError(
-                title: L10n.otpCode.text,
-                placeholder: L10n.otpCode.text,
-                text: $vm.code,
-                error: vm.fieldErrors.otp,
-                keyboardType: .numberPad,
-                textContentType: .oneTimeCode,
-                submitLabel: .continue,
-                autocapitalization: .none,
-                accessibilityId: "OtpField",
-                onSubmit: submit
-            )
-            .focused($isCodeFocused)
+                    TextFieldWithError(
+                        title: L10n.otpCode.text,
+                        placeholder: L10n.otpCode.text,
+                        text: $vm.code,
+                        error: vm.fieldErrors.otp,
+                        keyboardType: .numberPad,
+                        textContentType: .oneTimeCode,
+                        submitLabel: .continue,
+                        autocapitalization: .none,
+                        accessibilityId: "OtpField",
+                        onSubmit: submit
+                    )
+                    .focused($isCodeFocused)
 
-            if let errorMessage = vm.errorMessage {
-                ErrorBanner(
-                    message: errorMessage,
-                    accessibilityId: "OtpErrorBanner"
-                )
+                    if let errorMessage = vm.errorMessage {
+                        ErrorBanner(
+                            message: errorMessage,
+                            accessibilityId: "OtpErrorBanner"
+                        )
+                    }
+
+                    Spacer(minLength: 0)
+                }
+                .padding(.horizontal, Theme.screenHorizontalPadding)
+                .frame(maxWidth: Theme.maxContentWidth)
+                .frame(maxWidth: .infinity)
+                .frame(minHeight: proxy.size.height)
             }
-
-            Spacer()
         }
-        .padding(.horizontal, Theme.screenHorizontalPadding)
-        .frame(maxWidth: Theme.maxContentWidth)
-        .frame(maxWidth: .infinity)
         .background(Theme.backgroundPrimary.ignoresSafeArea())
         .safeAreaInset(edge: .bottom) {
             // Pinned action bar so Verify/Resend animate smoothly with the
-            // keyboard and remain reachable while typing.
+            // keyboard and remain reachable while typing. On iOS 15 the
+            // enclosing `ScrollView` now makes this inset lift above the
+            // keyboard (it was covered on iPhone SE 1st gen).
             VStack(spacing: Theme.spacingSmall) {
                 PrimaryButton(
                     title: L10n.otpSubmit.text,

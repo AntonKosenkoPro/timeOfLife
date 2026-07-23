@@ -36,14 +36,35 @@ final class SessionCache: @unchecked Sendable {
         }
     }
 
+    /// Persists the email awaiting OTP verification (set by `requestOtp`) so a
+    /// magic-link deep link can resolve it after a cold launch, when the
+    /// in-memory `SessionStore.cachedEmail` is gone. Cleared on sign-in/logout.
+    func savePendingEmail(_ email: String?) {
+        queue.sync {
+            if let email {
+                defaults.set(email, forKey: Keys.pendingEmail)
+            } else {
+                defaults.removeObject(forKey: Keys.pendingEmail)
+            }
+        }
+    }
+
+    func loadPendingEmail() -> String? {
+        queue.sync {
+            defaults.string(forKey: Keys.pendingEmail)
+        }
+    }
+
     func clear() {
         save(nil)
+        savePendingEmail(nil)
     }
 
     private enum Keys {
         static let id = "com.timeoflife.session.id"
         static let email = "com.timeoflife.session.email"
         static let emailVerified = "com.timeoflife.session.emailVerified"
+        static let pendingEmail = "com.timeoflife.session.pendingEmail"
     }
 }
 

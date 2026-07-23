@@ -64,8 +64,14 @@ func NewDefaultDependencies(cfg *config.Config, store db.Store) Dependencies {
 		OTPVerify:  ratelimit.OTPVerifyLimit,
 	}
 
+	trustedProxies, err := handlers.ParseTrustedProxies(cfg.TrustedProxies)
+	if err != nil {
+		logger.Error("invalid TRUSTED_PROXIES, ignoring forwarded headers", "error", err)
+	}
+
 	handlerCfg := handlers.HandlerConfig{
-		AppURL: "timeoflife://",
+		AppURL:         "timeoflife://",
+		TrustedProxies: trustedProxies,
 	}
 
 	// Sign in with Apple is config-gated: only construct the JWKS verifier
@@ -122,7 +128,6 @@ func New(_ *config.Config, deps Dependencies) *Server {
 	// Middleware
 	r.Use(chimw.Recoverer)
 	r.Use(chimw.RequestID)
-	r.Use(chimw.RealIP)
 	r.Use(requestLogger)
 	r.Use(chimw.Timeout(30 * time.Second))
 	r.Use(corsMiddleware)

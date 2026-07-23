@@ -34,6 +34,12 @@ type Config struct {
 	// native iOS app.
 	AppleClientID string
 	AppleJWKSURL  string
+	// TrustedProxies is a comma-separated list of IPs/CIDRs of reverse proxies
+	// that are allowed to set the X-Forwarded-For / X-Real-IP headers used for
+	// per-client rate limiting. Empty (default) = trust nobody: forwarded
+	// headers are ignored and the direct TCP peer is used. This prevents
+	// rate-limit bypass via spoofed headers. (FURPS R1/S5)
+	TrustedProxies string
 }
 
 // Load reads configuration from environment variables.
@@ -147,6 +153,10 @@ func Load() (*Config, error) {
 	if cfg.AppleJWKSURL == "" {
 		cfg.AppleJWKSURL = "https://appleid.apple.com/auth/keys"
 	}
+
+	// Optional: TRUSTED_PROXIES — comma-separated IPs/CIDRs allowed to set
+	// forwarded IP headers for rate limiting. Empty = trust nobody.
+	cfg.TrustedProxies = os.Getenv("TRUSTED_PROXIES")
 
 	return cfg, nil
 }

@@ -15,6 +15,13 @@ final class AuthService: ObservableObject {
     let cache: SessionCache
     let sessionStore: SessionStore
 
+    /// Single-flight in-flight refresh task. Concurrent callers of
+    /// `performRefresh` share one network refresh so that token rotation
+    /// (which revokes the old refresh token on the server) isn't raced: a
+    /// second concurrent refresh would read the now-revoked token, trip the
+    /// server's reuse detection, and revoke every session for the user.
+    private var refreshTask: Task<String, Error>?
+
     init(
         repository: AuthRepository,
         keychain: KeychainStoring,
@@ -36,6 +43,19 @@ final class AuthService: ObservableObject {
         let normalized = AuthValidator.normalize(email: email)
         try await repository.requestOtp(email: normalized)
         sessionStore.setCachedEmail(normalized)
+        // Persist so a magic-link deep link can resolve the email after a cold
+        // launch (the in-memory `cachedEmail` is lost when the OS kills the
+        // app). Cleared on sign-in/logout.
+        cache.savePendingEmail(normalized)
+    }
+
+    /// Resolves the email for a `timeoflife://verify?code=…` magic link. On a
+    /// warm resume the in-memory `cachedEmail` is set; on a cold launch it is
+    /// gone, so fall back to the persisted pending email written by the
+    /// preceding `requestOtp`. Returns an empty string if neither is present
+    /// (the OTP screen then waits for the user to go back and enter one).
+    func resolveDeepLinkEmail() -> String {
+        sessionStore.cachedEmail ?? cache.loadPendingEmail() ?? ""
     }
 
     /// `POST /auth/otp/verify`. Persists the returned session (tokens →
@@ -63,6 +83,10 @@ final class AuthService: ObservableObject {
         // If we have a cached session and tokens, optimistically show signed-in.
         if let cached, refreshToken != nil {
             sessionStore.setSignedIn(cached)
+        } else if cached == nil {
+            // Not signed in: hydrate the pending OTP email (if any) so a
+            // cold-launch magic link and back-navigation see the right address.
+            sessionStore.setCachedEmail(cache.loadPendingEmail())
         }
 
         guard refreshToken != nil else { return }
@@ -80,14 +104,12 @@ final class AuthService: ObservableObject {
             cache.save(updated)
             sessionStore.setSignedIn(updated)
         } catch APIError.unauthorized {
-            // Try to refresh.
+            // Try to refresh. Routed through `performRefresh` so it shares the
+            // single-flight coalescing with any concurrent refreshers (e.g.
+            // APIClient's transparent 401-retry), preventing a token-rotation
+            // race that would mass-revoke the user's sessions.
             do {
-                if let refresh = await keychain.string(for: .refreshToken) {
-                    let session = try await repository.refresh(refreshToken: refresh)
-                    await persist(session: session)
-                } else {
-                    await clearLocal()
-                }
+                _ = try await performRefresh()
             } catch {
                 await clearLocal()
             }
@@ -102,13 +124,31 @@ final class AuthService: ObservableObject {
 
     /// Refresh helper exposed for `APIClient`'s refresh hook. Rotates tokens
     /// and persists the new pair. Returns the new access token.
+    ///
+    /// Single-flight: if a refresh is already in progress, concurrent callers
+    /// await the same in-flight `Task` instead of starting a second network
+    /// refresh. The server rotates (and revokes) the refresh token on each
+    /// refresh, so two concurrent refreshes would have the second use the
+    /// just-revoked token, trip reuse detection, and revoke all the user's
+    /// sessions — a benign race that logs the user out everywhere. The
+    /// in-flight task is assigned before the first `await`, so a caller that
+    /// arrives while the refresh is running always joins rather than starts
+    /// its own.
     func performRefresh() async throws -> String {
-        guard let refresh = await keychain.string(for: .refreshToken) else {
-            throw APIError.unauthorized
+        if let existing = refreshTask {
+            return try await existing.value
         }
-        let session = try await repository.refresh(refreshToken: refresh)
-        await persist(session: session)
-        return session.accessToken
+        let task = Task<String, Error> { [self] in
+            guard let refresh = await self.keychain.string(for: .refreshToken) else {
+                throw APIError.unauthorized
+            }
+            let session = try await self.repository.refresh(refreshToken: refresh)
+            await self.persist(session: session)
+            return session.accessToken
+        }
+        refreshTask = task
+        defer { refreshTask = nil }
+        return try await task.value
     }
 
     /// Logout. Clears local state always; best-effort server revoke.
@@ -129,6 +169,8 @@ final class AuthService: ObservableObject {
         let cached = CachedSession(id: session.user.id, email: session.user.email,
                                    emailVerified: session.user.emailVerified)
         cache.save(cached)
+        // The pending OTP email is no longer relevant once signed in.
+        cache.savePendingEmail(nil)
         sessionStore.setSignedIn(cached)
     }
 
