@@ -23,7 +23,8 @@ import (
 
 // HandlerConfig holds configuration for the auth handler.
 type HandlerConfig struct {
-	AppURL string // base URL for magic link generation
+	AppURL         string       // base URL for magic link generation
+	TrustedProxies []*net.IPNet // CIDRs of trusted reverse proxies allowed to set forwarded IP headers
 }
 
 // Handler holds dependencies for all HTTP handlers.
@@ -191,7 +192,7 @@ func (h *Handler) RequestOTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Rate limit per IP+email.
-	ip := extractIP(r)
+	ip := h.clientIP(r)
 	rateKey := fmt.Sprintf("%s:%s", ip, req.Email)
 	if h.rateLimiter.OTPRequest != nil && !h.rateLimiter.OTPRequest.Allow(rateKey) {
 		h.logger.Warn("OTP request rate limited", "ip", ip, "email", maskEmail(req.Email))
@@ -251,7 +252,7 @@ func (h *Handler) VerifyOTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Rate limit per IP+email.
-	ip := extractIP(r)
+	ip := h.clientIP(r)
 	rateKey := fmt.Sprintf("%s:%s", ip, req.Email)
 	if h.rateLimiter.OTPVerify != nil && !h.rateLimiter.OTPVerify.Allow(rateKey) {
 		h.logger.Warn("OTP verify rate limited", "ip", ip, "email", maskEmail(req.Email))
@@ -370,7 +371,7 @@ func (h *Handler) AppleSignIn(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Rate limit per IP.
-	ip := extractIP(r)
+	ip := h.clientIP(r)
 	if h.rateLimiter.Apple != nil && !h.rateLimiter.Apple.Allow(ip) {
 		h.logger.Warn("apple sign-in rate limited", "ip", ip)
 		writeError(w, http.StatusTooManyRequests, "rate_limited",
@@ -564,16 +565,10 @@ func (h *Handler) Me(w http.ResponseWriter, r *http.Request) {
 
 // ---------- Utility ----------
 
+// extractIP returns the direct TCP peer address from r.RemoteAddr, stripping
+// the port. It does NOT consult forwarded headers — see Handler.clientIP for
+// the trusted-proxy-aware version used for rate limiting.
 func extractIP(r *http.Request) string {
-	// Check X-Forwarded-For first.
-	if fwd := r.Header.Get("X-Forwarded-For"); fwd != "" {
-		parts := strings.SplitN(fwd, ",", 2)
-		return strings.TrimSpace(parts[0])
-	}
-	// Fall back to X-Real-IP.
-	if realIP := r.Header.Get("X-Real-IP"); realIP != "" {
-		return realIP
-	}
 	// Strip the port from RemoteAddr. Use net.SplitHostPort so IPv6 literals
 	// like "[::1]:1234" are handled correctly — strings.LastIndex(":") would
 	// split inside the IPv6 address and return a truncated, bogus host.
@@ -581,6 +576,78 @@ func extractIP(r *http.Request) string {
 		return host
 	}
 	return r.RemoteAddr
+}
+
+// clientIP returns the effective client IP used for rate limiting. Forwarded
+// headers (X-Forwarded-For, X-Real-IP) are honoured only when the direct TCP
+// peer is a configured trusted proxy; otherwise the direct peer is used. With
+// no trusted proxies configured, forwarded headers are always ignored — the
+// safe default that prevents rate-limit bypass via spoofed headers.
+func (h *Handler) clientIP(r *http.Request) string {
+	peer := extractIP(r)
+	if !h.isTrustedProxy(peer) {
+		return peer
+	}
+	if fwd := r.Header.Get("X-Forwarded-For"); fwd != "" {
+		parts := strings.SplitN(fwd, ",", 2)
+		return strings.TrimSpace(parts[0])
+	}
+	if realIP := r.Header.Get("X-Real-IP"); realIP != "" {
+		return strings.TrimSpace(realIP)
+	}
+	return peer
+}
+
+// isTrustedProxy reports whether ip matches one of the configured trusted
+// proxy CIDRs. With no trusted proxies configured it always returns false.
+func (h *Handler) isTrustedProxy(ip string) bool {
+	if len(h.config.TrustedProxies) == 0 {
+		return false
+	}
+	parsed := net.ParseIP(ip)
+	if parsed == nil {
+		return false
+	}
+	for _, cidr := range h.config.TrustedProxies {
+		if cidr.Contains(parsed) {
+			return true
+		}
+	}
+	return false
+}
+
+// ParseTrustedProxies parses a comma-separated list of IPs/CIDRs (e.g.
+// "10.0.0.0/8,::1") into a list of IPNet networks. A bare IP is treated as a
+// /32 (or /128 for IPv6). Returns an error for invalid entries. An empty input
+// yields an empty slice (trust nobody).
+func ParseTrustedProxies(raw string) ([]*net.IPNet, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil, nil
+	}
+	var nets []*net.IPNet
+	for _, part := range strings.Split(raw, ",") {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		_, ipnet, err := net.ParseCIDR(part)
+		if err == nil {
+			nets = append(nets, ipnet)
+			continue
+		}
+		// Bare IP → /32 or /128.
+		ip := net.ParseIP(part)
+		if ip == nil {
+			return nil, fmt.Errorf("invalid trusted proxy entry %q: expected IP or CIDR", part)
+		}
+		if ip.To4() != nil {
+			nets = append(nets, &net.IPNet{IP: ip, Mask: net.CIDRMask(32, 32)})
+		} else {
+			nets = append(nets, &net.IPNet{IP: ip, Mask: net.CIDRMask(128, 128)})
+		}
+	}
+	return nets, nil
 }
 
 func maskEmail(email string) string {

@@ -4,7 +4,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
+	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -310,22 +313,138 @@ func TestExtractIP_FromRemoteAddr(t *testing.T) {
 	}
 }
 
-func TestExtractIP_ForwardedHeadersPreferred(t *testing.T) {
-	t.Run("X-Forwarded-For wins", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodPost, "/", nil)
-		req.RemoteAddr = "127.0.0.1:1234"
-		req.Header.Set("X-Forwarded-For", "203.0.113.9")
-		req.Header.Set("X-Real-IP", "198.51.100.1")
-		if got := extractIP(req); got != "203.0.113.9" {
-			t.Errorf("got %q, want X-Forwarded-For value", got)
+// extractIP must NOT consult forwarded headers — that is Handler.clientIP's
+// job, gated behind the trusted-proxy allowlist.
+func TestExtractIP_IgnoresForwardedHeaders(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPost, "/", nil)
+	req.RemoteAddr = "127.0.0.1:1234"
+	req.Header.Set("X-Forwarded-For", "203.0.113.9")
+	req.Header.Set("X-Real-IP", "198.51.100.1")
+	if got := extractIP(req); got != "127.0.0.1" {
+		t.Errorf("extractIP read forwarded header: got %q, want direct peer 127.0.0.1", got)
+	}
+}
+
+func TestParseTrustedProxies(t *testing.T) {
+	t.Run("empty trusts nobody", func(t *testing.T) {
+		got, err := ParseTrustedProxies("")
+		if err != nil || len(got) != 0 {
+			t.Fatalf("got %v, %v; want empty, nil", got, err)
 		}
 	})
-	t.Run("X-Real-IP used when no X-Forwarded-For", func(t *testing.T) {
+	t.Run("cidr and bare ip", func(t *testing.T) {
+		got, err := ParseTrustedProxies("10.0.0.0/8, ::1, 203.0.113.7")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(got) != 3 {
+			t.Fatalf("got %d networks, want 3", len(got))
+		}
+		if !got[0].Contains(net.ParseIP("10.5.5.5")) {
+			t.Error("10.0.0.0/8 should contain 10.5.5.5")
+		}
+		if !got[2].Contains(net.ParseIP("203.0.113.7")) {
+			t.Error("bare 203.0.113.7 should contain itself")
+		}
+	})
+	t.Run("invalid entry errors", func(t *testing.T) {
+		if _, err := ParseTrustedProxies("not-an-ip"); err == nil {
+			t.Error("want error for invalid entry")
+		}
+	})
+}
+
+func newHandlerWithProxies(t *testing.T, store db.Store, proxies string) *Handler {
+	t.Helper()
+	h := newTestHandler(t, store)
+	nets, err := ParseTrustedProxies(proxies)
+	if err != nil {
+		t.Fatalf("parse trusted proxies: %v", err)
+	}
+	h.config.TrustedProxies = nets
+	return h
+}
+
+func TestClientIP_TrustedProxyGate(t *testing.T) {
+	store := newTestStore(t)
+
+	t.Run("no trusted proxies: forwarded header ignored", func(t *testing.T) {
+		h := newTestHandler(t, store) // default: no trusted proxies
 		req := httptest.NewRequest(http.MethodPost, "/", nil)
-		req.RemoteAddr = "127.0.0.1:1234"
-		req.Header.Set("X-Real-IP", "198.51.100.1")
-		if got := extractIP(req); got != "198.51.100.1" {
+		req.RemoteAddr = "203.0.113.9:5555" // direct peer is a public IP
+		req.Header.Set("X-Forwarded-For", "198.51.100.1")
+		if got := h.clientIP(req); got != "203.0.113.9" {
+			t.Errorf("got %q, want direct peer (header must be ignored)", got)
+		}
+	})
+
+	t.Run("trusted proxy: X-Forwarded-For honoured", func(t *testing.T) {
+		h := newHandlerWithProxies(t, store, "10.0.0.0/8")
+		req := httptest.NewRequest(http.MethodPost, "/", nil)
+		req.RemoteAddr = "10.0.0.1:5555" // direct peer is a trusted proxy
+		req.Header.Set("X-Forwarded-For", "198.51.100.1")
+		if got := h.clientIP(req); got != "198.51.100.1" {
+			t.Errorf("got %q, want forwarded client IP", got)
+		}
+	})
+
+	t.Run("untrusted peer: forwarded header ignored even with proxies configured", func(t *testing.T) {
+		h := newHandlerWithProxies(t, store, "10.0.0.0/8")
+		req := httptest.NewRequest(http.MethodPost, "/", nil)
+		req.RemoteAddr = "203.0.113.9:5555" // direct peer is NOT a trusted proxy
+		req.Header.Set("X-Forwarded-For", "198.51.100.1")
+		if got := h.clientIP(req); got != "203.0.113.9" {
+			t.Errorf("got %q, want direct peer (spoofer must not bypass)", got)
+		}
+	})
+
+	t.Run("trusted proxy: X-Real-IP fallback", func(t *testing.T) {
+		h := newHandlerWithProxies(t, store, "127.0.0.1/32")
+		req := httptest.NewRequest(http.MethodPost, "/", nil)
+		req.RemoteAddr = "127.0.0.1:5555"
+		req.Header.Set("X-Real-IP", "198.51.100.2")
+		if got := h.clientIP(req); got != "198.51.100.2" {
 			t.Errorf("got %q, want X-Real-IP value", got)
 		}
 	})
+}
+
+// TestRequestOTP_SpoofedHeaderDoesNotBypassRateLimit verifies the security
+// property end-to-end: with no trusted proxy configured, a client that varies
+// X-Forwarded-For on every request cannot escape the per-IP rate limit.
+func TestRequestOTP_SpoofedHeaderDoesNotBypassRateLimit(t *testing.T) {
+	store := newTestStore(t)
+	// Tight limiter: 2 requests per minute per key.
+	h := newTestHandler(t, store)
+	h.rateLimiter.OTPRequest = ratelimit.NewTokenBucket(2, 2, time.Minute)
+
+	email := "spoof@example.com"
+	for i := 0; i < 2; i++ {
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/otp/request", nil)
+		req.RemoteAddr = "203.0.113.9:5555" // same real peer every time
+		// Vary the spoofed header to try to get a fresh key each request.
+		req.Header.Set("X-Forwarded-For", fmt.Sprintf("10.0.0.%d", i+1))
+		req.Header.Set("Content-Type", "application/json")
+		body, _ := json.Marshal(map[string]string{"email": email})
+		req.Body = io.NopCloser(bytes.NewReader(body))
+		w := httptest.NewRecorder()
+		h.RequestOTP(w, req)
+		if w.Code != http.StatusAccepted {
+			t.Fatalf("request %d: expected 202, got %d", i, w.Code)
+		}
+	}
+
+	// Third request from the same real peer must be limited despite a new
+	// spoofed forwarded IP.
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/otp/request", nil)
+	req.RemoteAddr = "203.0.113.9:5555"
+	req.Header.Set("X-Forwarded-For", "10.0.0.99")
+	req.Header.Set("Content-Type", "application/json")
+	body, _ := json.Marshal(map[string]string{"email": email})
+	req.Body = io.NopCloser(bytes.NewReader(body))
+	w := httptest.NewRecorder()
+	h.RequestOTP(w, req)
+	if w.Code != http.StatusTooManyRequests {
+		t.Errorf("expected 429 (spoofed header must not bypass), got %d", w.Code)
+	}
 }
