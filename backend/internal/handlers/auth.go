@@ -23,7 +23,6 @@ import (
 
 // HandlerConfig holds configuration for the auth handler.
 type HandlerConfig struct {
-	AppURL         string       // base URL for magic link generation
 	TrustedProxies []*net.IPNet // CIDRs of trusted reverse proxies allowed to set forwarded IP headers
 }
 
@@ -223,8 +222,7 @@ func (h *Handler) RequestOTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	magicLink := fmt.Sprintf("%sverify?code=%s", h.config.AppURL, code)
-	msg := email.NewOTPMessage(req.Email, code, magicLink)
+	msg := email.NewOTPMessage(req.Email, code)
 	if err := h.emailSender.Send(ctx, msg); err != nil {
 		h.logger.Error("failed to send OTP email", "error", err)
 	}

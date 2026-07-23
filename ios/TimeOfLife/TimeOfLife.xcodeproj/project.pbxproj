@@ -48,7 +48,6 @@
 		86E0196DDF4BFC41503B86AE /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B5F986977E9E9E353267FCE /* RootView.swift */; };
 		8777E4649846F5BDA6D2CF34 /* ListRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 918684BD5C6FE73CF0E925CE /* ListRow.swift */; };
 		87895C2B2EE3435BA50C59B4 /* AuthModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = D3EDF44C573A464EA1B15439 /* AuthModels.swift */; };
-		88C98688BC624559DA512F6E /* DeepLinkTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1E7E493CA9300179868671CA /* DeepLinkTests.swift */; };
 		8AB9908B8C7F43985CCFC26D /* AppleSignInButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8D155F2818F5E3002BCDE412 /* AppleSignInButton.swift */; };
 		8E3BC4D0F95F210ED76AAF02 /* TimerStoring.swift in Sources */ = {isa = PBXBuildFile; fileRef = 14B9F48EF37C2C71C3B823E3 /* TimerStoring.swift */; };
 		97433A58C0B24D13BECDCEE3 /* FakeAuthRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 027048F12B000EA16DC727F5 /* FakeAuthRepository.swift */; };
@@ -95,7 +94,6 @@
 		14B9F48EF37C2C71C3B823E3 /* TimerStoring.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimerStoring.swift; sourceTree = "<group>"; };
 		1BA5D8E5B341A3B8D60460B0 /* TimerViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimerViewModel.swift; sourceTree = "<group>"; };
 		1C4D6CE330BC518B835F9D0D /* AppNavigationStack.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppNavigationStack.swift; sourceTree = "<group>"; };
-		1E7E493CA9300179868671CA /* DeepLinkTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeepLinkTests.swift; sourceTree = "<group>"; };
 		25182CD3496B6223AF822CEB /* AuthServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthServiceTests.swift; sourceTree = "<group>"; };
 		2843FC74902C48E856B58F46 /* AuthFlowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthFlowView.swift; sourceTree = "<group>"; };
 		2E1D96E0E511C17C7E3A7AF2 /* AppleSignInServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppleSignInServiceTests.swift; sourceTree = "<group>"; };
@@ -432,7 +430,6 @@
 				CA4A905F0001EC1D8C076A52 /* AppleSignInViewModelTests.swift */,
 				25182CD3496B6223AF822CEB /* AuthServiceTests.swift */,
 				B680BA82BF4A62C66EF06EC8 /* AuthValidatorTests.swift */,
-				1E7E493CA9300179868671CA /* DeepLinkTests.swift */,
 				90C8D61D106A60570A0F793E /* LocalizationTests.swift */,
 				AEABA98A949DF941CA483AD8 /* OtpEntryViewModelTests.swift */,
 				C4CB3B09CEC8611ED769E87E /* RemoteAuthRepositoryTests.swift */,
@@ -665,7 +662,6 @@
 				21F046658455E93D62587CAC /* AppleSignInViewModelTests.swift in Sources */,
 				8172CADDF67BC614B4B1EC69 /* AuthServiceTests.swift in Sources */,
 				6853C8F73AA85C9A9D473947 /* AuthValidatorTests.swift in Sources */,
-				88C98688BC624559DA512F6E /* DeepLinkTests.swift in Sources */,
 				6F8C2CFEE0B00B9817AF30CA /* FakeAppleAuthorizationProvider.swift in Sources */,
 				97433A58C0B24D13BECDCEE3 /* FakeAuthRepository.swift in Sources */,
 				2ECF15BB26AE7182D0D76CC0 /* LocalizationTests.swift in Sources */,

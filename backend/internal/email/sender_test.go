@@ -33,13 +33,13 @@ func captureStdout(fn func()) string {
 }
 
 func sampleOTPMessage() Message {
-	return NewOTPMessage("user@example.com", "482103", "timeoflife://verify?code=482103")
+	return NewOTPMessage("user@example.com", "482103")
 }
 
 // ---------- NewOTPMessage ----------
 
 func TestNewOTPMessage_RendersTextAndHTML(t *testing.T) {
-	msg := NewOTPMessage("user@example.com", "482103", "timeoflife://verify?code=482103")
+	msg := NewOTPMessage("user@example.com", "482103")
 
 	if msg.To != "user@example.com" {
 		t.Errorf("expected To set, got %q", msg.To)
@@ -53,18 +53,12 @@ func TestNewOTPMessage_RendersTextAndHTML(t *testing.T) {
 	if !strings.Contains(msg.HTML, "482103") {
 		t.Errorf("expected code in HTML body, got: %s", msg.HTML)
 	}
-	if !strings.Contains(msg.Text, "timeoflife://verify?code=482103") {
-		t.Errorf("expected magic link in text body, got: %s", msg.Text)
-	}
-	if !strings.Contains(msg.HTML, "timeoflife://verify?code=482103") {
-		t.Errorf("expected magic link in HTML body, got: %s", msg.HTML)
-	}
 }
 
 // TestNewOTPMessage_CodeOnItsOwnLine enforces the iOS .oneTimeCode autofill
 // invariant: the OTP code must appear on its own line in the text body.
 func TestNewOTPMessage_CodeOnItsOwnLine(t *testing.T) {
-	msg := NewOTPMessage("user@example.com", "482103", "timeoflife://verify?code=482103")
+	msg := NewOTPMessage("user@example.com", "482103")
 
 	for _, line := range strings.Split(msg.Text, "\n") {
 		if line == "482103" {
@@ -91,20 +85,19 @@ func TestConsoleSender_PrintsCodeOnItsOwnLine(t *testing.T) {
 	}
 }
 
-func TestConsoleSender_IncludesMagicLink(t *testing.T) {
+func TestConsoleSender_IncludesCode(t *testing.T) {
 	s := NewConsoleSender(quietLogger())
 
 	ctx := context.Background()
-	magicLink := "timeoflife://verify?code=123456"
-	msg := NewOTPMessage("user@example.com", "123456", magicLink)
+	msg := NewOTPMessage("user@example.com", "123456")
 	output := captureStdout(func() {
 		if err := s.Send(ctx, msg); err != nil {
 			t.Fatalf("Send returned error: %v", err)
 		}
 	})
 
-	if !strings.Contains(output, magicLink) {
-		t.Errorf("expected magic link %q in output, got: %s", magicLink, output)
+	if !strings.Contains(output, "123456") {
+		t.Errorf("expected code 123456 in output, got: %s", output)
 	}
 }
 
@@ -112,7 +105,7 @@ func TestConsoleSender_IncludesRecipient(t *testing.T) {
 	s := NewConsoleSender(quietLogger())
 
 	ctx := context.Background()
-	msg := NewOTPMessage("alice@example.com", "987654", "timeoflife://verify?code=987654")
+	msg := NewOTPMessage("alice@example.com", "987654")
 	output := captureStdout(func() {
 		if err := s.Send(ctx, msg); err != nil {
 			t.Fatalf("Send returned error: %v", err)

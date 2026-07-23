@@ -70,7 +70,6 @@ func NewDefaultDependencies(cfg *config.Config, store db.Store) Dependencies {
 	}
 
 	handlerCfg := handlers.HandlerConfig{
-		AppURL:         "timeoflife://",
 		TrustedProxies: trustedProxies,
 	}
 

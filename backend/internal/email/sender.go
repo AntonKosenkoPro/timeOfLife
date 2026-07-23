@@ -34,8 +34,7 @@ type Sender interface {
 
 // otpTemplateData is the data passed to the OTP email templates.
 type otpTemplateData struct {
-	Code      string
-	MagicLink string
+	Code string
 }
 
 const otpEmailSubject = "Your verification code"
@@ -44,9 +43,6 @@ const otpEmailSubject = "Your verification code"
 // line so iOS .oneTimeCode autofill detects it.
 const defaultOTPTextTemplate = `Your verification code is:
 {{.Code}}
-
-Or tap this link on your iPhone:
-{{.MagicLink}}
 `
 
 // defaultOTPHTMLTemplate is a simple, unbranded HTML OTP body.
@@ -56,8 +52,6 @@ const defaultOTPHTMLTemplate = `<!DOCTYPE html>
 <body style="font-family:-apple-system,Helvetica,Arial,sans-serif;font-size:16px;color:#111;">
   <p>Your verification code is:</p>
   <p style="font-size:32px;letter-spacing:4px;font-family:monospace;">{{.Code}}</p>
-  <p>Or tap this link on your iPhone:</p>
-  <p><a href="{{.MagicLink}}">{{.MagicLink}}</a></p>
 </body>
 </html>
 `
@@ -96,8 +90,8 @@ func setOTPTemplates(textOverride, htmlOverride string) error {
 }
 
 // NewOTPMessage renders the OTP templates into a Message ready to send.
-func NewOTPMessage(to, code, magicLink string) Message {
-	data := otpTemplateData{Code: code, MagicLink: magicLink}
+func NewOTPMessage(to, code string) Message {
+	data := otpTemplateData{Code: code}
 
 	var textBuf, htmlBuf bytes.Buffer
 	_ = otpTextTmpl.Execute(&textBuf, data)

@@ -218,28 +218,7 @@ struct OtpEntryViewModelTests {
         #expect(vm.resendCountdown == 0)
     }
 
-    // MARK: - Deep link & reset
-
-    @Test("OtpEntryViewModel: handleDeepLinkCode pre-fills and auto-submits")
-    func otpEntryDeepLink() async throws {
-        let (service, repo, conn, store) = TestFactories.makeService()
-        let vm = OtpEntryViewModel(service: service, connectivity: conn, email: "a@b.com")
-
-        vm.handleDeepLinkCode("123456")
-
-        #expect(vm.code == "123456")
-
-        // Wait for the async submit to complete
-        try await Task.sleep(nanoseconds: 100_000_000) // 0.1s
-
-        #expect(repo.calls == [.verifyOtp(email: "a@b.com", code: "123456")])
-        #expect(vm.isVerified == true)
-        if case .signedIn = store.state {
-            // Success
-        } else {
-            Issue.record("Expected signed in state")
-        }
-    }
+    // MARK: - Reset
 
     @Test("OtpEntryViewModel: reset clears all state")
     func otpEntryReset() async throws {

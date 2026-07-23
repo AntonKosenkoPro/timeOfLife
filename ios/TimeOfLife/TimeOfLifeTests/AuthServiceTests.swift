@@ -36,8 +36,6 @@ struct AuthServiceTests {
         #expect(await keychain.string(for: .accessToken) == nil)
         #expect(await keychain.string(for: .refreshToken) == nil)
         #expect(store.cachedEmail == "foo@bar.com")
-        // Pending email is persisted so a cold-launch magic link can resolve it.
-        #expect(cache.loadPendingEmail() == "foo@bar.com")
     }
 
     @Test("requestOTP propagates network failure")
@@ -70,8 +68,6 @@ struct AuthServiceTests {
                 CachedSession(id: "u1", email: "a@b.com", emailVerified: true)
             )
         )
-        // Signing in clears the pending OTP email — it is no longer relevant.
-        #expect(cache.loadPendingEmail() == nil)
     }
 
     @Test("verifyOTP propagates invalid code error")
@@ -294,9 +290,9 @@ struct AuthServiceTests {
         #expect(refreshCount(repo.calls) == 1)
     }
 
-    // MARK: - handleDeepLink (via verifyOtp with stored email)
+    // MARK: - requestOtp then verifyOtp (cached email)
 
-    @Test("verifyOtp uses the email passed from deep link handler")
+    @Test("verifyOtp uses the email cached by requestOtp")
     func verifyOtpWithStoredEmail() async throws {
         let (service, repo, keychain, cache, store) = makeService()
 
@@ -304,7 +300,7 @@ struct AuthServiceTests {
         try await service.requestOtp(email: "  User@Example.com ")
         #expect(store.cachedEmail == "user@example.com")
 
-        // Then deep link triggers verifyOtp with the cached email
+        // verifyOtp with the cached email completes sign-in.
         try await service.verifyOtp(email: "user@example.com", code: "123456")
 
         #expect(repo.calls == [
@@ -319,68 +315,5 @@ struct AuthServiceTests {
                 CachedSession(id: "u1", email: "user@example.com", emailVerified: true)
             )
         )
-    }
-
-    // MARK: - Deep-link email resolution (cold launch)
-
-    @Test("resolveDeepLinkEmail returns the in-memory cached email when present")
-    func resolveDeepLinkEmailInMemory() async throws {
-        let (service, _, _, _, _) = makeService()
-        try await service.requestOtp(email: "warm@example.com")
-
-        #expect(service.resolveDeepLinkEmail() == "warm@example.com")
-    }
-
-    @Test("resolveDeepLinkEmail falls back to the persisted pending email on cold launch")
-    func resolveDeepLinkEmailColdLaunch() async throws {
-        // Simulate a cold launch: a fresh SessionStore (no in-memory cached
-        // email) but the pending email persisted by a prior requestOtp.
-        let cache = SessionCache(defaults: UserDefaults(suiteName: UUID().uuidString)!)
-        cache.savePendingEmail("cold@example.com")
-        let store = SessionStore()
-        let service = AuthService(
-            repository: FakeAuthRepository(),
-            keychain: InMemoryKeychainStore(),
-            cache: cache,
-            sessionStore: store
-        )
-
-        #expect(service.resolveDeepLinkEmail() == "cold@example.com")
-    }
-
-    @Test("resolveDeepLinkEmail returns empty when no email is available")
-    func resolveDeepLinkEmailEmpty() async throws {
-        let (service, _, _, _, _) = makeService()
-
-        #expect(service.resolveDeepLinkEmail().isEmpty)
-    }
-
-    @Test("restoreSession hydrates the pending email when not signed in")
-    func restoreSessionHydratesPendingEmail() async throws {
-        let cache = SessionCache(defaults: UserDefaults(suiteName: UUID().uuidString)!)
-        cache.savePendingEmail("pending@example.com")
-        let store = SessionStore()
-        let service = AuthService(
-            repository: FakeAuthRepository(),
-            keychain: InMemoryKeychainStore(),
-            cache: cache,
-            sessionStore: store
-        )
-
-        await service.restoreSession()
-
-        #expect(store.state == .signedOut)
-        #expect(store.cachedEmail == "pending@example.com")
-    }
-
-    @Test("logout clears the persisted pending email")
-    func logoutClearsPendingEmail() async throws {
-        let (service, _, _, cache, _) = makeService()
-        try await service.requestOtp(email: "go@example.com")
-        #expect(cache.loadPendingEmail() == "go@example.com")
-
-        await service.logout()
-
-        #expect(cache.loadPendingEmail() == nil)
     }
 }

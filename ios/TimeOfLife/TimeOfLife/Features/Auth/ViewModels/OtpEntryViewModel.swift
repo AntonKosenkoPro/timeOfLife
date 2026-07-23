@@ -3,8 +3,9 @@ import SwiftUI
 
 /// View model for the OTP entry screen.
 ///
-/// Validates the code locally (6 digits), delegates verification to
-/// `AuthService`, and handles magic-link deep link pre-fill + auto-submit.
+/// Validates the code locally (6 digits) and delegates verification to
+/// `AuthService`. The user reads the 6-digit code from the email and types it;
+/// there is no magic link / deep link.
 @MainActor
 final class OtpEntryViewModel: ObservableObject {
     /// Seconds remaining before the user may request another code. While > 0
@@ -72,14 +73,6 @@ final class OtpEntryViewModel: ObservableObject {
         }
 
         isLoading = false
-    }
-
-    /// Handles a magic-link deep link code: pre-fills the field and auto-submits.
-    func handleDeepLinkCode(_ code: String) {
-        self.code = code
-        Task {
-            await submit()
-        }
     }
 
     /// Resends the OTP code to the same email.

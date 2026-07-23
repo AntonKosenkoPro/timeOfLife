@@ -40,13 +40,12 @@ P1-4. VerifyOTP timing/enumeration side channel.
      P1-2 (create-on-verify changes this flow). Files:
      `backend/internal/handlers/auth.go` (VerifyOTP). (auth-audit P1-4; FURPS R1)
 
-P1-5. OTP email template is still an open TODO (FURPS U5).
-   - The magic link + 6-digit code are wired, but the email body template/design
-     hasn't been finalised ("find a template of OTP email message or make by
-     trying different templates"). Fix: plain-text + HTML template via
-     `html/template` with escaping — code prominent, magic-link button, expiry
-     note, do-not-reply footer; localised variants if needed. Files:
-     `backend/internal/email/sender.go`. (auth-audit P1-5; FURPS U5)
+P1-5. OTP email template polish (FURPS U5).
+   - The magic link was **removed** (deep links descoped — custom URL schemes
+     only work in Apple Mail); the OTP email now shows only the 6-digit code.
+     Remaining: make the code prominent in both plain-text and HTML bodies,
+     add an expiry note + do-not-reply footer, and localise the body (EN/RU).
+     Files: `backend/internal/email/sender.go`. (auth-audit P1-5; FURPS U5)
 
 P2-1. `restoreSession` dead code / unused access token.
    - `AuthService.restoreSession` reads `accessToken` from Keychain then
