@@ -10,9 +10,6 @@ struct OtpEntryView: View {
     @EnvironmentObject var navigation: AppNavigationStack
     @FocusState private var isCodeFocused: Bool
 
-    /// The deep link code to pre-fill, consumed on appear.
-    @State private var consumedDeepLink = false
-
     var body: some View {
         // `GeometryReader` + `ScrollView` engages SwiftUI's automatic keyboard
         // avoidance on iOS 15 (a bare `VStack` is not avoided, so on iPhone SE
@@ -106,22 +103,11 @@ struct OtpEntryView: View {
             // Resend button must be disabled from the first appearance, not
             // only after a manual resend.
             vm.armInitialResendCooldown()
-            // Consume a pending deep link before claiming focus: deep links
-            // auto-submit, so we must not also focus the field (which would
-            // dismiss and re-show the keyboard and race the submit).
-            if let code = navigation.pendingDeepLinkCode, !consumedDeepLink {
-                consumedDeepLink = true
-                vm.handleDeepLinkCode(code)
-                navigation.pendingDeepLinkCode = nil
-            } else {
-                isCodeFocused = true
-            }
+            isCodeFocused = true
         }
         .onChange(of: vm.code) { _ in
-            // Only clear stale validation state per keystroke. We deliberately
-            // do NOT auto-submit on a 6-digit count here: doing so dismissed
-            // the keyboard mid-typing and double-submitted on deep links
-            // (handleDeepLinkCode already submits). The user taps Verify.
+            // Only clear stale validation state per keystroke; the user taps
+            // Verify to submit.
             if vm.fieldErrors.otp != nil {
                 vm.fieldErrors.otp = nil
             }
@@ -131,12 +117,6 @@ struct OtpEntryView: View {
                 navigation.push(.signedIn)
                 vm.isVerified = false
             }
-        }
-        .onChange(of: navigation.pendingDeepLinkCode) { code in
-            guard let code, !consumedDeepLink else { return }
-            consumedDeepLink = true
-            vm.handleDeepLinkCode(code)
-            navigation.pendingDeepLinkCode = nil
         }
     }
 

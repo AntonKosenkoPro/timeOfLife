@@ -54,9 +54,7 @@ func newTestHandlerWithApple(t *testing.T, store db.Store, verifier apple.Verifi
 		OTPVerify:  ratelimit.NewTokenBucket(100, 100, time.Minute),
 		Apple:      ratelimit.NewTokenBucket(100, 100, time.Minute),
 	}
-	config := HandlerConfig{
-		AppURL: "timeoflife://",
-	}
+	config := HandlerConfig{}
 	return NewHandler(store, tokenService, otpService, emailSender, rateLimiter, verifier, config, logger)
 }
 

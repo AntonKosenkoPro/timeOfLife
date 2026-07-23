@@ -159,17 +159,23 @@ identical across both paths and that a dummy compare runs.
 **FURPS:** U5 (explicit TODO in the requirements doc)
 **Files:** `backend/internal/email/sender.go`; `Requirements/FURPS/Sign-up_and_Sign-in.md:10`
 
-FURPS U5 comment: "We should find a template of OTP email message or make by
-trying different templates." The magic link + code are wired, but the email body
-template/design hasn't been finalised.
+> Update: the **magic link was removed** (deep links descoped — custom URL
+> schemes only work in Apple Mail; Gmail/Outlook/Proton strip non-https
+> schemes, and Universal Links need a domain + AASA + Apple signing). The OTP
+> email now carries only the 6-digit code, which the user reads and types.
+> Remaining work: make the code prominent in plain-text + HTML, add an expiry
+> note + do-not-reply footer, and localise (EN/RU).
 
-**Fix:** Decide on a plain-text + HTML template (code prominently, magic link as
-button, expiry note, do-not-reply footer). Render via `html/template` with
-escaping; keep the 6-digit code and `timeoflife://verify?code=…` link. Add
+FURPS U5 comment: "We should find a template of OTP email message or make by
+trying different templates." The code-only body is wired, but the template
+design hasn't been finalised.
+
+**Fix:** Decide on a plain-text + HTML template (code prominently, expiry
+note, do-not-reply footer). Render via `html/template` with escaping. Add
 localised variants if needed (FURPS U4).
 
-**Tests:** `sender_test.go` — template renders the code and link; HTML-escaping
-test; golden snapshot of the body.
+**Tests:** `sender_test.go` — template renders the code; HTML-escaping test;
+golden snapshot of the body.
 
 ---
 

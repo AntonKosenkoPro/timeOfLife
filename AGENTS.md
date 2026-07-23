@@ -66,8 +66,6 @@ xcodegen generate
 swiftlint lint --strict         # linters (S6); --fix autocorrects
 xcodebuild -scheme TimeOfLife \
   -destination 'platform=iOS Simulator,name=iPhone 17,OS=latest' build|test
-# Magic link for manual testing:
-xcrun simctl openurl booted timeoflife://verify?code=123456
 ```
 
 ## API contract (`/api/v1`)

@@ -45,9 +45,7 @@ func newTestServer(t *testing.T) *Server {
 		OTPRequest: ratelimit.NewTokenBucket(100, 100, time.Minute),
 		OTPVerify:  ratelimit.NewTokenBucket(100, 100, time.Minute),
 	}
-	handlerCfg := handlers.HandlerConfig{
-		AppURL: "timeoflife://",
-	}
+	handlerCfg := handlers.HandlerConfig{}
 
 	deps := Dependencies{
 		Store:        store,
