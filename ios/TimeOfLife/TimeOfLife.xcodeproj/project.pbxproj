@@ -52,6 +52,7 @@
 		8AB9908B8C7F43985CCFC26D /* AppleSignInButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8D155F2818F5E3002BCDE412 /* AppleSignInButton.swift */; };
 		8E3BC4D0F95F210ED76AAF02 /* TimerStoring.swift in Sources */ = {isa = PBXBuildFile; fileRef = 14B9F48EF37C2C71C3B823E3 /* TimerStoring.swift */; };
 		97433A58C0B24D13BECDCEE3 /* FakeAuthRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 027048F12B000EA16DC727F5 /* FakeAuthRepository.swift */; };
+		9A2D5056DC767BB57C694909 /* OtpEntryViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AEABA98A949DF941CA483AD8 /* OtpEntryViewModelTests.swift */; };
 		9A98D9858BF93A8733160377 /* IconButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = 64A921C11A07AD58634AEEB8 /* IconButton.swift */; };
 		9AF09271230F83054D73D02C /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 6FBC3175DD1600E449FBA5FB /* Assets.xcassets */; };
 		A0181F850B58FA5E7D9603F3 /* TimerRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 005102D207345F7DA0E8E658 /* TimerRepository.swift */; };
@@ -70,7 +71,6 @@
 		E24F159A9BB0CF9D4E072521 /* AppleSignInService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6ACB1A62C045903B76031A56 /* AppleSignInService.swift */; };
 		E6AF3F110377FDA3600636EE /* SessionCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = 715D8DD36825AF67A5E31466 /* SessionCache.swift */; };
 		EE6078DD5C3E9C5B8915AA2C /* ViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 56C811B6C467F25C06DD0178 /* ViewModelTests.swift */; };
-		A1B2C3D4E5F6A7B8C9D0E1F2 /* OtpEntryViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1E2D3C4B5A69788696A4B3C /* OtpEntryViewModelTests.swift */; };
 		F0DAC53BBE56C751F73C41EF /* AppleSignInServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2E1D96E0E511C17C7E3A7AF2 /* AppleSignInServiceTests.swift */; };
 		F2A0C0AA7831EEE284624BE5 /* EmptyState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 673BDAA21016DBD758DD3D7E /* EmptyState.swift */; };
 		F9DD38F86A930D2B6220B523 /* APIEndpoint.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC48D5C245EF1DD96F6F6004 /* APIEndpoint.swift */; };
@@ -103,19 +103,18 @@
 		36062DF01DB94D5C475DD8A9 /* APIError.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIError.swift; sourceTree = "<group>"; };
 		4B4097319AAF4397780F6439 /* KeychainStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainStore.swift; sourceTree = "<group>"; };
 		4EC4306367AA63EABC039B9B /* ru */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = ru; path = ru.lproj/Localizable.strings; sourceTree = "<group>"; };
-		5355A9F93DC1371ECF4AD5E0 /* ru.lproj */ = {isa = PBXFileReference; lastKnownFileType = folder; path = ru.lproj; sourceTree = "<group>"; };
+		5355A9F93DC1371ECF4AD5E0 /* ru.lproj */ = {isa = PBXFileReference; path = ru.lproj; sourceTree = "<group>"; };
 		54CED4A382185F01233F1DDE /* Theme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Theme.swift; sourceTree = "<group>"; };
 		56C811B6C467F25C06DD0178 /* ViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ViewModelTests.swift; sourceTree = "<group>"; };
-		F1E2D3C4B5A69788696A4B3C /* OtpEntryViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OtpEntryViewModelTests.swift; sourceTree = "<group>"; };
 		5CBC211B0937CFA93E95589C /* TimerService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimerService.swift; sourceTree = "<group>"; };
 		61B7982F3DBB72A719070CAD /* Haptics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Haptics.swift; sourceTree = "<group>"; };
 		64A921C11A07AD58634AEEB8 /* IconButton.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IconButton.swift; sourceTree = "<group>"; };
 		657B3CBE41765BA7CCB784E8 /* en */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = en; path = en.lproj/Localizable.strings; sourceTree = "<group>"; };
 		673BDAA21016DBD758DD3D7E /* EmptyState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmptyState.swift; sourceTree = "<group>"; };
 		678C8AF5EDBA6D6C46007080 /* APISending.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APISending.swift; sourceTree = "<group>"; };
-		67C9EFC30BF19AAFC74B4A33 /* TimeOfLifeTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = TimeOfLifeTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
-		680E39E55DE52D88F865C14E /* TimeOfLife.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = TimeOfLife.app; sourceTree = BUILT_PRODUCTS_DIR; };
-		6A2271B6B045AC3B5B0ACF51 /* en.lproj */ = {isa = PBXFileReference; lastKnownFileType = folder; path = en.lproj; sourceTree = "<group>"; };
+		67C9EFC30BF19AAFC74B4A33 /* TimeOfLifeTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = TimeOfLifeTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		680E39E55DE52D88F865C14E /* TimeOfLife.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = TimeOfLife.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		6A2271B6B045AC3B5B0ACF51 /* en.lproj */ = {isa = PBXFileReference; path = en.lproj; sourceTree = "<group>"; };
 		6A683C275D64600D3CCD0230 /* TimerViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimerViewModelTests.swift; sourceTree = "<group>"; };
 		6ACB1A62C045903B76031A56 /* AppleSignInService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppleSignInService.swift; sourceTree = "<group>"; };
 		6ED222893725F45FD60EFDCA /* EmailEntryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmailEntryView.swift; sourceTree = "<group>"; };
@@ -139,6 +138,7 @@
 		A74EDB0BC994A5EFBF04BED2 /* String+Localized.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "String+Localized.swift"; sourceTree = "<group>"; };
 		A804E41CE6F0E40701020E2E /* MockAPIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MockAPIClient.swift; sourceTree = "<group>"; };
 		A8385ECB2A212347BA7A5183 /* TestFactories.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TestFactories.swift; sourceTree = "<group>"; };
+		AEABA98A949DF941CA483AD8 /* OtpEntryViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OtpEntryViewModelTests.swift; sourceTree = "<group>"; };
 		AF43C8060AE670862FB6C0F6 /* URLProtocolStub.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = URLProtocolStub.swift; sourceTree = "<group>"; };
 		B1ABBD582800CD4A3D7D93BB /* ErrorBanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ErrorBanner.swift; sourceTree = "<group>"; };
 		B1B0435AD68B3F08FC7E6EE3 /* EmailEntryViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmailEntryViewModel.swift; sourceTree = "<group>"; };
@@ -434,11 +434,11 @@
 				B680BA82BF4A62C66EF06EC8 /* AuthValidatorTests.swift */,
 				1E7E493CA9300179868671CA /* DeepLinkTests.swift */,
 				90C8D61D106A60570A0F793E /* LocalizationTests.swift */,
+				AEABA98A949DF941CA483AD8 /* OtpEntryViewModelTests.swift */,
 				C4CB3B09CEC8611ED769E87E /* RemoteAuthRepositoryTests.swift */,
 				D9B8919EF27555C4F388E106 /* TimeFormatterTests.swift */,
 				6A683C275D64600D3CCD0230 /* TimerViewModelTests.swift */,
 				56C811B6C467F25C06DD0178 /* ViewModelTests.swift */,
-				F1E2D3C4B5A69788696A4B3C /* OtpEntryViewModelTests.swift */,
 			);
 			path = TimeOfLifeTests;
 			sourceTree = "<group>";
@@ -562,6 +562,7 @@
 						ProvisioningStyle = Automatic;
 					};
 					EB1E59A9D1AC06C64272B862 = {
+						DevelopmentTeam = "";
 						ProvisioningStyle = Automatic;
 					};
 				};
@@ -669,13 +670,13 @@
 				97433A58C0B24D13BECDCEE3 /* FakeAuthRepository.swift in Sources */,
 				2ECF15BB26AE7182D0D76CC0 /* LocalizationTests.swift in Sources */,
 				55062862B5B737A4EE3EC8B0 /* MockAPIClient.swift in Sources */,
+				9A2D5056DC767BB57C694909 /* OtpEntryViewModelTests.swift in Sources */,
 				769D55B9329E320BDF2AA5F9 /* RemoteAuthRepositoryTests.swift in Sources */,
 				31C1103D0046FEDFDD22B3EE /* TestFactories.swift in Sources */,
 				0316CFCE845DAFD05A61F5EF /* TimeFormatterTests.swift in Sources */,
 				84456AD4EF8934541AB482C9 /* TimerViewModelTests.swift in Sources */,
 				2D54716C3A60788EF56400F4 /* URLProtocolStub.swift in Sources */,
 				EE6078DD5C3E9C5B8915AA2C /* ViewModelTests.swift in Sources */,
-				A1B2C3D4E5F6A7B8C9D0E1F2 /* OtpEntryViewModelTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -728,7 +729,6 @@
 				CODE_SIGN_ENTITLEMENTS = TimeOfLife/Configuration/TimeOfLife.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = 5H2N86S878;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = TimeOfLife/Configuration/Info.plist;
@@ -752,7 +752,6 @@
 				CODE_SIGN_ENTITLEMENTS = TimeOfLife/Configuration/TimeOfLife.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = 5H2N86S878;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = TimeOfLife/Configuration/Info.plist;

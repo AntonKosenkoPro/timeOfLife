@@ -47,8 +47,11 @@ struct TimeOfLifeApp: App {
                 navigation.pendingDeepLinkCode = code
             }
             // Resolve the email from the cached email when the link doesn't
-            // carry one (it never does — only the code is in the URL).
-            let resolvedEmail = email.isEmpty ? (session.cachedEmail ?? "") : email
+            // carry one (it never does — only the code is in the URL). On a
+            // warm resume the in-memory `cachedEmail` is set; on a cold launch
+            // (app killed by the OS) it is gone, so fall back to the persisted
+            // pending email written by the preceding `requestOtp`.
+            let resolvedEmail = email.isEmpty ? container.authService.resolveDeepLinkEmail() : email
             // If already on the OTP screen, don't push a duplicate — just
             // let the pending-code side channel update the existing view.
             if case .otpEntry = navigation.path.last {
@@ -62,36 +65,46 @@ struct TimeOfLifeApp: App {
 }
 
 /// Pure parsing of `timeoflife://` deep links, factored out for unit testing.
-/// The magic link is `timeoflife://verify?code=<6-digit>`.
+/// The magic link is `timeoflife://verify?code=<6-digit>`. The backend
+/// historically emitted `timeoflife://auth/verify?code=<6-digit>`; both forms
+/// are accepted so links already sitting in users' inboxes keep working after
+/// the contract was aligned to the shorter form.
 enum DeepLink {
     static let scheme = "timeoflife"
 
     enum Host: String {
         case verify
+        case auth
+    }
+
+    /// True for both `timeoflife://verify?code=…` and
+    /// `timeoflife://auth/verify?code=…`. Guards strictly against over-matching:
+    /// `timeoflife://auth?code=…` (no `/verify` path) is rejected.
+    static func isVerifyLink(_ url: URL) -> Bool {
+        guard url.scheme?.lowercased() == scheme else { return false }
+        let components = URLComponents(url: url, resolvingAgainstBaseURL: false)
+        let host = components?.host?.lowercased()
+        let path = components?.path.lowercased()
+        if host == Host.verify.rawValue { return true }
+        if host == Host.auth.rawValue, path == "/verify" { return true }
+        return false
     }
 
     /// Returns the route for the URL, or `nil` if it isn't a recognized link.
     /// The verify host returns `.otpEntry(email: "")` — the handler resolves
     /// the email from the cached session state (the URL only carries the code).
     static func parse(url: URL) -> AppRoute? {
-        guard url.scheme?.lowercased() == scheme else { return nil }
-        guard let host = url.host?.lowercased(), let kind = Host(rawValue: host) else {
-            return nil
-        }
+        guard isVerifyLink(url) else { return nil }
         let components = URLComponents(url: url, resolvingAgainstBaseURL: false)
-        switch kind {
-        case .verify:
-            guard let code = components?.queryItems?.first(where: { $0.name == "code" })?.value,
-                  !code.isEmpty else { return nil }
-            _ = code // `code(from:)` re-extracts; parse only validates presence.
-            return .otpEntry(email: "")
-        }
+        guard let code = components?.queryItems?.first(where: { $0.name == "code" })?.value,
+              !code.isEmpty else { return nil }
+        _ = code // `code(from:)` re-extracts; parse only validates presence.
+        return .otpEntry(email: "")
     }
 
     /// Extracts the 6-digit code from a `timeoflife://verify?code=…` URL.
     static func code(from url: URL) -> String? {
-        guard url.scheme?.lowercased() == scheme,
-              url.host?.lowercased() == Host.verify.rawValue else { return nil }
+        guard isVerifyLink(url) else { return nil }
         let components = URLComponents(url: url, resolvingAgainstBaseURL: false)
         return components?.queryItems?.first { $0.name == "code" }?.value
     }

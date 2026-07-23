@@ -18,6 +18,40 @@ struct DeepLinkTests {
         #expect(DeepLink.code(from: url) == "123456")
     }
 
+    @Test("legacy auth/verify deep link parses to otpEntry route")
+    func legacyAuthVerifyDeepLink() {
+        let url = URL(string: "timeoflife://auth/verify?code=123456")!
+        let route = DeepLink.parse(url: url)
+        #expect(route == .otpEntry(email: ""))
+    }
+
+    @Test("legacy auth/verify deep link extracts code correctly")
+    func legacyAuthVerifyExtractsCode() {
+        let url = URL(string: "timeoflife://auth/verify?code=123456")!
+        #expect(DeepLink.code(from: url) == "123456")
+    }
+
+    @Test("auth host without /verify path is rejected")
+    func authHostWithoutVerifyPath() {
+        // Must not over-match: `timeoflife://auth?code=…` is not a verify link.
+        #expect(DeepLink.parse(url: URL(string: "timeoflife://auth?code=123456")!) == nil)
+        #expect(DeepLink.code(from: URL(string: "timeoflife://auth?code=123456")!) == nil)
+        #expect(DeepLink.parse(url: URL(string: "timeoflife://auth/confirm?code=123456")!) == nil)
+    }
+
+    @Test("auth/verify deep link with missing code returns nil")
+    func authVerifyMissingCode() {
+        #expect(DeepLink.parse(url: URL(string: "timeoflife://auth/verify")!) == nil)
+        #expect(DeepLink.parse(url: URL(string: "timeoflife://auth/verify?code=")!) == nil)
+    }
+
+    @Test("auth/verify deep link with extra params still works")
+    func authVerifyExtraParams() {
+        let url = URL(string: "timeoflife://auth/verify?code=999999&source=email&lang=en")!
+        #expect(DeepLink.parse(url: url) == .otpEntry(email: ""))
+        #expect(DeepLink.code(from: url) == "999999")
+    }
+
     @Test("deep link with missing code returns nil")
     func missingCode() {
         #expect(DeepLink.parse(url: URL(string: "timeoflife://verify")!) == nil)

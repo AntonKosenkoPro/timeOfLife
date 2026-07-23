@@ -11,53 +11,66 @@ struct EmailEntryView: View {
     @FocusState private var isEmailFocused: Bool
 
     var body: some View {
-        VStack(spacing: Theme.spacingLarge) {
-            Spacer()
+        // `GeometryReader` + `ScrollView` engages SwiftUI's automatic keyboard
+        // avoidance on iOS 15 (a bare `VStack` is not avoided, so on iPhone SE
+        // 1st gen the pinned action bar was covered by the keyboard). The
+        // `minHeight` keeps the content vertically centered when it fits and
+        // lets it scroll when it overflows on short screens.
+        GeometryReader { proxy in
+            ScrollView {
+                VStack(spacing: Theme.spacingLarge) {
+                    Spacer(minLength: 0)
 
-            Text(L10n.authWelcome.text)
-                .font(.title.bold())
-                .foregroundStyle(Theme.textPrimary)
-                .multilineTextAlignment(.center)
+                    Text(L10n.authWelcome.text)
+                        .font(.title.bold())
+                        .foregroundStyle(Theme.textPrimary)
+                        .multilineTextAlignment(.center)
 
-            Text(L10n.authSubtitle.text)
-                .font(.subheadline)
-                .foregroundStyle(Theme.textSecondary)
-                .multilineTextAlignment(.center)
+                    Text(L10n.authSubtitle.text)
+                        .font(.subheadline)
+                        .foregroundStyle(Theme.textSecondary)
+                        .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
 
-            Spacer().frame(height: Theme.spacingSmall)
+                    Spacer().frame(height: Theme.spacingSmall)
 
-            TextFieldWithError(
-                title: L10n.emailEntryEmail.text,
-                placeholder: L10n.emailEntryEmail.text,
-                text: $vm.email,
-                error: vm.fieldErrors.email,
-                keyboardType: .emailAddress,
-                textContentType: .emailAddress,
-                submitLabel: .continue,
-                autocapitalization: .none,
-                accessibilityId: "EmailField",
-                onSubmit: submit
-            )
-            .focused($isEmailFocused)
+                    TextFieldWithError(
+                        title: L10n.emailEntryEmail.text,
+                        placeholder: L10n.emailEntryEmail.text,
+                        text: $vm.email,
+                        error: vm.fieldErrors.email,
+                        keyboardType: .emailAddress,
+                        textContentType: .emailAddress,
+                        submitLabel: .continue,
+                        autocapitalization: .none,
+                        accessibilityId: "EmailField",
+                        onSubmit: submit
+                    )
+                    .focused($isEmailFocused)
 
-            if let errorMessage = vm.errorMessage {
-                ErrorBanner(
-                    message: errorMessage,
-                    accessibilityId: "EmailErrorBanner"
-                )
+                    if let errorMessage = vm.errorMessage {
+                        ErrorBanner(
+                            message: errorMessage,
+                            accessibilityId: "EmailErrorBanner"
+                        )
+                    }
+
+                    Spacer(minLength: 0)
+                }
+                .padding(.horizontal, Theme.screenHorizontalPadding)
+                .frame(maxWidth: Theme.maxContentWidth)
+                .frame(maxWidth: .infinity)
+                .frame(minHeight: proxy.size.height)
             }
-
-            Spacer()
         }
-        .padding(.horizontal, Theme.screenHorizontalPadding)
-        .frame(maxWidth: Theme.maxContentWidth)
-        .frame(maxWidth: .infinity)
         .background(Theme.backgroundPrimary.ignoresSafeArea())
         .safeAreaInset(edge: .bottom) {
             // Pinned action bar. Content in `safeAreaInset` animates with the
             // system keyboard transition instead of reflowing with the main
             // stack, and stays visible above the keyboard so the user can tap
-            // Continue without dismissing the keyboard first.
+            // Continue without dismissing the keyboard first. On iOS 15 the
+            // enclosing `ScrollView` now makes this inset lift above the
+            // keyboard (it was covered on iPhone SE 1st gen).
             VStack(spacing: Theme.spacingSmall) {
                 PrimaryButton(
                     title: L10n.emailEntrySubmit.text,
