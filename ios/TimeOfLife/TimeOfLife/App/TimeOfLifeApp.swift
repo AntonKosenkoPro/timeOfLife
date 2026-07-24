@@ -15,10 +15,56 @@ struct TimeOfLifeApp: App {
     @StateObject private var navigation: AppNavigationStack
 
     init() {
-        let container = AppContainer.production()
+        // UI-feedback loop: when launched with `UITEST_SCREEN=<screen>` (or
+        // `SIMCTL_CHILD_UITEST_SCREEN=<screen>`, which `simctl launch` preserves)
+        // in DEBUG, build a deterministic, stub-backed graph seeded to that
+        // screen so the agent can inspect any UI without a real backend. See
+        // `AppContainer.uiTesting(screen:)` and the `ios-ui-loop` skill.
+        let container: AppContainer
+        #if DEBUG
+        if let screen = Self.uiTestingScreen(), !screen.isEmpty {
+            container = AppContainer.uiTesting(screen: screen)
+        } else {
+            container = AppContainer.production()
+        }
+        #else
+        container = AppContainer.production()
+        #endif
         self._container = StateObject(wrappedValue: container)
         self._session = StateObject(wrappedValue: container.sessionStore)
         self._navigation = StateObject(wrappedValue: container.navigation)
+    }
+
+    /// Resolves the UI-feedback screen from the environment or launch
+    /// arguments. `simctl launch` forwards `KEY=VALUE` pairs, but on modern
+    /// simulators iOS does not expose them through `ProcessInfo.environment`,
+    /// so also parse `ProcessInfo.arguments` for both `UITEST_SCREEN` and
+    /// `SIMCTL_CHILD_UITEST_SCREEN` forms.
+    private static func uiTestingScreen() -> String? {
+        let env = ProcessInfo.processInfo.environment
+        if let screen = env["UITEST_SCREEN"], !screen.isEmpty { return screen }
+        if let screen = env["SIMCTL_CHILD_UITEST_SCREEN"], !screen.isEmpty { return screen }
+
+        let args = ProcessInfo.processInfo.arguments
+        for (index, arg) in args.enumerated() {
+            let key: String
+            if arg.hasPrefix("UITEST_SCREEN=") {
+                key = "UITEST_SCREEN="
+            } else if arg.hasPrefix("SIMCTL_CHILD_UITEST_SCREEN=") {
+                key = "SIMCTL_CHILD_UITEST_SCREEN="
+            } else if arg == "UITEST_SCREEN" || arg == "SIMCTL_CHILD_UITEST_SCREEN" {
+                let next = index + 1
+                guard next < args.count else { continue }
+                let screen = args[next]
+                if !screen.isEmpty { return screen }
+                continue
+            } else {
+                continue
+            }
+            let screen = String(arg.dropFirst(key.count))
+            if !screen.isEmpty { return screen }
+        }
+        return nil
     }
 
     var body: some Scene {
