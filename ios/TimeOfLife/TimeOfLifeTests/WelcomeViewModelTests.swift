@@ -3,8 +3,8 @@ import Foundation
 @testable import TimeOfLife
 
 @MainActor
-@Suite("EmailEntryViewModel — Sign in with Apple")
-struct AppleSignInViewModelTests {
+@Suite("WelcomeViewModel — Sign in with Apple")
+struct WelcomeViewModelTests {
 
     private func makeService(
         repo: FakeAuthRepository = FakeAuthRepository()
@@ -21,20 +21,20 @@ struct AppleSignInViewModelTests {
         return (service, repo, Connectivity(), store)
     }
 
-    private func makeAppleVM(
+    private func makeWelcomeVM(
         service: AuthService,
         conn: Connectivity,
         provider: FakeAppleAuthorizationProvider = FakeAppleAuthorizationProvider()
-    ) -> (EmailEntryViewModel, FakeAppleAuthorizationProvider) {
+    ) -> (WelcomeViewModel, FakeAppleAuthorizationProvider) {
         let appleService = AppleSignInService(provider: provider)
-        let vm = EmailEntryViewModel(service: service, connectivity: conn, appleService: appleService)
+        let vm = WelcomeViewModel(service: service, connectivity: conn, appleService: appleService)
         return (vm, provider)
     }
 
     @Test("Apple sign-in success exchanges token and signs in")
     func appleSignInSuccess() async throws {
         let (service, repo, conn, store) = makeService()
-        let (vm, _) = makeAppleVM(service: service, conn: conn)
+        let (vm, _) = makeWelcomeVM(service: service, conn: conn)
 
         await vm.signInWithApple()
 
@@ -48,17 +48,19 @@ struct AppleSignInViewModelTests {
         }
     }
 
-    @Test("Apple sign-in offline shows error and does not call backend")
-    func appleSignInOffline() async throws {
+    @Test("Apple sign-in delegates to backend; offline is handled by the view")
+    func appleSignInOfflineHandledByView() async throws {
         let (service, repo, _, _) = makeService()
         let conn = Connectivity()
         conn.isConnected = false
-        let (vm, _) = makeAppleVM(service: service, conn: conn)
+        let (vm, _) = makeWelcomeVM(service: service, conn: conn)
 
         await vm.signInWithApple()
 
-        #expect(repo.calls.isEmpty)
-        #expect(vm.errorMessage != nil)
+        // The view disables the Apple button when offline, so the VM no longer
+        // guards connectivity itself and should proceed with the backend call.
+        #expect(repo.calls == [.appleSignIn(identityToken: "id-token")])
+        #expect(vm.errorMessage == nil)
     }
 
     @Test("Apple sign-in canceled is silent")
@@ -66,7 +68,7 @@ struct AppleSignInViewModelTests {
         let (service, repo, conn, _) = makeService()
         let provider = FakeAppleAuthorizationProvider()
         provider.error = AppleSignInError.canceled
-        let (vm, _) = makeAppleVM(service: service, conn: conn, provider: provider)
+        let (vm, _) = makeWelcomeVM(service: service, conn: conn, provider: provider)
 
         await vm.signInWithApple()
 
@@ -79,7 +81,7 @@ struct AppleSignInViewModelTests {
         let (service, repo, conn, _) = makeService()
         let provider = FakeAppleAuthorizationProvider()
         provider.error = AppleSignInError.failed("boom")
-        let (vm, _) = makeAppleVM(service: service, conn: conn, provider: provider)
+        let (vm, _) = makeWelcomeVM(service: service, conn: conn, provider: provider)
 
         await vm.signInWithApple()
 
@@ -92,7 +94,7 @@ struct AppleSignInViewModelTests {
         let repo = FakeAuthRepository()
         repo.appleSignInError = APIError.server(code: "invalid_apple_token", message: "Invalid Apple identity token")
         let (service, _, conn, _) = makeService(repo: repo)
-        let (vm, _) = makeAppleVM(service: service, conn: conn)
+        let (vm, _) = makeWelcomeVM(service: service, conn: conn)
 
         await vm.signInWithApple()
 

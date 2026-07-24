@@ -48,6 +48,20 @@ struct OtpEntryViewModelTests {
         #expect(vm.isVerified == false)
     }
 
+    @Test("OtpEntryViewModel: verification failure clears the code so the user can retype")
+    func otpEntryClearsCodeOnError() async throws {
+        let repo = FakeAuthRepository()
+        repo.otpVerifyError = APIError.server(code: "invalid_otp", message: "Incorrect code. Try again.")
+        let (service, _, conn, _) = TestFactories.makeService(repo: repo)
+        let vm = OtpEntryViewModel(service: service, connectivity: conn, email: "a@b.com")
+        vm.code = "123456"
+
+        await vm.submit()
+
+        #expect(vm.errorMessage != nil)
+        #expect(vm.code.isEmpty)
+    }
+
     @Test("OtpEntryViewModel: otp_expired error sets errorMessage")
     func otpEntryExpired() async throws {
         let repo = FakeAuthRepository()

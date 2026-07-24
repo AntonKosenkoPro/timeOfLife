@@ -19,6 +19,7 @@ struct PrimaryButton: View {
     let isLoading: Bool
     let isDisabled: Bool
     let accessibilityId: String
+    let tint: Color? // default nil → Theme.accentPrimary
     let action: () -> Void
 }
 ```
@@ -27,16 +28,18 @@ struct PrimaryButton: View {
 
 | State | Visual |
 |---|---|
-| Default | `.borderedProminent`, `.controlSize(.large)`, `Theme.accentPrimary` tint |
-| Loading | `ProgressView()` with white tint centered in the button; keeps full width |
-| Disabled | `disabled(isLoading \|\| isDisabled)` — SwiftUI grays the button |
+| Default | Fixed 54pt filled rectangle, `Theme.cornerRadius` continuous corners, filled with `tint ?? Theme.accentPrimary` |
+| Loading | `ProgressView()` with white tint centered in the button; keeps full width; fill dimmed to 50% alpha |
+| Disabled | `disabled(isLoading \|\| isDisabled)`; fill dimmed to 50% alpha |
 | Error | No change; errors are shown near the related field, not the button |
 
 ### Requirements
 
 - Title uses `.body.bold()`.
-- Frame is `maxWidth: .infinity`, height implied by `.controlSize(.large)`.
-- Minimum tap area is satisfied by `.controlSize(.large)`.
+- Frame is `maxWidth: .infinity`, fixed height `54` — matches `AppleSignInButton` geometry.
+- Fill is `tint ?? Theme.accentPrimary`; dimmed via `Theme.color(fill, alpha: 0.5)` while loading or disabled.
+- Corners are a continuous `RoundedRectangle` with `Theme.cornerRadius`.
+- Do NOT use `.borderedProminent`/`.controlSize(.large)` — the system prominent style renders as a floating liquid-glass capsule on iOS 27 and breaks shape parity and keyboard tracking.
 
 ### Usage
 
@@ -110,13 +113,99 @@ TextFieldWithError(
 
 ---
 
+## `OtpCodeField`
+
+One styled input box per digit, backed by a single hidden `TextField` so paste, SMS AutoFill, and typing work as one continuous code.
+
+### Signature
+
+```swift
+struct OtpCodeField: View {
+    @Binding var code: String
+    var length: Int = 6
+    let error: String?
+    let isLoading: Bool
+    let accessibilityId: String
+
+    @FocusState private var isFocused: Bool
+    @Environment(\.colorScheme) private var colorScheme
+}
+```
+
+### Visual
+
+- `ZStack`:
+  - Hidden `TextField("", text: $code)`:
+    - `.keyboardType(.numberPad)`
+    - `.textContentType(.oneTimeCode)` for SMS AutoFill / QuickType
+    - `.autocorrectionDisabled()`, `.textInputAutocapitalization(.never)`
+    - `opacity(0)` and `.accessibilityHidden(true)` so only the boxes are visible
+  - `HStack(spacing: Theme.spacingSmall)` with `length` boxes (default 6).
+- Each box:
+  - Size `44 × 56 pt` (minimum tap area 44 pt).
+  - Background `Theme.backgroundSecondary`.
+  - Border 1 pt `RoundedRectangle(cornerRadius: Theme.cornerRadius, style: .continuous)` stroke: `Theme.hairline` normally, `Theme.accentPrimary` on the active box while focused, `Theme.danger` when `error != nil`.
+  - Digit shown in `Theme.textPrimary`, `.title2.monospacedDigit()` when filled; empty boxes are blank (no placeholder).
+- The active box index is `min(code.count, length - 1)` while focused, else `-1` (no box highlighted).
+- The whole group is horizontally centered.
+
+### States
+
+| State | Visual |
+|---|---|
+| Empty | Boxes blank; active box (index 0) has accent border while focused |
+| Partial | Filled boxes show digits; remaining boxes blank; active box has accent border |
+| Complete | All boxes filled; active box (last) has accent border |
+| Error | All boxes use `Theme.danger` border; error text appears below the component |
+| Loading | The hidden field is disabled; the parent shows loading via the primary action |
+
+### Behavior
+
+- The component focuses itself on appear (`.onAppear { isFocused = true }`). It owns its `@FocusState` internally and never needs an external focus binding; do not dismiss focus elsewhere.
+- Tapping any box focuses the hidden field.
+- Typing appends digits to `code`; focus management is irrelevant because there is only one real responder.
+- `onChange(of: code)` sanitizes the value to digits only and truncates to `length`, writing back only when different to avoid feedback loops.
+- Pasting a multi-character string fills as many boxes as possible from the start, truncated to `length`.
+- Backspace removes the last digit.
+- Auto-submit is the parent screen’s responsibility; the component only exposes the bound `code`.
+- Clear `error` when `code` changes (parent logic).
+
+### Accessibility
+
+- Group the boxes into a single accessible element:
+  - `.accessibilityElement(children: .combine)`
+  - `.accessibilityLabel("One-time code, \(length) digits")`
+  - `.accessibilityValue(code)`
+  - `.accessibilityIdentifier(accessibilityId)`
+- Hide individual visual boxes from VoiceOver with `.accessibilityHidden(true)`.
+- The component focuses itself on appear via its own `@FocusState`; no external focus binding is needed. Do not force-focus while VoiceOver is running — do not fight the screen reader.
+
+### Usage
+
+```swift
+OtpCodeField(
+    code: $vm.code,
+    length: 6,
+    error: vm.fieldErrors.otp,
+    isLoading: vm.isLoading,
+    accessibilityId: "OtpCodeField"
+)
+```
+
+### Notes
+
+- If `length` exceeds 6, wrap the box row in a horizontal `ScrollView` so it does not clip on narrow screens.
+- The component must not implement its own text engine, custom touch handling, or custom caret. The hidden `TextField` owns all text input.
+
+---
+
 ## `OfflineBanner`
 
 Top banner shown when the device is offline.
 
 ### Signature
 
-Already implemented: `RootView.OfflineBanner` in `ios/TimeOfLife/TimeOfLife/Features/Auth/Views/RootView.swift:32`.
+Already implemented: `RootView.OfflineBanner` in `ios/TimeOfLife/TimeOfLife/Features/Auth/Views/RootView.swift:33`.
 
 ### Visual
 

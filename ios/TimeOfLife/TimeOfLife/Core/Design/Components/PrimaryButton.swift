@@ -25,7 +25,29 @@ struct PrimaryButton: View {
     let isLoading: Bool
     let isDisabled: Bool
     let accessibilityId: String
+    /// Optional fill override. When `nil` (the default) the button uses
+    /// `Theme.accentPrimary`; pass `Theme.danger` to render a destructive
+    /// primary action.
+    let tint: Color?
     let action: () -> Void
+
+    init(
+        title: String,
+        icon: String?,
+        isLoading: Bool,
+        isDisabled: Bool,
+        accessibilityId: String,
+        tint: Color? = nil,
+        action: @escaping () -> Void
+    ) {
+        self.title = title
+        self.icon = icon
+        self.isLoading = isLoading
+        self.isDisabled = isDisabled
+        self.accessibilityId = accessibilityId
+        self.tint = tint
+        self.action = action
+    }
 
     var body: some View {
         Button(action: action) {
@@ -52,17 +74,18 @@ struct PrimaryButton: View {
             .contentShape(RoundedRectangle(cornerRadius: Theme.cornerRadius, style: .continuous))
         }
         .disabled(isLoading || isDisabled)
-        .opacity(isLoading || isDisabled ? 0.6 : 1)
         .animation(.easeInOut(duration: 0.15), value: isLoading || isDisabled)
         .accessibilityIdentifier(accessibilityId)
     }
 
-    /// Filled accent background, dimmed while the button is inactive.
+    /// Filled background using `tint` (or `Theme.accentPrimary` when nil),
+    /// dimmed to 50% alpha while the button is inactive.
     private var background: Color {
+        let fill = tint ?? Theme.accentPrimary
         if isLoading || isDisabled {
-            return Theme.color(Theme.accentPrimary, alpha: 0.5)
+            return Theme.color(fill, alpha: 0.5)
         }
-        return Theme.accentPrimary
+        return fill
     }
 }
 

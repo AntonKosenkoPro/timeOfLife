@@ -16,12 +16,14 @@ final class TimerViewModel: ObservableObject {
     @Published var didSave = false
 
     let service: TimerService
+    let authService: AuthService
     private let connectivity: Connectivity
     private var startDate: Date?
     private var timerCancellable: AnyCancellable?
 
-    init(service: TimerService, connectivity: Connectivity) {
+    init(service: TimerService, authService: AuthService, connectivity: Connectivity) {
         self.service = service
+        self.authService = authService
         self.connectivity = connectivity
     }
 
@@ -79,6 +81,11 @@ final class TimerViewModel: ObservableObject {
         timerCancellable?.cancel()
         timerCancellable = nil
         UIApplication.shared.isIdleTimerDisabled = false
+    }
+
+    /// Signs the user out. Works offline by clearing local session state.
+    func signOut() async {
+        await authService.logout()
     }
 
     private func tick() {

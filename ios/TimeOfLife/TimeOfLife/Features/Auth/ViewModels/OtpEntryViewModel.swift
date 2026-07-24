@@ -68,8 +68,12 @@ final class OtpEntryViewModel: ObservableObject {
             isVerified = true
         } catch let error as APIError {
             errorMessage = ErrorLocalization.message(for: error)
+            // Clear the code so the user can re-type immediately after a
+            // verification failure. Offline never reaches this path.
+            code = ""
         } catch {
             errorMessage = String.localized("error.unknown")
+            code = ""
         }
 
         isLoading = false

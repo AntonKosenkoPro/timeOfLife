@@ -3,13 +3,14 @@
 // App
 "app.name" = "Time of Life";
 
-// Auth flow
-"auth.welcome" = "Добро пожаловать";
-"auth.subtitle" = "Войдите или создайте аккаунт, чтобы продолжить.";
+// Welcome
+"welcome.tagline" = "Личный трекер времени.";
+"welcome.continueWithEmail" = "Войти по почте";
 
 // Email entry (passwordless: sign-in + sign-up collapse into email → OTP)
-"emailEntry.title" = "Вход";
+"emailEntry.title" = "Войти по почте";
 "emailEntry.email" = "Эл. почта";
+"emailEntry.subtitle" = "Введите адрес эл. почты, и мы отправим вам одноразовый код.";
 "emailEntry.submit" = "Продолжить";
 
 // OTP entry
@@ -19,17 +20,17 @@
 "otp.submit" = "Подтвердить";
 "otp.resend" = "Отправить код снова";
 "otp.resendCountdown" = "Отправить код через %d с";
-"otp.success" = "Вход выполнен";
 "otp.resent" = "Новый код отправлен.";
-
-// Signed in
-"signedIn.title" = "Вход выполнен";
-"signedIn.email" = "Вы вошли как %@";
-"signedIn.logout" = "Выйти";
-"signedIn.placeholder" = "Трекинг времени скоро появится.";
+"otp.changeEmail" = "Изменить почту";
 
 // Offline
 "offline.banner" = "Вы не в сети. Некоторые действия недоступны.";
+
+// Sign out confirmation
+"signOut.confirmationTitle" = "Выйти?";
+"signOut.confirmationMessage" = "Это очистит локальную сессию.";
+"signOut.confirm" = "Выйти";
+"signOut.cancel" = "Отмена";
 
 // Validation (unified messages — Requirements U2/U4: one merged message per field)
 "common.and" = "и";
@@ -65,3 +66,4 @@
 "timer.stop" = "Стоп";
 "timer.offlineHint" = "Записи сохраняются локально и синхронизируются после появления сети.";
 "timer.emptyActivityError" = "Введите название активности.";
+"timer.signOut" = "Выйти";

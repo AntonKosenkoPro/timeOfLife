@@ -24,6 +24,7 @@ struct RootView: View {
         case .signedIn:
             TimerView(vm: TimerViewModel(
                 service: container.timerService,
+                authService: container.authService,
                 connectivity: container.connectivity
             ))
         }

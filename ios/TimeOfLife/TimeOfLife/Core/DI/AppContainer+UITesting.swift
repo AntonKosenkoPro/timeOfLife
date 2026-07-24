@@ -64,6 +64,10 @@ extension AppContainer {
         navigation: AppNavigationStack
     ) {
         switch screen {
+        case "emailEntry":
+            // Auth flow pushed to the email entry screen.
+            sessionStore.setSignedOut()
+            navigation.path = [.emailEntry]
         case "otpEntry":
             // Auth flow pushed to the OTP screen.
             sessionStore.setSignedOut()
@@ -74,14 +78,8 @@ extension AppContainer {
                 id: "ui-test", email: "user@example.com", emailVerified: true
             ))
             navigation.path = []
-        case "signedInConfirmation":
-            // The `.signedIn` route's `SignedInView` lives in `AuthFlowView`,
-            // which only renders while signed out — so stay signed out and
-            // push the route.
-            sessionStore.setSignedOut()
-            navigation.path = [.signedIn]
         default:
-            // "emailEntry" (and any unknown value) → auth-flow root.
+            // "welcome" (and any unknown value) → auth-flow root.
             sessionStore.setSignedOut()
             navigation.path = []
         }

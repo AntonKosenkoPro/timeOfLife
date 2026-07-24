@@ -2,7 +2,7 @@
 
 Context for AI agents working in this repository. Read this first. (Requirements `Common.md` S7.)
 
-## Flow recomendations
+## Flow recommendations
 
 - Plan every not obvious task (that will consume over 100k tokens per session)
 - Use subagents whenever it's suitable
@@ -36,7 +36,7 @@ backend/                 Go backend (chi + pgx/Postgres; sqlite for tests)
   deploy.sh              CI/CD deploy script
   Makefile               Common commands (build, test, lint, run, deploy)
 ios/TimeOfLife/          SwiftUI app (iOS 15+), XcodeGen-managed (project.yml)
-  TimeOfLife/Features/Auth/        passwordless flow: EmailEntry → OtpEntry → SignedIn
+  TimeOfLife/Features/Auth/        passwordless flow: Welcome → EmailEntry → OtpEntry
   TimeOfLife/Features/TimeTracking/  start/stop timer, TimeEntry model, TimerService + LocalTimerStore
   TimeOfLife/Core/                 networking, keychain, reachability, theme, navigation, DI, design components
   TimeOfLife/Localization/         en + ru Localizable.strings + L10n enum
@@ -154,7 +154,7 @@ Code signing is disabled in `project.yml` (`DEVELOPMENT_TEAM: ""`, `CODE_SIGNING
 - SwiftUI snapshot/on-device keychain tests — manual smoke checklist in README.
 
 ## Sign in with Apple (F2)
-- iOS: `Features/AppleSignIn/` — `AppleSignInService` wraps an injectable `AppleAuthorizationProviding` (real `ASAuthorizationAppleIDProvider`-backed impl + a fake in tests). The `AppleSignInButton` (UIControl wrapper) triggers `EmailEntryViewModel.signInWithApple()`, which obtains Apple's identity token and posts it via `AuthService.signInWithApple` → `POST /auth/apple`. Success reuses `AuthService.persist` → `SessionStore` flips → `RootView` lands on the timer (no new navigation wiring).
+- iOS: `Features/AppleSignIn/` — `AppleSignInService` wraps an injectable `AppleAuthorizationProviding` (real `ASAuthorizationAppleIDProvider`-backed impl + a fake in tests). The `AppleSignInButton` (UIControl wrapper) now lives on `WelcomeView` and triggers `WelcomeViewModel.signInWithApple()`, which obtains Apple's identity token and posts it via `AuthService.signInWithApple` → `POST /auth/apple`. Success reuses `AuthService.persist` → `SessionStore` flips → `RootView` lands on the timer (no new navigation wiring).
 - Backend: `POST /api/v1/auth/apple` (`internal/handlers/auth.go` `AppleSignIn`) verifies Apple's RS256 identity-token JWT via `internal/apple` (JWKS fetched with `github.com/MicahParks/keyfunc/v3`, pinned `RS256`, `iss`/`aud`=Bundle ID/`exp`), upserts a user keyed by Apple's `sub` (`Store.UpsertUserByAppleSubject`, migration `002_apple.sql` adds `users.apple_subject`), and issues the same token pair as OTP verify.
 - **Config-gated**: the route is registered only when `APPLE_CLIENT_ID` is set (the app's Bundle ID — Apple puts the Bundle ID in the identity token's `aud` for a native app). Empty → feature off; the handler returns `apple_not_configured` (503) if hit directly. `APPLE_JWKS_URL` defaults to `https://appleid.apple.com/auth/keys`.
 - Running end-to-end requires the **Sign in with Apple** capability (entitlements file + portal App ID) and code signing enabled — both currently off. The code + unit tests (119) are green without them.

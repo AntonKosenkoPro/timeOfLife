@@ -2,22 +2,24 @@ import SwiftUI
 
 /// OTP entry screen for passwordless authentication.
 ///
-/// The user enters the 6-digit code sent to their email. Supports magic-link
-/// deep link pre-fill and auto-submit. Follows U1 minimalistic design with
-/// Theme semantic colors.
+/// The user enters the 6-digit code sent to their email in a one-box-per-digit
+/// field (`OtpCodeField`). The code auto-submits ~250 ms after the 6th digit is
+/// entered so the user sees the complete code before the network call. On a
+/// verification failure the code is cleared so the user can re-type. Follows
+/// U1 minimalistic design with Theme semantic colors.
 struct OtpEntryView: View {
     @ObservedObject var vm: OtpEntryViewModel
     @EnvironmentObject var navigation: AppNavigationStack
-    @FocusState private var isCodeFocused: Bool
+    @EnvironmentObject var container: AppContainer
     @State private var bottomBarHeight: CGFloat = 0
+    @State private var autoSubmitTask: Task<Void, Never>?
 
     var body: some View {
         // `GeometryReader` + `ScrollView` gives us keyboard avoidance on
         // iOS 15. The form stacks from the top with a fixed reserve for the
         // pinned bottom action bar so the field never crowds the buttons on
         // short screens (iPhone SE 1st gen), especially while the keyboard is
-        // open. A top Spacer with a minimum length keeps the form roughly
-        // centered on tall screens.
+        // open. Content scrolls when it does not fit.
         GeometryReader { _ in
             ScrollView {
                 VStack(spacing: Theme.spacingLarge) {
@@ -34,19 +36,13 @@ struct OtpEntryView: View {
 
                     Spacer().frame(height: Theme.spacingSmall)
 
-                    TextFieldWithError(
-                        title: L10n.otpCode.text,
-                        placeholder: L10n.otpCode.text,
-                        text: $vm.code,
+                    OtpCodeField(
+                        code: $vm.code,
+                        length: 6,
                         error: vm.fieldErrors.otp,
-                        keyboardType: .numberPad,
-                        textContentType: .oneTimeCode,
-                        submitLabel: .continue,
-                        autocapitalization: .none,
-                        accessibilityId: "OtpField",
-                        onSubmit: submit
+                        isLoading: vm.isLoading,
+                        accessibilityId: "OtpCodeField"
                     )
-                    .focused($isCodeFocused)
 
                     if let errorMessage = vm.errorMessage {
                         ErrorBanner(
@@ -55,11 +51,11 @@ struct OtpEntryView: View {
                         )
                     }
 
-                    // Extra breathing room between the input/error and the
+                    // Extra breathing room between the field/error and the
                     // pinned bottom action bar. This space is part of the
                     // scrollable content, so when the keyboard scrolls the
                     // field into view it leaves a comfortable gap above the
-                    // Verify/Resend bar on short screens (iPhone SE 1st gen).
+                    // Resend/Change-email bar on short screens (iPhone SE 1st gen).
                     Spacer().frame(height: Theme.spacingLarge)
 
                     // Fixed reserve for the pinned bottom action bar plus
@@ -75,26 +71,17 @@ struct OtpEntryView: View {
         }
         .background(Theme.backgroundPrimary.ignoresSafeArea())
         .safeAreaInset(edge: .bottom) {
-            // Pinned action bar so Verify/Resend animate smoothly with the
-            // keyboard and remain reachable while typing. On iOS 15 the
+            // Pinned action bar so Resend/Change-email animate smoothly with
+            // the keyboard and remain reachable while typing. On iOS 15 the
             // enclosing `ScrollView` now makes this inset lift above the
             // keyboard (it was covered on iPhone SE 1st gen).
             MeasuredBottomBar {
                 VStack(spacing: Theme.spacingSmall) {
                     // This spacer makes the action bar taller, which in turn
                     // increases the ScrollView's bottom safe-area inset and
-                    // keeps the Code field from crowding the Verify/Resend
-                    // bar on small screens with the keyboard open.
+                    // keeps the Code field from crowding the bar on small
+                    // screens with the keyboard open.
                     Spacer().frame(height: Theme.spacingLarge)
-
-                    PrimaryButton(
-                        title: L10n.otpSubmit.text,
-                        icon: nil,
-                        isLoading: vm.isLoading,
-                        isDisabled: vm.code.trimmingCharacters(in: .whitespaces).isEmpty,
-                        accessibilityId: "OtpVerifyButton",
-                        action: submit
-                    )
 
                     Button {
                         Task { await vm.resendOtp() }
@@ -103,8 +90,17 @@ struct OtpEntryView: View {
                             .font(.subheadline)
                             .foregroundStyle(resendColor)
                     }
-                    .disabled(vm.isLoading || vm.resendCountdown > 0)
+                    .disabled(vm.isLoading || vm.resendCountdown > 0 || !container.connectivity.isConnected)
                     .accessibilityIdentifier("OtpResendButton")
+
+                    Button {
+                        navigation.popLast()
+                    } label: {
+                        Text(L10n.otpChangeEmail.text)
+                            .font(.subheadline)
+                            .foregroundStyle(Theme.textSecondary)
+                    }
+                    .accessibilityIdentifier("OtpChangeEmailButton")
                 }
                 .padding(.horizontal, Theme.screenHorizontalPadding)
                 .padding(.vertical, Theme.spacingSmall)
@@ -120,26 +116,29 @@ struct OtpEntryView: View {
             // Resend button must be disabled from the first appearance, not
             // only after a manual resend.
             vm.armInitialResendCooldown()
-            isCodeFocused = true
         }
-        .onChange(of: vm.code) { _ in
-            // Only clear stale validation state per keystroke; the user taps
-            // Verify to submit.
+        .onChange(of: vm.code) { newValue in
+            // Clear stale validation state per keystroke.
             if vm.fieldErrors.otp != nil {
                 vm.fieldErrors.otp = nil
             }
-        }
-        .onChange(of: vm.isVerified) { verified in
-            if verified {
-                navigation.push(.signedIn)
-                vm.isVerified = false
+
+            // Auto-submit after the 6th digit, debounced so the user sees the
+            // full code before the network call. A shorter/changed code cancels
+            // any pending auto-submit. The field stays first responder (we do
+            // not dismiss the keyboard); on success `AuthService` flips
+            // `SessionStore` and `RootView` swaps to `TimerView`.
+            autoSubmitTask?.cancel()
+            guard newValue.count == 6 else { return }
+            autoSubmitTask = Task {
+                try? await Task.sleep(nanoseconds: 250_000_000)
+                guard !Task.isCancelled, vm.code.count == 6, !vm.isLoading else { return }
+                await vm.submit()
             }
         }
-    }
-
-    private func submit() {
-        isCodeFocused = false
-        Task { await vm.submit() }
+        .onDisappear {
+            autoSubmitTask?.cancel()
+        }
     }
 
     /// Label for the Resend button: shows the plain call-to-action while it is

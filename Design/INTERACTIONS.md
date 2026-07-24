@@ -36,6 +36,62 @@ These rules apply across all screens unless a screen spec explicitly overrides t
 - Move focus to the next field with `.submitLabel(.continue)` and `.onSubmit`.
 - Dismiss the keyboard when the primary action is triggered.
 
+## Keyboard and primary input placement
+
+When a screen’s main purpose is to collect input from a single field (email, OTP, activity name, etc.), the layout must guarantee that the focused field and the primary action button remain visible while the system keyboard is open.
+
+### Placement rules
+
+1. **Primary input stays above the keyboard without scrolling.**
+   - Position the input field in the upper half of the screen (top-aligned content), not vertically centered.
+   - On appear, focus the field immediately. The user should already see the caret and typed characters without the app needing to scroll.
+2. **Primary action follows the keyboard.**
+   - Place the submit / continue / primary button in a pinned bottom action bar using `.safeAreaInset(edge: .bottom)`.
+   - The action bar animates with the keyboard on iOS 15+ and stays tappable above the keyboard.
+3. **Reserve space for the action bar in the scrollable content.**
+   - Add a bottom spacer (measured via `BottomBarHeightPreferenceKey` or fixed) equal to the action bar height plus `Theme.spacingLarge` so the scrollable content ends well above the bar.
+   - This prevents the input from being obscured on short screens (e.g., iPhone SE 1st gen) when the keyboard is open.
+4. **Use a `ScrollView` as a safety net.**
+   - Even though the input is positioned to avoid the keyboard, wrap the form in a `ScrollView` so the user can correct any overlap caused by larger dynamic-type sizes or smaller devices.
+5. **Do not rely on `Spacer()` to center the form.**
+   - Centering pushes the field into the keyboard zone on short devices. Use a small top padding and fixed spacers instead.
+
+### Anti-patterns
+
+- Centering the form with `Spacer()` above and below the input.
+- Placing the primary action button inside the scrollable content where it can be scrolled behind the keyboard.
+- Forcing the user to scroll manually to see what they are typing.
+
+## Auth flow interactions
+
+### Return-key submit
+
+- Email fields use `.submitLabel(.continue)` and `.onSubmit` to submit via the keyboard Return key.
+- A visible primary button that performs the same action must also exist. VoiceOver / Switch Control users may never discover the Return-key shortcut.
+
+### OTP input and auto-submit
+
+- The OTP field is a single hidden `TextField` with `.textContentType(.oneTimeCode)`. Visual digit boxes are decorative and hidden from VoiceOver.
+- The hidden field stays first responder while the OTP screen is visible so SMS AutoFill / QuickType can insert the code.
+- Tapping any digit box focuses the hidden field.
+- Typing, pasting, or AutoFill updates the bound code.
+- Auto-submit triggers only after the code reaches the required length (6 digits), debounced by 250 ms so the user sees the complete code before the network call.
+- On a verification error, clear the code and re-focus the hidden field so the user can re-type immediately. Do not force focus when VoiceOver is running.
+- Do not auto-submit partial codes or on every keystroke.
+
+### Sign Out
+
+- Sign Out is a destructive, low-frequency account action.
+- Until a dedicated Account/Profile screen exists, Sign Out lives in the `TimerView` top toolbar.
+- Tapping Sign Out must show a confirmation alert before clearing the local session, because local timer data may be lost.
+- Sign Out must work offline by clearing the local session.
+
+### Auth transitions
+
+- Auth screens (Welcome → Email → OTP) are pushed on the shared `AppNavigationStack`.
+- Use the system `NavigationStack` push slide. Do not add custom `.transition()` modifiers that could break the iOS 15 `NavigationView(.stack)` polyfill.
+- iOS 18 native zoom navigation transitions are noted as future-only and require a separate decision.
+
 ## Haptics
 
 | Action | Haptic |

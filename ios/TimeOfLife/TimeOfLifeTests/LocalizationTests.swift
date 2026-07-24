@@ -120,29 +120,31 @@ struct LocalizationTests {
 
     @Test("L10n enum allCases count matches expected keys")
     func allCasesCount() {
-        // 26 keys: appName, authWelcome, authSubtitle,
-        // emailEntryTitle, emailEntryEmail, emailEntrySubmit,
-        // otpTitle, otpSentTo, otpCode, otpSubmit, otpResend, otpSuccess, otpResent,
-        // signedInTitle, signedInEmail, signedInLogout, signedInPlaceholder,
+        // 29 keys: appName,
+        // welcomeTagline, welcomeContinueWithEmail,
+        // emailEntryTitle, emailEntryEmail, emailEntrySubtitle, emailEntrySubmit,
+        // otpTitle, otpSentTo, otpCode, otpSubmit, otpResend, otpResendCountdown, otpResent, otpChangeEmail,
         // offlineBanner,
         // appleSignInTitle, appleSignInError,
         // timerTitle, timerActivityPlaceholder, timerStart, timerStop,
-        // timerOfflineHint, timerEmptyActivityError
-        #expect(l10nCases.count == 26)
+        // timerOfflineHint, timerEmptyActivityError, timerSignOut,
+        // signOutConfirmationTitle, signOutConfirmationMessage, signOutConfirm, signOutCancel
+        #expect(l10nCases.count == 29)
     }
 }
 
 extension L10n: CaseIterable {
     public static var allCases: [L10n] {
         [
-            .appName, .authWelcome, .authSubtitle,
-            .emailEntryTitle, .emailEntryEmail, .emailEntrySubmit,
-            .otpTitle, .otpSentTo, .otpCode, .otpSubmit, .otpResend, .otpSuccess, .otpResent,
-            .signedInTitle, .signedInEmail, .signedInLogout, .signedInPlaceholder,
+            .appName,
+            .welcomeTagline, .welcomeContinueWithEmail,
+            .emailEntryTitle, .emailEntryEmail, .emailEntrySubtitle, .emailEntrySubmit,
+            .otpTitle, .otpSentTo, .otpCode, .otpSubmit, .otpResend, .otpResendCountdown, .otpResent, .otpChangeEmail,
             .offlineBanner,
             .appleSignInTitle, .appleSignInError,
             .timerTitle, .timerActivityPlaceholder, .timerStart, .timerStop,
-            .timerOfflineHint, .timerEmptyActivityError,
+            .timerOfflineHint, .timerEmptyActivityError, .timerSignOut,
+            .signOutConfirmationTitle, .signOutConfirmationMessage, .signOutConfirm, .signOutCancel,
         ]
     }
 }

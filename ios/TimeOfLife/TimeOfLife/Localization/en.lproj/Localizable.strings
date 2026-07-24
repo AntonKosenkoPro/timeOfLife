@@ -3,13 +3,14 @@
 // App
 "app.name" = "Time of Life";
 
-// Auth flow
-"auth.welcome" = "Welcome";
-"auth.subtitle" = "Sign in or create an account to continue.";
+// Welcome
+"welcome.tagline" = "Personal time tracker.";
+"welcome.continueWithEmail" = "Continue with Email";
 
 // Email entry (passwordless: sign-in + sign-up collapse into email → OTP)
-"emailEntry.title" = "Sign In";
+"emailEntry.title" = "Continue with Email";
 "emailEntry.email" = "Email";
+"emailEntry.subtitle" = "Enter your email and we’ll send you a one-time code.";
 "emailEntry.submit" = "Continue";
 
 // OTP entry
@@ -19,17 +20,17 @@
 "otp.submit" = "Verify";
 "otp.resend" = "Resend code";
 "otp.resendCountdown" = "Resend code in %ds";
-"otp.success" = "Signed in";
 "otp.resent" = "A new code has been sent.";
-
-// Signed in
-"signedIn.title" = "Signed In";
-"signedIn.email" = "Signed in as %@";
-"signedIn.logout" = "Log Out";
-"signedIn.placeholder" = "Time tracking coming soon.";
+"otp.changeEmail" = "Change email";
 
 // Offline
 "offline.banner" = "You are offline. Some actions are unavailable.";
+
+// Sign out confirmation
+"signOut.confirmationTitle" = "Sign Out?";
+"signOut.confirmationMessage" = "This will clear your local session.";
+"signOut.confirm" = "Sign Out";
+"signOut.cancel" = "Cancel";
 
 // Validation (unified messages — Requirements U2/U4: one merged message per field)
 "common.and" = "and";
@@ -65,3 +66,4 @@
 "timer.stop" = "Stop";
 "timer.offlineHint" = "Entries are saved locally and synced when you’re back online.";
 "timer.emptyActivityError" = "Enter an activity name.";
+"timer.signOut" = "Sign Out";

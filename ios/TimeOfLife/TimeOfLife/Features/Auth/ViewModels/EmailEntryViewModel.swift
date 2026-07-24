@@ -4,7 +4,8 @@ import SwiftUI
 /// View model for the email entry screen.
 ///
 /// Validates the email locally before hitting the network, normalizes it
-/// (trim + lowercase), and delegates the request to `AuthService`.
+/// (trim + lowercase), and delegates the request to `AuthService`. Sign in with
+/// Apple is no longer on this screen — it lives on the welcome screen.
 @MainActor
 final class EmailEntryViewModel: ObservableObject {
     @Published var email: String = ""
@@ -15,24 +16,19 @@ final class EmailEntryViewModel: ObservableObject {
 
     private let service: AuthService
     private let connectivity: Connectivity
-    private let appleService: AppleSignInService
     private let sessionStore: SessionStore
 
-    /// `appleService` defaults to a real `AppleSignInService` so existing call
-    /// sites (and previews) keep working; tests inject one wrapping a fake
-    /// `AppleAuthorizationProviding`. `sessionStore` defaults to a fresh store
-    /// but production injects the shared one so the email field can be
-    /// restored from `cachedEmail` when the user navigates back here from the
-    /// OTP screen (a fresh view model is created on each appearance).
+    /// `sessionStore` defaults to a fresh store but production injects the shared
+    /// one so the email field can be restored from `cachedEmail` when the user
+    /// navigates back here from the OTP screen (a fresh view model is created on
+    /// each appearance).
     init(
         service: AuthService,
         connectivity: Connectivity,
-        appleService: AppleSignInService = AppleSignInService(),
         sessionStore: SessionStore = SessionStore()
     ) {
         self.service = service
         self.connectivity = connectivity
-        self.appleService = appleService
         self.sessionStore = sessionStore
         if let cached = sessionStore.cachedEmail, !cached.isEmpty {
             email = cached
@@ -77,31 +73,5 @@ final class EmailEntryViewModel: ObservableObject {
         isLoading = false
         isEmailSent = false
         errorMessage = nil
-    }
-
-    /// Initiates Sign in with Apple. Runs the Apple authorization, then exchanges
-    /// the identity token for a session via `AuthService`. Cancellation is silent
-    /// (no error banner); other failures surface `appleSignIn.error`.
-    func signInWithApple() async {
-        guard connectivity.isConnected else {
-            errorMessage = String.localized("error.offline")
-            return
-        }
-
-        isLoading = true
-        errorMessage = nil
-
-        do {
-            let credential = try await appleService.signIn()
-            try await service.signInWithApple(identityToken: credential.identityToken)
-        } catch AppleSignInError.canceled {
-            // User dismissed the Apple sheet — no error.
-        } catch let error as APIError {
-            errorMessage = ErrorLocalization.message(for: error)
-        } catch {
-            errorMessage = L10n.appleSignInError.text
-        }
-
-        isLoading = false
     }
 }

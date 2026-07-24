@@ -1,7 +1,8 @@
 import SwiftUI
 
-/// The auth navigation container. Passwordless: root is `EmailEntryView`;
-/// routes push `OtpEntryView`, `SignedInView`, and `TimerView`.
+/// The auth navigation container. The welcome screen is the root; routes push
+/// `EmailEntryView` and `OtpEntryView`. Sign in with Apple lives on the welcome
+/// screen and flips `SessionStore` directly (no route).
 struct AuthFlowView: View {
     @EnvironmentObject var container: AppContainer
 
@@ -14,7 +15,6 @@ struct AuthFlowView: View {
                     EmailEntryView(vm: EmailEntryViewModel(
                         service: container.authService,
                         connectivity: container.connectivity,
-                        appleService: container.appleService,
                         sessionStore: container.sessionStore
                     ))
                 case .otpEntry(let email):
@@ -23,21 +23,13 @@ struct AuthFlowView: View {
                         connectivity: container.connectivity,
                         email: email
                     ))
-                case .signedIn:
-                    SignedInView()
-                case .timer:
-                    TimerView(vm: TimerViewModel(
-                        service: container.timerService,
-                        connectivity: container.connectivity
-                    ))
                 }
             },
             root: {
-                EmailEntryView(vm: EmailEntryViewModel(
+                WelcomeView(vm: WelcomeViewModel(
                     service: container.authService,
                     connectivity: container.connectivity,
-                    appleService: container.appleService,
-                    sessionStore: container.sessionStore
+                    appleService: container.appleService
                 ))
             }
         )

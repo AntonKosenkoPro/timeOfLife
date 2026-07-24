@@ -6,12 +6,15 @@ import Foundation
 enum L10n: String {
     // App
     case appName = "app.name"
-    case authWelcome = "auth.welcome"
-    case authSubtitle = "auth.subtitle"
+
+    // Welcome
+    case welcomeTagline = "welcome.tagline"
+    case welcomeContinueWithEmail = "welcome.continueWithEmail"
 
     // Email entry (passwordless)
     case emailEntryTitle = "emailEntry.title"
     case emailEntryEmail = "emailEntry.email"
+    case emailEntrySubtitle = "emailEntry.subtitle"
     case emailEntrySubmit = "emailEntry.submit"
 
     // OTP entry
@@ -21,14 +24,8 @@ enum L10n: String {
     case otpSubmit = "otp.submit"
     case otpResend = "otp.resend"
     case otpResendCountdown = "otp.resendCountdown"
-    case otpSuccess = "otp.success"
     case otpResent = "otp.resent"
-
-    // Signed in
-    case signedInTitle = "signedIn.title"
-    case signedInEmail = "signedIn.email"
-    case signedInLogout = "signedIn.logout"
-    case signedInPlaceholder = "signedIn.placeholder"
+    case otpChangeEmail = "otp.changeEmail"
 
     // Offline
     case offlineBanner = "offline.banner"
@@ -44,6 +41,13 @@ enum L10n: String {
     case timerStop = "timer.stop"
     case timerOfflineHint = "timer.offlineHint"
     case timerEmptyActivityError = "timer.emptyActivityError"
+    case timerSignOut = "timer.signOut"
+
+    // Sign out confirmation
+    case signOutConfirmationTitle = "signOut.confirmationTitle"
+    case signOutConfirmationMessage = "signOut.confirmationMessage"
+    case signOutConfirm = "signOut.confirm"
+    case signOutCancel = "signOut.cancel"
 
     /// Resolves the key via `NSLocalizedString` against `Localizable.strings`.
     var text: String {

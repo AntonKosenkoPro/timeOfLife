@@ -29,7 +29,7 @@ Keep design under version control as plain Markdown so:
 | `TOKENS.md` | Colors, typography, spacing, corner radii, shadows, icons. |
 | `COMPONENTS.md` | Reusable SwiftUI components: signature, states, accessibility IDs, usage. |
 | `INTERACTIONS.md` | Shared patterns: loading, errors, offline, empty states, haptics, focus. |
-| `SCREENS/Auth.md` | Auth flow screens (EmailEntry, OtpEntry, SignedIn). |
+| `SCREENS/Auth.md` | Auth flow screens (Welcome, EmailEntry, OtpEntry). |
 | `SCREENS/TimeTracking.md` | First time-tracking screen. |
 | `DECISIONS.md` | Design precedents and rationale. |
 

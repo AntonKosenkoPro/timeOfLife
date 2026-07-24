@@ -2,9 +2,10 @@ import SwiftUI
 
 /// Email entry screen for passwordless authentication.
 ///
-/// The user enters their email address and taps "Continue" to receive a
-/// one-time passcode. Validation is performed locally before the network
-/// request. Follows U1 minimalistic design with Theme semantic colors.
+/// The user enters their email address and taps "Continue" (or presses the
+/// keyboard Return key) to receive a one-time passcode. Validation is performed
+/// locally before the network request. Sign in with Apple lives on the welcome
+/// screen, not here. Follows U1 minimalistic design with Theme semantic colors.
 struct EmailEntryView: View {
     @ObservedObject var vm: EmailEntryViewModel
     @EnvironmentObject var navigation: AppNavigationStack
@@ -20,12 +21,12 @@ struct EmailEntryView: View {
         GeometryReader { _ in
             ScrollView {
                 VStack(spacing: Theme.spacingLarge) {
-                    Text(L10n.authWelcome.text)
+                    Text(L10n.emailEntryTitle.text)
                         .font(.title.bold())
                         .foregroundStyle(Theme.textPrimary)
                         .multilineTextAlignment(.center)
 
-                    Text(L10n.authSubtitle.text)
+                    Text(L10n.emailEntrySubtitle.text)
                         .font(.subheadline)
                         .foregroundStyle(Theme.textSecondary)
                         .multilineTextAlignment(.center)
@@ -82,12 +83,6 @@ struct EmailEntryView: View {
             // keyboard (it was covered on iPhone SE 1st gen).
             MeasuredBottomBar {
                 VStack(spacing: Theme.spacingSmall) {
-                    // This spacer makes the action bar taller, which in turn
-                    // increases the ScrollView's bottom safe-area inset and
-                    // keeps the Email field from crowding the Continue button
-                    // on small screens with the keyboard open.
-                    Spacer().frame(height: Theme.spacingLarge)
-
                     PrimaryButton(
                         title: L10n.emailEntrySubmit.text,
                         icon: nil,
@@ -96,11 +91,6 @@ struct EmailEntryView: View {
                         accessibilityId: "EmailContinueButton",
                         action: submit
                     )
-
-                    AppleSignInButton {
-                        isEmailFocused = false
-                        Task { await vm.signInWithApple() }
-                    }
                 }
                 .padding(.horizontal, Theme.screenHorizontalPadding)
                 .padding(.vertical, Theme.spacingSmall)
