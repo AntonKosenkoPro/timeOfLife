@@ -14,6 +14,7 @@
 		07B957B10278B4D0DB757452 /* ValidationPresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8354E22EF578D0FAD1780F56 /* ValidationPresentation.swift */; };
 		08CCCBCD9EF05DA404F276B1 /* TimerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = EA8DFE98BAAEE08E2279FB79 /* TimerView.swift */; };
 		090C2A7B79E0933BB66C1AD3 /* String+Localized.swift in Sources */ = {isa = PBXBuildFile; fileRef = A74EDB0BC994A5EFBF04BED2 /* String+Localized.swift */; };
+		0A14B9946CFED15B6D977C91 /* AppContainer+UITesting.swift in Sources */ = {isa = PBXBuildFile; fileRef = A7B8FFA75AF7F8D2F89322E1 /* AppContainer+UITesting.swift */; };
 		0CAC1D03E6D0EEE20337B269 /* SessionStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0874FC5BA7B3C73D5C5B143E /* SessionStore.swift */; };
 		0F6DAA7FFEDF66B1AC52EEAC /* AppConfigTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 85122E318E4D8F45391C746D /* AppConfigTests.swift */; };
 		19F0D73B9A8FF3C0B96E4E3D /* OtpEntryViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 146F9D6A4DD4275282D92DB5 /* OtpEntryViewModel.swift */; };
@@ -31,6 +32,7 @@
 		55062862B5B737A4EE3EC8B0 /* MockAPIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A804E41CE6F0E40701020E2E /* MockAPIClient.swift */; };
 		55A6FE1FB11EBDC58A360F61 /* RemoteAuthRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = CFA82C0B1B0D3CC37E91A663 /* RemoteAuthRepository.swift */; };
 		5624C44246E758AC0CC0F18B /* AuthService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B6E641C4518D72A37B1EBB8D /* AuthService.swift */; };
+		597506534B7FB471E0623349 /* BottomBarMeasurement.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B5A3683F81BF66D5BE42349 /* BottomBarMeasurement.swift */; };
 		5EEAF02CCB59536F36B4262B /* NetworkMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = C3F6803D7E54B898F2CA9644 /* NetworkMonitor.swift */; };
 		5EFCE7CF46CF295721840587 /* KeychainStoring.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8CA716127F00F134D9613A0B /* KeychainStoring.swift */; };
 		5F2488D4FCD1C0F62DB73E38 /* AppConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7ABEF75F6EFBA381BDFE37C9 /* AppConfig.swift */; };
@@ -96,12 +98,13 @@
 		1C4D6CE330BC518B835F9D0D /* AppNavigationStack.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppNavigationStack.swift; sourceTree = "<group>"; };
 		25182CD3496B6223AF822CEB /* AuthServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthServiceTests.swift; sourceTree = "<group>"; };
 		2843FC74902C48E856B58F46 /* AuthFlowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthFlowView.swift; sourceTree = "<group>"; };
+		2B5A3683F81BF66D5BE42349 /* BottomBarMeasurement.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BottomBarMeasurement.swift; sourceTree = "<group>"; };
 		2E1D96E0E511C17C7E3A7AF2 /* AppleSignInServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppleSignInServiceTests.swift; sourceTree = "<group>"; };
 		30A4C0A62168F19E5DA9FC66 /* AuthValidator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthValidator.swift; sourceTree = "<group>"; };
 		36062DF01DB94D5C475DD8A9 /* APIError.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIError.swift; sourceTree = "<group>"; };
 		4B4097319AAF4397780F6439 /* KeychainStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainStore.swift; sourceTree = "<group>"; };
 		4EC4306367AA63EABC039B9B /* ru */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = ru; path = ru.lproj/Localizable.strings; sourceTree = "<group>"; };
-		5355A9F93DC1371ECF4AD5E0 /* ru.lproj */ = {isa = PBXFileReference; path = ru.lproj; sourceTree = "<group>"; };
+		5355A9F93DC1371ECF4AD5E0 /* ru.lproj */ = {isa = PBXFileReference; lastKnownFileType = folder; path = ru.lproj; sourceTree = "<group>"; };
 		54CED4A382185F01233F1DDE /* Theme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Theme.swift; sourceTree = "<group>"; };
 		56C811B6C467F25C06DD0178 /* ViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ViewModelTests.swift; sourceTree = "<group>"; };
 		5CBC211B0937CFA93E95589C /* TimerService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimerService.swift; sourceTree = "<group>"; };
@@ -110,9 +113,9 @@
 		657B3CBE41765BA7CCB784E8 /* en */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = en; path = en.lproj/Localizable.strings; sourceTree = "<group>"; };
 		673BDAA21016DBD758DD3D7E /* EmptyState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmptyState.swift; sourceTree = "<group>"; };
 		678C8AF5EDBA6D6C46007080 /* APISending.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APISending.swift; sourceTree = "<group>"; };
-		67C9EFC30BF19AAFC74B4A33 /* TimeOfLifeTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = TimeOfLifeTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
-		680E39E55DE52D88F865C14E /* TimeOfLife.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = TimeOfLife.app; sourceTree = BUILT_PRODUCTS_DIR; };
-		6A2271B6B045AC3B5B0ACF51 /* en.lproj */ = {isa = PBXFileReference; path = en.lproj; sourceTree = "<group>"; };
+		67C9EFC30BF19AAFC74B4A33 /* TimeOfLifeTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = TimeOfLifeTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		680E39E55DE52D88F865C14E /* TimeOfLife.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = TimeOfLife.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		6A2271B6B045AC3B5B0ACF51 /* en.lproj */ = {isa = PBXFileReference; lastKnownFileType = folder; path = en.lproj; sourceTree = "<group>"; };
 		6A683C275D64600D3CCD0230 /* TimerViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimerViewModelTests.swift; sourceTree = "<group>"; };
 		6ACB1A62C045903B76031A56 /* AppleSignInService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppleSignInService.swift; sourceTree = "<group>"; };
 		6ED222893725F45FD60EFDCA /* EmailEntryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmailEntryView.swift; sourceTree = "<group>"; };
@@ -134,6 +137,7 @@
 		940441AFB736E5F4A66942F0 /* InMemoryKeychainStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InMemoryKeychainStore.swift; sourceTree = "<group>"; };
 		A2F1A386CD28E8741E767009 /* AuthRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthRepository.swift; sourceTree = "<group>"; };
 		A74EDB0BC994A5EFBF04BED2 /* String+Localized.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "String+Localized.swift"; sourceTree = "<group>"; };
+		A7B8FFA75AF7F8D2F89322E1 /* AppContainer+UITesting.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppContainer+UITesting.swift"; sourceTree = "<group>"; };
 		A804E41CE6F0E40701020E2E /* MockAPIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MockAPIClient.swift; sourceTree = "<group>"; };
 		A8385ECB2A212347BA7A5183 /* TestFactories.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TestFactories.swift; sourceTree = "<group>"; };
 		AEABA98A949DF941CA483AD8 /* OtpEntryViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OtpEntryViewModelTests.swift; sourceTree = "<group>"; };
@@ -376,6 +380,7 @@
 		A7CBBF07340FB8B020FCF315 /* Utilities */ = {
 			isa = PBXGroup;
 			children = (
+				2B5A3683F81BF66D5BE42349 /* BottomBarMeasurement.swift */,
 				61B7982F3DBB72A719070CAD /* Haptics.swift */,
 				7906983F14097ADD30C4F248 /* TimeFormatter.swift */,
 			);
@@ -481,6 +486,7 @@
 			isa = PBXGroup;
 			children = (
 				8E168995FCCABB958FC8B931 /* AppContainer.swift */,
+				A7B8FFA75AF7F8D2F89322E1 /* AppContainer+UITesting.swift */,
 			);
 			path = DI;
 			sourceTree = "<group>";
@@ -559,7 +565,6 @@
 						ProvisioningStyle = Automatic;
 					};
 					EB1E59A9D1AC06C64272B862 = {
-						DevelopmentTeam = "";
 						ProvisioningStyle = Automatic;
 					};
 				};
@@ -607,6 +612,7 @@
 				A7458B2CB8DCC258720B7B3D /* APIError.swift in Sources */,
 				B7579E8CAA5DF73946E9F899 /* APISending.swift in Sources */,
 				5F2488D4FCD1C0F62DB73E38 /* AppConfig.swift in Sources */,
+				0A14B9946CFED15B6D977C91 /* AppContainer+UITesting.swift in Sources */,
 				24C62C5291ADC6171489F5C6 /* AppContainer.swift in Sources */,
 				05A54E081FFB036B0E0687E2 /* AppNavigationStack.swift in Sources */,
 				8313D434E078176833F6E7B6 /* AppRoute.swift in Sources */,
@@ -617,6 +623,7 @@
 				C187C7B02E6247DB3AE1BE1D /* AuthRepository.swift in Sources */,
 				5624C44246E758AC0CC0F18B /* AuthService.swift in Sources */,
 				ABA2DFE7B6F8A2CEA6955096 /* AuthValidator.swift in Sources */,
+				597506534B7FB471E0623349 /* BottomBarMeasurement.swift in Sources */,
 				505245854684D1C616F816B6 /* EmailEntryView.swift in Sources */,
 				806578352B5148EAB4C585BD /* EmailEntryViewModel.swift in Sources */,
 				F2A0C0AA7831EEE284624BE5 /* EmptyState.swift in Sources */,
@@ -725,6 +732,7 @@
 				CODE_SIGN_ENTITLEMENTS = TimeOfLife/Configuration/TimeOfLife.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 5H2N86S878;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = TimeOfLife/Configuration/Info.plist;
@@ -748,6 +756,7 @@
 				CODE_SIGN_ENTITLEMENTS = TimeOfLife/Configuration/TimeOfLife.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 5H2N86S878;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = TimeOfLife/Configuration/Info.plist;

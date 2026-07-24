@@ -9,20 +9,18 @@ struct OtpEntryView: View {
     @ObservedObject var vm: OtpEntryViewModel
     @EnvironmentObject var navigation: AppNavigationStack
     @FocusState private var isCodeFocused: Bool
+    @State private var bottomBarHeight: CGFloat = 0
 
     var body: some View {
-        // `GeometryReader` + `ScrollView` engages SwiftUI's automatic keyboard
-        // avoidance on iOS 15 (a bare `VStack` is not avoided, so on iPhone SE
-        // 1st gen the pinned Verify/Resend bar was covered by the keyboard).
-        // The `minHeight` keeps the content vertically centered when it fits
-        // and lets it scroll when it overflows on short screens — the long
-        // "Enter the 6-digit code sent to …" subtitle (especially in RU) no
-        // longer gets clipped.
-        GeometryReader { proxy in
+        // `GeometryReader` + `ScrollView` gives us keyboard avoidance on
+        // iOS 15. The form stacks from the top with a fixed reserve for the
+        // pinned bottom action bar so the field never crowds the buttons on
+        // short screens (iPhone SE 1st gen), especially while the keyboard is
+        // open. A top Spacer with a minimum length keeps the form roughly
+        // centered on tall screens.
+        GeometryReader { _ in
             ScrollView {
                 VStack(spacing: Theme.spacingLarge) {
-                    Spacer(minLength: 0)
-
                     Text(L10n.otpTitle.text)
                         .font(.title.bold())
                         .foregroundStyle(Theme.textPrimary)
@@ -57,12 +55,22 @@ struct OtpEntryView: View {
                         )
                     }
 
-                    Spacer(minLength: 0)
+                    // Extra breathing room between the input/error and the
+                    // pinned bottom action bar. This space is part of the
+                    // scrollable content, so when the keyboard scrolls the
+                    // field into view it leaves a comfortable gap above the
+                    // Verify/Resend bar on short screens (iPhone SE 1st gen).
+                    Spacer().frame(height: Theme.spacingLarge)
+
+                    // Fixed reserve for the pinned bottom action bar plus
+                    // margin so the scrollable content ends well above the
+                    // buttons on every screen size, even with the keyboard up.
+                    Color.clear.frame(height: bottomBarHeight + Theme.spacingLarge)
                 }
                 .padding(.horizontal, Theme.screenHorizontalPadding)
+                .padding(.top, Theme.spacingExtraLarge)
                 .frame(maxWidth: Theme.maxContentWidth)
                 .frame(maxWidth: .infinity)
-                .frame(minHeight: proxy.size.height)
             }
         }
         .background(Theme.backgroundPrimary.ignoresSafeArea())
@@ -71,32 +79,41 @@ struct OtpEntryView: View {
             // keyboard and remain reachable while typing. On iOS 15 the
             // enclosing `ScrollView` now makes this inset lift above the
             // keyboard (it was covered on iPhone SE 1st gen).
-            VStack(spacing: Theme.spacingSmall) {
-                PrimaryButton(
-                    title: L10n.otpSubmit.text,
-                    icon: nil,
-                    isLoading: vm.isLoading,
-                    isDisabled: vm.code.trimmingCharacters(in: .whitespaces).isEmpty,
-                    accessibilityId: "OtpVerifyButton",
-                    action: submit
-                )
+            MeasuredBottomBar {
+                VStack(spacing: Theme.spacingSmall) {
+                    // This spacer makes the action bar taller, which in turn
+                    // increases the ScrollView's bottom safe-area inset and
+                    // keeps the Code field from crowding the Verify/Resend
+                    // bar on small screens with the keyboard open.
+                    Spacer().frame(height: Theme.spacingLarge)
 
-                Button {
-                    Task { await vm.resendOtp() }
-                } label: {
-                    Text(resendLabel)
-                        .font(.subheadline)
-                        .foregroundStyle(resendColor)
+                    PrimaryButton(
+                        title: L10n.otpSubmit.text,
+                        icon: nil,
+                        isLoading: vm.isLoading,
+                        isDisabled: vm.code.trimmingCharacters(in: .whitespaces).isEmpty,
+                        accessibilityId: "OtpVerifyButton",
+                        action: submit
+                    )
+
+                    Button {
+                        Task { await vm.resendOtp() }
+                    } label: {
+                        Text(resendLabel)
+                            .font(.subheadline)
+                            .foregroundStyle(resendColor)
+                    }
+                    .disabled(vm.isLoading || vm.resendCountdown > 0)
+                    .accessibilityIdentifier("OtpResendButton")
                 }
-                .disabled(vm.isLoading || vm.resendCountdown > 0)
-                .accessibilityIdentifier("OtpResendButton")
+                .padding(.horizontal, Theme.screenHorizontalPadding)
+                .padding(.vertical, Theme.spacingSmall)
+                .frame(maxWidth: Theme.maxContentWidth)
+                .frame(maxWidth: .infinity)
+                .background(Theme.backgroundPrimary)
             }
-            .padding(.horizontal, Theme.screenHorizontalPadding)
-            .padding(.vertical, Theme.spacingSmall)
-            .frame(maxWidth: Theme.maxContentWidth)
-            .frame(maxWidth: .infinity)
-            .background(Theme.backgroundPrimary)
         }
+        .onPreferenceChange(BottomBarHeightPreferenceKey.self) { bottomBarHeight = $0 }
         .onAppear {
             // The OTP was already requested by the email form before this
             // screen appeared, so arm the resend cooldown immediately — the
