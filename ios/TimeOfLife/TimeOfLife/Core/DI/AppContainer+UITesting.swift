@@ -50,7 +50,8 @@ extension AppContainer {
             themeManager: themeManager,
             authService: authService,
             appleService: appleService,
-            timerService: timerService
+            timerService: timerService,
+            clientHolder: nil
         )
 
         seed(screen: screen, sessionStore: sessionStore, navigation: navigation)

@@ -46,6 +46,7 @@ struct EmailEntryView: View {
                         accessibilityId: "EmailField",
                         onSubmit: submit
                     )
+                    .disabled(vm.isLoading)
                     .focused($isEmailFocused)
 
                     if let errorMessage = vm.errorMessage {
@@ -87,7 +88,7 @@ struct EmailEntryView: View {
                         title: L10n.emailEntrySubmit.text,
                         icon: nil,
                         isLoading: vm.isLoading,
-                        isDisabled: vm.email.trimmingCharacters(in: .whitespaces).isEmpty,
+                        isDisabled: vm.email.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
                         accessibilityId: "EmailContinueButton",
                         action: submit
                     )
@@ -104,6 +105,9 @@ struct EmailEntryView: View {
         .onChange(of: vm.email) { _ in
             if vm.fieldErrors.email != nil {
                 vm.fieldErrors.email = nil
+            }
+            if vm.errorMessage != nil {
+                vm.errorMessage = nil
             }
         }
         .onChange(of: vm.isEmailSent) { sent in

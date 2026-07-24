@@ -17,6 +17,10 @@ final class AppContainer: ObservableObject {
     let authService: AuthService
     let appleService: AppleSignInService
     let timerService: TimerService
+    /// Strong reference to the holder that wires the API client's refresh hook
+    /// back to `authService`. If this were not retained, the holder would
+    /// deallocate after `production()` returns and token refresh would fail.
+    private let clientHolder: APIClientHolder?
 
     init(
         baseURL: URL,
@@ -30,7 +34,8 @@ final class AppContainer: ObservableObject {
         themeManager: ThemeManager,
         authService: AuthService,
         appleService: AppleSignInService,
-        timerService: TimerService
+        timerService: TimerService,
+        clientHolder: APIClientHolder? = nil
     ) {
         self.baseURL = baseURL
         self.apiClient = apiClient
@@ -44,6 +49,7 @@ final class AppContainer: ObservableObject {
         self.authService = authService
         self.appleService = appleService
         self.timerService = timerService
+        self.clientHolder = clientHolder
     }
 
     /// Default production graph wired against `AppConfig.baseURL`.
@@ -61,25 +67,7 @@ final class AppContainer: ObservableObject {
             connectivity: connectivity
         )
 
-        // The auth service must exist before the API client's refresh hook can
-        // reference it. We create a placeholder client and rewire via a
-        // closure that captures the service by the time it's called.
-        let clientHolder = APIClientHolder()
-        let client = APIClient(
-            baseURL: baseURL,
-            session: URLSession.shared,
-            accessTokenProvider: { [weak keychain] () async -> String? in
-                await keychain?.string(for: .accessToken)
-            },
-            refreshHandler: { [weak clientHolder] () async throws -> String in
-                guard let service = await clientHolder?.service else {
-                    throw APIError.unauthorized
-                }
-                return try await service.performRefresh()
-            }
-        )
-        clientHolder.client = client
-
+        let (client, clientHolder) = makeAuthClient(baseURL: baseURL, keychain: keychain)
         let repository = RemoteAuthRepository(client: client)
         let authService = AuthService(
             repository: repository,
@@ -103,8 +91,34 @@ final class AppContainer: ObservableObject {
             themeManager: themeManager,
             authService: authService,
             appleService: appleService,
-            timerService: timerService
+            timerService: timerService,
+            clientHolder: clientHolder
         )
+    }
+
+    /// Builds the API client and the back-reference holder used to break the
+    /// auth-service / API-client initialization cycle. Kept separate so the
+    /// production factory stays within the linter's function-body limit.
+    private static func makeAuthClient(
+        baseURL: URL,
+        keychain: KeychainStoring
+    ) -> (APIClient, APIClientHolder) {
+        let clientHolder = APIClientHolder()
+        let client = APIClient(
+            baseURL: baseURL,
+            session: URLSession.shared,
+            accessTokenProvider: { [weak keychain] () async -> String? in
+                await keychain?.string(for: .accessToken)
+            },
+            refreshHandler: { [weak clientHolder] () async throws -> String in
+                guard let service = await clientHolder?.service else {
+                    throw APIError.unauthorized
+                }
+                return try await service.performRefresh()
+            }
+        )
+        clientHolder.client = client
+        return (client, clientHolder)
     }
 }
 

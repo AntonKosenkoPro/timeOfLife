@@ -72,6 +72,11 @@ private final class ContainerView: UIView {
             authorizationButtonStyle: style
         )
         button.cornerRadius = Theme.cornerRadius
+        // The transparent SwiftUI overlay Button handles taps and
+        // accessibility; hide the native control so VoiceOver and UI tests see
+        // exactly one activatable element.
+        button.isUserInteractionEnabled = false
+        button.isAccessibilityElement = false
         button.translatesAutoresizingMaskIntoConstraints = false
         addSubview(button)
         NSLayoutConstraint.activate([

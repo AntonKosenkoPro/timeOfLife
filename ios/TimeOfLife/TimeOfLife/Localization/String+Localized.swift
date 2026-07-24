@@ -25,7 +25,6 @@ enum L10n: String {
     case otpResend = "otp.resend"
     case otpResendCountdown = "otp.resendCountdown"
     case otpResent = "otp.resent"
-    case otpChangeEmail = "otp.changeEmail"
 
     // Offline
     case offlineBanner = "offline.banner"

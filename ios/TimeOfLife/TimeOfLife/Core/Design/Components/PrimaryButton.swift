@@ -76,6 +76,7 @@ struct PrimaryButton: View {
         .disabled(isLoading || isDisabled)
         .animation(.easeInOut(duration: 0.15), value: isLoading || isDisabled)
         .accessibilityIdentifier(accessibilityId)
+        .accessibilityLabel(title)
     }
 
     /// Filled background using `tint` (or `Theme.accentPrimary` when nil),

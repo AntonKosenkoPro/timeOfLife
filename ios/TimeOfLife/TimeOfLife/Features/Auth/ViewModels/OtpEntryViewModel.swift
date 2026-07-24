@@ -86,6 +86,9 @@ final class OtpEntryViewModel: ObservableObject {
     /// disables the button). The countdown only starts after a successful
     /// resend, so a failed attempt (e.g. offline or server error) leaves the
     /// button tappable for an immediate retry.
+    ///
+    /// Clears the existing code and field error before the network call so the
+    /// user can type the fresh code and any pending auto-submit is cancelled.
     func resendOtp() async {
         guard resendCountdown == 0 else { return }
 
@@ -96,6 +99,8 @@ final class OtpEntryViewModel: ObservableObject {
 
         isLoading = true
         errorMessage = nil
+        fieldErrors.otp = nil
+        code = ""
 
         do {
             try await service.requestOtp(email: email)

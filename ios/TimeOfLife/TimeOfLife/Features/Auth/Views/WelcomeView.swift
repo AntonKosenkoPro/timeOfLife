@@ -5,6 +5,8 @@ import SwiftUI
 /// Introduces the app ("Time of Life — personal time tracker") and leads with
 /// Sign in with Apple as the primary, default auth method. Email/OTP is a
 /// secondary option reached via a plain text button that pushes `.emailEntry`.
+/// The email button is always tappable (it only navigates); it is disabled only
+/// while an Apple sign-in attempt is in flight to prevent concurrent auth flows.
 /// No text entry on this screen, so there is no keyboard handling.
 struct WelcomeView: View {
     @ObservedObject var vm: WelcomeViewModel
@@ -12,7 +14,8 @@ struct WelcomeView: View {
     @EnvironmentObject var container: AppContainer
 
     private var isOffline: Bool { !container.connectivity.isConnected }
-    private var actionsDisabled: Bool { isOffline || vm.isLoading }
+    private var appleButtonDisabled: Bool { isOffline || vm.isLoading }
+    private var emailButtonDisabled: Bool { vm.isLoading }
 
     var body: some View {
         ScrollView {
@@ -63,8 +66,12 @@ struct WelcomeView: View {
                     AppleSignInButton {
                         Task { await vm.signInWithApple() }
                     }
-                    .disabled(actionsDisabled)
-
+                    .disabled(appleButtonDisabled)
+                    .opacity(appleButtonDisabled ? 0.6 : 1)
+                    .animation(.easeInOut(duration: 0.15), value: appleButtonDisabled)
+                    
+                    Spacer().frame(height: Theme.spacingSmall)
+                    
                     Button {
                         navigation.push(.emailEntry)
                     } label: {
@@ -74,7 +81,7 @@ struct WelcomeView: View {
                             .frame(maxWidth: .infinity)
                             .frame(minHeight: Theme.minTapArea)
                     }
-                    .disabled(actionsDisabled)
+                    .disabled(emailButtonDisabled)
                     .accessibilityIdentifier("WelcomeContinueWithEmailButton")
                 }
                 .padding(.horizontal, Theme.screenHorizontalPadding)

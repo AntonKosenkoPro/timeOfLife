@@ -1,5 +1,17 @@
 Fixed problems.
 
+12. Session doesn't save and you have to sign in every time you open the app.
+    - Root cause: `RemoteAuthRepository.me()` decoded `GET /api/v1/auth/me` as a flat `UserDTO`, but the backend returns it wrapped as `{"user": ...}`. The decode failed every launch, producing `APIError.decoding`. That error was treated as a non-recoverable server error, so `AuthService.restoreSession()` called `clearLocal()` and wiped Keychain tokens and `SessionCache`.
+    - Fix: added a `MeResponse` wrapper in `RemoteAuthRepository.swift` and decoded it in `me()`. Updated `RemoteAuthRepositoryTests` to return the wrapped shape. Also hardened `AuthService.restoreSession()` so transient non-auth failures (offline, 5xx, transport) keep the cached signed-in state; only `unauthorized` after a failed refresh clears local state. Covered by new `AuthServiceTests` case `restoreSessionKeepsCachedOnServerError`.
+
+13. Change email button duplicates the system back button on the OTP screen.
+    - Root cause: `OtpEntryView` had both the system navigation back affordance and a pinned bottom "Change email" button that both called `navigation.popLast()`.
+    - Fix: removed the bottom action bar from `OtpEntryView`. The system back button (and swipe-back gesture) now returns to `EmailEntryView`, where the email is restored from `SessionStore.cachedEmail`. Removed `L10n.otpChangeEmail` and its `en`/`ru` strings; updated `LocalizationTests`; updated `Design/SCREENS/Auth.md`.
+
+14. Visual glitch on OTP entries corners — background sticks out from under entries.
+    - Root cause: `OtpCodeField` used `.background(Theme.backgroundSecondary)` (a sharp-cornered rectangle) with a rounded-rectangle stroke overlay, so the fill protruded past the border at the corners.
+    - Fix: replaced the square color background with a rounded-rectangle fill using the same `Theme.cornerRadiusSmall` continuous shape as the stroke. Updated `Design/COMPONENTS.md` to document the shape.
+
 6. Deep link in email doesn't work. It opens the app, but doesn't paste the code.
    - Root cause: the backend generated `timeoflife://auth/verify?code=<6-digit>` (`backend/internal/handlers/auth.go`) while the iOS `DeepLink` parser only accepted host `verify` (`timeoflife://verify?code=…`). `DeepLink.parse` returned `nil`, so `TimeOfLifeApp.handle(url:)` bailed out before staging `pendingDeepLinkCode` or pushing `.otpEntry` — the OTP view never received the code. This broke both warm-resume and cold launch, at URL recognition, before any view ordering. Fixed on both sides: the iOS parser now accepts both forms via a shared `DeepLink.isVerifyLink(_:)` (host `verify`, or host `auth` + path `/verify`, strict against over-matching), and the backend now emits the documented `timeoflife://verify?code=…` form. Covered by new `DeepLinkTests` cases for the `auth/verify` form and negatives. Satisfies FURPS U5 (OTP autofill from email).
    - Cold-launch robustness: `SessionStore.cachedEmail` was in-memory only, so when the OS had killed the app the magic link pasted the code but auto-submitted with an empty email. `SessionCache` now persists a pending email (`savePendingEmail`/`loadPendingEmail`) written by `AuthService.requestOtp`, cleared on sign-in/logout. `AuthService.resolveDeepLinkEmail()` (in-memory → persisted → `""`) resolves the email for the deep-link handler, and `restoreSession()` hydrates `cachedEmail` from the persisted pending email when not signed in. Covered by new `AuthServiceTests` (persistence, cold-launch resolution, hydration, logout clears).

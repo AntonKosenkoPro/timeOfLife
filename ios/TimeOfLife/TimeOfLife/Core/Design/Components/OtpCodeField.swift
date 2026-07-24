@@ -37,14 +37,18 @@ struct OtpCodeField: View {
                             .font(.title2.monospacedDigit())
                             .foregroundStyle(Theme.textPrimary)
                             .frame(width: 44, height: 56)
-                            .background(Theme.backgroundSecondary)
+                            .background(
+                                RoundedRectangle(cornerRadius: Theme.cornerRadiusSmall, style: .continuous)
+                                    .fill(Theme.backgroundSecondary)
+                            )
                             .overlay(
-                                RoundedRectangle(cornerRadius: Theme.cornerRadius, style: .continuous)
+                                RoundedRectangle(cornerRadius: Theme.cornerRadiusSmall, style: .continuous)
                                     .stroke(borderColor(at: index), lineWidth: 1)
                             )
                             .accessibilityHidden(true)
                     }
                 }
+                .contentShape(Rectangle())
                 .disabled(isLoading)
                 .onTapGesture {
                     guard !isLoading else { return }

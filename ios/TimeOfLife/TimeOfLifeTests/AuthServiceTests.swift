@@ -191,6 +191,23 @@ struct AuthServiceTests {
         #expect(cache.load() == cached)
     }
 
+    @Test("restoreSession keeps cached session on transient server error")
+    func restoreSessionKeepsCachedOnServerError() async throws {
+        let cached = CachedSession(id: "u1", email: "a@b.com", emailVerified: true)
+        let (service, repo, keychain, cache, store) = makeService(
+            initialTokens: [.accessToken: "at", .refreshToken: "rt"],
+            cached: cached
+        )
+        repo.meError = APIError.server(code: "http_500", message: "Internal server error")
+
+        await service.restoreSession()
+
+        #expect(store.state == .signedIn(cached))
+        #expect(cache.load() == cached)
+        #expect(await keychain.string(for: .accessToken) == "at")
+        #expect(await keychain.string(for: .refreshToken) == "rt")
+    }
+
     @Test("restoreSession refreshes on 401 from /me")
     func restoreRefreshesOn401() async throws {
         let cached = CachedSession(id: "u1", email: "a@b.com", emailVerified: true)

@@ -143,8 +143,8 @@ struct OtpCodeField: View {
   - `HStack(spacing: Theme.spacingSmall)` with `length` boxes (default 6).
 - Each box:
   - Size `44 × 56 pt` (minimum tap area 44 pt).
-  - Background `Theme.backgroundSecondary`.
-  - Border 1 pt `RoundedRectangle(cornerRadius: Theme.cornerRadius, style: .continuous)` stroke: `Theme.hairline` normally, `Theme.accentPrimary` on the active box while focused, `Theme.danger` when `error != nil`.
+  - Background fill `Theme.backgroundSecondary` inside a `RoundedRectangle(cornerRadius: Theme.cornerRadiusSmall, style: .continuous)` so the background matches the border shape and no square corners stick out.
+  - Border 1 pt `RoundedRectangle(cornerRadius: Theme.cornerRadiusSmall, style: .continuous)` stroke: `Theme.hairline` normally, `Theme.accentPrimary` on the active box while focused, `Theme.danger` when `error != nil`.
   - Digit shown in `Theme.textPrimary`, `.title2.monospacedDigit()` when filled; empty boxes are blank (no placeholder).
 - The active box index is `min(code.count, length - 1)` while focused, else `-1` (no box highlighted).
 - The whole group is horizontally centered.

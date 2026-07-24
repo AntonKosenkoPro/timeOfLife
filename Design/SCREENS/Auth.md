@@ -34,6 +34,7 @@ Background: `Theme.backgroundPrimary`.
 Pinned bottom action bar via `.safeAreaInset(edge: .bottom)` → `MeasuredBottomBar`:
 
 - `AppleSignInButton` — full width, height `54 pt`, dynamic style (`black` light / `white` dark). `accessibilityIdentifier("WelcomeSignInWithAppleButton")`
+- `Spacer().frame(height: Theme.spacingSmall)`
 - Plain `Button(L10n.welcomeContinueWithEmail)` — `.subheadline`, `Theme.accentPrimary`, `accessibilityIdentifier("WelcomeContinueWithEmailButton")`
 
 ### Behaviors
@@ -136,26 +137,19 @@ Follows `Design/INTERACTIONS.md` → **Keyboard and primary input placement**. T
    - `error`: `vm.fieldErrors.otp`
    - `isLoading`: `vm.isLoading`
    - `accessibilityId`: `OtpCodeField`
-5. `ErrorBanner` if `vm.errorMessage != nil`:
+5. Resend button:
+   - Plain `Button` with `L10n.otpResend` / `L10n.otpResendCountdown`, `.subheadline`, `Theme.accentPrimary`
+   - `accessibilityId`: `OtpResendButton`
+   - Lives directly below the code field because it is a context action tied to the input, not a primary screen action.
+6. `ErrorBanner` if `vm.errorMessage != nil`:
    - `accessibilityId`: `OtpErrorBanner`
-6. `Spacer().frame(height: Theme.spacingLarge)`
-7. Fixed reserve for the pinned bottom action bar
+7. `Spacer().frame(height: Theme.spacingLarge)`
 
 Background: `Theme.backgroundPrimary`.
 
-Pinned bottom action bar:
-
-- Resend button:
-  - Plain `Button` with `L10n.otpResend` / `L10n.otpResendCountdown`, `.subheadline`, `Theme.accentPrimary`
-  - `accessibilityId`: `OtpResendButton`
-- Change-email button (optional but recommended):
-  - Plain `Button(L10n.otpChangeEmail)`, `.subheadline`, `Theme.textSecondary`
-  - `accessibilityId`: `OtpChangeEmailButton`
-  - action: `navigation.popLast()`
-
 ### Keyboard handling
 
-Follows `Design/INTERACTIONS.md` → **Keyboard and primary input placement**. The `OtpCodeField` sits near the top of the scrollable area so the digit boxes remain visible above the keyboard. The Resend / Change-email action bar is pinned to `.safeAreaInset(edge: .bottom)` so it follows the keyboard and stays reachable while typing.
+Follows `Design/INTERACTIONS.md` → **Keyboard and primary input placement**. The `OtpCodeField` sits near the top of the scrollable area so the digit boxes remain visible above the keyboard. The Resend button lives in the scrollable content just below the field, so it stays visually grouped with the input as the keyboard opens. The system navigation back button (or swipe-back gesture) provides the escape action to return to `EmailEntryView`.
 
 ### Behaviors
 
@@ -177,6 +171,7 @@ See `Design/COMPONENTS.md` → `OtpCodeField`. At a high level:
 - Pasting or typing a full code fills the boxes and auto-submits after the debounce.
 - Backspace removes the last digit.
 - The component exposes one grouped VoiceOver element: label “One-time code, 6 digits”, value `code`, hint “Double tap to edit”.
+- Each box uses `Theme.cornerRadiusSmall` (8 pt) instead of the global `Theme.cornerRadius` so the radius is proportionate to the 44×56 pt cell.
 
 ### Implementation checklist
 
@@ -215,8 +210,6 @@ Add to `en.lproj/Localizable.strings` and `ru.lproj/Localizable.strings`, then t
 // Email entry
 "emailEntry.subtitle" = "Enter your email and we’ll send you a one-time code.";
 
-// OTP entry
-"otp.changeEmail" = "Change email";
 ```
 
 Russian:
@@ -228,9 +221,6 @@ Russian:
 
 // Email entry
 "emailEntry.subtitle" = "Введите адрес эл. почты, и мы отправим вам одноразовый код.";
-
-// OTP entry
-"otp.changeEmail" = "Изменить почту";
 ```
 
 ### Key value changes
@@ -248,5 +238,6 @@ Russian:
 - `signedIn.logout`
 - `signedIn.placeholder`
 - `otp.success` (unused after removing SignedInView; verify no other usage)
+- `otp.changeEmail` (system back button replaces the custom Change-email button)
 
 Remove the matching `L10n` enum cases and update `LocalizationTests.allCases`.

@@ -9,17 +9,14 @@ import SwiftUI
 /// U1 minimalistic design with Theme semantic colors.
 struct OtpEntryView: View {
     @ObservedObject var vm: OtpEntryViewModel
-    @EnvironmentObject var navigation: AppNavigationStack
     @EnvironmentObject var container: AppContainer
-    @State private var bottomBarHeight: CGFloat = 0
     @State private var autoSubmitTask: Task<Void, Never>?
 
     var body: some View {
         // `GeometryReader` + `ScrollView` gives us keyboard avoidance on
-        // iOS 15. The form stacks from the top with a fixed reserve for the
-        // pinned bottom action bar so the field never crowds the buttons on
-        // short screens (iPhone SE 1st gen), especially while the keyboard is
-        // open. Content scrolls when it does not fit.
+        // iOS 15. The form stacks from the top; content scrolls when it does
+        // not fit, especially while the keyboard is open on short screens
+        // (iPhone SE 1st gen).
         GeometryReader { _ in
             ScrollView {
                 VStack(spacing: Theme.spacingLarge) {
@@ -51,65 +48,33 @@ struct OtpEntryView: View {
                         )
                     }
 
-                    // Extra breathing room between the field/error and the
-                    // pinned bottom action bar. This space is part of the
-                    // scrollable content, so when the keyboard scrolls the
-                    // field into view it leaves a comfortable gap above the
-                    // Resend/Change-email bar on short screens (iPhone SE 1st gen).
-                    Spacer().frame(height: Theme.spacingLarge)
-
-                    // Fixed reserve for the pinned bottom action bar plus
-                    // margin so the scrollable content ends well above the
-                    // buttons on every screen size, even with the keyboard up.
-                    Color.clear.frame(height: bottomBarHeight + Theme.spacingLarge)
-                }
-                .padding(.horizontal, Theme.screenHorizontalPadding)
-                .padding(.top, Theme.spacingExtraLarge)
-                .frame(maxWidth: Theme.maxContentWidth)
-                .frame(maxWidth: .infinity)
-            }
-        }
-        .background(Theme.backgroundPrimary.ignoresSafeArea())
-        .safeAreaInset(edge: .bottom) {
-            // Pinned action bar so Resend/Change-email animate smoothly with
-            // the keyboard and remain reachable while typing. On iOS 15 the
-            // enclosing `ScrollView` now makes this inset lift above the
-            // keyboard (it was covered on iPhone SE 1st gen).
-            MeasuredBottomBar {
-                VStack(spacing: Theme.spacingSmall) {
-                    // This spacer makes the action bar taller, which in turn
-                    // increases the ScrollView's bottom safe-area inset and
-                    // keeps the Code field from crowding the bar on small
-                    // screens with the keyboard open.
-                    Spacer().frame(height: Theme.spacingLarge)
-
+                    // Resend link lives close to the OTP field because it is a
+                    // context action tied to the code input, not a primary
+                    // screen action.
                     Button {
                         Task { await vm.resendOtp() }
                     } label: {
                         Text(resendLabel)
                             .font(.subheadline)
                             .foregroundStyle(resendColor)
+                            .frame(maxWidth: .infinity)
+                            .frame(minHeight: Theme.minTapArea)
                     }
                     .disabled(vm.isLoading || vm.resendCountdown > 0 || !container.connectivity.isConnected)
                     .accessibilityIdentifier("OtpResendButton")
 
-                    Button {
-                        navigation.popLast()
-                    } label: {
-                        Text(L10n.otpChangeEmail.text)
-                            .font(.subheadline)
-                            .foregroundStyle(Theme.textSecondary)
-                    }
-                    .accessibilityIdentifier("OtpChangeEmailButton")
+                    // Extra breathing room below the Resend button so the
+                    // scrollable content ends comfortably above the keyboard on
+                    // short screens (iPhone SE 1st gen).
+                    Spacer().frame(height: Theme.spacingLarge)
                 }
                 .padding(.horizontal, Theme.screenHorizontalPadding)
-                .padding(.vertical, Theme.spacingSmall)
+                .padding(.vertical, Theme.spacingExtraLarge)
                 .frame(maxWidth: Theme.maxContentWidth)
                 .frame(maxWidth: .infinity)
-                .background(Theme.backgroundPrimary)
             }
         }
-        .onPreferenceChange(BottomBarHeightPreferenceKey.self) { bottomBarHeight = $0 }
+        .background(Theme.backgroundPrimary.ignoresSafeArea())
         .onAppear {
             // The OTP was already requested by the email form before this
             // screen appeared, so arm the resend cooldown immediately — the
@@ -150,9 +115,11 @@ struct OtpEntryView: View {
         return L10n.otpResend.text
     }
 
-    /// Dimmed appearance while the cooldown disables the button.
+    /// Dimmed appearance whenever the button is disabled (cooldown, loading,
+    /// or offline) so the user has a visual affordance that resend is unavailable.
     private var resendColor: Color {
-        vm.resendCountdown > 0
+        let disabled = vm.isLoading || vm.resendCountdown > 0 || !container.connectivity.isConnected
+        return disabled
             ? Theme.color(Theme.accentPrimary, alpha: 0.5)
             : Theme.accentPrimary
     }

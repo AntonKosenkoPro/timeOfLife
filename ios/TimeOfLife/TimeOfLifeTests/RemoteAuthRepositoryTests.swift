@@ -164,7 +164,7 @@ struct RemoteAuthRepositoryTests {
     func meEndpoint() async throws {
         let (repo, mock) = makeRepo()
         let expectedUser = TestFactories.makeUser(id: "u1", email: "user@example.com")
-        mock.sendHandler = { _, _ in expectedUser }
+        mock.sendHandler = { _, _ in MeResponse(user: expectedUser) }
 
         let user = try await repo.me()
 

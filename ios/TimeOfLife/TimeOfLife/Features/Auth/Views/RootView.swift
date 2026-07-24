@@ -7,14 +7,22 @@ struct RootView: View {
     @EnvironmentObject var container: AppContainer
 
     var body: some View {
-        ZStack(alignment: .top) {
-            content
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            OfflineBanner()
-                .environmentObject(container.connectivity)
-        }
-        .background(Theme.backgroundPrimary.ignoresSafeArea())
-        .task { await container.authService.restoreSession() }
+        content
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .safeAreaInset(edge: .top) {
+                OfflineBanner()
+                    .environmentObject(container.connectivity)
+                    .animation(.easeInOut(duration: 0.2), value: container.connectivity.isConnected)
+            }
+            .background(Theme.backgroundPrimary.ignoresSafeArea())
+            .task { await container.authService.restoreSession() }
+            .onChange(of: session.state) { newState in
+                // When the user signs out, drop any pushed auth routes so they land
+                // on the welcome screen instead of the last pushed screen (e.g. OTP).
+                if newState == .signedOut {
+                    container.navigation.popToRoot()
+                }
+            }
     }
 
     @ViewBuilder private var content: some View {

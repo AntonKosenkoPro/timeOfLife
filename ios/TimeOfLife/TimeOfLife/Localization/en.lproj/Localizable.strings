@@ -21,7 +21,6 @@
 "otp.resend" = "Resend code";
 "otp.resendCountdown" = "Resend code in %ds";
 "otp.resent" = "A new code has been sent.";
-"otp.changeEmail" = "Change email";
 
 // Offline
 "offline.banner" = "You are offline. Some actions are unavailable.";

@@ -48,9 +48,14 @@ final class RemoteAuthRepository: AuthRepository {
     }
 
     func me() async throws -> UserDTO {
-        try await client.send(
+        let response = try await client.send(
             APIEndpoint.value(method: .get, path: "\(basePath)/auth/me", requiresAuth: true),
-            as: UserDTO.self
+            as: MeResponse.self
         )
+        return response.user
     }
+}
+
+struct MeResponse: Decodable, Sendable {
+    let user: UserDTO
 }

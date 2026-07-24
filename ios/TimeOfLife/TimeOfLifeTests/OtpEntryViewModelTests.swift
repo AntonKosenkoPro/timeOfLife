@@ -139,6 +139,20 @@ struct OtpEntryViewModelTests {
         #expect(vm.errorMessage == nil)
     }
 
+    @Test("OtpEntryViewModel: resend clears the existing code and field error")
+    func otpEntryResendClearsCode() async throws {
+        let (service, repo, conn, _) = TestFactories.makeService()
+        let vm = OtpEntryViewModel(service: service, connectivity: conn, email: "a@b.com")
+        vm.code = "123456"
+        vm.fieldErrors.otp = "Old error"
+
+        await vm.resendOtp()
+
+        #expect(vm.code.isEmpty)
+        #expect(vm.fieldErrors.otp == nil)
+        #expect(repo.calls == [.requestOtp(email: "a@b.com")])
+    }
+
     @Test("OtpEntryViewModel: arming the initial cooldown disables resend on appear")
     func otpEntryArmInitialCooldown() async throws {
         let (service, _, conn, _) = TestFactories.makeService()

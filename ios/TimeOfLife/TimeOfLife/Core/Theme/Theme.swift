@@ -26,6 +26,7 @@ enum Theme {
     // MARK: - Layout
 
     static let cornerRadius: CGFloat = 10
+    static let cornerRadiusSmall: CGFloat = 8
     static let cornerRadiusLarge: CGFloat = 16
     static let minTapArea: CGFloat = 44
     static let screenHorizontalPadding: CGFloat = 24
