@@ -92,11 +92,10 @@ Uniform error envelope: `{ "error": { "code": String, "message": String, "detail
 | PATCH | `/categories/{id}` | `{name?,color?,updated_at}` | 200 `{category}` | `invalid_body`, `validation_error`, `not_found`, `conflict`, `category_exists`, (401) |
 | DELETE | `/categories/{id}` | (Bearer) | 204 (join rows cascade; entries unaffected) | `not_found`, (401) |
 | GET  | `/entries` | (Bearer) | 200 `{items,next_cursor?}` (`?from=&to=&activity_id=&category_id=&limit=&cursor=`) | (401) |
-| POST | `/entries` | `{id,activity_id?,activity_name_snapshot?,started_at,ended_at?,notes?}` | 201/200 `{entry}` (idempotent on `id`) | `invalid_body`, `validation_error`, `activity_not_found`, `conflict`, (401) |
+| POST | `/entries` | `{id,activity_id,started_at,ended_at?,notes?}` | 201/200 `{entry}` (idempotent on `id`; `activity_id` required) | `invalid_body`, `validation_error`, `activity_not_found`, `conflict`, (401) |
 | GET  | `/entries/{id}` | (Bearer) | 200 `{entry}` | `not_found`, (401) |
 | PATCH | `/entries/{id}` | `{started_at?,ended_at?,notes?,updated_at}` | 200 `{entry}` (recomputes `duration_seconds`) | `invalid_body`, `validation_error`, `not_found`, `conflict`, (401) |
 | DELETE | `/entries/{id}` | (Bearer) | 204 | `not_found`, (401) |
-| POST | `/entries/{id}/unlink` | (Bearer) | 200 `{entry}` (freezes tag snapshot) | `not_found`, `conflict` (already unlinked), (401) |
 
 **Epic 1 (activity catalog & entries):** all `/activities`, `/categories`, `/entries` routes are Bearer-protected. Ids are **client-generated UUID v7** and `POST` is **idempotent on `id`** (a replay returns the existing record with 200, enabling offline create-then-sync). Writes use **last-write-wins on `updated_at`** (PATCH carries `updated_at`; a stale write returns 409 `conflict` with the server's current version in `details`). Deletes are hard (the client holds the 30 s undo buffer). `activity_exists`/`category_exists` (409) report a case-insensitive name collision and carry the winning record's `{id,name}` in `details`. Validation failures are 422 `validation_error` with `details` = `{field: message}`. **Suggestions are client-side** (F5): the client ranks its synced activities by `last_used_at` — there is no `/activities/suggestions` endpoint; `last_used_at` syncs so recency is shared across devices. Seeding (F6) is client-side via ordinary `POST /categories`. The authoritative contract is [`backend/api/openapi.yaml`](backend/api/openapi.yaml) (v1.1.0).
 

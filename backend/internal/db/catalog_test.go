@@ -274,7 +274,7 @@ func TestStore_CategoryCRUD(t *testing.T) {
 	}
 }
 
-func TestStore_CreateEntry_SnapshotFromActivity(t *testing.T) {
+func TestStore_CreateEntry_ResolvesActivityName(t *testing.T) {
 	store := setupTestStore(t)
 	defer func() { _ = store.Close() }()
 	uid := newTestUser(t, store, "snap@example.com")
@@ -289,39 +289,17 @@ func TestStore_CreateEntry_SnapshotFromActivity(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateEntry: %v", err)
 	}
-	if e.ActivityNameSnapshot != "Gym" {
-		t.Errorf("expected snapshot 'Gym', got %q", e.ActivityNameSnapshot)
+	if e.ActivityName != "Gym" {
+		t.Errorf("expected activity_name 'Gym', got %q", e.ActivityName)
 	}
-	if !e.Linked || e.ActivityID == nil {
-		t.Error("expected linked entry")
+	if e.ActivityID == nil || *e.ActivityID != a.ID {
+		t.Error("expected entry linked to the activity")
 	}
 	if e.DurationSeconds == nil || *e.DurationSeconds != 3600 {
 		t.Errorf("expected duration 3600, got %v", e.DurationSeconds)
 	}
 	if len(e.Categories) != 1 || e.Categories[0].Name != "Sport" {
 		t.Errorf("expected inferred Sport tag, got %+v", e.Categories)
-	}
-}
-
-func TestStore_CreateEntry_FreeText(t *testing.T) {
-	store := setupTestStore(t)
-	defer func() { _ = store.Close() }()
-	uid := newTestUser(t, store, "freetext@example.com")
-	start := time.Now()
-	e, _, err := store.CreateEntry(context.Background(), Entry{
-		ID: uuidV7(), UserID: uid, ActivityNameSnapshot: "Adhoc thing", StartedAt: start,
-	})
-	if err != nil {
-		t.Fatalf("CreateEntry free text: %v", err)
-	}
-	if e.ActivityNameSnapshot != "Adhoc thing" {
-		t.Errorf("expected snapshot 'Adhoc thing', got %q", e.ActivityNameSnapshot)
-	}
-	if e.Linked || e.ActivityID != nil {
-		t.Error("expected unlinked free-text entry")
-	}
-	if e.EndedAt != nil {
-		t.Error("expected running timer (nil ended_at)")
 	}
 }
 
@@ -344,11 +322,12 @@ func TestStore_UpdateEntry_StopsTimer(t *testing.T) {
 	store := setupTestStore(t)
 	defer func() { _ = store.Close() }()
 	uid := newTestUser(t, store, "stop@example.com")
+	a := mustCreateActivity(t, store, uid, "Gym", nil)
 	// Whole-second UTC times: the SQLite TEXT timestamp format truncates
 	// sub-seconds, so fixed times keep the round-trip exact.
 	start := time.Date(2026, 7, 27, 10, 0, 0, 0, time.UTC)
 	e, _, err := store.CreateEntry(context.Background(), Entry{
-		ID: uuidV7(), UserID: uid, StartedAt: start,
+		ID: uuidV7(), UserID: uid, ActivityID: &a.ID, StartedAt: start,
 	})
 	if err != nil {
 		t.Fatalf("CreateEntry: %v", err)
@@ -369,51 +348,16 @@ func TestStore_UpdateEntry_StopsTimer(t *testing.T) {
 	}
 }
 
-func TestStore_UnlinkEntry_SnapshotsTags(t *testing.T) {
-	store := setupTestStore(t)
-	defer func() { _ = store.Close() }()
-	uid := newTestUser(t, store, "unlink@example.com")
-	cat := mustCreateCategory(t, store, uid, "Sport")
-	a := mustCreateActivity(t, store, uid, "Gym", []string{cat.ID})
-	start := time.Now().Add(-time.Hour)
-	e, _, err := store.CreateEntry(context.Background(), Entry{
-		ID: uuidV7(), UserID: uid, ActivityID: &a.ID, StartedAt: start,
-	})
-	if err != nil {
-		t.Fatalf("CreateEntry: %v", err)
-	}
-
-	unlinked, err := store.UnlinkEntry(context.Background(), uid, e.ID)
-	if err != nil {
-		t.Fatalf("UnlinkEntry: %v", err)
-	}
-	if unlinked.Linked || unlinked.ActivityID != nil {
-		t.Error("expected entry unlinked")
-	}
-	if len(unlinked.Categories) != 1 || unlinked.Categories[0].Name != "Sport" {
-		t.Errorf("expected frozen Sport tag, got %+v", unlinked.Categories)
-	}
-
-	// Second unlink → conflict.
-	if _, err := store.UnlinkEntry(context.Background(), uid, e.ID); !errors.Is(err, ErrConflict) {
-		t.Errorf("expected ErrConflict on second unlink, got %v", err)
-	}
-
-	// The activity is unaffected.
-	if _, err := store.GetActivity(context.Background(), uid, a.ID); err != nil {
-		t.Errorf("activity should still exist, got %v", err)
-	}
-}
-
 func TestStore_ListEntries_Pagination(t *testing.T) {
 	store := setupTestStore(t)
 	defer func() { _ = store.Close() }()
 	uid := newTestUser(t, store, "page@example.com")
+	a := mustCreateActivity(t, store, uid, "Gym", nil)
 	base := time.Date(2026, 7, 1, 9, 0, 0, 0, time.UTC)
 	for i := 0; i < 5; i++ {
 		st := base.Add(time.Duration(i) * time.Hour)
 		_, _, err := store.CreateEntry(context.Background(), Entry{
-			ID: uuidV7(), UserID: uid, ActivityNameSnapshot: "x", StartedAt: st,
+			ID: uuidV7(), UserID: uid, ActivityID: &a.ID, StartedAt: st,
 		})
 		if err != nil {
 			t.Fatalf("CreateEntry %d: %v", i, err)
@@ -481,9 +425,10 @@ func TestStore_UpdateEntry_Notes(t *testing.T) {
 	store := setupTestStore(t)
 	defer func() { _ = store.Close() }()
 	uid := newTestUser(t, store, "notes@example.com")
+	a := mustCreateActivity(t, store, uid, "Gym", nil)
 	start := time.Date(2026, 7, 27, 9, 0, 0, 0, time.UTC)
 	e, _, err := store.CreateEntry(context.Background(), Entry{
-		ID: uuidV7(), UserID: uid, ActivityNameSnapshot: "x", StartedAt: start, Notes: "old",
+		ID: uuidV7(), UserID: uid, ActivityID: &a.ID, StartedAt: start, Notes: "old",
 	})
 	if err != nil {
 		t.Fatalf("CreateEntry: %v", err)
@@ -557,10 +502,11 @@ func TestStore_UpdateEntry_PartialPatchRejectsNegativeDuration(t *testing.T) {
 	store := setupTestStore(t)
 	defer func() { _ = store.Close() }()
 	uid := newTestUser(t, store, "neg@example.com")
+	a := mustCreateActivity(t, store, uid, "Gym", nil)
 	start := time.Date(2026, 7, 27, 10, 0, 0, 0, time.UTC)
 	end := start.Add(time.Hour)
 	e, _, err := store.CreateEntry(context.Background(), Entry{
-		ID: uuidV7(), UserID: uid, StartedAt: start, EndedAt: &end,
+		ID: uuidV7(), UserID: uid, ActivityID: &a.ID, StartedAt: start, EndedAt: &end,
 	})
 	if err != nil {
 		t.Fatalf("CreateEntry: %v", err)
@@ -588,11 +534,12 @@ func TestStore_ListEntries_ToFilterInclusive(t *testing.T) {
 	store := setupTestStore(t)
 	defer func() { _ = store.Close() }()
 	uid := newTestUser(t, store, "tofilter@example.com")
+	a := mustCreateActivity(t, store, uid, "Gym", nil)
 	base := time.Date(2026, 7, 27, 9, 0, 0, 0, time.UTC)
 	for i := 0; i < 3; i++ {
 		st := base.Add(time.Duration(i) * time.Hour)
 		if _, _, err := store.CreateEntry(context.Background(), Entry{
-			ID: uuidV7(), UserID: uid, ActivityNameSnapshot: "x", StartedAt: st,
+			ID: uuidV7(), UserID: uid, ActivityID: &a.ID, StartedAt: st,
 		}); err != nil {
 			t.Fatalf("CreateEntry %d: %v", i, err)
 		}

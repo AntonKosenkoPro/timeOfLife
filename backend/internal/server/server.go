@@ -162,7 +162,6 @@ func New(_ *config.Config, deps Dependencies) *Server {
 			r.Get("/entries/{id}", h.GetEntry)
 			r.Patch("/entries/{id}", h.UpdateEntry)
 			r.Delete("/entries/{id}", h.DeleteEntry)
-			r.Post("/entries/{id}/unlink", h.UnlinkEntry)
 		})
 	})
 

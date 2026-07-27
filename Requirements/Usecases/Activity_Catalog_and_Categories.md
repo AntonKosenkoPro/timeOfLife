@@ -41,15 +41,8 @@ Narrative flows for **Epic 1: Activity Catalog & Categories**. Each flow maps to
 4. If the user taps **Undo** (or shakes the device before the next undoable action / relaunch), the deletion is restored from the client-side undo buffer and nothing is synced.
 5. If the 30-second window passes without undo, the deletion is committed to the local store and synced to the backend (hard delete; no long-lived trash).
 
-## 7. Unlink an entry from its activity
+## 7. Work offline
 
-1. From an entry (e.g. in History, or the entry that was just stopped), the user chooses **Unlink from activity**.
-2. The entry is detached from its activity; the entry keeps a frozen snapshot of the activity name and the tags it had at detach time, so its history still reads correctly.
-3. The activity itself remains in the catalog and is unaffected.
-4. Unlink is undoable via the same 30-second Undo affordance and shake-to-undo.
-
-## 8. Work offline
-
-1. With no connectivity, the user creates, edits, deletes, and unlinks activities/categories and starts timers.
+1. With no connectivity, the user creates, edits, and deletes activities/categories and starts timers.
 2. All changes are applied locally and queued.
 3. When connectivity returns, the queue syncs to the backend; conflicts resolve by last-write-wins on `updated_at`.

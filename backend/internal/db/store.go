@@ -65,22 +65,22 @@ type Category struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
-// Entry is one timed interval (Epic 1). ActivityID is nil after the entry is
-// unlinked from its activity; while linked, Categories are inferred from the
-// activity's tags at read time, and after unlink from entry_tag_snapshots.
+// Entry is one timed interval (Epic 1). Every entry references exactly one
+// activity (ActivityID is always set). Categories are inferred from the
+// activity's tags at read time; ActivityName is the activity's current name,
+// resolved at read time.
 type Entry struct {
-	ID                   string        `json:"id"`
-	UserID               string        `json:"-"`
-	ActivityID           *string       `json:"activity_id"`
-	ActivityNameSnapshot string        `json:"activity_name_snapshot"`
-	StartedAt            time.Time     `json:"started_at"`
-	EndedAt              *time.Time    `json:"ended_at"`
-	DurationSeconds      *int          `json:"duration_seconds"`
-	Notes                string        `json:"notes"`
-	Categories           []CategoryTag `json:"categories"`
-	Linked               bool          `json:"linked"` // computed: ActivityID != nil
-	CreatedAt            time.Time     `json:"created_at"`
-	UpdatedAt            time.Time     `json:"updated_at"`
+	ID              string        `json:"id"`
+	UserID          string        `json:"-"`
+	ActivityID      *string       `json:"activity_id"`
+	ActivityName    string        `json:"activity_name"`
+	StartedAt       time.Time     `json:"started_at"`
+	EndedAt         *time.Time    `json:"ended_at"`
+	DurationSeconds *int          `json:"duration_seconds"`
+	Notes           string        `json:"notes"`
+	Categories      []CategoryTag `json:"categories"`
+	CreatedAt       time.Time     `json:"created_at"`
+	UpdatedAt       time.Time     `json:"updated_at"`
 }
 
 // EntryFilter carries the optional GET /entries query parameters.
@@ -88,7 +88,7 @@ type EntryFilter struct {
 	From       *time.Time // include entries with started_at >= From
 	To         *time.Time // include entries with started_at <= To (inclusive upper bound)
 	ActivityID string     // restrict to a single activity
-	CategoryID string     // restrict to entries whose (linked) activity is tagged
+	CategoryID string     // restrict to entries whose activity is tagged
 	Limit      int        // page size; 0 → default
 	Cursor     string     // opaque pagination cursor from a previous response
 }
@@ -234,15 +234,14 @@ type Store interface {
 	// next page, or empty when the page is the last.
 	ListEntries(ctx context.Context, userID string, f EntryFilter) (items []Entry, nextCursor string, err error)
 
-	// GetEntry returns one entry by id with its categories (inferred while
-	// linked, snapshot after unlink). Returns ErrNotFound if missing/foreign.
+	// GetEntry returns one entry by id with its categories (inferred from the
+	// activity) and activity name. Returns ErrNotFound if missing/foreign.
 	GetEntry(ctx context.Context, userID, id string) (Entry, error)
 
 	// CreateEntry inserts a new entry using its client-generated id, idempotent
-	// on id (replay → created=false). When ActivityID is non-nil it must belong to
-	// the user (else ErrActivityNotFound); ActivityNameSnapshot is set from the
-	// activity's name. duration_seconds is computed from ended_at - started_at
-	// when ended_at is present.
+	// on id (replay → created=false). ActivityID must belong to the user (else
+	// ErrActivityNotFound). duration_seconds is computed from ended_at -
+	// started_at when ended_at is present.
 	CreateEntry(ctx context.Context, e Entry) (Entry, bool, error)
 
 	// UpdateEntry applies a partial LWW update on started_at/ended_at/notes and
@@ -251,13 +250,6 @@ type Store interface {
 
 	// DeleteEntry hard-deletes an entry. Returns ErrNotFound if missing.
 	DeleteEntry(ctx context.Context, userID, id string) error
-
-	// UnlinkEntry detaches a single entry from its activity (sets activity_id
-	// NULL) and copies the activity's current tags into entry_tag_snapshots so
-	// the entry's history still reads correctly. Returns ErrNotFound if
-	// missing, ErrConflict if already unlinked. The server advances
-	// updated_at; the client adopts the returned version.
-	UnlinkEntry(ctx context.Context, userID, id string) (Entry, error)
 
 	// Close closes the database connection.
 	Close() error

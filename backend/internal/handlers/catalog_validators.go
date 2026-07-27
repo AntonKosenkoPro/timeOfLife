@@ -159,12 +159,11 @@ type categoryUpdateReq struct {
 }
 
 type entryCreateReq struct {
-	ID           string  `json:"id"`
-	ActivityID   *string `json:"activity_id"`
-	ActivityName string  `json:"activity_name_snapshot"`
-	StartedAt    string  `json:"started_at"`
-	EndedAt      *string `json:"ended_at"`
-	Notes        string  `json:"notes"`
+	ID         string  `json:"id"`
+	ActivityID *string `json:"activity_id"`
+	StartedAt  string  `json:"started_at"`
+	EndedAt    *string `json:"ended_at"`
+	Notes      string  `json:"notes"`
 }
 
 type entryUpdateReq struct {
