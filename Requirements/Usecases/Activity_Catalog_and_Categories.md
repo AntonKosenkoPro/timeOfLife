@@ -10,7 +10,7 @@ Narrative flows for **Epic 1: Activity Catalog & Categories**. Each flow maps to
 
 ## 2. Start a timer from a suggestion
 
-1. On the timer screen, the user sees their 3–5 most recently used activities as tappable suggestions (color + icon).
+1. On the timer screen, the user sees their 3–5 most recently used activities as tappable suggestions (color + icon), ranked on-device from the local catalog by `last_used_at` — no server round-trip, works offline.
 2. The user taps a suggestion; the activity name is prefilled into the activity field and the activity is linked to the upcoming entry.
 3. The user taps **Start**; the timer runs and the entry is recorded against the selected activity (and its category tags).
 
