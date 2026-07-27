@@ -144,6 +144,26 @@ func New(_ *config.Config, deps Dependencies) *Server {
 			r.With(h.AuthMiddleware).Post("/logout", h.Logout)
 			r.With(h.AuthMiddleware).Get("/me", h.Me)
 		})
+
+		// Epic 1: activity catalog, categories, and entries. All protected.
+		r.Group(func(r chi.Router) {
+			r.Use(h.AuthMiddleware)
+			r.Get("/activities", h.ListActivities)
+			r.Post("/activities", h.CreateActivity)
+			r.Get("/activities/{id}", h.GetActivity)
+			r.Patch("/activities/{id}", h.UpdateActivity)
+			r.Delete("/activities/{id}", h.DeleteActivity)
+			r.Get("/categories", h.ListCategories)
+			r.Post("/categories", h.CreateCategory)
+			r.Patch("/categories/{id}", h.UpdateCategory)
+			r.Delete("/categories/{id}", h.DeleteCategory)
+			r.Get("/entries", h.ListEntries)
+			r.Post("/entries", h.CreateEntry)
+			r.Get("/entries/{id}", h.GetEntry)
+			r.Patch("/entries/{id}", h.UpdateEntry)
+			r.Delete("/entries/{id}", h.DeleteEntry)
+			r.Post("/entries/{id}/unlink", h.UnlinkEntry)
+		})
 	})
 
 	s.router = r
@@ -187,7 +207,7 @@ func corsMiddleware(next http.Handler) http.Handler {
 		}
 
 		w.Header().Set("Access-Control-Allow-Origin", origin)
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
 		w.Header().Set("Access-Control-Allow-Credentials", "true")
 

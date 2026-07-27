@@ -22,7 +22,7 @@ backend/                 Go backend (chi + pgx/Postgres; sqlite for tests)
   cmd/server/main.go     entrypoint (run() int pattern; os.Exit owns lifecycle)
   internal/
     auth/                token service (JWT + rotated refresh) + otp service
-    handlers/            HTTP handlers for the 5 endpoints
+    handlers/            HTTP handlers (auth + activity catalog/entries)
     server/              chi router + middleware (recoverer, logger, jwtAuth)
     db/                  Store interface + postgres + sqlite impls
     migrations/          embedded SQL migrations (go:embed)
@@ -82,6 +82,23 @@ Uniform error envelope: `{ "error": { "code": String, "message": String, "detail
 | POST | `/auth/refresh` | `{refresh_token}` | 200 new pair | `invalid_refresh`, `token_reuse`, `token_expired` |
 | POST | `/auth/logout` | (Bearer) | 204 | (401) |
 | GET  | `/auth/me` | (Bearer) | 200 `user` | (401) |
+| GET  | `/activities` | (Bearer) | 200 `[{activity}]` (recency order; `?q=` typeahead) | (401) |
+| POST | `/activities` | `{id,name,color,icon,notes?,category_ids?}` | 201/200 `{activity}` (idempotent on `id`) | `invalid_body`, `validation_error`, `activity_exists`, `conflict`, (401) |
+| GET  | `/activities/{id}` | (Bearer) | 200 `{activity}` | `not_found`, (401) |
+| PATCH | `/activities/{id}` | `{name?,color?,icon?,notes?,category_ids?,updated_at}` | 200 `{activity}` | `invalid_body`, `validation_error`, `not_found`, `conflict`, `activity_exists`, (401) |
+| DELETE | `/activities/{id}` | (Bearer) | 204 (cascades to entries + tags) | `not_found`, (401) |
+| GET  | `/categories` | (Bearer) | 200 `[{category}]` (name order) | (401) |
+| POST | `/categories` | `{id,name,color}` | 201/200 `{category}` (idempotent on `id`) | `invalid_body`, `validation_error`, `category_exists`, `conflict`, (401) |
+| PATCH | `/categories/{id}` | `{name?,color?,updated_at}` | 200 `{category}` | `invalid_body`, `validation_error`, `not_found`, `conflict`, `category_exists`, (401) |
+| DELETE | `/categories/{id}` | (Bearer) | 204 (join rows cascade; entries unaffected) | `not_found`, (401) |
+| GET  | `/entries` | (Bearer) | 200 `{items,next_cursor?}` (`?from=&to=&activity_id=&category_id=&limit=&cursor=`) | (401) |
+| POST | `/entries` | `{id,activity_id?,activity_name_snapshot?,started_at,ended_at?,notes?}` | 201/200 `{entry}` (idempotent on `id`) | `invalid_body`, `validation_error`, `activity_not_found`, `conflict`, (401) |
+| GET  | `/entries/{id}` | (Bearer) | 200 `{entry}` | `not_found`, (401) |
+| PATCH | `/entries/{id}` | `{started_at?,ended_at?,notes?,updated_at}` | 200 `{entry}` (recomputes `duration_seconds`) | `invalid_body`, `validation_error`, `not_found`, `conflict`, (401) |
+| DELETE | `/entries/{id}` | (Bearer) | 204 | `not_found`, (401) |
+| POST | `/entries/{id}/unlink` | (Bearer) | 200 `{entry}` (freezes tag snapshot) | `not_found`, `conflict` (already unlinked), (401) |
+
+**Epic 1 (activity catalog & entries):** all `/activities`, `/categories`, `/entries` routes are Bearer-protected. Ids are **client-generated UUID v7** and `POST` is **idempotent on `id`** (a replay returns the existing record with 200, enabling offline create-then-sync). Writes use **last-write-wins on `updated_at`** (PATCH carries `updated_at`; a stale write returns 409 `conflict` with the server's current version in `details`). Deletes are hard (the client holds the 30 s undo buffer). `activity_exists`/`category_exists` (409) report a case-insensitive name collision and carry the winning record's `{id,name}` in `details`. Validation failures are 422 `validation_error` with `details` = `{field: message}`. **Suggestions are client-side** (F5): the client ranks its synced activities by `last_used_at` — there is no `/activities/suggestions` endpoint; `last_used_at` syncs so recency is shared across devices. Seeding (F6) is client-side via ordinary `POST /categories`. The authoritative contract is [`backend/api/openapi.yaml`](backend/api/openapi.yaml) (v1.1.0).
 
 The iOS `RemoteAuthRepository` mirrors these paths exactly. If you change an endpoint, change both sides and update [`backend/api/openapi.yaml`](backend/api/openapi.yaml).
 
@@ -149,8 +166,8 @@ Code signing is disabled in `project.yml` (`DEVELOPMENT_TEAM: ""`, `CODE_SIGNING
 - **Sign in with Apple follow-ups** — F2 itself is implemented (see below); still deferred: account-deletion token revocation via Apple `/auth/revoke` (App Store 5.1.1v, needs `.p8` + `APPLE_TEAM_ID`/`APPLE_KEY_ID`), nonce replay defense, and Apple credential-state/revocation observation on the client.
 - **Kafka** — deferred (S1 names it but auth MVP doesn't need an MQ).
 - **Rate-limit store** — in-memory; swap for Redis before multi-instance deploy.
-- **History/list UI for time entries** — local queue exists but no list view yet.
-- **Remote time-tracking endpoint** — backend endpoint not implemented; `StubTimerRepository` is used.
+- **History/list UI for time entries** — the backend `/entries` resource + sync landed in Epic 1, but the iOS History list/edit UI is Epic 2.
+- **iOS catalog sync** — the backend `/activities`, `/categories`, `/entries` endpoints are implemented (Epic 1); the iOS remote repository + offline sync queue for them is separate work.
 - SwiftUI snapshot/on-device keychain tests — manual smoke checklist in README.
 
 ## Sign in with Apple (F2)
