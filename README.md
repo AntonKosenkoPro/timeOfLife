@@ -127,6 +127,18 @@ Errors use a uniform envelope: `{ "error": { "code", "message", "details": {} } 
 | POST | `/auth/refresh` | `{refresh_token}` | 200 new pair | `invalid_refresh`, `token_reuse`, `token_expired` |
 | POST | `/auth/logout` | (Bearer) | 204 | (401) |
 | GET  | `/auth/me` | (Bearer) | 200 `user{id,email,email_verified}` | (401) |
+| GET  | `/activities` | (Bearer) | 200 `[{activity}]` (recency; `?q=` typeahead) | (401) |
+| POST | `/activities` | `{id,name,color,icon,notes?,category_ids?}` | 201/200 `{activity}` (idempotent on `id`) | `validation_error`, `activity_exists`, `conflict` |
+| GET/PATCH/DELETE | `/activities/{id}` | (PATCH) `{…,updated_at}` | 200 / 204 | `not_found`, `conflict`, `activity_exists` |
+| GET  | `/categories` | (Bearer) | 200 `[{category}]` | (401) |
+| POST | `/categories` | `{id,name,color}` | 201/200 `{category}` (idempotent on `id`) | `validation_error`, `category_exists`, `conflict` |
+| PATCH/DELETE | `/categories/{id}` | (PATCH) `{…,updated_at}` | 200 / 204 | `not_found`, `conflict`, `category_exists` |
+| GET  | `/entries` | (Bearer) | 200 `{items,next_cursor?}` (`?from=&to=&activity_id=&category_id=&limit=&cursor=`) | (401) |
+| POST | `/entries` | `{id,activity_id?,activity_name_snapshot?,started_at,ended_at?,notes?}` | 201/200 `{entry}` (idempotent on `id`) | `validation_error`, `activity_not_found`, `conflict` |
+| GET/PATCH/DELETE | `/entries/{id}` | (PATCH) `{started_at?,ended_at?,notes?,updated_at}` | 200 / 204 | `not_found`, `conflict` |
+| POST | `/entries/{id}/unlink` | (Bearer) | 200 `{entry}` (freezes tag snapshot) | `not_found`, `conflict` |
+
+**Epic 1 (activity catalog & entries):** all `/activities`, `/categories`, `/entries` routes are Bearer-protected. Ids are **client-generated UUID v7** and `POST` is **idempotent on `id`** (offline create-then-sync). Writes use **last-write-wins on `updated_at`** (stale → 409 `conflict` with the server's version in `details`); deletes are hard (the client holds the 30 s undo buffer). Validation failures are 422 `validation_error` with `details` = `{field: message}`. **Suggestions are client-side** (F5) — there is no `/activities/suggestions` endpoint; the client ranks its synced activities by `last_used_at`. See the OpenAPI spec (v1.1.0) for full schemas.
 
 ## Manual smoke checklist
 
@@ -144,6 +156,9 @@ Backend (Docker Postgres running):
 4. Repeat the wrong code 5+ times → `otp_attempts_exceeded`.
 5. `POST /api/v1/auth/refresh` → rotated pair; reusing the old refresh → 401 `token_reuse` and all sessions revoked.
 6. `GET /api/v1/auth/me` with the Bearer access token → 200 user.
+7. `POST /api/v1/activities` `{id:<uuidv7>,name:"Gym",color:"blue",icon:"figure.run"}` → 201; replay the same body → 200 (idempotent).
+8. `PATCH /api/v1/activities/{id}` with a stale `updated_at` → 409 `conflict` (LWW); with a newer `updated_at` → 200.
+9. `GET /api/v1/activities` → 200 `[{activity}]`; `POST /api/v1/entries` → 201; `POST /api/v1/entries/{id}/unlink` → 200 with `linked:false` and frozen tag snapshot.
 
 iOS (Simulator, backend running):
 1. Enter email → request OTP → enter/autofill the 6-digit code → timer screen.

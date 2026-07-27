@@ -28,7 +28,17 @@ info:
     - Rate limiting: 3 req/min for OTP request, 5 req/min for OTP verify (per IP+email).
     - User enumeration is prevented: `/auth/otp/request` always returns 202.
 
-  version: "1.0.0"
+    ## Activity catalog & entries (Epic 1)
+    Activities, categories (many-to-many tags), and time entries are per-user
+    resources — Bearer-auth and scoped to the authenticated user. Records use
+    client-generated UUID v7 ids so they can be created offline and synced
+    later; `POST` is idempotent on `id`. Mutations use last-write-wins on
+    `updated_at` (409 `conflict` on a stale write; the server's current version
+    is returned for reconciliation). Deletes are hard (the client owns the 30 s
+    undo window). Timer-screen suggestions are computed client-side from the
+    synced `last_used_at` — there is no suggestions endpoint.
+
+  version: "1.1.0"
   contact:
     name: Anton Kosenko
 
@@ -366,6 +376,558 @@ paths:
                   code: unauthorized
                   message: Invalid or expired access token
 
+  # ---------- Activities (Epic 1) ----------
+
+  /api/v1/activities:
+    get:
+      operationId: listActivities
+      summary: List activities
+      description: |
+        Returns the authenticated user's activities ordered by most-recently-used
+        (`last_used_at` DESC). The optional `q` filters by case-insensitive name
+        prefix for typeahead / quick-add lookup. Each activity includes its
+        category tags. The client computes timer-screen suggestions locally from
+        this list (F5); there is no suggestions endpoint.
+      tags:
+        - Activities
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: q
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Case-insensitive name filter (typeahead).
+      responses:
+        "200":
+          description: The user's activities, recency-ordered.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Activity"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    post:
+      operationId: createActivity
+      summary: Create an activity
+      description: |
+        Creates an activity. The `id` is a client-generated UUID v7, enabling
+        offline create-then-sync; POST is idempotent on `id` — replaying the same
+        id returns the existing record unchanged (200). A case-insensitive name
+        collision with an existing activity returns 409 `activity_exists`.
+      tags:
+        - Activities
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ActivityCreate"
+      responses:
+        "201":
+          description: Activity created.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Activity"
+        "200":
+          description: Idempotent replay — an activity with this `id` already exists and is returned unchanged.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Activity"
+        "400":
+          $ref: "#/components/responses/InvalidBody"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
+  /api/v1/activities/{id}:
+    get:
+      operationId: getActivity
+      summary: Get an activity
+      description: Returns a single activity with its category tags.
+      tags:
+        - Activities
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: The activity id.
+      responses:
+        "200":
+          description: The activity.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Activity"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    patch:
+      operationId: updateActivity
+      summary: Update an activity
+      description: |
+        Updates an activity. `category_ids`, if present, replaces the activity's
+        tags in full. Last-write-wins: the write applies only if `updated_at` is
+        newer than the server's; a stale write returns 409 `conflict` with the
+        server's current version. A name change that collides with another
+        activity returns 409 `activity_exists`.
+      tags:
+        - Activities
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ActivityUpdate"
+      responses:
+        "200":
+          description: The updated activity.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Activity"
+        "400":
+          $ref: "#/components/responses/InvalidBody"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+    delete:
+      operationId: deleteActivity
+      summary: Delete an activity
+      description: |
+        Hard-deletes an activity and cascades to its entries and tag-join rows
+        (F10 "delete the entire activity and all its entries"). The 30 s undo
+        window is owned by the client; the server just hard-deletes. Deleting an
+        activity that has a running entry ends that entry first.
+      tags:
+        - Activities
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "204":
+          description: Activity deleted (entries and join rows cascaded).
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  # ---------- Categories (Epic 1) ----------
+
+  /api/v1/categories:
+    get:
+      operationId: listCategories
+      summary: List categories
+      description: Returns the authenticated user's categories, ordered by name.
+      tags:
+        - Categories
+      security:
+        - BearerAuth: []
+      responses:
+        "200":
+          description: The user's categories.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Category"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    post:
+      operationId: createCategory
+      summary: Create a category
+      description: |
+        Creates a category. `id` is a client-generated UUID v7 (idempotent on
+        replay). A case-insensitive name collision returns 409 `category_exists`.
+      tags:
+        - Categories
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CategoryCreate"
+      responses:
+        "201":
+          description: Category created.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Category"
+        "200":
+          description: Idempotent replay — a category with this `id` already exists and is returned unchanged.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Category"
+        "400":
+          $ref: "#/components/responses/InvalidBody"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
+  /api/v1/categories/{id}:
+    patch:
+      operationId: updateCategory
+      summary: Update a category
+      description: |
+        Updates a category (last-write-wins on `updated_at`). A name change that
+        collides with another category returns 409 `category_exists`.
+      tags:
+        - Categories
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CategoryUpdate"
+      responses:
+        "200":
+          description: The updated category.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Category"
+        "400":
+          $ref: "#/components/responses/InvalidBody"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+    delete:
+      operationId: deleteCategory
+      summary: Delete a category
+      description: |
+        Hard-deletes a category. The tag-join rows cascade (the tag is removed
+        from all activities); entries are unaffected because they infer tags at
+        query time while linked.
+      tags:
+        - Categories
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "204":
+          description: Category deleted (tag-join rows cascaded).
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  # ---------- Entries (Epic 1) ----------
+
+  /api/v1/entries:
+    get:
+      operationId: listEntries
+      summary: List entries
+      description: |
+        Returns the authenticated user's entries, newest first, with filters and
+        cursor pagination. Each entry includes its category tags (inferred from
+        the linked activity while `linked` is true, or the frozen snapshot after
+        unlink). Used by History (Epic 2); the resource lands in Epic 1 so
+        `activity_id` has a home and entries sync cross-device from the start.
+      tags:
+        - Entries
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: from
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+          description: Inclusive lower bound on `started_at`.
+        - name: to
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+          description: Inclusive upper bound on `started_at`.
+        - name: activity_id
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+        - name: category_id
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+          description: Filter to entries whose (linked) activity has this category tag.
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 50
+        - name: cursor
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Opaque pagination cursor returned by a previous request.
+      responses:
+        "200":
+          description: A page of entries.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EntryListResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+    post:
+      operationId: createEntry
+      summary: Create a time entry
+      description: |
+        Creates a time entry. `activity_id` is optional (free-text entries stay
+        first-class). With `activity_id` present, the server sets
+        `activity_name_snapshot` from the activity and bumps the activity's
+        `last_used_at` (recency for suggestions). `ended_at` null/omitted = running.
+        `id` is client-generated UUID v7 (idempotent on replay).
+      tags:
+        - Entries
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EntryCreate"
+      responses:
+        "201":
+          description: Entry created.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Entry"
+        "200":
+          description: Idempotent replay — an entry with this `id` already exists and is returned unchanged.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Entry"
+        "400":
+          $ref: "#/components/responses/InvalidBody"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: The referenced `activity_id` does not belong to the user.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error:
+                  code: activity_not_found
+                  message: Referenced activity not found
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
+  /api/v1/entries/{id}:
+    get:
+      operationId: getEntry
+      summary: Get an entry
+      description: Returns a single entry with its category tags.
+      tags:
+        - Entries
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The entry.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Entry"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    patch:
+      operationId: updateEntry
+      summary: Update an entry
+      description: |
+        Updates an entry (last-write-wins on `updated_at`). Setting `ended_at`
+        stops a running timer; `duration_seconds` is recomputed. Editing the
+        timer/UI is Epic 2; the endpoint lands in Epic 1.
+      tags:
+        - Entries
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EntryUpdate"
+      responses:
+        "200":
+          description: The updated entry.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Entry"
+        "400":
+          $ref: "#/components/responses/InvalidBody"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+    delete:
+      operationId: deleteEntry
+      summary: Delete an entry
+      description: Hard-deletes a single entry (F10 "delete only the current entry"). The 30 s undo window is client-side.
+      tags:
+        - Entries
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "204":
+          description: Entry deleted.
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/entries/{id}/unlink:
+    post:
+      operationId: unlinkEntry
+      summary: Unlink an entry from its activity
+      description: |
+        Detaches a single entry from its activity (F11): sets `activity_id` to
+        null and copies the activity's current tags into `entry_tag_snapshots`
+        so the entry's history still reads correctly. The activity itself stays
+        in the catalog. Already-unlinked entries return 409 `conflict`.
+      tags:
+        - Entries
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: "The unlinked entry (now `linked: false`, with frozen tag snapshot)."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Entry"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: The entry is already unlinked.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error:
+                  code: conflict
+                  message: Entry is already unlinked
+
 components:
   securitySchemes:
     BearerAuth:
@@ -375,6 +937,93 @@ components:
       description: |
         JWT access token obtained from `/auth/otp/verify`, `/auth/apple`, or `/auth/refresh`.
         Format: `Authorization: Bearer <token>`
+
+  responses:
+    # ---------- Shared error responses (catalog/entries) ----------
+
+    Unauthorized:
+      description: Missing or invalid access token.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            error:
+              code: unauthorized
+              message: Invalid or expired access token
+
+    InvalidBody:
+      description: Malformed request body (invalid JSON or extra data).
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            error:
+              code: invalid_body
+              message: Invalid request body
+
+    ValidationError:
+      description: Field-level validation failed; `details` maps each invalid field to a single unified message.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            error:
+              code: validation_error
+              message: Validation failed
+              details:
+                name: Name must be 60 characters or fewer
+
+    NotFound:
+      description: Resource not found, or it belongs to another user.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            error:
+              code: not_found
+              message: Not found
+
+    Conflict:
+      description: |
+        409 conflict. `conflict` — a last-write-wins stale write (`updated_at`
+        older than the server's); `details` carries the server's current version.
+        `activity_exists` / `category_exists` — a case-insensitive name collision
+        on create; `details` carries the existing record's id and name.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          examples:
+            conflict:
+              summary: Stale last-write-wins write
+              value:
+                error:
+                  code: conflict
+                  message: Outdated version; a newer record exists on the server.
+                  details:
+                    updated_at: "2026-07-27T10:00:00Z"
+            activity_exists:
+              summary: Activity name already exists (case-insensitive)
+              value:
+                error:
+                  code: activity_exists
+                  message: An activity with this name already exists.
+                  details:
+                    id: "019639f1-7a3b-7abc-9def-100000000001"
+                    name: Gym
+            category_exists:
+              summary: Category name already exists (case-insensitive)
+              value:
+                error:
+                  code: category_exists
+                  message: A category with this name already exists.
+                  details:
+                    id: "019639f1-7a3b-7abc-9def-100000000002"
+                    name: Sport
 
   schemas:
     # ---------- Request schemas ----------
@@ -522,3 +1171,380 @@ components:
               type: object
               description: Optional additional error context
               example: {}
+
+    # ---------- Catalog & entries schemas (Epic 1) ----------
+
+    # Shared embedded tag (a category as it appears on an activity or entry).
+    CategoryTag:
+      type: object
+      description: A category tag embedded in an activity or entry.
+      required:
+        - id
+        - name
+        - color
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        color:
+          type: string
+
+    # ---------- Catalog request schemas ----------
+
+    ActivityCreate:
+      type: object
+      description: |
+        Request body for creating an activity. `id` is a client-generated UUID v7
+        (enables offline create + idempotent replay). Name is case-insensitively
+        unique per user.
+      required:
+        - id
+        - name
+        - color
+        - icon
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Client-generated UUID v7.
+        name:
+          type: string
+          minLength: 1
+          maxLength: 60
+          description: Activity name (trimmed; case-insensitively unique per user).
+        color:
+          type: string
+          description: Color palette key/hex, from the fixed set.
+        icon:
+          type: string
+          description: SF Symbol name, from the allowed set.
+        notes:
+          type: string
+          maxLength: 280
+          nullable: true
+          description: Optional activity notes.
+        category_ids:
+          type: array
+          items:
+            type: string
+            format: uuid
+          description: Optional initial category tags.
+      example:
+        id: "019639f1-7a3b-7abc-9def-100000000001"
+        name: Gym
+        color: blue
+        icon: figure.strengthtraining
+        notes: ""
+        category_ids:
+          - "019639f1-7a3b-7abc-9def-100000000002"
+
+    ActivityUpdate:
+      type: object
+      description: |
+        Request body for updating an activity. All fields optional except
+        `updated_at` (last-write-wins version). `category_ids`, if present, is a
+        full replace of the activity's tags; omit it to leave tags unchanged.
+      required:
+        - updated_at
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 60
+        color:
+          type: string
+        icon:
+          type: string
+        notes:
+          type: string
+          maxLength: 280
+          nullable: true
+        category_ids:
+          type: array
+          items:
+            type: string
+            format: uuid
+          description: Replace-all tag set.
+        updated_at:
+          type: string
+          format: date-time
+          description: Client's version timestamp; the write applies only if newer than the server's.
+
+    CategoryCreate:
+      type: object
+      description: Request body for creating a category. `id` is client-generated UUID v7.
+      required:
+        - id
+        - name
+        - color
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+          minLength: 1
+          maxLength: 60
+        color:
+          type: string
+      example:
+        id: "019639f1-7a3b-7abc-9def-100000000002"
+        name: Sport
+        color: green
+
+    CategoryUpdate:
+      type: object
+      description: Request body for updating a category. `updated_at` required for last-write-wins.
+      required:
+        - updated_at
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 60
+        color:
+          type: string
+        updated_at:
+          type: string
+          format: date-time
+
+    # ---------- Entries request schemas ----------
+
+    EntryCreate:
+      type: object
+      description: |
+        Request body for creating a time entry. `activity_id` is optional to keep
+        the free-text path first-class: when omitted, `activity_name_snapshot`
+        should be supplied directly; when present, the server sets
+        `activity_name_snapshot` from the activity at create time. `ended_at`
+        omitted/null means a running timer.
+      required:
+        - id
+        - started_at
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Client-generated UUID v7.
+        activity_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: The linked activity id (must belong to the user), or null for a free-text entry.
+        activity_name_snapshot:
+          type: string
+          maxLength: 60
+          description: Free-text name; required when `activity_id` is omitted, ignored otherwise.
+        started_at:
+          type: string
+          format: date-time
+        ended_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: End time; null/omitted = running timer.
+        notes:
+          type: string
+          nullable: true
+      example:
+        id: "019639f1-7a3b-7abc-9def-100000000003"
+        activity_id: "019639f1-7a3b-7abc-9def-100000000001"
+        started_at: "2026-07-27T09:00:00Z"
+
+    EntryUpdate:
+      type: object
+      description: Request body for updating an entry. `updated_at` required for last-write-wins.
+      required:
+        - updated_at
+      properties:
+        started_at:
+          type: string
+          format: date-time
+        ended_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: Setting this stops a running timer; `duration_seconds` is recomputed.
+        notes:
+          type: string
+          nullable: true
+        updated_at:
+          type: string
+          format: date-time
+
+    # ---------- Catalog & entries response schemas ----------
+
+    Activity:
+      type: object
+      description: An activity record with its category tags.
+      required:
+        - id
+        - name
+        - color
+        - icon
+        - notes
+        - last_used_at
+        - created_at
+        - updated_at
+        - categories
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+          maxLength: 60
+        color:
+          type: string
+        icon:
+          type: string
+        notes:
+          type: string
+          nullable: true
+          maxLength: 280
+        last_used_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: Last time the activity was used; drives client-side suggestions (F5). Synced across devices.
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        categories:
+          type: array
+          items:
+            $ref: "#/components/schemas/CategoryTag"
+      example:
+        id: "019639f1-7a3b-7abc-9def-100000000001"
+        name: Gym
+        color: blue
+        icon: figure.strengthtraining
+        notes: ""
+        last_used_at: "2026-07-27T09:00:00Z"
+        created_at: "2026-07-20T08:00:00Z"
+        updated_at: "2026-07-27T09:00:00Z"
+        categories:
+          - id: "019639f1-7a3b-7abc-9def-100000000002"
+            name: Sport
+            color: green
+
+    Category:
+      type: object
+      description: A category record.
+      required:
+        - id
+        - name
+        - color
+        - created_at
+        - updated_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+          maxLength: 60
+        color:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+      example:
+        id: "019639f1-7a3b-7abc-9def-100000000002"
+        name: Sport
+        color: green
+        created_at: "2026-07-20T08:00:00Z"
+        updated_at: "2026-07-20T08:00:00Z"
+
+    Entry:
+      type: object
+      description: |
+        A time entry. `categories` are inferred from the linked activity at
+        query time while `linked` is true; after unlink they are the frozen
+        snapshot (F11).
+      required:
+        - id
+        - activity_name_snapshot
+        - started_at
+        - linked
+        - created_at
+        - updated_at
+        - categories
+      properties:
+        id:
+          type: string
+          format: uuid
+        activity_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: Null after unlink (F11).
+        activity_name_snapshot:
+          type: string
+          description: Frozen activity name; retained so history reads after unlink/delete.
+        started_at:
+          type: string
+          format: date-time
+        ended_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: Null = running timer.
+        duration_seconds:
+          type: integer
+          nullable: true
+          description: ended_at - started_at, in seconds; null while running.
+        notes:
+          type: string
+          nullable: true
+        linked:
+          type: boolean
+          description: Convenience flag = (activity_id != null).
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        categories:
+          type: array
+          items:
+            $ref: "#/components/schemas/CategoryTag"
+      example:
+        id: "019639f1-7a3b-7abc-9def-100000000003"
+        activity_id: "019639f1-7a3b-7abc-9def-100000000001"
+        activity_name_snapshot: Gym
+        started_at: "2026-07-27T09:00:00Z"
+        ended_at: "2026-07-27T10:00:00Z"
+        duration_seconds: 3600
+        notes: ""
+        linked: true
+        created_at: "2026-07-27T09:00:00Z"
+        updated_at: "2026-07-27T10:00:00Z"
+        categories:
+          - id: "019639f1-7a3b-7abc-9def-100000000002"
+            name: Sport
+            color: green
+
+    EntryListResponse:
+      type: object
+      description: Paginated entries list, newest first.
+      required:
+        - items
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Entry"
+        next_cursor:
+          type: string
+          nullable: true
+          description: Opaque cursor for the next page; null/absent when exhausted.

@@ -140,6 +140,23 @@ func TestAuthRoutesProtected(t *testing.T) {
 	}
 }
 
+func TestCatalogRoutesProtected(t *testing.T) {
+	s := newTestServer(t)
+
+	for _, path := range []string{
+		"/api/v1/activities",
+		"/api/v1/categories",
+		"/api/v1/entries",
+	} {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		w := httptest.NewRecorder()
+		s.ServeHTTP(w, req)
+		if w.Code != http.StatusUnauthorized {
+			t.Errorf("GET %s without auth: expected 401, got %d", path, w.Code)
+		}
+	}
+}
+
 func TestServerContentType(t *testing.T) {
 	s := newTestServer(t)
 
