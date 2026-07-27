@@ -50,6 +50,7 @@ Use Apple system fonts via SwiftUI text styles. Do not use custom fonts for the 
 | Token | Value | Swift usage | Purpose |
 |---|---|---|---|
 | `cornerRadius` | `10` | `Theme.cornerRadius` | Cards, fields, buttons |
+| `cornerRadiusSmall` | `8` | `Theme.cornerRadiusSmall` | Compact inputs such as OTP digit boxes |
 | `cornerRadiusLarge` | `16` | `Theme.cornerRadiusLarge` | Large cards, bottom sheets |
 | `minTapArea` | `44` | `Theme.minTapArea` | Minimum tappable dimension |
 | `screenHorizontalPadding` | `24` | `Theme.screenHorizontalPadding` | Standard screen edge padding |

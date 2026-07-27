@@ -8,9 +8,9 @@ Scope: `backend/internal/{handlers,auth,ratelimit,db,email,apple}` and
 
 Status legend: the feature already implements passwordless OTP (F1), Sign in with
 Apple (F2), access-by-email restore (F3), client+server validation (U1/U2),
-autofill + magic-link deep link (U3/U5), resend cooldown, refresh-token rotation
-with reuse detection, rate limiting, and email-enumeration prevention. The items
-below are the **second-order gaps** that remain.
+autofill (U3/U5), resend cooldown, refresh-token rotation with reuse detection,
+rate limiting, and email-enumeration prevention. Deep links / magic links were
+removed. The items below are the **second-order gaps** that remain.
 
 ## Priority tiers
 
@@ -21,8 +21,9 @@ below are the **second-order gaps** that remain.
 ---
 
 ## P0-1 · `extractIP` trusts `X-Forwarded-For` unconditionally — rate-limit bypass
+**Status:** ✅ Fixed (see `fixed.md` item 9). Forwarded headers are now honoured only for configured `TRUSTED_PROXIES`; otherwise the direct TCP peer is used.
 **FURPS:** R1 (secure storage/auth), S5 (best practice)
-**Files:** `backend/internal/handlers/auth.go:566-582`
+**Files:** `backend/internal/handlers/auth.go:566-615`
 
 `extractIP` returns the first `X-Forwarded-For` value verbatim. If the server is
 not strictly behind a trusted proxy that **overwrites** that header, any client
@@ -41,8 +42,9 @@ OTP-request limiter when no trusted proxy is configured.
 ---
 
 ## P0-2 · `extractIP` mangles IPv6 `RemoteAddr`
+**Status:** ✅ Fixed (see `fixed.md` item 9). `extractIP` now uses `net.SplitHostPort`, with fallback to `r.RemoteAddr`.
 **FURPS:** +2/R1
-**Files:** `backend/internal/handlers/auth.go:577-581`
+**Files:** `backend/internal/handlers/auth.go:569-577`
 
 `strings.LastIndex(addr, ":")` splits on the last colon, which is wrong for
 IPv6 literals like `[::1]:1234` — it returns `::1` truncated mid-address,
@@ -58,8 +60,9 @@ bare host without a port.
 ---
 
 ## P0-3 · Concurrent refresh race → mass logout
+**Status:** ✅ Fixed (see `fixed.md` item 10). `AuthService.performRefresh` now coalesces concurrent callers onto one in-flight `Task`.
 **FURPS:** R1, U3 (don't sign users out spuriously)
-**Files:** `ios/.../Core/Networking/APIClient.swift:72-88`, `ios/.../Features/Auth/Services/AuthService.swift:99-117,122-129`
+**Files:** `ios/.../Core/Networking/APIClient.swift`, `ios/.../Features/Auth/Services/AuthService.swift:121-136`
 
 Two overlapping 401s (e.g. `/me` from `restoreSession` and a parallel authed
 request, or several requests fired at once) can each enter the 401 branch and

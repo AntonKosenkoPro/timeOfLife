@@ -62,7 +62,8 @@ final class AuthService: ObservableObject {
     }
 
     /// Reads Keychain + cache; if a refresh token exists, attempts `/me`.
-    /// On transient offline failure keeps the cached session.
+    /// On transient non-auth failures (offline, 5xx, transport) keeps the
+    /// cached session. Only `unauthorized` after a failed refresh clears local state.
     func restoreSession() async {
         let cached = cache.load()
         let refreshToken = await keychain.string(for: .refreshToken)
@@ -97,11 +98,10 @@ final class AuthService: ObservableObject {
             } catch {
                 await clearLocal()
             }
-        } catch APIError.offline {
-            // Keep cached session; do not log out on offline (U3).
         } catch {
-            // Any other server error: don't trust the session.
-            await clearLocal()
+            // Keep the cached session on any non-auth failure (offline, transient
+            // 5xx, transport blips). Only a confirmed unauthorized response after
+            // a failed refresh, or explicit logout, should clear local state.
         }
         _ = accessToken // referenced for clarity
     }

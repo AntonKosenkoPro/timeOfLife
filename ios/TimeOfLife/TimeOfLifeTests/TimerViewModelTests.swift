@@ -86,7 +86,13 @@ struct TimerViewModelTests {
             repository: StubTimerRepository(),
             connectivity: connectivity
         )
-        return TimerViewModel(service: service, connectivity: connectivity)
+        let authService = AuthService(
+            repository: FakeAuthRepository(),
+            keychain: InMemoryKeychainStore(),
+            cache: SessionCache(defaults: UserDefaults(suiteName: UUID().uuidString)!),
+            sessionStore: SessionStore()
+        )
+        return TimerViewModel(service: service, authService: authService, connectivity: connectivity)
     }
 
     private func temporaryStoreURL() -> URL {

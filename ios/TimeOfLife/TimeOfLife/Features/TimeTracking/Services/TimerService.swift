@@ -8,13 +8,13 @@ import Foundation
 /// sync when connectivity returns.
 @MainActor
 final class TimerService: ObservableObject {
-    let store: any TimerStoring
-    private let repository: any TimerRepository
+    let store: TimerStoring
+    private let repository: TimerRepository
     private let connectivity: Connectivity
 
     init(
-        store: any TimerStoring,
-        repository: any TimerRepository,
+        store: TimerStoring,
+        repository: TimerRepository,
         connectivity: Connectivity
     ) {
         self.store = store

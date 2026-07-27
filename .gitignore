@@ -23,6 +23,9 @@ build/
 *.xcodeproj/project.xcworkspace/xcuserdata/
 *.xcworkspace/xcuserdata/
 
+### Generated Xcode project (single source of truth is project.yml)
+ios/TimeOfLife/TimeOfLife.xcodeproj/
+
 ### Swift Package Manager (legacy)
 .build/
 .swiftpm/
@@ -40,6 +43,11 @@ Packages/
 .env
 .env.*
 !.env.example
+
+### BMAD / Claude user-specific and generated artifacts
+_bmad/config.user.toml
+_bmad-output/
+.claude/skills/
 
 ### Editor / OS
 .vscode/

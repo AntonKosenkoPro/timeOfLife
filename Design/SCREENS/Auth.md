@@ -2,6 +2,59 @@
 
 Implements `Requirements/Usecases/Sign-up_and_Sign-in.md` and `Requirements/FURPS/Sign-up_and_Sign-in.md`.
 
+The signed-out flow is now a linear `NavigationStack`:
+
+```
+WelcomeView  --(Continue with Email)-->  EmailEntryView  --(email sent)-->  OtpEntryView
+```
+
+`Sign in with Apple` is the primary action on `WelcomeView` and handles sign-up/sign-in in one step. The email/OTP path is a deliberate secondary option. When any auth path succeeds, `SessionStore` flips to `.signedIn` and `RootView` replaces the auth flow with `TimerView`.
+
+---
+
+## Screen: WelcomeView
+
+- **File**: `ios/TimeOfLife/TimeOfLife/Features/Auth/Views/WelcomeView.swift`
+- **Route**: none — root of `AuthFlowView`
+- **ViewModel**: `WelcomeViewModel`
+
+### Layout
+
+Centered `ScrollView` → `VStack(spacing: Theme.spacingLarge)` with horizontal padding `Theme.screenHorizontalPadding` and `Theme.maxContentWidth`:
+
+1. `Spacer()`
+2. Brand icon — `Image(systemName: "clock.arrow.circlepath")`, `.font(.system(size: 48, weight: .light))`, `Theme.accentPrimary`, `accessibilityHidden(true)`
+3. App name: `L10n.appName` — `.largeTitle.bold()`, `Theme.textPrimary`, `multilineTextAlignment(.center)`
+4. Tagline: `L10n.welcomeTagline` — `.headline`, `Theme.textSecondary`, `multilineTextAlignment(.center)`
+5. `Spacer().frame(height: Theme.spacingExtraLarge)`
+6. Fixed reserve for the pinned bottom action bar (`Color.clear` matching the measured bar height)
+
+Background: `Theme.backgroundPrimary`.
+
+Pinned bottom action bar via `.safeAreaInset(edge: .bottom)` → `MeasuredBottomBar`:
+
+- `AppleSignInButton` — full width, height `54 pt`, dynamic style (`black` light / `white` dark). `accessibilityIdentifier("WelcomeSignInWithAppleButton")`
+- `Spacer().frame(height: Theme.spacingSmall)`
+- Plain `Button(L10n.welcomeContinueWithEmail)` — `.subheadline`, `Theme.accentPrimary`, `accessibilityIdentifier("WelcomeContinueWithEmailButton")`
+
+### Behaviors
+
+- Apple sign-in calls `WelcomeViewModel.signInWithApple()`. On success `AuthService` persists the session and `RootView` transitions to `TimerView` automatically.
+- “Continue with Email” pushes `.emailEntry` through `AppNavigationStack`.
+- Offline: show `OfflineBanner` and disable both sign-in actions.
+- No keyboard handling needed on this screen.
+
+### Implementation checklist
+
+- [ ] All colors use `Theme.*` tokens.
+- [ ] All strings use `L10n.*` keys.
+- [ ] Apple button uses the native control and dynamic light/dark style.
+- [ ] Continue-with-email button has `WelcomeContinueWithEmailButton`.
+- [ ] Screen previews exist for light/dark and EN/RU.
+- [ ] SwiftLint passes with zero findings.
+
+---
+
 ## Screen: EmailEntryView
 
 - **File**: `ios/TimeOfLife/TimeOfLife/Features/Auth/Views/EmailEntryView.swift`
@@ -10,13 +63,12 @@ Implements `Requirements/Usecases/Sign-up_and_Sign-in.md` and `Requirements/FURP
 
 ### Layout
 
-Centered `VStack(spacing: Theme.spacingLarge)` with horizontal padding `Theme.screenHorizontalPadding`:
+`ScrollView` → `VStack(spacing: Theme.spacingLarge)` with horizontal padding `Theme.screenHorizontalPadding`:
 
-1. `Spacer()`
-2. Title: `L10n.authWelcome` — `.title.bold()`, `Theme.textPrimary`
-3. Subtitle: `L10n.authSubtitle` — `.subheadline`, `Theme.textSecondary`
-4. Spacer fixed to `Theme.spacingSmall` (8 pt)
-5. `TextFieldWithError`:
+1. Title: `L10n.emailEntryTitle` — `.title.bold()`, `Theme.textPrimary`
+2. Subtitle: `L10n.emailEntrySubtitle` — `.subheadline`, `Theme.textSecondary`
+3. `Spacer().frame(height: Theme.spacingSmall)`
+4. `TextFieldWithError`:
    - `accessibilityId`: `EmailField`
    - title/placeholder: `L10n.emailEntryEmail`
    - `keyboardType`: `.emailAddress`
@@ -24,26 +76,35 @@ Centered `VStack(spacing: Theme.spacingLarge)` with horizontal padding `Theme.sc
    - `autocapitalization`: `.none`
    - `autocorrectionDisabled()`
    - `submitLabel`: `.continue`
-6. `ErrorBanner` if `vm.errorMessage != nil`:
+5. `ErrorBanner` if `vm.errorMessage != nil`:
    - `accessibilityId`: `EmailErrorBanner`
-7. `PrimaryButton`:
-   - title: `L10n.emailEntrySubmit`
-   - `accessibilityId`: `EmailContinueButton`
-   - disabled when email is empty
-8. `AppleSignInButton` (deferred F2)
-9. `Spacer()`
+6. `Spacer().frame(height: Theme.spacingLarge)`
+7. Fixed reserve for the pinned bottom action bar
 
 Background: `Theme.backgroundPrimary`.
 
+Pinned bottom action bar:
+
+- `PrimaryButton`:
+  - title: `L10n.emailEntrySubmit`
+  - `accessibilityId`: `EmailContinueButton`
+  - disabled when email is empty/whitespace-only
+
+### Keyboard handling
+
+Follows `Design/INTERACTIONS.md` → **Keyboard and primary input placement**. The email field sits near the top of the scrollable area (title, subtitle, then field) so the caret remains visible when the keyboard opens. The Continue button is pinned to `.safeAreaInset(edge: .bottom)` so it follows the keyboard and is always tappable without dismissing the keyboard first. A measured bottom reserve prevents the field from being hidden behind the action bar on short screens.
+
 ### Behaviors
 
-- Focus email field on appear.
+- Focus the email field on appear.
 - Validate on submit: email format and maximum length (≤ 254).
-- On validation failure show one unified field error.
+- Both `.onSubmit` (Return key) and the Continue button call the same `submit()` action.
+- On validation failure show one unified field error beneath the email field.
 - On network success (`isEmailSent`) push `.otpEntry(email: vm.email)`.
+- When the user navigates back from `OtpEntryView`, pre-fill the email from `SessionStore.cachedEmail`.
 - Clear field error when `vm.email` changes.
 - Disable the Continue button while loading or when email is empty.
-- Offline: show banner and disable submit; set `errorMessage` to `L10n.errorOffline` if submit is attempted.
+- Offline: show banner and disable submit; set `errorMessage` to `String.localized("error.offline")` if submit is attempted.
 
 ### Implementation checklist
 
@@ -65,87 +126,103 @@ Background: `Theme.backgroundPrimary`.
 
 ### Layout
 
-Centered `VStack(spacing: Theme.spacingLarge)` with horizontal padding `Theme.screenHorizontalPadding`:
+`ScrollView` → `VStack(spacing: Theme.spacingLarge)` with horizontal padding `Theme.screenHorizontalPadding`:
 
-1. `Spacer()`
-2. Title: `L10n.otpTitle` — `.title.bold()`, `Theme.textPrimary`
-3. Sent-to message: `String(format: L10n.otpSentTo.text, vm.email)` — `.subheadline`, `Theme.textSecondary`
-4. Spacer fixed to `Theme.spacingSmall` (8 pt)
-5. `TextFieldWithError`:
-   - `accessibilityId`: `OtpField`
-   - title/placeholder: `L10n.otpCode`
-   - `keyboardType`: `.numberPad`
-   - `textContentType`: `.oneTimeCode`
-   - `autocapitalization`: `.none`
-   - `autocorrectionDisabled()`
+1. Title: `L10n.otpTitle` — `.title.bold()`, `Theme.textPrimary`
+2. Sent-to message: `String(format: L10n.otpSentTo.text, vm.email)` — `.subheadline`, `Theme.textSecondary`
+3. `Spacer().frame(height: Theme.spacingSmall)`
+4. `OtpCodeField`:
+   - `code`: `$vm.code`
+   - `length`: `6`
+   - `error`: `vm.fieldErrors.otp`
+   - `isLoading`: `vm.isLoading`
+   - `accessibilityId`: `OtpCodeField`
+5. Resend button:
+   - Plain `Button` with `L10n.otpResend` / `L10n.otpResendCountdown`, `.subheadline`, `Theme.accentPrimary`
+   - `accessibilityId`: `OtpResendButton`
+   - Lives directly below the code field because it is a context action tied to the input, not a primary screen action.
 6. `ErrorBanner` if `vm.errorMessage != nil`:
    - `accessibilityId`: `OtpErrorBanner`
-7. `PrimaryButton`:
-   - title: `L10n.otpSubmit`
-   - `accessibilityId`: `OtpVerifyButton`
-   - disabled when code is empty
-8. Resend button:
-   - Plain `Button` with `L10n.otpResend`, `.subheadline`, `Theme.accentPrimary`
-   - `accessibilityId`: `OtpResendButton`
-9. `Spacer()`
+7. `Spacer().frame(height: Theme.spacingLarge)`
 
 Background: `Theme.backgroundPrimary`.
 
+### Keyboard handling
+
+Follows `Design/INTERACTIONS.md` → **Keyboard and primary input placement**. The `OtpCodeField` sits near the top of the scrollable area so the digit boxes remain visible above the keyboard. The Resend button lives in the scrollable content just below the field, so it stays visually grouped with the input as the keyboard opens. The system navigation back button (or swipe-back gesture) provides the escape action to return to `EmailEntryView`.
+
 ### Behaviors
 
-- Focus OTP field on appear.
-- Validate on submit: exactly 6 digits.
-- Auto-submit when 6 digits are entered and valid.
-- On success (`isVerified`) push `.signedIn`.
-- Allow navigation back to `EmailEntryView` with pre-filled email.
+- Focus the hidden OTP field on appear and re-focus it after a verification error.
+- Auto-submit: when `vm.code` reaches 6 digits, debounce 250 ms then call `vm.submit()`. The debounce lets the user see the full code before the network call.
+- On a verification error, clear `vm.code` and refocus so the user can re-enter the code.
+- On success, `AuthService` updates `SessionStore`; `RootView` transitions to `TimerView`.
 - Resend is enabled after a 30-second cooldown; on resend show a feedback message via `L10n.otpResent`.
-- Consume deep link code from `navigation.pendingDeepLinkCode` on appear and on change.
 - Clear field error when `vm.code` changes.
-- Offline: show banner, disable submit, set `errorMessage` to `L10n.errorOffline` if submit is attempted.
+- Offline: show banner, disable submit, set `errorMessage` to `String.localized("error.offline")` if submit is attempted.
+
+### OTP input details
+
+See `Design/COMPONENTS.md` → `OtpCodeField`. At a high level:
+
+- A single hidden `TextField` is the real responder. It has `.keyboardType(.numberPad)` and `.textContentType(.oneTimeCode)`.
+- Six styled visual boxes reflect the current code.
+- Tapping any box focuses the hidden field.
+- Pasting or typing a full code fills the boxes and auto-submits after the debounce.
+- Backspace removes the last digit.
+- The component exposes one grouped VoiceOver element: label “One-time code, 6 digits”, value `code`, hint “Double tap to edit”.
+- Each box uses `Theme.cornerRadiusSmall` (8 pt) instead of the global `Theme.cornerRadius` so the radius is proportionate to the 44×56 pt cell.
 
 ### Implementation checklist
 
 - [ ] All colors use `Theme.*` tokens.
 - [ ] All strings use `L10n.*` keys.
-- [ ] OTP field has `accessibilityIdentifier("OtpField")` and error label `OtpFieldError`.
-- [ ] Verify button uses `PrimaryButton` with `OtpVerifyButton`.
+- [ ] OTP uses `OtpCodeField` with `OtpCodeField` accessibility identifier.
 - [ ] Resend button has `OtpResendButton`.
-- [ ] Deep link code is consumed exactly once.
+- [ ] Auto-submit debounces and clears the code on error.
 - [ ] Screen previews exist for light/dark and EN/RU.
 - [ ] SwiftLint passes with zero findings.
 
 ---
 
-## Screen: SignedInView
+## New and changed localization keys
 
-- **File**: `ios/TimeOfLife/TimeOfLife/Features/Auth/Views/SignedInView.swift`
-- **Route**: `.signedIn`
-- **State source**: `SessionStore`
+Add to `en.lproj/Localizable.strings` and `ru.lproj/Localizable.strings`, then to `L10n`:
 
-### Layout
+```text
+// Welcome
+"welcome.tagline" = "Personal time tracker.";
+"welcome.continueWithEmail" = "Continue with Email";
 
-Centered `VStack(spacing: Theme.spacingMedium)` with padding `Theme.spacingMedium`:
+// Email entry
+"emailEntry.subtitle" = "Enter your email and we’ll send you a one-time code.";
 
-1. Title: `L10n.signedInTitle` — `.title2.bold()`, `Theme.textPrimary`
-2. If `session.cachedEmail` is not nil: `String(format: L10n.signedInEmail.text, email)` — `Theme.textSecondary`
-3. Placeholder: `L10n.signedInPlaceholder` — `.subheadline`, `Theme.textSecondary`
-4. `Spacer()`
-5. Logout `PrimaryButton`:
-   - title: `L10n.signedInLogout`
-   - `tint: Theme.danger`
-   - `accessibilityId`: `SignedInLogout`
+```
 
-Background: `Theme.backgroundPrimary`.
+Russian:
 
-### Behaviors
+```text
+// Welcome
+"welcome.tagline" = "Личный трекер времени.";
+"welcome.continueWithEmail" = "Войти по почте";
 
-- Display the signed-in user's cached email.
-- Logout clears the local session and returns to `EmailEntryView`.
-- Logout works offline.
+// Email entry
+"emailEntry.subtitle" = "Введите адрес эл. почты, и мы отправим вам одноразовый код.";
+```
 
-### Implementation checklist
+### Key value changes
 
-- [ ] All strings use `L10n.*` keys (move currently direct `NSLocalizedString` calls to `L10n`).
-- [ ] Logout button uses `PrimaryButton` with destructive tint and `SignedInLogout`.
-- [ ] Screen previews exist for light/dark and EN/RU.
-- [ ] SwiftLint passes with zero findings.
+| Key | Old EN | New EN | Old RU | New RU |
+|---|---|---|---|---|
+| `emailEntry.title` | "Sign In" | "Continue with Email" | "Вход" | "Войти по почте" |
+
+### Keys to remove
+
+- `auth.welcome`
+- `auth.subtitle`
+- `otp.changeEmail` (system back button replaces the custom Change-email button)
+- `otp.code` (unused; the OTP field is decorative and needs no label)
+- `otp.submit` (OTP auto-submits; no visible Verify button)
+- `otp.resent` (unused resend feedback message)
+
+Remove the matching `L10n` enum cases and update `LocalizationTests.allCases`.

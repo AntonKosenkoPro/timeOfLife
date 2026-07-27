@@ -20,9 +20,6 @@ type Config struct {
 	OTPMaxAttempts       int
 	OTPEmailTemplate     string
 	OTPEmailHTMLTemplate string
-	MailgunDomain        string
-	MailgunAPIKey        string
-	MailgunFrom          string
 	// AWS SES (real mail sender). Required when EMAIL_BACKEND=ses.
 	AWSAccessKeyID     string
 	AWSSecretAccessKey string
@@ -71,8 +68,8 @@ func Load() (*Config, error) {
 		return nil, requiredFieldError("EMAIL_BACKEND")
 	}
 	cfg.EmailBackend = strings.ToLower(cfg.EmailBackend)
-	if cfg.EmailBackend != "console" && cfg.EmailBackend != "mailgun" && cfg.EmailBackend != "ses" {
-		return nil, invalidFieldError("EMAIL_BACKEND", "console, mailgun or ses")
+	if cfg.EmailBackend != "console" && cfg.EmailBackend != "ses" {
+		return nil, invalidFieldError("EMAIL_BACKEND", "console or ses")
 	}
 
 	// Optional: PORT (default 8080)
@@ -115,11 +112,6 @@ func Load() (*Config, error) {
 	// When empty, package-level defaults are used.
 	cfg.OTPEmailTemplate = os.Getenv("OTP_EMAIL_TEMPLATE")
 	cfg.OTPEmailHTMLTemplate = os.Getenv("OTP_EMAIL_HTML_TEMPLATE")
-
-	// Optional: MAILGUN_DOMAIN, MAILGUN_API_KEY, MAILGUN_FROM.
-	cfg.MailgunDomain = os.Getenv("MAILGUN_DOMAIN")
-	cfg.MailgunAPIKey = os.Getenv("MAILGUN_API_KEY")
-	cfg.MailgunFrom = os.Getenv("MAILGUN_FROM")
 
 	// Optional: AWS SES. Required when EMAIL_BACKEND=ses.
 	cfg.AWSAccessKeyID = os.Getenv("AWS_ACCESS_KEY_ID")

@@ -325,8 +325,7 @@ func (h *Handler) VerifyOTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	refreshExpiry := time.Now().Add(h.tokenService.RefreshTokenTTL())
-	if err := h.store.SaveRefreshToken(ctx, user.ID, refreshHash, "", refreshExpiry); err != nil {
+	if err := h.store.SaveRefreshToken(ctx, user.ID, refreshHash, ""); err != nil {
 		h.logger.Error("failed to save refresh token", "error", err)
 		writeError(w, http.StatusInternalServerError, "internal_error", "An internal error occurred", nil)
 		return
@@ -408,8 +407,7 @@ func (h *Handler) AppleSignIn(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	refreshExpiry := time.Now().Add(h.tokenService.RefreshTokenTTL())
-	if err := h.store.SaveRefreshToken(ctx, user.ID, refreshHash, "", refreshExpiry); err != nil {
+	if err := h.store.SaveRefreshToken(ctx, user.ID, refreshHash, ""); err != nil {
 		h.logger.Error("failed to save refresh token", "error", err)
 		writeError(w, http.StatusInternalServerError, "internal_error", "An internal error occurred", nil)
 		return
@@ -494,8 +492,7 @@ func (h *Handler) RefreshToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	refreshExpiry := time.Now().Add(h.tokenService.RefreshTokenTTL())
-	if err := h.store.SaveRefreshToken(ctx, user.ID, refreshHash, "", refreshExpiry); err != nil {
+	if err := h.store.SaveRefreshToken(ctx, user.ID, refreshHash, ""); err != nil {
 		h.logger.Error("failed to save new refresh token", "error", err)
 		writeError(w, http.StatusInternalServerError, "internal_error", "An internal error occurred", nil)
 		return

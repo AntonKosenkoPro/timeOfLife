@@ -25,8 +25,11 @@ final class AppNavigationStack: ObservableObject {
         path.removeAll()
     }
 
-    func popLast() {
-        if !path.isEmpty { path.removeLast() }
+    /// Trims the stack so it contains exactly `count` routes. Used by the iOS 15
+    /// navigation polyfill when a nested `NavigationLink` deactivates.
+    func popTo(count: Int) {
+        guard path.count > count else { return }
+        path.removeSubrange(count...)
     }
 }
 
@@ -56,20 +59,20 @@ struct AppStack<Root: View, Destination: View>: View {
                     }
             }
         } else {
-            // iOS 15 fallback: NavigationView(.stack) with a hidden active link
-            // that renders the top of `path`. RouteLink pushes by mutating
-            // `path`; this link surfaces the destination.
+            // iOS 15 fallback: nested `NavigationLink`s so each pushed route can
+            // push the next one, preserving the stack up to `path.count`. The
+            // root link covers index 0; each destination links to index + 1.
             NavigationView {
                 root()
                     .background(
                         Group {
-                            if let top = stack.path.last {
+                            if !stack.path.isEmpty {
                                 NavigationLink(
-                                    destination: destination(top),
+                                    destination: nestedDestination(at: 0),
                                     isActive: Binding(
                                         get: { !stack.path.isEmpty },
                                         set: { active in
-                                            if !active { stack.popLast() }
+                                            if !active { stack.popTo(count: 0) }
                                         }
                                     )
                                 ) { EmptyView() }
@@ -81,22 +84,31 @@ struct AppStack<Root: View, Destination: View>: View {
             .navigationViewStyle(.stack)
         }
     }
-}
 
-/// A route-aware navigation link. On iOS 16+ uses value-based links (works
-/// with `NavigationStack` + `navigationDestination`); on iOS 15 pushes via
-/// the `AppNavigationStack` and renders the destination through a hidden
-/// `NavigationLink`.
-struct RouteLink<Label: View>: View {
-    @ObservedObject var stack: AppNavigationStack
-    let route: AppRoute
-    @ViewBuilder var label: () -> Label
-
-    var body: some View {
-        if #available(iOS 16.0, *) {
-            NavigationLink(value: route) { label() }
-        } else {
-            Button { stack.push(route) } label: { label() }
-        }
+    /// Recursively builds the iOS 15 destination chain: the route at `index`
+    /// carries a hidden link to `index + 1` so the system back button and
+    /// swipe-back gesture traverse the stack in the same order as on iOS 16+.
+    /// Returns `AnyView` because a recursive `@ViewBuilder` `some View` would
+    /// define its opaque return type in terms of itself.
+    private func nestedDestination(at index: Int) -> AnyView {
+        AnyView(
+            destination(stack.path[index])
+                .background(
+                    Group {
+                        if index + 1 < stack.path.count {
+                            NavigationLink(
+                                destination: nestedDestination(at: index + 1),
+                                isActive: Binding(
+                                    get: { index + 1 < stack.path.count },
+                                    set: { active in
+                                        if !active { stack.popTo(count: index + 1) }
+                                    }
+                                )
+                            ) { EmptyView() }
+                            .opacity(0)
+                        }
+                    }
+                )
+        )
     }
 }

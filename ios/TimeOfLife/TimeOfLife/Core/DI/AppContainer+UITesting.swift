@@ -19,7 +19,6 @@ extension AppContainer {
         let sessionStore = SessionStore()
         let navigation = AppNavigationStack()
         let connectivity = MockConnectivity(connected: true)
-        let themeManager = ThemeManager()
         let timerService = TimerService(
             store: LocalTimerStore(),
             repository: StubTimerRepository(),
@@ -47,10 +46,10 @@ extension AppContainer {
             sessionStore: sessionStore,
             navigation: navigation,
             connectivity: connectivity,
-            themeManager: themeManager,
             authService: authService,
             appleService: appleService,
-            timerService: timerService
+            timerService: timerService,
+            clientHolder: nil
         )
 
         seed(screen: screen, sessionStore: sessionStore, navigation: navigation)
@@ -64,6 +63,10 @@ extension AppContainer {
         navigation: AppNavigationStack
     ) {
         switch screen {
+        case "emailEntry":
+            // Auth flow pushed to the email entry screen.
+            sessionStore.setSignedOut()
+            navigation.path = [.emailEntry]
         case "otpEntry":
             // Auth flow pushed to the OTP screen.
             sessionStore.setSignedOut()
@@ -74,14 +77,8 @@ extension AppContainer {
                 id: "ui-test", email: "user@example.com", emailVerified: true
             ))
             navigation.path = []
-        case "signedInConfirmation":
-            // The `.signedIn` route's `SignedInView` lives in `AuthFlowView`,
-            // which only renders while signed out — so stay signed out and
-            // push the route.
-            sessionStore.setSignedOut()
-            navigation.path = [.signedIn]
         default:
-            // "emailEntry" (and any unknown value) → auth-flow root.
+            // "welcome" (and any unknown value) → auth-flow root.
             sessionStore.setSignedOut()
             navigation.path = []
         }

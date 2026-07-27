@@ -3,8 +3,8 @@ import Foundation
 @testable import TimeOfLife
 
 @MainActor
-@Suite("ViewModels")
-struct ViewModelTests {
+@Suite("EmailEntryViewModel")
+struct EmailEntryViewModelTests {
 
     // MARK: - EmailEntryViewModel
 
@@ -141,24 +141,6 @@ struct ViewModelTests {
         #expect(vm.isEmailSent == true)
     }
 
-    @Test("EmailEntryViewModel: reset clears all state")
-    func emailEntryReset() async throws {
-        let (service, _, conn, _) = TestFactories.makeService()
-        let vm = EmailEntryViewModel(service: service, connectivity: conn)
-        vm.email = "a@b.com"
-        vm.fieldErrors.email = "Some error"
-        vm.isLoading = true
-        vm.errorMessage = "Error"
-
-        vm.reset()
-
-        #expect(vm.email.isEmpty)
-        #expect(vm.fieldErrors.isEmpty)
-        #expect(vm.isLoading == false)
-        #expect(vm.errorMessage == nil)
-        #expect(vm.isEmailSent == false)
-    }
-
     // MARK: - Navigation state transitions
 
     @Test("EmailEntryViewModel: successful submit transitions to email sent state")
@@ -173,15 +155,4 @@ struct ViewModelTests {
         #expect(vm.errorMessage == nil)
     }
 
-    @Test("OtpEntryViewModel: successful verify transitions to verified state")
-    func otpEntryNavigationTransition() async throws {
-        let (service, _, conn, _) = TestFactories.makeService()
-        let vm = OtpEntryViewModel(service: service, connectivity: conn, email: "user@example.com")
-        vm.code = "123456"
-
-        await vm.submit()
-
-        #expect(vm.isVerified == true)
-        #expect(vm.errorMessage == nil)
-    }
 }

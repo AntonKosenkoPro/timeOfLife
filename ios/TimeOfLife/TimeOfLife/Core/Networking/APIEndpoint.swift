@@ -25,6 +25,7 @@ struct APIEndpoint: Equatable, Sendable {
         do {
             return try JSONEncoder().encode(AnyEncodable(body))
         } catch {
+            assertionFailure("Failed to encode endpoint body: \(error)")
             return nil
         }
     }

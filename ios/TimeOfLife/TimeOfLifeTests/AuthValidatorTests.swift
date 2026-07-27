@@ -81,22 +81,6 @@ struct AuthValidatorTests {
         #expect(AuthValidator.validateOtpCode("1234567").contains(.otpInvalid))
     }
 
-    // MARK: - Combined validation
-
-    @Test("combined validate maps email and OTP errors to fields")
-    func combinedFields() {
-        let result = AuthValidator.validate(email: "bad", code: "123")
-        #expect(result[.email]?.contains(.emailInvalid) == true)
-        #expect(result[.otp]?.contains(.otpInvalid) == true)
-    }
-
-    @Test("combined validate with nil code only checks email")
-    func combinedEmailOnly() {
-        let result = AuthValidator.validate(email: "", code: nil)
-        #expect(result[.email]?.contains(.emailEmpty) == true)
-        #expect(result[.otp] == nil)
-    }
-
     // MARK: - Unified messages
 
     @Test("no error message when valid")

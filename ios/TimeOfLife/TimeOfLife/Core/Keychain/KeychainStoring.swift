@@ -7,7 +7,6 @@ protocol KeychainStoring: AnyObject, Sendable {
     func setString(_ string: String, for key: KeychainKey) async
     func string(for key: KeychainKey) async -> String?
     func remove(key: KeychainKey) async
-    func removeAll() async
 }
 
 /// Stable Keychain keys. Never put user-facing data here — secrets only.

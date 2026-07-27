@@ -16,7 +16,6 @@ final class OtpEntryViewModel: ObservableObject {
     @Published var code: String = ""
     @Published var fieldErrors: FieldErrors = .empty
     @Published var isLoading = false
-    @Published var isVerified = false
     @Published var errorMessage: String?
     @Published private(set) var resendCountdown: Int = 0
 
@@ -51,7 +50,8 @@ final class OtpEntryViewModel: ObservableObject {
         return errors.isEmpty
     }
 
-    /// Submits the OTP verification. Validates first; on success sets `isVerified`.
+    /// Submits the OTP verification. On success `AuthService` updates
+    /// `SessionStore`, which drives the signed-in transition in `RootView`.
     func submit() async {
         guard connectivity.isConnected else {
             errorMessage = String.localized("error.offline")
@@ -65,11 +65,14 @@ final class OtpEntryViewModel: ObservableObject {
 
         do {
             try await service.verifyOtp(email: email, code: code)
-            isVerified = true
         } catch let error as APIError {
             errorMessage = ErrorLocalization.message(for: error)
+            // Clear the code so the user can re-type immediately after a
+            // verification failure. Offline never reaches this path.
+            code = ""
         } catch {
             errorMessage = String.localized("error.unknown")
+            code = ""
         }
 
         isLoading = false
@@ -82,6 +85,9 @@ final class OtpEntryViewModel: ObservableObject {
     /// disables the button). The countdown only starts after a successful
     /// resend, so a failed attempt (e.g. offline or server error) leaves the
     /// button tappable for an immediate retry.
+    ///
+    /// Clears the existing code and field error before the network call so the
+    /// user can type the fresh code and any pending auto-submit is cancelled.
     func resendOtp() async {
         guard resendCountdown == 0 else { return }
 
@@ -92,6 +98,8 @@ final class OtpEntryViewModel: ObservableObject {
 
         isLoading = true
         errorMessage = nil
+        fieldErrors.otp = nil
+        code = ""
 
         do {
             try await service.requestOtp(email: email)
@@ -128,7 +136,6 @@ final class OtpEntryViewModel: ObservableObject {
         code = ""
         fieldErrors = .empty
         isLoading = false
-        isVerified = false
         errorMessage = nil
         resendCountdownTask?.cancel()
         resendCountdownTask = nil

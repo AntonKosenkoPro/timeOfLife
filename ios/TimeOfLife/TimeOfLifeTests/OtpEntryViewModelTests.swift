@@ -10,7 +10,7 @@ struct OtpEntryViewModelTests {
 
     @Test("OtpEntryViewModel: invalid code blocks submit")
     func otpEntryValidation() async throws {
-        let (service, repo, conn, _) = TestFactories.makeService()
+        let (service, repo, conn, store) = TestFactories.makeService()
         let vm = OtpEntryViewModel(service: service, connectivity: conn, email: "a@b.com")
         vm.code = "12345"
 
@@ -18,7 +18,7 @@ struct OtpEntryViewModelTests {
 
         #expect(repo.calls.isEmpty)
         #expect(vm.fieldErrors.otp != nil)
-        #expect(vm.isVerified == false)
+        #expect(store.state == .signedOut)
     }
 
     @Test("OtpEntryViewModel: empty code shows validation error")
@@ -37,7 +37,7 @@ struct OtpEntryViewModelTests {
     func otpEntryInvalidOtp() async throws {
         let repo = FakeAuthRepository()
         repo.otpVerifyError = APIError.server(code: "invalid_otp", message: "Incorrect code. Try again.")
-        let (service, _, conn, _) = TestFactories.makeService(repo: repo)
+        let (service, _, conn, store) = TestFactories.makeService(repo: repo)
         let vm = OtpEntryViewModel(service: service, connectivity: conn, email: "a@b.com")
         vm.code = "123456"
 
@@ -45,13 +45,13 @@ struct OtpEntryViewModelTests {
 
         #expect(repo.calls == [.verifyOtp(email: "a@b.com", code: "123456")])
         #expect(vm.errorMessage != nil)
-        #expect(vm.isVerified == false)
+        #expect(store.state == .signedOut)
     }
 
-    @Test("OtpEntryViewModel: otp_expired error sets errorMessage")
-    func otpEntryExpired() async throws {
+    @Test("OtpEntryViewModel: verification failure clears the code so the user can retype")
+    func otpEntryClearsCodeOnError() async throws {
         let repo = FakeAuthRepository()
-        repo.otpVerifyError = APIError.server(code: "otp_expired", message: "This code has expired.")
+        repo.otpVerifyError = APIError.server(code: "invalid_otp", message: "Incorrect code. Try again.")
         let (service, _, conn, _) = TestFactories.makeService(repo: repo)
         let vm = OtpEntryViewModel(service: service, connectivity: conn, email: "a@b.com")
         vm.code = "123456"
@@ -59,7 +59,21 @@ struct OtpEntryViewModelTests {
         await vm.submit()
 
         #expect(vm.errorMessage != nil)
-        #expect(vm.isVerified == false)
+        #expect(vm.code.isEmpty)
+    }
+
+    @Test("OtpEntryViewModel: otp_expired error sets errorMessage")
+    func otpEntryExpired() async throws {
+        let repo = FakeAuthRepository()
+        repo.otpVerifyError = APIError.server(code: "otp_expired", message: "This code has expired.")
+        let (service, _, conn, store) = TestFactories.makeService(repo: repo)
+        let vm = OtpEntryViewModel(service: service, connectivity: conn, email: "a@b.com")
+        vm.code = "123456"
+
+        await vm.submit()
+
+        #expect(vm.errorMessage != nil)
+        #expect(store.state == .signedOut)
     }
 
     @Test("OtpEntryViewModel: otp_attempts_exceeded error sets errorMessage")
@@ -69,17 +83,17 @@ struct OtpEntryViewModelTests {
             code: "otp_attempts_exceeded",
             message: "Too many attempts. Request a new code."
         )
-        let (service, _, conn, _) = TestFactories.makeService(repo: repo)
+        let (service, _, conn, store) = TestFactories.makeService(repo: repo)
         let vm = OtpEntryViewModel(service: service, connectivity: conn, email: "a@b.com")
         vm.code = "123456"
 
         await vm.submit()
 
         #expect(vm.errorMessage != nil)
-        #expect(vm.isVerified == false)
+        #expect(store.state == .signedOut)
     }
 
-    @Test("OtpEntryViewModel: success verifies and sets isVerified")
+    @Test("OtpEntryViewModel: success signs the user in via SessionStore")
     func otpEntrySuccess() async throws {
         let (service, repo, conn, store) = TestFactories.makeService()
         let vm = OtpEntryViewModel(service: service, connectivity: conn, email: "a@b.com")
@@ -88,7 +102,6 @@ struct OtpEntryViewModelTests {
         await vm.submit()
 
         #expect(repo.calls == [.verifyOtp(email: "a@b.com", code: "123456")])
-        #expect(vm.isVerified == true)
         #expect(vm.errorMessage == nil)
         if case .signedIn = store.state {
             // Success
@@ -99,7 +112,7 @@ struct OtpEntryViewModelTests {
 
     @Test("OtpEntryViewModel: offline blocks submit and shows error")
     func otpEntryOffline() async throws {
-        let (service, repo, _, _) = TestFactories.makeService()
+        let (service, repo, _, store) = TestFactories.makeService()
         let conn = Connectivity()
         conn.isConnected = false
         let vm = OtpEntryViewModel(service: service, connectivity: conn, email: "a@b.com")
@@ -109,7 +122,7 @@ struct OtpEntryViewModelTests {
 
         #expect(repo.calls.isEmpty)
         #expect(vm.errorMessage != nil)
-        #expect(vm.isVerified == false)
+        #expect(store.state == .signedOut)
     }
 
     // MARK: - Resend & cooldown
@@ -123,6 +136,20 @@ struct OtpEntryViewModelTests {
 
         #expect(repo.calls == [.requestOtp(email: "a@b.com")])
         #expect(vm.errorMessage == nil)
+    }
+
+    @Test("OtpEntryViewModel: resend clears the existing code and field error")
+    func otpEntryResendClearsCode() async throws {
+        let (service, repo, conn, _) = TestFactories.makeService()
+        let vm = OtpEntryViewModel(service: service, connectivity: conn, email: "a@b.com")
+        vm.code = "123456"
+        vm.fieldErrors.otp = "Old error"
+
+        await vm.resendOtp()
+
+        #expect(vm.code.isEmpty)
+        #expect(vm.fieldErrors.otp == nil)
+        #expect(repo.calls == [.requestOtp(email: "a@b.com")])
     }
 
     @Test("OtpEntryViewModel: arming the initial cooldown disables resend on appear")
@@ -235,6 +262,5 @@ struct OtpEntryViewModelTests {
         #expect(vm.fieldErrors.isEmpty)
         #expect(vm.isLoading == false)
         #expect(vm.errorMessage == nil)
-        #expect(vm.isVerified == false)
     }
 }

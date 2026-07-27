@@ -100,15 +100,4 @@ final class MockAPIClient: APISending, @unchecked Sendable {
         }
     }
 
-    /// Resets all recorded calls and handlers.
-    func reset() {
-        lock.lock()
-        _received.removeAll()
-        sendCallCount = 0
-        sendVoidCallCount = 0
-        throwError = nil
-        sendHandler = nil
-        sendVoidHandler = nil
-        lock.unlock()
-    }
 }

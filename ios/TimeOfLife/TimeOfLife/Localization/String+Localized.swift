@@ -6,29 +6,22 @@ import Foundation
 enum L10n: String {
     // App
     case appName = "app.name"
-    case authWelcome = "auth.welcome"
-    case authSubtitle = "auth.subtitle"
+
+    // Welcome
+    case welcomeTagline = "welcome.tagline"
+    case welcomeContinueWithEmail = "welcome.continueWithEmail"
 
     // Email entry (passwordless)
     case emailEntryTitle = "emailEntry.title"
     case emailEntryEmail = "emailEntry.email"
+    case emailEntrySubtitle = "emailEntry.subtitle"
     case emailEntrySubmit = "emailEntry.submit"
 
     // OTP entry
     case otpTitle = "otp.title"
     case otpSentTo = "otp.sentTo"
-    case otpCode = "otp.code"
-    case otpSubmit = "otp.submit"
     case otpResend = "otp.resend"
     case otpResendCountdown = "otp.resendCountdown"
-    case otpSuccess = "otp.success"
-    case otpResent = "otp.resent"
-
-    // Signed in
-    case signedInTitle = "signedIn.title"
-    case signedInEmail = "signedIn.email"
-    case signedInLogout = "signedIn.logout"
-    case signedInPlaceholder = "signedIn.placeholder"
 
     // Offline
     case offlineBanner = "offline.banner"
@@ -44,23 +37,19 @@ enum L10n: String {
     case timerStop = "timer.stop"
     case timerOfflineHint = "timer.offlineHint"
     case timerEmptyActivityError = "timer.emptyActivityError"
+    case timerSignOut = "timer.signOut"
+
+    // Sign out confirmation
+    case signOutConfirmationTitle = "signOut.confirmationTitle"
+    case signOutConfirmationMessage = "signOut.confirmationMessage"
+    case signOutConfirm = "signOut.confirm"
+    case signOutCancel = "signOut.cancel"
 
     /// Resolves the key via `NSLocalizedString` against `Localizable.strings`.
     var text: String {
         NSLocalizedString(rawValue, comment: "")
     }
 
-    /// Resolves the key, falling back to `key` when missing. Used by the
-    /// localization test to detect missing entries per-bundle.
-    func text(in bundle: Bundle, localeIdentifier: String) -> String {
-        let langCode = localeIdentifier.lowercased()
-        let path = bundle.path(forResource: langCode, ofType: "lproj")
-            ?? bundle.path(forResource: String(langCode.prefix(2)), ofType: "lproj")
-            ?? bundle.path(forResource: "Base", ofType: "lproj")
-            ?? bundle.bundlePath
-        let locBundle = Bundle(path: path) ?? bundle
-        return NSLocalizedString(rawValue, tableName: "Localizable", bundle: locBundle, comment: "")
-    }
 }
 
 extension String {

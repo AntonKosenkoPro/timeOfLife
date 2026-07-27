@@ -8,7 +8,7 @@ info:
     ## Auth flow (passwordless email-OTP)
     1. **Request OTP** — `POST /auth/otp/request` with an email address. Always returns 202
        (prevents user enumeration). The server upserts the user, generates a 6-digit code,
-       and sends it via email (console or Mailgun).
+       and sends it via email (console in dev/test, AWS SES in production).
     2. **Verify OTP** — `POST /auth/otp/verify` with the email and 6-digit code. On success,
        returns a JWT access token (15 min TTL) and an opaque refresh token (7 day TTL).
     3. **Refresh** — `POST /auth/refresh` with the refresh token. Issues a new token pair

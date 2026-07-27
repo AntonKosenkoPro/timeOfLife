@@ -234,9 +234,8 @@ func TestSQLiteStore_SaveRefreshTokenAndGetRefreshToken(t *testing.T) {
 
 	tokenHash := "test-refresh-token-hash-123"
 	deviceID := "device-001"
-	expiresAt := time.Now().Add(7 * 24 * time.Hour)
 
-	if err := store.SaveRefreshToken(ctx, user.ID, tokenHash, deviceID, expiresAt); err != nil {
+	if err := store.SaveRefreshToken(ctx, user.ID, tokenHash, deviceID); err != nil {
 		t.Fatalf("SaveRefreshToken failed: %v", err)
 	}
 
@@ -270,8 +269,7 @@ func TestSQLiteStore_RevokeRefreshToken_MarksTokenAsRevoked(t *testing.T) {
 	}
 
 	tokenHash := "token-to-revoke"
-	expiresAt := time.Now().Add(7 * 24 * time.Hour)
-	if err := store.SaveRefreshToken(ctx, user.ID, tokenHash, "", expiresAt); err != nil {
+	if err := store.SaveRefreshToken(ctx, user.ID, tokenHash, ""); err != nil {
 		t.Fatalf("SaveRefreshToken failed: %v", err)
 	}
 
@@ -304,11 +302,10 @@ func TestSQLiteStore_RevokeAllUserSessions_RevokesAllTokens(t *testing.T) {
 		t.Fatalf("UpsertUser failed: %v", err)
 	}
 
-	expiresAt := time.Now().Add(7 * 24 * time.Hour)
-	if err := store.SaveRefreshToken(ctx, user.ID, "token-1", "", expiresAt); err != nil {
+	if err := store.SaveRefreshToken(ctx, user.ID, "token-1", ""); err != nil {
 		t.Fatalf("SaveRefreshToken 1 failed: %v", err)
 	}
-	if err := store.SaveRefreshToken(ctx, user.ID, "token-2", "", expiresAt); err != nil {
+	if err := store.SaveRefreshToken(ctx, user.ID, "token-2", ""); err != nil {
 		t.Fatalf("SaveRefreshToken 2 failed: %v", err)
 	}
 
@@ -430,11 +427,10 @@ func TestSQLiteStore_RevokeAllUserSessions_OnlyRevokesSpecifiedUser(t *testing.T
 		t.Fatalf("UpsertUser user2 failed: %v", err)
 	}
 
-	expiresAt := time.Now().Add(7 * 24 * time.Hour)
-	if err := store.SaveRefreshToken(ctx, user1.ID, "user1-token", "", expiresAt); err != nil {
+	if err := store.SaveRefreshToken(ctx, user1.ID, "user1-token", ""); err != nil {
 		t.Fatalf("SaveRefreshToken user1 failed: %v", err)
 	}
-	if err := store.SaveRefreshToken(ctx, user2.ID, "user2-token", "", expiresAt); err != nil {
+	if err := store.SaveRefreshToken(ctx, user2.ID, "user2-token", ""); err != nil {
 		t.Fatalf("SaveRefreshToken user2 failed: %v", err)
 	}
 
