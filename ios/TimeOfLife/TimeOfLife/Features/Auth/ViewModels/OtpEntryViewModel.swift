@@ -16,7 +16,6 @@ final class OtpEntryViewModel: ObservableObject {
     @Published var code: String = ""
     @Published var fieldErrors: FieldErrors = .empty
     @Published var isLoading = false
-    @Published var isVerified = false
     @Published var errorMessage: String?
     @Published private(set) var resendCountdown: Int = 0
 
@@ -51,7 +50,8 @@ final class OtpEntryViewModel: ObservableObject {
         return errors.isEmpty
     }
 
-    /// Submits the OTP verification. Validates first; on success sets `isVerified`.
+    /// Submits the OTP verification. On success `AuthService` updates
+    /// `SessionStore`, which drives the signed-in transition in `RootView`.
     func submit() async {
         guard connectivity.isConnected else {
             errorMessage = String.localized("error.offline")
@@ -65,7 +65,6 @@ final class OtpEntryViewModel: ObservableObject {
 
         do {
             try await service.verifyOtp(email: email, code: code)
-            isVerified = true
         } catch let error as APIError {
             errorMessage = ErrorLocalization.message(for: error)
             // Clear the code so the user can re-type immediately after a
@@ -137,7 +136,6 @@ final class OtpEntryViewModel: ObservableObject {
         code = ""
         fieldErrors = .empty
         isLoading = false
-        isVerified = false
         errorMessage = nil
         resendCountdownTask?.cancel()
         resendCountdownTask = nil

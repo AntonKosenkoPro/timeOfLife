@@ -14,16 +14,13 @@ final class WelcomeViewModel: ObservableObject {
     @Published var errorMessage: String?
 
     private let service: AuthService
-    private let connectivity: Connectivity
     private let appleService: AppleSignInService
 
     init(
         service: AuthService,
-        connectivity: Connectivity,
         appleService: AppleSignInService
     ) {
         self.service = service
-        self.connectivity = connectivity
         self.appleService = appleService
     }
 

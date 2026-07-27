@@ -12,7 +12,6 @@ enum Theme {
     static let textSecondary = Color("TextSecondary", bundle: .main)
     static let accentPrimary = Color("AccentPrimary", bundle: .main)
     static let danger = Color("Danger", bundle: .main)
-    static let success = Color("Success", bundle: .main)
     static let hairline = Color("Hairline", bundle: .main)
 
     // MARK: - Spacing
@@ -27,15 +26,9 @@ enum Theme {
 
     static let cornerRadius: CGFloat = 10
     static let cornerRadiusSmall: CGFloat = 8
-    static let cornerRadiusLarge: CGFloat = 16
     static let minTapArea: CGFloat = 44
     static let screenHorizontalPadding: CGFloat = 24
     static let maxContentWidth: CGFloat = 420
-
-    // MARK: - Shadows
-
-    static let shadowSmall = ShadowStyle(radius: 4, y: 2, opacity: 0.08)
-    static let shadowMedium = ShadowStyle(radius: 8, y: 4, opacity: 0.12)
 
     // MARK: - Helpers
 
@@ -56,13 +49,4 @@ struct ShadowStyle {
     let radius: CGFloat
     let y: CGFloat
     let opacity: Double
-}
-
-/// Manages the active color scheme. For the MVP it follows the system;
-/// `ThemeManager` is the seam where a future setting could override it.
-@MainActor
-final class ThemeManager: ObservableObject {
-    @Published var colorScheme: ColorScheme? // nil = follow system
-
-    init() {}
 }

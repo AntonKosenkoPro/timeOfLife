@@ -145,16 +145,4 @@ final class FakeAuthRepository: AuthRepository, @unchecked Sendable {
         return meResult
     }
 
-    /// Resets all recorded calls and errors.
-    func reset() {
-        lock.lock()
-        _calls.removeAll()
-        otpRequestError = nil
-        otpVerifyError = nil
-        appleSignInError = nil
-        refreshError = nil
-        logoutError = nil
-        meError = nil
-        lock.unlock()
-    }
 }

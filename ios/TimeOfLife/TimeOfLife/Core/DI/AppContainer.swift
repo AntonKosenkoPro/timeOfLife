@@ -5,15 +5,14 @@ import SwiftUI
 /// objects views/view models need. Everything is injectable for tests.
 @MainActor
 final class AppContainer: ObservableObject {
-    let baseURL: URL
-    let apiClient: APIClient
-    let keychain: KeychainStoring
-    let sessionCache: SessionCache
-    let repository: AuthRepository
+    private let baseURL: URL
+    private let apiClient: APIClient
+    private let keychain: KeychainStoring
+    private let sessionCache: SessionCache
+    private let repository: AuthRepository
     let sessionStore: SessionStore
     let navigation: AppNavigationStack
     let connectivity: Connectivity
-    let themeManager: ThemeManager
     let authService: AuthService
     let appleService: AppleSignInService
     let timerService: TimerService
@@ -31,7 +30,6 @@ final class AppContainer: ObservableObject {
         sessionStore: SessionStore,
         navigation: AppNavigationStack,
         connectivity: Connectivity,
-        themeManager: ThemeManager,
         authService: AuthService,
         appleService: AppleSignInService,
         timerService: TimerService,
@@ -45,7 +43,6 @@ final class AppContainer: ObservableObject {
         self.sessionStore = sessionStore
         self.navigation = navigation
         self.connectivity = connectivity
-        self.themeManager = themeManager
         self.authService = authService
         self.appleService = appleService
         self.timerService = timerService
@@ -60,7 +57,6 @@ final class AppContainer: ObservableObject {
         let sessionStore = SessionStore()
         let navigation = AppNavigationStack()
         let connectivity = NetworkMonitor()
-        let themeManager = ThemeManager()
         let timerService = TimerService(
             store: LocalTimerStore(),
             repository: StubTimerRepository(),
@@ -88,7 +84,6 @@ final class AppContainer: ObservableObject {
             sessionStore: sessionStore,
             navigation: navigation,
             connectivity: connectivity,
-            themeManager: themeManager,
             authService: authService,
             appleService: appleService,
             timerService: timerService,

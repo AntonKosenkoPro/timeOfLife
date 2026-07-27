@@ -26,7 +26,7 @@ backend/                 Go backend (chi + pgx/Postgres; sqlite for tests)
     server/              chi router + middleware (recoverer, logger, jwtAuth)
     db/                  Store interface + postgres + sqlite impls
     migrations/          embedded SQL migrations (go:embed)
-    email/               Sender (console + mailgun) + localized bodies
+    email/               Sender (console + AWS SES) + localized bodies
     ratelimit/           in-memory token bucket
     config/              env config (fail-fast JWT_SECRET ≥32 bytes)
   Dockerfile             Multi-stage Docker build (alpine)

@@ -7,8 +7,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"net/http"
-	"net/url"
 	"strings"
 	"text/template"
 
@@ -124,76 +122,6 @@ func (s *ConsoleSender) Send(_ context.Context, msg Message) error {
 	return nil
 }
 
-// ---------- MailgunSender ----------
-
-// MailgunSender sends emails via the Mailgun API.
-type MailgunSender struct {
-	apiKey string
-	domain string
-	from   string
-	client *http.Client
-	logger *slog.Logger
-}
-
-// MailgunSenderConfig holds configuration for MailgunSender.
-type MailgunSenderConfig struct {
-	APIKey string
-	Domain string
-	From   string
-	Logger *slog.Logger
-}
-
-// NewMailgunSender creates a new MailgunSender.
-func NewMailgunSender(cfg MailgunSenderConfig) (*MailgunSender, error) {
-	return &MailgunSender{
-		apiKey: cfg.APIKey,
-		domain: cfg.Domain,
-		from:   cfg.From,
-		client: &http.Client{},
-		logger: cfg.Logger,
-	}, nil
-}
-
-// Send sends an email via the Mailgun API.
-func (s *MailgunSender) Send(ctx context.Context, msg Message) error {
-	from := msg.From
-	if from == "" {
-		from = s.from
-	}
-
-	form := url.Values{}
-	form.Set("from", from)
-	form.Set("to", msg.To)
-	form.Set("subject", msg.Subject)
-	form.Set("text", msg.Text)
-	if msg.HTML != "" {
-		form.Set("html", msg.HTML)
-	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
-		fmt.Sprintf("https://api.mailgun.net/v3/%s/messages", s.domain),
-		strings.NewReader(form.Encode()),
-	)
-	if err != nil {
-		return fmt.Errorf("create mailgun request: %w", err)
-	}
-	req.SetBasicAuth("api", s.apiKey)
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-
-	resp, err := s.client.Do(req)
-	if err != nil {
-		return fmt.Errorf("send mailgun request: %w", err)
-	}
-	_ = resp.Body.Close()
-
-	if resp.StatusCode >= 400 {
-		return fmt.Errorf("mailgun API error: %s", resp.Status)
-	}
-
-	s.logger.Info("email sent via Mailgun", "to", msg.To)
-	return nil
-}
-
 // ---------- SESSender ----------
 
 // sesAPI wraps the single sesv2.Client method we use, so SESSender is
@@ -286,10 +214,7 @@ func (s *SESSender) Send(ctx context.Context, msg Message) error {
 
 // SenderConfig holds configuration for selecting and constructing a Sender.
 type SenderConfig struct {
-	Backend              string // "console" (default), "mailgun", "ses"
-	MailgunAPIKey        string
-	MailgunDomain        string
-	MailgunFrom          string
+	Backend              string // "console" (default) or "ses"
 	AWSAccessKeyID       string
 	AWSSecretAccessKey   string
 	AWSRegion            string
@@ -300,8 +225,8 @@ type SenderConfig struct {
 }
 
 // NewSender creates the appropriate Sender based on Backend. Supported values:
-// "console" (default), "mailgun", "ses". On construction failure it falls back
-// to ConsoleSender so the service stays available.
+// "console" (default) and "ses". On construction failure it falls back to
+// ConsoleSender so the service stays available.
 func NewSender(cfg SenderConfig) Sender {
 	logger := cfg.Logger
 	if logger == nil {
@@ -314,18 +239,6 @@ func NewSender(cfg SenderConfig) Sender {
 	}
 
 	switch strings.ToLower(cfg.Backend) {
-	case "mailgun":
-		s, err := NewMailgunSender(MailgunSenderConfig{
-			APIKey: cfg.MailgunAPIKey,
-			Domain: cfg.MailgunDomain,
-			From:   cfg.MailgunFrom,
-			Logger: logger,
-		})
-		if err != nil {
-			logger.Error("failed to create Mailgun sender, falling back to console", "error", err)
-			return NewConsoleSender(logger)
-		}
-		return s
 	case "ses":
 		s, err := NewSESSender(SESSenderConfig{
 			AccessKeyID:     cfg.AWSAccessKeyID,

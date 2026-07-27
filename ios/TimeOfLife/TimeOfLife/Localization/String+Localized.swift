@@ -20,11 +20,8 @@ enum L10n: String {
     // OTP entry
     case otpTitle = "otp.title"
     case otpSentTo = "otp.sentTo"
-    case otpCode = "otp.code"
-    case otpSubmit = "otp.submit"
     case otpResend = "otp.resend"
     case otpResendCountdown = "otp.resendCountdown"
-    case otpResent = "otp.resent"
 
     // Offline
     case offlineBanner = "offline.banner"
@@ -53,17 +50,6 @@ enum L10n: String {
         NSLocalizedString(rawValue, comment: "")
     }
 
-    /// Resolves the key, falling back to `key` when missing. Used by the
-    /// localization test to detect missing entries per-bundle.
-    func text(in bundle: Bundle, localeIdentifier: String) -> String {
-        let langCode = localeIdentifier.lowercased()
-        let path = bundle.path(forResource: langCode, ofType: "lproj")
-            ?? bundle.path(forResource: String(langCode.prefix(2)), ofType: "lproj")
-            ?? bundle.path(forResource: "Base", ofType: "lproj")
-            ?? bundle.bundlePath
-        let locBundle = Bundle(path: path) ?? bundle
-        return NSLocalizedString(rawValue, tableName: "Localizable", bundle: locBundle, comment: "")
-    }
 }
 
 extension String {

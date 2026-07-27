@@ -39,12 +39,6 @@ actor KeychainStore: KeychainStoring {
         SecItemDelete(query as CFDictionary)
     }
 
-    func removeAll() async {
-        for key in [KeychainKey.accessToken, KeychainKey.refreshToken] {
-            SecItemDelete(baseQuery(for: key) as CFDictionary)
-        }
-    }
-
     private func baseQuery(for key: KeychainKey) -> [String: Any] {
         [
             kSecClass as String: kSecClassGenericPassword,

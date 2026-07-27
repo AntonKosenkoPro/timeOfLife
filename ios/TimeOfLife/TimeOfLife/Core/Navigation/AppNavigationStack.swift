@@ -25,10 +25,6 @@ final class AppNavigationStack: ObservableObject {
         path.removeAll()
     }
 
-    func popLast() {
-        if !path.isEmpty { path.removeLast() }
-    }
-
     /// Trims the stack so it contains exactly `count` routes. Used by the iOS 15
     /// navigation polyfill when a nested `NavigationLink` deactivates.
     func popTo(count: Int) {
@@ -114,23 +110,5 @@ struct AppStack<Root: View, Destination: View>: View {
                     }
                 )
         )
-    }
-}
-
-/// A route-aware navigation link. On iOS 16+ uses value-based links (works
-/// with `NavigationStack` + `navigationDestination`); on iOS 15 pushes via
-/// the `AppNavigationStack` and renders the destination through a hidden
-/// `NavigationLink`.
-struct RouteLink<Label: View>: View {
-    @ObservedObject var stack: AppNavigationStack
-    let route: AppRoute
-    @ViewBuilder var label: () -> Label
-
-    var body: some View {
-        if #available(iOS 16.0, *) {
-            NavigationLink(value: route) { label() }
-        } else {
-            Button { stack.push(route) } label: { label() }
-        }
     }
 }

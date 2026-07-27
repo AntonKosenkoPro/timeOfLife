@@ -19,7 +19,6 @@ extension AppContainer {
         let sessionStore = SessionStore()
         let navigation = AppNavigationStack()
         let connectivity = MockConnectivity(connected: true)
-        let themeManager = ThemeManager()
         let timerService = TimerService(
             store: LocalTimerStore(),
             repository: StubTimerRepository(),
@@ -47,7 +46,6 @@ extension AppContainer {
             sessionStore: sessionStore,
             navigation: navigation,
             connectivity: connectivity,
-            themeManager: themeManager,
             authService: authService,
             appleService: appleService,
             timerService: timerService,

@@ -117,31 +117,6 @@ func TestConsoleSender_IncludesRecipient(t *testing.T) {
 	}
 }
 
-// ---------- MailgunSender ----------
-
-func TestMailgunSender_NewMailgunSender_NoError(t *testing.T) {
-	t.Parallel()
-
-	s, err := NewMailgunSender(MailgunSenderConfig{
-		APIKey: "test-api-key",
-		Domain: "mg.example.com",
-		From:   "noreply@example.com",
-		Logger: quietLogger(),
-	})
-	if err != nil {
-		t.Fatalf("NewMailgunSender returned error: %v", err)
-	}
-	if s == nil {
-		t.Fatal("expected non-nil sender")
-	}
-	if s.domain != "mg.example.com" {
-		t.Errorf("expected domain mg.example.com, got %q", s.domain)
-	}
-	if s.from != "noreply@example.com" {
-		t.Errorf("expected from noreply@example.com, got %q", s.from)
-	}
-}
-
 // ---------- SESSender ----------
 
 // fakeSES captures the SendEmailInput passed to SendEmail.

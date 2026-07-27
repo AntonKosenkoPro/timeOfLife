@@ -28,7 +28,6 @@ struct AuthFlowView: View {
             root: {
                 WelcomeView(vm: WelcomeViewModel(
                     service: container.authService,
-                    connectivity: container.connectivity,
                     appleService: container.appleService
                 ))
             }

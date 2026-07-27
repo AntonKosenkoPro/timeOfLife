@@ -23,17 +23,6 @@ enum AuthValidator {
     static let maxEmail = 254
     static let otpLength = 6
 
-    /// Returns per-field errors; empty means valid. `code` is optional so the
-    /// email screen can validate email alone.
-    static func validate(email: String, code: String?) -> [Field: [ValidationError]] {
-        var out: [Field: [ValidationError]] = [:]
-        out[.email] = validateEmail(email)
-        if let code {
-            out[.otp] = validateOtpCode(code)
-        }
-        return out.filter { !$0.value.isEmpty }
-    }
-
     static func validateEmail(_ raw: String) -> [ValidationError] {
         var errors: [ValidationError] = []
         let email = raw.trimmingCharacters(in: .whitespacesAndNewlines)

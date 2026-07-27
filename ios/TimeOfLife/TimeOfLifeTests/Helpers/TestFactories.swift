@@ -42,13 +42,6 @@ enum TestFactories {
         return (try? JSONSerialization.data(withJSONObject: envelope)) ?? Data()
     }
 
-    // MARK: - Input factories
-
-    static func makeValidEmail() -> String { "user@example.com" }
-    static func makeInvalidEmail() -> String { "not-an-email" }
-    static func makeValidOTP() -> String { "123456" }
-    static func makeInvalidOTP() -> String { "abc" }
-
     // MARK: - HTTP response factories
 
     /// Creates a 200 `HTTPURLResponse` for the given URL.
@@ -81,10 +74,6 @@ enum TestFactories {
             headerFields: ["Content-Type": "application/json"]
         )!
         return (body, resp)
-    }
-
-    static func makeURL(_ path: String) -> URL {
-        URL(string: "http://127.0.0.1:8080\(path)")!
     }
 
     // MARK: - Service factories

@@ -103,7 +103,6 @@ struct WelcomeView: View {
     let container = AppContainer.production()
     WelcomeView(vm: WelcomeViewModel(
         service: container.authService,
-        connectivity: container.connectivity,
         appleService: container.appleService
     ))
     .environmentObject(container.navigation)
@@ -114,7 +113,6 @@ struct WelcomeView: View {
     let container = AppContainer.production()
     WelcomeView(vm: WelcomeViewModel(
         service: container.authService,
-        connectivity: container.connectivity,
         appleService: container.appleService
     ))
     .environmentObject(container.navigation)

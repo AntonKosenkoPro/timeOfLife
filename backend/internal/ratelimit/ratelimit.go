@@ -64,20 +64,6 @@ func (tb *TokenBucket) Allow(key string) bool {
 	return false
 }
 
-// Cleanup removes stale entries that have not been accessed for longer than
-// the given duration. This prevents unbounded memory growth.
-func (tb *TokenBucket) Cleanup(maxAge time.Duration) {
-	tb.mu.Lock()
-	defer tb.mu.Unlock()
-
-	now := time.Now()
-	for key, entry := range tb.tokens {
-		if now.Sub(entry.lastCheck) > maxAge {
-			delete(tb.tokens, key)
-		}
-	}
-}
-
 func minFloat(a, b float64) float64 {
 	if a < b {
 		return a

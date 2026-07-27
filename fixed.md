@@ -12,6 +12,22 @@ Fixed problems.
     - Root cause: `OtpCodeField` used `.background(Theme.backgroundSecondary)` (a sharp-cornered rectangle) with a rounded-rectangle stroke overlay, so the fill protruded past the border at the corners.
     - Fix: replaced the square color background with a rounded-rectangle fill using the same `Theme.cornerRadiusSmall` continuous shape as the stroke. Updated `Design/COMPONENTS.md` to document the shape.
 
+15. Backend cleanup: removed dead Mailgun sender and config.
+    - Root cause: production uses AWS SES (CI/CD `.env` only sets SES credentials); the `mailgun` backend option, `MailgunSender`, Mailgun env vars, and tests were unused. `deploy.sh` was also unused.
+    - Fix: deleted `MailgunSender` and related config from `internal/email/sender.go`, `internal/config/config.go`, `internal/server/server.go`, `docker-compose.prod.yml`, `.env.example`, and tests. Removed `backend/deploy.sh`. Updated `backend/api/openapi.yaml` and docs to reflect console/SES only.
+
+16. Backend cleanup: dropped unused `refresh_tokens.expires_at` column and `TokenBucket.Cleanup`.
+    - Root cause: `expires_at` was written but never enforced; `Cleanup` was implemented but never called.
+    - Fix: removed the column from migrations and all read/write paths; removed `Cleanup` and its tests.
+
+17. iOS cleanup: removed dead code, unused localization, and stale configuration.
+    - Root cause: auth MVP simplification left behind `ThemeManager`, `EmptyState`, `ListRow`, `RouteLink`, `KeychainStoring.removeAll()`, `AppNavigationStack.popLast()`, unused `HTTPMethod` cases, unused `Theme` constants/color, unused `L10n` keys (`otpCode`, `otpSubmit`, `otpResent`), test-only view-model methods, and the removed `timeoflife://` URL scheme in `project.yml`.
+    - Fix: deleted files/types/methods/keys, renamed `ViewModelTests.swift` to `EmailEntryViewModelTests.swift`, removed ignored `GeometryReader` wrappers, made `APIEndpoint.encode` fail loudly in debug, dropped `any` existentials from `TimerService`, and privatized internal `AppContainer` construction properties.
+
+18. Repository / docs cleanup.
+    - Root cause: README still described removed magic links and Mailgun; `auth-audit.md` still listed fixed P0 gaps; `Requirements/Common.md` duplicated `Requirements/FURPS/Common.md`; generated Xcode project files, user data, and empty directories were tracked.
+    - Fix: updated README.md and AGENTS.md, marked P0 items fixed in auth-audit.md, deleted duplicate Common.md, removed empty directories, added generated/user-specific files to `.gitignore`, and untracked `ios/TimeOfLife/TimeOfLife.xcodeproj` and `_bmad/config.user.toml`.
+
 6. Deep link in email doesn't work. It opens the app, but doesn't paste the code.
    - Root cause: the backend generated `timeoflife://auth/verify?code=<6-digit>` (`backend/internal/handlers/auth.go`) while the iOS `DeepLink` parser only accepted host `verify` (`timeoflife://verify?code=…`). `DeepLink.parse` returned `nil`, so `TimeOfLifeApp.handle(url:)` bailed out before staging `pendingDeepLinkCode` or pushing `.otpEntry` — the OTP view never received the code. This broke both warm-resume and cold launch, at URL recognition, before any view ordering. Fixed on both sides: the iOS parser now accepts both forms via a shared `DeepLink.isVerifyLink(_:)` (host `verify`, or host `auth` + path `/verify`, strict against over-matching), and the backend now emits the documented `timeoflife://verify?code=…` form. Covered by new `DeepLinkTests` cases for the `auth/verify` form and negatives. Satisfies FURPS U5 (OTP autofill from email).
    - Cold-launch robustness: `SessionStore.cachedEmail` was in-memory only, so when the OS had killed the app the magic link pasted the code but auto-submitted with an empty email. `SessionCache` now persists a pending email (`savePendingEmail`/`loadPendingEmail`) written by `AuthService.requestOtp`, cleared on sign-in/logout. `AuthService.resolveDeepLinkEmail()` (in-memory → persisted → `""`) resolves the email for the deep-link handler, and `restoreSession()` hydrates `cachedEmail` from the persisted pending email when not signed in. Covered by new `AuthServiceTests` (persistence, cold-launch resolution, hydration, logout clears).

@@ -185,19 +185,6 @@ See `Design/COMPONENTS.md` → `OtpCodeField`. At a high level:
 
 ---
 
-## Deprecated: SignedInView
-
-The `.signedIn` route and `SignedInView` are deprecated. Signed-in users now land directly on `TimerView` via `RootView`, so the intermediate confirmation screen is redundant. The implementation pass will:
-
-- remove `case signedIn` from `AppRoute`
-- delete `Features/Auth/Views/SignedInView.swift`
-- remove the `navigation.push(.signedIn)` call from `OtpEntryView`
-- remove the `signedIn.*` `L10n` keys and `.strings` entries
-- update `LocalizationTests.allCases`
-- update `AppContainer+UITesting.swift` seed screens
-
----
-
 ## New and changed localization keys
 
 Add to `en.lproj/Localizable.strings` and `ru.lproj/Localizable.strings`, then to `L10n`:
@@ -233,11 +220,9 @@ Russian:
 
 - `auth.welcome`
 - `auth.subtitle`
-- `signedIn.title`
-- `signedIn.email`
-- `signedIn.logout`
-- `signedIn.placeholder`
-- `otp.success` (unused after removing SignedInView; verify no other usage)
 - `otp.changeEmail` (system back button replaces the custom Change-email button)
+- `otp.code` (unused; the OTP field is decorative and needs no label)
+- `otp.submit` (OTP auto-submits; no visible Verify button)
+- `otp.resent` (unused resend feedback message)
 
 Remove the matching `L10n` enum cases and update `LocalizationTests.allCases`.

@@ -47,9 +47,6 @@ func NewDefaultDependencies(cfg *config.Config, store db.Store) Dependencies {
 
 	emailSender := email.NewSender(email.SenderConfig{
 		Backend:              cfg.EmailBackend,
-		MailgunAPIKey:        cfg.MailgunAPIKey,
-		MailgunDomain:        cfg.MailgunDomain,
-		MailgunFrom:          cfg.MailgunFrom,
 		AWSAccessKeyID:       cfg.AWSAccessKeyID,
 		AWSSecretAccessKey:   cfg.AWSSecretAccessKey,
 		AWSRegion:            cfg.AWSRegion,

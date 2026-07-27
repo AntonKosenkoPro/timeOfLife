@@ -120,16 +120,16 @@ struct LocalizationTests {
 
     @Test("L10n enum allCases count matches expected keys")
     func allCasesCount() {
-        // 28 keys: appName,
+        // 25 keys: appName,
         // welcomeTagline, welcomeContinueWithEmail,
         // emailEntryTitle, emailEntryEmail, emailEntrySubtitle, emailEntrySubmit,
-        // otpTitle, otpSentTo, otpCode, otpSubmit, otpResend, otpResendCountdown, otpResent,
+        // otpTitle, otpSentTo, otpResend, otpResendCountdown,
         // offlineBanner,
         // appleSignInTitle, appleSignInError,
         // timerTitle, timerActivityPlaceholder, timerStart, timerStop,
         // timerOfflineHint, timerEmptyActivityError, timerSignOut,
         // signOutConfirmationTitle, signOutConfirmationMessage, signOutConfirm, signOutCancel
-        #expect(l10nCases.count == 28)
+        #expect(l10nCases.count == 25)
     }
 }
 
@@ -139,7 +139,7 @@ extension L10n: CaseIterable {
             .appName,
             .welcomeTagline, .welcomeContinueWithEmail,
             .emailEntryTitle, .emailEntryEmail, .emailEntrySubtitle, .emailEntrySubmit,
-            .otpTitle, .otpSentTo, .otpCode, .otpSubmit, .otpResend, .otpResendCountdown, .otpResent,
+            .otpTitle, .otpSentTo, .otpResend, .otpResendCountdown,
             .offlineBanner,
             .appleSignInTitle, .appleSignInError,
             .timerTitle, .timerActivityPlaceholder, .timerStart, .timerStop,

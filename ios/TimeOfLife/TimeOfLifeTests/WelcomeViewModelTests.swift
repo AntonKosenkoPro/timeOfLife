@@ -23,18 +23,17 @@ struct WelcomeViewModelTests {
 
     private func makeWelcomeVM(
         service: AuthService,
-        conn: Connectivity,
         provider: FakeAppleAuthorizationProvider = FakeAppleAuthorizationProvider()
     ) -> (WelcomeViewModel, FakeAppleAuthorizationProvider) {
         let appleService = AppleSignInService(provider: provider)
-        let vm = WelcomeViewModel(service: service, connectivity: conn, appleService: appleService)
+        let vm = WelcomeViewModel(service: service, appleService: appleService)
         return (vm, provider)
     }
 
     @Test("Apple sign-in success exchanges token and signs in")
     func appleSignInSuccess() async throws {
-        let (service, repo, conn, store) = makeService()
-        let (vm, _) = makeWelcomeVM(service: service, conn: conn)
+        let (service, repo, _, store) = makeService()
+        let (vm, _) = makeWelcomeVM(service: service)
 
         await vm.signInWithApple()
 
@@ -51,9 +50,7 @@ struct WelcomeViewModelTests {
     @Test("Apple sign-in delegates to backend; offline is handled by the view")
     func appleSignInOfflineHandledByView() async throws {
         let (service, repo, _, _) = makeService()
-        let conn = Connectivity()
-        conn.isConnected = false
-        let (vm, _) = makeWelcomeVM(service: service, conn: conn)
+        let (vm, _) = makeWelcomeVM(service: service)
 
         await vm.signInWithApple()
 
@@ -65,10 +62,10 @@ struct WelcomeViewModelTests {
 
     @Test("Apple sign-in canceled is silent")
     func appleSignInCanceled() async throws {
-        let (service, repo, conn, _) = makeService()
+        let (service, repo, _, _) = makeService()
         let provider = FakeAppleAuthorizationProvider()
         provider.error = AppleSignInError.canceled
-        let (vm, _) = makeWelcomeVM(service: service, conn: conn, provider: provider)
+        let (vm, _) = makeWelcomeVM(service: service, provider: provider)
 
         await vm.signInWithApple()
 
@@ -78,10 +75,10 @@ struct WelcomeViewModelTests {
 
     @Test("Apple provider failure shows apple error")
     func appleSignInProviderFailed() async throws {
-        let (service, repo, conn, _) = makeService()
+        let (service, repo, _, _) = makeService()
         let provider = FakeAppleAuthorizationProvider()
         provider.error = AppleSignInError.failed("boom")
-        let (vm, _) = makeWelcomeVM(service: service, conn: conn, provider: provider)
+        let (vm, _) = makeWelcomeVM(service: service, provider: provider)
 
         await vm.signInWithApple()
 
@@ -93,8 +90,8 @@ struct WelcomeViewModelTests {
     func appleSignInBackendError() async throws {
         let repo = FakeAuthRepository()
         repo.appleSignInError = APIError.server(code: "invalid_apple_token", message: "Invalid Apple identity token")
-        let (service, _, conn, _) = makeService(repo: repo)
-        let (vm, _) = makeWelcomeVM(service: service, conn: conn)
+        let (service, _, _, _) = makeService(repo: repo)
+        let (vm, _) = makeWelcomeVM(service: service)
 
         await vm.signInWithApple()
 

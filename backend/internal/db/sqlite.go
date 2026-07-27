@@ -157,11 +157,11 @@ func (s *SQLiteStore) MarkOTPExhausted(ctx context.Context, otpID string) error 
 }
 
 // SaveRefreshToken stores a new refresh token.
-func (s *SQLiteStore) SaveRefreshToken(ctx context.Context, userID string, tokenHash string, deviceID string, expiresAt time.Time) error {
+func (s *SQLiteStore) SaveRefreshToken(ctx context.Context, userID string, tokenHash string, deviceID string) error {
 	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO refresh_tokens (id, user_id, token_hash, device_id, revoked, expires_at, created_at)
-		VALUES (?, ?, ?, ?, false, ?, datetime('now'))
-	`, uuidV7(), userID, tokenHash, deviceID, expiresAt.UTC().Format("2006-01-02 15:04:05"))
+		INSERT INTO refresh_tokens (id, user_id, token_hash, device_id, revoked, created_at)
+		VALUES (?, ?, ?, ?, false, datetime('now'))
+	`, uuidV7(), userID, tokenHash, deviceID)
 	if err != nil {
 		return fmt.Errorf("save refresh token: %w", err)
 	}

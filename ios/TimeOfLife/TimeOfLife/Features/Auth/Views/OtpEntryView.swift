@@ -13,66 +13,63 @@ struct OtpEntryView: View {
     @State private var autoSubmitTask: Task<Void, Never>?
 
     var body: some View {
-        // `GeometryReader` + `ScrollView` gives us keyboard avoidance on
-        // iOS 15. The form stacks from the top; content scrolls when it does
-        // not fit, especially while the keyboard is open on short screens
-        // (iPhone SE 1st gen).
-        GeometryReader { _ in
-            ScrollView {
-                VStack(spacing: Theme.spacingLarge) {
-                    Text(L10n.otpTitle.text)
-                        .font(.title.bold())
-                        .foregroundStyle(Theme.textPrimary)
-                        .multilineTextAlignment(.center)
+        // `ScrollView` gives us keyboard avoidance on iOS 15. The form stacks
+        // from the top; content scrolls when it does not fit, especially while
+        // the keyboard is open on short screens (iPhone SE 1st gen).
+        ScrollView {
+            VStack(spacing: Theme.spacingLarge) {
+                Text(L10n.otpTitle.text)
+                    .font(.title.bold())
+                    .foregroundStyle(Theme.textPrimary)
+                    .multilineTextAlignment(.center)
 
-                    Text(String(format: L10n.otpSentTo.text, vm.email))
-                        .font(.subheadline)
-                        .foregroundStyle(Theme.textSecondary)
-                        .multilineTextAlignment(.center)
-                        .fixedSize(horizontal: false, vertical: true)
+                Text(String(format: L10n.otpSentTo.text, vm.email))
+                    .font(.subheadline)
+                    .foregroundStyle(Theme.textSecondary)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
 
-                    Spacer().frame(height: Theme.spacingSmall)
+                Spacer().frame(height: Theme.spacingSmall)
 
-                    OtpCodeField(
-                        code: $vm.code,
-                        length: 6,
-                        error: vm.fieldErrors.otp,
-                        isLoading: vm.isLoading,
-                        accessibilityId: "OtpCodeField"
+                OtpCodeField(
+                    code: $vm.code,
+                    length: 6,
+                    error: vm.fieldErrors.otp,
+                    isLoading: vm.isLoading,
+                    accessibilityId: "OtpCodeField"
+                )
+
+                if let errorMessage = vm.errorMessage {
+                    ErrorBanner(
+                        message: errorMessage,
+                        accessibilityId: "OtpErrorBanner"
                     )
-
-                    if let errorMessage = vm.errorMessage {
-                        ErrorBanner(
-                            message: errorMessage,
-                            accessibilityId: "OtpErrorBanner"
-                        )
-                    }
-
-                    // Resend link lives close to the OTP field because it is a
-                    // context action tied to the code input, not a primary
-                    // screen action.
-                    Button {
-                        Task { await vm.resendOtp() }
-                    } label: {
-                        Text(resendLabel)
-                            .font(.subheadline)
-                            .foregroundStyle(resendColor)
-                            .frame(maxWidth: .infinity)
-                            .frame(minHeight: Theme.minTapArea)
-                    }
-                    .disabled(vm.isLoading || vm.resendCountdown > 0 || !container.connectivity.isConnected)
-                    .accessibilityIdentifier("OtpResendButton")
-
-                    // Extra breathing room below the Resend button so the
-                    // scrollable content ends comfortably above the keyboard on
-                    // short screens (iPhone SE 1st gen).
-                    Spacer().frame(height: Theme.spacingLarge)
                 }
-                .padding(.horizontal, Theme.screenHorizontalPadding)
-                .padding(.vertical, Theme.spacingExtraLarge)
-                .frame(maxWidth: Theme.maxContentWidth)
-                .frame(maxWidth: .infinity)
+
+                // Resend link lives close to the OTP field because it is a
+                // context action tied to the code input, not a primary
+                // screen action.
+                Button {
+                    Task { await vm.resendOtp() }
+                } label: {
+                    Text(resendLabel)
+                        .font(.subheadline)
+                        .foregroundStyle(resendColor)
+                        .frame(maxWidth: .infinity)
+                        .frame(minHeight: Theme.minTapArea)
+                }
+                .disabled(vm.isLoading || vm.resendCountdown > 0 || !container.connectivity.isConnected)
+                .accessibilityIdentifier("OtpResendButton")
+
+                // Extra breathing room below the Resend button so the
+                // scrollable content ends comfortably above the keyboard on
+                // short screens (iPhone SE 1st gen).
+                Spacer().frame(height: Theme.spacingLarge)
             }
+            .padding(.horizontal, Theme.screenHorizontalPadding)
+            .padding(.vertical, Theme.spacingExtraLarge)
+            .frame(maxWidth: Theme.maxContentWidth)
+            .frame(maxWidth: .infinity)
         }
         .background(Theme.backgroundPrimary.ignoresSafeArea())
         .onAppear {

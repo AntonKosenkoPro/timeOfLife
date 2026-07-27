@@ -151,11 +151,11 @@ func (s *PostgresStore) MarkOTPExhausted(ctx context.Context, otpID string) erro
 }
 
 // SaveRefreshToken stores a new refresh token.
-func (s *PostgresStore) SaveRefreshToken(ctx context.Context, userID string, tokenHash string, deviceID string, expiresAt time.Time) error {
+func (s *PostgresStore) SaveRefreshToken(ctx context.Context, userID string, tokenHash string, deviceID string) error {
 	_, err := s.pool.Exec(ctx, `
-		INSERT INTO refresh_tokens (id, user_id, token_hash, device_id, revoked, expires_at, created_at)
-		VALUES (gen_random_uuid(), $1, $2, $3, false, $4, NOW())
-	`, userID, tokenHash, deviceID, expiresAt)
+		INSERT INTO refresh_tokens (id, user_id, token_hash, device_id, revoked, created_at)
+		VALUES (gen_random_uuid(), $1, $2, $3, false, NOW())
+	`, userID, tokenHash, deviceID)
 	if err != nil {
 		// Check for unique constraint violation
 		var pgErr *pgconn.PgError

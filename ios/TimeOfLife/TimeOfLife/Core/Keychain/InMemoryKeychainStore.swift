@@ -25,11 +25,6 @@ final class InMemoryKeychainStore: KeychainStoring, @unchecked Sendable {
         storage.removeValue(forKey: key)
     }
 
-    func removeAll() async {
-        lock.lock(); defer { lock.unlock() }
-        storage.removeAll()
-    }
-
     /// Test-only snapshot accessor.
     func snapshot() -> [KeychainKey: String] {
         lock.lock(); defer { lock.unlock() }

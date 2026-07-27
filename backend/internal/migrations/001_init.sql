@@ -24,7 +24,6 @@ CREATE TABLE IF NOT EXISTS refresh_tokens (
     token_hash TEXT UNIQUE NOT NULL,
     device_id TEXT,
     revoked BOOLEAN DEFAULT false,
-    expires_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 

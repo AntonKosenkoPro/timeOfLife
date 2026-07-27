@@ -57,7 +57,7 @@ type Store interface {
 	MarkOTPExhausted(ctx context.Context, otpID string) error
 
 	// SaveRefreshToken stores a new refresh token.
-	SaveRefreshToken(ctx context.Context, userID string, tokenHash string, deviceID string, expiresAt time.Time) error
+	SaveRefreshToken(ctx context.Context, userID string, tokenHash string, deviceID string) error
 
 	// GetRefreshToken returns a refresh token by its hash, including user info.
 	GetRefreshToken(ctx context.Context, tokenHash string) (RefreshToken, error)

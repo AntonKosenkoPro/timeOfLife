@@ -16,8 +16,7 @@ ios/       SwiftUI app (iOS 15+) — MVVM + Repository, keychain token storage
 ### Auth flow (passwordless)
 1. **Enter email** → `POST /auth/otp/request` → server upserts the user (created unverified on first request) and emails a 6-digit OTP code. Always 202 (no enumeration).
 2. **Enter the code** (autofilled from the email via `.oneTimeCode`, or typed) → `POST /auth/otp/verify` → server marks the user verified and issues an access + refresh token pair. This proves email ownership, so there is no separate "verify email" step.
-3. **Magic link** `timeoflife://verify?code=…` (also in the email) opens the app and pre-fills + submits the code.
-4. **Refresh** with rotation: each refresh issues a new pair and revokes the old token; reuse of a revoked token revokes *all* the user's sessions (`token_reuse`).
+3. **Refresh** with rotation: each refresh issues a new pair and revokes the old token; reuse of a revoked token revokes *all* the user's sessions (`token_reuse`).
 
 ### Auth flow (Sign in with Apple)
 1. **Tap "Sign in with Apple"** on the email screen → the app requests an Apple identity token (`ASAuthorizationAppleIDProvider`, `.fullName`/`.email` scopes).
@@ -37,14 +36,14 @@ ios/       SwiftUI app (iOS 15+) — MVVM + Repository, keychain token storage
 - **No passwords anywhere.** Accounts authenticate by proving email ownership via an OTP code (stored only as a **SHA-256 hash**, 10-min expiry, max 5 attempts).
 - **JWT access token** (HS256, 15 min) + **opaque refresh token** stored as a **SHA-256 hash** in the DB, rotated on every use with reuse detection.
 - iOS stores tokens in the **Keychain** (`kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly`) — never `UserDefaults`, never logged.
-- Deep link (not a website) for the magic link (+1). ATS scoped to `127.0.0.1` only — never arbitrary loads; production must be HTTPS.
+- ATS scoped to `127.0.0.1` only — never arbitrary loads; production must be HTTPS.
 - No user enumeration: `/auth/otp/request` always returns 202.
 - In-memory per-IP+email rate limiting on `otp/request` + `otp/verify` (swap for Redis before multi-instance).
 - `log/slog` logging never touches codes, tokens, or request bodies.
 
 ## Backend (`/backend`) — Go
 
-Stack: Go 1.22+, `go-chi/chi/v5`, `jackc/pgx/v5` (Postgres), `modernc.org/sqlite` (pure-Go, no CGO — for tests), `golang-jwt/jwt/v5`, `joho/godotenv`, `crypto/sha256`. Email via a `Sender` interface — `ConsoleSender` (prints code + magic link to stdout, dev/test) and `MailgunSender` (prod, env-configured). No bcrypt (no passwords).
+Stack: Go 1.22+, `go-chi/chi/v5`, `jackc/pgx/v5` (Postgres), `modernc.org/sqlite` (pure-Go, no CGO — for tests), `golang-jwt/jwt/v5`, `joho/godotenv`, `crypto/sha256`. Email via a `Sender` interface — `ConsoleSender` (prints the OTP code to stdout, dev/test) and `SESSender` (AWS SES, prod). No bcrypt (no passwords).
 
 ### Run (with Docker)
 ```bash
@@ -53,7 +52,7 @@ cp .env.example .env        # set DATABASE_URL, JWT_SECRET (≥32 bytes), EMAIL_
 docker-compose up -d postgres
 go run ./cmd/server         # auto-migrates, serves http://127.0.0.1:8080
 ```
-In dev, watch stdout for the printed OTP code + magic link (e.g. `timeoflife://verify?code=123456`).
+In dev, watch stdout for the printed OTP code.
 
 ### Tests & lint (no Docker required)
 Tests run against an in-memory SQLite store so `go test` is fully self-contained:
@@ -80,7 +79,6 @@ open TimeOfLife.xcodeproj
 - `API_BASE_URL` is injected into `Info.plist` from a per-configuration xcconfig: `Config.Debug.xcconfig` → `http://127.0.0.1:8080` (start the backend first), `Config.Release.xcconfig` → `https://timeoflife-api.antonkosenko.pro` (production). ATS allows plain HTTP only to `127.0.0.1`; production is HTTPS so no ATS exception is needed.
 - Code signing is disabled in `project.yml` (no Apple Developer account required) so simulator and CI builds work out of the box. To ship via TestFlight/App Store later, set `DEVELOPMENT_TEAM` and enable distribution signing (see comment in `project.yml`).
 - On Simulator the host's `127.0.0.1` is reachable directly; a physical device needs your LAN IP instead.
-- Test the magic link: `xcrun simctl openurl booted timeoflife://verify?code=123456`
 
 ### Tests & lint
 ```bash
@@ -89,7 +87,7 @@ swiftlint lint --strict     # linters (S6); `--fix` autocorrects. Config: .swift
 xcodebuild -scheme TimeOfLife \
   -destination 'platform=iOS Simulator,name=iPhone 17,OS=latest' test   # 111 tests, SwiftTesting
 ```
-Unit tests cover the email/OTP validators, deep-link parsing, the API client (incl. 401→refresh→retry and offline mapping via a URLProtocol stub), repositories, the AuthService (keychain/cache/restore-on-offline), and both view-models. Out of scope: SwiftUI snapshot tests and on-device keychain (see smoke checklist below).
+Unit tests cover the email/OTP validators, the API client (incl. 401→refresh→retry and offline mapping via a URLProtocol stub), repositories, the AuthService (keychain/cache/restore-on-offline), and the auth view-models. Out of scope: SwiftUI snapshot tests and on-device keychain (see smoke checklist below).
 
 ## Code quality & CI (S5/S6/S7)
 - **Linters (S6):** Go `golangci-lint` (`backend/.golangci.yml`), Swift `swiftlint` (`ios/TimeOfLife/.swiftlint.yml`), plus `.editorconfig`. Both must pass with zero findings before merge.
@@ -140,7 +138,7 @@ Errors use a uniform envelope: `{ "error": { "code", "message", "details": {} } 
 5. Check VM logs: `gcloud compute ssh timeoflife-backend --zone=us-east1-b --command="cd /opt/timeoflife && sudo docker compose logs backend --tail=20"`
 
 Backend (Docker Postgres running):
-1. `POST /api/v1/auth/otp/request` `{email}` → 202; console sender prints the code + magic link.
+1. `POST /api/v1/auth/otp/request` `{email}` → 202; console sender prints the code.
 2. `POST /api/v1/auth/otp/verify` `{email, code}` (wrong code) → 401 `invalid_otp`.
 3. `POST /api/v1/auth/otp/verify` with the correct code → 200 + tokens.
 4. Repeat the wrong code 5+ times → `otp_attempts_exceeded`.
@@ -148,10 +146,9 @@ Backend (Docker Postgres running):
 6. `GET /api/v1/auth/me` with the Bearer access token → 200 user.
 
 iOS (Simulator, backend running):
-1. Enter email → request OTP → enter/autofill the 6-digit code → signed-in placeholder.
-2. Magic link `xcrun simctl openurl booted timeoflife://verify?code=123456` pre-fills + submits the code.
-3. Switch device language to Russian and toggle dark mode — UI localized + themed.
-4. Turn off network (Simulator features) → offline banner, disabled submit, cached session persists across relaunch.
+1. Enter email → request OTP → enter/autofill the 6-digit code → timer screen.
+2. Switch device language to Russian and toggle dark mode — UI localized + themed.
+3. Turn off network (Simulator features) → offline banner, disabled submit, cached session persists across relaunch.
 
 ## Requirements coverage (MVP)
 
@@ -163,18 +160,18 @@ iOS (Simulator, backend running):
 | U2 Dark/light theme | ✅ `Theme` semantic colors from asset-catalog light/dark sets; follows system |
 | U3 Offline-correct | ✅ `NetworkMonitor` + offline banner, disabled submit, cached session restore, logout works offline |
 | U4 EN + RU localization | ✅ `en.lproj`/`ru.lproj` + `L10n`; tests assert all keys resolve in both |
-| U5 Apple HIG compliance | ✅ `Form`/`Section` structure, `.borderedProminent` primary actions, `.controlSize(.large)`, `.submitLabel`, field-focus chaining, interactive keyboard dismiss, semantic colors, Dynamic Type |
+| U5 Apple HIG compliance | ✅ Native SwiftUI components, `.submitLabel`, field-focus chaining, interactive keyboard dismiss, semantic colors, Dynamic Type |
 | R1 Secure auth storage | ✅ No passwords; OTP + refresh stored as SHA-256 hashes; tokens in Keychain on device |
 | S1 Mainstream tech | ✅ Go (chi + PostgreSQL) backend; Kafka deferred |
 | S2 Native UI SDK | ✅ SwiftUI |
-| S3 Test coverage | ✅ Go tests ≥90% on handlers/services + 59 iOS unit tests; logic-layer ~100%; coverage gating documented |
+| S3 Test coverage | ✅ Go tests ≥90% on handlers/services + 118 iOS unit tests; logic-layer ~100%; coverage gating documented |
 | S4 Run locally + cloud | ✅ docker-compose local, Dockerfile (Go multi-stage) for cloud deploy; deployed to GCP Compute Engine VM |
 | S5 Minimal + standardized code, revising each iteration | ✅ `.editorconfig`; standards + per-iteration checklist in `AGENTS.md` |
 | S6 Linters + analyzers guarantee quality | ✅ `golangci-lint` + `swiftlint` + `.editorconfig`; both pass with zero findings |
 | S6 Tests + linters run on every GitHub PR (mandatory) | ✅ `.github/workflows/backend.yml` + `ios.yml` — mandatory PR checks |
 | S7 `AGENTS.md` for AI agents | ✅ `AGENTS.md` with repo layout, build/test/run, contract, standards, revising process |
 | S10 OpenAPI documentation for every backend API | ✅ [`backend/api/openapi.yaml`](backend/api/openapi.yaml) (OpenAPI 3.0) |
-| +1 No website | ✅ Magic-link deep link; pure mobile client + API |
+| +1 No website | ✅ Pure mobile client + API; no website required |
 | +2 iOS 15+ all devices | ✅ Deployment target 15.0; nav polyfill for iOS 15; adaptive layouts |
 | +3 Backend in Golang | ✅ Go backend (replaced the earlier Swift/Vapor prototype) |
 | +4 Mobile app in Swift | ✅ SwiftUI / Swift |
@@ -190,7 +187,7 @@ iOS (Simulator, backend running):
 | U2 Errors below editors | ✅ Each field renders its single error directly beneath the editor (`FieldErrorLabel`) |
 | U3 Autofill | ✅ Email field `.emailAddress` (Hide my Email); OTP field `.oneTimeCode` + `.numberPad` |
 | U4 Unified error messages | ✅ Multiple failed email rules collapse into one sentence via `AuthValidator.unified*Message` + localized `and`-join |
-| U5 OTP autofill from email | ✅ `.textContentType(.oneTimeCode)`; email body formats the code on its own line for iOS detection (template configurable via `OTP_EMAIL_TEMPLATE`; may need empirical tuning) |
+| U5 OTP code from email | ✅ The email shows the 6-digit code on its own line; the iOS OTP field uses `.textContentType(.oneTimeCode)` for QuickType autofilling. Deep links / magic links were removed because custom URL schemes only work in Apple Mail. |
 
 ## Deferred / out of scope for this MVP
 - **Kafka** — deferred until event-driven needs arise.

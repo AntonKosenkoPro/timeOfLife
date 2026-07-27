@@ -65,13 +65,4 @@ final class EmailEntryViewModel: ObservableObject {
 
         isLoading = false
     }
-
-    /// Resets the form to its initial state.
-    func reset() {
-        email = ""
-        fieldErrors = .empty
-        isLoading = false
-        isEmailSent = false
-        errorMessage = nil
-    }
 }

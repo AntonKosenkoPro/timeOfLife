@@ -65,10 +65,6 @@ targets:
           - UIInterfaceOrientationPortrait
         UIRequiredDeviceCapabilities:
           - armv7
-        CFBundleURLTypes:
-          - CFBundleURLName: com.antonkosenko.timeoflife.deeplink
-            CFBundleURLSchemes:
-              - timeoflife
         NSAppTransportSecurity:
           NSExceptionDomains:
             127.0.0.1:

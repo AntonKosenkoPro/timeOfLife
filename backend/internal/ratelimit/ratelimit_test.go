@@ -92,51 +92,6 @@ func TestTokenBucket_Allow_MultipleTokens(t *testing.T) {
 	}
 }
 
-func TestTokenBucket_Cleanup_RemovesStaleEntries(t *testing.T) {
-	t.Parallel()
-
-	tb := NewTokenBucket(1, 1, time.Minute)
-
-	// Create an entry
-	tb.Allow("stale-key")
-
-	// Verify entry exists
-	tb.mu.Lock()
-	_, exists := tb.tokens["stale-key"]
-	tb.mu.Unlock()
-	if !exists {
-		t.Fatal("expected stale-key to exist in map")
-	}
-
-	// Cleanup with zero maxAge should remove it
-	tb.Cleanup(0)
-
-	tb.mu.Lock()
-	_, exists = tb.tokens["stale-key"]
-	tb.mu.Unlock()
-	if exists {
-		t.Error("expected stale-key to be removed after cleanup")
-	}
-}
-
-func TestTokenBucket_Cleanup_KeepsRecentEntries(t *testing.T) {
-	t.Parallel()
-
-	tb := NewTokenBucket(1, 1, time.Minute)
-
-	tb.Allow("recent-key")
-
-	// Cleanup with large maxAge should keep it
-	tb.Cleanup(time.Hour)
-
-	tb.mu.Lock()
-	_, exists := tb.tokens["recent-key"]
-	tb.mu.Unlock()
-	if !exists {
-		t.Error("expected recent-key to still exist after cleanup with large maxAge")
-	}
-}
-
 func TestTokenBucket_Allow_RefillWithHighRate(t *testing.T) {
 	t.Parallel()
 
