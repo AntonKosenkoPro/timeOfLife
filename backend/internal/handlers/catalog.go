@@ -29,6 +29,8 @@ func (h *Handler) writeCatalogStoreErr(w http.ResponseWriter, record any, err er
 			"A category with this name already exists.", idNameDetails(record))
 	case errors.Is(err, db.ErrActivityNotFound):
 		writeError(w, http.StatusNotFound, codeActivityMissing, "Referenced activity not found", nil)
+	case errors.Is(err, db.ErrEndBeforeStart):
+		writeValidation(w, validationErrs{"ended_at": "ended_at must be after started_at"})
 	case errors.Is(err, db.ErrInvalidCategoryID):
 		writeValidation(w, validationErrs{"category_ids": "One or more categories do not exist"})
 	default:

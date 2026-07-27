@@ -476,6 +476,9 @@ func (s *PostgresStore) CreateCategory(ctx context.Context, c Category) (Categor
 		VALUES ($1, $2, $3, $4, $5, $5)
 	`, c.ID, c.UserID, c.Name, c.Color, now); err != nil {
 		if pgIsUniqueViolation(err) {
+			if clash, err2 := s.pgGetCategoryRowByName(ctx, c.UserID, c.Name); err2 == nil {
+				return clash, false, fmt.Errorf("create category: %w", ErrCategoryExists)
+			}
 			return Category{}, false, fmt.Errorf("create category: %w", ErrCategoryExists)
 		}
 		return Category{}, false, fmt.Errorf("create category: %w", err)
@@ -602,7 +605,7 @@ func (s *PostgresStore) ListEntries(ctx context.Context, userID string, f EntryF
 		addc("started_at >= $%d", *f.From)
 	}
 	if f.To != nil {
-		addc("started_at < $%d", *f.To)
+		addc("started_at <= $%d", *f.To)
 	}
 	if f.ActivityID != "" {
 		addc("activity_id = $%d", f.ActivityID)
@@ -706,6 +709,12 @@ func (s *PostgresStore) CreateEntry(ctx context.Context, e Entry) (Entry, bool, 
 		nameSnap = a.Name
 	}
 
+	// Reject ended_at <= started_at (the handler validates the both-present
+	// case; this also guards direct store calls and a stray zero-time ended_at).
+	if e.EndedAt != nil && !e.EndedAt.After(e.StartedAt) {
+		return Entry{}, false, fmt.Errorf("create entry: %w", ErrEndBeforeStart)
+	}
+
 	var dur *int
 	if e.EndedAt != nil {
 		d := int(e.EndedAt.Sub(e.StartedAt).Seconds())
@@ -718,6 +727,17 @@ func (s *PostgresStore) CreateEntry(ctx context.Context, e Entry) (Entry, bool, 
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $9)
 	`, e.ID, e.UserID, e.ActivityID, pgStrPtr(nameSnap), e.StartedAt, e.EndedAt, dur, pgStrPtr(e.Notes), now); err != nil {
 		return Entry{}, false, fmt.Errorf("create entry: %w", err)
+	}
+	// Bump the activity's last_used_at to the entry's started_at (recency for
+	// suggestions, F5). Only advance it forward so a historical entry does not
+	// regress recency. Skipped on idempotent replay (which returns above).
+	if e.ActivityID != nil {
+		if _, err := s.pool.Exec(ctx, `
+			UPDATE activities SET last_used_at = $1
+			WHERE id = $2 AND user_id = $3 AND (last_used_at IS NULL OR $1 > last_used_at)
+		`, e.StartedAt, *e.ActivityID, e.UserID); err != nil {
+			return Entry{}, false, fmt.Errorf("bump activity last_used_at: %w", err)
+		}
 	}
 	created, err := s.GetEntry(ctx, e.UserID, e.ID)
 	if err != nil {
@@ -746,6 +766,11 @@ func (s *PostgresStore) UpdateEntry(ctx context.Context, userID, id string, p En
 	} else {
 		endedAt = current.EndedAt
 	}
+	// Reject a partial patch that makes ended_at <= started_at once merged
+	// with the current row, rather than persisting a negative duration.
+	if (p.StartedAt != nil || p.EndedAt.Set) && endedAt != nil && !endedAt.After(startedAt) {
+		return Entry{}, fmt.Errorf("update entry: %w", ErrEndBeforeStart)
+	}
 	var dur *int
 	if endedAt != nil {
 		d := int(endedAt.Sub(startedAt).Seconds())
@@ -765,6 +790,11 @@ func (s *PostgresStore) UpdateEntry(ctx context.Context, userID, id string, p En
 		args = append([]any{endedAt}, args...)
 		n++
 	}
+	if p.Notes != nil {
+		sets = append([]string{fmt.Sprintf("notes = $%d", n)}, sets...)
+		args = append([]any{pgStrPtr(*p.Notes)}, args...)
+		n++
+	}
 	args = append(args, id, userID, p.UpdatedAt)
 	query := `UPDATE entries SET ` + strings.Join(sets, ", ") +
 		fmt.Sprintf(" WHERE id = $%d AND user_id = $%d AND updated_at < $%d", n, n+1, n+2)
@@ -773,6 +803,14 @@ func (s *PostgresStore) UpdateEntry(ctx context.Context, userID, id string, p En
 		return Entry{}, fmt.Errorf("update entry: %w", err)
 	}
 	if res.RowsAffected() == 0 {
+		// The row may have been deleted between the fetch above and this UPDATE;
+		// re-check existence so a concurrent delete returns ErrNotFound (404),
+		// not a stale ErrConflict (409), mirroring UpdateActivity/UpdateCategory.
+		if _, err := s.pgGetEntryRow(ctx, userID, id); errors.Is(err, ErrNotFound) {
+			return Entry{}, fmt.Errorf("update entry: %w", ErrNotFound)
+		} else if err != nil {
+			return Entry{}, err
+		}
 		return current, fmt.Errorf("update entry: %w", ErrConflict)
 	}
 	return s.GetEntry(ctx, userID, id)

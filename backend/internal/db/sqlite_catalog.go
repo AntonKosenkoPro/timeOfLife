@@ -357,6 +357,15 @@ func (s *SQLiteStore) CreateActivity(ctx context.Context, a Activity, categoryID
 		INSERT INTO activities (id, user_id, name, color, icon, notes, last_used_at, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`, a.ID, a.UserID, a.Name, a.Color, a.Icon, nullStrArg(a.Notes), fmtTimeArg(a.LastUsedAt), fmtTime(now), fmtTime(now)); err != nil {
+		// A concurrent create that raced past the name pre-check surfaces as a
+		// UNIQUE-constraint failure on the INSERT; map it to ErrActivityExists
+		// (409) like the Postgres path, not a raw 500.
+		if isUniqueViolation(err) {
+			if clash, err2 := s.getActivityRowByName(ctx, a.UserID, a.Name); err2 == nil {
+				return clash, false, fmt.Errorf("create activity: %w", ErrActivityExists)
+			}
+			return Activity{}, false, fmt.Errorf("create activity: %w", ErrActivityExists)
+		}
 		return Activity{}, false, fmt.Errorf("create activity: %w", err)
 	}
 	if err := s.replaceActivityCategories(ctx, a.UserID, a.ID, categoryIDs); err != nil {
@@ -560,6 +569,15 @@ func (s *SQLiteStore) CreateCategory(ctx context.Context, c Category) (Category,
 		INSERT INTO categories (id, user_id, name, color, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?)
 	`, c.ID, c.UserID, c.Name, c.Color, fmtTime(now), fmtTime(now)); err != nil {
+		// A concurrent create that raced past the name pre-check surfaces as a
+		// UNIQUE-constraint failure on the INSERT; map it to ErrCategoryExists
+		// (409) like the Postgres path, not a raw 500.
+		if isUniqueViolation(err) {
+			if clash, err2 := s.getCategoryRowByName(ctx, c.UserID, c.Name); err2 == nil {
+				return clash, false, fmt.Errorf("create category: %w", ErrCategoryExists)
+			}
+			return Category{}, false, fmt.Errorf("create category: %w", ErrCategoryExists)
+		}
 		return Category{}, false, fmt.Errorf("create category: %w", err)
 	}
 	created, err := s.getCategoryRow(ctx, c.UserID, c.ID)
@@ -691,7 +709,7 @@ func (s *SQLiteStore) ListEntries(ctx context.Context, userID string, f EntryFil
 		args = append(args, fmtTime(*f.From))
 	}
 	if f.To != nil {
-		conds = append(conds, "started_at < ?")
+		conds = append(conds, "started_at <= ?")
 		args = append(args, fmtTime(*f.To))
 	}
 	if f.ActivityID != "" {
@@ -807,6 +825,12 @@ func (s *SQLiteStore) CreateEntry(ctx context.Context, e Entry) (Entry, bool, er
 		nameSnap = a.Name
 	}
 
+	// Reject ended_at <= started_at (the handler validates the both-present
+	// case; this also guards direct store calls and a stray zero-time ended_at).
+	if e.EndedAt != nil && !e.EndedAt.After(e.StartedAt) {
+		return Entry{}, false, fmt.Errorf("create entry: %w", ErrEndBeforeStart)
+	}
+
 	// Compute duration when ended.
 	var dur *int
 	if e.EndedAt != nil {
@@ -820,6 +844,17 @@ func (s *SQLiteStore) CreateEntry(ctx context.Context, e Entry) (Entry, bool, er
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`, e.ID, e.UserID, strPtrArg(e.ActivityID), nullStrArg(nameSnap), fmtTime(e.StartedAt), fmtTimeArg(e.EndedAt), nullIntArg(dur), nullStrArg(e.Notes), fmtTime(now), fmtTime(now)); err != nil {
 		return Entry{}, false, fmt.Errorf("create entry: %w", err)
+	}
+	// Bump the activity's last_used_at to the entry's started_at (recency for
+	// suggestions, F5). Only advance it forward so a historical entry does not
+	// regress recency. Skipped on idempotent replay (which returns above).
+	if e.ActivityID != nil {
+		if _, err := s.db.ExecContext(ctx, `
+			UPDATE activities SET last_used_at = ?
+			WHERE id = ? AND user_id = ? AND (last_used_at IS NULL OR ? > last_used_at)
+		`, fmtTime(e.StartedAt), *e.ActivityID, e.UserID, fmtTime(e.StartedAt)); err != nil {
+			return Entry{}, false, fmt.Errorf("bump activity last_used_at: %w", err)
+		}
 	}
 	created, err := s.GetEntry(ctx, e.UserID, e.ID)
 	if err != nil {
@@ -857,6 +892,11 @@ func (s *SQLiteStore) UpdateEntry(ctx context.Context, userID, id string, p Entr
 	} else {
 		endedAt = current.EndedAt
 	}
+	// Reject a partial patch that makes ended_at <= started_at once merged
+	// with the current row, rather than persisting a negative duration.
+	if (p.StartedAt != nil || p.EndedAt.Set) && endedAt != nil && !endedAt.After(startedAt) {
+		return Entry{}, fmt.Errorf("update entry: %w", ErrEndBeforeStart)
+	}
 	var dur *int
 	if endedAt != nil {
 		d := int(endedAt.Sub(startedAt).Seconds())
@@ -873,6 +913,10 @@ func (s *SQLiteStore) UpdateEntry(ctx context.Context, userID, id string, p Entr
 		sets = append([]string{"ended_at = ?"}, sets...)
 		args = append([]any{fmtTimeArg(endedAt)}, args...)
 	}
+	if p.Notes != nil {
+		sets = append([]string{"notes = ?"}, sets...)
+		args = append([]any{nullStrArg(*p.Notes)}, args...)
+	}
 	args = append(args, id, userID, fmtTime(p.UpdatedAt))
 	res, err := s.db.ExecContext(ctx, `
 		UPDATE entries SET `+strings.Join(sets, ", ")+`
@@ -886,6 +930,14 @@ func (s *SQLiteStore) UpdateEntry(ctx context.Context, userID, id string, p Entr
 		return Entry{}, fmt.Errorf("update entry rows: %w", err)
 	}
 	if affected == 0 {
+		// The row may have been deleted between the fetch above and this UPDATE;
+		// re-check existence so a concurrent delete returns ErrNotFound (404),
+		// not a stale ErrConflict (409), mirroring UpdateActivity/UpdateCategory.
+		if _, err := s.getEntryRow(ctx, userID, id); errors.Is(err, ErrNotFound) {
+			return Entry{}, fmt.Errorf("update entry: %w", ErrNotFound)
+		} else if err != nil {
+			return Entry{}, err
+		}
 		return current, fmt.Errorf("update entry: %w", ErrConflict)
 	}
 	return s.GetEntry(ctx, userID, id)

@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 )
@@ -474,3 +475,222 @@ func TestStore_CrossUserIsolation(t *testing.T) {
 
 // ptr returns a pointer to s (helper for patch fields).
 func ptr(s string) *string { return &s }
+
+// F1: UpdateEntry must persist notes (previously dropped from the UPDATE).
+func TestStore_UpdateEntry_Notes(t *testing.T) {
+	store := setupTestStore(t)
+	defer func() { _ = store.Close() }()
+	uid := newTestUser(t, store, "notes@example.com")
+	start := time.Date(2026, 7, 27, 9, 0, 0, 0, time.UTC)
+	e, _, err := store.CreateEntry(context.Background(), Entry{
+		ID: uuidV7(), UserID: uid, ActivityNameSnapshot: "x", StartedAt: start, Notes: "old",
+	})
+	if err != nil {
+		t.Fatalf("CreateEntry: %v", err)
+	}
+	notes := "new notes"
+	updated, err := store.UpdateEntry(context.Background(), uid, e.ID, EntryPatch{
+		Notes: &notes, UpdatedAt: e.UpdatedAt.Add(time.Second),
+	})
+	if err != nil {
+		t.Fatalf("UpdateEntry: %v", err)
+	}
+	if updated.Notes != "new notes" {
+		t.Errorf("expected notes %q, got %q", "new notes", updated.Notes)
+	}
+	// Clearing notes to "" stores NULL and reads back as "".
+	empty := ""
+	updated, err = store.UpdateEntry(context.Background(), uid, e.ID, EntryPatch{
+		Notes: &empty, UpdatedAt: updated.UpdatedAt.Add(time.Second),
+	})
+	if err != nil {
+		t.Fatalf("UpdateEntry clear: %v", err)
+	}
+	if updated.Notes != "" {
+		t.Errorf("expected notes cleared, got %q", updated.Notes)
+	}
+}
+
+// F2: CreateEntry with an activity_id bumps the activity's last_used_at to the
+// entry's started_at, without regressing it for historical entries.
+func TestStore_CreateEntry_BumpsActivityLastUsedAt(t *testing.T) {
+	store := setupTestStore(t)
+	defer func() { _ = store.Close() }()
+	uid := newTestUser(t, store, "bump@example.com")
+	a := mustCreateActivity(t, store, uid, "Gym", nil)
+	if a.LastUsedAt != nil {
+		t.Fatalf("expected nil last_used_at on a new activity, got %v", a.LastUsedAt)
+	}
+	start := time.Date(2026, 7, 27, 9, 0, 0, 0, time.UTC)
+	if _, _, err := store.CreateEntry(context.Background(), Entry{
+		ID: uuidV7(), UserID: uid, ActivityID: &a.ID, StartedAt: start,
+	}); err != nil {
+		t.Fatalf("CreateEntry: %v", err)
+	}
+	got, err := store.GetActivity(context.Background(), uid, a.ID)
+	if err != nil {
+		t.Fatalf("GetActivity: %v", err)
+	}
+	if got.LastUsedAt == nil || !got.LastUsedAt.Equal(start) {
+		t.Errorf("expected last_used_at=%v, got %v", start, got.LastUsedAt)
+	}
+	// A historical (earlier) entry must not regress last_used_at.
+	earlier := start.Add(-2 * time.Hour)
+	if _, _, err := store.CreateEntry(context.Background(), Entry{
+		ID: uuidV7(), UserID: uid, ActivityID: &a.ID, StartedAt: earlier,
+	}); err != nil {
+		t.Fatalf("CreateEntry earlier: %v", err)
+	}
+	got, err = store.GetActivity(context.Background(), uid, a.ID)
+	if err != nil {
+		t.Fatalf("GetActivity 2: %v", err)
+	}
+	if got.LastUsedAt == nil || !got.LastUsedAt.Equal(start) {
+		t.Errorf("expected last_used_at to stay %v (no regression), got %v", start, got.LastUsedAt)
+	}
+}
+
+// F3: a partial PATCH that moves ended_at before the existing started_at (or
+// vice versa) must be rejected by the store rather than persisting a negative
+// duration_seconds.
+func TestStore_UpdateEntry_PartialPatchRejectsNegativeDuration(t *testing.T) {
+	store := setupTestStore(t)
+	defer func() { _ = store.Close() }()
+	uid := newTestUser(t, store, "neg@example.com")
+	start := time.Date(2026, 7, 27, 10, 0, 0, 0, time.UTC)
+	end := start.Add(time.Hour)
+	e, _, err := store.CreateEntry(context.Background(), Entry{
+		ID: uuidV7(), UserID: uid, StartedAt: start, EndedAt: &end,
+	})
+	if err != nil {
+		t.Fatalf("CreateEntry: %v", err)
+	}
+	// Move only ended_at to before the existing started_at.
+	earlier := start.Add(-time.Hour)
+	if _, err := store.UpdateEntry(context.Background(), uid, e.ID, EntryPatch{
+		EndedAt:   NullableTime{Set: true, Valid: true, Value: earlier},
+		UpdatedAt: e.UpdatedAt.Add(time.Second),
+	}); !errors.Is(err, ErrEndBeforeStart) {
+		t.Fatalf("expected ErrEndBeforeStart, got %v", err)
+	}
+	// Move only started_at to after the existing ended_at.
+	later := end.Add(time.Hour)
+	if _, err := store.UpdateEntry(context.Background(), uid, e.ID, EntryPatch{
+		StartedAt: &later,
+		UpdatedAt: e.UpdatedAt.Add(time.Second),
+	}); !errors.Is(err, ErrEndBeforeStart) {
+		t.Fatalf("expected ErrEndBeforeStart on started_at move, got %v", err)
+	}
+}
+
+// F5: the `to` filter is an inclusive upper bound on started_at.
+func TestStore_ListEntries_ToFilterInclusive(t *testing.T) {
+	store := setupTestStore(t)
+	defer func() { _ = store.Close() }()
+	uid := newTestUser(t, store, "tofilter@example.com")
+	base := time.Date(2026, 7, 27, 9, 0, 0, 0, time.UTC)
+	for i := 0; i < 3; i++ {
+		st := base.Add(time.Duration(i) * time.Hour)
+		if _, _, err := store.CreateEntry(context.Background(), Entry{
+			ID: uuidV7(), UserID: uid, ActivityNameSnapshot: "x", StartedAt: st,
+		}); err != nil {
+			t.Fatalf("CreateEntry %d: %v", i, err)
+		}
+	}
+	to := base.Add(time.Hour) // 10:00 — exactly matches the middle entry.
+	items, _, err := store.ListEntries(context.Background(), uid, EntryFilter{To: &to})
+	if err != nil {
+		t.Fatalf("ListEntries: %v", err)
+	}
+	if len(items) != 2 { // 09:00 and 10:00 inclusive
+		t.Errorf("expected 2 items (inclusive to), got %d", len(items))
+	}
+}
+
+// F7: updating a missing entry returns ErrNotFound (contract guard for the
+// concurrent-delete race, which re-checks existence on RowsAffected==0).
+func TestStore_UpdateEntry_MissingReturnsNotFound(t *testing.T) {
+	store := setupTestStore(t)
+	defer func() { _ = store.Close() }()
+	uid := newTestUser(t, store, "missing@example.com")
+	_, err := store.UpdateEntry(context.Background(), uid, "does-not-exist", EntryPatch{
+		UpdatedAt: time.Now(),
+	})
+	if !errors.Is(err, ErrNotFound) {
+		t.Errorf("expected ErrNotFound, got %v", err)
+	}
+}
+
+// F8: a concurrent name collision that races past the pre-check must surface as
+// ErrActivityExists (409), not a raw UNIQUE-constraint error (500). With a
+// single pooled connection, the pre-check and INSERT release the connection
+// between statements, so a burst of identical-name creates reliably reaches the
+// INSERT-path UNIQUE violation.
+func TestStore_CreateActivity_ConcurrentNameCollision(t *testing.T) {
+	store := setupTestStore(t)
+	defer func() { _ = store.Close() }()
+	uid := newTestUser(t, store, "race@example.com")
+	const n = 100
+	var wg sync.WaitGroup
+	errs := make([]error, n)
+	created := make([]bool, n)
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			_, isNew, err := store.CreateActivity(context.Background(), Activity{
+				ID: uuidV7(), UserID: uid, Name: "Gym", Color: "blue", Icon: "figure.run",
+			}, nil)
+			errs[i] = err
+			created[i] = isNew
+		}(i)
+	}
+	wg.Wait()
+	createdCount := 0
+	for i := 0; i < n; i++ {
+		if created[i] {
+			createdCount++
+		}
+		if errs[i] != nil && !errors.Is(errs[i], ErrActivityExists) {
+			t.Errorf("goroutine %d: expected nil or ErrActivityExists, got %v", i, errs[i])
+		}
+	}
+	if createdCount != 1 {
+		t.Errorf("expected exactly 1 created activity, got %d", createdCount)
+	}
+}
+
+// F8 (categories): same race contract for CreateCategory.
+func TestStore_CreateCategory_ConcurrentNameCollision(t *testing.T) {
+	store := setupTestStore(t)
+	defer func() { _ = store.Close() }()
+	uid := newTestUser(t, store, "catrace@example.com")
+	const n = 100
+	var wg sync.WaitGroup
+	errs := make([]error, n)
+	created := make([]bool, n)
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			_, isNew, err := store.CreateCategory(context.Background(), Category{
+				ID: uuidV7(), UserID: uid, Name: "Sport", Color: "green",
+			})
+			errs[i] = err
+			created[i] = isNew
+		}(i)
+	}
+	wg.Wait()
+	createdCount := 0
+	for i := 0; i < n; i++ {
+		if created[i] {
+			createdCount++
+		}
+		if errs[i] != nil && !errors.Is(errs[i], ErrCategoryExists) {
+			t.Errorf("goroutine %d: expected nil or ErrCategoryExists, got %v", i, errs[i])
+		}
+	}
+	if createdCount != 1 {
+		t.Errorf("expected exactly 1 created category, got %d", createdCount)
+	}
+}

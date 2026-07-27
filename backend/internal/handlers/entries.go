@@ -21,6 +21,7 @@ func (h *Handler) ListEntries(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	q := r.URL.Query()
+	errs := validationErrs{}
 	f := db.EntryFilter{
 		ActivityID: q.Get("activity_id"),
 		CategoryID: q.Get("category_id"),
@@ -29,17 +30,28 @@ func (h *Handler) ListEntries(w http.ResponseWriter, r *http.Request) {
 	if v := q.Get("from"); v != "" {
 		if t, ok := parseRFC3339(v); ok {
 			f.From = &t
+		} else {
+			errs.add("from", "from must be a valid RFC 3339 timestamp")
 		}
 	}
 	if v := q.Get("to"); v != "" {
 		if t, ok := parseRFC3339(v); ok {
 			f.To = &t
+		} else {
+			errs.add("to", "to must be a valid RFC 3339 timestamp")
 		}
 	}
 	if v := q.Get("limit"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 1 || n > 200 {
+			errs.add("limit", "limit must be between 1 and 200")
+		} else {
 			f.Limit = n
 		}
+	}
+	if !errs.ok() {
+		writeValidation(w, errs)
+		return
 	}
 
 	items, next, err := h.store.ListEntries(r.Context(), userID, f)
@@ -69,6 +81,12 @@ func (h *Handler) CreateEntry(w http.ResponseWriter, r *http.Request) {
 		h.logger.Warn("invalid create entry body", "error", err)
 		writeError(w, http.StatusBadRequest, "invalid_body", "Invalid request body", nil)
 		return
+	}
+	// An empty ended_at string means "no value" (running timer), not a present
+	// zero-time timestamp. Normalize it to omitted so it is not stored as
+	// year-0001 with a hugely negative duration_seconds.
+	if req.EndedAt != nil && *req.EndedAt == "" {
+		req.EndedAt = nil
 	}
 
 	errs := validationErrs{}

@@ -199,3 +199,51 @@ func TestDeleteEntry(t *testing.T) {
 		t.Errorf("expected 404 after delete, got %d", wg.Code)
 	}
 }
+
+// F4: an empty ended_at string is treated as omitted (running timer), not as a
+// present zero-time timestamp that yields a hugely negative duration.
+func TestCreateEntry_EmptyEndedAtIsRunning(t *testing.T) {
+	h, _, _, tok := newCatalogHandler(t)
+	w := serve(h, jsonReq(t, "POST", "/api/v1/entries", tok, map[string]any{
+		"id": v7(), "activity_name_snapshot": "x",
+		"started_at": "2026-07-27T09:00:00Z", "ended_at": "",
+	}))
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d (body=%s)", w.Code, w.Body.String())
+	}
+	var e struct {
+		EndedAt         *string `json:"ended_at"`
+		DurationSeconds *int    `json:"duration_seconds"`
+	}
+	decodeBody(t, w, &e)
+	if e.EndedAt != nil {
+		t.Errorf("expected nil ended_at (running), got %v", *e.EndedAt)
+	}
+	if e.DurationSeconds != nil {
+		t.Errorf("expected nil duration_seconds (running), got %d", *e.DurationSeconds)
+	}
+}
+
+// F6: GET /entries returns 422 validation_error for unparseable from/to or an
+// out-of-range limit, rather than silently dropping the filter and returning
+// the full unfiltered list.
+func TestListEntries_InvalidParamsReturn422(t *testing.T) {
+	h, _, _, tok := newCatalogHandler(t)
+	cases := []string{
+		"/api/v1/entries?from=garbage",
+		"/api/v1/entries?to=notadate",
+		"/api/v1/entries?limit=0",
+		"/api/v1/entries?limit=201",
+		"/api/v1/entries?limit=abc",
+	}
+	for _, path := range cases {
+		w := serve(h, jsonReq(t, "GET", path, tok, nil))
+		if w.Code != http.StatusUnprocessableEntity {
+			t.Errorf("%s: expected 422, got %d (body=%s)", path, w.Code, w.Body.String())
+			continue
+		}
+		if code := errCode(t, w); code != "validation_error" {
+			t.Errorf("%s: expected validation_error, got %q", path, code)
+		}
+	}
+}

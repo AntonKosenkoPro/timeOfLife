@@ -30,4 +30,10 @@ var (
 	// category_id that does not exist or belong to the user. It is a
 	// validation error (422), not a missing-resource error (404).
 	ErrInvalidCategoryID = errors.New("invalid category id")
+
+	// ErrEndBeforeStart is returned when an entry's ended_at is not after its
+	// started_at. Because a partial PATCH can move only one side, the check is
+	// performed in the store against the merged value; it is a validation error
+	// (422), not a persistence error.
+	ErrEndBeforeStart = errors.New("ended_at must be after started_at")
 )

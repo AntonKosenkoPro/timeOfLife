@@ -86,7 +86,7 @@ type Entry struct {
 // EntryFilter carries the optional GET /entries query parameters.
 type EntryFilter struct {
 	From       *time.Time // include entries with started_at >= From
-	To         *time.Time // include entries with started_at <  To
+	To         *time.Time // include entries with started_at <= To (inclusive upper bound)
 	ActivityID string     // restrict to a single activity
 	CategoryID string     // restrict to entries whose (linked) activity is tagged
 	Limit      int        // page size; 0 → default
