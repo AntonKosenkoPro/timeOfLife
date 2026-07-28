@@ -16,6 +16,11 @@ final class AppContainer: ObservableObject {
     let authService: AuthService
     let appleService: AppleSignInService
     let timerService: TimerService
+    let catalogStore: CatalogStore
+    let catalogRepository: CatalogRepository
+    let syncQueue: SyncQueue
+    let undoBuffer: UndoBuffer
+    let catalogService: CatalogService
     /// Strong reference to the holder that wires the API client's refresh hook
     /// back to `authService`. If this were not retained, the holder would
     /// deallocate after `production()` returns and token refresh would fail.
@@ -33,6 +38,11 @@ final class AppContainer: ObservableObject {
         authService: AuthService,
         appleService: AppleSignInService,
         timerService: TimerService,
+        catalogStore: CatalogStore,
+        catalogRepository: CatalogRepository,
+        syncQueue: SyncQueue,
+        undoBuffer: UndoBuffer,
+        catalogService: CatalogService,
         clientHolder: APIClientHolder? = nil
     ) {
         self.baseURL = baseURL
@@ -46,6 +56,11 @@ final class AppContainer: ObservableObject {
         self.authService = authService
         self.appleService = appleService
         self.timerService = timerService
+        self.catalogStore = catalogStore
+        self.catalogRepository = catalogRepository
+        self.syncQueue = syncQueue
+        self.undoBuffer = undoBuffer
+        self.catalogService = catalogService
         self.clientHolder = clientHolder
     }
 
@@ -75,6 +90,8 @@ final class AppContainer: ObservableObject {
 
         let appleService = AppleSignInService()
 
+        let catalog = makeCatalogGraph(client: client, connectivity: connectivity)
+
         return AppContainer(
             baseURL: baseURL,
             apiClient: client,
@@ -87,8 +104,34 @@ final class AppContainer: ObservableObject {
             authService: authService,
             appleService: appleService,
             timerService: timerService,
+            catalogStore: catalog.store,
+            catalogRepository: catalog.repository,
+            syncQueue: catalog.queue,
+            undoBuffer: catalog.undoBuffer,
+            catalogService: catalog.service,
             clientHolder: clientHolder
         )
+    }
+
+    /// Builds the catalog graph (store + remote repo + queue + undo + service).
+    /// Extracted so `production()` stays within the linter's function-body limit.
+    private static func makeCatalogGraph(
+        client: APIClient,
+        connectivity: Connectivity
+    ) -> (store: CatalogStore, repository: CatalogRepository,
+          queue: SyncQueue, undoBuffer: UndoBuffer, service: CatalogService) {
+        let store = CatalogStore()
+        let repository = RemoteCatalogRepository(client: client)
+        let queue = SyncQueue()
+        let undoBuffer = UndoBuffer()
+        let service = CatalogService(
+            store: store,
+            repository: repository,
+            syncQueue: queue,
+            undoBuffer: undoBuffer,
+            connectivity: connectivity
+        )
+        return (store, repository, queue, undoBuffer, service)
     }
 
     /// Builds the API client and the back-reference holder used to break the

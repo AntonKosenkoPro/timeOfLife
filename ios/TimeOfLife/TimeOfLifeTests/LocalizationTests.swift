@@ -71,6 +71,9 @@ struct LocalizationTests {
             "invalid_body", "rate_limited",
             "invalid_otp", "otp_expired", "otp_attempts_exceeded",
             "invalid_refresh", "token_reuse", "token_expired",
+            // Catalog (Epic 1)
+            "conflict", "activity_exists", "category_exists",
+            "validation_error", "not_found",
         ]
         let unknownText = NSLocalizedString("error.unknown", comment: "")
 
@@ -84,7 +87,8 @@ struct LocalizationTests {
 
     @Test("offline error maps to offline banner text")
     func offlineMapping() {
-        let msg = ErrorLocalization.message(for: .offline)
+        // Qualified because `CatalogError.offline` also exists (catalog Epic 1).
+        let msg = ErrorLocalization.message(for: APIError.offline)
         #expect(!msg.isEmpty)
     }
 
@@ -120,16 +124,11 @@ struct LocalizationTests {
 
     @Test("L10n enum allCases count matches expected keys")
     func allCasesCount() {
-        // 25 keys: appName,
-        // welcomeTagline, welcomeContinueWithEmail,
-        // emailEntryTitle, emailEntryEmail, emailEntrySubtitle, emailEntrySubmit,
-        // otpTitle, otpSentTo, otpResend, otpResendCountdown,
-        // offlineBanner,
-        // appleSignInTitle, appleSignInError,
-        // timerTitle, timerActivityPlaceholder, timerStart, timerStop,
-        // timerOfflineHint, timerEmptyActivityError, timerSignOut,
-        // signOutConfirmationTitle, signOutConfirmationMessage, signOutConfirm, signOutCancel
-        #expect(l10nCases.count == 25)
+        // 34 keys: 25 existing + 9 catalog (Epic 1):
+        // tagsEmptyHint, undoButton, toastDismiss,
+        // deleteActivityTitle, deleteActivityMessage, deleteActivityEntire,
+        // deleteActivityEntryOnly, deleteActivityCancel, activityLastUsed
+        #expect(l10nCases.count == 34)
     }
 }
 
@@ -145,6 +144,10 @@ extension L10n: CaseIterable {
             .timerTitle, .timerActivityPlaceholder, .timerStart, .timerStop,
             .timerOfflineHint, .timerEmptyActivityError, .timerSignOut,
             .signOutConfirmationTitle, .signOutConfirmationMessage, .signOutConfirm, .signOutCancel,
+            // Catalog (Epic 1)
+            .tagsEmptyHint, .undoButton, .toastDismiss,
+            .deleteActivityTitle, .deleteActivityMessage, .deleteActivityEntire,
+            .deleteActivityEntryOnly, .deleteActivityCancel, .activityLastUsed,
         ]
     }
 }

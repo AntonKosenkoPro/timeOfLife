@@ -51,6 +51,20 @@
 "error.unknown" = "Что-то пошло не так. Попробуйте снова.";
 "error.unauthorized" = "Сессия истекла. Войдите снова.";
 
+// Catalog server errors (mapped from error codes)
+"error.conflict" = "На сервере есть более новая версия. Изменения не применены.";
+"error.activity_exists" = "Активность с таким названием уже существует.";
+"error.category_exists" = "Категория с таким названием уже существует.";
+"error.validation_error" = "Проверьте введённые данные.";
+"error.not_found" = "Этот элемент больше не существует.";
+
+// Catalog validation (one merged message per field — U2/U4)
+"validation.catalog.nameEmpty" = "Введите название.";
+"validation.catalog.nameTooLong" = "Название должно быть не длиннее 60 символов.";
+"validation.catalog.notesTooLong" = "Заметки должны быть не длиннее 280 символов.";
+"validation.catalog.colorInvalid" = "Выберите допустимый цвет.";
+"validation.catalog.iconInvalid" = "Выберите допустимую иконку.";
+
 // Apple sign in
 "appleSignIn.title" = "Вход через Apple";
 "appleSignIn.error" = "Не удалось войти через Apple. Попробуйте снова.";
@@ -63,3 +77,14 @@
 "timer.offlineHint" = "Записи сохраняются локально и синхронизируются после появления сети.";
 "timer.emptyActivityError" = "Введите название активности.";
 "timer.signOut" = "Выйти";
+
+// Catalog (Epic 1)
+"tags.emptyHint" = "Пока нет категорий — создайте одну";
+"undo.button" = "Отменить";
+"delete.activity.title" = "Удалить активность";
+"delete.activity.message" = "У этой активности %d записей о времени.";
+"delete.activity.entire" = "Удалить активность и все %d записей";
+"delete.activity.entryOnly" = "Удалить только эту запись";
+"delete.activity.cancel" = "Отмена";
+"toast.dismiss" = "Закрыть";
+"activity.lastUsed" = "последнее использование %@";

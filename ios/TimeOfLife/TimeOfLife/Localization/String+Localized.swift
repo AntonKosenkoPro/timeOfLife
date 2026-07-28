@@ -45,9 +45,33 @@ enum L10n: String {
     case signOutConfirm = "signOut.confirm"
     case signOutCancel = "signOut.cancel"
 
+    // Catalog (Epic 1)
+    case tagsEmptyHint = "tags.emptyHint"
+    case undoButton = "undo.button"
+    case toastDismiss = "toast.dismiss"
+    case deleteActivityTitle = "delete.activity.title"
+    case deleteActivityMessage = "delete.activity.message"
+    case deleteActivityEntire = "delete.activity.entire"
+    case deleteActivityEntryOnly = "delete.activity.entryOnly"
+    case deleteActivityCancel = "delete.activity.cancel"
+    case activityLastUsed = "activity.lastUsed"
+
     /// Resolves the key via `NSLocalizedString` against `Localizable.strings`.
     var text: String {
         NSLocalizedString(rawValue, comment: "")
+    }
+
+    /// Resolves the key with format arguments (e.g. `"%d entries"`).
+    func text(_ args: CVarArg...) -> String {
+        String(format: NSLocalizedString(rawValue, comment: ""), arguments: args)
+    }
+
+    /// Plural-aware resolution for a single integer argument. Consults
+    /// `Localizable.stringsdict` variants (`one`/`few`/`many`/`other`) when
+    /// present, so counts like 1 render correctly ("1 time entry" / "1 запись")
+    /// instead of the uninflected form ("1 time entries" / "1 записей").
+    func text(_ arg: Int) -> String {
+        String.localizedStringWithFormat(NSLocalizedString(rawValue, comment: ""), arg)
     }
 
 }

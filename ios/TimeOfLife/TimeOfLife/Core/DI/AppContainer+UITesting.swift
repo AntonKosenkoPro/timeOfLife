@@ -37,6 +37,8 @@ extension AppContainer {
         let apiClient = APIClient(baseURL: AppConfig.baseURL, session: .shared)
         let appleService = AppleSignInService()
 
+        let catalog = makeUITestingCatalogGraph(connectivity: connectivity)
+
         let container = AppContainer(
             baseURL: AppConfig.baseURL,
             apiClient: apiClient,
@@ -49,11 +51,37 @@ extension AppContainer {
             authService: authService,
             appleService: appleService,
             timerService: timerService,
+            catalogStore: catalog.store,
+            catalogRepository: catalog.repository,
+            syncQueue: catalog.queue,
+            undoBuffer: catalog.undoBuffer,
+            catalogService: catalog.service,
             clientHolder: nil
         )
 
         seed(screen: screen, sessionStore: sessionStore, navigation: navigation)
         return container
+    }
+
+    /// Deterministic, offline catalog graph for UI testing: a temp-directory
+    /// store/queue + a stub repository so the catalog runs without a network.
+    private static func makeUITestingCatalogGraph(connectivity: Connectivity)
+    -> (store: CatalogStore, repository: CatalogRepository,
+        queue: SyncQueue, undoBuffer: UndoBuffer, service: CatalogService) {
+        let tempDir = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("TimeOfLifeUITesting", isDirectory: true)
+        let store = CatalogStore(directory: tempDir)
+        let repository = UITestingCatalogRepository()
+        let queue = SyncQueue(url: tempDir)
+        let undoBuffer = UndoBuffer()
+        let service = CatalogService(
+            store: store,
+            repository: repository,
+            syncQueue: queue,
+            undoBuffer: undoBuffer,
+            connectivity: connectivity
+        )
+        return (store, repository, queue, undoBuffer, service)
     }
 
     /// Places the app on a specific screen for inspection.
@@ -120,5 +148,31 @@ struct UITestingAuthRepository: AuthRepository {
     func logout() async throws {}
 
     func me() async throws -> UserDTO { Self.user }
+}
+
+/// Stub `CatalogRepository` for the UI-feedback loop. Returns deterministic,
+/// empty results so catalog-driven screens render deterministically without a
+/// network. DEBUG-only; never ships. Stateless `Sendable` struct.
+struct UITestingCatalogRepository: CatalogRepository {
+    /// Fixed reference date for deterministic stub responses.
+    private static let stubDate = Date(timeIntervalSinceReferenceDate: 0)
+
+    func listActivities(query: String?) async throws -> [Activity] { [] }
+    func getActivity(_ id: UUID) async throws -> Activity {
+        Activity(id: id, name: "Activity", color: .gray, icon: .clock, notes: nil,
+                 lastUsedAt: nil, categoryIds: [],
+                 createdAt: Self.stubDate, updatedAt: Self.stubDate)
+    }
+    func createActivity(_ activity: Activity) async throws -> Activity { activity }
+    func updateActivity(_ activity: Activity) async throws -> Activity { activity }
+    func deleteActivity(_ id: UUID) async throws {}
+    func listCategories() async throws -> [Category] { [] }
+    func getCategory(_ id: UUID) async throws -> Category {
+        Category(id: id, name: "Category", color: .gray,
+                 createdAt: Self.stubDate, updatedAt: Self.stubDate)
+    }
+    func createCategory(_ category: Category) async throws -> Category { category }
+    func updateCategory(_ category: Category) async throws -> Category { category }
+    func deleteCategory(_ id: UUID) async throws {}
 }
 #endif

@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>delete.activity.message</key>
+    <dict>
+        <key>NSStringLocalizedFormat</key>
+        <string>%#@entries@</string>
+        <key>entries</key>
+        <dict>
+            <key>NSStringFormatSpecifierKey</key>
+            <string>%d</string>
+            <key>NSStringFormatValueTypeKey</key>
+            <string>d</string>
+            <key>one</key>
+            <string>This activity has %d time entry.</string>
+            <key>other</key>
+            <string>This activity has %d time entries.</string>
+        </dict>
+    </dict>
+    <key>delete.activity.entire</key>
+    <dict>
+        <key>NSStringLocalizedFormat</key>
+        <string>%#@entries@</string>
+        <key>entries</key>
+        <dict>
+            <key>NSStringFormatSpecifierKey</key>
+            <string>%d</string>
+            <key>NSStringFormatValueTypeKey</key>
+            <string>d</string>
+            <key>one</key>
+            <string>Delete activity and all %d entry</string>
+            <key>other</key>
+            <string>Delete activity and all %d entries</string>
+        </dict>
+    </dict>
+</dict>
+</plist>
