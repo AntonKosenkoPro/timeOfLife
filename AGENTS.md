@@ -15,6 +15,8 @@ Requirements live in `Requirements/FURPS/` (the FURPS+ table) and `Requirements/
 
 The **design system** lives in `Design/` — see `Design/README.md`. All visual, component, and interaction decisions for iOS are specified there as Markdown so they can be implemented deterministically.
 
+**Epic 1 design materials** (FURPS S3): new screen specs `Design/SCREENS/ManageActivities.md`, `ManageCategories.md`, `ActivityEditor.md`, `CategoryEditor.md`; timer suggestions/quick-add spec in `Design/SCREENS/TimeTracking.md` (suggestions are client-side, no endpoint — F5/D16); activity/category color palette + icon set in `Design/TOKENS.md`; new catalog components in `Design/COMPONENTS.md`; undo/delete-scope/sync-conflict interactions in `Design/INTERACTIONS.md`. The backend contract is `Design/BACKEND/Activity_Catalog_API.md`.
+
 ## Repo layout
 ```
 backend/                 Go backend (chi + pgx/Postgres; sqlite for tests)

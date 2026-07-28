@@ -26,12 +26,18 @@ Keep design under version control as plain Markdown so:
 
 | File | Purpose |
 |---|---|
-| `TOKENS.md` | Colors, typography, spacing, corner radii, shadows, icons. |
+| `TOKENS.md` | Colors, typography, spacing, corner radii, shadows, icons; activity/category color palette + icon set. |
 | `COMPONENTS.md` | Reusable SwiftUI components: signature, states, accessibility IDs, usage. |
 | `INTERACTIONS.md` | Shared patterns: loading, errors, offline, empty states, haptics, focus. |
 | `SCREENS/Auth.md` | Auth flow screens (Welcome, EmailEntry, OtpEntry). |
-| `SCREENS/TimeTracking.md` | First time-tracking screen. |
+| `SCREENS/TimeTracking.md` | First time-tracking screen; covers Epic 1 recency suggestions + quick-add. |
+| `SCREENS/ManageActivities.md` | Manage Activities screen — full activity CRUD, delete scope, undo. |
+| `SCREENS/ManageCategories.md` | Manage Categories screen — category CRUD, seeding, undo. |
+| `SCREENS/ActivityEditor.md` | Shared sheet to create/edit an activity (quick-add + manage). |
+| `SCREENS/CategoryEditor.md` | Shared sheet to create/edit a category. |
 | `DECISIONS.md` | Design precedents and rationale. |
+
+> Epic 1 introduces the catalog editors (`ActivityEditor`, `CategoryEditor`, `ManageActivities`, `ManageCategories`) and the timer suggestions/quick-add spec in `TimeTracking.md`.
 
 ## Global rules
 

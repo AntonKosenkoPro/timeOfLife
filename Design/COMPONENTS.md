@@ -343,3 +343,521 @@ struct IconButton: View {
 - Frame `Theme.minTapArea × Theme.minTapArea`.
 - Foreground `Theme.accentPrimary`.
 - Disabled when `isDisabled`.
+
+---
+
+## `ColorSwatchGrid`
+
+Selectable grid of the fixed 12-key activity/category palette (D15). Used by `ActivityEditor` and `CategoryEditor` to pick `color`.
+
+### Signature
+
+```swift
+struct ColorSwatchGrid: View {
+    let options: [ActivityColor]
+    @Binding var selection: ActivityColor?
+    let accessibilityId: String
+}
+```
+
+### Visual
+
+- `LazyVGrid` of circular swatches, 32 pt each.
+- Each swatch fill is `Theme.activityColor(key)` with a 1 pt `Theme.hairline` border.
+- Selected swatch gets a 2 pt `Theme.textPrimary` ring and a `checkmark` overlay (`.caption`, `Theme.textPrimary`).
+- Hit area is expanded to `Theme.minTapArea × Theme.minTapArea` so the tap target stays ≥ 44 even though the swatch is 32.
+
+### States
+
+| State | Visual |
+|---|---|
+| Default | 32 pt circle, `Theme.activityColor(key)` fill, 1 pt `Theme.hairline` border |
+| Selected | 2 pt `Theme.textPrimary` ring + `checkmark` overlay |
+| Disabled | Whole grid `.disabled(true)`; swatches dimmed to 50% alpha |
+
+### Requirements
+
+- `options` is the full 12-key set from `Theme.activityColor(_:)` (D15); `selection` is the chosen key or `nil`.
+- Each swatch `accessibilityIdentifier("\(accessibilityId)Swatch(\(key))")`.
+- Min tap area 44 (F7/U9); the visible swatch is 32 pt — the tap target is larger than the swatch.
+- Tapping a swatch sets `selection` to that key; tapping the selected swatch keeps it selected (no deselect).
+- Used by `ActivityEditor` (F1) and `CategoryEditor` (F2).
+
+### Usage
+
+```swift
+ColorSwatchGrid(
+    options: ActivityColor.allCases,
+    selection: $vm.color,
+    accessibilityId: "ActivityEditorColor"
+)
+```
+
+### Accessibility
+
+- Each swatch is its own button element with a label derived from the color key (e.g. "Color, blue").
+- Selected swatch exposes `.accessibilityValue("Selected")`.
+- Combined tap targets meet `Theme.minTapArea` even where the visible circle is smaller.
+
+---
+
+## `IconPickerGrid`
+
+Selectable grid of allowed SF Symbols for `activity.icon` (F1/U1). Mirrors `ColorSwatchGrid` geometry.
+
+### Signature
+
+```swift
+struct IconPickerGrid: View {
+    let options: [String]
+    @Binding var selection: String
+    let accessibilityId: String
+}
+```
+
+### Visual
+
+- `LazyVGrid` of `IconButton`-style cells, 44 × 44 pt.
+- Each cell: `Theme.backgroundSecondary` fill inside `RoundedRectangle(cornerRadius: Theme.cornerRadiusSmall, style: .continuous)`, with `Image(systemName: symbol)` in `Theme.textPrimary`, `.body`.
+- Selected cell gets a 2 pt `Theme.accentPrimary` border.
+
+### States
+
+| State | Visual |
+|---|---|
+| Default | 44 × 44 cell, `Theme.backgroundSecondary` fill, `Theme.cornerRadiusSmall` |
+| Selected | Same fill + 2 pt `Theme.accentPrimary` border |
+
+### Requirements
+
+- `options` is the allowed SF Symbols set (F1/U1, D15); `selection` is the chosen symbol name.
+- Each cell `accessibilityIdentifier("\(accessibilityId)Cell(\(symbol))")`.
+- Min tap area 44 — matches the cell size exactly.
+- Tapping a cell sets `selection` to that symbol.
+
+### Usage
+
+```swift
+IconPickerGrid(
+    options: ActivityIcon.allowedSymbols,
+    selection: $vm.icon,
+    accessibilityId: "ActivityEditorIcon"
+)
+```
+
+### Accessibility
+
+- Each cell is a button element with `.accessibilityLabel("Icon, \(symbol)")`.
+- Selected cell exposes `.accessibilityValue("Selected")`.
+
+---
+
+## `TagChip`
+
+Read-only category pill: color dot + name. Displayed on `ActivityRow` and entries to surface an activity's tags (F3).
+
+### Signature
+
+```swift
+struct TagChip: View {
+    let name: String
+    let color: ActivityColor
+}
+```
+
+### Visual
+
+- `Capsule` with `Theme.backgroundSecondary` fill.
+- Leading 6 pt `Circle` filled with `Theme.activityColor(color)`.
+- `.caption` name in `Theme.textPrimary`.
+- Padding `Theme.spacingSmall` horizontal / 4 vertical.
+
+### States
+
+| State | Visual |
+|---|---|
+| Default | `Theme.backgroundSecondary` capsule, color dot + name |
+
+### Requirements
+
+- Read-only — no tap action, no selection state.
+- Color is resolved via `Theme.activityColor(_:)` (D15).
+- Use only on rows/entries; for tappable multi-select see `TagSelector`.
+
+### Usage
+
+```swift
+ForEach(activity.categories) { c in
+    TagChip(name: c.name, color: c.color)
+}
+```
+
+### Accessibility
+
+- `.accessibilityElement(children: .combine)` so the chip reads as one element ("Tag, Work").
+- `.accessibilityHidden(false)` — visible to VoiceOver but not focusable as a control.
+
+---
+
+## `TagSelector`
+
+Multi-select category chips for an activity (F3). Wrapping `FlowLayout` of tappable chips; toggling a chip adds/removes the category id from `selected`.
+
+### Signature
+
+```swift
+struct TagSelector: View {
+    let options: [Category]
+    @Binding var selected: Set<UUID>
+    let accessibilityId: String
+}
+```
+
+### Visual
+
+- Wrapping `FlowLayout` (left-aligned, `Theme.spacingSmall` spacing).
+- Unselected chip: `Theme.backgroundSecondary` fill + 1 pt `Theme.hairline` border.
+- Selected chip: `Theme.accentPrimary` fill, white text, leading `checkmark` (`.caption`).
+- Each chip: color dot (6 pt `Theme.activityColor(color)`) + name (`.caption`), padding `Theme.spacingSmall` horizontal / 4 vertical, `Capsule` shape.
+- When `options` is empty, render a hint: `L10n.tagsEmptyHint` ("No categories yet — create one"), `.caption`, `Theme.textSecondary`.
+
+### States
+
+| State | Visual |
+|---|---|
+| Unselected | `Theme.backgroundSecondary` fill + `Theme.hairline` border |
+| Selected | `Theme.accentPrimary` fill, white text, `checkmark` |
+| Empty options | Centered `L10n.tagsEmptyHint` hint, no chips (U8) |
+
+### Requirements
+
+- Tapping a chip toggles its id in `selected` (F3).
+- Each chip `accessibilityIdentifier("\(accessibilityId)Chip(\(id))")`.
+- Tags are optional; an activity with no tags is valid (F3). The selector never forces a selection.
+- Empty-state hint follows U8 — guides toward creation without blocking the editor.
+
+### Usage
+
+```swift
+TagSelector(
+    options: vm.allCategories,
+    selected: $vm.selectedCategoryIds,
+    accessibilityId: "ActivityEditorTags"
+)
+```
+
+### Accessibility
+
+- Each chip is a button element with `.accessibilityLabel("Category, \(name)")` and `.accessibilityValue(selected.contains(id) ? "Selected" : "Not selected")`.
+- The empty-state hint is `.accessibilityHidden(true)` decoration; the parent screen owns the "create category" action.
+
+---
+
+## `SuggestionRow`
+
+Recency-based suggestion row on the timer screen (F5/U3). One tap prefills the activity name and links the activity to the entry.
+
+### Signature
+
+```swift
+struct SuggestionRow: View {
+    let activity: Activity
+    let action: () -> Void
+}
+```
+
+### Visual
+
+- `Button`-styled `HStack(spacing: Theme.spacingMedium)`:
+  - 8 pt `Circle` filled with `Theme.activityColor(activity.color)`.
+  - `Image(systemName: activity.icon)` in `Theme.textSecondary`, `.body`.
+  - Name in `.subheadline`, `Theme.textPrimary`.
+- Full width, min height `Theme.minTapArea`.
+- `accessibilityIdentifier("TimerSuggestion(\(activity.id))")`.
+
+### States
+
+| State | Visual |
+|---|---|
+| Default | `Theme.backgroundPrimary` row, full-width tap target |
+| Pressed | System highlight (no custom pressed style) |
+
+### Requirements
+
+- Renders inside the `TimerSuggestionList` container; ranking is computed on-device from the local catalog ordered by `last_used_at` (F5, P1).
+- Suggestions are hidden while the timer is running (F5).
+- Tapping calls `action` — the parent screen prefills the activity field and links `activity.id` to the entry (F4/U3).
+
+### Usage
+
+```swift
+ForEach(vm.suggestions) { a in
+    SuggestionRow(activity: a) { vm.prefill(from: a) }
+}
+```
+
+### Accessibility
+
+- `accessibilityIdentifier("TimerSuggestion(\(activity.id))")` (U3).
+- `.accessibilityLabel("Suggestion, \(activity.name)")`.
+- `.accessibilityHint("Starts a timer for this activity")`.
+
+---
+
+## `ActivityRow`
+
+Manage-list row for an activity (F8). Tap opens `ActivityEditor`; swipe-to-delete is handled by the parent `List`.
+
+### Signature
+
+```swift
+struct ActivityRow: View {
+    let activity: Activity
+    let action: () -> Void
+}
+```
+
+### Visual
+
+- `HStack(spacing: Theme.spacingMedium)`:
+  - Leading: 32 × 32 `RoundedRectangle(cornerRadius: Theme.cornerRadiusSmall, style: .continuous)` with `Theme.backgroundSecondary` fill, containing `Image(systemName: activity.icon)` in `Theme.textPrimary`, `.body`. A 10 pt `Circle` (`Theme.activityColor(activity.color)`) sits at the leading edge of the icon square.
+  - Middle `VStack(alignment: .leading, spacing: 2)`:
+    - Name in `.headline`, `Theme.textPrimary`.
+    - `HStack` of `TagChip`s for the activity's categories, hidden when none (F3).
+    - Last-used subtitle in `.footnote`, `Theme.textSecondary`.
+  - Trailing `Image(systemName: "chevron.right")` in `Theme.textSecondary`.
+- Min height `Theme.minTapArea`; full width.
+
+### States
+
+| State | Visual |
+|---|---|
+| Default | Row with icon square, name + tags + subtitle, trailing chevron |
+| No tags | Tag `HStack` collapses; name sits directly above the subtitle |
+| No last-used | Subtitle hidden |
+
+### Requirements
+
+- `accessibilityIdentifier("ActivityRow(\(activity.id))")`.
+- List ordering is recency-based (most-recently-used first, F8). No manual reorder at MVP.
+- Swipe-to-delete is owned by the parent `List`, not by this row.
+- Tapping calls `action` — the parent navigates to `ActivityEditor`.
+
+### Usage
+
+```swift
+List {
+    ForEach(vm.activities) { a in
+        ActivityRow(activity: a) { vm.edit(a) }
+            .swipeActions { Button(role: .destructive) { vm.delete(a) } label: { Label(L10n.delete, systemImage: "trash") } }
+    }
+}
+```
+
+### Accessibility
+
+- `accessibilityIdentifier("ActivityRow(\(activity.id))")`.
+- The whole row is a single button element; chips and subtitle are `.accessibilityHidden(true)` and folded into the row label ("\(name), \(tagsCount) tags, last used \(subtitle)").
+
+---
+
+## `CategoryRow`
+
+Manage-categories list row for a category (F2). Tap opens `CategoryEditor`.
+
+### Signature
+
+```swift
+struct CategoryRow: View {
+    let category: Category
+    let action: () -> Void
+}
+```
+
+### Visual
+
+- `HStack(spacing: Theme.spacingMedium)`:
+  - Leading 10 pt `Circle` filled with `Theme.activityColor(category.color)`.
+  - Name in `.body`, `Theme.textPrimary`.
+  - Trailing `Image(systemName: "chevron.right")` in `Theme.textSecondary`.
+- Min height `Theme.minTapArea`; full width.
+
+### States
+
+| State | Visual |
+|---|---|
+| Default | Color dot + name + trailing chevron |
+
+### Requirements
+
+- `accessibilityIdentifier("CategoryRow(\(category.id))")`.
+- Swipe-to-delete is owned by the parent `List`.
+- Tapping calls `action` — the parent navigates to `CategoryEditor`.
+
+### Usage
+
+```swift
+List {
+    ForEach(vm.categories) { c in
+        CategoryRow(category: c) { vm.edit(c) }
+    }
+}
+```
+
+### Accessibility
+
+- `accessibilityIdentifier("CategoryRow(\(category.id))")`.
+- The whole row is a single button element: `.accessibilityLabel("Category, \(category.name)")`.
+
+---
+
+## `SectionHeader`
+
+Simple section title used in editor screens to label Color / Icon / Tags sections.
+
+### Signature
+
+```swift
+struct SectionHeader: View {
+    let title: String
+}
+```
+
+### Visual
+
+- `Text(title).font(.title2.bold()).foregroundStyle(Theme.textPrimary)`.
+- Padded with `Theme.spacingMedium` leading / `Theme.spacingSmall` vertical.
+
+### States
+
+| State | Visual |
+|---|---|
+| Default | `.title2.bold()` title in `Theme.textPrimary` |
+
+### Requirements
+
+- Pure presentational — no state, no action.
+- Used in `ActivityEditor` / `CategoryEditor` to label sections (Color, Icon, Tags).
+
+### Usage
+
+```swift
+SectionHeader(title: L10n.activityEditorColorSection)
+ColorSwatchGrid(options: ActivityColor.allCases, selection: $vm.color, accessibilityId: "ActivityEditorColor")
+```
+
+### Accessibility
+
+- `.accessibilityAddTraits(.isHeader)` so VoiceOver announces it as a section header.
+
+---
+
+## `UndoToast`
+
+Transient 30-second undo affordance shown after a delete (R3/U6). Purely presentational — the auto-dismiss timer and the 30 s undo window are owned by the parent ViewModel.
+
+### Signature
+
+```swift
+struct UndoToast: View {
+    let message: String
+    let onUndo: () -> Void
+    let onDismiss: () -> Void
+}
+```
+
+### Visual
+
+- Floating bottom banner via `.safeAreaInset(edge: .bottom)` or overlay.
+- `Theme.backgroundSecondary` fill with `Theme.shadowSmall`, `Theme.cornerRadiusLarge`.
+- `HStack`: message (`.subheadline`, `Theme.textPrimary`) + `IconButton`-style Undo button (`L10n.undoButton`, `Theme.accentPrimary` tint) + dismiss `xmark`.
+- `accessibilityIdentifier("UndoToastButton")` on the Undo button.
+
+### States
+
+| State | Visual |
+|---|---|
+| Visible | Banner in view at the bottom safe area |
+| Dismissing | Slide-down + fade transition (`.move(edge: .bottom).combined(with: .opacity)`) |
+
+### Requirements
+
+- The toast is purely presentational (D17): it does not own the 30 s undo window or the auto-dismiss timer — the parent ViewModel starts both when it shows the toast and calls `onDismiss` when either fires.
+- Undo button is accent-tinted, `accessibilityIdentifier("UndoToastButton")`.
+- Both choices (undo, dismiss) are destructive-safe: undo restores from the client-side undo buffer before the deletion is committed (R3).
+
+### Usage
+
+```swift
+if let undo = vm.undoToast {
+    UndoToast(
+        message: String(format: L10n.undoDeleteMessage.text, undo.itemName),
+        onUndo: { vm.performUndo() },
+        onDismiss: { vm.dismissUndo() }
+    )
+}
+```
+
+### Accessibility
+
+- `accessibilityIdentifier("UndoToastButton")` on the Undo button.
+- The toast container is `.accessibilityElement(children: .contain)` so VoiceOver focuses the message then the actions.
+- `.accessibilityAddTraits(.updatesFrequently)` is NOT set — the toast is static for its 30 s lifetime.
+
+---
+
+## `ScopeConfirmation`
+
+Destructive two-option confirmation for deleting an activity that has past entries (F10/U5). The user must choose between deleting the entire activity (and all its entries) or only the current entry.
+
+### Signature
+
+```swift
+struct ScopeConfirmation: View {
+    @Binding var isPresented: Bool
+    let entryCount: Int
+    let onDeleteAll: () -> Void
+    let onDeleteEntryOnly: () -> Void
+    let onCancel: () -> Void
+}
+```
+
+### Visual
+
+- System `.confirmationDialog` with:
+  - Title: `L10n.deleteActivityTitle`.
+  - Message: `String(format: L10n.deleteActivityMessage, entryCount)` — names the number of affected entries (U5).
+  - Two destructive buttons (D18):
+    - `L10n.deleteActivityEntire` with `%d` entries — `role: .destructive`, calls `onDeleteAll`.
+    - `L10n.deleteActivityEntryOnly` — `role: .destructive`, calls `onDeleteEntryOnly`.
+  - A cancel button calling `onCancel`.
+
+### States
+
+| State | Visual |
+|---|---|
+| Presented | System `.confirmationDialog` sheet |
+| Dismissed | Binding flipped to `false` by any action |
+
+### Requirements
+
+- Both destructive choices trigger the undo flow (R3/U6) — the parent shows `UndoToast` after either runs.
+- `entryCount` must be > 0; the parent only presents this dialog when the activity has entries (D18).
+- For category delete, a simpler single-destructive `.confirmationDialog` is used directly in the parent screen — no separate component is needed, because a category has no entries-scope choice.
+
+### Usage
+
+```swift
+ScopeConfirmation(
+    isPresented: $vm.showDeleteScope,
+    entryCount: vm.entryCount(for: activity),
+    onDeleteAll: { vm.deleteActivityAndEntries(activity) },
+    onDeleteEntryOnly: { vm.deleteEntryOnly(activity) },
+    onCancel: { vm.cancelDelete() }
+)
+```
+
+### Accessibility
+
+- Relies on the system `.confirmationDialog` accessibility — no custom identifiers needed.
+- The dialog title and message are read together; destructive buttons are announced as "Delete" with the destructive trait.

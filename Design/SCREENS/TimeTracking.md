@@ -94,7 +94,9 @@ The timer screen must not tremble when the timer starts or stops. To guarantee t
 | State | Visual |
 |---|---|
 | Idle | Activity field enabled; timer shows `00:00`; Start button shown |
+| Idle with suggestions | Suggestions block visible below the activity field (F5, D16) |
 | Running | Activity field disabled; timer updates live; Stop button shown (destructive tint) |
+| Running (suggestions hidden) | Suggestions block hidden while `vm.isRunning` (F5) |
 | Saving | Stop button shows `ProgressView`; timer continues until save completes |
 | Error | Inline error below activity field or banner above controls |
 | Sign Out confirmation | Alert with destructive confirm and cancel |
@@ -123,6 +125,10 @@ struct TimeEntry: Identifiable, Codable, Sendable {
 - [ ] Offline save-and-sync behavior is implemented and tested.
 - [ ] Haptics follow `INTERACTIONS.md`.
 - [ ] Sign Out toolbar item has `TimerSignOutButton` and shows a confirmation alert.
+- [ ] Suggestions render idle-only via `TimerSuggestionList` / `TimerSuggestion(<id>)` (F5/U3, D16).
+- [ ] Quick-add button `TimerQuickAddButton` opens `ActivityEditor` as a sheet (F7, D21).
+- [ ] Auto-create reuses an existing activity case-insensitively; otherwise creates with defaults (F4/D20).
+- [ ] Entry carries `activityId` (F9); `activityName` is derived, not stored.
 - [ ] Screen previews exist for light/dark and EN/RU.
 - [ ] SwiftLint passes with zero findings.
 
@@ -147,6 +153,11 @@ Add to `en.lproj/Localizable.strings` and `ru.lproj/Localizable.strings`, then t
 "signOut.confirmationMessage" = "This will clear your local session.";
 "signOut.confirm" = "Sign Out";
 "signOut.cancel" = "Cancel";
+
+// Epic 1 — suggestions + quick-add + manage
+"timer.suggestionsHeader" = "Recent";
+"timer.quickAdd" = "New activity";
+"timer.manageActivities" = "Manage activities";
 ```
 
 Russian:
@@ -166,6 +177,11 @@ Russian:
 "signOut.confirmationMessage" = "Это очистит локальную сессию.";
 "signOut.confirm" = "Выйти";
 "signOut.cancel" = "Отмена";
+
+// Epic 1 — предложения + быстрое добавление + управление
+"timer.suggestionsHeader" = "Недавние";
+"timer.quickAdd" = "Новая активность";
+"timer.manageActivities" = "Активности";
 ```
 
 ---
@@ -177,3 +193,51 @@ Russian:
 - Widgets and shortcuts for one-tap start.
 - Categories with color tags.
 - Dedicated **Account/Profile** screen that replaces the interim `TimerView` Sign Out toolbar item.
+
+---
+
+## Epic 1 changes
+
+Epic 1 (Activity Catalog & Categories) extends the timer with recency suggestions (F5), a quick-add entry point (F7), auto-create-with-`activity_id` (F4), and an updated entry model (F9). Implements `Requirements/Usecases/Activity_Catalog_and_Categories.md` flows 2 and 3.
+
+### Suggestions (F5 / U3, D16 / D19)
+
+A new block rendered directly below `TextFieldWithError`, **idle only** — hidden while `vm.isRunning` because the activity field is disabled (F5). `TimerSuggestionList` wraps up to 5 `SuggestionRow`s (`COMPONENTS.md`) ranked by `last_used_at` on-device; there is no suggestions endpoint, so it works fully offline (D16). `last_used_at` syncs, so recency is shared across devices (D19 — no manual reorder at MVP).
+
+- Container `accessibilityIdentifier("TimerSuggestionList")`.
+- Each row `accessibilityIdentifier("TimerSuggestion(\(activity.id))")` (U3).
+- One tap prefills `vm.activityName` with the activity's name AND sets `vm.selectedActivityId` so the entry links to it (F4/U3).
+- If the catalog is empty, render nothing — free-text start still works (D20). No `timer.suggestionsEmpty` key is needed; the `EmptyState` pattern belongs to Manage screens (U8).
+
+### Quick-add entry point (F7)
+
+An `IconButton` (`COMPONENTS.md`) with `square.and.pencil` (`TOKENS.md` → Management icons) sits beside the activity field, `accessibilityIdentifier("TimerQuickAddButton")`. Tapping it presents `ActivityEditor` in create mode as a sheet (D21); keyboard placement inside the sheet follows D13. On save, the new activity is selected on the timer (name prefilled + `selectedActivityId` set) and the sheet dismisses. Disabled while the timer is running (the field is disabled while running).
+
+### Auto-create behavior (F4 / D20)
+
+On Start, trim + casefold the typed name. If it matches an existing activity (case-insensitive), reuse it — no duplicate. Otherwise auto-create a new activity (default color `mint`, default icon `clock`, no tags) and link `activity_id`. The user is never forced into the catalog to start a timer. This mirrors the backend's `UNIQUE (user_id, lower(name))` constraint and the 409 `activity_exists` reuse path (`Design/BACKEND/Activity_Catalog_API.md` Sync & ids): a case-insensitive collision returns the winning record's `{id,name}` in `details` and the client re-maps to the surviving id.
+
+### Updated data model (F9)
+
+`TimeEntry` gains a required `activityId: UUID` and an optional `categories: [Category]?` resolved at query time; `activityName` becomes a convenience derived from the activity (no longer the source of truth). Entries reference `activity_id`; the activity's name and tags resolve at query time (nothing is denormalized onto the entry).
+
+```swift
+struct TimeEntry: Identifiable, Codable, Sendable {
+    let id: UUID
+    let activityId: UUID          // F9 — links to Activity.id
+    let startedAt: Date
+    let endedAt: Date
+    var duration: TimeInterval { endedAt.timeIntervalSince(startedAt) }
+    var categories: [Category]?   // resolved at query time
+    var activityName: String { /* derived from Activity via activityId */ }
+    var synced: Bool
+}
+```
+
+### Manage Activities / Categories entry points
+
+The timer toolbar (or a future account/menu destination) links to `.manageActivities`. The interim Sign Out toolbar item stays until Epic 3's dedicated Account/Profile screen replaces it (D12).
+
+### New localization keys
+
+Appended to the "New localization keys required" blocks above: `timer.suggestionsHeader`, `timer.quickAdd`, `timer.manageActivities` (EN + RU). No `timer.suggestionsEmpty` key — render nothing when the catalog is empty (D20).
