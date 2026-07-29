@@ -123,11 +123,19 @@ R3 / U6 / U7; decision D17. Applies to activity and category deletions from Mana
 
 - A deletion is **not** committed to the local store or pushed to sync immediately. It enters a client-side **undo buffer** and is only committed + synced after a 30 s window passes.
 - Present a transient `UndoToast` (`COMPONENTS.md`) at the bottom with an **Undo** button; auto-dismiss after 30 s.
-- **Undo** (tap, or system shake-to-undo via `.onShake` / `scenePhase`) re-inserts the deleted item(s) from the buffer before the window elapses; nothing is synced.
+- **Undo** (tap, or system shake-to-undo) re-inserts the deleted item(s) from the buffer before the window elapses; nothing is synced.
 - The buffer is **superseded** by the next undoable action and cleared on app relaunch — only the most recent undoable deletion is restorable (matches U7 wording).
 - After the window, commit locally (hard delete) and enqueue the `DELETE` for sync; the server hard-deletes (no trash, per `Activity_Catalog_API.md` Sync & ids).
 - Bulk deletions (delete activity + its entries, F10) are undoable as a unit — the buffer holds the whole set and Undo restores all of it.
 - **Undo API failure:** If the undo API call fails (network error, 404, 409), show an `ErrorBanner` ("Could not undo — try again") and keep the item in its edited state. The undo buffer is not cleared on failure, so the user can retry by triggering undo again (e.g. via a second UndoToast if still within the 30 s window).
+
+### Shake-to-undo wiring (U7)
+
+U7 says "no custom shake detection" — use the iOS system motion event. The view layer owns the binding:
+
+- **iOS 17+:** add a `.onShake { vm.performUndo() }` modifier on the manage screen.
+- **iOS 15/16:** create a small `ShakeHostingController` subclass of `UIHostingController` that overrides `motionEnded(_:with:)`. When the event is `UIEvent.EventType.motion` and the subtype is `.motionShake`, forward to the active manage screen's `performUndo()` (via a shared observable flag or `NotificationCenter`). Use the same controller subclass for the signed-in navigation stack so both `ManageActivitiesView` and `ManageCategoriesView` inherit the gesture.
+- Do not implement custom accelerometer/gyro logic.
 
 ## Delete-scope confirmation (F10 / U5)
 
@@ -147,6 +155,15 @@ R2. Reuses the Offline sync path; do not duplicate the Offline section above.
 - If the user dismisses the conflict `ErrorBanner` without choosing, default to keep-latest (adopt server version) — the banner is informational, not blocking.
 - On 409 `activity_exists` / `category_exists` (case-insensitive name collision on create), the client re-maps local references to the surviving id (see `Activity_Catalog_API.md` Sync & ids) and proceeds; in the editor this means "reuse the existing activity" rather than surfacing an error.
 - Idempotent `POST` (same id replayed) returns the existing record — the offline queue is safe to replay; do not surface this as an error.
+
+### Confirmation-dialog cleanup
+
+For destructive confirmations that use `.confirmationDialog` or `.alert`, the cancel callback attached to a `role: .cancel` button is **not** called when the user taps outside the sheet or swipes down. To avoid stale `pendingDelete` / "delete in progress" state, either:
+
+- Observe the presentation binding (`isPresented`) in the parent ViewModel and clear pending state when it flips to `false`; or
+- Provide an explicit `onDismiss` closure on the sheet/dialog and reset state there.
+
+All manage-screen delete flows should follow this pattern consistently.
 
 | Server response | Client action |
 |---|---|

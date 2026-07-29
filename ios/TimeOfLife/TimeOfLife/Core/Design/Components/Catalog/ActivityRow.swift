@@ -5,7 +5,14 @@ import SwiftUI
 /// Tap opens `ActivityEditor`; swipe-to-delete is handled by the parent `List`.
 struct ActivityRow: View {
     let activity: Activity
+    let categories: [Category]
     let action: () -> Void
+
+    init(activity: Activity, categories: [Category] = [], action: @escaping () -> Void) {
+        self.activity = activity
+        self.categories = categories
+        self.action = action
+    }
 
     var body: some View {
         Button(action: action) {
@@ -47,6 +54,15 @@ struct ActivityRow: View {
                 .font(.headline)
                 .foregroundStyle(Theme.textPrimary)
 
+            if !categories.isEmpty {
+                HStack(spacing: Theme.spacingSmall) {
+                    ForEach(categories) { cat in
+                        TagChip(name: cat.name, color: cat.color)
+                    }
+                }
+                .accessibilityHidden(true)
+            }
+
             if let lastUsedAt = activity.lastUsedAt {
                 Text(lastUsedAt, style: .relative)
                     .font(.footnote)
@@ -78,6 +94,9 @@ struct ActivityRow: View {
 
     private var accessibilityLabel: String {
         var parts = [activity.name]
+        if !categories.isEmpty {
+            parts.append("\(categories.count) tags")
+        }
         if let lastUsed = activity.lastUsedAt {
             let relative = Self.relativeDateFormatter
                 .localizedString(for: lastUsed, relativeTo: Date())
@@ -126,17 +145,17 @@ private let sampleActivityNoLastUsed = Activity(
 )
 
 #Preview("EN Light — With Tags") {
-    ActivityRow(activity: sampleActivityWithTags) {}
+    ActivityRow(activity: sampleActivityWithTags, categories: [Category.sampleBlue, Category.sampleGreen]) {}
         .padding()
 }
 
 #Preview("EN Light — No Tags") {
-    ActivityRow(activity: sampleActivityNoTags) {}
+    ActivityRow(activity: sampleActivityNoTags, categories: []) {}
         .padding()
 }
 
 #Preview("RU Dark — No Last Used") {
-    ActivityRow(activity: sampleActivityNoLastUsed) {}
+    ActivityRow(activity: sampleActivityNoLastUsed, categories: []) {}
         .padding()
         .preferredColorScheme(.dark)
         .environment(\.locale, .init(identifier: "ru"))

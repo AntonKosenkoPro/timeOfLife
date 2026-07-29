@@ -88,3 +88,8 @@
 "delete.activity.cancel" = "Отмена";
 "toast.dismiss" = "Закрыть";
 "activity.lastUsed" = "последнее использование %@";
+
+// Timer — Epic 1 (suggestions, quick-add, manage)
+"timer.suggestionsHeader" = "Недавние";
+"timer.quickAdd" = "Новая активность";
+"timer.manageActivities" = "Активности";

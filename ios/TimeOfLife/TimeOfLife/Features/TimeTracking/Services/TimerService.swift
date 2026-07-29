@@ -6,15 +6,20 @@ import Foundation
 /// locally first, then attempts remote persistence, and finally marks the
 /// entry synced. If the remote call fails, the entry remains queued for later
 /// sync when connectivity returns.
+///
+/// POST-at-Stop strategy: the entry is created locally with `endedAt` set and
+/// POSTed to the backend as a completed entry (no PATCH-stop needed for the
+/// basic flow). The `stop(id:endedAt:updatedAt:)` path is for the running-entry
+/// case (Epic 2).
 @MainActor
 final class TimerService: ObservableObject {
     let store: TimerStoring
-    private let repository: TimerRepository
+    private let repository: EntriesRepository
     private let connectivity: Connectivity
 
     init(
         store: TimerStoring,
-        repository: TimerRepository,
+        repository: EntriesRepository,
         connectivity: Connectivity
     ) {
         self.store = store
@@ -25,18 +30,18 @@ final class TimerService: ObservableObject {
     /// Saves a completed time entry. Local persistence is always attempted.
     /// Remote persistence is attempted only when online; offline entries stay
     /// queued for `syncUnsyncedEntries()`.
-    func saveEntry(name: String, duration: TimeInterval, startedAt: Date) async throws {
+    func saveEntry(activityId: UUID, duration: TimeInterval, startedAt: Date) async throws {
         let endedAt = startedAt.addingTimeInterval(duration)
         let entry = TimeEntry(
-            id: UUID(),
-            activityName: name.trimmingCharacters(in: .whitespacesAndNewlines),
+            id: UUID.v7(),
+            activityId: activityId,
             startedAt: startedAt,
             endedAt: endedAt,
             synced: false
         )
         try await store.save(entry)
         guard connectivity.isConnected else { return }
-        try await repository.save(entry)
+        try await repository.create(entry)
         try await store.markSynced(entry)
     }
 
@@ -45,7 +50,7 @@ final class TimerService: ObservableObject {
         guard connectivity.isConnected else { return }
         let unsynced = await store.unsyncedEntries()
         for entry in unsynced {
-            try await repository.save(entry)
+            try await repository.create(entry)
             try await store.markSynced(entry)
         }
     }

@@ -31,7 +31,8 @@ The main content uses a `ScrollView` → `VStack(spacing: Theme.spacingMedium)` 
 3. `Spacer` fixed to `Theme.spacingExtraLarge`
 4. `TextFieldWithError` for activity name:
    - `accessibilityId`: `TimerActivityField`
-   - title/placeholder: `L10n.timerActivityPlaceholder`
+   - title: `L10n.timerActivityLabel`
+   - placeholder: `L10n.timerActivityPlaceholder`
    - `submitLabel`: `.done`
    - disabled while timer is running
 5. Large timer display:
@@ -51,10 +52,13 @@ Top toolbar:
 
 Pinned bottom action bar via `.safeAreaInset(edge: .bottom)`:
 
+- Non-field error banner (if any):
+  - `ErrorBanner(message: vm.errorMessage, accessibilityId: "TimerErrorBanner")` rendered above the primary button.
 - Primary control button (same position for Start and Stop):
   - Title/icon: `L10n.timerStart` + `play.fill` when idle; `L10n.timerStop` + `stop.fill` when running.
   - Tint: `Theme.accentPrimary` when idle, `Theme.danger` when running.
   - `accessibilityId`: `TimerStartButton` / `TimerStopButton`.
+  - Accessibility hint on Stop: `L10n.timerStopHint` — "Stops the timer and saves the entry".
 - Bottom hint (if offline):
   - `L10n.timerOfflineHint` — `.caption`, `Theme.textSecondary`.
 
@@ -78,9 +82,13 @@ The timer screen must not tremble when the timer starts or stops. To guarantee t
 
 - Focus the activity field on appear.
 - Validate that activity name is non-empty before starting.
+- Defocus the activity field when the timer starts (drop `@FocusState` and keep the field disabled while running).
+- Suggestions render only when the field is focused/idle and the typed name is empty or case-insensitively prefix-matches an existing activity. Hide suggestions while the user types a brand-new, non-matching name.
+- Preserve `selectedActivityId` when the user edits the typed name but the trimmed, case-folded name still matches the linked activity; clear it only when the name diverges.
 - Start timer updates `TimerViewModel.startDate` and begins a periodic `Timer.publish` to refresh display.
-- Stop timer calculates elapsed time, stops publisher, and calls `TimerService.saveEntry(name:duration:startedAt:)`.
+- Stop timer calculates elapsed time, stops publisher, and calls `TimerService.saveEntry(activityId:duration:startedAt:)`.
 - If offline, save the entry locally and sync when connectivity returns.
+- Non-field save errors (network/offline/server) are shown in an `ErrorBanner` above the primary button; field errors stay under the activity field.
 - Reset input and timer display after successful save.
 - Haptic feedback on start (`selection`) and stop (`success`).
 - Keep screen awake while timer is running using `UIApplication.shared.isIdleTimerDisabled`.
@@ -94,8 +102,9 @@ The timer screen must not tremble when the timer starts or stops. To guarantee t
 | State | Visual |
 |---|---|
 | Idle | Activity field enabled; timer shows `00:00`; Start button shown |
-| Idle with suggestions | Suggestions block visible below the activity field (F5, D16) |
-| Running | Activity field disabled; timer updates live; Stop button shown (destructive tint) |
+| Idle with suggestions | Suggestions block visible below the activity field when the field is focused and the typed name is empty or matches an existing prefix (F5, D16) |
+| Idle, typing a new name | Suggestions hidden once the typed name does not case-insensitively match any existing activity |
+| Running | Activity field disabled and defocused; timer updates live; Stop button shown (destructive tint) |
 | Running (suggestions hidden) | Suggestions block hidden while `vm.isRunning` (F5) |
 | Saving | Stop button shows `ProgressView`; timer continues until save completes |
 | Error | Inline error below activity field or banner above controls |
@@ -141,9 +150,11 @@ Add to `en.lproj/Localizable.strings` and `ru.lproj/Localizable.strings`, then t
 ```text
 // Timer
 "timer.title" = "Timer";
+"timer.activityLabel" = "Activity";
 "timer.activityPlaceholder" = "What are you working on?";
 "timer.start" = "Start";
 "timer.stop" = "Stop";
+"timer.stopHint" = "Stops the timer and saves the entry";
 "timer.offlineHint" = "Entries are saved locally and synced when you’re back online.";
 "timer.emptyActivityError" = "Enter an activity name.";
 "timer.signOut" = "Sign Out";
@@ -165,9 +176,11 @@ Russian:
 ```text
 // Timer
 "timer.title" = "Таймер";
+"timer.activityLabel" = "Активность";
 "timer.activityPlaceholder" = "Над чем вы работаете?";
 "timer.start" = "Старт";
 "timer.stop" = "Стоп";
+"timer.stopHint" = "Останавливает таймер и сохраняет запись";
 "timer.offlineHint" = "Записи сохраняются локально и синхронизируются после появления сети.";
 "timer.emptyActivityError" = "Введите название активности.";
 "timer.signOut" = "Выйти";
@@ -211,7 +224,7 @@ A new block rendered directly below `TextFieldWithError`, **idle only** — hidd
 
 ### Quick-add entry point (F7)
 
-An `IconButton` (`COMPONENTS.md`) with `square.and.pencil` (`TOKENS.md` → Management icons) sits beside the activity field, `accessibilityIdentifier("TimerQuickAddButton")`. Tapping it presents `ActivityEditor` in create mode as a sheet (D21); keyboard placement inside the sheet follows D13. On save, the new activity is selected on the timer (name prefilled + `selectedActivityId` set) and the sheet dismisses. Disabled while the timer is running (the field is disabled while running).
+An `IconButton` (`COMPONENTS.md`) with `square.and.pencil` (`TOKENS.md` → Management icons) sits beside the activity field, `accessibilityIdentifier("TimerQuickAddButton")`. Tapping it presents the real `ActivityEditorView` in create-from-timer mode as a sheet (D21); keyboard placement inside the sheet follows D13. On save, the new activity is selected on the timer (name prefilled + `selectedActivityId` set) and the sheet dismisses. Disabled while the timer is running (the field is disabled while running).
 
 ### Auto-create behavior (F4 / D20)
 

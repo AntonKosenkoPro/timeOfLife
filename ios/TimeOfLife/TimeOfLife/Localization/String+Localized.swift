@@ -38,6 +38,9 @@ enum L10n: String {
     case timerOfflineHint = "timer.offlineHint"
     case timerEmptyActivityError = "timer.emptyActivityError"
     case timerSignOut = "timer.signOut"
+    case timerSuggestionsHeader = "timer.suggestionsHeader"
+    case timerQuickAdd = "timer.quickAdd"
+    case timerManageActivities = "timer.manageActivities"
 
     // Sign out confirmation
     case signOutConfirmationTitle = "signOut.confirmationTitle"

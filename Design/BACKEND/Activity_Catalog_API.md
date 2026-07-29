@@ -58,7 +58,6 @@ Deleting a category removes the tag from all activities (cascade on the join) bu
 | `started_at` | TIMESTAMPTZ NOT NULL | |
 | `ended_at` | TIMESTAMPTZ | NULL = running timer |
 | `duration_seconds` | INT | `ended_at - started_at` when ended; NULL while running; stored for query/filter convenience |
-| `notes` | TEXT | entry-level notes (nullable; Epic 2 edits these) |
 | `created_at` | TIMESTAMPTZ NOT NULL DEFAULT NOW() | |
 | `updated_at` | TIMESTAMPTZ NOT NULL DEFAULT NOW() | LWW sync version |
 
@@ -107,8 +106,8 @@ All `401 unauthorized` on missing/invalid token (existing `AuthMiddleware`). All
 |---|---|---|---|---|
 | GET | `/entries` | — | 200 `{items:[…], next_cursor?}` ordered by `started_at DESC`; filters `?from=&to=&activity_id=&category_id=&limit=&cursor=` | (401) |
 | GET | `/entries/{id}` | — | 200 `{entry…}` with `categories[]` (inferred from the activity) and `activity_name` (the activity's current name) | 404, (401) |
-| POST | `/entries` | `{id, activity_id, started_at, ended_at?, notes?}` | 201 `{entry…}`; `activity_id` is required and must belong to the user; `ended_at` null = running | 400, 422, 404 `activity_not_found` (when `activity_id` doesn't belong to user), 409 `conflict`, (401) |
-| PATCH | `/entries/{id}` | `{started_at?, ended_at?, notes?, updated_at}` | 200 `{entry…}` (stop a running timer = set `ended_at`; recompute `duration_seconds`) | 400, 404, 409 `conflict`, 422, (401) |
+| POST | `/entries` | `{id, activity_id, started_at, ended_at?}` | 201 `{entry…}`; `activity_id` is required and must belong to the user; `ended_at` null = running | 400, 422, 404 `activity_not_found` (when `activity_id` doesn't belong to user), 409 `conflict`, (401) |
+| PATCH | `/entries/{id}` | `{started_at?, ended_at?, updated_at}` | 200 `{entry…}` (stop a running timer = set `ended_at`; recompute `duration_seconds`) | 400, 404, 409 `conflict`, 422, (401) |
 | DELETE | `/entries/{id}` | — | 204 (hard delete) | 404, (401) |
 
 > `activity_id` on `POST /entries` is required — every entry must reference an activity. The activity's name and tags are resolved at query time, so no name is stored on the entry.
@@ -145,7 +144,7 @@ No dedicated endpoint. Seeds are created client-side on first run (7 localized c
 {
   "id": "…", "activity_id": "…", "activity_name": "Gym",
   "started_at": "…", "ended_at": "…", "duration_seconds": 3600,
-  "notes": "", "created_at": "…", "updated_at": "…",
+  "created_at": "…", "updated_at": "…",
   "categories": [ { "id": "…", "name": "Sport", "color": "green" } ]
 }
 ```

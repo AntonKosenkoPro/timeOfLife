@@ -55,7 +55,8 @@ actor LocalTimerStore: TimerStoring {
     private func loadEntries() throws -> [TimeEntry] {
         guard FileManager.default.fileExists(atPath: url.path) else { return [] }
         let data = try Data(contentsOf: url)
-        return try JSONDecoder().decode([TimeEntry].self, from: data)
+        let entries = try JSONDecoder().decode([TimeEntry].self, from: data)
+        return entries
     }
 
     private func saveEntries(_ entries: [TimeEntry]) throws {

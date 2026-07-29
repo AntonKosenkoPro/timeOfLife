@@ -415,6 +415,8 @@ struct IconPickerGrid: View {
 }
 ```
 
+**Callers should pass `ActivityIcon.allowedSymbols` (or another caller-validated set).** The component itself does not filter invalid or duplicate symbol names; invalid names render as blank cells and duplicate names break `ForEach` identity. Use the typed seam (`ActivityIcon`) to guarantee a valid set.
+
 ### Visual
 
 - `LazyVGrid` of `IconButton`-style cells, 44 × 44 pt.
@@ -430,7 +432,7 @@ struct IconPickerGrid: View {
 
 ### Requirements
 
-- `options` is the allowed SF Symbols set (F1/U1, D15); `selection` is the chosen symbol name.
+- `options` is the allowed SF Symbols set (F1/U1, D15); `selection` is the chosen symbol name. Callers must pass `ActivityIcon.allowedSymbols` (the 27-symbol design-spec set from `TOKENS.md`, plus the default `clock`).
 - Each cell `accessibilityIdentifier("\(accessibilityId)Cell(\(symbol))")`.
 - Min tap area 44 — matches the cell size exactly.
 - Tapping a cell sets `selection` to that symbol.
@@ -613,6 +615,7 @@ Manage-list row for an activity (F8). Tap opens `ActivityEditor`; swipe-to-delet
 ```swift
 struct ActivityRow: View {
     let activity: Activity
+    let categories: [Category]
     let action: () -> Void
 }
 ```
@@ -623,7 +626,7 @@ struct ActivityRow: View {
   - Leading: 32 × 32 `RoundedRectangle(cornerRadius: Theme.cornerRadiusSmall, style: .continuous)` with `Theme.backgroundSecondary` fill, containing `Image(systemName: activity.icon)` in `Theme.textPrimary`, `.body`. A 10 pt `Circle` (`Theme.activityColor(activity.color)`) sits at the leading edge of the icon square.
   - Middle `VStack(alignment: .leading, spacing: 2)`:
     - Name in `.headline`, `Theme.textPrimary`.
-    - `HStack` of `TagChip`s for the activity's categories, hidden when none (F3).
+    - `HStack` of `TagChip`s for `categories`, hidden when `categories.isEmpty` (F3).
     - Last-used subtitle in `.footnote`, `Theme.textSecondary`.
   - Trailing `Image(systemName: "chevron.right")` in `Theme.textSecondary`.
 - Min height `Theme.minTapArea`; full width.
@@ -648,7 +651,7 @@ struct ActivityRow: View {
 ```swift
 List {
     ForEach(vm.activities) { a in
-        ActivityRow(activity: a) { vm.edit(a) }
+        ActivityRow(activity: a, categories: vm.categories(for: a)) { vm.edit(a) }
             .swipeActions { Button(role: .destructive) { vm.delete(a) } label: { Label(L10n.delete, systemImage: "trash") } }
     }
 }
@@ -657,7 +660,7 @@ List {
 ### Accessibility
 
 - `accessibilityIdentifier("ActivityRow(\(activity.id))")`.
-- The whole row is a single button element; chips and subtitle are `.accessibilityHidden(true)` and folded into the row label ("\(name), \(tagsCount) tags, last used \(subtitle)").
+- The whole row is a single button element; chips and subtitle are `.accessibilityHidden(true)` and folded into the row label ("\(name), \(categories.count) tags, last used \(subtitle)").
 
 ---
 

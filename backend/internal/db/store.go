@@ -77,7 +77,6 @@ type Entry struct {
 	StartedAt       time.Time     `json:"started_at"`
 	EndedAt         *time.Time    `json:"ended_at"`
 	DurationSeconds *int          `json:"duration_seconds"`
-	Notes           string        `json:"notes"`
 	Categories      []CategoryTag `json:"categories"`
 	CreatedAt       time.Time     `json:"created_at"`
 	UpdatedAt       time.Time     `json:"updated_at"`
@@ -120,7 +119,6 @@ type ActivityPatch struct {
 type EntryPatch struct {
 	StartedAt *time.Time
 	EndedAt   NullableTime // Set=false leaves ended_at unchanged
-	Notes     *string
 	UpdatedAt time.Time
 }
 
@@ -244,7 +242,7 @@ type Store interface {
 	// started_at when ended_at is present.
 	CreateEntry(ctx context.Context, e Entry) (Entry, bool, error)
 
-	// UpdateEntry applies a partial LWW update on started_at/ended_at/notes and
+	// UpdateEntry applies a partial LWW update on started_at/ended_at and
 	// recomputes duration_seconds. Returns ErrNotFound or ErrConflict.
 	UpdateEntry(ctx context.Context, userID, id string, p EntryPatch) (Entry, error)
 

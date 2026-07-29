@@ -5,29 +5,77 @@ import Combine
 /// View model for the time-tracking timer screen.
 ///
 /// Owns the running timer state, validates the activity name, and delegates
-/// persistence to `TimerService`.
+/// persistence to `TimerService`. Integrates with the activity catalog for
+/// recency-based suggestions, quick-add, and auto-create.
 @MainActor
 final class TimerViewModel: ObservableObject {
-    @Published var activityName: String = ""
+    @Published var activityName: String = "" {
+        didSet {
+            // Clearing a stale suggestion-selection on user edit; `prefill`
+            // re-sets `selectedActivityId` after assigning `activityName`, so
+            // programmatic prefill survives this reset.
+            selectedActivityId = nil
+        }
+    }
     @Published var fieldError: String?
     @Published var isLoading = false
     @Published var elapsed: TimeInterval = 0
     @Published var isRunning = false
     @Published var didSave = false
+    @Published var suggestions: [Activity] = []
+    @Published var selectedActivityId: UUID?
+    @Published var showQuickAdd = false
 
     let service: TimerService
     let authService: AuthService
+    let catalogStore: CatalogStore
+    let catalogService: CatalogService
     private let connectivity: Connectivity
     private var startDate: Date?
     private var timerCancellable: AnyCancellable?
 
-    init(service: TimerService, authService: AuthService, connectivity: Connectivity) {
+    init(
+        service: TimerService,
+        authService: AuthService,
+        connectivity: Connectivity,
+        catalogStore: CatalogStore,
+        catalogService: CatalogService
+    ) {
         self.service = service
         self.authService = authService
         self.connectivity = connectivity
+        self.catalogStore = catalogStore
+        self.catalogService = catalogService
+    }
+
+    /// Refreshes suggestions from the local catalog store.
+    func refreshSuggestions() async {
+        let activities = await catalogStore.activitiesSortedByLastUsedAt()
+        suggestions = Array(activities.prefix(5))
+    }
+
+    /// Prefills the activity field from a suggestion.
+    func prefill(from activity: Activity) {
+        activityName = activity.name
+        selectedActivityId = activity.id
+        fieldError = nil
+    }
+
+    /// Opens the quick-add sheet (no-op while running).
+    func openQuickAdd() {
+        guard !isRunning else { return }
+        showQuickAdd = true
+    }
+
+    /// Called when a new activity is created via the quick-add sheet.
+    func didSelectNewActivity(_ activity: Activity) {
+        prefill(from: activity)
+        showQuickAdd = false
+        Task { await refreshSuggestions() }
     }
 
     /// Starts the timer if the activity name is valid.
+    /// Handles auto-create: reuses an existing activity by name or creates a new one.
     func start() {
         guard validate() else {
             Haptics.error()
@@ -59,9 +107,11 @@ final class TimerViewModel: ObservableObject {
         defer { isLoading = false }
 
         do {
-            try await service.saveEntry(name: activityName, duration: duration, startedAt: startDate)
+            let activityId = try await resolveActivityId()
+            try await service.saveEntry(activityId: activityId, duration: duration, startedAt: startDate)
             didSave = true
             reset()
+            await refreshSuggestions()
             Haptics.success()
         } catch {
             Haptics.error()
@@ -71,6 +121,49 @@ final class TimerViewModel: ObservableObject {
         }
     }
 
+    /// Resolves the activity ID for the current entry.
+    /// Uses `selectedActivityId` if set; otherwise reuses an existing activity
+    /// by case-insensitive name, or auto-creates a new one. Bumps the
+    /// resolved activity's `lastUsedAt` so suggestions reflect recency.
+    func resolveActivityId() async throws -> UUID {
+        let name = activityName.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        // If already linked to a suggestion/quick-add, use it directly.
+        if let selectedActivityId {
+            await bumpLastUsedAt(selectedActivityId)
+            return selectedActivityId
+        }
+
+        // Try case-insensitive reuse.
+        if let existing = await catalogService.caseInsensitiveReuse(named: name) {
+            await bumpLastUsedAt(existing.id)
+            return existing.id
+        }
+
+        // Auto-create a new activity with defaults (seeded with current
+        // `lastUsedAt` so it ranks first in suggestions).
+        let newActivity = Activity(
+            id: UUID.v7(),
+            name: name,
+            color: .mint,
+            icon: .clock,
+            notes: nil,
+            lastUsedAt: Date(),
+            categoryIds: [],
+            createdAt: Date(),
+            updatedAt: Date()
+        )
+
+        let created = try await catalogService.createActivity(newActivity)
+        return created.id
+    }
+
+    private func bumpLastUsedAt(_ id: UUID) async {
+        guard var activity = await catalogStore.activity(id) else { return }
+        activity.lastUsedAt = Date()
+        _ = try? await catalogService.updateActivity(activity)
+    }
+
     /// Resets the form and timer state.
     func reset() {
         activityName = ""
@@ -78,6 +171,7 @@ final class TimerViewModel: ObservableObject {
         elapsed = 0
         isRunning = false
         startDate = nil
+        selectedActivityId = nil
         timerCancellable?.cancel()
         timerCancellable = nil
         UIApplication.shared.isIdleTimerDisabled = false

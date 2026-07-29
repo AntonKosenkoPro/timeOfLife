@@ -72,12 +72,6 @@ final class AppContainer: ObservableObject {
         let sessionStore = SessionStore()
         let navigation = AppNavigationStack()
         let connectivity = NetworkMonitor()
-        let timerService = TimerService(
-            store: LocalTimerStore(),
-            repository: StubTimerRepository(),
-            connectivity: connectivity
-        )
-
         let (client, clientHolder) = makeAuthClient(baseURL: baseURL, keychain: keychain)
         let repository = RemoteAuthRepository(client: client)
         let authService = AuthService(
@@ -91,6 +85,13 @@ final class AppContainer: ObservableObject {
         let appleService = AppleSignInService()
 
         let catalog = makeCatalogGraph(client: client, connectivity: connectivity)
+
+        let entriesRepository = RemoteEntriesRepository(client: client)
+        let timerService = TimerService(
+            store: LocalTimerStore(),
+            repository: entriesRepository,
+            connectivity: connectivity
+        )
 
         return AppContainer(
             baseURL: baseURL,

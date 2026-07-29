@@ -1297,9 +1297,6 @@ components:
           format: date-time
           nullable: true
           description: End time; null/omitted = running timer.
-        notes:
-          type: string
-          nullable: true
       example:
         id: "019639f1-7a3b-7abc-9def-100000000003"
         activity_id: "019639f1-7a3b-7abc-9def-100000000001"
@@ -1319,9 +1316,6 @@ components:
           format: date-time
           nullable: true
           description: Setting this stops a running timer; `duration_seconds` is recomputed.
-        notes:
-          type: string
-          nullable: true
         updated_at:
           type: string
           format: date-time
@@ -1453,9 +1447,6 @@ components:
           type: integer
           nullable: true
           description: ended_at - started_at, in seconds; null while running.
-        notes:
-          type: string
-          nullable: true
         created_at:
           type: string
           format: date-time
@@ -1473,7 +1464,6 @@ components:
         started_at: "2026-07-27T09:00:00Z"
         ended_at: "2026-07-27T10:00:00Z"
         duration_seconds: 3600
-        notes: ""
         created_at: "2026-07-27T09:00:00Z"
         updated_at: "2026-07-27T10:00:00Z"
         categories:

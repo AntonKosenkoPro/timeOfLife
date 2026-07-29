@@ -98,7 +98,6 @@ func (h *Handler) CreateEntry(w http.ResponseWriter, r *http.Request) {
 	if req.EndedAt != nil {
 		validateTimestamp("ended_at", *req.EndedAt, false, errs)
 	}
-	validateNotes(req.Notes, errs)
 	// ended_at must be after started_at when both are present and valid.
 	if req.EndedAt != nil && req.StartedAt != "" {
 		if st, ok1 := parseRFC3339(req.StartedAt); ok1 {
@@ -124,7 +123,6 @@ func (h *Handler) CreateEntry(w http.ResponseWriter, r *http.Request) {
 		ActivityID: req.ActivityID,
 		StartedAt:  startedAt,
 		EndedAt:    endedAt,
-		Notes:      req.Notes,
 	}
 	created, isNew, err := h.store.CreateEntry(r.Context(), e)
 	if err != nil {
@@ -173,9 +171,6 @@ func (h *Handler) UpdateEntry(w http.ResponseWriter, r *http.Request) {
 	if req.EndedAt.Set && req.EndedAt.Bad {
 		errs.add("ended_at", "ended_at must be a valid RFC 3339 timestamp")
 	}
-	if req.Notes != nil {
-		validateNotes(*req.Notes, errs)
-	}
 	validateTimestamp("updated_at", req.UpdatedAt, true, errs)
 	// ended_at must be after started_at when both are valid.
 	if req.StartedAt != nil && req.EndedAt.Set && req.EndedAt.Valid {
@@ -198,7 +193,7 @@ func (h *Handler) UpdateEntry(w http.ResponseWriter, r *http.Request) {
 		endedAt = db.NullableTime{Set: true, Valid: req.EndedAt.Valid, Value: req.EndedAt.Value}
 	}
 	updatedAt, _ := parseRFC3339(req.UpdatedAt)
-	patch := db.EntryPatch{StartedAt: startedAt, EndedAt: endedAt, Notes: req.Notes, UpdatedAt: updatedAt}
+	patch := db.EntryPatch{StartedAt: startedAt, EndedAt: endedAt, UpdatedAt: updatedAt}
 	updated, err := h.store.UpdateEntry(r.Context(), userID, chi.URLParam(r, "id"), patch)
 	if err != nil {
 		h.writeCatalogStoreErr(w, updated, err, "update entry")

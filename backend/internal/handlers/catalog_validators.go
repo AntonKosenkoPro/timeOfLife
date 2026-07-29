@@ -163,13 +163,11 @@ type entryCreateReq struct {
 	ActivityID *string `json:"activity_id"`
 	StartedAt  string  `json:"started_at"`
 	EndedAt    *string `json:"ended_at"`
-	Notes      string  `json:"notes"`
 }
 
 type entryUpdateReq struct {
 	StartedAt *string `json:"started_at"`
 	EndedAt   optTime `json:"ended_at"`
-	Notes     *string `json:"notes"`
 	UpdatedAt string  `json:"updated_at"`
 }
 

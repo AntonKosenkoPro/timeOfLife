@@ -83,6 +83,21 @@ enum ActivityIcon: String, Codable, CaseIterable, Sendable {
 
     /// All valid raw SF Symbol names, for client-side pre-checks.
     static var validKeys: Set<String> { Set(allCases.map(\.rawValue)) }
+
+    /// The approved design set of SF Symbol names for the `IconPickerGrid`.
+    /// Matches `TOKENS.md` → Activity icons (28 symbols including `clock`).
+    static let allowedSymbols: [String] = [
+        "clock", "laptopcomputer", "briefcase", "book",
+        "pencil.and.ruler", "brain.head.profile",
+        "figure.run", "figure.strengthtraining", "figure.yoga",
+        "dumbbell", "bicycle",
+        "fork.knife", "cup.and.saucer",
+        "bed.double", "moon.stars",
+        "gamecontroller", "tv", "film",
+        "music.note", "guitar", "paintbrush", "camera",
+        "airplane", "car.fill", "hammer",
+        "heart", "leaf", "sparkles",
+    ]
 }
 
 // MARK: - Preview fixtures

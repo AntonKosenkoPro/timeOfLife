@@ -19,9 +19,10 @@ extension AppContainer {
         let sessionStore = SessionStore()
         let navigation = AppNavigationStack()
         let connectivity = MockConnectivity(connected: true)
+        let entriesRepository = UITestingEntriesRepository()
         let timerService = TimerService(
             store: LocalTimerStore(),
-            repository: StubTimerRepository(),
+            repository: entriesRepository,
             connectivity: connectivity
         )
         let repository = UITestingAuthRepository()
@@ -174,5 +175,23 @@ struct UITestingCatalogRepository: CatalogRepository {
     func createCategory(_ category: Category) async throws -> Category { category }
     func updateCategory(_ category: Category) async throws -> Category { category }
     func deleteCategory(_ id: UUID) async throws {}
+}
+
+/// Stub `EntriesRepository` for the UI-feedback loop. Returns deterministic,
+/// no-op results so the timer screen renders without a network. DEBUG-only;
+/// never ships. Stateless `Sendable` struct.
+struct UITestingEntriesRepository: EntriesRepository {
+    func create(_ entry: TimeEntry) async throws {}
+    func stop(id: UUID, endedAt: Date, updatedAt: Date) async throws {}
+    func delete(id: UUID) async throws {}
+    func get(id: UUID) async throws -> EntryDTO {
+        EntryDTO(
+            id: id,
+            activityId: UUID(uuidString: "00000000-0000-0000-0000-000000000001")!,
+            startedAt: Date(timeIntervalSinceReferenceDate: 0),
+            createdAt: Date(timeIntervalSinceReferenceDate: 0),
+            updatedAt: Date(timeIntervalSinceReferenceDate: 0)
+        )
+    }
 }
 #endif

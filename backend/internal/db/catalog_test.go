@@ -420,42 +420,6 @@ func TestStore_CrossUserIsolation(t *testing.T) {
 // ptr returns a pointer to s (helper for patch fields).
 func ptr(s string) *string { return &s }
 
-// F1: UpdateEntry must persist notes (previously dropped from the UPDATE).
-func TestStore_UpdateEntry_Notes(t *testing.T) {
-	store := setupTestStore(t)
-	defer func() { _ = store.Close() }()
-	uid := newTestUser(t, store, "notes@example.com")
-	a := mustCreateActivity(t, store, uid, "Gym", nil)
-	start := time.Date(2026, 7, 27, 9, 0, 0, 0, time.UTC)
-	e, _, err := store.CreateEntry(context.Background(), Entry{
-		ID: uuidV7(), UserID: uid, ActivityID: &a.ID, StartedAt: start, Notes: "old",
-	})
-	if err != nil {
-		t.Fatalf("CreateEntry: %v", err)
-	}
-	notes := "new notes"
-	updated, err := store.UpdateEntry(context.Background(), uid, e.ID, EntryPatch{
-		Notes: &notes, UpdatedAt: e.UpdatedAt.Add(time.Second),
-	})
-	if err != nil {
-		t.Fatalf("UpdateEntry: %v", err)
-	}
-	if updated.Notes != "new notes" {
-		t.Errorf("expected notes %q, got %q", "new notes", updated.Notes)
-	}
-	// Clearing notes to "" stores NULL and reads back as "".
-	empty := ""
-	updated, err = store.UpdateEntry(context.Background(), uid, e.ID, EntryPatch{
-		Notes: &empty, UpdatedAt: updated.UpdatedAt.Add(time.Second),
-	})
-	if err != nil {
-		t.Fatalf("UpdateEntry clear: %v", err)
-	}
-	if updated.Notes != "" {
-		t.Errorf("expected notes cleared, got %q", updated.Notes)
-	}
-}
-
 // F2: CreateEntry with an activity_id bumps the activity's last_used_at to the
 // entry's started_at, without regressing it for historical entries.
 func TestStore_CreateEntry_BumpsActivityLastUsedAt(t *testing.T) {

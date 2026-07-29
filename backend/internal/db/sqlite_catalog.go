@@ -76,11 +76,10 @@ func scanEntry(sc rowScanner, userID string) (Entry, error) {
 		startedAt  string
 		endedAt    sql.NullString
 		dur        sql.NullInt64
-		notes      sql.NullString
 		createdAt  string
 		updatedAt  string
 	)
-	if err := sc.Scan(&e.ID, &activityID, &startedAt, &endedAt, &dur, &notes, &createdAt, &updatedAt); err != nil {
+	if err := sc.Scan(&e.ID, &activityID, &startedAt, &endedAt, &dur, &createdAt, &updatedAt); err != nil {
 		return Entry{}, err
 	}
 	e.UserID = userID
@@ -90,13 +89,12 @@ func scanEntry(sc rowScanner, userID string) (Entry, error) {
 	e.StartedAt = parseTime(startedAt)
 	e.EndedAt = nullTimePtr(endedAt)
 	e.DurationSeconds = nullIntPtr(dur)
-	e.Notes = notes.String
 	e.CreatedAt = parseTime(createdAt)
 	e.UpdatedAt = parseTime(updatedAt)
 	return e, nil
 }
 
-const entryColumns = `id, activity_id, started_at, ended_at, duration_seconds, notes, created_at, updated_at`
+const entryColumns = `id, activity_id, started_at, ended_at, duration_seconds, created_at, updated_at`
 
 // listActivityTagsBatch returns category tags keyed by activity_id for the
 // given activities (entries reuse this by their activity_id).
@@ -823,9 +821,9 @@ func (s *SQLiteStore) CreateEntry(ctx context.Context, e Entry) (Entry, bool, er
 
 	now := time.Now().UTC()
 	if _, err := s.db.ExecContext(ctx, `
-		INSERT INTO entries (id, user_id, activity_id, started_at, ended_at, duration_seconds, notes, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`, e.ID, e.UserID, strPtrArg(e.ActivityID), fmtTime(e.StartedAt), fmtTimeArg(e.EndedAt), nullIntArg(dur), nullStrArg(e.Notes), fmtTime(now), fmtTime(now)); err != nil {
+		INSERT INTO entries (id, user_id, activity_id, started_at, ended_at, duration_seconds, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+	`, e.ID, e.UserID, strPtrArg(e.ActivityID), fmtTime(e.StartedAt), fmtTimeArg(e.EndedAt), nullIntArg(dur), fmtTime(now), fmtTime(now)); err != nil {
 		return Entry{}, false, fmt.Errorf("create entry: %w", err)
 	}
 	// Bump the activity's last_used_at to the entry's started_at (recency for
@@ -893,10 +891,6 @@ func (s *SQLiteStore) UpdateEntry(ctx context.Context, userID, id string, p Entr
 	if p.EndedAt.Set {
 		sets = append([]string{"ended_at = ?"}, sets...)
 		args = append([]any{fmtTimeArg(endedAt)}, args...)
-	}
-	if p.Notes != nil {
-		sets = append([]string{"notes = ?"}, sets...)
-		args = append([]any{nullStrArg(*p.Notes)}, args...)
 	}
 	args = append(args, id, userID, fmtTime(p.UpdatedAt))
 	res, err := s.db.ExecContext(ctx, `

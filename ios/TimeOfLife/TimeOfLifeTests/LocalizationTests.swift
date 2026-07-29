@@ -124,11 +124,9 @@ struct LocalizationTests {
 
     @Test("L10n enum allCases count matches expected keys")
     func allCasesCount() {
-        // 34 keys: 25 existing + 9 catalog (Epic 1):
-        // tagsEmptyHint, undoButton, toastDismiss,
-        // deleteActivityTitle, deleteActivityMessage, deleteActivityEntire,
-        // deleteActivityEntryOnly, deleteActivityCancel, activityLastUsed
-        #expect(l10nCases.count == 34)
+        // 37 keys: 34 existing + 3 timer (Epic 1):
+        // timerSuggestionsHeader, timerQuickAdd, timerManageActivities
+        #expect(l10nCases.count == 37)
     }
 }
 
@@ -143,6 +141,7 @@ extension L10n: CaseIterable {
             .appleSignInTitle, .appleSignInError,
             .timerTitle, .timerActivityPlaceholder, .timerStart, .timerStop,
             .timerOfflineHint, .timerEmptyActivityError, .timerSignOut,
+            .timerSuggestionsHeader, .timerQuickAdd, .timerManageActivities,
             .signOutConfirmationTitle, .signOutConfirmationMessage, .signOutConfirm, .signOutCancel,
             // Catalog (Epic 1)
             .tagsEmptyHint, .undoButton, .toastDismiss,

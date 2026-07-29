@@ -23,6 +23,10 @@ struct AuthFlowView: View {
                         connectivity: container.connectivity,
                         email: email
                     ))
+                case .manageActivities:
+                    // Handled by TimerView's own NavigationStack; not reachable
+                    // from the auth flow. Placeholder for exhaustive switch.
+                    EmptyView()
                 }
             },
             root: {

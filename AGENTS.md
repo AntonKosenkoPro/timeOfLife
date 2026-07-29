@@ -94,9 +94,9 @@ Uniform error envelope: `{ "error": { "code": String, "message": String, "detail
 | PATCH | `/categories/{id}` | `{name?,color?,updated_at}` | 200 `{category}` | `invalid_body`, `validation_error`, `not_found`, `conflict`, `category_exists`, (401) |
 | DELETE | `/categories/{id}` | (Bearer) | 204 (join rows cascade; entries unaffected) | `not_found`, (401) |
 | GET  | `/entries` | (Bearer) | 200 `{items,next_cursor?}` (`?from=&to=&activity_id=&category_id=&limit=&cursor=`) | (401) |
-| POST | `/entries` | `{id,activity_id,started_at,ended_at?,notes?}` | 201/200 `{entry}` (idempotent on `id`; `activity_id` required) | `invalid_body`, `validation_error`, `activity_not_found`, `conflict`, (401) |
+| POST | `/entries` | `{id,activity_id,started_at,ended_at?}` | 201/200 `{entry}` (idempotent on `id`; `activity_id` required) | `invalid_body`, `validation_error`, `activity_not_found`, `conflict`, (401) |
 | GET  | `/entries/{id}` | (Bearer) | 200 `{entry}` | `not_found`, (401) |
-| PATCH | `/entries/{id}` | `{started_at?,ended_at?,notes?,updated_at}` | 200 `{entry}` (recomputes `duration_seconds`) | `invalid_body`, `validation_error`, `not_found`, `conflict`, (401) |
+| PATCH | `/entries/{id}` | `{started_at?,ended_at?,updated_at}` | 200 `{entry}` (recomputes `duration_seconds`) | `invalid_body`, `validation_error`, `not_found`, `conflict`, (401) |
 | DELETE | `/entries/{id}` | (Bearer) | 204 | `not_found`, (401) |
 
 **Epic 1 (activity catalog & entries):** all `/activities`, `/categories`, `/entries` routes are Bearer-protected. Ids are **client-generated UUID v7** and `POST` is **idempotent on `id`** (a replay returns the existing record with 200, enabling offline create-then-sync). Writes use **last-write-wins on `updated_at`** (PATCH carries `updated_at`; a stale write returns 409 `conflict` with the server's current version in `details`). Deletes are hard (the client holds the 30 s undo buffer). `activity_exists`/`category_exists` (409) report a case-insensitive name collision and carry the winning record's `{id,name}` in `details`. Validation failures are 422 `validation_error` with `details` = `{field: message}`. **Suggestions are client-side** (F5): the client ranks its synced activities by `last_used_at` — there is no `/activities/suggestions` endpoint; `last_used_at` syncs so recency is shared across devices. Seeding (F6) is client-side via ordinary `POST /categories`. The authoritative contract is [`backend/api/openapi.yaml`](backend/api/openapi.yaml) (v1.1.0).
@@ -162,6 +162,10 @@ make deploy   # or push to main and let CI/CD handle it
 `AppConfig` reads it at runtime and falls back to the dev URL if missing/malformed. The unit tests run under `Debug`, so they keep asserting `127.0.0.1:8080`.
 
 Code signing is disabled in `project.yml` (`DEVELOPMENT_TEAM: ""`, `CODE_SIGNING_REQUIRED: NO`) so simulator/CI builds need no Apple Developer account. **TestFlight/App Store distribution is deferred** — to enable it later: set `DEVELOPMENT_TEAM`, switch `CODE_SIGNING_REQUIRED`/`CODE_SIGN_IDENTITY` to distribution values, supply a provisioning profile, and add a fastlane/gym archive + upload CI job (needs an App Store Connect API key secret). The comment in `project.yml` marks the exact lines.
+
+## Pre-release policy
+
+The app is unreleased; there is no on-disk data in the wild. **No backward compatibility / migration for local on-disk formats is needed before release.** Do not add legacy-decode branches, `legacy*` fields, or `migrateIfNeeded` paths to local stores. On-disk schema changes are applied by editing the `Codable` shape in place; existing test fixtures and dev devices simply start fresh. Revisit this policy once a build ships to TestFlight or any external tester.
 
 ## Deferred / out of scope
 - **Sign in with Apple follow-ups** — F2 itself is implemented (see below); still deferred: account-deletion token revocation via Apple `/auth/revoke` (App Store 5.1.1v, needs `.p8` + `APPLE_TEAM_ID`/`APPLE_KEY_ID`), nonce replay defense, and Apple credential-state/revocation observation on the client.

@@ -34,22 +34,18 @@ func pgScanEntry(sc pgxScanner, userID string) (Entry, error) {
 		activityID *string
 		endedAt    *time.Time
 		dur        *int
-		notes      *string
 	)
-	if err := sc.Scan(&e.ID, &activityID, &e.StartedAt, &endedAt, &dur, &notes, &e.CreatedAt, &e.UpdatedAt); err != nil {
+	if err := sc.Scan(&e.ID, &activityID, &e.StartedAt, &endedAt, &dur, &e.CreatedAt, &e.UpdatedAt); err != nil {
 		return Entry{}, err
 	}
 	e.UserID = userID
 	e.ActivityID = activityID
 	e.EndedAt = endedAt
 	e.DurationSeconds = dur
-	if notes != nil {
-		e.Notes = *notes
-	}
 	return e, nil
 }
 
-const pgEntryColumns = `id, activity_id, started_at, ended_at, duration_seconds, notes, created_at, updated_at`
+const pgEntryColumns = `id, activity_id, started_at, ended_at, duration_seconds, created_at, updated_at`
 
 // pgListActivityTagsBatch returns category tags keyed by activity_id.
 func (s *PostgresStore) pgListActivityTagsBatch(ctx context.Context, userID string, activityIDs []string) (map[string][]CategoryTag, error) {
@@ -706,9 +702,9 @@ func (s *PostgresStore) CreateEntry(ctx context.Context, e Entry) (Entry, bool, 
 
 	now := time.Now().UTC()
 	if _, err := s.pool.Exec(ctx, `
-		INSERT INTO entries (id, user_id, activity_id, started_at, ended_at, duration_seconds, notes, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $8)
-	`, e.ID, e.UserID, e.ActivityID, e.StartedAt, e.EndedAt, dur, pgStrPtr(e.Notes), now); err != nil {
+		INSERT INTO entries (id, user_id, activity_id, started_at, ended_at, duration_seconds, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $7)
+	`, e.ID, e.UserID, e.ActivityID, e.StartedAt, e.EndedAt, dur, now); err != nil {
 		return Entry{}, false, fmt.Errorf("create entry: %w", err)
 	}
 	// Bump the activity's last_used_at to the entry's started_at (recency for
@@ -769,11 +765,6 @@ func (s *PostgresStore) UpdateEntry(ctx context.Context, userID, id string, p En
 	if p.EndedAt.Set {
 		sets = append([]string{fmt.Sprintf("ended_at = $%d", n)}, sets...)
 		args = append([]any{endedAt}, args...)
-		n++
-	}
-	if p.Notes != nil {
-		sets = append([]string{fmt.Sprintf("notes = $%d", n)}, sets...)
-		args = append([]any{pgStrPtr(*p.Notes)}, args...)
 		n++
 	}
 	args = append(args, id, userID, p.UpdatedAt)

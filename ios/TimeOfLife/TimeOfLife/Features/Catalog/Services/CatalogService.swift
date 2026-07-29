@@ -60,7 +60,12 @@ final class CatalogService: ObservableObject {
                     payload: encode(activity), updatedAt: activity.updatedAt)
         )
         await syncNow()
-        return await store.activity(activity.id) ?? activity
+        // After sync, the optimistic activity may have been remapped (409
+        // activity_exists). If it was removed, return the survivor (found by
+        // name) instead of the dead optimistic record.
+        if let stored = await store.activity(activity.id) { return stored }
+        if let survivor = await store.activity(named: activity.name) { return survivor }
+        return activity
     }
 
     /// Applies an update optimistically (LWW: `updated_at` is carried) and

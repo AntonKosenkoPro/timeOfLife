@@ -20,6 +20,7 @@ struct TimerViewModelTests {
     func startTimer() {
         let vm = makeViewModel()
         vm.activityName = "Design"
+        vm.selectedActivityId = UUID()
         vm.start()
 
         #expect(vm.isRunning)
@@ -31,7 +32,9 @@ struct TimerViewModelTests {
     @Test("stop timer saves entry and resets form")
     func stopTimerSavesEntry() async {
         let vm = makeViewModel()
+        let activityId = UUID()
         vm.activityName = "Coding"
+        vm.selectedActivityId = activityId
         vm.start()
 
         try? await Task.sleep(nanoseconds: 10_000_000)
@@ -49,7 +52,9 @@ struct TimerViewModelTests {
     @Test("offline stop leaves entry unsynced")
     func offlineStopLeavesUnsynced() async {
         let vm = makeViewModel(connected: false)
+        let activityId = UUID()
         vm.activityName = "Reading"
+        vm.selectedActivityId = activityId
         vm.start()
 
         try? await Task.sleep(nanoseconds: 10_000_000)
@@ -59,7 +64,7 @@ struct TimerViewModelTests {
         #expect(!vm.isRunning)
         let unsynced = await vm.service.store.unsyncedEntries()
         #expect(unsynced.count == 1)
-        #expect(unsynced.first?.activityName == "Reading")
+        #expect(unsynced.first?.activityId == activityId)
 
         vm.reset()
     }
@@ -68,6 +73,7 @@ struct TimerViewModelTests {
     func resetClearsState() {
         let vm = makeViewModel()
         vm.activityName = "Work"
+        vm.selectedActivityId = UUID()
         vm.start()
         vm.reset()
 
@@ -75,15 +81,18 @@ struct TimerViewModelTests {
         #expect(vm.activityName.isEmpty)
         #expect(vm.elapsed == 0)
         #expect(vm.fieldError == nil)
+        #expect(vm.selectedActivityId == nil)
     }
 
     // MARK: - Helpers
 
     private func makeViewModel(connected: Bool = true) -> TimerViewModel {
         let connectivity = MockConnectivity(connected: connected)
+        let store = LocalTimerStore(url: temporaryStoreURL())
+        let repository = FakeEntriesRepository()
         let service = TimerService(
-            store: LocalTimerStore(url: temporaryStoreURL()),
-            repository: StubTimerRepository(),
+            store: store,
+            repository: repository,
             connectivity: connectivity
         )
         let authService = AuthService(
@@ -92,12 +101,34 @@ struct TimerViewModelTests {
             cache: SessionCache(defaults: UserDefaults(suiteName: UUID().uuidString)!),
             sessionStore: SessionStore()
         )
-        return TimerViewModel(service: service, authService: authService, connectivity: connectivity)
+        let catalogStore = CatalogStore(directory: temporaryDirectory())
+        let catalogRepo = FakeCatalogRepository()
+        let syncQueue = SyncQueue(url: temporaryDirectory())
+        let undoBuffer = UndoBuffer()
+        let catalogService = CatalogService(
+            store: catalogStore,
+            repository: catalogRepo,
+            syncQueue: syncQueue,
+            undoBuffer: undoBuffer,
+            connectivity: connectivity
+        )
+        return TimerViewModel(
+            service: service,
+            authService: authService,
+            connectivity: connectivity,
+            catalogStore: catalogStore,
+            catalogService: catalogService
+        )
     }
 
     private func temporaryStoreURL() -> URL {
         URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent(UUID().uuidString)
             .appendingPathComponent("timerQueue.json")
+    }
+
+    private func temporaryDirectory() -> URL {
+        URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent(UUID().uuidString)
     }
 }
