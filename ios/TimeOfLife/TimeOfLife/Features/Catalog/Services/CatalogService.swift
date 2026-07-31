@@ -15,6 +15,10 @@ final class CatalogService: ObservableObject {
     let undoBuffer: UndoBuffer
     let connectivity: Connectivity
 
+    /// Published revision counter bumped on every store mutation so observers
+    /// (e.g. TimerViewModel) can react to catalog changes.
+    @Published private(set) var storeRevision: UInt64 = 0
+
     private var connectivityCancellable: AnyCancellable?
 
     init(
@@ -54,7 +58,8 @@ final class CatalogService: ObservableObject {
     /// optimistic version if still pending.
     @discardableResult
     func createActivity(_ activity: Activity) async throws -> Activity {
-        try await store.upsertActivity(activity)
+        await store.upsertActivity(activity)
+        storeRevision &+= 1
         try await syncQueue.enqueue(
             .create(resource: .activity, resourceId: activity.id,
                     payload: encode(activity), updatedAt: activity.updatedAt)
@@ -74,7 +79,8 @@ final class CatalogService: ObservableObject {
     /// optimistic version if still pending.
     @discardableResult
     func updateActivity(_ activity: Activity) async throws -> Activity {
-        try await store.upsertActivity(activity)
+        await store.upsertActivity(activity)
+        storeRevision &+= 1
         try await syncQueue.enqueue(
             .update(resource: .activity, resourceId: activity.id,
                     payload: encode(activity), updatedAt: activity.updatedAt)
@@ -94,7 +100,8 @@ final class CatalogService: ObservableObject {
     // MARK: - Categories
 
     func createCategory(_ category: Category) async throws {
-        try await store.upsertCategory(category)
+        await store.upsertCategory(category)
+        storeRevision &+= 1
         try await syncQueue.enqueue(
             .create(resource: .category, resourceId: category.id,
                     payload: encode(category), updatedAt: category.updatedAt)
@@ -103,7 +110,8 @@ final class CatalogService: ObservableObject {
     }
 
     func updateCategory(_ category: Category) async throws {
-        try await store.upsertCategory(category)
+        await store.upsertCategory(category)
+        storeRevision &+= 1
         try await syncQueue.enqueue(
             .update(resource: .category, resourceId: category.id,
                     payload: encode(category), updatedAt: category.updatedAt)
@@ -123,19 +131,16 @@ final class CatalogService: ObservableObject {
     /// failure"). Returns the restored item, or `nil` if nothing is restorable.
     func undo() async -> UndoableItem? {
         guard let item = undoBuffer.undo() else { return nil }
-        do {
-            switch item {
-            case .activity(let activity):
-                try await store.upsertActivity(activity)
-            case .category(let category):
-                try await store.upsertCategory(category)
-            case .activityWithEntries(let activity, _):
-                try await store.upsertActivity(activity)
-                // Entry restore is owned by 1-3.
-            }
-        } catch {
-            undoBuffer.restore(item)
+        switch item {
+        case .activity(let activity):
+            await store.upsertActivity(activity)
+        case .category(let category):
+            await store.upsertCategory(category)
+        case .activityWithEntries(let activity, _):
+            await store.upsertActivity(activity)
+            // Entry restore is owned by 1-3.
         }
+        storeRevision &+= 1
         return item
     }
 
@@ -143,8 +148,11 @@ final class CatalogService: ObservableObject {
 
     /// Case-insensitive, whitespace-trimmed activity lookup so the timer screen
     /// (1-3) can decide reuse vs auto-create. Returns the existing activity.
+    /// Skips records currently held in the undo buffer (about to be deleted).
     func caseInsensitiveReuse(named name: String) async -> Activity? {
-        await store.activity(named: name)
+        guard let activity = await store.activity(named: name) else { return nil }
+        if undoBuffer.heldIds.contains(activity.id) { return nil }
+        return activity
     }
 
     // MARK: - Seeding (F6)
@@ -158,7 +166,7 @@ final class CatalogService: ObservableObject {
         var lastError: Error?
         for category in categories {
             do {
-                try await store.upsertCategory(category)
+                await store.upsertCategory(category)
                 try await syncQueue.enqueue(
                     .create(resource: .category, resourceId: category.id,
                             payload: encode(category), updatedAt: category.updatedAt)
@@ -179,6 +187,7 @@ final class CatalogService: ObservableObject {
     /// mutation and on reconnect.
     func syncNow() async {
         await syncQueue.replay(using: repository, store: store, connectivity: connectivity)
+        storeRevision &+= 1
     }
 
     // MARK: - Commit (undo window elapsed)
@@ -186,51 +195,39 @@ final class CatalogService: ObservableObject {
     private func commitDeletion(_ item: UndoableItem) async {
         switch item {
         case .activity(let activity):
-            do {
-                try await store.removeActivity(activity.id)
-                try await syncQueue.enqueue(
-                    .delete(resource: .activity, resourceId: activity.id, updatedAt: Date())
-                )
-            } catch {
-                os_log(.error, "commitDeletion activity failed: %{public}@",
-                       error.localizedDescription)
-            }
+            await store.removeActivity(activity.id)
+            storeRevision &+= 1
+            try? await syncQueue.enqueue(
+                .delete(resource: .activity, resourceId: activity.id, updatedAt: Date())
+            )
         case .category(let category):
-            do {
-                // Capture affected activities BEFORE removal so we can enqueue
-                // sync mutations for the cascaded category id removal.
-                let affected = await store.loadActivities().filter {
-                    $0.categoryIds.contains(category.id)
-                }
-                try await store.removeCategory(category.id)
-                try await syncQueue.enqueue(
-                    .delete(resource: .category, resourceId: category.id, updatedAt: Date())
+            // Capture affected activities BEFORE removal so we can enqueue
+            // sync mutations for the cascaded category id removal.
+            let affected = await store.loadActivities().filter {
+                $0.categoryIds.contains(category.id)
+            }
+            await store.removeCategory(category.id)
+            storeRevision &+= 1
+            try? await syncQueue.enqueue(
+                .delete(resource: .category, resourceId: category.id, updatedAt: Date())
+            )
+            // Enqueue update mutations for activities whose categoryIds
+            // were cascaded by removeCategory.
+            for activity in affected {
+                var updated = activity
+                updated.categoryIds.removeAll { $0 == category.id }
+                try? await syncQueue.enqueue(
+                    .update(resource: .activity, resourceId: updated.id,
+                            payload: encode(updated), updatedAt: updated.updatedAt)
                 )
-                // Enqueue update mutations for activities whose categoryIds
-                // were cascaded by removeCategory.
-                for activity in affected {
-                    var updated = activity
-                    updated.categoryIds.removeAll { $0 == category.id }
-                    try await syncQueue.enqueue(
-                        .update(resource: .activity, resourceId: updated.id,
-                                payload: encode(updated), updatedAt: updated.updatedAt)
-                    )
-                }
-            } catch {
-                os_log(.error, "commitDeletion category failed: %{public}@",
-                       error.localizedDescription)
             }
         case .activityWithEntries(let activity, _):
             // Activity + its entries deleted as a unit (F10); entries owned by 1-3.
-            do {
-                try await store.removeActivity(activity.id)
-                try await syncQueue.enqueue(
-                    .delete(resource: .activity, resourceId: activity.id, updatedAt: Date())
-                )
-            } catch {
-                os_log(.error, "commitDeletion activityWithEntries failed: %{public}@",
-                       error.localizedDescription)
-            }
+            await store.removeActivity(activity.id)
+            storeRevision &+= 1
+            try? await syncQueue.enqueue(
+                .delete(resource: .activity, resourceId: activity.id, updatedAt: Date())
+            )
         }
     }
 

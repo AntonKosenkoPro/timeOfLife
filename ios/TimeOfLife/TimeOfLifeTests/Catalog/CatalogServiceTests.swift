@@ -53,7 +53,7 @@ struct CatalogServiceTests {
     func deleteHolds() async throws {
         let (service, store, _, queue, undo, _) = makeService(connected: true)
         let activity = TestCatalogFactory.activity()
-        try await store.upsertActivity(activity)
+        await store.upsertActivity(activity)
 
         try await service.deleteActivity(activity)
 
@@ -68,7 +68,7 @@ struct CatalogServiceTests {
     func deleteCommitsAfterWindow() async throws {
         let (service, store, _, queue, undo, _) = makeService(connected: true)
         let activity = TestCatalogFactory.activity()
-        try await store.upsertActivity(activity)
+        await store.upsertActivity(activity)
 
         try await service.deleteActivity(activity)
         // Simulate the undo window elapsing (the scheduler is `.none`).
@@ -86,7 +86,7 @@ struct CatalogServiceTests {
     func undoRestores() async throws {
         let (service, store, _, queue, undo, _) = makeService(connected: true)
         let activity = TestCatalogFactory.activity()
-        try await store.upsertActivity(activity)
+        await store.upsertActivity(activity)
 
         try await service.deleteActivity(activity)
         let restored = await service.undo()
@@ -100,7 +100,7 @@ struct CatalogServiceTests {
     @Test("caseInsensitiveReuse returns an existing activity by trimmed, lowercased name")
     func caseInsensitiveReuse() async throws {
         let (service, store, _, _, _, _) = makeService(connected: true)
-        try await store.upsertActivity(TestCatalogFactory.activity(name: "Gym"))
+        await store.upsertActivity(TestCatalogFactory.activity(name: "Gym"))
 
         let reuse = await service.caseInsensitiveReuse(named: "  gym ")
         #expect(reuse?.name == "Gym")

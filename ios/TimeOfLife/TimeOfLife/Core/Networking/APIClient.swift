@@ -73,11 +73,15 @@ actor APIClient: APISending {
         let request = try await makeRequest(endpoint)
         do {
             return try await execute(request)
-        } catch APIError.unauthorized where allowRetry {
+        } catch APIError.unauthorized where allowRetry && endpoint.requiresAuth {
             guard let refreshHandler else { throw APIError.unauthorized }
             let newToken: String
             do {
                 newToken = try await refreshHandler()
+            } catch let error as APIError {
+                // Preserve offline and transport failures so callers do not
+                // sign out merely because a refresh could not reach the API.
+                throw error
             } catch {
                 throw APIError.unauthorized
             }
@@ -117,7 +121,7 @@ actor APIClient: APISending {
                 throw APIError.server(
                     code: env.error.code,
                     message: env.error.message,
-                    details: env.detailsAsHashable
+                    details: env.detailsAsStringMap
                 )
             }
             throw APIError.server(
@@ -171,8 +175,8 @@ struct ErrorEnvelope: Decodable, Sendable {
     }
     let error: Body
 
-    var detailsAsHashable: [String: AnyHashable] {
-        error.details?.asHashable ?? [:]
+    var detailsAsStringMap: [String: String] {
+        error.details?.asStringMap ?? [:]
     }
 }
 
@@ -185,49 +189,56 @@ struct DetailsEnvelope: Decodable, Sendable {
         self.raw = try AnyCodable(from: decoder)
     }
 
-    var asHashable: [String: AnyHashable] {
-        if let dict = raw.value as? [String: Any] {
-            var out: [String: AnyHashable] = [:]
-            for (k, v) in dict {
-                if let hv = v as? AnyHashable { out[k] = hv }
-            }
-            return out
-        }
-        return [:]
+    var asStringMap: [String: String] {
+        raw.stringDictionary
     }
 }
 
-/// Minimal any-codable for opaque details payloads.
-struct AnyCodable: Decodable, Encodable, Sendable {
-    let value: Any
+/// Codable, Sendable representation for opaque JSON details payloads.
+enum AnyCodable: Codable, Sendable {
+    case null
+    case string(String)
+    case number(Double)
+    case bool(Bool)
+    case array([AnyCodable])
+    case object([String: AnyCodable])
 
     init(from decoder: Decoder) throws {
         let container = try decoder.singleValueContainer()
         if container.decodeNil() {
-            self.value = NSNull()
-        } else if let v = try? container.decode(String.self) {
-            self.value = v
-        } else if let v = try? container.decode(Double.self) {
-            self.value = v
-        } else if let v = try? container.decode(Bool.self) {
-            self.value = v
-        } else if let v = try? container.decode([AnyCodable].self) {
-            self.value = v.map { $0.value }
-        } else if let v = try? container.decode([String: AnyCodable].self) {
-            self.value = v.mapValues { $0.value }
+            self = .null
+        } else if let value = try? container.decode(String.self) {
+            self = .string(value)
+        } else if let value = try? container.decode(Bool.self) {
+            self = .bool(value)
+        } else if let value = try? container.decode(Double.self) {
+            self = .number(value)
+        } else if let value = try? container.decode([AnyCodable].self) {
+            self = .array(value)
+        } else if let value = try? container.decode([String: AnyCodable].self) {
+            self = .object(value)
         } else {
-            self.value = NSNull()
+            self = .null
         }
     }
 
     func encode(to encoder: Encoder) throws {
         var container = encoder.singleValueContainer()
-        switch value {
-        case is NSNull: try container.encodeNil()
-        case let v as String: try container.encode(v)
-        case let v as Double: try container.encode(v)
-        case let v as Bool: try container.encode(v)
-        default: try container.encodeNil()
+        switch self {
+        case .null: try container.encodeNil()
+        case let .string(value): try container.encode(value)
+        case let .number(value): try container.encode(value)
+        case let .bool(value): try container.encode(value)
+        case let .array(value): try container.encode(value)
+        case let .object(value): try container.encode(value)
+        }
+    }
+
+    var stringDictionary: [String: String] {
+        guard case let .object(values) = self else { return [:] }
+        return values.compactMapValues { value in
+            guard case let .string(string) = value else { return nil }
+            return string
         }
     }
 }

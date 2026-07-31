@@ -191,7 +191,7 @@ private struct FlowLayoutLegacy<Item, RowContent: View>: View {
 }
 
 private struct FlowLayoutWidthKey: PreferenceKey {
-    static var defaultValue: [Int: CGFloat] = [:]
+    static let defaultValue: [Int: CGFloat] = [:]
     static func reduce(value: inout [Int: CGFloat], nextValue: () -> [Int: CGFloat]) {
         value.merge(nextValue()) { _, new in new }
     }

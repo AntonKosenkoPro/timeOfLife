@@ -531,6 +531,11 @@ func (s *SQLiteStore) ListCategories(ctx context.Context, userID string) ([]Cate
 	return out, nil
 }
 
+// GetCategory returns one category by id.
+func (s *SQLiteStore) GetCategory(ctx context.Context, userID, id string) (Category, error) {
+	return s.getCategoryRow(ctx, userID, id)
+}
+
 // CreateCategory inserts a new category, idempotent on id.
 func (s *SQLiteStore) CreateCategory(ctx context.Context, c Category) (Category, bool, error) {
 	// Idempotent replay on id.
@@ -820,7 +825,13 @@ func (s *SQLiteStore) CreateEntry(ctx context.Context, e Entry) (Entry, bool, er
 	}
 
 	now := time.Now().UTC()
-	if _, err := s.db.ExecContext(ctx, `
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return Entry{}, false, fmt.Errorf("create entry begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO entries (id, user_id, activity_id, started_at, ended_at, duration_seconds, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 	`, e.ID, e.UserID, strPtrArg(e.ActivityID), fmtTime(e.StartedAt), fmtTimeArg(e.EndedAt), nullIntArg(dur), fmtTime(now), fmtTime(now)); err != nil {
@@ -829,11 +840,14 @@ func (s *SQLiteStore) CreateEntry(ctx context.Context, e Entry) (Entry, bool, er
 	// Bump the activity's last_used_at to the entry's started_at (recency for
 	// suggestions, F5). Only advance it forward so a historical entry does not
 	// regress recency. Skipped on idempotent replay (which returns above).
-	if _, err := s.db.ExecContext(ctx, `
+	if _, err := tx.ExecContext(ctx, `
 		UPDATE activities SET last_used_at = ?
 		WHERE id = ? AND user_id = ? AND (last_used_at IS NULL OR ? > last_used_at)
 	`, fmtTime(e.StartedAt), *e.ActivityID, e.UserID, fmtTime(e.StartedAt)); err != nil {
 		return Entry{}, false, fmt.Errorf("bump activity last_used_at: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return Entry{}, false, fmt.Errorf("create entry commit: %w", err)
 	}
 	created, err := s.GetEntry(ctx, e.UserID, e.ID)
 	if err != nil {

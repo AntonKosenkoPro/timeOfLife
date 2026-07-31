@@ -98,7 +98,6 @@ struct APIClientTests {
     func refreshRetry() async throws {
         defer { URLProtocolStub.clear() }
 
-        let meURL = url(for: "/api/v1/auth/me")
         var callCount = 0
 
         // Use the closure-based approach for multi-step scenarios
@@ -209,13 +208,6 @@ struct APIClientTests {
 
         // Return a non-HTTP response by using the closure handler
         URLProtocolStub.responseHandler = { request in
-            // Return a URLResponse that is not HTTPURLResponse
-            let nonHTTPResponse = URLResponse(
-                url: request.url!,
-                mimeType: nil,
-                expectedContentLength: 0,
-                textEncodingName: nil
-            )
             // We can't easily return a non-HTTP response via URLProtocolStub,
             // so we simulate it by returning a bad status code that the client
             // will try to parse as an error envelope.

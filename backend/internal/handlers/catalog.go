@@ -266,6 +266,20 @@ func (h *Handler) CreateCategory(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, status, created)
 }
 
+// GetCategory handles GET /categories/{id}.
+func (h *Handler) GetCategory(w http.ResponseWriter, r *http.Request) {
+	userID, ok := h.requireUserID(w, r)
+	if !ok {
+		return
+	}
+	c, err := h.store.GetCategory(r.Context(), userID, chi.URLParam(r, "id"))
+	if err != nil {
+		h.writeCatalogStoreErr(w, c, err, "get category")
+		return
+	}
+	writeJSON(w, http.StatusOK, c)
+}
+
 // UpdateCategory handles PATCH /categories/{id} (partial, LWW).
 func (h *Handler) UpdateCategory(w http.ResponseWriter, r *http.Request) {
 	userID, ok := h.requireUserID(w, r)

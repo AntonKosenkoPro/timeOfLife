@@ -155,6 +155,7 @@ func New(_ *config.Config, deps Dependencies) *Server {
 			r.Delete("/activities/{id}", h.DeleteActivity)
 			r.Get("/categories", h.ListCategories)
 			r.Post("/categories", h.CreateCategory)
+			r.Get("/categories/{id}", h.GetCategory)
 			r.Patch("/categories/{id}", h.UpdateCategory)
 			r.Delete("/categories/{id}", h.DeleteCategory)
 			r.Get("/entries", h.ListEntries)

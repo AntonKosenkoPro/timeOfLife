@@ -57,7 +57,7 @@ actor MockCatalogStore: CatalogStoring {
 
     // MARK: - Writes
 
-    func upsertActivity(_ activity: Activity) async throws {
+    func upsertActivity(_ activity: Activity) async {
         calls.append(.upsertActivity(activity))
         if let index = activities.firstIndex(where: { $0.id == activity.id }) {
             activities[index] = activity
@@ -66,7 +66,7 @@ actor MockCatalogStore: CatalogStoring {
         }
     }
 
-    func upsertCategory(_ category: Category) async throws {
+    func upsertCategory(_ category: Category) async {
         calls.append(.upsertCategory(category))
         if let index = categories.firstIndex(where: { $0.id == category.id }) {
             categories[index] = category
@@ -75,12 +75,12 @@ actor MockCatalogStore: CatalogStoring {
         }
     }
 
-    func removeActivity(_ id: UUID) async throws {
+    func removeActivity(_ id: UUID) async {
         calls.append(.removeActivity(id))
         activities.removeAll { $0.id == id }
     }
 
-    func removeCategory(_ id: UUID) async throws {
+    func removeCategory(_ id: UUID) async {
         calls.append(.removeCategory(id))
         categories.removeAll { $0.id == id }
         for index in activities.indices where activities[index].categoryIds.contains(id) {
@@ -88,7 +88,7 @@ actor MockCatalogStore: CatalogStoring {
         }
     }
 
-    func replaceCategoryReferences(from oldId: UUID, to newId: UUID) async throws {
+    func replaceCategoryReferences(from oldId: UUID, to newId: UUID) async {
         calls.append(.replaceCategoryReferences(from: oldId, to: newId))
         guard oldId != newId else { return }
         for index in activities.indices where activities[index].categoryIds.contains(oldId) {
@@ -99,7 +99,7 @@ actor MockCatalogStore: CatalogStoring {
         }
     }
 
-    func replaceActivityReferences(from oldId: UUID, to newId: UUID) async throws {
+    func replaceActivityReferences(from oldId: UUID, to newId: UUID) async {
         calls.append(.replaceActivityReferences(from: oldId, to: newId))
     }
 }

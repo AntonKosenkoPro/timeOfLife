@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 /// A pending catalog mutation queued for sync. Generic over the resource kind
 /// (activity/category, plus an `entry` stub owned by story 1-3). Persisted to
@@ -59,15 +60,9 @@ extension SyncMutation {
     }
 }
 
-/// File-based offline sync queue. Mirrors `LocalTimerStore`'s persistence
-/// approach (JSON in Application Support/TimeOfLife/). Replay is safe:
-/// idempotent POST (same id → existing record) is success; `404` on DELETE is
-/// success; `409 conflict` adopts the server version (keep-latest, R2);
-/// `409 *_exists` re-maps local references to the surviving id (F4);
-/// `422` is kept for retry (never dropped silently).
+/// File-based offline sync queue. Replay is safe: idempotent POST, 404 on
+/// DELETE, 409 conflict adopts server version, 409 *_exists re-maps refs.
 actor SyncQueue {
-    /// Maximum replay attempts before a mutation is dropped (avoids infinite
-    /// retry loops for permanently-failing mutations like 422 validation errors).
     private static let maxAttempts = 5
 
     private let url: URL
@@ -150,7 +145,13 @@ actor SyncQueue {
             }
         }
 
-        try? save(remaining)
+        // Reload from disk to capture any mutations enqueued during replay
+        // (e.g. cascaded activity-updates from remapCategory).
+        let onDisk = (try? load()) ?? []
+        let newMutations = onDisk.filter { m in
+            !pending.contains { $0.id == m.id }
+        }
+        try? save(remaining + newMutations)
     }
 
     // MARK: - Per-mutation dispatch
@@ -175,7 +176,7 @@ actor SyncQueue {
             return await replayCategoryUpdate(mutation, repository: repository, store: store)
         case (.category, .delete):
             return await replayCategoryDelete(mutation, repository: repository)
-        case (.entry, _):
+        case (.entry, .create), (.entry, .update), (.entry, .delete):
             // Entries are owned by story 1-3; never enqueued here.
             return .done
         }
@@ -191,7 +192,7 @@ actor SyncQueue {
         guard let activity = decode(Activity.self, mutation.payload) else { return .done }
         do {
             let canonical = try await repository.createActivity(activity)
-            try? await store.upsertActivity(canonical)
+            await store.upsertActivity(canonical)
             return .done
         } catch CatalogError.activityExists(let existingId, _) {
             await remapActivity(from: activity.id, to: existingId, repository: repository, store: store)
@@ -213,12 +214,12 @@ actor SyncQueue {
         guard let activity = decode(Activity.self, mutation.payload) else { return .done }
         do {
             let canonical = try await repository.updateActivity(activity)
-            try? await store.upsertActivity(canonical)
+            await store.upsertActivity(canonical)
             return .done
         } catch CatalogError.conflict {
             // Keep-latest: adopt the server's current version (re-fetch).
             if let server = try? await repository.getActivity(activity.id) {
-                try? await store.upsertActivity(server)
+                await store.upsertActivity(server)
             }
             return .done
         } catch CatalogError.activityExists(let existingId, _) {
@@ -257,10 +258,10 @@ actor SyncQueue {
         store: CatalogStoring
     ) async {
         if let survivor = try? await repository.getActivity(newId) {
-            try? await store.upsertActivity(survivor)
+            await store.upsertActivity(survivor)
         }
-        try? await store.removeActivity(oldId)
-        try? await store.replaceActivityReferences(from: oldId, to: newId)
+        await store.removeActivity(oldId)
+        await store.replaceActivityReferences(from: oldId, to: newId)
     }
 
     // MARK: Category replay
@@ -273,7 +274,7 @@ actor SyncQueue {
         guard let category = decode(Category.self, mutation.payload) else { return .done }
         do {
             let canonical = try await repository.createCategory(category)
-            try? await store.upsertCategory(canonical)
+            await store.upsertCategory(canonical)
             return .done
         } catch CatalogError.categoryExists(let existingId, _) {
             await remapCategory(from: category.id, to: existingId, repository: repository, store: store)
@@ -295,11 +296,11 @@ actor SyncQueue {
         guard let category = decode(Category.self, mutation.payload) else { return .done }
         do {
             let canonical = try await repository.updateCategory(category)
-            try? await store.upsertCategory(canonical)
+            await store.upsertCategory(canonical)
             return .done
         } catch CatalogError.conflict {
             if let server = try? await repository.getCategory(category.id) {
-                try? await store.upsertCategory(server)
+                await store.upsertCategory(server)
             }
             return .done
         } catch CatalogError.categoryExists(let existingId, _) {
@@ -343,10 +344,10 @@ actor SyncQueue {
             $0.categoryIds.contains(oldId)
         }
         if let survivor = try? await repository.getCategory(newId) {
-            try? await store.upsertCategory(survivor)
+            await store.upsertCategory(survivor)
         }
-        try? await store.removeCategory(oldId)
-        try? await store.replaceCategoryReferences(from: oldId, to: newId)
+        await store.removeCategory(oldId)
+        await store.replaceCategoryReferences(from: oldId, to: newId)
         // Enqueue update mutations for activities whose categoryIds were
         // rewritten by replaceCategoryReferences.
         for activity in affected {
@@ -376,7 +377,15 @@ actor SyncQueue {
     private func load() throws -> [SyncMutation] {
         guard FileManager.default.fileExists(atPath: url.path) else { return [] }
         let data = try Data(contentsOf: url)
-        return try JSONDecoder().decode([SyncMutation].self, from: data)
+        do {
+            return try JSONDecoder().decode([SyncMutation].self, from: data)
+        } catch {
+            let ts = ISO8601DateFormatter().string(from: Date())
+            let dir = url.deletingLastPathComponent()
+            let quarantined = dir.appendingPathComponent("syncQueue.corrupted.\(ts).json")
+            try? FileManager.default.moveItem(at: url, to: quarantined)
+            return []
+        }
     }
 
     private func save(_ mutations: [SyncMutation]) throws {
@@ -384,7 +393,5 @@ actor SyncQueue {
         try data.write(to: url)
     }
 
-    private func decode<T: Decodable>(_ type: T.Type, _ data: Data) -> T? {
-        try? JSONDecoder().decode(type, from: data)
-    }
+    private func decode<T: Decodable>(_ type: T.Type, _ data: Data) -> T? { try? JSONDecoder().decode(type, from: data) }
 }

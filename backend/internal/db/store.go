@@ -212,6 +212,10 @@ type Store interface {
 	// ListCategories returns the user's categories ordered by name.
 	ListCategories(ctx context.Context, userID string) ([]Category, error)
 
+	// GetCategory returns one category by id, scoped to the user. Returns
+	// ErrNotFound if missing or owned by another user.
+	GetCategory(ctx context.Context, userID, id string) (Category, error)
+
 	// CreateCategory inserts a new category using its client-generated id,
 	// idempotent on id (replay → created=false). A case-insensitive name
 	// collision returns ErrCategoryExists.

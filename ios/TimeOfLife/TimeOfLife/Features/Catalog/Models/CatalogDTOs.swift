@@ -3,7 +3,7 @@ import OSLog
 
 // MARK: - Date coding
 
-/// Shared RFC 3339 date coding for catalog network DTOs.
+/// RFC 3339 date coding for catalog network DTOs.
 ///
 /// The shared `APIClient` uses a plain `JSONDecoder`/`JSONEncoder`
 /// (deferred-to-date). Network DTOs therefore decode/encode dates as ISO 8601
@@ -11,34 +11,24 @@ import OSLog
 /// (`CatalogStore`) uses deferred-to-date `Double` — separate concern.
 enum CatalogDateCoding {
     /// Decodes RFC 3339 with optional fractional seconds. `ISO8601DateFormatter`
-    /// is thread-safe for formatting (unlike `DateFormatter`); the formatter is
-    /// never mutated after construction.
-    private static let fractionalDecoder: ISO8601DateFormatter = {
+    private static func makeFormatter(fractionalSeconds: Bool) -> ISO8601DateFormatter {
         let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        formatter.formatOptions = fractionalSeconds
+            ? [.withInternetDateTime, .withFractionalSeconds]
+            : [.withInternetDateTime]
         return formatter
-    }()
-
-    private static let plainDecoder: ISO8601DateFormatter = {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime]
-        return formatter
-    }()
-
-    private static let encoder: ISO8601DateFormatter = {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime]
-        return formatter
-    }()
+    }
 
     /// Parses an RFC 3339 date string (with or without fractional seconds).
     static func decode(_ string: String) -> Date? {
-        fractionalDecoder.date(from: string) ?? plainDecoder.date(from: string)
+        let fractionalDecoder = makeFormatter(fractionalSeconds: true)
+        let plainDecoder = makeFormatter(fractionalSeconds: false)
+        return fractionalDecoder.date(from: string) ?? plainDecoder.date(from: string)
     }
 
     /// Formats a date as an RFC 3339 string.
     static func encode(_ date: Date) -> String {
-        encoder.string(from: date)
+        makeFormatter(fractionalSeconds: false).string(from: date)
     }
 
     /// Decodes a required date key from an RFC 3339 string.

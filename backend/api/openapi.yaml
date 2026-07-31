@@ -609,6 +609,32 @@ paths:
           $ref: "#/components/responses/ValidationError"
 
   /api/v1/categories/{id}:
+    get:
+      operationId: getCategory
+      summary: Get a category
+      description: Returns a single category by id.
+      tags:
+        - Categories
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The category.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Category"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
     patch:
       operationId: updateCategory
       summary: Update a category

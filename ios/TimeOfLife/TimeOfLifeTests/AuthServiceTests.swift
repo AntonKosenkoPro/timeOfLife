@@ -28,7 +28,7 @@ struct AuthServiceTests {
 
     @Test("requestOTP normalizes email, caches it, and writes no tokens on success")
     func requestOtpSuccess() async throws {
-        let (service, repo, keychain, cache, store) = makeService()
+        let (service, repo, keychain, _, store) = makeService()
 
         try await service.requestOtp(email: "  Foo@Bar.com ")
 
@@ -262,7 +262,11 @@ struct AuthServiceTests {
 
     @Test("performRefresh throws unauthorized when no refresh token")
     func performRefreshNoToken() async throws {
-        let (service, _, _, _, _) = makeService()
+        let cached = CachedSession(id: "u1", email: "a@b.com", emailVerified: true)
+        let (service, _, keychain, cache, store) = makeService(
+            initialTokens: [.accessToken: "at"],
+            cached: cached
+        )
 
         do {
             _ = try await service.performRefresh()
@@ -270,6 +274,30 @@ struct AuthServiceTests {
         } catch let error as APIError {
             #expect(error == .unauthorized)
         }
+        #expect(await keychain.string(for: .accessToken) == nil)
+        #expect(cache.load() == nil)
+        #expect(store.state == .signedOut)
+    }
+
+    @Test("performRefresh signs out when the server rejects the refresh token")
+    func performRefreshRejectedTokenSignsOut() async throws {
+        let cached = CachedSession(id: "u1", email: "a@b.com", emailVerified: true)
+        let (service, repo, keychain, cache, store) = makeService(
+            initialTokens: [.accessToken: "expired", .refreshToken: "revoked"],
+            cached: cached
+        )
+        repo.refreshError = APIError.unauthorized
+
+        do {
+            _ = try await service.performRefresh()
+            Issue.record("Expected unauthorized error")
+        } catch let error as APIError {
+            #expect(error == .unauthorized)
+        }
+        #expect(await keychain.string(for: .accessToken) == nil)
+        #expect(await keychain.string(for: .refreshToken) == nil)
+        #expect(cache.load() == nil)
+        #expect(store.state == .signedOut)
     }
 
     @Test("performRefresh coalesces concurrent refreshes into one network call (single-flight)")

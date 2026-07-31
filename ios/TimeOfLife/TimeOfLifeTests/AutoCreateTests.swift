@@ -58,7 +58,7 @@ struct AutoCreateTests {
 
         // Seed activities synchronously so callers can rely on them.
         for activity in catalogActivities {
-            try? await catalogStore.upsertActivity(activity)
+            await catalogStore.upsertActivity(activity)
         }
 
         return TimerViewModel(

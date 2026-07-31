@@ -56,57 +56,55 @@ enum CatalogError: Error, Equatable, Sendable {
         case .offline:
             return .offline
         case let .server(code, _, details):
-            switch code {
-            case "conflict":
-                return .conflict(serverUpdatedAt: parseUpdatedAt(details))
-            case "activity_exists":
-                guard let existingId = parseId(details) else {
-                    return .unexpected(description: "activity_exists missing id in details")
-                }
-                return .activityExists(
-                    existingId: existingId,
-                    existingName: parseName(details) ?? "")
-            case "category_exists":
-                guard let existingId = parseId(details) else {
-                    return .unexpected(description: "category_exists missing id in details")
-                }
-                return .categoryExists(
-                    existingId: existingId,
-                    existingName: parseName(details) ?? "")
-            case "validation_error":
-                return .validation(fields: parseFieldMap(details))
-            case "not_found", "activity_not_found":
-                return .notFound
-            default:
-                return .underlying(api)
-            }
+            return mapServerError(code: code, details: details, api: api)
         default:
             return .underlying(api)
         }
     }
 
-    private static func parseUpdatedAt(_ details: [String: AnyHashable]) -> Date? {
-        guard let raw = details["updated_at"] as? String else { return nil }
+    private static func mapServerError(
+        code: String,
+        details: [String: String],
+        api: APIError
+    ) -> CatalogError {
+        switch code {
+        case "conflict":
+            return .conflict(serverUpdatedAt: parseUpdatedAt(details))
+        case "activity_exists":
+            guard let existingId = parseId(details) else {
+                return .unexpected(description: "activity_exists missing id in details")
+            }
+            return .activityExists(existingId: existingId, existingName: parseName(details) ?? "")
+        case "category_exists":
+            guard let existingId = parseId(details) else {
+                return .unexpected(description: "category_exists missing id in details")
+            }
+            return .categoryExists(existingId: existingId, existingName: parseName(details) ?? "")
+        case "validation_error":
+            return .validation(fields: parseFieldMap(details))
+        case "not_found", "activity_not_found":
+            return .notFound
+        default:
+            return .underlying(api)
+        }
+    }
+
+    private static func parseUpdatedAt(_ details: [String: String]) -> Date? {
+        guard let raw = details["updated_at"] else { return nil }
         return CatalogDateCoding.decode(raw)
     }
 
-    private static func parseId(_ details: [String: AnyHashable]) -> UUID? {
-        guard let raw = details["id"] as? String else { return nil }
+    private static func parseId(_ details: [String: String]) -> UUID? {
+        guard let raw = details["id"] else { return nil }
         return UUID(uuidString: raw)
     }
 
-    private static func parseName(_ details: [String: AnyHashable]) -> String? {
-        details["name"] as? String
+    private static func parseName(_ details: [String: String]) -> String? {
+        details["name"]
     }
 
-    private static func parseFieldMap(_ details: [String: AnyHashable]) -> [String: String] {
-        var out: [String: String] = [:]
-        for (field, value) in details {
-            if let message = value as? String {
-                out[field] = message
-            }
-        }
-        return out
+    private static func parseFieldMap(_ details: [String: String]) -> [String: String] {
+        details
     }
 }
 

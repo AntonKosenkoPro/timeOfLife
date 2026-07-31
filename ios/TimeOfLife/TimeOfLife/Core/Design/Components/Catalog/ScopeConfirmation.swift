@@ -32,12 +32,21 @@ struct ScopeConfirmation: View {
 
                 Button(L10n.deleteActivityCancel.text,
                        role: .cancel) {
-                    isPresented = false
-                    onCancel()
+                    dismiss()
                 }
             } message: {
                 Text(L10n.deleteActivityMessage.text(entryCount))
             }
+            .onChange(of: isPresented) { newValue in
+                if !newValue {
+                    dismiss()
+                }
+            }
+    }
+
+    private func dismiss() {
+        isPresented = false
+        onCancel()
     }
 }
 

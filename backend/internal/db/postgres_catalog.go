@@ -436,6 +436,11 @@ func (s *PostgresStore) ListCategories(ctx context.Context, userID string) ([]Ca
 	return out, nil
 }
 
+// GetCategory returns one category by id.
+func (s *PostgresStore) GetCategory(ctx context.Context, userID, id string) (Category, error) {
+	return s.pgGetCategoryRow(ctx, userID, id)
+}
+
 // CreateCategory inserts a new category, idempotent on id.
 func (s *PostgresStore) CreateCategory(ctx context.Context, c Category) (Category, bool, error) {
 	if existing, err := s.pgGetCategoryRow(ctx, c.UserID, c.ID); err == nil {
@@ -701,7 +706,13 @@ func (s *PostgresStore) CreateEntry(ctx context.Context, e Entry) (Entry, bool, 
 	}
 
 	now := time.Now().UTC()
-	if _, err := s.pool.Exec(ctx, `
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return Entry{}, false, fmt.Errorf("create entry begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	if _, err := tx.Exec(ctx, `
 		INSERT INTO entries (id, user_id, activity_id, started_at, ended_at, duration_seconds, created_at, updated_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $7)
 	`, e.ID, e.UserID, e.ActivityID, e.StartedAt, e.EndedAt, dur, now); err != nil {
@@ -710,11 +721,14 @@ func (s *PostgresStore) CreateEntry(ctx context.Context, e Entry) (Entry, bool, 
 	// Bump the activity's last_used_at to the entry's started_at (recency for
 	// suggestions, F5). Only advance it forward so a historical entry does not
 	// regress recency. Skipped on idempotent replay (which returns above).
-	if _, err := s.pool.Exec(ctx, `
+	if _, err := tx.Exec(ctx, `
 		UPDATE activities SET last_used_at = $1
 		WHERE id = $2 AND user_id = $3 AND (last_used_at IS NULL OR $1 > last_used_at)
 	`, e.StartedAt, *e.ActivityID, e.UserID); err != nil {
 		return Entry{}, false, fmt.Errorf("bump activity last_used_at: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return Entry{}, false, fmt.Errorf("create entry commit: %w", err)
 	}
 	created, err := s.GetEntry(ctx, e.UserID, e.ID)
 	if err != nil {

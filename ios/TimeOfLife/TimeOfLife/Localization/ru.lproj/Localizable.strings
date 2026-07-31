@@ -71,9 +71,11 @@
 
 // Timer
 "timer.title" = "Таймер";
+"timer.activityLabel" = "Активность";
 "timer.activityPlaceholder" = "Над чем вы работаете?";
 "timer.start" = "Старт";
 "timer.stop" = "Стоп";
+"timer.stopHint" = "Останавливает таймер и сохраняет запись";
 "timer.offlineHint" = "Записи сохраняются локально и синхронизируются после появления сети.";
 "timer.emptyActivityError" = "Введите название активности.";
 "timer.signOut" = "Выйти";
@@ -81,9 +83,14 @@
 // Catalog (Epic 1)
 "tags.emptyHint" = "Пока нет категорий — создайте одну";
 "undo.button" = "Отменить";
+"accessibility.color" = "Цвет, %@";
 "delete.activity.title" = "Удалить активность";
-"delete.activity.message" = "У этой активности %d записей о времени.";
-"delete.activity.entire" = "Удалить активность и все %d записей";
+"delete.activity.message.one" = "У этой активности %d запись о времени.";
+"delete.activity.message.few" = "У этой активности %d записи о времени.";
+"delete.activity.message.many" = "У этой активности %d записей о времени.";
+"delete.activity.entire.one" = "Удалить активность и всю %d запись";
+"delete.activity.entire.few" = "Удалить активность и все %d записи";
+"delete.activity.entire.many" = "Удалить активность и все %d записей";
 "delete.activity.entryOnly" = "Удалить только эту запись";
 "delete.activity.cancel" = "Отмена";
 "toast.dismiss" = "Закрыть";

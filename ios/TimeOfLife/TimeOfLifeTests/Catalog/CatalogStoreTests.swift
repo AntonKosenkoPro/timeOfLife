@@ -15,7 +15,7 @@ struct CatalogStoreTests {
         let store = CatalogStore(directory: tempDir())
         let activity = TestCatalogFactory.activity(name: "Gym")
 
-        try await store.upsertActivity(activity)
+        await store.upsertActivity(activity)
         let loaded = await store.loadActivities()
 
         #expect(loaded.count == 1)
@@ -27,10 +27,10 @@ struct CatalogStoreTests {
         let store = CatalogStore(directory: tempDir())
         let id = UUID.v7()
         let original = TestCatalogFactory.activity(id: id, name: "Gym")
-        try await store.upsertActivity(original)
+        await store.upsertActivity(original)
 
         let renamed = TestCatalogFactory.activity(id: id, name: "Lifting")
-        try await store.upsertActivity(renamed)
+        await store.upsertActivity(renamed)
 
         let loaded = await store.loadActivities()
         #expect(loaded.count == 1)
@@ -41,9 +41,9 @@ struct CatalogStoreTests {
     func deleteRemoves() async throws {
         let store = CatalogStore(directory: tempDir())
         let activity = TestCatalogFactory.activity()
-        try await store.upsertActivity(activity)
+        await store.upsertActivity(activity)
 
-        try await store.removeActivity(activity.id)
+        await store.removeActivity(activity.id)
         let loaded = await store.loadActivities()
         #expect(loaded.isEmpty)
         #expect(await store.activity(activity.id) == nil)
@@ -55,9 +55,9 @@ struct CatalogStoreTests {
         let older = TestCatalogFactory.activity(name: "Old", lastUsedAt: Date(timeIntervalSince1970: 100))
         let newer = TestCatalogFactory.activity(name: "New", lastUsedAt: Date(timeIntervalSince1970: 500))
         let never = TestCatalogFactory.activity(name: "Never", lastUsedAt: nil)
-        try await store.upsertActivity(older)
-        try await store.upsertActivity(newer)
-        try await store.upsertActivity(never)
+        await store.upsertActivity(older)
+        await store.upsertActivity(newer)
+        await store.upsertActivity(never)
 
         let ordered = await store.activitiesSortedByLastUsedAt()
         #expect(ordered.map(\.name) == ["New", "Old", "Never"])
@@ -68,7 +68,7 @@ struct CatalogStoreTests {
         let dir = tempDir()
         let store = CatalogStore(directory: dir)
         let activity = TestCatalogFactory.activity(name: "Persistent")
-        try await store.upsertActivity(activity)
+        await store.upsertActivity(activity)
 
         let reopened = CatalogStore(directory: dir)
         let loaded = await reopened.loadActivities()
@@ -83,7 +83,7 @@ struct CatalogStoreTests {
         await withTaskGroup(of: Void.self) { group in
             for id in ids {
                 group.addTask {
-                    try? await store.upsertActivity(TestCatalogFactory.activity(id: id))
+                    await store.upsertActivity(TestCatalogFactory.activity(id: id))
                 }
             }
         }
@@ -95,7 +95,7 @@ struct CatalogStoreTests {
     @Test("case-insensitive, trimmed name lookup")
     func nameLookup() async throws {
         let store = CatalogStore(directory: tempDir())
-        try await store.upsertActivity(TestCatalogFactory.activity(name: "Gym"))
+        await store.upsertActivity(TestCatalogFactory.activity(name: "Gym"))
 
         #expect(await store.activity(named: "  gym ") != nil)
         #expect(await store.activity(named: "GYM") != nil)
@@ -106,11 +106,11 @@ struct CatalogStoreTests {
     func categoryCascade() async throws {
         let store = CatalogStore(directory: tempDir())
         let catId = UUID.v7()
-        try await store.upsertCategory(TestCatalogFactory.category(id: catId))
-        try await store.upsertActivity(TestCatalogFactory.activity(name: "A", categoryIds: [catId]))
-        try await store.upsertActivity(TestCatalogFactory.activity(name: "B", categoryIds: [catId]))
+        await store.upsertCategory(TestCatalogFactory.category(id: catId))
+        await store.upsertActivity(TestCatalogFactory.activity(name: "A", categoryIds: [catId]))
+        await store.upsertActivity(TestCatalogFactory.activity(name: "B", categoryIds: [catId]))
 
-        try await store.removeCategory(catId)
+        await store.removeCategory(catId)
         let activities = await store.loadActivities()
         #expect(activities.allSatisfy { $0.categoryIds.isEmpty })
         #expect(await store.category(catId) == nil)
@@ -121,9 +121,9 @@ struct CatalogStoreTests {
         let store = CatalogStore(directory: tempDir())
         let oldId = UUID.v7()
         let newId = UUID.v7()
-        try await store.upsertActivity(TestCatalogFactory.activity(name: "A", categoryIds: [oldId]))
+        await store.upsertActivity(TestCatalogFactory.activity(name: "A", categoryIds: [oldId]))
 
-        try await store.replaceCategoryReferences(from: oldId, to: newId)
+        await store.replaceCategoryReferences(from: oldId, to: newId)
         let activity = await store.activity(named: "a")
         #expect(activity?.categoryIds == [newId])
     }

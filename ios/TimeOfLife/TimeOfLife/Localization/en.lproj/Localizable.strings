@@ -71,9 +71,11 @@
 
 // Timer
 "timer.title" = "Timer";
+"timer.activityLabel" = "Activity";
 "timer.activityPlaceholder" = "What are you working on?";
 "timer.start" = "Start";
 "timer.stop" = "Stop";
+"timer.stopHint" = "Stops the timer and saves the entry";
 "timer.offlineHint" = "Entries are saved locally and synced when you’re back online.";
 "timer.emptyActivityError" = "Enter an activity name.";
 "timer.signOut" = "Sign Out";
@@ -81,9 +83,12 @@
 // Catalog (Epic 1)
 "tags.emptyHint" = "No categories yet — create one";
 "undo.button" = "Undo";
+"accessibility.color" = "Color, %@";
 "delete.activity.title" = "Delete Activity";
-"delete.activity.message" = "This activity has %d time entries.";
-"delete.activity.entire" = "Delete activity and all %d entries";
+"delete.activity.message.one" = "This activity has %d time entry.";
+"delete.activity.message.other" = "This activity has %d time entries.";
+"delete.activity.entire.one" = "Delete activity and all %d entry";
+"delete.activity.entire.other" = "Delete activity and all %d entries";
 "delete.activity.entryOnly" = "Delete this entry only";
 "delete.activity.cancel" = "Cancel";
 "toast.dismiss" = "Dismiss";

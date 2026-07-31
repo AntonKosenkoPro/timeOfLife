@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 /// Local persistence contract for the catalog. The store is the offline-first
 /// source of truth for on-device suggestions (F5) and manage lists; it has no
@@ -15,18 +16,18 @@ protocol CatalogStoring: Sendable {
     func category(named: String) async -> Category?
 
     /// Upserts (create or replace-by-id) an activity optimistically.
-    func upsertActivity(_ activity: Activity) async throws
-    func upsertCategory(_ category: Category) async throws
+    func upsertActivity(_ activity: Activity) async
+    func upsertCategory(_ category: Category) async
     /// Removes an activity by id.
-    func removeActivity(_ id: UUID) async throws
-    func removeCategory(_ id: UUID) async throws
+    func removeActivity(_ id: UUID) async
+    func removeCategory(_ id: UUID) async
     /// Rewrites activities' `categoryIds`, replacing `oldId` with `newId`.
     /// Used when a `category_exists` collision re-maps references (F4).
-    func replaceCategoryReferences(from oldId: UUID, to newId: UUID) async throws
+    func replaceCategoryReferences(from oldId: UUID, to newId: UUID) async
     /// Rewrites references to an activity id (entries are owned by 1-3; in this
     /// story the store has no in-store activity references, so this is a no-op
     /// seam for the entry side). Called on `activity_exists` re-map.
-    func replaceActivityReferences(from oldId: UUID, to newId: UUID) async throws
+    func replaceActivityReferences(from oldId: UUID, to newId: UUID) async
 }
 
 /// File-based local catalog store. Mirrors `LocalTimerStore`: JSON in
@@ -95,53 +96,81 @@ actor CatalogStore: CatalogStoring {
 
     // MARK: - Writes
 
-    func upsertActivity(_ activity: Activity) async throws {
-        try ensureDirectory(at: activitiesURL)
-        var activities = try loadActivitiesLocked()
+    func upsertActivity(_ activity: Activity) async {
+        guard (try? ensureDirectory(at: activitiesURL)) != nil else { return }
+        guard var activities = try? loadActivitiesLocked() else {
+            Logger(subsystem: "com.timeoflife", category: "catalog").error("upsertActivity: failed to load activities")
+            return
+        }
         if let index = activities.firstIndex(where: { $0.id == activity.id }) {
             activities[index] = activity
         } else {
             activities.append(activity)
         }
-        try saveActivitiesLocked(activities)
+        if (try? saveActivitiesLocked(activities)) == nil {
+            Logger(subsystem: "com.timeoflife", category: "catalog").error("upsertActivity: failed to save activities")
+        }
     }
 
-    func upsertCategory(_ category: Category) async throws {
-        try ensureDirectory(at: categoriesURL)
-        var categories = try loadCategoriesLocked()
+    func upsertCategory(_ category: Category) async {
+        guard (try? ensureDirectory(at: categoriesURL)) != nil else { return }
+        guard var categories = try? loadCategoriesLocked() else {
+            Logger(subsystem: "com.timeoflife", category: "catalog").error("upsertCategory: failed to load categories")
+            return
+        }
         if let index = categories.firstIndex(where: { $0.id == category.id }) {
             categories[index] = category
         } else {
             categories.append(category)
         }
-        try saveCategoriesLocked(categories)
+        if (try? saveCategoriesLocked(categories)) == nil {
+            Logger(subsystem: "com.timeoflife", category: "catalog").error("upsertCategory: failed to save categories")
+        }
     }
 
-    func removeActivity(_ id: UUID) async throws {
-        var activities = try loadActivitiesLocked()
+    func removeActivity(_ id: UUID) async {
+        guard var activities = try? loadActivitiesLocked() else {
+            Logger(subsystem: "com.timeoflife", category: "catalog").error("removeActivity: failed to load activities")
+            return
+        }
         activities.removeAll { $0.id == id }
-        try saveActivitiesLocked(activities)
+        if (try? saveActivitiesLocked(activities)) == nil {
+            Logger(subsystem: "com.timeoflife", category: "catalog").error("removeActivity: failed to save activities")
+        }
     }
 
-    func removeCategory(_ id: UUID) async throws {
+    func removeCategory(_ id: UUID) async {
         // Cascade the tag removal on activities FIRST so that if the activities
         // save fails, the categories file is untouched (rollback-safe ordering).
-        var activities = try loadActivitiesLocked()
+        guard var activities = try? loadActivitiesLocked() else {
+            Logger(subsystem: "com.timeoflife", category: "catalog").error("removeCategory: failed to load activities")
+            return
+        }
         var changed = false
         for index in activities.indices where activities[index].categoryIds.contains(id) {
             activities[index].categoryIds.removeAll { $0 == id }
             changed = true
         }
-        if changed { try saveActivitiesLocked(activities) }
+        if changed, (try? saveActivitiesLocked(activities)) == nil {
+            Logger(subsystem: "com.timeoflife", category: "catalog").error("removeCategory: failed to save activities")
+        }
 
-        var categories = try loadCategoriesLocked()
+        guard var categories = try? loadCategoriesLocked() else {
+            Logger(subsystem: "com.timeoflife", category: "catalog").error("removeCategory: failed to load categories")
+            return
+        }
         categories.removeAll { $0.id == id }
-        try saveCategoriesLocked(categories)
+        if (try? saveCategoriesLocked(categories)) == nil {
+            Logger(subsystem: "com.timeoflife", category: "catalog").error("removeCategory: failed to save categories")
+        }
     }
 
-    func replaceCategoryReferences(from oldId: UUID, to newId: UUID) async throws {
+    func replaceCategoryReferences(from oldId: UUID, to newId: UUID) async {
         guard oldId != newId else { return }
-        var activities = try loadActivitiesLocked()
+        guard var activities = try? loadActivitiesLocked() else {
+            Logger(subsystem: "com.timeoflife", category: "catalog").error("replaceCategoryReferences: failed to load activities")
+            return
+        }
         var changed = false
         for index in activities.indices where activities[index].categoryIds.contains(oldId) {
             activities[index].categoryIds.removeAll { $0 == oldId }
@@ -150,10 +179,12 @@ actor CatalogStore: CatalogStoring {
             }
             changed = true
         }
-        if changed { try saveActivitiesLocked(activities) }
+        if changed, (try? saveActivitiesLocked(activities)) == nil {
+            Logger(subsystem: "com.timeoflife", category: "catalog").error("replaceCategoryReferences: failed to save activities")
+        }
     }
 
-    func replaceActivityReferences(from oldId: UUID, to newId: UUID) async throws {
+    func replaceActivityReferences(from oldId: UUID, to newId: UUID) async {
         // No in-store references to an activity id (entries are owned by 1-3).
         // Provided as the re-map seam for the `activity_exists` path.
         _ = oldId; _ = newId
@@ -161,11 +192,12 @@ actor CatalogStore: CatalogStoring {
 
     // MARK: - File helpers
 
-    private func ensureDirectory(at url: URL) throws {
+    private func ensureDirectory(at url: URL) throws -> URL {
         let directory = url.deletingLastPathComponent()
         try FileManager.default.createDirectory(
             at: directory, withIntermediateDirectories: true, attributes: nil
         )
+        return directory
     }
 
     private func loadActivitiesLocked() throws -> [Activity] {

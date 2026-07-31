@@ -42,6 +42,7 @@ var validIcons = map[string]bool{
 	"paintbrush": true, "briefcase": true, "house": true,
 	"fork.knife": true, "cup.and.saucer": true, "moon.zzz": true,
 	"car.fill": true, "airplane": true, "cart": true, "phone": true,
+	"clock": true,
 }
 
 const (

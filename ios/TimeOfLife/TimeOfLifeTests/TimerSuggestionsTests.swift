@@ -69,7 +69,7 @@ struct TimerSuggestionsTests {
 
         // Seed activities into the store.
         for activity in activities {
-            try? await catalogStore.upsertActivity(activity)
+            await catalogStore.upsertActivity(activity)
         }
 
         return vm
@@ -170,7 +170,7 @@ struct TimerSuggestionsTests {
 
         let catalogStore = CatalogStore(directory: temporaryDirectory())
         for activity in activities {
-            try? await catalogStore.upsertActivity(activity)
+            await catalogStore.upsertActivity(activity)
         }
 
         let clock = ContinuousClock()

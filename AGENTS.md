@@ -67,7 +67,9 @@ cd ios/TimeOfLife
 xcodegen generate
 swiftlint lint --strict         # linters (S6); --fix autocorrects
 xcodebuild -scheme TimeOfLife \
-  -destination 'platform=iOS Simulator,name=iPhone 17,OS=latest' build|test
+  -destination 'generic/platform=iOS Simulator' \
+  SWIFT_TREAT_WARNINGS_AS_ERRORS=YES \
+  GCC_TREAT_WARNINGS_AS_ERRORS=YES build
 ```
 
 ## API contract (`/api/v1`)
@@ -106,6 +108,11 @@ The iOS `RemoteAuthRepository` mirrors these paths exactly. If you change an end
 ## Auth model (passwordless)
 Enter email → `otp/request` (always 202, account auto-created unverified) → server emails a 6-digit code → `otp/verify` → marks verified + issues JWT access (15 min) + rotated refresh. The OTP proves email ownership — there is no separate "verify email" step and no password anywhere (R1). OTP codes and refresh tokens are stored only as **SHA-256 hashes**; tokens live in the iOS **Keychain**. `otp/request` and `otp/verify` are rate-limited per IP+email. The client IP for rate limiting is resolved by `Handler.clientIP`, which honours `X-Forwarded-For`/`X-Real-IP` **only** when the direct TCP peer is in `TRUSTED_PROXIES` (comma-separated IPs/CIDRs; empty = trust nobody, the safe default that prevents rate-limit bypass via spoofed headers). The email body puts the 6-digit code on its own line for iOS `.oneTimeCode` autofill (U5); the template is configurable via `OTP_EMAIL_TEMPLATE` and may need empirical tuning.
 
+The iOS `APIClient` retries protected requests once after a 401 using the
+single-flight refresh path. A rejected or reused refresh token clears the
+Keychain/cache/session so `RootView` returns to sign-in; offline or transport
+failures are preserved and do not sign the user out.
+
 ## Coding standards (Requirements S5)
 Keep code **minimal and standardized**, following modern best practices.
 - **Backend (Go):** idiomatic Go; `gofmt`-formatted (tabs); table-free errors via the domain error types in `internal/`; `context.Context` first param; no `panic` in request paths; `log/slog` only (never log codes/tokens/bodies/emails at info). No new deps without strong justification (S1: mainstream).
@@ -116,14 +123,14 @@ Keep code **minimal and standardized**, following modern best practices.
 
 ## Per-iteration revising process (Requirements S5)
 On every iteration (feature/fix PR) the author MUST:
-1. Run both linters and fix every finding: `golangci-lint run` (backend), `swiftlint lint --strict` (iOS); `gofmt -l .` must be empty.
+1. Run both linters and fix every finding: `golangci-lint run` (backend), `swiftlint lint --strict` (iOS); run the iOS build with `SWIFT_TREAT_WARNINGS_AS_ERRORS=YES GCC_TREAT_WARNINGS_AS_ERRORS=YES` and inspect/fix every `xcodebuild` warning; `gofmt -l .` must be empty.
 2. Run both test suites green (`go test ./...`; `xcodebuild test`).
 3. Re-read the relevant `Requirements/FURPS/*.md` rows and confirm the change aligns; correct the requirements doc if rows conflict (see the passwordless correction as precedent).
 4. Update this `AGENTS.md`, the README, the relevant `Design/*.md` files, and [`backend/api/openapi.yaml`](backend/api/openapi.yaml) if architecture/contract/run steps or visual design changed. The OpenAPI spec is the authoritative API contract — keep it in sync with the handlers.
 5. Prefer reusing existing utilities/patterns over new code; remove dead code.
 
 ## CI (Requirements S6)
-`.github/workflows/backend.yml` (Go: gofmt, go vet, golangci-lint, test + coverage) and `.github/workflows/ios.yml` (xcodegen, swiftlint, build, test) run on every PR and on pushes to `main`. Both are **mandatory** PR checks — a PR is not mergeable until both are green.
+`.github/workflows/backend.yml` (Go: gofmt, go vet, golangci-lint, test + coverage) and `.github/workflows/ios.yml` (xcodegen, swiftlint, warning-as-error xcodebuild build, test) run on every PR and on pushes to `main`. Both are **mandatory** PR checks — a PR is not mergeable until both are green.
 
 ## Deployment (S4)
 The backend is deployed to a **Google Cloud Compute Engine VM** (`timeoflife-backend`, us-east1-b). The production stack runs via Docker Compose:

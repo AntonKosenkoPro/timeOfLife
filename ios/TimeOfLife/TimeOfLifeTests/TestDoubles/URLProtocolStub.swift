@@ -12,42 +12,50 @@ import Foundation
 /// Call `clear()` between tests to reset all state.
 final class URLProtocolStub: URLProtocol {
 
-    // MARK: - Stored stubs
-
-    private static var stubs: [URL: Stub] = [:]
-    private static var lock = os_unfair_lock()
-
-    /// Closure-based handler for complex scenarios. When set, takes precedence
-    /// over the stub dictionary.
-    nonisolated(unsafe) static var responseHandler: ((URLRequest) throws -> (Data, HTTPURLResponse))?
-
     /// A canned response for a given URL.
     private enum Stub {
         case data(Data, statusCode: Int)
         case error(Error)
     }
 
+    /// Synchronous URLProtocol callbacks need a lock-protected shared state.
+    /// The wrapper is unchecked because all access is serialized by `lock`.
+    private final class State: @unchecked Sendable {
+        var stubs: [URL: Stub] = [:]
+        var responseHandler: ((URLRequest) throws -> (Data, HTTPURLResponse))?
+        let lock = NSLock()
+
+        func withLock<T>(_ body: (State) -> T) -> T {
+            lock.lock()
+            defer { lock.unlock() }
+            return body(self)
+        }
+    }
+
+    private static let state = State()
+
+    /// Closure-based handler for complex scenarios. When set, takes precedence
+    /// over the stub dictionary.
+    static var responseHandler: ((URLRequest) throws -> (Data, HTTPURLResponse))? {
+        get { state.withLock { $0.responseHandler } }
+        set { state.withLock { $0.responseHandler = newValue } }
+    }
+
     // MARK: - Public API
 
     /// Stubs the given URL to return `data` with a 200 status code.
     static func stub(data: Data, for url: URL) {
-        os_unfair_lock_lock(&lock)
-        stubs[url] = .data(data, statusCode: 200)
-        os_unfair_lock_unlock(&lock)
+        state.withLock { $0.stubs[url] = .data(data, statusCode: 200) }
     }
 
     /// Stubs the given URL to return `data` with the given status code.
     static func stub(data: Data, statusCode: Int, for url: URL) {
-        os_unfair_lock_lock(&lock)
-        stubs[url] = .data(data, statusCode: statusCode)
-        os_unfair_lock_unlock(&lock)
+        state.withLock { $0.stubs[url] = .data(data, statusCode: statusCode) }
     }
 
     /// Stubs the given URL to throw `error`.
     static func stub(error: Error, for url: URL) {
-        os_unfair_lock_lock(&lock)
-        stubs[url] = .error(error)
-        os_unfair_lock_unlock(&lock)
+        state.withLock { $0.stubs[url] = .error(error) }
     }
 
     /// Stubs the given URL to return an empty body with the given status code.
@@ -57,10 +65,10 @@ final class URLProtocolStub: URLProtocol {
 
     /// Removes all stubs and the response handler.
     static func clear() {
-        os_unfair_lock_lock(&lock)
-        stubs.removeAll()
-        responseHandler = nil
-        os_unfair_lock_unlock(&lock)
+        state.withLock {
+            $0.stubs.removeAll()
+            $0.responseHandler = nil
+        }
     }
 
     // MARK: - URLProtocol overrides
@@ -97,9 +105,7 @@ final class URLProtocolStub: URLProtocol {
             return
         }
 
-        os_unfair_lock_lock(&Self.lock)
-        let stub = Self.stubs[url]
-        os_unfair_lock_unlock(&Self.lock)
+        let stub = Self.state.withLock { $0.stubs[url] }
 
         guard let stub else {
             client?.urlProtocol(self, didFailWithError: URLError(.unsupportedURL))

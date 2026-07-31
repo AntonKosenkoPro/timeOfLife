@@ -64,6 +64,17 @@ final class UndoBuffer: ObservableObject {
     /// deletion to `CatalogStore` and enqueues a `DELETE` on `SyncQueue`.
     var onCommit: (UndoableItem) async -> Void = { _ in }
 
+    /// The ids of activities/categories currently held in the undo buffer.
+    /// Used by reuse lookups to skip soon-to-be-deleted records.
+    var heldIds: Set<UUID> {
+        guard case let .holding(item, _) = state else { return [] }
+        switch item {
+        case .activity(let a): return [a.id]
+        case .category(let c): return [c.id]
+        case .activityWithEntries(let a, _): return [a.id]
+        }
+    }
+
     private let scheduler: UndoScheduler
     private var cancellable: UndoScheduler.Cancellable?
 
@@ -77,8 +88,15 @@ final class UndoBuffer: ObservableObject {
 
     /// Records an undoable deletion, starting the 30s window. Supersedes any
     /// previous hold (only the most recent undoable deletion is restorable, U7).
-    /// The deletion is NOT committed while held.
+    /// The deletion is NOT committed while held. On supersession, the earlier
+    /// hold is committed immediately so it is not silently lost.
     func record(_ item: UndoableItem, window: TimeInterval = 30, now: Date = Date()) {
+        // If there is a previous unexpired hold, commit it immediately.
+        if case let .holding(previousItem, expiresAt) = state, now < expiresAt {
+            cancellable?.cancel()
+            state = .empty
+            Task { await onCommit(previousItem) }
+        }
         let expiresAt = now.addingTimeInterval(window)
         state = .holding(item, expiresAt: expiresAt)
         cancellable?.cancel()

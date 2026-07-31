@@ -50,7 +50,7 @@ struct ColorSwatchGrid: View {
             .opacity(disabled ? 0.5 : 1)
         }
         .accessibilityIdentifier("\(accessibilityId)Swatch(\(key))")
-        .accessibilityLabel("Color, \(key)")
+        .accessibilityLabel(Text(verbatim: L10n.accessibilityColor.text(key.rawValue)))
         .accessibilityValue(isSelected ? "Selected" : "")
     }
 }

@@ -31,6 +31,16 @@ jobs:
         working-directory: ios/TimeOfLife
         run: swiftlint lint --strict
 
+      - name: Build with warnings as errors
+        working-directory: ios/TimeOfLife
+        run: |
+          set -o pipefail
+          xcodebuild -scheme TimeOfLife \
+            -destination 'generic/platform=iOS Simulator' \
+            SWIFT_TREAT_WARNINGS_AS_ERRORS=YES \
+            GCC_TREAT_WARNINGS_AS_ERRORS=YES \
+            build | xcpretty
+
       - name: Resolve simulator destination
         id: sim
         working-directory: ios/TimeOfLife
@@ -42,18 +52,12 @@ jobs:
                      if "iPhone" in d["name"] and d.get("isAvailable")))')
           echo "name=$NAME" >> "$GITHUB_OUTPUT"
 
-      - name: Build
-        working-directory: ios/TimeOfLife
-        run: |
-          set -o pipefail
-          xcodebuild -scheme TimeOfLife \
-            -destination "platform=iOS Simulator,name=${{ steps.sim.outputs.name }},OS=latest" \
-            build | xcpretty
-
       - name: Test
         working-directory: ios/TimeOfLife
         run: |
           set -o pipefail
           xcodebuild -scheme TimeOfLife \
             -destination "platform=iOS Simulator,name=${{ steps.sim.outputs.name }},OS=latest" \
+            SWIFT_TREAT_WARNINGS_AS_ERRORS=YES \
+            GCC_TREAT_WARNINGS_AS_ERRORS=YES \
             test | xcpretty

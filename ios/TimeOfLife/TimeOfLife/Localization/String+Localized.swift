@@ -3,7 +3,7 @@ import Foundation
 /// Compile-time-safe localization keys. Each case maps to a key in
 /// `Localizable.strings` (en + ru). The single test in `LocalizationTests`
 /// asserts every case resolves in both bundles.
-enum L10n: String {
+enum L10n: String, CaseIterable {
     // App
     case appName = "app.name"
 
@@ -41,6 +41,8 @@ enum L10n: String {
     case timerSuggestionsHeader = "timer.suggestionsHeader"
     case timerQuickAdd = "timer.quickAdd"
     case timerManageActivities = "timer.manageActivities"
+    case timerActivityLabel = "timer.activityLabel"
+    case timerStopHint = "timer.stopHint"
 
     // Sign out confirmation
     case signOutConfirmationTitle = "signOut.confirmationTitle"
@@ -52,6 +54,7 @@ enum L10n: String {
     case tagsEmptyHint = "tags.emptyHint"
     case undoButton = "undo.button"
     case toastDismiss = "toast.dismiss"
+    case accessibilityColor = "accessibility.color"
     case deleteActivityTitle = "delete.activity.title"
     case deleteActivityMessage = "delete.activity.message"
     case deleteActivityEntire = "delete.activity.entire"
@@ -69,12 +72,35 @@ enum L10n: String {
         String(format: NSLocalizedString(rawValue, comment: ""), arguments: args)
     }
 
-    /// Plural-aware resolution for a single integer argument. Consults
-    /// `Localizable.stringsdict` variants (`one`/`few`/`many`/`other`) when
-    /// present, so counts like 1 render correctly ("1 time entry" / "1 запись")
-    /// instead of the uninflected form ("1 time entries" / "1 записей").
+    /// Plural-aware resolution for a single integer argument. The stringsdict
+    /// path was removed because Foundation's strings lookup crashes when a key
+    /// has a plist-dict value on the current SDK; instead the plural-suffixed
+    /// keys (`<root>.<form>` in `Localizable.strings`) are selected in Swift
+    /// via `PluralForm.form(for:)`, then `String(format:)` substitutes `%d`.
+    /// For keys without a plural root the same call back to a single template
+    /// is preserved (so misc `Int` args still work).
     func text(_ arg: Int) -> String {
-        String.localizedStringWithFormat(NSLocalizedString(rawValue, comment: ""), arg)
+        let template = NSLocalizedString(templateKey(for: arg), comment: "")
+        return String(format: template, arg)
+    }
+
+    /// Returns the `.strings` key to look up for a count-aware `text(Int:)`
+    /// call. Keys declared with a `pluralRoot` replace their `<root>` with
+    /// `<root>.<form>`; every other key keeps its single form.
+    private func templateKey(for count: Int) -> String {
+        guard let root = pluralRoot else { return rawValue }
+        return "\(root).\(PluralForm.form(for: count).rawValue)"
+    }
+
+    /// For plural-rendered keys (`delete.activity.{message,entire}`), the
+    /// rawValue identifies the *root* key (e.g. `delete.activity.message`).
+    /// Per-form variants are stored as `<root>.<form>` in `Localizable.strings`.
+    private var pluralRoot: String? {
+        switch self {
+        case .deleteActivityMessage: return "delete.activity.message"
+        case .deleteActivityEntire: return "delete.activity.entire"
+        default: return nil
+        }
     }
 
 }
@@ -114,4 +140,51 @@ extension L10n {
 struct BundleProvider {
     let bundle: Bundle
     static var `default`: BundleProvider { BundleProvider(bundle: .main) }
+}
+
+/// Per-language plural-form selector. Replaces the `Localizable.stringsdict`
+/// machinery that crashes Foundation on the current SDK (see `L10n.text(_:)`).
+/// Only English (`one`/`other`) and Russian (`one`/`few`/`many`) pluantity are
+/// supported — both locales the app currently ships (Requirements U4).
+enum PluralForm: String {
+    case one
+    case few
+    case many
+    case other
+
+    /// Selects the plural form for `count` according to the selected UI
+    /// localization. The localization is read from the bundle's preferred
+    /// localizations so it stays consistent with whichever `Localizable.strings`
+    /// table `NSLocalizedString` will consult.
+    static func form(for count: Int) -> PluralForm {
+        let lang = Localization.preferredLanguageCode
+        switch lang {
+        case "ru":
+            let mod10 = count % 10
+            let mod100 = count % 100
+            if mod10 == 1, mod100 != 11 { return .one }
+            if mod10 >= 2, mod10 <= 4, !(mod100 >= 12 && mod100 <= 14) { return .few }
+            return .many
+        default:
+            return count == 1 ? .one : .other
+        }
+    }
+}
+
+/// Shared helpers for the localization layer.
+enum Localization {
+    /// Two-letter ISO code of the UI's preferred localization, falling back to
+    /// English when nothing is known. Uses `Bundle.main.preferredLocalizations`
+    /// first (matches whatever `NSLocalizedString` will resolve), then
+    /// `Locale.current` via iOS-16-guarded API.
+    static var preferredLanguageCode: String {
+        if let pref = Bundle.main.preferredLocalizations.first {
+            return String(pref.prefix(2))
+        }
+        if #available(iOS 16, *) {
+            return Locale.current.language.languageCode?.identifier ?? "en"
+        } else {
+            return Locale.current.languageCode ?? "en"
+        }
+    }
 }

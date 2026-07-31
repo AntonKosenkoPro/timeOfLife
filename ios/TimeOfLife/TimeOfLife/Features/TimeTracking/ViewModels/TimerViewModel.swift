@@ -18,6 +18,7 @@ final class TimerViewModel: ObservableObject {
         }
     }
     @Published var fieldError: String?
+    @Published var errorMessage: String?
     @Published var isLoading = false
     @Published var elapsed: TimeInterval = 0
     @Published var isRunning = false
@@ -25,6 +26,7 @@ final class TimerViewModel: ObservableObject {
     @Published var suggestions: [Activity] = []
     @Published var selectedActivityId: UUID?
     @Published var showQuickAdd = false
+    @Published var isActivityFocused = false
 
     let service: TimerService
     let authService: AuthService
@@ -33,6 +35,17 @@ final class TimerViewModel: ObservableObject {
     private let connectivity: Connectivity
     private var startDate: Date?
     private var timerCancellable: AnyCancellable?
+    private var storeCancellable: AnyCancellable?
+
+    /// Whether suggestions should be shown: field is focused, not running,
+    /// and the current text is empty or case-insensitively prefix-matches
+    /// at least one existing activity.
+    var shouldShowSuggestions: Bool {
+        guard isActivityFocused, !isRunning, !suggestions.isEmpty else { return false }
+        guard !activityName.isEmpty else { return true }
+        let key = CatalogValidator.normalizeName(activityName)
+        return suggestions.contains { CatalogValidator.normalizeName($0.name).hasPrefix(key) }
+    }
 
     init(
         service: TimerService,
@@ -46,6 +59,13 @@ final class TimerViewModel: ObservableObject {
         self.connectivity = connectivity
         self.catalogStore = catalogStore
         self.catalogService = catalogService
+
+        // Observe catalog store changes to keep suggestions fresh.
+        storeCancellable = catalogService.$storeRevision
+            .dropFirst()
+            .sink { [weak self] _ in
+                Task { @MainActor in await self?.refreshSuggestions() }
+            }
     }
 
     /// Refreshes suggestions from the local catalog store.
@@ -68,10 +88,18 @@ final class TimerViewModel: ObservableObject {
     }
 
     /// Called when a new activity is created via the quick-add sheet.
+    /// Persists the activity first so the entry POST does not 404.
     func didSelectNewActivity(_ activity: Activity) {
-        prefill(from: activity)
         showQuickAdd = false
-        Task { await refreshSuggestions() }
+        Task {
+            do {
+                let created = try await catalogService.createActivity(activity)
+                prefill(from: created)
+                await refreshSuggestions()
+            } catch {
+                errorMessage = L10n.text(in: .default, code: "error.unknown")
+            }
+        }
     }
 
     /// Starts the timer if the activity name is valid.
@@ -115,7 +143,7 @@ final class TimerViewModel: ObservableObject {
             Haptics.success()
         } catch {
             Haptics.error()
-            fieldError = connectivity.isConnected
+            errorMessage = connectivity.isConnected
                 ? L10n.text(in: .default, code: "error.unknown")
                 : L10n.text(in: .default, code: "error.offline")
         }
@@ -160,7 +188,9 @@ final class TimerViewModel: ObservableObject {
 
     private func bumpLastUsedAt(_ id: UUID) async {
         guard var activity = await catalogStore.activity(id) else { return }
-        activity.lastUsedAt = Date()
+        let now = Date()
+        activity.lastUsedAt = now
+        activity.updatedAt = now
         _ = try? await catalogService.updateActivity(activity)
     }
 
@@ -168,6 +198,7 @@ final class TimerViewModel: ObservableObject {
     func reset() {
         activityName = ""
         fieldError = nil
+        errorMessage = nil
         elapsed = 0
         isRunning = false
         startDate = nil

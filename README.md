@@ -36,6 +36,7 @@ ios/       SwiftUI app (iOS 15+) — MVVM + Repository, keychain token storage
 - **No passwords anywhere.** Accounts authenticate by proving email ownership via an OTP code (stored only as a **SHA-256 hash**, 10-min expiry, max 5 attempts).
 - **JWT access token** (HS256, 15 min) + **opaque refresh token** stored as a **SHA-256 hash** in the DB, rotated on every use with reuse detection.
 - iOS stores tokens in the **Keychain** (`kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly`) — never `UserDefaults`, never logged.
+- Protected requests refresh an expired access token once; an invalid/reused refresh token clears the local session and returns the app to sign-in, while offline refresh failures keep the cached session.
 - ATS scoped to `127.0.0.1` only — never arbitrary loads; production must be HTTPS.
 - No user enumeration: `/auth/otp/request` always returns 202.
 - In-memory per-IP+email rate limiting on `otp/request` + `otp/verify` (swap for Redis before multi-instance).
@@ -85,13 +86,16 @@ open TimeOfLife.xcodeproj
 cd ios/TimeOfLife
 swiftlint lint --strict     # linters (S6); `--fix` autocorrects. Config: .swiftlint.yml
 xcodebuild -scheme TimeOfLife \
-  -destination 'platform=iOS Simulator,name=iPhone 17,OS=latest' test   # 111 tests, SwiftTesting
+  -destination 'generic/platform=iOS Simulator' \
+  SWIFT_TREAT_WARNINGS_AS_ERRORS=YES \
+  GCC_TREAT_WARNINGS_AS_ERRORS=YES build
 ```
+Use an available simulator destination for `xcodebuild test`; the CI workflow resolves one dynamically.
 Unit tests cover the email/OTP validators, the API client (incl. 401→refresh→retry and offline mapping via a URLProtocol stub), repositories, the AuthService (keychain/cache/restore-on-offline), and the auth view-models. Out of scope: SwiftUI snapshot tests and on-device keychain (see smoke checklist below).
 
 ## Code quality & CI (S5/S6/S7)
-- **Linters (S6):** Go `golangci-lint` (`backend/.golangci.yml`), Swift `swiftlint` (`ios/TimeOfLife/.swiftlint.yml`), plus `.editorconfig`. Both must pass with zero findings before merge.
-- **CI on every PR (S6):** `.github/workflows/backend.yml` (gofmt, go vet, golangci-lint, test + coverage) and `.github/workflows/ios.yml` (xcodegen, swiftlint, build, test) run on every PR and on pushes to `main`. Both are mandatory PR checks.
+- **Linters (S6):** Go `golangci-lint` (`backend/.golangci.yml`), Swift `swiftlint` (`ios/TimeOfLife/.swiftlint.yml`), plus `.editorconfig`. Both must pass with zero findings before merge; iOS `xcodebuild` compiler warnings are also treated as errors.
+- **CI on every PR (S6):** `.github/workflows/backend.yml` (gofmt, go vet, golangci-lint, test + coverage) and `.github/workflows/ios.yml` (xcodegen, swiftlint, warning-as-error xcodebuild build, test) run on every PR and on pushes to `main`. Both are mandatory PR checks.
 - **Standards + revising process (S5):** code is kept minimal and standardized; every iteration runs linters + tests, re-checks the relevant `Requirements/FURPS/*.md` rows, and updates docs if the architecture changes (see `AGENTS.md`).
 - **AI agent context (S7):** [`AGENTS.md`](AGENTS.md) holds repo layout, build/test/run, the API contract, coding standards, the per-iteration revising process, and the decisions log.
 
