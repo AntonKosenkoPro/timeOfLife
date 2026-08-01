@@ -19,7 +19,11 @@ struct RootView: View {
             .onChange(of: session.state) { newState in
                 // When the user signs out, drop any pushed auth routes so they land
                 // on the welcome screen instead of the last pushed screen (e.g. OTP).
+                // When the user signs in, drop stale auth routes so TimerView's
+                // NavigationStack doesn't push to EmptyView destinations.
                 if newState == .signedOut {
+                    container.navigation.popToRoot()
+                } else if case .signedIn = newState {
                     container.navigation.popToRoot()
                 }
             }
@@ -33,7 +37,9 @@ struct RootView: View {
             TimerView(vm: TimerViewModel(
                 service: container.timerService,
                 authService: container.authService,
-                connectivity: container.connectivity
+                connectivity: container.connectivity,
+                catalogStore: container.catalogStore,
+                catalogService: container.catalogService
             ))
         }
     }

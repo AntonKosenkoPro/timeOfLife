@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>delete.activity.message</key>
+    <dict>
+        <key>NSStringLocalizedFormat</key>
+        <string>%#@entries@</string>
+        <key>entries</key>
+        <dict>
+            <key>NSStringFormatSpecifierKey</key>
+            <string>%d</string>
+            <key>NSStringFormatValueTypeKey</key>
+            <string>d</string>
+            <key>one</key>
+            <string>У этой активности %d запись о времени.</string>
+            <key>few</key>
+            <string>У этой активности %d записи о времени.</string>
+            <key>many</key>
+            <string>У этой активности %d записей о времени.</string>
+            <key>other</key>
+            <string>У этой активности %d записей о времени.</string>
+        </dict>
+    </dict>
+    <key>delete.activity.entire</key>
+    <dict>
+        <key>NSStringLocalizedFormat</key>
+        <string>%#@entries@</string>
+        <key>entries</key>
+        <dict>
+            <key>NSStringFormatSpecifierKey</key>
+            <string>%d</string>
+            <key>NSStringFormatValueTypeKey</key>
+            <string>d</string>
+            <key>one</key>
+            <string>Удалить активность и %d запись</string>
+            <key>few</key>
+            <string>Удалить активность и %d записи</string>
+            <key>many</key>
+            <string>Удалить активность и %d записей</string>
+            <key>other</key>
+            <string>Удалить активность и %d записей</string>
+        </dict>
+    </dict>
+</dict>
+</plist>

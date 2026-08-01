@@ -42,6 +42,7 @@ var validIcons = map[string]bool{
 	"paintbrush": true, "briefcase": true, "house": true,
 	"fork.knife": true, "cup.and.saucer": true, "moon.zzz": true,
 	"car.fill": true, "airplane": true, "cart": true, "phone": true,
+	"clock": true,
 }
 
 const (
@@ -159,18 +160,15 @@ type categoryUpdateReq struct {
 }
 
 type entryCreateReq struct {
-	ID           string  `json:"id"`
-	ActivityID   *string `json:"activity_id"`
-	ActivityName string  `json:"activity_name_snapshot"`
-	StartedAt    string  `json:"started_at"`
-	EndedAt      *string `json:"ended_at"`
-	Notes        string  `json:"notes"`
+	ID         string  `json:"id"`
+	ActivityID *string `json:"activity_id"`
+	StartedAt  string  `json:"started_at"`
+	EndedAt    *string `json:"ended_at"`
 }
 
 type entryUpdateReq struct {
 	StartedAt *string `json:"started_at"`
 	EndedAt   optTime `json:"ended_at"`
-	Notes     *string `json:"notes"`
 	UpdatedAt string  `json:"updated_at"`
 }
 

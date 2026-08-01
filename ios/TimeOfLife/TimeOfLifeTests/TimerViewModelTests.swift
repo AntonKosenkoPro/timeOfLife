@@ -7,20 +7,34 @@ import Foundation
 struct TimerViewModelTests {
 
     @Test("start fails with empty activity name")
-    func startFailsWhenEmpty() {
+    func startFailsWhenEmpty() async {
         let vm = makeViewModel()
         vm.activityName = "   "
-        vm.start()
+        await vm.start()
 
         #expect(vm.fieldError == L10n.timerEmptyActivityError.text)
         #expect(!vm.isRunning)
     }
 
+    @Test("start rejects an activity name longer than the catalog limit")
+    func startRejectsLongName() async {
+        let vm = makeViewModel()
+        vm.activityName = String(repeating: "a", count: CatalogValidator.maxName + 1)
+
+        await vm.start()
+
+        #expect(vm.fieldError == CatalogValidator.unifiedNameMessage(
+            CatalogValidator.validateName(vm.activityName)
+        ))
+        #expect(!vm.isRunning)
+    }
+
     @Test("start timer sets running and elapsed to zero")
-    func startTimer() {
+    func startTimer() async {
         let vm = makeViewModel()
         vm.activityName = "Design"
-        vm.start()
+        vm.selectedActivityId = UUID()
+        await vm.start()
 
         #expect(vm.isRunning)
         #expect(vm.elapsed == 0)
@@ -31,8 +45,10 @@ struct TimerViewModelTests {
     @Test("stop timer saves entry and resets form")
     func stopTimerSavesEntry() async {
         let vm = makeViewModel()
+        let activityId = UUID()
         vm.activityName = "Coding"
-        vm.start()
+        vm.selectedActivityId = activityId
+        await vm.start()
 
         try? await Task.sleep(nanoseconds: 10_000_000)
 
@@ -49,8 +65,10 @@ struct TimerViewModelTests {
     @Test("offline stop leaves entry unsynced")
     func offlineStopLeavesUnsynced() async {
         let vm = makeViewModel(connected: false)
+        let activityId = UUID()
         vm.activityName = "Reading"
-        vm.start()
+        vm.selectedActivityId = activityId
+        await vm.start()
 
         try? await Task.sleep(nanoseconds: 10_000_000)
 
@@ -59,31 +77,125 @@ struct TimerViewModelTests {
         #expect(!vm.isRunning)
         let unsynced = await vm.service.store.unsyncedEntries()
         #expect(unsynced.count == 1)
-        #expect(unsynced.first?.activityName == "Reading")
+        #expect(unsynced.first?.activityId == activityId)
 
         vm.reset()
     }
 
     @Test("reset clears timer state")
-    func resetClearsState() {
+    func resetClearsState() async {
         let vm = makeViewModel()
         vm.activityName = "Work"
-        vm.start()
+        vm.selectedActivityId = UUID()
+        await vm.start()
         vm.reset()
 
         #expect(!vm.isRunning)
         #expect(vm.activityName.isEmpty)
         #expect(vm.elapsed == 0)
         #expect(vm.fieldError == nil)
+        #expect(vm.selectedActivityId == nil)
+    }
+
+    @Test("offline entries replay when connectivity returns")
+    func offlineEntriesReplayAfterReconnect() async throws {
+        let connectivity = MockConnectivity(connected: false)
+        let store = LocalTimerStore(url: temporaryStoreURL())
+        let repository = FakeEntriesRepository()
+        let service = TimerService(store: store, repository: repository, connectivity: connectivity)
+
+        try await service.saveEntry(activityId: UUID(), duration: 1, startedAt: Date())
+        connectivity.isConnected = true
+
+        for _ in 0..<20 where repository.calls.isEmpty {
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+
+        #expect(repository.calls.count == 1)
+        #expect((await store.unsyncedEntries()).isEmpty)
+    }
+
+    @Test("entry replay continues after a failed entry")
+    func entryReplayContinuesAfterFailure() async throws {
+        let connectivity = MockConnectivity(connected: false)
+        let store = LocalTimerStore(url: temporaryStoreURL())
+        let repository = FakeEntriesRepository()
+        repository.transientCreateError = APIError.server(code: "not_found", message: "Not found")
+        repository.createFailuresRemaining = 1
+        let service = TimerService(store: store, repository: repository, connectivity: connectivity)
+        let activityId = UUID()
+        let first = TimeEntry(id: UUID.v7(), activityId: activityId, startedAt: Date(), endedAt: Date(), synced: false)
+        let second = TimeEntry(id: UUID.v7(), activityId: activityId, startedAt: Date(), endedAt: Date(), synced: false)
+        try await store.save(first)
+        try await store.save(second)
+        connectivity.isConnected = true
+
+        for _ in 0..<20 where repository.calls.count < 2 {
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+
+        #expect(repository.calls.count == 2)
+        #expect((await service.store.unsyncedEntries()).map(\.id) == [first.id])
+    }
+
+    @Test("transient entry sync failures retry while connectivity stays online")
+    func entryReplayRetriesWithoutConnectivityChange() async throws {
+        let connectivity = MockConnectivity(connected: true)
+        let store = LocalTimerStore(url: temporaryStoreURL())
+        let repository = FakeEntriesRepository()
+        repository.createFailuresRemaining = 1
+        let service = TimerService(
+            store: store, repository: repository, connectivity: connectivity, retryDelay: 0
+        )
+        let entry = TimeEntry(
+            id: UUID.v7(), activityId: UUID(), startedAt: Date(), endedAt: Date(), synced: false
+        )
+        try await store.save(entry)
+
+        try await service.syncUnsyncedEntries()
+        for _ in 0..<20 where !(await store.unsyncedEntries()).isEmpty {
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+
+        #expect((await store.unsyncedEntries()).isEmpty)
+        #expect(repository.calls.count == 2)
+    }
+
+    @Test("activity collision remapping rewrites queued entries")
+    func collisionRemappingRewritesQueuedEntries() async throws {
+        let store = LocalTimerStore(url: temporaryStoreURL())
+        let oldId = UUID()
+        let newId = UUID()
+        let entry = TimeEntry(id: UUID.v7(), activityId: oldId, startedAt: Date(), endedAt: Date(), synced: false)
+        try await store.save(entry)
+
+        try await store.replaceActivityId(from: oldId, to: newId)
+
+        #expect((await store.unsyncedEntries()).first?.activityId == newId)
+    }
+
+    @Test("activity entry counter reads locally persisted entries")
+    func activityEntryCounter() async throws {
+        let store = LocalTimerStore(url: temporaryStoreURL())
+        let activityId = UUID()
+        try await store.save(
+            TimeEntry(id: UUID.v7(), activityId: activityId, startedAt: Date(), endedAt: Date(), synced: true)
+        )
+        let counter = TimerStoreActivityEntryCounter(store: store)
+
+        #expect(await counter.entryCount(forActivityId: activityId) == 1)
+        #expect(await counter.entryCount(forActivityId: UUID()) == 0)
     }
 
     // MARK: - Helpers
 
     private func makeViewModel(connected: Bool = true) -> TimerViewModel {
         let connectivity = MockConnectivity(connected: connected)
+        let store = LocalTimerStore(url: temporaryStoreURL())
+        let repository = FakeEntriesRepository()
         let service = TimerService(
-            store: LocalTimerStore(url: temporaryStoreURL()),
-            repository: StubTimerRepository(),
+            store: store,
+            repository: repository,
             connectivity: connectivity
         )
         let authService = AuthService(
@@ -92,12 +204,34 @@ struct TimerViewModelTests {
             cache: SessionCache(defaults: UserDefaults(suiteName: UUID().uuidString)!),
             sessionStore: SessionStore()
         )
-        return TimerViewModel(service: service, authService: authService, connectivity: connectivity)
+        let catalogStore = CatalogStore(directory: temporaryDirectory())
+        let catalogRepo = FakeCatalogRepository()
+        let syncQueue = SyncQueue(url: temporaryDirectory())
+        let undoBuffer = UndoBuffer()
+        let catalogService = CatalogService(
+            store: catalogStore,
+            repository: catalogRepo,
+            syncQueue: syncQueue,
+            undoBuffer: undoBuffer,
+            connectivity: connectivity
+        )
+        return TimerViewModel(
+            service: service,
+            authService: authService,
+            connectivity: connectivity,
+            catalogStore: catalogStore,
+            catalogService: catalogService
+        )
     }
 
     private func temporaryStoreURL() -> URL {
         URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent(UUID().uuidString)
             .appendingPathComponent("timerQueue.json")
+    }
+
+    private func temporaryDirectory() -> URL {
+        URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent(UUID().uuidString)
     }
 }

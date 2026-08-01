@@ -609,6 +609,32 @@ paths:
           $ref: "#/components/responses/ValidationError"
 
   /api/v1/categories/{id}:
+    get:
+      operationId: getCategory
+      summary: Get a category
+      description: Returns a single category by id.
+      tags:
+        - Categories
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The category.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Category"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
     patch:
       operationId: updateCategory
       summary: Update a category
@@ -654,8 +680,8 @@ paths:
       summary: Delete a category
       description: |
         Hard-deletes a category. The tag-join rows cascade (the tag is removed
-        from all activities); entries are unaffected because they infer tags at
-        query time while linked.
+        from all activities); entries are unaffected because they infer tags
+        from their activity at query time.
       tags:
         - Categories
       security:
@@ -684,9 +710,9 @@ paths:
       description: |
         Returns the authenticated user's entries, newest first, with filters and
         cursor pagination. Each entry includes its category tags (inferred from
-        the linked activity while `linked` is true, or the frozen snapshot after
-        unlink). Used by History (Epic 2); the resource lands in Epic 1 so
-        `activity_id` has a home and entries sync cross-device from the start.
+        the entry's activity) and the activity's current name. Used by History
+        (Epic 2); the resource lands in Epic 1 so `activity_id` has a home and
+        entries sync cross-device from the start.
       tags:
         - Entries
       security:
@@ -718,7 +744,7 @@ paths:
           schema:
             type: string
             format: uuid
-          description: Filter to entries whose (linked) activity has this category tag.
+          description: Filter to entries whose activity has this category tag.
         - name: limit
           in: query
           required: false
@@ -748,11 +774,11 @@ paths:
       operationId: createEntry
       summary: Create a time entry
       description: |
-        Creates a time entry. `activity_id` is optional (free-text entries stay
-        first-class). With `activity_id` present, the server sets
-        `activity_name_snapshot` from the activity and bumps the activity's
-        `last_used_at` (recency for suggestions). `ended_at` null/omitted = running.
-        `id` is client-generated UUID v7 (idempotent on replay).
+        Creates a time entry. `activity_id` is required and must belong to the
+        user; the server resolves `activity_name` from the activity and bumps
+        the activity's `last_used_at` (recency for suggestions). `ended_at`
+        null/omitted = running. `id` is client-generated UUID v7 (idempotent on
+        replay).
       tags:
         - Entries
       security:
@@ -885,48 +911,6 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "404":
           $ref: "#/components/responses/NotFound"
-
-  /api/v1/entries/{id}/unlink:
-    post:
-      operationId: unlinkEntry
-      summary: Unlink an entry from its activity
-      description: |
-        Detaches a single entry from its activity (F11): sets `activity_id` to
-        null and copies the activity's current tags into `entry_tag_snapshots`
-        so the entry's history still reads correctly. The activity itself stays
-        in the catalog. Already-unlinked entries return 409 `conflict`.
-      tags:
-        - Entries
-      security:
-        - BearerAuth: []
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-            format: uuid
-      responses:
-        "200":
-          description: "The unlinked entry (now `linked: false`, with frozen tag snapshot)."
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Entry"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "404":
-          $ref: "#/components/responses/NotFound"
-        "409":
-          description: The entry is already unlinked.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorResponse"
-              example:
-                error:
-                  code: conflict
-                  message: Entry is already unlinked
 
 components:
   securitySchemes:
@@ -1315,13 +1299,12 @@ components:
     EntryCreate:
       type: object
       description: |
-        Request body for creating a time entry. `activity_id` is optional to keep
-        the free-text path first-class: when omitted, `activity_name_snapshot`
-        should be supplied directly; when present, the server sets
-        `activity_name_snapshot` from the activity at create time. `ended_at`
-        omitted/null means a running timer.
+        Request body for creating a time entry. `activity_id` is required and
+        must belong to the user; the server resolves `activity_name` from the
+        activity. `ended_at` omitted/null means a running timer.
       required:
         - id
+        - activity_id
         - started_at
       properties:
         id:
@@ -1331,12 +1314,7 @@ components:
         activity_id:
           type: string
           format: uuid
-          nullable: true
-          description: The linked activity id (must belong to the user), or null for a free-text entry.
-        activity_name_snapshot:
-          type: string
-          maxLength: 60
-          description: Free-text name; required when `activity_id` is omitted, ignored otherwise.
+          description: The entry's activity (must belong to the user).
         started_at:
           type: string
           format: date-time
@@ -1345,9 +1323,6 @@ components:
           format: date-time
           nullable: true
           description: End time; null/omitted = running timer.
-        notes:
-          type: string
-          nullable: true
       example:
         id: "019639f1-7a3b-7abc-9def-100000000003"
         activity_id: "019639f1-7a3b-7abc-9def-100000000001"
@@ -1367,9 +1342,6 @@ components:
           format: date-time
           nullable: true
           description: Setting this stops a running timer; `duration_seconds` is recomputed.
-        notes:
-          type: string
-          nullable: true
         updated_at:
           type: string
           format: date-time
@@ -1467,14 +1439,14 @@ components:
     Entry:
       type: object
       description: |
-        A time entry. `categories` are inferred from the linked activity at
-        query time while `linked` is true; after unlink they are the frozen
-        snapshot (F11).
+        A time entry. Every entry references exactly one activity. `categories`
+        are inferred from the activity's tags at query time, and
+        `activity_name` is the activity's current name, resolved at query time.
       required:
         - id
-        - activity_name_snapshot
+        - activity_id
+        - activity_name
         - started_at
-        - linked
         - created_at
         - updated_at
         - categories
@@ -1485,11 +1457,10 @@ components:
         activity_id:
           type: string
           format: uuid
-          nullable: true
-          description: Null after unlink (F11).
-        activity_name_snapshot:
+          description: The entry's activity.
+        activity_name:
           type: string
-          description: Frozen activity name; retained so history reads after unlink/delete.
+          description: The activity's current name, resolved at query time.
         started_at:
           type: string
           format: date-time
@@ -1502,12 +1473,6 @@ components:
           type: integer
           nullable: true
           description: ended_at - started_at, in seconds; null while running.
-        notes:
-          type: string
-          nullable: true
-        linked:
-          type: boolean
-          description: Convenience flag = (activity_id != null).
         created_at:
           type: string
           format: date-time
@@ -1521,12 +1486,10 @@ components:
       example:
         id: "019639f1-7a3b-7abc-9def-100000000003"
         activity_id: "019639f1-7a3b-7abc-9def-100000000001"
-        activity_name_snapshot: Gym
+        activity_name: Gym
         started_at: "2026-07-27T09:00:00Z"
         ended_at: "2026-07-27T10:00:00Z"
         duration_seconds: 3600
-        notes: ""
-        linked: true
         created_at: "2026-07-27T09:00:00Z"
         updated_at: "2026-07-27T10:00:00Z"
         categories:

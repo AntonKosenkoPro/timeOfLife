@@ -73,36 +73,31 @@ func scanEntry(sc rowScanner, userID string) (Entry, error) {
 	var (
 		e          Entry
 		activityID sql.NullString
-		nameSnap   sql.NullString
 		startedAt  string
 		endedAt    sql.NullString
 		dur        sql.NullInt64
-		notes      sql.NullString
 		createdAt  string
 		updatedAt  string
 	)
-	if err := sc.Scan(&e.ID, &activityID, &nameSnap, &startedAt, &endedAt, &dur, &notes, &createdAt, &updatedAt); err != nil {
+	if err := sc.Scan(&e.ID, &activityID, &startedAt, &endedAt, &dur, &createdAt, &updatedAt); err != nil {
 		return Entry{}, err
 	}
 	e.UserID = userID
 	if activityID.Valid && activityID.String != "" {
 		e.ActivityID = &activityID.String
 	}
-	e.ActivityNameSnapshot = nameSnap.String
 	e.StartedAt = parseTime(startedAt)
 	e.EndedAt = nullTimePtr(endedAt)
 	e.DurationSeconds = nullIntPtr(dur)
-	e.Notes = notes.String
 	e.CreatedAt = parseTime(createdAt)
 	e.UpdatedAt = parseTime(updatedAt)
-	e.Linked = e.ActivityID != nil
 	return e, nil
 }
 
-const entryColumns = `id, activity_id, activity_name_snapshot, started_at, ended_at, duration_seconds, notes, created_at, updated_at`
+const entryColumns = `id, activity_id, started_at, ended_at, duration_seconds, created_at, updated_at`
 
 // listActivityTagsBatch returns category tags keyed by activity_id for the
-// given activities (linked entries reuse this by their activity_id).
+// given activities (entries reuse this by their activity_id).
 func (s *SQLiteStore) listActivityTagsBatch(ctx context.Context, userID string, activityIDs []string) (map[string][]CategoryTag, error) {
 	out := map[string][]CategoryTag{}
 	if len(activityIDs) == 0 {
@@ -140,70 +135,65 @@ func (s *SQLiteStore) listActivityTagsBatch(ctx context.Context, userID string, 
 	return out, nil
 }
 
-// listEntrySnapshotsBatch returns frozen tag snapshots keyed by entry_id.
-func (s *SQLiteStore) listEntrySnapshotsBatch(ctx context.Context, entryIDs []string) (map[string][]CategoryTag, error) {
-	out := map[string][]CategoryTag{}
-	if len(entryIDs) == 0 {
-		return out, nil
-	}
-	placeholders := strings.Repeat("?,", len(entryIDs))
-	placeholders = placeholders[:len(placeholders)-1]
-	args := make([]any, 0, len(entryIDs))
-	for _, id := range entryIDs {
-		args = append(args, id)
-	}
-	rows, err := s.db.QueryContext(ctx, `
-		SELECT entry_id, category_id, category_name_snapshot, category_color_snapshot
-		FROM entry_tag_snapshots
-		WHERE entry_id IN (`+placeholders+`)
-		ORDER BY category_name_snapshot
-	`, args...)
-	if err != nil {
-		return nil, fmt.Errorf("list entry snapshots: %w", err)
-	}
-	defer func() { _ = rows.Close() }()
-	for rows.Next() {
-		var entryID string
-		var t CategoryTag
-		if err := rows.Scan(&entryID, &t.ID, &t.Name, &t.Color); err != nil {
-			return nil, fmt.Errorf("list entry snapshots scan: %w", err)
-		}
-		out[entryID] = append(out[entryID], t)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("list entry snapshots rows: %w", err)
-	}
-	return out, nil
-}
-
-// attachEntryTags populates Categories on each entry (inferred while linked,
-// snapshot after unlink) using two batched queries.
-func (s *SQLiteStore) attachEntryTags(ctx context.Context, userID string, items []Entry) error {
+// attachEntryActivity populates Categories (inferred from each entry's
+// activity's tags) and ActivityName (the activity's current name) on each entry
+// via two batched queries keyed by activity_id.
+func (s *SQLiteStore) attachEntryActivity(ctx context.Context, userID string, items []Entry) error {
 	activityIDs := make([]string, 0, len(items))
-	unlinkedIDs := make([]string, 0, len(items))
 	for _, e := range items {
 		if e.ActivityID != nil {
 			activityIDs = append(activityIDs, *e.ActivityID)
-		} else {
-			unlinkedIDs = append(unlinkedIDs, e.ID)
 		}
 	}
 	tagsByActivity, err := s.listActivityTagsBatch(ctx, userID, activityIDs)
 	if err != nil {
 		return err
 	}
-	snapshots, err := s.listEntrySnapshotsBatch(ctx, unlinkedIDs)
+	namesByActivity, err := s.listActivityNamesBatch(ctx, activityIDs)
 	if err != nil {
 		return err
 	}
 	for i := range items {
 		if items[i].ActivityID != nil {
 			items[i].Categories = ensureCategories(tagsByActivity[*items[i].ActivityID])
-		} else {
-			items[i].Categories = ensureCategories(snapshots[items[i].ID])
+			items[i].ActivityName = namesByActivity[*items[i].ActivityID]
 		}
 	}
 	return nil
+}
+
+// listActivityNamesBatch returns activity names keyed by activity_id.
+func (s *SQLiteStore) listActivityNamesBatch(ctx context.Context, activityIDs []string) (map[string]string, error) {
+	out := map[string]string{}
+	if len(activityIDs) == 0 {
+		return out, nil
+	}
+	placeholders := strings.Repeat("?,", len(activityIDs))
+	placeholders = placeholders[:len(placeholders)-1]
+	args := make([]any, 0, len(activityIDs))
+	for _, id := range activityIDs {
+		args = append(args, id)
+	}
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT id, name
+		FROM activities
+		WHERE id IN (`+placeholders+`)
+	`, args...)
+	if err != nil {
+		return nil, fmt.Errorf("list activity names: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var id, name string
+		if err := rows.Scan(&id, &name); err != nil {
+			return nil, fmt.Errorf("list activity names scan: %w", err)
+		}
+		out[id] = name
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list activity names rows: %w", err)
+	}
+	return out, nil
 }
 
 // ---------- Activities ----------
@@ -486,14 +476,6 @@ func (s *SQLiteStore) DeleteActivity(ctx context.Context, userID, id string) err
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	// Delete snapshots for this activity's entries.
-	if _, err := tx.ExecContext(ctx, `
-		DELETE FROM entry_tag_snapshots WHERE entry_id IN (
-			SELECT id FROM entries WHERE activity_id = ? AND user_id = ?
-		)
-	`, id, userID); err != nil {
-		return fmt.Errorf("delete activity snapshots: %w", err)
-	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM entries WHERE activity_id = ? AND user_id = ?`, id, userID); err != nil {
 		return fmt.Errorf("delete activity entries: %w", err)
 	}
@@ -547,6 +529,11 @@ func (s *SQLiteStore) ListCategories(ctx context.Context, userID string) ([]Cate
 		return nil, fmt.Errorf("list categories rows: %w", err)
 	}
 	return out, nil
+}
+
+// GetCategory returns one category by id.
+func (s *SQLiteStore) GetCategory(ctx context.Context, userID, id string) (Category, error) {
+	return s.getCategoryRow(ctx, userID, id)
 }
 
 // CreateCategory inserts a new category, idempotent on id.
@@ -755,7 +742,7 @@ func (s *SQLiteStore) ListEntries(ctx context.Context, userID string, f EntryFil
 		nextCursor = encodeCursor(last.StartedAt, last.ID)
 		items = items[:limit]
 	}
-	if err := s.attachEntryTags(ctx, userID, items); err != nil {
+	if err := s.attachEntryActivity(ctx, userID, items); err != nil {
 		return nil, "", err
 	}
 	return items, nextCursor, nil
@@ -776,7 +763,7 @@ func (s *SQLiteStore) GetEntry(ctx context.Context, userID, id string) (Entry, e
 		return Entry{}, fmt.Errorf("get entry: %w", err)
 	}
 	items := []Entry{e}
-	if err := s.attachEntryTags(ctx, userID, items); err != nil {
+	if err := s.attachEntryActivity(ctx, userID, items); err != nil {
 		return Entry{}, err
 	}
 	return items[0], nil
@@ -804,7 +791,7 @@ func (s *SQLiteStore) CreateEntry(ctx context.Context, e Entry) (Entry, bool, er
 	// Idempotent replay on id.
 	if existing, err := s.getEntryRow(ctx, e.UserID, e.ID); err == nil {
 		items := []Entry{existing}
-		if err := s.attachEntryTags(ctx, e.UserID, items); err != nil {
+		if err := s.attachEntryActivity(ctx, e.UserID, items); err != nil {
 			return Entry{}, false, err
 		}
 		return items[0], false, nil
@@ -812,17 +799,16 @@ func (s *SQLiteStore) CreateEntry(ctx context.Context, e Entry) (Entry, bool, er
 		return Entry{}, false, err
 	}
 
-	// Resolve activity name snapshot.
-	nameSnap := e.ActivityNameSnapshot
-	if e.ActivityID != nil {
-		a, err := s.getActivityRow(ctx, e.UserID, *e.ActivityID)
-		if err != nil {
-			if errors.Is(err, ErrNotFound) {
-				return Entry{}, false, fmt.Errorf("create entry: %w", ErrActivityNotFound)
-			}
-			return Entry{}, false, err
+	// An entry must reference one of the user's activities. The handler
+	// enforces a non-nil activity_id; this also guards direct store calls.
+	if e.ActivityID == nil {
+		return Entry{}, false, fmt.Errorf("create entry: %w", ErrActivityNotFound)
+	}
+	if _, err := s.getActivityRow(ctx, e.UserID, *e.ActivityID); err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return Entry{}, false, fmt.Errorf("create entry: %w", ErrActivityNotFound)
 		}
-		nameSnap = a.Name
+		return Entry{}, false, err
 	}
 
 	// Reject ended_at <= started_at (the handler validates the both-present
@@ -839,22 +825,29 @@ func (s *SQLiteStore) CreateEntry(ctx context.Context, e Entry) (Entry, bool, er
 	}
 
 	now := time.Now().UTC()
-	if _, err := s.db.ExecContext(ctx, `
-		INSERT INTO entries (id, user_id, activity_id, activity_name_snapshot, started_at, ended_at, duration_seconds, notes, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`, e.ID, e.UserID, strPtrArg(e.ActivityID), nullStrArg(nameSnap), fmtTime(e.StartedAt), fmtTimeArg(e.EndedAt), nullIntArg(dur), nullStrArg(e.Notes), fmtTime(now), fmtTime(now)); err != nil {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return Entry{}, false, fmt.Errorf("create entry begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO entries (id, user_id, activity_id, started_at, ended_at, duration_seconds, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+	`, e.ID, e.UserID, strPtrArg(e.ActivityID), fmtTime(e.StartedAt), fmtTimeArg(e.EndedAt), nullIntArg(dur), fmtTime(now), fmtTime(now)); err != nil {
 		return Entry{}, false, fmt.Errorf("create entry: %w", err)
 	}
 	// Bump the activity's last_used_at to the entry's started_at (recency for
 	// suggestions, F5). Only advance it forward so a historical entry does not
 	// regress recency. Skipped on idempotent replay (which returns above).
-	if e.ActivityID != nil {
-		if _, err := s.db.ExecContext(ctx, `
-			UPDATE activities SET last_used_at = ?
-			WHERE id = ? AND user_id = ? AND (last_used_at IS NULL OR ? > last_used_at)
-		`, fmtTime(e.StartedAt), *e.ActivityID, e.UserID, fmtTime(e.StartedAt)); err != nil {
-			return Entry{}, false, fmt.Errorf("bump activity last_used_at: %w", err)
-		}
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE activities SET last_used_at = ?
+		WHERE id = ? AND user_id = ? AND (last_used_at IS NULL OR ? > last_used_at)
+	`, fmtTime(e.StartedAt), *e.ActivityID, e.UserID, fmtTime(e.StartedAt)); err != nil {
+		return Entry{}, false, fmt.Errorf("bump activity last_used_at: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return Entry{}, false, fmt.Errorf("create entry commit: %w", err)
 	}
 	created, err := s.GetEntry(ctx, e.UserID, e.ID)
 	if err != nil {
@@ -913,10 +906,6 @@ func (s *SQLiteStore) UpdateEntry(ctx context.Context, userID, id string, p Entr
 		sets = append([]string{"ended_at = ?"}, sets...)
 		args = append([]any{fmtTimeArg(endedAt)}, args...)
 	}
-	if p.Notes != nil {
-		sets = append([]string{"notes = ?"}, sets...)
-		args = append([]any{nullStrArg(*p.Notes)}, args...)
-	}
 	args = append(args, id, userID, fmtTime(p.UpdatedAt))
 	res, err := s.db.ExecContext(ctx, `
 		UPDATE entries SET `+strings.Join(sets, ", ")+`
@@ -950,9 +939,6 @@ func (s *SQLiteStore) DeleteEntry(ctx context.Context, userID, id string) error 
 		return fmt.Errorf("delete entry begin: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	if _, err := tx.ExecContext(ctx, `DELETE FROM entry_tag_snapshots WHERE entry_id = ?`, id); err != nil {
-		return fmt.Errorf("delete entry snapshots: %w", err)
-	}
 	res, err := tx.ExecContext(ctx, `DELETE FROM entries WHERE id = ? AND user_id = ?`, id, userID)
 	if err != nil {
 		return fmt.Errorf("delete entry: %w", err)
@@ -968,75 +954,6 @@ func (s *SQLiteStore) DeleteEntry(ctx context.Context, userID, id string) error 
 		return fmt.Errorf("delete entry commit: %w", err)
 	}
 	return nil
-}
-
-// UnlinkEntry detaches an entry from its activity, freezing its tags.
-func (s *SQLiteStore) UnlinkEntry(ctx context.Context, userID, id string) (Entry, error) {
-	current, err := s.getEntryRow(ctx, userID, id)
-	if err != nil {
-		return Entry{}, err
-	}
-	if !current.Linked {
-		return current, fmt.Errorf("unlink entry: %w", ErrConflict)
-	}
-
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return Entry{}, fmt.Errorf("unlink entry begin: %w", err)
-	}
-	defer func() { _ = tx.Rollback() }()
-
-	now := time.Now().UTC()
-	res, err := tx.ExecContext(ctx, `
-		UPDATE entries SET activity_id = NULL, updated_at = ?
-		WHERE id = ? AND user_id = ? AND activity_id IS NOT NULL
-	`, fmtTime(now), id, userID)
-	if err != nil {
-		return Entry{}, fmt.Errorf("unlink entry update: %w", err)
-	}
-	if affected, err := res.RowsAffected(); err != nil {
-		return Entry{}, fmt.Errorf("unlink entry rows: %w", err)
-	} else if affected == 0 {
-		return current, fmt.Errorf("unlink entry: %w", ErrConflict)
-	}
-
-	// Freeze the activity's current tags into the snapshot table. Read all
-	// tags first (closing the cursor) before inserting, so we never run an
-	// INSERT on the single SQLite connection while a Rows cursor is open.
-	rows, err := tx.QueryContext(ctx, `
-		SELECT c.id, c.name, c.color
-		FROM activity_categories ac
-		JOIN categories c ON c.id = ac.category_id
-		WHERE ac.activity_id = ? AND c.user_id = ?
-	`, *current.ActivityID, userID)
-	if err != nil {
-		return Entry{}, fmt.Errorf("unlink entry snapshot select: %w", err)
-	}
-	var tags []CategoryTag
-	for rows.Next() {
-		var t CategoryTag
-		if err := rows.Scan(&t.ID, &t.Name, &t.Color); err != nil {
-			return Entry{}, fmt.Errorf("unlink entry snapshot scan: %w", err)
-		}
-		tags = append(tags, t)
-	}
-	if err := rows.Err(); err != nil {
-		return Entry{}, fmt.Errorf("unlink entry snapshot rows: %w", err)
-	}
-	_ = rows.Close()
-	for _, t := range tags {
-		if _, err := tx.ExecContext(ctx, `
-			INSERT OR IGNORE INTO entry_tag_snapshots (entry_id, category_id, category_name_snapshot, category_color_snapshot)
-			VALUES (?, ?, ?, ?)
-		`, id, t.ID, t.Name, t.Color); err != nil {
-			return Entry{}, fmt.Errorf("unlink entry snapshot insert: %w", err)
-		}
-	}
-
-	if err := tx.Commit(); err != nil {
-		return Entry{}, fmt.Errorf("unlink entry commit: %w", err)
-	}
-	return s.GetEntry(ctx, userID, id)
 }
 
 // isUniqueViolation reports whether err is a SQLite UNIQUE constraint failure.

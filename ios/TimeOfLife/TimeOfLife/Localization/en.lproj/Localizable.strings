@@ -51,15 +51,79 @@
 "error.unknown" = "Something went wrong. Please try again.";
 "error.unauthorized" = "Session expired. Please sign in again.";
 
+// Catalog server errors (mapped from error codes)
+"error.conflict" = "A newer version exists on the server. Your changes were not applied.";
+"error.activity_exists" = "An activity with this name already exists.";
+"error.category_exists" = "A category with this name already exists.";
+"error.validation_error" = "Please check your input.";
+"error.not_found" = "This item no longer exists.";
+
+// Catalog validation (one merged message per field — U2/U4)
+"validation.catalog.nameEmpty" = "Name is required.";
+"validation.catalog.nameTooLong" = "Name must be 60 characters or fewer.";
+"validation.catalog.notesTooLong" = "Notes must be 280 characters or fewer.";
+"validation.catalog.colorInvalid" = "Select a valid color.";
+"validation.catalog.iconInvalid" = "Select a valid icon.";
+
 // Apple sign in
 "appleSignIn.title" = "Sign in with Apple";
 "appleSignIn.error" = "Sign in with Apple failed. Please try again.";
 
 // Timer
 "timer.title" = "Timer";
+"timer.activityLabel" = "Activity";
 "timer.activityPlaceholder" = "What are you working on?";
 "timer.start" = "Start";
 "timer.stop" = "Stop";
+"timer.stopHint" = "Stops the timer and saves the entry";
 "timer.offlineHint" = "Entries are saved locally and synced when you’re back online.";
 "timer.emptyActivityError" = "Enter an activity name.";
 "timer.signOut" = "Sign Out";
+
+// Catalog (Epic 1)
+"tags.emptyHint" = "No categories yet — create one";
+"undo.button" = "Undo";
+"accessibility.color" = "Color, %@";
+"delete.activity.title" = "Delete Activity";
+"delete.activity.message.one" = "This activity has %d time entry.";
+"delete.activity.message.other" = "This activity has %d time entries.";
+"delete.activity.entire.one" = "Delete activity and all %d entry";
+"delete.activity.entire.other" = "Delete activity and all %d entries";
+"delete.activity.entryOnly" = "Delete this entry only";
+"delete.activity.cancel" = "Cancel";
+"toast.dismiss" = "Dismiss";
+"activity.lastUsed" = "last used %@";
+
+// Timer — Epic 1 (suggestions, quick-add, manage)
+"timer.suggestionsHeader" = "Recent";
+"timer.quickAdd" = "New activity";
+"timer.manageActivities" = "Manage activities";
+
+// Manage activities
+"manage.activities.title" = "Activities";
+"manage.activities.emptyTitle" = "No activities yet";
+"manage.activities.emptySubtitle" = "Add one, or just type a name on the timer.";
+"manage.activities.categories" = "Categories";
+"undo.activityDeleted" = "Activity deleted";
+"undo.entriesDeleted" = "%d entries deleted";
+"error.activityExists" = "An activity with this name already exists.";
+"error.undoFailed" = "Could not undo — try again.";
+
+// Activity editor
+"activityEditor.createTitle" = "New activity";
+"activityEditor.editTitle" = "Edit activity";
+"activityEditor.nameLabel" = "Name";
+"activityEditor.namePlaceholder" = "e.g. Gym";
+"activityEditor.colorLabel" = "Color";
+"activityEditor.iconLabel" = "Icon";
+"activityEditor.notesLabel" = "Notes";
+"activityEditor.notesPlaceholder" = "Optional notes";
+"activityEditor.notesCounter" = "%d / 280";
+"activityEditor.tagsLabel" = "Categories";
+"activityEditor.noTags" = "No categories yet.";
+"activityEditor.addCategory" = "Add a category";
+"activityEditor.save" = "Save";
+"activityEditor.cancel" = "Cancel";
+"validation.nameEmpty" = "Enter a name.";
+"validation.nameTooLong" = "Name must be at most 60 characters.";
+"validation.notesTooLong" = "Notes must be at most 280 characters.";

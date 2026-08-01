@@ -78,3 +78,38 @@ Resolved design precedents for Time of Life. Add a new entry here when a visual 
 - The `OtpEntryView` submits automatically once the 6-digit code is entered, debounced by 250 ms. There is no visible Verify button because the number pad has no Return key and the screen’s sole purpose is the single OTP field.
 - Reason: the one-box-per-digit field already has a clear completion point (6 digits); adding a Verify button would duplicate the action without improving accessibility, since the field is exposed as a single editable accessibility element and AutoFill/paste work through the hidden `TextField`.
 - Guard: keep the field focused after verification errors and ensure the component exposes the `.isTextField` trait so assistive tech recognizes it as editable.
+
+## D15 — Fixed activity/category color palette
+
+- Activities and categories choose a color from one closed, validated set of 12 palette keys (`gray, red, orange, yellow, green, teal, blue, indigo, purple, pink, brown, mint`), not arbitrary hex. Resolved via `Theme.activityColor(_:)`. The backend validates `color` against the same keys, so client and server share the set.
+- Reason: F1/F2 require a color; U1 requires validation against a provided set; a closed palette keeps light/dark parity deterministic and avoids clashing/garish user picks.
+
+## D16 — On-device recency suggestions
+
+- The timer's top-5 activity suggestions are computed locally from the synced catalog, ranked by `last_used_at`; there is no suggestions endpoint. Works fully offline. `last_used_at` still syncs so recency is shared across devices.
+- Reason: F5/P1 — the client already holds the synced catalog, so a server round-trip would buy nothing and break offline; the backend only keeps `last_used_at` correct on entry start.
+
+## D17 — Soft-delete via client undo buffer
+
+- Deletions are held 30 s in a client-side undo buffer (transient `UndoToast` + system shake-to-undo) and only committed to the local store / pushed to sync after the window passes; the server hard-deletes (no long-lived trash). The buffer is superseded by the next undoable action or cleared on relaunch.
+- Reason: R3/U6/U7 — undoable deletion without server-side trash; keeps destructive actions reversible for the common "oops" case while staying simple.
+
+## D18 — Delete-scope confirmation for activities with history
+
+- Deleting an activity that has past entries shows a destructive two-option confirm naming the affected entry count: delete the entire activity (+ all entries) vs. delete only the current entry. Both choices are destructive and enter the undo flow as a unit.
+- Reason: F10/U5 — the user must understand the scope before losing history; the prompt names the count so the choice is informed.
+
+## D19 — Recency ordering, no manual reorder at MVP
+
+- Manage Activities and timer suggestions are ordered by `last_used_at` (most-recent first). No drag-to-reorder at MVP.
+- Reason: F8 — manual reorder adds complexity for little value now; recency is the cheapest useful default.
+
+## D20 — Free-text start stays first-class
+
+- Typing a name and starting the timer still works in one step; if the name matches an existing activity (case-insensitive, trimmed) it is reused, otherwise a new activity is auto-created (default color/icon, no tags) and linked to the entry. The user is never forced into the catalog to start a timer.
+- Reason: F4 — forcing categorization would add friction and fight the app's minimal-effort premise; auto-create keeps the free-text flow frictionless while still giving every entry an `activity_id`.
+
+## D21 — Editors as sheets, shared create/edit modes
+
+- `ActivityEditor` and `CategoryEditor` are presented as sheets, each with create + edit modes, reused by the timer (quick-add, F7) and the Manage screens (F8). Keyboard placement follows D13.
+- Reason: one editor component per entity avoids duplicate surfaces; sheets keep the user in context (timer / manage list) without a full navigation push.

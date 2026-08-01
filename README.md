@@ -36,6 +36,7 @@ ios/       SwiftUI app (iOS 15+) — MVVM + Repository, keychain token storage
 - **No passwords anywhere.** Accounts authenticate by proving email ownership via an OTP code (stored only as a **SHA-256 hash**, 10-min expiry, max 5 attempts).
 - **JWT access token** (HS256, 15 min) + **opaque refresh token** stored as a **SHA-256 hash** in the DB, rotated on every use with reuse detection.
 - iOS stores tokens in the **Keychain** (`kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly`) — never `UserDefaults`, never logged.
+- Protected requests refresh an expired access token once; an invalid/reused refresh token clears the local session and returns the app to sign-in, while offline refresh failures keep the cached session.
 - ATS scoped to `127.0.0.1` only — never arbitrary loads; production must be HTTPS.
 - No user enumeration: `/auth/otp/request` always returns 202.
 - In-memory per-IP+email rate limiting on `otp/request` + `otp/verify` (swap for Redis before multi-instance).
@@ -85,13 +86,16 @@ open TimeOfLife.xcodeproj
 cd ios/TimeOfLife
 swiftlint lint --strict     # linters (S6); `--fix` autocorrects. Config: .swiftlint.yml
 xcodebuild -scheme TimeOfLife \
-  -destination 'platform=iOS Simulator,name=iPhone 17,OS=latest' test   # 111 tests, SwiftTesting
+  -destination 'generic/platform=iOS Simulator' \
+  SWIFT_TREAT_WARNINGS_AS_ERRORS=YES \
+  GCC_TREAT_WARNINGS_AS_ERRORS=YES build
 ```
+Use an available simulator destination for `xcodebuild test`; the CI workflow resolves one dynamically.
 Unit tests cover the email/OTP validators, the API client (incl. 401→refresh→retry and offline mapping via a URLProtocol stub), repositories, the AuthService (keychain/cache/restore-on-offline), and the auth view-models. Out of scope: SwiftUI snapshot tests and on-device keychain (see smoke checklist below).
 
 ## Code quality & CI (S5/S6/S7)
-- **Linters (S6):** Go `golangci-lint` (`backend/.golangci.yml`), Swift `swiftlint` (`ios/TimeOfLife/.swiftlint.yml`), plus `.editorconfig`. Both must pass with zero findings before merge.
-- **CI on every PR (S6):** `.github/workflows/backend.yml` (gofmt, go vet, golangci-lint, test + coverage) and `.github/workflows/ios.yml` (xcodegen, swiftlint, build, test) run on every PR and on pushes to `main`. Both are mandatory PR checks.
+- **Linters (S6):** Go `golangci-lint` (`backend/.golangci.yml`), Swift `swiftlint` (`ios/TimeOfLife/.swiftlint.yml`), plus `.editorconfig`. Both must pass with zero findings before merge; iOS `xcodebuild` compiler warnings are also treated as errors.
+- **CI on every PR (S6):** `.github/workflows/backend.yml` (gofmt, go vet, golangci-lint, test + coverage) and `.github/workflows/ios.yml` (xcodegen, swiftlint, warning-as-error xcodebuild build, test) run on every PR and on pushes to `main`. Both are mandatory PR checks.
 - **Standards + revising process (S5):** code is kept minimal and standardized; every iteration runs linters + tests, re-checks the relevant `Requirements/FURPS/*.md` rows, and updates docs if the architecture changes (see `AGENTS.md`).
 - **AI agent context (S7):** [`AGENTS.md`](AGENTS.md) holds repo layout, build/test/run, the API contract, coding standards, the per-iteration revising process, and the decisions log.
 
@@ -134,9 +138,8 @@ Errors use a uniform envelope: `{ "error": { "code", "message", "details": {} } 
 | POST | `/categories` | `{id,name,color}` | 201/200 `{category}` (idempotent on `id`) | `validation_error`, `category_exists`, `conflict` |
 | PATCH/DELETE | `/categories/{id}` | (PATCH) `{…,updated_at}` | 200 / 204 | `not_found`, `conflict`, `category_exists` |
 | GET  | `/entries` | (Bearer) | 200 `{items,next_cursor?}` (`?from=&to=&activity_id=&category_id=&limit=&cursor=`) | (401) |
-| POST | `/entries` | `{id,activity_id?,activity_name_snapshot?,started_at,ended_at?,notes?}` | 201/200 `{entry}` (idempotent on `id`) | `validation_error`, `activity_not_found`, `conflict` |
+| POST | `/entries` | `{id,activity_id,started_at,ended_at?,notes?}` | 201/200 `{entry}` (idempotent on `id`; `activity_id` required) | `validation_error`, `activity_not_found`, `conflict` |
 | GET/PATCH/DELETE | `/entries/{id}` | (PATCH) `{started_at?,ended_at?,notes?,updated_at}` | 200 / 204 | `not_found`, `conflict` |
-| POST | `/entries/{id}/unlink` | (Bearer) | 200 `{entry}` (freezes tag snapshot) | `not_found`, `conflict` |
 
 **Epic 1 (activity catalog & entries):** all `/activities`, `/categories`, `/entries` routes are Bearer-protected. Ids are **client-generated UUID v7** and `POST` is **idempotent on `id`** (offline create-then-sync). Writes use **last-write-wins on `updated_at`** (stale → 409 `conflict` with the server's version in `details`); deletes are hard (the client holds the 30 s undo buffer). Validation failures are 422 `validation_error` with `details` = `{field: message}`. **Suggestions are client-side** (F5) — there is no `/activities/suggestions` endpoint; the client ranks its synced activities by `last_used_at`. See the OpenAPI spec (v1.1.0) for full schemas.
 
@@ -158,7 +161,7 @@ Backend (Docker Postgres running):
 6. `GET /api/v1/auth/me` with the Bearer access token → 200 user.
 7. `POST /api/v1/activities` `{id:<uuidv7>,name:"Gym",color:"blue",icon:"figure.run"}` → 201; replay the same body → 200 (idempotent).
 8. `PATCH /api/v1/activities/{id}` with a stale `updated_at` → 409 `conflict` (LWW); with a newer `updated_at` → 200.
-9. `GET /api/v1/activities` → 200 `[{activity}]`; `POST /api/v1/entries` → 201; `POST /api/v1/entries/{id}/unlink` → 200 with `linked:false` and frozen tag snapshot.
+9. `GET /api/v1/activities` → 200 `[{activity}]`; `POST /api/v1/entries` `{id:<uuidv7>,activity_id:<id>,started_at:"…"}` → 201 (omit `activity_id` → 422 `validation_error`).
 
 iOS (Simulator, backend running):
 1. Enter email → request OTP → enter/autofill the 6-digit code → timer screen.

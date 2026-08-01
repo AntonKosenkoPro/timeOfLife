@@ -116,3 +116,84 @@ Keep haptics subtle. Do not vibrate on every keystroke.
 - Every interactive element has a stable `accessibilityIdentifier`.
 - Format: `<Screen><Element><Role>`. Examples: `EmailContinueButton`, `OtpFieldError`, `TimerStartButton`.
 - Reuse identifiers across the app only when the element is truly the same.
+
+## Undo flow (catalog deletions)
+
+R3 / U6 / U7; decision D17. Applies to activity and category deletions from Manage Activities / Manage Categories.
+
+- A deletion is **not** committed to the local store or pushed to sync immediately. It enters a client-side **undo buffer** and is only committed + synced after a 30 s window passes.
+- Present a transient `UndoToast` (`COMPONENTS.md`) at the bottom with an **Undo** button; auto-dismiss after 30 s.
+- **Undo** (tap, or system shake-to-undo) re-inserts the deleted item(s) from the buffer before the window elapses; nothing is synced.
+- The buffer is **superseded** by the next undoable action and cleared on app relaunch — only the most recent undoable deletion is restorable (matches U7 wording).
+- After the window, commit locally (hard delete) and enqueue the `DELETE` for sync; the server hard-deletes (no trash, per `Activity_Catalog_API.md` Sync & ids).
+- Bulk deletions (delete activity + its entries, F10) are undoable as a unit — the buffer holds the whole set and Undo restores all of it.
+- **Undo API failure:** If the undo API call fails (network error, 404, 409), show an `ErrorBanner` ("Could not undo — try again") and keep the item in its edited state. The undo buffer is not cleared on failure, so the user can retry by triggering undo again (e.g. via a second UndoToast if still within the 30 s window).
+
+### Shake-to-undo wiring (U7)
+
+U7 says "no custom shake detection" — use the iOS system motion event. The view layer owns the binding:
+
+- **iOS 17+:** add a `.onShake { vm.performUndo() }` modifier on the manage screen.
+- **iOS 15/16:** create a small `ShakeHostingController` subclass of `UIHostingController` that overrides `motionEnded(_:with:)`. When the event is `UIEvent.EventType.motion` and the subtype is `.motionShake`, forward to the active manage screen's `performUndo()` (via a shared observable flag or `NotificationCenter`). Use the same controller subclass for the signed-in navigation stack so both `ManageActivitiesView` and `ManageCategoriesView` inherit the gesture.
+- Do not implement custom accelerometer/gyro logic.
+
+## Delete-scope confirmation (F10 / U5)
+
+Decision D18. The confirm pattern depends on what is being deleted.
+
+- **Activity with no entries:** single destructive confirm → undo flow.
+- **Activity with entries:** `ScopeConfirmation` (`COMPONENTS.md`) offering two destructive choices, both naming the affected entry count: (a) delete the entire activity + all N entries, (b) delete only the current entry. Both are destructive and enter the undo flow as a unit.
+- Destructive buttons use `role: .destructive` / `Theme.danger` tint.
+- **Category:** single destructive confirm; the category's tag is removed from all activities (join cascade), entries are unaffected — state this clearly in the confirm copy. Still undoable for 30 s (Undo re-applies the tags).
+
+## Sync conflict (last-write-wins)
+
+R2. Reuses the Offline sync path; do not duplicate the Offline section above.
+
+- Every mutable request carries the client `updated_at`. The server applies the write only if `client.updated_at > server.updated_at`; otherwise it returns **409 `conflict`** with the server's current version in `details`.
+- On 409 `conflict`, the client shows an inline `ErrorBanner` ("Edited on another device") and adopts the server's version as the source of truth (keep-latest). No field-level merge at MVP.
+- If the user dismisses the conflict `ErrorBanner` without choosing, default to keep-latest (adopt server version) — the banner is informational, not blocking.
+- On 409 `activity_exists` / `category_exists` (case-insensitive name collision on create), the client re-maps local references to the surviving id (see `Activity_Catalog_API.md` Sync & ids) and proceeds; in the editor this means "reuse the existing activity" rather than surfacing an error.
+- Idempotent `POST` (same id replayed) returns the existing record — the offline queue is safe to replay; do not surface this as an error.
+
+### Confirmation-dialog cleanup
+
+For destructive confirmations that use `.confirmationDialog` or `.alert`, the cancel callback attached to a `role: .cancel` button is **not** called when the user taps outside the sheet or swipes down. To avoid stale `pendingDelete` / "delete in progress" state, either:
+
+- Observe the presentation binding (`isPresented`) in the parent ViewModel and clear pending state when it flips to `false`; or
+- Provide an explicit `onDismiss` closure on the sheet/dialog and reset state there.
+
+All manage-screen delete flows should follow this pattern consistently.
+
+| Server response | Client action |
+|---|---|
+| 200/201 success | Apply locally, clear outbound queue entry |
+| 404 not found (on DELETE) | Treat as success — item was already removed elsewhere; remove row locally, clear outbound queue entry |
+| 409 `conflict` | `ErrorBanner`, adopt server version, keep-latest |
+| 409 `activity_exists` / `category_exists` | Re-map local refs to surviving id, proceed |
+| Idempotent POST (replay) | Treat as success; no error surfaced |
+
+## Catalog empty states
+
+U8. Applies to Manage Activities and Manage Categories.
+
+- Show `EmptyState` (`COMPONENTS.md`) when there are zero activities / zero categories (e.g. after deleting all, or if seeds are declined on first run).
+- Empty states guide toward creation ("Add an activity") and **never block** free-text timer start — typing a name and starting always works (F4 / D20).
+
+## Recency ordering
+
+F8; decision D19.
+
+- The Manage Activities list and timer suggestions are ordered by `last_used_at` (most-recent first), computed on-device (D16). No manual drag-reorder at MVP.
+- `last_used_at` is bumped on every entry start and syncs across devices, so recency is shared (see `Activity_Catalog_API.md` Suggestions).
+
+## Editor sheets and keyboard placement
+
+D13 / D21. Applies to `ActivityEditor` and `CategoryEditor`.
+
+- Editors are presented as sheets (`.sheet`, medium detents) and shared across create + edit modes (D21).
+- Inside the sheet, follow the existing **Keyboard and primary input placement** rule above:
+  - The name field is in the upper scrollable area, focused on appear.
+  - The Save `PrimaryButton` is pinned to `.safeAreaInset(edge: .bottom)` so it follows the keyboard and stays tappable.
+  - A measured bottom reserve prevents the field from being hidden on short screens.
+- Dismiss the sheet on save success or cancel; do not leave the keyboard up after save.

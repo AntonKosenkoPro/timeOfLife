@@ -15,6 +15,8 @@ Requirements live in `Requirements/FURPS/` (the FURPS+ table) and `Requirements/
 
 The **design system** lives in `Design/` — see `Design/README.md`. All visual, component, and interaction decisions for iOS are specified there as Markdown so they can be implemented deterministically.
 
+**Epic 1 design materials** (FURPS S3): new screen specs `Design/SCREENS/ManageActivities.md`, `ManageCategories.md`, `ActivityEditor.md`, `CategoryEditor.md`; timer suggestions/quick-add spec in `Design/SCREENS/TimeTracking.md` (suggestions are client-side, no endpoint — F5/D16); activity/category color palette + icon set in `Design/TOKENS.md`; new catalog components in `Design/COMPONENTS.md`; undo/delete-scope/sync-conflict interactions in `Design/INTERACTIONS.md`. The backend contract is `Design/BACKEND/Activity_Catalog_API.md`.
+
 ## Repo layout
 ```
 backend/                 Go backend (chi + pgx/Postgres; sqlite for tests)
@@ -65,7 +67,9 @@ cd ios/TimeOfLife
 xcodegen generate
 swiftlint lint --strict         # linters (S6); --fix autocorrects
 xcodebuild -scheme TimeOfLife \
-  -destination 'platform=iOS Simulator,name=iPhone 17,OS=latest' build|test
+  -destination 'generic/platform=iOS Simulator' \
+  SWIFT_TREAT_WARNINGS_AS_ERRORS=YES \
+  GCC_TREAT_WARNINGS_AS_ERRORS=YES build
 ```
 
 ## API contract (`/api/v1`)
@@ -92,11 +96,10 @@ Uniform error envelope: `{ "error": { "code": String, "message": String, "detail
 | PATCH | `/categories/{id}` | `{name?,color?,updated_at}` | 200 `{category}` | `invalid_body`, `validation_error`, `not_found`, `conflict`, `category_exists`, (401) |
 | DELETE | `/categories/{id}` | (Bearer) | 204 (join rows cascade; entries unaffected) | `not_found`, (401) |
 | GET  | `/entries` | (Bearer) | 200 `{items,next_cursor?}` (`?from=&to=&activity_id=&category_id=&limit=&cursor=`) | (401) |
-| POST | `/entries` | `{id,activity_id?,activity_name_snapshot?,started_at,ended_at?,notes?}` | 201/200 `{entry}` (idempotent on `id`) | `invalid_body`, `validation_error`, `activity_not_found`, `conflict`, (401) |
+| POST | `/entries` | `{id,activity_id,started_at,ended_at?}` | 201/200 `{entry}` (idempotent on `id`; `activity_id` required) | `invalid_body`, `validation_error`, `activity_not_found`, `conflict`, (401) |
 | GET  | `/entries/{id}` | (Bearer) | 200 `{entry}` | `not_found`, (401) |
-| PATCH | `/entries/{id}` | `{started_at?,ended_at?,notes?,updated_at}` | 200 `{entry}` (recomputes `duration_seconds`) | `invalid_body`, `validation_error`, `not_found`, `conflict`, (401) |
+| PATCH | `/entries/{id}` | `{started_at?,ended_at?,updated_at}` | 200 `{entry}` (recomputes `duration_seconds`) | `invalid_body`, `validation_error`, `not_found`, `conflict`, (401) |
 | DELETE | `/entries/{id}` | (Bearer) | 204 | `not_found`, (401) |
-| POST | `/entries/{id}/unlink` | (Bearer) | 200 `{entry}` (freezes tag snapshot) | `not_found`, `conflict` (already unlinked), (401) |
 
 **Epic 1 (activity catalog & entries):** all `/activities`, `/categories`, `/entries` routes are Bearer-protected. Ids are **client-generated UUID v7** and `POST` is **idempotent on `id`** (a replay returns the existing record with 200, enabling offline create-then-sync). Writes use **last-write-wins on `updated_at`** (PATCH carries `updated_at`; a stale write returns 409 `conflict` with the server's current version in `details`). Deletes are hard (the client holds the 30 s undo buffer). `activity_exists`/`category_exists` (409) report a case-insensitive name collision and carry the winning record's `{id,name}` in `details`. Validation failures are 422 `validation_error` with `details` = `{field: message}`. **Suggestions are client-side** (F5): the client ranks its synced activities by `last_used_at` — there is no `/activities/suggestions` endpoint; `last_used_at` syncs so recency is shared across devices. Seeding (F6) is client-side via ordinary `POST /categories`. The authoritative contract is [`backend/api/openapi.yaml`](backend/api/openapi.yaml) (v1.1.0).
 
@@ -104,6 +107,11 @@ The iOS `RemoteAuthRepository` mirrors these paths exactly. If you change an end
 
 ## Auth model (passwordless)
 Enter email → `otp/request` (always 202, account auto-created unverified) → server emails a 6-digit code → `otp/verify` → marks verified + issues JWT access (15 min) + rotated refresh. The OTP proves email ownership — there is no separate "verify email" step and no password anywhere (R1). OTP codes and refresh tokens are stored only as **SHA-256 hashes**; tokens live in the iOS **Keychain**. `otp/request` and `otp/verify` are rate-limited per IP+email. The client IP for rate limiting is resolved by `Handler.clientIP`, which honours `X-Forwarded-For`/`X-Real-IP` **only** when the direct TCP peer is in `TRUSTED_PROXIES` (comma-separated IPs/CIDRs; empty = trust nobody, the safe default that prevents rate-limit bypass via spoofed headers). The email body puts the 6-digit code on its own line for iOS `.oneTimeCode` autofill (U5); the template is configurable via `OTP_EMAIL_TEMPLATE` and may need empirical tuning.
+
+The iOS `APIClient` retries protected requests once after a 401 using the
+single-flight refresh path. A rejected or reused refresh token clears the
+Keychain/cache/session so `RootView` returns to sign-in; offline or transport
+failures are preserved and do not sign the user out.
 
 ## Coding standards (Requirements S5)
 Keep code **minimal and standardized**, following modern best practices.
@@ -115,14 +123,14 @@ Keep code **minimal and standardized**, following modern best practices.
 
 ## Per-iteration revising process (Requirements S5)
 On every iteration (feature/fix PR) the author MUST:
-1. Run both linters and fix every finding: `golangci-lint run` (backend), `swiftlint lint --strict` (iOS); `gofmt -l .` must be empty.
+1. Run both linters and fix every finding: `golangci-lint run` (backend), `swiftlint lint --strict` (iOS); run the iOS build with `SWIFT_TREAT_WARNINGS_AS_ERRORS=YES GCC_TREAT_WARNINGS_AS_ERRORS=YES` and inspect/fix every `xcodebuild` warning; `gofmt -l .` must be empty.
 2. Run both test suites green (`go test ./...`; `xcodebuild test`).
 3. Re-read the relevant `Requirements/FURPS/*.md` rows and confirm the change aligns; correct the requirements doc if rows conflict (see the passwordless correction as precedent).
 4. Update this `AGENTS.md`, the README, the relevant `Design/*.md` files, and [`backend/api/openapi.yaml`](backend/api/openapi.yaml) if architecture/contract/run steps or visual design changed. The OpenAPI spec is the authoritative API contract — keep it in sync with the handlers.
 5. Prefer reusing existing utilities/patterns over new code; remove dead code.
 
 ## CI (Requirements S6)
-`.github/workflows/backend.yml` (Go: gofmt, go vet, golangci-lint, test + coverage) and `.github/workflows/ios.yml` (xcodegen, swiftlint, build, test) run on every PR and on pushes to `main`. Both are **mandatory** PR checks — a PR is not mergeable until both are green.
+`.github/workflows/backend.yml` (Go: gofmt, go vet, golangci-lint, test + coverage) and `.github/workflows/ios.yml` (xcodegen, swiftlint, warning-as-error xcodebuild build, test) run on every PR and on pushes to `main`. Both are **mandatory** PR checks — a PR is not mergeable until both are green.
 
 ## Deployment (S4)
 The backend is deployed to a **Google Cloud Compute Engine VM** (`timeoflife-backend`, us-east1-b). The production stack runs via Docker Compose:
@@ -161,6 +169,10 @@ make deploy   # or push to main and let CI/CD handle it
 `AppConfig` reads it at runtime and falls back to the dev URL if missing/malformed. The unit tests run under `Debug`, so they keep asserting `127.0.0.1:8080`.
 
 Code signing is disabled in `project.yml` (`DEVELOPMENT_TEAM: ""`, `CODE_SIGNING_REQUIRED: NO`) so simulator/CI builds need no Apple Developer account. **TestFlight/App Store distribution is deferred** — to enable it later: set `DEVELOPMENT_TEAM`, switch `CODE_SIGNING_REQUIRED`/`CODE_SIGN_IDENTITY` to distribution values, supply a provisioning profile, and add a fastlane/gym archive + upload CI job (needs an App Store Connect API key secret). The comment in `project.yml` marks the exact lines.
+
+## Pre-release policy
+
+The app is unreleased; there is no on-disk data in the wild. **No backward compatibility / migration for local on-disk formats is needed before release.** Do not add legacy-decode branches, `legacy*` fields, or `migrateIfNeeded` paths to local stores. On-disk schema changes are applied by editing the `Codable` shape in place; existing test fixtures and dev devices simply start fresh. Revisit this policy once a build ships to TestFlight or any external tester.
 
 ## Deferred / out of scope
 - **Sign in with Apple follow-ups** — F2 itself is implemented (see below); still deferred: account-deletion token revocation via Apple `/auth/revoke` (App Store 5.1.1v, needs `.p8` + `APPLE_TEAM_ID`/`APPLE_KEY_ID`), nonce replay defense, and Apple credential-state/revocation observation on the client.

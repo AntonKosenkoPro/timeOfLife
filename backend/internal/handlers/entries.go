@@ -1,10 +1,8 @@
 package handlers
 
 import (
-	"errors"
 	"net/http"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -92,22 +90,14 @@ func (h *Handler) CreateEntry(w http.ResponseWriter, r *http.Request) {
 	errs := validationErrs{}
 	validateID(req.ID, errs)
 	validateTimestamp("started_at", req.StartedAt, true, errs)
-	if req.ActivityID != nil {
-		if !validateUUIDv7(*req.ActivityID) {
-			errs.add("activity_id", "activity_id must be a valid UUID v7")
-		}
-	} else {
-		name := strings.TrimSpace(req.ActivityName)
-		if name == "" {
-			errs.add("activity_name_snapshot", "activity_name_snapshot is required when activity_id is omitted")
-		} else if len(name) > maxNameLen {
-			errs.add("activity_name_snapshot", "activity_name_snapshot must be 60 characters or fewer")
-		}
+	if req.ActivityID == nil {
+		errs.add("activity_id", "activity_id is required")
+	} else if !validateUUIDv7(*req.ActivityID) {
+		errs.add("activity_id", "activity_id must be a valid UUID v7")
 	}
 	if req.EndedAt != nil {
 		validateTimestamp("ended_at", *req.EndedAt, false, errs)
 	}
-	validateNotes(req.Notes, errs)
 	// ended_at must be after started_at when both are present and valid.
 	if req.EndedAt != nil && req.StartedAt != "" {
 		if st, ok1 := parseRFC3339(req.StartedAt); ok1 {
@@ -128,13 +118,11 @@ func (h *Handler) CreateEntry(w http.ResponseWriter, r *http.Request) {
 		endedAt = &et
 	}
 	e := db.Entry{
-		ID:                   req.ID,
-		UserID:               userID,
-		ActivityID:           req.ActivityID,
-		ActivityNameSnapshot: strings.TrimSpace(req.ActivityName),
-		StartedAt:            startedAt,
-		EndedAt:              endedAt,
-		Notes:                req.Notes,
+		ID:         req.ID,
+		UserID:     userID,
+		ActivityID: req.ActivityID,
+		StartedAt:  startedAt,
+		EndedAt:    endedAt,
 	}
 	created, isNew, err := h.store.CreateEntry(r.Context(), e)
 	if err != nil {
@@ -183,9 +171,6 @@ func (h *Handler) UpdateEntry(w http.ResponseWriter, r *http.Request) {
 	if req.EndedAt.Set && req.EndedAt.Bad {
 		errs.add("ended_at", "ended_at must be a valid RFC 3339 timestamp")
 	}
-	if req.Notes != nil {
-		validateNotes(*req.Notes, errs)
-	}
 	validateTimestamp("updated_at", req.UpdatedAt, true, errs)
 	// ended_at must be after started_at when both are valid.
 	if req.StartedAt != nil && req.EndedAt.Set && req.EndedAt.Valid {
@@ -208,7 +193,7 @@ func (h *Handler) UpdateEntry(w http.ResponseWriter, r *http.Request) {
 		endedAt = db.NullableTime{Set: true, Valid: req.EndedAt.Valid, Value: req.EndedAt.Value}
 	}
 	updatedAt, _ := parseRFC3339(req.UpdatedAt)
-	patch := db.EntryPatch{StartedAt: startedAt, EndedAt: endedAt, Notes: req.Notes, UpdatedAt: updatedAt}
+	patch := db.EntryPatch{StartedAt: startedAt, EndedAt: endedAt, UpdatedAt: updatedAt}
 	updated, err := h.store.UpdateEntry(r.Context(), userID, chi.URLParam(r, "id"), patch)
 	if err != nil {
 		h.writeCatalogStoreErr(w, updated, err, "update entry")
@@ -228,27 +213,4 @@ func (h *Handler) DeleteEntry(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
-}
-
-// UnlinkEntry handles POST /entries/{id}/unlink (bodyless; 409 if already unlinked).
-func (h *Handler) UnlinkEntry(w http.ResponseWriter, r *http.Request) {
-	userID, ok := h.requireUserID(w, r)
-	if !ok {
-		return
-	}
-	e, err := h.store.UnlinkEntry(r.Context(), userID, chi.URLParam(r, "id"))
-	if err != nil {
-		switch {
-		case errors.Is(err, db.ErrNotFound):
-			writeError(w, http.StatusNotFound, codeNotFound, "Not found", nil)
-		case errors.Is(err, db.ErrConflict):
-			writeError(w, http.StatusConflict, codeConflict, "Entry is already unlinked", nil)
-		default:
-			h.logger.Error("unlink entry failed", "error", err)
-			writeError(w, http.StatusInternalServerError, "internal_error", "An internal error occurred", nil)
-		}
-		return
-	}
-	h.logger.Info("entry unlinked", "userID", userID, "entryID", e.ID)
-	writeJSON(w, http.StatusOK, e)
 }

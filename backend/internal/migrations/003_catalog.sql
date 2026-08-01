@@ -1,8 +1,8 @@
 -- Epic 1: Activity Catalog & Categories. Introduces activities, categories,
--- the many-to-many activity_categories tag join, entries (with a nullable
--- activity_id so an entry can be unlinked from its activity), and
--- entry_tag_snapshots (frozen tags captured at unlink time so an unlinked
--- entry's history still reads correctly). All ids are client-generated UUID v7.
+-- the many-to-many activity_categories tag join, and entries. Each entry
+-- references exactly one activity (activity_id is required); category tags
+-- are inferred from the activity at query time. All ids are client-generated
+-- UUID v7.
 --
 -- Postgres dialect; migrations.adaptToSQLite converts this for the SQLite
 -- test store (TIMESTAMPTZ->TEXT, UUID->TEXT, NOW()->(datetime('now')), IF NOT
@@ -51,8 +51,7 @@ CREATE TABLE IF NOT EXISTS activity_categories (
 CREATE TABLE IF NOT EXISTS entries (
     id UUID PRIMARY KEY,
     user_id UUID NOT NULL REFERENCES users(id),
-    activity_id UUID REFERENCES activities(id) ON DELETE CASCADE,
-    activity_name_snapshot TEXT,
+    activity_id UUID NOT NULL REFERENCES activities(id) ON DELETE CASCADE,
     started_at TIMESTAMPTZ NOT NULL,
     ended_at TIMESTAMPTZ,
     duration_seconds INT,
@@ -66,11 +65,3 @@ CREATE INDEX IF NOT EXISTS idx_entries_user_started
 
 CREATE INDEX IF NOT EXISTS idx_entries_user_activity
     ON entries(user_id, activity_id);
-
-CREATE TABLE IF NOT EXISTS entry_tag_snapshots (
-    entry_id UUID NOT NULL REFERENCES entries(id) ON DELETE CASCADE,
-    category_id UUID NOT NULL,
-    category_name_snapshot TEXT NOT NULL,
-    category_color_snapshot TEXT NOT NULL,
-    PRIMARY KEY (entry_id, category_id)
-);

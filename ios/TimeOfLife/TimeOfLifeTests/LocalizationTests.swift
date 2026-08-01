@@ -10,6 +10,18 @@ struct LocalizationTests {
         L10n.allCases
     }
 
+    /// Plural-*root* keys — `delete.activity.message` and `delete.activity.entire`
+    /// — have no single form in `Localizable.strings`; only `<root>.<form>`
+    /// variants exist (one/few/many/other). The singular root value points to
+    /// nothing in either bundle, so it must be excluded from the plain-string
+    /// parity loops below. The variants themselves are checked in
+    /// `pluralFormKeysExist`, and resolution via `L10n.text(Int)` is exercised
+    /// in `pluralKeysResolve`.
+    private static let pluralKeys: Set<String> = [
+        L10n.deleteActivityMessage.rawValue,
+        L10n.deleteActivityEntire.rawValue,
+    ]
+
     // MARK: - Key resolution
 
     @Test("all L10n keys resolve to non-empty strings in en.lproj")
@@ -19,7 +31,7 @@ struct LocalizationTests {
                                 "Missing en.lproj in main bundle")
         let bundle = try #require(Bundle(path: path))
 
-        for caseValue in l10nCases {
+        for caseValue in l10nCases where !Self.pluralKeys.contains(caseValue.rawValue) {
             let value = NSLocalizedString(caseValue.rawValue, bundle: bundle, comment: "")
             #expect(value != caseValue.rawValue,
                     "Unresolved key \(caseValue.rawValue) in en")
@@ -35,7 +47,7 @@ struct LocalizationTests {
                                 "Missing ru.lproj in main bundle")
         let bundle = try #require(Bundle(path: path))
 
-        for caseValue in l10nCases {
+        for caseValue in l10nCases where !Self.pluralKeys.contains(caseValue.rawValue) {
             let value = NSLocalizedString(caseValue.rawValue, bundle: bundle, comment: "")
             #expect(value != caseValue.rawValue,
                     "Unresolved key \(caseValue.rawValue) in ru")
@@ -52,7 +64,7 @@ struct LocalizationTests {
         let enBundle = try #require(Bundle(path: enPath))
         let ruBundle = try #require(Bundle(path: ruPath))
 
-        for caseValue in l10nCases {
+        for caseValue in l10nCases where !Self.pluralKeys.contains(caseValue.rawValue) {
             let enValue = NSLocalizedString(caseValue.rawValue, bundle: enBundle, comment: "")
             let ruValue = NSLocalizedString(caseValue.rawValue, bundle: ruBundle, comment: "")
 
@@ -60,6 +72,54 @@ struct LocalizationTests {
                     "Key \(caseValue.rawValue) missing in en")
             #expect(ruValue != caseValue.rawValue,
                     "Key \(caseValue.rawValue) missing in ru")
+        }
+    }
+
+    @Test("plural-root keys resolve via the Swift-side plural dispatcher")
+    func pluralKeysResolve() {
+        for count in [0, 1, 2, 5, 11, 21, 22, 25, 100] {
+            let m = L10n.deleteActivityMessage.text(count)
+            let e = L10n.deleteActivityEntire.text(count)
+            #expect(!m.isEmpty,
+                    "delete.activity.message empty for count \(count)")
+            #expect(m != L10n.deleteActivityMessage.rawValue,
+                    "delete.activity.message unresolved for count \(count)")
+            #expect(!e.isEmpty,
+                    "delete.activity.entire empty for count \(count)")
+            #expect(e != L10n.deleteActivityEntire.rawValue,
+                    "delete.activity.entire unresolved for count \(count)")
+        }
+    }
+
+    @Test("per-form plural keys resolve to non-empty strings in en + ru bundles")
+    func pluralFormKeysExist() throws {
+        let main = Bundle.main
+        let enPath = try #require(main.path(forResource: "en", ofType: "lproj"),
+                                  "Missing en.lproj in main bundle")
+        let ruPath = try #require(main.path(forResource: "ru", ofType: "lproj"),
+                                  "Missing ru.lproj in main bundle")
+        let enBundle = try #require(Bundle(path: enPath))
+        let ruBundle = try #require(Bundle(path: ruPath))
+
+        let roots: [String] = [
+            L10n.deleteActivityMessage.rawValue,
+            L10n.deleteActivityEntire.rawValue,
+        ]
+        let pairs: [(String, Bundle, [String])] = [
+            ("en", enBundle, ["one", "other"]),
+            ("ru", ruBundle, ["one", "few", "many"]),
+        ]
+        for (locale, bundle, forms) in pairs {
+            for root in roots {
+                for form in forms {
+                    let key = "\(root).\(form)"
+                    let value = NSLocalizedString(key, bundle: bundle, comment: "")
+                    #expect(value != key,
+                            "Unresolved key \(key) in \(locale)")
+                    #expect(!value.isEmpty,
+                            "Empty value for key \(key) in \(locale)")
+                }
+            }
         }
     }
 
@@ -71,6 +131,9 @@ struct LocalizationTests {
             "invalid_body", "rate_limited",
             "invalid_otp", "otp_expired", "otp_attempts_exceeded",
             "invalid_refresh", "token_reuse", "token_expired",
+            // Catalog (Epic 1)
+            "conflict", "activity_exists", "category_exists",
+            "validation_error", "not_found",
         ]
         let unknownText = NSLocalizedString("error.unknown", comment: "")
 
@@ -84,7 +147,8 @@ struct LocalizationTests {
 
     @Test("offline error maps to offline banner text")
     func offlineMapping() {
-        let msg = ErrorLocalization.message(for: .offline)
+        // Qualified because `CatalogError.offline` also exists (catalog Epic 1).
+        let msg = ErrorLocalization.message(for: APIError.offline)
         #expect(!msg.isEmpty)
     }
 
@@ -118,33 +182,34 @@ struct LocalizationTests {
 
     // MARK: - L10n enum allCases matches strings files
 
-    @Test("L10n enum allCases count matches expected keys")
-    func allCasesCount() {
-        // 25 keys: appName,
-        // welcomeTagline, welcomeContinueWithEmail,
-        // emailEntryTitle, emailEntryEmail, emailEntrySubtitle, emailEntrySubmit,
-        // otpTitle, otpSentTo, otpResend, otpResendCountdown,
-        // offlineBanner,
-        // appleSignInTitle, appleSignInError,
-        // timerTitle, timerActivityPlaceholder, timerStart, timerStop,
-        // timerOfflineHint, timerEmptyActivityError, timerSignOut,
-        // signOutConfirmationTitle, signOutConfirmationMessage, signOutConfirm, signOutCancel
-        #expect(l10nCases.count == 25)
-    }
-}
-
-extension L10n: CaseIterable {
-    public static var allCases: [L10n] {
-        [
-            .appName,
-            .welcomeTagline, .welcomeContinueWithEmail,
-            .emailEntryTitle, .emailEntryEmail, .emailEntrySubtitle, .emailEntrySubmit,
-            .otpTitle, .otpSentTo, .otpResend, .otpResendCountdown,
-            .offlineBanner,
-            .appleSignInTitle, .appleSignInError,
-            .timerTitle, .timerActivityPlaceholder, .timerStart, .timerStop,
-            .timerOfflineHint, .timerEmptyActivityError, .timerSignOut,
-            .signOutConfirmationTitle, .signOutConfirmationMessage, .signOutConfirm, .signOutCancel,
+    @Test("L10n enum allCases count matches keys in en.lproj")
+    func allCasesCount() throws {
+        let main = Bundle.main
+        let enPath = try #require(main.path(forResource: "en", ofType: "lproj"),
+                                  "Missing en.lproj in main bundle")
+        let enBundle = try #require(Bundle(path: enPath))
+        let stringsPath = try #require(enBundle.path(forResource: "Localizable", ofType: "strings"),
+                                       "Missing Localizable.strings in en.lproj")
+        // .strings files are UTF-16 property lists; read via PropertyListSerialization.
+        let stringsData = try Data(contentsOf: URL(fileURLWithPath: stringsPath))
+        let plist = try PropertyListSerialization.propertyList(from: stringsData, format: nil)
+        guard let dict = plist as? [String: String] else {
+            Issue.record("Failed to load Localizable.strings")
+            return
+        }
+        let keysInFile = Set(dict.keys)
+        let pluralRoots = [
+            L10n.deleteActivityMessage.rawValue,
+            L10n.deleteActivityEntire.rawValue,
         ]
+        let enumKeys = Set(l10nCases.map(\.rawValue))
+        let missingKeys = enumKeys.filter { key in
+            if pluralRoots.contains(key) {
+                return false
+            }
+            return !keysInFile.contains(key)
+        }
+        #expect(missingKeys.isEmpty,
+                "Missing L10n keys in en.lproj: \(missingKeys.sorted())")
     }
 }

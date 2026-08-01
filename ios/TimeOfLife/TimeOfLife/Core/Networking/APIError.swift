@@ -8,7 +8,7 @@ import Foundation
 /// keys off of.
 enum APIError: Error, Equatable, Sendable {
     /// Non-2xx response carrying the uniform error envelope.
-    case server(code: String, message: String, details: [String: AnyHashable] = [:])
+    case server(code: String, message: String, details: [String: String] = [:])
     /// No network connectivity (or request dropped before it reached the wire).
     case offline
     /// Decoding failure of a success response.

@@ -89,10 +89,10 @@ final class AuthService: ObservableObject {
             cache.save(updated)
             sessionStore.setSignedIn(updated)
         } catch APIError.unauthorized {
-            // Try to refresh. Routed through `performRefresh` so it shares the
-            // single-flight coalescing with any concurrent refreshers (e.g.
-            // APIClient's transparent 401-retry), preventing a token-rotation
-            // race that would mass-revoke the user's sessions.
+            // APIClient already attempted one transparent refresh. Keep this
+            // fallback for repository implementations that report the 401
+            // directly; a failed refresh clears the token before this path
+            // runs, so it cannot submit the revoked token a second time.
             do {
                 _ = try await performRefresh()
             } catch {
@@ -132,7 +132,14 @@ final class AuthService: ObservableObject {
         }
         refreshTask = task
         defer { refreshTask = nil }
-        return try await task.value
+        do {
+            return try await task.value
+        } catch APIError.unauthorized {
+            // A rejected or reused refresh token cannot recover locally. Clear
+            // the cached session immediately so RootView returns to sign-in.
+            await clearLocal()
+            throw APIError.unauthorized
+        }
     }
 
     /// Logout. Clears local state always; best-effort server revoke.

@@ -10,6 +10,11 @@ WelcomeView  --(Continue with Email)-->  EmailEntryView  --(email sent)-->  OtpE
 
 `Sign in with Apple` is the primary action on `WelcomeView` and handles sign-up/sign-in in one step. The email/OTP path is a deliberate secondary option. When any auth path succeeds, `SessionStore` flips to `.signedIn` and `RootView` replaces the auth flow with `TimerView`.
 
+Protected API requests refresh an expired access token once. If the refresh token is
+invalid or reused, the client clears the local session and `RootView` returns to
+this signed-out flow; temporary offline or transport failures keep the cached
+session for a later retry.
+
 ---
 
 ## Screen: WelcomeView

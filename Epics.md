@@ -17,7 +17,7 @@ You can start/stop a timer against a free-text activity name, and it syncs offli
 - **Suggestions** surfaced on the timer screen from your most-used/recent activities (one tap to prefill name).
 - CRUD for activities/categories; default categories seeded on first run.
 - *Why first:* the typed-name timer is the thing that gets old fastest; structured activities are the prerequisite for every later epic (history grouping, widgets targeting a specific activity, goals per category).
-- *Backend:* `activities`, `categories` resources; entries gain `activity_id` (free-text stays as fallback for ad-hoc).
+- *Backend:* `activities`, `categories` resources; entries gain a required `activity_id` (typing a new name auto-creates one, F4 — so the free-text start flow stays frictionless without ever leaving an entry uncategorized).
 
 ### Epic 2: History & Entries Management
 - `HistoryView` (already named in `Design/SCREENS/TimeTracking.md` "Future extensions") — paginated list of entries grouped by day, with duration totals.

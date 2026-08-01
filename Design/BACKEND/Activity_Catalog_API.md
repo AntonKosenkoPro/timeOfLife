@@ -47,38 +47,24 @@ New migration `003_catalog.sql`. Follows the existing pattern (`internal/migrati
 | `category_id` | UUID → categories(id) ON DELETE CASCADE | |
 | `PRIMARY KEY (activity_id, category_id)` | | |
 
-Deleting a category removes the tag from all activities (cascade on the join) but does **not** touch entries — entries infer tags at query time while linked (F9), so they simply drop the tag.
+Deleting a category removes the tag from all activities (cascade on the join) but does **not** touch entries — entries infer tags from their activity at query time (F9), so they simply drop the tag.
 
 ### `entries`
 | column | type | notes |
 |---|---|---|
 | `id` | UUID PK | client-generated v7 |
 | `user_id` | UUID NOT NULL → users(id) | |
-| `activity_id` | UUID → activities(id) ON DELETE CASCADE, nullable | NULL after unlink (F11) |
-| `activity_name_snapshot` | TEXT | frozen name; set at creation from the activity, retained after unlink/deletion so history reads correctly (F9/F11) |
+| `activity_id` | UUID NOT NULL → activities(id) ON DELETE CASCADE | required; every entry references exactly one activity |
 | `started_at` | TIMESTAMPTZ NOT NULL | |
 | `ended_at` | TIMESTAMPTZ | NULL = running timer |
 | `duration_seconds` | INT | `ended_at - started_at` when ended; NULL while running; stored for query/filter convenience |
-| `notes` | TEXT | entry-level notes (nullable; Epic 2 edits these) |
 | `created_at` | TIMESTAMPTZ NOT NULL DEFAULT NOW() | |
 | `updated_at` | TIMESTAMPTZ NOT NULL DEFAULT NOW() | LWW sync version |
 
 - `INDEX (user_id, started_at DESC)` — history list / date-range queries (Epic 2).
 - `INDEX (user_id, activity_id)` — per-activity lookups.
-- FK `ON DELETE CASCADE`: deleting an activity removes all its entries (F10 "delete entire activity and all N entries"). Unlink is **not** a delete — it's an explicit `UPDATE … SET activity_id = NULL` (allowed because the FK is nullable), which freezes the snapshot first.
-
-### `entry_tag_snapshots` (frozen tags after unlink; F11)
-| column | type | notes |
-|---|---|---|
-| `entry_id` | UUID → entries(id) ON DELETE CASCADE | |
-| `category_id` | UUID | the category id at detach time (may later not exist) |
-| `category_name_snapshot` | TEXT NOT NULL | frozen |
-| `category_color_snapshot` | TEXT NOT NULL | frozen |
-| `PRIMARY KEY (entry_id, category_id)` | | |
-
-Populated only at **unlink** time: the activity's current tags are copied here. While an entry is linked (`activity_id` NOT NULL), its tags are inferred at query time via `activity_categories` ⨝ `categories` (F9: editing an activity's tags reflects on past entries). Once unlinked, the API returns the snapshot rows instead. This dual-mode read keeps "inferred while linked, frozen after unlink" exact.
-
-> Why a snapshot table and not a JSON column: matches the existing relational style (no JSON used anywhere), and works identically on Postgres and the SQLite test store.
+- FK `ON DELETE CASCADE`: deleting an activity removes all its entries (F10 "delete entire activity and all N entries").
+- The activity's **name** and **tags** are resolved from the activity at query time (via `activities` and `activity_categories` ⨝ `categories`), so editing an activity's name or tags reflects on its past entries (F9). Nothing is frozen/denormalized on the entry.
 
 ---
 
@@ -119,13 +105,12 @@ All `401 unauthorized` on missing/invalid token (existing `AuthMiddleware`). All
 | Method | Path | Body | Success | Errors |
 |---|---|---|---|---|
 | GET | `/entries` | — | 200 `{items:[…], next_cursor?}` ordered by `started_at DESC`; filters `?from=&to=&activity_id=&category_id=&limit=&cursor=` | (401) |
-| GET | `/entries/{id}` | — | 200 `{entry…}` with `categories[]` (inferred if linked, snapshot if unlinked) | 404, (401) |
-| POST | `/entries` | `{id, activity_id?, started_at, ended_at?, notes?}` | 201 `{entry…}`; server sets `activity_name_snapshot` from the activity at create time; `ended_at` null = running | 400, 422, 404 `activity_not_found` (when `activity_id` doesn't belong to user), 409 `conflict`, (401) |
-| PATCH | `/entries/{id}` | `{started_at?, ended_at?, notes?, updated_at}` | 200 `{entry…}` (stop a running timer = set `ended_at`; recompute `duration_seconds`) | 400, 404, 409 `conflict`, 422, (401) |
+| GET | `/entries/{id}` | — | 200 `{entry…}` with `categories[]` (inferred from the activity) and `activity_name` (the activity's current name) | 404, (401) |
+| POST | `/entries` | `{id, activity_id, started_at, ended_at?}` | 201 `{entry…}`; `activity_id` is required and must belong to the user; `ended_at` null = running | 400, 422, 404 `activity_not_found` (when `activity_id` doesn't belong to user), 409 `conflict`, (401) |
+| PATCH | `/entries/{id}` | `{started_at?, ended_at?, updated_at}` | 200 `{entry…}` (stop a running timer = set `ended_at`; recompute `duration_seconds`) | 400, 404, 409 `conflict`, 422, (401) |
 | DELETE | `/entries/{id}` | — | 204 (hard delete) | 404, (401) |
-| POST | `/entries/{id}/unlink` | — | 200 `{entry…}` (sets `activity_id=NULL`, copies tags into `entry_tag_snapshots`) | 404, 409 `conflict` (already unlinked), (401) |
 
-> `activity_id` on `POST /entries` is optional to keep the door open for ad-hoc/free-text entries (the MVP's free-text path stays first-class per the Epics.md cross-cutting decision). When `activity_id` is omitted, `activity_name_snapshot` may be supplied directly as free text.
+> `activity_id` on `POST /entries` is required — every entry must reference an activity. The activity's name and tags are resolved at query time, so no name is stored on the entry.
 
 ### Suggestions (F5) — client-side, no endpoint
 
@@ -157,13 +142,13 @@ No dedicated endpoint. Seeds are created client-side on first run (7 localized c
 ### Entry
 ```json
 {
-  "id": "…", "activity_id": "…", "activity_name_snapshot": "Gym",
+  "id": "…", "activity_id": "…", "activity_name": "Gym",
   "started_at": "…", "ended_at": "…", "duration_seconds": 3600,
-  "notes": "", "linked": true, "created_at": "…", "updated_at": "…",
+  "created_at": "…", "updated_at": "…",
   "categories": [ { "id": "…", "name": "Sport", "color": "green" } ]
 }
 ```
-`linked` = `activity_id != null` (convenience for the client; `false` means read tags from the snapshot).
+`activity_name` and `categories` are resolved from the activity at query time (the entry stores only `activity_id`).
 
 ---
 
@@ -206,10 +191,10 @@ No PII (notes content) is logged (S4); structured `log/slog` events use ids only
 
 Mirrors the existing layering so review is mechanical:
 
-1. **Migration** `internal/migrations/003_catalog.sql` — the five tables + indexes + constraints above.
-2. **Store** — extend `db.Store` with activity/category/entry CRUD + `activity_categories` + `entry_tag_snapshots` methods; implement in `postgres.go` and `sqlite.go` (dual, per convention). Add `ErrConflict`, `ErrActivityExists`, `ErrCategoryExists` to `errors.go`.
-3. **Handlers** — new `internal/handlers/catalog.go` (activities + categories) and `internal/handlers/entries.go` (entries + unlink), reusing `decodeJSON`/`writeJSON`/`writeError` and `UserIDFromContext`. New validators in a `catalog_validators.go` matching the auth validator style. (No suggestions handler — F5 is client-side.)
+1. **Migration** `internal/migrations/003_catalog.sql` — the four tables + indexes + constraints above.
+2. **Store** — extend `db.Store` with activity/category/entry CRUD + `activity_categories` methods; implement in `postgres.go` and `sqlite.go` (dual, per convention). Add `ErrConflict`, `ErrActivityExists`, `ErrCategoryExists` to `errors.go`.
+3. **Handlers** — new `internal/handlers/catalog.go` (activities + categories) and `internal/handlers/entries.go` (entries), reusing `decodeJSON`/`writeJSON`/`writeError` and `UserIDFromContext`. New validators in a `catalog_validators.go` matching the auth validator style. (No suggestions handler — F5 is client-side.)
 4. **Routing** — `server.go`: `r.Route("/api/v1", …)` adds `/activities`, `/categories`, `/entries` groups, all `r.With(h.AuthMiddleware)`.
 5. **OpenAPI** — append the paths + schemas above to `backend/api/openapi.yaml` (S10/S1).
-6. **Tests** — `catalog_test.go`, `entries_test.go` against the SQLite store; cover validators, dedup, LWW conflict, unlink snapshot, cascade delete, idempotent POST (S2).
+6. **Tests** — `catalog_test.go`, `entries_test.go` against the SQLite store; cover validators, dedup, LWW conflict, cascade delete, idempotent POST (S2).
 7. **Docs** — update `AGENTS.md` (API contract table + catalog/entries entries), `README.md` (API contract + coverage), and this doc stays the design source.

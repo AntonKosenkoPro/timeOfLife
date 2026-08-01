@@ -85,7 +85,6 @@ func catalogRouter(h *Handler) http.Handler {
 			r.Get("/entries/{id}", h.GetEntry)
 			r.Patch("/entries/{id}", h.UpdateEntry)
 			r.Delete("/entries/{id}", h.DeleteEntry)
-			r.Post("/entries/{id}/unlink", h.UnlinkEntry)
 		})
 	})
 	return r
@@ -136,11 +135,10 @@ type activityResp struct {
 
 // entryResp mirrors the Entry response for test assertions.
 type entryResp struct {
-	ID                   string  `json:"id"`
-	ActivityID           *string `json:"activity_id"`
-	ActivityNameSnapshot string  `json:"activity_name_snapshot"`
-	Linked               bool    `json:"linked"`
-	DurationSeconds      *int    `json:"duration_seconds"`
+	ID              string  `json:"id"`
+	ActivityID      *string `json:"activity_id"`
+	ActivityName    string  `json:"activity_name"`
+	DurationSeconds *int    `json:"duration_seconds"`
 }
 
 func newCatalogHandler(t *testing.T) (*Handler, db.Store, string, string) {
@@ -149,4 +147,18 @@ func newCatalogHandler(t *testing.T) (*Handler, db.Store, string, string) {
 	h := newTestHandler(t, store)
 	uid, tok := mintBearer(t, store, "catalog-handler@example.com")
 	return h, store, uid, tok
+}
+
+// newActivity creates an activity for the authenticated user and returns its id.
+func newActivity(t *testing.T, h *Handler, tok string) string {
+	t.Helper()
+	w := serve(h, jsonReq(t, "POST", "/api/v1/activities", tok, map[string]any{
+		"id": v7(), "name": "Gym", "color": "blue", "icon": "figure.run",
+	}))
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create activity: expected 201, got %d (body=%s)", w.Code, w.Body.String())
+	}
+	var a activityResp
+	decodeBody(t, w, &a)
+	return a.ID
 }
