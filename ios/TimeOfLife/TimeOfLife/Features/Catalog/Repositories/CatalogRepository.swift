@@ -47,8 +47,11 @@ enum CatalogError: Error, Equatable, Sendable {
     /// Non-APIError passthrough with original description.
     case unexpected(description: String)
 
-    /// Maps any thrown error (coerced to `APIError`) into a `CatalogError`.
+    /// Maps any thrown error into a `CatalogError`, preserving domain errors.
     static func map(_ error: Error) -> CatalogError {
+        if let catalogError = error as? CatalogError {
+            return catalogError
+        }
         guard let api = error as? APIError else {
             return .unexpected(description: error.localizedDescription)
         }

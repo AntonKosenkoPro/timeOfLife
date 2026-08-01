@@ -30,7 +30,11 @@ final class ManageActivitiesViewModel: ObservableObject {
     @Published var isLoading = false
     @Published var undoToast: UndoToastState?
     @Published var errorMessage: String?
-    @Published var showDeleteScope = false
+    @Published var showDeleteScope = false {
+        didSet {
+            if !showDeleteScope { pendingDelete = nil }
+        }
+    }
     @Published var showDeleteConfirmation = false {
         didSet {
             if !showDeleteConfirmation { pendingDelete = nil }

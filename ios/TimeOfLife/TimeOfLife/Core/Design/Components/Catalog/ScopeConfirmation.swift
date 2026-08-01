@@ -22,15 +22,15 @@ struct ScopeConfirmation: View {
                 Button(L10n.deleteActivityEntire.text(entryCount),
                        role: .destructive) {
                     selectedAction = true
-                    isPresented = false
                     onDeleteAll()
+                    isPresented = false
                 }
 
                 Button(L10n.deleteActivityEntryOnly.text,
                        role: .destructive) {
                     selectedAction = true
-                    isPresented = false
                     onDeleteEntryOnly()
+                    isPresented = false
                 }
 
                 Button(L10n.deleteActivityCancel.text,
