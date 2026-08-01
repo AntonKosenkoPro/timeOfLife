@@ -99,6 +99,7 @@ struct RemoteCatalogRepositoryTests {
         let body = try #require(bodyObject(r.body))
         #expect(body["updated_at"] != nil)
         #expect(body["name"] != nil)
+        #expect((body["notes"] as? String)?.isEmpty == true)
     }
 
     @Test("deleteActivity calls DELETE /activities/{id} and returns on 204")

@@ -108,16 +108,24 @@ struct SyncQueueTests {
             existingId: survivorId, existingName: "Gym"
         )
         repo.activityResult = survivor
+        let entryStore = LocalTimerStore(url: tempDir().appendingPathComponent("timerQueue.json"))
+        let entry = TimeEntry(
+            id: UUID.v7(), activityId: oldId, startedAt: Date(), endedAt: Date(), synced: false
+        )
+        try await entryStore.save(entry)
         try await queue.enqueue(
             .create(resource: .activity, resourceId: oldId,
                     payload: JSONEncoder().encode(activity), updatedAt: activity.updatedAt)
         )
 
-        await queue.replay(using: repo, store: store, connectivity: connectivity)
+        await queue.replay(
+            using: repo, store: store, connectivity: connectivity, entryStore: entryStore
+        )
 
         #expect(await queue.pending().isEmpty)
         #expect(await store.activity(survivorId) != nil)
         #expect(await store.activity(oldId) == nil)
+        #expect((await entryStore.unsyncedEntries()).first?.activityId == survivorId)
     }
 
     @Test("404 on DELETE is treated as success and removes the entry")

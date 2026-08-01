@@ -1,4 +1,5 @@
 import Foundation
+import Combine
 
 /// Orchestrates local storage and remote sync for time entries.
 ///
@@ -16,15 +17,33 @@ final class TimerService: ObservableObject {
     let store: TimerStoring
     private let repository: EntriesRepository
     private let connectivity: Connectivity
+    private let retryDelay: TimeInterval
+    private var connectivityCancellable: AnyCancellable?
+    private var retryTask: Task<Void, Never>?
 
     init(
         store: TimerStoring,
         repository: EntriesRepository,
-        connectivity: Connectivity
+        connectivity: Connectivity,
+        retryDelay: TimeInterval = 5
     ) {
         self.store = store
         self.repository = repository
         self.connectivity = connectivity
+        self.retryDelay = retryDelay
+        connectivityCancellable = connectivity.$isConnected
+            .dropFirst()
+            .filter { $0 }
+            .sink { [weak self] _ in
+                Task { @MainActor in
+                    try? await self?.syncUnsyncedEntries()
+                }
+            }
+        if connectivity.isConnected {
+            Task { @MainActor [weak self] in
+                try? await self?.syncUnsyncedEntries()
+            }
+        }
     }
 
     /// Saves a completed time entry. Local persistence is always attempted.
@@ -41,17 +60,44 @@ final class TimerService: ObservableObject {
         )
         try await store.save(entry)
         guard connectivity.isConnected else { return }
-        try await repository.create(entry)
-        try await store.markSynced(entry)
+        do {
+            try await repository.create(entry)
+            try await store.markSynced(entry)
+        } catch {
+            scheduleRetry()
+            throw error
+        }
     }
 
     /// Replays any unsynced entries to the remote repository.
     func syncUnsyncedEntries() async throws {
         guard connectivity.isConnected else { return }
         let unsynced = await store.unsyncedEntries()
+        var shouldRetry = false
         for entry in unsynced {
-            try await repository.create(entry)
-            try await store.markSynced(entry)
+            do {
+                try await repository.create(entry)
+                try await store.markSynced(entry)
+            } catch {
+                shouldRetry = true
+                continue
+            }
         }
+        if shouldRetry { scheduleRetry() }
+    }
+
+    private func scheduleRetry() {
+        guard retryTask == nil else { return }
+        retryTask = Task { [weak self] in
+            guard let self else { return }
+            try? await Task.sleep(nanoseconds: UInt64(self.retryDelay * 1_000_000_000))
+            guard !Task.isCancelled else { return }
+            self.retryTask = nil
+            try? await self.syncUnsyncedEntries()
+        }
+    }
+
+    deinit {
+        retryTask?.cancel()
     }
 }

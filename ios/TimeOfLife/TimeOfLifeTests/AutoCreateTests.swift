@@ -175,6 +175,18 @@ struct AutoCreateTests {
         #expect(vm.selectedActivityId == activity.id)
     }
 
+    @Test("equivalent activity name edits preserve the selected activity")
+    func equivalentEditsPreserveSelection() async {
+        let activity = makeActivity(id: UUID(), name: "Reading")
+        let vm = await makeViewModel(catalogActivities: [activity])
+        await vm.refreshSuggestions()
+        vm.prefill(from: activity)
+
+        vm.activityName = " reading "
+
+        #expect(vm.selectedActivityId == activity.id)
+    }
+
     @Test("reset clears selectedActivityId")
     func resetClearsSelection() async {
         let vm = await makeViewModel()

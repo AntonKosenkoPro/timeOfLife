@@ -11,6 +11,7 @@ struct ScopeConfirmation: View {
     let onDeleteAll: () -> Void
     let onDeleteEntryOnly: () -> Void
     let onCancel: () -> Void
+    @State private var selectedAction = false
 
     var body: some View {
         Text("")
@@ -20,12 +21,14 @@ struct ScopeConfirmation: View {
             ) {
                 Button(L10n.deleteActivityEntire.text(entryCount),
                        role: .destructive) {
+                    selectedAction = true
                     isPresented = false
                     onDeleteAll()
                 }
 
                 Button(L10n.deleteActivityEntryOnly.text,
                        role: .destructive) {
+                    selectedAction = true
                     isPresented = false
                     onDeleteEntryOnly()
                 }
@@ -38,9 +41,10 @@ struct ScopeConfirmation: View {
                 Text(L10n.deleteActivityMessage.text(entryCount))
             }
             .onChange(of: isPresented) { newValue in
-                if !newValue {
+                if !newValue, !selectedAction {
                     dismiss()
                 }
+                selectedAction = false
             }
     }
 

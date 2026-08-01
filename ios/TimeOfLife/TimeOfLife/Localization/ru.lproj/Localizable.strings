@@ -100,3 +100,32 @@
 "timer.suggestionsHeader" = "Недавние";
 "timer.quickAdd" = "Новая активность";
 "timer.manageActivities" = "Активности";
+
+// Управление активностями
+"manage.activities.title" = "Активности";
+"manage.activities.emptyTitle" = "Пока нет активностей";
+"manage.activities.emptySubtitle" = "Добавьте свою или просто введите название на таймере.";
+"manage.activities.categories" = "Категории";
+"undo.activityDeleted" = "Активность удалена";
+"undo.entriesDeleted" = "Удалено записей: %d";
+"error.activityExists" = "Активность с таким названием уже существует.";
+"error.undoFailed" = "Не удалось отменить действие — попробуйте снова.";
+
+// Редактор активности
+"activityEditor.createTitle" = "Новая активность";
+"activityEditor.editTitle" = "Изменить активность";
+"activityEditor.nameLabel" = "Название";
+"activityEditor.namePlaceholder" = "напр. Спортзал";
+"activityEditor.colorLabel" = "Цвет";
+"activityEditor.iconLabel" = "Значок";
+"activityEditor.notesLabel" = "Заметки";
+"activityEditor.notesPlaceholder" = "Необязательные заметки";
+"activityEditor.notesCounter" = "%d / 280";
+"activityEditor.tagsLabel" = "Категории";
+"activityEditor.noTags" = "Пока нет категорий.";
+"activityEditor.addCategory" = "Добавить категорию";
+"activityEditor.save" = "Сохранить";
+"activityEditor.cancel" = "Отмена";
+"validation.nameEmpty" = "Введите название.";
+"validation.nameTooLong" = "Название должно быть не длиннее 60 символов.";
+"validation.notesTooLong" = "Заметки должны быть не длиннее 280 символов.";

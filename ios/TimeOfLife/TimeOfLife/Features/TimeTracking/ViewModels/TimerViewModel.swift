@@ -11,10 +11,14 @@ import Combine
 final class TimerViewModel: ObservableObject {
     @Published var activityName: String = "" {
         didSet {
-            // Clearing a stale suggestion-selection on user edit; `prefill`
-            // re-sets `selectedActivityId` after assigning `activityName`, so
-            // programmatic prefill survives this reset.
-            selectedActivityId = nil
+            guard let selectedActivityId else { return }
+            guard let selected = knownActivities.first(where: { $0.id == selectedActivityId }) else {
+                self.selectedActivityId = nil
+                return
+            }
+            if CatalogValidator.normalizeName(activityName) != CatalogValidator.normalizeName(selected.name) {
+                self.selectedActivityId = nil
+            }
         }
     }
     @Published var fieldError: String?
@@ -36,6 +40,7 @@ final class TimerViewModel: ObservableObject {
     private var startDate: Date?
     private var timerCancellable: AnyCancellable?
     private var storeCancellable: AnyCancellable?
+    private var knownActivities: [Activity] = []
 
     /// Whether suggestions should be shown: field is focused, not running,
     /// and the current text is empty or case-insensitively prefix-matches
@@ -44,7 +49,7 @@ final class TimerViewModel: ObservableObject {
         guard isActivityFocused, !isRunning, !suggestions.isEmpty else { return false }
         guard !activityName.isEmpty else { return true }
         let key = CatalogValidator.normalizeName(activityName)
-        return suggestions.contains { CatalogValidator.normalizeName($0.name).hasPrefix(key) }
+        return knownActivities.contains { CatalogValidator.normalizeName($0.name).hasPrefix(key) }
     }
 
     init(
@@ -71,6 +76,7 @@ final class TimerViewModel: ObservableObject {
     /// Refreshes suggestions from the local catalog store.
     func refreshSuggestions() async {
         let activities = await catalogStore.activitiesSortedByLastUsedAt()
+        knownActivities = activities
         suggestions = Array(activities.prefix(5))
     }
 
@@ -97,34 +103,52 @@ final class TimerViewModel: ObservableObject {
                 prefill(from: created)
                 await refreshSuggestions()
             } catch {
-                errorMessage = L10n.text(in: .default, code: "error.unknown")
+                errorMessage = localizedMessage(for: error)
             }
         }
+    }
+
+    /// Receives the shared activity editor's result without creating the
+    /// activity a second time. The editor owns persistence; the timer only
+    /// selects the returned activity for the upcoming entry.
+    func didSelectActivity(_ activity: Activity) {
+        showQuickAdd = false
+        prefill(from: activity)
+        Task { await refreshSuggestions() }
     }
 
     /// Starts the timer if the activity name is valid.
     /// Handles auto-create: reuses an existing activity by name or creates a new one.
-    func start() {
+    func start() async {
         guard validate() else {
             Haptics.error()
             return
         }
-        isRunning = true
-        didSave = false
-        startDate = Date()
-        elapsed = 0
-        timerCancellable = Timer.publish(every: 1, on: .main, in: .common)
-            .autoconnect()
-            .sink { [weak self] _ in
-                self?.tick()
-            }
-        UIApplication.shared.isIdleTimerDisabled = true
-        Haptics.selection()
+        isLoading = true
+        errorMessage = nil
+        defer { isLoading = false }
+        do {
+            selectedActivityId = try await resolveActivityId()
+            isRunning = true
+            didSave = false
+            startDate = Date()
+            elapsed = 0
+            timerCancellable = Timer.publish(every: 1, on: .main, in: .common)
+                .autoconnect()
+                .sink { [weak self] _ in
+                    self?.tick()
+                }
+            UIApplication.shared.isIdleTimerDisabled = true
+            Haptics.selection()
+        } catch {
+            Haptics.error()
+            errorMessage = localizedMessage(for: error)
+        }
     }
 
     /// Stops the timer and saves the completed entry.
     func stop() async {
-        guard isRunning, let startDate else { return }
+        guard isRunning, let startDate, let selectedActivityId else { return }
         isRunning = false
         timerCancellable?.cancel()
         timerCancellable = nil
@@ -135,17 +159,18 @@ final class TimerViewModel: ObservableObject {
         defer { isLoading = false }
 
         do {
-            let activityId = try await resolveActivityId()
-            try await service.saveEntry(activityId: activityId, duration: duration, startedAt: startDate)
+            try await service.saveEntry(
+                activityId: selectedActivityId,
+                duration: duration,
+                startedAt: startDate
+            )
             didSave = true
             reset()
             await refreshSuggestions()
             Haptics.success()
         } catch {
             Haptics.error()
-            errorMessage = connectivity.isConnected
-                ? L10n.text(in: .default, code: "error.unknown")
-                : L10n.text(in: .default, code: "error.offline")
+            errorMessage = localizedMessage(for: error)
         }
     }
 
@@ -194,6 +219,16 @@ final class TimerViewModel: ObservableObject {
         _ = try? await catalogService.updateActivity(activity)
     }
 
+    private func localizedMessage(for error: Error) -> String {
+        if let error = error as? CatalogError {
+            return ErrorLocalization.message(for: error)
+        }
+        if let error = error as? APIError {
+            return ErrorLocalization.message(for: error)
+        }
+        return L10n.text(in: .default, code: "error.unknown")
+    }
+
     /// Resets the form and timer state.
     func reset() {
         activityName = ""
@@ -222,6 +257,12 @@ final class TimerViewModel: ObservableObject {
         let name = activityName.trimmingCharacters(in: .whitespacesAndNewlines)
         if name.isEmpty {
             fieldError = L10n.timerEmptyActivityError.text
+            return false
+        }
+        if let message = CatalogValidator.unifiedNameMessage(
+            CatalogValidator.validateName(activityName)
+        ) {
+            fieldError = message
             return false
         }
         fieldError = nil

@@ -57,6 +57,7 @@ extension AppContainer {
             syncQueue: catalog.queue,
             undoBuffer: catalog.undoBuffer,
             catalogService: catalog.service,
+            activityEntryCounter: TimerStoreActivityEntryCounter(store: timerService.store),
             clientHolder: nil
         )
 

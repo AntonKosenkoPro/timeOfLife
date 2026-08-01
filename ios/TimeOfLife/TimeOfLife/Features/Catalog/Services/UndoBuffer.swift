@@ -16,6 +16,7 @@ enum UndoableItem: Equatable, Sendable {
     case category(Category)
     case activity(Activity)
     case activityWithEntries(Activity, entryIds: [UUID])
+    case entryOnly(UUID)
 }
 
 /// Schedules the undo-window commit. Injected so tests drive expiry
@@ -72,6 +73,7 @@ final class UndoBuffer: ObservableObject {
         case .activity(let a): return [a.id]
         case .category(let c): return [c.id]
         case .activityWithEntries(let a, _): return [a.id]
+        case .entryOnly: return []
         }
     }
 

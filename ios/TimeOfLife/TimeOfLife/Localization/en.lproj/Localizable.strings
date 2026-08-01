@@ -98,3 +98,32 @@
 "timer.suggestionsHeader" = "Recent";
 "timer.quickAdd" = "New activity";
 "timer.manageActivities" = "Manage activities";
+
+// Manage activities
+"manage.activities.title" = "Activities";
+"manage.activities.emptyTitle" = "No activities yet";
+"manage.activities.emptySubtitle" = "Add one, or just type a name on the timer.";
+"manage.activities.categories" = "Categories";
+"undo.activityDeleted" = "Activity deleted";
+"undo.entriesDeleted" = "%d entries deleted";
+"error.activityExists" = "An activity with this name already exists.";
+"error.undoFailed" = "Could not undo — try again.";
+
+// Activity editor
+"activityEditor.createTitle" = "New activity";
+"activityEditor.editTitle" = "Edit activity";
+"activityEditor.nameLabel" = "Name";
+"activityEditor.namePlaceholder" = "e.g. Gym";
+"activityEditor.colorLabel" = "Color";
+"activityEditor.iconLabel" = "Icon";
+"activityEditor.notesLabel" = "Notes";
+"activityEditor.notesPlaceholder" = "Optional notes";
+"activityEditor.notesCounter" = "%d / 280";
+"activityEditor.tagsLabel" = "Categories";
+"activityEditor.noTags" = "No categories yet.";
+"activityEditor.addCategory" = "Add a category";
+"activityEditor.save" = "Save";
+"activityEditor.cancel" = "Cancel";
+"validation.nameEmpty" = "Enter a name.";
+"validation.nameTooLong" = "Name must be at most 60 characters.";
+"validation.notesTooLong" = "Notes must be at most 280 characters.";

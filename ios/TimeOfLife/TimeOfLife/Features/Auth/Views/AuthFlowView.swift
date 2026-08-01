@@ -27,6 +27,8 @@ struct AuthFlowView: View {
                     // Handled by TimerView's own NavigationStack; not reachable
                     // from the auth flow. Placeholder for exhaustive switch.
                     EmptyView()
+                case .manageCategories:
+                    EmptyView()
                 }
             },
             root: {

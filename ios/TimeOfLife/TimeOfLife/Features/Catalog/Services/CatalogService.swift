@@ -14,10 +14,14 @@ final class CatalogService: ObservableObject {
     let syncQueue: SyncQueue
     let undoBuffer: UndoBuffer
     let connectivity: Connectivity
+    let entryStore: TimerStoring?
 
     /// Published revision counter bumped on every store mutation so observers
     /// (e.g. TimerViewModel) can react to catalog changes.
     @Published private(set) var storeRevision: UInt64 = 0
+
+    var onSyncCompleted: (() async -> Void)?
+    private var conflictedActivityIds: Set<UUID> = []
 
     private var connectivityCancellable: AnyCancellable?
 
@@ -26,13 +30,15 @@ final class CatalogService: ObservableObject {
         repository: CatalogRepository,
         syncQueue: SyncQueue,
         undoBuffer: UndoBuffer,
-        connectivity: Connectivity
+        connectivity: Connectivity,
+        entryStore: TimerStoring? = nil
     ) {
         self.store = store
         self.repository = repository
         self.syncQueue = syncQueue
         self.undoBuffer = undoBuffer
         self.connectivity = connectivity
+        self.entryStore = entryStore
 
         // After the 30s undo window, commit the deletion locally + enqueue a
         // server DELETE. The buffer is in-memory; this is the only place the
@@ -139,6 +145,9 @@ final class CatalogService: ObservableObject {
         case .activityWithEntries(let activity, _):
             await store.upsertActivity(activity)
             // Entry restore is owned by 1-3.
+        case .entryOnly:
+            // Entry deletion/restoration is owned by the time-entry feature.
+            break
         }
         storeRevision &+= 1
         return item
@@ -186,8 +195,20 @@ final class CatalogService: ObservableObject {
     /// Drains the queue now (no-op while offline). Called after each optimistic
     /// mutation and on reconnect.
     func syncNow() async {
-        await syncQueue.replay(using: repository, store: store, connectivity: connectivity)
+        let conflicts = await syncQueue.replay(
+            using: repository,
+            store: store,
+            connectivity: connectivity,
+            entryStore: entryStore
+        )
+        conflictedActivityIds.formUnion(conflicts)
         storeRevision &+= 1
+        await onSyncCompleted?()
+    }
+
+    func consumeActivityConflicts() -> Set<UUID> {
+        defer { conflictedActivityIds.removeAll() }
+        return conflictedActivityIds
     }
 
     // MARK: - Commit (undo window elapsed)
@@ -228,6 +249,9 @@ final class CatalogService: ObservableObject {
             try? await syncQueue.enqueue(
                 .delete(resource: .activity, resourceId: activity.id, updatedAt: Date())
             )
+        case .entryOnly:
+            // Entry deletion is owned by the time-entry feature.
+            break
         }
     }
 

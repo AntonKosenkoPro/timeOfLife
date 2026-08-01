@@ -2,6 +2,29 @@ import Testing
 import Foundation
 @testable import TimeOfLife
 
+private final class CallCounter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value = 0
+
+    var count: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return value
+    }
+
+    var isEmpty: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return value == 0
+    }
+
+    func increment() {
+        lock.lock()
+        value += 1
+        lock.unlock()
+    }
+}
+
 @Suite("APIClient unauthorized handling", .serialized)
 struct APIClientUnauthorizedTests {
 
@@ -30,14 +53,15 @@ struct APIClientUnauthorizedTests {
             )!
             return (Data(), response)
         }
-        var refreshCalls = 0
-        let client = makeClient {
-            refreshCalls += 1
+        let refreshCalls = CallCounter()
+        let refreshHandler: @Sendable () async throws -> String = {
+            refreshCalls.increment()
             return "new"
         }
+        let client = makeClient(refreshHandler: refreshHandler)
 
         do {
-            try await client.send(
+            _ = try await client.send(
                 APIEndpoint.value(method: .get, path: "/api/v1/auth/me"),
                 as: UserDTO.self
             )
@@ -45,7 +69,7 @@ struct APIClientUnauthorizedTests {
         } catch let error as APIError {
             #expect(error == .unauthorized)
         }
-        #expect(refreshCalls == 0)
+        #expect(refreshCalls.isEmpty)
     }
 
     @Test("refresh errors are preserved for offline recovery")
@@ -65,7 +89,7 @@ struct APIClientUnauthorizedTests {
         )
 
         do {
-            try await client.send(
+            _ = try await client.send(
                 APIEndpoint.value(method: .get, path: "/api/v1/auth/me", requiresAuth: true),
                 as: UserDTO.self
             )

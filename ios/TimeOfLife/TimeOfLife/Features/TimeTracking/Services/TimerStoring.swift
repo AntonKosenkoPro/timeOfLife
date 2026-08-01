@@ -4,7 +4,9 @@ import Foundation
 protocol TimerStoring: Sendable {
     func save(_ entry: TimeEntry) async throws
     func unsyncedEntries() async -> [TimeEntry]
+    func entryCount(forActivityId id: UUID) async -> Int
     func markSynced(_ entry: TimeEntry) async throws
+    func replaceActivityId(from oldId: UUID, to newId: UUID) async throws
 }
 
 /// File-based local store that keeps unsynced entries in Application Support.
@@ -36,10 +38,23 @@ actor LocalTimerStore: TimerStoring {
         return entries.filter { !$0.synced }
     }
 
+    func entryCount(forActivityId id: UUID) async -> Int {
+        (try? loadEntries().filter { $0.activityId == id }.count) ?? 0
+    }
+
     func markSynced(_ entry: TimeEntry) async throws {
         var entries = try loadEntries()
         guard let index = entries.firstIndex(where: { $0.id == entry.id }) else { return }
         entries[index] = entries[index].markSynced()
+        try saveEntries(entries)
+    }
+
+    func replaceActivityId(from oldId: UUID, to newId: UUID) async throws {
+        guard oldId != newId else { return }
+        var entries = try loadEntries()
+        for index in entries.indices where entries[index].activityId == oldId {
+            entries[index] = entries[index].replacingActivityId(with: newId)
+        }
         try saveEntries(entries)
     }
 

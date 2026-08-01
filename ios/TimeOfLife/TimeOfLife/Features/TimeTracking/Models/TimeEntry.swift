@@ -38,6 +38,13 @@ struct TimeEntry: Identifiable, Codable, Equatable, Sendable {
         )
     }
 
+    func replacingActivityId(with activityId: UUID) -> Self {
+        Self(
+            id: id, activityId: activityId, startedAt: startedAt,
+            endedAt: endedAt, synced: synced, categories: categories
+        )
+    }
+
     enum CodingKeys: String, CodingKey {
         case id
         case activityId = "activity_id"

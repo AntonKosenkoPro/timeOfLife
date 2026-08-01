@@ -62,6 +62,36 @@ enum L10n: String, CaseIterable {
     case deleteActivityCancel = "delete.activity.cancel"
     case activityLastUsed = "activity.lastUsed"
 
+    // Manage activities
+    case manageActivitiesTitle = "manage.activities.title"
+    case manageActivitiesEmptyTitle = "manage.activities.emptyTitle"
+    case manageActivitiesEmptySubtitle = "manage.activities.emptySubtitle"
+    case manageActivitiesCategories = "manage.activities.categories"
+    case undoActivityDeleted = "undo.activityDeleted"
+    case undoEntriesDeleted = "undo.entriesDeleted"
+    case errorActivityExists = "error.activityExists"
+    case errorConflict = "error.conflict"
+    case errorUndoFailed = "error.undoFailed"
+    case activityEditorCreateTitle = "activityEditor.createTitle"
+    case activityEditorEditTitle = "activityEditor.editTitle"
+    case activityEditorNameLabel = "activityEditor.nameLabel"
+    case activityEditorNamePlaceholder = "activityEditor.namePlaceholder"
+    case activityEditorColorLabel = "activityEditor.colorLabel"
+    case activityEditorIconLabel = "activityEditor.iconLabel"
+    case activityEditorNotesLabel = "activityEditor.notesLabel"
+    case activityEditorNotesPlaceholder = "activityEditor.notesPlaceholder"
+    case activityEditorNotesCounter = "activityEditor.notesCounter"
+    case activityEditorTagsLabel = "activityEditor.tagsLabel"
+    case activityEditorNoTags = "activityEditor.noTags"
+    case activityEditorAddCategory = "activityEditor.addCategory"
+    case activityEditorSave = "activityEditor.save"
+    case activityEditorCancel = "activityEditor.cancel"
+    case activityValidationNameEmpty = "validation.nameEmpty"
+    case activityValidationNameTooLong = "validation.nameTooLong"
+    case activityValidationNotesTooLong = "validation.notesTooLong"
+    case validationCatalogColorInvalid = "validation.catalog.colorInvalid"
+    case validationCatalogIconInvalid = "validation.catalog.iconInvalid"
+
     /// Resolves the key via `NSLocalizedString` against `Localizable.strings`.
     var text: String {
         NSLocalizedString(rawValue, comment: "")

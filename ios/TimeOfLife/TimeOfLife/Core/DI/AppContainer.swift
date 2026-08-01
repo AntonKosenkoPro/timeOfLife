@@ -21,6 +21,7 @@ final class AppContainer: ObservableObject {
     let syncQueue: SyncQueue
     let undoBuffer: UndoBuffer
     let catalogService: CatalogService
+    let activityEntryCounter: ActivityEntryCounting
     /// Strong reference to the holder that wires the API client's refresh hook
     /// back to `authService`. If this were not retained, the holder would
     /// deallocate after `production()` returns and token refresh would fail.
@@ -43,6 +44,7 @@ final class AppContainer: ObservableObject {
         syncQueue: SyncQueue,
         undoBuffer: UndoBuffer,
         catalogService: CatalogService,
+        activityEntryCounter: ActivityEntryCounting,
         clientHolder: APIClientHolder? = nil
     ) {
         self.baseURL = baseURL
@@ -61,6 +63,7 @@ final class AppContainer: ObservableObject {
         self.syncQueue = syncQueue
         self.undoBuffer = undoBuffer
         self.catalogService = catalogService
+        self.activityEntryCounter = activityEntryCounter
         self.clientHolder = clientHolder
     }
 
@@ -84,14 +87,20 @@ final class AppContainer: ObservableObject {
 
         let appleService = AppleSignInService()
 
-        let catalog = makeCatalogGraph(client: client, connectivity: connectivity)
-
         let entriesRepository = RemoteEntriesRepository(client: client)
         let timerService = TimerService(
             store: LocalTimerStore(),
             repository: entriesRepository,
             connectivity: connectivity
         )
+        let catalog = makeCatalogGraph(
+            client: client,
+            connectivity: connectivity,
+            entryStore: timerService.store
+        )
+        catalog.service.onSyncCompleted = {
+            try? await timerService.syncUnsyncedEntries()
+        }
 
         return AppContainer(
             baseURL: baseURL,
@@ -110,6 +119,7 @@ final class AppContainer: ObservableObject {
             syncQueue: catalog.queue,
             undoBuffer: catalog.undoBuffer,
             catalogService: catalog.service,
+            activityEntryCounter: TimerStoreActivityEntryCounter(store: timerService.store),
             clientHolder: clientHolder
         )
     }
@@ -118,7 +128,8 @@ final class AppContainer: ObservableObject {
     /// Extracted so `production()` stays within the linter's function-body limit.
     private static func makeCatalogGraph(
         client: APIClient,
-        connectivity: Connectivity
+        connectivity: Connectivity,
+        entryStore: TimerStoring
     ) -> (store: CatalogStore, repository: CatalogRepository,
           queue: SyncQueue, undoBuffer: UndoBuffer, service: CatalogService) {
         let store = CatalogStore()
@@ -130,7 +141,8 @@ final class AppContainer: ObservableObject {
             repository: repository,
             syncQueue: queue,
             undoBuffer: undoBuffer,
-            connectivity: connectivity
+            connectivity: connectivity,
+            entryStore: entryStore
         )
         return (store, repository, queue, undoBuffer, service)
     }

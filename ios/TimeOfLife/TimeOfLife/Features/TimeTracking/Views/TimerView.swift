@@ -21,47 +21,23 @@ struct TimerView: View {
     @State private var bottomBarHeight: CGFloat = 0
 
     var body: some View {
-        // `NavigationStack` is iOS 16+; fall back to `NavigationView(.stack)`
-        // on iOS 15 so the toolbar still renders. The root content carries the
-        // navigation title, toolbar, and sign-out alert. Both primitives are
-        // bound to `container.navigation.path` so toolbar pushes actually render.
-        Group {
-            if #available(iOS 16, *) {
-                NavigationStack(path: Binding(
-                    get: { container.navigation.path },
-                    set: { container.navigation.path = $0 }
-                )) {
-                    contentWithToolbar
-                        .navigationDestination(for: AppRoute.self) { route in
-                            switch route {
-                            case .manageActivities:
-                                manageActivitiesDestination
-                            default:
-                                EmptyView()
-                            }
-                        }
+        // Use the shared navigation polyfill so catalog routes are rendered by
+        // one container on both iOS 15 and iOS 16+.
+        AppStack(
+            stack: container.navigation,
+            destination: { route in
+                switch route {
+                case .manageActivities:
+                    manageActivitiesDestination
+                case .manageCategories:
+                    Text(L10n.manageActivitiesCategories.text)
+                        .navigationTitle(L10n.manageActivitiesCategories.text)
+                default:
+                    EmptyView()
                 }
-            } else {
-                NavigationView {
-                    contentWithToolbar
-                        .background(
-                            NavigationLink(
-                                destination: manageActivitiesDestination,
-                                isActive: Binding(
-                                    get: { container.navigation.path.last == .manageActivities },
-                                    set: { active in
-                                        if !active, !container.navigation.path.isEmpty {
-                                            container.navigation.popToRoot()
-                                        }
-                                    }
-                                )
-                            ) { EmptyView() }
-                            .opacity(0)
-                        )
-                }
-                .navigationViewStyle(.stack)
-            }
-        }
+            },
+            root: { contentWithToolbar }
+        )
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Theme.backgroundPrimary.ignoresSafeArea())
         .task { await vm.refreshSuggestions() }
@@ -126,15 +102,15 @@ struct TimerView: View {
                         accessibilityId: "TimerActivityField"
                     ) {
                         isActivityFocused = false
-                        vm.start()
+                        Task { await vm.start() }
                     }
                     .focused($isActivityFocused)
-                    .disabled(vm.isRunning)
+                    .disabled(vm.isRunning || vm.isLoading)
 
                     IconButton(
                         icon: "square.and.pencil",
                         accessibilityId: "TimerQuickAddButton",
-                        isDisabled: vm.isRunning
+                        isDisabled: vm.isRunning || vm.isLoading
                     ) {
                         vm.openQuickAdd()
                     }
@@ -142,7 +118,7 @@ struct TimerView: View {
                 }
 
                 // Suggestions list — idle only.
-                if !vm.isRunning && !vm.suggestions.isEmpty {
+                if vm.shouldShowSuggestions {
                     TimerSuggestionList(suggestions: vm.suggestions) { vm.prefill(from: $0) }
                 }
 
@@ -180,11 +156,14 @@ struct TimerView: View {
                     // button on small screens with the keyboard open.
                     Spacer().frame(height: Theme.spacingLarge)
 
+                    if let errorMessage = vm.errorMessage {
+                        ErrorBanner(message: errorMessage, accessibilityId: "TimerErrorBanner")
+                    }
                     PrimaryButton(
                         title: vm.isRunning ? L10n.timerStop.text : L10n.timerStart.text,
                         icon: vm.isRunning ? "stop.fill" : "play.fill",
                         isLoading: vm.isLoading,
-                        isDisabled: !vm.isRunning && vm.activityName.trimmingCharacters(in: .whitespaces).isEmpty,
+                        isDisabled: vm.isLoading || (!vm.isRunning && vm.activityName.trimmingCharacters(in: .whitespaces).isEmpty),
                         accessibilityId: vm.isRunning ? "TimerStopButton" : "TimerStartButton",
                         tint: vm.isRunning ? Theme.danger : Theme.accentPrimary
                     ) {
@@ -192,7 +171,7 @@ struct TimerView: View {
                             Task { await vm.stop() }
                         } else {
                             isActivityFocused = false
-                            vm.start()
+                            Task { await vm.start() }
                         }
                     }
                     .animation(nil, value: vm.isRunning)
@@ -213,26 +192,49 @@ struct TimerView: View {
             }
         }
         .onPreferenceChange(BottomBarHeightPreferenceKey.self) { bottomBarHeight = $0 }
-        .onAppear { isActivityFocused = true }
+        .onAppear {
+            isActivityFocused = true
+            vm.isActivityFocused = true
+        }
+        .onChange(of: isActivityFocused) { vm.isActivityFocused = $0 }
         .onChange(of: vm.activityName) { _ in
             if vm.fieldError != nil {
                 vm.fieldError = nil
             }
+            if vm.errorMessage != nil {
+                vm.errorMessage = nil
+            }
         }
         .sheet(isPresented: $vm.showQuickAdd) {
-            // Quick-add sheet: ActivityEditor in create mode.
-            // If 1-4 has not landed, this is a placeholder.
-            ActivityEditorQuickAdd { activity in
-                vm.didSelectNewActivity(activity)
-            }
+            let editor = ActivityEditorViewModel(
+                mode: .createFromTimer,
+                store: container.catalogStore,
+                repository: container.catalogRepository,
+                service: container.catalogService,
+                connectivity: container.connectivity
+            )
+            ActivityEditorView(vm: editor)
+                .onChange(of: editor.onSaveResult) { result in
+                    guard let result else { return }
+                    switch result {
+                    case let .created(activity, _), let .reused(activity), let .updated(activity):
+                        vm.didSelectActivity(activity)
+                    case .cancelled:
+                        break
+                    }
+                }
         }
     }
 
-    /// Placeholder destination for `.manageActivities` until 1-4 lands.
+    /// Catalog destination for the signed-in navigation stack.
     @ViewBuilder private var manageActivitiesDestination: some View {
-        Text(L10n.timerManageActivities.text)
-            .navigationTitle(L10n.timerManageActivities.text)
-            .navigationBarTitleDisplayMode(.inline)
+        ManageActivitiesView(vm: ManageActivitiesViewModel(
+            store: container.catalogStore,
+            service: container.catalogService,
+            repository: container.catalogRepository,
+            undoBuffer: container.undoBuffer,
+            entryCounter: container.activityEntryCounter
+        ))
     }
 }
 
@@ -259,51 +261,6 @@ struct TimerSuggestionList: View {
         .background(Theme.backgroundSecondary)
         .cornerRadius(Theme.cornerRadius)
         .accessibilityIdentifier("TimerSuggestionList")
-    }
-}
-
-/// Placeholder quick-add sheet until 1-4's `ActivityEditor` lands.
-/// Provides a simple text field to create a new activity with defaults.
-struct ActivityEditorQuickAdd: View {
-    let onSave: (Activity) -> Void
-    @State private var name: String = ""
-    @Environment(\.dismiss)
-    private var dismiss
-
-    var body: some View {
-        NavigationView {
-            Form {
-                Section(L10n.timerQuickAdd.text) {
-                    TextField(L10n.timerActivityPlaceholder.text, text: $name)
-                        .accessibilityIdentifier("QuickAddNameField")
-                }
-            }
-            .navigationTitle(L10n.timerQuickAdd.text)
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button(L10n.signOutCancel.text) { dismiss() }
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button(L10n.emailEntrySubmit.text) {
-                        let activity = Activity(
-                            id: UUID.v7(),
-                            name: name.trimmingCharacters(in: .whitespacesAndNewlines),
-                            color: .mint,
-                            icon: .clock,
-                            notes: nil,
-                            lastUsedAt: nil,
-                            categoryIds: [],
-                            createdAt: Date(),
-                            updatedAt: Date()
-                        )
-                        onSave(activity)
-                        dismiss()
-                    }
-                    .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty)
-                }
-            }
-        }
     }
 }
 

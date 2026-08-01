@@ -178,7 +178,8 @@ final class RemoteCatalogRepository: CatalogRepository {
             name: activity.name,
             color: activity.color,
             icon: activity.icon,
-            notes: activity.notes,
+            // PATCH needs an explicit empty string to clear an existing note.
+            notes: activity.notes ?? "",
             categoryIds: activity.categoryIds,
             updatedAt: activity.updatedAt
         )

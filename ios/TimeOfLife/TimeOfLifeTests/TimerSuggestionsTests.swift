@@ -135,12 +135,25 @@ struct TimerSuggestionsTests {
         let activity = makeActivity(name: "Test", lastUsedAt: Date())
         let vm = await makeViewModel(activities: [activity])
         await vm.refreshSuggestions()
-        #expect(!vm.suggestions.isEmpty)
+        vm.isActivityFocused = true
+        #expect(vm.shouldShowSuggestions)
 
         vm.isRunning = true
-        // The view renders suggestions only when !isRunning && !suggestions.isEmpty.
-        let shouldShowSuggestions = !vm.isRunning && !vm.suggestions.isEmpty
-        #expect(!shouldShowSuggestions)
+        #expect(!vm.shouldShowSuggestions)
+    }
+
+    @Test("suggestions hide when unfocused or the typed name has no match")
+    func visibilityTracksFocusAndPrefix() async {
+        let activity = makeActivity(name: "Reading", lastUsedAt: Date())
+        let vm = await makeViewModel(activities: [activity])
+        await vm.refreshSuggestions()
+
+        vm.isActivityFocused = false
+        #expect(!vm.shouldShowSuggestions)
+
+        vm.isActivityFocused = true
+        vm.activityName = "Writing"
+        #expect(!vm.shouldShowSuggestions)
     }
 
     @Test("prefill sets activityName and selectedActivityId")

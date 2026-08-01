@@ -104,15 +104,19 @@ actor SyncQueue {
 
     /// Replays pending mutations in FIFO order. On offline, stops and leaves
     /// the remaining entries (retried on the next connectivity change).
+    @discardableResult
     func replay(
         using repository: CatalogRepository,
         store: CatalogStoring,
-        connectivity: Connectivity
-    ) async {
-        guard await connectivity.isConnected else { return }
+        connectivity: Connectivity,
+        entryStore: TimerStoring? = nil
+    ) async -> Set<UUID> {
+        guard await connectivity.isConnected else { return [] }
+        let context = ReplayContext(repository: repository, store: store, entryStore: entryStore)
         let pending = (try? load()) ?? []
         var remaining: [SyncMutation] = []
         var stopped = false
+        var conflictedActivityIds: Set<UUID> = []
 
         for mutation in pending {
             if stopped {
@@ -126,9 +130,12 @@ actor SyncQueue {
                 stopped = true
                 continue
             }
-            let outcome = await replayOne(mutation, using: repository, store: store)
+            let outcome = await replayOne(mutation, context: context)
             switch outcome {
             case .done:
+                continue
+            case let .conflict(activityId):
+                conflictedActivityIds.insert(activityId)
                 continue
             case .retry:
                 // Increment attempts and drop if exceeded max retries.
@@ -152,30 +159,33 @@ actor SyncQueue {
             !pending.contains { $0.id == m.id }
         }
         try? save(remaining + newMutations)
+        return conflictedActivityIds
     }
 
     // MARK: - Per-mutation dispatch
 
-    private enum ReplayOutcome { case done, retry, stop }
+    private enum ReplayOutcome { case done, conflict(UUID), retry, stop }
 
-    private func replayOne(
-        _ mutation: SyncMutation,
-        using repository: CatalogRepository,
-        store: CatalogStoring
-    ) async -> ReplayOutcome {
+    private struct ReplayContext {
+        let repository: CatalogRepository
+        let store: CatalogStoring
+        let entryStore: TimerStoring?
+    }
+
+    private func replayOne(_ mutation: SyncMutation, context: ReplayContext) async -> ReplayOutcome {
         switch (mutation.resource, mutation.method) {
         case (.activity, .create):
-            return await replayActivityCreate(mutation, repository: repository, store: store)
+            return await replayActivityCreate(mutation, context: context)
         case (.activity, .update):
-            return await replayActivityUpdate(mutation, repository: repository, store: store)
+            return await replayActivityUpdate(mutation, context: context)
         case (.activity, .delete):
-            return await replayActivityDelete(mutation, repository: repository)
+            return await replayActivityDelete(mutation, repository: context.repository)
         case (.category, .create):
-            return await replayCategoryCreate(mutation, repository: repository, store: store)
+            return await replayCategoryCreate(mutation, repository: context.repository, store: context.store)
         case (.category, .update):
-            return await replayCategoryUpdate(mutation, repository: repository, store: store)
+            return await replayCategoryUpdate(mutation, repository: context.repository, store: context.store)
         case (.category, .delete):
-            return await replayCategoryDelete(mutation, repository: repository)
+            return await replayCategoryDelete(mutation, repository: context.repository)
         case (.entry, .create), (.entry, .update), (.entry, .delete):
             // Entries are owned by story 1-3; never enqueued here.
             return .done
@@ -184,19 +194,14 @@ actor SyncQueue {
 
     // MARK: Activity replay
 
-    private func replayActivityCreate(
-        _ mutation: SyncMutation,
-        repository: CatalogRepository,
-        store: CatalogStoring
-    ) async -> ReplayOutcome {
+    private func replayActivityCreate(_ mutation: SyncMutation, context: ReplayContext) async -> ReplayOutcome {
         guard let activity = decode(Activity.self, mutation.payload) else { return .done }
         do {
-            let canonical = try await repository.createActivity(activity)
-            await store.upsertActivity(canonical)
+            let canonical = try await context.repository.createActivity(activity)
+            await context.store.upsertActivity(canonical)
             return .done
         } catch CatalogError.activityExists(let existingId, _) {
-            await remapActivity(from: activity.id, to: existingId, repository: repository, store: store)
-            return .done
+            return await remapActivity(from: activity.id, to: existingId, context: context) ? .done : .retry
         } catch CatalogError.validation {
             return .done // 422 will never succeed on retry
         } catch CatalogError.offline {
@@ -206,25 +211,20 @@ actor SyncQueue {
         }
     }
 
-    private func replayActivityUpdate(
-        _ mutation: SyncMutation,
-        repository: CatalogRepository,
-        store: CatalogStoring
-    ) async -> ReplayOutcome {
+    private func replayActivityUpdate(_ mutation: SyncMutation, context: ReplayContext) async -> ReplayOutcome {
         guard let activity = decode(Activity.self, mutation.payload) else { return .done }
         do {
-            let canonical = try await repository.updateActivity(activity)
-            await store.upsertActivity(canonical)
+            let canonical = try await context.repository.updateActivity(activity)
+            await context.store.upsertActivity(canonical)
             return .done
         } catch CatalogError.conflict {
             // Keep-latest: adopt the server's current version (re-fetch).
-            if let server = try? await repository.getActivity(activity.id) {
-                await store.upsertActivity(server)
+            if let server = try? await context.repository.getActivity(activity.id) {
+                await context.store.upsertActivity(server)
             }
-            return .done
+            return .conflict(activity.id)
         } catch CatalogError.activityExists(let existingId, _) {
-            await remapActivity(from: activity.id, to: existingId, repository: repository, store: store)
-            return .done
+            return await remapActivity(from: activity.id, to: existingId, context: context) ? .done : .retry
         } catch CatalogError.validation {
             return .done
         } catch CatalogError.notFound {
@@ -251,17 +251,18 @@ actor SyncQueue {
         }
     }
 
-    private func remapActivity(
-        from oldId: UUID,
-        to newId: UUID,
-        repository: CatalogRepository,
-        store: CatalogStoring
-    ) async {
-        if let survivor = try? await repository.getActivity(newId) {
-            await store.upsertActivity(survivor)
+    private func remapActivity(from oldId: UUID, to newId: UUID, context: ReplayContext) async -> Bool {
+        if let survivor = try? await context.repository.getActivity(newId) {
+            await context.store.upsertActivity(survivor)
         }
-        await store.removeActivity(oldId)
-        await store.replaceActivityReferences(from: oldId, to: newId)
+        do {
+            try await context.entryStore?.replaceActivityId(from: oldId, to: newId)
+        } catch {
+            return false
+        }
+        await context.store.removeActivity(oldId)
+        await context.store.replaceActivityReferences(from: oldId, to: newId)
+        return true
     }
 
     // MARK: Category replay

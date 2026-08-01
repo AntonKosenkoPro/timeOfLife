@@ -9,6 +9,7 @@ enum AppRoute: Hashable, Sendable {
     case emailEntry
     case otpEntry(email: String)
     /// Navigates to the Manage Activities screen (Epic 1, story 1-4).
-    /// Bound to a placeholder until 1-4 lands.
     case manageActivities
+    /// Navigates to the category catalog (Epic 1, story 1-5).
+    case manageCategories
 }

@@ -33,6 +33,8 @@ final class FakeEntriesRepository: EntriesRepository, @unchecked Sendable {
     // MARK: - Per-method errors
 
     var createError: Error?
+    var transientCreateError: Error?
+    var createFailuresRemaining = 0
     var stopError: Error?
     var deleteError: Error?
     var getError: Error?
@@ -43,10 +45,18 @@ final class FakeEntriesRepository: EntriesRepository, @unchecked Sendable {
         lock.lock(); _calls.append(call); lock.unlock()
     }
 
+    private func transientCreateFailure() -> Error? {
+        lock.lock(); defer { lock.unlock() }
+        guard createFailuresRemaining > 0 else { return nil }
+        createFailuresRemaining -= 1
+        return transientCreateError ?? APIError.server(code: "unknown", message: "Unknown")
+    }
+
     // MARK: - EntriesRepository
 
     func create(_ entry: TimeEntry) async throws {
         record(.create(entry))
+        if let error = transientCreateFailure() { throw error }
         if let e = createError { throw e }
     }
 
