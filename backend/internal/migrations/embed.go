@@ -79,6 +79,9 @@ func adaptToSQLite(sql string) string {
 	sql = strings.ReplaceAll(sql, "DEFAULT true", "DEFAULT 1")
 	// Remove IF NOT EXISTS for indexes (SQLite doesn't support it)
 	sql = strings.ReplaceAll(sql, "IF NOT EXISTS", "")
+	// Remove IF EXISTS for DROP COLUMN (SQLite doesn't support it; the column
+	// always exists on the fresh in-memory DB used by tests)
+	sql = strings.ReplaceAll(sql, "IF EXISTS", "")
 	// Remove CONCURRENTLY if present
 	sql = strings.ReplaceAll(sql, "CONCURRENTLY", "")
 	return sql
