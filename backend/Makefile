@@ -11,6 +11,16 @@ build: ## Build the Go binary
 test: ## Run all tests (no Docker required)
 	go test ./... -cover
 
+test:race: ## Run all tests with the race detector
+	go test ./... -race
+
+test:cover: ## Run all tests and print per-function coverage
+	go test ./... -coverprofile=coverage.out
+	go tool cover -func=coverage.out
+
+test:pg: ## Run PostgreSQL parity tests (needs `docker compose up -d postgres`)
+	TEST_PG_DSN="postgres://postgres:postgres@localhost:5432/timeoflife?sslmode=disable" go test ./internal/db -run 'Postgres' -v
+
 lint: ## Run all linters
 	gofmt -l .
 	go vet ./...

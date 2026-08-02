@@ -39,8 +39,8 @@ struct IconPickerGrid: View {
                 )
         }
         .accessibilityIdentifier("\(accessibilityId)Cell(\(symbol))")
-        .accessibilityLabel("Icon, \(symbol)")
-        .accessibilityValue(isSelected ? "Selected" : "")
+        .accessibilityLabel(L10n.accessibilityIcon.text(symbol))
+        .accessibilityValue(isSelected ? L10n.accessibilitySelected.text : "")
     }
 }
 

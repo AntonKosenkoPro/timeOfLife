@@ -27,8 +27,8 @@ struct SuggestionRow: View {
             .frame(maxWidth: .infinity, minHeight: Theme.minTapArea)
         }
         .accessibilityIdentifier("TimerSuggestion(\(activity.id))")
-        .accessibilityLabel("Suggestion, \(activity.name)")
-        .accessibilityHint("Starts a timer for this activity")
+        .accessibilityLabel(L10n.accessibilitySuggestion.text(activity.name))
+        .accessibilityHint(L10n.accessibilitySuggestionHint.text)
     }
 }
 

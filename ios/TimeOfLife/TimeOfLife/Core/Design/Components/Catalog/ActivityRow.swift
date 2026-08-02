@@ -95,7 +95,7 @@ struct ActivityRow: View {
     private var accessibilityLabel: String {
         var parts = [activity.name]
         if !categories.isEmpty {
-            parts.append("\(categories.count) tags")
+            parts.append(L10n.accessibilityTagsCount.text(categories.count))
         }
         if let lastUsed = activity.lastUsedAt {
             let relative = Self.relativeDateFormatter

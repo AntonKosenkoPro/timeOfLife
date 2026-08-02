@@ -53,7 +53,7 @@ func (tb *TokenBucket) Allow(key string) bool {
 	// Refill tokens based on elapsed time.
 	elapsed := now.Sub(entry.lastCheck)
 	refill := tb.rate * elapsed.Seconds() / tb.interval.Seconds()
-	entry.tokens = minFloat(entry.tokens+refill, float64(tb.burst))
+	entry.tokens = min(entry.tokens+refill, float64(tb.burst))
 	entry.lastCheck = now
 
 	if entry.tokens >= 1 {
@@ -64,13 +64,6 @@ func (tb *TokenBucket) Allow(key string) bool {
 	return false
 }
 
-func minFloat(a, b float64) float64 {
-	if a < b {
-		return a
-	}
-	return b
-}
-
 // Common rate limit configurations.
 var (
 	// OTPRequestLimit limits OTP request attempts: 3 per minute per key.
@@ -78,4 +71,9 @@ var (
 
 	// OTPVerifyLimit limits OTP verification attempts: 5 per minute per key.
 	OTPVerifyLimit = NewTokenBucket(5, 5, time.Minute)
+
+	// AppleLimit limits Sign in with Apple attempts per IP: 5 per minute.
+	// It is a dedicated bucket so Apple traffic cannot starve (or be starved
+	// by) the OTP request bucket (cross-feature isolation).
+	AppleLimit = NewTokenBucket(5, 5, time.Minute)
 )

@@ -20,6 +20,8 @@ final class TimerService: ObservableObject {
     private let retryDelay: TimeInterval
     private var connectivityCancellable: AnyCancellable?
     private var retryTask: Task<Void, Never>?
+    private var isSyncing = false
+    private var syncRequested = false
 
     init(
         store: TimerStoring,
@@ -72,18 +74,28 @@ final class TimerService: ObservableObject {
     /// Replays any unsynced entries to the remote repository.
     func syncUnsyncedEntries() async throws {
         guard connectivity.isConnected else { return }
-        let unsynced = await store.unsyncedEntries()
-        var shouldRetry = false
-        for entry in unsynced {
-            do {
-                try await repository.create(entry)
-                try await store.markSynced(entry)
-            } catch {
-                shouldRetry = true
-                continue
-            }
+        guard !isSyncing else {
+            syncRequested = true
+            return
         }
-        if shouldRetry { scheduleRetry() }
+
+        isSyncing = true
+        defer { isSyncing = false }
+        repeat {
+            syncRequested = false
+            let unsynced = await store.unsyncedEntries()
+            var shouldRetry = false
+            for entry in unsynced {
+                do {
+                    try await repository.create(entry)
+                    try await store.markSynced(entry)
+                } catch {
+                    shouldRetry = true
+                    continue
+                }
+            }
+            if shouldRetry { scheduleRetry() }
+        } while syncRequested && connectivity.isConnected
     }
 
     private func scheduleRetry() {

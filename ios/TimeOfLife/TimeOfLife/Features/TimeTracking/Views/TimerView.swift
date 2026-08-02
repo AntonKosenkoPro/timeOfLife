@@ -30,8 +30,7 @@ struct TimerView: View {
                 case .manageActivities:
                     manageActivitiesDestination
                 case .manageCategories:
-                    Text(L10n.manageActivitiesCategories.text)
-                        .navigationTitle(L10n.manageActivitiesCategories.text)
+                    manageCategoriesDestination
                 default:
                     EmptyView()
                 }
@@ -143,55 +142,52 @@ struct TimerView: View {
             .frame(maxWidth: .infinity)
         }
         .background(Theme.backgroundPrimary.ignoresSafeArea())
-        .safeAreaInset(edge: .bottom) {
+        .measuredBottomBar(height: $bottomBarHeight) {
             // Pinned action bar. Content in `safeAreaInset` animates with the
             // system keyboard transition instead of reflowing with the main
             // stack, and stays visible above the keyboard so the user can tap
             // Start/Stop without dismissing the keyboard first.
-            MeasuredBottomBar {
-                VStack(spacing: Theme.spacingSmall) {
-                    // This spacer makes the action bar taller, which in turn
-                    // increases the ScrollView's bottom safe-area inset and
-                    // keeps the activity field from crowding the primary
-                    // button on small screens with the keyboard open.
-                    Spacer().frame(height: Theme.spacingLarge)
+            VStack(spacing: Theme.spacingSmall) {
+                // This spacer makes the action bar taller, which in turn
+                // increases the ScrollView's bottom safe-area inset and
+                // keeps the activity field from crowding the primary
+                // button on small screens with the keyboard open.
+                Spacer().frame(height: Theme.spacingLarge)
 
-                    if let errorMessage = vm.errorMessage {
-                        ErrorBanner(message: errorMessage, accessibilityId: "TimerErrorBanner")
-                    }
-                    PrimaryButton(
-                        title: vm.isRunning ? L10n.timerStop.text : L10n.timerStart.text,
-                        icon: vm.isRunning ? "stop.fill" : "play.fill",
-                        isLoading: vm.isLoading,
-                        isDisabled: vm.isLoading || (!vm.isRunning && vm.activityName.trimmingCharacters(in: .whitespaces).isEmpty),
-                        accessibilityId: vm.isRunning ? "TimerStopButton" : "TimerStartButton",
-                        tint: vm.isRunning ? Theme.danger : Theme.accentPrimary
-                    ) {
-                        if vm.isRunning {
-                            Task { await vm.stop() }
-                        } else {
-                            isActivityFocused = false
-                            Task { await vm.start() }
-                        }
-                    }
-                    .animation(nil, value: vm.isRunning)
-
-                    if !container.connectivity.isConnected {
-                        Text(L10n.timerOfflineHint.text)
-                            .font(.caption)
-                            .foregroundStyle(Theme.textSecondary)
-                            .multilineTextAlignment(.center)
-                            .accessibilityIdentifier("TimerOfflineHint")
+                if let errorMessage = vm.errorMessage {
+                    ErrorBanner(message: errorMessage, accessibilityId: "TimerErrorBanner")
+                }
+                PrimaryButton(
+                    title: vm.isRunning ? L10n.timerStop.text : L10n.timerStart.text,
+                    icon: vm.isRunning ? "stop.fill" : "play.fill",
+                    isLoading: vm.isLoading,
+                    isDisabled: vm.isLoading || (!vm.isRunning && vm.activityName.trimmingCharacters(in: .whitespaces).isEmpty),
+                    accessibilityId: vm.isRunning ? "TimerStopButton" : "TimerStartButton",
+                    tint: vm.isRunning ? Theme.danger : Theme.accentPrimary
+                ) {
+                    if vm.isRunning {
+                        Task { await vm.stop() }
+                    } else {
+                        isActivityFocused = false
+                        Task { await vm.start() }
                     }
                 }
-                .padding(.horizontal, Theme.screenHorizontalPadding)
-                .padding(.vertical, Theme.spacingSmall)
-                .frame(maxWidth: Theme.maxContentWidth)
-                .frame(maxWidth: .infinity)
-                .background(Theme.backgroundPrimary)
+                .animation(nil, value: vm.isRunning)
+
+                if !container.connectivity.isConnected {
+                    Text(L10n.timerOfflineHint.text)
+                        .font(.caption)
+                        .foregroundStyle(Theme.textSecondary)
+                        .multilineTextAlignment(.center)
+                        .accessibilityIdentifier("TimerOfflineHint")
+                }
             }
+            .padding(.horizontal, Theme.screenHorizontalPadding)
+            .padding(.vertical, Theme.spacingSmall)
+            .frame(maxWidth: Theme.maxContentWidth)
+            .frame(maxWidth: .infinity)
+            .background(Theme.backgroundPrimary)
         }
-        .onPreferenceChange(BottomBarHeightPreferenceKey.self) { bottomBarHeight = $0 }
         .onAppear {
             isActivityFocused = true
             vm.isActivityFocused = true
@@ -234,6 +230,17 @@ struct TimerView: View {
             repository: container.catalogRepository,
             undoBuffer: container.undoBuffer,
             entryCounter: container.activityEntryCounter
+        ))
+    }
+
+    /// Category catalog destination for the signed-in navigation stack.
+    @ViewBuilder private var manageCategoriesDestination: some View {
+        ManageCategoriesView(vm: ManageCategoriesViewModel(
+            store: container.catalogStore,
+            service: container.catalogService,
+            repository: container.catalogRepository,
+            undoBuffer: container.undoBuffer,
+            connectivity: container.connectivity
         ))
     }
 }

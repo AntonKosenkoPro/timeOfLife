@@ -56,7 +56,6 @@ struct TimerViewModelTests {
 
         #expect(!vm.isRunning)
         #expect(vm.activityName.isEmpty)
-        #expect(vm.didSave)
 
         let unsynced = await vm.service.store.unsyncedEntries()
         #expect(unsynced.isEmpty)

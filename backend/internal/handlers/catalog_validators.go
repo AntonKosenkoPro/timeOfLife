@@ -184,7 +184,7 @@ func validateName(field, name string, errs validationErrs) {
 }
 
 func validateNotes(n string, errs validationErrs) {
-	if len(n) > maxNotesLen {
+	if len(strings.TrimSpace(n)) > maxNotesLen {
 		errs.add("notes", "Notes must be 280 characters or fewer")
 	}
 }

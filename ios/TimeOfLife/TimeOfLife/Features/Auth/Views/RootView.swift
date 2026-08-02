@@ -25,6 +25,7 @@ struct RootView: View {
                     container.navigation.popToRoot()
                 } else if case .signedIn = newState {
                     container.navigation.popToRoot()
+                    Task { await container.catalogSeeder.seedIfNeeded() }
                 }
             }
     }

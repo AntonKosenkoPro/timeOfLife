@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -157,11 +156,6 @@ func (s *PostgresStore) SaveRefreshToken(ctx context.Context, userID string, tok
 		VALUES (gen_random_uuid(), $1, $2, $3, false, NOW())
 	`, userID, tokenHash, deviceID)
 	if err != nil {
-		// Check for unique constraint violation
-		var pgErr *pgconn.PgError
-		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
-			return fmt.Errorf("save refresh token: %w", ErrDuplicateToken)
-		}
 		return fmt.Errorf("save refresh token: %w", err)
 	}
 	return nil

@@ -162,3 +162,33 @@ func newActivity(t *testing.T, h *Handler, tok string) string {
 	decodeBody(t, w, &a)
 	return a.ID
 }
+
+// newActivityWithEntries creates an activity plus n time entries for the
+// authenticated user and returns the activity id. Entries use deterministic
+// 1-hour slots ending at a fixed anchor so durations are reproducible.
+func newActivityWithEntries(t *testing.T, h *Handler, tok string, n int) string {
+	t.Helper()
+	id := newActivity(t, h, tok)
+	anchor := time.Date(2026, 7, 27, 9, 0, 0, 0, time.UTC)
+	for i := 0; i < n; i++ {
+		w := serve(h, jsonReq(t, "POST", "/api/v1/entries", tok, map[string]any{
+			"id":          v7(),
+			"activity_id": id,
+			"started_at":  anchor.Add(time.Duration(i) * time.Hour).Format(time.RFC3339),
+			"ended_at":    anchor.Add(time.Duration(i+1) * time.Hour).Format(time.RFC3339),
+		}))
+		if w.Code != http.StatusCreated {
+			t.Fatalf("create entry %d: expected 201, got %d (body=%s)", i, w.Code, w.Body.String())
+		}
+	}
+	return id
+}
+
+// twoUsers creates two independent users with valid bearer tokens, for
+// ownership-isolation tests (R-014). Returns (userA, tokenA, userB, tokenB).
+func twoUsers(t *testing.T, store db.Store) (string, string, string, string) {
+	t.Helper()
+	uidA, tokA := mintBearer(t, store, "owner-a@example.com")
+	uidB, tokB := mintBearer(t, store, "owner-b@example.com")
+	return uidA, tokA, uidB, tokB
+}

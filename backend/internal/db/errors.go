@@ -7,9 +7,6 @@ var (
 	// ErrNotFound is returned when a requested resource is not found.
 	ErrNotFound = errors.New("not found")
 
-	// ErrDuplicateToken is returned when a refresh token hash already exists.
-	ErrDuplicateToken = errors.New("duplicate token")
-
 	// ErrConflict is returned on a last-write-wins stale write: the client's
 	// updated_at is older than the stored updated_at.
 	ErrConflict = errors.New("conflict")

@@ -34,7 +34,7 @@ struct ManageActivitiesView: View {
             if let undo = vm.undoToast {
                 UndoToast(
                     message: undo.message,
-                    onUndo: { vm.onShake() },
+                    onUndo: { Task { await vm.performUndo() } },
                     onDismiss: { vm.dismissUndo() }
                 )
                 .padding(.bottom, Theme.spacingSmall)
@@ -65,7 +65,7 @@ struct ManageActivitiesView: View {
                             Button(role: .destructive) {
                                 Task { await vm.requestDelete(activity) }
                             } label: {
-                                Label(L10n.deleteActivityTitle.text, systemImage: "trash")
+                                Label(L10n.deleteButton.text, systemImage: "trash")
                             }
                             .tint(Theme.danger)
                             .accessibilityIdentifier("ActivityRowDelete(\(activity.id))")
@@ -102,7 +102,7 @@ struct ManageActivitiesView: View {
             presenting: vm.pendingDelete
         ) { activity in
             Button(L10n.deleteActivityTitle.text, role: .destructive) {
-                vm.performDelete(activity, scope: .all)
+                Task { await vm.performDelete(activity, scope: .all) }
             }
             Button(L10n.deleteActivityCancel.text, role: .cancel) {}
         } message: { _ in
@@ -113,10 +113,10 @@ struct ManageActivitiesView: View {
                 isPresented: $vm.showDeleteScope,
                 entryCount: vm.entryCount(for: vm.pendingDelete),
                 onDeleteAll: {
-                    if let activity = vm.pendingDelete { vm.performDelete(activity, scope: .all) }
+                    if let activity = vm.pendingDelete { Task { await vm.performDelete(activity, scope: .all) } }
                 },
                 onDeleteEntryOnly: {
-                    if let activity = vm.pendingDelete { vm.performDelete(activity, scope: .entryOnly) }
+                    if let activity = vm.pendingDelete { Task { await vm.performDelete(activity, scope: .entryOnly) } }
                 },
                 onCancel: { vm.pendingDelete = nil }
             )

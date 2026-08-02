@@ -52,16 +52,13 @@
 "error.unauthorized" = "Сессия истекла. Войдите снова.";
 
 // Catalog server errors (mapped from error codes)
-"error.conflict" = "На сервере есть более новая версия. Изменения не применены.";
+"error.conflict" = "Изменено на другом устройстве. Показана актуальная версия.";
 "error.activity_exists" = "Активность с таким названием уже существует.";
 "error.category_exists" = "Категория с таким названием уже существует.";
 "error.validation_error" = "Проверьте введённые данные.";
 "error.not_found" = "Этот элемент больше не существует.";
 
 // Catalog validation (one merged message per field — U2/U4)
-"validation.catalog.nameEmpty" = "Введите название.";
-"validation.catalog.nameTooLong" = "Название должно быть не длиннее 60 символов.";
-"validation.catalog.notesTooLong" = "Заметки должны быть не длиннее 280 символов.";
 "validation.catalog.colorInvalid" = "Выберите допустимый цвет.";
 "validation.catalog.iconInvalid" = "Выберите допустимую иконку.";
 
@@ -71,11 +68,9 @@
 
 // Timer
 "timer.title" = "Таймер";
-"timer.activityLabel" = "Активность";
 "timer.activityPlaceholder" = "Над чем вы работаете?";
 "timer.start" = "Старт";
 "timer.stop" = "Стоп";
-"timer.stopHint" = "Останавливает таймер и сохраняет запись";
 "timer.offlineHint" = "Записи сохраняются локально и синхронизируются после появления сети.";
 "timer.emptyActivityError" = "Введите название активности.";
 "timer.signOut" = "Выйти";
@@ -84,21 +79,27 @@
 "tags.emptyHint" = "Пока нет категорий — создайте одну";
 "undo.button" = "Отменить";
 "accessibility.color" = "Цвет, %@";
+"accessibility.category" = "Категория, %@";
+"accessibility.icon" = "Значок, %@";
+"accessibility.suggestion" = "Предложение, %@";
+"accessibility.suggestionHint" = "Запускает таймер для этой активности";
+"accessibility.selected" = "Выбрано";
+"accessibility.tagsCount" = "%d тегов";
 "delete.activity.title" = "Удалить активность";
+"delete.button" = "Удалить";
 "delete.activity.message.one" = "У этой активности %d запись о времени.";
 "delete.activity.message.few" = "У этой активности %d записи о времени.";
 "delete.activity.message.many" = "У этой активности %d записей о времени.";
 "delete.activity.entire.one" = "Удалить активность и всю %d запись";
 "delete.activity.entire.few" = "Удалить активность и все %d записи";
 "delete.activity.entire.many" = "Удалить активность и все %d записей";
-"delete.activity.entryOnly" = "Удалить только эту запись";
+"delete.activity.entryOnly" = "Удалить последнюю запись";
 "delete.activity.cancel" = "Отмена";
 "toast.dismiss" = "Закрыть";
 "activity.lastUsed" = "последнее использование %@";
 
 // Timer — Epic 1 (suggestions, quick-add, manage)
 "timer.suggestionsHeader" = "Недавние";
-"timer.quickAdd" = "Новая активность";
 "timer.manageActivities" = "Активности";
 
 // Управление активностями
@@ -107,9 +108,34 @@
 "manage.activities.emptySubtitle" = "Добавьте свою или просто введите название на таймере.";
 "manage.activities.categories" = "Категории";
 "undo.activityDeleted" = "Активность удалена";
-"undo.entriesDeleted" = "Удалено записей: %d";
+"undo.entryDeleted" = "Запись удалена";
 "error.activityExists" = "Активность с таким названием уже существует.";
 "error.undoFailed" = "Не удалось отменить действие — попробуйте снова.";
+
+// Управление категориями
+"manage.categories.title" = "Категории";
+"manage.categories.emptyTitle" = "Пока нет категорий";
+"manage.categories.emptySubtitle" = "Добавьте категорию, чтобы размечать активности.";
+"delete.category.title" = "Удалить категорию?";
+"delete.category.message" = "%@ будет удалена со всех активностей. Записи сохранятся.";
+"delete.category.confirm" = "Удалить";
+"delete.category.cancel" = "Отмена";
+"undo.categoryDeleted" = "Категория удалена";
+"error.categoryExists" = "Категория с таким названием уже существует.";
+"categoryEditor.createTitle" = "Новая категория";
+"categoryEditor.editTitle" = "Изменить категорию";
+"categoryEditor.nameLabel" = "Название";
+"categoryEditor.namePlaceholder" = "напр. Спорт";
+"categoryEditor.colorLabel" = "Цвет";
+"categoryEditor.save" = "Сохранить";
+"categoryEditor.cancel" = "Отмена";
+"category.seed.work" = "Работа";
+"category.seed.hobby" = "Хобби";
+"category.seed.sport" = "Спорт";
+"category.seed.education" = "Образование";
+"category.seed.relax" = "Отдых";
+"category.seed.sleep" = "Сон";
+"category.seed.entertainment" = "Развлечения";
 
 // Редактор активности
 "activityEditor.createTitle" = "Новая активность";
@@ -128,4 +154,6 @@
 "activityEditor.cancel" = "Отмена";
 "validation.nameEmpty" = "Введите название.";
 "validation.nameTooLong" = "Название должно быть не длиннее 60 символов.";
+"validation.name.prefix" = "Название должно";
+"validation.name.rule.tooLong" = "быть не длиннее 60 символов";
 "validation.notesTooLong" = "Заметки должны быть не длиннее 280 символов.";

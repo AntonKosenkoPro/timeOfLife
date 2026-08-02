@@ -67,7 +67,6 @@ final class AuthService: ObservableObject {
     func restoreSession() async {
         let cached = cache.load()
         let refreshToken = await keychain.string(for: .refreshToken)
-        let accessToken = await keychain.string(for: .accessToken)
 
         // If we have a cached session and tokens, optimistically show signed-in.
         if let cached, refreshToken != nil {
@@ -103,7 +102,6 @@ final class AuthService: ObservableObject {
             // 5xx, transport blips). Only a confirmed unauthorized response after
             // a failed refresh, or explicit logout, should clear local state.
         }
-        _ = accessToken // referenced for clarity
     }
 
     /// Refresh helper exposed for `APIClient`'s refresh hook. Rotates tokens

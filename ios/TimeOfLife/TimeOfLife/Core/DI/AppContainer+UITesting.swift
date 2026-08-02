@@ -38,7 +38,7 @@ extension AppContainer {
         let apiClient = APIClient(baseURL: AppConfig.baseURL, session: .shared)
         let appleService = AppleSignInService()
 
-        let catalog = makeUITestingCatalogGraph(connectivity: connectivity)
+        let catalog = makeUITestingCatalogGraph(connectivity: connectivity, entriesRepository: entriesRepository)
 
         let container = AppContainer(
             baseURL: AppConfig.baseURL,
@@ -57,6 +57,11 @@ extension AppContainer {
             syncQueue: catalog.queue,
             undoBuffer: catalog.undoBuffer,
             catalogService: catalog.service,
+            catalogSeeder: CatalogSeeder(
+                repository: catalog.repository,
+                service: catalog.service,
+                sessionCache: sessionCache
+            ),
             activityEntryCounter: TimerStoreActivityEntryCounter(store: timerService.store),
             clientHolder: nil
         )
@@ -67,7 +72,7 @@ extension AppContainer {
 
     /// Deterministic, offline catalog graph for UI testing: a temp-directory
     /// store/queue + a stub repository so the catalog runs without a network.
-    private static func makeUITestingCatalogGraph(connectivity: Connectivity)
+    private static func makeUITestingCatalogGraph(connectivity: Connectivity, entriesRepository: EntriesRepository)
     -> (store: CatalogStore, repository: CatalogRepository,
         queue: SyncQueue, undoBuffer: UndoBuffer, service: CatalogService) {
         let tempDir = URL(fileURLWithPath: NSTemporaryDirectory())
@@ -81,7 +86,8 @@ extension AppContainer {
             repository: repository,
             syncQueue: queue,
             undoBuffer: undoBuffer,
-            connectivity: connectivity
+            connectivity: connectivity,
+            entriesRepository: entriesRepository
         )
         return (store, repository, queue, undoBuffer, service)
     }

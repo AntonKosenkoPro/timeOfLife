@@ -49,12 +49,6 @@ actor MockCatalogStore: CatalogStoring {
         categories.first { $0.id == id }
     }
 
-    func category(named name: String) async -> Category? {
-        let key = CatalogValidator.normalizeName(name)
-        guard !key.isEmpty else { return nil }
-        return categories.first { CatalogValidator.normalizeName($0.name) == key }
-    }
-
     // MARK: - Writes
 
     func upsertActivity(_ activity: Activity) async {

@@ -21,6 +21,7 @@ final class AppContainer: ObservableObject {
     let syncQueue: SyncQueue
     let undoBuffer: UndoBuffer
     let catalogService: CatalogService
+    let catalogSeeder: CatalogSeeder
     let activityEntryCounter: ActivityEntryCounting
     /// Strong reference to the holder that wires the API client's refresh hook
     /// back to `authService`. If this were not retained, the holder would
@@ -44,6 +45,7 @@ final class AppContainer: ObservableObject {
         syncQueue: SyncQueue,
         undoBuffer: UndoBuffer,
         catalogService: CatalogService,
+        catalogSeeder: CatalogSeeder,
         activityEntryCounter: ActivityEntryCounting,
         clientHolder: APIClientHolder? = nil
     ) {
@@ -63,6 +65,7 @@ final class AppContainer: ObservableObject {
         self.syncQueue = syncQueue
         self.undoBuffer = undoBuffer
         self.catalogService = catalogService
+        self.catalogSeeder = catalogSeeder
         self.activityEntryCounter = activityEntryCounter
         self.clientHolder = clientHolder
     }
@@ -96,11 +99,10 @@ final class AppContainer: ObservableObject {
         let catalog = makeCatalogGraph(
             client: client,
             connectivity: connectivity,
-            entryStore: timerService.store
+            entryStore: timerService.store,
+            entriesRepository: entriesRepository
         )
-        catalog.service.onSyncCompleted = {
-            try? await timerService.syncUnsyncedEntries()
-        }
+        wireCatalogSync(service: catalog.service, timerService: timerService)
 
         return AppContainer(
             baseURL: baseURL,
@@ -119,6 +121,7 @@ final class AppContainer: ObservableObject {
             syncQueue: catalog.queue,
             undoBuffer: catalog.undoBuffer,
             catalogService: catalog.service,
+            catalogSeeder: makeCatalogSeeder(catalog: catalog, sessionCache: sessionCache),
             activityEntryCounter: TimerStoreActivityEntryCounter(store: timerService.store),
             clientHolder: clientHolder
         )
@@ -129,7 +132,8 @@ final class AppContainer: ObservableObject {
     private static func makeCatalogGraph(
         client: APIClient,
         connectivity: Connectivity,
-        entryStore: TimerStoring
+        entryStore: TimerStoring,
+        entriesRepository: EntriesRepository
     ) -> (store: CatalogStore, repository: CatalogRepository,
           queue: SyncQueue, undoBuffer: UndoBuffer, service: CatalogService) {
         let store = CatalogStore()
@@ -142,9 +146,28 @@ final class AppContainer: ObservableObject {
             syncQueue: queue,
             undoBuffer: undoBuffer,
             connectivity: connectivity,
-            entryStore: entryStore
+            entryStore: entryStore,
+            entriesRepository: entriesRepository
         )
         return (store, repository, queue, undoBuffer, service)
+    }
+
+    private static func makeCatalogSeeder(
+        catalog: (store: CatalogStore, repository: CatalogRepository,
+                  queue: SyncQueue, undoBuffer: UndoBuffer, service: CatalogService),
+        sessionCache: SessionCache
+    ) -> CatalogSeeder {
+        CatalogSeeder(
+            repository: catalog.repository,
+            service: catalog.service,
+            sessionCache: sessionCache
+        )
+    }
+
+    private static func wireCatalogSync(service: CatalogService, timerService: TimerService) {
+        service.onSyncCompleted = {
+            try? await timerService.syncUnsyncedEntries()
+        }
     }
 
     /// Builds the API client and the back-reference holder used to break the

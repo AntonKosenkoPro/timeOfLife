@@ -15,6 +15,7 @@ final class CatalogService: ObservableObject {
     let undoBuffer: UndoBuffer
     let connectivity: Connectivity
     let entryStore: TimerStoring?
+    let entriesRepository: EntriesRepository?
 
     /// Published revision counter bumped on every store mutation so observers
     /// (e.g. TimerViewModel) can react to catalog changes.
@@ -31,7 +32,8 @@ final class CatalogService: ObservableObject {
         syncQueue: SyncQueue,
         undoBuffer: UndoBuffer,
         connectivity: Connectivity,
-        entryStore: TimerStoring? = nil
+        entryStore: TimerStoring? = nil,
+        entriesRepository: EntriesRepository? = nil
     ) {
         self.store = store
         self.repository = repository
@@ -39,6 +41,7 @@ final class CatalogService: ObservableObject {
         self.undoBuffer = undoBuffer
         self.connectivity = connectivity
         self.entryStore = entryStore
+        self.entriesRepository = entriesRepository
 
         // After the 30s undo window, commit the deletion locally + enqueue a
         // server DELETE. The buffer is in-memory; this is the only place the
@@ -105,24 +108,32 @@ final class CatalogService: ObservableObject {
 
     // MARK: - Categories
 
-    func createCategory(_ category: Category) async throws {
+    @discardableResult
+    func createCategory(_ category: Category) async throws -> Category {
         await store.upsertCategory(category)
         storeRevision &+= 1
-        try await syncQueue.enqueue(
-            .create(resource: .category, resourceId: category.id,
-                    payload: encode(category), updatedAt: category.updatedAt)
+        let mutation = SyncMutation.create(
+            resource: .category,
+            resourceId: category.id,
+            payload: try encode(category),
+            updatedAt: category.updatedAt
         )
-        await syncNow()
+        try await syncQueue.enqueue(mutation)
+        return try await sendCategory(category, mutation: mutation, isCreate: true)
     }
 
-    func updateCategory(_ category: Category) async throws {
+    @discardableResult
+    func updateCategory(_ category: Category) async throws -> Category {
         await store.upsertCategory(category)
         storeRevision &+= 1
-        try await syncQueue.enqueue(
-            .update(resource: .category, resourceId: category.id,
-                    payload: encode(category), updatedAt: category.updatedAt)
+        let mutation = SyncMutation.update(
+            resource: .category,
+            resourceId: category.id,
+            payload: try encode(category),
+            updatedAt: category.updatedAt
         )
-        await syncNow()
+        try await syncQueue.enqueue(mutation)
+        return try await sendCategory(category, mutation: mutation, isCreate: false)
     }
 
     func deleteCategory(_ category: Category) async throws {
@@ -142,12 +153,12 @@ final class CatalogService: ObservableObject {
             await store.upsertActivity(activity)
         case .category(let category):
             await store.upsertCategory(category)
-        case .activityWithEntries(let activity, _):
+        case .activityWithEntries(let activity):
             await store.upsertActivity(activity)
             // Entry restore is owned by 1-3.
-        case .entryOnly:
-            // Entry deletion/restoration is owned by the time-entry feature.
-            break
+        case .entryOnly(let entry):
+            // Re-insert the deleted time entry.
+            try? await entryStore?.save(entry)
         }
         storeRevision &+= 1
         return item
@@ -199,7 +210,8 @@ final class CatalogService: ObservableObject {
             using: repository,
             store: store,
             connectivity: connectivity,
-            entryStore: entryStore
+            entryStore: entryStore,
+            entriesRepository: entriesRepository
         )
         conflictedActivityIds.formUnion(conflicts)
         storeRevision &+= 1
@@ -242,16 +254,52 @@ final class CatalogService: ObservableObject {
                             payload: encode(updated), updatedAt: updated.updatedAt)
                 )
             }
-        case .activityWithEntries(let activity, _):
+        case .activityWithEntries(let activity):
             // Activity + its entries deleted as a unit (F10); entries owned by 1-3.
             await store.removeActivity(activity.id)
             storeRevision &+= 1
             try? await syncQueue.enqueue(
                 .delete(resource: .activity, resourceId: activity.id, updatedAt: Date())
             )
-        case .entryOnly:
-            // Entry deletion is owned by the time-entry feature.
-            break
+        case .entryOnly(let entry):
+            // Delete the entry locally, then enqueue a server DELETE. Replay
+            // removes it from the queue on success / 404 (see SyncQueue).
+            guard let store = entryStore else { break }
+            try? await store.delete(id: entry.id)
+            storeRevision &+= 1
+            try? await syncQueue.enqueue(
+                .delete(resource: .entry, resourceId: entry.id, updatedAt: Date())
+            )
+        }
+    }
+
+    private func sendCategory(
+        _ category: Category,
+        mutation: SyncMutation,
+        isCreate: Bool
+    ) async throws -> Category {
+        guard connectivity.isConnected else { return category }
+
+        do {
+            let saved = try await (isCreate
+                ? repository.createCategory(category)
+                : repository.updateCategory(category))
+            await store.upsertCategory(saved)
+            try await syncQueue.remove(mutation.id)
+            await syncNow()
+            return saved
+        } catch {
+            switch CatalogError.map(error) {
+            case .offline:
+                return category
+            case .validation, .conflict, .categoryExists, .notFound:
+                try? await syncQueue.remove(mutation.id)
+                throw error
+            default:
+                // Keep the queued mutation for a later retry after a transient
+                // server or transport failure.
+                return category
+            }
         }
     }
 

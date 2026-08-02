@@ -12,8 +12,6 @@ type contextKey string
 const (
 	// ContextKeyUserID is the context key for the authenticated user's ID.
 	ContextKeyUserID contextKey = "userID"
-	// ContextKeyEmail is the context key for the authenticated user's email.
-	ContextKeyEmail contextKey = "email"
 )
 
 // AuthMiddleware returns an HTTP middleware that validates JWT Bearer tokens
@@ -36,7 +34,7 @@ func (h *Handler) AuthMiddleware(next http.Handler) http.Handler {
 		}
 
 		tokenStr := parts[1]
-		userID, email, err := h.tokenService.ValidateAccessToken(tokenStr)
+		userID, _, err := h.tokenService.ValidateAccessToken(tokenStr)
 		if err != nil {
 			h.logger.Warn("invalid access token", "error", err)
 			writeError(w, http.StatusUnauthorized, "unauthorized", "Invalid or expired access token", nil)
@@ -44,7 +42,6 @@ func (h *Handler) AuthMiddleware(next http.Handler) http.Handler {
 		}
 
 		ctx := context.WithValue(r.Context(), ContextKeyUserID, userID)
-		ctx = context.WithValue(ctx, ContextKeyEmail, email)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
@@ -53,10 +50,4 @@ func (h *Handler) AuthMiddleware(next http.Handler) http.Handler {
 func UserIDFromContext(ctx context.Context) (string, bool) {
 	id, ok := ctx.Value(ContextKeyUserID).(string)
 	return id, ok
-}
-
-// EmailFromContext extracts the authenticated user's email from the request context.
-func EmailFromContext(ctx context.Context) (string, bool) {
-	email, ok := ctx.Value(ContextKeyEmail).(string)
-	return email, ok
 }

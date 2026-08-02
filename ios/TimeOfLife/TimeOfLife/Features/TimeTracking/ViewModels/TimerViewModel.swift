@@ -26,7 +26,6 @@ final class TimerViewModel: ObservableObject {
     @Published var isLoading = false
     @Published var elapsed: TimeInterval = 0
     @Published var isRunning = false
-    @Published var didSave = false
     @Published var suggestions: [Activity] = []
     @Published var selectedActivityId: UUID?
     @Published var showQuickAdd = false
@@ -93,21 +92,6 @@ final class TimerViewModel: ObservableObject {
         showQuickAdd = true
     }
 
-    /// Called when a new activity is created via the quick-add sheet.
-    /// Persists the activity first so the entry POST does not 404.
-    func didSelectNewActivity(_ activity: Activity) {
-        showQuickAdd = false
-        Task {
-            do {
-                let created = try await catalogService.createActivity(activity)
-                prefill(from: created)
-                await refreshSuggestions()
-            } catch {
-                errorMessage = localizedMessage(for: error)
-            }
-        }
-    }
-
     /// Receives the shared activity editor's result without creating the
     /// activity a second time. The editor owns persistence; the timer only
     /// selects the returned activity for the upcoming entry.
@@ -130,7 +114,6 @@ final class TimerViewModel: ObservableObject {
         do {
             selectedActivityId = try await resolveActivityId()
             isRunning = true
-            didSave = false
             startDate = Date()
             elapsed = 0
             timerCancellable = Timer.publish(every: 1, on: .main, in: .common)
@@ -164,7 +147,6 @@ final class TimerViewModel: ObservableObject {
                 duration: duration,
                 startedAt: startDate
             )
-            didSave = true
             reset()
             await refreshSuggestions()
             Haptics.success()

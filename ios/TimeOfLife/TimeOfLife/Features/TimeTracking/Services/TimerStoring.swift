@@ -5,6 +5,8 @@ protocol TimerStoring: Sendable {
     func save(_ entry: TimeEntry) async throws
     func unsyncedEntries() async -> [TimeEntry]
     func entryCount(forActivityId id: UUID) async -> Int
+    func latestEntry(forActivityId id: UUID) async -> TimeEntry?
+    func delete(id: UUID) async throws
     func markSynced(_ entry: TimeEntry) async throws
     func replaceActivityId(from oldId: UUID, to newId: UUID) async throws
 }
@@ -40,6 +42,16 @@ actor LocalTimerStore: TimerStoring {
 
     func entryCount(forActivityId id: UUID) async -> Int {
         (try? loadEntries().filter { $0.activityId == id }.count) ?? 0
+    }
+
+    func latestEntry(forActivityId id: UUID) async -> TimeEntry? {
+        (try? loadEntries().filter { $0.activityId == id }.max { $0.startedAt < $1.startedAt }) ?? nil
+    }
+
+    func delete(id: UUID) async throws {
+        var entries = try loadEntries()
+        entries.removeAll { $0.id == id }
+        try saveEntries(entries)
     }
 
     func markSynced(_ entry: TimeEntry) async throws {

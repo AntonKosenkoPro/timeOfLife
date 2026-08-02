@@ -39,6 +39,13 @@ services:
       AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
       AWS_REGION: ${AWS_REGION:-}
       SES_FROM: ${SES_FROM:-}
+      # Sign in with Apple (F2). APPLE_CLIENT_ID is the app's Bundle ID;
+      # empty disables the feature (the /auth/apple route returns 503).
+      APPLE_CLIENT_ID: ${APPLE_CLIENT_ID:-}
+      APPLE_JWKS_URL: ${APPLE_JWKS_URL:-}
+      # Comma-separated IPs/CIDRs of reverse proxies allowed to set forwarded
+      # IP headers for rate limiting. Empty = trust nobody.
+      TRUSTED_PROXIES: ${TRUSTED_PROXIES:-}
     expose:
       - "8080"
 

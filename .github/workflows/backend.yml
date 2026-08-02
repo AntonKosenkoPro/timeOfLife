@@ -1,6 +1,9 @@
 name: backend
 
 # Requirements S6: linters + tests run on every pull request as a mandatory check.
+# Execution strategy (test-design-epic-1.md): PR = deterministic suites + race +
+# OpenAPI contract gate + critical PostgreSQL parity subset; nightly = full PG
+# parity matrix + burn-in for flake detection (R-012).
 on:
   pull_request:
     paths:
@@ -10,6 +13,9 @@ on:
     branches: [main]
     paths:
       - "backend/**"
+  schedule:
+    # Nightly burn-in + full PostgreSQL parity matrix
+    - cron: "0 2 * * *"
   workflow_dispatch:
     inputs:
       environment:
@@ -67,6 +73,81 @@ jobs:
         working-directory: backend
         run: go tool cover -func=coverage.out | tail -1
 
+      - name: coverage gate
+        working-directory: backend
+        run: |
+          cov="$(go tool cover -func=coverage.out | tail -1 | grep -oE '[0-9.]+%' | tr -d '%')"
+          echo "total coverage: ${cov}%"
+          # No-regression floor. Ratchets up as Epic 1 closes gaps; the exact
+          # hard floor awaits team approval (test design Quality Gate Criteria).
+          floor=45
+          if [ "${cov%.*}" -lt "$floor" ]; then
+            echo "::error::total coverage ${cov}% below floor ${floor}%"
+            exit 1
+          fi
+
+  # PostgreSQL parity (R-007 / 1.1-API-007): the same critical catalog
+  # semantics SQLite tests cover, executed against real PostgreSQL so
+  # SQLite-only CI cannot mask production behavior drift. Runs the parity
+  # suite on every PR/push; the nightly schedule burns it in.
+  postgres-parity:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: timeoflife
+        ports:
+          - "5432:5432"
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+          cache-dependency-path: backend/go.sum
+
+      - name: Postgres parity
+        working-directory: backend
+        env:
+          TEST_PG_DSN: postgres://postgres:postgres@localhost:5432/timeoflife?sslmode=disable
+        run: go test ./internal/db -run Postgres -count=1 -v
+
+  # Nightly burn-in: repeated runs of the timing-sensitive suites (R-012 —
+  # sleeps, yield polling, concurrency tests are the flake sources) plus the
+  # full PG parity matrix. No retry-to-green: a flake here is a real finding.
+  nightly-burn-in:
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+          cache-dependency-path: backend/go.sum
+
+      - name: Race + repeat burn-in
+        working-directory: backend
+        run: go test ./... -race -count=3
+
+      - name: Upload burn-in artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: burn-in-failures
+          path: backend/coverage.out
+          retention-days: 30
+
   deploy:
     # push to main auto-deploys to prod; workflow_dispatch deploys the chosen
     # environment (default stage). Per-environment branch + reviewer gating is
@@ -74,7 +155,7 @@ jobs:
     if: >
       github.event_name == 'push' ||
       github.event_name == 'workflow_dispatch'
-    needs: lint-and-test
+    needs: [lint-and-test, postgres-parity]
     runs-on: ubuntu-latest
     environment: ${{ github.event.inputs.environment || 'stage' }}
     steps:
@@ -142,6 +223,8 @@ jobs:
             AWS_REGION=${{ vars.AWS_REGION }}
             SES_FROM=${{ vars.SES_FROM }}
             APPLE_CLIENT_ID=${{ secrets.APPLE_CLIENT_ID }}
+            APPLE_JWKS_URL=${{ vars.APPLE_JWKS_URL }}
+            TRUSTED_PROXIES=${{ vars.TRUSTED_PROXIES }}
             ENVEOF
             chmod 600 .env
 
@@ -155,8 +238,8 @@ jobs:
             # not a secret. Default to console when unset — compose also defaults to console.
             EMAIL_BACKEND="${EMAIL_BACKEND:-console}"
             case "$EMAIL_BACKEND" in
-              console|mailgun|ses) ;;
-              *) echo "EMAIL_BACKEND '$EMAIL_BACKEND' is not one of console|mailgun|ses"; exit 1 ;;
+              console|ses) ;;
+              *) echo "EMAIL_BACKEND '$EMAIL_BACKEND' is not one of console|ses"; exit 1 ;;
             esac
             if [ "$EMAIL_BACKEND" = ses ]; then
               : "${AWS_ACCESS_KEY_ID:?AWS_ACCESS_KEY_ID required when EMAIL_BACKEND=ses}"

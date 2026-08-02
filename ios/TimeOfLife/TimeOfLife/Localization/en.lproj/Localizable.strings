@@ -52,16 +52,13 @@
 "error.unauthorized" = "Session expired. Please sign in again.";
 
 // Catalog server errors (mapped from error codes)
-"error.conflict" = "A newer version exists on the server. Your changes were not applied.";
+"error.conflict" = "Edited on another device. Showing the latest version.";
 "error.activity_exists" = "An activity with this name already exists.";
 "error.category_exists" = "A category with this name already exists.";
 "error.validation_error" = "Please check your input.";
 "error.not_found" = "This item no longer exists.";
 
 // Catalog validation (one merged message per field — U2/U4)
-"validation.catalog.nameEmpty" = "Name is required.";
-"validation.catalog.nameTooLong" = "Name must be 60 characters or fewer.";
-"validation.catalog.notesTooLong" = "Notes must be 280 characters or fewer.";
 "validation.catalog.colorInvalid" = "Select a valid color.";
 "validation.catalog.iconInvalid" = "Select a valid icon.";
 
@@ -71,11 +68,9 @@
 
 // Timer
 "timer.title" = "Timer";
-"timer.activityLabel" = "Activity";
 "timer.activityPlaceholder" = "What are you working on?";
 "timer.start" = "Start";
 "timer.stop" = "Stop";
-"timer.stopHint" = "Stops the timer and saves the entry";
 "timer.offlineHint" = "Entries are saved locally and synced when you’re back online.";
 "timer.emptyActivityError" = "Enter an activity name.";
 "timer.signOut" = "Sign Out";
@@ -84,19 +79,25 @@
 "tags.emptyHint" = "No categories yet — create one";
 "undo.button" = "Undo";
 "accessibility.color" = "Color, %@";
+"accessibility.category" = "Category, %@";
+"accessibility.icon" = "Icon, %@";
+"accessibility.suggestion" = "Suggestion, %@";
+"accessibility.suggestionHint" = "Starts a timer for this activity";
+"accessibility.selected" = "Selected";
+"accessibility.tagsCount" = "%d tags";
 "delete.activity.title" = "Delete Activity";
+"delete.button" = "Delete";
 "delete.activity.message.one" = "This activity has %d time entry.";
 "delete.activity.message.other" = "This activity has %d time entries.";
 "delete.activity.entire.one" = "Delete activity and all %d entry";
 "delete.activity.entire.other" = "Delete activity and all %d entries";
-"delete.activity.entryOnly" = "Delete this entry only";
+"delete.activity.entryOnly" = "Delete latest entry";
 "delete.activity.cancel" = "Cancel";
 "toast.dismiss" = "Dismiss";
 "activity.lastUsed" = "last used %@";
 
 // Timer — Epic 1 (suggestions, quick-add, manage)
 "timer.suggestionsHeader" = "Recent";
-"timer.quickAdd" = "New activity";
 "timer.manageActivities" = "Manage activities";
 
 // Manage activities
@@ -105,9 +106,34 @@
 "manage.activities.emptySubtitle" = "Add one, or just type a name on the timer.";
 "manage.activities.categories" = "Categories";
 "undo.activityDeleted" = "Activity deleted";
-"undo.entriesDeleted" = "%d entries deleted";
+"undo.entryDeleted" = "Entry deleted";
 "error.activityExists" = "An activity with this name already exists.";
 "error.undoFailed" = "Could not undo — try again.";
+
+// Manage categories
+"manage.categories.title" = "Categories";
+"manage.categories.emptyTitle" = "No categories yet";
+"manage.categories.emptySubtitle" = "Add one to tag your activities.";
+"delete.category.title" = "Delete category?";
+"delete.category.message" = "%@ will be removed from all activities. Your entries are kept.";
+"delete.category.confirm" = "Delete";
+"delete.category.cancel" = "Cancel";
+"undo.categoryDeleted" = "Category deleted";
+"error.categoryExists" = "A category with this name already exists.";
+"categoryEditor.createTitle" = "New category";
+"categoryEditor.editTitle" = "Edit category";
+"categoryEditor.nameLabel" = "Name";
+"categoryEditor.namePlaceholder" = "e.g. Sport";
+"categoryEditor.colorLabel" = "Color";
+"categoryEditor.save" = "Save";
+"categoryEditor.cancel" = "Cancel";
+"category.seed.work" = "Work";
+"category.seed.hobby" = "Hobby";
+"category.seed.sport" = "Sport";
+"category.seed.education" = "Education";
+"category.seed.relax" = "Relax";
+"category.seed.sleep" = "Sleep";
+"category.seed.entertainment" = "Entertainment";
 
 // Activity editor
 "activityEditor.createTitle" = "New activity";
@@ -124,6 +150,8 @@
 "activityEditor.addCategory" = "Add a category";
 "activityEditor.save" = "Save";
 "activityEditor.cancel" = "Cancel";
-"validation.nameEmpty" = "Enter a name.";
+"validation.nameEmpty" = "Name is required.";
 "validation.nameTooLong" = "Name must be at most 60 characters.";
+"validation.name.prefix" = "Name must";
+"validation.name.rule.tooLong" = "be at most 60 characters";
 "validation.notesTooLong" = "Notes must be at most 280 characters.";

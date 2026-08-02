@@ -202,8 +202,8 @@ paths:
         returns the same access + refresh token pair as the OTP flow. Apple users are
         considered email-verified.
 
-        This endpoint is only registered when the server is configured with
-        `APPLE_CLIENT_ID`; otherwise it returns HTTP 503 (`apple_not_configured`).
+        This endpoint is always registered. When the server is not configured
+        with `APPLE_CLIENT_ID`, it returns HTTP 503 (`apple_not_configured`).
       tags:
         - Auth
       requestBody:
