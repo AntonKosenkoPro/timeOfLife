@@ -5,10 +5,8 @@ import Foundation
 /// `synced` is false while the entry is stored locally only; it flips to true
 /// after the remote repository confirms persistence.
 ///
-/// `activityId` links to the `Activity` catalog. `activityName(lookup:)` is a
-/// derived convenience resolved at query time via the injected lookup (not the
-/// source of truth). `categories` is optional and resolved at query time (nil
-/// while offline-only).
+/// `activityId` links to the `Activity` catalog. `categories` is optional and
+/// resolved at query time (nil while offline-only).
 struct TimeEntry: Identifiable, Codable, Equatable, Sendable {
     let id: UUID
     let activityId: UUID
@@ -16,12 +14,6 @@ struct TimeEntry: Identifiable, Codable, Equatable, Sendable {
     let endedAt: Date
     let synced: Bool
     var categories: [Category]?
-
-    /// Resolved activity name. Looks up the `Activity` via `activityId` at
-    /// query time using the injected `lookup` closure.
-    func activityName(lookup: (UUID) -> Activity?) -> String {
-        lookup(activityId)?.name ?? "Activity"
-    }
 
     var duration: TimeInterval {
         endedAt.timeIntervalSince(startedAt)

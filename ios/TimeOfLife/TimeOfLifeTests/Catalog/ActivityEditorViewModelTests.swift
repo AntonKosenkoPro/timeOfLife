@@ -151,6 +151,36 @@ struct ActivityEditorViewModelTests {
         #expect(activity == existing)
     }
 
+    @Test("cancel sets the cancelled result and does not call the repository")
+    func cancel() async {
+        let (vm, repository, _, _) = make()
+        vm.cancel()
+        #expect(vm.onSaveResult == .cancelled)
+        #expect(repository.calls.isEmpty)
+    }
+
+    @Test("create from timer emits a create result with the link-and-select signal")
+    func createFromTimerLinks() async {
+        let store = MockCatalogStore()
+        let repository = FakeCatalogRepository()
+        let connectivity = MockConnectivity(connected: true)
+        let vm = ActivityEditorViewModel(
+            mode: .createFromTimer, store: store, repository: repository,
+            service: makeService(store: store, repository: repository),
+            connectivity: connectivity
+        )
+        vm.draft.name = "Gym"
+        await vm.save()
+
+        #expect(repository.calls.count == 1)
+        guard case let .created(activity, linkAndSelect)? = vm.onSaveResult else {
+            Issue.record("Expected create result")
+            return
+        }
+        #expect(activity.name == "Gym")
+        #expect(linkAndSelect)
+    }
+
     private func makeService(store: MockCatalogStore, repository: FakeCatalogRepository) -> CatalogService {
         CatalogService(
             store: store, repository: repository,

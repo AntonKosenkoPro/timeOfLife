@@ -14,7 +14,8 @@ struct ScopeConfirmation: View {
     @State private var selectedAction = false
 
     var body: some View {
-        Text("")
+        Color.clear
+            .frame(width: 0, height: 0)
             .confirmationDialog(
                 L10n.deleteActivityTitle.text,
                 isPresented: $isPresented

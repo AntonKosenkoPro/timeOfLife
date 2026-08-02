@@ -13,7 +13,6 @@ protocol CatalogStoring: Sendable {
     /// Case-insensitive, whitespace-trimmed name lookup for reuse (F4).
     func activity(named: String) async -> Activity?
     func category(_ id: UUID) async -> Category?
-    func category(named: String) async -> Category?
 
     /// Upserts (create or replace-by-id) an activity optimistically.
     func upsertActivity(_ activity: Activity) async
@@ -84,14 +83,6 @@ actor CatalogStore: CatalogStoring {
 
     func category(_ id: UUID) async -> Category? {
         ((try? loadCategoriesLocked()) ?? []).first { $0.id == id }
-    }
-
-    func category(named name: String) async -> Category? {
-        let key = CatalogValidator.normalizeName(name)
-        guard !key.isEmpty else { return nil }
-        return ((try? loadCategoriesLocked()) ?? []).first {
-            CatalogValidator.normalizeName($0.name) == key
-        }
     }
 
     // MARK: - Writes

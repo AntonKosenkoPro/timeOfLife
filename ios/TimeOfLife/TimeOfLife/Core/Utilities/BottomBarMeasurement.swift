@@ -31,3 +31,21 @@ struct MeasuredBottomBar<Content: View>: View {
             )
     }
 }
+
+extension View {
+    /// Pins a bottom action bar in a `.safeAreaInset(edge: .bottom)` and
+    /// reports its measured height into `height` (via
+    /// `BottomBarHeightPreferenceKey`), so callers can reserve matching space
+    /// in their scrollable content. Wraps the two-step
+    /// `MeasuredBottomBar` + `.onPreferenceChange(...)` boilerplate once.
+    func measuredBottomBar<Content: View>(
+        height: Binding<CGFloat>,
+        @ViewBuilder content: @escaping () -> Content
+    ) -> some View {
+        self
+            .safeAreaInset(edge: .bottom) {
+                MeasuredBottomBar { content() }
+            }
+            .onPreferenceChange(BottomBarHeightPreferenceKey.self) { height.wrappedValue = $0 }
+    }
+}

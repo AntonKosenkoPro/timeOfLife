@@ -73,32 +73,29 @@ struct EmailEntryView: View {
             .frame(maxWidth: .infinity)
         }
         .background(Theme.backgroundPrimary.ignoresSafeArea())
-        .safeAreaInset(edge: .bottom) {
+        .measuredBottomBar(height: $bottomBarHeight) {
             // Pinned action bar. Content in `safeAreaInset` animates with the
             // system keyboard transition instead of reflowing with the main
             // stack, and stays visible above the keyboard so the user can tap
             // Continue without dismissing the keyboard first. On iOS 15 the
             // enclosing `ScrollView` now makes this inset lift above the
             // keyboard (it was covered on iPhone SE 1st gen).
-            MeasuredBottomBar {
-                VStack(spacing: Theme.spacingSmall) {
-                    PrimaryButton(
-                        title: L10n.emailEntrySubmit.text,
-                        icon: nil,
-                        isLoading: vm.isLoading,
-                        isDisabled: vm.email.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-                        accessibilityId: "EmailContinueButton",
-                        action: submit
-                    )
-                }
-                .padding(.horizontal, Theme.screenHorizontalPadding)
-                .padding(.vertical, Theme.spacingSmall)
-                .frame(maxWidth: Theme.maxContentWidth)
-                .frame(maxWidth: .infinity)
-                .background(Theme.backgroundPrimary)
+            VStack(spacing: Theme.spacingSmall) {
+                PrimaryButton(
+                    title: L10n.emailEntrySubmit.text,
+                    icon: nil,
+                    isLoading: vm.isLoading,
+                    isDisabled: vm.email.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                    accessibilityId: "EmailContinueButton",
+                    action: submit
+                )
             }
+            .padding(.horizontal, Theme.screenHorizontalPadding)
+            .padding(.vertical, Theme.spacingSmall)
+            .frame(maxWidth: Theme.maxContentWidth)
+            .frame(maxWidth: .infinity)
+            .background(Theme.backgroundPrimary)
         }
-        .onPreferenceChange(BottomBarHeightPreferenceKey.self) { bottomBarHeight = $0 }
         .onAppear { isEmailFocused = true }
         .onChange(of: vm.email) { _ in
             if vm.fieldErrors.email != nil {

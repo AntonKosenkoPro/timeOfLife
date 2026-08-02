@@ -12,7 +12,6 @@ enum Theme {
     static let textSecondary = Color("TextSecondary", bundle: .main)
     static let accentPrimary = Color("AccentPrimary", bundle: .main)
     static let danger = Color("Danger", bundle: .main)
-    static let success = Color("Success", bundle: .main)
     static let hairline = Color("Hairline", bundle: .main)
 
     // MARK: - Spacing

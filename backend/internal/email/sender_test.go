@@ -228,21 +228,6 @@ func TestSESSender_Send_OmitsHTMLWhenEmpty(t *testing.T) {
 	}
 }
 
-func TestSESSender_Send_UsesMessageFromOverride(t *testing.T) {
-	t.Parallel()
-
-	fake := &fakeSES{}
-	s := &SESSender{client: fake, from: "default@example.com", logger: quietLogger()}
-
-	msg := Message{To: "user@example.com", Subject: "s", Text: "t", From: "custom@example.com"}
-	if err := s.Send(context.Background(), msg); err != nil {
-		t.Fatalf("Send returned error: %v", err)
-	}
-	if got := *fake.input.FromEmailAddress; got != "custom@example.com" {
-		t.Errorf("expected From override custom@example.com, got %q", got)
-	}
-}
-
 func TestSESSender_Send_PropagatesClientError(t *testing.T) {
 	t.Parallel()
 

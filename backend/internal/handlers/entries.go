@@ -98,7 +98,10 @@ func (h *Handler) CreateEntry(w http.ResponseWriter, r *http.Request) {
 	if req.EndedAt != nil {
 		validateTimestamp("ended_at", *req.EndedAt, false, errs)
 	}
-	// ended_at must be after started_at when both are present and valid.
+	// ended_at must be after started_at when both are present and valid. The
+	// store independently guards the partial-PATCH merged value (and direct
+	// store calls); here we surface the plain both-present case with precise
+	// field-level details for the common create path.
 	if req.EndedAt != nil && req.StartedAt != "" {
 		if st, ok1 := parseRFC3339(req.StartedAt); ok1 {
 			if et, ok2 := parseRFC3339(*req.EndedAt); ok2 && !et.After(st) {
@@ -172,12 +175,6 @@ func (h *Handler) UpdateEntry(w http.ResponseWriter, r *http.Request) {
 		errs.add("ended_at", "ended_at must be a valid RFC 3339 timestamp")
 	}
 	validateTimestamp("updated_at", req.UpdatedAt, true, errs)
-	// ended_at must be after started_at when both are valid.
-	if req.StartedAt != nil && req.EndedAt.Set && req.EndedAt.Valid {
-		if st, ok1 := parseRFC3339(*req.StartedAt); ok1 && !req.EndedAt.Value.After(st) {
-			errs.add("ended_at", "ended_at must be after started_at")
-		}
-	}
 	if !errs.ok() {
 		writeValidation(w, errs)
 		return

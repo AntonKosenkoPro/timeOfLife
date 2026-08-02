@@ -113,7 +113,7 @@ final class ManageActivitiesViewModel: ObservableObject {
         return entryCounts[activity.id] ?? 0
     }
 
-    func performDelete(_ activity: Activity, scope: ActivityDeleteScope) {
+    func performDelete(_ activity: Activity, scope: ActivityDeleteScope) async {
         pendingDelete = nil
         showDeleteScope = false
         showDeleteConfirmation = false
@@ -125,15 +125,17 @@ final class ManageActivitiesViewModel: ObservableObject {
         let item: UndoableItem
         switch scope {
         case .all where count > 0:
-            item = .activityWithEntries(activity, entryIds: [])
+            item = .activityWithEntries(activity)
         case .all:
             item = .activity(activity)
         case .entryOnly:
-            item = .entryOnly(activity.id)
+            let latest = await entryCounter.latestEntry(forActivityId: activity.id)
+            guard let latest else { return }
+            item = .entryOnly(latest)
         }
         undoBuffer.record(item)
         let message = scope == .entryOnly
-            ? L10n.undoEntriesDeleted.text(count)
+            ? L10n.undoEntryDeleted.text
             : L10n.undoActivityDeleted.text
         undoToast = UndoToastState(message: message, startedAt: Date())
         toastTask?.cancel()
@@ -168,16 +170,6 @@ final class ManageActivitiesViewModel: ObservableObject {
 
     func onShake() {
         Task { await performUndo() }
-    }
-
-    func replaceWithLatest(_ activity: Activity) {
-        if let index = activities.firstIndex(where: { $0.id == activity.id }) {
-            activities[index] = activity
-        } else {
-            activities.append(activity)
-        }
-        activities.sort { ($0.lastUsedAt ?? .distantPast) > ($1.lastUsedAt ?? .distantPast) }
-        errorMessage = L10n.errorConflict.text
     }
 
     private func refreshConflict() async {

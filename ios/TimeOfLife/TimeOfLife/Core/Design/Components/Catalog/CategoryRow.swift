@@ -26,7 +26,7 @@ struct CategoryRow: View {
             .frame(maxWidth: .infinity, minHeight: Theme.minTapArea)
         }
         .accessibilityIdentifier("CategoryRow(\(category.id))")
-        .accessibilityLabel("Category, \(category.name)")
+        .accessibilityLabel(L10n.accessibilityCategory.text(category.name))
     }
 }
 

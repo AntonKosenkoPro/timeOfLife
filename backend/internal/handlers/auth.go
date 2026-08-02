@@ -2,6 +2,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -152,7 +153,51 @@ func writeError(w http.ResponseWriter, status int, code, message string, details
 	})
 }
 
+// writeAccepted responds 202 with a uniform "accepted" envelope. Used by the
+// OTP request path to close user enumeration (no per-error status leaks).
+func writeAccepted(w http.ResponseWriter) {
+	writeJSON(w, http.StatusAccepted, map[string]string{"status": "accepted"})
+}
+
+// issueTokens creates an access + refresh token pair for user, persists the
+// refresh token hash, and writes the authResponse envelope. On any failure it
+// writes an internal_error response. It returns nothing; callers return.
+func (h *Handler) issueTokens(ctx context.Context, w http.ResponseWriter, user db.User, emailVerified bool) {
+	accessToken, err := h.tokenService.CreateAccessToken(user.ID, user.Email)
+	if err != nil {
+		h.logger.Error("failed to create access token", "error", err)
+		writeError(w, http.StatusInternalServerError, "internal_error", "An internal error occurred", nil)
+		return
+	}
+
+	rawRefresh, refreshHash, err := h.tokenService.GenerateRefreshToken()
+	if err != nil {
+		h.logger.Error("failed to generate refresh token", "error", err)
+		writeError(w, http.StatusInternalServerError, "internal_error", "An internal error occurred", nil)
+		return
+	}
+
+	if err := h.store.SaveRefreshToken(ctx, user.ID, refreshHash, ""); err != nil {
+		h.logger.Error("failed to save refresh token", "error", err)
+		writeError(w, http.StatusInternalServerError, "internal_error", "An internal error occurred", nil)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, authResponse{
+		AccessToken:  accessToken,
+		RefreshToken: rawRefresh,
+		User: userResponse{
+			ID:            user.ID,
+			Email:         user.Email,
+			EmailVerified: emailVerified,
+		},
+	})
+}
+
 func decodeJSON(r *http.Request, v any) error {
+	// A nil ResponseWriter is safe here: MaxBytesReader only calls WriteHeader
+	// when its writer is non-nil, so the 413-on-overflow path is skipped. The
+	// handler responds with its own 400 invalid_body on a too-large body.
 	r.Body = http.MaxBytesReader(nil, r.Body, 1<<16) // 64 KB
 	dec := json.NewDecoder(r.Body)
 	if err := dec.Decode(v); err != nil {
@@ -204,21 +249,21 @@ func (h *Handler) RequestOTP(w http.ResponseWriter, r *http.Request) {
 	user, err := h.store.UpsertUser(ctx, req.Email)
 	if err != nil {
 		h.logger.Error("failed to upsert user", "error", err)
-		writeJSON(w, http.StatusAccepted, map[string]string{"status": "accepted"})
+		writeAccepted(w)
 		return
 	}
 
 	code, hash, err := h.otpService.GenerateOTP()
 	if err != nil {
 		h.logger.Error("failed to generate OTP", "error", err)
-		writeJSON(w, http.StatusAccepted, map[string]string{"status": "accepted"})
+		writeAccepted(w)
 		return
 	}
 
 	expiresAt := time.Now().Add(h.otpService.Expiry())
 	if err := h.store.SaveOTP(ctx, user.ID, hash, expiresAt); err != nil {
 		h.logger.Error("failed to save OTP", "error", err)
-		writeJSON(w, http.StatusAccepted, map[string]string{"status": "accepted"})
+		writeAccepted(w)
 		return
 	}
 
@@ -227,7 +272,7 @@ func (h *Handler) RequestOTP(w http.ResponseWriter, r *http.Request) {
 		h.logger.Error("failed to send OTP email", "error", err)
 	}
 
-	writeJSON(w, http.StatusAccepted, map[string]string{"status": "accepted"})
+	writeAccepted(w)
 }
 
 // VerifyOTP handles POST /auth/otp/verify.
@@ -310,36 +355,7 @@ func (h *Handler) VerifyOTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Generate tokens.
-	accessToken, err := h.tokenService.CreateAccessToken(user.ID, user.Email)
-	if err != nil {
-		h.logger.Error("failed to create access token", "error", err)
-		writeError(w, http.StatusInternalServerError, "internal_error", "An internal error occurred", nil)
-		return
-	}
-
-	rawRefresh, refreshHash, err := h.tokenService.GenerateRefreshToken()
-	if err != nil {
-		h.logger.Error("failed to generate refresh token", "error", err)
-		writeError(w, http.StatusInternalServerError, "internal_error", "An internal error occurred", nil)
-		return
-	}
-
-	if err := h.store.SaveRefreshToken(ctx, user.ID, refreshHash, ""); err != nil {
-		h.logger.Error("failed to save refresh token", "error", err)
-		writeError(w, http.StatusInternalServerError, "internal_error", "An internal error occurred", nil)
-		return
-	}
-
-	writeJSON(w, http.StatusOK, authResponse{
-		AccessToken:  accessToken,
-		RefreshToken: rawRefresh,
-		User: userResponse{
-			ID:            user.ID,
-			Email:         user.Email,
-			EmailVerified: true,
-		},
-	})
+	h.issueTokens(ctx, w, user, true)
 }
 
 // AppleSignIn handles POST /auth/apple.
@@ -392,38 +408,9 @@ func (h *Handler) AppleSignIn(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Issue tokens (same path as VerifyOTP).
-	accessToken, err := h.tokenService.CreateAccessToken(user.ID, user.Email)
-	if err != nil {
-		h.logger.Error("failed to create access token", "error", err)
-		writeError(w, http.StatusInternalServerError, "internal_error", "An internal error occurred", nil)
-		return
-	}
-
-	rawRefresh, refreshHash, err := h.tokenService.GenerateRefreshToken()
-	if err != nil {
-		h.logger.Error("failed to generate refresh token", "error", err)
-		writeError(w, http.StatusInternalServerError, "internal_error", "An internal error occurred", nil)
-		return
-	}
-
-	if err := h.store.SaveRefreshToken(ctx, user.ID, refreshHash, ""); err != nil {
-		h.logger.Error("failed to save refresh token", "error", err)
-		writeError(w, http.StatusInternalServerError, "internal_error", "An internal error occurred", nil)
-		return
-	}
-
+	// Issue tokens (same path as VerifyOTP). Apple users are email-verified.
+	h.issueTokens(ctx, w, user, true)
 	h.logger.Info("apple user signed in", "userID", user.ID)
-
-	writeJSON(w, http.StatusOK, authResponse{
-		AccessToken:  accessToken,
-		RefreshToken: rawRefresh,
-		User: userResponse{
-			ID:            user.ID,
-			Email:         user.Email,
-			EmailVerified: true,
-		},
-	})
 }
 
 // RefreshToken handles POST /auth/refresh.
@@ -478,35 +465,7 @@ func (h *Handler) RefreshToken(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Generate new token pair.
-	accessToken, err := h.tokenService.CreateAccessToken(user.ID, user.Email)
-	if err != nil {
-		h.logger.Error("failed to create access token during refresh", "error", err)
-		writeError(w, http.StatusInternalServerError, "internal_error", "An internal error occurred", nil)
-		return
-	}
-
-	rawRefresh, refreshHash, err := h.tokenService.GenerateRefreshToken()
-	if err != nil {
-		h.logger.Error("failed to generate refresh token during refresh", "error", err)
-		writeError(w, http.StatusInternalServerError, "internal_error", "An internal error occurred", nil)
-		return
-	}
-
-	if err := h.store.SaveRefreshToken(ctx, user.ID, refreshHash, ""); err != nil {
-		h.logger.Error("failed to save new refresh token", "error", err)
-		writeError(w, http.StatusInternalServerError, "internal_error", "An internal error occurred", nil)
-		return
-	}
-
-	writeJSON(w, http.StatusOK, authResponse{
-		AccessToken:  accessToken,
-		RefreshToken: rawRefresh,
-		User: userResponse{
-			ID:            user.ID,
-			Email:         user.Email,
-			EmailVerified: user.EmailVerified,
-		},
-	})
+	h.issueTokens(ctx, w, user, user.EmailVerified)
 }
 
 // Logout handles POST /auth/logout.

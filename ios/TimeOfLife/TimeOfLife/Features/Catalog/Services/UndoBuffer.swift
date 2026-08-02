@@ -10,13 +10,13 @@ enum UndoState: Equatable, Sendable {
 }
 
 /// The most recent undoable deletion. `activityWithEntries` holds the activity
-/// + its entry ids as a unit (F10); the entries side is owned by 1-3 — this
+/// + its entries as a unit (F10); the entries side is owned by 1-3 — this
 /// story defines the case and the restore contract only.
 enum UndoableItem: Equatable, Sendable {
     case category(Category)
     case activity(Activity)
-    case activityWithEntries(Activity, entryIds: [UUID])
-    case entryOnly(UUID)
+    case activityWithEntries(Activity)
+    case entryOnly(TimeEntry)
 }
 
 /// Schedules the undo-window commit. Injected so tests drive expiry
@@ -72,10 +72,9 @@ final class UndoBuffer: ObservableObject {
         switch item {
         case .activity(let a): return [a.id]
         case .category(let c): return [c.id]
-        case .activityWithEntries(let a, _): return [a.id]
+        case .activityWithEntries(let a): return [a.id]
         case .entryOnly: return []
-        }
-    }
+        }    }
 
     private let scheduler: UndoScheduler
     private var cancellable: UndoScheduler.Cancellable?

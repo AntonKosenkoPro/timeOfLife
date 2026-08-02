@@ -15,14 +15,13 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/sesv2/types"
 )
 
-// Message is a transactional email. From, when non-empty, overrides the
-// sender's default From address.
+// Message is a transactional email. The From address is fixed by the sender
+// (SESSenderConfig.From), so it is not part of the message.
 type Message struct {
 	To      string
 	Subject string
 	Text    string // plain-text body; required (iOS reads the OTP from here)
 	HTML    string // optional HTML body
-	From    string // optional From override
 }
 
 // Sender sends a transactional email.
@@ -179,13 +178,8 @@ func NewSESSender(cfg SESSenderConfig) (*SESSender, error) {
 
 // Send sends an email via the AWS SES v2 API.
 func (s *SESSender) Send(ctx context.Context, msg Message) error {
-	from := msg.From
-	if from == "" {
-		from = s.from
-	}
-
 	input := &sesv2.SendEmailInput{
-		FromEmailAddress: &from,
+		FromEmailAddress: &s.from,
 		Destination: &types.Destination{
 			ToAddresses: []string{msg.To},
 		},

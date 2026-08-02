@@ -66,10 +66,10 @@ enum CatalogValidator {
     static func unifiedNameMessage(_ errors: [ValidationError]) -> String? {
         guard !errors.isEmpty else { return nil }
         if errors.contains(.nameEmpty) {
-            return NSLocalizedString("validation.catalog.nameEmpty", comment: "")
+            return L10n.activityValidationNameEmpty.text
         }
         if errors.contains(.nameTooLong) {
-            return NSLocalizedString("validation.catalog.nameTooLong", comment: "")
+            return L10n.activityValidationNameTooLong.text
         }
         return nil
     }
@@ -78,7 +78,7 @@ enum CatalogValidator {
     static func unifiedNotesMessage(_ errors: [ValidationError]) -> String? {
         guard !errors.isEmpty else { return nil }
         if errors.contains(.notesTooLong) {
-            return NSLocalizedString("validation.catalog.notesTooLong", comment: "")
+            return L10n.activityValidationNotesTooLong.text
         }
         return nil
     }
@@ -86,12 +86,12 @@ enum CatalogValidator {
     /// A single message for the color field, or `nil` when valid.
     static func unifiedColorMessage(_ errors: [ValidationError]) -> String? {
         guard errors.contains(.colorInvalid) else { return nil }
-        return NSLocalizedString("validation.catalog.colorInvalid", comment: "")
+        return L10n.validationCatalogColorInvalid.text
     }
 
     /// A single message for the icon field, or `nil` when valid.
     static func unifiedIconMessage(_ errors: [ValidationError]) -> String? {
         guard errors.contains(.iconInvalid) else { return nil }
-        return NSLocalizedString("validation.catalog.iconInvalid", comment: "")
+        return L10n.validationCatalogIconInvalid.text
     }
 }

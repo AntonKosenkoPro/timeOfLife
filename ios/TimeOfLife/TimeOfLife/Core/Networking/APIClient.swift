@@ -195,12 +195,12 @@ struct DetailsEnvelope: Decodable, Sendable {
 }
 
 /// Codable, Sendable representation for opaque JSON details payloads.
+/// The contract's `details` is either an object or (rarely) a null/string;
+/// numeric/bool/array values are never produced by the backend, so those cases
+/// are not represented here.
 enum AnyCodable: Codable, Sendable {
     case null
     case string(String)
-    case number(Double)
-    case bool(Bool)
-    case array([AnyCodable])
     case object([String: AnyCodable])
 
     init(from decoder: Decoder) throws {
@@ -209,12 +209,6 @@ enum AnyCodable: Codable, Sendable {
             self = .null
         } else if let value = try? container.decode(String.self) {
             self = .string(value)
-        } else if let value = try? container.decode(Bool.self) {
-            self = .bool(value)
-        } else if let value = try? container.decode(Double.self) {
-            self = .number(value)
-        } else if let value = try? container.decode([AnyCodable].self) {
-            self = .array(value)
         } else if let value = try? container.decode([String: AnyCodable].self) {
             self = .object(value)
         } else {
@@ -227,9 +221,6 @@ enum AnyCodable: Codable, Sendable {
         switch self {
         case .null: try container.encodeNil()
         case let .string(value): try container.encode(value)
-        case let .number(value): try container.encode(value)
-        case let .bool(value): try container.encode(value)
-        case let .array(value): try container.encode(value)
         case let .object(value): try container.encode(value)
         }
     }

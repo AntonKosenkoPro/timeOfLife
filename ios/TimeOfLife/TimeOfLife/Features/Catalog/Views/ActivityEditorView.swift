@@ -2,6 +2,7 @@ import SwiftUI
 
 struct ActivityEditorView: View {
     @ObservedObject var vm: ActivityEditorViewModel
+    @EnvironmentObject private var container: AppContainer
     @Environment(\.dismiss)
     private var dismiss
     @FocusState private var isNameFocused: Bool
@@ -18,6 +19,7 @@ struct ActivityEditorView: View {
             }
         }
         .modifier(ActivityEditorDetents())
+        .interactiveDismissDisabled(vm.isLoading)
     }
 
     private var editorContent: some View {
@@ -97,24 +99,21 @@ struct ActivityEditorView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .background(Theme.backgroundPrimary.ignoresSafeArea())
-        .safeAreaInset(edge: .bottom) {
-            MeasuredBottomBar {
-                PrimaryButton(
-                    title: L10n.activityEditorSave.text,
-                    icon: nil,
-                    isLoading: vm.isLoading,
-                    isDisabled: vm.draft.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-                    accessibilityId: "ActivityEditorSaveButton"
-                ) {
-                    isNameFocused = false
-                    Task { await vm.save() }
-                }
-                .padding(.horizontal, Theme.screenHorizontalPadding)
-                .padding(.vertical, Theme.spacingSmall)
-                .background(Theme.backgroundPrimary)
+        .measuredBottomBar(height: $bottomBarHeight) {
+            PrimaryButton(
+                title: L10n.activityEditorSave.text,
+                icon: nil,
+                isLoading: vm.isLoading,
+                isDisabled: vm.draft.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                accessibilityId: "ActivityEditorSaveButton"
+            ) {
+                isNameFocused = false
+                Task { await vm.save() }
             }
+            .padding(.horizontal, Theme.screenHorizontalPadding)
+            .padding(.vertical, Theme.spacingSmall)
+            .background(Theme.backgroundPrimary)
         }
-        .onPreferenceChange(BottomBarHeightPreferenceKey.self) { bottomBarHeight = $0 }
         .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
@@ -134,9 +133,43 @@ struct ActivityEditorView: View {
             if result != nil { dismiss() }
         }
         .sheet(isPresented: $showCategoryEditor) {
-            Text(L10n.manageActivitiesCategories.text)
-                .padding()
+            let editor = CategoryEditorViewModel(
+                mode: .create,
+                store: container.catalogStore,
+                repository: container.catalogRepository,
+                service: container.catalogService,
+                connectivity: container.connectivity
+            )
+            CategoryEditorView(vm: editor)
+                .onChange(of: editor.onSaveResult) { result in
+                    guard let result else { return }
+                    switch result {
+                    case let .saved(category):
+                        addCategory(category)
+                    case let .reused(category):
+                        addCategory(category)
+                        vm.errorMessage = L10n.errorCategoryExists.text
+                    case let .conflict(category):
+                        vm.errorMessage = L10n.errorConflict.text
+                        if let index = vm.availableCategories.firstIndex(where: { $0.id == category.id }) {
+                            vm.availableCategories[index] = category
+                        }
+                    case .cancelled:
+                        break
+                    }
+                }
         }
+    }
+
+    private func addCategory(_ category: Category) {
+        if !vm.availableCategories.contains(where: { $0.id == category.id }) {
+            vm.availableCategories.append(category)
+            vm.availableCategories.sort {
+                $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
+            }
+        }
+        vm.draft.categoryIds.insert(category.id)
+        showCategoryEditor = false
     }
 
     private var title: String {

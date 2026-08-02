@@ -4,6 +4,8 @@ import Foundation
 /// time-entry model. The history store will provide the real implementation.
 protocol ActivityEntryCounting: Sendable {
     func entryCount(forActivityId id: UUID) async -> Int
+    /// The most recently recorded entry for an activity, or `nil` if none.
+    func latestEntry(forActivityId id: UUID) async -> TimeEntry?
 }
 
 struct TimerStoreActivityEntryCounter: ActivityEntryCounting {
@@ -11,5 +13,9 @@ struct TimerStoreActivityEntryCounter: ActivityEntryCounting {
 
     func entryCount(forActivityId id: UUID) async -> Int {
         await store.entryCount(forActivityId: id)
+    }
+
+    func latestEntry(forActivityId id: UUID) async -> TimeEntry? {
+        await store.latestEntry(forActivityId: id)
     }
 }

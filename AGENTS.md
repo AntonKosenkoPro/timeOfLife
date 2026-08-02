@@ -48,7 +48,7 @@ ios/TimeOfLife/.swiftlint.yml   Swift linters (run from ios/TimeOfLife/)
 ```
 
 ## Build, test, run
-### Backend (Go 1.22+)
+### Backend (Go 1.24)
 ```bash
 cd backend
 go build ./...
@@ -142,7 +142,7 @@ The backend is deployed to a **Google Cloud Compute Engine VM** (`timeoflife-bac
 ### CI/CD pipeline
 On every push to `main` that touches `backend/`, the CI/CD pipeline:
 1. Runs lint + test (same as PR checks)
-2. Builds the Docker image and pushes to `ghcr.io/antonkosenko/time-of-life/backend:latest`
+2. Builds the Docker image and pushes to `ghcr.io/antonkosenkopro/timeoflife/backend:latest`
 3. SSHs into the VM, pulls the new image, and restarts the backend container
 
 ### Manual deploy
@@ -186,7 +186,7 @@ The app is unreleased; there is no on-disk data in the wild. **No backward compa
 - iOS: `Features/AppleSignIn/` — `AppleSignInService` wraps an injectable `AppleAuthorizationProviding` (real `ASAuthorizationAppleIDProvider`-backed impl + a fake in tests). The `AppleSignInButton` (UIControl wrapper) now lives on `WelcomeView` and triggers `WelcomeViewModel.signInWithApple()`, which obtains Apple's identity token and posts it via `AuthService.signInWithApple` → `POST /auth/apple`. Success reuses `AuthService.persist` → `SessionStore` flips → `RootView` lands on the timer (no new navigation wiring).
 - Backend: `POST /api/v1/auth/apple` (`internal/handlers/auth.go` `AppleSignIn`) verifies Apple's RS256 identity-token JWT via `internal/apple` (JWKS fetched with `github.com/MicahParks/keyfunc/v3`, pinned `RS256`, `iss`/`aud`=Bundle ID/`exp`), upserts a user keyed by Apple's `sub` (`Store.UpsertUserByAppleSubject`, migration `002_apple.sql` adds `users.apple_subject`), and issues the same token pair as OTP verify.
 - **Config-gated**: the route is registered only when `APPLE_CLIENT_ID` is set (the app's Bundle ID — Apple puts the Bundle ID in the identity token's `aud` for a native app). Empty → feature off; the handler returns `apple_not_configured` (503) if hit directly. `APPLE_JWKS_URL` defaults to `https://appleid.apple.com/auth/keys`.
-- Running end-to-end requires the **Sign in with Apple** capability (entitlements file + portal App ID) and code signing enabled — both currently off. The code + unit tests (119) are green without them.
+- Running end-to-end requires the **Sign in with Apple** capability (entitlements file + portal App ID) and code signing enabled — both currently off. The code + unit tests (277) are green without them.
 
 ## Decisions log (precedents to respect)
 - Backend language is **Go** (+3); mobile is **Swift** (+4). Do not reintroduce Swift/Vapor in the backend.

@@ -157,6 +157,38 @@ struct SyncQueueTests {
         #expect(await queue.pending().count == 3)
     }
 
+    @Test("entry DELETE replay calls the entries repository and 404 is success")
+    func entryDeleteReplay() async throws {
+        let (queue, store, repo, connectivity) = makeCollaborators()
+        let entryId = UUID.v7()
+        let entriesRepo = FakeEntriesRepository()
+        try await queue.enqueue(.delete(resource: .entry, resourceId: entryId, updatedAt: Date()))
+
+        await queue.replay(
+            using: repo, store: store,
+            connectivity: connectivity, entriesRepository: entriesRepo
+        )
+
+        #expect(await queue.pending().isEmpty)
+        #expect(entriesRepo.calls.contains(.delete(id: entryId)))
+    }
+
+    @Test("entry DELETE replay retries on a transient error and stops offline")
+    func entryDeleteReplayRetry() async throws {
+        let (queue, store, repo, connectivity) = makeCollaborators()
+        let entryId = UUID.v7()
+        let entriesRepo = FakeEntriesRepository()
+        entriesRepo.deleteError = APIError.transport(underlying: "reset")
+        try await queue.enqueue(.delete(resource: .entry, resourceId: entryId, updatedAt: Date()))
+
+        await queue.replay(
+            using: repo, store: store,
+            connectivity: connectivity, entriesRepository: entriesRepo
+        )
+
+        #expect((await queue.pending()).count == 1)
+    }
+
     @Test("offline guard skips replay entirely")
     func offlineGuardSkips() async throws {
         let (queue, _, repo, connectivity) = makeCollaborators(connected: false)

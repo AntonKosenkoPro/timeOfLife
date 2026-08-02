@@ -49,6 +49,7 @@ final class FakeCatalogRepository: CatalogRepository, @unchecked Sendable {
     var listCategoriesError: Error?
     var getCategoryError: Error?
     var createCategoryError: Error?
+    var createCategoryErrors: [Error?] = []
     var updateCategoryError: Error?
     var deleteCategoryError: Error?
 
@@ -106,6 +107,10 @@ final class FakeCatalogRepository: CatalogRepository, @unchecked Sendable {
 
     func createCategory(_ category: Category) async throws -> Category {
         record(.createCategory(category))
+        if !createCategoryErrors.isEmpty {
+            let error = createCategoryErrors.removeFirst()
+            if let error { throw error }
+        }
         if let e = createCategoryError { throw e }
         return category
     }

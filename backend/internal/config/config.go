@@ -59,7 +59,7 @@ func Load() (*Config, error) {
 		return nil, requiredFieldError("JWT_SECRET")
 	}
 	if len(cfg.JWTSecret) < 32 {
-		panic("JWT_SECRET must be at least 32 bytes long")
+		return nil, &configError{field: "JWT_SECRET", msg: "JWT_SECRET must be at least 32 bytes long"}
 	}
 
 	// Required: EMAIL_BACKEND

@@ -58,40 +58,37 @@ struct WelcomeView: View {
             .frame(maxWidth: .infinity)
         }
         .background(Theme.backgroundPrimary.ignoresSafeArea())
-        .safeAreaInset(edge: .bottom) {
-            MeasuredBottomBar {
-                VStack(spacing: Theme.spacingSmall) {
-                    Spacer().frame(height: Theme.spacingLarge)
+        .measuredBottomBar(height: $bottomBarHeight) {
+            VStack(spacing: Theme.spacingSmall) {
+                Spacer().frame(height: Theme.spacingLarge)
 
-                    AppleSignInButton {
-                        Task { await vm.signInWithApple() }
-                    }
-                    .disabled(appleButtonDisabled)
-                    .opacity(appleButtonDisabled ? 0.6 : 1)
-                    .animation(.easeInOut(duration: 0.15), value: appleButtonDisabled)
-                    
-                    Spacer().frame(height: Theme.spacingSmall)
-                    
-                    Button {
-                        navigation.push(.emailEntry)
-                    } label: {
-                        Text(L10n.welcomeContinueWithEmail.text)
-                            .font(.subheadline)
-                            .foregroundStyle(Theme.accentPrimary)
-                            .frame(maxWidth: .infinity)
-                            .frame(minHeight: Theme.minTapArea)
-                    }
-                    .disabled(emailButtonDisabled)
-                    .accessibilityIdentifier("WelcomeContinueWithEmailButton")
+                AppleSignInButton {
+                    Task { await vm.signInWithApple() }
                 }
-                .padding(.horizontal, Theme.screenHorizontalPadding)
-                .padding(.vertical, Theme.spacingSmall)
-                .frame(maxWidth: Theme.maxContentWidth)
-                .frame(maxWidth: .infinity)
-                .background(Theme.backgroundPrimary)
+                .disabled(appleButtonDisabled)
+                .opacity(appleButtonDisabled ? 0.6 : 1)
+                .animation(.easeInOut(duration: 0.15), value: appleButtonDisabled)
+                
+                Spacer().frame(height: Theme.spacingSmall)
+                
+                Button {
+                    navigation.push(.emailEntry)
+                } label: {
+                    Text(L10n.welcomeContinueWithEmail.text)
+                        .font(.subheadline)
+                        .foregroundStyle(Theme.accentPrimary)
+                        .frame(maxWidth: .infinity)
+                        .frame(minHeight: Theme.minTapArea)
+                }
+                .disabled(emailButtonDisabled)
+                .accessibilityIdentifier("WelcomeContinueWithEmailButton")
             }
+            .padding(.horizontal, Theme.screenHorizontalPadding)
+            .padding(.vertical, Theme.spacingSmall)
+            .frame(maxWidth: Theme.maxContentWidth)
+            .frame(maxWidth: .infinity)
+            .background(Theme.backgroundPrimary)
         }
-        .onPreferenceChange(BottomBarHeightPreferenceKey.self) { bottomBarHeight = $0 }
         .onAppear { vm.reset() }
     }
 

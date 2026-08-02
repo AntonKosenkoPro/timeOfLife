@@ -79,7 +79,7 @@ func NewDefaultDependencies(cfg *config.Config, store db.Store) Dependencies {
 			logger.Error("failed to create apple verifier; feature disabled", "error", err)
 		} else {
 			appleVerifier = v
-			rateLimiter.Apple = ratelimit.OTPRequestLimit
+			rateLimiter.Apple = ratelimit.AppleLimit
 		}
 	}
 
@@ -137,10 +137,10 @@ func New(_ *config.Config, deps Dependencies) *Server {
 			r.Post("/otp/request", h.RequestOTP)
 			r.Post("/otp/verify", h.VerifyOTP)
 			r.Post("/refresh", h.RefreshToken)
-			// Sign in with Apple is only registered when configured (verifier non-nil).
-			if deps.AppleVerifier != nil {
-				r.Post("/apple", h.AppleSignIn)
-			}
+			// Sign in with Apple is always registered: the handler returns
+			// 503 (apple_not_configured) when the verifier is nil, surfacing
+			// the contract instead of a 404.
+			r.Post("/apple", h.AppleSignIn)
 			r.With(h.AuthMiddleware).Post("/logout", h.Logout)
 			r.With(h.AuthMiddleware).Get("/me", h.Me)
 		})

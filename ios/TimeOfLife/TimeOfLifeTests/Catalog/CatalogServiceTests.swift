@@ -97,6 +97,61 @@ struct CatalogServiceTests {
         #expect(await queue.pending().isEmpty)
     }
 
+    @Test("entry-only delete commits locally and enqueues an entry DELETE after the window")
+    func entryOnlyDeleteCommits() async throws {
+        let dir = tempDir()
+        let entryStore = LocalTimerStore(url: dir.appendingPathComponent("timerQueue.json"))
+        let store = CatalogStore(directory: dir)
+        let repo = FakeCatalogRepository()
+        let queue = SyncQueue(url: dir)
+        let undo = UndoBuffer(scheduler: .manual)
+        let connectivity = MockConnectivity(connected: true)
+        let entriesRepo = FakeEntriesRepository()
+        let service = CatalogService(
+            store: store, repository: repo, syncQueue: queue, undoBuffer: undo,
+            connectivity: connectivity, entryStore: entryStore, entriesRepository: entriesRepo
+        )
+        let activity = TestCatalogFactory.activity()
+        let entry = TimeEntry(
+            id: UUID.v7(), activityId: activity.id, startedAt: Date(), endedAt: Date(), synced: true
+        )
+        try await entryStore.save(entry)
+
+        undo.record(.entryOnly(entry))
+        await undo.commit(now: Date().addingTimeInterval(31))
+
+        #expect(await entryStore.entryCount(forActivityId: activity.id) == 0)
+        let pending = await queue.pending()
+        #expect(pending.contains { $0.resource == .entry && $0.method == .delete })
+    }
+
+    @Test("undo restores the deleted entry in the local timer store")
+    func entryOnlyUndoRestores() async throws {
+        let dir = tempDir()
+        let entryStore = LocalTimerStore(url: dir.appendingPathComponent("timerQueue.json"))
+        let store = CatalogStore(directory: dir)
+        let repo = FakeCatalogRepository()
+        let queue = SyncQueue(url: dir)
+        let undo = UndoBuffer(scheduler: .manual)
+        let service = CatalogService(
+            store: store, repository: repo, syncQueue: queue, undoBuffer: undo,
+            connectivity: MockConnectivity(connected: true), entryStore: entryStore
+        )
+        let activity = TestCatalogFactory.activity()
+        let entry = TimeEntry(
+            id: UUID.v7(), activityId: activity.id, startedAt: Date(), endedAt: Date(), synced: true
+        )
+        try await entryStore.save(entry)
+        try await entryStore.delete(id: entry.id)
+        #expect(await entryStore.entryCount(forActivityId: activity.id) == 0)
+
+        undo.record(.entryOnly(entry))
+        let restored = await service.undo()
+
+        #expect(restored == .entryOnly(entry))
+        #expect(await entryStore.entryCount(forActivityId: activity.id) == 1)
+    }
+
     @Test("caseInsensitiveReuse returns an existing activity by trimmed, lowercased name")
     func caseInsensitiveReuse() async throws {
         let (service, store, _, _, _, _) = makeService(connected: true)
@@ -129,6 +184,33 @@ struct CatalogServiceTests {
         #expect(await store.activity(activity.id) != nil)
         #expect(await queue.pending().count == 1)
         #expect(!repo.calls.contains(.createActivity(activity)))
+    }
+
+    @Test("offline category create remains queued until connectivity returns")
+    func offlineCategoryCreate() async throws {
+        let (service, store, repo, queue, _, _) = makeService(connected: false)
+        let category = TestCatalogFactory.category()
+
+        try await service.createCategory(category)
+
+        #expect(await store.category(category.id) == category)
+        let pending = await queue.pending()
+        #expect(pending.count == 1)
+        #expect(pending.first?.resource == .category)
+        #expect(pending.first?.method == .create)
+        #expect(!repo.calls.contains(.createCategory(category)))
+    }
+
+    @Test("transient category create failure keeps its durable mutation")
+    func transientCategoryFailureRemainsQueued() async throws {
+        let (service, store, repo, queue, _, _) = makeService(connected: true)
+        let category = TestCatalogFactory.category()
+        repo.createCategoryError = APIError.transport(underlying: "connection reset")
+
+        try await service.createCategory(category)
+
+        #expect(await store.category(category.id) == category)
+        #expect(await queue.pending().count == 1)
     }
 
     @Test("reconnect drains the queue (syncOnReconnect)")

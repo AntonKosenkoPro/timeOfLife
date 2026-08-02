@@ -44,7 +44,7 @@ ios/       SwiftUI app (iOS 15+) — MVVM + Repository, keychain token storage
 
 ## Backend (`/backend`) — Go
 
-Stack: Go 1.22+, `go-chi/chi/v5`, `jackc/pgx/v5` (Postgres), `modernc.org/sqlite` (pure-Go, no CGO — for tests), `golang-jwt/jwt/v5`, `joho/godotenv`, `crypto/sha256`. Email via a `Sender` interface — `ConsoleSender` (prints the OTP code to stdout, dev/test) and `SESSender` (AWS SES, prod). No bcrypt (no passwords).
+Stack: Go 1.24, `go-chi/chi/v5`, `jackc/pgx/v5` (Postgres), `modernc.org/sqlite` (pure-Go, no CGO — for tests), `golang-jwt/jwt/v5`, `joho/godotenv`, `crypto/sha256`. Email via a `Sender` interface — `ConsoleSender` (prints the OTP code to stdout, dev/test) and `SESSender` (AWS SES, prod). No bcrypt (no passwords).
 
 ### Run (with Docker)
 ```bash
@@ -138,8 +138,8 @@ Errors use a uniform envelope: `{ "error": { "code", "message", "details": {} } 
 | POST | `/categories` | `{id,name,color}` | 201/200 `{category}` (idempotent on `id`) | `validation_error`, `category_exists`, `conflict` |
 | PATCH/DELETE | `/categories/{id}` | (PATCH) `{…,updated_at}` | 200 / 204 | `not_found`, `conflict`, `category_exists` |
 | GET  | `/entries` | (Bearer) | 200 `{items,next_cursor?}` (`?from=&to=&activity_id=&category_id=&limit=&cursor=`) | (401) |
-| POST | `/entries` | `{id,activity_id,started_at,ended_at?,notes?}` | 201/200 `{entry}` (idempotent on `id`; `activity_id` required) | `validation_error`, `activity_not_found`, `conflict` |
-| GET/PATCH/DELETE | `/entries/{id}` | (PATCH) `{started_at?,ended_at?,notes?,updated_at}` | 200 / 204 | `not_found`, `conflict` |
+| POST | `/entries` | `{id,activity_id,started_at,ended_at?}` | 201/200 `{entry}` (idempotent on `id`; `activity_id` required) | `validation_error`, `activity_not_found`, `conflict` |
+| GET/PATCH/DELETE | `/entries/{id}` | (PATCH) `{started_at?,ended_at?,updated_at}` | 200 / 204 | `not_found`, `conflict` |
 
 **Epic 1 (activity catalog & entries):** all `/activities`, `/categories`, `/entries` routes are Bearer-protected. Ids are **client-generated UUID v7** and `POST` is **idempotent on `id`** (offline create-then-sync). Writes use **last-write-wins on `updated_at`** (stale → 409 `conflict` with the server's version in `details`); deletes are hard (the client holds the 30 s undo buffer). Validation failures are 422 `validation_error` with `details` = `{field: message}`. **Suggestions are client-side** (F5) — there is no `/activities/suggestions` endpoint; the client ranks its synced activities by `last_used_at`. See the OpenAPI spec (v1.1.0) for full schemas.
 
@@ -182,7 +182,7 @@ iOS (Simulator, backend running):
 | R1 Secure auth storage | ✅ No passwords; OTP + refresh stored as SHA-256 hashes; tokens in Keychain on device |
 | S1 Mainstream tech | ✅ Go (chi + PostgreSQL) backend; Kafka deferred |
 | S2 Native UI SDK | ✅ SwiftUI |
-| S3 Test coverage | ✅ Go tests ≥90% on handlers/services + 118 iOS unit tests; logic-layer ~100%; coverage gating documented |
+| S3 Test coverage | ✅ Go tests ≥90% on handlers/services + 277 iOS unit tests; logic-layer ~100%; coverage gating documented |
 | S4 Run locally + cloud | ✅ docker-compose local, Dockerfile (Go multi-stage) for cloud deploy; deployed to GCP Compute Engine VM |
 | S5 Minimal + standardized code, revising each iteration | ✅ `.editorconfig`; standards + per-iteration checklist in `AGENTS.md` |
 | S6 Linters + analyzers guarantee quality | ✅ `golangci-lint` + `swiftlint` + `.editorconfig`; both pass with zero findings |
