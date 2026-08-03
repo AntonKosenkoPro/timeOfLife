@@ -194,22 +194,46 @@ actor CatalogStore: CatalogStoring {
     private func loadActivitiesLocked() throws -> [Activity] {
         guard FileManager.default.fileExists(atPath: activitiesURL.path) else { return [] }
         let data = try Data(contentsOf: activitiesURL)
-        return try JSONDecoder().decode([Activity].self, from: data)
+        do {
+            return try JSONDecoder().decode([Activity].self, from: data)
+        } catch {
+            let logger = Logger(subsystem: "com.timeoflife", category: "catalog")
+            let timestamp = ISO8601DateFormatter().string(from: Date())
+            let filename = "\(activitiesURL.deletingPathExtension().lastPathComponent).corrupted.\(timestamp).json"
+            let quarantinedURL = activitiesURL.deletingLastPathComponent()
+                .appendingPathComponent(filename)
+            logger.error("loadActivitiesLocked: corrupt catalog file detected: \(error.localizedDescription, privacy: .public)")
+            try FileManager.default.moveItem(at: activitiesURL, to: quarantinedURL)
+            logger.error("loadActivitiesLocked: quarantined corrupt catalog file at \(quarantinedURL.path, privacy: .public)")
+            return []
+        }
     }
 
     private func loadCategoriesLocked() throws -> [Category] {
         guard FileManager.default.fileExists(atPath: categoriesURL.path) else { return [] }
         let data = try Data(contentsOf: categoriesURL)
-        return try JSONDecoder().decode([Category].self, from: data)
+        do {
+            return try JSONDecoder().decode([Category].self, from: data)
+        } catch {
+            let logger = Logger(subsystem: "com.timeoflife", category: "catalog")
+            let timestamp = ISO8601DateFormatter().string(from: Date())
+            let filename = "\(categoriesURL.deletingPathExtension().lastPathComponent).corrupted.\(timestamp).json"
+            let quarantinedURL = categoriesURL.deletingLastPathComponent()
+                .appendingPathComponent(filename)
+            logger.error("loadCategoriesLocked: corrupt catalog file detected: \(error.localizedDescription, privacy: .public)")
+            try FileManager.default.moveItem(at: categoriesURL, to: quarantinedURL)
+            logger.error("loadCategoriesLocked: quarantined corrupt catalog file at \(quarantinedURL.path, privacy: .public)")
+            return []
+        }
     }
 
     private func saveActivitiesLocked(_ activities: [Activity]) throws {
         let data = try JSONEncoder().encode(activities)
-        try data.write(to: activitiesURL)
+        try data.write(to: activitiesURL, options: .atomic)
     }
 
     private func saveCategoriesLocked(_ categories: [Category]) throws {
         let data = try JSONEncoder().encode(categories)
-        try data.write(to: categoriesURL)
+        try data.write(to: categoriesURL, options: .atomic)
     }
 }

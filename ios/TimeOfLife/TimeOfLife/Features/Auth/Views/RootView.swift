@@ -1,4 +1,5 @@
 import SwiftUI
+import OSLog
 
 /// Root view. Decides between auth flow and signed-in placeholder based on
 /// `SessionStore`, and renders the offline banner.
@@ -25,7 +26,16 @@ struct RootView: View {
                     container.navigation.popToRoot()
                 } else if case .signedIn = newState {
                     container.navigation.popToRoot()
-                    Task { await container.catalogSeeder.seedIfNeeded() }
+                    os_log("RootView: signedIn, starting sync+pull+seed")
+                    Task {
+                        os_log("RootView: syncNow starting")
+                        await container.catalogService.syncNow()
+                        os_log("RootView: syncNow done, pullFromServer starting")
+                        await container.catalogService.pullFromServer()
+                        os_log("RootView: pullFromServer done, seedIfNeeded starting")
+                        await container.catalogSeeder.seedIfNeeded()
+                        os_log("RootView: seedIfNeeded done")
+                    }
                 }
             }
     }

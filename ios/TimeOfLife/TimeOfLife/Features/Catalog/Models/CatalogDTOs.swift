@@ -26,9 +26,9 @@ enum CatalogDateCoding {
         return fractionalDecoder.date(from: string) ?? plainDecoder.date(from: string)
     }
 
-    /// Formats a date as an RFC 3339 string.
+    /// Formats a date as an RFC 3339 string with fractional seconds.
     static func encode(_ date: Date) -> String {
-        makeFormatter(fractionalSeconds: false).string(from: date)
+        makeFormatter(fractionalSeconds: true).string(from: date)
     }
 
     /// Decodes a required date key from an RFC 3339 string.

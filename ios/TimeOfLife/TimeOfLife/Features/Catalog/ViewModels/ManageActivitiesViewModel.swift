@@ -1,5 +1,6 @@
 import Combine
 import Foundation
+import OSLog
 
 struct UndoToastState: Equatable, Sendable {
     let message: String
@@ -68,15 +69,18 @@ final class ManageActivitiesViewModel: ObservableObject {
         serviceCancellable = service.$storeRevision
             .dropFirst()
             .sink { [weak self] _ in
-                Task { @MainActor in await self?.refreshConflict() }
+                Task { @MainActor in await self?.onStoreRevisionChanged() }
             }
     }
 
     func load() async {
+        os_log("ManageActivitiesViewModel.load: starting")
         isLoading = true
         activities = await store.activitiesSortedByLastUsedAt()
             .filter { !undoBuffer.heldIds.contains($0.id) }
-        categories = await store.loadCategories()
+        let cats = await store.loadCategories()
+        categories = cats
+        os_log("ManageActivitiesViewModel.load: loaded %d activities, %d categories", activities.count, cats.count)
         isLoading = false
     }
 
@@ -174,13 +178,14 @@ final class ManageActivitiesViewModel: ObservableObject {
         Task { await performUndo() }
     }
 
-    private func refreshConflict() async {
+    private func onStoreRevisionChanged() async {
         let conflictedIds = service.consumeActivityConflicts()
-        guard !conflictedIds.isEmpty else { return }
+        os_log("ManageActivitiesViewModel.onStoreRevisionChanged: conflictedIds=%d", conflictedIds.count)
         let updated = await store.activitiesSortedByLastUsedAt()
             .filter { !undoBuffer.heldIds.contains($0.id) }
+        os_log("ManageActivitiesViewModel.onStoreRevisionChanged: updating activities to %d items", updated.count)
         activities = updated
-        if updated.contains(where: { conflictedIds.contains($0.id) }) {
+        if !conflictedIds.isEmpty && updated.contains(where: { conflictedIds.contains($0.id) }) {
             errorMessage = L10n.errorConflict.text
         }
     }

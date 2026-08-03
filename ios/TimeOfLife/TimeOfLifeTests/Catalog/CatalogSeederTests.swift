@@ -18,13 +18,13 @@ struct CatalogSeederTests {
         #expect(creates.count == 7)
         #expect(creates.map(\.name) == ["Work", "Hobby", "Sport", "Education", "Relax", "Sleep", "Entertainment"])
         #expect(creates.map(\.icon) == [.briefcase, .paintbrush, .figureRun, .book, .cupAndSaucer, .bedDouble, .tv])
-        #expect(cache.categoriesSeeded)
+        #expect(cache.categoriesSeeded(for: Self.userId))
     }
 
     @Test("a seeded flag makes relaunch idempotent")
     func flagGatesSecondRun() async {
         let (seeder, repository, cache) = make(locale: "en")
-        cache.categoriesSeeded = true
+        cache.setCategoriesSeeded(true, for: Self.userId)
 
         await seeder.seedIfNeeded()
 
@@ -53,7 +53,7 @@ struct CatalogSeederTests {
 
         await seeder.seedIfNeeded()
 
-        #expect(cache.categoriesSeeded)
+        #expect(cache.categoriesSeeded(for: Self.userId))
     }
 
     @Test("an offline request stays queued and completes seeding locally")
@@ -63,7 +63,7 @@ struct CatalogSeederTests {
 
         await seeder.seedIfNeeded()
 
-        #expect(cache.categoriesSeeded)
+        #expect(cache.categoriesSeeded(for: Self.userId))
         #expect(repository.calls.count == 7)
     }
 
@@ -74,7 +74,7 @@ struct CatalogSeederTests {
 
         await seeder.seedIfNeeded()
 
-        #expect(cache.categoriesSeeded)
+        #expect(cache.categoriesSeeded(for: Self.userId))
         #expect(repository.calls.count == 8) // Seven seeds plus one queued retry.
     }
 
@@ -96,6 +96,7 @@ struct CatalogSeederTests {
         let defaults = UserDefaults(suiteName: suite)!
         defaults.removePersistentDomain(forName: suite)
         let cache = SessionCache(defaults: defaults)
+        cache.save(CachedSession(id: Self.userId, email: "test@example.com", emailVerified: true))
         let store = MockCatalogStore()
         let repository = FakeCatalogRepository()
         let queue = SyncQueue(
@@ -120,4 +121,6 @@ struct CatalogSeederTests {
         )
         return (seeder, repository, cache)
     }
+
+    private static let userId = "user-id"
 }

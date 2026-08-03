@@ -186,6 +186,168 @@ struct TimerViewModelTests {
         #expect(await counter.entryCount(forActivityId: UUID()) == 0)
     }
 
+    // MARK: - Permanent error handling
+
+    @Test("validation_error marks entry syncFailed and does not retry")
+    func validationErrorMarksFailed() async throws {
+        let connectivity = MockConnectivity(connected: false)
+        let store = LocalTimerStore(url: temporaryStoreURL())
+        let repository = FakeEntriesRepository()
+        repository.createError = APIError.server(code: "validation_error", message: "ended_at must be after started_at")
+        let service = TimerService(
+            store: store, repository: repository, connectivity: connectivity, retryDelay: 0
+        )
+        let entry = TimeEntry(
+            id: UUID.v7(), activityId: UUID(), startedAt: Date(), endedAt: Date(), synced: false
+        )
+        try await store.save(entry)
+        connectivity.isConnected = true
+
+        for _ in 0..<20 where repository.calls.isEmpty {
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+
+        let unsynced = await store.unsyncedEntries()
+        #expect(unsynced.isEmpty)
+        #expect(repository.calls.count == 1)
+    }
+
+    @Test("offline error schedules retry and leaves entry unsynced")
+    func offlineErrorSchedulesRetry() async throws {
+        let connectivity = MockConnectivity(connected: true)
+        let store = LocalTimerStore(url: temporaryStoreURL())
+        let repository = FakeEntriesRepository()
+        repository.createError = APIError.offline
+        let service = TimerService(
+            store: store, repository: repository, connectivity: connectivity, retryDelay: 0
+        )
+        let entry = TimeEntry(
+            id: UUID.v7(), activityId: UUID(), startedAt: Date(), endedAt: Date(), synced: false
+        )
+        try await store.save(entry)
+
+        try? await service.syncUnsyncedEntries()
+
+        let unsynced = await store.unsyncedEntries()
+        #expect(unsynced.count == 1)
+        #expect(repository.calls.count == 1)
+    }
+
+    @Test("transport error schedules retry and leaves entry unsynced")
+    func transportErrorSchedulesRetry() async throws {
+        let connectivity = MockConnectivity(connected: true)
+        let store = LocalTimerStore(url: temporaryStoreURL())
+        let repository = FakeEntriesRepository()
+        repository.createError = APIError.transport(underlying: "timeout")
+        let service = TimerService(
+            store: store, repository: repository, connectivity: connectivity, retryDelay: 0
+        )
+        let entry = TimeEntry(
+            id: UUID.v7(), activityId: UUID(), startedAt: Date(), endedAt: Date(), synced: false
+        )
+        try await store.save(entry)
+
+        try? await service.syncUnsyncedEntries()
+
+        let unsynced = await store.unsyncedEntries()
+        #expect(unsynced.count == 1)
+        #expect(repository.calls.count == 1)
+    }
+
+    @Test("activity_not_found increments attempts and leaves entry unsynced")
+    func activityNotFoundLeavesUnsynced() async throws {
+        let connectivity = MockConnectivity(connected: false)
+        let store = LocalTimerStore(url: temporaryStoreURL())
+        let repository = FakeEntriesRepository()
+        repository.createError = APIError.server(code: "activity_not_found", message: "Activity not found")
+        let service = TimerService(
+            store: store, repository: repository, connectivity: connectivity, retryDelay: 0
+        )
+        let entry = TimeEntry(
+            id: UUID.v7(), activityId: UUID(), startedAt: Date(), endedAt: Date(), synced: false
+        )
+        try await store.save(entry)
+        connectivity.isConnected = true
+
+        for _ in 0..<20 where repository.calls.isEmpty {
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+
+        let unsynced = await store.unsyncedEntries()
+        #expect(unsynced.count == 1)
+        #expect(unsynced.first?.syncAttempts == 1)
+        #expect(repository.calls.count == 1)
+    }
+
+    @Test("activity_not_found marks syncFailed after max attempts")
+    func activityNotFoundMaxAttemptsFails() async throws {
+        let connectivity = MockConnectivity(connected: false)
+        let store = LocalTimerStore(url: temporaryStoreURL())
+        let repository = FakeEntriesRepository()
+        repository.createError = APIError.server(code: "activity_not_found", message: "Activity not found")
+        let service = TimerService(
+            store: store, repository: repository, connectivity: connectivity, retryDelay: 0
+        )
+        let entry = TimeEntry(
+            id: UUID.v7(), activityId: UUID(), startedAt: Date(), endedAt: Date(),
+            synced: false, syncAttempts: TimeEntry.maxSyncAttempts - 1
+        )
+        try await store.save(entry)
+        connectivity.isConnected = true
+
+        for _ in 0..<20 where repository.calls.isEmpty {
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+
+        let unsynced = await store.unsyncedEntries()
+        #expect(unsynced.isEmpty)
+        #expect(repository.calls.count == 1)
+    }
+
+    @Test("TimeEntry syncFailed defaults to false and round-trips Codable")
+    func syncFailedRoundTrip() throws {
+        let entry = TimeEntry(
+            id: UUID.v7(), activityId: UUID(), startedAt: Date(), endedAt: Date(), synced: false
+        )
+        #expect(entry.syncFailed == false)
+        #expect(entry.syncAttempts == 0)
+
+        let failed = entry.markSyncFailed()
+        #expect(failed.syncFailed == true)
+        #expect(failed.synced == false)
+
+        let data = try JSONEncoder().encode(failed)
+        let decoded = try JSONDecoder().decode(TimeEntry.self, from: data)
+        #expect(decoded.syncFailed == true)
+    }
+
+    @Test("TimeEntry syncAttempts round-trips Codable and increments")
+    func syncAttemptsRoundTrip() throws {
+        let entry = TimeEntry(
+            id: UUID.v7(), activityId: UUID(), startedAt: Date(), endedAt: Date(),
+            synced: false, syncAttempts: 5
+        )
+        #expect(entry.syncAttempts == 5)
+
+        let incremented = entry.incrementSyncAttempts()
+        #expect(incremented.syncAttempts == 6)
+
+        let data = try JSONEncoder().encode(incremented)
+        let decoded = try JSONDecoder().decode(TimeEntry.self, from: data)
+        #expect(decoded.syncAttempts == 6)
+    }
+
+    @Test("TimeEntry markSynced preserves syncFailed")
+    func markSyncedPreservesSyncFailed() throws {
+        let failed = TimeEntry(
+            id: UUID.v7(), activityId: UUID(), startedAt: Date(), endedAt: Date(),
+            synced: false, syncFailed: true
+        )
+        let synced = failed.markSynced()
+        #expect(synced.synced == true)
+        #expect(synced.syncFailed == true)
+    }
+
     // MARK: - Helpers
 
     private func makeViewModel(connected: Bool = true) -> TimerViewModel {

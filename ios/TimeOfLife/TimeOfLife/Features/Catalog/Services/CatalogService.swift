@@ -206,6 +206,7 @@ final class CatalogService: ObservableObject {
     /// Drains the queue now (no-op while offline). Called after each optimistic
     /// mutation and on reconnect.
     func syncNow() async {
+        os_log("syncNow: starting")
         let conflicts = await syncQueue.replay(
             using: repository,
             store: store,
@@ -213,9 +214,34 @@ final class CatalogService: ObservableObject {
             entryStore: entryStore,
             entriesRepository: entriesRepository
         )
+        os_log("syncNow: conflicts=%d, storeRevision before bump=%llu", conflicts.count, storeRevision)
         conflictedActivityIds.formUnion(conflicts)
         storeRevision &+= 1
+        os_log("syncNow: done, storeRevision=%llu", storeRevision)
         await onSyncCompleted?()
+    }
+
+    /// Fetches the full catalog from the server and merges into the local store.
+    /// Server-wins per record (LWW by updated_at). Call after syncNow() so pending
+    /// local mutations are pushed first.
+    func pullFromServer() async {
+        guard connectivity.isConnected else { os_log("pullFromServer: offline, skipping"); return }
+        do {
+            let categories = try await repository.listCategories()
+            os_log("pullFromServer: fetched %d categories", categories.count)
+            for category in categories {
+                await store.upsertCategory(category)
+            }
+            let activities = try await repository.listActivities(query: nil)
+            os_log("pullFromServer: fetched %d activities", activities.count)
+            for activity in activities {
+                await store.upsertActivity(activity)
+            }
+            storeRevision &+= 1
+            os_log("pullFromServer: done, storeRevision=%llu", storeRevision)
+        } catch {
+            os_log(.error, "pullFromServer failed: %{public}@", error.localizedDescription)
+        }
     }
 
     func consumeActivityConflicts() -> Set<UUID> {

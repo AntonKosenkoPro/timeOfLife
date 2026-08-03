@@ -17,5 +17,18 @@
       "model": "opencode-go/kimi-k3",
       "reasoningEffort": "max"
     }
+  },
+  "mcp": {
+    "argent": {
+      "type": "local",
+      "command": [
+        "argent",
+        "mcp"
+      ],
+      "enabled": true
+    }
+  },
+  "tools": {
+    "argent*": true
   }
 }

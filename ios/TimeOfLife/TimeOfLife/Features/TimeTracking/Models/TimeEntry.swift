@@ -5,6 +5,13 @@ import Foundation
 /// `synced` is false while the entry is stored locally only; it flips to true
 /// after the remote repository confirms persistence.
 ///
+/// `syncFailed` is true when the entry received a permanent server error
+/// (e.g. `validation_error`) and should not be retried automatically.
+///
+/// `syncAttempts` counts how many times a deferrable permanent error
+/// (e.g. `activity_not_found`) has been retried. After `maxSyncAttempts`
+/// the entry is marked `syncFailed` to stop the deferral loop.
+///
 /// `activityId` links to the `Activity` catalog. `categories` is optional and
 /// resolved at query time (nil while offline-only).
 struct TimeEntry: Identifiable, Codable, Equatable, Sendable {
@@ -13,7 +20,11 @@ struct TimeEntry: Identifiable, Codable, Equatable, Sendable {
     let startedAt: Date
     let endedAt: Date
     let synced: Bool
+    let syncFailed: Bool
+    let syncAttempts: Int
     var categories: [Category]?
+
+    static let maxSyncAttempts = 10
 
     var duration: TimeInterval {
         endedAt.timeIntervalSince(startedAt)
@@ -26,6 +37,34 @@ struct TimeEntry: Identifiable, Codable, Equatable, Sendable {
             startedAt: startedAt,
             endedAt: endedAt,
             synced: true,
+            syncFailed: syncFailed,
+            syncAttempts: syncAttempts,
+            categories: categories
+        )
+    }
+
+    func markSyncFailed() -> Self {
+        Self(
+            id: id,
+            activityId: activityId,
+            startedAt: startedAt,
+            endedAt: endedAt,
+            synced: synced,
+            syncFailed: true,
+            syncAttempts: syncAttempts,
+            categories: categories
+        )
+    }
+
+    func incrementSyncAttempts() -> Self {
+        Self(
+            id: id,
+            activityId: activityId,
+            startedAt: startedAt,
+            endedAt: endedAt,
+            synced: synced,
+            syncFailed: syncFailed,
+            syncAttempts: syncAttempts + 1,
             categories: categories
         )
     }
@@ -33,7 +72,8 @@ struct TimeEntry: Identifiable, Codable, Equatable, Sendable {
     func replacingActivityId(with activityId: UUID) -> Self {
         Self(
             id: id, activityId: activityId, startedAt: startedAt,
-            endedAt: endedAt, synced: synced, categories: categories
+            endedAt: endedAt, synced: synced, syncFailed: syncFailed,
+            syncAttempts: syncAttempts, categories: categories
         )
     }
 
@@ -43,6 +83,8 @@ struct TimeEntry: Identifiable, Codable, Equatable, Sendable {
         case startedAt = "started_at"
         case endedAt = "ended_at"
         case synced
+        case syncFailed = "sync_failed"
+        case syncAttempts = "sync_attempts"
         case categories
     }
 
@@ -52,6 +94,8 @@ struct TimeEntry: Identifiable, Codable, Equatable, Sendable {
         startedAt: Date,
         endedAt: Date,
         synced: Bool,
+        syncFailed: Bool = false,
+        syncAttempts: Int = 0,
         categories: [Category]? = nil
     ) {
         self.id = id
@@ -59,6 +103,8 @@ struct TimeEntry: Identifiable, Codable, Equatable, Sendable {
         self.startedAt = startedAt
         self.endedAt = endedAt
         self.synced = synced
+        self.syncFailed = syncFailed
+        self.syncAttempts = syncAttempts
         self.categories = categories
     }
 
@@ -69,6 +115,8 @@ struct TimeEntry: Identifiable, Codable, Equatable, Sendable {
         self.startedAt = try c.decode(Date.self, forKey: .startedAt)
         self.endedAt = try c.decode(Date.self, forKey: .endedAt)
         self.synced = try c.decode(Bool.self, forKey: .synced)
+        self.syncFailed = try c.decodeIfPresent(Bool.self, forKey: .syncFailed) ?? false
+        self.syncAttempts = try c.decodeIfPresent(Int.self, forKey: .syncAttempts) ?? 0
         self.categories = try c.decodeIfPresent([Category].self, forKey: .categories)
     }
 
@@ -79,6 +127,8 @@ struct TimeEntry: Identifiable, Codable, Equatable, Sendable {
         try c.encode(startedAt, forKey: .startedAt)
         try c.encode(endedAt, forKey: .endedAt)
         try c.encode(synced, forKey: .synced)
+        try c.encode(syncFailed, forKey: .syncFailed)
+        try c.encode(syncAttempts, forKey: .syncAttempts)
         try c.encodeIfPresent(categories, forKey: .categories)
     }
 }

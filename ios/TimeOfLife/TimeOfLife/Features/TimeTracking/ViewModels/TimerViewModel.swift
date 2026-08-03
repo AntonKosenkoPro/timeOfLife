@@ -39,7 +39,7 @@ final class TimerViewModel: ObservableObject {
     private let connectivity: Connectivity
     private var startDate: Date?
     private var timerCancellable: AnyCancellable?
-    private var storeCancellable: AnyCancellable?
+    private var cancellables: Set<AnyCancellable> = []
     private var knownActivities: [Activity] = []
 
     /// Whether suggestions should be shown: field is focused, not running,
@@ -66,11 +66,12 @@ final class TimerViewModel: ObservableObject {
         self.catalogService = catalogService
 
         // Observe catalog store changes to keep suggestions fresh.
-        storeCancellable = catalogService.$storeRevision
+        catalogService.$storeRevision
             .dropFirst()
             .sink { [weak self] _ in
                 Task { @MainActor in await self?.refreshSuggestions() }
             }
+            .store(in: &cancellables)
     }
 
     /// Refreshes suggestions from the local catalog store.

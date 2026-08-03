@@ -147,6 +147,23 @@ struct CatalogModelsTests {
         #expect(object["id"] != nil)
     }
 
+    // MARK: - Date coding
+
+    @Test("CatalogDateCoding.encode preserves fractional seconds")
+    func encodePreservesFractionalSeconds() throws {
+        let date = Date(timeIntervalSince1970: 1_785_626_400.123)
+        let encoded = CatalogDateCoding.encode(date)
+        #expect(encoded.contains("."))
+        #expect(encoded.hasSuffix("Z"))
+    }
+
+    @Test("CatalogDateCoding.encode differentiates sub-second dates")
+    func encodeDifferentiatesSubSecondDates() throws {
+        let a = Date(timeIntervalSince1970: 1_785_626_400.1)
+        let b = Date(timeIntervalSince1970: 1_785_626_400.5)
+        #expect(CatalogDateCoding.encode(a) != CatalogDateCoding.encode(b))
+    }
+
     // MARK: - Validator
 
     @Test("name validation: empty and too-long")

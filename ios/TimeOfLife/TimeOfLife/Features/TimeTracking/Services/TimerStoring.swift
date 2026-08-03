@@ -8,6 +8,8 @@ protocol TimerStoring: Sendable {
     func latestEntry(forActivityId id: UUID) async -> TimeEntry?
     func delete(id: UUID) async throws
     func markSynced(_ entry: TimeEntry) async throws
+    func markSyncFailed(_ entry: TimeEntry) async throws
+    func incrementSyncAttempts(_ entry: TimeEntry) async throws
     func replaceActivityId(from oldId: UUID, to newId: UUID) async throws
 }
 
@@ -37,7 +39,7 @@ actor LocalTimerStore: TimerStoring {
 
     func unsyncedEntries() async -> [TimeEntry] {
         guard let entries = try? loadEntries() else { return [] }
-        return entries.filter { !$0.synced }
+        return entries.filter { !$0.synced && !$0.syncFailed }
     }
 
     func entryCount(forActivityId id: UUID) async -> Int {
@@ -58,6 +60,20 @@ actor LocalTimerStore: TimerStoring {
         var entries = try loadEntries()
         guard let index = entries.firstIndex(where: { $0.id == entry.id }) else { return }
         entries[index] = entries[index].markSynced()
+        try saveEntries(entries)
+    }
+
+    func markSyncFailed(_ entry: TimeEntry) async throws {
+        var entries = try loadEntries()
+        guard let index = entries.firstIndex(where: { $0.id == entry.id }) else { return }
+        entries[index] = entries[index].markSyncFailed()
+        try saveEntries(entries)
+    }
+
+    func incrementSyncAttempts(_ entry: TimeEntry) async throws {
+        var entries = try loadEntries()
+        guard let index = entries.firstIndex(where: { $0.id == entry.id }) else { return }
+        entries[index] = entries[index].incrementSyncAttempts()
         try saveEntries(entries)
     }
 

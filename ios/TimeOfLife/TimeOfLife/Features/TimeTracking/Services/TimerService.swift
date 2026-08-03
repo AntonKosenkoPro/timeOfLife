@@ -68,7 +68,9 @@ final class TimerService: ObservableObject {
             try await repository.create(entry)
             try await store.markSynced(entry)
         } catch {
-            scheduleRetry()
+            if !isPermanentError(error) {
+                scheduleRetry()
+            }
             throw error
         }
     }
@@ -92,10 +94,28 @@ final class TimerService: ObservableObject {
                     try await repository.create(entry)
                     try await store.markSynced(entry)
                 } catch {
+                    if let api = error as? APIError,
+                       case let .server(code, _, _) = api,
+                       code == "validation_error" {
+                        Self.log.warning("marking entry \(entry.id.uuidString) syncFailed after validation_error: \(error.localizedDescription)")
+                        try? await store.markSyncFailed(entry)
+                        continue
+                    }
+                    if let api = error as? APIError,
+                       case let .server(code, _, _) = api,
+                       code == "activity_not_found" {
+                        let attempts = entry.syncAttempts + 1
+                        if attempts >= TimeEntry.maxSyncAttempts {
+                            Self.log.warning("marking entry \(entry.id.uuidString) syncFailed after \(attempts) activity_not_found attempts")
+                            try? await store.markSyncFailed(entry)
+                        } else {
+                            Self.log.warning("deferring entry \(entry.id.uuidString) after activity_not_found (attempt \(attempts)/\(TimeEntry.maxSyncAttempts)): \(error.localizedDescription)")
+                            try? await store.incrementSyncAttempts(entry)
+                        }
+                        continue
+                    }
                     if isPermanentError(error) {
                         Self.log.warning("deferring entry \(entry.id.uuidString) after permanent error: \(error.localizedDescription)")
-                        // Leave the entry unsynced — it will be retried on the
-                        // next catalog sync completion (onSyncCompleted hook).
                         continue
                     }
                     shouldRetry = true

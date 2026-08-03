@@ -37,7 +37,12 @@ final class CatalogSeeder {
     }
 
     func seedIfNeeded() async {
-        guard !sessionCache.categoriesSeeded, !isSeeding else { return }
+        guard let userId = sessionCache.load()?.id else { return }
+        guard !sessionCache.categoriesSeeded(for: userId), !isSeeding else { return }
+        if !(await service.store.loadCategories()).isEmpty {
+            sessionCache.setCategoriesSeeded(true, for: userId)
+            return
+        }
         isSeeding = true
         defer { isSeeding = false }
 
@@ -66,7 +71,7 @@ final class CatalogSeeder {
             }
         }
 
-        sessionCache.categoriesSeeded = true
+        sessionCache.setCategoriesSeeded(true, for: userId)
     }
 
     private func existingCategory(id: UUID, name: String, fallback: Category) async -> Category {
