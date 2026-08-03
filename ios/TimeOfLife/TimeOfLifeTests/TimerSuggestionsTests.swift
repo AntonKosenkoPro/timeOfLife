@@ -17,8 +17,6 @@ struct TimerSuggestionsTests {
         Activity(
             id: id,
             name: name,
-            color: .blue,
-            icon: .clock,
             notes: nil,
             lastUsedAt: lastUsedAt,
             categoryIds: [],

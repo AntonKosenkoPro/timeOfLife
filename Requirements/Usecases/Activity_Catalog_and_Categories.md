@@ -6,32 +6,32 @@ Narrative flows for **Epic 1: Activity Catalog & Categories**. Each flow maps to
 
 1. The user signs in and lands on the timer screen for the first time.
 2. The app seeds a localized (EN or RU per device language) starter set of 7 categories: Work, Hobby, Sport, Education, Relax, Sleep, Entertainment. No starter activities are seeded.
-3. The seeded categories are ordinary records; the user can rename, recolor, or delete any of them later.
+3. The seeded categories are ordinary records; the user can rename, change their icons, or delete any of them later.
 
 ## 2. Start a timer from a suggestion
 
-1. On the timer screen, the user sees their 3–5 most recently used activities as tappable suggestions (color + icon), ranked on-device from the local catalog by `last_used_at` — no server round-trip, works offline.
+1. On the timer screen, the user sees their 3–5 most recently used activities as tappable suggestions with the first category's icon and comma-separated category names, ranked on-device from the local catalog by `last_used_at` — no server round-trip, works offline.
 2. The user taps a suggestion; the activity name is prefilled into the activity field and the activity is linked to the upcoming entry.
 3. The user taps **Start**; the timer runs and the entry is recorded against the selected activity (and its category tags).
 
 ## 3. Start a timer with a brand-new name (auto-create)
 
 1. The user types a name that does not match any existing activity (case-insensitive) and taps **Start**.
-2. The app auto-creates a new activity with that name (default color/icon, no tags) and links the entry to it.
+2. The app auto-creates a new activity with that name and no categories, then links the entry to it.
 3. The new activity now appears in suggestions on future sessions.
 4. If the typed name matches an existing activity (case-insensitive, whitespace-trimmed), the existing activity is reused — no duplicate is created.
 
 ## 4. Quick-add an activity from the timer
 
 1. The user opens the quick-add sheet from the timer screen.
-2. The user enters a name, picks a color and an SF Symbol icon, optionally adds notes and category tags, and saves.
+2. The user enters a name, optionally adds notes and category tags, and saves.
 3. The sheet closes; the new activity is selected on the timer and linked to the upcoming entry.
 
 ## 5. Manage activities and categories
 
 1. The user opens the **Manage Activities** screen.
-2. The user sees all activities (with color, icon, and category tags), ordered by most-recently-used, and can edit or delete them, and can create/edit/delete categories. No manual reorder is offered at MVP.
-3. Editing an activity updates its name/color/icon/notes/tags; existing past entries reflect the new color/icon/tags at query time (entries store an `activity_id`, not a snapshot, while the activity exists).
+2. The user sees all activities with their first category's icon and comma-separated category names, ordered by most-recently-used, and can edit or delete them, and can create/edit/delete categories. No manual reorder is offered at MVP.
+3. Editing an activity updates its name/notes/categories; existing past entries reflect the current category-derived representation at query time (entries store an `activity_id`, not a snapshot, while the activity exists).
 
 ## 6. Delete an activity that has history
 

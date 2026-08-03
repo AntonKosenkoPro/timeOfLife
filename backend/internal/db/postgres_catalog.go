@@ -54,11 +54,11 @@ func (s *PostgresStore) pgListActivityTagsBatch(ctx context.Context, userID stri
 		return out, nil
 	}
 	rows, err := s.pool.Query(ctx, `
-		SELECT ac.activity_id, c.id, c.name, c.color
+		SELECT ac.activity_id, c.id, c.name, c.icon
 		FROM activity_categories ac
 		JOIN categories c ON c.id = ac.category_id
 		WHERE c.user_id = $1 AND ac.activity_id = ANY($2)
-		ORDER BY c.name
+		ORDER BY ac.position, c.name
 	`, userID, activityIDs)
 	if err != nil {
 		return nil, fmt.Errorf("list activity tags: %w", err)
@@ -67,7 +67,7 @@ func (s *PostgresStore) pgListActivityTagsBatch(ctx context.Context, userID stri
 	for rows.Next() {
 		var activityID string
 		var t CategoryTag
-		if err := rows.Scan(&activityID, &t.ID, &t.Name, &t.Color); err != nil {
+		if err := rows.Scan(&activityID, &t.ID, &t.Name, &t.Icon); err != nil {
 			return nil, fmt.Errorf("list activity tags scan: %w", err)
 		}
 		out[activityID] = append(out[activityID], t)
@@ -141,14 +141,14 @@ func (s *PostgresStore) ListActivities(ctx context.Context, userID, q string) ([
 	var err error
 	if q != "" {
 		rows, err = s.pool.Query(ctx, `
-			SELECT id, name, color, icon, notes, last_used_at, created_at, updated_at
+			SELECT id, name, notes, last_used_at, created_at, updated_at
 			FROM activities
 			WHERE user_id = $1 AND lower(name) LIKE $2
 			ORDER BY (last_used_at IS NULL), last_used_at DESC, updated_at DESC
 		`, userID, "%"+strings.ToLower(q)+"%")
 	} else {
 		rows, err = s.pool.Query(ctx, `
-			SELECT id, name, color, icon, notes, last_used_at, created_at, updated_at
+			SELECT id, name, notes, last_used_at, created_at, updated_at
 			FROM activities
 			WHERE user_id = $1
 			ORDER BY (last_used_at IS NULL), last_used_at DESC, updated_at DESC
@@ -164,7 +164,7 @@ func (s *PostgresStore) ListActivities(ctx context.Context, userID, q string) ([
 		var a Activity
 		var notes *string
 		var lastUsed *time.Time
-		if err := rows.Scan(&a.ID, &a.Name, &a.Color, &a.Icon, &notes, &lastUsed, &a.CreatedAt, &a.UpdatedAt); err != nil {
+		if err := rows.Scan(&a.ID, &a.Name, &notes, &lastUsed, &a.CreatedAt, &a.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("list activities scan: %w", err)
 		}
 		a.UserID = userID
@@ -207,10 +207,10 @@ func (s *PostgresStore) pgGetActivityRow(ctx context.Context, userID, id string)
 	var notes *string
 	var lastUsed *time.Time
 	err := s.pool.QueryRow(ctx, `
-		SELECT id, name, color, icon, notes, last_used_at, created_at, updated_at
+		SELECT id, name, notes, last_used_at, created_at, updated_at
 		FROM activities
 		WHERE user_id = $1 AND id = $2
-	`, userID, id).Scan(&a.ID, &a.Name, &a.Color, &a.Icon, &notes, &lastUsed, &a.CreatedAt, &a.UpdatedAt)
+	`, userID, id).Scan(&a.ID, &a.Name, &notes, &lastUsed, &a.CreatedAt, &a.UpdatedAt)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return Activity{}, fmt.Errorf("get activity: %w", ErrNotFound)
@@ -230,10 +230,10 @@ func (s *PostgresStore) pgGetActivityRowByName(ctx context.Context, userID, name
 	var notes *string
 	var lastUsed *time.Time
 	err := s.pool.QueryRow(ctx, `
-		SELECT id, name, color, icon, notes, last_used_at, created_at, updated_at
+		SELECT id, name, notes, last_used_at, created_at, updated_at
 		FROM activities
 		WHERE user_id = $1 AND lower(name) = lower($2)
-	`, userID, name).Scan(&a.ID, &a.Name, &a.Color, &a.Icon, &notes, &lastUsed, &a.CreatedAt, &a.UpdatedAt)
+	`, userID, name).Scan(&a.ID, &a.Name, &notes, &lastUsed, &a.CreatedAt, &a.UpdatedAt)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return Activity{}, fmt.Errorf("get activity by name: %w", ErrNotFound)
@@ -273,9 +273,9 @@ func (s *PostgresStore) CreateActivity(ctx context.Context, a Activity, category
 
 	now := time.Now().UTC()
 	if _, err := s.pool.Exec(ctx, `
-		INSERT INTO activities (id, user_id, name, color, icon, notes, last_used_at, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $8)
-	`, a.ID, a.UserID, a.Name, a.Color, a.Icon, pgStrPtr(a.Notes), a.LastUsedAt, now); err != nil {
+		INSERT INTO activities (id, user_id, name, notes, last_used_at, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $6)
+	`, a.ID, a.UserID, a.Name, pgStrPtr(a.Notes), a.LastUsedAt, now); err != nil {
 		if pgIsUniqueViolation(err) {
 			if clash, err2 := s.pgGetActivityRowByName(ctx, a.UserID, a.Name); err2 == nil {
 				return clash, false, fmt.Errorf("create activity: %w", ErrActivityExists)
@@ -306,12 +306,6 @@ func (s *PostgresStore) UpdateActivity(ctx context.Context, userID, id string, p
 	}
 	if p.Name != nil {
 		add("name", *p.Name)
-	}
-	if p.Color != nil {
-		add("color", *p.Color)
-	}
-	if p.Icon != nil {
-		add("icon", *p.Icon)
 	}
 	if p.Notes != nil {
 		add("notes", pgStrPtr(*p.Notes))
@@ -347,7 +341,7 @@ func (s *PostgresStore) UpdateActivity(ctx context.Context, userID, id string, p
 	return s.GetActivity(ctx, userID, id)
 }
 
-func (s *PostgresStore) pgReplaceActivityCategories(ctx context.Context, userID, activityID string, categoryIDs []string) error {
+func (s *PostgresStore) pgReplaceActivityCategories(ctx context.Context, userID, activityID string, orderedIDs []string) error {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("replace activity categories begin: %w", err)
@@ -358,7 +352,7 @@ func (s *PostgresStore) pgReplaceActivityCategories(ctx context.Context, userID,
 		return fmt.Errorf("replace activity categories delete: %w", err)
 	}
 	seen := map[string]bool{}
-	for _, cid := range categoryIDs {
+	for i, cid := range orderedIDs {
 		if cid == "" || seen[cid] {
 			continue
 		}
@@ -370,7 +364,7 @@ func (s *PostgresStore) pgReplaceActivityCategories(ctx context.Context, userID,
 			}
 			return fmt.Errorf("replace activity categories check: %w", err)
 		}
-		if _, err := tx.Exec(ctx, `INSERT INTO activity_categories (activity_id, category_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`, activityID, cid); err != nil {
+		if _, err := tx.Exec(ctx, `INSERT INTO activity_categories (activity_id, category_id, position) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`, activityID, cid, i); err != nil {
 			return fmt.Errorf("replace activity categories insert: %w", err)
 		}
 	}
@@ -412,7 +406,7 @@ func (s *PostgresStore) DeleteActivity(ctx context.Context, userID, id string) e
 // ListCategories returns the user's categories ordered by name.
 func (s *PostgresStore) ListCategories(ctx context.Context, userID string) ([]Category, error) {
 	rows, err := s.pool.Query(ctx, `
-		SELECT id, name, color, created_at, updated_at
+		SELECT id, name, icon, created_at, updated_at
 		FROM categories
 		WHERE user_id = $1
 		ORDER BY lower(name)
@@ -424,7 +418,7 @@ func (s *PostgresStore) ListCategories(ctx context.Context, userID string) ([]Ca
 	var out []Category
 	for rows.Next() {
 		var c Category
-		if err := rows.Scan(&c.ID, &c.Name, &c.Color, &c.CreatedAt, &c.UpdatedAt); err != nil {
+		if err := rows.Scan(&c.ID, &c.Name, &c.Icon, &c.CreatedAt, &c.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("list categories scan: %w", err)
 		}
 		c.UserID = userID
@@ -456,9 +450,9 @@ func (s *PostgresStore) CreateCategory(ctx context.Context, c Category) (Categor
 
 	now := time.Now().UTC()
 	if _, err := s.pool.Exec(ctx, `
-		INSERT INTO categories (id, user_id, name, color, created_at, updated_at)
+		INSERT INTO categories (id, user_id, name, icon, created_at, updated_at)
 		VALUES ($1, $2, $3, $4, $5, $5)
-	`, c.ID, c.UserID, c.Name, c.Color, now); err != nil {
+	`, c.ID, c.UserID, c.Name, c.Icon, now); err != nil {
 		if pgIsUniqueViolation(err) {
 			if clash, err2 := s.pgGetCategoryRowByName(ctx, c.UserID, c.Name); err2 == nil {
 				return clash, false, fmt.Errorf("create category: %w", ErrCategoryExists)
@@ -477,10 +471,10 @@ func (s *PostgresStore) CreateCategory(ctx context.Context, c Category) (Categor
 func (s *PostgresStore) pgGetCategoryRow(ctx context.Context, userID, id string) (Category, error) {
 	var c Category
 	err := s.pool.QueryRow(ctx, `
-		SELECT id, name, color, created_at, updated_at
+		SELECT id, name, icon, created_at, updated_at
 		FROM categories
 		WHERE user_id = $1 AND id = $2
-	`, userID, id).Scan(&c.ID, &c.Name, &c.Color, &c.CreatedAt, &c.UpdatedAt)
+	`, userID, id).Scan(&c.ID, &c.Name, &c.Icon, &c.CreatedAt, &c.UpdatedAt)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return Category{}, fmt.Errorf("get category: %w", ErrNotFound)
@@ -494,10 +488,10 @@ func (s *PostgresStore) pgGetCategoryRow(ctx context.Context, userID, id string)
 func (s *PostgresStore) pgGetCategoryRowByName(ctx context.Context, userID, name string) (Category, error) {
 	var c Category
 	err := s.pool.QueryRow(ctx, `
-		SELECT id, name, color, created_at, updated_at
+		SELECT id, name, icon, created_at, updated_at
 		FROM categories
 		WHERE user_id = $1 AND lower(name) = lower($2)
-	`, userID, name).Scan(&c.ID, &c.Name, &c.Color, &c.CreatedAt, &c.UpdatedAt)
+	`, userID, name).Scan(&c.ID, &c.Name, &c.Icon, &c.CreatedAt, &c.UpdatedAt)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return Category{}, fmt.Errorf("get category by name: %w", ErrNotFound)
@@ -508,7 +502,7 @@ func (s *PostgresStore) pgGetCategoryRowByName(ctx context.Context, userID, name
 	return c, nil
 }
 
-// UpdateCategory applies a partial LWW update on name/color.
+// UpdateCategory applies a partial LWW update on name/icon.
 func (s *PostgresStore) UpdateCategory(ctx context.Context, userID, id string, p CategoryPatch) (Category, error) {
 	sets := []string{}
 	args := []any{}
@@ -521,8 +515,8 @@ func (s *PostgresStore) UpdateCategory(ctx context.Context, userID, id string, p
 	if p.Name != nil {
 		add("name", *p.Name)
 	}
-	if p.Color != nil {
-		add("color", *p.Color)
+	if p.Icon != nil {
+		add("icon", *p.Icon)
 	}
 	add("updated_at", p.UpdatedAt)
 	args = append(args, id, userID, p.UpdatedAt)

@@ -7,15 +7,13 @@ enum TestCatalogFactory {
     static func activity(
         id: UUID = UUID.v7(),
         name: String = "Gym",
-        color: ActivityColor = .blue,
-        icon: ActivityIcon = .figureStrengthtraining,
         notes: String? = nil,
         lastUsedAt: Date? = nil,
         categoryIds: [UUID] = [],
         createdAt: Date = Date(),
         updatedAt: Date = Date()
     ) -> Activity {
-        Activity(id: id, name: name, color: color, icon: icon, notes: notes,
+        Activity(id: id, name: name, notes: notes,
                  lastUsedAt: lastUsedAt, categoryIds: categoryIds,
                  createdAt: createdAt, updatedAt: updatedAt)
     }
@@ -23,11 +21,11 @@ enum TestCatalogFactory {
     static func category(
         id: UUID = UUID.v7(),
         name: String = "Sport",
-        color: ActivityColor = .green,
+        icon: CatalogIcon = .tag,
         createdAt: Date = Date(),
         updatedAt: Date = Date()
     ) -> Category {
-        Category(id: id, name: name, color: color,
+        Category(id: id, name: name, icon: icon,
                  createdAt: createdAt, updatedAt: updatedAt)
     }
 }

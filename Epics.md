@@ -13,7 +13,7 @@ You can start/stop a timer against a free-text activity name, and it syncs offli
 ## Phase 1 — Make the timer screen a complete daily product
 
 ### Epic 1: Activity Catalog & Categories
-- Persistent list of named activities with optional **category + color tag** (replaces throwaway free-text).
+- Persistent list of named activities with optional **categories** (replaces throwaway free-text).
 - **Suggestions** surfaced on the timer screen from your most-used/recent activities (one tap to prefill name).
 - CRUD for activities/categories; default categories seeded on first run.
 - *Why first:* the typed-name timer is the thing that gets old fastest; structured activities are the prerequisite for every later epic (history grouping, widgets targeting a specific activity, goals per category).

@@ -13,7 +13,7 @@ func TestCatalog_NoAuth_Returns401(t *testing.T) {
 	if w.Code != http.StatusUnauthorized {
 		t.Errorf("list: expected 401, got %d", w.Code)
 	}
-	w = serve(h, jsonReq(t, "POST", "/api/v1/activities", "", map[string]any{"id": v7(), "name": "Gym", "color": "blue", "icon": "figure.run"}))
+	w = serve(h, jsonReq(t, "POST", "/api/v1/activities", "", map[string]any{"id": v7(), "name": "Gym"}))
 	if w.Code != http.StatusUnauthorized {
 		t.Errorf("create: expected 401, got %d", w.Code)
 	}
@@ -27,14 +27,14 @@ func TestCreateActivity_Success(t *testing.T) {
 	h, _, _, tok := newCatalogHandler(t)
 
 	w := serve(h, jsonReq(t, "POST", "/api/v1/activities", tok, map[string]any{
-		"id": v7(), "name": "Gym", "color": "blue", "icon": "figure.run", "notes": "leg day",
+		"id": v7(), "name": "Gym", "notes": "leg day",
 	}))
 	if w.Code != http.StatusCreated {
 		t.Fatalf("expected 201, got %d (body=%s)", w.Code, w.Body.String())
 	}
 	var a activityResp
 	decodeBody(t, w, &a)
-	if a.Name != "Gym" || a.Color != "blue" || a.Icon != "figure.run" || a.Notes != "leg day" {
+	if a.Name != "Gym" || a.Notes != "leg day" {
 		t.Errorf("unexpected activity: %+v", a)
 	}
 }
@@ -43,7 +43,7 @@ func TestCreateActivity_ValidationErrors(t *testing.T) {
 	h, _, _, tok := newCatalogHandler(t)
 
 	w := serve(h, jsonReq(t, "POST", "/api/v1/activities", tok, map[string]any{
-		"id": v7(), "name": "", "color": "puce", "icon": "figure.run",
+		"id": v7(), "name": "",
 	}))
 	if w.Code != http.StatusUnprocessableEntity {
 		t.Fatalf("expected 422, got %d (body=%s)", w.Code, w.Body.String())
@@ -61,15 +61,12 @@ func TestCreateActivity_ValidationErrors(t *testing.T) {
 	if _, ok := resp.Error.Details["name"]; !ok {
 		t.Errorf("expected name in details, got %+v", resp.Error.Details)
 	}
-	if _, ok := resp.Error.Details["color"]; !ok {
-		t.Errorf("expected color in details, got %+v", resp.Error.Details)
-	}
 }
 
 func TestCreateActivity_IdempotentReplay(t *testing.T) {
 	h, _, _, tok := newCatalogHandler(t)
 	id := v7()
-	body := map[string]any{"id": id, "name": "Run", "color": "red", "icon": "figure.walk"}
+	body := map[string]any{"id": id, "name": "Run"}
 
 	w1 := serve(h, jsonReq(t, "POST", "/api/v1/activities", tok, body))
 	if w1.Code != http.StatusCreated {
@@ -89,14 +86,14 @@ func TestCreateActivity_IdempotentReplay(t *testing.T) {
 
 func TestCreateActivity_NameCollision(t *testing.T) {
 	h, _, _, tok := newCatalogHandler(t)
-	body := map[string]any{"id": v7(), "name": "Gym", "color": "blue", "icon": "figure.run"}
+	body := map[string]any{"id": v7(), "name": "Gym"}
 	w1 := serve(h, jsonReq(t, "POST", "/api/v1/activities", tok, body))
 	if w1.Code != http.StatusCreated {
 		t.Fatalf("expected 201, got %d", w1.Code)
 	}
 
 	w2 := serve(h, jsonReq(t, "POST", "/api/v1/activities", tok, map[string]any{
-		"id": v7(), "name": "gym", "color": "red", "icon": "figure.walk",
+		"id": v7(), "name": "gym",
 	}))
 	if w2.Code != http.StatusConflict {
 		t.Fatalf("expected 409, got %d (body=%s)", w2.Code, w2.Body.String())
@@ -110,7 +107,7 @@ func TestListActivities(t *testing.T) {
 	h, _, _, tok := newCatalogHandler(t)
 	for _, n := range []string{"Gym", "Read", "Walk"} {
 		w := serve(h, jsonReq(t, "POST", "/api/v1/activities", tok, map[string]any{
-			"id": v7(), "name": n, "color": "blue", "icon": "figure.run",
+			"id": v7(), "name": n,
 		}))
 		if w.Code != http.StatusCreated {
 			t.Fatalf("create %q: expected 201, got %d", n, w.Code)
@@ -142,7 +139,7 @@ func TestGetActivity_NotFound(t *testing.T) {
 func TestUpdateActivity_LWWConflict(t *testing.T) {
 	h, _, _, tok := newCatalogHandler(t)
 	w := serve(h, jsonReq(t, "POST", "/api/v1/activities", tok, map[string]any{
-		"id": v7(), "name": "Gym", "color": "blue", "icon": "figure.run",
+		"id": v7(), "name": "Gym",
 	}))
 	var a activityResp
 	decodeBody(t, w, &a)
@@ -163,7 +160,7 @@ func TestUpdateActivity_LWWConflict(t *testing.T) {
 func TestUpdateActivity_Success(t *testing.T) {
 	h, _, _, tok := newCatalogHandler(t)
 	w := serve(h, jsonReq(t, "POST", "/api/v1/activities", tok, map[string]any{
-		"id": v7(), "name": "Gym", "color": "blue", "icon": "figure.run",
+		"id": v7(), "name": "Gym",
 	}))
 	var a activityResp
 	decodeBody(t, w, &a)
@@ -186,7 +183,7 @@ func TestUpdateActivity_Success(t *testing.T) {
 func TestDeleteActivity(t *testing.T) {
 	h, _, _, tok := newCatalogHandler(t)
 	w := serve(h, jsonReq(t, "POST", "/api/v1/activities", tok, map[string]any{
-		"id": v7(), "name": "Gym", "color": "blue", "icon": "figure.run",
+		"id": v7(), "name": "Gym",
 	}))
 	var a activityResp
 	decodeBody(t, w, &a)
@@ -206,18 +203,22 @@ func TestCategory_CRUD(t *testing.T) {
 	h, _, _, tok := newCatalogHandler(t)
 
 	w := serve(h, jsonReq(t, "POST", "/api/v1/categories", tok, map[string]any{
-		"id": v7(), "name": "Sport", "color": "green",
+		"id": v7(), "name": "Sport", "icon": "tag",
 	}))
 	if w.Code != http.StatusCreated {
 		t.Fatalf("expected 201, got %d (body=%s)", w.Code, w.Body.String())
 	}
 	var c struct {
-		ID string `json:"id"`
+		ID   string `json:"id"`
+		Icon string `json:"icon"`
 	}
 	decodeBody(t, w, &c)
+	if c.Icon != "tag" {
+		t.Errorf("expected category icon tag, got %q", c.Icon)
+	}
 
 	w2 := serve(h, jsonReq(t, "POST", "/api/v1/categories", tok, map[string]any{
-		"id": v7(), "name": "sport", "color": "red",
+		"id": v7(), "name": "sport", "icon": "briefcase",
 	}))
 	if w2.Code != http.StatusConflict || errCode(t, w2) != "category_exists" {
 		t.Errorf("expected 409 category_exists, got %d code=%q", w2.Code, errCode(t, w2))
@@ -228,15 +229,80 @@ func TestCategory_CRUD(t *testing.T) {
 		t.Fatalf("expected 200, got %d", wl.Code)
 	}
 	var list []struct {
-		ID, Name, Color string
+		ID, Name, Icon string
 	}
 	decodeBody(t, wl, &list)
-	if len(list) != 1 || list[0].Name != "Sport" {
+	if len(list) != 1 || list[0].Name != "Sport" || list[0].Icon != "tag" {
 		t.Errorf("expected one Sport category, got %+v", list)
 	}
 
 	wd := serve(h, jsonReq(t, "DELETE", "/api/v1/categories/"+c.ID, tok, nil))
 	if wd.Code != http.StatusNoContent {
 		t.Fatalf("expected 204, got %d", wd.Code)
+	}
+}
+
+func TestCreateCategory_InvalidIcon(t *testing.T) {
+	h, _, _, tok := newCatalogHandler(t)
+
+	w := serve(h, jsonReq(t, "POST", "/api/v1/categories", tok, map[string]any{
+		"id": v7(), "name": "Sport", "icon": "not-an-icon",
+	}))
+	if w.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("expected 422, got %d (body=%s)", w.Code, w.Body.String())
+	}
+	var resp struct {
+		Error struct {
+			Details map[string]string `json:"details"`
+		} `json:"error"`
+	}
+	decodeBody(t, w, &resp)
+	if _, ok := resp.Error.Details["icon"]; !ok {
+		t.Errorf("expected icon in details, got %+v", resp.Error.Details)
+	}
+}
+
+func TestActivityCategoryOrder_RoundTrip(t *testing.T) {
+	h, _, _, tok := newCatalogHandler(t)
+	createCategory := func(name, icon string) string {
+		t.Helper()
+		w := serve(h, jsonReq(t, "POST", "/api/v1/categories", tok, map[string]any{
+			"id": v7(), "name": name, "icon": icon,
+		}))
+		if w.Code != http.StatusCreated {
+			t.Fatalf("create category %q: expected 201, got %d (body=%s)", name, w.Code, w.Body.String())
+		}
+		var c struct {
+			ID string `json:"id"`
+		}
+		decodeBody(t, w, &c)
+		return c.ID
+	}
+
+	firstID := createCategory("Sport", "tag")
+	secondID := createCategory("Work", "briefcase")
+	w := serve(h, jsonReq(t, "POST", "/api/v1/activities", tok, map[string]any{
+		"id": v7(), "name": "Gym", "category_ids": []string{secondID, firstID},
+	}))
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create activity: expected 201, got %d (body=%s)", w.Code, w.Body.String())
+	}
+	var created activityResp
+	decodeBody(t, w, &created)
+	if len(created.Categories) != 2 || created.Categories[0].ID != secondID || created.Categories[1].ID != firstID {
+		t.Fatalf("expected category order [%s %s], got %+v", secondID, firstID, created.Categories)
+	}
+	if created.Categories[0].Icon != "briefcase" || created.Categories[1].Icon != "tag" {
+		t.Errorf("expected ordered category icons, got %+v", created.Categories)
+	}
+
+	got := serve(h, jsonReq(t, "GET", "/api/v1/activities/"+created.ID, tok, nil))
+	if got.Code != http.StatusOK {
+		t.Fatalf("get activity: expected 200, got %d", got.Code)
+	}
+	var fetched activityResp
+	decodeBody(t, got, &fetched)
+	if len(fetched.Categories) != 2 || fetched.Categories[0].ID != secondID || fetched.Categories[1].ID != firstID {
+		t.Errorf("GET did not preserve category order: %+v", fetched.Categories)
 	}
 }

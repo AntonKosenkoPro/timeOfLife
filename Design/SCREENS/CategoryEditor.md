@@ -22,7 +22,7 @@ Implements F2/U1/U2 of `Requirements/FURPS/Activity_Catalog_and_Categories.md`. 
    - `autocapitalization`: `.sentences`
    - error: `vm.fieldErrors.name`
    - Focused on appear.
-3. `SectionHeader(L10n.categoryEditorColorLabel)` + `ColorSwatchGrid(options: ActivityColor.allCases, selection: $vm.color, accessibilityId: "CategoryEditorColor")`.
+3. `SectionHeader(L10n.categoryEditorIconLabel)` + `IconPickerGrid(options: CatalogIcon.allowedSymbols, selection: $vm.icon, accessibilityId: "CategoryEditorIcon")`.
 4. `ErrorBanner` if `vm.errorMessage != nil`:
    - `accessibilityId`: `CategoryEditorErrorBanner`
 5. Fixed reserve for the pinned bottom action bar.
@@ -45,7 +45,7 @@ Follows `Design/INTERACTIONS.md` → **Editor sheets and keyboard placement** (D
 
 - Focus the name field on appear.
 - Validate (U1/U2): name non-empty and ≤ 60 chars → unified `validation.name*` message; collapse multiple rules into a single message per field (U2).
-- Edit mode pre-fills `vm.name` and `vm.color` from the passed-in `Category`.
+- Edit mode pre-fills `vm.name` and `vm.icon` from the passed-in `Category`.
 - On 422 show field errors beneath the name field.
 - On 409 `category_exists` (case-insensitive name collision), reuse the existing category per `Design/INTERACTIONS.md` → **Sync conflict**: dismiss the sheet and surface `L10n.errorCategoryExists` to the caller; re-map local references to the surviving id (no editor-level error).
 - Save success: dismiss the sheet. If opened from the Activity Editor's add-category link, the new category appears pre-selected in the `TagSelector`.
@@ -56,8 +56,8 @@ Follows `Design/INTERACTIONS.md` → **Editor sheets and keyboard placement** (D
 
 | State | Visual |
 |---|---|
-| Create | Empty name field, default color swatch selected, Save disabled (name empty) |
-| Edit | Name + color pre-filled from the existing `Category`, Save enabled |
+| Create | Empty name field, default `tag` icon selected, Save disabled (name empty) |
+| Edit | Name + icon pre-filled from the existing `Category`, Save enabled |
 | Saving | Save button shows `ProgressView`; fields and swatches disabled |
 | Validation error | Name field border + error label in `Theme.danger`; Save disabled if name empty/invalid |
 | Conflict (409 `category_exists`) | Sheet dismissed; caller surfaces `error.categoryExists` banner |
@@ -67,29 +67,28 @@ Follows `Design/INTERACTIONS.md` → **Editor sheets and keyboard placement** (D
 ```swift
 struct CategoryEditorDraft {
     var name: String
-    var color: ActivityColor?
+    var icon: CatalogIcon?
 }
 
 struct Category: Identifiable, Codable, Sendable {
     let id: UUID
     var name: String
-    var color: ActivityColor
+    var icon: CatalogIcon
     var updatedAt: Date
 }
 ```
 
-- The draft holds `name` and `color`.
+- The draft holds `name` and `icon`.
 - On save, the ViewModel produces a `Category`: `POST` (create) or `PATCH` (edit) carrying `updated_at` (R2, last-write-wins).
 
 ### Implementation checklist
 
-- [ ] All colors use `Theme.*` tokens.
 - [ ] All strings use `L10n.*` keys (add new keys to EN and RU).
-- [ ] Accessibility identifiers: `CategoryEditorNameField`, `CategoryEditorColor`, `CategoryEditorSaveButton`, `CategoryEditorCancelButton`, `CategoryEditorErrorBanner`.
+- [ ] Accessibility identifiers: `CategoryEditorNameField`, `CategoryEditorIcon`, `CategoryEditorSaveButton`, `CategoryEditorCancelButton`, `CategoryEditorErrorBanner`.
 - [ ] Keyboard placement follows D13 (name upper, Save pinned bottom, measured reserve).
 - [ ] Validation uses unified `validation.name*` messages (U2).
 - [ ] 409 `category_exists` reuses the existing category and dismisses the editor (per `INTERACTIONS.md`).
-- [ ] Edit mode pre-fills name + color from the passed-in `Category`.
+- [ ] Edit mode pre-fills name + icon from the passed-in `Category`.
 - [ ] Screen previews exist for light/dark and EN/RU.
 - [ ] SwiftLint passes with zero findings.
 
@@ -105,7 +104,7 @@ Add to `en.lproj/Localizable.strings` and `ru.lproj/Localizable.strings`, then t
 "categoryEditor.editTitle" = "Edit category";
 "categoryEditor.nameLabel" = "Name";
 "categoryEditor.namePlaceholder" = "e.g. Sport";
-"categoryEditor.colorLabel" = "Color";
+"categoryEditor.iconLabel" = "Icon";
 "categoryEditor.save" = "Save";
 "categoryEditor.cancel" = "Cancel";
 
@@ -121,7 +120,7 @@ Russian:
 "categoryEditor.editTitle" = "Изменить категорию";
 "categoryEditor.nameLabel" = "Название";
 "categoryEditor.namePlaceholder" = "напр. Спорт";
-"categoryEditor.colorLabel" = "Цвет";
+"categoryEditor.iconLabel" = "Значок";
 "categoryEditor.save" = "Сохранить";
 "categoryEditor.cancel" = "Отмена";
 

@@ -4,17 +4,17 @@ import Foundation
 struct CategoryDraft: Equatable, Sendable {
     let id: UUID?
     var name: String
-    var color: ActivityColor
+    var icon: CatalogIcon
     let createdAt: Date
 
     init(
         name: String,
-        color: ActivityColor,
+        icon: CatalogIcon,
         id: UUID? = nil,
         createdAt: Date = Date()
     ) {
         self.name = name
-        self.color = color
+        self.icon = icon
         self.id = id
         self.createdAt = createdAt
     }
@@ -93,7 +93,7 @@ final class ManageCategoriesViewModel: ObservableObject {
         let candidate = Category(
             id: draft.id ?? UUID.v7(),
             name: draft.name.trimmingCharacters(in: .whitespacesAndNewlines),
-            color: draft.color,
+            icon: draft.icon,
             createdAt: draft.createdAt,
             updatedAt: Date()
         )
@@ -236,7 +236,7 @@ final class ManageCategoriesViewModel: ObservableObject {
             let replacement = survivor ?? Category(
                 id: existingId,
                 name: existingName,
-                color: candidate.color,
+                icon: candidate.icon,
                 createdAt: candidate.createdAt,
                 updatedAt: candidate.updatedAt
             )

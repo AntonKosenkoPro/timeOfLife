@@ -4,13 +4,12 @@ import Foundation
 
 @Suite("ActivityValidator")
 struct ActivityValidatorTests {
-    @Test("validates the activity limits and closed sets")
+    @Test("validates the activity limits and shared icon set")
     func validatesLimits() {
         #expect(ActivityValidator.validateName("") == [.nameEmpty])
         #expect(ActivityValidator.validateName(String(repeating: "a", count: 61)) == [.nameTooLong])
         #expect(ActivityValidator.validateNotes(String(repeating: "a", count: 281)) == [.notesTooLong])
-        #expect(ActivityValidator.validateColor("invalid") == [.colorInvalid])
-        #expect(ActivityValidator.validateIcon("invalid") == [.iconInvalid])
+        #expect(CatalogValidator.validateIcon("invalid") == [.iconInvalid])
     }
 
     @Test("collapses validation to one localized message per field")

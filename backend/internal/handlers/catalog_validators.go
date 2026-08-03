@@ -23,14 +23,7 @@ const (
 	codeActivityMissing = "activity_not_found"
 )
 
-// validColors is the fixed color palette. iOS Theme.* must use these keys.
-var validColors = map[string]bool{
-	"blue": true, "green": true, "orange": true, "pink": true,
-	"purple": true, "red": true, "teal": true, "yellow": true,
-	"indigo": true, "mint": true, "brown": true, "gray": true,
-}
-
-// validIcons is the allowed SF Symbol set for activities. iOS must align.
+// validIcons is the allowed SF Symbol set for catalog icons. iOS must align.
 var validIcons = map[string]bool{
 	"figure.walk": true, "figure.run": true, "figure.strengthtraining": true,
 	"figure.yoga": true, "figure.cycling": true, "figure.swimming": true,
@@ -42,7 +35,7 @@ var validIcons = map[string]bool{
 	"paintbrush": true, "briefcase": true, "house": true,
 	"fork.knife": true, "cup.and.saucer": true, "moon.zzz": true,
 	"car.fill": true, "airplane": true, "cart": true, "phone": true,
-	"clock": true,
+	"clock": true, "tag": true,
 }
 
 const (
@@ -132,30 +125,26 @@ func (h *Handler) requireUserID(w http.ResponseWriter, r *http.Request) (string,
 type activityCreateReq struct {
 	ID          string   `json:"id"`
 	Name        string   `json:"name"`
-	Color       string   `json:"color"`
-	Icon        string   `json:"icon"`
 	Notes       string   `json:"notes"`
 	CategoryIDs []string `json:"category_ids"`
 }
 
 type activityUpdateReq struct {
 	Name        *string   `json:"name"`
-	Color       *string   `json:"color"`
-	Icon        *string   `json:"icon"`
 	Notes       *string   `json:"notes"`
 	CategoryIDs *[]string `json:"category_ids"`
 	UpdatedAt   string    `json:"updated_at"`
 }
 
 type categoryCreateReq struct {
-	ID    string `json:"id"`
-	Name  string `json:"name"`
-	Color string `json:"color"`
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	Icon string `json:"icon"`
 }
 
 type categoryUpdateReq struct {
 	Name      *string `json:"name"`
-	Color     *string `json:"color"`
+	Icon      *string `json:"icon"`
 	UpdatedAt string  `json:"updated_at"`
 }
 
@@ -186,12 +175,6 @@ func validateName(field, name string, errs validationErrs) {
 func validateNotes(n string, errs validationErrs) {
 	if len(strings.TrimSpace(n)) > maxNotesLen {
 		errs.add("notes", "Notes must be 280 characters or fewer")
-	}
-}
-
-func validateColor(c string, errs validationErrs) {
-	if !validColors[c] {
-		errs.add("color", "Color is not in the allowed palette")
 	}
 }
 

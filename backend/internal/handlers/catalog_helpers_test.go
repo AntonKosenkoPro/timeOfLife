@@ -122,14 +122,12 @@ func errCode(t *testing.T, w *httptest.ResponseRecorder) string {
 type activityResp struct {
 	ID         string `json:"id"`
 	Name       string `json:"name"`
-	Color      string `json:"color"`
-	Icon       string `json:"icon"`
 	Notes      string `json:"notes"`
 	UpdatedAt  string `json:"updated_at"`
 	Categories []struct {
-		ID    string `json:"id"`
-		Name  string `json:"name"`
-		Color string `json:"color"`
+		ID   string `json:"id"`
+		Name string `json:"name"`
+		Icon string `json:"icon"`
 	} `json:"categories"`
 }
 
@@ -153,7 +151,7 @@ func newCatalogHandler(t *testing.T) (*Handler, db.Store, string, string) {
 func newActivity(t *testing.T, h *Handler, tok string) string {
 	t.Helper()
 	w := serve(h, jsonReq(t, "POST", "/api/v1/activities", tok, map[string]any{
-		"id": v7(), "name": "Gym", "color": "blue", "icon": "figure.run",
+		"id": v7(), "name": "Gym",
 	}))
 	if w.Code != http.StatusCreated {
 		t.Fatalf("create activity: expected 201, got %d (body=%s)", w.Code, w.Body.String())

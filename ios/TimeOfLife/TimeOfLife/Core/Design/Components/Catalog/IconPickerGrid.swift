@@ -1,8 +1,8 @@
 import SwiftUI
 
-/// Selectable grid of allowed SF Symbols for `activity.icon` (F1/U1).
+/// Selectable grid of allowed SF Symbols for categories (F1/U1).
 ///
-/// Mirrors `ColorSwatchGrid` geometry. Each cell is 44 × 44 pt with
+/// Each cell is 44 × 44 pt with
 /// `Theme.backgroundSecondary` fill and a 2 pt accent border when selected.
 struct IconPickerGrid: View {
     let options: [String]

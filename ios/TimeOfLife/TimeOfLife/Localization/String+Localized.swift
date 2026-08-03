@@ -51,7 +51,6 @@ enum L10n: String, CaseIterable {
     case tagsEmptyHint = "tags.emptyHint"
     case undoButton = "undo.button"
     case toastDismiss = "toast.dismiss"
-    case accessibilityColor = "accessibility.color"
     case accessibilityCategory = "accessibility.category"
     case accessibilityIcon = "accessibility.icon"
     case accessibilitySuggestion = "accessibility.suggestion"
@@ -91,7 +90,7 @@ enum L10n: String, CaseIterable {
     case categoryEditorEditTitle = "categoryEditor.editTitle"
     case categoryEditorNameLabel = "categoryEditor.nameLabel"
     case categoryEditorNamePlaceholder = "categoryEditor.namePlaceholder"
-    case categoryEditorColorLabel = "categoryEditor.colorLabel"
+    case categoryEditorIconLabel = "categoryEditor.iconLabel"
     case categoryEditorSave = "categoryEditor.save"
     case categoryEditorCancel = "categoryEditor.cancel"
     case categorySeedWork = "category.seed.work"
@@ -105,8 +104,6 @@ enum L10n: String, CaseIterable {
     case activityEditorEditTitle = "activityEditor.editTitle"
     case activityEditorNameLabel = "activityEditor.nameLabel"
     case activityEditorNamePlaceholder = "activityEditor.namePlaceholder"
-    case activityEditorColorLabel = "activityEditor.colorLabel"
-    case activityEditorIconLabel = "activityEditor.iconLabel"
     case activityEditorNotesLabel = "activityEditor.notesLabel"
     case activityEditorNotesPlaceholder = "activityEditor.notesPlaceholder"
     case activityEditorNotesCounter = "activityEditor.notesCounter"
@@ -120,7 +117,6 @@ enum L10n: String, CaseIterable {
     case validationNamePrefix = "validation.name.prefix"
     case validationNameRuleTooLong = "validation.name.rule.tooLong"
     case activityValidationNotesTooLong = "validation.notesTooLong"
-    case validationCatalogColorInvalid = "validation.catalog.colorInvalid"
     case validationCatalogIconInvalid = "validation.catalog.iconInvalid"
 
     /// Resolves the key via `NSLocalizedString` against `Localizable.strings`.

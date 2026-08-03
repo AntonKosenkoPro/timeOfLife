@@ -2,21 +2,21 @@
 
 Implements F2/F6/U8/R1/R3 of `Requirements/FURPS/Activity_Catalog_and_Categories.md`. Full CRUD surface for category tags, reached from Manage Activities.
 
-A separate Manage Categories screen (per the user's decision) so category CRUD does not crowd the Manage Activities list. The screen lists all categories, lets the user create/edit/delete them, and seeds 8 localized defaults on first run after sign-in (F6). Deletions are undoable for 30 s (R3) and conflict with the server by last-write-wins (R2).
+A separate Manage Categories screen (per the user's decision) so category CRUD does not crowd the Manage Activities list. The screen lists all categories, lets the user create/edit/delete them, and seeds 7 localized defaults on first run after sign-in (F6). Deletions are undoable for 30 s (R3) and conflict with the server by last-write-wins (R2).
 
 **Default categories (F6):**
 
-| Name | Color |
+| Name | Icon |
 |---|---|
-| Work | `blue` |
-| Hobby | `yellow` |
-| Sport | `green` |
-| Education | `orange` |
-| Relax | `teal` |
-| Sleep | `gray` |
-| Entertainment | `pink` |
+| Work | `briefcase` |
+| Hobby | `paintbrush` |
+| Sport | `figure.run` |
+| Education | `book` |
+| Relax | `cup.and.saucer` |
+| Sleep | `bed.double` |
+| Entertainment | `tv` |
 
-Seeded on first run after sign-in, only if the user has zero categories. Localized names via `L10n` (EN + RU). Categories do not have icons. The seed list matches `Requirements/FURPS/Activity_Catalog_and_Categories.md` F6; any earlier 8-row / icon-bearing table in this document was a drafting error and is superseded by this table.
+Seeded on first run after sign-in, only if the user has zero categories. Localized names via `L10n` (EN + RU). Categories have a validated catalog icon. The seed list matches `Requirements/FURPS/Activity_Catalog_and_Categories.md` F6.
 
 ---
 
@@ -44,12 +44,12 @@ N/A — the screen is a list with no text input; editors are handled in the `Cat
 ### Behaviors
 
 - On appear load categories from the local store (offline-first, R1/D7). The list is sourced from the synced catalog and rendered in alpha order by `name`.
-- Tap row → `CategoryEditor` edit mode (sheet, D21). The editor owns name + color (`ColorSwatchGrid`) editing; save returns to this screen.
+- Tap row → `CategoryEditor` edit mode (sheet, D21). The editor owns name + icon (`IconPickerGrid`) editing; save returns to this screen.
 - Swipe-to-delete on a row → single destructive confirm (see Delete flow below). On confirm enter the undo flow (30 s; R3/U6/D17). Undo re-applies the tag to all activities that carried it via the join cascade; after 30 s commit locally and enqueue `DELETE` for sync.
 - Toolbar `+` → `CategoryEditor` create mode (sheet, D21). On create conflict (409 `category_exists`, case-insensitive name collision) re-map local refs to the surviving id and proceed (R2); in the editor surface `L10n.errorCategoryExists`.
 - **Offline (R1):** list renders from the local store; create/edit/delete are queued locally and synced when connectivity returns. Disable no control here — list reads and optimistic mutations are offline-safe.
 - **Conflict (R2):** on 409 `conflict`, show the inline `ErrorBanner` (`L10n.errorConflict`) and adopt the server's version as the source of truth (keep-latest). No field-level merge at MVP.
-- **Seeding (F6):** on first run after sign-in, seed 7 localized categories — Work, Hobby, Sport, Education, Relax, Sleep, Entertainment — via ordinary `POST /categories` requests. The seed set matches the requirement (F6); the screen spec previously listed an 8-row table with icons, which has been corrected. Seeds are first-class records: editable, recolorable, deletable like any user-created category. Seeding is **idempotent** — it runs once, gated by a `categoriesSeeded` flag persisted locally; replays (same `POST` idempotently, or re-runs after relaunch before the flag is set) do not duplicate records.
+- **Seeding (F6):** on first run after sign-in, seed 7 localized categories — Work, Hobby, Sport, Education, Relax, Sleep, Entertainment — with their catalog icons via ordinary `POST /categories` requests. Seeds are first-class records: editable, icon-selectable, and deletable like any user-created category. Seeding is **idempotent** — it runs once, gated by a `categoriesSeeded` flag persisted locally; replays (same `POST` idempotently, or re-runs after relaunch before the flag is set) do not duplicate records.
 
 ### Delete flow
 
@@ -82,7 +82,7 @@ Reference: D17 and `Design/INTERACTIONS.md` → Undo flow + Delete-scope confirm
 struct Category: Identifiable, Codable, Sendable {
     let id: UUID
     var name: String
-    var color: ActivityColor
+    var icon: CatalogIcon
     let createdAt: Date
     var updatedAt: Date
 }
@@ -90,7 +90,6 @@ struct Category: Identifiable, Codable, Sendable {
 
 ### Implementation checklist
 
-- [ ] All colors use `Theme.*` tokens (no raw `Color(...)`).
 - [ ] All strings use `L10n.*` keys (EN + RU).
 - [ ] List has `accessibilityIdentifier("ManageCategoriesList")`.
 - [ ] Add button has `accessibilityIdentifier("ManageCategoriesAddButton")`.
@@ -98,6 +97,7 @@ struct Category: Identifiable, Codable, Sendable {
 - [ ] Swipe-to-delete button has `accessibilityIdentifier("CategoryRowDelete(<id>)")`.
 - [ ] Undo button uses `UndoToast` with `UndoToastButton` (per `COMPONENTS.md`).
 - [ ] Category delete is tag-only — join cascade removes the tag from activities; entries are unaffected (state in confirm copy).
+- [ ] Category icons use the validated `CatalogIcon` set.
 - [ ] Seeding runs once and is idempotent (`categoriesSeeded` flag); seeds are editable/deletable.
 - [ ] Offline queue handles create/edit/delete; conflict (409 `conflict`) shows `ErrorBanner` and adopts server version (R2).
 - [ ] Screen previews exist for light/dark and EN/RU.

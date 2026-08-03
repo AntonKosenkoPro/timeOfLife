@@ -75,17 +75,15 @@ F10 / D17 / D18; see `Design/INTERACTIONS.md` → Undo flow and Delete-scope con
 struct Activity: Identifiable, Codable, Sendable {
     let id: UUID
     var name: String
-    var color: ActivityColor
-    var icon: String
     var notes: String?
     var lastUsedAt: Date?
-    var categories: [Category]?
+    var categoryIds: [UUID]
 }
 
 struct Category: Identifiable, Codable, Sendable {
     let id: UUID
     var name: String
-    var color: ActivityColor
+    var icon: CatalogIcon
     var createdAt: Date
     var updatedAt: Date
 }
@@ -95,7 +93,6 @@ Entries reference an activity by `activity_id` (F9); the activity's name and tag
 
 ### Implementation checklist
 
-- [ ] All colors use `Theme.*` tokens.
 - [ ] All strings use `L10n.*` keys (add new keys to EN and RU).
 - [ ] List has `accessibilityIdentifier("ManageActivitiesList")`.
 - [ ] Add button has `ManageActivitiesAddButton`; Categories button has `ManageActivitiesCategoriesButton`.

@@ -132,11 +132,11 @@ Errors use a uniform envelope: `{ "error": { "code", "message", "details": {} } 
 | POST | `/auth/logout` | (Bearer) | 204 | (401) |
 | GET  | `/auth/me` | (Bearer) | 200 `user{id,email,email_verified}` | (401) |
 | GET  | `/activities` | (Bearer) | 200 `[{activity}]` (recency; `?q=` typeahead) | (401) |
-| POST | `/activities` | `{id,name,color,icon,notes?,category_ids?}` | 201/200 `{activity}` (idempotent on `id`) | `validation_error`, `activity_exists`, `conflict` |
-| GET/PATCH/DELETE | `/activities/{id}` | (PATCH) `{…,updated_at}` | 200 / 204 | `not_found`, `conflict`, `activity_exists` |
+| POST | `/activities` | `{id,name,notes?,category_ids?}` | 201/200 `{activity}` (idempotent on `id`) | `validation_error`, `activity_exists`, `conflict` |
+| GET/PATCH/DELETE | `/activities/{id}` | (PATCH) `{name?,notes?,category_ids?,updated_at}` | 200 / 204 | `not_found`, `conflict`, `activity_exists` |
 | GET  | `/categories` | (Bearer) | 200 `[{category}]` | (401) |
-| POST | `/categories` | `{id,name,color}` | 201/200 `{category}` (idempotent on `id`) | `validation_error`, `category_exists`, `conflict` |
-| PATCH/DELETE | `/categories/{id}` | (PATCH) `{…,updated_at}` | 200 / 204 | `not_found`, `conflict`, `category_exists` |
+| POST | `/categories` | `{id,name,icon}` | 201/200 `{category}` (idempotent on `id`) | `validation_error`, `category_exists`, `conflict` |
+| PATCH/DELETE | `/categories/{id}` | (PATCH) `{name?,icon?,updated_at}` | 200 / 204 | `not_found`, `conflict`, `category_exists` |
 | GET  | `/entries` | (Bearer) | 200 `{items,next_cursor?}` (`?from=&to=&activity_id=&category_id=&limit=&cursor=`) | (401) |
 | POST | `/entries` | `{id,activity_id,started_at,ended_at?}` | 201/200 `{entry}` (idempotent on `id`; `activity_id` required) | `validation_error`, `activity_not_found`, `conflict` |
 | GET/PATCH/DELETE | `/entries/{id}` | (PATCH) `{started_at?,ended_at?,updated_at}` | 200 / 204 | `not_found`, `conflict` |
@@ -159,7 +159,7 @@ Backend (Docker Postgres running):
 4. Repeat the wrong code 5+ times → `otp_attempts_exceeded`.
 5. `POST /api/v1/auth/refresh` → rotated pair; reusing the old refresh → 401 `token_reuse` and all sessions revoked.
 6. `GET /api/v1/auth/me` with the Bearer access token → 200 user.
-7. `POST /api/v1/activities` `{id:<uuidv7>,name:"Gym",color:"blue",icon:"figure.run"}` → 201; replay the same body → 200 (idempotent).
+7. `POST /api/v1/activities` `{id:<uuidv7>,name:"Gym"}` → 201; replay the same body → 200 (idempotent).
 8. `PATCH /api/v1/activities/{id}` with a stale `updated_at` → 409 `conflict` (LWW); with a newer `updated_at` → 200.
 9. `GET /api/v1/activities` → 200 `[{activity}]`; `POST /api/v1/entries` `{id:<uuidv7>,activity_id:<id>,started_at:"…"}` → 201 (omit `activity_id` → 422 `validation_error`).
 

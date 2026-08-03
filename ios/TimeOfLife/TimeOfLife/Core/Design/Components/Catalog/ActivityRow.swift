@@ -30,21 +30,16 @@ struct ActivityRow: View {
 
     // MARK: - Subviews
 
-    private var leadingIcon: some View {
-        ZStack(alignment: .topLeading) {
+    @ViewBuilder private var leadingIcon: some View {
+        if let category = categories.first {
             RoundedRectangle(cornerRadius: Theme.cornerRadiusSmall, style: .continuous)
                 .fill(Theme.backgroundSecondary)
                 .frame(width: 32, height: 32)
-
-            Image(systemName: activity.icon.rawValue)
-                .font(.body)
-                .foregroundStyle(Theme.textPrimary)
-                .frame(width: 32, height: 32)
-
-            Circle()
-                .fill(Theme.activityColor(activity.color))
-                .frame(width: 10, height: 10)
-                .offset(Self.cornerDotOffset)
+                .overlay {
+                    Image(systemName: category.icon.rawValue)
+                        .font(.body)
+                        .foregroundStyle(Theme.textPrimary)
+                }
         }
     }
 
@@ -55,12 +50,10 @@ struct ActivityRow: View {
                 .foregroundStyle(Theme.textPrimary)
 
             if !categories.isEmpty {
-                HStack(spacing: Theme.spacingSmall) {
-                    ForEach(categories) { cat in
-                        TagChip(name: cat.name, color: cat.color)
-                    }
-                }
-                .accessibilityHidden(true)
+                Text(categories.map(\.name).joined(separator: ", "))
+                    .font(.footnote)
+                    .foregroundStyle(Theme.textSecondary)
+                    .accessibilityHidden(true)
             }
 
             if let lastUsedAt = activity.lastUsedAt {
@@ -78,11 +71,6 @@ struct ActivityRow: View {
     }
 
     // MARK: - Accessibility
-
-    /// Overhang of the 10 pt color dot past the top-leading corner of the
-    /// 32 pt icon square, per `COMPONENTS.md#ActivityRow` ("sits at the leading
-    /// edge"). Kept as a named constant rather than an inline magic number.
-    private static let cornerDotOffset = CGSize(width: -2, height: -2)
 
     /// Reused across reads of `accessibilityLabel` to avoid per-access
     /// allocation of a `RelativeDateTimeFormatter`.
@@ -111,8 +99,6 @@ struct ActivityRow: View {
 private let sampleActivityWithTags = Activity(
     id: UUID(),
     name: "Reading",
-    color: .blue,
-    icon: .book,
     notes: nil,
     lastUsedAt: Date().addingTimeInterval(-3600),
     categoryIds: [Category.sampleBlue.id, Category.sampleGreen.id],
@@ -123,8 +109,6 @@ private let sampleActivityWithTags = Activity(
 private let sampleActivityNoTags = Activity(
     id: UUID(),
     name: "Gym",
-    color: .green,
-    icon: .figureStrengthtraining,
     notes: nil,
     lastUsedAt: Date().addingTimeInterval(-7200),
     categoryIds: [],
@@ -135,8 +119,6 @@ private let sampleActivityNoTags = Activity(
 private let sampleActivityNoLastUsed = Activity(
     id: UUID(),
     name: "New Activity",
-    color: .purple,
-    icon: .sparkles,
     notes: nil,
     lastUsedAt: nil,
     categoryIds: [],

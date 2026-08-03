@@ -5,22 +5,29 @@ import SwiftUI
 /// One tap prefills the activity name and links the activity to the entry.
 struct SuggestionRow: View {
     let activity: Activity
+    let categories: [Category]
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
             HStack(spacing: Theme.spacingMedium) {
-                Circle()
-                    .fill(Theme.activityColor(activity.color))
-                    .frame(width: 8, height: 8)
+                if let category = categories.first {
+                    Image(systemName: category.icon.rawValue)
+                        .font(.body)
+                        .foregroundStyle(Theme.textSecondary)
+                }
 
-                Image(systemName: activity.icon.rawValue)
-                    .font(.body)
-                    .foregroundStyle(Theme.textSecondary)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(activity.name)
+                        .font(.subheadline)
+                        .foregroundStyle(Theme.textPrimary)
 
-                Text(activity.name)
-                    .font(.subheadline)
-                    .foregroundStyle(Theme.textPrimary)
+                    if !categories.isEmpty {
+                        Text(categories.map(\.name).joined(separator: ", "))
+                            .font(.footnote)
+                            .foregroundStyle(Theme.textSecondary)
+                    }
+                }
 
                 Spacer()
             }
@@ -37,8 +44,6 @@ struct SuggestionRow: View {
 private let sampleActivity = Activity(
     id: UUID(),
     name: "Reading",
-    color: .blue,
-    icon: .book,
     notes: nil,
     lastUsedAt: Date().addingTimeInterval(-3600),
     categoryIds: [],
@@ -47,12 +52,12 @@ private let sampleActivity = Activity(
 )
 
 #Preview("EN Light") {
-    SuggestionRow(activity: sampleActivity) {}
+    SuggestionRow(activity: sampleActivity, categories: [Category.sampleBlue]) {}
         .padding()
 }
 
 #Preview("RU Dark") {
-    SuggestionRow(activity: sampleActivity) {}
+    SuggestionRow(activity: sampleActivity, categories: [Category.sampleBlue]) {}
         .padding()
         .preferredColorScheme(.dark)
         .environment(\.locale, .init(identifier: "ru"))

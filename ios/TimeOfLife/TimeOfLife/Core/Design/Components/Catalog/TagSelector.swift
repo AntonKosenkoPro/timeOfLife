@@ -3,11 +3,11 @@ import SwiftUI
 /// Multi-select category chips for an activity (F3).
 ///
 /// Wrapping `FlowLayout` of tappable chips; toggling a chip adds/removes
-/// the category id from `selected`. When `options` is empty, renders a
+/// the category id from `selected` in tap order. When `options` is empty, renders a
 /// hint label instead.
 struct TagSelector: View {
     let options: [Category]
-    @Binding var selected: Set<UUID>
+    @Binding var selected: [UUID]
     let accessibilityId: String
 
     var body: some View {
@@ -31,9 +31,9 @@ struct TagSelector: View {
 
         Button {
             if isSelected {
-                selected.remove(category.id)
+                selected.removeAll { $0 == category.id }
             } else {
-                selected.insert(category.id)
+                selected.append(category.id)
             }
         } label: {
             HStack(spacing: 6) {
@@ -43,9 +43,8 @@ struct TagSelector: View {
                         .foregroundStyle(.white)
                 }
 
-                Circle()
-                    .fill(Theme.activityColor(category.color))
-                    .frame(width: 6, height: 6)
+                Image(systemName: category.icon.rawValue)
+                    .foregroundStyle(isSelected ? .white : Theme.textSecondary)
 
                 Text(category.name)
                     .font(.caption)
@@ -73,7 +72,7 @@ struct TagSelector: View {
 #if DEBUG
 
 private struct TagSelectorPreview: View {
-    @State private var selected: Set<UUID> = [Category.sampleBlue.id]
+    @State private var selected: [UUID] = [Category.sampleBlue.id]
 
     private let sampleCategories: [Category] = [
         Category.sampleBlue,
@@ -92,7 +91,7 @@ private struct TagSelectorPreview: View {
 }
 
 private struct TagSelectorEmptyPreview: View {
-    @State private var selected: Set<UUID> = []
+    @State private var selected: [UUID] = []
 
     var body: some View {
         TagSelector(

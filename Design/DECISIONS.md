@@ -79,10 +79,9 @@ Resolved design precedents for Time of Life. Add a new entry here when a visual 
 - Reason: the one-box-per-digit field already has a clear completion point (6 digits); adding a Verify button would duplicate the action without improving accessibility, since the field is exposed as a single editable accessibility element and AutoFill/paste work through the hidden `TextField`.
 - Guard: keep the field focused after verification errors and ensure the component exposes the `.isTextField` trait so assistive tech recognizes it as editable.
 
-## D15 — Fixed activity/category color palette
+## D15 — Retired: fixed activity/category color palette
 
-- Activities and categories choose a color from one closed, validated set of 12 palette keys (`gray, red, orange, yellow, green, teal, blue, indigo, purple, pink, brown, mint`), not arbitrary hex. Resolved via `Theme.activityColor(_:)`. The backend validates `color` against the same keys, so client and server share the set.
-- Reason: F1/F2 require a color; U1 requires validation against a provided set; a closed palette keeps light/dark parity deterministic and avoids clashing/garish user picks.
+- Superseded by the activity/category model reconciliation: activities no longer carry color or icon, categories carry a validated catalog icon, and the palette plus `Theme.activityColor(_:)` resolver are removed.
 
 ## D16 — On-device recency suggestions
 
@@ -106,10 +105,15 @@ Resolved design precedents for Time of Life. Add a new entry here when a visual 
 
 ## D20 — Free-text start stays first-class
 
-- Typing a name and starting the timer still works in one step; if the name matches an existing activity (case-insensitive, trimmed) it is reused, otherwise a new activity is auto-created (default color/icon, no tags) and linked to the entry. The user is never forced into the catalog to start a timer.
+- Typing a name and starting the timer still works in one step; if the name matches an existing activity (case-insensitive, trimmed) it is reused, otherwise a new activity is auto-created with no categories and linked to the entry. The user is never forced into the catalog to start a timer.
 - Reason: F4 — forcing categorization would add friction and fight the app's minimal-effort premise; auto-create keeps the free-text flow frictionless while still giving every entry an `activity_id`.
 
 ## D21 — Editors as sheets, shared create/edit modes
 
 - `ActivityEditor` and `CategoryEditor` are presented as sheets, each with create + edit modes, reused by the timer (quick-add, F7) and the Manage screens (F8). Keyboard placement follows D13.
 - Reason: one editor component per entity avoids duplicate surfaces; sheets keep the user in context (timer / manage list) without a full navigation push.
+
+## D22 — Categories have catalog icons
+
+- Categories carry one icon from the validated `CatalogIcon` set, defaulting to `tag`; category icons are used in category rows, selectors, and activity/suggestion representations.
+- This reverses the earlier “categories do not have icons” correction in `ManageCategories.md` and supersedes the retired color-palette decision (D15).

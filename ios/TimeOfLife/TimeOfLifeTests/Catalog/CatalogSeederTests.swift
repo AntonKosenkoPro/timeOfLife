@@ -17,7 +17,7 @@ struct CatalogSeederTests {
         }
         #expect(creates.count == 7)
         #expect(creates.map(\.name) == ["Work", "Hobby", "Sport", "Education", "Relax", "Sleep", "Entertainment"])
-        #expect(creates.map(\.color) == [.blue, .yellow, .green, .orange, .teal, .gray, .pink])
+        #expect(creates.map(\.icon) == [.briefcase, .paintbrush, .figureRun, .book, .cupAndSaucer, .bedDouble, .tv])
         #expect(cache.categoriesSeeded)
     }
 

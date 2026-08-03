@@ -160,8 +160,6 @@ final class RemoteCatalogRepository: CatalogRepository {
         let body = ActivityCreateRequest(
             id: activity.id,
             name: activity.name,
-            color: activity.color,
-            icon: activity.icon,
             notes: activity.notes,
             categoryIds: activity.categoryIds
         )
@@ -179,8 +177,6 @@ final class RemoteCatalogRepository: CatalogRepository {
     func updateActivity(_ activity: Activity) async throws -> Activity {
         let body = ActivityPatchRequest(
             name: activity.name,
-            color: activity.color,
-            icon: activity.icon,
             // PATCH needs an explicit empty string to clear an existing note.
             notes: activity.notes ?? "",
             categoryIds: activity.categoryIds,
@@ -235,7 +231,7 @@ final class RemoteCatalogRepository: CatalogRepository {
     }
 
     func createCategory(_ category: Category) async throws -> Category {
-        let body = CategoryCreateRequest(id: category.id, name: category.name, color: category.color)
+        let body = CategoryCreateRequest(id: category.id, name: category.name, icon: category.icon)
         do {
             let dto = try await client.send(
                 APIEndpoint(method: .post, path: "\(basePath)/categories", body: body, requiresAuth: true),
@@ -248,7 +244,7 @@ final class RemoteCatalogRepository: CatalogRepository {
     }
 
     func updateCategory(_ category: Category) async throws -> Category {
-        let body = CategoryPatchRequest(name: category.name, color: category.color, updatedAt: category.updatedAt)
+        let body = CategoryPatchRequest(name: category.name, icon: category.icon, updatedAt: category.updatedAt)
         do {
             let dto = try await client.send(
                 APIEndpoint(method: .patch, path: "\(basePath)/categories/\(category.id.uuidString)",

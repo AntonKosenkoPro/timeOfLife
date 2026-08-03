@@ -16,8 +16,6 @@ struct AutoCreateTests {
         Activity(
             id: id,
             name: name,
-            color: .blue,
-            icon: .clock,
             notes: nil,
             lastUsedAt: lastUsedAt,
             categoryIds: [],
@@ -108,7 +106,7 @@ struct AutoCreateTests {
         #expect(resolved == existingId)
     }
 
-    @Test("auto-create creates activity with defaults when no match found")
+    @Test("auto-create creates an activity when no match is found")
     func autoCreateWithDefaults() async throws {
         let vm = await makeViewModel(catalogActivities: [])
         vm.activityName = "New Activity"
@@ -120,8 +118,6 @@ struct AutoCreateTests {
         let activity = await vm.catalogStore.activity(named: "New Activity")
         #expect(activity != nil)
         #expect(activity?.id == resolved)
-        #expect(activity?.color == .mint)
-        #expect(activity?.icon == .clock)
     }
 
     @Test("409 activity_exists re-maps to the surviving activity id")

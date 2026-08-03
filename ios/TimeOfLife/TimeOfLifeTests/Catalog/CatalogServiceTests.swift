@@ -111,6 +111,7 @@ struct CatalogServiceTests {
             store: store, repository: repo, syncQueue: queue, undoBuffer: undo,
             connectivity: connectivity, entryStore: entryStore, entriesRepository: entriesRepo
         )
+        _ = service
         let activity = TestCatalogFactory.activity()
         let entry = TimeEntry(
             id: UUID.v7(), activityId: activity.id, startedAt: Date(), endedAt: Date(), synced: true

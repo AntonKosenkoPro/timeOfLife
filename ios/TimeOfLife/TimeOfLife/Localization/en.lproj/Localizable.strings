@@ -59,7 +59,6 @@
 "error.not_found" = "This item no longer exists.";
 
 // Catalog validation (one merged message per field — U2/U4)
-"validation.catalog.colorInvalid" = "Select a valid color.";
 "validation.catalog.iconInvalid" = "Select a valid icon.";
 
 // Apple sign in
@@ -78,7 +77,6 @@
 // Catalog (Epic 1)
 "tags.emptyHint" = "No categories yet — create one";
 "undo.button" = "Undo";
-"accessibility.color" = "Color, %@";
 "accessibility.category" = "Category, %@";
 "accessibility.icon" = "Icon, %@";
 "accessibility.suggestion" = "Suggestion, %@";
@@ -124,7 +122,7 @@
 "categoryEditor.editTitle" = "Edit category";
 "categoryEditor.nameLabel" = "Name";
 "categoryEditor.namePlaceholder" = "e.g. Sport";
-"categoryEditor.colorLabel" = "Color";
+"categoryEditor.iconLabel" = "Icon";
 "categoryEditor.save" = "Save";
 "categoryEditor.cancel" = "Cancel";
 "category.seed.work" = "Work";
@@ -140,8 +138,6 @@
 "activityEditor.editTitle" = "Edit activity";
 "activityEditor.nameLabel" = "Name";
 "activityEditor.namePlaceholder" = "e.g. Gym";
-"activityEditor.colorLabel" = "Color";
-"activityEditor.iconLabel" = "Icon";
 "activityEditor.notesLabel" = "Notes";
 "activityEditor.notesPlaceholder" = "Optional notes";
 "activityEditor.notesCounter" = "%d / 280";

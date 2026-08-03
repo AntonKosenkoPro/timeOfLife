@@ -10,7 +10,6 @@ enum CatalogValidator {
     enum Field: String, Hashable, Sendable {
         case name
         case notes
-        case color
         case icon
     }
 
@@ -18,7 +17,6 @@ enum CatalogValidator {
         case nameEmpty
         case nameTooLong
         case notesTooLong
-        case colorInvalid
         case iconInvalid
     }
 
@@ -45,14 +43,9 @@ enum CatalogValidator {
         return []
     }
 
-    /// Validates a raw color key against the palette.
-    static func validateColor(_ raw: String) -> [ValidationError] {
-        ActivityColor.validKeys.contains(raw) ? [] : [.colorInvalid]
-    }
-
     /// Validates a raw icon key against the allowed SF Symbols set.
     static func validateIcon(_ raw: String) -> [ValidationError] {
-        ActivityIcon.validKeys.contains(raw) ? [] : [.iconInvalid]
+        CatalogIcon.validKeys.contains(raw) ? [] : [.iconInvalid]
     }
 
     /// Normalizes a name for reuse lookups: trimmed + lowercased (F4).
@@ -81,12 +74,6 @@ enum CatalogValidator {
             return L10n.activityValidationNotesTooLong.text
         }
         return nil
-    }
-
-    /// A single message for the color field, or `nil` when valid.
-    static func unifiedColorMessage(_ errors: [ValidationError]) -> String? {
-        guard errors.contains(.colorInvalid) else { return nil }
-        return L10n.validationCatalogColorInvalid.text
     }
 
     /// A single message for the icon field, or `nil` when valid.

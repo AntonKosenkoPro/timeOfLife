@@ -111,11 +111,11 @@ func (s *SQLiteStore) listActivityTagsBatch(ctx context.Context, userID string, 
 		args = append(args, id)
 	}
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT ac.activity_id, c.id, c.name, c.color
+		SELECT ac.activity_id, c.id, c.name, c.icon
 		FROM activity_categories ac
 		JOIN categories c ON c.id = ac.category_id
 		WHERE c.user_id = ? AND ac.activity_id IN (`+placeholders+`)
-		ORDER BY c.name
+		ORDER BY ac.position, c.name
 	`, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list activity tags: %w", err)
@@ -124,7 +124,7 @@ func (s *SQLiteStore) listActivityTagsBatch(ctx context.Context, userID string, 
 	for rows.Next() {
 		var activityID string
 		var t CategoryTag
-		if err := rows.Scan(&activityID, &t.ID, &t.Name, &t.Color); err != nil {
+		if err := rows.Scan(&activityID, &t.ID, &t.Name, &t.Icon); err != nil {
 			return nil, fmt.Errorf("list activity tags scan: %w", err)
 		}
 		out[activityID] = append(out[activityID], t)
@@ -204,14 +204,14 @@ func (s *SQLiteStore) ListActivities(ctx context.Context, userID, q string) ([]A
 	var err error
 	if q != "" {
 		rows, err = s.db.QueryContext(ctx, `
-			SELECT id, name, color, icon, notes, last_used_at, created_at, updated_at
+			SELECT id, name, notes, last_used_at, created_at, updated_at
 			FROM activities
 			WHERE user_id = ? AND lower(name) LIKE ?
 			ORDER BY (last_used_at IS NULL), last_used_at DESC, updated_at DESC
 		`, userID, "%"+strings.ToLower(q)+"%")
 	} else {
 		rows, err = s.db.QueryContext(ctx, `
-			SELECT id, name, color, icon, notes, last_used_at, created_at, updated_at
+			SELECT id, name, notes, last_used_at, created_at, updated_at
 			FROM activities
 			WHERE user_id = ?
 			ORDER BY (last_used_at IS NULL), last_used_at DESC, updated_at DESC
@@ -229,7 +229,7 @@ func (s *SQLiteStore) ListActivities(ctx context.Context, userID, q string) ([]A
 		var notes sql.NullString
 		var lastUsed sql.NullString
 		var createdAt, updatedAt string
-		if err := rows.Scan(&a.ID, &a.Name, &a.Color, &a.Icon, &notes, &lastUsed, &createdAt, &updatedAt); err != nil {
+		if err := rows.Scan(&a.ID, &a.Name, &notes, &lastUsed, &createdAt, &updatedAt); err != nil {
 			return nil, fmt.Errorf("list activities scan: %w", err)
 		}
 		a.UserID = userID
@@ -274,10 +274,10 @@ func (s *SQLiteStore) getActivityRow(ctx context.Context, userID, id string) (Ac
 	var lastUsed sql.NullString
 	var createdAt, updatedAt string
 	err := s.db.QueryRowContext(ctx, `
-		SELECT id, name, color, icon, notes, last_used_at, created_at, updated_at
+		SELECT id, name, notes, last_used_at, created_at, updated_at
 		FROM activities
 		WHERE user_id = ? AND id = ?
-	`, userID, id).Scan(&a.ID, &a.Name, &a.Color, &a.Icon, &notes, &lastUsed, &createdAt, &updatedAt)
+	`, userID, id).Scan(&a.ID, &a.Name, &notes, &lastUsed, &createdAt, &updatedAt)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return Activity{}, fmt.Errorf("get activity: %w", ErrNotFound)
@@ -299,10 +299,10 @@ func (s *SQLiteStore) getActivityRowByName(ctx context.Context, userID, name str
 	var lastUsed sql.NullString
 	var createdAt, updatedAt string
 	err := s.db.QueryRowContext(ctx, `
-		SELECT id, name, color, icon, notes, last_used_at, created_at, updated_at
+		SELECT id, name, notes, last_used_at, created_at, updated_at
 		FROM activities
 		WHERE user_id = ? AND lower(name) = lower(?)
-	`, userID, name).Scan(&a.ID, &a.Name, &a.Color, &a.Icon, &notes, &lastUsed, &createdAt, &updatedAt)
+	`, userID, name).Scan(&a.ID, &a.Name, &notes, &lastUsed, &createdAt, &updatedAt)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return Activity{}, fmt.Errorf("get activity by name: %w", ErrNotFound)
@@ -344,9 +344,9 @@ func (s *SQLiteStore) CreateActivity(ctx context.Context, a Activity, categoryID
 
 	now := time.Now().UTC()
 	if _, err := s.db.ExecContext(ctx, `
-		INSERT INTO activities (id, user_id, name, color, icon, notes, last_used_at, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`, a.ID, a.UserID, a.Name, a.Color, a.Icon, nullStrArg(a.Notes), fmtTimeArg(a.LastUsedAt), fmtTime(now), fmtTime(now)); err != nil {
+		INSERT INTO activities (id, user_id, name, notes, last_used_at, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?)
+	`, a.ID, a.UserID, a.Name, nullStrArg(a.Notes), fmtTimeArg(a.LastUsedAt), fmtTime(now), fmtTime(now)); err != nil {
 		// A concurrent create that raced past the name pre-check surfaces as a
 		// UNIQUE-constraint failure on the INSERT; map it to ErrActivityExists
 		// (409) like the Postgres path, not a raw 500.
@@ -375,14 +375,6 @@ func (s *SQLiteStore) UpdateActivity(ctx context.Context, userID, id string, p A
 	if p.Name != nil {
 		sets = append(sets, "name = ?")
 		args = append(args, *p.Name)
-	}
-	if p.Color != nil {
-		sets = append(sets, "color = ?")
-		args = append(args, *p.Color)
-	}
-	if p.Icon != nil {
-		sets = append(sets, "icon = ?")
-		args = append(args, *p.Icon)
 	}
 	if p.Notes != nil {
 		sets = append(sets, "notes = ?")
@@ -435,7 +427,7 @@ func (s *SQLiteStore) UpdateActivity(ctx context.Context, userID, id string, p A
 
 // replaceActivityCategories validates ownership, then atomically replaces an
 // activity's join rows.
-func (s *SQLiteStore) replaceActivityCategories(ctx context.Context, userID, activityID string, categoryIDs []string) error {
+func (s *SQLiteStore) replaceActivityCategories(ctx context.Context, userID, activityID string, orderedIDs []string) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("replace activity categories begin: %w", err)
@@ -446,7 +438,7 @@ func (s *SQLiteStore) replaceActivityCategories(ctx context.Context, userID, act
 		return fmt.Errorf("replace activity categories delete: %w", err)
 	}
 	seen := map[string]bool{}
-	for _, cid := range categoryIDs {
+	for i, cid := range orderedIDs {
 		if cid == "" || seen[cid] {
 			continue
 		}
@@ -458,7 +450,7 @@ func (s *SQLiteStore) replaceActivityCategories(ctx context.Context, userID, act
 			}
 			return fmt.Errorf("replace activity categories check: %w", err)
 		}
-		if _, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO activity_categories (activity_id, category_id) VALUES (?, ?)`, activityID, cid); err != nil {
+		if _, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO activity_categories (activity_id, category_id, position) VALUES (?, ?, ?)`, activityID, cid, i); err != nil {
 			return fmt.Errorf("replace activity categories insert: %w", err)
 		}
 	}
@@ -504,7 +496,7 @@ func (s *SQLiteStore) DeleteActivity(ctx context.Context, userID, id string) err
 // ListCategories returns the user's categories ordered by name.
 func (s *SQLiteStore) ListCategories(ctx context.Context, userID string) ([]Category, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, name, color, created_at, updated_at
+		SELECT id, name, icon, created_at, updated_at
 		FROM categories
 		WHERE user_id = ?
 		ORDER BY lower(name)
@@ -517,7 +509,7 @@ func (s *SQLiteStore) ListCategories(ctx context.Context, userID string) ([]Cate
 	for rows.Next() {
 		var c Category
 		var createdAt, updatedAt string
-		if err := rows.Scan(&c.ID, &c.Name, &c.Color, &createdAt, &updatedAt); err != nil {
+		if err := rows.Scan(&c.ID, &c.Name, &c.Icon, &createdAt, &updatedAt); err != nil {
 			return nil, fmt.Errorf("list categories scan: %w", err)
 		}
 		c.UserID = userID
@@ -553,9 +545,9 @@ func (s *SQLiteStore) CreateCategory(ctx context.Context, c Category) (Category,
 
 	now := time.Now().UTC()
 	if _, err := s.db.ExecContext(ctx, `
-		INSERT INTO categories (id, user_id, name, color, created_at, updated_at)
+		INSERT INTO categories (id, user_id, name, icon, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?)
-	`, c.ID, c.UserID, c.Name, c.Color, fmtTime(now), fmtTime(now)); err != nil {
+	`, c.ID, c.UserID, c.Name, c.Icon, fmtTime(now), fmtTime(now)); err != nil {
 		// A concurrent create that raced past the name pre-check surfaces as a
 		// UNIQUE-constraint failure on the INSERT; map it to ErrCategoryExists
 		// (409) like the Postgres path, not a raw 500.
@@ -578,10 +570,10 @@ func (s *SQLiteStore) getCategoryRow(ctx context.Context, userID, id string) (Ca
 	var c Category
 	var createdAt, updatedAt string
 	err := s.db.QueryRowContext(ctx, `
-		SELECT id, name, color, created_at, updated_at
+		SELECT id, name, icon, created_at, updated_at
 		FROM categories
 		WHERE user_id = ? AND id = ?
-	`, userID, id).Scan(&c.ID, &c.Name, &c.Color, &createdAt, &updatedAt)
+	`, userID, id).Scan(&c.ID, &c.Name, &c.Icon, &createdAt, &updatedAt)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return Category{}, fmt.Errorf("get category: %w", ErrNotFound)
@@ -598,10 +590,10 @@ func (s *SQLiteStore) getCategoryRowByName(ctx context.Context, userID, name str
 	var c Category
 	var createdAt, updatedAt string
 	err := s.db.QueryRowContext(ctx, `
-		SELECT id, name, color, created_at, updated_at
+		SELECT id, name, icon, created_at, updated_at
 		FROM categories
 		WHERE user_id = ? AND lower(name) = lower(?)
-	`, userID, name).Scan(&c.ID, &c.Name, &c.Color, &createdAt, &updatedAt)
+	`, userID, name).Scan(&c.ID, &c.Name, &c.Icon, &createdAt, &updatedAt)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return Category{}, fmt.Errorf("get category by name: %w", ErrNotFound)
@@ -614,7 +606,7 @@ func (s *SQLiteStore) getCategoryRowByName(ctx context.Context, userID, name str
 	return c, nil
 }
 
-// UpdateCategory applies a partial LWW update on name/color.
+// UpdateCategory applies a partial LWW update on name/icon.
 func (s *SQLiteStore) UpdateCategory(ctx context.Context, userID, id string, c CategoryPatch) (Category, error) {
 	sets := []string{}
 	args := []any{}
@@ -622,9 +614,9 @@ func (s *SQLiteStore) UpdateCategory(ctx context.Context, userID, id string, c C
 		sets = append(sets, "name = ?")
 		args = append(args, *c.Name)
 	}
-	if c.Color != nil {
-		sets = append(sets, "color = ?")
-		args = append(args, *c.Color)
+	if c.Icon != nil {
+		sets = append(sets, "icon = ?")
+		args = append(args, *c.Icon)
 	}
 	sets = append(sets, "updated_at = ?")
 	args = append(args, fmtTime(c.UpdatedAt))

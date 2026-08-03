@@ -12,8 +12,7 @@ struct RemoteCatalogRepositoryTests {
     }
 
     private func makeDTO(id: UUID = UUID(), name: String = "Gym") -> ActivityDTO {
-        ActivityDTO(id: id, name: name, color: .blue, icon: .figureStrengthtraining,
-                    notes: nil, lastUsedAt: nil, createdAt: Date(), updatedAt: Date(),
+        ActivityDTO(id: id, name: name, notes: nil, lastUsedAt: nil, createdAt: Date(), updatedAt: Date(),
                     categories: [])
     }
 
@@ -64,7 +63,7 @@ struct RemoteCatalogRepositoryTests {
         #expect(r.requiresAuth == true)
     }
 
-    @Test("createActivity calls POST /activities with id/name/color/icon/category_ids")
+    @Test("createActivity calls POST /activities with id/name/category_ids")
     func createActivityEndpoint() async throws {
         let (repo, mock) = makeRepo()
         mock.sendHandler = { _, _ in self.makeDTO() }
@@ -79,8 +78,8 @@ struct RemoteCatalogRepositoryTests {
         let body = try #require(bodyObject(r.body))
         #expect(body["id"] != nil)
         #expect(body["name"] as? String == "Gym")
-        #expect(body["color"] as? String == "blue")
-        #expect(body["icon"] as? String == "figure.strengthtraining")
+        #expect(body["color"] == nil)
+        #expect(body["icon"] == nil)
         #expect(body["category_ids"] != nil)
     }
 
@@ -119,11 +118,11 @@ struct RemoteCatalogRepositoryTests {
 
     // MARK: - Categories
 
-    @Test("createCategory calls POST /categories with id/name/color")
+    @Test("createCategory calls POST /categories with id/name/icon")
     func createCategoryEndpoint() async throws {
         let (repo, mock) = makeRepo()
         mock.sendHandler = { _, _ in
-            CategoryDTO(id: UUID(), name: "Sport", color: .green, createdAt: Date(), updatedAt: Date())
+            CategoryDTO(id: UUID(), name: "Sport", icon: .tag, createdAt: Date(), updatedAt: Date())
         }
         let category = TestCatalogFactory.category()
 
@@ -136,14 +135,14 @@ struct RemoteCatalogRepositoryTests {
         let body = try #require(bodyObject(r.body))
         #expect(body["id"] != nil)
         #expect(body["name"] as? String == "Sport")
-        #expect(body["color"] as? String == "green")
+        #expect(body["icon"] as? String == "tag")
     }
 
     @Test("updateCategory calls PATCH /categories/{id} with updated_at")
     func updateCategoryEndpoint() async throws {
         let (repo, mock) = makeRepo()
         mock.sendHandler = { _, _ in
-            CategoryDTO(id: UUID(), name: "Sport", color: .green, createdAt: Date(), updatedAt: Date())
+            CategoryDTO(id: UUID(), name: "Sport", icon: .tag, createdAt: Date(), updatedAt: Date())
         }
         let category = TestCatalogFactory.category()
 

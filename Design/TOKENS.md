@@ -71,15 +71,15 @@ Use SF Symbols. Prefer filled variants for active/primary actions.
 | Check | `checkmark.circle.fill` | Success state |
 | Exclamation | `exclamationmark.triangle.fill` | Error state |
 | Arrow back | `chevron.left` | Back navigation |
-| Clock | `clock` | Activity icon fallback |
+| Clock | `clock` | Time / duration |
 
-### Activity icons
+### Catalog icons
 
-Allowed set for `activity.icon` (F1); default is `clock`. Validated against this exact set (U1, D15).
+Allowed set for category icons (F2); default is `tag`. Validated against this exact set (U1).
 
 | SF Symbol | Usage |
 |---|---|
-| `clock` | Activity icon default / fallback |
+| `clock` | Time / duration |
 | `laptopcomputer` | Work / coding |
 | `briefcase` | Work / office |
 | `book` | Education / reading |
@@ -107,6 +107,7 @@ Allowed set for `activity.icon` (F1); default is `clock`. Validated against this
 | `heart` | Wellness |
 | `leaf` | Nature / outdoors |
 | `sparkles` | Misc / other |
+| `tag` | Category marker |
 
 ### Management icons
 
@@ -136,30 +137,6 @@ New for Epic 1 (Manage Activities, quick-add sheet, category management).
 
 `ThemeManager` is the seam for a future manual theme override. For the MVP it is `nil`, which means the app follows the system color scheme.
 
-## Activity / Category color palette
-
-A fixed, validated set of 12 palette keys that activities (F1) and categories (F2) pick from — never arbitrary hex (D15). Validation requires `color` ∈ this set (U1).
-
-| Key | Light (`#RRGGBB`) | Dark (`#RRGGBB`) | Purpose |
-|---|---|---|---|
-| `gray` | `#8E8E93` | `#8E8E93` | Neutral content color |
-| `red` | `#FF3B30` | `#FF453A` | Content color |
-| `orange` | `#FF9500` | `#FF9F0A` | Content color (distinct from `accentPrimary` `#FF840A`) |
-| `yellow` | `#FFCC00` | `#FFD60A` | Content color |
-| `green` | `#34C759` | `#30D158` | Content color |
-| `teal` | `#30B0C7` | `#40C8E0` | Content color |
-| `blue` | `#007AFF` | `#0A84FF` | Content color |
-| `indigo` | `#5856D6` | `#5E5CE6` | Content color |
-| `purple` | `#AF52DE` | `#BF5AF2` | Content color |
-| `pink` | `#FF2D55` | `#FF375F` | Content color |
-| `brown` | `#A2845E` | `#AC8E68` | Content color |
-| `mint` | `#00C7BE` | `#66D4CF` | Content color |
-
-> **Rule:** These are content colors, not the brand accent. `orange` here is `#FF9500`, distinct from `accentPrimary` (`#FF840A`).
-
-Keys are stored as a Swift enum/map and resolved via `Theme.activityColor(_ key: ActivityColor) -> Color`, returning the light/dark asset by scheme. The palette is **closed**: the backend validates `color` against these exact keys (see `Activity_Catalog_API.md` validation, U1), so client and server share the same set (D15).
-
 ## Implementation notes (Epic 1)
 
 - `success` and `cornerRadiusLarge` are already documented in this file but are not yet declared in `Core/Theme/Theme.swift`; add them when implementing Epic 1.
-- Add `ActivityColor` enum + `Theme.activityColor(_:)` resolver reading 12 new `Assets.xcassets` color sets (light/dark each).

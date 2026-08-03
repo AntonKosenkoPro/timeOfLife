@@ -4,18 +4,18 @@ import Foundation
 final class CatalogSeeder {
     struct Seed: Sendable {
         let key: String
-        let color: ActivityColor
+        let icon: CatalogIcon
         let id: UUID
     }
 
     static let seeds: [Seed] = [
-        Seed(key: "category.seed.work", color: .blue, id: UUID(uuidString: "018f0000-0000-7000-8000-000000000001")!),
-        Seed(key: "category.seed.hobby", color: .yellow, id: UUID(uuidString: "018f0000-0000-7000-8000-000000000002")!),
-        Seed(key: "category.seed.sport", color: .green, id: UUID(uuidString: "018f0000-0000-7000-8000-000000000003")!),
-        Seed(key: "category.seed.education", color: .orange, id: UUID(uuidString: "018f0000-0000-7000-8000-000000000004")!),
-        Seed(key: "category.seed.relax", color: .teal, id: UUID(uuidString: "018f0000-0000-7000-8000-000000000005")!),
-        Seed(key: "category.seed.sleep", color: .gray, id: UUID(uuidString: "018f0000-0000-7000-8000-000000000006")!),
-        Seed(key: "category.seed.entertainment", color: .pink, id: UUID(uuidString: "018f0000-0000-7000-8000-000000000007")!),
+        Seed(key: "category.seed.work", icon: .briefcase, id: UUID(uuidString: "018f0000-0000-7000-8000-000000000001")!),
+        Seed(key: "category.seed.hobby", icon: .paintbrush, id: UUID(uuidString: "018f0000-0000-7000-8000-000000000002")!),
+        Seed(key: "category.seed.sport", icon: .figureRun, id: UUID(uuidString: "018f0000-0000-7000-8000-000000000003")!),
+        Seed(key: "category.seed.education", icon: .book, id: UUID(uuidString: "018f0000-0000-7000-8000-000000000004")!),
+        Seed(key: "category.seed.relax", icon: .cupAndSaucer, id: UUID(uuidString: "018f0000-0000-7000-8000-000000000005")!),
+        Seed(key: "category.seed.sleep", icon: .bedDouble, id: UUID(uuidString: "018f0000-0000-7000-8000-000000000006")!),
+        Seed(key: "category.seed.entertainment", icon: .tv, id: UUID(uuidString: "018f0000-0000-7000-8000-000000000007")!),
     ]
 
     private let repository: CatalogRepository
@@ -46,7 +46,7 @@ final class CatalogSeeder {
             let category = Category(
                 id: seed.id,
                 name: localizedName(for: seed.key),
-                color: seed.color,
+                icon: seed.icon,
                 createdAt: now,
                 updatedAt: now
             )
@@ -76,7 +76,7 @@ final class CatalogSeeder {
         return Category(
             id: id,
             name: name,
-            color: fallback.color,
+            icon: fallback.icon,
             createdAt: fallback.createdAt,
             updatedAt: fallback.updatedAt
         )

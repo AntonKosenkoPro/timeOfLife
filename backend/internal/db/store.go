@@ -33,12 +33,12 @@ type RefreshToken struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
-// CategoryTag is a denormalized category (id + name + color) attached to an
+// CategoryTag is a denormalized category (id + name + icon) attached to an
 // activity or entry in API responses. It is never written on its own.
 type CategoryTag struct {
-	ID    string `json:"id"`
-	Name  string `json:"name"`
-	Color string `json:"color"`
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	Icon string `json:"icon"`
 }
 
 // Activity is a saved, reusable time-tracking target (Epic 1).
@@ -46,8 +46,6 @@ type Activity struct {
 	ID         string        `json:"id"`
 	UserID     string        `json:"-"`
 	Name       string        `json:"name"`
-	Color      string        `json:"color"`
-	Icon       string        `json:"icon"`
 	Notes      string        `json:"notes"`
 	LastUsedAt *time.Time    `json:"last_used_at"`
 	Categories []CategoryTag `json:"categories"`
@@ -60,7 +58,7 @@ type Category struct {
 	ID        string    `json:"id"`
 	UserID    string    `json:"-"`
 	Name      string    `json:"name"`
-	Color     string    `json:"color"`
+	Icon      string    `json:"icon"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 }
@@ -107,8 +105,6 @@ type NullableTime struct {
 // (required): the write applies only if newer than the stored updated_at.
 type ActivityPatch struct {
 	Name        *string
-	Color       *string
-	Icon        *string
 	Notes       *string
 	CategoryIDs *[]string
 	UpdatedAt   time.Time
@@ -126,7 +122,7 @@ type EntryPatch struct {
 // Nil pointer fields are left unchanged. UpdatedAt is the LWW version (required).
 type CategoryPatch struct {
 	Name      *string
-	Color     *string
+	Icon      *string
 	UpdatedAt time.Time
 }
 
@@ -221,7 +217,7 @@ type Store interface {
 	// collision returns ErrCategoryExists.
 	CreateCategory(ctx context.Context, c Category) (Category, bool, error)
 
-	// UpdateCategory applies a partial LWW update on name/color. Returns
+	// UpdateCategory applies a partial LWW update on name/icon. Returns
 	// ErrNotFound, ErrConflict, or ErrCategoryExists.
 	UpdateCategory(ctx context.Context, userID, id string, p CategoryPatch) (Category, error)
 

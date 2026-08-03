@@ -47,16 +47,13 @@ Mode: report only; no files were modified.
 - **M6.** `AuthService.restoreSession()` reads unused `accessToken` — `.../Features/Auth/Services/AuthService.swift:70,106` (no-op `_ = accessToken`).
 - **M7.** `MeasuredBottomBar` + `.onPreferenceChange(BottomBarHeightPreferenceKey.self)` boilerplate duplicated across 5 views — Welcome, TimerView, EmailEntryView, ActivityEditorView, CategoryEditorView. Extract a `.measuredBottomBar { ... }` modifier.
 - **M8.** `AnyCodable` decode branches for `.number`/`.bool`/`.array` never produced — `.../Core/Networking/APIClient.swift:198-244`; `DetailsEnvelope` only handles `.string`/`.object`. Narrow to `.null`/`.string`/`.object`.
-- **M9.** `Theme.success` color unused — `.../Core/Theme/Theme.swift:15`.
-
 ### Docs / consistency
 
-- **M10.** AGENTS.md:145 wrong GHCR image path — `ghcr.io/antonkosenko/time-of-life/backend` vs actual `ghcr.io/antonkosenkopro/timeoflife/backend`.
-- **M11.** Test counts stale — README "118" / AGENTS "119", actual **272** `@Test` annotations.
-- **M12.** Go "1.22+" → actual 1.24 — `AGENTS.md:51`, `README.md:47` (go.mod, Dockerfile, CI all 1.24).
-- **M13.** Dead `.stringsdict` files still shipped — `en.lproj/Localizable.stringsdict` + `ru.lproj` referenced 7× in `project.pbxproj`, but plural moved to Swift suffix keys (`String+Localized.swift`). Delete both + pbxproj refs. RU wording also diverges.
-- **M14.** Duplicate validation strings — `L10n.activityValidationNameEmpty/TooLong/NotesTooLong` vs a second `validation.catalog.*` set used via hardcoded `NSLocalizedString` in `CatalogValidator.swift:69-95`. Consolidate on one set.
-- **M15.** `openapi.yaml:205-262` documents unreachable 503 `apple_not_configured` — route only registered when `AppleVerifier != nil` (`server.go:141-143`), so unconfigured server never routes. Register always (to surface 503) or drop the 503 from spec.
+- **M9.** AGENTS.md:145 wrong GHCR image path — `ghcr.io/antonkosenko/time-of-life/backend` vs actual `ghcr.io/antonkosenkopro/timeoflife/backend`.
+- **M10.** Test counts stale — README "118" / AGENTS "119", actual **272** `@Test` annotations.
+- **M11.** Go "1.22+" → actual 1.24 — `AGENTS.md:51`, `README.md:47` (go.mod, Dockerfile, CI all 1.24).
+- **M12.** Dead `.stringsdict` files still shipped — `en.lproj/Localizable.stringsdict` + `ru.lproj` referenced 7× in `project.pbxproj`, but plural moved to Swift suffix keys (`String+Localized.swift`). Delete both + pbxproj refs. RU wording also diverges.
+- **M13.** `openapi.yaml:205-262` documents unreachable 503 `apple_not_configured` — route only registered when `AppleVerifier != nil` (`server.go:141-143`), so unconfigured server never routes. Register always (to surface 503) or drop the 503 from spec.
 
 ---
 
@@ -67,13 +64,12 @@ Mode: report only; no files were modified.
 - **L3.** `validateNotes` doesn't trim while `validateName` does — `internal/handlers/catalog_validators.go:177-190`. Whitespace-padded notes counted inconsistently.
 - **L4.** Test-only exported getters — `MaxAttempts()` (`internal/auth/otp.go:70`), `RefreshTokenTTL()` (`internal/auth/token.go:97`); `Server.handler` field (`internal/server/server.go:100,119`). Trim or expose via test helpers.
 - **L5.** `decodeJSON` passes nil `ResponseWriter` to `MaxBytesReader` — `internal/handlers/auth.go:156`. Cosmetic.
-- **L6.** Hard-coded user-facing accessibility strings (violate U4/AGENTS.md) — `IconPickerGrid.swift:42`, `SuggestionRow.swift:31-32`, `ColorSwatchGrid.swift:54`, `ActivityRow.swift:98`. Route through `L10n`.
-- **L7.** Hard-coded colors used with semantic fills — `TagSelector.swift:43,52`, `TagChip`/`PrimaryButton.swift:57,71`, `IconPickerGrid.swift:38`, `RootView.swift:57`. Consider `Theme.onDanger`/`Theme.buttonLabel` tokens.
-- **L8.** `UndoableItem.activityWithEntries(_, entryIds:)` carries unused `entryIds` (always `[]`, discarded at matches) — `UndoBuffer.swift:18,75`, `CatalogService.swift:156,257`. Simplify until Epic 2.
-- **L9.** `ScopeConfirmation` attaches its dialog to a `Text("")` — `.../Design/Components/Catalog/ScopeConfirmation.swift:17`. Works; consider background attachment.
-- **L10.** `backend/.env` contains real-looking AWS SES credentials — gitignored but live in working tree with `EMAIL_BACKEND=ses`. **Rotate the keys.**
-- **L11.** `ActivityIcon` enum has many cases only exercised by `validKeys` in tests — by-design to match the backend union; keep, but note it's a conscious decision.
-- **L12.** Localization en/ru parity is OK — `.other` vs `.few/.many` plural differences are correct per `PluralForm`. No action.
+- **L6.** Hard-coded user-facing accessibility strings (violate U4/AGENTS.md) — `IconPickerGrid.swift:42`, `SuggestionRow.swift:31-32`, `ActivityRow.swift:98`. Route through `L10n`.
+- **L7.** `UndoableItem.activityWithEntries(_, entryIds:)` carries unused `entryIds` (always `[]`, discarded at matches) — `UndoBuffer.swift:18,75`, `CatalogService.swift:156,257`. Simplify until Epic 2.
+- **L8.** `ScopeConfirmation` attaches its dialog to a `Text("")` — `.../Design/Components/Catalog/ScopeConfirmation.swift:17`. Works; consider background attachment.
+- **L9.** `backend/.env` contains real-looking AWS SES credentials — gitignored but live in working tree with `EMAIL_BACKEND=ses`. **Rotate the keys.**
+- **L10.** `CatalogIcon` enum has many cases only exercised by `validKeys` in tests — by-design to match the backend union plus the category `tag` symbol; keep, but note it's a conscious decision.
+- **L11.** Localization en/ru parity is OK — `.other` vs `.few/.many` plural differences are correct per `PluralForm`. No action.
 
 ---
 

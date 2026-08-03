@@ -14,14 +14,6 @@ enum ActivityValidator {
         CatalogValidator.validateNotes(value)
     }
 
-    static func validateColor(_ value: String) -> [ValidationError] {
-        CatalogValidator.validateColor(value)
-    }
-
-    static func validateIcon(_ value: String) -> [ValidationError] {
-        CatalogValidator.validateIcon(value)
-    }
-
     static func unifiedNameMessage(_ errors: [ValidationError]) -> String? {
         guard !errors.isEmpty else { return nil }
         if errors.contains(.nameEmpty) {
@@ -37,11 +29,4 @@ enum ActivityValidator {
         errors.contains(.notesTooLong) ? L10n.activityValidationNotesTooLong.text : nil
     }
 
-    static func unifiedColorMessage(_ errors: [ValidationError]) -> String? {
-        errors.contains(.colorInvalid) ? L10n.validationCatalogColorInvalid.text : nil
-    }
-
-    static func unifiedIconMessage(_ errors: [ValidationError]) -> String? {
-        errors.contains(.iconInvalid) ? L10n.validationCatalogIconInvalid.text : nil
-    }
 }
