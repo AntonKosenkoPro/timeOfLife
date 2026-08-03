@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 // Epic 1 introduces the catalog/entries endpoints. Unlike the auth handlers
@@ -23,7 +24,9 @@ const (
 	codeActivityMissing = "activity_not_found"
 )
 
-// validIcons is the allowed SF Symbol set for catalog icons. iOS must align.
+// validIcons is the allowed SF Symbol set for catalog icons. Must match
+// iOS CatalogIcon.validKeys (CatalogModels.swift). The backend is the
+// authoritative validator (U1); the client keeps the full union.
 var validIcons = map[string]bool{
 	"figure.walk": true, "figure.run": true, "figure.strengthtraining": true,
 	"figure.yoga": true, "figure.cycling": true, "figure.swimming": true,
@@ -36,6 +39,12 @@ var validIcons = map[string]bool{
 	"fork.knife": true, "cup.and.saucer": true, "moon.zzz": true,
 	"car.fill": true, "airplane": true, "cart": true, "phone": true,
 	"clock": true, "tag": true,
+	// iOS-only icons (CatalogIcon.validKeys union)
+	"pencil.and.ruler": true, "brain.head.profile": true,
+	"dumbbell": true, "bicycle": true,
+	"bed.double": true, "moon.stars": true,
+	"film": true, "music.note": true, "guitar": true, "camera": true,
+	"hammer": true, "heart": true, "leaf": true, "sparkles": true,
 }
 
 const (
@@ -167,13 +176,13 @@ func validateName(field, name string, errs validationErrs) {
 	n := strings.TrimSpace(name)
 	if n == "" {
 		errs.add(field, "Name must not be empty")
-	} else if len(n) > maxNameLen {
+	} else if utf8.RuneCountInString(n) > maxNameLen {
 		errs.add(field, "Name must be 60 characters or fewer")
 	}
 }
 
 func validateNotes(n string, errs validationErrs) {
-	if len(strings.TrimSpace(n)) > maxNotesLen {
+	if utf8.RuneCountInString(strings.TrimSpace(n)) > maxNotesLen {
 		errs.add("notes", "Notes must be 280 characters or fewer")
 	}
 }

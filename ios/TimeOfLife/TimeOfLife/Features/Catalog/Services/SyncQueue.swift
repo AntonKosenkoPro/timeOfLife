@@ -1,14 +1,11 @@
 import Foundation
 import os
 
-/// A pending catalog mutation queued for sync. Generic over the resource kind
-/// (activity/category, plus an `entry` stub owned by story 1-3). Persisted to
-/// disk so the queue survives relaunch and replays on reconnect (F12/R1).
 struct SyncMutation: Codable, Sendable, Equatable {
     enum Resource: String, Codable, Sendable {
         case activity
         case category
-        case entry // forward-looking stub; owned by 1-3
+        case entry
     }
 
     enum Method: String, Codable, Sendable {
@@ -17,13 +14,10 @@ struct SyncMutation: Codable, Sendable, Equatable {
         case delete
     }
 
-    /// Local operation id (for dedup/removal).
     let id: UUID
-    /// The id of the affected activity/category/entry.
     let resourceId: UUID
     let resource: Resource
     let method: Method
-    /// Encoded `Activity`/`Category` (empty for deletes).
     let payload: Data
     let updatedAt: Date
     var attempts: Int
@@ -46,7 +40,6 @@ struct SyncMutation: Codable, Sendable, Equatable {
 }
 
 extension SyncMutation {
-    /// Convenience for a create carrying an encoded record.
     static func create(resource: Resource, resourceId: UUID, payload: Data, updatedAt: Date) -> SyncMutation {
         SyncMutation(resourceId: resourceId, resource: resource, method: .create, updatedAt: updatedAt, payload: payload)
     }
@@ -60,10 +53,9 @@ extension SyncMutation {
     }
 }
 
-/// File-based offline sync queue. Replay is safe: idempotent POST, 404 on
-/// DELETE, 409 conflict adopts server version, 409 *_exists re-maps refs.
 actor SyncQueue {
     private static let maxAttempts = 5
+    private static let log = Logger(subsystem: "com.timeoflife", category: "sync")
 
     private let url: URL
 
@@ -76,8 +68,6 @@ actor SyncQueue {
                 .appendingPathComponent("TimeOfLife", isDirectory: true)
         self.url = base.appendingPathComponent("syncQueue.json")
     }
-
-    // MARK: - Queue ops
 
     func enqueue(_ mutation: SyncMutation) async throws {
         try ensureDirectory()
@@ -122,7 +112,6 @@ actor SyncQueue {
                 remaining.append(mutation)
                 continue
             }
-            // Re-check connectivity before each mutation (network may drop mid-replay).
             guard await connectivity.isConnected else {
                 remaining.append(mutation)
                 stopped = true
@@ -136,11 +125,10 @@ actor SyncQueue {
                 conflictedActivityIds.insert(activityId)
                 continue
             case .retry:
-                // Increment attempts and drop if exceeded max retries.
                 var m = mutation
                 m.attempts += 1
                 if m.attempts >= Self.maxAttempts {
-                    // Log and drop — the mutation will never succeed.
+                    Self.log.warning("dropping mutation after \(Self.maxAttempts) attempts: \(m.resource.rawValue) \(m.method.rawValue) id=\(m.resourceId.uuidString)")
                     continue
                 }
                 remaining.append(m)
@@ -150,8 +138,6 @@ actor SyncQueue {
             }
         }
 
-        // Reload from disk to capture any mutations enqueued during replay
-        // (e.g. cascaded activity-updates from remapCategory).
         let onDisk = (try? load()) ?? []
         let newMutations = onDisk.filter { m in
             !pending.contains { $0.id == m.id }
@@ -159,8 +145,6 @@ actor SyncQueue {
         try? save(remaining + newMutations)
         return conflictedActivityIds
     }
-
-    // MARK: - Per-mutation dispatch
 
     private enum ReplayOutcome { case done, conflict(UUID), retry, stop }
 
@@ -180,14 +164,17 @@ actor SyncQueue {
         case (.category, .update): return await replayCategoryUpdate(mutation, repository: context.repository, store: context.store)
         case (.category, .delete): return await replayCategoryDelete(mutation, repository: context.repository)
         case (.entry, .delete): return await replayEntryDelete(mutation, context: context)
-        case (.entry, .create), (.entry, .update): return .done // entries are synced by 1-3 (TimerService)
+        case (.entry, .create), (.entry, .update): return .done
         }
     }
 
     // MARK: Activity replay
 
     private func replayActivityCreate(_ mutation: SyncMutation, context: ReplayContext) async -> ReplayOutcome {
-        guard let activity = decode(Activity.self, mutation.payload) else { return .done }
+        guard let activity = decode(Activity.self, mutation.payload) else {
+            Self.log.warning("drop activity create: payload decode failure id=\(mutation.resourceId.uuidString)")
+            return .done
+        }
         do {
             let canonical = try await context.repository.createActivity(activity)
             await context.store.upsertActivity(canonical)
@@ -195,6 +182,7 @@ actor SyncQueue {
         } catch CatalogError.activityExists(let existingId, _) {
             return await remapActivity(from: activity.id, to: existingId, context: context) ? .done : .retry
         } catch CatalogError.validation {
+            Self.log.warning("drop activity create: 422 validation id=\(mutation.resourceId.uuidString)")
             return .done // 422 will never succeed on retry
         } catch CatalogError.offline {
             return .stop
@@ -204,13 +192,15 @@ actor SyncQueue {
     }
 
     private func replayActivityUpdate(_ mutation: SyncMutation, context: ReplayContext) async -> ReplayOutcome {
-        guard let activity = decode(Activity.self, mutation.payload) else { return .done }
+        guard let activity = decode(Activity.self, mutation.payload) else {
+            Self.log.warning("drop activity update: payload decode failure id=\(mutation.resourceId.uuidString)")
+            return .done
+        }
         do {
             let canonical = try await context.repository.updateActivity(activity)
             await context.store.upsertActivity(canonical)
             return .done
         } catch CatalogError.conflict {
-            // Keep-latest: adopt the server's current version (re-fetch).
             if let server = try? await context.repository.getActivity(activity.id) {
                 await context.store.upsertActivity(server)
             }
@@ -218,9 +208,11 @@ actor SyncQueue {
         } catch CatalogError.activityExists(let existingId, _) {
             return await remapActivity(from: activity.id, to: existingId, context: context) ? .done : .retry
         } catch CatalogError.validation {
+            Self.log.warning("drop activity update: 422 validation id=\(mutation.resourceId.uuidString)")
             return .done
         } catch CatalogError.notFound {
-            return .done // deleted server-side; drop the stale update
+            Self.log.warning("drop activity update: 404 not found id=\(mutation.resourceId.uuidString)")
+            return .done
         } catch CatalogError.offline {
             return .stop
         } catch {
@@ -233,8 +225,10 @@ actor SyncQueue {
             try await repository.deleteActivity(mutation.resourceId)
             return .done
         } catch CatalogError.notFound {
-            return .done // 404 on DELETE is success
+            Self.log.warning("drop activity delete: 404 not found id=\(mutation.resourceId.uuidString)")
+            return .done
         } catch CatalogError.validation {
+            Self.log.warning("drop activity delete: 422 validation id=\(mutation.resourceId.uuidString)")
             return .done
         } catch CatalogError.offline {
             return .stop
@@ -244,15 +238,16 @@ actor SyncQueue {
     }
 
     private func replayEntryDelete(_ mutation: SyncMutation, context: ReplayContext) async -> ReplayOutcome {
-        guard let entriesRepository = context.entriesRepository else { return .done } // catalog-only graph
+        guard let entriesRepository = context.entriesRepository else { return .done }
         do { try await entriesRepository.delete(id: mutation.resourceId); return .done } catch let error as APIError {
-            if case let .server(code, _, _) = error, code == "not_found" { return .done } // 404 = success
+            if case let .server(code, _, _) = error, code == "not_found" { return .done }
             if case .offline = error { return .stop }
             return .retry
         } catch { return .retry }
     }
 
-    private func remapActivity(from oldId: UUID, to newId: UUID, context: ReplayContext) async -> Bool {        if let survivor = try? await context.repository.getActivity(newId) {
+    private func remapActivity(from oldId: UUID, to newId: UUID, context: ReplayContext) async -> Bool {
+        if let survivor = try? await context.repository.getActivity(newId) {
             await context.store.upsertActivity(survivor)
         }
         do {
@@ -272,7 +267,10 @@ actor SyncQueue {
         repository: CatalogRepository,
         store: CatalogStoring
     ) async -> ReplayOutcome {
-        guard let category = decode(Category.self, mutation.payload) else { return .done }
+        guard let category = decode(Category.self, mutation.payload) else {
+            Self.log.warning("drop category create: payload decode failure id=\(mutation.resourceId.uuidString)")
+            return .done
+        }
         do {
             let canonical = try await repository.createCategory(category)
             await store.upsertCategory(canonical)
@@ -281,6 +279,7 @@ actor SyncQueue {
             await remapCategory(from: category.id, to: existingId, repository: repository, store: store)
             return .done
         } catch CatalogError.validation {
+            Self.log.warning("drop category create: 422 validation id=\(mutation.resourceId.uuidString)")
             return .done
         } catch CatalogError.offline {
             return .stop
@@ -294,7 +293,10 @@ actor SyncQueue {
         repository: CatalogRepository,
         store: CatalogStoring
     ) async -> ReplayOutcome {
-        guard let category = decode(Category.self, mutation.payload) else { return .done }
+        guard let category = decode(Category.self, mutation.payload) else {
+            Self.log.warning("drop category update: payload decode failure id=\(mutation.resourceId.uuidString)")
+            return .done
+        }
         do {
             let canonical = try await repository.updateCategory(category)
             await store.upsertCategory(canonical)
@@ -308,8 +310,10 @@ actor SyncQueue {
             await remapCategory(from: category.id, to: existingId, repository: repository, store: store)
             return .done
         } catch CatalogError.validation {
+            Self.log.warning("drop category update: 422 validation id=\(mutation.resourceId.uuidString)")
             return .done
         } catch CatalogError.notFound {
+            Self.log.warning("drop category update: 404 not found id=\(mutation.resourceId.uuidString)")
             return .done
         } catch CatalogError.offline {
             return .stop
@@ -366,13 +370,9 @@ actor SyncQueue {
         }
     }
 
-    // MARK: - File helpers
-
     private func ensureDirectory() throws {
         let directory = url.deletingLastPathComponent()
-        try FileManager.default.createDirectory(
-            at: directory, withIntermediateDirectories: true, attributes: nil
-        )
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true, attributes: nil)
     }
 
     private func load() throws -> [SyncMutation] {
@@ -394,5 +394,7 @@ actor SyncQueue {
         try data.write(to: url)
     }
 
-    private func decode<T: Decodable>(_ type: T.Type, _ data: Data) -> T? { try? JSONDecoder().decode(type, from: data) }
+    private func decode<T: Decodable>(_ type: T.Type, _ data: Data) -> T? {
+        try? JSONDecoder().decode(type, from: data)
+    }
 }

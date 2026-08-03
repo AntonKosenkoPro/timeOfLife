@@ -63,6 +63,77 @@ func TestCreateActivity_ValidationErrors(t *testing.T) {
 	}
 }
 
+func TestCreateActivity_RuneCountName(t *testing.T) {
+	h, _, _, tok := newCatalogHandler(t)
+
+	// 60 Cyrillic characters = 120 bytes — must pass (rune count ≤ 60).
+	sixtyRunes := ""
+	for i := 0; i < 60; i++ {
+		sixtyRunes += "я"
+	}
+	w := serve(h, jsonReq(t, "POST", "/api/v1/activities", tok, map[string]any{
+		"id": v7(), "name": sixtyRunes,
+	}))
+	if w.Code != http.StatusCreated {
+		t.Fatalf("60 Cyrillic chars: expected 201, got %d (body=%s)", w.Code, w.Body.String())
+	}
+
+	// 61 Cyrillic characters = 122 bytes — must fail (rune count > 60).
+	sixtyOneRunes := sixtyRunes + "я"
+	w2 := serve(h, jsonReq(t, "POST", "/api/v1/activities", tok, map[string]any{
+		"id": v7(), "name": sixtyOneRunes,
+	}))
+	if w2.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("61 Cyrillic chars: expected 422, got %d (body=%s)", w2.Code, w2.Body.String())
+	}
+}
+
+func TestCreateActivity_RuneCountNotes(t *testing.T) {
+	h, _, _, tok := newCatalogHandler(t)
+
+	// 280 Cyrillic characters = 560 bytes — must pass.
+	notes := ""
+	for i := 0; i < 280; i++ {
+		notes += "я"
+	}
+	w := serve(h, jsonReq(t, "POST", "/api/v1/activities", tok, map[string]any{
+		"id": v7(), "name": "Test", "notes": notes,
+	}))
+	if w.Code != http.StatusCreated {
+		t.Fatalf("280 Cyrillic notes: expected 201, got %d (body=%s)", w.Code, w.Body.String())
+	}
+
+	// 281 Cyrillic characters — must fail.
+	notes281 := notes + "я"
+	w2 := serve(h, jsonReq(t, "POST", "/api/v1/activities", tok, map[string]any{
+		"id": v7(), "name": "Test", "notes": notes281,
+	}))
+	if w2.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("281 Cyrillic notes: expected 422, got %d (body=%s)", w2.Code, w2.Body.String())
+	}
+}
+
+func TestCreateCategory_NewIcons(t *testing.T) {
+	h, _, _, tok := newCatalogHandler(t)
+
+	// Each iOS-only icon must be accepted.
+	icons := []string{
+		"pencil.and.ruler", "brain.head.profile",
+		"dumbbell", "bicycle",
+		"bed.double", "moon.stars",
+		"film", "music.note", "guitar", "camera",
+		"hammer", "heart", "leaf", "sparkles",
+	}
+	for _, icon := range icons {
+		w := serve(h, jsonReq(t, "POST", "/api/v1/categories", tok, map[string]any{
+			"id": v7(), "name": icon, "icon": icon,
+		}))
+		if w.Code != http.StatusCreated {
+			t.Errorf("icon %q: expected 201, got %d (body=%s)", icon, w.Code, w.Body.String())
+		}
+	}
+}
+
 func TestCreateActivity_IdempotentReplay(t *testing.T) {
 	h, _, _, tok := newCatalogHandler(t)
 	id := v7()
