@@ -1,5 +1,4 @@
 import SwiftUI
-import OSLog
 
 /// Root view. Decides between auth flow and signed-in placeholder based on
 /// `SessionStore`, and renders the offline banner.
@@ -20,22 +19,8 @@ struct RootView: View {
             .onChange(of: session.state) { newState in
                 // When the user signs out, drop any pushed auth routes so they land
                 // on the welcome screen instead of the last pushed screen (e.g. OTP).
-                // When the user signs in, drop stale auth routes so TimerView's
-                // NavigationStack doesn't push to EmptyView destinations.
                 if newState == .signedOut {
                     container.navigation.popToRoot()
-                } else if case .signedIn = newState {
-                    container.navigation.popToRoot()
-                    os_log("RootView: signedIn, starting sync+pull+seed")
-                    Task {
-                        os_log("RootView: syncNow starting")
-                        await container.catalogService.syncNow()
-                        os_log("RootView: syncNow done, pullFromServer starting")
-                        await container.catalogService.pullFromServer()
-                        os_log("RootView: pullFromServer done, seedIfNeeded starting")
-                        await container.catalogSeeder.seedIfNeeded()
-                        os_log("RootView: seedIfNeeded done")
-                    }
                 }
             }
     }
@@ -48,9 +33,7 @@ struct RootView: View {
             TimerView(vm: TimerViewModel(
                 service: container.timerService,
                 authService: container.authService,
-                connectivity: container.connectivity,
-                catalogStore: container.catalogStore,
-                catalogService: container.catalogService
+                connectivity: container.connectivity
             ))
         }
     }

@@ -26,7 +26,6 @@ enum Theme {
 
     static let cornerRadius: CGFloat = 10
     static let cornerRadiusSmall: CGFloat = 8
-    static let cornerRadiusLarge: CGFloat = 16
     static let minTapArea: CGFloat = 44
     static let screenHorizontalPadding: CGFloat = 24
     static let maxContentWidth: CGFloat = 420
@@ -43,7 +42,6 @@ enum Theme {
     static func color(_ color: Color, alpha: Double) -> Color {
         Color(uiColor: UIColor(color).withAlphaComponent(alpha))
     }
-
 }
 
 /// Lightweight shadow description used by view modifiers.
@@ -51,9 +49,4 @@ struct ShadowStyle {
     let radius: CGFloat
     let y: CGFloat
     let opacity: Double
-}
-
-extension Theme {
-    /// Small card shadow: radius 4, y 2, opacity 0.08 (TOKENS.md → Shadows).
-    static let shadowSmall = ShadowStyle(radius: 4, y: 2, opacity: 0.08)
 }

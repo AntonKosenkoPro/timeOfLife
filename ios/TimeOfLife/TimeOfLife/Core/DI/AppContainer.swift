@@ -16,13 +16,6 @@ final class AppContainer: ObservableObject {
     let authService: AuthService
     let appleService: AppleSignInService
     let timerService: TimerService
-    let catalogStore: CatalogStore
-    let catalogRepository: CatalogRepository
-    let syncQueue: SyncQueue
-    let undoBuffer: UndoBuffer
-    let catalogService: CatalogService
-    let catalogSeeder: CatalogSeeder
-    let activityEntryCounter: ActivityEntryCounting
     /// Strong reference to the holder that wires the API client's refresh hook
     /// back to `authService`. If this were not retained, the holder would
     /// deallocate after `production()` returns and token refresh would fail.
@@ -40,13 +33,6 @@ final class AppContainer: ObservableObject {
         authService: AuthService,
         appleService: AppleSignInService,
         timerService: TimerService,
-        catalogStore: CatalogStore,
-        catalogRepository: CatalogRepository,
-        syncQueue: SyncQueue,
-        undoBuffer: UndoBuffer,
-        catalogService: CatalogService,
-        catalogSeeder: CatalogSeeder,
-        activityEntryCounter: ActivityEntryCounting,
         clientHolder: APIClientHolder? = nil
     ) {
         self.baseURL = baseURL
@@ -60,16 +46,10 @@ final class AppContainer: ObservableObject {
         self.authService = authService
         self.appleService = appleService
         self.timerService = timerService
-        self.catalogStore = catalogStore
-        self.catalogRepository = catalogRepository
-        self.syncQueue = syncQueue
-        self.undoBuffer = undoBuffer
-        self.catalogService = catalogService
-        self.catalogSeeder = catalogSeeder
-        self.activityEntryCounter = activityEntryCounter
         self.clientHolder = clientHolder
     }
 
+    /// Default production graph wired against `AppConfig.baseURL`.
     static func production() -> AppContainer {
         let baseURL = AppConfig.baseURL
         let keychain = KeychainStore()
@@ -77,6 +57,12 @@ final class AppContainer: ObservableObject {
         let sessionStore = SessionStore()
         let navigation = AppNavigationStack()
         let connectivity = NetworkMonitor()
+        let timerService = TimerService(
+            store: LocalTimerStore(),
+            repository: StubTimerRepository(),
+            connectivity: connectivity
+        )
+
         let (client, clientHolder) = makeAuthClient(baseURL: baseURL, keychain: keychain)
         let repository = RemoteAuthRepository(client: client)
         let authService = AuthService(
@@ -86,16 +72,9 @@ final class AppContainer: ObservableObject {
             sessionStore: sessionStore
         )
         clientHolder.service = authService
+
         let appleService = AppleSignInService()
-        let entriesRepository = RemoteEntriesRepository(client: client)
-        let timerService = TimerService(
-            store: LocalTimerStore(),
-            repository: entriesRepository,
-            connectivity: connectivity
-        )
-        let catalog = makeCatalogGraph(client: client, connectivity: connectivity, entryStore: timerService.store, entriesRepository: entriesRepository)
-        wireCatalogSync(service: catalog.service, timerService: timerService)
-        wireLogoutCancelRetry(authService: authService, timerService: timerService)
+
         return AppContainer(
             baseURL: baseURL,
             apiClient: client,
@@ -108,52 +87,8 @@ final class AppContainer: ObservableObject {
             authService: authService,
             appleService: appleService,
             timerService: timerService,
-            catalogStore: catalog.store,
-            catalogRepository: catalog.repository,
-            syncQueue: catalog.queue,
-            undoBuffer: catalog.undoBuffer,
-            catalogService: catalog.service,
-            catalogSeeder: CatalogSeeder(repository: catalog.repository, service: catalog.service, sessionCache: sessionCache),
-            activityEntryCounter: TimerStoreActivityEntryCounter(store: timerService.store),
             clientHolder: clientHolder
         )
-    }
-
-    private static func makeCatalogGraph(
-        client: APIClient,
-        connectivity: Connectivity,
-        entryStore: TimerStoring,
-        entriesRepository: EntriesRepository
-    ) -> (store: CatalogStore, repository: CatalogRepository,
-          queue: SyncQueue, undoBuffer: UndoBuffer, service: CatalogService) {
-        let store = CatalogStore()
-        let repository = RemoteCatalogRepository(client: client)
-        let queue = SyncQueue()
-        let undoBuffer = UndoBuffer()
-        let service = CatalogService(
-            store: store,
-            repository: repository,
-            syncQueue: queue,
-            undoBuffer: undoBuffer,
-            connectivity: connectivity,
-            entryStore: entryStore,
-            entriesRepository: entriesRepository
-        )
-        return (store, repository, queue, undoBuffer, service)
-    }
-
-    private static func wireCatalogSync(service: CatalogService, timerService: TimerService) {
-        service.onSyncCompleted = {
-            try? await timerService.syncUnsyncedEntries()
-        }
-    }
-
-    /// Cancels TimerService retries on logout so the app stops hammering
-    /// the backend without a token.
-    private static func wireLogoutCancelRetry(authService: AuthService, timerService: TimerService) {
-        authService.onLogout = { [weak timerService] in
-            timerService?.cancelRetry()
-        }
     }
 
     /// Builds the API client and the back-reference holder used to break the

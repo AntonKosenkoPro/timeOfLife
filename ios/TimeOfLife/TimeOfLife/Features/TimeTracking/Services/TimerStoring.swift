@@ -4,13 +4,7 @@ import Foundation
 protocol TimerStoring: Sendable {
     func save(_ entry: TimeEntry) async throws
     func unsyncedEntries() async -> [TimeEntry]
-    func entryCount(forActivityId id: UUID) async -> Int
-    func latestEntry(forActivityId id: UUID) async -> TimeEntry?
-    func delete(id: UUID) async throws
     func markSynced(_ entry: TimeEntry) async throws
-    func markSyncFailed(_ entry: TimeEntry) async throws
-    func incrementSyncAttempts(_ entry: TimeEntry) async throws
-    func replaceActivityId(from oldId: UUID, to newId: UUID) async throws
 }
 
 /// File-based local store that keeps unsynced entries in Application Support.
@@ -39,50 +33,13 @@ actor LocalTimerStore: TimerStoring {
 
     func unsyncedEntries() async -> [TimeEntry] {
         guard let entries = try? loadEntries() else { return [] }
-        return entries.filter { !$0.synced && !$0.syncFailed }
-    }
-
-    func entryCount(forActivityId id: UUID) async -> Int {
-        (try? loadEntries().filter { $0.activityId == id }.count) ?? 0
-    }
-
-    func latestEntry(forActivityId id: UUID) async -> TimeEntry? {
-        (try? loadEntries().filter { $0.activityId == id }.max { $0.startedAt < $1.startedAt }) ?? nil
-    }
-
-    func delete(id: UUID) async throws {
-        var entries = try loadEntries()
-        entries.removeAll { $0.id == id }
-        try saveEntries(entries)
+        return entries.filter { !$0.synced }
     }
 
     func markSynced(_ entry: TimeEntry) async throws {
         var entries = try loadEntries()
         guard let index = entries.firstIndex(where: { $0.id == entry.id }) else { return }
         entries[index] = entries[index].markSynced()
-        try saveEntries(entries)
-    }
-
-    func markSyncFailed(_ entry: TimeEntry) async throws {
-        var entries = try loadEntries()
-        guard let index = entries.firstIndex(where: { $0.id == entry.id }) else { return }
-        entries[index] = entries[index].markSyncFailed()
-        try saveEntries(entries)
-    }
-
-    func incrementSyncAttempts(_ entry: TimeEntry) async throws {
-        var entries = try loadEntries()
-        guard let index = entries.firstIndex(where: { $0.id == entry.id }) else { return }
-        entries[index] = entries[index].incrementSyncAttempts()
-        try saveEntries(entries)
-    }
-
-    func replaceActivityId(from oldId: UUID, to newId: UUID) async throws {
-        guard oldId != newId else { return }
-        var entries = try loadEntries()
-        for index in entries.indices where entries[index].activityId == oldId {
-            entries[index] = entries[index].replacingActivityId(with: newId)
-        }
         try saveEntries(entries)
     }
 
@@ -98,8 +55,7 @@ actor LocalTimerStore: TimerStoring {
     private func loadEntries() throws -> [TimeEntry] {
         guard FileManager.default.fileExists(atPath: url.path) else { return [] }
         let data = try Data(contentsOf: url)
-        let entries = try JSONDecoder().decode([TimeEntry].self, from: data)
-        return entries
+        return try JSONDecoder().decode([TimeEntry].self, from: data)
     }
 
     private func saveEntries(_ entries: [TimeEntry]) throws {

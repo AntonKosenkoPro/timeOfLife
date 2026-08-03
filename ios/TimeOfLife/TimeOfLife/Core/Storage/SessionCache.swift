@@ -40,22 +40,10 @@ final class SessionCache: @unchecked Sendable {
         save(nil)
     }
 
-    /// Whether the signed-in account has completed client-side category
-    /// seeding. The flag is deliberately separate from cached session data so
-    /// clearing auth tokens does not race a seed request in flight.
-    func categoriesSeeded(for userId: String) -> Bool {
-        queue.sync { defaults.bool(forKey: Keys.categoriesSeededPrefix + userId) }
-    }
-
-    func setCategoriesSeeded(_ seeded: Bool, for userId: String) {
-        queue.sync { defaults.set(seeded, forKey: Keys.categoriesSeededPrefix + userId) }
-    }
-
     private enum Keys {
         static let id = "com.timeoflife.session.id"
         static let email = "com.timeoflife.session.email"
         static let emailVerified = "com.timeoflife.session.emailVerified"
-        static let categoriesSeededPrefix = "com.timeoflife.categoriesSeeded."
     }
 }
 

@@ -7,8 +7,8 @@ import SwiftUI
 /// `path`. Call sites stay identical; the underlying primitive is selected at
 /// runtime.
 ///
-/// `AppNavigationStack` is the `ObservableObject` that owns the path so views
-/// can push routes into the shared navigation container.
+/// `AppNavigationStack` is the `ObservableObject` that owns the path so
+/// `EmailEntryView` can push routes into it.
 @MainActor
 final class AppNavigationStack: ObservableObject {
     @Published var path: [AppRoute] = []
