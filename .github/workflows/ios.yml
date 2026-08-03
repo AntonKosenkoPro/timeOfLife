@@ -37,8 +37,6 @@ jobs:
           set -o pipefail
           xcodebuild -scheme TimeOfLife \
             -destination 'generic/platform=iOS Simulator' \
-            SWIFT_TREAT_WARNINGS_AS_ERRORS=YES \
-            GCC_TREAT_WARNINGS_AS_ERRORS=YES \
             build | xcpretty
 
       - name: Resolve simulator destination
@@ -58,6 +56,4 @@ jobs:
           set -o pipefail
           xcodebuild -scheme TimeOfLife \
             -destination "platform=iOS Simulator,name=${{ steps.sim.outputs.name }},OS=latest" \
-            SWIFT_TREAT_WARNINGS_AS_ERRORS=YES \
-            GCC_TREAT_WARNINGS_AS_ERRORS=YES \
             test | xcpretty

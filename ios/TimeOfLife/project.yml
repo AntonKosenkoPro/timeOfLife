@@ -23,6 +23,11 @@ settings:
 configs:
   Debug: debug
   Release: release
+packages:
+  GRDB:
+    url: https://github.com/groue/GRDB.swift.git
+    from: 7.8.0
+    minorVersion: 7
 configFiles:
   Debug: TimeOfLife/Configuration/Config.Debug.xcconfig
   Release: TimeOfLife/Configuration/Config.Release.xcconfig
@@ -83,10 +88,15 @@ targets:
         SWIFT_EMIT_LOC_STRINGS: NO
         CURRENT_PROJECT_VERSION: "1"
         GENERATE_INFOPLIST_FILE: NO
+        # Warnings-as-errors for app/test targets only (not package deps like
+        # GRDB, which builds with -suppress-warnings and conflicts otherwise).
+        SWIFT_TREAT_WARNINGS_AS_ERRORS: YES
+        GCC_TREAT_WARNINGS_AS_ERRORS: YES
       configs:
         Debug:
           SWIFT_ACTIVE_COMPILATION_CONDITIONS: DEBUG
-    dependencies: []
+    dependencies:
+      - package: GRDB
   TimeOfLifeTests:
     type: bundle.unit-test
     platform: iOS
@@ -98,9 +108,9 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.antonkosenko.timeoflife.tests
-        BUNDLE_LOADER: "$(TEST_HOST)"
-        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/TimeOfLife.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/TimeOfLife"
         GENERATE_INFOPLIST_FILE: YES
+        SWIFT_TREAT_WARNINGS_AS_ERRORS: YES
+        GCC_TREAT_WARNINGS_AS_ERRORS: YES
 schemes:
   TimeOfLife:
     build:
