@@ -26,7 +26,7 @@ Keep design under version control as plain Markdown so:
 
 | File | Purpose |
 |---|---|
-| `TOKENS.md` | Colors, typography, spacing, corner radii, shadows, icons; activity/category color palette + icon set. |
+| `TOKENS.md` | Colors, typography, spacing, corner radii, shadows, and the catalog icon set. |
 | `COMPONENTS.md` | Reusable SwiftUI components: signature, states, accessibility IDs, usage. |
 | `INTERACTIONS.md` | Shared patterns: loading, errors, offline, empty states, haptics, focus. |
 | `SCREENS/Auth.md` | Auth flow screens (Welcome, EmailEntry, OtpEntry). |

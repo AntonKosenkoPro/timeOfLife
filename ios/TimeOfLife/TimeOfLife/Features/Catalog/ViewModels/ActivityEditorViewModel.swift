@@ -9,10 +9,8 @@ enum ActivityEditorMode: Equatable, Sendable {
 struct ActivityDraft: Equatable, Sendable {
     let id: UUID
     var name: String
-    var color: ActivityColor
-    var icon: String
     var notes: String
-    var categoryIds: Set<UUID>
+    var categoryIds: [UUID]
     var lastUsedAt: Date?
     let createdAt: Date
     var updatedAt: Date
@@ -22,18 +20,14 @@ struct ActivityDraft: Equatable, Sendable {
         case let .edit(activity):
             id = activity.id
             name = activity.name
-            color = activity.color
-            icon = activity.icon.rawValue
             notes = activity.notes ?? ""
-            categoryIds = Set(activity.categoryIds)
+            categoryIds = activity.categoryIds
             lastUsedAt = activity.lastUsedAt
             createdAt = activity.createdAt
             updatedAt = activity.updatedAt
         case .createFromManage, .createFromTimer:
             id = UUID.v7()
             name = ""
-            color = .mint
-            icon = ActivityIcon.default.rawValue
             notes = ""
             categoryIds = []
             lastUsedAt = nil
@@ -42,16 +36,13 @@ struct ActivityDraft: Equatable, Sendable {
         }
     }
 
-    func activity() -> Activity? {
-        guard let icon = ActivityIcon(rawValue: icon) else { return nil }
-        return Activity(
+    func toActivity() -> Activity {
+        Activity(
             id: id,
             name: name.trimmingCharacters(in: .whitespacesAndNewlines),
-            color: color,
-            icon: icon,
             notes: notes.isEmpty ? nil : notes,
             lastUsedAt: lastUsedAt,
-            categoryIds: categoryIds.sorted { $0.uuidString < $1.uuidString },
+            categoryIds: categoryIds,
             createdAt: createdAt,
             updatedAt: updatedAt
         )
@@ -59,10 +50,8 @@ struct ActivityDraft: Equatable, Sendable {
 
     mutating func adopt(_ activity: Activity) {
         name = activity.name
-        color = activity.color
-        icon = activity.icon.rawValue
         notes = activity.notes ?? ""
-        categoryIds = Set(activity.categoryIds)
+        categoryIds = activity.categoryIds
         lastUsedAt = activity.lastUsedAt
         updatedAt = activity.updatedAt
     }
@@ -71,14 +60,10 @@ struct ActivityDraft: Equatable, Sendable {
 struct ActivityFieldErrors: Equatable, Sendable {
     var name: String?
     var notes: String?
-    var color: String?
-    var icon: String?
 
-    init(name: String? = nil, notes: String? = nil, color: String? = nil, icon: String? = nil) {
+    init(name: String? = nil, notes: String? = nil) {
         self.name = name
         self.notes = notes
-        self.color = color
-        self.icon = icon
     }
 }
 
@@ -150,16 +135,12 @@ final class ActivityEditorViewModel: ObservableObject {
         }
 
         let validCategoryIds = Set(availableCategories.map(\.id))
-        draft.categoryIds.formIntersection(validCategoryIds)
+        draft.categoryIds.removeAll { !validCategoryIds.contains($0) }
         if case .edit = mode {
             // The backend accepts a patch only when its LWW timestamp advances.
             draft.updatedAt = Date()
         }
-        guard let candidate = draft.activity() else {
-            fieldErrors.icon = ActivityValidator.unifiedIconMessage([.iconInvalid])
-            Haptics.error()
-            return
-        }
+        let candidate = draft.toActivity()
 
         isLoading = true
         errorMessage = nil
@@ -218,13 +199,9 @@ final class ActivityEditorViewModel: ObservableObject {
     private func validateDraft() -> ActivityFieldErrors {
         let nameErrors = ActivityValidator.validateName(draft.name)
         let notesErrors = ActivityValidator.validateNotes(draft.notes)
-        let colorErrors = ActivityValidator.validateColor(draft.color.rawValue)
-        let iconErrors = ActivityValidator.validateIcon(draft.icon)
         return ActivityFieldErrors(
             name: ActivityValidator.unifiedNameMessage(nameErrors),
-            notes: ActivityValidator.unifiedNotesMessage(notesErrors),
-            color: ActivityValidator.unifiedColorMessage(colorErrors),
-            icon: ActivityValidator.unifiedIconMessage(iconErrors)
+            notes: ActivityValidator.unifiedNotesMessage(notesErrors)
         )
     }
 
@@ -234,9 +211,7 @@ final class ActivityEditorViewModel: ObservableObject {
         case let .validation(fields):
             fieldErrors = ActivityFieldErrors(
                 name: fields["name"],
-                notes: fields["notes"],
-                color: fields["color"],
-                icon: fields["icon"]
+                notes: fields["notes"]
             )
         case .conflict:
             await adoptServerVersion()
@@ -267,8 +242,6 @@ final class ActivityEditorViewModel: ObservableObject {
         return Activity(
             id: id,
             name: name,
-            color: .mint,
-            icon: .clock,
             notes: nil,
             lastUsedAt: nil,
             categoryIds: [],

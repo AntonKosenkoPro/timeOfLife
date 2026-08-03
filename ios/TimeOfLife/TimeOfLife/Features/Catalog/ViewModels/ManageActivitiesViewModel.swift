@@ -81,7 +81,9 @@ final class ManageActivitiesViewModel: ObservableObject {
     }
 
     func categories(for activity: Activity) -> [Category] {
-        categories.filter { activity.categoryIds.contains($0.id) }
+        activity.categoryIds.compactMap { id in
+            categories.first { $0.id == id }
+        }
     }
 
     func create() {

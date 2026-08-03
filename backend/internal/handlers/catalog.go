@@ -100,19 +100,16 @@ func (h *Handler) CreateActivity(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	name := strings.TrimSpace(req.Name)
-	color := strings.ToLower(req.Color)
 	errs := validationErrs{}
 	validateID(req.ID, errs)
 	validateName("name", name, errs)
-	validateColor(color, errs)
-	validateIcon(req.Icon, errs)
 	validateNotes(req.Notes, errs)
 	if !errs.ok() {
 		writeValidation(w, errs)
 		return
 	}
 
-	a := db.Activity{ID: req.ID, UserID: userID, Name: name, Color: color, Icon: req.Icon, Notes: req.Notes}
+	a := db.Activity{ID: req.ID, UserID: userID, Name: name, Notes: req.Notes}
 	created, isNew, err := h.store.CreateActivity(r.Context(), a, req.CategoryIDs)
 	if err != nil {
 		h.writeCatalogStoreErr(w, created, err, "create activity")
@@ -158,14 +155,6 @@ func (h *Handler) UpdateActivity(w http.ResponseWriter, r *http.Request) {
 		validateName("name", n, errs)
 		req.Name = &n
 	}
-	if req.Color != nil {
-		c := strings.ToLower(*req.Color)
-		validateColor(c, errs)
-		req.Color = &c
-	}
-	if req.Icon != nil {
-		validateIcon(*req.Icon, errs)
-	}
 	if req.Notes != nil {
 		validateNotes(*req.Notes, errs)
 	}
@@ -185,7 +174,7 @@ func (h *Handler) UpdateActivity(w http.ResponseWriter, r *http.Request) {
 
 	updatedAt, _ := parseRFC3339(req.UpdatedAt)
 	patch := db.ActivityPatch{
-		Name: req.Name, Color: req.Color, Icon: req.Icon, Notes: req.Notes,
+		Name: req.Name, Notes: req.Notes,
 		CategoryIDs: req.CategoryIDs, UpdatedAt: updatedAt,
 	}
 	updated, err := h.store.UpdateActivity(r.Context(), userID, chi.URLParam(r, "id"), patch)
@@ -242,17 +231,17 @@ func (h *Handler) CreateCategory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	name := strings.TrimSpace(req.Name)
-	color := strings.ToLower(req.Color)
+	icon := strings.ToLower(req.Icon)
 	errs := validationErrs{}
 	validateID(req.ID, errs)
 	validateName("name", name, errs)
-	validateColor(color, errs)
+	validateIcon(icon, errs)
 	if !errs.ok() {
 		writeValidation(w, errs)
 		return
 	}
 
-	c := db.Category{ID: req.ID, UserID: userID, Name: name, Color: color}
+	c := db.Category{ID: req.ID, UserID: userID, Name: name, Icon: icon}
 	created, isNew, err := h.store.CreateCategory(r.Context(), c)
 	if err != nil {
 		h.writeCatalogStoreErr(w, created, err, "create category")
@@ -298,10 +287,10 @@ func (h *Handler) UpdateCategory(w http.ResponseWriter, r *http.Request) {
 		validateName("name", n, errs)
 		req.Name = &n
 	}
-	if req.Color != nil {
-		c := strings.ToLower(*req.Color)
-		validateColor(c, errs)
-		req.Color = &c
+	if req.Icon != nil {
+		i := strings.ToLower(*req.Icon)
+		validateIcon(i, errs)
+		req.Icon = &i
 	}
 	validateTimestamp("updated_at", req.UpdatedAt, true, errs)
 	if !errs.ok() {
@@ -310,7 +299,7 @@ func (h *Handler) UpdateCategory(w http.ResponseWriter, r *http.Request) {
 	}
 
 	updatedAt, _ := parseRFC3339(req.UpdatedAt)
-	patch := db.CategoryPatch{Name: req.Name, Color: req.Color, UpdatedAt: updatedAt}
+	patch := db.CategoryPatch{Name: req.Name, Icon: req.Icon, UpdatedAt: updatedAt}
 	updated, err := h.store.UpdateCategory(r.Context(), userID, chi.URLParam(r, "id"), patch)
 	if err != nil {
 		h.writeCatalogStoreErr(w, updated, err, "update category")

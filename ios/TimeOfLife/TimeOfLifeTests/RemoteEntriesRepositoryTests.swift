@@ -194,7 +194,7 @@ struct RemoteEntriesRepositoryTests {
                 [
                     "id": categoryId.uuidString.lowercased(),
                     "name": "Mind",
-                    "color": "red",
+                    "icon": "tag",
                     "created_at": "2024-01-15T10:00:00Z",
                     "updated_at": "2024-01-15T10:00:00Z"
                 ] as [String: Any]
@@ -212,6 +212,7 @@ struct RemoteEntriesRepositoryTests {
         let categories = try #require(decoded.categories)
         #expect(categories.count == 1)
         #expect(categories.first?.id == categoryId)
+        #expect(categories.first?.icon == .tag)
     }
 
     // MARK: - Idempotent POST

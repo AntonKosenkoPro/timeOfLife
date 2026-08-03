@@ -59,7 +59,6 @@
 "error.not_found" = "Этот элемент больше не существует.";
 
 // Catalog validation (one merged message per field — U2/U4)
-"validation.catalog.colorInvalid" = "Выберите допустимый цвет.";
 "validation.catalog.iconInvalid" = "Выберите допустимую иконку.";
 
 // Apple sign in
@@ -78,7 +77,6 @@
 // Catalog (Epic 1)
 "tags.emptyHint" = "Пока нет категорий — создайте одну";
 "undo.button" = "Отменить";
-"accessibility.color" = "Цвет, %@";
 "accessibility.category" = "Категория, %@";
 "accessibility.icon" = "Значок, %@";
 "accessibility.suggestion" = "Предложение, %@";
@@ -126,7 +124,7 @@
 "categoryEditor.editTitle" = "Изменить категорию";
 "categoryEditor.nameLabel" = "Название";
 "categoryEditor.namePlaceholder" = "напр. Спорт";
-"categoryEditor.colorLabel" = "Цвет";
+"categoryEditor.iconLabel" = "Значок";
 "categoryEditor.save" = "Сохранить";
 "categoryEditor.cancel" = "Отмена";
 "category.seed.work" = "Работа";
@@ -142,8 +140,6 @@
 "activityEditor.editTitle" = "Изменить активность";
 "activityEditor.nameLabel" = "Название";
 "activityEditor.namePlaceholder" = "напр. Спортзал";
-"activityEditor.colorLabel" = "Цвет";
-"activityEditor.iconLabel" = "Значок";
 "activityEditor.notesLabel" = "Заметки";
 "activityEditor.notesPlaceholder" = "Необязательные заметки";
 "activityEditor.notesCounter" = "%d / 280";

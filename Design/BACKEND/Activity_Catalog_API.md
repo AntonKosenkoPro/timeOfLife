@@ -18,8 +18,6 @@ New migration `003_catalog.sql`. Follows the existing pattern (`internal/migrati
 | `id` | UUID PK | client-generated v7 |
 | `user_id` | UUID NOT NULL → users(id) | owner scope |
 | `name` | TEXT NOT NULL | ≤ 60 chars, trimmed |
-| `color` | TEXT NOT NULL | palette key/hex; chosen from a fixed set (validated) |
-| `icon` | TEXT NOT NULL | SF Symbol name; chosen from the allowed set (validated) |
 | `notes` | TEXT | ≤ 280 chars, nullable |
 | `last_used_at` | TIMESTAMPTZ | recency for **client-side** suggestions (F5); updated on entry start; synced so recency is shared across devices |
 | `created_at` | TIMESTAMPTZ NOT NULL DEFAULT NOW() | |
@@ -34,7 +32,7 @@ New migration `003_catalog.sql`. Follows the existing pattern (`internal/migrati
 | `id` | UUID PK | client-generated v7 |
 | `user_id` | UUID NOT NULL → users(id) | |
 | `name` | TEXT NOT NULL | ≤ 60 chars |
-| `color` | TEXT NOT NULL | palette key/hex |
+| `icon` | TEXT NOT NULL | SF Symbol name; chosen from the allowed set (validated) |
 | `created_at` | TIMESTAMPTZ NOT NULL DEFAULT NOW() | |
 | `updated_at` | TIMESTAMPTZ NOT NULL DEFAULT NOW() | LWW sync version |
 
@@ -87,8 +85,8 @@ All `401 unauthorized` on missing/invalid token (existing `AuthMiddleware`). All
 |---|---|---|---|---|
 | GET | `/activities` | — | 200 `[{activity…}]` ordered by `last_used_at DESC`; optional `?q=` typeahead filter (case-insensitive `name LIKE`) | (401) |
 | GET | `/activities/{id}` | — | 200 `{activity…}` with `categories[]` | 404 `not_found`, (401) |
-| POST | `/activities` | `{id, name, color, icon, notes?, category_ids?}` | 201 `{activity…}`; idempotent on `id` (replay → 200 existing) | 400 `invalid_body`, 422 `validation_error`, 409 `activity_exists`/`conflict`, (401) |
-| PATCH | `/activities/{id}` | `{name?, color?, icon?, notes?, category_ids?, updated_at}` | 200 `{activity…}` (full `category_ids` = replace-all tags) | 400, 404 `not_found`, 409 `conflict`/`activity_exists`, 422, (401) |
+| POST | `/activities` | `{id, name, notes?, category_ids?}` | 201 `{activity…}`; idempotent on `id` (replay → 200 existing) | 400 `invalid_body`, 422 `validation_error`, 409 `activity_exists`/`conflict`, (401) |
+| PATCH | `/activities/{id}` | `{name?, notes?, category_ids?, updated_at}` | 200 `{activity…}` (full `category_ids` = replace-all tags) | 400, 404 `not_found`, 409 `conflict`/`activity_exists`, 422, (401) |
 | DELETE | `/activities/{id}` | — | 204 (cascades to entries + join rows) | 404 `not_found`, (401) |
 
 ### Categories
@@ -96,8 +94,8 @@ All `401 unauthorized` on missing/invalid token (existing `AuthMiddleware`). All
 | Method | Path | Body | Success | Errors |
 |---|---|---|---|---|
 | GET | `/categories` | — | 200 `[{category…}]` ordered by name | (401) |
-| POST | `/categories` | `{id, name, color}` | 201 `{category…}`; idempotent on `id` | 400, 422, 409 `category_exists`/`conflict`, (401) |
-| PATCH | `/categories/{id}` | `{name?, color?, updated_at}` | 200 `{category…}` | 400, 404, 409 `conflict`/`category_exists`, 422, (401) |
+| POST | `/categories` | `{id, name, icon}` | 201 `{category…}`; idempotent on `id` | 400, 422, 409 `category_exists`/`conflict`, (401) |
+| PATCH | `/categories/{id}` | `{name?, icon?, updated_at}` | 200 `{category…}` | 400, 404, 409 `conflict`/`category_exists`, 422, (401) |
 | DELETE | `/categories/{id}` | — | 204 (join rows cascade; entries unaffected) | 404, (401) |
 
 ### Entries
@@ -118,7 +116,7 @@ All `401 unauthorized` on missing/invalid token (existing `AuthMiddleware`). All
 
 ### Seeding (F6)
 
-No dedicated endpoint. Seeds are created client-side on first run (7 localized categories, no activities) and synced via ordinary `POST /categories` calls. This keeps the backend simple and lets the client own localization (EN/RU) — the server is locale-agnostic. Seeds are ordinary records, fully editable/deletable.
+No dedicated endpoint. Seeds are created client-side on first run (7 localized categories with catalog icons, no activities) and synced via ordinary `POST /categories` calls. This keeps the backend simple and lets the client own localization (EN/RU) — the server is locale-agnostic. Seeds are ordinary records, fully editable/deletable.
 
 ---
 
@@ -127,16 +125,16 @@ No dedicated endpoint. Seeds are created client-side on first run (7 localized c
 ### Activity
 ```json
 {
-  "id": "0196…", "name": "Gym", "color": "blue", "icon": "figure.strengthtraining",
+  "id": "0196…", "name": "Gym",
   "notes": "", "last_used_at": "2026-07-27T09:00:00Z",
   "created_at": "…", "updated_at": "…",
-  "categories": [ { "id": "…", "name": "Sport", "color": "green" } ]
+  "categories": [ { "id": "…", "name": "Sport", "icon": "figure.run" } ]
 }
 ```
 
 ### Category
 ```json
-{ "id": "…", "name": "Sport", "color": "green", "created_at": "…", "updated_at": "…" }
+{ "id": "…", "name": "Sport", "icon": "figure.run", "created_at": "…", "updated_at": "…" }
 ```
 
 ### Entry
@@ -145,7 +143,7 @@ No dedicated endpoint. Seeds are created client-side on first run (7 localized c
   "id": "…", "activity_id": "…", "activity_name": "Gym",
   "started_at": "…", "ended_at": "…", "duration_seconds": 3600,
   "created_at": "…", "updated_at": "…",
-  "categories": [ { "id": "…", "name": "Sport", "color": "green" } ]
+  "categories": [ { "id": "…", "name": "Sport", "icon": "figure.run" } ]
 }
 ```
 `activity_name` and `categories` are resolved from the activity at query time (the entry stores only `activity_id`).
@@ -158,8 +156,7 @@ Reuses the auth validator pattern (one field → one error; multiple rules for o
 
 - `name` (activity & category): non-empty after trim, ≤ 60 chars.
 - `notes`: ≤ 280 chars.
-- `color`: must be one of the fixed palette keys.
-- `icon`: must be a non-empty SF Symbol string from the allowed set.
+- `icon` (category): must be a non-empty SF Symbol string from the allowed set.
 - `started_at`: required, valid RFC 3339, ≤ now + small clock-skew tolerance.
 - `ended_at`: if present, must be > `started_at`.
 - `category_ids`: each must exist and belong to the user.

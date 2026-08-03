@@ -55,7 +55,7 @@ struct ManageCategoriesViewModelTests {
     func savesCreateAndEdit() async {
         let (viewModel, store, repository, _, _) = make()
         let created = await viewModel.saveCategory(
-            CategoryDraft(name: "Work", color: .blue)
+            CategoryDraft(name: "Work", icon: .briefcase)
         )
         guard let created else {
             Issue.record("Expected category create")
@@ -68,7 +68,7 @@ struct ManageCategoriesViewModelTests {
         })
 
         let updated = await viewModel.saveCategory(
-            CategoryDraft(name: "Office", color: .indigo, id: created.id, createdAt: created.createdAt)
+            CategoryDraft(name: "Office", icon: .briefcase, id: created.id, createdAt: created.createdAt)
         )
         #expect(updated?.name == "Office")
         #expect(repository.calls.contains {
@@ -169,7 +169,7 @@ struct ManageCategoriesViewModelTests {
         await store.upsertCategory(original)
 
         let result = await viewModel.saveCategory(
-            CategoryDraft(name: "Mine", color: original.color, id: original.id, createdAt: original.createdAt)
+            CategoryDraft(name: "Mine", icon: original.icon, id: original.id, createdAt: original.createdAt)
         )
 
         #expect(result == nil)
@@ -191,7 +191,7 @@ struct ManageCategoriesViewModelTests {
         await store.upsertActivity(activity)
 
         let result = await viewModel.saveCategory(
-            CategoryDraft(name: candidate.name, color: candidate.color, id: candidate.id, createdAt: candidate.createdAt)
+            CategoryDraft(name: candidate.name, icon: candidate.icon, id: candidate.id, createdAt: candidate.createdAt)
         )
 
         #expect(result == nil)

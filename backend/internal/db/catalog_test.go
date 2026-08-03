@@ -21,7 +21,7 @@ func newTestUser(t *testing.T, store *SQLiteStore, email string) string {
 func mustCreateActivity(t *testing.T, store *SQLiteStore, userID, name string, categoryIDs []string) Activity {
 	t.Helper()
 	a, created, err := store.CreateActivity(context.Background(), Activity{
-		ID: uuidV7(), UserID: userID, Name: name, Color: "blue", Icon: "figure.run",
+		ID: uuidV7(), UserID: userID, Name: name,
 	}, categoryIDs)
 	if err != nil {
 		t.Fatalf("CreateActivity: %v", err)
@@ -35,7 +35,7 @@ func mustCreateActivity(t *testing.T, store *SQLiteStore, userID, name string, c
 func mustCreateCategory(t *testing.T, store *SQLiteStore, userID, name string) Category {
 	t.Helper()
 	c, created, err := store.CreateCategory(context.Background(), Category{
-		ID: uuidV7(), UserID: userID, Name: name, Color: "green",
+		ID: uuidV7(), UserID: userID, Name: name, Icon: "tag",
 	})
 	if err != nil {
 		t.Fatalf("CreateCategory: %v", err)
@@ -58,7 +58,7 @@ func TestStore_CreateAndGetActivity(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetActivity: %v", err)
 	}
-	if got.Name != "Gym" || got.Color != "blue" || got.Icon != "figure.run" {
+	if got.Name != "Gym" {
 		t.Errorf("unexpected activity: %+v", got)
 	}
 	if len(got.Categories) != 1 || got.Categories[0].ID != cat.ID {
@@ -66,6 +66,9 @@ func TestStore_CreateAndGetActivity(t *testing.T) {
 	}
 	if got.Categories[0].Name != "Sport" {
 		t.Errorf("expected tag name Sport, got %q", got.Categories[0].Name)
+	}
+	if got.Categories[0].Icon != "tag" {
+		t.Errorf("expected tag icon tag, got %q", got.Categories[0].Icon)
 	}
 }
 
@@ -76,7 +79,7 @@ func TestStore_CreateActivity_IdempotentReplay(t *testing.T) {
 
 	a := mustCreateActivity(t, store, uid, "Run", nil)
 	replay, created, err := store.CreateActivity(context.Background(), Activity{
-		ID: a.ID, UserID: uid, Name: "Run", Color: "red", Icon: "figure.walk",
+		ID: a.ID, UserID: uid, Name: "Run",
 	}, nil)
 	if err != nil {
 		t.Fatalf("replay CreateActivity: %v", err)
@@ -84,7 +87,7 @@ func TestStore_CreateActivity_IdempotentReplay(t *testing.T) {
 	if created {
 		t.Error("expected created=false on idempotent replay")
 	}
-	if replay.ID != a.ID || replay.Color != "blue" {
+	if replay.ID != a.ID {
 		t.Errorf("replay should return the original record, got %+v", replay)
 	}
 }
@@ -96,7 +99,7 @@ func TestStore_CreateActivity_NameCollision(t *testing.T) {
 
 	a := mustCreateActivity(t, store, uid, "Gym", nil)
 	winner, created, err := store.CreateActivity(context.Background(), Activity{
-		ID: uuidV7(), UserID: uid, Name: "gym", Color: "red", Icon: "figure.walk",
+		ID: uuidV7(), UserID: uid, Name: "gym",
 	}, nil)
 	if !errors.Is(err, ErrActivityExists) {
 		t.Fatalf("expected ErrActivityExists, got %v", err)
@@ -184,6 +187,30 @@ func TestStore_UpdateActivity_ReplaceTags(t *testing.T) {
 	}
 }
 
+func TestStore_ActivityCategoryPositionOrdering(t *testing.T) {
+	store := setupTestStore(t)
+	defer func() { _ = store.Close() }()
+	uid := newTestUser(t, store, "ordered-tags@example.com")
+	first := mustCreateCategory(t, store, uid, "First")
+	second := mustCreateCategory(t, store, uid, "Second")
+	a := mustCreateActivity(t, store, uid, "Gym", []string{second.ID, first.ID, second.ID})
+
+	if len(a.Categories) != 2 || a.Categories[0].ID != second.ID || a.Categories[1].ID != first.ID {
+		t.Fatalf("expected initial order [%s %s], got %+v", second.ID, first.ID, a.Categories)
+	}
+
+	ordered := []string{first.ID, second.ID}
+	updated, err := store.UpdateActivity(context.Background(), uid, a.ID, ActivityPatch{
+		CategoryIDs: &ordered, UpdatedAt: a.UpdatedAt.Add(time.Second),
+	})
+	if err != nil {
+		t.Fatalf("UpdateActivity reorder: %v", err)
+	}
+	if len(updated.Categories) != 2 || updated.Categories[0].ID != first.ID || updated.Categories[1].ID != second.ID {
+		t.Errorf("expected reordered categories [%s %s], got %+v", first.ID, second.ID, updated.Categories)
+	}
+}
+
 func TestStore_DeleteActivity_Cascades(t *testing.T) {
 	store := setupTestStore(t)
 	defer func() { _ = store.Close() }()
@@ -251,19 +278,22 @@ func TestStore_CategoryCRUD(t *testing.T) {
 	c := mustCreateCategory(t, store, uid, "Work")
 	// Collision.
 	if _, _, err := store.CreateCategory(context.Background(), Category{
-		ID: uuidV7(), UserID: uid, Name: "work", Color: "red",
+		ID: uuidV7(), UserID: uid, Name: "work", Icon: "briefcase",
 	}); !errors.Is(err, ErrCategoryExists) {
 		t.Fatalf("expected ErrCategoryExists, got %v", err)
 	}
 	// Update.
 	updated, err := store.UpdateCategory(context.Background(), uid, c.ID, CategoryPatch{
-		Name: ptr("Job"), UpdatedAt: c.UpdatedAt.Add(time.Second),
+		Name: ptr("Job"), Icon: ptr("briefcase"), UpdatedAt: c.UpdatedAt.Add(time.Second),
 	})
 	if err != nil {
 		t.Fatalf("UpdateCategory: %v", err)
 	}
 	if updated.Name != "Job" {
 		t.Errorf("expected name Job, got %q", updated.Name)
+	}
+	if updated.Icon != "briefcase" {
+		t.Errorf("expected icon briefcase, got %q", updated.Icon)
 	}
 	// Delete.
 	if err := store.DeleteCategory(context.Background(), uid, c.ID); err != nil {
@@ -550,7 +580,7 @@ func TestStore_CreateActivity_ConcurrentNameCollision(t *testing.T) {
 		go func(i int) {
 			defer wg.Done()
 			_, isNew, err := store.CreateActivity(context.Background(), Activity{
-				ID: uuidV7(), UserID: uid, Name: "Gym", Color: "blue", Icon: "figure.run",
+				ID: uuidV7(), UserID: uid, Name: "Gym",
 			}, nil)
 			errs[i] = err
 			created[i] = isNew
@@ -585,7 +615,7 @@ func TestStore_CreateCategory_ConcurrentNameCollision(t *testing.T) {
 		go func(i int) {
 			defer wg.Done()
 			_, isNew, err := store.CreateCategory(context.Background(), Category{
-				ID: uuidV7(), UserID: uid, Name: "Sport", Color: "green",
+				ID: uuidV7(), UserID: uid, Name: "Sport", Icon: "tag",
 			})
 			errs[i] = err
 			created[i] = isNew

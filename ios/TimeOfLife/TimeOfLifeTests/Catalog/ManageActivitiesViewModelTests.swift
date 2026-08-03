@@ -172,7 +172,7 @@ struct ManageActivitiesViewModelTests {
 
     @Test("a 404 on a queued DELETE is treated as success")
     func deleteNotFoundIsSuccess() async {
-        let (vm, store, repository, queue, undo, _, _) = make()
+        let (vm, store, repository, _, undo, _, _) = make()
         let activity = TestCatalogFactory.activity()
         await store.upsertActivity(activity)
         await vm.load()

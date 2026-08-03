@@ -15,7 +15,7 @@ Requirements live in `Requirements/FURPS/` (the FURPS+ table) and `Requirements/
 
 The **design system** lives in `Design/` — see `Design/README.md`. All visual, component, and interaction decisions for iOS are specified there as Markdown so they can be implemented deterministically.
 
-**Epic 1 design materials** (FURPS S3): new screen specs `Design/SCREENS/ManageActivities.md`, `ManageCategories.md`, `ActivityEditor.md`, `CategoryEditor.md`; timer suggestions/quick-add spec in `Design/SCREENS/TimeTracking.md` (suggestions are client-side, no endpoint — F5/D16); activity/category color palette + icon set in `Design/TOKENS.md`; new catalog components in `Design/COMPONENTS.md`; undo/delete-scope/sync-conflict interactions in `Design/INTERACTIONS.md`. The backend contract is `Design/BACKEND/Activity_Catalog_API.md`.
+**Epic 1 design materials** (FURPS S3): new screen specs `Design/SCREENS/ManageActivities.md`, `ManageCategories.md`, `ActivityEditor.md`, `CategoryEditor.md`; timer suggestions/quick-add spec in `Design/SCREENS/TimeTracking.md` (suggestions are client-side, no endpoint — F5/D16); category icon set in `Design/TOKENS.md`; new catalog components in `Design/COMPONENTS.md`; undo/delete-scope/sync-conflict interactions in `Design/INTERACTIONS.md`. The backend contract is `Design/BACKEND/Activity_Catalog_API.md`.
 
 ## Repo layout
 ```
@@ -87,13 +87,13 @@ Uniform error envelope: `{ "error": { "code": String, "message": String, "detail
 | POST | `/auth/logout` | (Bearer) | 204 | (401) |
 | GET  | `/auth/me` | (Bearer) | 200 `user` | (401) |
 | GET  | `/activities` | (Bearer) | 200 `[{activity}]` (recency order; `?q=` typeahead) | (401) |
-| POST | `/activities` | `{id,name,color,icon,notes?,category_ids?}` | 201/200 `{activity}` (idempotent on `id`) | `invalid_body`, `validation_error`, `activity_exists`, `conflict`, (401) |
+| POST | `/activities` | `{id,name,notes?,category_ids?}` | 201/200 `{activity}` (idempotent on `id`) | `invalid_body`, `validation_error`, `activity_exists`, `conflict`, (401) |
 | GET  | `/activities/{id}` | (Bearer) | 200 `{activity}` | `not_found`, (401) |
-| PATCH | `/activities/{id}` | `{name?,color?,icon?,notes?,category_ids?,updated_at}` | 200 `{activity}` | `invalid_body`, `validation_error`, `not_found`, `conflict`, `activity_exists`, (401) |
+| PATCH | `/activities/{id}` | `{name?,notes?,category_ids?,updated_at}` | 200 `{activity}` | `invalid_body`, `validation_error`, `not_found`, `conflict`, `activity_exists`, (401) |
 | DELETE | `/activities/{id}` | (Bearer) | 204 (cascades to entries + tags) | `not_found`, (401) |
 | GET  | `/categories` | (Bearer) | 200 `[{category}]` (name order) | (401) |
-| POST | `/categories` | `{id,name,color}` | 201/200 `{category}` (idempotent on `id`) | `invalid_body`, `validation_error`, `category_exists`, `conflict`, (401) |
-| PATCH | `/categories/{id}` | `{name?,color?,updated_at}` | 200 `{category}` | `invalid_body`, `validation_error`, `not_found`, `conflict`, `category_exists`, (401) |
+| POST | `/categories` | `{id,name,icon}` | 201/200 `{category}` (idempotent on `id`) | `invalid_body`, `validation_error`, `category_exists`, `conflict`, (401) |
+| PATCH | `/categories/{id}` | `{name?,icon?,updated_at}` | 200 `{category}` | `invalid_body`, `validation_error`, `not_found`, `conflict`, `category_exists`, (401) |
 | DELETE | `/categories/{id}` | (Bearer) | 204 (join rows cascade; entries unaffected) | `not_found`, (401) |
 | GET  | `/entries` | (Bearer) | 200 `{items,next_cursor?}` (`?from=&to=&activity_id=&category_id=&limit=&cursor=`) | (401) |
 | POST | `/entries` | `{id,activity_id,started_at,ended_at?}` | 201/200 `{entry}` (idempotent on `id`; `activity_id` required) | `invalid_body`, `validation_error`, `activity_not_found`, `conflict`, (401) |

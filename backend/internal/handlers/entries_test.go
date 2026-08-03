@@ -23,7 +23,7 @@ func TestCreateEntry_WithActivity(t *testing.T) {
 	h, _, _, tok := newCatalogHandler(t)
 
 	wa := serve(h, jsonReq(t, "POST", "/api/v1/activities", tok, map[string]any{
-		"id": v7(), "name": "Gym", "color": "blue", "icon": "figure.run",
+		"id": v7(), "name": "Gym",
 	}))
 	var a activityResp
 	decodeBody(t, wa, &a)
@@ -54,7 +54,7 @@ func TestCreateEntry_ActivityNotOwned(t *testing.T) {
 	_, tok2 := mintBearer(t, store, "other@example.com")
 
 	wa := serve(h, jsonReq(t, "POST", "/api/v1/activities", tok2, map[string]any{
-		"id": v7(), "name": "Yoga", "color": "purple", "icon": "figure.yoga",
+		"id": v7(), "name": "Yoga",
 	}))
 	var a activityResp
 	decodeBody(t, wa, &a)

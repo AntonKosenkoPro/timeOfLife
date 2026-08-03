@@ -57,7 +57,7 @@ func parityUser(t *testing.T, store *PostgresStore, email string) string {
 func parityActivity(t *testing.T, store *PostgresStore, userID, name string) Activity {
 	t.Helper()
 	a, created, err := store.CreateActivity(context.Background(), Activity{
-		ID: uuidV7(), UserID: userID, Name: name, Color: "blue", Icon: "figure.run",
+		ID: uuidV7(), UserID: userID, Name: name,
 	}, nil)
 	if err != nil {
 		t.Fatalf("CreateActivity: %v", err)
@@ -72,7 +72,7 @@ func TestPostgres_CreateActivity_IdempotentReplay(t *testing.T) {
 	store := newParityStore(t)
 	uid := parityUser(t, store, "replay@example.com")
 
-	a := Activity{ID: uuidV7(), UserID: uid, Name: "Gym", Color: "blue", Icon: "figure.run"}
+	a := Activity{ID: uuidV7(), UserID: uid, Name: "Gym"}
 	_, created, err := store.CreateActivity(context.Background(), a, nil)
 	if err != nil || !created {
 		t.Fatalf("first create: created=%v err=%v", created, err)
@@ -92,7 +92,7 @@ func TestPostgres_CreateActivity_NameCollision(t *testing.T) {
 
 	parityActivity(t, store, uid, "Gym")
 	_, _, err := store.CreateActivity(context.Background(), Activity{
-		ID: uuidV7(), UserID: uid, Name: "gym", Color: "red", Icon: "figure.run",
+		ID: uuidV7(), UserID: uid, Name: "gym",
 	}, nil)
 	if !errors.Is(err, ErrActivityExists) {
 		t.Fatalf("expected ErrActivityExists, got %v", err)

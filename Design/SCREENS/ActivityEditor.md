@@ -22,16 +22,14 @@ Presented as `.sheet` with `medium` detents (`.medium` + `.large()` if content s
    - `autocapitalization`: `.sentences`
    - error: `vm.fieldErrors.name`
    - Focused on appear.
-3. `SectionHeader(L10n.activityEditorColorLabel)` + `ColorSwatchGrid(options: ActivityColor.all, selection: $vm.color, accessibilityId: "ActivityEditorColor")`.
-4. `SectionHeader(L10n.activityEditorIconLabel)` + `IconPickerGrid(options: ActivityIcon.all, selection: $vm.icon, accessibilityId: "ActivityEditorIcon")`.
-5. Notes — a styled `TextEditor` (multi-line) with the same field treatment as `TextFieldWithError`:
+3. Notes — a styled `TextEditor` (multi-line) with the same field treatment as `TextFieldWithError`:
    - label above: `L10n.activityEditorNotesLabel` — `.caption`, `Theme.textSecondary`
    - `TextEditor(text: $vm.notes)` with `Theme.backgroundSecondary` fill, `Theme.hairline` 1 pt border, `Theme.cornerRadius`, min height ~96 pt
    - `accessibilityIdentifier("ActivityEditorNotesField")`
    - char counter beneath: `String(format: L10n.activityEditorNotesCounter.text, vm.notes.count)` — `.caption`, `Theme.textSecondary`, trailing-aligned; switches to `Theme.danger` when count > 280
-6. `SectionHeader(L10n.activityEditorTagsLabel)` + `TagSelector(options: vm.availableCategories, selected: $vm.selectedCategoryIds, accessibilityId: "ActivityEditorTags")`. If `vm.availableCategories.isEmpty`, show a hint `L10n.activityEditorNoTags` (`.caption`, `Theme.textSecondary`) with a tappable link `L10n.activityEditorAddCategory` (`.subheadline`, `Theme.accentPrimary`, `accessibilityIdentifier("ActivityEditorAddCategoryButton")`) → presents `CategoryEditor` create sheet.
-7. `ErrorBanner` if `vm.errorMessage != nil` — `accessibilityId: ActivityEditorErrorBanner`.
-8. Fixed reserve for the pinned bottom action bar (`Color.clear` matching the measured bar height plus `Theme.spacingLarge`).
+4. `SectionHeader(L10n.activityEditorTagsLabel)` + `TagSelector(options: vm.availableCategories, selected: $vm.selectedCategoryIds, accessibilityId: "ActivityEditorTags")`. If `vm.availableCategories.isEmpty`, show a hint `L10n.activityEditorNoTags` (`.caption`, `Theme.textSecondary`) with a tappable link `L10n.activityEditorAddCategory` (`.subheadline`, `Theme.accentPrimary`, `accessibilityIdentifier("ActivityEditorAddCategoryButton")`) → presents `CategoryEditor` create sheet.
+5. `ErrorBanner` if `vm.errorMessage != nil` — `accessibilityId: ActivityEditorErrorBanner`.
+6. Fixed reserve for the pinned bottom action bar (`Color.clear` matching the measured bar height plus `Theme.spacingLarge`).
 
 Background: `Theme.backgroundPrimary`.
 
@@ -59,7 +57,7 @@ Follows `Design/INTERACTIONS.md` → **Keyboard and primary input placement** an
 ### Behaviors
 
 - Focus the name field on appear (D13).
-- Validate on save (U1/U2): name non-empty after trim & ≤ 60 → unified `validation.nameEmpty` / `validation.nameTooLong`; notes ≤ 280 → `validation.notesTooLong`; color/icon default to `mint`/`clock` in create mode; edit mode pre-fills from the activity. Multiple rules for one field collapse into a single unified message (U2).
+- Validate on save (U1/U2): name non-empty after trim & ≤ 60 → unified `validation.nameEmpty` / `validation.nameTooLong`; notes ≤ 280 → `validation.notesTooLong`. Multiple rules for one field collapse into a single unified message (U2).
 - Clear a field's error when the user edits that field.
 - On 422 `validation_error`: map `details` into `vm.fieldErrors` and show each beneath its field.
 - On 409 `activity_exists` (case-insensitive name collision on create): reuse the existing activity per INTERACTIONS — in create-from-timer mode, select that activity on the timer, link it to the upcoming entry (F7), and dismiss; in create-from-manage mode, dismiss and surface `error.activityExists` via `ErrorBanner`.
@@ -73,7 +71,7 @@ Follows `Design/INTERACTIONS.md` → **Keyboard and primary input placement** an
 
 | State | Visual |
 |---|---|
-| Create | Title `activityEditorCreateTitle`; defaults `mint`/`clock`; Save disabled while name trim-empty |
+| Create | Title `activityEditorCreateTitle`; Save disabled while name trim-empty |
 | Edit | Title `activityEditorEditTitle`; fields pre-filled from the activity; Save enabled if name non-empty and changed |
 | Saving | `PrimaryButton` shows `ProgressView`; Save disabled |
 | Validation error | Field errors beneath name / notes; `.notification(.error)` haptic; Save re-enables after edit |
@@ -87,20 +85,17 @@ The editor holds a draft:
 ```swift
 struct ActivityDraft {
     var name: String
-    var color: ActivityColor
-    var icon: String
     var notes: String?
-    var categoryIds: Set<UUID>
+    var categoryIds: [UUID]
 }
 ```
 
-On save it produces an `Activity` (create) or a PATCH body (edit) carrying `updated_at` for LWW (R2). Color is validated against `ActivityColor.all`; icon against `ActivityIcon.all` (D15, U1).
+On save it produces an `Activity` (create) or a PATCH body (edit) carrying `updated_at` for LWW (R2). Category order is preserved in `categoryIds`.
 
 ### Implementation checklist
 
-- [ ] All colors use `Theme.*` tokens.
 - [ ] All strings use `L10n.*` keys (add new keys to EN and RU).
-- [ ] Accessibility IDs: `ActivityEditorNameField`, `ActivityEditorColor`, `ActivityEditorIcon`, `ActivityEditorNotesField`, `ActivityEditorTags`, `ActivityEditorSaveButton`, `ActivityEditorCancelButton`, `ActivityEditorAddCategoryButton`; swatches via `ColorSwatch(<key>)` / cells via `IconCell(<symbol>)` / chips via `TagChip(<id>)` from the components.
+- [ ] Accessibility IDs: `ActivityEditorNameField`, `ActivityEditorNotesField`, `ActivityEditorTags`, `ActivityEditorSaveButton`, `ActivityEditorCancelButton`, `ActivityEditorAddCategoryButton`.
 - [ ] Keyboard placement follows D13 / D21: name upper, Save pinned bottom, measured reserve.
 - [ ] Validation uses unified messages (`validation.nameEmpty` / `validation.nameTooLong` / `validation.notesTooLong`); 409 `activity_exists` reuses the existing activity per INTERACTIONS.
 - [ ] 409 `conflict` adopts the server version (R2 keep-latest).
@@ -120,8 +115,6 @@ Add to `en.lproj/Localizable.strings` and `ru.lproj/Localizable.strings`, then t
 "activityEditor.editTitle" = "Edit activity";
 "activityEditor.nameLabel" = "Name";
 "activityEditor.namePlaceholder" = "e.g. Gym";
-"activityEditor.colorLabel" = "Color";
-"activityEditor.iconLabel" = "Icon";
 "activityEditor.notesLabel" = "Notes";
 "activityEditor.notesPlaceholder" = "Optional notes";
 "activityEditor.notesCounter" = "%d / 280";
@@ -148,8 +141,6 @@ Russian:
 "activityEditor.editTitle" = "Изменить активность";
 "activityEditor.nameLabel" = "Название";
 "activityEditor.namePlaceholder" = "напр. Спортзал";
-"activityEditor.colorLabel" = "Цвет";
-"activityEditor.iconLabel" = "Значок";
 "activityEditor.notesLabel" = "Заметки";
 "activityEditor.notesPlaceholder" = "Необязательные заметки";
 "activityEditor.notesCounter" = "%d / 280";

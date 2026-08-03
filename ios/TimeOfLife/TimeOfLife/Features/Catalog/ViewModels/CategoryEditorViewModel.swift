@@ -15,9 +15,11 @@ enum CategorySaveResult: Equatable, Sendable {
 
 struct CategoryFieldErrors: Equatable, Sendable {
     var name: String?
+    var icon: String?
 
-    init(name: String? = nil) {
+    init(name: String? = nil, icon: String? = nil) {
         self.name = name
+        self.icon = icon
     }
 
     static let empty = CategoryFieldErrors()
@@ -26,7 +28,7 @@ struct CategoryFieldErrors: Equatable, Sendable {
 @MainActor
 final class CategoryEditorViewModel: ObservableObject {
     @Published var name: String
-    @Published var color: ActivityColor
+    @Published var icon: CatalogIcon
     @Published private(set) var fieldErrors = CategoryFieldErrors.empty
     @Published var errorMessage: String?
     @Published private(set) var isLoading = false
@@ -59,12 +61,12 @@ final class CategoryEditorViewModel: ObservableObject {
         case .create:
             id = UUID.v7()
             name = ""
-            color = .mint
+            icon = .tag
             createdAt = now
         case let .edit(category):
             id = category.id
             name = category.name
-            color = category.color
+            icon = category.icon
             createdAt = category.createdAt
         }
     }
@@ -72,6 +74,10 @@ final class CategoryEditorViewModel: ObservableObject {
     func clearNameError() {
         fieldErrors.name = nil
         errorMessage = nil
+    }
+
+    func clearIconError() {
+        fieldErrors.icon = nil
     }
 
 #if DEBUG
@@ -96,6 +102,9 @@ final class CategoryEditorViewModel: ObservableObject {
         fieldErrors = CategoryFieldErrors(
             name: CategoryValidator.unifiedNameMessage(
                 CategoryValidator.validateName(name)
+            ),
+            icon: CategoryValidator.unifiedIconMessage(
+                CategoryValidator.validateIcon(icon.rawValue)
             )
         )
         guard fieldErrors == .empty else {
@@ -106,7 +115,7 @@ final class CategoryEditorViewModel: ObservableObject {
         let candidate = Category(
             id: id,
             name: name.trimmingCharacters(in: .whitespacesAndNewlines),
-            color: color,
+            icon: icon,
             createdAt: createdAt,
             updatedAt: Date()
         )
@@ -142,7 +151,7 @@ final class CategoryEditorViewModel: ObservableObject {
         let catalogError = CatalogError.map(error)
         switch catalogError {
         case let .validation(fields):
-            fieldErrors.name = fields["name"]
+            fieldErrors = CategoryFieldErrors(name: fields["name"], icon: fields["icon"])
         case .conflict:
             if let latest = await adoptServerVersion() {
                 errorMessage = L10n.errorConflict.text
@@ -180,7 +189,7 @@ final class CategoryEditorViewModel: ObservableObject {
     private func adoptServerVersion() async -> Category? {
         guard let category = try? await repository.getCategory(id) else { return nil }
         name = category.name
-        color = category.color
+        icon = category.icon
         await store.upsertCategory(category)
         return category
     }
@@ -192,7 +201,7 @@ final class CategoryEditorViewModel: ObservableObject {
         return Category(
             id: id,
             name: name,
-            color: fallback.color,
+            icon: fallback.icon,
             createdAt: fallback.createdAt,
             updatedAt: fallback.updatedAt
         )

@@ -1,31 +1,19 @@
 import Foundation
 
-// MARK: - Color palette
+// MARK: - Catalog icons
 
-/// The closed, validated 12-key activity/category color palette (D15 / TOKENS).
-///
-/// Raw values are the exact string keys the backend validates against (U1).
-/// Resolved to light/dark colors via `Theme.activityColor(_:)`.
-enum ActivityColor: String, Codable, CaseIterable, Sendable {
-    case gray, red, orange, yellow, green, teal, blue, indigo, purple, pink, brown, mint
-
-    /// All valid raw keys, for client-side pre-checks.
-    static var validKeys: Set<String> { Set(allCases.map(\.rawValue)) }
-}
-
-// MARK: - Activity icons
-
-/// The allowed SF Symbols set for `activity.icon` (F1 / TOKENS); default `.clock`.
+/// The allowed SF Symbols set shared by catalog activities and categories
+/// (F1 / TOKENS); default `.tag`.
 ///
 /// Raw values are the exact SF Symbol strings. This enum is the **union** of the
 /// backend's `validIcons` (`catalog_validators.go`) and the design set in
 /// `TOKENS.md`, so the client does not pre-reject icons from either source.
 /// The backend remains the authoritative validator (U1): an icon outside its
-/// set will still get a 422 from the server, but the client keeps `clock` (the
-/// UX default per U1/TOKENS) acceptable on-device. Decision: union, per the
+/// set will still get a 422 from the server, but the client keeps the full
+/// union acceptable on-device. Decision: union, per the
 /// cross-doc icon-set variance (backend `validIcons` ≠ TOKENS.md; `clock` is
 /// not backend-valid).
-enum ActivityIcon: String, Codable, CaseIterable, Sendable {
+enum CatalogIcon: String, Codable, CaseIterable, Sendable {
     // Shared by backend + TOKENS.md
     case figureRun = "figure.run"
     case figureStrengthtraining = "figure.strengthtraining"
@@ -57,6 +45,7 @@ enum ActivityIcon: String, Codable, CaseIterable, Sendable {
     case heart
     case leaf
     case sparkles
+    case tag
 
     // Backend validIcons only
     case figureWalk = "figure.walk"
@@ -78,16 +67,16 @@ enum ActivityIcon: String, Codable, CaseIterable, Sendable {
     case cart
     case phone
 
-    /// Default icon for a newly created activity (UX default per TOKENS.md).
-    static let `default` = ActivityIcon.clock
+    /// Default icon for a newly created category (UX default per TOKENS.md).
+    static let `default` = CatalogIcon.tag
 
     /// All valid raw SF Symbol names, for client-side pre-checks.
     static var validKeys: Set<String> { Set(allCases.map(\.rawValue)) }
 
     /// The approved design set of SF Symbol names for the `IconPickerGrid`.
-    /// Matches `TOKENS.md` → Activity icons (28 symbols including `clock`).
+    /// Matches `TOKENS.md` → Category icons, plus the shared catalog defaults.
     static let allowedSymbols: [String] = [
-        "clock", "laptopcomputer", "briefcase", "book",
+        "tag", "clock", "laptopcomputer", "briefcase", "book",
         "pencil.and.ruler", "brain.head.profile",
         "figure.run", "figure.strengthtraining", "figure.yoga",
         "dumbbell", "bicycle",
@@ -107,7 +96,7 @@ extension Category {
     static let sampleBlue = Category(
         id: UUID(uuidString: "00000000-0000-0000-0000-000000000001")!,
         name: "Work",
-        color: .blue,
+        icon: .briefcase,
         createdAt: Date(),
         updatedAt: Date()
     )
@@ -115,7 +104,7 @@ extension Category {
     static let sampleGreen = Category(
         id: UUID(uuidString: "00000000-0000-0000-0000-000000000002")!,
         name: "Fitness",
-        color: .green,
+        icon: .figureRun,
         createdAt: Date(),
         updatedAt: Date()
     )
@@ -123,7 +112,7 @@ extension Category {
     static let sampleOrange = Category(
         id: UUID(uuidString: "00000000-0000-0000-0000-000000000003")!,
         name: "Reading",
-        color: .orange,
+        icon: .tag,
         createdAt: Date(),
         updatedAt: Date()
     )
@@ -140,8 +129,6 @@ extension Category {
 struct Activity: Identifiable, Codable, Sendable, Equatable {
     let id: UUID
     var name: String
-    var color: ActivityColor
-    var icon: ActivityIcon
     var notes: String?
     var lastUsedAt: Date?
     var categoryIds: [UUID]
@@ -149,7 +136,7 @@ struct Activity: Identifiable, Codable, Sendable, Equatable {
     var updatedAt: Date
 
     enum CodingKeys: String, CodingKey {
-        case id, name, color, icon, notes
+        case id, name, notes
         case lastUsedAt = "last_used_at"
         case categoryIds = "category_ids"
         case createdAt = "created_at"
@@ -162,12 +149,12 @@ struct Activity: Identifiable, Codable, Sendable, Equatable {
 struct Category: Identifiable, Codable, Sendable, Equatable {
     let id: UUID
     var name: String
-    var color: ActivityColor
+    var icon: CatalogIcon
     var createdAt: Date
     var updatedAt: Date
 
     enum CodingKeys: String, CodingKey {
-        case id, name, color
+        case id, name, icon
         case createdAt = "created_at"
         case updatedAt = "updated_at"
     }

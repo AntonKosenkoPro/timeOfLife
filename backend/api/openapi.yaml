@@ -38,7 +38,7 @@ info:
     undo window). Timer-screen suggestions are computed client-side from the
     synced `last_used_at` — there is no suggestions endpoint.
 
-  version: "1.1.0"
+  version: "1.2.0"
   contact:
     name: Anton Kosenko
 
@@ -1165,14 +1165,14 @@ components:
       required:
         - id
         - name
-        - color
+        - icon
       properties:
         id:
           type: string
           format: uuid
         name:
           type: string
-        color:
+        icon:
           type: string
 
     # ---------- Catalog request schemas ----------
@@ -1186,8 +1186,6 @@ components:
       required:
         - id
         - name
-        - color
-        - icon
       properties:
         id:
           type: string
@@ -1198,12 +1196,6 @@ components:
           minLength: 1
           maxLength: 60
           description: Activity name (trimmed; case-insensitively unique per user).
-        color:
-          type: string
-          description: Color palette key/hex, from the fixed set.
-        icon:
-          type: string
-          description: SF Symbol name, from the allowed set.
         notes:
           type: string
           maxLength: 280
@@ -1218,8 +1210,6 @@ components:
       example:
         id: "019639f1-7a3b-7abc-9def-100000000001"
         name: Gym
-        color: blue
-        icon: figure.strengthtraining
         notes: ""
         category_ids:
           - "019639f1-7a3b-7abc-9def-100000000002"
@@ -1237,10 +1227,6 @@ components:
           type: string
           minLength: 1
           maxLength: 60
-        color:
-          type: string
-        icon:
-          type: string
         notes:
           type: string
           maxLength: 280
@@ -1262,7 +1248,7 @@ components:
       required:
         - id
         - name
-        - color
+        - icon
       properties:
         id:
           type: string
@@ -1271,12 +1257,12 @@ components:
           type: string
           minLength: 1
           maxLength: 60
-        color:
+        icon:
           type: string
       example:
         id: "019639f1-7a3b-7abc-9def-100000000002"
         name: Sport
-        color: green
+        icon: tag
 
     CategoryUpdate:
       type: object
@@ -1288,7 +1274,7 @@ components:
           type: string
           minLength: 1
           maxLength: 60
-        color:
+        icon:
           type: string
         updated_at:
           type: string
@@ -1354,8 +1340,6 @@ components:
       required:
         - id
         - name
-        - color
-        - icon
         - notes
         - last_used_at
         - created_at
@@ -1368,10 +1352,6 @@ components:
         name:
           type: string
           maxLength: 60
-        color:
-          type: string
-        icon:
-          type: string
         notes:
           type: string
           nullable: true
@@ -1394,8 +1374,6 @@ components:
       example:
         id: "019639f1-7a3b-7abc-9def-100000000001"
         name: Gym
-        color: blue
-        icon: figure.strengthtraining
         notes: ""
         last_used_at: "2026-07-27T09:00:00Z"
         created_at: "2026-07-20T08:00:00Z"
@@ -1403,7 +1381,7 @@ components:
         categories:
           - id: "019639f1-7a3b-7abc-9def-100000000002"
             name: Sport
-            color: green
+            icon: tag
 
     Category:
       type: object
@@ -1411,7 +1389,7 @@ components:
       required:
         - id
         - name
-        - color
+        - icon
         - created_at
         - updated_at
       properties:
@@ -1421,7 +1399,7 @@ components:
         name:
           type: string
           maxLength: 60
-        color:
+        icon:
           type: string
         created_at:
           type: string
@@ -1432,7 +1410,7 @@ components:
       example:
         id: "019639f1-7a3b-7abc-9def-100000000002"
         name: Sport
-        color: green
+        icon: tag
         created_at: "2026-07-20T08:00:00Z"
         updated_at: "2026-07-20T08:00:00Z"
 
@@ -1495,7 +1473,7 @@ components:
         categories:
           - id: "019639f1-7a3b-7abc-9def-100000000002"
             name: Sport
-            color: green
+            icon: tag
 
     EntryListResponse:
       type: object

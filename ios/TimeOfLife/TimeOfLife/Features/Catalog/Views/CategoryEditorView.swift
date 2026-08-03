@@ -43,16 +43,21 @@ struct CategoryEditorView: View {
                 .focused($isNameFocused)
                 .disabled(vm.isLoading)
 
-                SectionHeader(title: L10n.categoryEditorColorLabel.text)
-                ColorSwatchGrid(
-                    options: ActivityColor.allCases,
+                SectionHeader(title: L10n.categoryEditorIconLabel.text)
+                IconPickerGrid(
+                    options: CatalogIcon.allowedSymbols,
                     selection: Binding(
-                        get: { vm.color },
-                        set: { vm.color = $0 ?? .mint }
+                        get: { vm.icon.rawValue },
+                        set: { vm.icon = CatalogIcon(rawValue: $0) ?? .tag }
                     ),
-                    accessibilityId: "CategoryEditorColor",
-                    disabled: vm.isLoading
+                    accessibilityId: "CategoryEditorIcon"
                 )
+                .disabled(vm.isLoading)
+                if let error = vm.fieldErrors.icon {
+                    Text(error)
+                        .font(.caption)
+                        .foregroundStyle(Theme.danger)
+                }
 
                 if let message = vm.errorMessage {
                     ErrorBanner(message: message, accessibilityId: "CategoryEditorErrorBanner")
@@ -97,6 +102,7 @@ struct CategoryEditorView: View {
         }
         .onAppear { isNameFocused = true }
         .onChange(of: vm.name) { _ in vm.clearNameError() }
+        .onChange(of: vm.icon) { _ in vm.clearIconError() }
         .onChange(of: vm.onSaveResult) { result in
             guard let result else { return }
             switch result {

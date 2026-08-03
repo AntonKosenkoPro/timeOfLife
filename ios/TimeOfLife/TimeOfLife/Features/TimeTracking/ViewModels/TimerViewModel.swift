@@ -27,6 +27,7 @@ final class TimerViewModel: ObservableObject {
     @Published var elapsed: TimeInterval = 0
     @Published var isRunning = false
     @Published var suggestions: [Activity] = []
+    @Published private(set) var categories: [Category] = []
     @Published var selectedActivityId: UUID?
     @Published var showQuickAdd = false
     @Published var isActivityFocused = false
@@ -75,6 +76,7 @@ final class TimerViewModel: ObservableObject {
     /// Refreshes suggestions from the local catalog store.
     func refreshSuggestions() async {
         let activities = await catalogStore.activitiesSortedByLastUsedAt()
+        categories = await catalogStore.loadCategories()
         knownActivities = activities
         suggestions = Array(activities.prefix(5))
     }
@@ -180,8 +182,6 @@ final class TimerViewModel: ObservableObject {
         let newActivity = Activity(
             id: UUID.v7(),
             name: name,
-            color: .mint,
-            icon: .clock,
             notes: nil,
             lastUsedAt: Date(),
             categoryIds: [],

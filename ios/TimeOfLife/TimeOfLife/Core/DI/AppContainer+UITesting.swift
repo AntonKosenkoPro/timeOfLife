@@ -167,7 +167,7 @@ struct UITestingCatalogRepository: CatalogRepository {
 
     func listActivities(query: String?) async throws -> [Activity] { [] }
     func getActivity(_ id: UUID) async throws -> Activity {
-        Activity(id: id, name: "Activity", color: .gray, icon: .clock, notes: nil,
+        Activity(id: id, name: "Activity", notes: nil,
                  lastUsedAt: nil, categoryIds: [],
                  createdAt: Self.stubDate, updatedAt: Self.stubDate)
     }
@@ -176,7 +176,7 @@ struct UITestingCatalogRepository: CatalogRepository {
     func deleteActivity(_ id: UUID) async throws {}
     func listCategories() async throws -> [Category] { [] }
     func getCategory(_ id: UUID) async throws -> Category {
-        Category(id: id, name: "Category", color: .gray,
+        Category(id: id, name: "Category", icon: .tag,
                  createdAt: Self.stubDate, updatedAt: Self.stubDate)
     }
     func createCategory(_ category: Category) async throws -> Category { category }

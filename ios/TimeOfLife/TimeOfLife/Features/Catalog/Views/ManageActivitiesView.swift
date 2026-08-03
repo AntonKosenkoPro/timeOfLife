@@ -135,7 +135,7 @@ struct ManageActivitiesView: View {
 
 private func previewActivity(_ name: String, lastUsedAt: Date?) -> Activity {
     Activity(
-        id: UUID(), name: name, color: .blue, icon: .book, notes: nil,
+        id: UUID(), name: name, notes: nil,
         lastUsedAt: lastUsedAt, categoryIds: [], createdAt: Date(), updatedAt: Date()
     )
 }

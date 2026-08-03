@@ -51,12 +51,12 @@ enum CatalogDateCoding {
 struct CategoryDTO: Decodable, Sendable, Equatable {
     let id: UUID
     let name: String
-    let color: ActivityColor
+    let icon: CatalogIcon
     let createdAt: Date
     let updatedAt: Date
 
     enum CodingKeys: String, CodingKey {
-        case id, name, color
+        case id, name, icon
         case createdAt = "created_at"
         case updatedAt = "updated_at"
     }
@@ -65,21 +65,21 @@ struct CategoryDTO: Decodable, Sendable, Equatable {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.id = try c.decode(UUID.self, forKey: .id)
         self.name = try c.decode(String.self, forKey: .name)
-        self.color = try c.decode(ActivityColor.self, forKey: .color)
+        self.icon = try c.decode(CatalogIcon.self, forKey: .icon)
         self.createdAt = try CatalogDateCoding.decodeDate(c, forKey: .createdAt)
         self.updatedAt = try CatalogDateCoding.decodeDate(c, forKey: .updatedAt)
     }
 
-    init(id: UUID, name: String, color: ActivityColor, createdAt: Date, updatedAt: Date) {
+    init(id: UUID, name: String, icon: CatalogIcon, createdAt: Date, updatedAt: Date) {
         self.id = id
         self.name = name
-        self.color = color
+        self.icon = icon
         self.createdAt = createdAt
         self.updatedAt = updatedAt
     }
 
     func toCategory() -> Category {
-        Category(id: id, name: name, color: color, createdAt: createdAt, updatedAt: updatedAt)
+        Category(id: id, name: name, icon: icon, createdAt: createdAt, updatedAt: updatedAt)
     }
 }
 
@@ -88,8 +88,6 @@ struct CategoryDTO: Decodable, Sendable, Equatable {
 struct ActivityDTO: Decodable, Sendable, Equatable {
     let id: UUID
     let name: String
-    let color: ActivityColor
-    let icon: ActivityIcon
     let notes: String?
     let lastUsedAt: Date?
     let createdAt: Date
@@ -97,7 +95,7 @@ struct ActivityDTO: Decodable, Sendable, Equatable {
     let categories: [CategoryDTO]
 
     enum CodingKeys: String, CodingKey {
-        case id, name, color, icon, notes, categories
+        case id, name, notes, categories
         case lastUsedAt = "last_used_at"
         case createdAt = "created_at"
         case updatedAt = "updated_at"
@@ -107,8 +105,6 @@ struct ActivityDTO: Decodable, Sendable, Equatable {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.id = try c.decode(UUID.self, forKey: .id)
         self.name = try c.decode(String.self, forKey: .name)
-        self.color = try c.decode(ActivityColor.self, forKey: .color)
-        self.icon = try c.decode(ActivityIcon.self, forKey: .icon)
         self.notes = try c.decodeIfPresent(String.self, forKey: .notes)
         if let raw = try c.decodeIfPresent(String.self, forKey: .lastUsedAt) {
             if let date = CatalogDateCoding.decode(raw) {
@@ -128,8 +124,6 @@ struct ActivityDTO: Decodable, Sendable, Equatable {
     init(
         id: UUID,
         name: String,
-        color: ActivityColor,
-        icon: ActivityIcon,
         notes: String?,
         lastUsedAt: Date?,
         createdAt: Date,
@@ -138,8 +132,6 @@ struct ActivityDTO: Decodable, Sendable, Equatable {
     ) {
         self.id = id
         self.name = name
-        self.color = color
-        self.icon = icon
         self.notes = notes
         self.lastUsedAt = lastUsedAt
         self.createdAt = createdAt
@@ -152,8 +144,6 @@ struct ActivityDTO: Decodable, Sendable, Equatable {
         Activity(
             id: id,
             name: name,
-            color: color,
-            icon: icon,
             notes: notes,
             lastUsedAt: lastUsedAt,
             categoryIds: categories.map(\.id),
@@ -165,17 +155,15 @@ struct ActivityDTO: Decodable, Sendable, Equatable {
 
 // MARK: - Request bodies
 
-/// `POST /activities` body: `{id, name, color, icon, notes?, category_ids?}`.
+/// `POST /activities` body: `{id, name, notes?, category_ids?}`.
 struct ActivityCreateRequest: Encodable, Sendable {
     let id: UUID
     let name: String
-    let color: ActivityColor
-    let icon: ActivityIcon
     let notes: String?
     let categoryIds: [UUID]?
 
     enum CodingKeys: String, CodingKey {
-        case id, name, color, icon, notes
+        case id, name, notes
         case categoryIds = "category_ids"
     }
 }
@@ -185,14 +173,12 @@ struct ActivityCreateRequest: Encodable, Sendable {
 /// `category_ids` is present).
 struct ActivityPatchRequest: Encodable, Sendable {
     let name: String?
-    let color: ActivityColor?
-    let icon: ActivityIcon?
     let notes: String?
     let categoryIds: [UUID]?
     let updatedAt: Date
 
     enum CodingKeys: String, CodingKey {
-        case name, color, icon, notes
+        case name, notes
         case categoryIds = "category_ids"
         case updatedAt = "updated_at"
     }
@@ -200,40 +186,38 @@ struct ActivityPatchRequest: Encodable, Sendable {
     func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
         try c.encodeIfPresent(name, forKey: .name)
-        try c.encodeIfPresent(color, forKey: .color)
-        try c.encodeIfPresent(icon, forKey: .icon)
         try c.encodeIfPresent(notes, forKey: .notes)
         try c.encodeIfPresent(categoryIds, forKey: .categoryIds)
         try c.encode(CatalogDateCoding.encode(updatedAt), forKey: .updatedAt)
     }
 }
 
-/// `POST /categories` body: `{id, name, color}`.
+/// `POST /categories` body: `{id, name, icon}`.
 struct CategoryCreateRequest: Encodable, Sendable {
     let id: UUID
     let name: String
-    let color: ActivityColor
+    let icon: CatalogIcon
 
     enum CodingKeys: String, CodingKey {
-        case id, name, color
+        case id, name, icon
     }
 }
 
 /// `PATCH /categories/{id}` body. `updated_at` always carried for LWW (R2).
 struct CategoryPatchRequest: Encodable, Sendable {
     let name: String?
-    let color: ActivityColor?
+    let icon: CatalogIcon?
     let updatedAt: Date
 
     enum CodingKeys: String, CodingKey {
-        case name, color
+        case name, icon
         case updatedAt = "updated_at"
     }
 
     func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
         try c.encodeIfPresent(name, forKey: .name)
-        try c.encodeIfPresent(color, forKey: .color)
+        try c.encodeIfPresent(icon, forKey: .icon)
         try c.encode(CatalogDateCoding.encode(updatedAt), forKey: .updatedAt)
     }
 }

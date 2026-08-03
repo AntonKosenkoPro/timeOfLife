@@ -5,31 +5,19 @@ import Foundation
 @Suite("CatalogModels")
 struct CatalogModelsTests {
 
-    // MARK: - Palette + icons
+    // MARK: - Catalog icons
 
-    @Test("ActivityColor has the 12 palette keys")
-    func paletteCount() {
-        #expect(ActivityColor.allCases.count == 12)
-        let keys = Set(ActivityColor.allCases.map(\.rawValue))
-        let expected = [
-            "gray", "red", "orange", "yellow", "green", "teal", "blue",
-            "indigo", "purple", "pink", "brown", "mint"
-        ]
-        for key in expected {
-            #expect(keys.contains(key), "Missing color key \(key)")
-        }
-    }
-
-    @Test("ActivityIcon is the union of backend + TOKENS; default is clock")
+    @Test("CatalogIcon is the union of backend + TOKENS; default is tag")
     func iconSet() {
-        // Union = 13 shared + 15 TOKENS-only + 18 backend-only = 46.
-        #expect(ActivityIcon.allCases.count == 46)
-        #expect(ActivityIcon.default == .clock)
-        let keys = ActivityIcon.validKeys
+        // Union = the original 46 symbols plus the category tag symbol.
+        #expect(CatalogIcon.allCases.count == 47)
+        #expect(CatalogIcon.default == .tag)
+        let keys = CatalogIcon.validKeys
         // TOKENS-only
         #expect(keys.contains("clock"))
         #expect(keys.contains("brain.head.profile"))
         #expect(keys.contains("moon.stars"))
+        #expect(keys.contains("tag"))
         // Backend-only
         #expect(keys.contains("figure.walk"))
         #expect(keys.contains("musicalnotes"))
@@ -39,11 +27,9 @@ struct CatalogModelsTests {
         #expect(keys.contains("fork.knife"))
     }
 
-    @Test("Activity color/icon enums decode from raw strings")
+    @Test("CatalogIcon decodes from raw strings")
     func rawDecoding() throws {
-        let color = try JSONDecoder().decode(ActivityColor.self, from: Data("\"blue\"".utf8))
-        #expect(color == .blue)
-        let icon = try JSONDecoder().decode(ActivityIcon.self, from: Data("\"figure.run\"".utf8))
+        let icon = try JSONDecoder().decode(CatalogIcon.self, from: Data("\"figure.run\"".utf8))
         #expect(icon == .figureRun)
     }
 
@@ -75,7 +61,7 @@ struct CatalogModelsTests {
 
     @Test("Category round-trips Codable")
     func categoryRoundTrip() throws {
-        let category = TestCatalogFactory.category(name: "Work", color: .orange)
+        let category = TestCatalogFactory.category(name: "Work", icon: .briefcase)
         let data = try JSONEncoder().encode(category)
         let decoded = try JSONDecoder().decode(Category.self, from: data)
         #expect(decoded == category)
@@ -90,14 +76,12 @@ struct CatalogModelsTests {
         {
           "id": "019639f1-7a3b-7abc-9def-100000000001",
           "name": "Gym",
-          "color": "blue",
-          "icon": "figure.strengthtraining",
           "notes": "",
           "last_used_at": "2026-07-27T09:00:00Z",
           "created_at": "2026-07-27T08:00:00Z",
           "updated_at": "2026-07-27T09:00:00Z",
           "categories": [
-            { "id": "\(categoryId)", "name": "Sport", "color": "green",
+            { "id": "\(categoryId)", "name": "Sport", "icon": "tag",
               "created_at": "2026-07-27T08:00:00Z", "updated_at": "2026-07-27T08:00:00Z" }
           ]
         }
@@ -105,8 +89,6 @@ struct CatalogModelsTests {
         let dto = try JSONDecoder().decode(ActivityDTO.self, from: Data(json.utf8))
         let activity = dto.toActivity()
         #expect(activity.id.uuidString.lowercased() == "019639f1-7a3b-7abc-9def-100000000001")
-        #expect(activity.color == .blue)
-        #expect(activity.icon == .figureStrengthtraining)
         #expect(activity.categoryIds.map { $0.uuidString.lowercased() } == [categoryId])
         #expect(activity.lastUsedAt == CatalogDateCoding.decode("2026-07-27T09:00:00Z"))
     }
@@ -116,7 +98,7 @@ struct CatalogModelsTests {
         let json = """
         {
           "id": "019639f1-7a3b-7abc-9def-100000000010",
-          "name": "Read", "color": "indigo", "icon": "book",
+          "name": "Read",
           "notes": null, "last_used_at": "2026-07-27T09:00:00.123Z",
           "created_at": "2026-07-27T08:00:00Z", "updated_at": "2026-07-27T08:00:00Z"
         }
@@ -130,19 +112,19 @@ struct CatalogModelsTests {
     @Test("CategoryDTO decodes and maps toCategory")
     func categoryDTODecodes() throws {
         let json = """
-        { "id": "019639f1-7a3b-7abc-9def-100000000020", "name": "Sport", "color": "green",
+        { "id": "019639f1-7a3b-7abc-9def-100000000020", "name": "Sport", "icon": "tag",
           "created_at": "2026-07-27T08:00:00Z", "updated_at": "2026-07-27T08:00:00Z" }
         """
         let dto = try JSONDecoder().decode(CategoryDTO.self, from: Data(json.utf8))
         let category = dto.toCategory()
-        #expect(category.color == .green)
+        #expect(category.icon == .tag)
         #expect(category.name == "Sport")
     }
 
     @Test("ActivityPatchRequest encodes updated_at as an ISO string")
     func patchEncodesUpdatedAt() throws {
         let date = Date(timeIntervalSince1970: 1_785_626_400)
-        let body = ActivityPatchRequest(name: "Gym", color: nil, icon: nil, notes: nil, categoryIds: nil, updatedAt: date)
+        let body = ActivityPatchRequest(name: "Gym", notes: nil, categoryIds: nil, updatedAt: date)
         let data = try JSONEncoder().encode(body)
         let object = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
         let updated = try #require(object["updated_at"] as? String)
@@ -158,7 +140,7 @@ struct CatalogModelsTests {
     @Test("ActivityCreateRequest encodes category_ids")
     func createEncodesCategoryIds() throws {
         let id = UUID()
-        let body = ActivityCreateRequest(id: UUID(), name: "Gym", color: .blue, icon: .figureStrengthtraining, notes: nil, categoryIds: [id])
+        let body = ActivityCreateRequest(id: UUID(), name: "Gym", notes: nil, categoryIds: [id])
         let data = try JSONEncoder().encode(body)
         let object = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
         #expect(object["category_ids"] != nil)
@@ -183,11 +165,9 @@ struct CatalogModelsTests {
         #expect(CatalogValidator.validateNotes(String(repeating: "a", count: 281)) == [.notesTooLong])
     }
 
-    @Test("color + icon validation against the allowed sets")
-    func colorIconValidation() {
-        #expect(CatalogValidator.validateColor("blue").isEmpty)
-        #expect(CatalogValidator.validateColor("notacolor") == [.colorInvalid])
-        #expect(CatalogValidator.validateIcon("clock").isEmpty)
+    @Test("icon validation against the allowed set")
+    func iconValidation() {
+        #expect(CatalogValidator.validateIcon("tag").isEmpty)
         #expect(CatalogValidator.validateIcon("figure.run").isEmpty)
         #expect(CatalogValidator.validateIcon("notasymbol") == [.iconInvalid])
     }
@@ -205,7 +185,6 @@ struct CatalogModelsTests {
         #expect(CatalogValidator.unifiedNameMessage([.nameEmpty]) != nil)
         #expect(CatalogValidator.unifiedNameMessage([.nameTooLong]) != nil)
         #expect(CatalogValidator.unifiedNotesMessage([.notesTooLong]) != nil)
-        #expect(CatalogValidator.unifiedColorMessage([.colorInvalid]) != nil)
         #expect(CatalogValidator.unifiedIconMessage([.iconInvalid]) != nil)
     }
 }

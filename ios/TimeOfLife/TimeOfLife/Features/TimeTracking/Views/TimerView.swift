@@ -118,7 +118,9 @@ struct TimerView: View {
 
                 // Suggestions list — idle only.
                 if vm.shouldShowSuggestions {
-                    TimerSuggestionList(suggestions: vm.suggestions) { vm.prefill(from: $0) }
+                    TimerSuggestionList(suggestions: vm.suggestions, categories: vm.categories) {
+                        vm.prefill(from: $0)
+                    }
                 }
 
                 // Fixed-size stable timer display.
@@ -248,6 +250,7 @@ struct TimerView: View {
 /// Suggestion list rendered below the activity field when idle.
 struct TimerSuggestionList: View {
     let suggestions: [Activity]
+    let categories: [Category]
     let onTap: (Activity) -> Void
 
     var body: some View {
@@ -258,7 +261,7 @@ struct TimerSuggestionList: View {
                 .padding(.leading, Theme.spacingSmall)
 
             ForEach(suggestions, id: \.id) { activity in
-                SuggestionRow(activity: activity) {
+                SuggestionRow(activity: activity, categories: categories(for: activity)) {
                     onTap(activity)
                 }
             }
@@ -268,6 +271,12 @@ struct TimerSuggestionList: View {
         .background(Theme.backgroundSecondary)
         .cornerRadius(Theme.cornerRadius)
         .accessibilityIdentifier("TimerSuggestionList")
+    }
+
+    private func categories(for activity: Activity) -> [Category] {
+        activity.categoryIds.compactMap { id in
+            categories.first { $0.id == id }
+        }
     }
 }
 
@@ -308,10 +317,10 @@ struct TimerSuggestionList: View {
         catalogService: container.catalogService
     )
     vm.suggestions = [
-        Activity(id: UUID(), name: "Reading", color: .blue, icon: .book,
+        Activity(id: UUID(), name: "Reading",
                  notes: nil, lastUsedAt: Date(), categoryIds: [],
                  createdAt: Date(), updatedAt: Date()),
-        Activity(id: UUID(), name: "Fitness", color: .green, icon: .figureRun,
+        Activity(id: UUID(), name: "Fitness",
                  notes: nil, lastUsedAt: Date().addingTimeInterval(-3600), categoryIds: [],
                  createdAt: Date(), updatedAt: Date()),
     ]
@@ -329,10 +338,10 @@ struct TimerSuggestionList: View {
         catalogService: container.catalogService
     )
     vm.suggestions = [
-        Activity(id: UUID(), name: "Чтение", color: .blue, icon: .book,
+        Activity(id: UUID(), name: "Чтение",
                  notes: nil, lastUsedAt: Date(), categoryIds: [],
                  createdAt: Date(), updatedAt: Date()),
-        Activity(id: UUID(), name: "Фитнес", color: .green, icon: .figureRun,
+        Activity(id: UUID(), name: "Фитнес",
                  notes: nil, lastUsedAt: Date().addingTimeInterval(-3600), categoryIds: [],
                  createdAt: Date(), updatedAt: Date()),
     ]

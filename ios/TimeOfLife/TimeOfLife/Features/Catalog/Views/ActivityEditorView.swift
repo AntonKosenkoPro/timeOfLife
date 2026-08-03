@@ -45,23 +45,6 @@ struct ActivityEditorView: View {
                 }
                 .focused($isNameFocused)
 
-                SectionHeader(title: L10n.activityEditorColorLabel.text)
-                ColorSwatchGrid(
-                    options: ActivityColor.allCases,
-                    selection: Binding(
-                        get: { vm.draft.color },
-                        set: { vm.draft.color = $0 ?? .mint }
-                    ),
-                    accessibilityId: "ActivityEditorColor"
-                )
-
-                SectionHeader(title: L10n.activityEditorIconLabel.text)
-                IconPickerGrid(
-                    options: ActivityIcon.allowedSymbols,
-                    selection: $vm.draft.icon,
-                    accessibilityId: "ActivityEditorIcon"
-                )
-
                 notesSection
 
                 SectionHeader(title: L10n.activityEditorTagsLabel.text)
@@ -168,7 +151,7 @@ struct ActivityEditorView: View {
                 $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
             }
         }
-        vm.draft.categoryIds.insert(category.id)
+        vm.draft.categoryIds.append(category.id)
         showCategoryEditor = false
     }
 
@@ -226,7 +209,7 @@ private struct ActivityEditorDetents: ViewModifier {
 #if DEBUG
 
 private let editorPreviewActivity = Activity(
-    id: UUID(), name: "Reading", color: .blue, icon: .book,
+    id: UUID(), name: "Reading",
     notes: "Morning reading", lastUsedAt: Date(), categoryIds: [Category.sampleBlue.id],
     createdAt: Date().addingTimeInterval(-3600), updatedAt: Date()
 )

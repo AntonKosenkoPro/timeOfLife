@@ -9,6 +9,10 @@ enum CategoryValidator {
         CatalogValidator.validateName(raw)
     }
 
+    static func validateIcon(_ raw: String) -> [ValidationError] {
+        CatalogValidator.validateIcon(raw)
+    }
+
     static func unifiedNameMessage(_ errors: [ValidationError]) -> String? {
         guard !errors.isEmpty else { return nil }
         if errors.contains(.nameEmpty) {
@@ -16,5 +20,10 @@ enum CategoryValidator {
         }
         guard errors.contains(.nameTooLong) else { return nil }
         return "\(L10n.validationNamePrefix.text) \(L10n.validationNameRuleTooLong.text)."
+    }
+
+    static func unifiedIconMessage(_ errors: [ValidationError]) -> String? {
+        guard errors.contains(.iconInvalid) else { return nil }
+        return L10n.validationCatalogIconInvalid.text
     }
 }

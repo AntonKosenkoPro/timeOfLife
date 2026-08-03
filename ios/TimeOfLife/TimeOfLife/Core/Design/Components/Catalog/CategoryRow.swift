@@ -10,9 +10,10 @@ struct CategoryRow: View {
     var body: some View {
         Button(action: action) {
             HStack(spacing: Theme.spacingMedium) {
-                Circle()
-                    .fill(Theme.activityColor(category.color))
-                    .frame(width: 10, height: 10)
+                Image(systemName: category.icon.rawValue)
+                    .font(.body)
+                    .foregroundStyle(Theme.textSecondary)
+                    .frame(width: Theme.minTapArea, height: Theme.minTapArea)
 
                 Text(category.name)
                     .font(.body)
@@ -35,7 +36,7 @@ struct CategoryRow: View {
 private let sampleCategory = Category(
     id: UUID(),
     name: "Work",
-    color: .blue,
+    icon: .briefcase,
     createdAt: Date(),
     updatedAt: Date()
 )

@@ -346,64 +346,9 @@ struct IconButton: View {
 
 ---
 
-## `ColorSwatchGrid`
-
-Selectable grid of the fixed 12-key activity/category palette (D15). Used by `ActivityEditor` and `CategoryEditor` to pick `color`.
-
-### Signature
-
-```swift
-struct ColorSwatchGrid: View {
-    let options: [ActivityColor]
-    @Binding var selection: ActivityColor?
-    let accessibilityId: String
-}
-```
-
-### Visual
-
-- `LazyVGrid` of circular swatches, 32 pt each.
-- Each swatch fill is `Theme.activityColor(key)` with a 1 pt `Theme.hairline` border.
-- Selected swatch gets a 2 pt `Theme.textPrimary` ring and a `checkmark` overlay (`.caption`, `Theme.textPrimary`).
-- Hit area is expanded to `Theme.minTapArea × Theme.minTapArea` so the tap target stays ≥ 44 even though the swatch is 32.
-
-### States
-
-| State | Visual |
-|---|---|
-| Default | 32 pt circle, `Theme.activityColor(key)` fill, 1 pt `Theme.hairline` border |
-| Selected | 2 pt `Theme.textPrimary` ring + `checkmark` overlay |
-| Disabled | Whole grid `.disabled(true)`; swatches dimmed to 50% alpha |
-
-### Requirements
-
-- `options` is the full 12-key set from `Theme.activityColor(_:)` (D15); `selection` is the chosen key or `nil`.
-- Each swatch `accessibilityIdentifier("\(accessibilityId)Swatch(\(key))")`.
-- Min tap area 44 (F7/U9); the visible swatch is 32 pt — the tap target is larger than the swatch.
-- Tapping a swatch sets `selection` to that key; tapping the selected swatch keeps it selected (no deselect).
-- Used by `ActivityEditor` (F1) and `CategoryEditor` (F2).
-
-### Usage
-
-```swift
-ColorSwatchGrid(
-    options: ActivityColor.allCases,
-    selection: $vm.color,
-    accessibilityId: "ActivityEditorColor"
-)
-```
-
-### Accessibility
-
-- Each swatch is its own button element with a label derived from the color key (e.g. "Color, blue").
-- Selected swatch exposes `.accessibilityValue("Selected")`.
-- Combined tap targets meet `Theme.minTapArea` even where the visible circle is smaller.
-
----
-
 ## `IconPickerGrid`
 
-Selectable grid of allowed SF Symbols for `activity.icon` (F1/U1). Mirrors `ColorSwatchGrid` geometry.
+Selectable grid of allowed SF Symbols for categories (F2/U1).
 
 ### Signature
 
@@ -415,7 +360,7 @@ struct IconPickerGrid: View {
 }
 ```
 
-**Callers should pass `ActivityIcon.allowedSymbols` (or another caller-validated set).** The component itself does not filter invalid or duplicate symbol names; invalid names render as blank cells and duplicate names break `ForEach` identity. Use the typed seam (`ActivityIcon`) to guarantee a valid set.
+**Callers should pass `CatalogIcon.allowedSymbols` (or another caller-validated set).** The component itself does not filter invalid or duplicate symbol names; invalid names render as blank cells and duplicate names break `ForEach` identity. Use the typed seam (`CatalogIcon`) to guarantee a valid set.
 
 ### Visual
 
@@ -432,7 +377,7 @@ struct IconPickerGrid: View {
 
 ### Requirements
 
-- `options` is the allowed SF Symbols set (F1/U1, D15); `selection` is the chosen symbol name. Callers must pass `ActivityIcon.allowedSymbols` (the 27-symbol design-spec set from `TOKENS.md`, plus the default `clock`).
+- `options` is the allowed category SF Symbols set (F2/U1); `selection` is the chosen symbol name. Callers must pass `CatalogIcon.allowedSymbols`.
 - Each cell `accessibilityIdentifier("\(accessibilityId)Cell(\(symbol))")`.
 - Min tap area 44 — matches the cell size exactly.
 - Tapping a cell sets `selection` to that symbol.
@@ -441,9 +386,9 @@ struct IconPickerGrid: View {
 
 ```swift
 IconPickerGrid(
-    options: ActivityIcon.allowedSymbols,
+    options: CatalogIcon.allowedSymbols,
     selection: $vm.icon,
-    accessibilityId: "ActivityEditorIcon"
+    accessibilityId: "CategoryEditorIcon"
 )
 ```
 
@@ -451,53 +396,6 @@ IconPickerGrid(
 
 - Each cell is a button element with `.accessibilityLabel("Icon, \(symbol)")`.
 - Selected cell exposes `.accessibilityValue("Selected")`.
-
----
-
-## `TagChip`
-
-Read-only category pill: color dot + name. Displayed on `ActivityRow` and entries to surface an activity's tags (F3).
-
-### Signature
-
-```swift
-struct TagChip: View {
-    let name: String
-    let color: ActivityColor
-}
-```
-
-### Visual
-
-- `Capsule` with `Theme.backgroundSecondary` fill.
-- Leading 6 pt `Circle` filled with `Theme.activityColor(color)`.
-- `.caption` name in `Theme.textPrimary`.
-- Padding `Theme.spacingSmall` horizontal / 4 vertical.
-
-### States
-
-| State | Visual |
-|---|---|
-| Default | `Theme.backgroundSecondary` capsule, color dot + name |
-
-### Requirements
-
-- Read-only — no tap action, no selection state.
-- Color is resolved via `Theme.activityColor(_:)` (D15).
-- Use only on rows/entries; for tappable multi-select see `TagSelector`.
-
-### Usage
-
-```swift
-ForEach(activity.categories) { c in
-    TagChip(name: c.name, color: c.color)
-}
-```
-
-### Accessibility
-
-- `.accessibilityElement(children: .combine)` so the chip reads as one element ("Tag, Work").
-- `.accessibilityHidden(false)` — visible to VoiceOver but not focusable as a control.
 
 ---
 
@@ -520,7 +418,7 @@ struct TagSelector: View {
 - Wrapping `FlowLayout` (left-aligned, `Theme.spacingSmall` spacing).
 - Unselected chip: `Theme.backgroundSecondary` fill + 1 pt `Theme.hairline` border.
 - Selected chip: `Theme.accentPrimary` fill, white text, leading `checkmark` (`.caption`).
-- Each chip: color dot (6 pt `Theme.activityColor(color)`) + name (`.caption`), padding `Theme.spacingSmall` horizontal / 4 vertical, `Capsule` shape.
+- Each chip: category icon (`.caption`, `Theme.textSecondary`) + name (`.caption`), padding `Theme.spacingSmall` horizontal / 4 vertical, `Capsule` shape.
 - When `options` is empty, render a hint: `L10n.tagsEmptyHint` ("No categories yet — create one"), `.caption`, `Theme.textSecondary`.
 
 ### States
@@ -564,6 +462,7 @@ Recency-based suggestion row on the timer screen (F5/U3). One tap prefills the a
 ```swift
 struct SuggestionRow: View {
     let activity: Activity
+    let categories: [Category]
     let action: () -> Void
 }
 ```
@@ -571,9 +470,9 @@ struct SuggestionRow: View {
 ### Visual
 
 - `Button`-styled `HStack(spacing: Theme.spacingMedium)`:
-  - 8 pt `Circle` filled with `Theme.activityColor(activity.color)`.
-  - `Image(systemName: activity.icon)` in `Theme.textSecondary`, `.body`.
+  - The first category's icon in `Theme.textSecondary`, `.body`, when categories are present.
   - Name in `.subheadline`, `Theme.textPrimary`.
+  - Category names joined with `", "` in `.caption`, `Theme.textSecondary`.
 - Full width, min height `Theme.minTapArea`.
 - `accessibilityIdentifier("TimerSuggestion(\(activity.id))")`.
 
@@ -594,14 +493,14 @@ struct SuggestionRow: View {
 
 ```swift
 ForEach(vm.suggestions) { a in
-    SuggestionRow(activity: a) { vm.prefill(from: a) }
+    SuggestionRow(activity: a, categories: vm.categories(for: a)) { vm.prefill(from: a) }
 }
 ```
 
 ### Accessibility
 
 - `accessibilityIdentifier("TimerSuggestion(\(activity.id))")` (U3).
-- `.accessibilityLabel("Suggestion, \(activity.name)")`.
+- `.accessibilityLabel("Suggestion, \(activity.name)")`; category names are included in the combined value when present.
 - `.accessibilityHint("Starts a timer for this activity")`.
 
 ---
@@ -623,10 +522,10 @@ struct ActivityRow: View {
 ### Visual
 
 - `HStack(spacing: Theme.spacingMedium)`:
-  - Leading: 32 × 32 `RoundedRectangle(cornerRadius: Theme.cornerRadiusSmall, style: .continuous)` with `Theme.backgroundSecondary` fill, containing `Image(systemName: activity.icon)` in `Theme.textPrimary`, `.body`. A 10 pt `Circle` (`Theme.activityColor(activity.color)`) sits at the leading edge of the icon square.
+  - Leading: the first category's icon in `Theme.textSecondary`, `.body`, when categories are present.
   - Middle `VStack(alignment: .leading, spacing: 2)`:
     - Name in `.headline`, `Theme.textPrimary`.
-    - `HStack` of `TagChip`s for `categories`, hidden when `categories.isEmpty` (F3).
+    - Comma-separated category names in `.caption`, hidden when `categories.isEmpty` (F3).
     - Last-used subtitle in `.footnote`, `Theme.textSecondary`.
   - Trailing `Image(systemName: "chevron.right")` in `Theme.textSecondary`.
 - Min height `Theme.minTapArea`; full width.
@@ -635,8 +534,8 @@ struct ActivityRow: View {
 
 | State | Visual |
 |---|---|
-| Default | Row with icon square, name + tags + subtitle, trailing chevron |
-| No tags | Tag `HStack` collapses; name sits directly above the subtitle |
+| Default | Row with first-category icon, name + category names + subtitle, trailing chevron |
+| No categories | Category icon and names collapse; name sits directly above the subtitle |
 | No last-used | Subtitle hidden |
 
 ### Requirements
@@ -660,7 +559,7 @@ List {
 ### Accessibility
 
 - `accessibilityIdentifier("ActivityRow(\(activity.id))")`.
-- The whole row is a single button element; chips and subtitle are `.accessibilityHidden(true)` and folded into the row label ("\(name), \(categories.count) tags, last used \(subtitle)").
+- The whole row is a single button element; category names and subtitle are `.accessibilityHidden(true)` and folded into the row label.
 
 ---
 
@@ -680,7 +579,7 @@ struct CategoryRow: View {
 ### Visual
 
 - `HStack(spacing: Theme.spacingMedium)`:
-  - Leading 10 pt `Circle` filled with `Theme.activityColor(category.color)`.
+  - Leading `Image(systemName: category.icon.rawValue)` in `Theme.textSecondary`.
   - Name in `.body`, `Theme.textPrimary`.
   - Trailing `Image(systemName: "chevron.right")` in `Theme.textSecondary`.
 - Min height `Theme.minTapArea`; full width.
@@ -689,7 +588,7 @@ struct CategoryRow: View {
 
 | State | Visual |
 |---|---|
-| Default | Color dot + name + trailing chevron |
+| Default | Category icon + name + trailing chevron |
 
 ### Requirements
 
@@ -716,7 +615,7 @@ List {
 
 ## `SectionHeader`
 
-Simple section title used in editor screens to label Color / Icon / Tags sections.
+Simple section title used in editor screens to label input sections.
 
 ### Signature
 
@@ -740,13 +639,13 @@ struct SectionHeader: View {
 ### Requirements
 
 - Pure presentational — no state, no action.
-- Used in `ActivityEditor` / `CategoryEditor` to label sections (Color, Icon, Tags).
+- Used in `CategoryEditor` to label the icon section.
 
 ### Usage
 
 ```swift
-SectionHeader(title: L10n.activityEditorColorSection)
-ColorSwatchGrid(options: ActivityColor.allCases, selection: $vm.color, accessibilityId: "ActivityEditorColor")
+SectionHeader(title: L10n.categoryEditorIconLabel)
+IconPickerGrid(options: CatalogIcon.allowedSymbols, selection: $vm.icon, accessibilityId: "CategoryEditorIcon")
 ```
 
 ### Accessibility
