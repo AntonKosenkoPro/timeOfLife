@@ -140,6 +140,10 @@ final class AuthService: ObservableObject {
         }
     }
 
+    /// Called after local state is cleared on logout. Wired by AppContainer
+    /// to cancel TimerService retries and other cleanup.
+    var onLogout: (() -> Void)?
+
     /// Logout. Clears local state always; best-effort server revoke.
     func logout() async {
         do {
@@ -148,6 +152,7 @@ final class AuthService: ObservableObject {
             // Best-effort: ignore network/401 — we still clear local state.
         }
         await clearLocal()
+        onLogout?()
     }
 
     // MARK: - Internals

@@ -1,5 +1,6 @@
 import Foundation
 import Combine
+import OSLog
 
 /// Orchestrates local storage and remote sync for time entries.
 ///
@@ -22,6 +23,7 @@ final class TimerService: ObservableObject {
     private var retryTask: Task<Void, Never>?
     private var isSyncing = false
     private var syncRequested = false
+    private static let log = Logger(subsystem: "com.timeoflife", category: "timer-sync")
 
     init(
         store: TimerStoring,
@@ -90,12 +92,43 @@ final class TimerService: ObservableObject {
                     try await repository.create(entry)
                     try await store.markSynced(entry)
                 } catch {
+                    if isPermanentError(error) {
+                        Self.log.warning("deferring entry \(entry.id.uuidString) after permanent error: \(error.localizedDescription)")
+                        // Leave the entry unsynced — it will be retried on the
+                        // next catalog sync completion (onSyncCompleted hook).
+                        continue
+                    }
                     shouldRetry = true
                     continue
                 }
             }
             if shouldRetry { scheduleRetry() }
         } while syncRequested && connectivity.isConnected
+    }
+
+    /// Returns true for errors that will never succeed on retry.
+    private func isPermanentError(_ error: Error) -> Bool {
+        if let api = error as? APIError {
+            switch api {
+            case .unauthorized:
+                return true
+            case let .server(code, _, _):
+                // 404 activity_not_found: the referenced activity doesn't exist
+                // server-side; wait for catalog sync to create it.
+                // 422 validation_error: will never succeed.
+                return code == "activity_not_found" || code == "validation_error"
+            case .offline, .decoding, .transport, .invalidRequest, .unexpected:
+                return false
+            }
+        }
+        return false
+    }
+
+    /// Cancels any pending retry. Called on logout so the app stops hammering
+    /// the backend without a token.
+    func cancelRetry() {
+        retryTask?.cancel()
+        retryTask = nil
     }
 
     private func scheduleRetry() {

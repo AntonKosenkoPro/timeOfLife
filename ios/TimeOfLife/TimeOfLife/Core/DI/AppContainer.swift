@@ -70,7 +70,6 @@ final class AppContainer: ObservableObject {
         self.clientHolder = clientHolder
     }
 
-    /// Default production graph wired against `AppConfig.baseURL`.
     static func production() -> AppContainer {
         let baseURL = AppConfig.baseURL
         let keychain = KeychainStore()
@@ -87,23 +86,16 @@ final class AppContainer: ObservableObject {
             sessionStore: sessionStore
         )
         clientHolder.service = authService
-
         let appleService = AppleSignInService()
-
         let entriesRepository = RemoteEntriesRepository(client: client)
         let timerService = TimerService(
             store: LocalTimerStore(),
             repository: entriesRepository,
             connectivity: connectivity
         )
-        let catalog = makeCatalogGraph(
-            client: client,
-            connectivity: connectivity,
-            entryStore: timerService.store,
-            entriesRepository: entriesRepository
-        )
+        let catalog = makeCatalogGraph(client: client, connectivity: connectivity, entryStore: timerService.store, entriesRepository: entriesRepository)
         wireCatalogSync(service: catalog.service, timerService: timerService)
-
+        wireLogoutCancelRetry(authService: authService, timerService: timerService)
         return AppContainer(
             baseURL: baseURL,
             apiClient: client,
@@ -121,14 +113,12 @@ final class AppContainer: ObservableObject {
             syncQueue: catalog.queue,
             undoBuffer: catalog.undoBuffer,
             catalogService: catalog.service,
-            catalogSeeder: makeCatalogSeeder(catalog: catalog, sessionCache: sessionCache),
+            catalogSeeder: CatalogSeeder(repository: catalog.repository, service: catalog.service, sessionCache: sessionCache),
             activityEntryCounter: TimerStoreActivityEntryCounter(store: timerService.store),
             clientHolder: clientHolder
         )
     }
 
-    /// Builds the catalog graph (store + remote repo + queue + undo + service).
-    /// Extracted so `production()` stays within the linter's function-body limit.
     private static func makeCatalogGraph(
         client: APIClient,
         connectivity: Connectivity,
@@ -152,21 +142,17 @@ final class AppContainer: ObservableObject {
         return (store, repository, queue, undoBuffer, service)
     }
 
-    private static func makeCatalogSeeder(
-        catalog: (store: CatalogStore, repository: CatalogRepository,
-                  queue: SyncQueue, undoBuffer: UndoBuffer, service: CatalogService),
-        sessionCache: SessionCache
-    ) -> CatalogSeeder {
-        CatalogSeeder(
-            repository: catalog.repository,
-            service: catalog.service,
-            sessionCache: sessionCache
-        )
-    }
-
     private static func wireCatalogSync(service: CatalogService, timerService: TimerService) {
         service.onSyncCompleted = {
             try? await timerService.syncUnsyncedEntries()
+        }
+    }
+
+    /// Cancels TimerService retries on logout so the app stops hammering
+    /// the backend without a token.
+    private static func wireLogoutCancelRetry(authService: AuthService, timerService: TimerService) {
+        authService.onLogout = { [weak timerService] in
+            timerService?.cancelRetry()
         }
     }
 
