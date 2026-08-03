@@ -68,8 +68,10 @@ enum DatabaseSchema {
     private static func createEntriesTable(_ db: Database) throws {
         try db.create(table: "entries", ifNotExists: true) { t in
             t.column("id", .text).primaryKey()
+            // No FK cascade — the app manages entry lifecycle (cascade on
+            // activity deletion is explicit, not automatic, so dirty
+            // entries survive activity removal during reconciliation).
             t.column("activity_id", .text).notNull()
-                .references("activities", onDelete: .cascade)
             t.column("started_at", .double).notNull()
             t.column("ended_at", .double)
             t.column("duration_seconds", .double)
