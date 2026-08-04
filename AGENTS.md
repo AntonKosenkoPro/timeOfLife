@@ -180,7 +180,7 @@ Code signing is disabled in `project.yml` (`DEVELOPMENT_TEAM: ""`, `CODE_SIGNING
 
 ## Pre-release policy
 
-The app is unreleased; there is no on-disk data in the wild. **No backward compatibility / migration for local on-disk formats is needed before release.** Do not add legacy-decode branches, `legacy*` fields, or `migrateIfNeeded` paths to local stores. On-disk schema changes are applied by editing the `Codable` shape in place; existing test fixtures and dev devices simply start fresh. The `CatalogStore` self-heals: a corrupt/undecodable file is quarantined (renamed to `.corrupted.<timestamp>.json`) and the store starts fresh. Revisit this policy once a build ships to TestFlight or any external tester.
+The app is unreleased; there is no on-disk data in the wild. **No backward compatibility / migration for local on-disk formats is needed before release.** Do not add legacy-decode branches, `legacy*` fields, or `migrateIfNeeded` paths to local stores. On-disk schema changes are applied by editing the `Codable` shape in place; existing test fixtures and dev devices simply start fresh. The `LocalStore` (GRDB) self-heals: a corrupt/undecodable database is quarantined (renamed to `.corrupted.<timestamp>.sqlite`) and the store starts fresh. Revisit this policy once a build ships to TestFlight or any external tester.
 
 ## Deferred / out of scope
 - **Sign in with Apple follow-ups** — F2 itself is implemented (see below); still deferred: account-deletion token revocation via Apple `/auth/revoke` (App Store 5.1.1v, needs `.p8` + `APPLE_TEAM_ID`/`APPLE_KEY_ID`), nonce replay defense, and Apple credential-state/revocation observation on the client.
