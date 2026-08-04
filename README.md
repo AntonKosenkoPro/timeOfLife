@@ -1,6 +1,6 @@
 # Time of Life
 
-A personal time-tracking app for iOS — minimal-effort tracking of where your time goes (widgets, shortcuts, integrations). This repository contains the **auth MVP** (passwordless email + OTP) and the first **time-tracking MVP** screen (start/stop timer with offline-first persistence).
+A personal time-tracking app for iOS — minimal-effort tracking of where your time goes (widgets, shortcuts, integrations). This repository contains the **auth MVP** (passwordless email + OTP), the first **time-tracking MVP** screen, and the Epic 1 GRDB-backed activity/category catalog with offline-first entry sync.
 
 See [`Requirements/FURPS/`](Requirements/FURPS/) for the full requirements, [`AGENTS.md`](AGENTS.md) for context for AI agents, and [`Design/`](Design/) for the text-based design system (colors, components, screen specs, and interaction patterns). This MVP implements **F1** (passwordless email-OTP sign up/in), **F2** (Sign in with Apple), the supporting infrastructure, and the first time-tracking use case. **F3** (restore access by email) is subsumed by the OTP flow (no password to reset).
 
@@ -10,7 +10,7 @@ Monorepo with two subsystems that share a JSON API contract:
 
 ```
 backend/   Go (chi + pgx/PostgreSQL, sqlite for tests) — REST API under /api/v1
-ios/       SwiftUI app (iOS 15+) — MVVM + Repository, keychain token storage
+ ios/       SwiftUI app (iOS 15+) — MVVM + Repository, keychain tokens, per-account GRDB catalog
 ```
 
 ### Auth flow (passwordless)
@@ -30,7 +30,7 @@ ios/       SwiftUI app (iOS 15+) — MVVM + Repository, keychain token storage
 2. **Start** an activity: type a name and tap **Start**.
 3. **Timer counts up** while running; the device stays awake.
 4. **Stop** saves the entry: online → saved locally and synced remotely; offline → queued locally and synced when connectivity returns.
-5. Entries are stored in `Application Support/TimeOfLife/timerQueue.json`.
+5. Activities, categories, and entries are stored in a per-account GRDB database under `Application Support/TimeOfLife/accounts/`.
 
 ### Security (R1)
 - **No passwords anywhere.** Accounts authenticate by proving email ownership via an OTP code (stored only as a **SHA-256 hash**, 10-min expiry, max 5 attempts).
@@ -87,11 +87,15 @@ cd ios/TimeOfLife
 swiftlint lint --strict     # linters (S6); `--fix` autocorrects. Config: .swiftlint.yml
 xcodebuild -scheme TimeOfLife \
   -destination 'generic/platform=iOS Simulator' \
-  SWIFT_TREAT_WARNINGS_AS_ERRORS=YES \
-  GCC_TREAT_WARNINGS_AS_ERRORS=YES build
+  ENABLE_APP_INTENTS_METADATA=NO \
+  build
+xcodebuild -scheme TimeOfLife \
+  -destination 'platform=iOS Simulator,name=iPhone 17,OS=latest' \
+  ENABLE_APP_INTENTS_METADATA=NO \
+  test
 ```
-Use an available simulator destination for `xcodebuild test`; the CI workflow resolves one dynamically.
-Unit tests cover the email/OTP validators, the API client (incl. 401→refresh→retry and offline mapping via a URLProtocol stub), repositories, the AuthService (keychain/cache/restore-on-offline), and the auth view-models. Out of scope: SwiftUI snapshot tests and on-device keychain (see smoke checklist below).
+Warnings-as-errors are configured on the app and test targets in `project.yml`; do not pass them globally because GRDB builds with warning suppression. The App Intents override suppresses an Xcode 27 metadata-tool diagnostic for targets without App Intents.
+Unit tests cover auth, GRDB account isolation/durability, sync conflict and reconnect behavior, catalog view models, undo, localization, and the 1,000-activity suggestion performance budget. `TimeOfLifeUITests` covers deterministic offline smoke flows for suggestion start, quick-add, catalog navigation/editing, delete, and undo. Out of scope: SwiftUI snapshot tests and on-device keychain (see smoke checklist below).
 
 ## Code quality & CI (S5/S6/S7)
 - **Linters (S6):** Go `golangci-lint` (`backend/.golangci.yml`), Swift `swiftlint` (`ios/TimeOfLife/.swiftlint.yml`), plus `.editorconfig`. Both must pass with zero findings before merge; iOS `xcodebuild` compiler warnings are also treated as errors.

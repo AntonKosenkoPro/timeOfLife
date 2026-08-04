@@ -4,20 +4,30 @@ import SwiftUI
 struct ManageCategoriesView: View {
     @StateObject var vm: ManageCategoriesViewModel
     @EnvironmentObject var container: AppContainer
+    private let embeddedInNavigation: Bool
     @State private var showAddSheet = false
     @State private var editingCategory: Category?
 
+    init(vm: ManageCategoriesViewModel, embeddedInNavigation: Bool = false) {
+        _vm = StateObject(wrappedValue: vm)
+        self.embeddedInNavigation = embeddedInNavigation
+    }
+
     var body: some View {
         Group {
-            if #available(iOS 16, *) {
-                NavigationStack {
-                    content
-                }
+            if embeddedInNavigation {
+                content
             } else {
-                NavigationView {
-                    content
+                if #available(iOS 16, *) {
+                    NavigationStack {
+                        content
+                    }
+                } else {
+                    NavigationView {
+                        content
+                    }
+                    .navigationViewStyle(.stack)
                 }
-                .navigationViewStyle(.stack)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)

@@ -17,6 +17,13 @@ struct AdoptionResult<T: Sendable>: Sendable {
     let didOverwrite: Bool
 }
 
+/// Optional synchronous seed used by deterministic DEBUG UI composition.
+struct LocalStoreSeed: Sendable {
+    let categories: [Category]
+    let activities: [Activity]
+    let entries: [Entry]
+}
+
 /// The sole owner of catalog and entry persistence.
 ///
 /// One actor-backed `DatabaseQueue` per authenticated user. All multi-record
@@ -44,11 +51,32 @@ actor LocalStore {
     }
 
     /// Creates an in-memory store for tests that don't need durability.
-    init(inMemory: Bool = true) throws {
+    init(inMemory: Bool = true, seed: LocalStoreSeed? = nil) throws {
         precondition(inMemory, "Use init(databaseURL:) for a file-backed store")
         self.dbQueue = try DatabaseQueue()
         try dbQueue.write { db in
             try DatabaseSchema.migrate(db)
+            guard let seed else { return }
+
+            for category in seed.categories {
+                var record = CategoryRecord.from(category)
+                try record.save(db)
+            }
+            for activity in seed.activities {
+                var record = ActivityRecord.from(activity)
+                try record.save(db)
+                for (position, categoryId) in activity.categoryIds.enumerated() {
+                    var join = ActivityCategoryRecord(
+                        activityId: activity.id,
+                        categoryId: categoryId,
+                        position: position)
+                    try join.save(db)
+                }
+            }
+            for entry in seed.entries {
+                var record = EntryRecord.from(entry)
+                try record.save(db)
+            }
         }
     }
 

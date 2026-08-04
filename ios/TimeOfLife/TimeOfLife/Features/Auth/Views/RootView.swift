@@ -16,6 +16,15 @@ struct RootView: View {
             }
             .background(Theme.backgroundPrimary.ignoresSafeArea())
             .task { await container.authService.restoreSession() }
+            .task(id: container.sessionStore.state) {
+                // Open the per-account catalog DB when signed in; close it on
+                // sign-out/account switch.
+                if let session = container.sessionStore.currentSession {
+                    await container.openAccount(userID: session.id)
+                } else {
+                    await container.closeAccount()
+                }
+            }
             .onChange(of: session.state) { newState in
                 // When the user signs out, drop any pushed auth routes so they land
                 // on the welcome screen instead of the last pushed screen (e.g. OTP).
@@ -65,25 +74,29 @@ private struct SignedInView: View {
             destination: { route in
                 switch route {
                 case .manageActivities:
-                    if let store = container.localStoreForCatalog,
+                    if container.isCatalogReady,
+                       let store = container.localStoreForCatalog,
                        let undo = container.undoService {
                         ManageActivitiesView(
                             vm: ManageActivitiesViewModel(
                                 localStore: store,
                                 undoService: undo,
-                                syncCoordinator: container.syncCoordinator))
+                                syncCoordinator: container.syncCoordinator),
+                            embeddedInNavigation: true)
                             .environmentObject(container)
                     } else {
                         EmptyView()
                     }
                 case .manageCategories:
-                    if let store = container.localStoreForCatalog,
+                    if container.isCatalogReady,
+                       let store = container.localStoreForCatalog,
                        let undo = container.undoService {
                         ManageCategoriesView(
                             vm: ManageCategoriesViewModel(
                                 localStore: store,
                                 undoService: undo,
-                                syncCoordinator: container.syncCoordinator))
+                                syncCoordinator: container.syncCoordinator),
+                            embeddedInNavigation: true)
                             .environmentObject(container)
                     } else {
                         EmptyView()
@@ -97,8 +110,8 @@ private struct SignedInView: View {
                 TimerView(vm: TimerViewModel(
                     service: container.timerService,
                     authService: container.authService,
-                    connectivity: container.connectivity
-                ))
+                    connectivity: container.connectivity),
+                    embeddedInNavigation: true)
             }
         )
         .environmentObject(container)

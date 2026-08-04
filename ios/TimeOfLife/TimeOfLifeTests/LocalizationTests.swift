@@ -123,4 +123,72 @@ struct LocalizationTests {
         // 80 keys (pre-catalog 28 + 52 catalog keys for Epic 1 rewrite).
         #expect(l10nCases.count == 80)
     }
+
+    // MARK: - Delete-scope wording (AC9: "latest entry", not "current entry")
+
+    @Test("delete scope wording says 'latest entry' in EN")
+    func deleteScopeWordingEN() throws {
+        let main = Bundle.main
+        let path = try #require(main.path(forResource: "en", ofType: "lproj"))
+        let bundle = try #require(Bundle(path: path))
+
+        let entryOnly = NSLocalizedString("delete.activity.entryOnly", bundle: bundle, comment: "")
+        // The approved wording (R-001) is "latest entry" — not "current entry".
+        #expect(entryOnly.lowercased().contains("latest"),
+                "EN delete scope wording should say 'latest entry', got: \(entryOnly)")
+        #expect(!entryOnly.lowercased().contains("current"),
+                "EN delete scope wording must not say 'current entry', got: \(entryOnly)")
+    }
+
+    @Test("delete scope wording resolves in RU")
+    func deleteScopeWordingRU() throws {
+        let main = Bundle.main
+        let path = try #require(main.path(forResource: "ru", ofType: "lproj"))
+        let bundle = try #require(Bundle(path: path))
+
+        let entryOnly = NSLocalizedString("delete.activity.entryOnly", bundle: bundle, comment: "")
+        #expect(entryOnly != "delete.activity.entryOnly", "Unresolved RU key")
+        #expect(!entryOnly.isEmpty)
+    }
+
+    // MARK: - Seed names localized (AC8 / F6)
+
+    @Test("seed category names resolve in EN and RU bundles")
+    func seedNamesLocalized() throws {
+        let seedKeys = [
+            "category.seed.work",
+            "category.seed.hobby",
+            "category.seed.sport",
+            "category.seed.education",
+            "category.seed.relax",
+            "category.seed.sleep",
+            "category.seed.entertainment",
+        ]
+        let main = Bundle.main
+
+        for code in ["en", "ru"] {
+            let path = try #require(main.path(forResource: code, ofType: "lproj"))
+            let bundle = try #require(Bundle(path: path))
+            for key in seedKeys {
+                let value = NSLocalizedString(key, bundle: bundle, comment: "")
+                #expect(value != key, "Unresolved seed key \(key) in \(code)")
+                #expect(!value.isEmpty, "Empty seed value for \(key) in \(code)")
+            }
+        }
+    }
+
+    @Test("RU seed names differ from EN (genuinely localized)")
+    func seedNamesDifferByLocale() throws {
+        let main = Bundle.main
+        let enPath = try #require(main.path(forResource: "en", ofType: "lproj"))
+        let ruPath = try #require(main.path(forResource: "ru", ofType: "lproj"))
+        let enBundle = try #require(Bundle(path: enPath))
+        let ruBundle = try #require(Bundle(path: ruPath))
+
+        for key in ["category.seed.work", "category.seed.sleep", "category.seed.entertainment"] {
+            let en = NSLocalizedString(key, bundle: enBundle, comment: "")
+            let ru = NSLocalizedString(key, bundle: ruBundle, comment: "")
+            #expect(en != ru, "Seed key \(key) should differ between locales")
+        }
+    }
 }

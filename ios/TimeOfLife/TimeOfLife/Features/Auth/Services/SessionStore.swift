@@ -13,6 +13,12 @@ final class SessionStore: ObservableObject {
         case signedIn(CachedSession)
     }
 
+    /// The current signed-in session, if any.
+    var currentSession: CachedSession? {
+        if case let .signedIn(session) = state { return session }
+        return nil
+    }
+
     init() {}
 
     func setSignedIn(_ session: CachedSession) {

@@ -7,9 +7,11 @@ import Foundation
 /// `SyncCoordinator` to push them to the server.
 @MainActor
 final class TimerService: ObservableObject {
-    let localStore: LocalStore?
-    let syncCoordinator: SyncCoordinator?
     let legacyStore: TimerStoring?
+    /// The catalog store, once the per-account database is open (`attachCatalog`).
+    private(set) var localStore: LocalStore?
+    /// The sync coordinator, once the per-account database is open (`attachCatalog`).
+    private(set) var syncCoordinator: SyncCoordinator?
     private let repository: TimerRepository
     private let connectivity: Connectivity
 
@@ -23,19 +25,34 @@ final class TimerService: ObservableObject {
         syncCoordinator: SyncCoordinator? = nil,
         legacyStore: TimerStoring? = nil
     ) {
+        self.repository = repository
+        self.connectivity = connectivity
         self.localStore = localStore
         self.syncCoordinator = syncCoordinator
         self.legacyStore = legacyStore
-        self.repository = repository
-        self.connectivity = connectivity
+    }
+
+    /// Upgrades the service to the catalog path once the per-account database
+    /// is open (called by `AppContainer.openAccount`).
+    func attachCatalog(localStore: LocalStore, syncCoordinator: SyncCoordinator) {
+        self.localStore = localStore
+        self.syncCoordinator = syncCoordinator
+    }
+
+    /// Drops the catalog path (called on logout/account close).
+    func detachCatalog() {
+        localStore = nil
+        syncCoordinator = nil
     }
 
     // MARK: - Suggestions
 
     /// Returns the 5 most recent activities from the local store (F5).
+    /// Uses the optimized single-query ranking path (AC10: < 50 ms for
+    /// 1,000+ activities).
     func suggestions() async throws -> [Activity] {
         guard let localStore else { return [] }
-        return Array(try await localStore.activitiesSortedByLastUsedAt().prefix(5))
+        return try await localStore.suggestionActivities(limit: 5)
     }
 
     // MARK: - Activity resolution

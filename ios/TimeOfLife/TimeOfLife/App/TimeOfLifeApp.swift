@@ -47,21 +47,24 @@ struct TimeOfLifeApp: App {
 
         let args = ProcessInfo.processInfo.arguments
         for (index, arg) in args.enumerated() {
+            let normalizedArg = arg.hasPrefix("-") ? String(arg.dropFirst()) : arg
             let key: String
-            if arg.hasPrefix("UITEST_SCREEN=") {
+            if normalizedArg.hasPrefix("UITEST_SCREEN=") {
                 key = "UITEST_SCREEN="
-            } else if arg.hasPrefix("SIMCTL_CHILD_UITEST_SCREEN=") {
+            } else if normalizedArg.hasPrefix("SIMCTL_CHILD_UITEST_SCREEN=") {
                 key = "SIMCTL_CHILD_UITEST_SCREEN="
-            } else if arg == "UITEST_SCREEN" || arg == "SIMCTL_CHILD_UITEST_SCREEN" {
+            } else if normalizedArg == "UITEST_SCREEN" || normalizedArg == "SIMCTL_CHILD_UITEST_SCREEN" {
                 let next = index + 1
                 guard next < args.count else { continue }
-                let screen = args[next]
+                let screen = args[next].hasPrefix("-")
+                    ? String(args[next].dropFirst())
+                    : args[next]
                 if !screen.isEmpty { return screen }
                 continue
             } else {
                 continue
             }
-            let screen = String(arg.dropFirst(key.count))
+            let screen = String(normalizedArg.dropFirst(key.count))
             if !screen.isEmpty { return screen }
         }
         return nil

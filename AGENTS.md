@@ -37,7 +37,7 @@ backend/                 Go backend (chi + pgx/Postgres; sqlite for tests)
   nginx/                 Nginx configs (SSL termination, reverse proxy)
   deploy.sh              CI/CD deploy script
   Makefile               Common commands (build, test, lint, run, deploy)
-ios/TimeOfLife/          SwiftUI app (iOS 15+), XcodeGen-managed (project.yml)
+ios/TimeOfLife/          SwiftUI app (iOS 15+), XcodeGen-managed (project.yml), GRDB per-account catalog
   TimeOfLife/Features/Auth/        passwordless flow: Welcome → EmailEntry → OtpEntry
   TimeOfLife/Features/TimeTracking/  start/stop timer, TimeEntry model, TimerService + LocalTimerStore
   TimeOfLife/Core/                 networking, keychain, reachability, theme, navigation, DI, design components
@@ -68,9 +68,15 @@ xcodegen generate
 swiftlint lint --strict         # linters (S6); --fix autocorrects
 xcodebuild -scheme TimeOfLife \
   -destination 'generic/platform=iOS Simulator' \
-  SWIFT_TREAT_WARNINGS_AS_ERRORS=YES \
-  GCC_TREAT_WARNINGS_AS_ERRORS=YES build
+  ENABLE_APP_INTENTS_METADATA=NO \
+  build
+xcodebuild -scheme TimeOfLife \
+  -destination 'platform=iOS Simulator,name=iPhone 17,OS=latest' \
+  ENABLE_APP_INTENTS_METADATA=NO \
+  test
 ```
+
+Warnings-as-errors are target-scoped in `project.yml`; do not pass them globally because the GRDB package target uses warning suppression. `ENABLE_APP_INTENTS_METADATA=NO` avoids an Xcode 27 metadata-tool diagnostic when the app has no App Intents.
 
 ## API contract (`/api/v1`)
 

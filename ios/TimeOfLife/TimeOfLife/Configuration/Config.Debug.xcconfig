@@ -5,3 +5,4 @@
 // The $(EMPTY) reference expands to nothing, resulting in http://127.0.0.1:8080.
 EMPTY =
 API_BASE_URL = http:/$(EMPTY)/127.0.0.1:8080
+ENABLE_APP_INTENTS_METADATA = NO

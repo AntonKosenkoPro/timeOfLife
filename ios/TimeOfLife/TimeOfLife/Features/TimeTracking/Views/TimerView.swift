@@ -15,25 +15,35 @@ import SwiftUI
 struct TimerView: View {
     @ObservedObject var vm: TimerViewModel
     @EnvironmentObject var container: AppContainer
+    private let embeddedInNavigation: Bool
     @FocusState private var isActivityFocused: Bool
 
     @State private var showSignOutConfirm = false
     @State private var bottomBarHeight: CGFloat = 0
 
+    init(vm: TimerViewModel, embeddedInNavigation: Bool = false) {
+        self.vm = vm
+        self.embeddedInNavigation = embeddedInNavigation
+    }
+
     var body: some View {
-        // `NavigationStack` is iOS 16+; fall back to `NavigationView(.stack)`
-        // on iOS 15 so the toolbar still renders. The root content carries the
-        // navigation title, toolbar, and sign-out alert.
         Group {
-            if #available(iOS 16, *) {
-                NavigationStack {
-                    contentWithToolbar
-                }
+            if embeddedInNavigation {
+                contentWithToolbar
             } else {
-                NavigationView {
-                    contentWithToolbar
+                // `NavigationStack` is iOS 16+; fall back to `NavigationView(.stack)`
+                // on iOS 15 so the toolbar still renders. The root content carries the
+                // navigation title, toolbar, and sign-out alert.
+                if #available(iOS 16, *) {
+                    NavigationStack {
+                        contentWithToolbar
+                    }
+                } else {
+                    NavigationView {
+                        contentWithToolbar
+                    }
+                    .navigationViewStyle(.stack)
                 }
-                .navigationViewStyle(.stack)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -49,21 +59,21 @@ struct TimerView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    HStack {
-                        Button {
-                            container.navigation.push(.manageActivities)
-                        } label: {
-                            Image(systemName: "list.bullet")
-                                .font(.subheadline)
-                        }
-                        .accessibilityIdentifier("TimerManageActivitiesButton")
-
-                        Button(L10n.timerSignOut.text, role: .destructive) {
-                            showSignOutConfirm = true
-                        }
-                        .font(.subheadline)
-                        .accessibilityIdentifier("TimerSignOutButton")
+                    Button {
+                        container.navigation.push(.manageActivities)
+                    } label: {
+                        Image(systemName: "list.bullet")
+                            .font(.subheadline)
                     }
+                    .accessibilityIdentifier("TimerManageActivitiesButton")
+                }
+
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button(L10n.timerSignOut.text, role: .destructive) {
+                        showSignOutConfirm = true
+                    }
+                    .font(.subheadline)
+                    .accessibilityIdentifier("TimerSignOutButton")
                 }
             }
             .alert(L10n.signOutConfirmationTitle.text, isPresented: $showSignOutConfirm) {
@@ -213,6 +223,11 @@ struct TimerView: View {
                 vm.fieldError = nil
             }
             Task { await vm.refreshSuggestions() }
+        }
+        .onChange(of: container.isCatalogReady) { isReady in
+            if isReady {
+                Task { await vm.loadSuggestions() }
+            }
         }
         .sheet(isPresented: $vm.isQuickAddPresented) {
             // Quick-add sheet — Phase 8 will present the real ActivityEditorView.

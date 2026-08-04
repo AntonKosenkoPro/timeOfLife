@@ -35,6 +35,20 @@
                ReferencedContainer = "container:TimeOfLife.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>
+         <BuildActionEntry
+            buildForTesting = "YES"
+            buildForRunning = "NO"
+            buildForProfiling = "NO"
+            buildForArchiving = "NO"
+            buildForAnalyzing = "NO">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "90ADC53A7A69105F9B03F1B3"
+               BuildableName = "TimeOfLifeUITests.xctest"
+               BlueprintName = "TimeOfLifeUITests"
+               ReferencedContainer = "container:TimeOfLife.xcodeproj">
+            </BuildableReference>
+         </BuildActionEntry>
       </BuildActionEntries>
    </BuildAction>
    <TestAction
@@ -61,6 +75,17 @@
                BlueprintIdentifier = "DD226B64D1EE49B283FB75BD"
                BuildableName = "TimeOfLifeTests.xctest"
                BlueprintName = "TimeOfLifeTests"
+               ReferencedContainer = "container:TimeOfLife.xcodeproj">
+            </BuildableReference>
+         </TestableReference>
+         <TestableReference
+            skipped = "NO"
+            parallelizable = "NO">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "90ADC53A7A69105F9B03F1B3"
+               BuildableName = "TimeOfLifeUITests.xctest"
+               BlueprintName = "TimeOfLifeUITests"
                ReferencedContainer = "container:TimeOfLife.xcodeproj">
             </BuildableReference>
          </TestableReference>

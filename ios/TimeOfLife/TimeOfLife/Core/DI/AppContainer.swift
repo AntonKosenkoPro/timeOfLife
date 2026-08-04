@@ -19,14 +19,20 @@ final class AppContainer: ObservableObject {
     /// Per-account local store for the catalog (GRDB). `nil` until a user
     /// signs in. Views use `localStoreForCatalog` (force-unwrap) after
     /// sign-in.
-    var localStoreForCatalog: LocalStore?
+    private(set) var localStoreForCatalog: LocalStore?
     /// Single synchronization coordinator for the catalog. `nil` until a user
     /// signs in.
-    var syncCoordinator: SyncCoordinator?
+    private(set) var syncCoordinator: SyncCoordinator?
     /// Undo service for catalog deletions. `nil` until a user signs in.
-    var undoService: UndoService?
+    private(set) var undoService: UndoService?
     /// Seeder for default categories. `nil` until a user signs in.
-    var seeder: Seeder?
+    private(set) var seeder: Seeder?
+    /// `true` once the per-account catalog graph is open and ready. Views
+    /// observing the container re-render when this flips, so a screen pushed
+    /// while the DB is still opening (e.g. Manage Activities) upgrades from
+    /// `EmptyView` to the real view without user action.
+    @Published private(set) var isCatalogReady = false
+    private(set) var activeAccountID: String?
     /// Strong reference to the holder that wires the API client's refresh hook
     /// back to `authService`. If this were not retained, the holder would
     /// deallocate after `production()` returns and token refresh would fail.
@@ -58,6 +64,101 @@ final class AppContainer: ObservableObject {
         self.appleService = appleService
         self.timerService = timerService
         self.clientHolder = clientHolder
+    }
+
+    // MARK: - Account lifecycle (per-user database)
+
+    /// Opens the per-account GRDB database, wires the catalog graph, and
+    /// triggers the initial sync + seeding. Called when the session flips to
+    /// signed-in (sign-in, cold restore). Replaces any previously open account.
+    func openAccount(userID: String) async {
+        if activeAccountID == userID {
+            return
+        }
+
+        // Account switch: close the previous DB and cancel its sync first.
+        await closeAccount()
+
+        do {
+            let url = try AccountDatabasePath.databaseURL(forUserUUID: userID)
+            let store = try LocalStore(databaseURL: url)
+            let catalogRepo = RemoteCatalogRepository(client: apiClient)
+            let entriesRepo = RemoteEntriesRepository(client: apiClient)
+            let (coordinator, seederService) = installCatalogGraph(
+                localStore: store,
+                catalogRepo: catalogRepo,
+                entriesRepo: entriesRepo,
+                accountID: userID,
+                ready: false)
+
+            // Bootstrap: outbound sync → initial pull → seed → sync seeds.
+            await coordinator.sync()
+            await seederService.seedIfNeeded()
+
+            // Mark the graph ready only after everything is open — views
+            // pushed early (e.g. Manage Activities while the DB opens) flip
+            // from EmptyView to the real screen when this publishes.
+            isCatalogReady = true
+        } catch {
+            // If the account database can't be opened, the catalog graph stays
+            // nil (views degrade to EmptyView) but auth keeps working.
+            await closeAccount()
+        }
+    }
+
+    /// Installs a catalog graph without performing network bootstrap. The
+    /// deterministic DEBUG UI graph uses this with in-memory storage and
+    /// no-op remote repositories.
+    @discardableResult
+    func installCatalogGraph(
+        localStore: LocalStore,
+        catalogRepo: CatalogRemoteSending,
+        entriesRepo: EntriesRemoteSending,
+        accountID: String,
+        ready: Bool
+    ) -> (SyncCoordinator, Seeder) {
+        let coordinator = SyncCoordinator(
+            localStore: localStore,
+            catalogRepo: catalogRepo,
+            entriesRepo: entriesRepo,
+            connectivity: connectivity)
+        let undo = UndoService(
+            localStore: localStore,
+            syncCoordinator: coordinator)
+        let seederService = Seeder(
+            localStore: localStore,
+            syncCoordinator: coordinator)
+
+        localStoreForCatalog = localStore
+        syncCoordinator = coordinator
+        undoService = undo
+        seeder = seederService
+        activeAccountID = accountID
+        timerService.attachCatalog(
+            localStore: localStore,
+            syncCoordinator: coordinator)
+        isCatalogReady = ready
+        return (coordinator, seederService)
+    }
+
+    /// Closes the per-account database and cancels its sync. Called on logout
+    /// and before opening another account's database.
+    func closeAccount() async {
+        let coordinator = syncCoordinator
+        await coordinator?.cancelSync()
+        isCatalogReady = false
+        activeAccountID = nil
+        localStoreForCatalog = nil
+        undoService = nil
+        seeder = nil
+        timerService.detachCatalog()
+    }
+
+    /// Opens the account database for the current cached session, if any.
+    /// Called from `RootView.task` after `restoreSession()`.
+    func openAccountForCurrentSession() async {
+        guard let session = sessionStore.currentSession else { return }
+        await openAccount(userID: session.id)
     }
 
     /// Default production graph wired against `AppConfig.baseURL`.

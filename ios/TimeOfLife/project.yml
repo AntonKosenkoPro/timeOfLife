@@ -100,7 +100,7 @@ targets:
   TimeOfLifeTests:
     type: bundle.unit-test
     platform: iOS
-    deploymentTarget: "15.0"
+    deploymentTarget: "17.0"
     sources:
       - TimeOfLifeTests
     dependencies:
@@ -111,18 +111,35 @@ targets:
         GENERATE_INFOPLIST_FILE: YES
         SWIFT_TREAT_WARNINGS_AS_ERRORS: YES
         GCC_TREAT_WARNINGS_AS_ERRORS: YES
+  TimeOfLifeUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    deploymentTarget: "17.0"
+    sources:
+      - TimeOfLifeUITests
+    dependencies:
+      - target: TimeOfLife
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.antonkosenko.timeoflife.uitests
+        GENERATE_INFOPLIST_FILE: YES
+        SWIFT_TREAT_WARNINGS_AS_ERRORS: YES
+        GCC_TREAT_WARNINGS_AS_ERRORS: YES
+        TEST_TARGET_NAME: TimeOfLife
 schemes:
   TimeOfLife:
     build:
       targets:
         TimeOfLife: all
         TimeOfLifeTests: [test]
+        TimeOfLifeUITests: [test]
     run:
       config: Debug
     test:
       config: Debug
       targets:
         - TimeOfLifeTests
+        - TimeOfLifeUITests
     profile:
       config: Release
     analyze:

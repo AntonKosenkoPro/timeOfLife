@@ -6,3 +6,4 @@
 // https://timeoflife-api.antonkosenko.pro (the Cloudflare-fronted origin).
 EMPTY =
 API_BASE_URL = https:/$(EMPTY)/timeoflife-api.antonkosenko.pro
+ENABLE_APP_INTENTS_METADATA = NO

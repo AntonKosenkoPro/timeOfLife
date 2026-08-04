@@ -78,6 +78,35 @@ extension LocalStore {
         }
     }
 
+    /// Returns up to `limit` visible activities ordered by `last_used_at`
+    /// descending (name tie-break) — the timer suggestion query (F5).
+    ///
+    /// Unlike `activitiesSortedByLastUsedAt`, this loads category joins in a
+    /// single `IN` query so ranking stays well under the 50 ms budget for
+    /// 1,000+ activities (AC10).
+    func suggestionActivities(limit: Int) throws -> [Activity] {
+        try dbQueue.read { db in
+            let records = try ActivityRecord
+                .filter(
+                    Column(SyncMetadataColumns.isDeleted) == 0 &&
+                    Column(SyncMetadataColumns.isUndoHidden) == 0)
+                .order(Column("last_used_at").desc, Column("name").asc)
+                .limit(limit)
+                .fetchAll(db)
+            guard !records.isEmpty else { return [] }
+            let ids = records.map(\.id)
+            let joins = try ActivityCategoryRecord
+                .filter(ids.contains(Column("activity_id")))
+                .order(Column("activity_id").asc, Column("position").asc)
+                .fetchAll(db)
+            let joinsByActivity = Dictionary(grouping: joins, by: \.activityId)
+            return records.map { record in
+                let categoryIds = joinsByActivity[record.id]?.map(\.categoryId) ?? []
+                return record.toModel(categoryIds: categoryIds)
+            }
+        }
+    }
+
     /// Returns a single activity by id, regardless of visibility flags.
     func activity(id: String) throws -> Activity? {
         try dbQueue.read { db in

@@ -4,20 +4,30 @@ import SwiftUI
 struct ManageActivitiesView: View {
     @StateObject var vm: ManageActivitiesViewModel
     @EnvironmentObject var container: AppContainer
+    private let embeddedInNavigation: Bool
     @State private var showAddSheet = false
     @State private var editingActivity: Activity?
 
+    init(vm: ManageActivitiesViewModel, embeddedInNavigation: Bool = false) {
+        _vm = StateObject(wrappedValue: vm)
+        self.embeddedInNavigation = embeddedInNavigation
+    }
+
     var body: some View {
         Group {
-            if #available(iOS 16, *) {
-                NavigationStack {
-                    content
-                }
+            if embeddedInNavigation {
+                content
             } else {
-                NavigationView {
-                    content
+                if #available(iOS 16, *) {
+                    NavigationStack {
+                        content
+                    }
+                } else {
+                    NavigationView {
+                        content
+                    }
+                    .navigationViewStyle(.stack)
                 }
-                .navigationViewStyle(.stack)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -44,6 +54,7 @@ struct ManageActivitiesView: View {
                             } label: {
                                 Label(L10n.undoButton.text, systemImage: "trash")
                             }
+                            .accessibilityIdentifier("ActivityDeleteButton(\(activity.id))")
                         }
                     }
                 }
@@ -87,6 +98,16 @@ struct ManageActivitiesView: View {
                         localStore: store,
                         syncCoordinator: container.syncCoordinator,
                         editingActivity: activity))
+            }
+        }
+        .onChange(of: showAddSheet) { isPresented in
+            if !isPresented {
+                Task { await vm.loadActivities() }
+            }
+        }
+        .onChange(of: editingActivity) { activity in
+            if activity == nil {
+                Task { await vm.loadActivities() }
             }
         }
         .onChange(of: vm.showDeleteScope) { _ in
