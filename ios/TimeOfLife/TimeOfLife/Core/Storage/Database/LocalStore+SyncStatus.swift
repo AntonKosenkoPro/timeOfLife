@@ -7,11 +7,13 @@ extension LocalStore {
     // MARK: - Pending / blocked queries
 
     /// Returns all pending categories (in dependency order: creates/updates
-    /// first, then deletes).
+    /// first, then deletes). Excludes undo-hidden records.
     func pendingCategories() throws -> (createsUpdates: [Category], deletes: [Category]) {
         try dbQueue.read { db in
             let records = try CategoryRecord
-                .filter(Column(SyncMetadataColumns.syncStatus) == SyncStatus.pending.rawValue)
+                .filter(
+                    Column(SyncMetadataColumns.syncStatus) == SyncStatus.pending.rawValue &&
+                    Column(SyncMetadataColumns.isUndoHidden) == 0)
                 .fetchAll(db)
             var createsUpdates: [Category] = []
             var deletes: [Category] = []
@@ -28,11 +30,13 @@ extension LocalStore {
     }
 
     /// Returns all pending activities (in dependency order: creates/updates
-    /// first, then deletes).
+    /// first, then deletes). Excludes undo-hidden records.
     func pendingActivities() throws -> (createsUpdates: [Activity], deletes: [Activity]) {
         try dbQueue.read { db in
             let records = try ActivityRecord
-                .filter(Column(SyncMetadataColumns.syncStatus) == SyncStatus.pending.rawValue)
+                .filter(
+                    Column(SyncMetadataColumns.syncStatus) == SyncStatus.pending.rawValue &&
+                    Column(SyncMetadataColumns.isUndoHidden) == 0)
                 .fetchAll(db)
             var createsUpdates: [Activity] = []
             var deletes: [Activity] = []
@@ -49,11 +53,13 @@ extension LocalStore {
     }
 
     /// Returns all pending entries (in dependency order: creates/updates
-    /// first, then deletes).
+    /// first, then deletes). Excludes undo-hidden records.
     func pendingEntries() throws -> (createsUpdates: [Entry], deletes: [Entry]) {
         try dbQueue.read { db in
             let records = try EntryRecord
-                .filter(Column(SyncMetadataColumns.syncStatus) == SyncStatus.pending.rawValue)
+                .filter(
+                    Column(SyncMetadataColumns.syncStatus) == SyncStatus.pending.rawValue &&
+                    Column(SyncMetadataColumns.isUndoHidden) == 0)
                 .fetchAll(db)
             var createsUpdates: [Entry] = []
             var deletes: [Entry] = []
@@ -67,6 +73,23 @@ extension LocalStore {
             }
             return (createsUpdates, deletes)
         }
+    }
+
+    /// Returns `true` if any of the given category ids has a pending (not yet
+    /// created on the server) local create. Used to defer dependent activity
+    /// pushes until their category tags exist server-side.
+    func hasPendingCategoryCreate(for categoryIds: [String]) throws -> Bool {
+        guard !categoryIds.isEmpty else { return false }
+        let count = try dbQueue.read { db in
+            try CategoryRecord
+                .filter(
+                    categoryIds.contains(Column("id")) &&
+                    Column(SyncMetadataColumns.syncStatus) == SyncStatus.pending.rawValue &&
+                    Column(SyncMetadataColumns.isDeleted) == 0 &&
+                    Column(SyncMetadataColumns.remoteKnown) == 0)
+                .fetchCount(db)
+        }
+        return count > 0
     }
 
     /// Returns all blocked records (categories, activities, entries).
@@ -110,6 +133,11 @@ extension LocalStore {
 
     /// Transactionally replaces a losing category with the winner, rewriting
     /// `activity_categories` rows in one atomic step. Entries are unaffected.
+    ///
+    /// After the remap, per-activity positions are re-assigned sequentially so
+    /// the tag order shown in the editor stays gap-free and matches the user's
+    /// original ordering (the surviving winner row keeps its old position,
+    /// which would otherwise leave gaps and drift the order).
     func remapCategoryId(loserId: String, winnerId: String) throws {
         try dbQueue.write { db in
             try db.execute(
@@ -125,6 +153,25 @@ extension LocalStore {
                 sql: "UPDATE activity_categories SET category_id = ? WHERE category_id = ?",
                 arguments: [winnerId, loserId])
             _ = try CategoryRecord.filter(key: loserId).deleteAll(db)
+
+            // Renumber positions per activity so the join table stays gap-free
+            // and ordered exactly as the user originally tagged.
+            let affected = try ActivityCategoryRecord
+                .filter(Column("category_id") == winnerId)
+                .fetchAll(db)
+            let activities = Set(affected.map(\.activityId))
+            for activityId in activities {
+                let joins = try ActivityCategoryRecord
+                    .filter(Column("activity_id") == activityId)
+                    .order(Column("position").asc)
+                    .fetchAll(db)
+                for (newPosition, join) in joins.enumerated()
+                where join.position != newPosition {
+                    var updated = join
+                    updated.position = newPosition
+                    try updated.save(db)
+                }
+            }
         }
     }
 
@@ -181,6 +228,11 @@ extension LocalStore {
 
     // MARK: - Private
 
+    /// The synchronizable tables `updateSyncStatus` may touch. This is the
+    /// allow-list backing the interpolated `UPDATE` statement — no other
+    /// table name is ever accepted.
+    private static let syncStatusTables: Set<String> = ["categories", "activities", "entries"]
+
     /// Shared SQL for updating sync status on a single record.
     private func updateSyncStatus(
         table: String,
@@ -191,6 +243,10 @@ extension LocalStore {
         errorCode: String? = nil,
         errorMessage: String? = nil
     ) throws {
+        guard Self.syncStatusTables.contains(table) else {
+            assertionFailure("updateSyncStatus called with unexpected table: \(table)")
+            return
+        }
         try dbQueue.write { db in
             var sql = "UPDATE \(table) SET \(SyncMetadataColumns.syncStatus) = ?"
             var args: [DatabaseValueConvertible] = [status.rawValue]
@@ -201,10 +257,13 @@ extension LocalStore {
                 sql += ", \(SyncMetadataColumns.syncErrorCode) = NULL"
                 sql += ", \(SyncMetadataColumns.syncErrorMessage) = NULL"
             } else {
+                // Nil payloads persist as SQL NULL, not empty strings, so a
+                // "blocked with no error" record does not round-trip as a
+                // non-nil empty error.
                 sql += ", \(SyncMetadataColumns.syncErrorCode) = ?"
                 sql += ", \(SyncMetadataColumns.syncErrorMessage) = ?"
-                args.append(errorCode ?? "")
-                args.append(errorMessage ?? "")
+                args.append(errorCode ?? DatabaseValue.null)
+                args.append(errorMessage ?? DatabaseValue.null)
             }
             sql += " WHERE id = ?"
             args.append(id)

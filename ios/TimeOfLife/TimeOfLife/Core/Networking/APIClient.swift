@@ -38,11 +38,11 @@ actor APIClient: APISending {
     }
 
     static func defaultDecoder() -> JSONDecoder {
-        JSONDecoder() // snake_case handled via explicit CodingKeys
+        JSONDecoder.catalogDecoder // RFC 3339 with fractional seconds (catalog/entry DTOs)
     }
 
     static func defaultEncoder() -> JSONEncoder {
-        JSONEncoder() // snake_case handled via explicit CodingKeys
+        JSONEncoder.catalogEncoder // RFC 3339 with fractional seconds (catalog/entry DTOs)
     }
 
     // MARK: - Public

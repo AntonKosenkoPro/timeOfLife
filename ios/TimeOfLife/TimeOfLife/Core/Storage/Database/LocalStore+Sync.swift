@@ -7,16 +7,22 @@ extension LocalStore {
     // MARK: - Category CRUD
 
     /// Returns all visible categories (not deleted, not undo-hidden),
-    /// ordered by name ascending.
+    /// ordered by name ascending (case-insensitive, matching the backend's
+    /// `ORDER BY lower(name)`).
+    ///
+    /// Ordering happens in Swift rather than SQL: SQLite's `lower()` is
+    /// ASCII-only, so a SQL `ORDER BY lower(name)` would diverge from the
+    /// backend's Unicode-aware Postgres `lower()` for non-ASCII names.
     func categoriesSortedByName() throws -> [Category] {
         try dbQueue.read { db in
             let records = try CategoryRecord
                 .filter(
                     Column(SyncMetadataColumns.isDeleted) == 0 &&
                     Column(SyncMetadataColumns.isUndoHidden) == 0)
-                .order(Column("name").asc)
                 .fetchAll(db)
-            return records.map { $0.toModel() }
+            return records
+                .map { $0.toModel() }
+                .sorted { $0.name.lowercased() < $1.name.lowercased() }
         }
     }
 
@@ -33,6 +39,21 @@ extension LocalStore {
     /// Case-insensitive, normalized name lookup for collision detection.
     func category(normalizedName: String) throws -> Category? {
         try dbQueue.read { db in
+            // SQLite NOCASE provides a cheap fast path for the common ASCII
+            // case. Keep the Swift fallback below because SQLite's NOCASE is
+            // ASCII-only while Swift lowercasing handles localized names.
+            let fastCandidates = try CategoryRecord
+                .filter(
+                    Column(SyncMetadataColumns.isDeleted) == 0 &&
+                    Column(SyncMetadataColumns.isUndoHidden) == 0)
+                .filter(Column("name").collating(.nocase) == normalizedName)
+                .fetchAll(db)
+            if let match = fastCandidates.first(where: {
+                $0.name.lowercased().trimmingCharacters(in: .whitespaces) == normalizedName
+            }) {
+                return match.toModel()
+            }
+
             let records = try CategoryRecord
                 .filter(
                     Column(SyncMetadataColumns.isDeleted) == 0 &&
@@ -47,6 +68,18 @@ extension LocalStore {
     /// Upserts a category (insert or replace by id).
     func upsertCategory(_ category: Category) throws {
         try dbQueue.write { db in
+            var catRec = CategoryRecord.from(category); try catRec.save(db)
+        }
+    }
+
+    /// Inserts a canonical category only if it does not already exist locally.
+    /// Used after a collision so a local record with pending edits keeps its
+    /// pending state (its own unsent mutation must not be overwritten).
+    func adoptCanonicalCategoryIfAbsent(_ category: Category) throws {
+        try dbQueue.write { db in
+            guard try CategoryRecord.filter(key: category.id).fetchOne(db) == nil else {
+                return
+            }
             var catRec = CategoryRecord.from(category); try catRec.save(db)
         }
     }
@@ -120,6 +153,21 @@ extension LocalStore {
     /// Case-insensitive, normalized name lookup for collision detection.
     func activity(normalizedName: String) throws -> Activity? {
         try dbQueue.read { db in
+            // SQLite NOCASE provides a cheap fast path for the common ASCII
+            // case. Keep the Swift fallback below because SQLite's NOCASE is
+            // ASCII-only while Swift lowercasing handles localized names.
+            let fastCandidates = try ActivityRecord
+                .filter(
+                    Column(SyncMetadataColumns.isDeleted) == 0 &&
+                    Column(SyncMetadataColumns.isUndoHidden) == 0)
+                .filter(Column("name").collating(.nocase) == normalizedName)
+                .fetchAll(db)
+            if let match = fastCandidates.first(where: {
+                $0.name.lowercased().trimmingCharacters(in: .whitespaces) == normalizedName
+            }) {
+                return try loadActivityModel(db, record: match)
+            }
+
             let records = try ActivityRecord
                 .filter(
                     Column(SyncMetadataColumns.isDeleted) == 0 &&
@@ -134,6 +182,20 @@ extension LocalStore {
     /// Upserts an activity and its category-tag relationships.
     func upsertActivity(_ activity: Activity) throws {
         try dbQueue.write { db in
+            var actRec = ActivityRecord.from(activity); try actRec.save(db)
+            try replaceActivityCategories(
+                db, activityId: activity.id, categoryIds: activity.categoryIds)
+        }
+    }
+
+    /// Inserts a canonical activity only if it does not already exist locally.
+    /// Used after a collision so a local record with pending edits keeps its
+    /// pending state (its own unsent mutation must not be overwritten).
+    func adoptCanonicalActivityIfAbsent(_ activity: Activity) throws {
+        try dbQueue.write { db in
+            guard try ActivityRecord.filter(key: activity.id).fetchOne(db) == nil else {
+                return
+            }
             var actRec = ActivityRecord.from(activity); try actRec.save(db)
             try replaceActivityCategories(
                 db, activityId: activity.id, categoryIds: activity.categoryIds)

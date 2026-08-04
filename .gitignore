@@ -24,7 +24,11 @@ build/
 *.xcworkspace/xcuserdata/
 
 ### Generated Xcode project (single source of truth is project.yml)
-ios/TimeOfLife/TimeOfLife.xcodeproj/
+ios/TimeOfLife/TimeOfLife.xcodeproj/xcuserdata/
+ios/TimeOfLife/TimeOfLife.xcodeproj/project.xcworkspace/xcuserdata/
+ios/TimeOfLife/TimeOfLife.xcodeproj/xcshareddata/xcschemes/
+# Package.resolved is force-tracked for reproducible builds
+!ios/TimeOfLife/TimeOfLife.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved
 
 ### Swift Package Manager (legacy)
 .build/

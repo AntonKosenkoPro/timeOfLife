@@ -86,6 +86,7 @@
 		8AB9908B8C7F43985CCFC26D /* AppleSignInButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8D155F2818F5E3002BCDE412 /* AppleSignInButton.swift */; };
 		8E3BC4D0F95F210ED76AAF02 /* TimerStoring.swift in Sources */ = {isa = PBXBuildFile; fileRef = 14B9F48EF37C2C71C3B823E3 /* TimerStoring.swift */; };
 		8EFE540F24A602E680C63518 /* Seeder.swift in Sources */ = {isa = PBXBuildFile; fileRef = E7079794BECF174DFDCCD624 /* Seeder.swift */; };
+		8F0E864AD247991AFD9228EA /* CatalogDTOWireFormatTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5904D169439FBDC2AFA4B4F /* CatalogDTOWireFormatTests.swift */; };
 		95875072A46C4A1706C60CE2 /* ViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 12F694B4FA29E5BD513AA692 /* ViewModelTests.swift */; };
 		97433A58C0B24D13BECDCEE3 /* FakeAuthRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 027048F12B000EA16DC727F5 /* FakeAuthRepository.swift */; };
 		9865A14198FF02BEC96353F5 /* SyncCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 641493D337775C49C2A77DF6 /* SyncCoordinatorTests.swift */; };
@@ -261,6 +262,7 @@
 		CFA82C0B1B0D3CC37E91A663 /* RemoteAuthRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteAuthRepository.swift; sourceTree = "<group>"; };
 		D3EDF44C573A464EA1B15439 /* AuthModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthModels.swift; sourceTree = "<group>"; };
 		D46B208EB2ABFC11D92353BF /* OtpEntryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OtpEntryView.swift; sourceTree = "<group>"; };
+		D5904D169439FBDC2AFA4B4F /* CatalogDTOWireFormatTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CatalogDTOWireFormatTests.swift; sourceTree = "<group>"; };
 		D9B8919EF27555C4F388E106 /* TimeFormatterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimeFormatterTests.swift; sourceTree = "<group>"; };
 		DF021B3B2461F1B1311C8C49 /* CatalogTestFactory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CatalogTestFactory.swift; sourceTree = "<group>"; };
 		E1A31D299BAE86405A28F0D8 /* FlowLayout.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlowLayout.swift; sourceTree = "<group>"; };
@@ -454,6 +456,7 @@
 		4CE7060AFDA4CA66D90C3766 /* Storage */ = {
 			isa = PBXGroup;
 			children = (
+				D5904D169439FBDC2AFA4B4F /* CatalogDTOWireFormatTests.swift */,
 				9FDF1EBBFFE8084B89B6A5E8 /* LocalStoreCRUDTests.swift */,
 				B7BFB7BDA1CAC20D5520EA57 /* LocalStoreIsolationTests.swift */,
 				0BB9ED89D831530F85D9403B /* LocalStoreSyncTests.swift */,
@@ -1005,6 +1008,7 @@
 				F0DAC53BBE56C751F73C41EF /* AppleSignInServiceTests.swift in Sources */,
 				8172CADDF67BC614B4B1EC69 /* AuthServiceTests.swift in Sources */,
 				6853C8F73AA85C9A9D473947 /* AuthValidatorTests.swift in Sources */,
+				8F0E864AD247991AFD9228EA /* CatalogDTOWireFormatTests.swift in Sources */,
 				693B57520CBB44ABF73B7BEC /* CatalogTestFactory.swift in Sources */,
 				2EE38ACDC32BB66E6913E5D1 /* EmailEntryViewModelTests.swift in Sources */,
 				6F8C2CFEE0B00B9817AF30CA /* FakeAppleAuthorizationProvider.swift in Sources */,

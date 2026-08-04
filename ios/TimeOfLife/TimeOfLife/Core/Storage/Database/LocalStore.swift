@@ -44,6 +44,10 @@ actor LocalStore {
         configuration.prepareDatabase { db in
             try db.execute(sql: "PRAGMA foreign_keys = ON")
         }
+        // A busy timeout serializes access when a previous queue for the same
+        // file is still being torn down (e.g. re-login as the same user
+        // before the old actor is fully deallocated).
+        configuration.busyMode = .timeout(2.0)
         self.dbQueue = try DatabaseQueue(path: url.path, configuration: configuration)
         try dbQueue.write { db in
             try DatabaseSchema.migrate(db)
@@ -82,12 +86,14 @@ actor LocalStore {
 
     // MARK: - Account lifecycle
 
-    /// Closes the database. Called during account switch before opening the
-    /// next account's database.
+    /// Closes the database connection. Called during account switch before
+    /// opening the next account's database.
+    ///
+    /// After a successful close, every further database access on this store
+    /// throws `SQLITE_MISUSE` (GRDB contract), so callers must drop the
+    /// store reference immediately after closing.
     func close() {
-        // `DatabaseQueue` releases its connection when deallocated; nothing
-        // to do here explicitly. The actor keeps the queue alive until the
-        // caller drops its reference.
+        try? dbQueue.close()
     }
 
     // MARK: - Metadata
@@ -148,6 +154,12 @@ actor LocalStore {
     }
 
     /// Replaces all `activity_categories` rows for the given activity.
+    ///
+    /// Tag ids that reference a category missing from the local store are
+    /// skipped rather than inserted — the category may have been deleted on
+    /// the server between the snapshot's category fetch and this merge, and
+    /// a dangling join row would violate the FK and abort the entire
+    /// reconciliation transaction.
     func replaceActivityCategories(
         _ db: Database,
         activityId: String,
@@ -156,12 +168,17 @@ actor LocalStore {
         _ = try ActivityCategoryRecord
             .filter(Column("activity_id") == activityId)
             .deleteAll(db)
-        for (index, categoryId) in categoryIds.enumerated() {
+        var position = 0
+        for categoryId in categoryIds {
+            guard try CategoryRecord.filter(key: categoryId).fetchOne(db) != nil else {
+                continue
+            }
             var join = ActivityCategoryRecord(
                 activityId: activityId,
                 categoryId: categoryId,
-                position: index)
+                position: position)
             try join.save(db)
+            position += 1
         }
     }
 }

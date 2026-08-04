@@ -210,7 +210,10 @@ actor SyncCoordinator {
                 id: winner.id, name: winner.name, icon: winner.icon,
                 createdAt: winner.createdAt, updatedAt: winner.updatedAt,
                 sync: .adoptedClean())
-            try await localStore.upsertCategory(model)
+            // Upsert only if absent locally — a local record with pending
+            // edits must keep its pending state (it is the winner's own
+            // unsent mutation and will be pushed by the next cycle).
+            try await localStore.adoptCanonicalCategoryIfAbsent(model)
             try await localStore.remapCategoryId(loserId: loserId, winnerId: winnerId)
         } catch {
             // Could not fetch winner — retain pending for retry.
@@ -242,8 +245,15 @@ actor SyncCoordinator {
         }
 
         for activity in pending.createsUpdates {
-            // Skip activities that are pending deletion (server DELETE cascades).
+            // Skip activities pending deletion (server DELETE cascades), and
+            // defer activities whose category create is still pending — the
+            // server would reject the tag with 422 validation_error.
             guard !activity.sync.isDeleted else { continue }
+            let hasPendingCategory = (try? await localStore.hasPendingCategoryCreate(
+                for: activity.categoryIds)) ?? false
+            if hasPendingCategory {
+                continue
+            }
             await pushActivityMutation(activity)
         }
     }
@@ -344,7 +354,10 @@ actor SyncCoordinator {
                 lastUsedAt: winner.lastUsedAt,
                 createdAt: winner.createdAt, updatedAt: winner.updatedAt,
                 categoryIds: categoryIds, sync: .adoptedClean())
-            try await localStore.upsertActivity(model)
+            // Upsert only if absent locally — a local record with pending
+            // edits must keep its pending state (it is the winner's own
+            // unsent mutation and will be pushed by the next cycle).
+            try await localStore.adoptCanonicalActivityIfAbsent(model)
             try await localStore.remapActivityId(loserId: loserId, winnerId: winnerId)
         } catch {
             // Could not fetch winner — retain pending for retry.
@@ -382,6 +395,13 @@ actor SyncCoordinator {
             if let activity = try? await localStore.activity(id: entry.activityId),
                activity.sync.isDeleted {
                 // Activity is pending delete — skip this entry (server cascade will handle it).
+                continue
+            }
+            // Defer entries whose activity create is still pending — the server
+            // would reject them with 422 activity_not_found, which is terminal
+            // (blocked). They sync once the activity create succeeds.
+            if let activity = try? await localStore.activity(id: entry.activityId),
+               !activity.sync.remoteKnown {
                 continue
             }
             await pushEntryMutation(entry)

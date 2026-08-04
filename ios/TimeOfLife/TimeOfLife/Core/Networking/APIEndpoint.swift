@@ -23,7 +23,7 @@ struct APIEndpoint: Equatable, Sendable {
     private static func encode(_ body: Encodable?) -> Data? {
         guard let body else { return nil }
         do {
-            return try JSONEncoder().encode(AnyEncodable(body))
+            return try JSONEncoder.catalogEncoder.encode(AnyEncodable(body))
         } catch {
             assertionFailure("Failed to encode endpoint body: \(error)")
             return nil

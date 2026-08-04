@@ -146,12 +146,17 @@ final class AppContainer: ObservableObject {
     func closeAccount() async {
         let coordinator = syncCoordinator
         await coordinator?.cancelSync()
+        let store = localStoreForCatalog
         isCatalogReady = false
         activeAccountID = nil
         localStoreForCatalog = nil
         undoService = nil
         seeder = nil
         timerService.detachCatalog()
+        // Explicitly close the connection so a same-user re-login cannot run
+        // two queues on the same file. After close, the store is unusable and
+        // must be dropped — it is replaced by the next openAccount.
+        await store?.close()
     }
 
     /// Opens the account database for the current cached session, if any.

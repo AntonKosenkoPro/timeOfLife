@@ -19,8 +19,19 @@ enum CatalogDateCoding {
     }
 
     /// Parses an ISO 8601 string with optional fractional seconds.
+    ///
+    /// The backend emits `RFC3339Nano`, which omits the fractional part
+    /// entirely when sub-second is zero (e.g. `2026-07-27T09:00:00Z`).
+    /// `ISO8601DateFormatter` with `.withFractionalSeconds` rejects
+    /// fraction-less input, so fall back to the non-fractional formatter
+    /// (which also accepts non-Zulu offsets like `+00:00`).
     static func decode(_ string: String) -> Date? {
-        makeFormatter().date(from: string)
+        if let date = makeFormatter().date(from: string) {
+            return date
+        }
+        let fallback = ISO8601DateFormatter()
+        fallback.formatOptions = [.withInternetDateTime]
+        return fallback.date(from: string)
     }
 
     /// Formats a `Date` as an ISO 8601 string with fractional seconds.

@@ -131,7 +131,7 @@ Keep code **minimal and standardized**, following modern best practices.
 
 ## Per-iteration revising process (Requirements S5)
 On every iteration (feature/fix PR) the author MUST:
-1. Run both linters and fix every finding: `golangci-lint run` (backend), `swiftlint lint --strict` (iOS); run the iOS build with `SWIFT_TREAT_WARNINGS_AS_ERRORS=YES GCC_TREAT_WARNINGS_AS_ERRORS=YES` and inspect/fix every `xcodebuild` warning; `gofmt -l .` must be empty.
+1. Run both linters and fix every finding: `golangci-lint run` (backend), `swiftlint lint --strict` (iOS); run the iOS build with warnings-as-errors (set per-target in `project.yml` — `SWIFT_TREAT_WARNINGS_AS_ERRORS=YES` and `GCC_TREAT_WARNINGS_AS_ERRORS=YES` are target-scoped, not CLI-passed, to avoid conflict with GRDB's `-suppress-warnings`) and inspect/fix every `xcodebuild` warning; `gofmt -l .` must be empty.
 2. Run both test suites green (`go test ./...`; `xcodebuild test`).
 3. Re-read the relevant `Requirements/FURPS/*.md` rows and confirm the change aligns; correct the requirements doc if rows conflict (see the passwordless correction as precedent).
 4. Update this `AGENTS.md`, the README, the relevant `Design/*.md` files, and [`backend/api/openapi.yaml`](backend/api/openapi.yaml) if architecture/contract/run steps or visual design changed. The OpenAPI spec is the authoritative API contract — keep it in sync with the handlers.

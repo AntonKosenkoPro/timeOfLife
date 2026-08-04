@@ -117,9 +117,11 @@ extension LocalStore {
             try adoptServerCategory(db, dto: dto)
         }
 
-        // Remove clean local categories absent from server.
+        // Remove clean local categories absent from server (skip undo-hidden).
         let cleanCats = try CategoryRecord
-            .filter(Column(SyncMetadataColumns.syncStatus) == SyncStatus.clean.rawValue)
+            .filter(
+                Column(SyncMetadataColumns.syncStatus) == SyncStatus.clean.rawValue &&
+                Column(SyncMetadataColumns.isUndoHidden) == 0)
             .fetchAll(db)
         for cat in cleanCats where !serverIds.contains(cat.id) {
             _ = try CategoryRecord.filter(key: cat.id).deleteAll(db)
@@ -138,6 +140,23 @@ extension LocalStore {
             _ = try ActivityCategoryRecord
                 .filter(Column("category_id") == cat.id).deleteAll(db)
         }
+
+        // Complete blocked remote-known records absent from the snapshot —
+        // the server deleted them, so the local copy (stuck visible with a
+        // stale error) must go. Blocked records never created on the server
+        // (`remote_known == 0`) stay: they are local-only failed creates and
+        // can never appear in a snapshot.
+        let blockedRemoteCats = try CategoryRecord
+            .filter(
+                Column(SyncMetadataColumns.syncStatus) == SyncStatus.blocked.rawValue &&
+                Column(SyncMetadataColumns.remoteKnown) == 1 &&
+                Column(SyncMetadataColumns.isUndoHidden) == 0)
+            .fetchAll(db)
+        for cat in blockedRemoteCats where !serverIds.contains(cat.id) {
+            _ = try CategoryRecord.filter(key: cat.id).deleteAll(db)
+            _ = try ActivityCategoryRecord
+                .filter(Column("category_id") == cat.id).deleteAll(db)
+        }
     }
 
     /// Reconciles activities: adopt server values, remove absent clean
@@ -149,9 +168,12 @@ extension LocalStore {
             try adoptServerActivity(db, dto: dto)
         }
 
-        // Remove clean local activities absent from server, cascading clean entries.
+        // Remove clean local activities absent from server, cascading clean
+        // entries (skip undo-hidden).
         let cleanActs = try ActivityRecord
-            .filter(Column(SyncMetadataColumns.syncStatus) == SyncStatus.clean.rawValue)
+            .filter(
+                Column(SyncMetadataColumns.syncStatus) == SyncStatus.clean.rawValue &&
+                Column(SyncMetadataColumns.isUndoHidden) == 0)
             .fetchAll(db)
         for act in cleanActs where !serverIds.contains(act.id) {
             try deleteCleanEntriesForActivity(db, activityId: act.id)
@@ -173,6 +195,21 @@ extension LocalStore {
                 .filter(Column("activity_id") == act.id).deleteAll(db)
             _ = try ActivityRecord.filter(key: act.id).deleteAll(db)
         }
+
+        // Complete blocked remote-known activities absent from the snapshot
+        // (server deleted them). Local-only failed creates stay.
+        let blockedRemoteActs = try ActivityRecord
+            .filter(
+                Column(SyncMetadataColumns.syncStatus) == SyncStatus.blocked.rawValue &&
+                Column(SyncMetadataColumns.remoteKnown) == 1 &&
+                Column(SyncMetadataColumns.isUndoHidden) == 0)
+            .fetchAll(db)
+        for act in blockedRemoteActs where !serverIds.contains(act.id) {
+            try deleteCleanEntriesForActivity(db, activityId: act.id)
+            _ = try ActivityCategoryRecord
+                .filter(Column("activity_id") == act.id).deleteAll(db)
+            _ = try ActivityRecord.filter(key: act.id).deleteAll(db)
+        }
     }
 
     /// Reconciles entries: adopt server values, remove absent clean records,
@@ -184,9 +221,11 @@ extension LocalStore {
             try adoptServerEntry(db, dto: dto)
         }
 
-        // Remove clean local entries absent from server.
+        // Remove clean local entries absent from server (skip undo-hidden).
         let cleanEntries = try EntryRecord
-            .filter(Column(SyncMetadataColumns.syncStatus) == SyncStatus.clean.rawValue)
+            .filter(
+                Column(SyncMetadataColumns.syncStatus) == SyncStatus.clean.rawValue &&
+                Column(SyncMetadataColumns.isUndoHidden) == 0)
             .fetchAll(db)
         for ent in cleanEntries where !serverIds.contains(ent.id) {
             _ = try EntryRecord.filter(key: ent.id).deleteAll(db)
@@ -201,15 +240,28 @@ extension LocalStore {
         for ent in pendingDeleteEntries where !serverIds.contains(ent.id) {
             _ = try EntryRecord.filter(key: ent.id).deleteAll(db)
         }
+
+        // Complete blocked remote-known entries absent from the snapshot
+        // (server deleted them). Local-only failed creates stay.
+        let blockedRemoteEntries = try EntryRecord
+            .filter(
+                Column(SyncMetadataColumns.syncStatus) == SyncStatus.blocked.rawValue &&
+                Column(SyncMetadataColumns.remoteKnown) == 1 &&
+                Column(SyncMetadataColumns.isUndoHidden) == 0)
+            .fetchAll(db)
+        for ent in blockedRemoteEntries where !serverIds.contains(ent.id) {
+            _ = try EntryRecord.filter(key: ent.id).deleteAll(db)
+        }
     }
 
     /// Removes all clean entries for the given activity (used during
-    /// activity cascade deletion in reconciliation).
+    /// activity cascade deletion in reconciliation). Skips undo-hidden.
     private func deleteCleanEntriesForActivity(_ db: Database, activityId: String) throws {
         let cleanEntries = try EntryRecord
             .filter(
                 Column("activity_id") == activityId &&
-                Column(SyncMetadataColumns.syncStatus) == SyncStatus.clean.rawValue)
+                Column(SyncMetadataColumns.syncStatus) == SyncStatus.clean.rawValue &&
+                Column(SyncMetadataColumns.isUndoHidden) == 0)
             .fetchAll(db)
         for ent in cleanEntries {
             _ = try EntryRecord.filter(key: ent.id).deleteAll(db)
@@ -219,10 +271,11 @@ extension LocalStore {
     // MARK: - Adoption helpers (private)
 
     /// Adopts a server category: if local is clean (or absent), overwrite with
-    /// server values and mark clean. If dirty/blocked, preserve.
+    /// server values and mark clean. If dirty/blocked/undo-hidden, preserve.
     private func adoptServerCategory(_ db: Database, dto: CategoryDTO) throws {
         if let local = try CategoryRecord.filter(key: dto.id).fetchOne(db) {
-            guard local.syncStatus == SyncStatus.clean.rawValue else { return }
+            guard local.syncStatus == SyncStatus.clean.rawValue,
+                  local.isUndoHidden == 0 else { return }
         }
         let model = Category(
             id: dto.id, name: dto.name, icon: dto.icon,
@@ -233,10 +286,11 @@ extension LocalStore {
     }
 
     /// Adopts a server activity: if local is clean (or absent), overwrite with
-    /// server values + category tags and mark clean. If dirty/blocked, preserve.
+    /// server values + category tags and mark clean. If dirty/blocked/undo-hidden, preserve.
     private func adoptServerActivity(_ db: Database, dto: ActivityDTO) throws {
         if let local = try ActivityRecord.filter(key: dto.id).fetchOne(db) {
-            guard local.syncStatus == SyncStatus.clean.rawValue else { return }
+            guard local.syncStatus == SyncStatus.clean.rawValue,
+                  local.isUndoHidden == 0 else { return }
         }
         let categoryIds = dto.categories.map(\.id)
         let model = Activity(
@@ -250,10 +304,11 @@ extension LocalStore {
     }
 
     /// Adopts a server entry: if local is clean (or absent), overwrite with
-    /// server values and mark clean. If dirty/blocked, preserve.
+    /// server values and mark clean. If dirty/blocked/undo-hidden, preserve.
     private func adoptServerEntry(_ db: Database, dto: EntryDTO) throws {
         if let local = try EntryRecord.filter(key: dto.id).fetchOne(db) {
-            guard local.syncStatus == SyncStatus.clean.rawValue else { return }
+            guard local.syncStatus == SyncStatus.clean.rawValue,
+                  local.isUndoHidden == 0 else { return }
         }
         let model = Entry(
             id: dto.id, activityId: dto.activityId,
