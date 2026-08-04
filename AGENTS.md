@@ -17,6 +17,8 @@ The **design system** lives in `Design/` — see `Design/README.md`. All visual,
 
 **Epic 1 design materials** (FURPS S3): new screen specs `Design/SCREENS/ManageActivities.md`, `ManageCategories.md`, `ActivityEditor.md`, `CategoryEditor.md`; timer suggestions/quick-add spec in `Design/SCREENS/TimeTracking.md` (suggestions are client-side, no endpoint — F5/D16); category icon set in `Design/TOKENS.md`; new catalog components in `Design/COMPONENTS.md`; undo/delete-scope/sync-conflict interactions in `Design/INTERACTIONS.md`. The backend contract is `Design/BACKEND/Activity_Catalog_API.md`.
 
+Epic 1's iOS implementation was rewritten on a transactional foundation: the actor-backed `LocalStore` owns catalog and entry persistence in GRDB, one SQLite database is opened per authenticated user at `Application Support/TimeOfLife/accounts/<user-uuid>.sqlite`, and `SyncCoordinator` is the single owner of outbound and pull synchronization. The pre-release app does not read the retired JSON catalog or sync-queue files.
+
 ## Repo layout
 ```
 backend/                 Go backend (chi + pgx/Postgres; sqlite for tests)

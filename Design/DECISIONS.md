@@ -95,7 +95,7 @@ Resolved design precedents for Time of Life. Add a new entry here when a visual 
 
 ## D18 — Delete-scope confirmation for activities with history
 
-- Deleting an activity that has past entries shows a destructive two-option confirm naming the affected entry count: delete the entire activity (+ all entries) vs. delete only the current entry. Both choices are destructive and enter the undo flow as a unit.
+- Deleting an activity that has past entries shows a destructive two-option confirm naming the affected entry count: delete the entire activity (+ all entries) vs. delete only the latest entry. The latest entry is deterministic by `(started_at DESC, id DESC)`. Both choices are destructive and enter the undo flow as a unit.
 - Reason: F10/U5 — the user must understand the scope before losing history; the prompt names the count so the choice is informed.
 
 ## D19 — Recency ordering, no manual reorder at MVP

@@ -32,6 +32,8 @@ backend/   Go (chi + pgx/PostgreSQL, sqlite for tests) — REST API under /api/v
 4. **Stop** saves the entry: online → saved locally and synced remotely; offline → queued locally and synced when connectivity returns.
 5. Activities, categories, and entries are stored in a per-account GRDB database under `Application Support/TimeOfLife/accounts/`.
 
+The Epic 1 catalog rewrite uses an actor-backed `LocalStore` as the sole persistence owner and a single-flight `SyncCoordinator` for account activation, local mutations, reconnects, undo expiry, and pull reconciliation. Each authenticated account has an isolated SQLite file; pending mutations and the persisted undo hold remain durable across relaunches.
+
 ### Security (R1)
 - **No passwords anywhere.** Accounts authenticate by proving email ownership via an OTP code (stored only as a **SHA-256 hash**, 10-min expiry, max 5 attempts).
 - **JWT access token** (HS256, 15 min) + **opaque refresh token** stored as a **SHA-256 hash** in the DB, rotated on every use with reuse detection.

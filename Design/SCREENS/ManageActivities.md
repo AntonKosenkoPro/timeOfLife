@@ -121,7 +121,7 @@ Add to `en.lproj/Localizable.strings` and `ru.lproj/Localizable.strings`, then t
 "delete.activity.title" = "Delete activity?";
 "delete.activity.message" = "This activity has %d entries.";
 "delete.activity.entire" = "Delete activity and all %d entries";
-"delete.activity.entryOnly" = "Delete only this entry";
+"delete.activity.entryOnly" = "Delete only the latest entry";
 "delete.activity.cancel" = "Cancel";
 
 // Undo
@@ -147,7 +147,7 @@ Russian:
 "delete.activity.title" = "Удалить активность?";
 "delete.activity.message" = "У этой активности %d записей.";
 "delete.activity.entire" = "Удалить активность и все %d записи(ей)";
-"delete.activity.entryOnly" = "Удалить только эту запись";
+"delete.activity.entryOnly" = "Удалить только последнюю запись";
 "delete.activity.cancel" = "Отмена";
 
 // Undo
