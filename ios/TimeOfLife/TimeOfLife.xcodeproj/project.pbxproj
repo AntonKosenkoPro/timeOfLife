@@ -19,6 +19,7 @@
 		0A14B9946CFED15B6D977C91 /* AppContainer+UITesting.swift in Sources */ = {isa = PBXBuildFile; fileRef = A7B8FFA75AF7F8D2F89322E1 /* AppContainer+UITesting.swift */; };
 		0CAC1D03E6D0EEE20337B269 /* SessionStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0874FC5BA7B3C73D5C5B143E /* SessionStore.swift */; };
 		0F6DAA7FFEDF66B1AC52EEAC /* AppConfigTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 85122E318E4D8F45391C746D /* AppConfigTests.swift */; };
+		164648AD7D814818C3296996 /* UUIDv7.swift in Sources */ = {isa = PBXBuildFile; fileRef = AABBB03D6E556B5584805125 /* UUIDv7.swift */; };
 		172234F3334C1E02C095BC91 /* WelcomeViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2EFFF9667C6CCF590471CED4 /* WelcomeViewModelTests.swift */; };
 		19F0D73B9A8FF3C0B96E4E3D /* OtpEntryViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 146F9D6A4DD4275282D92DB5 /* OtpEntryViewModel.swift */; };
 		1BAD7B573F59E2D54E53A720 /* Haptics.swift in Sources */ = {isa = PBXBuildFile; fileRef = 61B7982F3DBB72A719070CAD /* Haptics.swift */; };
@@ -177,6 +178,7 @@
 		A7B8FFA75AF7F8D2F89322E1 /* AppContainer+UITesting.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppContainer+UITesting.swift"; sourceTree = "<group>"; };
 		A804E41CE6F0E40701020E2E /* MockAPIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MockAPIClient.swift; sourceTree = "<group>"; };
 		A8385ECB2A212347BA7A5183 /* TestFactories.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TestFactories.swift; sourceTree = "<group>"; };
+		AABBB03D6E556B5584805125 /* UUIDv7.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UUIDv7.swift; sourceTree = "<group>"; };
 		AEABA98A949DF941CA483AD8 /* OtpEntryViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OtpEntryViewModelTests.swift; sourceTree = "<group>"; };
 		AF43C8060AE670862FB6C0F6 /* URLProtocolStub.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = URLProtocolStub.swift; sourceTree = "<group>"; };
 		B0B28C9E2AD251C5A920A52E /* DatabaseSchema.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DatabaseSchema.swift; sourceTree = "<group>"; };
@@ -476,6 +478,7 @@
 				2B5A3683F81BF66D5BE42349 /* BottomBarMeasurement.swift */,
 				61B7982F3DBB72A719070CAD /* Haptics.swift */,
 				7906983F14097ADD30C4F248 /* TimeFormatter.swift */,
+				AABBB03D6E556B5584805125 /* UUIDv7.swift */,
 			);
 			path = Utilities;
 			sourceTree = "<group>";
@@ -784,6 +787,7 @@
 				8E3BC4D0F95F210ED76AAF02 /* TimerStoring.swift in Sources */,
 				08CCCBCD9EF05DA404F276B1 /* TimerView.swift in Sources */,
 				84F9944BA01C29BB062B5FF9 /* TimerViewModel.swift in Sources */,
+				164648AD7D814818C3296996 /* UUIDv7.swift in Sources */,
 				07B957B10278B4D0DB757452 /* ValidationPresentation.swift in Sources */,
 				04A2B8572B25A8E9B797E45B /* WelcomeView.swift in Sources */,
 				9FE89E7DE05C4F5BA8F2AD7B /* WelcomeViewModel.swift in Sources */,

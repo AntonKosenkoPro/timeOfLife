@@ -129,6 +129,6 @@ struct LocalizationTests {
         // timerTitle, timerActivityPlaceholder, timerStart, timerStop,
         // timerOfflineHint, timerEmptyActivityError, timerSignOut,
         // signOutConfirmationTitle, signOutConfirmationMessage, signOutConfirm, signOutCancel
-        #expect(l10nCases.count == 25)
+        #expect(l10nCases.count == 28)
     }
 }

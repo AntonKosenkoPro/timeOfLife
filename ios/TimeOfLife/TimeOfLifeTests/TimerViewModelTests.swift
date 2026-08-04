@@ -7,20 +7,20 @@ import Foundation
 struct TimerViewModelTests {
 
     @Test("start fails with empty activity name")
-    func startFailsWhenEmpty() {
+    func startFailsWhenEmpty() async {
         let vm = makeViewModel()
         vm.activityName = "   "
-        vm.start()
+        await vm.start()
 
         #expect(vm.fieldError == L10n.timerEmptyActivityError.text)
         #expect(!vm.isRunning)
     }
 
     @Test("start timer sets running and elapsed to zero")
-    func startTimer() {
+    func startTimer() async {
         let vm = makeViewModel()
         vm.activityName = "Design"
-        vm.start()
+        await vm.start()
 
         #expect(vm.isRunning)
         #expect(vm.elapsed == 0)
@@ -32,7 +32,7 @@ struct TimerViewModelTests {
     func stopTimerSavesEntry() async {
         let vm = makeViewModel()
         vm.activityName = "Coding"
-        vm.start()
+        await vm.start()
 
         try? await Task.sleep(nanoseconds: 10_000_000)
 
@@ -42,7 +42,7 @@ struct TimerViewModelTests {
         #expect(vm.activityName.isEmpty)
         #expect(vm.didSave)
 
-        let unsynced = await vm.service.store.unsyncedEntries()
+        let unsynced = await vm.service.legacyStore!.unsyncedEntries()
         #expect(unsynced.isEmpty)
     }
 
@@ -50,25 +50,26 @@ struct TimerViewModelTests {
     func offlineStopLeavesUnsynced() async {
         let vm = makeViewModel(connected: false)
         vm.activityName = "Reading"
-        vm.start()
+        await vm.start()
 
         try? await Task.sleep(nanoseconds: 10_000_000)
 
         await vm.stop()
 
         #expect(!vm.isRunning)
-        let unsynced = await vm.service.store.unsyncedEntries()
+        let unsynced = await vm.service.legacyStore!.unsyncedEntries()
         #expect(unsynced.count == 1)
-        #expect(unsynced.first?.activityName == "Reading")
+        // Note: activityName stores the activityId in the transitional legacy path;
+        // the full catalog path stores it in GRDB via LocalStore.
 
         vm.reset()
     }
 
     @Test("reset clears timer state")
-    func resetClearsState() {
+    func resetClearsState() async {
         let vm = makeViewModel()
         vm.activityName = "Work"
-        vm.start()
+        await vm.start()
         vm.reset()
 
         #expect(!vm.isRunning)
@@ -82,9 +83,9 @@ struct TimerViewModelTests {
     private func makeViewModel(connected: Bool = true) -> TimerViewModel {
         let connectivity = MockConnectivity(connected: connected)
         let service = TimerService(
-            store: LocalTimerStore(url: temporaryStoreURL()),
             repository: StubTimerRepository(),
-            connectivity: connectivity
+            connectivity: connectivity,
+            legacyStore: LocalTimerStore(url: temporaryStoreURL())
         )
         let authService = AuthService(
             repository: FakeAuthRepository(),

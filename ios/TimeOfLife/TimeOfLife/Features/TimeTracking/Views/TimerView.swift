@@ -49,11 +49,21 @@ struct TimerView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    Button(L10n.timerSignOut.text, role: .destructive) {
-                        showSignOutConfirm = true
+                    HStack {
+                        Button {
+                            container.navigation.push(.manageActivities)
+                        } label: {
+                            Image(systemName: "list.bullet")
+                                .font(.subheadline)
+                        }
+                        .accessibilityIdentifier("TimerManageActivitiesButton")
+
+                        Button(L10n.timerSignOut.text, role: .destructive) {
+                            showSignOutConfirm = true
+                        }
+                        .font(.subheadline)
+                        .accessibilityIdentifier("TimerSignOutButton")
                     }
-                    .font(.subheadline)
-                    .accessibilityIdentifier("TimerSignOutButton")
                 }
             }
             .alert(L10n.signOutConfirmationTitle.text, isPresented: $showSignOutConfirm) {
@@ -75,22 +85,68 @@ struct TimerView: View {
 
                 Spacer().frame(height: Theme.spacingExtraLarge)
 
-                TextFieldWithError(
-                    title: L10n.timerActivityPlaceholder.text,
-                    placeholder: L10n.timerActivityPlaceholder.text,
-                    text: $vm.activityName,
-                    error: vm.fieldError,
-                    keyboardType: .default,
-                    textContentType: nil,
-                    submitLabel: .done,
-                    autocapitalization: .sentences,
-                    accessibilityId: "TimerActivityField"
-                ) {
-                    isActivityFocused = false
-                    vm.start()
+                HStack(spacing: Theme.spacingSmall) {
+                    TextFieldWithError(
+                        title: L10n.timerActivityPlaceholder.text,
+                        placeholder: L10n.timerActivityPlaceholder.text,
+                        text: $vm.activityName,
+                        error: vm.fieldError,
+                        keyboardType: .default,
+                        textContentType: nil,
+                        submitLabel: .done,
+                        autocapitalization: .sentences,
+                        accessibilityId: "TimerActivityField"
+                    ) {
+                        isActivityFocused = false
+                        Task { await vm.start() }
+                    }
+                    .focused($isActivityFocused)
+                    .disabled(vm.isRunning)
+
+                    // Quick-add button (F7) — disabled while running.
+                    Button {
+                        isActivityFocused = false
+                        vm.isQuickAddPresented = true
+                    } label: {
+                        Image(systemName: "square.and.pencil")
+                            .font(.title3)
+                            .foregroundStyle(Theme.accentPrimary)
+                    }
+                    .disabled(vm.isRunning)
+                    .accessibilityIdentifier("TimerQuickAddButton")
                 }
-                .focused($isActivityFocused)
-                .disabled(vm.isRunning)
+
+                // Suggestions block (F5) — idle only, prefix matching.
+                if !vm.isRunning && !vm.suggestions.isEmpty {
+                    VStack(alignment: .leading, spacing: Theme.spacingSmall) {
+                        Text(L10n.timerSuggestionsHeader.text)
+                            .font(.caption)
+                            .foregroundStyle(Theme.textSecondary)
+                            .accessibilityIdentifier("TimerSuggestionList")
+
+                        ForEach(vm.suggestions) { activity in
+                            Button {
+                                vm.selectSuggestion(activity)
+                            } label: {
+                                HStack(spacing: Theme.spacingSmall) {
+                                    Text(activity.name)
+                                        .font(.body)
+                                        .foregroundStyle(Theme.textPrimary)
+                                    Spacer()
+                                    if let lastUsed = activity.lastUsedAt {
+                                        Text(lastUsed, style: .relative)
+                                            .font(.caption)
+                                            .foregroundStyle(Theme.textSecondary)
+                                    }
+                                }
+                                .padding(.vertical, Theme.spacingSmall)
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityIdentifier("TimerSuggestion(\(activity.id))")
+                        }
+                    }
+                }
 
                 // Fixed-size stable timer display.
                 Text(TimeFormatter.formattedDuration(vm.elapsed))
@@ -102,9 +158,7 @@ struct TimerView: View {
 
                 Spacer().frame(height: Theme.spacingLarge)
 
-                // Fixed reserve for the pinned bottom action bar so the
-                // scrollable content ends well above the bar on every screen
-                // size, even with the keyboard up.
+                // Fixed reserve for the pinned bottom action bar.
                 Color.clear.frame(height: bottomBarHeight + Theme.spacingLarge)
             }
             .padding(.horizontal, Theme.screenHorizontalPadding)
@@ -113,16 +167,8 @@ struct TimerView: View {
             .frame(maxWidth: .infinity)
         }
         .safeAreaInset(edge: .bottom) {
-            // Pinned action bar. Content in `safeAreaInset` animates with the
-            // system keyboard transition instead of reflowing with the main
-            // stack, and stays visible above the keyboard so the user can tap
-            // Start/Stop without dismissing the keyboard first.
             MeasuredBottomBar {
                 VStack(spacing: Theme.spacingSmall) {
-                    // This spacer makes the action bar taller, which in turn
-                    // increases the ScrollView's bottom safe-area inset and
-                    // keeps the activity field from crowding the primary
-                    // button on small screens with the keyboard open.
                     Spacer().frame(height: Theme.spacingLarge)
 
                     PrimaryButton(
@@ -137,7 +183,7 @@ struct TimerView: View {
                             Task { await vm.stop() }
                         } else {
                             isActivityFocused = false
-                            vm.start()
+                            Task { await vm.start() }
                         }
                     }
                     .animation(nil, value: vm.isRunning)
@@ -158,11 +204,20 @@ struct TimerView: View {
             }
         }
         .onPreferenceChange(BottomBarHeightPreferenceKey.self) { bottomBarHeight = $0 }
-        .onAppear { isActivityFocused = true }
+        .onAppear {
+            isActivityFocused = true
+            Task { await vm.loadSuggestions() }
+        }
         .onChange(of: vm.activityName) { _ in
             if vm.fieldError != nil {
                 vm.fieldError = nil
             }
+            Task { await vm.refreshSuggestions() }
+        }
+        .sheet(isPresented: $vm.isQuickAddPresented) {
+            // Quick-add sheet — Phase 8 will present the real ActivityEditorView.
+            // For now, a placeholder that lets the user create a simple activity.
+            QuickAddSheet(vm: vm)
         }
     }
 }
@@ -190,3 +245,73 @@ struct TimerView: View {
     .environment(\.locale, .init(identifier: "ru"))
 }
 #endif
+
+/// Quick-add sheet — creates a new activity from the timer.
+/// Phase 8 will replace this with the real `ActivityEditorView` in
+/// create-from-timer mode.
+private struct QuickAddSheet: View {
+    @ObservedObject var vm: TimerViewModel
+    @Environment(\.dismiss)
+    private var dismiss
+    @State private var name = ""
+
+    var body: some View {
+        NavigationView {
+            VStack(spacing: Theme.spacingMedium) {
+                TextFieldWithError(
+                    title: L10n.timerActivityPlaceholder.text,
+                    placeholder: L10n.timerActivityPlaceholder.text,
+                    text: $name,
+                    error: nil,
+                    keyboardType: .default,
+                    textContentType: nil,
+                    submitLabel: .done,
+                    autocapitalization: .sentences,
+                    accessibilityId: "QuickAddActivityField"
+                ) {
+                    save()
+                }
+
+                PrimaryButton(
+                    title: L10n.timerStart.text,
+                    icon: "plus",
+                    isLoading: false,
+                    isDisabled: name.trimmingCharacters(in: .whitespaces).isEmpty,
+                    accessibilityId: "QuickAddSaveButton"
+                ) {
+                    save()
+                }
+                Spacer()
+            }
+            .padding(.horizontal, Theme.screenHorizontalPadding)
+            .padding(.top, Theme.spacingLarge)
+            .navigationTitle(L10n.timerQuickAdd.text)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button("Cancel") { dismiss() }
+                }
+            }
+        }
+        .navigationViewStyle(.stack)
+    }
+
+    private func save() {
+        let trimmed = name.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return }
+        // Create a simple activity placeholder — Phase 8 will use the real
+        // ActivityEditorView with full validation + sync.
+        let activity = Activity(
+            id: UUIDv7.generate(),
+            name: trimmed,
+            notes: nil,
+            lastUsedAt: nil,
+            createdAt: Date(),
+            updatedAt: Date(),
+            categoryIds: [],
+            sync: .newPending()
+        )
+        vm.didSelectNewActivity(activity)
+        dismiss()
+    }
+}

@@ -20,9 +20,9 @@ extension AppContainer {
         let navigation = AppNavigationStack()
         let connectivity = MockConnectivity(connected: true)
         let timerService = TimerService(
-            store: LocalTimerStore(),
             repository: StubTimerRepository(),
-            connectivity: connectivity
+            connectivity: connectivity,
+            legacyStore: LocalTimerStore()
         )
         let repository = UITestingAuthRepository()
         let authService = AuthService(

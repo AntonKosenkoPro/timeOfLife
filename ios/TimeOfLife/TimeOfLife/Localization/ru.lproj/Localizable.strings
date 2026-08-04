@@ -63,3 +63,6 @@
 "timer.offlineHint" = "Записи сохраняются локально и синхронизируются после появления сети.";
 "timer.emptyActivityError" = "Введите название активности.";
 "timer.signOut" = "Выйти";
+"timer.suggestionsHeader" = "Недавние";
+"timer.quickAdd" = "Быстрое добавление";
+"timer.manageActivities" = "Управление занятиями";

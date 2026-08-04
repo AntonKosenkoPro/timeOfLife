@@ -58,9 +58,9 @@ final class AppContainer: ObservableObject {
         let navigation = AppNavigationStack()
         let connectivity = NetworkMonitor()
         let timerService = TimerService(
-            store: LocalTimerStore(),
             repository: StubTimerRepository(),
-            connectivity: connectivity
+            connectivity: connectivity,
+            legacyStore: LocalTimerStore()
         )
 
         let (client, clientHolder) = makeAuthClient(baseURL: baseURL, keychain: keychain)
