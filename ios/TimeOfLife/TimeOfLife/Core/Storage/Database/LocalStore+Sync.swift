@@ -185,4 +185,54 @@ extension LocalStore {
             _ = try EntryRecord.filter(key: id).deleteAll(db)
         }
     }
+
+    // MARK: - Undo snapshot queries
+
+    /// Returns the ids of all visible entries for the given activity, in
+    /// `(started_at DESC, id DESC)` order. Used to build an undo snapshot
+    /// for a whole-activity deletion.
+    func entryIds(forActivityId activityId: String) throws -> [String] {
+        try dbQueue.read { db in
+            try EntryRecord
+                .filter(
+                    Column("activity_id") == activityId &&
+                    Column(SyncMetadataColumns.isDeleted) == 0 &&
+                    Column(SyncMetadataColumns.isUndoHidden) == 0)
+                .order(Column("started_at").desc, Column("id").desc)
+                .fetchAll(db)
+                .map(\.id)
+        }
+    }
+
+    /// Returns the `activity_categories` join rows for the given category,
+    /// used to build an undo snapshot for a category deletion.
+    func categoryJoins(forCategoryId categoryId: String) throws -> [UndoHold.CategoryJoinSnapshot] {
+        try dbQueue.read { db in
+            try ActivityCategoryRecord
+                .filter(Column("category_id") == categoryId)
+                .order(Column("position").asc)
+                .fetchAll(db)
+                .map {
+                    UndoHold.CategoryJoinSnapshot(
+                        activityId: $0.activityId,
+                        categoryId: $0.categoryId,
+                        position: $0.position)
+                }
+        }
+    }
+
+    /// Returns the newest visible entry id for the given activity,
+    /// deterministically ordered by `(started_at DESC, id DESC)`.
+    func latestEntryId(forActivityId activityId: String) throws -> String? {
+        try dbQueue.read { db in
+            try EntryRecord
+                .filter(
+                    Column("activity_id") == activityId &&
+                    Column(SyncMetadataColumns.isDeleted) == 0 &&
+                    Column(SyncMetadataColumns.isUndoHidden) == 0)
+                .order(Column("started_at").desc, Column("id").desc)
+                .fetchOne(db)?
+                .id
+        }
+    }
 }
