@@ -66,3 +66,75 @@
 "timer.suggestionsHeader" = "Недавние";
 "timer.quickAdd" = "Быстрое добавление";
 "timer.manageActivities" = "Управление занятиями";
+
+// Seeded categories (F6)
+"category.seed.work" = "Работа";
+"category.seed.hobby" = "Хобби";
+"category.seed.sport" = "Спорт";
+"category.seed.education" = "Образование";
+"category.seed.relax" = "Отдых";
+"category.seed.sleep" = "Сон";
+"category.seed.entertainment" = "Развлечения";
+
+// Manage activities
+"manage.activities.title" = "Активности";
+"manage.activities.emptyTitle" = "Пока нет активностей";
+"manage.activities.emptySubtitle" = "Добавьте свою или просто введите название на таймере.";
+"manage.activities.categories" = "Категории";
+
+// Delete activity
+"delete.activity.title" = "Удалить активность?";
+"delete.activity.message" = "У этой активности %d записей.";
+"delete.activity.entire" = "Удалить активность и все %d записей";
+"delete.activity.entryOnly" = "Удалить только последнюю запись";
+"delete.activity.cancel" = "Отмена";
+
+// Undo
+"undo.activityDeleted" = "Активность удалена";
+"undo.entriesDeleted" = "Удалено записей: %d";
+"undo.categoryDeleted" = "Категория удалена";
+"undo.button" = "Отменить";
+
+// Manage categories
+"manage.categories.title" = "Категории";
+"manage.categories.emptyTitle" = "Пока нет категорий";
+"manage.categories.emptySubtitle" = "Добавьте категорию, чтобы размечать активности.";
+
+// Category delete confirmation
+"delete.category.title" = "Удалить категорию?";
+"delete.category.message" = "%@ будет удалена со всех активностей. Записи сохранятся.";
+"delete.category.confirm" = "Удалить";
+"delete.category.cancel" = "Отмена";
+
+// Activity editor
+"activityEditor.createTitle" = "Новая активность";
+"activityEditor.editTitle" = "Изменить активность";
+"activityEditor.nameLabel" = "Название";
+"activityEditor.namePlaceholder" = "напр. Спортзал";
+"activityEditor.notesLabel" = "Заметки";
+"activityEditor.notesPlaceholder" = "Необязательные заметки";
+"activityEditor.notesCounter" = "%d / 280";
+"activityEditor.tagsLabel" = "Категории";
+"activityEditor.noTags" = "Пока нет категорий.";
+"activityEditor.addCategory" = "Добавить категорию";
+"activityEditor.save" = "Сохранить";
+"activityEditor.cancel" = "Отмена";
+
+// Category editor
+"categoryEditor.createTitle" = "Новая категория";
+"categoryEditor.editTitle" = "Изменить категорию";
+"categoryEditor.nameLabel" = "Название";
+"categoryEditor.namePlaceholder" = "напр. Спорт";
+"categoryEditor.iconLabel" = "Значок";
+"categoryEditor.save" = "Сохранить";
+"categoryEditor.cancel" = "Отмена";
+
+// Validation
+"validation.nameEmpty" = "Введите название.";
+"validation.nameTooLong" = "Название должно быть не длиннее 60 символов.";
+"validation.notesTooLong" = "Заметки должны быть не длиннее 280 символов.";
+
+// Catalog errors
+"error.conflict" = "Изменено на другом устройстве. Показана актуальная версия.";
+"error.activityExists" = "Активность с таким названием уже существует.";
+"error.categoryExists" = "Категория с таким названием уже существует.";

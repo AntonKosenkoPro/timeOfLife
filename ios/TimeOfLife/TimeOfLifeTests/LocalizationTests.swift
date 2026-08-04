@@ -120,15 +120,7 @@ struct LocalizationTests {
 
     @Test("L10n enum allCases count matches expected keys")
     func allCasesCount() {
-        // 25 keys: appName,
-        // welcomeTagline, welcomeContinueWithEmail,
-        // emailEntryTitle, emailEntryEmail, emailEntrySubtitle, emailEntrySubmit,
-        // otpTitle, otpSentTo, otpResend, otpResendCountdown,
-        // offlineBanner,
-        // appleSignInTitle, appleSignInError,
-        // timerTitle, timerActivityPlaceholder, timerStart, timerStop,
-        // timerOfflineHint, timerEmptyActivityError, timerSignOut,
-        // signOutConfirmationTitle, signOutConfirmationMessage, signOutConfirm, signOutCancel
-        #expect(l10nCases.count == 28)
+        // 80 keys (pre-catalog 28 + 52 catalog keys for Epic 1 rewrite).
+        #expect(l10nCases.count == 80)
     }
 }

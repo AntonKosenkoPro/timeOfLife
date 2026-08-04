@@ -48,6 +48,78 @@ enum L10n: String, CaseIterable {
     case signOutConfirm = "signOut.confirm"
     case signOutCancel = "signOut.cancel"
 
+    // Seeded categories (F6)
+    case categorySeedWork = "category.seed.work"
+    case categorySeedHobby = "category.seed.hobby"
+    case categorySeedSport = "category.seed.sport"
+    case categorySeedEducation = "category.seed.education"
+    case categorySeedRelax = "category.seed.relax"
+    case categorySeedSleep = "category.seed.sleep"
+    case categorySeedEntertainment = "category.seed.entertainment"
+
+    // Manage activities
+    case manageActivitiesTitle = "manage.activities.title"
+    case manageActivitiesEmptyTitle = "manage.activities.emptyTitle"
+    case manageActivitiesEmptySubtitle = "manage.activities.emptySubtitle"
+    case manageActivitiesCategories = "manage.activities.categories"
+
+    // Delete activity
+    case deleteActivityTitle = "delete.activity.title"
+    case deleteActivityMessage = "delete.activity.message"
+    case deleteActivityEntire = "delete.activity.entire"
+    case deleteActivityEntryOnly = "delete.activity.entryOnly"
+    case deleteActivityCancel = "delete.activity.cancel"
+
+    // Undo
+    case undoActivityDeleted = "undo.activityDeleted"
+    case undoEntriesDeleted = "undo.entriesDeleted"
+    case undoCategoryDeleted = "undo.categoryDeleted"
+    case undoButton = "undo.button"
+
+    // Manage categories
+    case manageCategoriesTitle = "manage.categories.title"
+    case manageCategoriesEmptyTitle = "manage.categories.emptyTitle"
+    case manageCategoriesEmptySubtitle = "manage.categories.emptySubtitle"
+
+    // Category delete confirmation
+    case deleteCategoryTitle = "delete.category.title"
+    case deleteCategoryMessage = "delete.category.message"
+    case deleteCategoryConfirm = "delete.category.confirm"
+    case deleteCategoryCancel = "delete.category.cancel"
+
+    // Activity editor
+    case activityEditorCreateTitle = "activityEditor.createTitle"
+    case activityEditorEditTitle = "activityEditor.editTitle"
+    case activityEditorNameLabel = "activityEditor.nameLabel"
+    case activityEditorNamePlaceholder = "activityEditor.namePlaceholder"
+    case activityEditorNotesLabel = "activityEditor.notesLabel"
+    case activityEditorNotesPlaceholder = "activityEditor.notesPlaceholder"
+    case activityEditorNotesCounter = "activityEditor.notesCounter"
+    case activityEditorTagsLabel = "activityEditor.tagsLabel"
+    case activityEditorNoTags = "activityEditor.noTags"
+    case activityEditorAddCategory = "activityEditor.addCategory"
+    case activityEditorSave = "activityEditor.save"
+    case activityEditorCancel = "activityEditor.cancel"
+
+    // Category editor
+    case categoryEditorCreateTitle = "categoryEditor.createTitle"
+    case categoryEditorEditTitle = "categoryEditor.editTitle"
+    case categoryEditorNameLabel = "categoryEditor.nameLabel"
+    case categoryEditorNamePlaceholder = "categoryEditor.namePlaceholder"
+    case categoryEditorIconLabel = "categoryEditor.iconLabel"
+    case categoryEditorSave = "categoryEditor.save"
+    case categoryEditorCancel = "categoryEditor.cancel"
+
+    // Validation
+    case validationNameEmpty = "validation.nameEmpty"
+    case validationNameTooLong = "validation.nameTooLong"
+    case validationNotesTooLong = "validation.notesTooLong"
+
+    // Catalog errors
+    case errorConflict = "error.conflict"
+    case errorActivityExists = "error.activityExists"
+    case errorCategoryExists = "error.categoryExists"
+
     /// Resolves the key via `NSLocalizedString` against `Localizable.strings`.
     var text: String {
         NSLocalizedString(rawValue, comment: "")

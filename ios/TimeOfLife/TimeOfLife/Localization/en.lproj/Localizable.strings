@@ -66,3 +66,75 @@
 "timer.suggestionsHeader" = "Recent";
 "timer.quickAdd" = "Quick Add";
 "timer.manageActivities" = "Manage Activities";
+
+// Seeded categories (F6)
+"category.seed.work" = "Work";
+"category.seed.hobby" = "Hobby";
+"category.seed.sport" = "Sport";
+"category.seed.education" = "Education";
+"category.seed.relax" = "Relax";
+"category.seed.sleep" = "Sleep";
+"category.seed.entertainment" = "Entertainment";
+
+// Manage activities
+"manage.activities.title" = "Activities";
+"manage.activities.emptyTitle" = "No activities yet";
+"manage.activities.emptySubtitle" = "Add one, or just type a name on the timer.";
+"manage.activities.categories" = "Categories";
+
+// Delete activity
+"delete.activity.title" = "Delete activity?";
+"delete.activity.message" = "This activity has %d entries.";
+"delete.activity.entire" = "Delete activity and all %d entries";
+"delete.activity.entryOnly" = "Delete only the latest entry";
+"delete.activity.cancel" = "Cancel";
+
+// Undo
+"undo.activityDeleted" = "Activity deleted";
+"undo.entriesDeleted" = "%d entries deleted";
+"undo.categoryDeleted" = "Category deleted";
+"undo.button" = "Undo";
+
+// Manage categories
+"manage.categories.title" = "Categories";
+"manage.categories.emptyTitle" = "No categories yet";
+"manage.categories.emptySubtitle" = "Add one to tag your activities.";
+
+// Category delete confirmation
+"delete.category.title" = "Delete category?";
+"delete.category.message" = "%@ will be removed from all activities. Your entries are kept.";
+"delete.category.confirm" = "Delete";
+"delete.category.cancel" = "Cancel";
+
+// Activity editor
+"activityEditor.createTitle" = "New activity";
+"activityEditor.editTitle" = "Edit activity";
+"activityEditor.nameLabel" = "Name";
+"activityEditor.namePlaceholder" = "e.g. Gym";
+"activityEditor.notesLabel" = "Notes";
+"activityEditor.notesPlaceholder" = "Optional notes";
+"activityEditor.notesCounter" = "%d / 280";
+"activityEditor.tagsLabel" = "Categories";
+"activityEditor.noTags" = "No categories yet.";
+"activityEditor.addCategory" = "Add a category";
+"activityEditor.save" = "Save";
+"activityEditor.cancel" = "Cancel";
+
+// Category editor
+"categoryEditor.createTitle" = "New category";
+"categoryEditor.editTitle" = "Edit category";
+"categoryEditor.nameLabel" = "Name";
+"categoryEditor.namePlaceholder" = "e.g. Sport";
+"categoryEditor.iconLabel" = "Icon";
+"categoryEditor.save" = "Save";
+"categoryEditor.cancel" = "Cancel";
+
+// Validation
+"validation.nameEmpty" = "Enter a name.";
+"validation.nameTooLong" = "Name must be at most 60 characters.";
+"validation.notesTooLong" = "Notes must be at most 280 characters.";
+
+// Catalog errors
+"error.conflict" = "Edited on another device. Showing the latest version.";
+"error.activityExists" = "An activity with this name already exists.";
+"error.categoryExists" = "A category with this name already exists.";

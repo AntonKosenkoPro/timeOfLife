@@ -26,6 +26,7 @@
 		1BAD7B573F59E2D54E53A720 /* Haptics.swift in Sources */ = {isa = PBXBuildFile; fileRef = 61B7982F3DBB72A719070CAD /* Haptics.swift */; };
 		1E60626A50D64BDFF847D4AD /* RemoteEntriesRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7954F618BE904EBB495E99CE /* RemoteEntriesRepository.swift */; };
 		24C62C5291ADC6171489F5C6 /* AppContainer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E168995FCCABB958FC8B931 /* AppContainer.swift */; };
+		26B24DA8F25C101BD304CE1A /* CatalogIcon.swift in Sources */ = {isa = PBXBuildFile; fileRef = F344C9675F12A0EBADEB36DB /* CatalogIcon.swift */; };
 		26F4CC82357D81F490C04B02 /* OtpEntryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D46B208EB2ABFC11D92353BF /* OtpEntryView.swift */; };
 		2D54716C3A60788EF56400F4 /* URLProtocolStub.swift in Sources */ = {isa = PBXBuildFile; fileRef = AF43C8060AE670862FB6C0F6 /* URLProtocolStub.swift */; };
 		2ECF15BB26AE7182D0D76CC0 /* LocalizationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90C8D61D106A60570A0F793E /* LocalizationTests.swift */; };
@@ -58,6 +59,7 @@
 		6F03C399F5F9C273E524AD5D /* AccountDatabasePath.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3E6282D13935CF10312FE8B3 /* AccountDatabasePath.swift */; };
 		6F8C2CFEE0B00B9817AF30CA /* FakeAppleAuthorizationProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = F51CD644B504DA570FCB89E0 /* FakeAppleAuthorizationProvider.swift */; };
 		769D55B9329E320BDF2AA5F9 /* RemoteAuthRepositoryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C4CB3B09CEC8611ED769E87E /* RemoteAuthRepositoryTests.swift */; };
+		79C1D269DEF13DE1D93EB961 /* SeederTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E66774049BE6819298B73B7F /* SeederTests.swift */; };
 		806578352B5148EAB4C585BD /* EmailEntryViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1B0435AD68B3F08FC7E6EE3 /* EmailEntryViewModel.swift */; };
 		8172CADDF67BC614B4B1EC69 /* AuthServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 25182CD3496B6223AF822CEB /* AuthServiceTests.swift */; };
 		8313D434E078176833F6E7B6 /* AppRoute.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB2A40580A5C7F81443FA774 /* AppRoute.swift */; };
@@ -68,6 +70,7 @@
 		87A1CC2BADE99BBDB1F3E7CC /* LocalStore+Undo.swift in Sources */ = {isa = PBXBuildFile; fileRef = A04C99F9952BEE1ED6572B2B /* LocalStore+Undo.swift */; };
 		8AB9908B8C7F43985CCFC26D /* AppleSignInButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8D155F2818F5E3002BCDE412 /* AppleSignInButton.swift */; };
 		8E3BC4D0F95F210ED76AAF02 /* TimerStoring.swift in Sources */ = {isa = PBXBuildFile; fileRef = 14B9F48EF37C2C71C3B823E3 /* TimerStoring.swift */; };
+		8EFE540F24A602E680C63518 /* Seeder.swift in Sources */ = {isa = PBXBuildFile; fileRef = E7079794BECF174DFDCCD624 /* Seeder.swift */; };
 		97433A58C0B24D13BECDCEE3 /* FakeAuthRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 027048F12B000EA16DC727F5 /* FakeAuthRepository.swift */; };
 		9865A14198FF02BEC96353F5 /* SyncCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 641493D337775C49C2A77DF6 /* SyncCoordinatorTests.swift */; };
 		9A2D5056DC767BB57C694909 /* OtpEntryViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AEABA98A949DF941CA483AD8 /* OtpEntryViewModelTests.swift */; };
@@ -211,9 +214,12 @@
 		E4702FC534C42EFAD88BD737 /* LocalStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalStore.swift; sourceTree = "<group>"; };
 		E4D84B7363473F4C6FA47680 /* APIClientTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIClientTests.swift; sourceTree = "<group>"; };
 		E5FF05A90572B2773B8D7885 /* TextFieldWithError.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TextFieldWithError.swift; sourceTree = "<group>"; };
+		E66774049BE6819298B73B7F /* SeederTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SeederTests.swift; sourceTree = "<group>"; };
+		E7079794BECF174DFDCCD624 /* Seeder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Seeder.swift; sourceTree = "<group>"; };
 		EA8DFE98BAAEE08E2279FB79 /* TimerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimerView.swift; sourceTree = "<group>"; };
 		EB2A40580A5C7F81443FA774 /* AppRoute.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppRoute.swift; sourceTree = "<group>"; };
 		EEC9068E4720FD2F075A370C /* UndoHold.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UndoHold.swift; sourceTree = "<group>"; };
+		F344C9675F12A0EBADEB36DB /* CatalogIcon.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CatalogIcon.swift; sourceTree = "<group>"; };
 		F354288D9A7CBC6DF7B3ACDB /* TimeOfLife.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = TimeOfLife.entitlements; sourceTree = "<group>"; };
 		F51CD644B504DA570FCB89E0 /* FakeAppleAuthorizationProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FakeAppleAuthorizationProvider.swift; sourceTree = "<group>"; };
 		FAEFDDE28CA28D60069F0026 /* PrimaryButton.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrimaryButton.swift; sourceTree = "<group>"; };
@@ -374,6 +380,7 @@
 			children = (
 				9FDF1EBBFFE8084B89B6A5E8 /* LocalStoreCRUDTests.swift */,
 				0BB9ED89D831530F85D9403B /* LocalStoreSyncTests.swift */,
+				E66774049BE6819298B73B7F /* SeederTests.swift */,
 				641493D337775C49C2A77DF6 /* SyncCoordinatorTests.swift */,
 				2CA51315207E94FD18D69D11 /* UndoFlowTests.swift */,
 			);
@@ -460,6 +467,7 @@
 				A04C99F9952BEE1ED6572B2B /* LocalStore+Undo.swift */,
 				8EA4501C52B68465C78A2157 /* RemoteCatalogRepository.swift */,
 				7954F618BE904EBB495E99CE /* RemoteEntriesRepository.swift */,
+				E7079794BECF174DFDCCD624 /* Seeder.swift */,
 				82FB7E913BB0A937104038E3 /* SyncCoordinator.swift */,
 				A9DEA55F128A1F5CB0A9A597 /* UndoService.swift */,
 			);
@@ -579,6 +587,7 @@
 			children = (
 				959C5AF3A8A6E0E852714CED /* CatalogDateCoding.swift */,
 				BE24EBB6353C7D0DDAD8F05E /* CatalogDTOs.swift */,
+				F344C9675F12A0EBADEB36DB /* CatalogIcon.swift */,
 				2BE9F81E52E5DA78C2AC3414 /* CatalogModels.swift */,
 				EEC9068E4720FD2F075A370C /* UndoHold.swift */,
 			);
@@ -763,6 +772,7 @@
 				597506534B7FB471E0623349 /* BottomBarMeasurement.swift in Sources */,
 				515EBE908DCE204492C2C2DB /* CatalogDTOs.swift in Sources */,
 				9F21907E45755B7AC49135F9 /* CatalogDateCoding.swift in Sources */,
+				26B24DA8F25C101BD304CE1A /* CatalogIcon.swift in Sources */,
 				612460B1AA8BBC8A20884496 /* CatalogModels.swift in Sources */,
 				9D5327A56EA691B5201F70C2 /* CatalogRecords.swift in Sources */,
 				58581FB633B200C3EE6D0D35 /* DatabaseSchema.swift in Sources */,
@@ -789,6 +799,7 @@
 				07CC0D4A8B500EB1E6CE28F5 /* RemoteCatalogRepository.swift in Sources */,
 				1E60626A50D64BDFF847D4AD /* RemoteEntriesRepository.swift in Sources */,
 				86E0196DDF4BFC41503B86AE /* RootView.swift in Sources */,
+				8EFE540F24A602E680C63518 /* Seeder.swift in Sources */,
 				E6AF3F110377FDA3600636EE /* SessionCache.swift in Sources */,
 				0CAC1D03E6D0EEE20337B269 /* SessionStore.swift in Sources */,
 				9F15B11837BF57228D6A6552 /* ShakeSupport.swift in Sources */,
@@ -835,6 +846,7 @@
 				55062862B5B737A4EE3EC8B0 /* MockAPIClient.swift in Sources */,
 				9A2D5056DC767BB57C694909 /* OtpEntryViewModelTests.swift in Sources */,
 				769D55B9329E320BDF2AA5F9 /* RemoteAuthRepositoryTests.swift in Sources */,
+				79C1D269DEF13DE1D93EB961 /* SeederTests.swift in Sources */,
 				9865A14198FF02BEC96353F5 /* SyncCoordinatorTests.swift in Sources */,
 				31C1103D0046FEDFDD22B3EE /* TestFactories.swift in Sources */,
 				0316CFCE845DAFD05A61F5EF /* TimeFormatterTests.swift in Sources */,
