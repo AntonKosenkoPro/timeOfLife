@@ -23,6 +23,9 @@ disabled_rules:
   - switch_case_on_newline
   - no_grouping_extension
   - prefer_self_in_static_references
+  # `APIError.server(let code, let message, let details)` cannot be written as
+  # `case let .server(...)` when matching against a generic `Error` value.
+  - pattern_matching_keywords
   # Tuples and long test helpers are acceptable in tests.
   - large_tuple
   - type_body_length
@@ -107,6 +110,10 @@ opt_in_rules:
 function_parameter_count:
   warning: 6
   error: 8
+
+file_length:
+  warning: 600
+  error: 800
 
 number_separator:
   minimum_length: 5
