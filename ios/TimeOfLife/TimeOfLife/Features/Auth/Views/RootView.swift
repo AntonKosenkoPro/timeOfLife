@@ -54,8 +54,8 @@ struct OfflineBanner: View {
     }
 }
 
-/// Signed-in navigation container. The timer is the root; `manageActivities`
-/// pushes a placeholder (Phase 8 will add the real screen).
+/// Signed-in navigation container. The timer is the root; catalog screens
+/// push via `AppRoute`.
 private struct SignedInView: View {
     @EnvironmentObject var container: AppContainer
 
@@ -65,15 +65,29 @@ private struct SignedInView: View {
             destination: { route in
                 switch route {
                 case .manageActivities:
-                    // Phase 8 placeholder — the real ManageActivitiesView
-                    // will be built in the UX rebuild phase.
-                    VStack {
-                        Text(L10n.timerManageActivities.text)
-                            .font(.title)
-                            .foregroundStyle(Theme.textPrimary)
+                    if let store = container.localStoreForCatalog,
+                       let undo = container.undoService {
+                        ManageActivitiesView(
+                            vm: ManageActivitiesViewModel(
+                                localStore: store,
+                                undoService: undo,
+                                syncCoordinator: container.syncCoordinator))
+                            .environmentObject(container)
+                    } else {
+                        EmptyView()
                     }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .background(Theme.backgroundPrimary.ignoresSafeArea())
+                case .manageCategories:
+                    if let store = container.localStoreForCatalog,
+                       let undo = container.undoService {
+                        ManageCategoriesView(
+                            vm: ManageCategoriesViewModel(
+                                localStore: store,
+                                undoService: undo,
+                                syncCoordinator: container.syncCoordinator))
+                            .environmentObject(container)
+                    } else {
+                        EmptyView()
+                    }
                 case .emailEntry, .otpEntry:
                     // Auth routes should not appear in the signed-in stack.
                     EmptyView()

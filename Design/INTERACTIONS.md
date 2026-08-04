@@ -142,7 +142,7 @@ U7 says "no custom shake detection" — use the iOS system motion event. The vie
 Decision D18. The confirm pattern depends on what is being deleted.
 
 - **Activity with no entries:** single destructive confirm → undo flow.
-- **Activity with entries:** `ScopeConfirmation` (`COMPONENTS.md`) offering two destructive choices, both naming the affected entry count: (a) delete the entire activity + all N entries, (b) delete only the current entry. Both are destructive and enter the undo flow as a unit.
+- **Activity with entries:** `ScopeConfirmation` (`COMPONENTS.md`) offering two destructive choices, both naming the affected entry count: (a) delete the entire activity + all N entries, (b) delete only the latest entry. Both are destructive and enter the undo flow as a unit.
 - Destructive buttons use `role: .destructive` / `Theme.danger` tint.
 - **Category:** single destructive confirm; the category's tag is removed from all activities (join cascade), entries are unaffected — state this clearly in the confirm copy. Still undoable for 30 s (Undo re-applies the tags).
 

@@ -9,4 +9,5 @@ enum AppRoute: Hashable, Sendable {
     case emailEntry
     case otpEntry(email: String)
     case manageActivities
+    case manageCategories
 }

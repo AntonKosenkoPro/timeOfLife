@@ -23,7 +23,7 @@ struct AuthFlowView: View {
                         connectivity: container.connectivity,
                         email: email
                     ))
-                case .manageActivities:
+                case .manageActivities, .manageCategories:
                     // Not reachable in the auth flow.
                     EmptyView()
                 }

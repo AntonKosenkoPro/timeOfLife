@@ -53,7 +53,7 @@ F10 / D17 / D18; see `Design/INTERACTIONS.md` → Undo flow and Delete-scope con
 - **Activity with 0 entries:** single destructive confirm (system `.alert` / `.confirmationDialog`) → enter undo flow.
 - **Activity with N > 0 entries:** present `ScopeConfirmation` (`entryCount: N`) offering two destructive choices, both naming N (D18):
   - delete the entire activity + all N entries (`onDeleteAll`)
-  - delete only the current entry (`onDeleteEntryOnly`)
+  - delete only the latest entry (`onDeleteEntryOnly`)
   - cancel
 - On confirm, the chosen item set is removed from the list immediately (optimistic) and `UndoToast` is shown for 30 s (R3 / U6). Undo re-inserts from the client-side undo buffer; after the window, commit locally and enqueue the `DELETE` for sync (the server hard-deletes, no trash).
 - Bulk deletions (activity + its entries) are undoable as a unit — the buffer holds the whole set and Undo restores all of it.

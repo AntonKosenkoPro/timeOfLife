@@ -16,6 +16,17 @@ final class AppContainer: ObservableObject {
     let authService: AuthService
     let appleService: AppleSignInService
     let timerService: TimerService
+    /// Per-account local store for the catalog (GRDB). `nil` until a user
+    /// signs in. Views use `localStoreForCatalog` (force-unwrap) after
+    /// sign-in.
+    var localStoreForCatalog: LocalStore?
+    /// Single synchronization coordinator for the catalog. `nil` until a user
+    /// signs in.
+    var syncCoordinator: SyncCoordinator?
+    /// Undo service for catalog deletions. `nil` until a user signs in.
+    var undoService: UndoService?
+    /// Seeder for default categories. `nil` until a user signs in.
+    var seeder: Seeder?
     /// Strong reference to the holder that wires the API client's refresh hook
     /// back to `authService`. If this were not retained, the holder would
     /// deallocate after `production()` returns and token refresh would fail.

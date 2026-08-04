@@ -710,7 +710,7 @@ if let undo = vm.undoToast {
 
 ## `ScopeConfirmation`
 
-Destructive two-option confirmation for deleting an activity that has past entries (F10/U5). The user must choose between deleting the entire activity (and all its entries) or only the current entry.
+Destructive two-option confirmation for deleting an activity that has past entries (F10/U5). The user must choose between deleting the entire activity (and all its entries) or only the latest entry.
 
 ### Signature
 
