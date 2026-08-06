@@ -10,7 +10,7 @@ Narrative flows for **Epic 1: Activity Catalog & Categories**. Each flow maps to
 
 ## 2. Start a timer from a suggestion
 
-1. On the timer screen, the user sees their 3–5 most recently used activities as tappable suggestions with the first category's icon and comma-separated category names, ranked on-device from the local catalog by `last_used_at` — no server round-trip, works offline.
+1. On the Track screen, the user sees their 3–5 most recently used Activities as tappable suggestions with Activity names and recency only, ranked on-device from the local catalog by `last_used_at` — no server round-trip, works offline. Category icons and names are not shown during capture.
 2. The user taps a suggestion; the activity name is prefilled into the activity field and the activity is linked to the upcoming entry.
 3. The user taps **Start**; the timer runs and the entry is recorded against the selected activity (and its category tags).
 
@@ -30,7 +30,7 @@ Narrative flows for **Epic 1: Activity Catalog & Categories**. Each flow maps to
 ## 5. Manage activities and categories
 
 1. The user opens the **Manage Activities** screen.
-2. The user sees all activities with their first category's icon and comma-separated category names, ordered by most-recently-used, and can edit or delete them, and can create/edit/delete categories. No manual reorder is offered at MVP.
+2. The user sees all Activities with their category metadata, ordered by most-recently-used, and can edit or delete them. A separate **Manage Categories** screen owns category create/edit/delete. No manual reorder is offered at MVP.
 3. Editing an activity updates its name/notes/categories; existing past entries reflect the current category-derived representation at query time (entries store an `activity_id`, not a snapshot, while the activity exists).
 
 ## 6. Delete an activity that has history

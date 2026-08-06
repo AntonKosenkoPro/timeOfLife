@@ -14,6 +14,10 @@ struct TimeOfLifeApp: App {
     @StateObject private var session: SessionStore
     @StateObject private var navigation: AppNavigationStack
 
+    #if DEBUG
+    private let uiTestingScreen: String?
+    #endif
+
     init() {
         // UI-feedback loop: when launched with `UITEST_SCREEN=<screen>` (or
         // `SIMCTL_CHILD_UITEST_SCREEN=<screen>`, which `simctl launch` preserves)
@@ -22,7 +26,9 @@ struct TimeOfLifeApp: App {
         // `AppContainer.uiTesting(screen:)` and the `ios-ui-loop` skill.
         let container: AppContainer
         #if DEBUG
-        if let screen = Self.uiTestingScreen(), !screen.isEmpty {
+        let uiTestingScreen = Self.uiTestingScreen()
+        self.uiTestingScreen = uiTestingScreen
+        if let screen = uiTestingScreen, !screen.isEmpty {
             container = AppContainer.uiTesting(screen: screen)
         } else {
             container = AppContainer.production()
@@ -69,11 +75,27 @@ struct TimeOfLifeApp: App {
 
     var body: some Scene {
         WindowGroup {
-            RootView()
-                .environmentObject(container)
-                .environmentObject(session)
-                .environmentObject(navigation)
-                .preferredColorScheme(nil) // follow system
+            #if DEBUG
+            if let designScreen = DesignLabScreen(screenName: uiTestingScreen) {
+                TrackDesignPrototype(screen: designScreen)
+            } else if let numericMockup = NumericTimerMockupStyle(screenName: uiTestingScreen) {
+                NumericTimerMockupBoard(style: numericMockup)
+            } else if uiTestingScreen == "design-catalog" {
+                CatalogConceptPrototype()
+            } else {
+                appRoot
+            }
+            #else
+            appRoot
+            #endif
         }
+    }
+
+    private var appRoot: some View {
+        RootView()
+            .environmentObject(container)
+            .environmentObject(session)
+            .environmentObject(navigation)
+            .preferredColorScheme(nil) // follow system
     }
 }

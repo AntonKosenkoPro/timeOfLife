@@ -82,8 +82,8 @@ When a screen’s main purpose is to collect input from a single field (email, O
 
 ### Sign Out
 
-- Sign Out is a destructive, low-frequency account action.
-- Until a dedicated Account/Profile screen exists, Sign Out lives in the `TimerView` top toolbar.
+- Sign Out is a destructive, low-frequency account action owned by Profile.
+- The Track toolbar does not expose account actions as a peer to capture.
 - Tapping Sign Out must show a confirmation alert before clearing the local session, because local timer data may be lost.
 - Sign Out must work offline by clearing the local session.
 
@@ -186,6 +186,14 @@ F8; decision D19.
 
 - The Manage Activities list and timer suggestions are ordered by `last_used_at` (most-recent first), computed on-device (D16). No manual drag-reorder at MVP.
 - `last_used_at` is bumped on every entry start and syncs across devices, so recency is shared (see `Activity_Catalog_API.md` Suggestions).
+
+## Activity and category semantics
+
+- An Activity is the concrete task selected for a timer and is required for an entry.
+- A Category is optional analytics metadata; an Activity may have zero or more Categories.
+- Track suggestions and the Activity picker show Activity names only. Category icons and names are omitted from capture.
+- Manage Activities and Manage Categories are separate surfaces. The full Activity Editor may assign or remove Categories.
+- Entries resolve the Activity's current Categories at query time. Changing an Activity's Categories reclassifies its existing history in Insights.
 
 ## Editor sheets and keyboard placement
 

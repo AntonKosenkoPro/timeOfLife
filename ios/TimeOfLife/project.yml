@@ -90,7 +90,9 @@ targets:
   TimeOfLifeTests:
     type: bundle.unit-test
     platform: iOS
-    deploymentTarget: "15.0"
+    # Current Xcode XCTest/Testing frameworks require an iOS 17 test host;
+    # the application target remains iOS 15.
+    deploymentTarget: "17.0"
     sources:
       - TimeOfLifeTests
     dependencies:

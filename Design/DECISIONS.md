@@ -86,6 +86,7 @@ Resolved design precedents for Time of Life. Add a new entry here when a visual 
 ## D16 — On-device recency suggestions
 
 - The timer's top-5 activity suggestions are computed locally from the synced catalog, ranked by `last_used_at`; there is no suggestions endpoint. Works fully offline. `last_used_at` still syncs so recency is shared across devices.
+- Capture suggestions show Activity names and recency only. Category icons and names are intentionally omitted from the timer surface; they belong to Activity management and Insights.
 - Reason: F5/P1 — the client already holds the synced catalog, so a server round-trip would buy nothing and break offline; the backend only keeps `last_used_at` correct on entry start.
 
 ## D17 — Soft-delete via client undo buffer
@@ -115,5 +116,15 @@ Resolved design precedents for Time of Life. Add a new entry here when a visual 
 
 ## D22 — Categories have catalog icons
 
-- Categories carry one icon from the validated `CatalogIcon` set, defaulting to `tag`; category icons are used in category rows, selectors, and activity/suggestion representations.
+- Categories carry one icon from the validated `CatalogIcon` set, defaulting to `tag`; category icons are used in category rows, selectors, Activity management, and Insights representations, but not in capture suggestions.
 - This reverses the earlier “categories do not have icons” correction in `ManageCategories.md` and supersedes the retired color-palette decision (D15).
+
+## D23 — Centered numeric timer
+
+- Track uses a centered numeric readout for the exact elapsed duration. It has no Dial, ring, sweep, goal, daily-total, or decorative progress visualization.
+- Reason: the user rejected the Dial and chose a numbers-only treatment; exact elapsed time is sufficient for capture while History and Insights own retrospective meaning.
+
+## D24 — Categories are current Activity metadata
+
+- Activities are concrete tasks required for timing. Categories are optional zero-or-more analytics metadata managed separately from capture. Entries resolve an Activity's current Categories at query time, so editing an Activity's Categories reclassifies its existing history.
+- Reason: the current Activity/category API and entry model already use `activity_id` plus query-time tag resolution, and this keeps categoryless quick creation valid.

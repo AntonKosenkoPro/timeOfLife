@@ -21,6 +21,7 @@
 		172234F3334C1E02C095BC91 /* WelcomeViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2EFFF9667C6CCF590471CED4 /* WelcomeViewModelTests.swift */; };
 		19F0D73B9A8FF3C0B96E4E3D /* OtpEntryViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 146F9D6A4DD4275282D92DB5 /* OtpEntryViewModel.swift */; };
 		1BAD7B573F59E2D54E53A720 /* Haptics.swift in Sources */ = {isa = PBXBuildFile; fileRef = 61B7982F3DBB72A719070CAD /* Haptics.swift */; };
+		201650FD3040BCFAF5376249 /* TrackDesignPrototype.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1776BD7BE5DAADFC3B268B07 /* TrackDesignPrototype.swift */; };
 		24C62C5291ADC6171489F5C6 /* AppContainer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E168995FCCABB958FC8B931 /* AppContainer.swift */; };
 		26F4CC82357D81F490C04B02 /* OtpEntryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D46B208EB2ABFC11D92353BF /* OtpEntryView.swift */; };
 		2D54716C3A60788EF56400F4 /* URLProtocolStub.swift in Sources */ = {isa = PBXBuildFile; fileRef = AF43C8060AE670862FB6C0F6 /* URLProtocolStub.swift */; };
@@ -70,11 +71,14 @@
 		C19F17DE431375619AB638BD /* TimerService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5CBC211B0937CFA93E95589C /* TimerService.swift */; };
 		C980FE7483D4F04D2FF6D114 /* PrimaryButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = FAEFDDE28CA28D60069F0026 /* PrimaryButton.swift */; };
 		CE4E436707E5D8B0B501DB63 /* Localizable.strings in Resources */ = {isa = PBXBuildFile; fileRef = 22079FF917E5AA91F24FAFAD /* Localizable.strings */; };
+		D2B5CD2BFFEFC965EC8E747D /* NumericTimerMockupBoard.swift in Sources */ = {isa = PBXBuildFile; fileRef = F3D1BEF1AC13A836B746C99B /* NumericTimerMockupBoard.swift */; };
 		D35474572913AAF5DBEF8998 /* ErrorBanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1ABBD582800CD4A3D7D93BB /* ErrorBanner.swift */; };
 		E13E32C80E256B47B296FBF3 /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 54CED4A382185F01233F1DDE /* Theme.swift */; };
 		E24F159A9BB0CF9D4E072521 /* AppleSignInService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6ACB1A62C045903B76031A56 /* AppleSignInService.swift */; };
 		E6AF3F110377FDA3600636EE /* SessionCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = 715D8DD36825AF67A5E31466 /* SessionCache.swift */; };
+		E9F65D487147E7F4738E7BCC /* CatalogConceptPrototype.swift in Sources */ = {isa = PBXBuildFile; fileRef = DCC6D454716A65091B6644FC /* CatalogConceptPrototype.swift */; };
 		F0DAC53BBE56C751F73C41EF /* AppleSignInServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2E1D96E0E511C17C7E3A7AF2 /* AppleSignInServiceTests.swift */; };
+		F47139EE2D3FD48C1C9FB87B /* CatalogConceptComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = AEC55E103E9C141A4061EC81 /* CatalogConceptComponents.swift */; };
 		F9DD38F86A930D2B6220B523 /* APIEndpoint.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC48D5C245EF1DD96F6F6004 /* APIEndpoint.swift */; };
 /* End PBXBuildFile section */
 
@@ -96,6 +100,7 @@
 		0F3089A2973F630B1A12EB11 /* WelcomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WelcomeView.swift; sourceTree = "<group>"; };
 		146F9D6A4DD4275282D92DB5 /* OtpEntryViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OtpEntryViewModel.swift; sourceTree = "<group>"; };
 		14B9F48EF37C2C71C3B823E3 /* TimerStoring.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimerStoring.swift; sourceTree = "<group>"; };
+		1776BD7BE5DAADFC3B268B07 /* TrackDesignPrototype.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrackDesignPrototype.swift; sourceTree = "<group>"; };
 		1BA5D8E5B341A3B8D60460B0 /* TimerViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimerViewModel.swift; sourceTree = "<group>"; };
 		1C4D6CE330BC518B835F9D0D /* AppNavigationStack.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppNavigationStack.swift; sourceTree = "<group>"; };
 		25182CD3496B6223AF822CEB /* AuthServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthServiceTests.swift; sourceTree = "<group>"; };
@@ -144,6 +149,7 @@
 		A804E41CE6F0E40701020E2E /* MockAPIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MockAPIClient.swift; sourceTree = "<group>"; };
 		A8385ECB2A212347BA7A5183 /* TestFactories.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TestFactories.swift; sourceTree = "<group>"; };
 		AEABA98A949DF941CA483AD8 /* OtpEntryViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OtpEntryViewModelTests.swift; sourceTree = "<group>"; };
+		AEC55E103E9C141A4061EC81 /* CatalogConceptComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CatalogConceptComponents.swift; sourceTree = "<group>"; };
 		AF43C8060AE670862FB6C0F6 /* URLProtocolStub.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = URLProtocolStub.swift; sourceTree = "<group>"; };
 		B1ABBD582800CD4A3D7D93BB /* ErrorBanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ErrorBanner.swift; sourceTree = "<group>"; };
 		B1B0435AD68B3F08FC7E6EE3 /* EmailEntryViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmailEntryViewModel.swift; sourceTree = "<group>"; };
@@ -159,11 +165,13 @@
 		D3EDF44C573A464EA1B15439 /* AuthModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthModels.swift; sourceTree = "<group>"; };
 		D46B208EB2ABFC11D92353BF /* OtpEntryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OtpEntryView.swift; sourceTree = "<group>"; };
 		D9B8919EF27555C4F388E106 /* TimeFormatterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimeFormatterTests.swift; sourceTree = "<group>"; };
+		DCC6D454716A65091B6644FC /* CatalogConceptPrototype.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CatalogConceptPrototype.swift; sourceTree = "<group>"; };
 		E4D84B7363473F4C6FA47680 /* APIClientTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIClientTests.swift; sourceTree = "<group>"; };
 		E5FF05A90572B2773B8D7885 /* TextFieldWithError.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TextFieldWithError.swift; sourceTree = "<group>"; };
 		EA8DFE98BAAEE08E2279FB79 /* TimerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimerView.swift; sourceTree = "<group>"; };
 		EB2A40580A5C7F81443FA774 /* AppRoute.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppRoute.swift; sourceTree = "<group>"; };
 		F354288D9A7CBC6DF7B3ACDB /* TimeOfLife.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = TimeOfLife.entitlements; sourceTree = "<group>"; };
+		F3D1BEF1AC13A836B746C99B /* NumericTimerMockupBoard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NumericTimerMockupBoard.swift; sourceTree = "<group>"; };
 		F51CD644B504DA570FCB89E0 /* FakeAppleAuthorizationProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FakeAppleAuthorizationProvider.swift; sourceTree = "<group>"; };
 		FAEFDDE28CA28D60069F0026 /* PrimaryButton.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrimaryButton.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -289,6 +297,7 @@
 			children = (
 				11CBD1A0AADB4993DD4B5C74 /* AppleSignIn */,
 				B5FDF39D1E1BAEF2F7C50C12 /* Auth */,
+				A44A7923205DD9044F3D65C6 /* DesignLab */,
 				00523E7EB805090C97DBD075 /* TimeTracking */,
 			);
 			path = Features;
@@ -360,6 +369,17 @@
 				54CED4A382185F01233F1DDE /* Theme.swift */,
 			);
 			path = Theme;
+			sourceTree = "<group>";
+		};
+		A44A7923205DD9044F3D65C6 /* DesignLab */ = {
+			isa = PBXGroup;
+			children = (
+				AEC55E103E9C141A4061EC81 /* CatalogConceptComponents.swift */,
+				DCC6D454716A65091B6644FC /* CatalogConceptPrototype.swift */,
+				F3D1BEF1AC13A836B746C99B /* NumericTimerMockupBoard.swift */,
+				1776BD7BE5DAADFC3B268B07 /* TrackDesignPrototype.swift */,
+			);
+			path = DesignLab;
 			sourceTree = "<group>";
 		};
 		A6BC46F12CEB7684D40A7475 /* Localization */ = {
@@ -636,6 +656,8 @@
 				5624C44246E758AC0CC0F18B /* AuthService.swift in Sources */,
 				ABA2DFE7B6F8A2CEA6955096 /* AuthValidator.swift in Sources */,
 				597506534B7FB471E0623349 /* BottomBarMeasurement.swift in Sources */,
+				F47139EE2D3FD48C1C9FB87B /* CatalogConceptComponents.swift in Sources */,
+				E9F65D487147E7F4738E7BCC /* CatalogConceptPrototype.swift in Sources */,
 				505245854684D1C616F816B6 /* EmailEntryView.swift in Sources */,
 				806578352B5148EAB4C585BD /* EmailEntryViewModel.swift in Sources */,
 				D35474572913AAF5DBEF8998 /* ErrorBanner.swift in Sources */,
@@ -646,6 +668,7 @@
 				6ADE90901B2D48DBD55C9CF8 /* KeychainStore.swift in Sources */,
 				5EFCE7CF46CF295721840587 /* KeychainStoring.swift in Sources */,
 				5EEAF02CCB59536F36B4262B /* NetworkMonitor.swift in Sources */,
+				D2B5CD2BFFEFC965EC8E747D /* NumericTimerMockupBoard.swift in Sources */,
 				68EC519F6C32E6329E751DB8 /* OtpCodeField.swift in Sources */,
 				26F4CC82357D81F490C04B02 /* OtpEntryView.swift in Sources */,
 				19F0D73B9A8FF3C0B96E4E3D /* OtpEntryViewModel.swift in Sources */,
@@ -665,6 +688,7 @@
 				8E3BC4D0F95F210ED76AAF02 /* TimerStoring.swift in Sources */,
 				08CCCBCD9EF05DA404F276B1 /* TimerView.swift in Sources */,
 				84F9944BA01C29BB062B5FF9 /* TimerViewModel.swift in Sources */,
+				201650FD3040BCFAF5376249 /* TrackDesignPrototype.swift in Sources */,
 				07B957B10278B4D0DB757452 /* ValidationPresentation.swift in Sources */,
 				04A2B8572B25A8E9B797E45B /* WelcomeView.swift in Sources */,
 				9FE89E7DE05C4F5BA8F2AD7B /* WelcomeViewModel.swift in Sources */,
@@ -724,7 +748,7 @@
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				GENERATE_INFOPLIST_FILE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -789,7 +813,7 @@
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				GENERATE_INFOPLIST_FILE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",

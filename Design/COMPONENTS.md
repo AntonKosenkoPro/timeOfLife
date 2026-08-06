@@ -455,14 +455,13 @@ TagSelector(
 
 ## `SuggestionRow`
 
-Recency-based suggestion row on the timer screen (F5/U3). One tap prefills the activity name and links the activity to the entry.
+Recency-based Activity suggestion row on the Track screen (F5/U3). One tap prepares the Activity and links the upcoming entry.
 
 ### Signature
 
 ```swift
 struct SuggestionRow: View {
     let activity: Activity
-    let categories: [Category]
     let action: () -> Void
 }
 ```
@@ -470,9 +469,8 @@ struct SuggestionRow: View {
 ### Visual
 
 - `Button`-styled `HStack(spacing: Theme.spacingMedium)`:
-  - The first category's icon in `Theme.textSecondary`, `.body`, when categories are present.
   - Name in `.subheadline`, `Theme.textPrimary`.
-  - Category names joined with `", "` in `.caption`, `Theme.textSecondary`.
+  - Optional recency subtitle in `.caption`, `Theme.textSecondary`.
 - Full width, min height `Theme.minTapArea`.
 - `accessibilityIdentifier("TimerSuggestion(\(activity.id))")`.
 
@@ -487,21 +485,22 @@ struct SuggestionRow: View {
 
 - Renders inside the `TimerSuggestionList` container; ranking is computed on-device from the local catalog ordered by `last_used_at` (F5, P1).
 - Suggestions are hidden while the timer is running (F5).
-- Tapping calls `action` — the parent screen prefills the activity field and links `activity.id` to the entry (F4/U3).
+- Tapping calls `action` — the parent screen prepares the Activity and links `activity.id` to the upcoming entry (F4/U3).
 
 ### Usage
 
 ```swift
 ForEach(vm.suggestions) { a in
-    SuggestionRow(activity: a, categories: vm.categories(for: a)) { vm.prefill(from: a) }
+    SuggestionRow(activity: a) { vm.prefill(from: a) }
 }
 ```
 
 ### Accessibility
 
 - `accessibilityIdentifier("TimerSuggestion(\(activity.id))")` (U3).
-- `.accessibilityLabel("Suggestion, \(activity.name)")`; category names are included in the combined value when present.
-- `.accessibilityHint("Starts a timer for this activity")`.
+- `.accessibilityLabel("Activity suggestion, \(activity.name)")`.
+- `.accessibilityHint("Prepares this activity for timing")`.
+- Category icons and names are intentionally not exposed by this capture component; they belong to Activity management and Insights.
 
 ---
 
