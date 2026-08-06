@@ -1,40 +1,52 @@
 import SwiftUI
+import Combine
 
-/// Root view. Decides between auth flow and signed-in placeholder based on
-/// `SessionStore`, and renders the offline banner.
+/// Root view. Always shows the timer (D7): the app launches into time
+/// tracking with no account required. `SessionStore.state` gates
+/// `SyncController` (the optional paid sync feature), not the root view.
+///
+/// Also owns the lifecycle wiring for the local-first machinery:
+/// - foreground → commit expired undo buffers (D3, no background timer) and
+///   trigger a sync cycle (sync-client spec).
+/// - connectivity restored → trigger a sync cycle.
 struct RootView: View {
     @EnvironmentObject var session: SessionStore
     @EnvironmentObject var container: AppContainer
 
     var body: some View {
-        content
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .safeAreaInset(edge: .top) {
-                OfflineBanner()
-                    .environmentObject(container.connectivity)
-                    .animation(.easeInOut(duration: 0.2), value: container.connectivity.isConnected)
+        TimerView(vm: TimerViewModel(
+            service: container.timerService,
+            authService: container.authService,
+            connectivity: container.connectivity
+        ))
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .safeAreaInset(edge: .top) {
+            OfflineBanner()
+                .environmentObject(container.connectivity)
+                .animation(.easeInOut(duration: 0.2), value: container.connectivity.isConnected)
+        }
+        .background(Theme.backgroundPrimary.ignoresSafeArea())
+        .task { await container.authService.restoreSession() }
+        .onChange(of: session.state) { newState in
+            switch newState {
+            case .signedIn:
+                container.syncController.activate()
+            case .signedOut:
+                container.syncController.deactivate()
             }
-            .background(Theme.backgroundPrimary.ignoresSafeArea())
-            .task { await container.authService.restoreSession() }
-            .onChange(of: session.state) { newState in
-                // When the user signs out, drop any pushed auth routes so they land
-                // on the welcome screen instead of the last pushed screen (e.g. OTP).
-                if newState == .signedOut {
-                    container.navigation.popToRoot()
-                }
+        }
+        .onChange(of: container.connectivity.isConnected) { connected in
+            if connected {
+                container.syncController.trigger()
             }
-    }
-
-    @ViewBuilder private var content: some View {
-        switch session.state {
-        case .signedOut:
-            AuthFlowView()
-        case .signedIn:
-            TimerView(vm: TimerViewModel(
-                service: container.timerService,
-                authService: container.authService,
-                connectivity: container.connectivity
-            ))
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
+            // Durable undo buffer: commit expired deletions on foreground
+            // (never in the background). Then run a sync cycle if signed in.
+            Task {
+                try? await container.undoBuffer.commitExpired()
+                container.syncController.trigger()
+            }
         }
     }
 }

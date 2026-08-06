@@ -66,7 +66,10 @@ type Category struct {
 // Entry is one timed interval (Epic 1). Every entry references exactly one
 // activity (ActivityID is always set). Categories are inferred from the
 // activity's tags at read time; ActivityName is the activity's current name,
-// resolved at read time.
+// resolved at read time. Source/SourceRef record entry provenance (where the
+// entry came from: manual, widget, siri, control, screentime, garmin, ...);
+// Source defaults to "manual" and SourceRef is null for entries created
+// without them (back-compat with existing clients).
 type Entry struct {
 	ID              string        `json:"id"`
 	UserID          string        `json:"-"`
@@ -75,6 +78,8 @@ type Entry struct {
 	StartedAt       time.Time     `json:"started_at"`
 	EndedAt         *time.Time    `json:"ended_at"`
 	DurationSeconds *int          `json:"duration_seconds"`
+	Source          string        `json:"source"`
+	SourceRef       *string       `json:"source_ref"`
 	Categories      []CategoryTag `json:"categories"`
 	CreatedAt       time.Time     `json:"created_at"`
 	UpdatedAt       time.Time     `json:"updated_at"`
@@ -82,12 +87,13 @@ type Entry struct {
 
 // EntryFilter carries the optional GET /entries query parameters.
 type EntryFilter struct {
-	From       *time.Time // include entries with started_at >= From
-	To         *time.Time // include entries with started_at <= To (inclusive upper bound)
-	ActivityID string     // restrict to a single activity
-	CategoryID string     // restrict to entries whose activity is tagged
-	Limit      int        // page size; 0 → default
-	Cursor     string     // opaque pagination cursor from a previous response
+	From          *time.Time // include entries with started_at >= From
+	To            *time.Time // include entries with started_at <= To (inclusive upper bound)
+	ActivityID    string     // restrict to a single activity
+	CategoryID    string     // restrict to entries whose activity is tagged
+	Limit         int        // page size; 0 → default
+	Cursor        string     // opaque pagination cursor from a previous response
+	ModifiedSince *time.Time // include entries with updated_at > ModifiedSince (delta pull-sync; nil = full)
 }
 
 // NullableTime represents an optional timestamp on a partial update: Set=false
@@ -176,8 +182,9 @@ type Store interface {
 
 	// ListActivities returns the user's activities ordered by last_used_at DESC
 	// (most-recently-used first). A non-empty q applies a case-insensitive
-	// name LIKE typeahead filter.
-	ListActivities(ctx context.Context, userID, q string) ([]Activity, error)
+	// name LIKE typeahead filter. A non-nil modifiedSince restricts the result
+	// to records with updated_at > modifiedSince (delta pull-sync; nil = full).
+	ListActivities(ctx context.Context, userID, q string, modifiedSince *time.Time) ([]Activity, error)
 
 	// GetActivity returns one activity (with its category tags) by id, scoped to
 	// the user. Returns ErrNotFound if missing or owned by another user.

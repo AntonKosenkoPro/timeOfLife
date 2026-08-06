@@ -29,6 +29,9 @@ func (h *Handler) writeCatalogStoreErr(w http.ResponseWriter, record any, err er
 			"A category with this name already exists.", idNameDetails(record))
 	case errors.Is(err, db.ErrActivityNotFound):
 		writeError(w, http.StatusNotFound, codeActivityMissing, "Referenced activity not found", nil)
+	case errors.Is(err, db.ErrDuplicateImport):
+		writeError(w, http.StatusConflict, codeDuplicateImport,
+			"An entry with this source and source_ref already exists.", nil)
 	case errors.Is(err, db.ErrEndBeforeStart):
 		writeValidation(w, validationErrs{"ended_at": "ended_at must be after started_at"})
 	case errors.Is(err, db.ErrInvalidCategoryID):
@@ -68,14 +71,23 @@ func idNameDetails(record any) any {
 
 // ---------- Activities ----------
 
-// ListActivities handles GET /activities (?q= typeahead filter).
+// ListActivities handles GET /activities (?q= typeahead filter, ?modified_since= delta pull).
 func (h *Handler) ListActivities(w http.ResponseWriter, r *http.Request) {
 	userID, ok := h.requireUserID(w, r)
 	if !ok {
 		return
 	}
-	q := r.URL.Query().Get("q")
-	acts, err := h.store.ListActivities(r.Context(), userID, q)
+	q := r.URL.Query()
+	var modifiedSince *time.Time
+	if v := q.Get("modified_since"); v != "" {
+		t, ok := parseRFC3339(v)
+		if !ok {
+			writeValidation(w, validationErrs{"modified_since": "modified_since must be a valid RFC 3339 timestamp"})
+			return
+		}
+		modifiedSince = &t
+	}
+	acts, err := h.store.ListActivities(r.Context(), userID, q.Get("q"), modifiedSince)
 	if err != nil {
 		h.logger.Error("list activities failed", "error", err)
 		writeError(w, http.StatusInternalServerError, "internal_error", "An internal error occurred", nil)

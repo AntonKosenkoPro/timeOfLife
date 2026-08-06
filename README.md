@@ -26,11 +26,11 @@ ios/       SwiftUI app (iOS 15+) — MVVM + Repository, keychain token storage
 **Config-gated:** the backend registers `/auth/apple` only when `APPLE_CLIENT_ID` is set (the app's Bundle ID). The iOS button renders without the capability; the actual authorization requires the **Sign in with Apple** capability + a paid Apple Developer Program membership (see `project.yml` signing note). Account-deletion token revocation (App Store 5.1.1v) is a follow-up.
 
 ### Time tracking flow (MVP)
-1. **Signed-in home** shows the timer screen.
+1. **The app launches into the timer** — no sign-in required (auth is an optional "Enable Sync" action in Settings).
 2. **Start** an activity: type a name and tap **Start**.
 3. **Timer counts up** while running; the device stays awake.
-4. **Stop** saves the entry: online → saved locally and synced remotely; offline → queued locally and synced when connectivity returns.
-5. Entries are stored in `Application Support/TimeOfLife/timerQueue.json`.
+4. **Stop** saves the entry to the local GRDB database (the source of truth) and enqueues an outbox row; if signed in, the `SyncController` drains the outbox and pulls deltas on foreground/connectivity/manual "Sync now".
+5. Entries, activities, categories, the running timer state, the outbox, and the undo buffer live in the App Group shared container (`group.com.antonkosenko.timeoflife`), readable/writable cross-process by widgets, the Screen Time extension, and lock-screen Controls.
 
 ### Security (R1)
 - **No passwords anywhere.** Accounts authenticate by proving email ownership via an OTP code (stored only as a **SHA-256 hash**, 10-min expiry, max 5 attempts).
@@ -91,7 +91,7 @@ xcodebuild -scheme TimeOfLife \
   GCC_TREAT_WARNINGS_AS_ERRORS=YES build
 ```
 Use an available simulator destination for `xcodebuild test`; the CI workflow resolves one dynamically.
-Unit tests cover the email/OTP validators, the API client (incl. 401→refresh→retry and offline mapping via a URLProtocol stub), repositories, the AuthService (keychain/cache/restore-on-offline), and the auth view-models. Out of scope: SwiftUI snapshot tests and on-device keychain (see smoke checklist below).
+Unit tests cover the email/OTP validators, the API client (incl. 401→refresh→retry and offline mapping via a URLProtocol stub), repositories, the AuthService (keychain/cache/restore-on-offline), the auth view-models, and the local-first storage/sync layer (GRDB `LocalStore`, `UndoBufferStore`, `SyncController`). Out of scope: SwiftUI snapshot tests and on-device keychain (see smoke checklist below).
 
 ## Code quality & CI (S5/S6/S7)
 - **Linters (S6):** Go `golangci-lint` (`backend/.golangci.yml`), Swift `swiftlint` (`ios/TimeOfLife/.swiftlint.yml`), plus `.editorconfig`. Both must pass with zero findings before merge; iOS `xcodebuild` compiler warnings are also treated as errors.
@@ -131,17 +131,17 @@ Errors use a uniform envelope: `{ "error": { "code", "message", "details": {} } 
 | POST | `/auth/refresh` | `{refresh_token}` | 200 new pair | `invalid_refresh`, `token_reuse`, `token_expired` |
 | POST | `/auth/logout` | (Bearer) | 204 | (401) |
 | GET  | `/auth/me` | (Bearer) | 200 `user{id,email,email_verified}` | (401) |
-| GET  | `/activities` | (Bearer) | 200 `[{activity}]` (recency; `?q=` typeahead) | (401) |
+| GET  | `/activities` | (Bearer) | 200 `[{activity}]` (recency; `?q=` typeahead, `?modified_since=` delta pull) | (401) |
 | POST | `/activities` | `{id,name,notes?,category_ids?}` | 201/200 `{activity}` (idempotent on `id`) | `validation_error`, `activity_exists`, `conflict` |
 | GET/PATCH/DELETE | `/activities/{id}` | (PATCH) `{name?,notes?,category_ids?,updated_at}` | 200 / 204 | `not_found`, `conflict`, `activity_exists` |
 | GET  | `/categories` | (Bearer) | 200 `[{category}]` | (401) |
 | POST | `/categories` | `{id,name,icon}` | 201/200 `{category}` (idempotent on `id`) | `validation_error`, `category_exists`, `conflict` |
 | PATCH/DELETE | `/categories/{id}` | (PATCH) `{name?,icon?,updated_at}` | 200 / 204 | `not_found`, `conflict`, `category_exists` |
-| GET  | `/entries` | (Bearer) | 200 `{items,next_cursor?}` (`?from=&to=&activity_id=&category_id=&limit=&cursor=`) | (401) |
-| POST | `/entries` | `{id,activity_id,started_at,ended_at?}` | 201/200 `{entry}` (idempotent on `id`; `activity_id` required) | `validation_error`, `activity_not_found`, `conflict` |
+| GET  | `/entries` | (Bearer) | 200 `{items,next_cursor?}` (`?from=&to=&activity_id=&category_id=&limit=&cursor=&modified_since=`) | (401) |
+| POST | `/entries` | `{id,activity_id,started_at,ended_at?,source?,source_ref?}` | 201/200 `{entry}` (idempotent on `id`; `activity_id` required) | `validation_error`, `activity_not_found`, `conflict`, `duplicate_import` |
 | GET/PATCH/DELETE | `/entries/{id}` | (PATCH) `{started_at?,ended_at?,updated_at}` | 200 / 204 | `not_found`, `conflict` |
 
-**Epic 1 (activity catalog & entries):** all `/activities`, `/categories`, `/entries` routes are Bearer-protected. Ids are **client-generated UUID v7** and `POST` is **idempotent on `id`** (offline create-then-sync). Writes use **last-write-wins on `updated_at`** (stale → 409 `conflict` with the server's version in `details`); deletes are hard (the client holds the 30 s undo buffer). Validation failures are 422 `validation_error` with `details` = `{field: message}`. **Suggestions are client-side** (F5) — there is no `/activities/suggestions` endpoint; the client ranks its synced activities by `last_used_at`. See the OpenAPI spec (v1.1.0) for full schemas.
+**Epic 1 (activity catalog & entries):** all `/activities`, `/categories`, `/entries` routes are Bearer-protected. Ids are **client-generated UUID v7** and `POST` is **idempotent on `id`** (offline create-then-sync). Writes use **last-write-wins on `updated_at`** (stale → 409 `conflict` with the server's version in `details`); deletes are hard (the client holds the 30 s undo buffer). Validation failures are 422 `validation_error` with `details` = `{field: message}`. **Suggestions are client-side** (F5) — there is no `/activities/suggestions` endpoint; the client ranks its synced activities by `last_used_at`. **Delta pull-sync**: `GET /activities` and `GET /entries` accept an optional `modified_since` (RFC 3339) filtering to records with `updated_at` strictly greater than the timestamp (absent/empty = full pull); the client advances a per-resource cursor to the max `updated_at` received. **Entry provenance**: entries carry `source` (enum: `manual`, `widget`, `siri`, `control`, `screentime`, `garmin`, `calendar`, `healthkit`; default `manual`) and nullable `source_ref`; the server enforces `UNIQUE(user_id, source, source_ref)` for non-null `source_ref`, rejecting a duplicate import with 409 `duplicate_import`. See the OpenAPI spec (v1.2.0) for full schemas.
 
 ## Manual smoke checklist
 
@@ -182,7 +182,7 @@ iOS (Simulator, backend running):
 | R1 Secure auth storage | ✅ No passwords; OTP + refresh stored as SHA-256 hashes; tokens in Keychain on device |
 | S1 Mainstream tech | ✅ Go (chi + PostgreSQL) backend; Kafka deferred |
 | S2 Native UI SDK | ✅ SwiftUI |
-| S3 Test coverage | ✅ Go tests ≥90% on handlers/services + 277 iOS unit tests; logic-layer ~100%; coverage gating documented |
+| S3 Test coverage | ✅ Go tests ≥90% on handlers/services + 277 iOS unit tests; logic-layer ~100%; coverage gating documented. Backend tests additionally cover `modified_since` delta pull and `duplicate_import` provenance; iOS tests cover the GRDB `LocalStore`, `UndoBufferStore`, and `SyncController` |
 | S4 Run locally + cloud | ✅ docker-compose local, Dockerfile (Go multi-stage) for cloud deploy; deployed to GCP Compute Engine VM |
 | S5 Minimal + standardized code, revising each iteration | ✅ `.editorconfig`; standards + per-iteration checklist in `AGENTS.md` |
 | S6 Linters + analyzers guarantee quality | ✅ `golangci-lint` + `swiftlint` + `.editorconfig`; both pass with zero findings |

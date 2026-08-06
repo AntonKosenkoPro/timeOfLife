@@ -22,6 +22,7 @@ const (
 	codeActivityExists  = "activity_exists"
 	codeCategoryExists  = "category_exists"
 	codeActivityMissing = "activity_not_found"
+	codeDuplicateImport = "duplicate_import"
 )
 
 // validIcons is the allowed SF Symbol set for catalog icons. Must match
@@ -51,6 +52,14 @@ const (
 	maxNameLen  = 60
 	maxNotesLen = 280
 )
+
+// validEntrySources is the allowed provenance set for entries (entry-provenance
+// spec). The backend is the authoritative validator; the client keeps the
+// union. Future sources (e.g. a new integration) extend this list.
+var validEntrySources = map[string]bool{
+	"manual": true, "widget": true, "siri": true, "control": true,
+	"screentime": true, "garmin": true, "calendar": true, "healthkit": true,
+}
 
 var uuidV7Regex = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`)
 
@@ -162,6 +171,8 @@ type entryCreateReq struct {
 	ActivityID *string `json:"activity_id"`
 	StartedAt  string  `json:"started_at"`
 	EndedAt    *string `json:"ended_at"`
+	Source     string  `json:"source"`
+	SourceRef  *string `json:"source_ref"`
 }
 
 type entryUpdateReq struct {

@@ -562,6 +562,248 @@ func TestStore_UpdateEntry_MissingReturnsNotFound(t *testing.T) {
 	}
 }
 
+// Delta pull-sync: ListActivities with a non-nil modifiedSince returns only
+// records whose updated_at is newer than the cursor. updated_at is set
+// explicitly (SQLite stores second precision, so wall-clock sleeps are not
+// reliable separators).
+func TestStore_ListActivities_ModifiedSince(t *testing.T) {
+	store := setupTestStore(t)
+	defer func() { _ = store.Close() }()
+	uid := newTestUser(t, store, "modified-since@example.com")
+
+	a1 := mustCreateActivity(t, store, uid, "Gym", nil)
+	a2 := mustCreateActivity(t, store, uid, "Read", nil)
+
+	// Pin distinct updated_at values (LWW requires newer-than-stored): a1 at
+	// T+1s, a2 at T+2s, cursor at T+1s.
+	now := time.Now().UTC().Truncate(time.Second)
+	t1 := now.Add(time.Second)
+	t2 := now.Add(2 * time.Second)
+	if _, err := store.UpdateActivity(context.Background(), uid, a1.ID, ActivityPatch{
+		UpdatedAt: t1,
+	}); err != nil {
+		t.Fatalf("pin a1: %v", err)
+	}
+	if _, err := store.UpdateActivity(context.Background(), uid, a2.ID, ActivityPatch{
+		UpdatedAt: t2,
+	}); err != nil {
+		t.Fatalf("pin a2: %v", err)
+	}
+
+	// Cursor at T+1s: only the newer activity is returned.
+	items, err := store.ListActivities(context.Background(), uid, "", &t1)
+	if err != nil {
+		t.Fatalf("ListActivities: %v", err)
+	}
+	if len(items) != 1 || items[0].ID != a2.ID {
+		t.Errorf("expected only the newer activity, got %d items", len(items))
+	}
+
+	// Cursor after both: empty.
+	future := t2.Add(time.Second)
+	items, err = store.ListActivities(context.Background(), uid, "", &future)
+	if err != nil {
+		t.Fatalf("ListActivities: %v", err)
+	}
+	if len(items) != 0 {
+		t.Errorf("expected 0 items with a future cursor, got %d", len(items))
+	}
+
+	// Nil cursor: full pull (current behavior).
+	items, err = store.ListActivities(context.Background(), uid, "", nil)
+	if err != nil {
+		t.Fatalf("ListActivities: %v", err)
+	}
+	if len(items) != 2 {
+		t.Errorf("expected 2 items on full pull, got %d", len(items))
+	}
+}
+
+// Delta pull-sync: ListEntries with ModifiedSince returns only entries whose
+// updated_at is newer than the cursor.
+func TestStore_ListEntries_ModifiedSince(t *testing.T) {
+	store := setupTestStore(t)
+	defer func() { _ = store.Close() }()
+	uid := newTestUser(t, store, "entries-modified@example.com")
+	a := mustCreateActivity(t, store, uid, "Gym", nil)
+
+	base := time.Date(2026, 7, 27, 9, 0, 0, 0, time.UTC)
+	e1, _, err := store.CreateEntry(context.Background(), Entry{
+		ID: uuidV7(), UserID: uid, ActivityID: &a.ID, StartedAt: base,
+	})
+	if err != nil {
+		t.Fatalf("CreateEntry 1: %v", err)
+	}
+	e2, _, err := store.CreateEntry(context.Background(), Entry{
+		ID: uuidV7(), UserID: uid, ActivityID: &a.ID, StartedAt: base.Add(time.Hour),
+	})
+	if err != nil {
+		t.Fatalf("CreateEntry 2: %v", err)
+	}
+
+	// Pin distinct updated_at values (LWW requires newer-than-stored): e1 at
+	// T+1s, e2 at T+2s, cursor at T+1s.
+	now := time.Now().UTC().Truncate(time.Second)
+	t1 := now.Add(time.Second)
+	t2 := now.Add(2 * time.Second)
+	if _, err := store.UpdateEntry(context.Background(), uid, e1.ID, EntryPatch{
+		UpdatedAt: t1,
+	}); err != nil {
+		t.Fatalf("pin e1: %v", err)
+	}
+	if _, err := store.UpdateEntry(context.Background(), uid, e2.ID, EntryPatch{
+		UpdatedAt: t2,
+	}); err != nil {
+		t.Fatalf("pin e2: %v", err)
+	}
+
+	items, _, err := store.ListEntries(context.Background(), uid, EntryFilter{ModifiedSince: &t1})
+	if err != nil {
+		t.Fatalf("ListEntries: %v", err)
+	}
+	if len(items) != 1 || items[0].ID != e2.ID {
+		t.Errorf("expected only the newer entry, got %d items", len(items))
+	}
+
+	// An update bumps updated_at and must be picked up by a delta pull.
+	ended := base.Add(2 * time.Hour)
+	updated, err := store.UpdateEntry(context.Background(), uid, e1.ID, EntryPatch{
+		EndedAt: NullableTime{Set: true, Valid: true, Value: ended}, UpdatedAt: t2.Add(time.Second),
+	})
+	if err != nil {
+		t.Fatalf("UpdateEntry: %v", err)
+	}
+	items, _, err = store.ListEntries(context.Background(), uid, EntryFilter{ModifiedSince: &t1})
+	if err != nil {
+		t.Fatalf("ListEntries: %v", err)
+	}
+	if len(items) != 2 {
+		t.Errorf("expected 2 items after update, got %d", len(items))
+	}
+	if items[0].ID != updated.ID && items[1].ID != updated.ID {
+		t.Errorf("expected the updated entry in the delta, got %+v", items)
+	}
+}
+
+// Provenance: entries created without source/source_ref default to
+// manual/null (back-compat); entries created with them persist them.
+func TestStore_CreateEntry_ProvenanceDefaultsAndPersistence(t *testing.T) {
+	store := setupTestStore(t)
+	defer func() { _ = store.Close() }()
+	uid := newTestUser(t, store, "provenance@example.com")
+	a := mustCreateActivity(t, store, uid, "Gym", nil)
+	base := time.Date(2026, 7, 27, 9, 0, 0, 0, time.UTC)
+
+	// No provenance → manual/null.
+	e1, _, err := store.CreateEntry(context.Background(), Entry{
+		ID: uuidV7(), UserID: uid, ActivityID: &a.ID, StartedAt: base,
+	})
+	if err != nil {
+		t.Fatalf("CreateEntry: %v", err)
+	}
+	if e1.Source != "manual" {
+		t.Errorf("expected default source manual, got %q", e1.Source)
+	}
+	if e1.SourceRef != nil {
+		t.Errorf("expected nil source_ref, got %q", *e1.SourceRef)
+	}
+
+	// Explicit provenance persists.
+	ref := "callback-123"
+	e2, _, err := store.CreateEntry(context.Background(), Entry{
+		ID: uuidV7(), UserID: uid, ActivityID: &a.ID, StartedAt: base.Add(time.Hour),
+		Source: "screentime", SourceRef: &ref,
+	})
+	if err != nil {
+		t.Fatalf("CreateEntry: %v", err)
+	}
+	if e2.Source != "screentime" || e2.SourceRef == nil || *e2.SourceRef != ref {
+		t.Errorf("expected screentime/%s, got %q/%v", ref, e2.Source, e2.SourceRef)
+	}
+
+	// Round-trip through GetEntry.
+	got, err := store.GetEntry(context.Background(), uid, e2.ID)
+	if err != nil {
+		t.Fatalf("GetEntry: %v", err)
+	}
+	if got.Source != "screentime" || got.SourceRef == nil || *got.SourceRef != ref {
+		t.Errorf("round-trip: expected screentime/%s, got %q/%v", ref, got.Source, got.SourceRef)
+	}
+}
+
+// Duplicate import prevention: a second create with the same
+// (user_id, source, source_ref) is rejected by the partial unique index.
+func TestStore_CreateEntry_DuplicateImportRejected(t *testing.T) {
+	store := setupTestStore(t)
+	defer func() { _ = store.Close() }()
+	uid := newTestUser(t, store, "dup-import@example.com")
+	a := mustCreateActivity(t, store, uid, "Gym", nil)
+	base := time.Date(2026, 7, 27, 9, 0, 0, 0, time.UTC)
+	ref := "interval-42"
+
+	if _, _, err := store.CreateEntry(context.Background(), Entry{
+		ID: uuidV7(), UserID: uid, ActivityID: &a.ID, StartedAt: base,
+		Source: "screentime", SourceRef: &ref,
+	}); err != nil {
+		t.Fatalf("first create: %v", err)
+	}
+	_, _, err := store.CreateEntry(context.Background(), Entry{
+		ID: uuidV7(), UserID: uid, ActivityID: &a.ID, StartedAt: base.Add(time.Hour),
+		Source: "screentime", SourceRef: &ref,
+	})
+	if !errors.Is(err, ErrDuplicateImport) {
+		t.Fatalf("expected ErrDuplicateImport, got %v", err)
+	}
+
+	// Same source_ref with a different source is allowed (distinct provenance).
+	if _, _, err := store.CreateEntry(context.Background(), Entry{
+		ID: uuidV7(), UserID: uid, ActivityID: &a.ID, StartedAt: base.Add(2 * time.Hour),
+		Source: "garmin", SourceRef: &ref,
+	}); err != nil {
+		t.Fatalf("different source, same ref must be allowed: %v", err)
+	}
+
+	// Null source_ref rows are exempt from the constraint (manual entries).
+	if _, _, err := store.CreateEntry(context.Background(), Entry{
+		ID: uuidV7(), UserID: uid, ActivityID: &a.ID, StartedAt: base.Add(3 * time.Hour),
+	}); err != nil {
+		t.Fatalf("manual entry must not collide: %v", err)
+	}
+}
+
+// Idempotent replay with provenance: replaying the same id returns the
+// existing record (with its provenance) and does not create a duplicate.
+func TestStore_CreateEntry_IdempotentReplayWithProvenance(t *testing.T) {
+	store := setupTestStore(t)
+	defer func() { _ = store.Close() }()
+	uid := newTestUser(t, store, "replay-provenance@example.com")
+	a := mustCreateActivity(t, store, uid, "Gym", nil)
+	base := time.Date(2026, 7, 27, 9, 0, 0, 0, time.UTC)
+	ref := "garmin-activity-7"
+
+	e := Entry{
+		ID: uuidV7(), UserID: uid, ActivityID: &a.ID, StartedAt: base,
+		Source: "garmin", SourceRef: &ref,
+	}
+	created, isNew, err := store.CreateEntry(context.Background(), e)
+	if err != nil || !isNew {
+		t.Fatalf("first create: isNew=%v err=%v", isNew, err)
+	}
+	replayed, isNew, err := store.CreateEntry(context.Background(), e)
+	if err != nil {
+		t.Fatalf("replay: %v", err)
+	}
+	if isNew {
+		t.Fatal("replay must return created=false")
+	}
+	if replayed.Source != "garmin" || replayed.SourceRef == nil || *replayed.SourceRef != ref {
+		t.Errorf("replay must return the stored provenance, got %q/%v", replayed.Source, replayed.SourceRef)
+	}
+	if replayed.ID != created.ID {
+		t.Errorf("replay must return the same record, got %q vs %q", replayed.ID, created.ID)
+	}
+}
+
 // F8: a concurrent name collision that races past the pre-check must surface as
 // ErrActivityExists (409), not a raw UNIQUE-constraint error (500). With a
 // single pooled connection, the pre-check and INSERT release the connection

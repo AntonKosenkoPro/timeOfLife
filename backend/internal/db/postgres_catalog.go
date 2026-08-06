@@ -34,18 +34,20 @@ func pgScanEntry(sc pgxScanner, userID string) (Entry, error) {
 		activityID *string
 		endedAt    *time.Time
 		dur        *int
+		sourceRef  *string
 	)
-	if err := sc.Scan(&e.ID, &activityID, &e.StartedAt, &endedAt, &dur, &e.CreatedAt, &e.UpdatedAt); err != nil {
+	if err := sc.Scan(&e.ID, &activityID, &e.StartedAt, &endedAt, &dur, &sourceRef, &e.Source, &e.CreatedAt, &e.UpdatedAt); err != nil {
 		return Entry{}, err
 	}
 	e.UserID = userID
 	e.ActivityID = activityID
 	e.EndedAt = endedAt
 	e.DurationSeconds = dur
+	e.SourceRef = sourceRef
 	return e, nil
 }
 
-const pgEntryColumns = `id, activity_id, started_at, ended_at, duration_seconds, created_at, updated_at`
+const pgEntryColumns = `id, activity_id, started_at, ended_at, duration_seconds, source_ref, source, created_at, updated_at`
 
 // pgListActivityTagsBatch returns category tags keyed by activity_id.
 func (s *PostgresStore) pgListActivityTagsBatch(ctx context.Context, userID string, activityIDs []string) (map[string][]CategoryTag, error) {
@@ -136,23 +138,23 @@ func (s *PostgresStore) pgListActivityNamesBatch(ctx context.Context, activityID
 // ---------- Activities ----------
 
 // ListActivities returns the user's activities ordered by last_used_at DESC.
-func (s *PostgresStore) ListActivities(ctx context.Context, userID, q string) ([]Activity, error) {
+func (s *PostgresStore) ListActivities(ctx context.Context, userID, q string, modifiedSince *time.Time) ([]Activity, error) {
 	var rows pgx.Rows
 	var err error
 	if q != "" {
 		rows, err = s.pool.Query(ctx, `
 			SELECT id, name, notes, last_used_at, created_at, updated_at
 			FROM activities
-			WHERE user_id = $1 AND lower(name) LIKE $2
+			WHERE user_id = $1 AND lower(name) LIKE $2 AND ($3::timestamptz IS NULL OR updated_at > $3)
 			ORDER BY (last_used_at IS NULL), last_used_at DESC, updated_at DESC
-		`, userID, "%"+strings.ToLower(q)+"%")
+		`, userID, "%"+strings.ToLower(q)+"%", modifiedSince)
 	} else {
 		rows, err = s.pool.Query(ctx, `
 			SELECT id, name, notes, last_used_at, created_at, updated_at
 			FROM activities
-			WHERE user_id = $1
+			WHERE user_id = $1 AND ($2::timestamptz IS NULL OR updated_at > $2)
 			ORDER BY (last_used_at IS NULL), last_used_at DESC, updated_at DESC
-		`, userID)
+		`, userID, modifiedSince)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("list activities: %w", err)
@@ -591,6 +593,9 @@ func (s *PostgresStore) ListEntries(ctx context.Context, userID string, f EntryF
 	if f.CategoryID != "" {
 		addc("activity_id IN (SELECT activity_id FROM activity_categories WHERE category_id = $%d)", f.CategoryID)
 	}
+	if f.ModifiedSince != nil {
+		addc("updated_at > $%d", *f.ModifiedSince)
+	}
 	if cur, curID, ok := decodeCursor(f.Cursor); ok {
 		conds = append(conds, fmt.Sprintf("(started_at < $%d OR (started_at = $%d AND id < $%d))", n, n, n+1))
 		args = append(args, cur, curID)
@@ -698,6 +703,11 @@ func (s *PostgresStore) CreateEntry(ctx context.Context, e Entry) (Entry, bool, 
 		d := int(e.EndedAt.Sub(e.StartedAt).Seconds())
 		dur = &d
 	}
+	// Back-compat: entries created without provenance default to manual/null.
+	source := e.Source
+	if source == "" {
+		source = "manual"
+	}
 
 	now := time.Now().UTC()
 	tx, err := s.pool.Begin(ctx)
@@ -707,9 +717,15 @@ func (s *PostgresStore) CreateEntry(ctx context.Context, e Entry) (Entry, bool, 
 	defer func() { _ = tx.Rollback(ctx) }()
 
 	if _, err := tx.Exec(ctx, `
-		INSERT INTO entries (id, user_id, activity_id, started_at, ended_at, duration_seconds, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $7)
-	`, e.ID, e.UserID, e.ActivityID, e.StartedAt, e.EndedAt, dur, now); err != nil {
+		INSERT INTO entries (id, user_id, activity_id, started_at, ended_at, duration_seconds, source, source_ref, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $9)
+	`, e.ID, e.UserID, e.ActivityID, e.StartedAt, e.EndedAt, dur, source, e.SourceRef, now); err != nil {
+		// A duplicate import (same user_id, source, source_ref) surfaces as a
+		// UNIQUE-constraint failure on the partial index; map it to a clear
+		// error rather than a raw 500.
+		if pgIsUniqueViolation(err) {
+			return Entry{}, false, fmt.Errorf("create entry: %w", ErrDuplicateImport)
+		}
 		return Entry{}, false, fmt.Errorf("create entry: %w", err)
 	}
 	// Bump the activity's last_used_at to the entry's started_at (recency for

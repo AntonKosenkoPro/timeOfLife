@@ -55,6 +55,12 @@ extension APIError {
         return nil
     }
 
+    /// The `details` map for server errors, otherwise empty.
+    var details: [String: String] {
+        if case let .server(_, _, details) = self { return details }
+        return [:]
+    }
+
     /// Human-facing message from the server, otherwise a fallback.
     var message: String {
         switch self {

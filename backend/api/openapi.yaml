@@ -399,6 +399,15 @@ paths:
           schema:
             type: string
           description: Case-insensitive name filter (typeahead).
+        - name: modified_since
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+          description: |
+            Delta pull-sync: return only activities with `updated_at` strictly
+            greater than this RFC 3339 timestamp. Absent/empty = full pull.
       responses:
         "200":
           description: The user's activities, recency-ordered.
@@ -759,6 +768,15 @@ paths:
           schema:
             type: string
           description: Opaque pagination cursor returned by a previous request.
+        - name: modified_since
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+          description: |
+            Delta pull-sync: return only entries with `updated_at` strictly
+            greater than this RFC 3339 timestamp. Absent/empty = full pull.
       responses:
         "200":
           description: A page of entries.
@@ -977,6 +995,8 @@ components:
         older than the server's); `details` carries the server's current version.
         `activity_exists` / `category_exists` — a case-insensitive name collision
         on create; `details` carries the existing record's id and name.
+        `duplicate_import` — an entry with the same (source, source_ref) already
+        exists (duplicate import prevention).
       content:
         application/json:
           schema:
@@ -1008,6 +1028,12 @@ components:
                   details:
                     id: "019639f1-7a3b-7abc-9def-100000000002"
                     name: Sport
+            duplicate_import:
+              summary: Entry with the same source and source_ref already exists
+              value:
+                error:
+                  code: duplicate_import
+                  message: An entry with this source and source_ref already exists.
 
   schemas:
     # ---------- Request schemas ----------
@@ -1287,7 +1313,9 @@ components:
       description: |
         Request body for creating a time entry. `activity_id` is required and
         must belong to the user; the server resolves `activity_name` from the
-        activity. `ended_at` omitted/null means a running timer.
+        activity. `ended_at` omitted/null means a running timer. `source`
+        (default `manual`) and `source_ref` record provenance; a duplicate
+        (source, source_ref) is rejected with 409 `duplicate_import`.
       required:
         - id
         - activity_id
@@ -1309,10 +1337,20 @@ components:
           format: date-time
           nullable: true
           description: End time; null/omitted = running timer.
+        source:
+          type: string
+          enum: [manual, widget, siri, control, screentime, garmin, calendar, healthkit]
+          description: Entry provenance; defaults to `manual` when omitted.
+        source_ref:
+          type: string
+          nullable: true
+          description: External identifier for the source; null for manual entries.
       example:
         id: "019639f1-7a3b-7abc-9def-100000000003"
         activity_id: "019639f1-7a3b-7abc-9def-100000000001"
         started_at: "2026-07-27T09:00:00Z"
+        source: manual
+        source_ref: null
 
     EntryUpdate:
       type: object
@@ -1420,11 +1458,15 @@ components:
         A time entry. Every entry references exactly one activity. `categories`
         are inferred from the activity's tags at query time, and
         `activity_name` is the activity's current name, resolved at query time.
+        `source` records where the entry came from (provenance); `source_ref`
+        holds the external identifier for that source (e.g. a Screen Time
+        callback uuid or Garmin activity id) and is null for manual entries.
       required:
         - id
         - activity_id
         - activity_name
         - started_at
+        - source
         - created_at
         - updated_at
         - categories
@@ -1451,6 +1493,20 @@ components:
           type: integer
           nullable: true
           description: ended_at - started_at, in seconds; null while running.
+        source:
+          type: string
+          enum: [manual, widget, siri, control, screentime, garmin, calendar, healthkit]
+          description: |
+            Entry provenance — where the entry came from. `manual` is the
+            default for entries created without a source.
+        source_ref:
+          type: string
+          nullable: true
+          description: |
+            External identifier for the source (e.g. Screen Time callback uuid,
+            Garmin activity id, `.ics` UID). Null for manual entries. The
+            server enforces uniqueness on (user_id, source, source_ref) for
+            non-null source_ref, preventing duplicate imports.
         created_at:
           type: string
           format: date-time
@@ -1468,6 +1524,8 @@ components:
         started_at: "2026-07-27T09:00:00Z"
         ended_at: "2026-07-27T10:00:00Z"
         duration_seconds: 3600
+        source: manual
+        source_ref: null
         created_at: "2026-07-27T09:00:00Z"
         updated_at: "2026-07-27T10:00:00Z"
         categories:

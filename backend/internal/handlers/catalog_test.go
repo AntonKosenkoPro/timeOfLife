@@ -196,6 +196,54 @@ func TestListActivities(t *testing.T) {
 	}
 }
 
+// Delta pull-sync: GET /activities?modified_since= returns only activities
+// updated after the cursor; a malformed cursor is a 422.
+func TestListActivities_ModifiedSince(t *testing.T) {
+	h, _, _, tok := newCatalogHandler(t)
+	w1 := serve(h, jsonReq(t, "POST", "/api/v1/activities", tok, map[string]any{
+		"id": v7(), "name": "Gym",
+	}))
+	var a1 activityResp
+	decodeBody(t, w1, &a1)
+
+	w2 := serve(h, jsonReq(t, "POST", "/api/v1/activities", tok, map[string]any{
+		"id": v7(), "name": "Read",
+	}))
+	var a2 activityResp
+	decodeBody(t, w2, &a2)
+
+	// Pin distinct updated_at values (SQLite stores second precision): a1 at
+	// T+1s, a2 at T+2s.
+	now := time.Now().UTC().Truncate(time.Second)
+	t1 := now.Add(time.Second).Format(time.RFC3339)
+	t2 := now.Add(2 * time.Second).Format(time.RFC3339)
+	if w := serve(h, jsonReq(t, "PATCH", "/api/v1/activities/"+a1.ID, tok, map[string]any{
+		"updated_at": t1,
+	})); w.Code != http.StatusOK {
+		t.Fatalf("pin a1: expected 200, got %d (body=%s)", w.Code, w.Body.String())
+	}
+	if w := serve(h, jsonReq(t, "PATCH", "/api/v1/activities/"+a2.ID, tok, map[string]any{
+		"updated_at": t2,
+	})); w.Code != http.StatusOK {
+		t.Fatalf("pin a2: expected 200, got %d (body=%s)", w.Code, w.Body.String())
+	}
+
+	w := serve(h, jsonReq(t, "GET", "/api/v1/activities?modified_since="+t1, tok, nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	var list []activityResp
+	decodeBody(t, w, &list)
+	if len(list) != 1 || list[0].ID != a2.ID {
+		t.Errorf("expected only the newer activity, got %d items", len(list))
+	}
+
+	wb := serve(h, jsonReq(t, "GET", "/api/v1/activities?modified_since=garbage", tok, nil))
+	if wb.Code != http.StatusUnprocessableEntity {
+		t.Errorf("expected 422 for malformed modified_since, got %d", wb.Code)
+	}
+}
+
 func TestGetActivity_NotFound(t *testing.T) {
 	h, _, _, tok := newCatalogHandler(t)
 	w := serve(h, jsonReq(t, "GET", "/api/v1/activities/"+v7(), tok, nil))

@@ -5,7 +5,7 @@ import Combine
 /// View model for the time-tracking timer screen.
 ///
 /// Owns the running timer state, validates the activity name, and delegates
-/// persistence to `TimerService`.
+/// persistence to `TimerService` (which writes only to the local database).
 @MainActor
 final class TimerViewModel: ObservableObject {
     @Published var activityName: String = ""
@@ -19,6 +19,7 @@ final class TimerViewModel: ObservableObject {
     let authService: AuthService
     private let connectivity: Connectivity
     private var startDate: Date?
+    private var activityID: String?
     private var timerCancellable: AnyCancellable?
 
     init(service: TimerService, authService: AuthService, connectivity: Connectivity) {
@@ -27,7 +28,8 @@ final class TimerViewModel: ObservableObject {
         self.connectivity = connectivity
     }
 
-    /// Starts the timer if the activity name is valid.
+    /// Starts the timer if the activity name is valid. Persists the running
+    /// state so it survives a crash and is readable by widgets/Controls.
     func start() {
         guard validate() else {
             Haptics.error()
@@ -44,9 +46,22 @@ final class TimerViewModel: ObservableObject {
             }
         UIApplication.shared.isIdleTimerDisabled = true
         Haptics.selection()
+        Task {
+            do {
+                try await service.startTimer(
+                    activityName: activityName.trimmingCharacters(in: .whitespacesAndNewlines),
+                    startedAt: startDate ?? Date()
+                )
+                activityID = try await service.store.activity(named: activityName.trimmingCharacters(in: .whitespacesAndNewlines))?.id
+            } catch {
+                // Local persistence failure: surface it but keep the timer
+                // running in memory so the user can still stop and retry.
+                fieldError = L10n.text(in: .default, code: "error.unknown")
+            }
+        }
     }
 
-    /// Stops the timer and saves the completed entry.
+    /// Stops the timer and saves the completed entry locally.
     func stop() async {
         guard isRunning, let startDate else { return }
         isRunning = false
@@ -54,20 +69,22 @@ final class TimerViewModel: ObservableObject {
         timerCancellable = nil
         UIApplication.shared.isIdleTimerDisabled = false
 
-        let duration = Date().timeIntervalSince(startDate)
         isLoading = true
         defer { isLoading = false }
 
         do {
-            try await service.saveEntry(name: activityName, duration: duration, startedAt: startDate)
+            try await service.stopTimer(
+                activityID: activityID ?? UUID().uuidString.lowercased(),
+                activityName: activityName.trimmingCharacters(in: .whitespacesAndNewlines),
+                startedAt: startDate,
+                endedAt: Date()
+            )
             didSave = true
             reset()
             Haptics.success()
         } catch {
             Haptics.error()
-            fieldError = connectivity.isConnected
-                ? L10n.text(in: .default, code: "error.unknown")
-                : L10n.text(in: .default, code: "error.offline")
+            fieldError = L10n.text(in: .default, code: "error.unknown")
         }
     }
 
@@ -78,6 +95,7 @@ final class TimerViewModel: ObservableObject {
         elapsed = 0
         isRunning = false
         startDate = nil
+        activityID = nil
         timerCancellable?.cancel()
         timerCancellable = nil
         UIApplication.shared.isIdleTimerDisabled = false

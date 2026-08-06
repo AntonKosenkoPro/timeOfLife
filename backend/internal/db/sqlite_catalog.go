@@ -76,10 +76,11 @@ func scanEntry(sc rowScanner, userID string) (Entry, error) {
 		startedAt  string
 		endedAt    sql.NullString
 		dur        sql.NullInt64
+		sourceRef  sql.NullString
 		createdAt  string
 		updatedAt  string
 	)
-	if err := sc.Scan(&e.ID, &activityID, &startedAt, &endedAt, &dur, &createdAt, &updatedAt); err != nil {
+	if err := sc.Scan(&e.ID, &activityID, &startedAt, &endedAt, &dur, &sourceRef, &e.Source, &createdAt, &updatedAt); err != nil {
 		return Entry{}, err
 	}
 	e.UserID = userID
@@ -89,12 +90,15 @@ func scanEntry(sc rowScanner, userID string) (Entry, error) {
 	e.StartedAt = parseTime(startedAt)
 	e.EndedAt = nullTimePtr(endedAt)
 	e.DurationSeconds = nullIntPtr(dur)
+	if sourceRef.Valid {
+		e.SourceRef = &sourceRef.String
+	}
 	e.CreatedAt = parseTime(createdAt)
 	e.UpdatedAt = parseTime(updatedAt)
 	return e, nil
 }
 
-const entryColumns = `id, activity_id, started_at, ended_at, duration_seconds, created_at, updated_at`
+const entryColumns = `id, activity_id, started_at, ended_at, duration_seconds, source_ref, source, created_at, updated_at`
 
 // listActivityTagsBatch returns category tags keyed by activity_id for the
 // given activities (entries reuse this by their activity_id).
@@ -199,23 +203,23 @@ func (s *SQLiteStore) listActivityNamesBatch(ctx context.Context, activityIDs []
 // ---------- Activities ----------
 
 // ListActivities returns the user's activities ordered by last_used_at DESC.
-func (s *SQLiteStore) ListActivities(ctx context.Context, userID, q string) ([]Activity, error) {
+func (s *SQLiteStore) ListActivities(ctx context.Context, userID, q string, modifiedSince *time.Time) ([]Activity, error) {
 	var rows *sql.Rows
 	var err error
 	if q != "" {
 		rows, err = s.db.QueryContext(ctx, `
 			SELECT id, name, notes, last_used_at, created_at, updated_at
 			FROM activities
-			WHERE user_id = ? AND lower(name) LIKE ?
+			WHERE user_id = ? AND lower(name) LIKE ? AND (? IS NULL OR updated_at > ?)
 			ORDER BY (last_used_at IS NULL), last_used_at DESC, updated_at DESC
-		`, userID, "%"+strings.ToLower(q)+"%")
+		`, userID, "%"+strings.ToLower(q)+"%", fmtTimeArg(modifiedSince), fmtTimeArg(modifiedSince))
 	} else {
 		rows, err = s.db.QueryContext(ctx, `
 			SELECT id, name, notes, last_used_at, created_at, updated_at
 			FROM activities
-			WHERE user_id = ?
+			WHERE user_id = ? AND (? IS NULL OR updated_at > ?)
 			ORDER BY (last_used_at IS NULL), last_used_at DESC, updated_at DESC
-		`, userID)
+		`, userID, fmtTimeArg(modifiedSince), fmtTimeArg(modifiedSince))
 	}
 	if err != nil {
 		return nil, fmt.Errorf("list activities: %w", err)
@@ -699,6 +703,10 @@ func (s *SQLiteStore) ListEntries(ctx context.Context, userID string, f EntryFil
 		conds = append(conds, "activity_id IN (SELECT activity_id FROM activity_categories WHERE category_id = ?)")
 		args = append(args, f.CategoryID)
 	}
+	if f.ModifiedSince != nil {
+		conds = append(conds, "updated_at > ?")
+		args = append(args, fmtTime(*f.ModifiedSince))
+	}
 	if cur, curID, ok := decodeCursor(f.Cursor); ok {
 		conds = append(conds, "(started_at < ? OR (started_at = ? AND id < ?))")
 		args = append(args, fmtTime(cur), fmtTime(cur), curID)
@@ -815,6 +823,11 @@ func (s *SQLiteStore) CreateEntry(ctx context.Context, e Entry) (Entry, bool, er
 		d := int(e.EndedAt.Sub(e.StartedAt).Seconds())
 		dur = &d
 	}
+	// Back-compat: entries created without provenance default to manual/null.
+	source := e.Source
+	if source == "" {
+		source = "manual"
+	}
 
 	now := time.Now().UTC()
 	tx, err := s.db.BeginTx(ctx, nil)
@@ -824,9 +837,15 @@ func (s *SQLiteStore) CreateEntry(ctx context.Context, e Entry) (Entry, bool, er
 	defer func() { _ = tx.Rollback() }()
 
 	if _, err := tx.ExecContext(ctx, `
-		INSERT INTO entries (id, user_id, activity_id, started_at, ended_at, duration_seconds, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-	`, e.ID, e.UserID, strPtrArg(e.ActivityID), fmtTime(e.StartedAt), fmtTimeArg(e.EndedAt), nullIntArg(dur), fmtTime(now), fmtTime(now)); err != nil {
+		INSERT INTO entries (id, user_id, activity_id, started_at, ended_at, duration_seconds, source, source_ref, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, e.ID, e.UserID, strPtrArg(e.ActivityID), fmtTime(e.StartedAt), fmtTimeArg(e.EndedAt), nullIntArg(dur), source, strPtrArg(e.SourceRef), fmtTime(now), fmtTime(now)); err != nil {
+		// A duplicate import (same user_id, source, source_ref) surfaces as a
+		// UNIQUE-constraint failure on the partial index; map it to a clear
+		// error rather than a raw 500.
+		if isUniqueViolation(err) {
+			return Entry{}, false, fmt.Errorf("create entry: %w", ErrDuplicateImport)
+		}
 		return Entry{}, false, fmt.Errorf("create entry: %w", err)
 	}
 	// Bump the activity's last_used_at to the entry's started_at (recency for

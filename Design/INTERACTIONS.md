@@ -124,10 +124,20 @@ R3 / U6 / U7; decision D17. Applies to activity and category deletions from Mana
 - A deletion is **not** committed to the local store or pushed to sync immediately. It enters a client-side **undo buffer** and is only committed + synced after a 30 s window passes.
 - Present a transient `UndoToast` (`COMPONENTS.md`) at the bottom with an **Undo** button; auto-dismiss after 30 s.
 - **Undo** (tap, or system shake-to-undo) re-inserts the deleted item(s) from the buffer before the window elapses; nothing is synced.
-- The buffer is **superseded** by the next undoable action and cleared on app relaunch — only the most recent undoable deletion is restorable (matches U7 wording).
+- The buffer is **superseded** by the next undoable action — only the most recent undoable deletion is restorable (matches U7 wording).
 - After the window, commit locally (hard delete) and enqueue the `DELETE` for sync; the server hard-deletes (no trash, per `Activity_Catalog_API.md` Sync & ids).
 - Bulk deletions (delete activity + its entries, F10) are undoable as a unit — the buffer holds the whole set and Undo restores all of it.
 - **Undo API failure:** If the undo API call fails (network error, 404, 409), show an `ErrorBanner` ("Could not undo — try again") and keep the item in its edited state. The undo buffer is not cleared on failure, so the user can retry by triggering undo again (e.g. via a second UndoToast if still within the 30 s window).
+
+### Durable undo buffer (local-first)
+
+D3 (OpenSpec change `local-first-sync-architecture`). The undo buffer is **durable** — it lives in an `undo_buffer` table in the local GRDB database, not in memory:
+
+- The 30 s window is **wall-clock** (`deleted_at + 30s`), not a `Timer`. A `Timer` is only a UI convenience for the UndoToast countdown; the window itself is computed from the stored timestamp.
+- A deletion writes the buffer row (full serialized snapshot of the deleted records) and removes the records in **one transaction**; no outbox row is created while the deletion is in the buffer, so the relay is never notified of an undone deletion.
+- **Expired buffers commit on the next foreground** — never in the background, and there is no background timer. On foreground, the app detects expired buffers and commits (deletes the buffer row + inserts the outbox rows) in one transaction.
+- The buffer **survives suspension, kill, and cold launch**. After a cold launch within the window, no unsolicited UndoToast is shown; if the user navigates to the affected screen within the window, the deletion can still be undone from the durable buffer.
+- **Supersession (U7):** only the most recent undoable deletion is restorable via shake-to-undo / UndoToast; an older deletion commits when its own 30 s window elapses.
 
 ### Shake-to-undo wiring (U7)
 
@@ -172,6 +182,16 @@ All manage-screen delete flows should follow this pattern consistently.
 | 409 `conflict` | `ErrorBanner`, adopt server version, keep-latest |
 | 409 `activity_exists` / `category_exists` | Re-map local refs to surviving id, proceed |
 | Idempotent POST (replay) | Treat as success; no error surfaced |
+
+## Sync client (local-first)
+
+D6 (OpenSpec change `local-first-sync-architecture`). Sync is an **optional transport feature**, not a prerequisite: the app works fully offline and unsigned; the `SyncController` activates only on sign-in and deactivates on sign-out.
+
+- **Triggers:** (1) app enters foreground, (2) connectivity restored (`.satisfied`), (3) manual "Sync now" in Settings. No background task scheduling on iOS (unreliable); macOS may add a timer-based background sync later.
+- **First-sync is pull-first:** on activation, pull the relay's full state, merge server-wins on `updated_at` conflicts, then drain the local outbox. Subsequent pulls are deltas via `?modified_since=` (per-resource cursor advanced to the max `updated_at` received).
+- **Outbox drain:** one HTTP call per outbox row, in `created_at` order; idempotent POST / LWW PATCH / hard DELETE make replays safe. 409 `conflict` on push → adopt the server version (keep-latest) and clear the row; 409 `activity_exists`/`category_exists` → re-map local references to the winning id and proceed without an error.
+- **Status display (Settings, visible only when signed in):** "Last synced: <relative time>" or "Syncing…" (button disabled while in progress) or an error state (button stays enabled to allow retry). The manual "Sync now" action calls the same drain+pull path as the automatic triggers.
+- **Sign-out preserves local data and the outbox**; an explicit "Erase local data" action in Settings wipes them (destructive, confirmed).
 
 ## Catalog empty states
 

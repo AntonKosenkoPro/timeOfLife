@@ -16,6 +16,9 @@ final class AppContainer: ObservableObject {
     let authService: AuthService
     let appleService: AppleSignInService
     let timerService: TimerService
+    let localStore: LocalStore
+    let undoBuffer: UndoBufferStore
+    let syncController: SyncController
     /// Strong reference to the holder that wires the API client's refresh hook
     /// back to `authService`. If this were not retained, the holder would
     /// deallocate after `production()` returns and token refresh would fail.
@@ -33,6 +36,9 @@ final class AppContainer: ObservableObject {
         authService: AuthService,
         appleService: AppleSignInService,
         timerService: TimerService,
+        localStore: LocalStore,
+        undoBuffer: UndoBufferStore,
+        syncController: SyncController,
         clientHolder: APIClientHolder? = nil
     ) {
         self.baseURL = baseURL
@@ -46,6 +52,9 @@ final class AppContainer: ObservableObject {
         self.authService = authService
         self.appleService = appleService
         self.timerService = timerService
+        self.localStore = localStore
+        self.undoBuffer = undoBuffer
+        self.syncController = syncController
         self.clientHolder = clientHolder
     }
 
@@ -57,11 +66,11 @@ final class AppContainer: ObservableObject {
         let sessionStore = SessionStore()
         let navigation = AppNavigationStack()
         let connectivity = NetworkMonitor()
-        let timerService = TimerService(
-            store: LocalTimerStore(),
-            repository: StubTimerRepository(),
-            connectivity: connectivity
-        )
+        // The local database is the source of truth — the app cannot function
+        // without it, so an open failure is fatal (fail fast).
+        // swiftlint:disable:next force_try
+        let localStore = try! LocalStore()
+        let timerService = TimerService(store: localStore)
 
         let (client, clientHolder) = makeAuthClient(baseURL: baseURL, keychain: keychain)
         let repository = RemoteAuthRepository(client: client)
@@ -74,6 +83,14 @@ final class AppContainer: ObservableObject {
         clientHolder.service = authService
 
         let appleService = AppleSignInService()
+        let catalog = RemoteCatalogRepository(client: client)
+        let undoBuffer = UndoBufferStore(store: localStore)
+        let syncController = SyncController(
+            store: localStore,
+            remote: catalog,
+            connectivity: connectivity,
+            undoBuffer: undoBuffer
+        )
 
         return AppContainer(
             baseURL: baseURL,
@@ -87,6 +104,9 @@ final class AppContainer: ObservableObject {
             authService: authService,
             appleService: appleService,
             timerService: timerService,
+            localStore: localStore,
+            undoBuffer: undoBuffer,
+            syncController: syncController,
             clientHolder: clientHolder
         )
     }

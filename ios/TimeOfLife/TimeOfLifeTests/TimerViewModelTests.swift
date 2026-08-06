@@ -28,6 +28,23 @@ struct TimerViewModelTests {
         vm.reset()
     }
 
+    @Test("start timer persists running state to the local store")
+    func startTimerPersistsState() async throws {
+        let vm = makeViewModel()
+        vm.activityName = "Coding"
+        vm.start()
+
+        try? await Task.sleep(nanoseconds: 50_000_000)
+
+        let state = try await vm.service.store.timerState()
+        #expect(state != nil)
+        #expect(state?.status == "running")
+        #expect(state?.activityName == "Coding")
+
+        vm.reset()
+        try await vm.service.store.stopTimer()
+    }
+
     @Test("stop timer saves entry and resets form")
     func stopTimerSavesEntry() async {
         let vm = makeViewModel()
@@ -42,13 +59,15 @@ struct TimerViewModelTests {
         #expect(vm.activityName.isEmpty)
         #expect(vm.didSave)
 
-        let unsynced = await vm.service.store.unsyncedEntries()
-        #expect(unsynced.isEmpty)
+        let entries = try? await vm.service.store.entries()
+        #expect(entries?.count == 1)
+        #expect(entries?.first?.source == "manual")
+        #expect(entries?.first?.activityName == "Coding")
     }
 
-    @Test("offline stop leaves entry unsynced")
-    func offlineStopLeavesUnsynced() async {
-        let vm = makeViewModel(connected: false)
+    @Test("stop timer clears persisted running state")
+    func stopTimerClearsState() async throws {
+        let vm = makeViewModel()
         vm.activityName = "Reading"
         vm.start()
 
@@ -56,12 +75,8 @@ struct TimerViewModelTests {
 
         await vm.stop()
 
-        #expect(!vm.isRunning)
-        let unsynced = await vm.service.store.unsyncedEntries()
-        #expect(unsynced.count == 1)
-        #expect(unsynced.first?.activityName == "Reading")
-
-        vm.reset()
+        let state = try await vm.service.store.timerState()
+        #expect(state == nil)
     }
 
     @Test("reset clears timer state")
@@ -79,13 +94,11 @@ struct TimerViewModelTests {
 
     // MARK: - Helpers
 
-    private func makeViewModel(connected: Bool = true) -> TimerViewModel {
-        let connectivity = MockConnectivity(connected: connected)
-        let service = TimerService(
-            store: LocalTimerStore(url: temporaryStoreURL()),
-            repository: StubTimerRepository(),
-            connectivity: connectivity
-        )
+    private func makeViewModel() -> TimerViewModel {
+        let connectivity = MockConnectivity(connected: true)
+        // swiftlint:disable:next force_try
+        let store = try! LocalStore(url: temporaryStoreURL())
+        let service = TimerService(store: store)
         let authService = AuthService(
             repository: FakeAuthRepository(),
             keychain: InMemoryKeychainStore(),
@@ -98,6 +111,6 @@ struct TimerViewModelTests {
     private func temporaryStoreURL() -> URL {
         URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent(UUID().uuidString)
-            .appendingPathComponent("timerQueue.json")
+            .appendingPathComponent("timeoflife.sqlite")
     }
 }

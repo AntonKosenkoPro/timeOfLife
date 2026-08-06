@@ -33,4 +33,10 @@ var (
 	// performed in the store against the merged value; it is a validation error
 	// (422), not a persistence error.
 	ErrEndBeforeStart = errors.New("ended_at must be after started_at")
+
+	// ErrDuplicateImport is returned when creating an entry whose
+	// (user_id, source, source_ref) already exists (the partial unique index
+	// on provenance). A source re-sending the same record (e.g. Screen Time
+	// firing twice for the same interval) is rejected rather than duplicated.
+	ErrDuplicateImport = errors.New("duplicate import")
 )

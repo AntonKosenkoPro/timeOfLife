@@ -30,6 +30,7 @@ var canonicalErrorCodes = []string{
 	"activity_exists",
 	"category_exists",
 	"activity_not_found",
+	"duplicate_import",
 	"validation_error",
 }
 
@@ -62,7 +63,12 @@ type rawPath map[string]rawOperation
 type rawOperation struct {
 	OperationID string                 `yaml:"operationId"`
 	Security    []map[string]any       `yaml:"security"`
+	Parameters  []rawParameter         `yaml:"parameters"`
 	Responses   map[string]rawResponse `yaml:"responses"`
+}
+
+type rawParameter struct {
+	Name string `yaml:"name"`
 }
 
 type rawResponse struct {
@@ -82,7 +88,12 @@ type rawSchema struct {
 }
 
 type rawComponents struct {
-	Responses map[string]rawResponse `yaml:"responses"`
+	Responses map[string]rawResponse  `yaml:"responses"`
+	Schemas   map[string]rawSchemaDef `yaml:"schemas"`
+}
+
+type rawSchemaDef struct {
+	Properties map[string]any `yaml:"properties"`
 }
 
 func loadSpec(t *testing.T) *rawSpec {
@@ -247,6 +258,53 @@ func TestSpec_IdempotentPostsDocument200And201(t *testing.T) {
 		}
 		if _, ok := post.Responses["201"]; !ok {
 			t.Errorf("POST %s must document 201", path)
+		}
+	}
+}
+
+// Delta pull-sync (v1.2.0): GET /activities and GET /entries must document the
+// optional modified_since query parameter.
+func TestSpec_ModifiedSinceDocumentedOnListEndpoints(t *testing.T) {
+	s := loadSpec(t)
+	for _, path := range []string{"/api/v1/activities", "/api/v1/entries"} {
+		get, ok := s.Paths[path]["get"]
+		if !ok {
+			t.Errorf("expected GET %s", path)
+			continue
+		}
+		found := false
+		for _, p := range get.Parameters {
+			if p.Name == "modified_since" {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("GET %s must document the modified_since query parameter", path)
+		}
+	}
+}
+
+// Provenance (v1.2.0): the Entry schema must document source + source_ref and
+// the EntryCreate schema must accept them.
+func TestSpec_EntryProvenanceDocumented(t *testing.T) {
+	s := loadSpec(t)
+	entry, ok := s.Components.Schemas["Entry"]
+	if !ok {
+		t.Fatal("expected Entry schema")
+	}
+	for _, field := range []string{"source", "source_ref"} {
+		if _, ok := entry.Properties[field]; !ok {
+			t.Errorf("Entry schema must document %q", field)
+		}
+	}
+	create, ok := s.Components.Schemas["EntryCreate"]
+	if !ok {
+		t.Fatal("expected EntryCreate schema")
+	}
+	for _, field := range []string{"source", "source_ref"} {
+		if _, ok := create.Properties[field]; !ok {
+			t.Errorf("EntryCreate schema must document %q", field)
 		}
 	}
 }

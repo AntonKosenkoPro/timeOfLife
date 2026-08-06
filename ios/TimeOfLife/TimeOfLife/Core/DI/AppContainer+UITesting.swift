@@ -19,11 +19,9 @@ extension AppContainer {
         let sessionStore = SessionStore()
         let navigation = AppNavigationStack()
         let connectivity = MockConnectivity(connected: true)
-        let timerService = TimerService(
-            store: LocalTimerStore(),
-            repository: StubTimerRepository(),
-            connectivity: connectivity
-        )
+        // swiftlint:disable:next force_try
+        let localStore = try! LocalStore(url: temporaryStoreURL())
+        let timerService = TimerService(store: localStore)
         let repository = UITestingAuthRepository()
         let authService = AuthService(
             repository: repository,
@@ -36,6 +34,14 @@ extension AppContainer {
         // with no token/refresh hooks against the configured base URL.
         let apiClient = APIClient(baseURL: AppConfig.baseURL, session: .shared)
         let appleService = AppleSignInService()
+        let catalog = RemoteCatalogRepository(client: apiClient)
+        let undoBuffer = UndoBufferStore(store: localStore)
+        let syncController = SyncController(
+            store: localStore,
+            remote: catalog,
+            connectivity: connectivity,
+            undoBuffer: undoBuffer
+        )
 
         let container = AppContainer(
             baseURL: AppConfig.baseURL,
@@ -49,11 +55,20 @@ extension AppContainer {
             authService: authService,
             appleService: appleService,
             timerService: timerService,
+            localStore: localStore,
+            undoBuffer: undoBuffer,
+            syncController: syncController,
             clientHolder: nil
         )
 
         seed(screen: screen, sessionStore: sessionStore, navigation: navigation)
         return container
+    }
+
+    private static func temporaryStoreURL() -> URL {
+        URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent(UUID().uuidString)
+            .appendingPathComponent("timeoflife.sqlite")
     }
 
     /// Places the app on a specific screen for inspection.

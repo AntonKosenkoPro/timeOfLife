@@ -1,52 +1,59 @@
 import Foundation
 
-/// Orchestrates local storage and remote sync for time entries.
+/// Orchestrates the timer against the local database (local-first-store spec).
 ///
-/// The service is the single entry point for view models. It stores entries
-/// locally first, then attempts remote persistence, and finally marks the
-/// entry synced. If the remote call fails, the entry remains queued for later
-/// sync when connectivity returns.
+/// The service is the single entry point for view models. It writes only to
+/// `LocalStore` — the device is the source of truth. Remote propagation is the
+/// responsibility of the background `SyncController` (the outbox row is
+/// written in the same transaction as the state change), so there is no
+/// remote-push path here.
 @MainActor
 final class TimerService: ObservableObject {
-    let store: TimerStoring
-    private let repository: TimerRepository
-    private let connectivity: Connectivity
+    let store: LocalStore
 
-    init(
-        store: TimerStoring,
-        repository: TimerRepository,
-        connectivity: Connectivity
-    ) {
+    init(store: LocalStore) {
         self.store = store
-        self.repository = repository
-        self.connectivity = connectivity
     }
 
-    /// Saves a completed time entry. Local persistence is always attempted.
-    /// Remote persistence is attempted only when online; offline entries stay
-    /// queued for `syncUnsyncedEntries()`.
-    func saveEntry(name: String, duration: TimeInterval, startedAt: Date) async throws {
-        let endedAt = startedAt.addingTimeInterval(duration)
+    /// Starts a timer against the given activity, persisting the running
+    /// state (D8) so it survives a crash and is readable by widgets and
+    /// lock-screen Controls. The activity is created (or reused by
+    /// case-insensitive name) in the same transaction as the timer state.
+    func startTimer(activityName: String, startedAt: Date = Date()) async throws {
+        let name = activityName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let activity = try await store.activity(named: name) ?? Activity(
+            id: UUID().uuidString.lowercased(),
+            name: name,
+            createdAt: startedAt,
+            updatedAt: startedAt
+        )
+        if try await store.activity(id: activity.id) == nil {
+            try await store.createActivity(activity)
+        }
+        try await store.startTimer(activityID: activity.id, activityName: activity.name, startedAt: startedAt)
+    }
+
+    /// Stops the running timer and saves the completed entry (with
+    /// `source='manual'`) in one transaction with its outbox row. Clears the
+    /// persisted running state.
+    func stopTimer(activityID: String, activityName: String, startedAt: Date, endedAt: Date = Date()) async throws {
         let entry = TimeEntry(
-            id: UUID(),
-            activityName: name.trimmingCharacters(in: .whitespacesAndNewlines),
+            id: UUID().uuidString.lowercased(),
+            activityID: activityID,
+            activityName: activityName,
             startedAt: startedAt,
             endedAt: endedAt,
-            synced: false
+            durationSeconds: Int(endedAt.timeIntervalSince(startedAt)),
+            source: "manual"
         )
-        try await store.save(entry)
-        guard connectivity.isConnected else { return }
-        try await repository.save(entry)
-        try await store.markSynced(entry)
+        try await store.createEntry(entry)
+        try await store.stopTimer()
     }
 
-    /// Replays any unsynced entries to the remote repository.
-    func syncUnsyncedEntries() async throws {
-        guard connectivity.isConnected else { return }
-        let unsynced = await store.unsyncedEntries()
-        for entry in unsynced {
-            try await repository.save(entry)
-            try await store.markSynced(entry)
-        }
+    /// The persisted running-timer state, or nil when no timer is running.
+    /// Read on app launch to resume the running-timer UI after a crash or
+    /// relaunch (local-first-store spec).
+    func runningTimerState() async throws -> RunningTimerState? {
+        try await store.timerState()
     }
 }

@@ -83,10 +83,17 @@ targets:
         SWIFT_EMIT_LOC_STRINGS: NO
         CURRENT_PROJECT_VERSION: "1"
         GENERATE_INFOPLIST_FILE: NO
+        # Warnings-as-errors live here (target-scoped), not on the CLI: a
+        # global SWIFT_TREAT_WARNINGS_AS_ERRORS=YES conflicts with the
+        # -suppress-warnings flag Xcode adds to SPM package targets (GRDB).
+        SWIFT_TREAT_WARNINGS_AS_ERRORS: YES
+        GCC_TREAT_WARNINGS_AS_ERRORS: YES
       configs:
         Debug:
           SWIFT_ACTIVE_COMPILATION_CONDITIONS: DEBUG
-    dependencies: []
+    dependencies:
+      - package: GRDB
+        product: GRDB
   TimeOfLifeTests:
     type: bundle.unit-test
     platform: iOS
@@ -103,6 +110,8 @@ targets:
         BUNDLE_LOADER: "$(TEST_HOST)"
         TEST_HOST: "$(BUILT_PRODUCTS_DIR)/TimeOfLife.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/TimeOfLife"
         GENERATE_INFOPLIST_FILE: YES
+        SWIFT_TREAT_WARNINGS_AS_ERRORS: YES
+        GCC_TREAT_WARNINGS_AS_ERRORS: YES
 schemes:
   TimeOfLife:
     build:
@@ -121,3 +130,7 @@ schemes:
       config: Debug
     archive:
       config: Release
+packages:
+  GRDB:
+    url: https://github.com/groue/GRDB.swift
+    from: 7.0.0
