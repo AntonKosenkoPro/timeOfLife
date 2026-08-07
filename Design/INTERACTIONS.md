@@ -87,6 +87,13 @@ When a screen’s main purpose is to collect input from a single field (email, O
 - Tapping Sign Out must show a confirmation alert before clearing the local session, because local timer data may be lost.
 - Sign Out must work offline by clearing the local session.
 
+### Profile destination
+
+- The person control opens Profile for all users — signed out and signed in.
+- Signed out, the account section offers **Enable Sync**; local activity/category management, integrations, export, appearance, and data controls remain accessible independently.
+- Signed in, the account section shows sync status ("Last synced"/"Syncing…"/error) and a manual "Sync now" action, plus sign-out.
+- "Erase local data" is a destructive, confirmed action that wipes the local database (state + outbox + undo buffer + sync cursors).
+
 ### Auth transitions
 
 - Auth screens (Welcome → Email → OTP) are pushed on the shared `AppNavigationStack`.
@@ -110,6 +117,18 @@ Keep haptics subtle. Do not vibrate on every keystroke.
 - iOS 16+ uses `NavigationStack` + `navigationDestination(for:)`.
 - iOS 15 uses `NavigationView(.stack)` with a hidden `NavigationLink` bound to `path.last`.
 - Do not use `NavigationLink` directly for programmatic navigation.
+
+## App shell (Track / History / Insights / Profile)
+
+D1 (OpenSpec change `redesign-track-experience`). The root is a three-tab shell, not a timer-only root:
+
+- **Track, History, Insights are the primary destinations.** Track is initially selected and is the only destination that starts or stops a timer.
+- **Profile is a sheet, not a tab.** A consistent top-trailing person control on every tab opens it. Profile owns account/sync, activity and category management, integrations, export, appearance, and destructive data controls.
+- **Switching destinations never changes timer state** and never discards the previous destination's state.
+- **The app launches into Track without authentication**; History and Insights are reachable unsigned. Auth is an optional "Enable Sync" action inside Profile.
+- **A running timer stays globally accessible.** While running, History and Insights show the compact timer immediately above the tab bar (`.safeAreaInset(edge: .bottom)`). Its main area returns to Track; its Stop button saves in place and keeps the current destination selected. Track does not duplicate it.
+- **Sign Out is owned by Profile**, not the Track toolbar. Tapping Sign Out shows a confirmation alert before clearing the local session, because local timer data may be lost. Sign Out must work offline by clearing the local session.
+- The hierarchy maps to a future macOS sidebar without changing meaning (Track/History/Insights primary; profile-owned features secondary).
 
 ## Accessibility identifiers
 

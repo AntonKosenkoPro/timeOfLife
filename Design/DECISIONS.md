@@ -63,10 +63,10 @@ Resolved design precedents for Time of Life. Add a new entry here when a visual 
 - Email submission works via the keyboard Return key and via a visible Continue button. Both trigger the same action.
 - Reason: Return key is a convenience for sighted users; the visible button is required for VoiceOver and Switch Control workflows.
 
-## D12 — Interim Sign Out on TimerView
+## D12 — Sign Out lives in Profile
 
-- Until a dedicated Account/Profile screen is built, Sign Out lives in the `TimerView` top toolbar as a destructive text button with a confirmation alert.
-- Reason: user request; keeps the low-frequency account action out of the primary time-tracking controls.
+- Sign Out is a destructive, low-frequency account action owned by the Profile destination (D30), not the Track toolbar. It shows a confirmation alert before clearing the local session, because local timer data may be lost.
+- Reason: user request; keeps the low-frequency account action out of the primary time-tracking controls. Supersedes the interim TimerView toolbar placement.
 
 ## D13 — Primary input and action stay above the keyboard
 
@@ -128,3 +128,38 @@ Resolved design precedents for Time of Life. Add a new entry here when a visual 
 
 - Activities are concrete tasks required for timing. Categories are optional zero-or-more analytics metadata managed separately from capture. Entries resolve an Activity's current Categories at query time, so editing an Activity's Categories reclassifies its existing history.
 - Reason: the current Activity/category API and entry model already use `activity_id` plus query-time tag resolution, and this keeps categoryless quick creation valid.
+
+## D25 — Track, History, and Insights are the primary destinations
+
+- The root is a three-tab shell (Track initially selected). Profile is opened from a consistent top-trailing person control and is not a fourth tab.
+- Reason: capture, retrospective review, and interpretation are durable intents with different frequencies; a tab per intent keeps History discoverable and maps directly to a future macOS sidebar. Profile holds low-frequency configuration and optional account state, so a tab would overstate its importance.
+
+## D26 — The numeric timer is a pure start instrument
+
+- Track uses a centered numeric readout with no dial, ring, sweep, daily-total, goal, or decorative progress visualization. The readout carries the exact elapsed time, including hours, and stays in the same central region across ready, running, saving, and saved states.
+- Reason: the user rejected the Dial and chose a centered numeric treatment; exact numbers are sufficient for capture, while History and Insights own retrospective meaning.
+
+## D27 — Activity selection is a native sheet
+
+- Tapping the selected Activity affordance opens a searchable sheet: recent names before search, case-insensitive matches while typing, `Create "Name"` for valid unmatched input, and Manage Activities as a secondary destination. Category names and icons are not shown. Selecting or creating prepares the Activity and dismisses the sheet.
+- Reason: the main screen stays calm and numeric while the sheet handles a potentially large catalog with familiar search and keyboard behavior; Categories are optional analytics metadata and must not compete with the concrete task being selected.
+
+## D28 — Start is explicit and Stop is spatially stable
+
+- Selection enters a ready state; a separate Start action begins timing. The same central/lower control region changes from Start to Stop without moving. After Stop succeeds, a restrained saved confirmation appears and the same Activity remains prepared.
+- Reason: explicit Start is predictable across recents, search, and creation; stable geometry supports muscle memory; retaining selection makes repeated sessions quick while still requiring explicit confirmation.
+
+## D29 — A compact timer is inset above non-Track tabs
+
+- While running, History and Insights show a compact timer immediately above the tab bar. Its main area returns to Track; a separate Stop button saves in place. Track does not duplicate it.
+- Reason: a running timer is global app state and must not disappear on navigation; a bottom safe-area inset stays close to primary navigation, avoids covering content, and creates a visual grammar reusable by widgets and Live Activities.
+
+## D30 — Profile is useful without an account
+
+- The person control opens Profile for all users. Its account section offers Enable Sync when signed out and sync/account management when signed in; local activity/category management, integrations, export, appearance, and data controls remain accessible independently.
+- Reason: local-first behavior means "profile" cannot be shorthand for a mandatory remote identity; one destination avoids separate Settings and Account concepts.
+
+## D31 — Motion and haptics explain state rather than decorate it
+
+- Start uses a subtle selection haptic, Stop/save uses success feedback, and invalid input uses error feedback. State transitions remain restrained; Reduce Motion replaces rotational/spring transitions with fades or immediate updates.
+- Reason: physical feedback marks consequential state changes without making routine navigation noisy; motion must clarify readiness, running, and saved state and remain optional.

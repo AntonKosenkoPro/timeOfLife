@@ -105,6 +105,12 @@
       "sourceType": "github",
       "skillPath": "packages/skills/skills/argent-tv-interact/SKILL.md",
       "computedHash": "4a4a1916dab5e7d98478b5daeb4978c5ba9b8446959d45428abd0af1d862417d"
+    },
+    "swiftui-expert-skill": {
+      "source": "avdlee/swiftui-agent-skill",
+      "sourceType": "github",
+      "skillPath": "swiftui-expert-skill/SKILL.md",
+      "computedHash": "f903fb98352328f65ee7b433cfbc36fd11e08861d0ba81dc12cdc0feca1e59ea"
     }
   }
 }

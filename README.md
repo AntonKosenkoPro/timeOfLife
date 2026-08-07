@@ -1,8 +1,8 @@
 # Time of Life
 
-A personal time-tracking app for iOS — minimal-effort tracking of where your time goes (widgets, shortcuts, integrations). This repository contains the **auth MVP** (passwordless email + OTP) and the first **time-tracking MVP** screen (start/stop timer with offline-first persistence).
+A personal time-tracking app for iOS — minimal-effort tracking of where your time goes (widgets, shortcuts, integrations). This repository contains the **auth MVP** (passwordless email + OTP) and the **Track experience**: a three-tab shell (Track/History/Insights) with a centered numeric timer, an Activity-only capture chooser, a Profile destination, and a compact cross-tab running timer — all local-first.
 
-See [`Requirements/FURPS/`](Requirements/FURPS/) for the full requirements, [`AGENTS.md`](AGENTS.md) for context for AI agents, and [`Design/`](Design/) for the text-based design system (colors, components, screen specs, and interaction patterns). This MVP implements **F1** (passwordless email-OTP sign up/in), **F2** (Sign in with Apple), the supporting infrastructure, and the first time-tracking use case. **F3** (restore access by email) is subsumed by the OTP flow (no password to reset).
+See [`Requirements/FURPS/`](Requirements/FURPS/) for the full requirements, [`AGENTS.md`](AGENTS.md) for context for AI agents, and [`Design/`](Design/) for the text-based design system (colors, components, screen specs, and interaction patterns). This MVP implements **F1** (passwordless email-OTP sign up/in), **F2** (Sign in with Apple), the supporting infrastructure, and the Track capture use case. **F3** (restore access by email) is subsumed by the OTP flow (no password to reset).
 
 ## Architecture
 
@@ -21,16 +21,17 @@ ios/       SwiftUI app (iOS 15+) — MVVM + Repository, keychain token storage
 ### Auth flow (Sign in with Apple)
 1. **Tap "Sign in with Apple"** on the email screen → the app requests an Apple identity token (`ASAuthorizationAppleIDProvider`, `.fullName`/`.email` scopes).
 2. **`POST /auth/apple`** `{ identity_token }` → the backend verifies Apple's RS256 JWT against Apple's JWKS (`iss`/`aud`=Bundle ID/`exp`), upserts a user keyed by Apple's stable `sub` claim, and issues the same access + refresh token pair as the OTP flow.
-3. The app persists the session and lands on the timer screen — same path as OTP sign-in.
+3. The app persists the session and lands on the app shell (Track) — same path as OTP sign-in.
 
 **Config-gated:** the backend registers `/auth/apple` only when `APPLE_CLIENT_ID` is set (the app's Bundle ID). The iOS button renders without the capability; the actual authorization requires the **Sign in with Apple** capability + a paid Apple Developer Program membership (see `project.yml` signing note). Account-deletion token revocation (App Store 5.1.1v) is a follow-up.
 
-### Time tracking flow (MVP)
-1. **The app launches into the timer** — no sign-in required (auth is an optional "Enable Sync" action in Settings).
-2. **Start** an activity: type a name and tap **Start**.
-3. **Timer counts up** while running; the device stays awake.
+### Time tracking flow (Track)
+1. **The app launches into Track** — no sign-in required (auth is an optional "Enable Sync" action in Profile).
+2. **Choose an activity**: pick a recent one or create a new name in the chooser (selection alone never starts timing).
+3. **Start** the prepared activity; the centered numeric timer counts up exactly while the device stays awake.
 4. **Stop** saves the entry to the local GRDB database (the source of truth) and enqueues an outbox row; if signed in, the `SyncController` drains the outbox and pulls deltas on foreground/connectivity/manual "Sync now".
-5. Entries, activities, categories, the running timer state, the outbox, and the undo buffer live in the App Group shared container (`group.com.antonkosenko.timeoflife`), readable/writable cross-process by widgets, the Screen Time extension, and lock-screen Controls.
+5. **A running timer stays visible** above the tab bar on History and Insights (compact timer with return-to-Track and in-place Stop).
+6. Entries, activities, categories, the running timer state, the outbox, and the undo buffer live in the App Group shared container (`group.com.antonkosenko.timeoflife`), readable/writable cross-process by widgets, the Screen Time extension, and lock-screen Controls.
 
 ### Security (R1)
 - **No passwords anywhere.** Accounts authenticate by proving email ownership via an OTP code (stored only as a **SHA-256 hash**, 10-min expiry, max 5 attempts).
@@ -164,9 +165,11 @@ Backend (Docker Postgres running):
 9. `GET /api/v1/activities` → 200 `[{activity}]`; `POST /api/v1/entries` `{id:<uuidv7>,activity_id:<id>,started_at:"…"}` → 201 (omit `activity_id` → 422 `validation_error`).
 
 iOS (Simulator, backend running):
-1. Enter email → request OTP → enter/autofill the 6-digit code → timer screen.
-2. Switch device language to Russian and toggle dark mode — UI localized + themed.
-3. Turn off network (Simulator features) → offline banner, disabled submit, cached session persists across relaunch.
+1. Enter email → request OTP → enter/autofill the 6-digit code → app shell (Track).
+2. Launch unsigned → Track idle; create an activity in the chooser → ready → Start → running; switch to History/Insights → compact timer; Stop in place → entry saved.
+3. Kill and relaunch while running → the running timer resumes from `timer_state`.
+4. Switch device language to Russian and toggle dark mode — UI localized + themed.
+5. Turn off network (Simulator features) → offline banner, disabled submit, cached session persists across relaunch.
 
 ## Requirements coverage (MVP)
 

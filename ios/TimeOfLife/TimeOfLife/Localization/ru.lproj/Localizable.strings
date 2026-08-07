@@ -56,10 +56,64 @@
 "appleSignIn.error" = "Не удалось войти через Apple. Попробуйте снова.";
 
 // Timer
-"timer.title" = "Таймер";
+"timer.title" = "Трек";
 "timer.activityPlaceholder" = "Над чем вы работаете?";
 "timer.start" = "Старт";
 "timer.stop" = "Стоп";
+"timer.stopHint" = "Останавливает таймер и сохраняет запись";
 "timer.offlineHint" = "Записи сохраняются локально и синхронизируются после появления сети.";
 "timer.emptyActivityError" = "Введите название активности.";
 "timer.signOut" = "Выйти";
+"timer.chooseActivity" = "Выбрать активность";
+"timer.chooseActivityPrompt" = "Выберите активность, чтобы начать";
+"timer.saved" = "Сохранено";
+"timer.saving" = "Сохранение…";
+"timer.running" = "Идёт";
+"timer.ready" = "Готово";
+"timer.savedDuration" = "Сохранено %@";
+"timer.chooserTitle" = "Выбор активности";
+"timer.chooserSearchPrompt" = "Поиск или создание";
+"timer.chooserCreate" = "Создать «%@»";
+"timer.chooserRecent" = "Недавние";
+"timer.chooserActivities" = "Активности";
+"timer.chooserEmptyTitle" = "Пока нет активностей";
+"timer.chooserEmptySubtitle" = "Создайте первую активность, чтобы начать учёт времени.";
+"timer.chooserCreateFirst" = "Создать первую активность";
+"timer.manageActivities" = "Управление активностями";
+"timer.compactStop" = "Остановить и сохранить таймер";
+"timer.compactReturnHint" = "Вернуться в Трек";
+"timer.compactRunning" = "%@, таймер идёт";
+
+// App shell
+"tab.track" = "Трек";
+"tab.history" = "История";
+"tab.insights" = "Аналитика";
+"profile.title" = "Профиль";
+"profile.done" = "Готово";
+"profile.account" = "Аккаунт";
+"profile.enableSync" = "Включить синхронизацию";
+"profile.enableSyncSubtitle" = "Необязательный аккаунт для других устройств";
+"profile.syncNow" = "Синхронизировать";
+"profile.syncing" = "Синхронизация…";
+"profile.lastSynced" = "Синхронизировано: %@";
+"profile.syncError" = "Не удалось синхронизировать. Попробуйте снова.";
+"profile.library" = "Библиотека";
+"profile.activities" = "Активности";
+"profile.categories" = "Категории";
+"profile.connections" = "Подключения";
+"profile.integrations" = "Интеграции";
+"profile.export" = "Экспорт";
+"profile.app" = "Приложение";
+"profile.appearance" = "Оформление";
+"profile.dataAndPrivacy" = "Данные и конфиденциальность";
+"profile.eraseLocalData" = "Стереть локальные данные";
+"profile.eraseLocalDataConfirmTitle" = "Стереть локальные данные?";
+"profile.eraseLocalDataConfirmMessage" = "Это навсегда удалит все активности, категории, записи и ожидающие синхронизацию данные на этом устройстве.";
+"profile.eraseConfirm" = "Стереть";
+"profile.eraseCancel" = "Отмена";
+
+// Destination empty states
+"history.emptyTitle" = "Пока пусто";
+"history.emptySubtitle" = "Завершённые сессии появятся здесь в виде хронологии.";
+"insights.emptyTitle" = "Пока пусто";
+"insights.emptySubtitle" = "Закономерности появятся после небольшого объёма учёта времени.";

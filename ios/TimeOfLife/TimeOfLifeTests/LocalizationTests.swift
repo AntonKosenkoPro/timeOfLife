@@ -120,15 +120,31 @@ struct LocalizationTests {
 
     @Test("L10n enum allCases count matches expected keys")
     func allCasesCount() {
-        // 25 keys: appName,
+        // 25 base keys + 50 redesign keys = 75:
+        // appName,
         // welcomeTagline, welcomeContinueWithEmail,
         // emailEntryTitle, emailEntryEmail, emailEntrySubtitle, emailEntrySubmit,
         // otpTitle, otpSentTo, otpResend, otpResendCountdown,
         // offlineBanner,
         // appleSignInTitle, appleSignInError,
-        // timerTitle, timerActivityPlaceholder, timerStart, timerStop,
+        // timerTitle, timerActivityPlaceholder, timerStart, timerStop, timerStopHint,
         // timerOfflineHint, timerEmptyActivityError, timerSignOut,
+        // timerChooseActivity, timerChooseActivityPrompt, timerSaved, timerSaving,
+        // timerRunning, timerReady, timerSavedDuration,
+        // timerChooserTitle, timerChooserSearchPrompt, timerChooserCreate,
+        // timerChooserRecent, timerChooserActivities, timerChooserEmptyTitle,
+        // timerChooserEmptySubtitle, timerChooserCreateFirst, timerManageActivities,
+        // timerCompactStop, timerCompactReturnHint, timerCompactRunning,
+        // tabTrack, tabHistory, tabInsights,
+        // profileTitle, profileDone, profileAccount, profileEnableSync,
+        // profileEnableSyncSubtitle, profileSyncNow, profileSyncing, profileLastSynced,
+        // profileSyncError, profileLibrary, profileActivities, profileCategories,
+        // profileConnections, profileIntegrations, profileExport, profileApp,
+        // profileAppearance, profileDataAndPrivacy, profileEraseLocalData,
+        // profileEraseLocalDataConfirmTitle, profileEraseLocalDataConfirmMessage,
+        // profileEraseConfirm, profileEraseCancel,
+        // historyEmptyTitle, historyEmptySubtitle, insightsEmptyTitle, insightsEmptySubtitle,
         // signOutConfirmationTitle, signOutConfirmationMessage, signOutConfirm, signOutCancel
-        #expect(l10nCases.count == 25)
+        #expect(l10nCases.count == 75)
     }
 }

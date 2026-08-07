@@ -8,7 +8,7 @@ The signed-out flow is now a linear `NavigationStack`:
 WelcomeView  --(Continue with Email)-->  EmailEntryView  --(email sent)-->  OtpEntryView
 ```
 
-`Sign in with Apple` is the primary action on `WelcomeView` and handles sign-up/sign-in in one step. The email/OTP path is a deliberate secondary option. When any auth path succeeds, `SessionStore` flips to `.signedIn` and `RootView` replaces the auth flow with `TimerView`.
+`Sign in with Apple` is the primary action on `WelcomeView` and handles sign-up/sign-in in one step. The email/OTP path is a deliberate secondary option. When any auth path succeeds, `SessionStore` flips to `.signedIn` and `SyncController` activates; the app shell (Track) is the root regardless of session state — auth is an optional "Enable Sync" action in Profile, not a launch gate.
 
 Protected API requests refresh an expired access token once. If the refresh token is
 invalid or reused, the client clears the local session and `RootView` returns to
@@ -44,7 +44,7 @@ Pinned bottom action bar via `.safeAreaInset(edge: .bottom)` → `MeasuredBottom
 
 ### Behaviors
 
-- Apple sign-in calls `WelcomeViewModel.signInWithApple()`. On success `AuthService` persists the session and `RootView` transitions to `TimerView` automatically.
+- Apple sign-in calls `WelcomeViewModel.signInWithApple()`. On success `AuthService` persists the session and `SessionStore` flips to `.signedIn`, activating `SyncController`; the app shell (Track) remains the root.
 - “Continue with Email” pushes `.emailEntry` through `AppNavigationStack`.
 - Offline: show `OfflineBanner` and disable both sign-in actions.
 - No keyboard handling needed on this screen.
@@ -161,7 +161,7 @@ Follows `Design/INTERACTIONS.md` → **Keyboard and primary input placement**. T
 - Focus the hidden OTP field on appear and re-focus it after a verification error.
 - Auto-submit: when `vm.code` reaches 6 digits, debounce 250 ms then call `vm.submit()`. The debounce lets the user see the full code before the network call.
 - On a verification error, clear `vm.code` and refocus so the user can re-enter the code.
-- On success, `AuthService` updates `SessionStore`; `RootView` transitions to `TimerView`.
+- On success, `AuthService` updates `SessionStore`; `SyncController` activates. The app shell (Track) remains the root — auth is optional.
 - Resend is enabled after a 30-second cooldown; on resend show a feedback message via `L10n.otpResent`.
 - Clear field error when `vm.code` changes.
 - Offline: show banner, disable submit, set `errorMessage` to `String.localized("error.offline")` if submit is attempted.

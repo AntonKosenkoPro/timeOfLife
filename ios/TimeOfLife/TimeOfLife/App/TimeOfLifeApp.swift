@@ -14,10 +14,6 @@ struct TimeOfLifeApp: App {
     @StateObject private var session: SessionStore
     @StateObject private var navigation: AppNavigationStack
 
-    #if DEBUG
-    private let uiTestingScreen: String?
-    #endif
-
     init() {
         // UI-feedback loop: when launched with `UITEST_SCREEN=<screen>` (or
         // `SIMCTL_CHILD_UITEST_SCREEN=<screen>`, which `simctl launch` preserves)
@@ -27,7 +23,6 @@ struct TimeOfLifeApp: App {
         let container: AppContainer
         #if DEBUG
         let uiTestingScreen = Self.uiTestingScreen()
-        self.uiTestingScreen = uiTestingScreen
         if let screen = uiTestingScreen, !screen.isEmpty {
             container = AppContainer.uiTesting(screen: screen)
         } else {
@@ -75,19 +70,7 @@ struct TimeOfLifeApp: App {
 
     var body: some Scene {
         WindowGroup {
-            #if DEBUG
-            if let designScreen = DesignLabScreen(screenName: uiTestingScreen) {
-                TrackDesignPrototype(screen: designScreen)
-            } else if let numericMockup = NumericTimerMockupStyle(screenName: uiTestingScreen) {
-                NumericTimerMockupBoard(style: numericMockup)
-            } else if uiTestingScreen == "design-catalog" {
-                CatalogConceptPrototype()
-            } else {
-                appRoot
-            }
-            #else
             appRoot
-            #endif
         }
     }
 

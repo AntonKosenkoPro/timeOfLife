@@ -453,6 +453,126 @@ TagSelector(
 
 ---
 
+## `NumericTimerReadout`
+
+The centered numeric timer on Track (D2/D23). Its only purpose is displaying the exact elapsed duration; it has no dial, ring, sweep, goal, daily-total, or decorative progress visualization.
+
+### Signature
+
+```swift
+struct NumericTimerReadout: View {
+    let state: TrackState // idle / ready / running / saving / saved / error
+    let elapsed: TimeInterval
+    let activityName: String?
+}
+```
+
+### Visual
+
+- Elapsed time formatted as `MM:SS` or `H:MM:SS` (hours included once elapsed), `.monospacedDigit()`.
+- Font: `Theme.timerFont()` (`.system(size: 64, weight: .semibold, design: .rounded)`), `Theme.textPrimary`.
+- Centered in the main content region; keeps a stable frame across all timer states.
+- A short state caption below the readout (`READY`, `RUNNING`, `SAVING`, `SAVED`, or the idle prompt) in `.caption`, `Theme.textSecondary`.
+- `accessibilityIdentifier("TimerDisplay")`.
+
+### States
+
+| State | Visual |
+|---|---|
+| Idle | `00:00` + choose-an-Activity prompt |
+| Ready | `00:00` + `READY` caption |
+| Running | Live exact elapsed value + `RUNNING` caption |
+| Saving | Readout stable; primary action shows progress |
+| Saved | Brief `SAVED` confirmation; readout returns to `00:00` |
+| Error | Readout stable; localized non-field error above the primary action |
+
+### Accessibility
+
+- Single accessible element: `.accessibilityElement(children: .combine)`.
+- `.accessibilityLabel` announces the selected Activity, timer state, and elapsed duration; `.accessibilityValue` carries the exact formatted duration.
+- `.accessibilityAddTraits(.updatesFrequently)` while running so VoiceOver announces the live value.
+
+---
+
+## `CompactTimer`
+
+The persistent running-timer surface shown above the tab bar on History and Insights (D5). Track does not render it — the full numeric readout is already visible there.
+
+### Signature
+
+```swift
+struct CompactTimer: View {
+    let activityName: String
+    let startedAt: Date
+    let openTrack: () -> Void
+    let stop: () -> Void
+}
+```
+
+### Visual
+
+- Inset above the tab bar via `.safeAreaInset(edge: .bottom)` on History/Insights roots.
+- `HStack`: a non-destructive main area (activity name + live elapsed duration, `.monospacedDigit()`) that returns to Track, and a separate 44 pt circular Stop button (`stop.fill`, `Theme.danger` or accent tint).
+- Surface: `Theme.backgroundSecondary` fill, `Theme.cornerRadius` continuous corners, `Theme.hairline` 1 pt stroke.
+- `accessibilityIdentifier("CompactTimer")`; Stop button `accessibilityIdentifier("CompactTimerStopButton")`.
+
+### States
+
+| State | Visual |
+|---|---|
+| Running | Activity name + live elapsed duration + Stop |
+| Stopped | Removed from the shell (entry saved in place) |
+
+### Accessibility
+
+- Main area: `.accessibilityLabel("\(activityName), timer running")`, `.accessibilityHint("Returns to Track")`.
+- Stop button: `.accessibilityLabel("Stop and save timer")`.
+- VoiceOver announces activity name, elapsed duration, running state, and available actions.
+- The Stop target is a distinct 44 pt target separated from the navigation area (D5 risk mitigation).
+
+---
+
+## `ActivityChooser`
+
+The searchable native sheet for selecting or creating the Activity to prepare on Track (D3). Category names and icons are never shown here.
+
+### Signature
+
+```swift
+struct ActivityChooser: View {
+    let activities: [Activity] // recency-ordered
+    let onSelect: (Activity) -> Void
+    let onCreate: (String) -> Void
+    let onManageActivities: () -> Void
+}
+```
+
+### Visual
+
+- Native `List` in a sheet with `.searchable`.
+- Before search: recent Activity names in recency order (`last_used_at`), one activation selects.
+- While typing: case-insensitive name matches; unmatched valid input offers `Create "Name"`.
+- Empty catalog: `EmptyState` explaining the empty state with creating the first Activity as the primary action.
+- Secondary "Manage activities" row at the bottom.
+- `accessibilityIdentifier("ActivityChooser")`; create row `accessibilityIdentifier("ActivityChooserCreateButton")`.
+
+### States
+
+| State | Visual |
+|---|---|
+| Recent | Recency-ordered Activity names |
+| Searching | Case-insensitive matches only |
+| Unmatched input | `Create "Name"` row |
+| Empty catalog | `EmptyState` + primary create action |
+
+### Accessibility
+
+- Each row: `.accessibilityLabel("Select \(activity.name)")`.
+- Create row: `.accessibilityLabel("Create \(name)")`.
+- The sheet never requires a Category and never shows Category metadata.
+
+---
+
 ## `SuggestionRow`
 
 Recency-based Activity suggestion row on the Track screen (F5/U3). One tap prepares the Activity and links the upcoming entry.

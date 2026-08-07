@@ -4,28 +4,28 @@ Narrative flows for **Epic 1: Activity Catalog & Categories**. Each flow maps to
 
 ## 1. First run — seeded defaults
 
-1. The user signs in and lands on the timer screen for the first time.
+1. The user launches the app and lands on the Track screen (no account required) for the first time.
 2. The app seeds a localized (EN or RU per device language) starter set of 7 categories: Work, Hobby, Sport, Education, Relax, Sleep, Entertainment. No starter activities are seeded.
 3. The seeded categories are ordinary records; the user can rename, change their icons, or delete any of them later.
 
 ## 2. Start a timer from a suggestion
 
 1. On the Track screen, the user sees their 3–5 most recently used Activities as tappable suggestions with Activity names and recency only, ranked on-device from the local catalog by `last_used_at` — no server round-trip, works offline. Category icons and names are not shown during capture.
-2. The user taps a suggestion; the activity name is prefilled into the activity field and the activity is linked to the upcoming entry.
+2. The user taps a suggestion; the Activity is prepared (ready state) and linked to the upcoming entry.
 3. The user taps **Start**; the timer runs and the entry is recorded against the selected activity (and its category tags).
 
 ## 3. Start a timer with a brand-new name (auto-create)
 
-1. The user types a name that does not match any existing activity (case-insensitive) and taps **Start**.
-2. The app auto-creates a new activity with that name and no categories, then links the entry to it.
+1. The user enters a name that does not match any existing activity (case-insensitive) in the chooser and confirms **Create**.
+2. The app auto-creates a new activity with that name and no categories, prepares it, and links the upcoming entry to it.
 3. The new activity now appears in suggestions on future sessions.
-4. If the typed name matches an existing activity (case-insensitive, whitespace-trimmed), the existing activity is reused — no duplicate is created.
+4. If the entered name matches an existing activity (case-insensitive, whitespace-trimmed), the existing activity is reused — no duplicate is created.
 
 ## 4. Quick-add an activity from the timer
 
-1. The user opens the quick-add sheet from the timer screen.
+1. The user opens the activity chooser from the Track screen and chooses **Create** for an unmatched name (or opens the full Activity Editor via Manage Activities).
 2. The user enters a name, optionally adds notes and category tags, and saves.
-3. The sheet closes; the new activity is selected on the timer and linked to the upcoming entry.
+3. The sheet closes; the new activity is prepared on Track and linked to the upcoming entry.
 
 ## 5. Manage activities and categories
 

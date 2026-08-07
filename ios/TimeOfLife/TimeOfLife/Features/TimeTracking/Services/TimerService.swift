@@ -15,32 +15,61 @@ final class TimerService: ObservableObject {
         self.store = store
     }
 
+    /// Returns the activity with the given id, creating it (categoryless) if
+    /// it does not exist. Used by the Track chooser's create flow.
+    func ensureActivity(id: String, name: String, createdAt: Date = Date()) async throws -> Activity {
+        if let existing = try await store.activity(id: id) {
+            return existing
+        }
+        let activity = Activity(
+            id: id,
+            name: name,
+            createdAt: createdAt,
+            updatedAt: createdAt
+        )
+        try await store.createActivity(activity)
+        return activity
+    }
+
+    /// Returns the activity with the given name, creating it (categoryless)
+    /// if it does not exist. Case-insensitive reuse: an existing activity with
+    /// the same trimmed name is returned instead of creating a duplicate.
+    func ensureActivity(named name: String, createdAt: Date = Date()) async throws -> Activity {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let existing = try await store.activity(named: trimmed) {
+            return existing
+        }
+        let activity = Activity(
+            id: UUID().uuidString.lowercased(),
+            name: trimmed,
+            createdAt: createdAt,
+            updatedAt: createdAt
+        )
+        try await store.createActivity(activity)
+        return activity
+    }
+
     /// Starts a timer against the given activity, persisting the running
     /// state (D8) so it survives a crash and is readable by widgets and
-    /// lock-screen Controls. The activity is created (or reused by
-    /// case-insensitive name) in the same transaction as the timer state.
-    func startTimer(activityName: String, startedAt: Date = Date()) async throws {
-        let name = activityName.trimmingCharacters(in: .whitespacesAndNewlines)
-        let activity = try await store.activity(named: name) ?? Activity(
-            id: UUID().uuidString.lowercased(),
-            name: name,
-            createdAt: startedAt,
-            updatedAt: startedAt
+    /// lock-screen Controls.
+    func startTimer(activityID: String, startedAt: Date = Date()) async throws {
+        let activity = try await store.activity(id: activityID)
+        try await store.startTimer(
+            activityID: activityID,
+            activityName: activity?.name ?? "",
+            startedAt: startedAt
         )
-        if try await store.activity(id: activity.id) == nil {
-            try await store.createActivity(activity)
-        }
-        try await store.startTimer(activityID: activity.id, activityName: activity.name, startedAt: startedAt)
     }
 
     /// Stops the running timer and saves the completed entry (with
     /// `source='manual'`) in one transaction with its outbox row. Clears the
     /// persisted running state.
-    func stopTimer(activityID: String, activityName: String, startedAt: Date, endedAt: Date = Date()) async throws {
+    func stopTimer(activityID: String, startedAt: Date, endedAt: Date = Date()) async throws {
+        let activity = try await store.activity(id: activityID)
         let entry = TimeEntry(
             id: UUID().uuidString.lowercased(),
             activityID: activityID,
-            activityName: activityName,
+            activityName: activity?.name ?? "",
             startedAt: startedAt,
             endedAt: endedAt,
             durationSeconds: Int(endedAt.timeIntervalSince(startedAt)),

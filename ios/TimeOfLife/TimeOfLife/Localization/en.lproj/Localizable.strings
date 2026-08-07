@@ -56,10 +56,64 @@
 "appleSignIn.error" = "Sign in with Apple failed. Please try again.";
 
 // Timer
-"timer.title" = "Timer";
+"timer.title" = "Track";
 "timer.activityPlaceholder" = "What are you working on?";
 "timer.start" = "Start";
 "timer.stop" = "Stop";
+"timer.stopHint" = "Stops the timer and saves the entry";
 "timer.offlineHint" = "Entries are saved locally and synced when you’re back online.";
 "timer.emptyActivityError" = "Enter an activity name.";
 "timer.signOut" = "Sign Out";
+"timer.chooseActivity" = "Choose an activity";
+"timer.chooseActivityPrompt" = "Choose an activity to start";
+"timer.saved" = "Saved";
+"timer.saving" = "Saving…";
+"timer.running" = "Running";
+"timer.ready" = "Ready";
+"timer.savedDuration" = "Saved %@";
+"timer.chooserTitle" = "Choose Activity";
+"timer.chooserSearchPrompt" = "Search or create";
+"timer.chooserCreate" = "Create “%@”";
+"timer.chooserRecent" = "Recent";
+"timer.chooserActivities" = "Activities";
+"timer.chooserEmptyTitle" = "No activities yet";
+"timer.chooserEmptySubtitle" = "Create your first activity to start tracking time.";
+"timer.chooserCreateFirst" = "Create your first activity";
+"timer.manageActivities" = "Manage activities";
+"timer.compactStop" = "Stop and save timer";
+"timer.compactReturnHint" = "Returns to Track";
+"timer.compactRunning" = "%@, timer running";
+
+// App shell
+"tab.track" = "Track";
+"tab.history" = "History";
+"tab.insights" = "Insights";
+"profile.title" = "Profile";
+"profile.done" = "Done";
+"profile.account" = "Account";
+"profile.enableSync" = "Enable Sync";
+"profile.enableSyncSubtitle" = "Optional account for your other devices";
+"profile.syncNow" = "Sync now";
+"profile.syncing" = "Syncing…";
+"profile.lastSynced" = "Last synced: %@";
+"profile.syncError" = "Sync failed. Try again.";
+"profile.library" = "Library";
+"profile.activities" = "Activities";
+"profile.categories" = "Categories";
+"profile.connections" = "Connections";
+"profile.integrations" = "Integrations";
+"profile.export" = "Export";
+"profile.app" = "App";
+"profile.appearance" = "Appearance";
+"profile.dataAndPrivacy" = "Data and Privacy";
+"profile.eraseLocalData" = "Erase local data";
+"profile.eraseLocalDataConfirmTitle" = "Erase local data?";
+"profile.eraseLocalDataConfirmMessage" = "This permanently deletes all activities, categories, entries, and pending sync data on this device.";
+"profile.eraseConfirm" = "Erase";
+"profile.eraseCancel" = "Cancel";
+
+// Destination empty states
+"history.emptyTitle" = "Nothing here yet";
+"history.emptySubtitle" = "Your completed sessions will form a timeline here.";
+"insights.emptyTitle" = "Nothing here yet";
+"insights.emptySubtitle" = "Patterns emerge after you have tracked a little time.";

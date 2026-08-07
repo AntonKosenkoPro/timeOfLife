@@ -87,7 +87,7 @@ extension AppContainer {
             sessionStore.setSignedOut()
             navigation.path = [.otpEntry(email: "user@example.com")]
         case "signedIn":
-            // `RootView` renders `TimerView` when the session is signed in.
+            // `RootView` renders the app shell (Track) when the session is signed in.
             sessionStore.setSignedIn(CachedSession(
                 id: "ui-test", email: "user@example.com", emailVerified: true
             ))
