@@ -2,7 +2,7 @@ import SwiftUI
 
 /// Full-width prominent action button.
 ///
-/// Renders as a fixed-height (54pt) filled rectangle with `Theme.cornerRadius`
+/// Renders as a filled rectangle with a 54pt minimum height, `Theme.cornerRadius`
 /// and continuous corners. This deliberately mirrors the geometry of
 /// `AppleSignInButton`, which hosts Apple's `ASAuthorizationAppleIDButton` at the
 /// same height and corner radius. Matching the geometry matters for two reasons:
@@ -60,21 +60,27 @@ struct PrimaryButton: View {
                         if let icon {
                             Image(systemName: icon)
                                 .font(.body.bold())
+                                .accessibilityHidden(true)
                         }
                         Text(title)
                             .font(.body.bold())
+                            .multilineTextAlignment(.center)
+                            .lineLimit(2)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                 }
             }
             .frame(maxWidth: .infinity)
-            .frame(height: 54)
+            .frame(minHeight: 54)
             .foregroundStyle(.white)
-            .background(background)
-            .clipShape(RoundedRectangle(cornerRadius: Theme.cornerRadius, style: .continuous))
-            .contentShape(RoundedRectangle(cornerRadius: Theme.cornerRadius, style: .continuous))
+        .background(background)
+        .clipShape(RoundedRectangle(cornerRadius: Theme.cornerRadius, style: .continuous))
+        .contentShape(RoundedRectangle(cornerRadius: Theme.cornerRadius, style: .continuous))
         }
         .disabled(isLoading || isDisabled)
         .animation(.easeInOut(duration: 0.15), value: isLoading || isDisabled)
+        .accessibilityElement(children: .ignore)
+        .accessibilityAddTraits(.isButton)
         .accessibilityIdentifier(accessibilityId)
         .accessibilityLabel(title)
     }

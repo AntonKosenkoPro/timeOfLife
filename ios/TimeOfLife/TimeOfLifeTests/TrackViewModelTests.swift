@@ -14,6 +14,7 @@ struct TrackViewModelTests {
         #expect(vm.state == .idle)
         #expect(vm.state.activity == nil)
         #expect(vm.elapsed == 0)
+        #expect(!vm.isSearchActive)
     }
 
     @Test("selecting an activity prepares it without starting")
@@ -25,6 +26,7 @@ struct TrackViewModelTests {
         #expect(vm.state == .ready(activity))
         #expect(vm.elapsed == 0)
         #expect(!vm.state.isRunning)
+        #expect(!vm.isSearchActive)
     }
 
     @Test("start requires a prepared activity")
@@ -38,9 +40,11 @@ struct TrackViewModelTests {
     func startRuns() async throws {
         let vm = makeViewModel()
         let activity = Activity(id: "a1", name: "Coding")
+        try await vm.service.store.createActivity(activity)
         vm.select(activity)
         vm.start()
 
+        try? await Task.sleep(nanoseconds: 50_000_000)
         guard case let .running(selected, _) = vm.state else {
             Issue.record("expected running state")
             return
@@ -48,7 +52,6 @@ struct TrackViewModelTests {
         #expect(selected.id == activity.id)
         #expect(vm.state.isRunning)
 
-        try? await Task.sleep(nanoseconds: 50_000_000)
         let state = try await vm.service.store.timerState()
         #expect(state != nil)
         #expect(state?.status == "running")
@@ -59,6 +62,7 @@ struct TrackViewModelTests {
     func stopSaves() async {
         let vm = makeViewModel()
         let activity = Activity(id: "a1", name: "Reading")
+        try? await vm.service.store.createActivity(activity)
         vm.select(activity)
         vm.start()
         try? await Task.sleep(nanoseconds: 10_000_000)
@@ -94,76 +98,20 @@ struct TrackViewModelTests {
         #expect(TimeFormatter.formattedDuration(3661) == "1:01:01")
     }
 
-    // MARK: - Chooser
+    // MARK: - Empty catalog
 
-    @Test("filtered activities are recency-ordered and case-insensitive")
-    func filtering() async throws {
-        let vm = makeViewModel()
-        let store = vm.service.store
-        let older = Activity(id: "a1", name: "Deep work", lastUsedAt: Date().addingTimeInterval(-3600))
-        let newer = Activity(id: "a2", name: "Reading", lastUsedAt: Date())
-        try await store.createActivity(older)
-        try await store.createActivity(newer)
-
-        await vm.load()
-        #expect(vm.activities.map(\.id) == ["a2", "a1"])
-
-        vm.chooserQuery = "READ"
-        #expect(vm.filteredActivities.map(\.id) == ["a2"])
-        #expect(vm.canCreateFromQuery) // prefix match: filtered but not exact
-
-        vm.chooserQuery = "Reading"
-        #expect(!vm.canCreateFromQuery) // exact case-insensitive match
-
-        vm.chooserQuery = "  "
-        #expect(vm.filteredActivities.count == 2)
-    }
-
-    @Test("unmatched query offers creation")
-    func createFromQuery() async throws {
-        let vm = makeViewModel()
-        let store = vm.service.store
-        try await store.createActivity(Activity(id: "a1", name: "Deep work"))
-
-        await vm.load()
-        vm.chooserQuery = "Gym"
-        #expect(vm.canCreateFromQuery)
-
-        await vm.createActivity(named: "Gym")
-        guard case let .ready(created) = vm.state else {
-            Issue.record("expected ready state")
-            return
-        }
-        #expect(created.name == "Gym")
-        #expect(created.categoryIDs.isEmpty)
-    }
-
-    @Test("case-insensitive reuse does not create duplicates")
-    func reuseExisting() async throws {
-        let vm = makeViewModel()
-        let store = vm.service.store
-        try await store.createActivity(Activity(id: "a1", name: "Deep work"))
-
-        await vm.load()
-        vm.chooserQuery = "deep work"
-        #expect(!vm.canCreateFromQuery)
-
-        await vm.createActivity(named: "DEEP WORK")
-        guard case let .ready(selected) = vm.state else {
-            Issue.record("expected ready state")
-            return
-        }
-        #expect(selected.id == "a1")
-        let count = try await store.activities().count
-        #expect(count == 1)
-    }
-
-    @Test("empty catalog shows no activities")
+    @Test("empty catalog shows no activities and idle state")
     func emptyCatalog() async throws {
         let vm = makeViewModel()
         await vm.load()
         #expect(vm.activities.isEmpty)
         #expect(vm.state == .idle)
+        vm.activateSearch()
+        guard case let .browsing(activities) = vm.searchResults else {
+            Issue.record("expected browsing results")
+            return
+        }
+        #expect(activities.isEmpty)
     }
 
     // MARK: - Recoverable save failure
@@ -172,6 +120,7 @@ struct TrackViewModelTests {
     func stopFailurePreservesRunning() async {
         let vm = makeViewModel()
         let activity = Activity(id: "a1", name: "Work")
+        try? await vm.service.store.createActivity(activity)
         vm.select(activity)
         vm.start()
         try? await Task.sleep(nanoseconds: 10_000_000)

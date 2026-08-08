@@ -78,6 +78,15 @@ actor LocalStore {
                 t.column("created_at", .datetime).notNull()
                 t.column("updated_at", .datetime).notNull()
             }
+            // Normalized Activity-name uniqueness (unify-activity-preparation-
+            // flow spec): names are equal after trimming surrounding
+            // whitespace and case-insensitive comparison, mirroring the
+            // relay's per-user index for the single local catalog. The unique
+            // index is the final race guard for create-or-resolve.
+            try db.execute(sql: """
+                CREATE UNIQUE INDEX index_activities_on_lower_name
+                ON activities (lower(name))
+                """)
             try db.create(table: "categories") { t in
                 t.column("id", .text).primaryKey()
                 t.column("name", .text).notNull()
@@ -177,6 +186,88 @@ actor LocalStore {
     func activity(named name: String) throws -> Activity? {
         try dbQueue.read { db in
             try Self.fetchActivity(db, name: name)
+        }
+    }
+
+    /// The typed outcome of `createOrResolveActivity(named:...)`.
+    enum CreateOrResolve: Equatable {
+        /// A new activity was inserted (with its outbox create row).
+        case created(Activity)
+        /// An existing activity with the same normalized name was reused.
+        case existing(Activity)
+        /// A non-expired pending-deletion activity with the same normalized
+        /// name exists; the caller must confirm restoration explicitly.
+        case restorableDeletion(Activity)
+        /// The candidate name failed validation.
+        case invalid(ActivityName.Validation)
+        /// The local write failed (persistence error).
+        case failure
+    }
+
+    /// Atomically creates an activity or resolves an existing identity by
+    /// normalized name (unify-activity-preparation-flow spec, decision 6).
+    ///
+    /// The operation trims and validates the candidate name, resolves an
+    /// existing row using the database's case-insensitive comparison, and
+    /// inserts the activity plus its outbox row in one transaction only when
+    /// no active or restorable identity exists. The unique index on
+    /// `lower(name)` remains the final race guard: a concurrent insert that
+    /// wins the race is translated into an `existing` outcome.
+    ///
+    /// - Parameters:
+    ///   - name: The candidate name (surrounding whitespace is trimmed).
+    ///   - notes: Optional notes for a newly created activity.
+    ///   - categoryIDs: Optional category ids for a newly created activity.
+    ///   - now: The creation timestamp (injectable for tests).
+    func createOrResolveActivity(
+        named name: String,
+        notes: String? = nil,
+        categoryIDs: [String] = [],
+        now: Date = Date()
+    ) throws -> CreateOrResolve {
+        let trimmed = ActivityName.normalized(name)
+        switch ActivityName.validate(trimmed) {
+        case .empty, .tooLong:
+            return .invalid(ActivityName.validate(trimmed))
+        case .valid:
+            break
+        }
+        return try dbQueue.write { db in
+            if let existing = try Self.fetchActivity(db, name: trimmed) {
+                return .existing(existing)
+            }
+            if let pending = try Self.fetchPendingDeletionActivity(db, name: trimmed, now: now) {
+                return .restorableDeletion(pending)
+            }
+            let activity = Activity(
+                id: UUID().uuidString.lowercased(),
+                name: trimmed,
+                notes: notes,
+                categoryIDs: categoryIDs,
+                createdAt: now,
+                updatedAt: now
+            )
+            do {
+                try db.execute(
+                    sql: """
+                        INSERT INTO activities (id, name, notes, last_used_at, created_at, updated_at)
+                        VALUES (?, ?, ?, ?, ?, ?)
+                        """,
+                    arguments: [activity.id, activity.name, activity.notes, activity.lastUsedAt, activity.createdAt, activity.updatedAt]
+                )
+            } catch {
+                // The unique index on lower(name) is the final race guard: a
+                // concurrent create-or-resolve that inserted the same
+                // normalized name wins, and this attempt resolves to it.
+                if let existing = try? Self.fetchActivity(db, name: trimmed) {
+                    return .existing(existing)
+                }
+                return .failure
+            }
+            try Self.replaceActivityCategories(db: db, activityID: activity.id, categoryIDs: categoryIDs)
+            try Self.enqueueOutbox(db: db, resource: "activity", recordID: activity.id,
+                                   op: "create", payload: activity)
+            return .created(activity)
         }
     }
 
@@ -605,6 +696,47 @@ actor LocalStore {
         }
     }
 
+    /// A non-expired pending-deletion activity whose normalized name matches
+    /// `name` case-insensitively, or nil (unify-activity-preparation-flow
+    /// spec, decision 7). The returned activity is the full snapshot so the
+    /// caller can offer explicit restoration.
+    func pendingDeletionActivity(named name: String, now: Date = Date()) throws -> Activity? {
+        let trimmed = ActivityName.normalized(name)
+        return try dbQueue.read { db in
+            try Self.fetchPendingDeletionActivity(db, name: trimmed, now: now)
+        }
+    }
+
+    /// Explicitly restores the non-expired pending-deletion activity whose
+    /// normalized name matches `name` case-insensitively (unify-activity-
+    /// preparation-flow spec, decision 7). The snapshot records are
+    /// re-inserted and the buffer row removed in one transaction; no outbox
+    /// row is ever created, so the relay is never notified of the deletion.
+    /// Returns the restored activity, or nil when no matching non-expired
+    /// buffer row exists.
+    @discardableResult
+    func restorePendingDeletionActivity(named name: String, now: Date = Date()) throws -> Activity? {
+        let trimmed = ActivityName.normalized(name)
+        return try dbQueue.write { db in
+            let cutoff = now.addingTimeInterval(-UndoBufferStore.window)
+            let rows = try UndoBufferRow.fetchAll(db, sql: """
+                SELECT * FROM undo_buffer WHERE deleted_at >= ?
+                """, arguments: [cutoff])
+            for row in rows {
+                let snapshot = try JSONDecoder().decode(DeletionSnapshot.self, from: Data(row.payload.utf8))
+                for record in snapshot.records where record.resource == "activity" {
+                    let activity = try JSONDecoder().decode(Activity.self, from: record.data)
+                    if activity.name.caseInsensitiveCompare(trimmed) == .orderedSame {
+                        try Self.applySnapshot(db, snapshot)
+                        try db.execute(sql: "DELETE FROM undo_buffer WHERE id = ?", arguments: [row.id])
+                        return activity
+                    }
+                }
+            }
+            return nil
+        }
+    }
+
     /// Enters a pending deletion: inserts the buffer row in one transaction.
     /// The caller has already deleted the records (or does so in the same
     /// logical operation); no outbox row is created.
@@ -739,6 +871,31 @@ actor LocalStore {
             """, arguments: [name])
         guard let row else { return nil }
         return activity(from: row)
+    }
+
+    /// Finds a non-expired pending-deletion activity whose normalized name
+    /// matches `name` case-insensitively (unify-activity-preparation-flow
+    /// spec, decision 7). Returns the full snapshot activity so the caller
+    /// can offer explicit restoration.
+    private static func fetchPendingDeletionActivity(
+        _ db: Database,
+        name: String,
+        now: Date
+    ) throws -> Activity? {
+        let cutoff = now.addingTimeInterval(-UndoBufferStore.window)
+        let rows = try UndoBufferRow.fetchAll(db, sql: """
+            SELECT * FROM undo_buffer WHERE deleted_at >= ?
+            """, arguments: [cutoff])
+        for row in rows {
+            let snapshot = try JSONDecoder().decode(DeletionSnapshot.self, from: Data(row.payload.utf8))
+            for record in snapshot.records where record.resource == "activity" {
+                let activity = try JSONDecoder().decode(Activity.self, from: record.data)
+                if activity.name.caseInsensitiveCompare(name) == .orderedSame {
+                    return activity
+                }
+            }
+        }
+        return nil
     }
 
     /// Maps an activities row (with the joined category_ids) into an Activity.

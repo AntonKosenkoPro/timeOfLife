@@ -166,6 +166,22 @@ U7 says "no custom shake detection" — use the iOS system motion event. The vie
 - **iOS 15/16:** create a small `ShakeHostingController` subclass of `UIHostingController` that overrides `motionEnded(_:with:)`. When the event is `UIEvent.EventType.motion` and the subtype is `.motionShake`, forward to the active manage screen's `performUndo()` (via a shared observable flag or `NotificationCenter`). Use the same controller subclass for the signed-in navigation stack so both `ManageActivitiesView` and `ManageCategoriesView` inherit the gesture.
 - Do not implement custom accelerometer/gyro logic.
 
+### Activity search and creation (unify-activity-preparation-flow)
+
+D3 (OpenSpec change `unify-activity-preparation-flow`). Track has one
+search-styled Activity affordance. It opens a full-height searchable sheet;
+the operating system owns search-field placement, focus, keyboard, activation
+animation, and the Cancel affordance. The search content area is ordinary
+sheet content:
+
+- **Draft vs. commit:** the search query is a temporary draft that never mutates the committed prepared Activity. Native Cancel or sheet dismissal without confirmation closes search and restores the prior ready or idle timer state exactly. Selecting, quick-creating, restoring, or saving configured creation is the only commit boundary.
+- **Identity:** names are equal after trimming surrounding whitespace and case-insensitive comparison. Creation rechecks identity at confirmation time through the atomic local create-or-resolve operation; a concurrent duplicate resolves to the existing winning Activity.
+- **Pending-deletion identity:** when a non-expired pending-deletion Activity matches the query, the search content offers an explicit restore action instead of creation. Confirming restores the buffered snapshot transactionally (no outbox row) and prepares the restored Activity. Automatically restoring on typing is rejected — it would reverse a deletion without explicit confirmation.
+- **Configured creation:** the create row's configure target opens the shared Activity Editor with the trimmed query prefilled. Cancel returns to active search with the query preserved. Save success prepares the Activity without starting timing.
+- **Configured-save collision:** when configured save collides with an existing normalized name (or a pending-deletion identity), the user chooses explicitly: **Use Existing** (prepares the existing Activity; the draft notes and Categories are never applied) or **Keep Editing** (reopens the editor with the draft intact). The collision never silently updates the existing record.
+- **Stale preparation:** Start revalidates the committed Activity identifier locally. A prepared Activity that no longer exists clears preparation, returns to idle, and shows a localized error — it is never silently recreated.
+- **Failures:** a failed quick creation keeps search active with the query preserved and shows a localized non-field error; a failed configured save keeps the editor draft intact and permits retry.
+
 ## Delete-scope confirmation (F10 / U5)
 
 Decision D18. The confirm pattern depends on what is being deleted.

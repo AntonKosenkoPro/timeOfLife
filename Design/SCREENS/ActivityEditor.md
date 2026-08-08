@@ -2,12 +2,17 @@
 
 Implements F1/F3/F7/U1/U2/U4 of `Requirements/FURPS/Activity_Catalog_and_Categories.md`. Shared sheet for creating and editing an activity; reused by the timer quick-add (F7) and Manage Activities (F8). Per decision D21.
 
+The create-from-Track mode is implemented (unify-activity-preparation-flow spec, decision 5): configured creation from Activity search opens this sheet with the trimmed query prefilled; saving prepares the created Activity without starting timing; cancelling returns to active search with the query preserved. Existing-Activity edit mode and Manage Activities navigation are deferred.
+
 ---
 
 ## Screen: ActivityEditorView
 
 - **File**: `ios/TimeOfLife/TimeOfLife/Features/Catalog/Views/ActivityEditorView.swift`
-- **Route**: presented as a `.sheet` (not a nav route). Two modes: create / edit. In create-from-timer mode, on save it also selects the activity on the timer and links the upcoming entry (F7).
+- **Route**: presented as a `.sheet` (not a nav route). Create-from-Track is
+  implemented; edit mode is deferred. In create-from-Track mode, it is
+  presented over the Activity search sheet and save prepares the Activity
+  without starting timing.
 - **ViewModel**: `ActivityEditorViewModel`
 
 ### Layout
@@ -60,12 +65,30 @@ Follows `Design/INTERACTIONS.md` → **Keyboard and primary input placement** an
 - Validate on save (U1/U2): name non-empty after trim & ≤ 60 → unified `validation.nameEmpty` / `validation.nameTooLong`; notes ≤ 280 → `validation.notesTooLong`. Multiple rules for one field collapse into a single unified message (U2).
 - Clear a field's error when the user edits that field.
 - On 422 `validation_error`: map `details` into `vm.fieldErrors` and show each beneath its field.
-- On 409 `activity_exists` (case-insensitive name collision on create): reuse the existing activity per INTERACTIONS — in create-from-timer mode, select that activity on the timer, link it to the upcoming entry (F7), and dismiss; in create-from-manage mode, dismiss and surface `error.activityExists` via `ErrorBanner`.
+- On a normalized-name collision during configured creation: return the
+  existing Activity and draft to the search coordinator. It offers **Use
+  Existing** or **Keep Editing** and never applies draft notes or Categories
+  implicitly.
 - On 409 `conflict` (LWW stale write, R2): show `ErrorBanner` and adopt the server's version as the source of truth (keep-latest); pre-fill the editor from the server version.
-- Save success: dismiss the sheet; create-from-timer also links the activity to the upcoming entry (F7) and prefills the timer field with the activity's name.
+- Save success: dismiss the editor and its search sheet, prepare the saved
+  Activity, and leave Start explicit.
 - Dismiss the keyboard on save / cancel; do not leave it up after the sheet closes.
 - Haptic `.notification(.error)` on validation error (INTERACTIONS Haptics).
 - Offline: queue the create / edit locally and sync on reconnect (R1); the Save button stays tappable offline.
+
+### Create-from-Track collision handling (unify-activity-preparation-flow spec, decision 5)
+
+Configured creation saves through the local create-or-resolve operation. When
+the save collides with an existing normalized name (or a non-expired
+pending-deletion identity), the editor reports the collision to the Track
+search coordinator, which presents two explicit outcomes:
+
+- **Use Existing** — prepares the existing winning Activity; the draft notes
+  and Categories are never applied to it.
+- **Keep Editing** — reopens the editor with the draft intact so the user can
+  choose a distinct name.
+
+The collision never silently updates the existing record.
 
 ### States
 
@@ -86,22 +109,22 @@ The editor holds a draft:
 struct ActivityDraft {
     var name: String
     var notes: String?
-    var categoryIds: [UUID]
+    var categoryIds: [String]
 }
 ```
 
-On save it produces an `Activity` (create) or a PATCH body (edit) carrying `updated_at` for LWW (R2). Category order is preserved in `categoryIds`.
+On save it produces an `Activity` (create) or a PATCH body (edit) carrying `updated_at` for LWW (R2). Category order is preserved in `categoryIds`. (The app's identifiers are `String`, not `UUID`.)
 
 ### Implementation checklist
 
-- [ ] All strings use `L10n.*` keys (add new keys to EN and RU).
-- [ ] Accessibility IDs: `ActivityEditorNameField`, `ActivityEditorNotesField`, `ActivityEditorTags`, `ActivityEditorSaveButton`, `ActivityEditorCancelButton`, `ActivityEditorAddCategoryButton`.
-- [ ] Keyboard placement follows D13 / D21: name upper, Save pinned bottom, measured reserve.
-- [ ] Validation uses unified messages (`validation.nameEmpty` / `validation.nameTooLong` / `validation.notesTooLong`); 409 `activity_exists` reuses the existing activity per INTERACTIONS.
-- [ ] 409 `conflict` adopts the server version (R2 keep-latest).
-- [ ] Sheet dismisses on save success and on cancel (swipe + toolbar Cancel).
-- [ ] Screen previews exist for light/dark and EN/RU, in both create and edit modes.
-- [ ] SwiftLint passes with zero findings.
+- [x] All strings use `L10n.*` keys (add new keys to EN and RU).
+- [x] Accessibility IDs: `ActivityEditorNameField`, `ActivityEditorNotesField`, `ActivityEditorTags`, `ActivityEditorSaveButton`, `ActivityEditorCancelButton`, `ActivityEditorAddCategoryButton`.
+- [x] Keyboard placement follows D13 / D21: name upper, Save pinned bottom, measured reserve.
+- [x] Validation uses unified messages (`validation.nameEmpty` / `validation.nameTooLong` / `validation.notesTooLong`); 409 `activity_exists` reuses the existing activity per INTERACTIONS.
+- [ ] 409 `conflict` adopts the server version (R2 keep-latest) — deferred with the edit mode.
+- [x] Sheet dismisses on save success and on cancel (swipe + toolbar Cancel).
+- [ ] Screen previews exist for light/dark and EN/RU, in both create and edit modes — create mode only for now.
+- [x] SwiftLint passes with zero findings.
 
 ---
 

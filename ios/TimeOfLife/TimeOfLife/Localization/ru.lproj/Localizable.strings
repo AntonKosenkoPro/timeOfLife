@@ -57,7 +57,6 @@
 
 // Timer
 "timer.title" = "Трек";
-"timer.activityPlaceholder" = "Над чем вы работаете?";
 "timer.start" = "Старт";
 "timer.stop" = "Стоп";
 "timer.stopHint" = "Останавливает таймер и сохраняет запись";
@@ -71,15 +70,38 @@
 "timer.running" = "Идёт";
 "timer.ready" = "Готово";
 "timer.savedDuration" = "Сохранено %@";
-"timer.chooserTitle" = "Выбор активности";
-"timer.chooserSearchPrompt" = "Поиск или создание";
-"timer.chooserCreate" = "Создать «%@»";
 "timer.chooserRecent" = "Недавние";
-"timer.chooserActivities" = "Активности";
-"timer.chooserEmptyTitle" = "Пока нет активностей";
-"timer.chooserEmptySubtitle" = "Создайте первую активность, чтобы начать учёт времени.";
-"timer.chooserCreateFirst" = "Создать первую активность";
-"timer.manageActivities" = "Управление активностями";
+"timer.selectActivity" = "Выбрать %@";
+"timer.searchPrompt" = "Поиск или создание";
+"timer.searchEmptyCatalogTitle" = "Пока нет активностей";
+"timer.searchEmptyCatalogSubtitle" = "Введите название в поле поиска, чтобы создать первую активность.";
+"timer.searchNoResults" = "Нет подходящих активностей";
+"timer.searchCreate" = "Создать «%@»";
+"timer.searchConfigure" = "Настроить";
+"timer.searchRestorePrompt" = "«%@» недавно удалена и может быть восстановлена.";
+"timer.searchRestore" = "Восстановить";
+"timer.searchValidationEmpty" = "Введите название активности.";
+"timer.searchValidationTooLong" = "Название должно быть не длиннее 60 символов.";
+"timer.stalePreparationError" = "Эта активность больше не существует. Выберите другую.";
+"timer.collisionTitle" = "Активность уже существует";
+"timer.collisionMessage" = "Активность с названием «%@» уже существует. Используйте её или продолжите редактирование, чтобы выбрать другое название.";
+"timer.collisionUseExisting" = "Использовать существующую";
+"timer.collisionKeepEditing" = "Продолжить редактирование";
+
+// Activity editor
+"activityEditor.createTitle" = "Новая активность";
+"activityEditor.editTitle" = "Изменить активность";
+"activityEditor.nameLabel" = "Название";
+"activityEditor.namePlaceholder" = "напр. Спортзал";
+"activityEditor.notesLabel" = "Заметки";
+"activityEditor.notesPlaceholder" = "Необязательные заметки";
+"activityEditor.notesCounter" = "%d / 280";
+"activityEditor.notesTooLong" = "Заметки должны быть не длиннее 280 символов.";
+"activityEditor.tagsLabel" = "Категории";
+"activityEditor.noTags" = "Пока нет категорий.";
+"activityEditor.addCategory" = "Добавить категорию";
+"activityEditor.save" = "Сохранить";
+"activityEditor.cancel" = "Отмена";
 "timer.compactStop" = "Остановить и сохранить таймер";
 "timer.compactReturnHint" = "Вернуться в Трек";
 "timer.compactRunning" = "%@, таймер идёт";

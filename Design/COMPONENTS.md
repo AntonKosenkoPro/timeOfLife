@@ -532,44 +532,64 @@ struct CompactTimer: View {
 
 ---
 
-## `ActivityChooser`
+## `ActivitySearchSheet` and `ActivitySearchContent`
 
-The searchable native sheet for selecting or creating the Activity to prepare on Track (D3). Category names and icons are never shown here.
+`ActivitySearchSheet` is the full-height native-search presentation opened by
+the `TimerActivitySearchButton` affordance on Track. It owns the native search
+field and sheet dismissal. `ActivitySearchContent` is its results surface.
+The operating system owns field placement, focus, keyboard, and Cancel;
+Category names and icons are never shown here.
 
 ### Signature
 
 ```swift
-struct ActivityChooser: View {
-    let activities: [Activity] // recency-ordered
-    let onSelect: (Activity) -> Void
-    let onCreate: (String) -> Void
-    let onManageActivities: () -> Void
+struct ActivitySearchSheet: View {
+    @ObservedObject var vm: TrackViewModel
 }
 ```
 
 ### Visual
 
-- Native `List` in a sheet with `.searchable`.
-- Before search: recent Activity names in recency order (`last_used_at`), one activation selects.
-- While typing: case-insensitive name matches; unmatched valid input offers `Create "Name"`.
-- Empty catalog: `EmptyState` explaining the empty state with creating the first Activity as the primary action.
-- Secondary "Manage activities" row at the bottom.
-- `accessibilityIdentifier("ActivityChooser")`; create row `accessibilityIdentifier("ActivityChooserCreateButton")`.
+- Full-height sheet with an always-visible native search field and a native
+  `List` content surface. It does not replace the Track body.
+- Empty query: the complete catalog in recency order (`last_used_at`), with
+  the prepared Activity marked by a checkmark.
+- While typing: case-insensitive containment matches in recency order.
+- Exact normalized match: identified first; no create action for that name.
+- Valid unmatched input: one create row with two explicit targets — quick
+  creation (`ActivitySearchCreateButton`) and configured creation
+  (`ActivitySearchConfigureButton`), each a distinct 44 pt target with its own
+  localized accessibility label.
+- Non-expired pending-deletion identity: a restore row
+  (`ActivitySearchRestoreButton`) replaces creation for that name.
+- Empty catalog: `EmptyState` explaining the empty state and prompting the
+  user to enter a name in the native search field.
+- Invalid input: existing results stay available; localized validation
+  guidance (`ActivitySearchValidationError`) is shown.
+- Non-field errors: `ErrorBanner` (`ActivitySearchErrorBanner`).
+- Native Cancel and sheet swipe-down dismiss the sheet without changing the
+  committed ready/idle state. A confirmed result or creation prepares an
+  Activity and then dismisses the sheet.
 
 ### States
 
 | State | Visual |
 |---|---|
-| Recent | Recency-ordered Activity names |
+| Browse (empty query) | Recency-ordered catalog, prepared Activity marked |
 | Searching | Case-insensitive matches only |
-| Unmatched input | `Create "Name"` row |
-| Empty catalog | `EmptyState` + primary create action |
+| Unmatched valid input | Create row: quick-create + configure targets |
+| Pending-deletion identity | Restore row instead of creation |
+| Empty catalog | `EmptyState` + prompt to type a name |
+| Invalid input | Results + localized validation guidance |
 
 ### Accessibility
 
-- Each row: `.accessibilityLabel("Select \(activity.name)")`.
-- Create row: `.accessibilityLabel("Create \(name)")`.
-- The sheet never requires a Category and never shows Category metadata.
+- Each result row: `.accessibilityLabel("Select \(activity.name)")`, with
+  `.accessibilityValue("Ready")` when it is the prepared Activity.
+- Create row: `.accessibilityLabel("Create \(name)")`; configure target:
+  `.accessibilityLabel("Configure")`.
+- Restore row: `.accessibilityLabel("Restore \(name)")`.
+- The content never requires a Category and never shows Category metadata.
 
 ---
 

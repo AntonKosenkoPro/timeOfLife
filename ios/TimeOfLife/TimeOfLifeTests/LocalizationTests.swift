@@ -101,6 +101,8 @@ struct LocalizationTests {
             "validation.otpEmpty",
             "validation.otp.prefix",
             "validation.otp.rule.invalid",
+            "timer.searchValidationEmpty",
+            "timer.searchValidationTooLong",
         ]
         let main = Bundle.main
 
@@ -120,7 +122,7 @@ struct LocalizationTests {
 
     @Test("L10n enum allCases count matches expected keys")
     func allCasesCount() {
-        // 25 base keys + 50 redesign keys = 75:
+        // 25 base keys + 51 redesign keys + 6 search keys + 13 editor keys = 95:
         // appName,
         // welcomeTagline, welcomeContinueWithEmail,
         // emailEntryTitle, emailEntryEmail, emailEntrySubtitle, emailEntrySubmit,
@@ -132,8 +134,18 @@ struct LocalizationTests {
         // timerChooseActivity, timerChooseActivityPrompt, timerSaved, timerSaving,
         // timerRunning, timerReady, timerSavedDuration,
         // timerChooserTitle, timerChooserSearchPrompt, timerChooserCreate,
-        // timerChooserRecent, timerChooserActivities, timerChooserEmptyTitle,
+        // timerChooserRecent, timerSelectActivity, timerChooserActivities, timerChooserEmptyTitle,
         // timerChooserEmptySubtitle, timerChooserCreateFirst, timerManageActivities,
+        // timerSearchPrompt, timerSearchEmptyCatalogTitle, timerSearchEmptyCatalogSubtitle,
+        // timerSearchNoResults, timerSearchCreate, timerSearchConfigure,
+        // timerSearchRestorePrompt, timerSearchRestore,
+        // timerSearchValidationEmpty, timerSearchValidationTooLong,
+        // timerStalePreparationError, timerCollisionTitle, timerCollisionMessage,
+        // timerCollisionUseExisting, timerCollisionKeepEditing,
+        // activityEditorCreateTitle, activityEditorEditTitle, activityEditorNameLabel,
+        // activityEditorNamePlaceholder, activityEditorNotesLabel, activityEditorNotesPlaceholder,
+        // activityEditorNotesCounter, activityEditorNotesTooLong, activityEditorTagsLabel,
+        // activityEditorNoTags, activityEditorAddCategory, activityEditorSave, activityEditorCancel,
         // timerCompactStop, timerCompactReturnHint, timerCompactRunning,
         // tabTrack, tabHistory, tabInsights,
         // profileTitle, profileDone, profileAccount, profileEnableSync,
@@ -145,6 +157,6 @@ struct LocalizationTests {
         // profileEraseConfirm, profileEraseCancel,
         // historyEmptyTitle, historyEmptySubtitle, insightsEmptyTitle, insightsEmptySubtitle,
         // signOutConfirmationTitle, signOutConfirmationMessage, signOutConfirm, signOutCancel
-        #expect(l10nCases.count == 75)
+        #expect(l10nCases.count == 95)
     }
 }

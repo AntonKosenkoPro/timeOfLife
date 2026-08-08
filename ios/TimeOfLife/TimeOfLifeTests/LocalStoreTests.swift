@@ -69,6 +69,214 @@ struct LocalStoreTests {
         )
     }
 
+    // MARK: - Create-or-resolve (normalized identity)
+
+    @Test("createOrResolveActivity creates a new activity with an outbox row")
+    func createOrResolveCreates() async throws {
+        let store = try makeStore()
+        let outcome = try await store.createOrResolveActivity(named: "  Coding  ", now: Date(timeIntervalSinceReferenceDate: 5_000))
+
+        guard case let .created(activity) = outcome else {
+            Issue.record("expected created outcome, got \(outcome)")
+            return
+        }
+        #expect(activity.name == "Coding")
+        #expect(activity.notes == nil)
+        #expect(activity.categoryIDs.isEmpty)
+        #expect(activity.createdAt == Date(timeIntervalSinceReferenceDate: 5_000))
+
+        let rows = try await store.outboxRows()
+        #expect(rows.count == 1)
+        #expect(rows.first?.op == "create")
+        #expect(rows.first?.recordID == activity.id)
+    }
+
+    @Test("createOrResolveActivity reuses an existing case-insensitive match without a new outbox row")
+    func createOrResolveReusesExisting() async throws {
+        let store = try makeStore()
+        try await store.createActivity(makeActivity(name: "Coding"))
+        try? await Task.sleep(nanoseconds: 20_000_000)
+
+        let outcome = try await store.createOrResolveActivity(named: "  coding  ")
+        guard case let .existing(activity) = outcome else {
+            Issue.record("expected existing outcome, got \(outcome)")
+            return
+        }
+        #expect(activity.id == "act-1")
+        #expect(activity.name == "Coding")
+
+        let rows = try await store.outboxRows()
+        #expect(rows.count == 1)
+        #expect(rows.first?.op == "create")
+        #expect(rows.first?.recordID == "act-1")
+    }
+
+    @Test("createOrResolveActivity creates with notes and categories")
+    func createOrResolveWithMetadata() async throws {
+        let store = try makeStore()
+        try await store.createCategory(makeCategory())
+        let outcome = try await store.createOrResolveActivity(
+            named: "Gym",
+            notes: "Leg day",
+            categoryIDs: ["cat-1"]
+        )
+
+        guard case let .created(activity) = outcome else {
+            Issue.record("expected created outcome, got \(outcome)")
+            return
+        }
+        #expect(activity.notes == "Leg day")
+        #expect(activity.categoryIDs == ["cat-1"])
+        let stored = try await store.activity(id: activity.id)
+        #expect(stored?.categoryIDs == ["cat-1"])
+    }
+
+    @Test("createOrResolveActivity rejects empty and overlong names")
+    func createOrResolveValidates() async throws {
+        let store = try makeStore()
+        let empty = try await store.createOrResolveActivity(named: "   ")
+        #expect(empty == .invalid(.empty))
+
+        let long = try await store.createOrResolveActivity(named: String(repeating: "a", count: 61))
+        #expect(long == .invalid(.tooLong))
+
+        let rows = try await store.outboxRows()
+        #expect(rows.isEmpty)
+    }
+
+    @Test("the unique index on lower(name) rejects a direct duplicate insert")
+    func uniqueIndexEnforcesNormalizedUniqueness() async throws {
+        let store = try makeStore()
+        try await store.createActivity(makeActivity(name: "Coding"))
+        let duplicate = makeActivity(id: "act-2", name: "coding")
+
+        await #expect(throws: Error.self) {
+            try await store.createActivity(duplicate)
+        }
+        let activities = try await store.activities()
+        #expect(activities.count == 1)
+    }
+
+    @Test("a concurrent duplicate insert resolves to the existing activity")
+    func createOrResolveCollisionResolvesToExisting() async throws {
+        let store = try makeStore()
+        try await store.createActivity(makeActivity(name: "Coding"))
+
+        let outcome = try await store.createOrResolveActivity(named: "CODING")
+        guard case let .existing(activity) = outcome else {
+            Issue.record("expected existing outcome, got \(outcome)")
+            return
+        }
+        #expect(activity.id == "act-1")
+        let activities = try await store.activities()
+        #expect(activities.count == 1)
+    }
+
+    @Test("createOrResolveActivity works offline (no network dependency)")
+    func createOrResolveOffline() async throws {
+        let store = try makeStore()
+        let outcome = try await store.createOrResolveActivity(named: "Offline work")
+        guard case .created = outcome else {
+            Issue.record("expected created outcome, got \(outcome)")
+            return
+        }
+        let stored = try await store.activity(named: "offline work")
+        #expect(stored?.name == "Offline work")
+    }
+
+    // MARK: - Pending-deletion identity
+
+    @Test("createOrResolveActivity reports a non-expired pending deletion as restorable")
+    func createOrResolveFindsPendingDeletion() async throws {
+        let store = try makeStore()
+        let snapshot = try makeActivitySnapshot()
+        let payload = try JSONEncoder().encode(snapshot)
+        try await store.undoBufferEnter(payload: payload, deletedAt: Date())
+
+        let outcome = try await store.createOrResolveActivity(named: "coding")
+        guard case let .restorableDeletion(activity) = outcome else {
+            Issue.record("expected restorableDeletion outcome, got \(outcome)")
+            return
+        }
+        #expect(activity.id == "act-1")
+        #expect(activity.name == "Coding")
+
+        let rows = try await store.outboxRows()
+        #expect(rows.isEmpty)
+    }
+
+    @Test("an expired pending deletion is not restorable and creation proceeds")
+    func createOrResolveIgnoresExpiredDeletion() async throws {
+        let store = try makeStore()
+        let snapshot = try makeActivitySnapshot()
+        let payload = try JSONEncoder().encode(snapshot)
+        try await store.undoBufferEnter(
+            payload: payload,
+            deletedAt: Date().addingTimeInterval(-60)
+        )
+
+        let outcome = try await store.createOrResolveActivity(named: "Coding")
+        guard case let .created(activity) = outcome else {
+            Issue.record("expected created outcome, got \(outcome)")
+            return
+        }
+        #expect(activity.id != "act-1")
+        let rows = try await store.outboxRows()
+        #expect(rows.count == 1)
+    }
+
+    @Test("restorePendingDeletionActivity restores the snapshot without an outbox row")
+    func restorePendingDeletionRestores() async throws {
+        let store = try makeStore()
+        let snapshot = try makeActivitySnapshot()
+        let payload = try JSONEncoder().encode(snapshot)
+        try await store.undoBufferEnter(payload: payload, deletedAt: Date())
+
+        let restored = try await store.restorePendingDeletionActivity(named: "  CODING  ")
+        #expect(restored?.id == "act-1")
+        #expect(restored?.name == "Coding")
+
+        let stored = try await store.activity(id: "act-1")
+        #expect(stored?.name == "Coding")
+        let buffer = try await store.undoBufferMostRecent()
+        #expect(buffer == nil)
+        let rows = try await store.outboxRows()
+        #expect(rows.isEmpty)
+    }
+
+    @Test("restorePendingDeletionActivity returns nil for an expired or absent match")
+    func restorePendingDeletionMisses() async throws {
+        let store = try makeStore()
+        let snapshot = try makeActivitySnapshot()
+        let payload = try JSONEncoder().encode(snapshot)
+        try await store.undoBufferEnter(
+            payload: payload,
+            deletedAt: Date().addingTimeInterval(-60)
+        )
+
+        let restored = try await store.restorePendingDeletionActivity(named: "Coding")
+        #expect(restored == nil)
+        let buffer = try await store.undoBufferMostRecent()
+        #expect(buffer != nil)
+    }
+
+    /// A snapshot capturing a single activity (no entries).
+    private func makeActivitySnapshot() throws -> DeletionSnapshot {
+        let activity = Activity(
+            id: "act-1",
+            name: "Coding",
+            createdAt: Date(timeIntervalSinceReferenceDate: 1_000),
+            updatedAt: Date(timeIntervalSinceReferenceDate: 2_000)
+        )
+        return DeletionSnapshot(records: [
+            DeletionSnapshot.Record(
+                resource: "activity",
+                recordID: activity.id,
+                data: try JSONEncoder().encode(activity)
+            ),
+        ])
+    }
+
     // MARK: - Outbox atomicity
 
     @Test("createActivity writes the row and an outbox create row")
@@ -124,7 +332,7 @@ struct LocalStoreTests {
 
         let rows = try await store.outboxRows()
         #expect(rows.count == 2)
-        let row = try #require(rows.last)
+        let row = try #require(rows.first { $0.resource == "entry" && $0.recordID == entry.id })
         #expect(row.resource == "entry")
         #expect(row.recordID == entry.id)
         #expect(row.op == "create")

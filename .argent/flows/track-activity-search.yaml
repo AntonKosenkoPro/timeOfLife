@@ -1,0 +1,92 @@
+executionPrerequisite: App is running on the signed-in Track screen with an empty local Activity catalog.
+steps:
+  - echo: On idle Track. Activating the single state-specific preparation control below the timer.
+  - tap: { x: 0.5, y: 0.445 }
+  - wait: 800
+  - echo: Native search is focused with an empty query. Typing an unmatched name.
+  - tool: keyboard
+    args: { text: "Gym" }
+  - wait: 500
+  - tool: await-ui-element
+    args:
+      condition: visible
+      selector: { text: "Create" }
+  - echo: Quick-creating the unmatched Activity.
+  - tap: { x: 0.3, y: 0.2 }
+  - wait: 800
+  - tool: await-ui-element
+    args:
+      condition: visible
+      selector: { text: "Start" }
+  - echo: Quick-created "Gym" and returned to ready. Starting explicitly.
+  - tap: { x: 0.5, y: 0.523 }
+  - wait: 800
+  - tool: await-ui-element
+    args:
+      condition: visible
+      selector: { text: "Stop" }
+  - echo: Timer running. Stopping and saving the entry.
+  - tap: { x: 0.5, y: 0.523 }
+  - wait: 1000
+  - tool: await-ui-element
+    args:
+      condition: visible
+      selector: { text: "Start" }
+  - echo: Reopening ready search and confirming the existing Activity.
+  - tap: { x: 0.5, y: 0.44 }
+  - wait: 800
+  - tool: await-ui-element
+    args:
+      condition: visible
+      selector: { text: "Select Gym" }
+  - tap: { x: 0.5, y: 0.2 }
+  - wait: 800
+  - tool: await-ui-element
+    args:
+      condition: visible
+      selector: { text: "Start" }
+  - echo: Existing selection returned to ready without starting. Checking native search dismissal.
+  - tap: { x: 0.5, y: 0.44 }
+  - wait: 800
+  - tap: { x: 0.905, y: 0.123 }
+  - wait: 800
+  - echo: Native Cancel restored ready. Reopening configured creation.
+  - tap: { x: 0.5, y: 0.44 }
+  - wait: 800
+  - tool: keyboard
+    args: { key: backspace }
+  - tool: keyboard
+    args: { key: backspace }
+  - tool: keyboard
+    args: { key: backspace }
+  - tool: keyboard
+    args: { text: "Ceramics" }
+  - wait: 500
+  - tool: await-ui-element
+    args:
+      condition: visible
+      selector: { text: "Configure" }
+  - tap: { x: 0.905, y: 0.2 }
+  - wait: 800
+  - echo: Editor opened with the name prefilled. Saving configured creation.
+  - tap: { x: 0.5, y: 0.577 }
+  - wait: 1000
+  - tool: await-ui-element
+    args:
+      condition: visible
+      selector: { text: "Start" }
+  - wait: 800
+  - echo: Configured creation prepared the Activity. Starting and stopping explicitly.
+  - tap: { x: 0.5, y: 0.523 }
+  - wait: 800
+  - tool: await-ui-element
+    args:
+      condition: visible
+      selector: { text: "Stop" }
+  - tap: { x: 0.5, y: 0.523 }
+  - wait: 1000
+  - tool: await-ui-element
+    args:
+      condition: visible
+      selector: { text: "Start" }
+  - echo: "Flow complete: state-specific search, existing selection, quick creation, configured creation, Start, and Stop."

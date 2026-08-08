@@ -7,6 +7,7 @@ Narrative flows for **Epic 1: Activity Catalog & Categories**. Each flow maps to
 1. The user launches the app and lands on the Track screen (no account required) for the first time.
 2. The app seeds a localized (EN or RU per device language) starter set of 7 categories: Work, Hobby, Sport, Education, Relax, Sleep, Entertainment. No starter activities are seeded.
 3. The seeded categories are ordinary records; the user can rename, change their icons, or delete any of them later.
+4. With an empty catalog, the Track screen shows the idle timer and supporting copy; activating Activity search shows the empty-catalog guidance prompting the user to enter a name in the native search field. There is no separate creation alert.
 
 ## 2. Start a timer from a suggestion
 
@@ -16,16 +17,21 @@ Narrative flows for **Epic 1: Activity Catalog & Categories**. Each flow maps to
 
 ## 3. Start a timer with a brand-new name (auto-create)
 
-1. The user enters a name that does not match any existing activity (case-insensitive) in the chooser and confirms **Create**.
-2. The app auto-creates a new activity with that name and no categories, prepares it, and links the upcoming entry to it.
-3. The new activity now appears in suggestions on future sessions.
-4. If the entered name matches an existing activity (case-insensitive, whitespace-trimmed), the existing activity is reused — no duplicate is created.
+1. The user activates Activity search on Track and enters a name that does not match any existing activity (case-insensitive, whitespace-trimmed).
+2. The search content offers **Create** for the unmatched name; the user confirms quick creation.
+3. The app auto-creates a new activity with that name and no categories, prepares it (ready state), and dismisses search. The timer starts only after the user taps **Start**.
+4. The new activity now appears in suggestions on future sessions.
+5. If the entered name matches an existing activity (case-insensitive, whitespace-trimmed), the existing activity is reused — no duplicate is created. Creation rechecks identity at confirmation time through the atomic local create-or-resolve operation, so a concurrent duplicate resolves to the existing winning Activity.
+6. If a non-expired pending-deletion Activity matches the name, the search content offers explicit **Restore** instead of creation; confirming restores the original Activity (same id, no sync) and prepares it.
 
 ## 4. Quick-add an activity from the timer
 
-1. The user opens the activity chooser from the Track screen and chooses **Create** for an unmatched name (or opens the full Activity Editor via Manage Activities).
-2. The user enters a name, optionally adds notes and category tags, and saves.
-3. The sheet closes; the new activity is prepared on Track and linked to the upcoming entry.
+1. The user activates Activity search on Track and enters an unmatched valid name.
+2. The user taps the configure target on the create row; the shared Activity Editor opens with the name prefilled.
+3. The user optionally adds notes and category tags, and saves.
+4. The editor and search close; the new activity is prepared on Track (ready state) without starting timing.
+5. If the user cancels the editor, no Activity is created and the active search returns with the query preserved.
+6. If saving collides with an existing normalized name (or a pending-deletion identity), the app offers an explicit choice: **Use Existing** (prepares the existing Activity; the draft notes and Categories are never applied) or **Keep Editing** (reopens the editor with the draft intact).
 
 ## 5. Manage activities and categories
 

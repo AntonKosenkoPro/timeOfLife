@@ -1,6 +1,6 @@
 # Time of Life
 
-A personal time-tracking app for iOS — minimal-effort tracking of where your time goes (widgets, shortcuts, integrations). This repository contains the **auth MVP** (passwordless email + OTP) and the **Track experience**: a three-tab shell (Track/History/Insights) with a centered numeric timer, an Activity-only capture chooser, a Profile destination, and a compact cross-tab running timer — all local-first.
+A personal time-tracking app for iOS — minimal-effort tracking of where your time goes (widgets, shortcuts, integrations). This repository contains the **auth MVP** (passwordless email + OTP) and the **Track experience**: a three-tab shell (Track/History/Insights) with a centered numeric timer, platform-native Activity search for preparation, a Profile destination, and a compact cross-tab running timer — all local-first.
 
 See [`Requirements/FURPS/`](Requirements/FURPS/) for the full requirements, [`AGENTS.md`](AGENTS.md) for context for AI agents, and [`Design/`](Design/) for the text-based design system (colors, components, screen specs, and interaction patterns). This MVP implements **F1** (passwordless email-OTP sign up/in), **F2** (Sign in with Apple), the supporting infrastructure, and the Track capture use case. **F3** (restore access by email) is subsumed by the OTP flow (no password to reset).
 
@@ -27,7 +27,7 @@ ios/       SwiftUI app (iOS 15+) — MVVM + Repository, keychain token storage
 
 ### Time tracking flow (Track)
 1. **The app launches into Track** — no sign-in required (auth is an optional "Enable Sync" action in Profile).
-2. **Choose an activity**: pick a recent one or create a new name in the chooser (selection alone never starts timing).
+2. **Choose an activity**: pick a recent one, or activate native search to browse, filter, quick-create, or configure-create an Activity (selection alone never starts timing).
 3. **Start** the prepared activity; the centered numeric timer counts up exactly while the device stays awake.
 4. **Stop** saves the entry to the local GRDB database (the source of truth) and enqueues an outbox row; if signed in, the `SyncController` drains the outbox and pulls deltas on foreground/connectivity/manual "Sync now".
 5. **A running timer stays visible** above the tab bar on History and Insights (compact timer with return-to-Track and in-place Stop).
@@ -166,7 +166,7 @@ Backend (Docker Postgres running):
 
 iOS (Simulator, backend running):
 1. Enter email → request OTP → enter/autofill the 6-digit code → app shell (Track).
-2. Launch unsigned → Track idle; create an activity in the chooser → ready → Start → running; switch to History/Insights → compact timer; Stop in place → entry saved.
+2. Launch unsigned → Track idle; activate search and create an activity (quick or configured) → ready → Start → running; switch to History/Insights → compact timer; Stop in place → entry saved.
 3. Kill and relaunch while running → the running timer resumes from `timer_state`.
 4. Switch device language to Russian and toggle dark mode — UI localized + themed.
 5. Turn off network (Simulator features) → offline banner, disabled submit, cached session persists across relaunch.

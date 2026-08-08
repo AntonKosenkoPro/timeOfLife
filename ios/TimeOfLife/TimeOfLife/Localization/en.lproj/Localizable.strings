@@ -57,7 +57,6 @@
 
 // Timer
 "timer.title" = "Track";
-"timer.activityPlaceholder" = "What are you working on?";
 "timer.start" = "Start";
 "timer.stop" = "Stop";
 "timer.stopHint" = "Stops the timer and saves the entry";
@@ -71,15 +70,38 @@
 "timer.running" = "Running";
 "timer.ready" = "Ready";
 "timer.savedDuration" = "Saved %@";
-"timer.chooserTitle" = "Choose Activity";
-"timer.chooserSearchPrompt" = "Search or create";
-"timer.chooserCreate" = "Create “%@”";
 "timer.chooserRecent" = "Recent";
-"timer.chooserActivities" = "Activities";
-"timer.chooserEmptyTitle" = "No activities yet";
-"timer.chooserEmptySubtitle" = "Create your first activity to start tracking time.";
-"timer.chooserCreateFirst" = "Create your first activity";
-"timer.manageActivities" = "Manage activities";
+"timer.selectActivity" = "Select %@";
+"timer.searchPrompt" = "Search or create";
+"timer.searchEmptyCatalogTitle" = "No activities yet";
+"timer.searchEmptyCatalogSubtitle" = "Enter a name in the search field to create your first activity.";
+"timer.searchNoResults" = "No matching activities";
+"timer.searchCreate" = "Create “%@”";
+"timer.searchConfigure" = "Configure";
+"timer.searchRestorePrompt" = "“%@” was recently deleted and can be restored.";
+"timer.searchRestore" = "Restore";
+"timer.searchValidationEmpty" = "Enter an activity name.";
+"timer.searchValidationTooLong" = "Name must be at most 60 characters.";
+"timer.stalePreparationError" = "This activity no longer exists. Choose another one.";
+"timer.collisionTitle" = "Activity Already Exists";
+"timer.collisionMessage" = "An activity named “%@” already exists. Use it, or keep editing to choose a different name.";
+"timer.collisionUseExisting" = "Use Existing";
+"timer.collisionKeepEditing" = "Keep Editing";
+
+// Activity editor
+"activityEditor.createTitle" = "New activity";
+"activityEditor.editTitle" = "Edit activity";
+"activityEditor.nameLabel" = "Name";
+"activityEditor.namePlaceholder" = "e.g. Gym";
+"activityEditor.notesLabel" = "Notes";
+"activityEditor.notesPlaceholder" = "Optional notes";
+"activityEditor.notesCounter" = "%d / 280";
+"activityEditor.notesTooLong" = "Notes must be at most 280 characters.";
+"activityEditor.tagsLabel" = "Categories";
+"activityEditor.noTags" = "No categories yet.";
+"activityEditor.addCategory" = "Add a category";
+"activityEditor.save" = "Save";
+"activityEditor.cancel" = "Cancel";
 "timer.compactStop" = "Stop and save timer";
 "timer.compactReturnHint" = "Returns to Track";
 "timer.compactRunning" = "%@, timer running";

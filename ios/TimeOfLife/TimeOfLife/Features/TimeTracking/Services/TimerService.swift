@@ -31,22 +31,23 @@ final class TimerService: ObservableObject {
         return activity
     }
 
-    /// Returns the activity with the given name, creating it (categoryless)
-    /// if it does not exist. Case-insensitive reuse: an existing activity with
-    /// the same trimmed name is returned instead of creating a duplicate.
-    func ensureActivity(named name: String, createdAt: Date = Date()) async throws -> Activity {
-        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        if let existing = try await store.activity(named: trimmed) {
-            return existing
-        }
-        let activity = Activity(
-            id: UUID().uuidString.lowercased(),
-            name: trimmed,
-            createdAt: createdAt,
-            updatedAt: createdAt
+    /// Atomically creates an activity or resolves an existing identity by
+    /// normalized name (unify-activity-preparation-flow spec, decision 6).
+    /// The single transactional LocalStore operation replaces the previous
+    /// lookup-then-insert race: uniqueness races are translated into
+    /// deterministic `existing` outcomes by the store.
+    func prepareActivity(
+        named name: String,
+        notes: String? = nil,
+        categoryIDs: [String] = [],
+        now: Date = Date()
+    ) async throws -> LocalStore.CreateOrResolve {
+        try await store.createOrResolveActivity(
+            named: name,
+            notes: notes,
+            categoryIDs: categoryIDs,
+            now: now
         )
-        try await store.createActivity(activity)
-        return activity
     }
 
     /// Starts a timer against the given activity, persisting the running

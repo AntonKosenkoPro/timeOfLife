@@ -4,7 +4,8 @@ import Combine
 
 /// View model for the Track capture screen (timer-capture-experience spec).
 ///
-/// Owns the `TrackState` state machine, the activity chooser data, and the
+/// Owns the `TrackState` state machine, the temporary Activity-search
+/// interaction state (unify-activity-preparation-flow spec), and the
 /// elapsed-time ticker. Persistence is delegated to `TimerService`, which
 /// writes only to the local database (local-first-store spec).
 @MainActor
@@ -12,9 +13,12 @@ final class TrackViewModel: ObservableObject {
     @Published private(set) var state: TrackState = .idle
     @Published var elapsed: TimeInterval = 0
     @Published var errorMessage: String?
-    @Published var isChoosingActivity = false
-    @Published var chooserQuery = ""
+    @Published var isSearchActive = false
+    @Published private(set) var search = ActivitySearchState()
     @Published private(set) var activities: [Activity] = []
+    /// The non-expired pending-deletion identity matching the current query,
+    /// refreshed as the query changes (result-model input, decision 7).
+    @Published private(set) var pendingDeletion: Activity?
 
     let service: TimerService
     private let connectivity: Connectivity
@@ -52,29 +56,238 @@ final class TrackViewModel: ObservableObject {
         guard !state.isRunning else { return }
         state = .ready(activity)
         elapsed = 0
-        isChoosingActivity = false
+        isSearchActive = false
+        search = ActivitySearchState()
         Haptics.selection()
     }
 
-    /// Creates an activity from unmatched chooser input and prepares it.
-    func createActivity(named name: String) async {
-        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+    // MARK: - Activity search (unify-activity-preparation-flow spec)
+
+    /// The deterministic result model for the active search content. The
+    /// non-expired pending-deletion identity (if any) is resolved from the
+    /// store so the restore action can replace creation.
+    var searchResults: ActivitySearchResults {
+        ActivitySearchResults.derive(
+            query: search.query,
+            activities: activities,
+            pendingDeletion: pendingDeletion
+        )
+    }
+
+    /// A binding to the search query for the native search field. The query
+    /// is a draft: it never mutates the committed `TrackState`.
+    var searchQueryBinding: Binding<String> {
+        Binding(
+            get: { self.search.query },
+            set: { self.setSearchQuery($0) }
+        )
+    }
+
+    /// Sets the search query (draft). Used by the native search field binding
+    /// and by tests; never mutates the committed `TrackState`. Refreshes the
+    /// pending-deletion identity for the result model.
+    func setSearchQuery(_ query: String) {
+        search.query = query
+        refreshPendingDeletion()
+    }
+
+    /// Refreshes the non-expired pending-deletion identity matching the
+    /// trimmed query (result-model input, decision 7).
+    private func refreshPendingDeletion() {
+        let trimmed = search.trimmedQuery
+        guard !trimmed.isEmpty else {
+            pendingDeletion = nil
+            return
+        }
+        Task {
+            pendingDeletion = try? await service.store.pendingDeletionActivity(named: trimmed)
+        }
+    }
+
+    /// Activates Activity search. Idle search begins empty; ready and saved
+    /// search begins with the committed Activity name so it can be replaced
+    /// directly. The query remains a draft and the committed Activity is
+    /// retained as the fallback until a result is confirmed.
+    func activateSearch() {
+        guard !state.isRunning else { return }
+        let initialQuery: String
+        switch state {
+        case let .ready(activity), let .saved(activity, _):
+            initialQuery = activity.name
+        case .idle, .running, .saving, .error:
+            initialQuery = ""
+        }
+        search = ActivitySearchState(query: initialQuery)
+        isSearchActive = true
+        refreshPendingDeletion()
+    }
+
+    /// Syncs the native search environment state into the view model. The
+    /// operating system owns activation and cancellation; this keeps the
+    /// committed timer state untouched for unresolved input.
+    func setSearchActive(_ active: Bool) {
+        guard isSearchActive != active else { return }
+        isSearchActive = active
+        if !active {
+            search = ActivitySearchState()
+        }
+    }
+
+    /// Ends search without confirmation: the prior ready or idle timer state
+    /// is restored exactly (the draft never mutated it).
+    func cancelSearch() {
+        isSearchActive = false
+        search = ActivitySearchState()
+    }
+
+    /// Dismisses the pending-deletion restore prompt without acting.
+    func dismissPendingRestore() {
+        pendingRestore = nil
+    }
+
+    /// Dismisses the configured-save collision without acting.
+    func dismissCollision() {
+        search.collision = nil
+    }
+
+    /// Dismisses the create-from-Track editor without acting (Cancel).
+    func dismissEditor() {
+        search.editor = nil
+    }
+
+    /// Confirms an existing search result: prepares it and dismisses search.
+    func confirmSearchResult(_ activity: Activity) {
+        select(activity)
+    }
+
+    /// Quick-creates the unmatched valid query (categoryless) and prepares
+    /// it. On failure the search stays active with the query preserved and a
+    /// localized non-field error is shown. When a pending-deletion identity
+    /// surfaces at confirmation time, the explicit restore prompt is shown
+    /// instead of creating a duplicate.
+    func quickCreateFromSearch() async {
+        let trimmed = search.trimmedQuery
         guard !trimmed.isEmpty else { return }
         do {
-            let activity = try await service.ensureActivity(named: trimmed)
-            activities = try await service.store.activities()
-            select(activity)
+            let outcome = try await service.prepareActivity(named: trimmed)
+            switch outcome {
+            case let .created(activity), let .existing(activity):
+                activities = try await service.store.activities()
+                select(activity)
+            case let .restorableDeletion(activity):
+                pendingRestore = activity
+            case .invalid:
+                search.errorMessage = L10n.timerEmptyActivityError.text
+            case .failure:
+                search.errorMessage = L10n.text(in: .default, code: "error.unknown")
+            }
         } catch {
-            errorMessage = L10n.text(in: .default, code: "error.unknown")
+            search.errorMessage = L10n.text(in: .default, code: "error.unknown")
         }
+    }
+
+    /// The pending-deletion activity awaiting explicit restoration.
+    private(set) var pendingRestore: Activity?
+
+    /// Explicitly restores the pending-deletion activity and prepares it.
+    /// No outbox row is created (the deletion was never committed).
+    func restorePendingDeletion() async {
+        guard let pending = pendingRestore else { return }
+        do {
+            if let restored = try await service.store.restorePendingDeletionActivity(named: pending.name) {
+                activities = try await service.store.activities()
+                pendingRestore = nil
+                select(restored)
+            } else {
+                // The window elapsed or the buffer was superseded: fall back
+                // to ordinary creation.
+                pendingRestore = nil
+                await quickCreateFromSearch()
+            }
+        } catch {
+            search.errorMessage = L10n.text(in: .default, code: "error.unknown")
+        }
+    }
+
+    /// Opens configured creation with the trimmed query prefilled.
+    func openConfiguredCreation() {
+        let trimmed = search.trimmedQuery
+        guard !trimmed.isEmpty else { return }
+        search.editor = ActivitySearchState.EditorPresentation(
+            draft: ActivityDraft(name: trimmed)
+        )
+    }
+
+    /// Cancels configured creation: no Activity is created and the active
+    /// search returns with the prior query preserved.
+    func cancelConfiguredCreation() {
+        search.editor = nil
+    }
+
+    /// Saves configured creation from the editor draft. On success the
+    /// editor and search close and the saved Activity is prepared without
+    /// starting timing. On a normalized-name collision the editor presents
+    /// the explicit Use Existing / Keep Editing choice.
+    func saveConfiguredCreation(draft: ActivityDraft, saved: Activity) async {
+        if let refreshed = try? await service.store.activities() {
+            activities = refreshed
+        }
+        search.editor = nil
+        select(saved)
+    }
+
+    /// Reports a configured-save collision (the editor's create-or-resolve
+    /// found an existing or pending-deletion identity): the editor closes
+    /// and the explicit Use Existing / Keep Editing choice is presented.
+    func reportConfiguredCollision(existing: Activity, draft: ActivityDraft) {
+        search.editor = nil
+        search.collision = ActivitySearchState.CollisionPresentation(
+            existing: existing,
+            draft: draft
+        )
+    }
+
+    /// Uses the existing winning Activity after a configured-save collision,
+    /// never applying the draft notes or Categories to it.
+    func useExistingAfterCollision() {
+        guard let collision = search.collision else { return }
+        search.collision = nil
+        select(collision.existing)
+    }
+
+    /// Keeps editing after a configured-save collision: the editor reopens
+    /// with the draft intact so the user can choose a distinct name.
+    func keepEditingAfterCollision() {
+        guard let collision = search.collision else { return }
+        search.collision = nil
+        search.editor = ActivitySearchState.EditorPresentation(draft: collision.draft)
     }
 
     // MARK: - Start / Stop
 
     /// Starts the prepared activity. Selection alone never starts timing
     /// (timer-capture-experience spec); Start is the only entry to running.
+    /// The committed Activity identifier is revalidated first: a prepared
+    /// Activity that no longer exists clears preparation and returns to idle
+    /// with a localized error instead of being recreated.
     func start() {
         guard case let .ready(activity) = state else { return }
+        Task {
+            do {
+                guard try await service.store.activity(id: activity.id) != nil else {
+                    state = .idle
+                    elapsed = 0
+                    errorMessage = L10n.timerStalePreparationError.text
+                    return
+                }
+                beginRunning(activity: activity)
+            } catch {
+                errorMessage = L10n.text(in: .default, code: "error.unknown")
+            }
+        }
+    }
+
+    private func beginRunning(activity: Activity) {
         let startedAt = Date()
         state = .running(activity, startedAt: startedAt)
         elapsed = 0
@@ -84,9 +297,6 @@ final class TrackViewModel: ObservableObject {
         Haptics.selection()
         Task {
             do {
-                // Ensure the activity row exists (auto-create, F4) so the
-                // persisted timer state and the later entry insert hold.
-                _ = try await service.ensureActivity(id: activity.id, name: activity.name)
                 try await service.startTimer(activityID: activity.id, startedAt: startedAt)
             } catch {
                 // Local persistence failure: keep the timer running in memory
@@ -125,23 +335,6 @@ final class TrackViewModel: ObservableObject {
         await stop()
     }
 
-    // MARK: - Chooser
-
-    /// Recency-ordered activities, filtered case-insensitively by the query.
-    var filteredActivities: [Activity] {
-        let query = chooserQuery.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !query.isEmpty else { return activities }
-        return activities.filter { $0.name.localizedCaseInsensitiveContains(query) }
-    }
-
-    /// True when the trimmed query has no case-insensitive match — the chooser
-    /// then offers `Create "Name"`.
-    var canCreateFromQuery: Bool {
-        let query = chooserQuery.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !query.isEmpty else { return false }
-        return !activities.contains { $0.name.caseInsensitiveCompare(query) == .orderedSame }
-    }
-
     // MARK: - Ticker
 
     private func startTicker(from startedAt: Date) {
@@ -171,3 +364,35 @@ final class TrackViewModel: ObservableObject {
         }
     }
 }
+
+#if DEBUG
+extension TrackViewModel {
+    static func preview(
+        state: TrackState = .idle,
+        activities: [Activity] = [],
+        query: String = "",
+        isSearchActive: Bool = false,
+        collision: ActivitySearchState.CollisionPresentation? = nil
+    ) -> TrackViewModel {
+        let url = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent(UUID().uuidString)
+            .appendingPathComponent("preview.sqlite")
+        let store: LocalStore
+        do {
+            store = try LocalStore(url: url)
+        } catch {
+            fatalError("Unable to create preview store: \(error)")
+        }
+        let viewModel = TrackViewModel(
+            service: TimerService(store: store),
+            connectivity: MockConnectivity(connected: true)
+        )
+        viewModel.state = state
+        viewModel.activities = activities
+        viewModel.search.query = query
+        viewModel.isSearchActive = isSearchActive
+        viewModel.search.collision = collision
+        return viewModel
+    }
+}
+#endif

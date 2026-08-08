@@ -16,11 +16,11 @@ metadata for management and Insights; they are not part of capture selection.
 6. The user taps Stop to finish the session.
 7. The app saves the elapsed entry locally and syncs it when online.
 
-## Screen: TimerView
+## Screen: TrackView
 
-- **File**: `ios/TimeOfLife/TimeOfLife/Features/TimeTracking/Views/TimerView.swift`
-- **Route**: `.timer` during the shell migration
-- **ViewModel**: `TimerViewModel`
+- **File**: `ios/TimeOfLife/TimeOfLife/Features/TimeTracking/Views/TrackView.swift`
+- **Route**: Track tab in the app shell
+- **ViewModel**: `TrackViewModel`
 
 ### Layout
 
@@ -30,11 +30,17 @@ action bar.
 
 1. `OfflineBanner()` is rendered at the top by the root shell.
 2. Navigation title: `L10n.timerTitle` (`Track`).
-3. Selected Activity button:
-   - `accessibilityIdentifier`: `TimerActivityPicker`.
-   - Minimum tap area: `Theme.minTapArea`.
-   - Shows the concrete Activity name or a choose-an-Activity prompt.
-   - Does not show a Category icon or Category name.
+3. State-specific Activity preparation control below the numeric readout and
+   above Recents:
+   - Idle: the filled `+` button with `L10n.timerChooseActivity`, identifier
+     `TimerChooseActivityButton`, and minimum height 54 pt.
+   - Ready or saved: a search-styled picker with a magnifier, the prepared
+     Activity name, and identifier `TimerActivitySearchButton`.
+   - Running, saving, or recoverable error: a non-interactive prepared Activity
+     label with identifier `TimerActivityLabel`; search is unavailable while
+     timing is active.
+   - No state renders more than one preparation control.
+   - No control shows a Category icon or Category name.
 4. Numeric timer readout:
    - Elapsed time formatted as `MM:SS` or `H:MM:SS`.
    - Centered in the main content region.
@@ -61,17 +67,37 @@ Pinned bottom action bar via `.safeAreaInset(edge: .bottom)`:
 The Track screen has no Dial, ring, sweep, goal, daily-total, or decorative
 progress visualization.
 
-### Activity picker
+### Activity search sheet
 
-Tapping `TimerActivityPicker` presents a searchable native sheet:
+Tapping the idle `TimerChooseActivityButton` or the ready/saved
+`TimerActivitySearchButton` is the single Activity-search entry point for that
+state. It presents a full-height sheet containing a native, always-visible
+search field and ordinary result content. The operating system owns field
+placement, focus, keyboard, activation animation, and Cancel; the sheet owns
+its presentation and dismissal:
 
-- Recent Activity names appear before search, ordered by `last_used_at`.
-- Search matches Activity names case-insensitively.
-- Unmatched valid input offers `Create "Name"`.
-- Selecting or creating an Activity prepares it and dismisses the sheet.
-- The sheet never requires a Category and never shows Category metadata.
-- A Manage Activities entry point is available as a secondary action.
-- An Activity created here is valid with zero Categories.
+- Empty query: the complete Activity catalog in recency order
+  (`last_used_at`), with the prepared Activity marked.
+- Non-empty query: case-insensitive containment matches in recency order.
+- Exact normalized match (trimmed, case-insensitive): identified first; no
+  create action is offered for that name.
+- Valid unmatched input: a create row with two explicit targets — quick
+  creation (categoryless) and configured creation (opens the shared Activity
+  Editor with the name prefilled).
+- Invalid input: existing search results stay available, creation is
+  suppressed, and localized validation guidance is shown.
+- A non-expired pending-deletion identity matching the query offers explicit
+  restoration instead of creation.
+- Empty catalog: the content area explains the empty state and prompts the
+  user to enter a name in the native search field — no separate alert.
+- The search content never requires a Category and never shows Category
+  metadata.
+
+Search input is a temporary draft: it never changes the committed prepared
+Activity. Native Cancel and swipe-down dismissal close the sheet and restore
+the prior ready or idle timer state exactly. Selecting, quick-creating,
+restoring, or saving configured creation is the only commit boundary — it
+prepares the Activity and dismisses the sheet.
 
 Selection changes the ready state only. The timer starts only after the user
 activates Start.
@@ -90,15 +116,17 @@ activates Start.
 
 ### Keyboard handling
 
-The Track screen does not keep a free-text field in the primary capture layout.
-Search and Activity editing follow `Design/INTERACTIONS.md` -> **Keyboard and
-primary input placement**. The search/name field stays above the keyboard and
-the sheet's Save action is pinned with `.safeAreaInset(edge: .bottom)`.
+The Track screen does not keep a free-text field in the primary capture
+layout. Search and Activity editing follow `Design/INTERACTIONS.md` ->
+**Keyboard and primary input placement**. The native search field stays
+above the keyboard; the editor's Save action is pinned with
+`.safeAreaInset(edge: .bottom)`.
 
 ### Layout stability rule
 
-- The Activity affordance, numeric readout, state label, and primary action keep
-  their interaction regions across ready, running, saving, and saved states.
+- The numeric readout and state-specific preparation/primary controls keep
+  their interaction regions across idle, ready, running, saving, and saved
+  states.
 - Only the Activity state, readout value, label, button title/icon, and tint
   change.
 - No dial, ring, or progress card appears or disappears around the readout.
@@ -106,9 +134,19 @@ the sheet's Save action is pinned with `.safeAreaInset(edge: .bottom)`.
 
 ### Behaviors
 
-- Open the Activity picker from the selected Activity affordance.
+- Open Activity search from the state-specific preparation control below the
+  timer.
 - Selecting a recent Activity prepares it without creating an entry.
-- Creating an unmatched Activity prepares it locally without Categories.
+- Quick-creating an unmatched Activity prepares it locally without Categories.
+- Configured creation opens the shared Activity Editor with the name
+  prefilled; saving prepares the Activity without starting timing, and
+  cancelling returns to active search with the query preserved.
+- A configured-save name collision offers explicit Use Existing / Keep
+  Editing choices and never overwrites the existing Activity's notes or
+  Categories.
+- Start revalidates the prepared Activity by identifier; a prepared Activity
+  that no longer exists clears preparation and returns to idle with a
+  localized error (it is never silently recreated).
 - Start persists the running timer immediately, begins periodic readout refresh,
   emits selection feedback, and keeps the screen awake.
 - Stop calculates elapsed time, saves the entry locally, emits success feedback,
@@ -127,7 +165,8 @@ the sheet's Save action is pinned with `.safeAreaInset(edge: .bottom)`.
 |---|---|
 | Idle | No Activity selected; centered readout shows `00:00`; choose Activity prompt and Start are shown or Start is disabled according to validation policy. |
 | Ready | Selected Activity name; centered readout shows `00:00`; Start button shown. |
-| Running | Activity affordance remains visible; readout updates live; Stop button shown with destructive tint. |
+| Search active | Searchable sheet with a native field; content area shows browse/filtered results, create/configure or restore actions, empty-catalog guidance, or validation/error states; committed timer state unchanged. |
+| Running | Prepared Activity label remains visible; readout updates live; Stop button shown with destructive tint. |
 | Saving | Readout remains stable; Stop action shows progress while the save completes. |
 | Saved | Brief saved confirmation; same Activity remains prepared with `00:00` and Start. |
 | Error | Localized non-field error appears above the primary action; recoverable running state is preserved. |
@@ -152,13 +191,13 @@ Activity name and Categories are resolved from the local catalog by
 
 - [ ] All colors use `Theme.*` tokens.
 - [ ] All strings use `L10n.*` keys in English and Russian.
-- [ ] Activity picker, readout, and Start/Stop controls have stable identifiers.
+- [ ] Activity search, readout, and Start/Stop controls have stable identifiers.
 - [ ] Numeric readout is centered, fixed, and `.monospacedDigit()`.
-- [ ] Suggestions and picker rows expose Activity names only.
+- [ ] Suggestions and search rows expose Activity names only.
 - [ ] Start follows explicit selection and persists running state.
 - [ ] Stop saves locally and preserves recoverable state on failure.
 - [ ] Compact timer is available above History and Insights navigation.
-- [ ] VoiceOver, Dynamic Type, Reduce Motion, light/dark, and iOS 15 are tested.
+- [x] VoiceOver, Dynamic Type, Reduce Motion, light/dark, and iOS 15 are tested.
 - [ ] SwiftLint and warning-as-error builds pass.
 
 ## Localization keys
@@ -182,12 +221,13 @@ Add English and Russian values, then add corresponding `L10n` cases:
 Suggestions are computed on-device from the local catalog and ranked by
 `last_used_at`. Each row contains the Activity name and recency only. Category
 icons and names belong in Manage Activities, Manage Categories, Activity Editor,
-and Insights, not in the capture chooser.
+and Insights, not in the capture search.
 
-Quick-add presents the shared Activity Editor as a sheet. The user may save an
-Activity with no Categories and assign Categories later. Starting with a new
-name still auto-creates a categoryless Activity, reuses a case-insensitive
-match, and never forces the user into category management.
+The search sheet offers quick creation and an optional configured-creation
+target. Both can save an Activity with no Categories; configured creation
+opens the shared Activity Editor with the trimmed query prefilled. Starting
+with a new name still auto-creates a categoryless Activity, reuses a
+case-insensitive match, and never forces the user into category management.
 
 Manage Activities and Manage Categories are separate destinations/sheets. Both
 remain available offline and use the existing sync-conflict and 30-second

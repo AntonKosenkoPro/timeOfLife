@@ -4,33 +4,59 @@ import SwiftUI
 /// numeric timer whose only purpose is displaying the exact duration while
 /// the user chooses, starts, or stops an activity.
 ///
-/// Layout is intentionally stable: the activity affordance, numeric readout,
-/// state label, and primary action keep their interaction regions across
-/// idle, ready, running, saving, saved, and error states.
+/// Layout is intentionally stable: the numeric readout and state-specific
+/// preparation/primary controls keep their interaction regions across idle,
+/// ready, running, saving, saved, and error states.
+///
+/// Activity preparation uses a full-height native searchable sheet
+/// (unify-activity-preparation-flow spec, decision 1). The operating system
+/// owns the search field, focus, keyboard, and cancellation while Track keeps
+/// its committed timer state untouched until a result is confirmed.
 struct TrackView: View {
     @ObservedObject var vm: TrackViewModel
     @EnvironmentObject var container: AppContainer
 
     var body: some View {
-        content
+        TrackContent(vm: vm)
             .navigationTitle(L10n.tabTrack.text)
             .navigationBarTitleDisplayMode(.inline)
-            .sheet(isPresented: $vm.isChoosingActivity) {
-                ActivityChooserView(vm: vm)
-            }
             .task { await vm.load() }
+            .sheet(isPresented: searchPresentation, onDismiss: vm.cancelSearch) {
+                ActivitySearchSheet(vm: vm, store: container.localStore)
+                    .environmentObject(container)
+            }
     }
 
-    private var content: some View {
+    private var searchPresentation: Binding<Bool> {
+        Binding(
+            get: { vm.isSearchActive },
+            set: { if !$0 { vm.cancelSearch() } }
+        )
+    }
+}
+
+/// The stable Track timer layout. Activity-search draft state is rendered in
+/// `ActivitySearchSheet`, rather than replacing this body.
+private struct TrackContent: View {
+    @ObservedObject var vm: TrackViewModel
+
+    var body: some View {
+        timerContent
+            .background(Theme.backgroundPrimary.ignoresSafeArea())
+    }
+
+    // MARK: - Timer content
+
+    private var timerContent: some View {
         ScrollView {
             VStack(spacing: 0) {
-                activityAffordance
-                    .padding(.top, Theme.spacingMedium)
-
                 NumericTimerReadout(state: vm.state, elapsed: vm.elapsed)
                     .frame(maxWidth: .infinity)
                     .frame(height: 190)
                     .padding(.top, Theme.spacingExtraLarge)
+
+                activityPreparationControl
+                    .padding(.top, Theme.spacingLarge)
 
                 primaryAction
                     .padding(.top, Theme.spacingLarge)
@@ -60,55 +86,117 @@ struct TrackView: View {
             .frame(maxWidth: Theme.maxContentWidth)
             .frame(maxWidth: .infinity)
         }
-        .background(Theme.backgroundPrimary.ignoresSafeArea())
     }
 
-    // MARK: - Activity affordance
+    // MARK: - Activity preparation
 
-    private var activityAffordance: some View {
+    @ViewBuilder private var activityPreparationControl: some View {
+        switch vm.state {
+        case .idle:
+            chooseActivityButton
+        case .ready, .saved:
+            activityPicker
+        case .running, .saving, .error:
+            preparedActivityLabel
+        }
+    }
+
+    private var chooseActivityButton: some View {
+        PrimaryButton(
+            title: L10n.timerChooseActivity.text,
+            icon: "plus",
+            isLoading: false,
+            isDisabled: false,
+            accessibilityId: "TimerChooseActivityButton"
+        ) {
+            vm.activateSearch()
+        }
+    }
+
+    private var activityPicker: some View {
         Button {
-            vm.isChoosingActivity = true
+            vm.activateSearch()
         } label: {
-            HStack(spacing: 7) {
-                Text(vm.state.activity?.name ?? L10n.timerChooseActivity.text)
-                Image(systemName: "chevron.down")
-                    .font(.caption2.weight(.bold))
+            HStack(spacing: Theme.spacingSmall) {
+                Image(systemName: "magnifyingglass")
+                    .foregroundStyle(Theme.textSecondary)
+                    .accessibilityHidden(true)
+                Text(vm.state.activity?.name ?? L10n.timerSearchPrompt.text)
+                    .lineLimit(1)
+                    .foregroundStyle(vm.state.activity == nil ? Theme.textSecondary : Theme.textPrimary)
+                Spacer()
             }
-            .font(.headline)
-            .foregroundStyle(Theme.textPrimary)
-            .frame(minHeight: Theme.minTapArea)
+            .font(.body)
+            .padding(.horizontal, Theme.spacingMedium)
+            .frame(maxWidth: .infinity, minHeight: Theme.minTapArea)
+            .background(Theme.backgroundSecondary)
+            .clipShape(RoundedRectangle(cornerRadius: Theme.cornerRadius))
+            .overlay {
+                RoundedRectangle(cornerRadius: Theme.cornerRadius)
+                    .stroke(Theme.hairline, lineWidth: 0.7)
+            }
         }
         .disabled(vm.state.isRunning)
         .opacity(vm.state.isRunning ? 0.72 : 1)
-        .accessibilityIdentifier("TimerActivityPicker")
-        .accessibilityLabel(vm.state.activity?.name ?? L10n.timerChooseActivity.text)
+        .accessibilityIdentifier("TimerActivitySearchButton")
+        .accessibilityLabel(vm.state.activity?.name ?? L10n.timerSearchPrompt.text)
+    }
+
+    private var preparedActivityLabel: some View {
+        HStack(spacing: Theme.spacingSmall) {
+            Image(systemName: "timer")
+                .foregroundStyle(Theme.textSecondary)
+                .accessibilityHidden(true)
+            Text(vm.state.activity?.name ?? L10n.timerSearchPrompt.text)
+                .lineLimit(1)
+                .foregroundStyle(Theme.textPrimary)
+            Spacer()
+        }
+        .font(.body)
+        .padding(.horizontal, Theme.spacingMedium)
+        .frame(maxWidth: .infinity, minHeight: Theme.minTapArea)
+        .background(Theme.backgroundSecondary)
+        .clipShape(RoundedRectangle(cornerRadius: Theme.cornerRadius))
+        .overlay {
+            RoundedRectangle(cornerRadius: Theme.cornerRadius)
+                .stroke(Theme.hairline, lineWidth: 0.7)
+        }
+        .accessibilityIdentifier("TimerActivityLabel")
+        .accessibilityLabel(vm.state.activity?.name ?? L10n.timerSearchPrompt.text)
     }
 
     // MARK: - Primary action
 
-    private var primaryAction: some View {
-        PrimaryButton(
-            title: primaryTitle,
-            icon: primaryIcon,
-            isLoading: vm.state.isSaving,
-            isDisabled: primaryDisabled,
-            accessibilityId: primaryIdentifier,
-            tint: vm.state.isRunning ? Theme.danger : nil
-        ) {
-            switch vm.state {
-            case .idle:
-                vm.isChoosingActivity = true
-            case .ready, .saved:
-                vm.start()
-            case .running:
-                Task { await vm.stop() }
-            case .saving:
-                break
-            case .error:
-                Task { await vm.retryStop() }
+    @ViewBuilder private var primaryAction: some View {
+        if !isIdle {
+            PrimaryButton(
+                title: primaryTitle,
+                icon: primaryIcon,
+                isLoading: vm.state.isSaving,
+                isDisabled: primaryDisabled,
+                accessibilityId: primaryIdentifier,
+                tint: vm.state.isRunning ? Theme.danger : nil
+            ) {
+                switch vm.state {
+                case .idle:
+                    break
+                case .ready, .saved:
+                    vm.start()
+                case .running:
+                    Task { await vm.stop() }
+                case .saving:
+                    break
+                case .error:
+                    Task { await vm.retryStop() }
+                }
             }
+            .accessibilityHint(primaryHint)
         }
-        .accessibilityHint(primaryHint)
+    }
+
+    private var isIdle: Bool {
+        if case .idle = vm.state { return true }
+        return false
     }
 
     private var primaryTitle: String {
@@ -154,20 +242,12 @@ struct TrackView: View {
 
     private var recentActivities: some View {
         VStack(alignment: .leading, spacing: Theme.spacingSmall) {
-            HStack {
-                Text(L10n.timerChooserRecent.text)
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(Theme.textSecondary)
-                Spacer()
-                Button(L10n.timerManageActivities.text) {
-                    vm.isChoosingActivity = true
-                }
-                .font(.footnote.weight(.medium))
-                .foregroundStyle(Theme.accentPrimary)
-            }
+            Text(L10n.timerChooserRecent.text)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(Theme.textSecondary)
 
             if vm.activities.isEmpty {
-                Text(L10n.timerChooserEmptySubtitle.text)
+                Text(L10n.timerSearchEmptyCatalogSubtitle.text)
                     .font(.subheadline)
                     .foregroundStyle(Theme.textSecondary)
                     .padding(.vertical, Theme.spacingSmall)
@@ -189,7 +269,7 @@ struct TrackView: View {
                                         Capsule().stroke(Theme.hairline, lineWidth: 0.7)
                                     }
                             }
-                            .accessibilityLabel("Select \(activity.name)")
+                            .accessibilityLabel(String(format: L10n.timerSelectActivity.text, activity.name))
                             .accessibilityIdentifier("TimerSuggestion(\(activity.id))")
                         }
                     }
@@ -200,22 +280,18 @@ struct TrackView: View {
 }
 
 #if DEBUG
-#Preview("Track — EN Light") {
-    let container = AppContainer.production()
-    TrackView(vm: TrackViewModel(
-        service: container.timerService,
-        connectivity: container.connectivity
-    ))
-    .environmentObject(container)
+#Preview("Track — Idle EN Light") {
+    TrackContent(vm: .preview())
+}
+
+#Preview("Track — Ready EN Light") {
+    let activity = Activity(id: "preview-ready-en", name: "Deep work")
+    TrackContent(vm: .preview(state: .ready(activity), activities: [activity]))
 }
 
 #Preview("Track — RU Dark") {
-    let container = AppContainer.production()
-    TrackView(vm: TrackViewModel(
-        service: container.timerService,
-        connectivity: container.connectivity
-    ))
-    .environmentObject(container)
+    let activity = Activity(id: "preview-ready", name: "Спортзал")
+    TrackContent(vm: .preview(state: .ready(activity), activities: [activity]))
     .preferredColorScheme(.dark)
     .environment(\.locale, .init(identifier: "ru"))
 }

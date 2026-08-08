@@ -9,13 +9,13 @@ Context for AI agents working in this repository. Read this first. (Requirements
 - Ask the user to start a new session if the current context overwhelms 200k tokens
 
 ## What this is
-**Time of Life** — a personal time-tracking iOS app. The repo contains the **auth MVP** (passwordless email-OTP sign-up/sign-in) and the **Track experience** (OpenSpec change `redesign-track-experience`): a three-tab shell (Track/History/Insights) with a centered numeric timer, an Activity-only capture chooser, a Profile destination, and a compact cross-tab running timer — all local-first.
+**Time of Life** — a personal time-tracking iOS app. The repo contains the **auth MVP** (passwordless email-OTP sign-up/sign-in) and the **Track experience** (OpenSpec change `redesign-track-experience`, refined by `unify-activity-preparation-flow`): a three-tab shell (Track/History/Insights) with a centered numeric timer, platform-native Activity search for preparation (browse/filter/quick-create/configure-create), a Profile destination, and a compact cross-tab running timer — all local-first.
 
 Requirements live in `Requirements/FURPS/` (the FURPS+ table) and `Requirements/Usecases/` (use-case narratives). The auth requirements are `Requirements/FURPS/Sign-up_and_Sign-in.md`.
 
 The **design system** lives in `Design/` — see `Design/README.md`. All visual, component, and interaction decisions for iOS are specified there as Markdown so they can be implemented deterministically.
 
-**Epic 1 design materials** (FURPS S3): new screen specs `Design/SCREENS/ManageActivities.md`, `ManageCategories.md`, `ActivityEditor.md`, `CategoryEditor.md`; the Track screen + app shell specs in `Design/SCREENS/TimeTracking.md` and `Design/SCREENS/AppShell.md` (suggestions are client-side, no endpoint — F5/D16); category icon set in `Design/TOKENS.md`; numeric timer, compact timer, and activity chooser contracts in `Design/COMPONENTS.md`; undo/delete-scope/sync-conflict interactions in `Design/INTERACTIONS.md`. The backend contract is `Design/BACKEND/Activity_Catalog_API.md`.
+**Epic 1 design materials** (FURPS S3): new screen specs `Design/SCREENS/ManageActivities.md`, `ManageCategories.md`, `ActivityEditor.md`, `CategoryEditor.md`; the Track screen + app shell specs in `Design/SCREENS/TimeTracking.md` and `Design/SCREENS/AppShell.md` (suggestions are client-side, no endpoint — F5/D16); category icon set in `Design/TOKENS.md`; numeric timer, compact timer, and Activity search content contracts in `Design/COMPONENTS.md`; undo/delete-scope/sync-conflict/search-and-creation interactions in `Design/INTERACTIONS.md`. The backend contract is `Design/BACKEND/Activity_Catalog_API.md`.
 
 ## Architecture: local-first (OpenSpec change `local-first-sync-architecture`)
 
@@ -52,8 +52,8 @@ backend/                 Go backend (chi + pgx/Postgres; sqlite for tests)
 ios/TimeOfLife/          SwiftUI app (iOS 15+), XcodeGen-managed (project.yml)
   TimeOfLife/Features/Auth/        passwordless flow: Welcome → EmailEntry → OtpEntry
   TimeOfLife/Features/AppShell/    three-tab shell (Track/History/Insights) + Profile destination
-  TimeOfLife/Features/TimeTracking/  Track state machine, activity chooser, numeric/compact timers, TimerService
-  TimeOfLife/Features/Catalog/     Models/CatalogModels.swift, Repositories/RemoteCatalogRepository.swift
+  TimeOfLife/Features/TimeTracking/  Track state machine, Activity search interaction state, numeric/compact timers, TimerService
+  TimeOfLife/Features/Catalog/     Models/CatalogModels.swift, ActivityDraft.swift, ActivityName.swift, Repositories/RemoteCatalogRepository.swift, ActivityEditor (create-from-Track)
   TimeOfLife/Features/Sync/       SyncController.swift (outbox drain + delta pull)
   TimeOfLife/Core/Storage/         LocalStore.swift (GRDB), UndoBufferStore.swift
   TimeOfLife/Core/                 networking, keychain, reachability, theme, navigation, DI, design components
