@@ -48,6 +48,8 @@ action bar.
      approved Theme equivalent.
    - Uses `Theme.textPrimary` and `.monospacedDigit()`.
    - Keeps a stable frame across all timer states.
+   - The saved-state blue checkmark is layered above the readout without
+     participating in layout, so its appearance does not move the timer.
    - `accessibilityIdentifier`: `TimerDisplay`.
 5. State label below the readout:
    - `READY`, `RUNNING`, `SAVING`, or `SAVED` as appropriate.
@@ -168,7 +170,7 @@ above the keyboard; the editor's Save action is pinned with
 | Search active | Searchable sheet with a native field; content area shows browse/filtered results, create/configure or restore actions, empty-catalog guidance, or validation/error states; committed timer state unchanged. |
 | Running | Prepared Activity label remains visible; readout updates live; Stop button shown with destructive tint. |
 | Saving | Readout remains stable; Stop action shows progress while the save completes. |
-| Saved | Brief saved confirmation; same Activity remains prepared with `00:00` and Start. |
+| Saved | Brief saved confirmation above the readout; the same Activity remains prepared with `00:00` and Start, and the timer stays in its prior position. |
 | Error | Localized non-field error appears above the primary action; recoverable running state is preserved. |
 
 ### Data model

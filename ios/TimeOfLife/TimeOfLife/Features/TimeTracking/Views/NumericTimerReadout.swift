@@ -10,12 +10,6 @@ struct NumericTimerReadout: View {
 
     var body: some View {
         VStack(spacing: Theme.spacingSmall) {
-            if case .saved = state {
-                Image(systemName: "checkmark")
-                    .font(.system(size: 20, weight: .medium))
-                    .foregroundStyle(Theme.accentPrimary)
-            }
-
             Text(TimeFormatter.formattedDuration(elapsed))
                 .font(Theme.timerFont())
                 .foregroundStyle(Theme.textPrimary)
@@ -25,6 +19,15 @@ struct NumericTimerReadout: View {
             Text(caption)
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(Theme.textSecondary)
+        }
+        .overlay(alignment: .top) {
+            if case .saved = state {
+                Image(systemName: "checkmark")
+                    .font(.system(size: 20, weight: .medium))
+                    .foregroundStyle(Theme.accentPrimary)
+                    .offset(y: -Theme.spacingExtraLarge)
+                    .accessibilityHidden(true)
+            }
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel(state.readoutAccessibilityLabel)

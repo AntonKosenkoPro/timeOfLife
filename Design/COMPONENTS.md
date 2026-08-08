@@ -472,6 +472,8 @@ struct NumericTimerReadout: View {
 - Elapsed time formatted as `MM:SS` or `H:MM:SS` (hours included once elapsed), `.monospacedDigit()`.
 - Font: `Theme.timerFont()` (`.system(size: 64, weight: .semibold, design: .rounded)`), `Theme.textPrimary`.
 - Centered in the main content region; keeps a stable frame across all timer states.
+- The saved-state checkmark is an overlay above the readout and does not change the
+  numeric timer's vertical position or the stack's measured height.
 - A short state caption below the readout (`READY`, `RUNNING`, `SAVING`, `SAVED`, or the idle prompt) in `.caption`, `Theme.textSecondary`.
 - `accessibilityIdentifier("TimerDisplay")`.
 
@@ -483,7 +485,7 @@ struct NumericTimerReadout: View {
 | Ready | `00:00` + `READY` caption |
 | Running | Live exact elapsed value + `RUNNING` caption |
 | Saving | Readout stable; primary action shows progress |
-| Saved | Brief `SAVED` confirmation; readout returns to `00:00` |
+| Saved | Brief blue checkmark overlay and `SAVED` confirmation; readout returns to `00:00` without moving |
 | Error | Readout stable; localized non-field error above the primary action |
 
 ### Accessibility
