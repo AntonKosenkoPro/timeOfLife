@@ -41,6 +41,12 @@ action bar.
      timing is active.
    - No state renders more than one preparation control.
    - No control shows a Category icon or Category name.
+   - The selected-Activity row is an `HStack`: the state-specific control
+     (picker or label) takes flexible width, with a trailing Refine button
+     (`TimerActivityRefineButton`, localized visible label, minimum 44 pt
+     interaction area). Refine is visible in all non-idle states (ready,
+     running, saving, saved, error) and is disabled only while saving. The
+     search picker itself remains disabled outside ready/saved.
 4. Numeric timer readout:
    - Elapsed time formatted as `MM:SS` or `H:MM:SS`.
    - Centered in the main content region.
@@ -83,9 +89,8 @@ its presentation and dismissal:
 - Non-empty query: case-insensitive containment matches in recency order.
 - Exact normalized match (trimmed, case-insensitive): identified first; no
   create action is offered for that name.
-- Valid unmatched input: a create row with two explicit targets — quick
-  creation (categoryless) and configured creation (opens the shared Activity
-  Editor with the name prefilled).
+- Valid unmatched input: a single full-width quick-create row (categoryless)
+  that prepares the Activity directly.
 - Invalid input: existing search results stay available, creation is
   suppressed, and localized validation guidance is shown.
 - A non-expired pending-deletion identity matching the query offers explicit
@@ -97,9 +102,9 @@ its presentation and dismissal:
 
 Search input is a temporary draft: it never changes the committed prepared
 Activity. Native Cancel and swipe-down dismissal close the sheet and restore
-the prior ready or idle timer state exactly. Selecting, quick-creating,
-restoring, or saving configured creation is the only commit boundary — it
-prepares the Activity and dismisses the sheet.
+the prior ready or idle timer state exactly. Selecting, quick-creating, or
+restoring is the only commit boundary — it prepares the Activity and
+dismisses the sheet.
 
 Selection changes the ready state only. The timer starts only after the user
 activates Start.
@@ -140,12 +145,12 @@ above the keyboard; the editor's Save action is pinned with
   timer.
 - Selecting a recent Activity prepares it without creating an entry.
 - Quick-creating an unmatched Activity prepares it locally without Categories.
-- Configured creation opens the shared Activity Editor with the name
-  prefilled; saving prepares the Activity without starting timing, and
-  cancelling returns to active search with the query preserved.
-- A configured-save name collision offers explicit Use Existing / Keep
-  Editing choices and never overwrites the existing Activity's notes or
-  Categories.
+- Refine (visible in every non-idle state, disabled only while saving) opens
+  the shared Activity Editor prefilled with the selected Activity's name,
+  notes, and Categories. Saving replaces the Activity in place in the current
+  TrackState — no transition — preserving startedAt, duration, and the
+  ticker; cancelling or failing leaves the selected Activity and timer state
+  unchanged.
 - Start revalidates the prepared Activity by identifier; a prepared Activity
   that no longer exists clears preparation and returns to idle with a
   localized error (it is never silently recreated).
@@ -167,7 +172,7 @@ above the keyboard; the editor's Save action is pinned with
 |---|---|
 | Idle | No Activity selected; centered readout shows `00:00`; choose Activity prompt and Start are shown or Start is disabled according to validation policy. |
 | Ready | Selected Activity name; centered readout shows `00:00`; Start button shown. |
-| Search active | Searchable sheet with a native field; content area shows browse/filtered results, create/configure or restore actions, empty-catalog guidance, or validation/error states; committed timer state unchanged. |
+| Search active | Searchable sheet with a native field; content area shows browse/filtered results, create or restore actions, empty-catalog guidance, or validation/error states; committed timer state unchanged. |
 | Running | Prepared Activity label remains visible; readout updates live; Stop button shown with destructive tint. |
 | Saving | Readout remains stable; Stop action shows progress while the save completes. |
 | Saved | Brief saved confirmation above the readout; the same Activity remains prepared with `00:00` and Start, and the timer stays in its prior position. |
@@ -225,11 +230,10 @@ Suggestions are computed on-device from the local catalog and ranked by
 icons and names belong in Manage Activities, Manage Categories, Activity Editor,
 and Insights, not in the capture search.
 
-The search sheet offers quick creation and an optional configured-creation
-target. Both can save an Activity with no Categories; configured creation
-opens the shared Activity Editor with the trimmed query prefilled. Starting
-with a new name still auto-creates a categoryless Activity, reuses a
-case-insensitive match, and never forces the user into category management.
+The search sheet offers a single full-width quick-create row that saves an
+Activity with no Categories. Starting with a new name still auto-creates a
+categoryless Activity, reuses a case-insensitive match, and never forces the
+user into category management.
 
 Manage Activities and Manage Categories are separate destinations/sheets. Both
 remain available offline and use the existing sync-conflict and 30-second

@@ -24,14 +24,15 @@ Narrative flows for **Epic 1: Activity Catalog & Categories**. Each flow maps to
 5. If the entered name matches an existing activity (case-insensitive, whitespace-trimmed), the existing activity is reused — no duplicate is created. Creation rechecks identity at confirmation time through the atomic local create-or-resolve operation, so a concurrent duplicate resolves to the existing winning Activity.
 6. If a non-expired pending-deletion Activity matches the name, the search content offers explicit **Restore** instead of creation; confirming restores the original Activity (same id, no sync) and prepares it.
 
-## 4. Quick-add an activity from the timer
+## 4. Refine a selected activity from the timer
 
-1. The user activates Activity search on Track and enters an unmatched valid name.
-2. The user taps the configure target on the create row; the shared Activity Editor opens with the name prefilled.
-3. The user optionally adds notes and category tags, and saves.
-4. The editor and search close; the new activity is prepared on Track (ready state) without starting timing.
-5. If the user cancels the editor, no Activity is created and the active search returns with the query preserved.
-6. If saving collides with an existing normalized name (or a pending-deletion identity), the app offers an explicit choice: **Use Existing** (prepares the existing Activity; the draft notes and Categories are never applied) or **Keep Editing** (reopens the editor with the draft intact).
+1. After creating or selecting an activity on Track, the user taps **Refine** beside the Activity picker/label.
+2. The shared Activity Editor opens in edit mode with the Activity's name, notes, and Categories prefilled.
+3. The user optionally changes the name, adds notes, or assigns/removes category tags, and saves.
+4. The editor closes, the same Activity identifier remains selected, the Track row reflects the saved values, and the timer state is unchanged. If the timer was running, the start time, elapsed duration, and ticker continue without interruption.
+5. If the user cancels the editor, the Activity remains unchanged and selected, and the timer state is unchanged.
+6. If saving collides with another Activity's normalized name, the editor stays open with the draft intact and a localized error permits retry; the selected Activity and timer state remain unchanged.
+7. If the selected Activity was deleted before Refine opens or saves, the app clears the invalid preparation, returns to idle, and does not silently recreate the deleted Activity.
 
 ## 5. Manage activities and categories
 

@@ -558,10 +558,8 @@ struct ActivitySearchSheet: View {
   the prepared Activity marked by a checkmark.
 - While typing: case-insensitive containment matches in recency order.
 - Exact normalized match: identified first; no create action for that name.
-- Valid unmatched input: one create row with two explicit targets — quick
-  creation (`ActivitySearchCreateButton`) and configured creation
-  (`ActivitySearchConfigureButton`), each a distinct 44 pt target with its own
-  localized accessibility label.
+- Valid unmatched input: one full-width quick-create button
+  (`ActivitySearchCreateButton`) with a localized accessibility label.
 - Non-expired pending-deletion identity: a restore row
   (`ActivitySearchRestoreButton`) replaces creation for that name.
 - Empty catalog: `EmptyState` explaining the empty state and prompting the
@@ -579,7 +577,7 @@ struct ActivitySearchSheet: View {
 |---|---|
 | Browse (empty query) | Recency-ordered catalog, prepared Activity marked |
 | Searching | Case-insensitive matches only |
-| Unmatched valid input | Create row: quick-create + configure targets |
+| Unmatched valid input | Create row: full-width quick-create button |
 | Pending-deletion identity | Restore row instead of creation |
 | Empty catalog | `EmptyState` + prompt to type a name |
 | Invalid input | Results + localized validation guidance |
@@ -588,10 +586,48 @@ struct ActivitySearchSheet: View {
 
 - Each result row: `.accessibilityLabel("Select \(activity.name)")`, with
   `.accessibilityValue("Ready")` when it is the prepared Activity.
-- Create row: `.accessibilityLabel("Create \(name)")`; configure target:
-  `.accessibilityLabel("Configure")`.
+- Create row: `.accessibilityLabel("Create \(name)")`.
 - Restore row: `.accessibilityLabel("Restore \(name)")`.
 - The content never requires a Category and never shows Category metadata.
+
+---
+
+## `TimerActivityRefineButton`
+
+The Refine affordance on the Track selected-Activity row (refine-selected-activity-from-track). Opens the shared Activity Editor prefilled with the selected Activity.
+
+### Signature
+
+```swift
+struct TimerActivityRefineButton: View {
+    let isDisabled: Bool
+    let action: () -> Void
+}
+```
+
+### Visual
+
+- Trailing member of the selected-Activity `HStack` on Track; the state-specific picker or label takes flexible width, the button sits at the trailing edge.
+- A `Button` with a visible localized text label (not icon-only); minimum 44 pt interaction area.
+- `accessibilityIdentifier("TimerActivityRefineButton")`.
+
+### States
+
+| State | Visual |
+|---|---|
+| Enabled | Visible text label, `Theme.accentPrimary`; present in ready, running, saved, and error states |
+| Disabled | Dimmed; disabled only while saving |
+
+### Requirements
+
+- Visible in all non-idle states (ready, running, saving, saved, error); disabled only during saving.
+- The search picker remains disabled outside ready/saved independently of Refine.
+- Activating Refine resolves the selected Activity from LocalStore; if it no longer exists, Track follows the stale-preparation behavior.
+
+### Accessibility
+
+- `.accessibilityLabel("Refine activity")` — the localized visible label.
+- `.accessibilityHint("Edits the selected activity's name, notes, and categories")`.
 
 ---
 

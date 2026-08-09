@@ -104,6 +104,7 @@
 		F2A0C0AA7831EEE284624BE5 /* EmptyState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 673BDAA21016DBD758DD3D7E /* EmptyState.swift */; };
 		F5D417EDB1D66CDDD067B4BA /* ActivityNameTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2BAB6B65C2AC467AD76EDC37 /* ActivityNameTests.swift */; };
 		F9DD38F86A930D2B6220B523 /* APIEndpoint.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC48D5C245EF1DD96F6F6004 /* APIEndpoint.swift */; };
+		FBBCB2FCFDEDA3361705105D /* TrackViewModelRefinementTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 89B64C81A3DDBFDE2E8435BD /* TrackViewModelRefinementTests.swift */; };
 		FF9A532BD13B96EA7AB7BE5C /* CatalogModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9D08A7D35F1EA7C976ECD8D /* CatalogModels.swift */; };
 /* End PBXBuildFile section */
 
@@ -177,6 +178,7 @@
 		81CBB3375245CC27E76466B5 /* TagSelector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TagSelector.swift; sourceTree = "<group>"; };
 		8354E22EF578D0FAD1780F56 /* ValidationPresentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ValidationPresentation.swift; sourceTree = "<group>"; };
 		85122E318E4D8F45391C746D /* AppConfigTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppConfigTests.swift; sourceTree = "<group>"; };
+		89B64C81A3DDBFDE2E8435BD /* TrackViewModelRefinementTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrackViewModelRefinementTests.swift; sourceTree = "<group>"; };
 		8BED8B093172AB8DB5725DC9 /* Config.Debug.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Config.Debug.xcconfig; sourceTree = "<group>"; };
 		8BF118849409A64918AA1F7E /* TimerServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimerServiceTests.swift; sourceTree = "<group>"; };
 		8C18B8185BAE478236847BDB /* TimeOfLifeApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimeOfLifeApp.swift; sourceTree = "<group>"; };
@@ -595,6 +597,7 @@
 				8BF118849409A64918AA1F7E /* TimerServiceTests.swift */,
 				3AC1A9F390CC0E0497BD2684 /* TrackAccessibilityTests.swift */,
 				E9D319925FEFEA08B258F2C6 /* TrackSearchViewModelTests.swift */,
+				89B64C81A3DDBFDE2E8435BD /* TrackViewModelRefinementTests.swift */,
 				EA7F475949DFD759D3E82475 /* TrackViewModelTests.swift */,
 				2EFFF9667C6CCF590471CED4 /* WelcomeViewModelTests.swift */,
 			);
@@ -890,6 +893,7 @@
 				5A77E8A59B9EB720ECE12919 /* TimerServiceTests.swift in Sources */,
 				0639442DC60767BA90B84D32 /* TrackAccessibilityTests.swift in Sources */,
 				D954B097D7CACCA5BD2388B9 /* TrackSearchViewModelTests.swift in Sources */,
+				FBBCB2FCFDEDA3361705105D /* TrackViewModelRefinementTests.swift in Sources */,
 				79A86E15D66DC64FA48EA0D2 /* TrackViewModelTests.swift in Sources */,
 				2D54716C3A60788EF56400F4 /* URLProtocolStub.swift in Sources */,
 				172234F3334C1E02C095BC91 /* WelcomeViewModelTests.swift in Sources */,

@@ -145,16 +145,6 @@ final class TrackViewModel: ObservableObject {
         pendingRestore = nil
     }
 
-    /// Dismisses the configured-save collision without acting.
-    func dismissCollision() {
-        search.collision = nil
-    }
-
-    /// Dismisses the create-from-Track editor without acting (Cancel).
-    func dismissEditor() {
-        search.editor = nil
-    }
-
     /// Confirms an existing search result: prepares it and dismisses search.
     func confirmSearchResult(_ activity: Activity) {
         select(activity)
@@ -209,58 +199,70 @@ final class TrackViewModel: ObservableObject {
         }
     }
 
-    /// Opens configured creation with the trimmed query prefilled.
-    func openConfiguredCreation() {
-        let trimmed = search.trimmedQuery
-        guard !trimmed.isEmpty else { return }
-        search.editor = ActivitySearchState.EditorPresentation(
-            draft: ActivityDraft(name: trimmed)
-        )
+    // MARK: - Selected-Activity refinement (refine-selected-activity-from-track)
+
+    @Published private(set) var refinementPresentation: RefinementPresentation?
+
+    struct RefinementPresentation: Identifiable, Equatable {
+        let activity: Activity
+        var id: String { activity.id }
     }
 
-    /// Cancels configured creation: no Activity is created and the active
-    /// search returns with the prior query preserved.
-    func cancelConfiguredCreation() {
-        search.editor = nil
+    /// Activates refinement for the selected Activity. Resolves from
+    /// `LocalStore` first; stale preparation clears to idle.
+    func presentRefinement() {
+        guard let activity = state.activity else { return }
+        Task {
+            do {
+                guard let resolved = try await service.store.activity(id: activity.id) else {
+                    state = .idle
+                    elapsed = 0
+                    errorMessage = L10n.timerStalePreparationError.text
+                    return
+                }
+                refinementPresentation = RefinementPresentation(activity: resolved)
+            } catch {
+                errorMessage = L10n.text(in: .default, code: "error.unknown")
+            }
+        }
     }
 
-    /// Saves configured creation from the editor draft. On success the
-    /// editor and search close and the saved Activity is prepared without
-    /// starting timing. On a normalized-name collision the editor presents
-    /// the explicit Use Existing / Keep Editing choice.
-    func saveConfiguredCreation(draft: ActivityDraft, saved: Activity) async {
+    /// Dismisses the refinement editor without acting (Cancel).
+    func dismissRefinement() {
+        refinementPresentation = nil
+    }
+
+    /// On refinement save, refreshes the catalog and replaces the Activity
+    /// in the current state while preserving the state case and all
+    /// associated timer data (decision 5): ready stays ready, running
+    /// preserves startedAt and the active ticker, saving preserves
+    /// startedAt, saved preserves duration, error preserves startedAt and
+    /// retry behavior.
+    func saveRefinement(updated: Activity) async {
         if let refreshed = try? await service.store.activities() {
             activities = refreshed
         }
-        search.editor = nil
-        select(saved)
+        replaceActivityInState(updated)
+        refinementPresentation = nil
     }
 
-    /// Reports a configured-save collision (the editor's create-or-resolve
-    /// found an existing or pending-deletion identity): the editor closes
-    /// and the explicit Use Existing / Keep Editing choice is presented.
-    func reportConfiguredCollision(existing: Activity, draft: ActivityDraft) {
-        search.editor = nil
-        search.collision = ActivitySearchState.CollisionPresentation(
-            existing: existing,
-            draft: draft
-        )
-    }
-
-    /// Uses the existing winning Activity after a configured-save collision,
-    /// never applying the draft notes or Categories to it.
-    func useExistingAfterCollision() {
-        guard let collision = search.collision else { return }
-        search.collision = nil
-        select(collision.existing)
-    }
-
-    /// Keeps editing after a configured-save collision: the editor reopens
-    /// with the draft intact so the user can choose a distinct name.
-    func keepEditingAfterCollision() {
-        guard let collision = search.collision else { return }
-        search.collision = nil
-        search.editor = ActivitySearchState.EditorPresentation(draft: collision.draft)
+    /// Replaces the Activity in the current state without transitioning,
+    /// preserving all associated timer data.
+    private func replaceActivityInState(_ updated: Activity) {
+        switch state {
+        case .idle:
+            break
+        case .ready:
+            state = .ready(updated)
+        case let .running(_, startedAt):
+            state = .running(updated, startedAt: startedAt)
+        case let .saving(_, startedAt):
+            state = .saving(updated, startedAt: startedAt)
+        case let .saved(_, duration):
+            state = .saved(updated, duration: duration)
+        case let .error(_, startedAt):
+            state = .error(updated, startedAt: startedAt)
+        }
     }
 
     // MARK: - Start / Stop
@@ -372,7 +374,7 @@ extension TrackViewModel {
         activities: [Activity] = [],
         query: String = "",
         isSearchActive: Bool = false,
-        collision: ActivitySearchState.CollisionPresentation? = nil
+        refinementPresentation: RefinementPresentation? = nil
     ) -> TrackViewModel {
         let url = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent(UUID().uuidString)
@@ -383,16 +385,16 @@ extension TrackViewModel {
         } catch {
             fatalError("Unable to create preview store: \(error)")
         }
-        let viewModel = TrackViewModel(
+        let vm = TrackViewModel(
             service: TimerService(store: store),
             connectivity: MockConnectivity(connected: true)
         )
-        viewModel.state = state
-        viewModel.activities = activities
-        viewModel.search.query = query
-        viewModel.isSearchActive = isSearchActive
-        viewModel.search.collision = collision
-        return viewModel
+        vm.state = state
+        vm.activities = activities
+        vm.search.query = query
+        vm.isSearchActive = isSearchActive
+        vm.refinementPresentation = refinementPresentation
+        return vm
     }
 }
 #endif

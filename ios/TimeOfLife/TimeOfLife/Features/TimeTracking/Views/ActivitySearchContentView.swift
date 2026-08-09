@@ -1,10 +1,11 @@
 import SwiftUI
 
 /// The Activity search content shown on Track while native search is active
-/// (unify-activity-preparation-flow spec, decision 1/3/4). The operating
+/// (unify-activity-preparation-flow spec, decision 1/3/4; refine-selected-
+/// activity-from-track change removes configured creation). The operating
 /// system owns the search field, focus, keyboard, and Cancel; this view owns
 /// the results surface: full-catalog browse, filtered matches, the prepared
-/// checkmark, the unmatched create/configure row, empty-catalog guidance, and
+/// checkmark, the unmatched quick-create row, empty-catalog guidance, and
 /// localized validation/error states. Category metadata is never shown.
 struct ActivitySearchContentView: View {
     @ObservedObject var vm: TrackViewModel
@@ -165,39 +166,18 @@ struct ActivitySearchContentView: View {
     }
 
     private func createRow(_ candidate: String) -> some View {
-        // Two independent targets in one List row require `.borderless`
-        // button style — the default row style would make the whole row a
-        // single tap target and the create button would swallow configure
-        // taps.
-        HStack(spacing: Theme.spacingSmall) {
-            Button {
-                Task { await vm.quickCreateFromSearch() }
-            } label: {
-                Label(
-                    String(format: L10n.timerSearchCreate.text, candidate),
-                    systemImage: "plus.circle.fill"
-                )
-                .foregroundStyle(Theme.accentPrimary)
-                .frame(maxWidth: .infinity, minHeight: Theme.minTapArea, alignment: .leading)
-            }
-            .buttonStyle(.borderless)
-            .accessibilityLabel(String(format: L10n.timerSearchCreate.text, candidate))
-            .accessibilityIdentifier("ActivitySearchCreateButton")
-
-                Button {
-                    vm.openConfiguredCreation()
-                } label: {
-                    Image(systemName: "slider.horizontal.3")
-                        .font(.body.weight(.semibold))
-                        .foregroundStyle(Theme.accentPrimary)
-                        .frame(width: Theme.minTapArea, height: Theme.minTapArea)
-                        .contentShape(Rectangle())
-                        .accessibilityHidden(true)
-                }
-            .buttonStyle(.borderless)
-            .accessibilityLabel(L10n.timerSearchConfigure.text)
-            .accessibilityIdentifier("ActivitySearchConfigureButton")
+        Button {
+            Task { await vm.quickCreateFromSearch() }
+        } label: {
+            Label(
+                String(format: L10n.timerSearchCreate.text, candidate),
+                systemImage: "plus.circle.fill"
+            )
+            .foregroundStyle(Theme.accentPrimary)
+            .frame(maxWidth: .infinity, minHeight: Theme.minTapArea, alignment: .leading)
         }
+        .accessibilityLabel(String(format: L10n.timerSearchCreate.text, candidate))
+        .accessibilityIdentifier("ActivitySearchCreateButton")
     }
 }
 

@@ -313,6 +313,95 @@ actor LocalStore {
         }
     }
 
+    /// The typed outcome of `refineActivity(...)` (refine-selected-activity-
+    /// from-track change, design decision 4).
+    enum RefineActivity: Equatable {
+        /// The activity was updated (with its outbox update row).
+        case updated(Activity)
+        /// The original activity no longer exists.
+        case missing
+        /// Another active activity owns the same normalized name.
+        case collision(Activity)
+        /// The draft name failed validation.
+        case invalid(ActivityName.Validation)
+        /// The local write failed (persistence error).
+        case failure
+    }
+
+    /// Atomically refines an existing activity (refine-selected-activity-
+    /// from-track change, design decision 4). Accepts the original activity
+    /// identifier, a validated draft, and a timestamp. In one write
+    /// transaction it:
+    ///
+    /// 1. Fetches the original activity by id; returns `.missing` if absent.
+    /// 2. Normalizes and validates the draft name; returns `.invalid` on
+    ///    failure.
+    /// 3. Checks for another active activity with the same normalized name,
+    ///    excluding the original id; returns `.collision` if one exists.
+    /// 4. Updates name, notes, Categories, and `updated_at` on the original
+    ///    row.
+    /// 5. Enqueues one update outbox operation containing the complete updated
+    ///    activity.
+    /// 6. Returns the updated activity.
+    ///
+    /// The database unique index on `lower(name)` is the final race guard: a
+    /// constraint failure is translated to `.collision` when the winning row
+    /// can be resolved. The operation never creates a new identity or
+    /// restores a pending deletion.
+    func refineActivity(
+        id: String,
+        draft: ActivityDraft,
+        now: Date = Date()
+    ) throws -> RefineActivity {
+        let trimmed = ActivityName.normalized(draft.name)
+        switch ActivityName.validate(trimmed) {
+        case .empty, .tooLong:
+            return .invalid(ActivityName.validate(trimmed))
+        case .valid:
+            break
+        }
+        let trimmedNotes = draft.notes?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let notes = (trimmedNotes?.isEmpty ?? true) ? nil : trimmedNotes
+        return try dbQueue.write { db in
+            guard let original = try Self.fetchActivity(db, id: id) else {
+                return .missing
+            }
+            if trimmed.caseInsensitiveCompare(original.name) != .orderedSame {
+                if let other = try Self.fetchActivity(db, name: trimmed), other.id != id {
+                    return .collision(other)
+                }
+            }
+            let updated = Activity(
+                id: original.id,
+                name: trimmed,
+                notes: notes,
+                lastUsedAt: original.lastUsedAt,
+                categoryIDs: draft.categoryIDs,
+                createdAt: original.createdAt,
+                updatedAt: now
+            )
+            do {
+                try db.execute(
+                    sql: """
+                        UPDATE activities
+                        SET name = ?, notes = ?, last_used_at = ?, updated_at = ?
+                        WHERE id = ?
+                        """,
+                    arguments: [updated.name, updated.notes, updated.lastUsedAt, updated.updatedAt, updated.id]
+                )
+            } catch {
+                if let winner = try? Self.fetchActivity(db, name: trimmed), winner.id != id {
+                    return .collision(winner)
+                }
+                return .failure
+            }
+            try Self.replaceActivityCategories(db: db, activityID: updated.id, categoryIDs: draft.categoryIDs)
+            try Self.enqueueOutbox(db: db, resource: "activity", recordID: updated.id,
+                                   op: "update", payload: updated)
+            return .updated(updated)
+        }
+    }
+
     /// Deletes an activity and its child rows (entries + join rows) in one
     /// transaction, enqueuing a delete outbox row. The outbox row persists
     /// even though the activity row is gone (deletes are first-class).

@@ -2,10 +2,12 @@ import Foundation
 import SwiftUI
 
 /// View model for the shared Activity Editor (Design/SCREENS/
-/// ActivityEditor.md), create-from-Track mode (unify-activity-preparation-
-/// flow spec, decision 5). Holds the draft, field validation, and the
-/// local-first save outcome; the Track search coordinator owns the commit
-/// boundary (preparing the saved Activity without starting timing).
+/// ActivityEditor.md), edit mode (refine-selected-activity-from-track
+/// change, design decision 3). Accepts the selected Activity, initializes
+/// name, notes, and selected Category identifiers from its persisted values,
+/// and saves via the atomic `LocalStore.refineActivity` operation. The
+/// caller owns the post-save commit boundary (replacing the associated
+/// Activity in the current TrackState without transitioning it).
 @MainActor
 final class ActivityEditorViewModel: ObservableObject {
     @Published var name: String
@@ -19,9 +21,12 @@ final class ActivityEditorViewModel: ObservableObject {
     /// The maximum notes length in characters.
     static let notesMaxLength = 280
 
+    /// The original Activity identifier being refined.
+    let activityID: String
+
     private let store: LocalStore
     private let onSaved: (Activity) -> Void
-    private let onCollision: (Activity, ActivityDraft) -> Void
+    private let onCollision: (Activity) -> Void
 
     struct FieldErrors: Equatable {
         var name: String?
@@ -30,14 +35,15 @@ final class ActivityEditorViewModel: ObservableObject {
 
     init(
         store: LocalStore,
-        prefilledName: String,
+        activity: Activity,
         onSaved: @escaping (Activity) -> Void,
-        onCollision: @escaping (Activity, ActivityDraft) -> Void
+        onCollision: @escaping (Activity) -> Void
     ) {
         self.store = store
-        self.name = prefilledName
-        self.notes = ""
-        self.selectedCategoryIDs = []
+        self.activityID = activity.id
+        self.name = activity.name
+        self.notes = activity.notes ?? ""
+        self.selectedCategoryIDs = Set(activity.categoryIDs)
         self.fieldErrors = FieldErrors()
         self.onSaved = onSaved
         self.onCollision = onCollision
@@ -79,9 +85,9 @@ final class ActivityEditorViewModel: ObservableObject {
         fieldErrors.notes = nil
     }
 
-    /// Saves the draft locally (create-or-resolve) and reports the typed
-    /// outcome to the Track search coordinator. The editor stays interactive
-    /// on failure so the user can retry.
+    /// Saves the draft locally (atomic refine) and reports the typed outcome
+    /// to the caller. The editor stays interactive on failure so the user
+    /// can retry.
     func save() {
         validate()
         guard canSave else {
@@ -97,17 +103,18 @@ final class ActivityEditorViewModel: ObservableObject {
         )
         Task {
             do {
-                let outcome = try await store.createOrResolveActivity(
-                    named: draft.name,
-                    notes: draft.notes,
-                    categoryIDs: draft.categoryIDs
+                let outcome = try await store.refineActivity(
+                    id: activityID,
+                    draft: draft
                 )
                 isLoading = false
                 switch outcome {
-                case let .created(activity), let .existing(activity):
+                case let .updated(activity):
                     onSaved(activity)
-                case let .restorableDeletion(activity):
-                    onCollision(activity, draft)
+                case let .collision(existing):
+                    onCollision(existing)
+                case .missing:
+                    errorMessage = L10n.timerStalePreparationError.text
                 case .invalid:
                     validate()
                 case .failure:

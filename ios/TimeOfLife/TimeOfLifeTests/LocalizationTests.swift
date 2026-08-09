@@ -122,41 +122,10 @@ struct LocalizationTests {
 
     @Test("L10n enum allCases count matches expected keys")
     func allCasesCount() {
-        // 25 base keys + 51 redesign keys + 6 search keys + 13 editor keys = 95:
-        // appName,
-        // welcomeTagline, welcomeContinueWithEmail,
-        // emailEntryTitle, emailEntryEmail, emailEntrySubtitle, emailEntrySubmit,
-        // otpTitle, otpSentTo, otpResend, otpResendCountdown,
-        // offlineBanner,
-        // appleSignInTitle, appleSignInError,
-        // timerTitle, timerActivityPlaceholder, timerStart, timerStop, timerStopHint,
-        // timerOfflineHint, timerEmptyActivityError, timerSignOut,
-        // timerChooseActivity, timerChooseActivityPrompt, timerSaved, timerSaving,
-        // timerRunning, timerReady, timerSavedDuration,
-        // timerChooserTitle, timerChooserSearchPrompt, timerChooserCreate,
-        // timerChooserRecent, timerSelectActivity, timerChooserActivities, timerChooserEmptyTitle,
-        // timerChooserEmptySubtitle, timerChooserCreateFirst, timerManageActivities,
-        // timerSearchPrompt, timerSearchEmptyCatalogTitle, timerSearchEmptyCatalogSubtitle,
-        // timerSearchNoResults, timerSearchCreate, timerSearchConfigure,
-        // timerSearchRestorePrompt, timerSearchRestore,
-        // timerSearchValidationEmpty, timerSearchValidationTooLong,
-        // timerStalePreparationError, timerCollisionTitle, timerCollisionMessage,
-        // timerCollisionUseExisting, timerCollisionKeepEditing,
-        // activityEditorCreateTitle, activityEditorEditTitle, activityEditorNameLabel,
-        // activityEditorNamePlaceholder, activityEditorNotesLabel, activityEditorNotesPlaceholder,
-        // activityEditorNotesCounter, activityEditorNotesTooLong, activityEditorTagsLabel,
-        // activityEditorNoTags, activityEditorAddCategory, activityEditorSave, activityEditorCancel,
-        // timerCompactStop, timerCompactReturnHint, timerCompactRunning,
-        // tabTrack, tabHistory, tabInsights,
-        // profileTitle, profileDone, profileAccount, profileEnableSync,
-        // profileEnableSyncSubtitle, profileSyncNow, profileSyncing, profileLastSynced,
-        // profileSyncError, profileLibrary, profileActivities, profileCategories,
-        // profileConnections, profileIntegrations, profileExport, profileApp,
-        // profileAppearance, profileDataAndPrivacy, profileEraseLocalData,
-        // profileEraseLocalDataConfirmTitle, profileEraseLocalDataConfirmMessage,
-        // profileEraseConfirm, profileEraseCancel,
-        // historyEmptyTitle, historyEmptySubtitle, insightsEmptyTitle, insightsEmptySubtitle,
-        // signOutConfirmationTitle, signOutConfirmationMessage, signOutConfirm, signOutCancel
-        #expect(l10nCases.count == 95)
+        // 95 base keys - 5 removed (timerSearchConfigure, timerCollisionTitle,
+        // timerCollisionMessage, timerCollisionUseExisting,
+        // timerCollisionKeepEditing) + 2 added (timerActivityRefine,
+        // timerActivityRefineHint) = 92
+        #expect(l10nCases.count == 92)
     }
 }

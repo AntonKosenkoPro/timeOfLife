@@ -77,16 +77,13 @@
 "timer.searchEmptyCatalogSubtitle" = "Введите название в поле поиска, чтобы создать первую активность.";
 "timer.searchNoResults" = "Нет подходящих активностей";
 "timer.searchCreate" = "Создать «%@»";
-"timer.searchConfigure" = "Настроить";
 "timer.searchRestorePrompt" = "«%@» недавно удалена и может быть восстановлена.";
 "timer.searchRestore" = "Восстановить";
 "timer.searchValidationEmpty" = "Введите название активности.";
 "timer.searchValidationTooLong" = "Название должно быть не длиннее 60 символов.";
 "timer.stalePreparationError" = "Эта активность больше не существует. Выберите другую.";
-"timer.collisionTitle" = "Активность уже существует";
-"timer.collisionMessage" = "Активность с названием «%@» уже существует. Используйте её или продолжите редактирование, чтобы выбрать другое название.";
-"timer.collisionUseExisting" = "Использовать существующую";
-"timer.collisionKeepEditing" = "Продолжить редактирование";
+"timer.activityRefine" = "Изменить";
+"timer.activityRefineHint" = "Редактировать выбранную активность";
 
 // Activity editor
 "activityEditor.createTitle" = "Новая активность";

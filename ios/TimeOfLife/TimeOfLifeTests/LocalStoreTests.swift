@@ -698,6 +698,393 @@ struct LocalStoreTests {
     }
 }
 
+@Suite("LocalStore Refinement")
+struct LocalStoreRefinementTests {
+
+    // MARK: - Helpers
+
+    private func temporaryStoreURL() -> URL {
+        URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent(UUID().uuidString)
+            .appendingPathComponent("timeoflife.sqlite")
+    }
+
+    private func makeStore() throws -> LocalStore {
+        try LocalStore(url: temporaryStoreURL())
+    }
+
+    private func makeActivity(
+        id: String = "act-1",
+        name: String = "Coding",
+        notes: String? = nil,
+        categoryIDs: [String] = [],
+        updatedAt: Date = Date(timeIntervalSinceReferenceDate: 2_000)
+    ) -> Activity {
+        Activity(
+            id: id,
+            name: name,
+            notes: notes,
+            categoryIDs: categoryIDs,
+            createdAt: Date(timeIntervalSinceReferenceDate: 1_000),
+            updatedAt: updatedAt
+        )
+    }
+
+    private func makeCategory(
+        id: String = "cat-1",
+        name: String = "Work",
+        icon: String = "briefcase"
+    ) -> TimeOfLife.Category {
+        TimeOfLife.Category(
+            id: id,
+            name: name,
+            icon: icon,
+            createdAt: Date(timeIntervalSinceReferenceDate: 1_000),
+            updatedAt: Date(timeIntervalSinceReferenceDate: 2_000)
+        )
+    }
+
+    // MARK: - Successful updates
+
+    @Test("refineActivity updates name, notes, and Categories and enqueues an update outbox row")
+    func refineUpdatesFields() async throws {
+        let store = try makeStore()
+        try await store.createActivity(makeActivity())
+        try await store.createCategory(makeCategory(id: "cat-1", name: "Work"))
+        try await store.createCategory(makeCategory(id: "cat-2", name: "Health"))
+        try? await Task.sleep(nanoseconds: 20_000_000)
+
+        let now = Date(timeIntervalSinceReferenceDate: 5_000)
+        let outcome = try await store.refineActivity(
+            id: "act-1",
+            draft: ActivityDraft(name: "Deep Work", notes: "Focus session", categoryIDs: ["cat-2"]),
+            now: now
+        )
+
+        guard case let .updated(activity) = outcome else {
+            Issue.record("expected updated outcome, got \(outcome)")
+            return
+        }
+        #expect(activity.id == "act-1")
+        #expect(activity.name == "Deep Work")
+        #expect(activity.notes == "Focus session")
+        #expect(activity.categoryIDs == ["cat-2"])
+        #expect(activity.updatedAt == now)
+        #expect(activity.createdAt == Date(timeIntervalSinceReferenceDate: 1_000))
+
+        let stored = try await store.activity(id: "act-1")
+        #expect(stored?.name == "Deep Work")
+        #expect(stored?.notes == "Focus session")
+        #expect(stored?.categoryIDs == ["cat-2"])
+
+        let rows = try await store.outboxRows()
+        #expect(rows.count == 4)
+        let updateRow = try #require(rows.last)
+        #expect(updateRow.resource == "activity")
+        #expect(updateRow.recordID == "act-1")
+        #expect(updateRow.op == "update")
+        let payload = try #require(updateRow.payload)
+        let decoded = try JSONDecoder().decode(Activity.self, from: Data(payload.utf8))
+        #expect(decoded.name == "Deep Work")
+        #expect(decoded.notes == "Focus session")
+        #expect(decoded.categoryIDs == ["cat-2"])
+    }
+
+    @Test("refineActivity preserves the identifier and createdAt")
+    func refinePreservesIdentity() async throws {
+        let store = try makeStore()
+        try await store.createActivity(makeActivity())
+        try? await Task.sleep(nanoseconds: 20_000_000)
+
+        let outcome = try await store.refineActivity(
+            id: "act-1",
+            draft: ActivityDraft(name: "Renamed"),
+            now: Date(timeIntervalSinceReferenceDate: 6_000)
+        )
+
+        guard case let .updated(activity) = outcome else {
+            Issue.record("expected updated outcome")
+            return
+        }
+        #expect(activity.id == "act-1")
+        #expect(activity.createdAt == Date(timeIntervalSinceReferenceDate: 1_000))
+        #expect(activity.name == "Renamed")
+    }
+
+    @Test("refineActivity with the same name updates only metadata")
+    func refineSameName() async throws {
+        let store = try makeStore()
+        try await store.createActivity(makeActivity(name: "Coding"))
+        try? await Task.sleep(nanoseconds: 20_000_000)
+
+        let now = Date(timeIntervalSinceReferenceDate: 5_000)
+        let outcome = try await store.refineActivity(
+            id: "act-1",
+            draft: ActivityDraft(name: "Coding", notes: "Updated notes"),
+            now: now
+        )
+
+        guard case let .updated(activity) = outcome else {
+            Issue.record("expected updated outcome")
+            return
+        }
+        #expect(activity.name == "Coding")
+        #expect(activity.notes == "Updated notes")
+        #expect(activity.updatedAt == now)
+    }
+
+    @Test("refineActivity trims whitespace from name and notes")
+    func refineTrimsWhitespace() async throws {
+        let store = try makeStore()
+        try await store.createActivity(makeActivity())
+        try? await Task.sleep(nanoseconds: 20_000_000)
+
+        let outcome = try await store.refineActivity(
+            id: "act-1",
+            draft: ActivityDraft(name: "  Deep Work  ", notes: "  Notes  "),
+            now: Date(timeIntervalSinceReferenceDate: 5_000)
+        )
+
+        guard case let .updated(activity) = outcome else {
+            Issue.record("expected updated outcome")
+            return
+        }
+        #expect(activity.name == "Deep Work")
+        #expect(activity.notes == "Notes")
+    }
+
+    @Test("refineActivity stores nil for empty notes")
+    func refineEmptyNotesStoresNil() async throws {
+        let store = try makeStore()
+        try await store.createActivity(makeActivity(notes: "Old notes"))
+        try? await Task.sleep(nanoseconds: 20_000_000)
+
+        let outcome = try await store.refineActivity(
+            id: "act-1",
+            draft: ActivityDraft(name: "Coding", notes: "   "),
+            now: Date(timeIntervalSinceReferenceDate: 5_000)
+        )
+
+        guard case let .updated(activity) = outcome else {
+            Issue.record("expected updated outcome")
+            return
+        }
+        #expect(activity.notes == nil)
+        let stored = try await store.activity(id: "act-1")
+        #expect(stored?.notes == nil)
+    }
+
+    @Test("refineActivity replaces Category joins atomically")
+    func refineReplacesCategories() async throws {
+        let store = try makeStore()
+        try await store.createCategory(makeCategory(id: "cat-1", name: "Work"))
+        try await store.createCategory(makeCategory(id: "cat-2", name: "Health"))
+        try await store.createActivity(makeActivity(categoryIDs: ["cat-1"]))
+        try? await Task.sleep(nanoseconds: 20_000_000)
+
+        let outcome = try await store.refineActivity(
+            id: "act-1",
+            draft: ActivityDraft(name: "Coding", categoryIDs: ["cat-2"]),
+            now: Date(timeIntervalSinceReferenceDate: 5_000)
+        )
+
+        guard case .updated = outcome else {
+            Issue.record("expected updated outcome")
+            return
+        }
+        let stored = try await store.activity(id: "act-1")
+        #expect(stored?.categoryIDs == ["cat-2"])
+    }
+
+    @Test("refineActivity clears Categories when the draft has none")
+    func refineClearsCategories() async throws {
+        let store = try makeStore()
+        try await store.createCategory(makeCategory(id: "cat-1", name: "Work"))
+        try await store.createActivity(makeActivity(categoryIDs: ["cat-1"]))
+        try? await Task.sleep(nanoseconds: 20_000_000)
+
+        let outcome = try await store.refineActivity(
+            id: "act-1",
+            draft: ActivityDraft(name: "Coding", categoryIDs: []),
+            now: Date(timeIntervalSinceReferenceDate: 5_000)
+        )
+
+        guard case .updated = outcome else {
+            Issue.record("expected updated outcome")
+            return
+        }
+        let stored = try await store.activity(id: "act-1")
+        #expect(stored?.categoryIDs.isEmpty == true)
+    }
+
+    // MARK: - Collision
+
+    @Test("refineActivity rejects a normalized-name collision without partial writes")
+    func refineCollisionNoPartialWrite() async throws {
+        let store = try makeStore()
+        try await store.createActivity(makeActivity(id: "act-1", name: "Coding"))
+        try await store.createActivity(makeActivity(id: "act-2", name: "Reading"))
+        try? await Task.sleep(nanoseconds: 20_000_000)
+
+        let outcome = try await store.refineActivity(
+            id: "act-1",
+            draft: ActivityDraft(name: "Reading", notes: "Attempted"),
+            now: Date(timeIntervalSinceReferenceDate: 5_000)
+        )
+
+        guard case let .collision(winner) = outcome else {
+            Issue.record("expected collision outcome, got \(outcome)")
+            return
+        }
+        #expect(winner.id == "act-2")
+        #expect(winner.name == "Reading")
+
+        let stored = try await store.activity(id: "act-1")
+        #expect(stored?.name == "Coding")
+        #expect(stored?.notes == nil)
+
+        let rows = try await store.outboxRows()
+        let updateRows = rows.filter { $0.op == "update" }
+        #expect(updateRows.isEmpty)
+    }
+
+    @Test("refineActivity rejects a case-insensitive collision")
+    func refineCollisionCaseInsensitive() async throws {
+        let store = try makeStore()
+        try await store.createActivity(makeActivity(id: "act-1", name: "Coding"))
+        try await store.createActivity(makeActivity(id: "act-2", name: "Reading"))
+        try? await Task.sleep(nanoseconds: 20_000_000)
+
+        let outcome = try await store.refineActivity(
+            id: "act-1",
+            draft: ActivityDraft(name: "READING"),
+            now: Date(timeIntervalSinceReferenceDate: 5_000)
+        )
+
+        guard case let .collision(winner) = outcome else {
+            Issue.record("expected collision outcome")
+            return
+        }
+        #expect(winner.id == "act-2")
+    }
+
+    @Test("refineActivity allows renaming to the same normalized name")
+    func refineSameNormalizedNoCollision() async throws {
+        let store = try makeStore()
+        try await store.createActivity(makeActivity(name: "Coding"))
+        try? await Task.sleep(nanoseconds: 20_000_000)
+
+        let outcome = try await store.refineActivity(
+            id: "act-1",
+            draft: ActivityDraft(name: "CODING", notes: "Updated"),
+            now: Date(timeIntervalSinceReferenceDate: 5_000)
+        )
+
+        guard case let .updated(activity) = outcome else {
+            Issue.record("expected updated outcome, got \(outcome)")
+            return
+        }
+        #expect(activity.name == "CODING")
+        #expect(activity.notes == "Updated")
+    }
+
+    // MARK: - Missing Activity
+
+    @Test("refineActivity returns missing when the Activity does not exist")
+    func refineMissing() async throws {
+        let store = try makeStore()
+
+        let outcome = try await store.refineActivity(
+            id: "nonexistent",
+            draft: ActivityDraft(name: "Coding"),
+            now: Date(timeIntervalSinceReferenceDate: 5_000)
+        )
+
+        #expect(outcome == .missing)
+        let rows = try await store.outboxRows()
+        #expect(rows.isEmpty)
+    }
+
+    // MARK: - Invalid input
+
+    @Test("refineActivity rejects an empty name")
+    func refineInvalidEmpty() async throws {
+        let store = try makeStore()
+        try await store.createActivity(makeActivity())
+
+        let outcome = try await store.refineActivity(
+            id: "act-1",
+            draft: ActivityDraft(name: "   "),
+            now: Date(timeIntervalSinceReferenceDate: 5_000)
+        )
+
+        #expect(outcome == .invalid(.empty))
+        let stored = try await store.activity(id: "act-1")
+        #expect(stored?.name == "Coding")
+        let rows = try await store.outboxRows()
+        #expect(rows.count == 1)
+        #expect(rows.first?.op == "create")
+    }
+
+    @Test("refineActivity rejects an overlong name")
+    func refineInvalidTooLong() async throws {
+        let store = try makeStore()
+        try await store.createActivity(makeActivity())
+
+        let outcome = try await store.refineActivity(
+            id: "act-1",
+            draft: ActivityDraft(name: String(repeating: "a", count: 61)),
+            now: Date(timeIntervalSinceReferenceDate: 5_000)
+        )
+
+        #expect(outcome == .invalid(.tooLong))
+    }
+
+    // MARK: - Outbox payload
+
+    @Test("refineActivity outbox row contains the complete updated Activity")
+    func refineOutboxPayloadComplete() async throws {
+        let store = try makeStore()
+        try await store.createCategory(makeCategory(id: "cat-1", name: "Work"))
+        try await store.createActivity(makeActivity())
+        try? await Task.sleep(nanoseconds: 20_000_000)
+
+        let now = Date(timeIntervalSinceReferenceDate: 5_000)
+        _ = try await store.refineActivity(
+            id: "act-1",
+            draft: ActivityDraft(name: "Deep Work", notes: "Focus", categoryIDs: ["cat-1"]),
+            now: now
+        )
+
+        let rows = try await store.outboxRows()
+        let updateRow = try #require(rows.last)
+        let payload = try #require(updateRow.payload)
+        let decoded = try JSONDecoder().decode(Activity.self, from: Data(payload.utf8))
+        #expect(decoded.id == "act-1")
+        #expect(decoded.name == "Deep Work")
+        #expect(decoded.notes == "Focus")
+        #expect(decoded.categoryIDs == ["cat-1"])
+        #expect(decoded.updatedAt == now)
+    }
+
+    @Test("refineActivity does not create a new activity row")
+    func refineDoesNotCreateNewRow() async throws {
+        let store = try makeStore()
+        try await store.createActivity(makeActivity())
+        let countBefore = try await store.activities().count
+        try? await Task.sleep(nanoseconds: 20_000_000)
+
+        _ = try await store.refineActivity(
+            id: "act-1",
+            draft: ActivityDraft(name: "Renamed"),
+            now: Date(timeIntervalSinceReferenceDate: 5_000)
+        )
+
+        let countAfter = try await store.activities().count
+        #expect(countBefore == countAfter)
+    }
+}
+
 @Suite("UndoBufferStore")
 struct UndoBufferStoreTests {
 

@@ -77,16 +77,13 @@
 "timer.searchEmptyCatalogSubtitle" = "Enter a name in the search field to create your first activity.";
 "timer.searchNoResults" = "No matching activities";
 "timer.searchCreate" = "Create “%@”";
-"timer.searchConfigure" = "Configure";
 "timer.searchRestorePrompt" = "“%@” was recently deleted and can be restored.";
 "timer.searchRestore" = "Restore";
 "timer.searchValidationEmpty" = "Enter an activity name.";
 "timer.searchValidationTooLong" = "Name must be at most 60 characters.";
 "timer.stalePreparationError" = "This activity no longer exists. Choose another one.";
-"timer.collisionTitle" = "Activity Already Exists";
-"timer.collisionMessage" = "An activity named “%@” already exists. Use it, or keep editing to choose a different name.";
-"timer.collisionUseExisting" = "Use Existing";
-"timer.collisionKeepEditing" = "Keep Editing";
+"timer.activityRefine" = "Refine";
+"timer.activityRefineHint" = "Edit the selected activity";
 
 // Activity editor
 "activityEditor.createTitle" = "New activity";

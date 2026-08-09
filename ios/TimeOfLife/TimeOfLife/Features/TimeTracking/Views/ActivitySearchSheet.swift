@@ -4,6 +4,9 @@ import UIKit
 /// The full-height Activity search presentation. Search remains native while
 /// the result surface is ordinary sheet content so it can contain browse,
 /// creation, restoration, and error states consistently on iOS 15 and later.
+/// Configured creation and its editor/collision presentation have been
+/// removed (refine-selected-activity-from-track change); Track-owned
+/// refinement is presented by `TrackView` as a sibling sheet.
 struct ActivitySearchSheet: View {
     @ObservedObject var vm: TrackViewModel
     let store: LocalStore
@@ -29,56 +32,14 @@ struct ActivitySearchSheet: View {
                     }
                     Button(L10n.signOutCancel.text, role: .cancel) {}
                 }
-                .alert(
-                    L10n.timerCollisionTitle.text,
-                    isPresented: collisionBinding
-                ) {
-                    Button(L10n.timerCollisionUseExisting.text) {
-                        vm.useExistingAfterCollision()
-                    }
-                    Button(L10n.timerCollisionKeepEditing.text) {
-                        vm.keepEditingAfterCollision()
-                    }
-                    Button(L10n.signOutCancel.text, role: .cancel) {}
-                } message: {
-                    if let collision = vm.search.collision {
-                        Text(String(format: L10n.timerCollisionMessage.text, collision.existing.name))
-                    }
-                }
         }
         .navigationViewStyle(.stack)
-        .sheet(item: editorPresentation) { presentation in
-            ActivityEditorView(
-                store: store,
-                prefilledName: presentation.draft.name,
-                onSaved: { activity in
-                    Task { await vm.saveConfiguredCreation(draft: presentation.draft, saved: activity) }
-                },
-                onCollision: { existing, draft in
-                    vm.reportConfiguredCollision(existing: existing, draft: draft)
-                }
-            )
-        }
     }
 
     private var restorePromptBinding: Binding<Bool> {
         Binding(
             get: { vm.pendingRestore != nil },
             set: { if !$0 { vm.dismissPendingRestore() } }
-        )
-    }
-
-    private var collisionBinding: Binding<Bool> {
-        Binding(
-            get: { vm.search.collision != nil },
-            set: { if !$0 { vm.dismissCollision() } }
-        )
-    }
-
-    private var editorPresentation: Binding<ActivitySearchState.EditorPresentation?> {
-        Binding(
-            get: { vm.search.editor },
-            set: { if $0 == nil { vm.dismissEditor() } }
         )
     }
 }
@@ -203,21 +164,6 @@ private extension UIView {
         activities: [activity],
         query: activity.name,
         isSearchActive: true
-    )
-    return ActivitySearchSheet(vm: viewModel, store: viewModel.service.store)
-}
-
-#Preview("Search — Collision") {
-    let existing = Activity(id: "existing", name: "Gym")
-    let collision = ActivitySearchState.CollisionPresentation(
-        existing: existing,
-        draft: ActivityDraft(name: "Gym", notes: "Leg day")
-    )
-    let viewModel = TrackViewModel.preview(
-        state: .ready(existing),
-        activities: [existing],
-        isSearchActive: true,
-        collision: collision
     )
     return ActivitySearchSheet(vm: viewModel, store: viewModel.service.store)
 }

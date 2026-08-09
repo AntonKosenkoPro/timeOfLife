@@ -9,9 +9,9 @@ import Foundation
 /// 2. Non-empty query: case-insensitive containment matches in recency order.
 /// 3. Exact normalized match: identified first, all creation actions
 ///    suppressed.
-/// 4. Valid unmatched query: quick-create and configure-create actions after
-///    existing partial matches — unless a non-expired pending-deletion
-///    identity matches, in which case a restore action replaces creation.
+/// 4. Valid unmatched query: a quick-create action after existing partial
+///    matches — unless a non-expired pending-deletion identity matches, in
+///    which case a restore action replaces creation.
 /// 5. Invalid query: existing search results stay available, creation is
 ///    suppressed, and localized validation guidance is shown.
 ///

@@ -12,6 +12,8 @@ import SwiftUI
 /// (unify-activity-preparation-flow spec, decision 1). The operating system
 /// owns the search field, focus, keyboard, and cancellation while Track keeps
 /// its committed timer state untouched until a result is confirmed.
+/// Selected-Activity refinement is presented from Track as a sibling sheet
+/// (refine-selected-activity-from-track change, design decision 2).
 struct TrackView: View {
     @ObservedObject var vm: TrackViewModel
     @EnvironmentObject var container: AppContainer
@@ -25,12 +27,33 @@ struct TrackView: View {
                 ActivitySearchSheet(vm: vm, store: container.localStore)
                     .environmentObject(container)
             }
+            .sheet(item: refinementPresentation, onDismiss: vm.dismissRefinement) { presentation in
+                ActivityEditorView(
+                    store: container.localStore,
+                    activity: presentation.activity,
+                    onSaved: { updated in
+                        Task { await vm.saveRefinement(updated: updated) }
+                    },
+                    onCollision: { _ in
+                        // The editor stays open with the draft intact; the
+                        // editor's own error message surfaces the collision.
+                    }
+                )
+                .environmentObject(container)
+            }
     }
 
     private var searchPresentation: Binding<Bool> {
         Binding(
             get: { vm.isSearchActive },
             set: { if !$0 { vm.cancelSearch() } }
+        )
+    }
+
+    private var refinementPresentation: Binding<TrackViewModel.RefinementPresentation?> {
+        Binding(
+            get: { vm.refinementPresentation },
+            set: { if $0 == nil { vm.dismissRefinement() } }
         )
     }
 }
@@ -95,9 +118,9 @@ private struct TrackContent: View {
         case .idle:
             chooseActivityButton
         case .ready, .saved:
-            activityPicker
+            selectedActivityRow
         case .running, .saving, .error:
-            preparedActivityLabel
+            selectedActivityRow
         }
     }
 
@@ -110,6 +133,24 @@ private struct TrackContent: View {
             accessibilityId: "TimerChooseActivityButton"
         ) {
             vm.activateSearch()
+        }
+    }
+
+    private var selectedActivityRow: some View {
+        HStack(spacing: Theme.spacingSmall) {
+            activityControl
+            refineButton
+        }
+    }
+
+    @ViewBuilder private var activityControl: some View {
+        switch vm.state {
+        case .ready, .saved:
+            activityPicker
+        case .running, .saving, .error:
+            preparedActivityLabel
+        default:
+            activityPicker
         }
     }
 
@@ -163,6 +204,23 @@ private struct TrackContent: View {
         }
         .accessibilityIdentifier("TimerActivityLabel")
         .accessibilityLabel(vm.state.activity?.name ?? L10n.timerSearchPrompt.text)
+    }
+
+    private var refineButton: some View {
+        Button {
+            vm.presentRefinement()
+        } label: {
+            Text(L10n.timerActivityRefine.text)
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(Theme.accentPrimary)
+                .lineLimit(1)
+                .frame(minWidth: Theme.minTapArea, minHeight: Theme.minTapArea)
+        }
+        .disabled(vm.state.isSaving)
+        .opacity(vm.state.isSaving ? 0.5 : 1)
+        .accessibilityIdentifier("TimerActivityRefineButton")
+        .accessibilityLabel(L10n.timerActivityRefine.text)
+        .accessibilityHint(L10n.timerActivityRefineHint.text)
     }
 
     // MARK: - Primary action
@@ -289,10 +347,21 @@ private struct TrackContent: View {
     TrackContent(vm: .preview(state: .ready(activity), activities: [activity]))
 }
 
+#Preview("Track — Running EN Light") {
+    let activity = Activity(id: "preview-running", name: "Reading")
+    TrackContent(vm: .preview(state: .running(activity, startedAt: Date().addingTimeInterval(-120))))
+}
+
 #Preview("Track — RU Dark") {
     let activity = Activity(id: "preview-ready", name: "Спортзал")
     TrackContent(vm: .preview(state: .ready(activity), activities: [activity]))
     .preferredColorScheme(.dark)
     .environment(\.locale, .init(identifier: "ru"))
+}
+
+#Preview("Track — Long Name Ready") {
+    let longName = String(repeating: "Very Long Activity Name ", count: 3)
+    let activity = Activity(id: "preview-long", name: longName)
+    TrackContent(vm: .preview(state: .ready(activity), activities: [activity]))
 }
 #endif

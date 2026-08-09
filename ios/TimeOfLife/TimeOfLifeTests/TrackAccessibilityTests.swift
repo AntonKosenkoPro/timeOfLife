@@ -65,4 +65,26 @@ struct TrackAccessibilityTests {
         #expect(state.isSaving)
         #expect(!state.isRunning)
     }
+
+    @Test("non-idle states expose a selected Activity for Refine")
+    func nonIdleStatesHaveActivity() {
+        let activity = Activity(id: "a1", name: "Deep work")
+        #expect(TrackState.ready(activity).activity != nil)
+        #expect(TrackState.running(activity, startedAt: Date()).activity != nil)
+        #expect(TrackState.saving(activity, startedAt: Date()).activity != nil)
+        #expect(TrackState.saved(activity, duration: 60).activity != nil)
+        #expect(TrackState.error(activity, startedAt: Date()).activity != nil)
+    }
+
+    @Test("idle state exposes no Activity for Refine")
+    func idleStateHasNoActivity() {
+        #expect(TrackState.idle.activity == nil)
+    }
+
+    @Test("saving state disables Refine")
+    func savingStateDisablesRefine() {
+        let activity = Activity(id: "a1", name: "Work")
+        let state = TrackState.saving(activity, startedAt: Date())
+        #expect(state.isSaving)
+    }
 }

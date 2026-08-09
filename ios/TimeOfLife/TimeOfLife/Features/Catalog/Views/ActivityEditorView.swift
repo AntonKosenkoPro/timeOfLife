@@ -1,10 +1,11 @@
 import SwiftUI
 
 /// The shared Activity Editor sheet (Design/SCREENS/ActivityEditor.md),
-/// create-from-Track mode (unify-activity-preparation-flow spec, decision 5):
+/// edit mode (refine-selected-activity-from-track change, design decision 3):
 /// name, optional notes, optional Categories, field validation, and a pinned
-/// Save bar. Saving is local-first; the Track search coordinator prepares
-/// the saved Activity without starting timing.
+/// Save bar. Saving is local-first via the atomic `LocalStore.refineActivity`
+/// operation; the caller replaces the associated Activity in the current
+/// TrackState without transitioning it.
 struct ActivityEditorView: View {
     @StateObject private var vm: ActivityEditorViewModel
     @Environment(\.dismiss)
@@ -13,13 +14,13 @@ struct ActivityEditorView: View {
 
     init(
         store: LocalStore,
-        prefilledName: String,
+        activity: Activity,
         onSaved: @escaping (Activity) -> Void,
-        onCollision: @escaping (Activity, ActivityDraft) -> Void
+        onCollision: @escaping (Activity) -> Void
     ) {
         _vm = StateObject(wrappedValue: ActivityEditorViewModel(
             store: store,
-            prefilledName: prefilledName,
+            activity: activity,
             onSaved: onSaved,
             onCollision: onCollision
         ))
@@ -29,7 +30,7 @@ struct ActivityEditorView: View {
         NavigationView {
             ScrollView {
                 VStack(alignment: .leading, spacing: Theme.spacingLarge) {
-                    Text(L10n.activityEditorCreateTitle.text)
+                    Text(L10n.activityEditorEditTitle.text)
                         .font(.title.bold())
                         .foregroundStyle(Theme.textPrimary)
 
@@ -167,22 +168,24 @@ struct ActivityEditorView: View {
 #if DEBUG
 #Preview("Activity Editor — EN Light") {
     let container = AppContainer.production()
+    let activity = Activity(id: "preview-en", name: "Gym")
     ActivityEditorView(
         store: container.localStore,
-        prefilledName: "Gym",
+        activity: activity,
         onSaved: { _ in },
-        onCollision: { _, _ in }
+        onCollision: { _ in }
     )
     .environmentObject(container)
 }
 
 #Preview("Activity Editor — RU Dark") {
     let container = AppContainer.production()
+    let activity = Activity(id: "preview-ru", name: "Спортзал", notes: "Leg day")
     ActivityEditorView(
         store: container.localStore,
-        prefilledName: "Спортзал",
+        activity: activity,
         onSaved: { _ in },
-        onCollision: { _, _ in }
+        onCollision: { _ in }
     )
     .environmentObject(container)
     .preferredColorScheme(.dark)

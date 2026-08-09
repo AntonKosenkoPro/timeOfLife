@@ -9,7 +9,7 @@ Context for AI agents working in this repository. Read this first. (Requirements
 - Ask the user to start a new session if the current context overwhelms 200k tokens
 
 ## What this is
-**Time of Life** — a personal time-tracking iOS app. The repo contains the **auth MVP** (passwordless email-OTP sign-up/sign-in) and the **Track experience** (OpenSpec change `redesign-track-experience`, refined by `unify-activity-preparation-flow`): a three-tab shell (Track/History/Insights) with a centered numeric timer, platform-native Activity search for preparation (browse/filter/quick-create/configure-create), a Profile destination, and a compact cross-tab running timer — all local-first.
+**Time of Life** — a personal time-tracking iOS app. The repo contains the **auth MVP** (passwordless email-OTP sign-up/sign-in) and the **Track experience** (OpenSpec change `redesign-track-experience`, refined by `unify-activity-preparation-flow` and `refine-selected-activity-from-track`): a three-tab shell (Track/History/Insights) with a centered numeric timer, platform-native Activity search for preparation (browse/filter/quick-create), a Refine action beside the selected Activity for in-place editing, a Profile destination, and a compact cross-tab running timer — all local-first.
 
 Requirements live in `Requirements/FURPS/` (the FURPS+ table) and `Requirements/Usecases/` (use-case narratives). The auth requirements are `Requirements/FURPS/Sign-up_and_Sign-in.md`.
 
@@ -53,7 +53,7 @@ ios/TimeOfLife/          SwiftUI app (iOS 15+), XcodeGen-managed (project.yml)
   TimeOfLife/Features/Auth/        passwordless flow: Welcome → EmailEntry → OtpEntry
   TimeOfLife/Features/AppShell/    three-tab shell (Track/History/Insights) + Profile destination
   TimeOfLife/Features/TimeTracking/  Track state machine, Activity search interaction state, numeric/compact timers, TimerService
-  TimeOfLife/Features/Catalog/     Models/CatalogModels.swift, ActivityDraft.swift, ActivityName.swift, Repositories/RemoteCatalogRepository.swift, ActivityEditor (create-from-Track)
+  TimeOfLife/Features/Catalog/     Models/CatalogModels.swift, ActivityDraft.swift, ActivityName.swift, Repositories/RemoteCatalogRepository.swift, ActivityEditor (edit-from-Track refinement)
   TimeOfLife/Features/Sync/       SyncController.swift (outbox drain + delta pull)
   TimeOfLife/Core/Storage/         LocalStore.swift (GRDB), UndoBufferStore.swift
   TimeOfLife/Core/                 networking, keychain, reachability, theme, navigation, DI, design components
