@@ -689,16 +689,6 @@ actor LocalStore {
         }
     }
 
-    /// Increments the attempt counter on an outbox row (retry bookkeeping).
-    func incrementOutboxAttempts(id: String) throws {
-        try dbQueue.write { db in
-            try db.execute(
-                sql: "UPDATE outbox SET attempts = attempts + 1 WHERE id = ?",
-                arguments: [id]
-            )
-        }
-    }
-
     /// Rewrites the payload of every pending outbox row for (resource,
     /// record_id) — used after a name-collision remap so a later drain pushes
     /// the corrected reference instead of the stale one.

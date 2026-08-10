@@ -1,6 +1,6 @@
 # Manage Activities Screen
 
-Implements F8/F10/F12/U8/R1–R3 of `Requirements/FURPS/Activity_Catalog_and_Categories.md`. Full CRUD surface for activities, reached from the timer screen (and a future account/menu destination).
+Implements F8/F10/F12/U8/R1–R3 of `Requirements/FURPS/Activity_Catalog_and_Categories.md`. Full CRUD surface for activities, reached from Profile (Library section).
 
 Flows 5 and 6 in `Requirements/Usecases/Activity_Catalog_and_Categories.md`.
 
@@ -9,7 +9,7 @@ Flows 5 and 6 in `Requirements/Usecases/Activity_Catalog_and_Categories.md`.
 ## Screen: ManageActivitiesView
 
 - **File**: `ios/TimeOfLife/TimeOfLife/Features/Catalog/Views/ManageActivitiesView.swift` (new Features/Catalog area)
-- **Route**: `.manageActivities` (new `AppRoute` case; add to the enum)
+- **Route**: reached from Profile → Library (Manage Activities row); pushes `.manageCategories` for the Categories button
 - **ViewModel**: `ManageActivitiesViewModel`
 
 ### Layout

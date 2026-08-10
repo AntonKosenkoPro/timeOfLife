@@ -15,22 +15,6 @@ final class TimerService: ObservableObject {
         self.store = store
     }
 
-    /// Returns the activity with the given id, creating it (categoryless) if
-    /// it does not exist. Used by the Track chooser's create flow.
-    func ensureActivity(id: String, name: String, createdAt: Date = Date()) async throws -> Activity {
-        if let existing = try await store.activity(id: id) {
-            return existing
-        }
-        let activity = Activity(
-            id: id,
-            name: name,
-            createdAt: createdAt,
-            updatedAt: createdAt
-        )
-        try await store.createActivity(activity)
-        return activity
-    }
-
     /// Atomically creates an activity or resolves an existing identity by
     /// normalized name (unify-activity-preparation-flow spec, decision 6).
     /// The single transactional LocalStore operation replaces the previous

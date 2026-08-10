@@ -82,14 +82,14 @@ The sync client SHALL run on: (1) app enters foreground, (2) connectivity restor
 - **THEN** the sync client runs a cycle
 
 #### Scenario: Manual sync
-- **WHEN** the user taps "Sync now" in Settings
+- **WHEN** the user taps "Sync now" in Profile
 - **THEN** the sync client runs a cycle and updates the displayed "Last synced" timestamp on completion
 
 ### Requirement: Manual sync and status visibility
-The system SHALL expose a "Sync now" action and a sync status ("Last synced: <relative time>" or "Syncing…" or an error state) in Settings, visible only when signed in. The action calls the same drain+pull path as the automatic triggers.
+The system SHALL expose a "Sync now" action and a sync status ("Last synced: <relative time>" or "Syncing…" or an error state) in Profile, visible only when signed in. The action calls the same drain+pull path as the automatic triggers.
 
 #### Scenario: Status display
-- **WHEN** the user views Settings while signed in
+- **WHEN** the user views Profile while signed in
 - **THEN** the sync status and "Sync now" button are visible; while a sync is in progress, the button is disabled and "Syncing…" is shown
 
 #### Scenario: Error state

@@ -39,8 +39,7 @@ extension AppContainer {
         let syncController = SyncController(
             store: localStore,
             remote: catalog,
-            connectivity: connectivity,
-            undoBuffer: undoBuffer
+            connectivity: connectivity
         )
 
         let container = AppContainer(

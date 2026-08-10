@@ -30,7 +30,6 @@ final class SyncController: ObservableObject {
     private let store: LocalStore
     private let remote: CatalogSending
     private let connectivity: Connectivity
-    private let undoBuffer: UndoBufferStore
 
     /// Single-flight guard: concurrent triggers (foreground + connectivity +
     /// manual) share one cycle instead of racing.
@@ -39,13 +38,11 @@ final class SyncController: ObservableObject {
     init(
         store: LocalStore,
         remote: CatalogSending,
-        connectivity: Connectivity,
-        undoBuffer: UndoBufferStore
+        connectivity: Connectivity
     ) {
         self.store = store
         self.remote = remote
         self.connectivity = connectivity
-        self.undoBuffer = undoBuffer
     }
 
     // MARK: - Lifecycle (driven by SessionStore.state)

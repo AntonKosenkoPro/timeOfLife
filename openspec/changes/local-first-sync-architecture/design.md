@@ -2,7 +2,7 @@
 
 See `proposal.md` (Why) and the four delta specs (local-first-store, sync-client, entry-provenance, lock-screen-controls) for the behavioral contract. This design covers *how*.
 
-Current iOS state (pre-change): `LocalTimerStore` is a flat `timerQueue.json` of `TimeEntry` with a `synced` flag; `TimerService` pushes via a `StubTimerRepository` (no-op); `RootView` gates the app behind `AuthFlowView`. The backend (Go, 277 tests) already implements the catalog/entries CRUD, idempotent POST on `id`, LWW on `updated_at`, hard DELETE, and 409 `activity_exists`/`category_exists` remapping — all of which stay as the relay's merge rules.
+Current iOS state (pre-change): `LocalTimerStore` is a flat `timerQueue.json` of `TimeEntry` with a `synced` flag; `TimerService` pushes via a `StubTimerRepository` (no-op); `RootView` gates the app behind `AuthFlowView`. The Go backend already implements the catalog/entries CRUD, idempotent POST on `id`, LWW on `updated_at`, hard DELETE, and 409 `activity_exists`/`category_exists` remapping — all of which stay as the relay's merge rules.
 
 Constraints that shape the design: solo dev (no team to specialize); low/uncertain revenue (infra baseline must trend to ~$0); macOS is the next concrete platform (Screen Time API); Android/Web are uncertain; iOS 15 deployment target must stay; the app must launch and work fully with no account.
 
@@ -68,10 +68,10 @@ Constraints that shape the design: solo dev (no team to specialize); low/uncerta
 ### D5 — Backend additions are additive only (no contract break)
 **Choice:** Add `?modified_since=` (filter on `updated_at`) to `GET /activities` and `GET /entries`; add `source` + `source_ref` columns + `UNIQUE(user_id, source, source_ref)` to `entries` (migration). Auth, CRUD, LWW, idempotent POST, error envelope, OpenAPI shape all unchanged.
 
-**Rationale:** The backend's role shifts from authority to relay, but the API contract is stable. Existing 277 tests stay valid; the change is purely additive (new optional query param + new nullable columns). This keeps the iOS ↔ backend contract continuous and avoids a flag-day.
+**Rationale:** The backend's role shifts from authority to relay, but the API contract is stable. Existing tests stay valid; the change is purely additive (new optional query param + new nullable columns). This keeps the iOS ↔ backend contract continuous and avoids a flag-day.
 
 ### D6 — SyncController is a long-lived, optional, session-gated object
-**Choice:** `SyncController` is `@MainActor`, owns the drain+pull loop, observes `SessionStore` and `Connectivity`. `activate()` on `.signedIn`, `deactivate()` on `.signedOut`. Triggers: foreground, connectivity-restored, manual. Exposes `@Published status` for Settings.
+**Choice:** `SyncController` is `@MainActor`, owns the drain+pull loop, observes `SessionStore` and `Connectivity`. `activate()` on `.signedIn`, `deactivate()` on `.signedOut`. Triggers: foreground, connectivity-restored, manual. Exposes `@Published status` for Profile.
 
 **Rationale:** Distinct from request-response services (`AuthService`, `TimerService`) — it's a background reconciler, not a per-action call. Session-gated because sync is the paid feature. Observes connectivity because drain should wait for `.satisfied`.
 
@@ -79,8 +79,8 @@ Constraints that shape the design: solo dev (no team to specialize); low/uncerta
 - *Per-action push (current `TimerService` model)* — couples the timer to the network, can't batch, can't retry uniformly across surfaces. Rejected.
 - *A separate sync daemon process* — iOS doesn't support that; the app process is the only option. Rejected.
 
-### D7 — RootView launches into the timer; auth is a Settings action
-**Choice:** `RootView` always shows `TimerView`; `AuthFlowView` is presented as a sheet/destination from Settings ("Enable Sync"). `SessionStore.state` gates `SyncController`, not the root view.
+### D7 — RootView launches into the timer; auth is a Profile action
+**Choice:** `RootView` always shows `TimerView`; `AuthFlowView` is presented as a sheet/destination from Profile ("Enable Sync"). `SessionStore.state` gates `SyncController`, not the root view.
 
 **Rationale:** "Backend optional" requires the app to be usable with no account. Zero-friction onboarding — the user tracks time immediately. Sign-in is a deliberate action for users who want sync (the paid feature).
 
@@ -108,7 +108,7 @@ Constraints that shape the design: solo dev (no team to specialize); low/uncerta
 
 ## Risks / Trade-offs
 
-- **[App Group entitlement requires a paid Apple Developer account for distribution]** → Mitigation: the entitlement itself is free for dev builds; the paid account is already required for TestFlight (Epic 10). No new dependency for dev/CI.
+- **[App Group entitlement requires a paid Apple Developer account for distribution]** → Mitigation: the entitlement itself is free for dev builds; a paid account is already required for TestFlight distribution. No new dependency for dev/CI.
 - **[Two sources of truth (tables for now, outbox for distribution) can drift if a code path writes tables without an outbox row]** → Mitigation: a single `LocalStore` chokepoint owns all mutations and always writes both in one tx. Lint/review rule: no raw GRDB writes outside `LocalStore`.
 - **[Undo buffer is unbounded for bulk deletes (activity + N entries)]** → Mitigation: cap undo to deletes affecting ≤ N records (e.g., 50); larger deletes confirm hard and bypass the buffer. Reuses the F10 scope-confirm dialog. N to be tuned.
 - **[Delta pull relies on `updated_at` monotonicity across devices]** → Mitigation: `updated_at` is client-generated (UUID v7 timestamp-ordered) and the relay's LWW already depends on it; the existing design assumes this. Clock skew across devices is a known LWW limitation; acceptable at personal scale.
@@ -121,7 +121,7 @@ Constraints that shape the design: solo dev (no team to specialize); low/uncerta
 This is an unreleased app (per AGENTS.md pre-release policy): no on-disk data in the wild, no backward-compat needed.
 
 - **Local DB**: `timerQueue.json` is replaced in place by the GRDB database. Existing dev fixtures and test devices start fresh — no migration code.
-- **Backend**: one new migration (`004_provenance.sql` or appended to `003_catalog.sql` if not yet shipped) adding `source` + `source_ref` + the unique constraint to `entries`; `modified_since` is a query param, no migration. Existing tests stay green (new columns nullable, new param optional).
+- **Backend**: one new migration (`005_provenance.sql` or appended to `003_catalog.sql` if not yet shipped) adding `source` + `source_ref` + the unique constraint to `entries`; `modified_since` is a query param, no migration. Existing tests stay green (new columns nullable, new param optional).
 - **OpenAPI**: additive — new query param, new nullable fields on the entry schema. Version bump to v1.2.0.
 - **Rollback** (if needed before release): revert the iOS client to the previous build; the backend additions are additive and ignored by old clients. No data loss.
 

@@ -12,7 +12,7 @@ import (
 )
 
 // writeCatalogStoreErr maps a db store error (returned alongside its record)
-// to the Epic 1 error contract. record carries the server's current version
+// to the catalog error contract. record carries the server's current version
 // (for conflict) or the winning record (for *_exists), used to populate details.
 func (h *Handler) writeCatalogStoreErr(w http.ResponseWriter, record any, err error, action string) {
 	switch {

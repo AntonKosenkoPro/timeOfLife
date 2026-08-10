@@ -1,6 +1,6 @@
 # Activity Catalog & Categories — FURPS
 
-Requirements for **Epic 1: Activity Catalog & Categories** (`Epics.md`). This epic turns the MVP's free-text timer into a structured, reusable catalog of activities and category tags, and surfaces recency-based suggestions on the timer screen.
+Requirements for the **Activity Catalog & Categories** feature. This feature turns the MVP's free-text timer into a structured, reusable catalog of activities and category tags, and surfaces recency-based suggestions on the timer screen.
 
 App-wide requirements (minimalism, dark/light, offline, EN+RU localization, HIG, secure storage, linters, tests, CI, OpenAPI, `AGENTS.md`) live in [`Common.md`](./Common.md) and are not repeated here; only feature-specific rows are listed.
 

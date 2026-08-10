@@ -24,7 +24,7 @@ struct TrackView: View {
             .navigationBarTitleDisplayMode(.inline)
             .task { await vm.load() }
             .sheet(isPresented: searchPresentation, onDismiss: vm.cancelSearch) {
-                ActivitySearchSheet(vm: vm, store: container.localStore)
+                ActivitySearchSheet(vm: vm)
                     .environmentObject(container)
             }
             .sheet(item: refinementPresentation, onDismiss: vm.dismissRefinement) { presentation in

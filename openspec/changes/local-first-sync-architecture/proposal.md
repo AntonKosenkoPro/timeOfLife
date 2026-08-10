@@ -4,10 +4,10 @@ The current iOS client treats the backend as the source of truth and the app as 
 
 ## What Changes
 
-- **BREAKING**: The app launches into the timer without requiring sign-in. Auth becomes an optional action in Settings ("Enable Sync"), not a launch gate. `RootView` no longer routes to `AuthFlowView` on first launch.
+- **BREAKING**: The app launches into the timer without requiring sign-in. Auth becomes an optional action in Profile ("Enable Sync"), not a launch gate. `RootView` no longer routes to `AuthFlowView` on first launch.
 - **BREAKING**: `LocalTimerStore` (flat `timerQueue.json`) is replaced by a real SQLite local database (GRDB) in an App Group shared container. This database is the source of truth.
 - **BREAKING**: The `TimerRepository` / `StubTimerRepository` remote-push layer is removed. `TimerService` writes only to the local database. Remote propagation becomes the responsibility of a new background `SyncController`.
-- New `SyncController` (optional, activates on sign-in): drains a transactional outbox to the backend relay and pulls deltas via `?modified_since=`. Conflicts resolve by last-write-wins on `updated_at` (existing design). Manual "Sync now" action and "Last synced" status in Settings.
+- New `SyncController` (optional, activates on sign-in): drains a transactional outbox to the backend relay and pulls deltas via `?modified_since=`. Conflicts resolve by last-write-wins on `updated_at` (existing design). Manual "Sync now" action and "Last synced" status in Profile.
 - New **transactional outbox** table in the local database: every mutation (create/update/delete) writes the state change and an outbox row in one transaction. Deletes are first-class (the outbox holds the op even after the row is gone). Survives relaunch.
 - New **durable undo buffer** table: deletions enter the buffer + remove the records in one transaction; the 30s window is wall-clock (`deleted_at + 30s`), not a `Timer`. Expired buffers commit to the outbox on the next foreground (not in the background). Robust to suspension, kill, and cold launch — fixes a real bug in the in-memory buffer design under iOS lifecycle.
 - New **running-timer-state** persisted in the local database (not just in-memory): survives app crash; readable by lock-screen Controls and widgets to render "Stop (23 min)".
@@ -25,12 +25,12 @@ The current iOS client treats the backend as the source of truth and the app as 
 - `lock-screen-controls`: iOS 18+ Controls (WidgetKit `ControlWidget`) that start/stop the timer from the lock screen without opening the app or requiring Face ID, via an `alwaysAllowed` App Intent that writes to the App Group database. Available on iOS 18+ with availability guards; absent on older OSes.
 
 ### Modified Capabilities
-<!-- None — openspec/specs/ is empty (this is the first change). -->
+None. This change adds four local-first capabilities without modifying the existing `app-shell` or `timer-capture-experience` baselines.
 
 ## Impact
 
 - **iOS app**: `RootView`, `AppContainer`, `TimerService`, `TimeEntry`, `SessionStore` change; `TimerRepository`/`StubTimerRepository` deleted; new `SyncController`, `LocalStore` (GRDB), `Outbox`, `UndoBuffer`, `TimerStateStore`. App Group capability + entitlement added to `project.yml`.
 - **Backend**: additive `?modified_since=` query param on `GET /activities` and `GET /entries` (filter on `updated_at`); entries table gains `source` + `source_ref` + unique constraint (migration). Auth, CRUD, LWW, OpenAPI shape unchanged — the backend's role shifts from authority to relay, but the API contract is stable.
 - **Dependencies**: GRDB.swift added (iOS/macOS). App Group entitlement. iOS 18+ `ControlWidget` API (availability-guarded).
-- **Docs**: `AGENTS.md`, `Design/INTERACTIONS.md` (undo buffer durability, sync client), `Design/BACKEND/Activity_Catalog_API.md` (modified_since, source/source_ref), `backend/api/openapi.yaml` (additive params + fields), `Requirements/FURPS/Timetracking.md` (currently empty — to be populated).
+- **Docs**: `AGENTS.md`, `Design/INTERACTIONS.md` (undo buffer durability, sync client), `Design/BACKEND/Activity_Catalog_API.md` (modified_since, source/source_ref), `backend/api/openapi.yaml` (additive params + fields), `Requirements/FURPS/Timetracking.md`.
 - **Pre-release policy**: per `AGENTS.md`, no backward-compat for local on-disk formats; the flat `timerQueue.json` is replaced in place, existing dev fixtures start fresh.

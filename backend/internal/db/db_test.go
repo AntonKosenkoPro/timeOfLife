@@ -23,12 +23,13 @@ func setupTestStore(t *testing.T) *SQLiteStore {
 		t.Fatalf("RunSQLite failed: %v", err)
 	}
 
+	t.Cleanup(func() { _ = store.Close() })
+
 	return store
 }
 
 func TestSQLiteStore_UpsertUser_CreatesNewUser(t *testing.T) {
 	store := setupTestStore(t)
-	defer func() { _ = store.Close() }()
 
 	ctx := context.Background()
 	user, err := store.UpsertUser(ctx, "new@example.com")
@@ -51,7 +52,6 @@ func TestSQLiteStore_UpsertUser_CreatesNewUser(t *testing.T) {
 
 func TestSQLiteStore_UpsertUser_ReturnsExistingUserOnDuplicateEmail(t *testing.T) {
 	store := setupTestStore(t)
-	defer func() { _ = store.Close() }()
 
 	ctx := context.Background()
 
@@ -75,7 +75,6 @@ func TestSQLiteStore_UpsertUser_ReturnsExistingUserOnDuplicateEmail(t *testing.T
 
 func TestSQLiteStore_SetUserVerified_MarksUserAsVerified(t *testing.T) {
 	store := setupTestStore(t)
-	defer func() { _ = store.Close() }()
 
 	ctx := context.Background()
 
@@ -99,7 +98,6 @@ func TestSQLiteStore_SetUserVerified_MarksUserAsVerified(t *testing.T) {
 
 func TestSQLiteStore_SaveOTPAndGetValidOTP(t *testing.T) {
 	store := setupTestStore(t)
-	defer func() { _ = store.Close() }()
 
 	ctx := context.Background()
 
@@ -135,7 +133,6 @@ func TestSQLiteStore_SaveOTPAndGetValidOTP(t *testing.T) {
 
 func TestSQLiteStore_GetValidOTP_ReturnsErrorForExpiredOTP(t *testing.T) {
 	store := setupTestStore(t)
-	defer func() { _ = store.Close() }()
 
 	ctx := context.Background()
 
@@ -158,7 +155,6 @@ func TestSQLiteStore_GetValidOTP_ReturnsErrorForExpiredOTP(t *testing.T) {
 
 func TestSQLiteStore_IncrementOTPAttempts_IncrementsCounter(t *testing.T) {
 	store := setupTestStore(t)
-	defer func() { _ = store.Close() }()
 
 	ctx := context.Background()
 
@@ -192,7 +188,6 @@ func TestSQLiteStore_IncrementOTPAttempts_IncrementsCounter(t *testing.T) {
 
 func TestSQLiteStore_MarkOTPExhausted_MarksOTPAsExhausted(t *testing.T) {
 	store := setupTestStore(t)
-	defer func() { _ = store.Close() }()
 
 	ctx := context.Background()
 
@@ -223,7 +218,6 @@ func TestSQLiteStore_MarkOTPExhausted_MarksOTPAsExhausted(t *testing.T) {
 
 func TestSQLiteStore_SaveRefreshTokenAndGetRefreshToken(t *testing.T) {
 	store := setupTestStore(t)
-	defer func() { _ = store.Close() }()
 
 	ctx := context.Background()
 
@@ -259,7 +253,6 @@ func TestSQLiteStore_SaveRefreshTokenAndGetRefreshToken(t *testing.T) {
 
 func TestSQLiteStore_RevokeRefreshToken_MarksTokenAsRevoked(t *testing.T) {
 	store := setupTestStore(t)
-	defer func() { _ = store.Close() }()
 
 	ctx := context.Background()
 
@@ -293,7 +286,6 @@ func TestSQLiteStore_RevokeRefreshToken_MarksTokenAsRevoked(t *testing.T) {
 
 func TestSQLiteStore_RevokeAllUserSessions_RevokesAllTokens(t *testing.T) {
 	store := setupTestStore(t)
-	defer func() { _ = store.Close() }()
 
 	ctx := context.Background()
 
@@ -332,7 +324,6 @@ func TestSQLiteStore_RevokeAllUserSessions_RevokesAllTokens(t *testing.T) {
 
 func TestSQLiteStore_GetUserByID_ReturnsCorrectUser(t *testing.T) {
 	store := setupTestStore(t)
-	defer func() { _ = store.Close() }()
 
 	ctx := context.Background()
 
@@ -355,7 +346,6 @@ func TestSQLiteStore_GetUserByID_ReturnsCorrectUser(t *testing.T) {
 
 func TestSQLiteStore_GetUserByID_ReturnsErrorForNonexistentUser(t *testing.T) {
 	store := setupTestStore(t)
-	defer func() { _ = store.Close() }()
 
 	ctx := context.Background()
 
@@ -367,7 +357,6 @@ func TestSQLiteStore_GetUserByID_ReturnsErrorForNonexistentUser(t *testing.T) {
 
 func TestSQLiteStore_GetUserByEmail_ReturnsCorrectUser(t *testing.T) {
 	store := setupTestStore(t)
-	defer func() { _ = store.Close() }()
 
 	ctx := context.Background()
 
@@ -390,7 +379,6 @@ func TestSQLiteStore_GetUserByEmail_ReturnsCorrectUser(t *testing.T) {
 
 func TestSQLiteStore_GetUserByEmail_ReturnsErrorForNonexistentEmail(t *testing.T) {
 	store := setupTestStore(t)
-	defer func() { _ = store.Close() }()
 
 	ctx := context.Background()
 
@@ -402,7 +390,6 @@ func TestSQLiteStore_GetUserByEmail_ReturnsErrorForNonexistentEmail(t *testing.T
 
 func TestSQLiteStore_GetRefreshToken_ReturnsErrorForNonexistentToken(t *testing.T) {
 	store := setupTestStore(t)
-	defer func() { _ = store.Close() }()
 
 	ctx := context.Background()
 
@@ -414,7 +401,6 @@ func TestSQLiteStore_GetRefreshToken_ReturnsErrorForNonexistentToken(t *testing.
 
 func TestSQLiteStore_RevokeAllUserSessions_OnlyRevokesSpecifiedUser(t *testing.T) {
 	store := setupTestStore(t)
-	defer func() { _ = store.Close() }()
 
 	ctx := context.Background()
 
@@ -457,7 +443,6 @@ func TestSQLiteStore_RevokeAllUserSessions_OnlyRevokesSpecifiedUser(t *testing.T
 
 func TestSQLiteStore_GetValidOTP_ReturnsLatestOTP(t *testing.T) {
 	store := setupTestStore(t)
-	defer func() { _ = store.Close() }()
 
 	ctx := context.Background()
 
@@ -491,7 +476,6 @@ func TestSQLiteStore_GetValidOTP_ReturnsLatestOTP(t *testing.T) {
 
 func TestSQLiteStore_UpsertUserByAppleSubject_CreatesVerifiedUser(t *testing.T) {
 	store := setupTestStore(t)
-	defer func() { _ = store.Close() }()
 
 	ctx := context.Background()
 	user, err := store.UpsertUserByAppleSubject(ctx, "apple-sub-1", "relay@privaterelay.appleid.com")
@@ -511,7 +495,6 @@ func TestSQLiteStore_UpsertUserByAppleSubject_CreatesVerifiedUser(t *testing.T) 
 
 func TestSQLiteStore_UpsertUserByAppleSubject_IdempotentKeepsEmail(t *testing.T) {
 	store := setupTestStore(t)
-	defer func() { _ = store.Close() }()
 
 	ctx := context.Background()
 
@@ -539,7 +522,6 @@ func TestSQLiteStore_UpsertUserByAppleSubject_IdempotentKeepsEmail(t *testing.T)
 
 func TestSQLiteStore_UpsertUserByAppleSubject_DistinctSubjects(t *testing.T) {
 	store := setupTestStore(t)
-	defer func() { _ = store.Close() }()
 
 	ctx := context.Background()
 	u1, err := store.UpsertUserByAppleSubject(ctx, "sub-a", "a@example.com")

@@ -228,9 +228,8 @@ struct SyncControllerTests {
         let store = try! LocalStore(url: temporaryStoreURL())
         let mock = MockCatalogRepository()
         let connectivity = MockConnectivity(connected: connected)
-        let undoBuffer = UndoBufferStore(store: store)
         let controller = SyncController(
-            store: store, remote: mock, connectivity: connectivity, undoBuffer: undoBuffer
+            store: store, remote: mock, connectivity: connectivity
         )
         return (store, mock, controller)
     }

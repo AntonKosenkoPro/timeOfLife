@@ -68,9 +68,9 @@ struct LocalizationTests {
     @Test("known error codes resolve via ErrorLocalization without falling back to unknown")
     func errorCodesResolve() throws {
         let codes = [
-            "invalid_body", "rate_limited",
+            "invalid_body", "internal_error", "rate_limited",
             "invalid_otp", "otp_expired", "otp_attempts_exceeded",
-            "invalid_refresh", "token_reuse", "token_expired",
+            "invalid_refresh", "token_reuse",
         ]
         let unknownText = NSLocalizedString("error.unknown", comment: "")
 
@@ -122,10 +122,9 @@ struct LocalizationTests {
 
     @Test("L10n enum allCases count matches expected keys")
     func allCasesCount() {
-        // 95 base keys - 5 removed (timerSearchConfigure, timerCollisionTitle,
-        // timerCollisionMessage, timerCollisionUseExisting,
-        // timerCollisionKeepEditing) + 2 added (timerActivityRefine,
-        // timerActivityRefineHint) = 92
-        #expect(l10nCases.count == 92)
+        // 92 prior keys - 5 removed (timerTitle, timerSavedDuration,
+        // signOutConfirmationTitle, signOutConfirmationMessage,
+        // signOutConfirm) = 87
+        #expect(l10nCases.count == 87)
     }
 }

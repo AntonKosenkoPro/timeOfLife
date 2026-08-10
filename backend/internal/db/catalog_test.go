@@ -48,7 +48,6 @@ func mustCreateCategory(t *testing.T, store *SQLiteStore, userID, name string) C
 
 func TestStore_CreateAndGetActivity(t *testing.T) {
 	store := setupTestStore(t)
-	defer func() { _ = store.Close() }()
 	uid := newTestUser(t, store, "act@example.com")
 
 	cat := mustCreateCategory(t, store, uid, "Sport")
@@ -74,7 +73,6 @@ func TestStore_CreateAndGetActivity(t *testing.T) {
 
 func TestStore_CreateActivity_IdempotentReplay(t *testing.T) {
 	store := setupTestStore(t)
-	defer func() { _ = store.Close() }()
 	uid := newTestUser(t, store, "idem@example.com")
 
 	a := mustCreateActivity(t, store, uid, "Run", nil)
@@ -94,7 +92,6 @@ func TestStore_CreateActivity_IdempotentReplay(t *testing.T) {
 
 func TestStore_CreateActivity_NameCollision(t *testing.T) {
 	store := setupTestStore(t)
-	defer func() { _ = store.Close() }()
 	uid := newTestUser(t, store, "collide@example.com")
 
 	a := mustCreateActivity(t, store, uid, "Gym", nil)
@@ -114,7 +111,6 @@ func TestStore_CreateActivity_NameCollision(t *testing.T) {
 
 func TestStore_UpdateActivity_LWW(t *testing.T) {
 	store := setupTestStore(t)
-	defer func() { _ = store.Close() }()
 	uid := newTestUser(t, store, "lww@example.com")
 	a := mustCreateActivity(t, store, uid, "Read", nil)
 
@@ -144,7 +140,6 @@ func TestStore_UpdateActivity_LWW(t *testing.T) {
 
 func TestStore_UpdateActivity_NameCollision(t *testing.T) {
 	store := setupTestStore(t)
-	defer func() { _ = store.Close() }()
 	uid := newTestUser(t, store, "ucollide@example.com")
 	mustCreateActivity(t, store, uid, "Gym", nil)
 	a2 := mustCreateActivity(t, store, uid, "Run", nil)
@@ -159,7 +154,6 @@ func TestStore_UpdateActivity_NameCollision(t *testing.T) {
 
 func TestStore_UpdateActivity_ReplaceTags(t *testing.T) {
 	store := setupTestStore(t)
-	defer func() { _ = store.Close() }()
 	uid := newTestUser(t, store, "tags@example.com")
 	c1 := mustCreateCategory(t, store, uid, "Sport")
 	c2 := mustCreateCategory(t, store, uid, "Work")
@@ -189,7 +183,6 @@ func TestStore_UpdateActivity_ReplaceTags(t *testing.T) {
 
 func TestStore_ActivityCategoryPositionOrdering(t *testing.T) {
 	store := setupTestStore(t)
-	defer func() { _ = store.Close() }()
 	uid := newTestUser(t, store, "ordered-tags@example.com")
 	first := mustCreateCategory(t, store, uid, "First")
 	second := mustCreateCategory(t, store, uid, "Second")
@@ -213,7 +206,6 @@ func TestStore_ActivityCategoryPositionOrdering(t *testing.T) {
 
 func TestStore_DeleteActivity_Cascades(t *testing.T) {
 	store := setupTestStore(t)
-	defer func() { _ = store.Close() }()
 	uid := newTestUser(t, store, "cascade@example.com")
 	cat := mustCreateCategory(t, store, uid, "Sport")
 	a := mustCreateActivity(t, store, uid, "Gym", []string{cat.ID})
@@ -243,7 +235,6 @@ func TestStore_DeleteActivity_Cascades(t *testing.T) {
 
 func TestStore_DeleteCategory_RemovesJoinKeepsEntries(t *testing.T) {
 	store := setupTestStore(t)
-	defer func() { _ = store.Close() }()
 	uid := newTestUser(t, store, "delcat@example.com")
 	cat := mustCreateCategory(t, store, uid, "Sport")
 	a := mustCreateActivity(t, store, uid, "Gym", []string{cat.ID})
@@ -272,7 +263,6 @@ func TestStore_DeleteCategory_RemovesJoinKeepsEntries(t *testing.T) {
 
 func TestStore_CategoryCRUD(t *testing.T) {
 	store := setupTestStore(t)
-	defer func() { _ = store.Close() }()
 	uid := newTestUser(t, store, "cat@example.com")
 
 	c := mustCreateCategory(t, store, uid, "Work")
@@ -306,7 +296,6 @@ func TestStore_CategoryCRUD(t *testing.T) {
 
 func TestStore_CreateEntry_ResolvesActivityName(t *testing.T) {
 	store := setupTestStore(t)
-	defer func() { _ = store.Close() }()
 	uid := newTestUser(t, store, "snap@example.com")
 	cat := mustCreateCategory(t, store, uid, "Sport")
 	a := mustCreateActivity(t, store, uid, "Gym", []string{cat.ID})
@@ -335,7 +324,6 @@ func TestStore_CreateEntry_ResolvesActivityName(t *testing.T) {
 
 func TestStore_CreateEntry_ActivityNotOwned(t *testing.T) {
 	store := setupTestStore(t)
-	defer func() { _ = store.Close() }()
 	uid := newTestUser(t, store, "owner@example.com")
 	other := newTestUser(t, store, "other@example.com")
 	a := mustCreateActivity(t, store, other, "Their Gym", nil)
@@ -350,7 +338,6 @@ func TestStore_CreateEntry_ActivityNotOwned(t *testing.T) {
 
 func TestStore_UpdateEntry_StopsTimer(t *testing.T) {
 	store := setupTestStore(t)
-	defer func() { _ = store.Close() }()
 	uid := newTestUser(t, store, "stop@example.com")
 	a := mustCreateActivity(t, store, uid, "Gym", nil)
 	// Whole-second UTC times: the SQLite TEXT timestamp format truncates
@@ -380,7 +367,6 @@ func TestStore_UpdateEntry_StopsTimer(t *testing.T) {
 
 func TestStore_ListEntries_Pagination(t *testing.T) {
 	store := setupTestStore(t)
-	defer func() { _ = store.Close() }()
 	uid := newTestUser(t, store, "page@example.com")
 	a := mustCreateActivity(t, store, uid, "Gym", nil)
 	base := time.Date(2026, 7, 1, 9, 0, 0, 0, time.UTC)
@@ -434,7 +420,6 @@ func TestStore_ListEntries_Pagination(t *testing.T) {
 
 func TestStore_CrossUserIsolation(t *testing.T) {
 	store := setupTestStore(t)
-	defer func() { _ = store.Close() }()
 	u1 := newTestUser(t, store, "u1@example.com")
 	u2 := newTestUser(t, store, "u2@example.com")
 	a := mustCreateActivity(t, store, u1, "Mine", nil)
@@ -454,7 +439,6 @@ func ptr(s string) *string { return &s }
 // entry's started_at, without regressing it for historical entries.
 func TestStore_CreateEntry_BumpsActivityLastUsedAt(t *testing.T) {
 	store := setupTestStore(t)
-	defer func() { _ = store.Close() }()
 	uid := newTestUser(t, store, "bump@example.com")
 	a := mustCreateActivity(t, store, uid, "Gym", nil)
 	if a.LastUsedAt != nil {
@@ -494,7 +478,6 @@ func TestStore_CreateEntry_BumpsActivityLastUsedAt(t *testing.T) {
 // duration_seconds.
 func TestStore_UpdateEntry_PartialPatchRejectsNegativeDuration(t *testing.T) {
 	store := setupTestStore(t)
-	defer func() { _ = store.Close() }()
 	uid := newTestUser(t, store, "neg@example.com")
 	a := mustCreateActivity(t, store, uid, "Gym", nil)
 	start := time.Date(2026, 7, 27, 10, 0, 0, 0, time.UTC)
@@ -526,7 +509,6 @@ func TestStore_UpdateEntry_PartialPatchRejectsNegativeDuration(t *testing.T) {
 // F5: the `to` filter is an inclusive upper bound on started_at.
 func TestStore_ListEntries_ToFilterInclusive(t *testing.T) {
 	store := setupTestStore(t)
-	defer func() { _ = store.Close() }()
 	uid := newTestUser(t, store, "tofilter@example.com")
 	a := mustCreateActivity(t, store, uid, "Gym", nil)
 	base := time.Date(2026, 7, 27, 9, 0, 0, 0, time.UTC)
@@ -552,7 +534,6 @@ func TestStore_ListEntries_ToFilterInclusive(t *testing.T) {
 // concurrent-delete race, which re-checks existence on RowsAffected==0).
 func TestStore_UpdateEntry_MissingReturnsNotFound(t *testing.T) {
 	store := setupTestStore(t)
-	defer func() { _ = store.Close() }()
 	uid := newTestUser(t, store, "missing@example.com")
 	_, err := store.UpdateEntry(context.Background(), uid, "does-not-exist", EntryPatch{
 		UpdatedAt: time.Now(),
@@ -568,7 +549,6 @@ func TestStore_UpdateEntry_MissingReturnsNotFound(t *testing.T) {
 // reliable separators).
 func TestStore_ListActivities_ModifiedSince(t *testing.T) {
 	store := setupTestStore(t)
-	defer func() { _ = store.Close() }()
 	uid := newTestUser(t, store, "modified-since@example.com")
 
 	a1 := mustCreateActivity(t, store, uid, "Gym", nil)
@@ -623,7 +603,6 @@ func TestStore_ListActivities_ModifiedSince(t *testing.T) {
 // updated_at is newer than the cursor.
 func TestStore_ListEntries_ModifiedSince(t *testing.T) {
 	store := setupTestStore(t)
-	defer func() { _ = store.Close() }()
 	uid := newTestUser(t, store, "entries-modified@example.com")
 	a := mustCreateActivity(t, store, uid, "Gym", nil)
 
@@ -689,7 +668,6 @@ func TestStore_ListEntries_ModifiedSince(t *testing.T) {
 // manual/null (back-compat); entries created with them persist them.
 func TestStore_CreateEntry_ProvenanceDefaultsAndPersistence(t *testing.T) {
 	store := setupTestStore(t)
-	defer func() { _ = store.Close() }()
 	uid := newTestUser(t, store, "provenance@example.com")
 	a := mustCreateActivity(t, store, uid, "Gym", nil)
 	base := time.Date(2026, 7, 27, 9, 0, 0, 0, time.UTC)
@@ -735,7 +713,6 @@ func TestStore_CreateEntry_ProvenanceDefaultsAndPersistence(t *testing.T) {
 // (user_id, source, source_ref) is rejected by the partial unique index.
 func TestStore_CreateEntry_DuplicateImportRejected(t *testing.T) {
 	store := setupTestStore(t)
-	defer func() { _ = store.Close() }()
 	uid := newTestUser(t, store, "dup-import@example.com")
 	a := mustCreateActivity(t, store, uid, "Gym", nil)
 	base := time.Date(2026, 7, 27, 9, 0, 0, 0, time.UTC)
@@ -775,7 +752,6 @@ func TestStore_CreateEntry_DuplicateImportRejected(t *testing.T) {
 // existing record (with its provenance) and does not create a duplicate.
 func TestStore_CreateEntry_IdempotentReplayWithProvenance(t *testing.T) {
 	store := setupTestStore(t)
-	defer func() { _ = store.Close() }()
 	uid := newTestUser(t, store, "replay-provenance@example.com")
 	a := mustCreateActivity(t, store, uid, "Gym", nil)
 	base := time.Date(2026, 7, 27, 9, 0, 0, 0, time.UTC)
@@ -811,7 +787,6 @@ func TestStore_CreateEntry_IdempotentReplayWithProvenance(t *testing.T) {
 // INSERT-path UNIQUE violation.
 func TestStore_CreateActivity_ConcurrentNameCollision(t *testing.T) {
 	store := setupTestStore(t)
-	defer func() { _ = store.Close() }()
 	uid := newTestUser(t, store, "race@example.com")
 	const n = 100
 	var wg sync.WaitGroup
@@ -846,7 +821,6 @@ func TestStore_CreateActivity_ConcurrentNameCollision(t *testing.T) {
 // F8 (categories): same race contract for CreateCategory.
 func TestStore_CreateCategory_ConcurrentNameCollision(t *testing.T) {
 	store := setupTestStore(t)
-	defer func() { _ = store.Close() }()
 	uid := newTestUser(t, store, "catrace@example.com")
 	const n = 100
 	var wg sync.WaitGroup

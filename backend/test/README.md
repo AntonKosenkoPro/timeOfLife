@@ -13,7 +13,7 @@ make test:cover          # coverage profile + per-function report
 make test:pg             # PostgreSQL parity tests (needs Docker)
 ```
 
-`make test:pg` starts `postgres:15-alpine` via `docker-compose.yml`, applies the real embedded migrations, and runs `backend/internal/db/postgres_parity_test.go` against it. The parity suite skips itself when `TEST_PG_DSN` is unset, so `go test ./...` stays green offline.
+`make test:pg` runs the PostgreSQL parity tests against `TEST_PG_DSN` (defaults to the local `docker-compose.yml` Postgres on `localhost:5432`); it does **not** start Docker itself — run `docker compose up -d postgres` first. The parity suite skips itself when `TEST_PG_DSN` is unset, so `go test ./...` stays green offline.
 
 ## Architecture
 
@@ -35,17 +35,10 @@ make test:pg             # PostgreSQL parity tests (needs Docker)
 
 ## CI Integration
 
-`.github/workflows/backend.yml` runs `gofmt`, `go vet`, `golangci-lint`, and `go test ./... -race -coverprofile` on every PR (Requirements S6). The OpenAPI contract gate and SQLite suites run there with no Docker. PostgreSQL parity is scheduled/nightly scope per the test design (`test-design-epic-1.md`), run via `make test:pg`.
+`.github/workflows/backend.yml` runs `gofmt`, `go vet`, `golangci-lint`, and `go test ./... -race -coverprofile` on every PR (Requirements S6). The OpenAPI contract gate and SQLite suites run there with no Docker. Run PostgreSQL parity explicitly with `make test:pg` against the compose Postgres.
 
 ## Troubleshooting
 
-- **Parity tests skip** — `TEST_PG_DSN` unset; run `make test:pg` (starts Docker Postgres) or point `TEST_PG_DSN` at a reachable database.
+- **Parity tests skip** — `TEST_PG_DSN` unset; run `docker compose up -d postgres` then `make test:pg`, or point `TEST_PG_DSN` at a reachable database.
 - **Contract gate fails** — a handler/spec drifted; align `api/openapi.yaml` and the contract lists per Best Practices.
-- **Lint `unused` on a factory** — factories exist for upcoming ATDD/automation tests; a sample test in `catalog_factories_test.go` keeps them referenced. Delete a factory together with its last usage.
-
-## Knowledge Base References
-
-- `.agents/skills/bmad-testarch-framework/resources/knowledge/contract-testing.md` (R-006 gate rationale)
-- `.agents/skills/bmad-testarch-framework/resources/knowledge/data-factories.md` (factory patterns)
-- `.agents/skills/bmad-testarch-framework/resources/knowledge/fixture-architecture.md` (seeding strategy)
-- `.agents/skills/bmad-testarch-framework/resources/knowledge/test-quality.md` (determinism, isolation)
+- **Lint `unused` on a factory** — factories exist for upcoming API tests; a sample test in `catalog_factories_test.go` keeps them referenced. Delete a factory together with its last usage.

@@ -1,6 +1,6 @@
 # Activity Catalog & Categories — Use cases
 
-Narrative flows for **Epic 1: Activity Catalog & Categories**. Each flow maps to rows in [`FURPS/Activity_Catalog_and_Categories.md`](../FURPS/Activity_Catalog_and_Categories.md).
+Narrative flows for the **Activity Catalog & Categories** feature. Each flow maps to rows in [`FURPS/Activity_Catalog_and_Categories.md`](../FURPS/Activity_Catalog_and_Categories.md).
 
 ## 1. First run — seeded defaults
 

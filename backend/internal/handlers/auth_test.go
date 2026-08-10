@@ -33,22 +33,44 @@ func newTestStore(t *testing.T) *db.SQLiteStore {
 	if err := migrations.RunSQLite(ctx, store.DB()); err != nil {
 		t.Fatalf("failed to run migrations: %v", err)
 	}
+	t.Cleanup(func() { _ = store.Close() })
 	return store
+}
+
+type captureSender struct {
+	messages []email.Message
+}
+
+func (s *captureSender) Send(_ context.Context, message email.Message) error {
+	s.messages = append(s.messages, message)
+	return nil
 }
 
 func newTestHandler(t *testing.T, store db.Store) *Handler {
 	t.Helper()
-	return newTestHandlerWithApple(t, store, nil)
+	return newTestHandlerWithDependencies(t, store, nil, nil)
 }
 
 // newTestHandlerWithApple is like newTestHandler but injects an Apple
 // identity-token verifier (nil disables the Apple endpoint).
 func newTestHandlerWithApple(t *testing.T, store db.Store, verifier apple.Verifier) *Handler {
 	t.Helper()
+	return newTestHandlerWithDependencies(t, store, verifier, nil)
+}
+
+func newTestHandlerWithDependencies(
+	t *testing.T,
+	store db.Store,
+	verifier apple.Verifier,
+	emailSender email.Sender,
+) *Handler {
+	t.Helper()
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelWarn}))
 	tokenService := auth.NewTokenService("test-secret-key-at-least-32-bytes!!", 15*time.Minute, 7*24*time.Hour)
 	otpService := auth.NewOTPService(10*time.Minute, 5)
-	emailSender := email.NewConsoleSender(logger)
+	if emailSender == nil {
+		emailSender = email.NewConsoleSender(logger)
+	}
 	rateLimiter := &RateLimiterGroup{
 		OTPRequest: ratelimit.NewTokenBucket(100, 100, time.Minute),
 		OTPVerify:  ratelimit.NewTokenBucket(100, 100, time.Minute),
@@ -56,6 +78,21 @@ func newTestHandlerWithApple(t *testing.T, store db.Store, verifier apple.Verifi
 	}
 	config := HandlerConfig{}
 	return NewHandler(store, tokenService, otpService, emailSender, rateLimiter, verifier, config, logger)
+}
+
+func capturedOTP(t *testing.T, sender *captureSender) string {
+	t.Helper()
+	if len(sender.messages) != 1 {
+		t.Fatalf("expected one OTP email, got %d", len(sender.messages))
+	}
+	for _, line := range strings.Split(sender.messages[0].Text, "\n") {
+		code := strings.TrimSpace(line)
+		if validateCode(code) {
+			return code
+		}
+	}
+	t.Fatal("OTP email did not contain a six-digit code")
+	return ""
 }
 
 func requestOTP(t *testing.T, h *Handler, email string) *httptest.ResponseRecorder {
@@ -108,32 +145,30 @@ func TestRequestOTP_Returns400ForEmptyEmail(t *testing.T) {
 	}
 }
 
-func TestVerifyOTP_Returns200WithTokens(t *testing.T) {
+func TestVerifyOTP_ReturnsTokensForEmailedCode(t *testing.T) {
 	store := newTestStore(t)
-	h := newTestHandler(t, store)
+	sender := &captureSender{}
+	h := newTestHandlerWithDependencies(t, store, nil, sender)
 
-	// First request OTP
 	w := requestOTP(t, h, "test@example.com")
 	if w.Code != http.StatusAccepted {
 		t.Fatalf("expected 202, got %d", w.Code)
 	}
 
-	// Get the user to find the OTP
-	ctx := context.Background()
-	user, err := store.GetUserByEmail(ctx, "test@example.com")
-	if err != nil {
-		t.Fatalf("failed to get user: %v", err)
+	w = verifyOTP(t, h, "test@example.com", capturedOTP(t, sender))
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
 	}
 
-	_, err = store.GetValidOTP(ctx, user.ID)
-	if err != nil {
-		t.Fatalf("failed to get OTP: %v", err)
+	var response authResponse
+	if err := json.NewDecoder(w.Body).Decode(&response); err != nil {
+		t.Fatalf("decode auth response: %v", err)
 	}
-
-	// We can't know the plaintext code, so we verify the endpoint returns proper error for wrong code
-	w2 := verifyOTP(t, h, "test@example.com", "000000")
-	if w2.Code != http.StatusUnauthorized {
-		t.Errorf("expected 401 for wrong code, got %d", w2.Code)
+	if response.AccessToken == "" || response.RefreshToken == "" {
+		t.Fatal("expected non-empty access and refresh tokens")
+	}
+	if response.User.Email != "test@example.com" || !response.User.EmailVerified {
+		t.Errorf("unexpected verified user: %+v", response.User)
 	}
 }
 

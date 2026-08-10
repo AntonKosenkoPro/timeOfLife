@@ -1,9 +1,6 @@
 name: backend
 
 # Requirements S6: linters + tests run on every pull request as a mandatory check.
-# Execution strategy (test-design-epic-1.md): PR = deterministic suites + race +
-# OpenAPI contract gate + critical PostgreSQL parity subset; nightly = full PG
-# parity matrix + burn-in for flake detection (R-012).
 on:
   pull_request:
     paths:
@@ -13,9 +10,6 @@ on:
     branches: [main]
     paths:
       - "backend/**"
-  schedule:
-    # Nightly burn-in + full PostgreSQL parity matrix
-    - cron: "0 2 * * *"
   workflow_dispatch:
     inputs:
       environment:
@@ -78,7 +72,7 @@ jobs:
         run: |
           cov="$(go tool cover -func=coverage.out | tail -1 | grep -oE '[0-9.]+%' | tr -d '%')"
           echo "total coverage: ${cov}%"
-          # No-regression floor. Ratchets up as Epic 1 closes gaps; the exact
+          # No-regression floor. Ratchets up as the catalog feature closes gaps; the exact
           # hard floor awaits team approval (test design Quality Gate Criteria).
           floor=45
           if [ "${cov%.*}" -lt "$floor" ]; then

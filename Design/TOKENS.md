@@ -66,7 +66,7 @@ Use SF Symbols. Prefer filled variants for active/primary actions.
 | Pause | `pause.fill` | Pause timer |
 | Stop | `stop.fill` | Stop and save entry |
 | History | `clock.arrow.circlepath` | History tab |
-| Settings | `gearshape.fill` | Settings tab |
+| Settings | `gearshape.fill` | Settings / configuration |
 | Plus | `plus.circle.fill` | Add activity |
 | Check | `checkmark.circle.fill` | Success state |
 | Exclamation | `exclamationmark.triangle.fill` | Error state |
@@ -111,7 +111,7 @@ Allowed set for category icons (F2); default is `tag`. Validated against this ex
 
 ### Management icons
 
-New for Epic 1 (Manage Activities, quick-add sheet, category management).
+New for the catalog feature (Manage Activities, quick-add sheet, category management).
 
 | SF Symbol | Usage |
 |---|---|
@@ -137,6 +137,6 @@ New for Epic 1 (Manage Activities, quick-add sheet, category management).
 
 `ThemeManager` is the seam for a future manual theme override. For the MVP it is `nil`, which means the app follows the system color scheme.
 
-## Implementation notes (Epic 1)
+## Implementation notes (catalog feature)
 
-- `success` and `cornerRadiusLarge` are already documented in this file but are not yet declared in `Core/Theme/Theme.swift`; add them when implementing Epic 1.
+- `success` and `cornerRadiusLarge` are already documented in this file but are not yet declared in `Core/Theme/Theme.swift`; add them when implementing the catalog feature.

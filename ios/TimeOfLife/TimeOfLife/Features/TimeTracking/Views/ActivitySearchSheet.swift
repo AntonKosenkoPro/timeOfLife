@@ -9,7 +9,6 @@ import UIKit
 /// refinement is presented by `TrackView` as a sibling sheet.
 struct ActivitySearchSheet: View {
     @ObservedObject var vm: TrackViewModel
-    let store: LocalStore
     @Environment(\.dismiss)
     private var dismiss
 
@@ -154,7 +153,7 @@ private extension UIView {
 #if DEBUG
 #Preview("Search — Idle Empty") {
     let viewModel = TrackViewModel.preview(isSearchActive: true)
-    return ActivitySearchSheet(vm: viewModel, store: viewModel.service.store)
+    return ActivitySearchSheet(vm: viewModel)
 }
 
 #Preview("Search — Ready Prefilled") {
@@ -165,6 +164,6 @@ private extension UIView {
         query: activity.name,
         isSearchActive: true
     )
-    return ActivitySearchSheet(vm: viewModel, store: viewModel.service.store)
+    return ActivitySearchSheet(vm: viewModel)
 }
 #endif

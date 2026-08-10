@@ -96,12 +96,11 @@ func NewDefaultDependencies(cfg *config.Config, store db.Store) Dependencies {
 
 // Server holds the HTTP server and its dependencies.
 type Server struct {
-	router  http.Handler
-	handler *handlers.Handler
+	router http.Handler
 }
 
 // New creates a new Server with all routes configured.
-func New(_ *config.Config, deps Dependencies) *Server {
+func New(deps Dependencies) *Server {
 	logger := slog.Default()
 
 	h := handlers.NewHandler(
@@ -115,9 +114,7 @@ func New(_ *config.Config, deps Dependencies) *Server {
 		logger,
 	)
 
-	s := &Server{
-		handler: h,
-	}
+	s := &Server{}
 
 	r := chi.NewRouter()
 
@@ -145,7 +142,7 @@ func New(_ *config.Config, deps Dependencies) *Server {
 			r.With(h.AuthMiddleware).Get("/me", h.Me)
 		})
 
-		// Epic 1: activity catalog, categories, and entries. All protected.
+		// Activity catalog, categories, and entries. All protected.
 		r.Group(func(r chi.Router) {
 			r.Use(h.AuthMiddleware)
 			r.Get("/activities", h.ListActivities)

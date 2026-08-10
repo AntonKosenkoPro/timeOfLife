@@ -47,8 +47,7 @@ enum TestFactories {
     /// Creates a 200 `HTTPURLResponse` for the given URL.
     static func okResponse(
         _ url: URL,
-        status: Int = 200,
-        body: Data = Data()
+        status: Int = 200
     ) -> HTTPURLResponse {
         HTTPURLResponse(
             url: url,

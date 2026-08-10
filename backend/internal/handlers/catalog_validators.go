@@ -9,7 +9,7 @@ import (
 	"unicode/utf8"
 )
 
-// Epic 1 introduces the catalog/entries endpoints. Unlike the auth handlers
+// The catalog feature introduces the catalog/entries endpoints. Unlike the auth handlers
 // (inline boolean validators → 400 invalid_body), these use a field→message
 // accumulator that returns 422 validation_error with details = {field: message},
 // matching the OpenAPI ValidationError response. Error codes are declared as

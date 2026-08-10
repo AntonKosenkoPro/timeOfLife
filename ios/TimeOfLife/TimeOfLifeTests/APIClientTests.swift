@@ -115,7 +115,7 @@ struct APIClientTests {
             // Retry with new token: success
             let user = UserDTO(id: "u1", email: "a@b.com", emailVerified: true)
             let data = (try? JSONEncoder().encode(user)) ?? Data()
-            return (data, TestFactories.okResponse(request.url!, status: 200, body: data))
+            return (data, TestFactories.okResponse(request.url!, status: 200))
         }
 
         let (client, _) = makeClient(

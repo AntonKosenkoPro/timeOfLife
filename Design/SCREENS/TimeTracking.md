@@ -185,14 +185,17 @@ struct TimeEntry: Identifiable, Codable, Sendable {
     let id: UUID
     let activityId: UUID
     let startedAt: Date
-    let endedAt: Date
-    var duration: TimeInterval { endedAt.timeIntervalSince(startedAt) }
-    var synced: Bool
+    let endedAt: Date?
+    var duration: TimeInterval { endedAt.map { $0.timeIntervalSince(startedAt) } ?? 0 }
+    var source: String
+    var sourceRef: String?
 }
 ```
 
 Activity name and Categories are resolved from the local catalog by
-`activityId`; they are not denormalized onto the entry.
+`activityId`; they are not denormalized onto the entry. There is no `synced`
+flag on the model: sync is outbox-driven (every mutation writes a transactional
+outbox row; the relay is the transport, not a per-record state).
 
 ### Implementation checklist
 
@@ -223,7 +226,7 @@ Add English and Russian values, then add corresponding `L10n` cases:
 "timer.manageActivities" = "Manage activities";
 ```
 
-## Epic 1 behavior
+## Catalog behavior
 
 Suggestions are computed on-device from the local catalog and ranked by
 `last_used_at`. Each row contains the Activity name and recency only. Category

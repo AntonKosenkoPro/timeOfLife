@@ -21,10 +21,6 @@ final class AppNavigationStack: ObservableObject {
         path.append(route)
     }
 
-    func popToRoot() {
-        path.removeAll()
-    }
-
     /// Trims the stack so it contains exactly `count` routes. Used by the iOS 15
     /// navigation polyfill when a nested `NavigationLink` deactivates.
     func popTo(count: Int) {

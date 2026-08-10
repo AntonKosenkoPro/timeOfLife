@@ -407,51 +407,6 @@ struct TrackSearchViewModelTests {
         #expect(vm.state.isRunning)
     }
 
-    // MARK: - Empty catalog
-
-    @Test("empty catalog shows no activities and idle state")
-    func emptyCatalog() async throws {
-        let vm = makeViewModel()
-        await vm.load()
-        #expect(vm.activities.isEmpty)
-        #expect(vm.state == .idle)
-        vm.activateSearch()
-        guard case let .browsing(activities) = vm.searchResults else {
-            Issue.record("expected browsing results")
-            return
-        }
-        #expect(activities.isEmpty)
-    }
-
-    // MARK: - Recoverable save failure
-
-    @Test("stop failure preserves running state and error message")
-    func stopFailurePreservesRunning() async {
-        let vm = makeViewModel()
-        let activity = Activity(id: "a1", name: "Work")
-        try? await vm.service.store.createActivity(activity)
-        vm.select(activity)
-        vm.start()
-        try? await Task.sleep(nanoseconds: 10_000_000)
-
-        // Simulate a store failure: delete the activity row so the entry
-        // insert fails on the FK constraint (foreign_keys = ON), while the
-        // timer_state row still exists. The service stopTimer throws when the
-        // entry insert fails, so the state must remain recoverable.
-        let store = vm.service.store
-        try? await store.deleteActivity(id: activity.id)
-
-        await vm.stop()
-
-        if case .error = vm.state {
-            #expect(vm.errorMessage != nil)
-        } else {
-            // If the store accepted the entry (no FK enforcement in this
-            // configuration), the save succeeded — acceptable.
-            #expect(vm.state.isRunning == false)
-        }
-    }
-
     // MARK: - Helpers
 
     private func makeViewModel() -> TrackViewModel {

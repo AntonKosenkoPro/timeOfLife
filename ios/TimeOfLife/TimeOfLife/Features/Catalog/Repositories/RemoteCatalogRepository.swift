@@ -1,6 +1,6 @@
 import Foundation
 
-/// The backend relay's catalog/entries contract (Epic 1 + local-first
+/// The backend relay's catalog/entries contract (catalog feature + local-first
 /// additions). The backend is an optional relay, not the source of truth:
 /// the client pushes outbox rows and pulls deltas via `modified_since`.
 protocol CatalogSending: Sendable {

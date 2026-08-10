@@ -6,29 +6,30 @@ info:
     Backend API for the Time of Life personal time-tracking iOS app.
 
     ## Auth flow (passwordless email-OTP)
-    1. **Request OTP** — `POST /auth/otp/request` with an email address. Always returns 202
+    1. **Request OTP** — `POST /api/v1/auth/otp/request` with an email address. Always returns 202
        (prevents user enumeration). The server upserts the user, generates a 6-digit code,
        and sends it via email (console in dev/test, AWS SES in production).
-    2. **Verify OTP** — `POST /auth/otp/verify` with the email and 6-digit code. On success,
-       returns a JWT access token (15 min TTL) and an opaque refresh token (7 day TTL).
-    3. **Refresh** — `POST /auth/refresh` with the refresh token. Issues a new token pair
+    2. **Verify OTP** — `POST /api/v1/auth/otp/verify` with the email and 6-digit code. On success,
+       returns a JWT access token (15 min TTL) and an opaque refresh token.
+    3. **Refresh** — `POST /api/v1/auth/refresh` with the refresh token. Issues a new token pair
        and revokes the old one. Reuse of a revoked token revokes ALL user sessions.
-    4. **Logout** — `POST /auth/logout` with a Bearer access token. Revokes all sessions.
-    5. **Me** — `GET /auth/me` with a Bearer access token. Returns the user profile.
+    4. **Logout** — `POST /api/v1/auth/logout` with a Bearer access token. Revokes all sessions.
+    5. **Me** — `GET /api/v1/auth/me` with a Bearer access token. Returns the user profile.
 
     ## Auth flow (Sign in with Apple)
-    - **Apple** — `POST /auth/apple` with Apple's identity-token JWT (RS256). The server
+    - **Apple** — `POST /api/v1/auth/apple` with Apple's identity-token JWT (RS256). The server
       verifies it against Apple's JWKS (iss/aud/exp) and upserts a user keyed by Apple's
       stable `sub` claim, then issues the same access + refresh token pair as the OTP flow.
-      Config-gated: only registered when `APPLE_CLIENT_ID` is set.
+       The route is always registered; without `APPLE_CLIENT_ID` it returns 503
+       `apple_not_configured`.
 
     ## Security
     - No passwords. OTP codes and refresh tokens are stored only as SHA-256 hashes.
     - JWT access tokens use HS256 signing.
     - Rate limiting: 3 req/min for OTP request, 5 req/min for OTP verify (per IP+email).
-    - User enumeration is prevented: `/auth/otp/request` always returns 202.
+    - User enumeration is prevented: `/api/v1/auth/otp/request` always returns 202.
 
-    ## Activity catalog & entries (Epic 1)
+    ## Activity catalog & entries
     Activities, categories (many-to-many tags), and time entries are per-user
     resources — Bearer-auth and scoped to the authenticated user. Records use
     client-generated UUID v7 ids so they can be created offline and synced
@@ -45,7 +46,7 @@ info:
 servers:
   - url: http://localhost:8080
     description: Local development
-  - url: https://api.timeoflife.example.com
+  - url: https://timeoflife-api.antonkosenko.pro
     description: Production
 
 paths:
@@ -190,6 +191,8 @@ paths:
                 error:
                   code: rate_limited
                   message: Too many attempts. Please try again later.
+        "500":
+          $ref: "#/components/responses/InternalError"
 
   /api/v1/auth/apple:
     post:
@@ -261,6 +264,8 @@ paths:
                 error:
                   code: apple_not_configured
                   message: Sign in with Apple is not configured
+        "500":
+          $ref: "#/components/responses/InternalError"
 
   /api/v1/auth/refresh:
     post:
@@ -316,6 +321,8 @@ paths:
                     error:
                       code: token_reuse
                       message: Token has been revoked. All sessions have been invalidated.
+        "500":
+          $ref: "#/components/responses/InternalError"
 
   /api/v1/auth/logout:
     post:
@@ -341,6 +348,8 @@ paths:
                 error:
                   code: unauthorized
                   message: Missing authorization header
+        "500":
+          $ref: "#/components/responses/InternalError"
 
   /api/v1/auth/me:
     get:
@@ -375,8 +384,10 @@ paths:
                 error:
                   code: unauthorized
                   message: Invalid or expired access token
+        "500":
+          $ref: "#/components/responses/InternalError"
 
-  # ---------- Activities (Epic 1) ----------
+  # ---------- Activities ----------
 
   /api/v1/activities:
     get:
@@ -385,7 +396,7 @@ paths:
       description: |
         Returns the authenticated user's activities ordered by most-recently-used
         (`last_used_at` DESC). The optional `q` filters by case-insensitive name
-        prefix for typeahead / quick-add lookup. Each activity includes its
+        substring for typeahead / quick-add lookup. Each activity includes its
         category tags. The client computes timer-screen suggestions locally from
         this list (F5); there is no suggestions endpoint.
       tags:
@@ -419,6 +430,8 @@ paths:
                   $ref: "#/components/schemas/Activity"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
     post:
       operationId: createActivity
       summary: Create an activity
@@ -458,6 +471,8 @@ paths:
           $ref: "#/components/responses/Conflict"
         "422":
           $ref: "#/components/responses/ValidationError"
+        "500":
+          $ref: "#/components/responses/InternalError"
 
   /api/v1/activities/{id}:
     get:
@@ -487,6 +502,8 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "404":
           $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
     patch:
       operationId: updateActivity
       summary: Update an activity
@@ -530,14 +547,15 @@ paths:
           $ref: "#/components/responses/Conflict"
         "422":
           $ref: "#/components/responses/ValidationError"
+        "500":
+          $ref: "#/components/responses/InternalError"
     delete:
       operationId: deleteActivity
       summary: Delete an activity
       description: |
         Hard-deletes an activity and cascades to its entries and tag-join rows
         (F10 "delete the entire activity and all its entries"). The 30 s undo
-        window is owned by the client; the server just hard-deletes. Deleting an
-        activity that has a running entry ends that entry first.
+        window is owned by the client; the server just hard-deletes.
       tags:
         - Activities
       security:
@@ -556,8 +574,10 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "404":
           $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
 
-  # ---------- Categories (Epic 1) ----------
+  # ---------- Categories ----------
 
   /api/v1/categories:
     get:
@@ -579,6 +599,8 @@ paths:
                   $ref: "#/components/schemas/Category"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
     post:
       operationId: createCategory
       summary: Create a category
@@ -616,6 +638,8 @@ paths:
           $ref: "#/components/responses/Conflict"
         "422":
           $ref: "#/components/responses/ValidationError"
+        "500":
+          $ref: "#/components/responses/InternalError"
 
   /api/v1/categories/{id}:
     get:
@@ -644,6 +668,8 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "404":
           $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
     patch:
       operationId: updateCategory
       summary: Update a category
@@ -684,6 +710,8 @@ paths:
           $ref: "#/components/responses/Conflict"
         "422":
           $ref: "#/components/responses/ValidationError"
+        "500":
+          $ref: "#/components/responses/InternalError"
     delete:
       operationId: deleteCategory
       summary: Delete a category
@@ -709,8 +737,10 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "404":
           $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
 
-  # ---------- Entries (Epic 1) ----------
+  # ---------- Entries ----------
 
   /api/v1/entries:
     get:
@@ -719,8 +749,8 @@ paths:
       description: |
         Returns the authenticated user's entries, newest first, with filters and
         cursor pagination. Each entry includes its category tags (inferred from
-        the entry's activity) and the activity's current name. Used by History
-        (Epic 2); the resource lands in Epic 1 so `activity_id` has a home and
+        the entry's activity) and the activity's current name. Used by History;
+        the resource lands with the catalog so `activity_id` has a home and
         entries sync cross-device from the start.
       tags:
         - Entries
@@ -788,6 +818,8 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "422":
           $ref: "#/components/responses/ValidationError"
+        "500":
+          $ref: "#/components/responses/InternalError"
     post:
       operationId: createEntry
       summary: Create a time entry
@@ -838,6 +870,8 @@ paths:
           $ref: "#/components/responses/Conflict"
         "422":
           $ref: "#/components/responses/ValidationError"
+        "500":
+          $ref: "#/components/responses/InternalError"
 
   /api/v1/entries/{id}:
     get:
@@ -866,13 +900,15 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "404":
           $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
     patch:
       operationId: updateEntry
       summary: Update an entry
       description: |
         Updates an entry (last-write-wins on `updated_at`). Setting `ended_at`
         stops a running timer; `duration_seconds` is recomputed. Editing the
-        timer/UI is Epic 2; the endpoint lands in Epic 1.
+        timer/UI is the History feature; the endpoint lands with the catalog.
       tags:
         - Entries
       security:
@@ -907,6 +943,8 @@ paths:
           $ref: "#/components/responses/Conflict"
         "422":
           $ref: "#/components/responses/ValidationError"
+        "500":
+          $ref: "#/components/responses/InternalError"
     delete:
       operationId: deleteEntry
       summary: Delete an entry
@@ -929,6 +967,8 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "404":
           $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
 
 components:
   securitySchemes:
@@ -937,7 +977,7 @@ components:
       scheme: bearer
       bearerFormat: JWT
       description: |
-        JWT access token obtained from `/auth/otp/verify`, `/auth/apple`, or `/auth/refresh`.
+        JWT access token obtained from `/api/v1/auth/otp/verify`, `/api/v1/auth/apple`, or `/api/v1/auth/refresh`.
         Format: `Authorization: Bearer <token>`
 
   responses:
@@ -964,6 +1004,17 @@ components:
             error:
               code: invalid_body
               message: Invalid request body
+
+    InternalError:
+      description: An unexpected server-side failure occurred.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            error:
+              code: internal_error
+              message: An internal error occurred
 
     ValidationError:
       description: Field-level validation failed; `details` maps each invalid field to a single unified message.
@@ -1182,7 +1233,7 @@ components:
               description: Optional additional error context
               example: {}
 
-    # ---------- Catalog & entries schemas (Epic 1) ----------
+    # ---------- Catalog & entries schemas ----------
 
     # Shared embedded tag (a category as it appears on an activity or entry).
     CategoryTag:

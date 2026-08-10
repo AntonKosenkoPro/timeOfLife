@@ -1,7 +1,7 @@
 import Foundation
 import GRDB
 
-/// A saved, reusable time-tracking target (Epic 1 catalog).
+/// A saved, reusable time-tracking target.
 ///
 /// Not a GRDB record: `category_ids` is a join-derived value, not a column.
 /// `LocalStore` maps rows manually.
@@ -41,7 +41,7 @@ struct Activity: Identifiable, Codable, Equatable, Sendable {
     }
 }
 
-/// A many-to-many tag an activity may carry (Epic 1 catalog).
+/// A many-to-many tag an activity may carry.
 struct Category: Identifiable, Codable, Equatable, Sendable, FetchableRecord, PersistableRecord {
     static let databaseTableName = "categories"
     let id: String
@@ -71,7 +71,7 @@ struct Category: Identifiable, Codable, Equatable, Sendable, FetchableRecord, Pe
     }
 }
 
-/// One timed interval (Epic 1 catalog). `source` records provenance (where
+/// One timed interval. `source` records provenance (where
 /// the entry came from: manual, widget, siri, control, screentime, garmin, ...);
 /// `sourceRef` holds the external identifier for that source and is null for
 /// manual entries. The backend enforces uniqueness on (user_id, source,
@@ -126,10 +126,5 @@ struct TimeEntry: Identifiable, Codable, Equatable, Sendable {
         case sourceRef = "source_ref"
         case createdAt = "created_at"
         case updatedAt = "updated_at"
-    }
-
-    var duration: TimeInterval {
-        guard let endedAt else { return 0 }
-        return endedAt.timeIntervalSince(startedAt)
     }
 }

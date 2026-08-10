@@ -1,32 +1,57 @@
 schema: spec-driven
 
-# Project context (optional)
-# This is shown to AI when creating artifacts.
-# Add your tech stack, conventions, style guides, domain knowledge, etc.
-# Example:
-#   context: |
-#     Tech stack: TypeScript, React, Node.js
-#     We use conventional commits
-#     Domain: e-commerce platform
+# Project context (shown to AI when creating artifacts).
+# Read this first — it is the canonical, durable repository context (S7).
+context: |
+  Read `docs/project-context.md` before proposing, writing specs, implementing, or archiving anything:
+  it is the canonical context for this repo (architecture, OpenSpec routing, API contract,
+  incomplete surfaces, standards, build/test/run).
 
-# Per-artifact rules (optional)
-# Add custom rules for specific artifacts.
-# Example:
-#   rules:
-#     proposal:
-#       - Keep proposals under 500 words
-#       - Always include a "Non-goals" section
-#     tasks:
-#       - Break tasks into chunks of max 2 hours
+  What this is: Time of Life — a personal time-tracking iOS app (SwiftUI, iOS 15+, local-first)
+  with a Go backend that is an OPTIONAL sync relay. Auth MVP (passwordless email-OTP +
+  Sign in with Apple) and the Track experience (three-tab shell, numeric timer, Activity search +
+  quick-create, Refine, Profile, compact cross-tab timer).
 
-# Per-operation guidance (optional)
-# Add advisory guidance for how apply and archive work should be conducted.
-# This is separate from artifact rules above.
-# Example:
-#   operations:
-#     apply:
-#       guidance:
-#         - Keep test summaries concise
-#     archive:
-#       guidance:
-#         - Summarize the archive outcome before finishing
+  OpenSpec routing: baseline specs (`openspec/specs/<capability>/spec.md`, today `app-shell`
+  and `timer-capture-experience`) are the merged contract and are NEVER edited directly.
+  Behavior changes go through a change: delta specs under `openspec/changes/<change>/specs/`.
+  The only active change is `local-first-sync-architecture` (delta specs `local-first-store`,
+  `sync-client`, `entry-provenance`, `lock-screen-controls`; decisions
+  D1–D10 in its `design.md`). Archives (`openspec/changes/archive/`) are history already folded
+  into the baselines. Check the active change's `tasks.md` before implementing and mark tasks
+  as you complete them.
+
+  Non-negotiables: LocalStore is the single mutation chokepoint (GRDB, App Group
+  `group.com.antonkosenko.timeoflife`) — no raw GRDB writes outside it. Several local-first UI
+  surfaces are INCOMPLETE (see docs/project-context.md → "Incomplete / deferred"): UndoToast /
+  shake-to-undo, the "Enable Sync" AuthFlowView sheet (Profile currently does a silent
+  `restoreSession()`), "via <Source>" labels, and the iOS 18 lock-screen ControlWidget (no
+  target in `project.yml`). OpenAPI (`backend/api/openapi.yaml`) is the authoritative API
+  contract (S10). No backward compat for on-disk formats (pre-release). No passwords, no
+  plaintext secrets (R1). iOS strings go to both `en.lproj` and `ru.lproj` + `L10n` (U4).
+  XcodeGen-managed: edit `project.yml`, run `xcodegen generate`, never hand-edit the `.pbxproj`.
+  SwiftUI views use `Theme` semantic colors only.
+
+rules:
+  proposal:
+    - Identify affected baseline capabilities and authoritative documentation; include explicit non-goals.
+  design:
+    - Preserve the invariants in `docs/project-context.md` and cite decisions that constrain implementation.
+  specs:
+    - Write change-scoped deltas only; never edit baseline specs directly while proposing a change.
+  tasks:
+    - Include relevant tests, linters, requirements checks, and documentation updates.
+
+operations:
+  apply:
+    guidance:
+      - Read `docs/project-context.md` first (canonical context; `AGENTS.md` is the short entrypoint).
+      - Check `openspec/changes/local-first-sync-architecture/tasks.md` before implementing and mark tasks `[x]` as you complete them; reconcile with the relevant `Requirements/FURPS/*.md` rows.
+      - Incomplete local-first UI surfaces (UndoToast/shake-to-undo, "Enable Sync" AuthFlowView sheet, "via <Source>" labels, lock-screen ControlWidget) must not be claimed done; update docs/project-context.md → "Incomplete / deferred" and the delta spec text accordingly.
+      - If the OpenAPI contract changes, update `backend/api/openapi.yaml` and both client/server sides (S10); run the backend contract gate (`go test ./...` includes `internal/contract`).
+      - Run linters + warning-as-error build + both test suites per `docs/project-context.md` → "Per-iteration revising process (S5)".
+  archive:
+    guidance:
+      - Read `docs/project-context.md` first (canonical context; `AGENTS.md` is the short entrypoint).
+      - Archiving folds delta specs into the baselines — after `openspec archive`, the change moves to `openspec/changes/archive/` and its specs become the baseline contract.
+      - After archiving, update `docs/project-context.md` (OpenSpec routing section + "Incomplete / deferred" list) and `openspec/README.md` if the set of active changes changed.

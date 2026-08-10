@@ -1,6 +1,6 @@
 # Component Library
 
-Each component listed here has a single SwiftUI implementation under `ios/TimeOfLife/TimeOfLife/Core/Design/Components/`. The spec below is the contract: an agent should implement the component to match the signature, states, accessibility identifier, and usage.
+This file defines reusable component contracts. Implementations may live under `Core/Design/Components/` or beside the feature that owns them; contracts for deferred surfaces may not have an implementation yet.
 
 > **Rule:** prefer reusing an existing component over creating a new view. If a new component is needed, add it here first.
 
@@ -322,30 +322,6 @@ ListRow(
 
 ---
 
-## `IconButton`
-
-A circular button for icon-only actions.
-
-### Signature
-
-```swift
-struct IconButton: View {
-    let icon: String
-    let accessibilityId: String
-    let isDisabled: Bool
-    let action: () -> Void
-}
-```
-
-### Visual
-
-- `Button` with `Image(systemName: icon)` label.
-- Frame `Theme.minTapArea × Theme.minTapArea`.
-- Foreground `Theme.accentPrimary`.
-- Disabled when `isDisabled`.
-
----
-
 ## `IconPickerGrid`
 
 Selectable grid of allowed SF Symbols for categories (F2/U1).
@@ -364,7 +340,7 @@ struct IconPickerGrid: View {
 
 ### Visual
 
-- `LazyVGrid` of `IconButton`-style cells, 44 × 44 pt.
+- `LazyVGrid` of icon-only button cells, 44 × 44 pt.
 - Each cell: `Theme.backgroundSecondary` fill inside `RoundedRectangle(cornerRadius: Theme.cornerRadiusSmall, style: .continuous)`, with `Image(systemName: symbol)` in `Theme.textPrimary`, `.body`.
 - Selected cell gets a 2 pt `Theme.accentPrimary` border.
 
@@ -849,7 +825,7 @@ struct UndoToast: View {
 
 - Floating bottom banner via `.safeAreaInset(edge: .bottom)` or overlay.
 - `Theme.backgroundSecondary` fill with `Theme.shadowSmall`, `Theme.cornerRadiusLarge`.
-- `HStack`: message (`.subheadline`, `Theme.textPrimary`) + `IconButton`-style Undo button (`L10n.undoButton`, `Theme.accentPrimary` tint) + dismiss `xmark`.
+- `HStack`: message (`.subheadline`, `Theme.textPrimary`) + icon-only Undo button (`L10n.undoButton`, `Theme.accentPrimary` tint) + dismiss `xmark`.
 - `accessibilityIdentifier("UndoToastButton")` on the Undo button.
 
 ### States

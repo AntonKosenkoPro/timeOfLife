@@ -2,7 +2,7 @@
 
 Implements F2/F6/U8/R1/R3 of `Requirements/FURPS/Activity_Catalog_and_Categories.md`. Full CRUD surface for category tags, reached from Manage Activities.
 
-A separate Manage Categories screen (per the user's decision) so category CRUD does not crowd the Manage Activities list. The screen lists all categories, lets the user create/edit/delete them, and seeds 7 localized defaults on first run after sign-in (F6). Deletions are undoable for 30 s (R3) and conflict with the server by last-write-wins (R2).
+A separate Manage Categories screen (per the user's decision) so category CRUD does not crowd the Manage Activities list. The screen lists all categories, lets the user create/edit/delete them, and seeds 7 localized defaults on first run (F6). Deletions are undoable for 30 s (R3) and conflict with the server by last-write-wins (R2).
 
 **Default categories (F6):**
 
@@ -16,7 +16,7 @@ A separate Manage Categories screen (per the user's decision) so category CRUD d
 | Sleep | `bed.double` |
 | Entertainment | `tv` |
 
-Seeded on first run after sign-in, only if the user has zero categories. Localized names via `L10n` (EN + RU). Categories have a validated catalog icon. The seed list matches `Requirements/FURPS/Activity_Catalog_and_Categories.md` F6.
+Seeded on first run, only if the user has zero categories. Localized names via `L10n` (EN + RU). Categories have a validated catalog icon. The seed list matches `Requirements/FURPS/Activity_Catalog_and_Categories.md` F6.
 
 ---
 
@@ -49,7 +49,7 @@ N/A — the screen is a list with no text input; editors are handled in the `Cat
 - Toolbar `+` → `CategoryEditor` create mode (sheet, D21). On create conflict (409 `category_exists`, case-insensitive name collision) re-map local refs to the surviving id and proceed (R2); in the editor surface `L10n.errorCategoryExists`.
 - **Offline (R1):** list renders from the local store; create/edit/delete are queued locally and synced when connectivity returns. Disable no control here — list reads and optimistic mutations are offline-safe.
 - **Conflict (R2):** on 409 `conflict`, show the inline `ErrorBanner` (`L10n.errorConflict`) and adopt the server's version as the source of truth (keep-latest). No field-level merge at MVP.
-- **Seeding (F6):** on first run after sign-in, seed 7 localized categories — Work, Hobby, Sport, Education, Relax, Sleep, Entertainment — with their catalog icons via ordinary `POST /categories` requests. Seeds are first-class records: editable, icon-selectable, and deletable like any user-created category. Seeding is **idempotent** — it runs once, gated by a `categoriesSeeded` flag persisted locally; replays (same `POST` idempotently, or re-runs after relaunch before the flag is set) do not duplicate records.
+- **Seeding (F6):** on first run, seed 7 localized categories — Work, Hobby, Sport, Education, Relax, Sleep, Entertainment — with their catalog icons via ordinary `POST /categories` requests (queued locally and synced when signed in). Seeds are first-class records: editable, icon-selectable, and deletable like any user-created category. Seeding is **idempotent** — it runs once, gated by a `categoriesSeeded` flag persisted locally; replays (same `POST` idempotently, or re-runs after relaunch before the flag is set) do not duplicate records.
 
 ### Delete flow
 

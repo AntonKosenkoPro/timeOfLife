@@ -31,7 +31,6 @@ enum L10n: String, CaseIterable {
     case appleSignInError = "appleSignIn.error"
 
     // Timer
-    case timerTitle = "timer.title"
     case timerStart = "timer.start"
     case timerStop = "timer.stop"
     case timerStopHint = "timer.stopHint"
@@ -44,7 +43,6 @@ enum L10n: String, CaseIterable {
     case timerSaving = "timer.saving"
     case timerRunning = "timer.running"
     case timerReady = "timer.ready"
-    case timerSavedDuration = "timer.savedDuration"
     case timerChooserRecent = "timer.chooserRecent"
     case timerSelectActivity = "timer.selectActivity"
     case timerSearchPrompt = "timer.searchPrompt"
@@ -111,9 +109,6 @@ enum L10n: String, CaseIterable {
     case insightsEmptySubtitle = "insights.emptySubtitle"
 
     // Sign out confirmation
-    case signOutConfirmationTitle = "signOut.confirmationTitle"
-    case signOutConfirmationMessage = "signOut.confirmationMessage"
-    case signOutConfirm = "signOut.confirm"
     case signOutCancel = "signOut.cancel"
 
     /// Resolves the key via `NSLocalizedString` against `Localizable.strings`.

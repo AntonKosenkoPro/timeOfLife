@@ -18,7 +18,7 @@ Keep design under version control as plain Markdown so:
 4. Add SwiftUI Previews for light/dark and English/Russian.
 5. Run the per-iteration checklist from `AGENTS.md`:
    - `swiftlint lint --strict` (iOS)
-   - `xcodebuild test`
+   - `xcodebuild test -scheme TimeOfLife -destination '<available simulator>'`
    - confirm requirements alignment
    - update this design doc if the implementation diverged.
 
@@ -38,7 +38,7 @@ Keep design under version control as plain Markdown so:
 | `SCREENS/CategoryEditor.md` | Shared sheet to create/edit a category. |
 | `DECISIONS.md` | Design precedents and rationale. |
 
-> Epic 1 introduces the catalog editors (`ActivityEditor`, `CategoryEditor`, `ManageActivities`, `ManageCategories`) and the timer suggestions/quick-add spec in `TimeTracking.md`.
+> The catalog feature introduces the editors (`ActivityEditor`, `CategoryEditor`, `ManageActivities`, `ManageCategories`) and the timer suggestions/quick-add spec in `TimeTracking.md`.
 
 ## Global rules
 

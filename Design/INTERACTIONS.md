@@ -221,11 +221,11 @@ All manage-screen delete flows should follow this pattern consistently.
 
 D6 (OpenSpec change `local-first-sync-architecture`). Sync is an **optional transport feature**, not a prerequisite: the app works fully offline and unsigned; the `SyncController` activates only on sign-in and deactivates on sign-out.
 
-- **Triggers:** (1) app enters foreground, (2) connectivity restored (`.satisfied`), (3) manual "Sync now" in Settings. No background task scheduling on iOS (unreliable); macOS may add a timer-based background sync later.
+- **Triggers:** (1) app enters foreground, (2) connectivity restored (`.satisfied`), (3) manual "Sync now" in Profile. No background task scheduling on iOS (unreliable); macOS may add a timer-based background sync later.
 - **First-sync is pull-first:** on activation, pull the relay's full state, merge server-wins on `updated_at` conflicts, then drain the local outbox. Subsequent pulls are deltas via `?modified_since=` (per-resource cursor advanced to the max `updated_at` received).
 - **Outbox drain:** one HTTP call per outbox row, in `created_at` order; idempotent POST / LWW PATCH / hard DELETE make replays safe. 409 `conflict` on push → adopt the server version (keep-latest) and clear the row; 409 `activity_exists`/`category_exists` → re-map local references to the winning id and proceed without an error.
-- **Status display (Settings, visible only when signed in):** "Last synced: <relative time>" or "Syncing…" (button disabled while in progress) or an error state (button stays enabled to allow retry). The manual "Sync now" action calls the same drain+pull path as the automatic triggers.
-- **Sign-out preserves local data and the outbox**; an explicit "Erase local data" action in Settings wipes them (destructive, confirmed).
+- **Status display (Profile, visible only when signed in):** "Last synced: <relative time>" or "Syncing…" (button disabled while in progress) or an error state (button stays enabled to allow retry). The manual "Sync now" action calls the same drain+pull path as the automatic triggers.
+- **Sign-out preserves local data and the outbox**; an explicit "Erase local data" action in Profile wipes them (destructive, confirmed).
 
 ## Catalog empty states
 

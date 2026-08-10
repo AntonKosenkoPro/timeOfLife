@@ -47,8 +47,8 @@ type RateLimiterGroup struct {
 }
 
 // NewHandler creates a new Handler with the given dependencies. appleVerifier
-// may be nil when Sign in with Apple is disabled (config-gated); in that case
-// the /auth/apple route is not registered.
+// may be nil when Sign in with Apple is disabled; the registered route then
+// returns apple_not_configured.
 func NewHandler(
 	store db.Store,
 	tokenService *auth.TokenService,
@@ -216,7 +216,7 @@ func decodeJSON(r *http.Request, v any) error {
 
 // ---------- Handlers ----------
 
-// RequestOTP handles POST /auth/otp/request.
+// RequestOTP handles POST /api/v1/auth/otp/request.
 // It validates the email, rate-limits per IP+email, upserts the user,
 // generates an OTP, and sends it via email. Always returns 202.
 func (h *Handler) RequestOTP(w http.ResponseWriter, r *http.Request) {
@@ -275,7 +275,7 @@ func (h *Handler) RequestOTP(w http.ResponseWriter, r *http.Request) {
 	writeAccepted(w)
 }
 
-// VerifyOTP handles POST /auth/otp/verify.
+// VerifyOTP handles POST /api/v1/auth/otp/verify.
 // It validates the email and code, checks expiry and attempts,
 // verifies the code, marks the user verified, and returns tokens.
 func (h *Handler) VerifyOTP(w http.ResponseWriter, r *http.Request) {
@@ -358,7 +358,7 @@ func (h *Handler) VerifyOTP(w http.ResponseWriter, r *http.Request) {
 	h.issueTokens(ctx, w, user, true)
 }
 
-// AppleSignIn handles POST /auth/apple.
+// AppleSignIn handles POST /api/v1/auth/apple.
 // It verifies Apple's identity-token JWT, upserts the user by Apple's stable
 // `sub` identifier, and issues our own access + refresh tokens (the same
 // issuance path as VerifyOTP). Apple users are considered email-verified.
@@ -413,7 +413,7 @@ func (h *Handler) AppleSignIn(w http.ResponseWriter, r *http.Request) {
 	h.logger.Info("apple user signed in", "userID", user.ID)
 }
 
-// RefreshToken handles POST /auth/refresh.
+// RefreshToken handles POST /api/v1/auth/refresh.
 // It validates the refresh token, checks revocation, rotates the pair.
 func (h *Handler) RefreshToken(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
@@ -468,7 +468,7 @@ func (h *Handler) RefreshToken(w http.ResponseWriter, r *http.Request) {
 	h.issueTokens(ctx, w, user, user.EmailVerified)
 }
 
-// Logout handles POST /auth/logout.
+// Logout handles POST /api/v1/auth/logout.
 // It revokes all refresh tokens for the authenticated user.
 func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
@@ -490,7 +490,7 @@ func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// Me handles GET /auth/me.
+// Me handles GET /api/v1/auth/me.
 // It returns the authenticated user profile.
 func (h *Handler) Me(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()

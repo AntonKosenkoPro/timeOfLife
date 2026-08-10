@@ -34,16 +34,16 @@
 - [x] 4.3 First-sync (on `activate`): pull-first with `modified_since=nil` (full pull), merge server-wins on `updated_at`, then drain outbox.
 - [x] 4.4 LWW merge on pull: apply server record only if `server.updated_at > local.updated_at`; advance `sync_state.last_synced_at` to max `updated_at` received.
 - [x] 4.5 Conflict handling: 409 `conflict` → adopt server version + clear outbox row; 409 `activity_exists`/`category_exists` → remap local refs to winning id + clear outbox row; 404 on DELETE → treat as success + clear outbox row.
-- [x] 4.6 Triggers: `UIApplication.willEnterForegroundNotification`; `NWPathMonitor` `.satisfied`; manual `syncNow()` from Settings. Defer macOS timer-based trigger to the macOS target task.
+- [x] 4.6 Triggers: `UIApplication.willEnterForegroundNotification`; `NWPathMonitor` `.satisfied`; manual `syncNow()` from Profile. Defer macOS timer-based trigger to the macOS target task.
 - [x] 4.7 Wire `SyncController` into `AppContainer.production()`; inject the existing `APIClient` and `Connectivity`. `SessionStore.state` changes call `activate()`/`deactivate()`.
 - [x] 4.8 Tests: first-sync pull-first ordering; delta pull advances cursor; LWW merge both directions; outbox drain idempotency; conflict adoption; trigger wiring (mock connectivity + lifecycle).
 
 ## 5. RootView + auth flow reframe (backend optional)
 
 - [x] 5.1 `RootView` always shows `TimerView`; remove the `.signedOut` → `AuthFlowView` branch. `SessionStore.state` now gates `SyncController`, not the root view.
-- [ ] 5.2 Add an "Enable Sync" entry point (Settings destination or a toolbar action) that presents `AuthFlowView` as a sheet. The existing `AuthFlowView`/`EmailEntryView`/`OtpEntryView` flow is reused unchanged. *(UI — other change's responsibility)*
-- [x] 5.3 Add a "Sign out" action (where the interim toolbar Sign-Out lived) that calls `AuthService.signOut()` → `SessionStore.setSignedOut()` → `SyncController.deactivate()`. Local data and outbox are preserved. *(foundation: deactivate wired via SessionStore onChange; toolbar UI is other change's responsibility)*
-- [x] 5.4 Add "Erase local data" destructive action in Settings (confirm dialog) that wipes the App Group database (state + outbox + undo_buffer + sync_state). *(foundation: `LocalStore.eraseAll()` implemented; Settings UI is other change's responsibility)*
+- [ ] 5.2 Add an "Enable Sync" entry point (Profile destination or a toolbar action) that presents `AuthFlowView` as a sheet. The existing `AuthFlowView`/`EmailEntryView`/`OtpEntryView` flow is reused unchanged. *(UI — other change's responsibility)*
+- [x] 5.3 Add a "Sign out" action that calls `AuthService.logout()` → `SessionStore.setSignedOut()` → `SyncController.deactivate()`. Local data and outbox are preserved.
+- [x] 5.4 Add "Erase local data" destructive action in Profile (confirm dialog) that wipes the App Group database (state + outbox + undo_buffer + sync_state).
 - [ ] 5.5 Update `AuthFlowView` copy to frame sign-in as "Enable cross-device sync" (paid) rather than a required step; add EN + RU strings to `Localizable.strings` + `L10n`. *(UI — other change's responsibility)*
 - [ ] 5.6 Update `RootView`/auth tests for the new launch-into-timer behavior; add a test that the app launches to `TimerView` with no session. *(UI — other change's responsibility)*
 
@@ -51,7 +51,8 @@
 
 - [x] 6.1 `Entry` model: add `source` (default `manual`) + `source_ref` (nullable); thread them through `LocalStore` create/update and the outbox payload.
 - [ ] 6.2 Entry detail / history views: show a localized "via <Source>" label for non-`manual` sources; `manual` shows nothing. Add EN + RU strings (`L10n.sourceScreenTime`, `L10n.sourceGarmin`, …). *(UI — other change's responsibility)*
-- [x] 6.3 Tests: provenance round-trips through `LocalStore` + outbox; uniqueness constraint rejects duplicate `(source, source_ref)`; source label visibility in the detail view. *(store-level tests in scope; label visibility is UI)*
+- [x] 6.3 Tests: provenance round-trips through `LocalStore` + outbox; uniqueness constraint rejects duplicate `(source, source_ref)`.
+- [ ] 6.4 Tests: source label visibility in the detail/history UI after task 6.2 lands.
 
 ## 7. Lock-screen Controls (iOS 18+)
 
@@ -74,7 +75,7 @@
 
 - [x] 9.1 `cd backend && go test ./... -cover && golangci-lint run && gofmt -l . && go vet ./...` all green.
 - [x] 9.2 `cd ios/TimeOfLife && xcodegen generate && swiftlint lint --strict` green.
-- [x] 9.3 `xcodebuild -scheme TimeOfLife -destination 'generic/platform=iOS Simulator' SWIFT_TREAT_WARNINGS_AS_ERRORS=YES GCC_TREAT_WARNINGS_AS_ERRORS=YES build` green. *(flags moved into `project.yml` per-target — CLI flags conflict with GRDB's `-suppress-warnings`; CI workflow updated)*
-- [x] 9.4 `xcodebuild test` green (logic-layer coverage for `LocalStore`, `SyncController`, `UndoBufferStore`, provenance, RootView launch behavior).
+- [x] 9.3 `xcodebuild -scheme TimeOfLife -destination 'generic/platform=iOS Simulator' build` green. *(warnings-as-errors are configured per target in `project.yml`; global CLI flags conflict with GRDB's `-suppress-warnings`)*
+- [x] 9.4 `xcodebuild test -scheme TimeOfLife -destination '<available simulator>'` green (logic-layer coverage for `LocalStore`, `SyncController`, `UndoBufferStore`, and provenance; RootView launch behavior remains task 5.6).
 - [x] 9.5 Re-read `Requirements/FURPS/*.md` rows touched by this change; correct conflicts (Common R1/R2/R3, Timetracking rows).
 - [x] 9.6 Confirm no dead code remains (`TimerStoring`, `LocalTimerStore`, `TimerRepository`, `StubTimerRepository` deleted).

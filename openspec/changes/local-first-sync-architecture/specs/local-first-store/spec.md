@@ -87,12 +87,12 @@ The system SHALL hold deletions in a durable `undo_buffer` table (not in-memory)
 - **THEN** only the most recent deletion is restorable via shake-to-undo / UndoToast (per existing U7); the older deletion commits when its own 30s window elapses
 
 ### Requirement: Sign-out preserves local data
-The system SHALL NOT wipe the local database or the outbox when the user signs out of sync. The user's local data persists; an explicit "Erase local data" action is available in Settings for shared-device or privacy cases.
+The system SHALL NOT wipe the local database or the outbox when the user signs out of sync. The user's local data persists; an explicit "Erase local data" action is available in Profile for shared-device or privacy cases.
 
 #### Scenario: Sign out keeps data
 - **WHEN** the user signs out of sync
 - **THEN** the local database, including the outbox, is preserved; the user can continue using the app locally and can re-sign-in to resume sync
 
 #### Scenario: Explicit erase
-- **WHEN** the user taps "Erase local data" in Settings and confirms
+- **WHEN** the user taps "Erase local data" in Profile and confirms
 - **THEN** the local database is wiped (including the outbox and undo buffer); the action is destructive and irreversible

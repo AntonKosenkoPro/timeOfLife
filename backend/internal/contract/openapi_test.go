@@ -16,6 +16,7 @@ import (
 // The spec must document exactly these and no others.
 var canonicalErrorCodes = []string{
 	"invalid_body",
+	"internal_error",
 	"rate_limited",
 	"invalid_otp",
 	"otp_expired",

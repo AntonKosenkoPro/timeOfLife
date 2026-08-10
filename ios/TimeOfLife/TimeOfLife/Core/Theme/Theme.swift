@@ -43,10 +43,3 @@ enum Theme {
         Color(uiColor: UIColor(color).withAlphaComponent(alpha))
     }
 }
-
-/// Lightweight shadow description used by view modifiers.
-struct ShadowStyle {
-    let radius: CGFloat
-    let y: CGFloat
-    let opacity: Double
-}

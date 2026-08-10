@@ -88,8 +88,7 @@ final class AppContainer: ObservableObject {
         let syncController = SyncController(
             store: localStore,
             remote: catalog,
-            connectivity: connectivity,
-            undoBuffer: undoBuffer
+            connectivity: connectivity
         )
 
         return AppContainer(

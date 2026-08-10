@@ -41,7 +41,7 @@ type CategoryTag struct {
 	Icon string `json:"icon"`
 }
 
-// Activity is a saved, reusable time-tracking target (Epic 1).
+// Activity is a saved, reusable time-tracking target.
 type Activity struct {
 	ID         string        `json:"id"`
 	UserID     string        `json:"-"`
@@ -53,7 +53,7 @@ type Activity struct {
 	UpdatedAt  time.Time     `json:"updated_at"`
 }
 
-// Category is a many-to-many tag that an activity may carry (Epic 1).
+// Category is a many-to-many tag that an activity may carry.
 type Category struct {
 	ID        string    `json:"id"`
 	UserID    string    `json:"-"`
@@ -63,7 +63,7 @@ type Category struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
-// Entry is one timed interval (Epic 1). Every entry references exactly one
+// Entry is one timed interval. Every entry references exactly one
 // activity (ActivityID is always set). Categories are inferred from the
 // activity's tags at read time; ActivityName is the activity's current name,
 // resolved at read time. Source/SourceRef record entry provenance (where the
@@ -178,7 +178,7 @@ type Store interface {
 	// follow-up).
 	UpsertUserByAppleSubject(ctx context.Context, appleSubject, email string) (User, error)
 
-	// --- Activities (Epic 1) ---
+	// --- Activities ---
 
 	// ListActivities returns the user's activities ordered by last_used_at DESC
 	// (most-recently-used first). A non-empty q applies a case-insensitive
@@ -210,7 +210,7 @@ type Store interface {
 	// join rows). Returns ErrNotFound if missing.
 	DeleteActivity(ctx context.Context, userID, id string) error
 
-	// --- Categories (Epic 1) ---
+	// --- Categories ---
 
 	// ListCategories returns the user's categories ordered by name.
 	ListCategories(ctx context.Context, userID string) ([]Category, error)
@@ -232,7 +232,7 @@ type Store interface {
 	// unaffected). Returns ErrNotFound if missing.
 	DeleteCategory(ctx context.Context, userID, id string) error
 
-	// --- Entries (Epic 1) ---
+	// --- Entries ---
 
 	// ListEntries returns one page of the user's entries ordered by started_at
 	// DESC, filtered by EntryFilter. nextCursor is the opaque cursor for the

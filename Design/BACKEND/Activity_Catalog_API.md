@@ -1,8 +1,8 @@
 # Activity Catalog & Categories — Backend API Design
 
-Backend design for **Epic 1: Activity Catalog & Categories** (`Epics.md`, requirements in [`Requirements/FURPS/Activity_Catalog_and_Categories.md`](../../Requirements/FURPS/Activity_Catalog_and_Categories.md)). The authoritative contract is [`backend/api/openapi.yaml`](../../backend/api/openapi.yaml); this doc is the design reasoning and is kept in sync with it.
+Backend design for the **Activity Catalog & Categories** feature (requirements in [`Requirements/FURPS/Activity_Catalog_and_Categories.md`](../../Requirements/FURPS/Activity_Catalog_and_Categories.md)). The authoritative contract is [`backend/api/openapi.yaml`](../../backend/api/openapi.yaml); this doc is the design reasoning and is kept in sync with it.
 
-**Scope (confirmed):** Epic 1 backend introduces three resources — **activities**, **categories**, and **entries** — so `activity_id` has a real home and history syncs cross-device from the start. Entries editing/UI is Epic 2, but the entries *resource* and its sync land here (per the Epics.md cross-cutting note: build the entries schema once, with `activity_id` from day one, so Epics 2/7/8 don't re-migrate).
+**Scope (confirmed):** the catalog backend introduces three resources — **activities**, **categories**, and **entries** — so `activity_id` has a real home and history syncs cross-device from the start. Entries editing/UI is the History feature, but the entries *resource* and its sync land here (per the catalog cross-cutting note: build the entries schema once, with `activity_id` from day one, so later features don't re-migrate).
 
 All endpoints are under `/api/v1`, require a Bearer access token (`AuthMiddleware`, existing), and are scoped to the authenticated `userID` from context. Errors use the existing uniform envelope `{ "error": { code, message, details } }`.
 
@@ -61,7 +61,7 @@ Deleting a category removes the tag from all activities (cascade on the join) bu
 | `created_at` | TIMESTAMPTZ NOT NULL DEFAULT NOW() | |
 | `updated_at` | TIMESTAMPTZ NOT NULL DEFAULT NOW() | LWW sync version |
 
-- `INDEX (user_id, started_at DESC)` — history list / date-range queries (Epic 2).
+- `INDEX (user_id, started_at DESC)` — history list / date-range queries (History feature).
 - `INDEX (user_id, activity_id)` — per-activity lookups.
 - `UNIQUE (user_id, source, source_ref)` — for non-null `source_ref`; prevents duplicate imports (e.g. a Screen Time callback firing twice for the same interval). A duplicate insert is rejected with **409 `duplicate_import`**.
 - FK `ON DELETE CASCADE`: deleting an activity removes all its entries (F10 "delete entire activity and all N entries").
@@ -197,7 +197,7 @@ No PII (notes content) is logged (S4); structured `log/slog` events use ids only
 
 Mirrors the existing layering so review is mechanical:
 
-1. **Migration** `internal/migrations/003_catalog.sql` — the four tables + indexes + constraints above; the provenance columns (`source`, `source_ref`) + unique constraint are added in a follow-up migration (`004_provenance.sql` or appended to `003_catalog.sql` if not yet shipped).
+1. **Migration** `internal/migrations/003_catalog.sql` — the four tables + indexes + constraints above; the provenance columns (`source`, `source_ref`) + unique constraint are added in a follow-up migration (`005_provenance.sql` or appended to `003_catalog.sql` if not yet shipped).
 2. **Store** — extend `db.Store` with activity/category/entry CRUD + `activity_categories` methods; implement in `postgres.go` and `sqlite.go` (dual, per convention). Add `ErrConflict`, `ErrActivityExists`, `ErrCategoryExists` to `errors.go`.
 3. **Handlers** — new `internal/handlers/catalog.go` (activities + categories) and `internal/handlers/entries.go` (entries), reusing `decodeJSON`/`writeJSON`/`writeError` and `UserIDFromContext`. New validators in a `catalog_validators.go` matching the auth validator style. (No suggestions handler — F5 is client-side.)
 4. **Routing** — `server.go`: `r.Route("/api/v1", …)` adds `/activities`, `/categories`, `/entries` groups, all `r.With(h.AuthMiddleware)`.
