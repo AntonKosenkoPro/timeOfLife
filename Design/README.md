@@ -22,6 +22,10 @@ Keep design under version control as plain Markdown so:
    - confirm requirements alignment
    - update this design doc if the implementation diverged.
 
+### App icon assets
+
+`icon/ios/` is the authoritative approved iOS app-icon package. When the icon changes, replace that package first, then copy its `Contents.json` and referenced PNG files without transformation into `ios/TimeOfLife/TimeOfLife/Resources/Assets.xcassets/AppIcon.appiconset/`. Validate every image's pixel dimensions against its declared point size and scale before building.
+
 ## File guide
 
 | File | Purpose |
@@ -37,6 +41,7 @@ Keep design under version control as plain Markdown so:
 | `SCREENS/ActivityEditor.md` | Shared sheet to create/edit an activity (quick-add + manage). |
 | `SCREENS/CategoryEditor.md` | Shared sheet to create/edit a category. |
 | `DECISIONS.md` | Design precedents and rationale. |
+| `icon/ios/` | Authoritative iOS app-icon artwork and asset-catalog metadata. |
 
 > The catalog feature introduces the editors (`ActivityEditor`, `CategoryEditor`, `ManageActivities`, `ManageCategories`) and the timer suggestions/quick-add spec in `TimeTracking.md`.
 
