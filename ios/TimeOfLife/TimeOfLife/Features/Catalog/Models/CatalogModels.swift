@@ -42,6 +42,11 @@ struct Activity: Identifiable, Codable, Equatable, Sendable {
 }
 
 /// A many-to-many tag an activity may carry.
+///
+/// `icon` stores the raw SF Symbol name. It is validated against the closed
+/// `CatalogIcon` set at every mutation boundary; the stored value may be a
+/// catalog symbol that cannot render on this OS (rendered as `tag` fallback),
+/// but it is always within the authoritative catalog.
 struct Category: Identifiable, Codable, Equatable, Sendable, FetchableRecord, PersistableRecord {
     static let databaseTableName = "categories"
     let id: String

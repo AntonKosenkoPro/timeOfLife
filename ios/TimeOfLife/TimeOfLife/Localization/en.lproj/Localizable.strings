@@ -131,3 +131,98 @@
 "history.emptySubtitle" = "Your completed sessions will form a timeline here.";
 "insights.emptyTitle" = "Nothing here yet";
 "insights.emptySubtitle" = "Patterns emerge after you have tracked a little time.";
+
+// Starter categories (category-management spec, seed requirement)
+"category.seed.work" = "Work";
+"category.seed.hobby" = "Hobby";
+"category.seed.sport" = "Sport";
+"category.seed.education" = "Education";
+"category.seed.relax" = "Relax";
+"category.seed.sleep" = "Sleep";
+"category.seed.entertainment" = "Entertainment";
+
+// Undo (category-management D7)
+"undo.button" = "Undo";
+"undo.dismiss" = "Dismiss";
+"undo.categoryDeleted" = "Category deleted";
+"undo.selected" = "Selected";
+"undo.notSelected" = "Not selected";
+"undo.secondsRemaining" = "%d s left";
+
+// Manage categories (category-management D4)
+"manage.categories.title" = "Categories";
+"manage.categories.add" = "Add category";
+"manage.categories.emptyTitle" = "No categories yet";
+"manage.categories.emptySubtitle" = "Add one to tag your activities.";
+"manage.categories.rowA11y" = "Category";
+"manage.categories.editHint" = "Double-tap to edit.";
+"manage.categories.loading" = "Loading categories…";
+"delete.category.title" = "Delete category?";
+"delete.category.message" = "%@ will be removed from all activities. Your entries are kept.";
+"delete.category.confirm" = "Delete";
+"delete.category.cancel" = "Cancel";
+"error.categoryExists" = "A category with this name already exists.";
+"error.conflict" = "Edited on another device. Showing the latest version.";
+"error.localPersistence" = "Could not save locally. Please try again.";
+
+// Category editor (category-management D4)
+"categoryEditor.createTitle" = "New category";
+"categoryEditor.editTitle" = "Edit category";
+"categoryEditor.nameLabel" = "Name";
+"categoryEditor.namePlaceholder" = "e.g. Sport";
+"categoryEditor.iconLabel" = "Icon";
+"categoryEditor.iconUnavailable" = "This icon is unavailable on this iOS version and is shown as a tag.";
+"categoryEditor.save" = "Save";
+"categoryEditor.cancel" = "Cancel";
+"category.nameRequired" = "Enter a category name.";
+"category.nameTooLong" = "Name must be at most 60 characters.";
+"activityEditor.invalidAssociation" = "One of the selected categories no longer exists. Review your selection and try again.";
+
+// Catalog icon accessibility names
+"catalogIcon.clock" = "Clock";
+"catalogIcon.laptopcomputer" = "Laptop";
+"catalogIcon.briefcase" = "Briefcase";
+"catalogIcon.book" = "Book";
+"catalogIcon.pencil.and.ruler" = "Pencil and ruler";
+"catalogIcon.brain.head.profile" = "Brain";
+"catalogIcon.figure.walk" = "Walking";
+"catalogIcon.figure.run" = "Running";
+"catalogIcon.figure.strengthtraining" = "Strength training";
+"catalogIcon.figure.yoga" = "Yoga";
+"catalogIcon.figure.cycling" = "Cycling";
+"catalogIcon.figure.swimming" = "Swimming";
+"catalogIcon.figure.soccer" = "Soccer";
+"catalogIcon.figure.basketball" = "Basketball";
+"catalogIcon.figure.tennis" = "Tennis";
+"catalogIcon.figure.gymnastics" = "Gymnastics";
+"catalogIcon.figure.mindandbody" = "Mind and body";
+"catalogIcon.figure.core.training" = "Core training";
+"catalogIcon.dumbbell" = "Dumbbell";
+"catalogIcon.bicycle" = "Bicycle";
+"catalogIcon.books" = "Books";
+"catalogIcon.graduationcap" = "Graduation cap";
+"catalogIcon.desktopcomputer" = "Desktop computer";
+"catalogIcon.keyboard" = "Keyboard";
+"catalogIcon.gamecontroller" = "Game controller";
+"catalogIcon.fork.knife" = "Fork and knife";
+"catalogIcon.cup.and.saucer" = "Cup and saucer";
+"catalogIcon.bed.double" = "Bed";
+"catalogIcon.moon.stars" = "Moon and stars";
+"catalogIcon.moon.zzz" = "Sleeping moon";
+"catalogIcon.film" = "Film";
+"catalogIcon.music.note" = "Music note";
+"catalogIcon.guitar" = "Guitar";
+"catalogIcon.camera" = "Camera";
+"catalogIcon.tv" = "Television";
+"catalogIcon.musicalnotes" = "Music notes";
+"catalogIcon.paintbrush" = "Paintbrush";
+"catalogIcon.house" = "House";
+"catalogIcon.car.fill" = "Car";
+"catalogIcon.airplane" = "Airplane";
+"catalogIcon.cart" = "Shopping cart";
+"catalogIcon.phone" = "Phone";
+"catalogIcon.hammer" = "Hammer";
+"catalogIcon.heart" = "Heart";
+"catalogIcon.leaf" = "Leaf";
+"catalogIcon.sparkles" = "Sparkles";
+"catalogIcon.tag" = "Tag";

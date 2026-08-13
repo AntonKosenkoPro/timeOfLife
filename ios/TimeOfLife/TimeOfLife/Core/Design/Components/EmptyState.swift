@@ -6,6 +6,25 @@ struct EmptyState: View {
     let icon: String
     let title: String
     let subtitle: String
+    let actionTitle: String?
+    let actionAccessibilityId: String?
+    let action: (() -> Void)?
+
+    init(
+        icon: String,
+        title: String,
+        subtitle: String,
+        actionTitle: String? = nil,
+        actionAccessibilityId: String? = nil,
+        action: (() -> Void)? = nil
+    ) {
+        self.icon = icon
+        self.title = title
+        self.subtitle = subtitle
+        self.actionTitle = actionTitle
+        self.actionAccessibilityId = actionAccessibilityId
+        self.action = action
+    }
 
     var body: some View {
         VStack(spacing: Theme.spacingSmall) {
@@ -20,6 +39,16 @@ struct EmptyState: View {
                 .font(.subheadline)
                 .foregroundStyle(Theme.textSecondary)
                 .multilineTextAlignment(.center)
+            if let actionTitle, let action {
+                Button(actionTitle, action: action)
+                    .font(.body.weight(.semibold))
+                    .foregroundStyle(Theme.textOnAccent)
+                    .padding(.horizontal, Theme.spacingMedium)
+                    .frame(minHeight: Theme.minTapArea)
+                    .background(Theme.accentPrimary)
+                    .clipShape(RoundedRectangle(cornerRadius: Theme.cornerRadius, style: .continuous))
+                    .accessibilityIdentifier(actionAccessibilityId ?? "")
+            }
         }
         .padding(.horizontal, Theme.spacingLarge)
         .frame(maxWidth: .infinity, maxHeight: .infinity)

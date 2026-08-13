@@ -54,7 +54,7 @@ struct PrimaryButton: View {
             ZStack {
                 if isLoading {
                     ProgressView()
-                        .tint(.white)
+                        .tint(Theme.textOnAccent)
                 } else {
                     HStack(spacing: Theme.spacingSmall) {
                         if let icon {
@@ -72,7 +72,7 @@ struct PrimaryButton: View {
             }
             .frame(maxWidth: .infinity)
             .frame(minHeight: 54)
-            .foregroundStyle(.white)
+            .foregroundStyle(Theme.textOnAccent)
         .background(background)
         .clipShape(RoundedRectangle(cornerRadius: Theme.cornerRadius, style: .continuous))
         .contentShape(RoundedRectangle(cornerRadius: Theme.cornerRadius, style: .continuous))

@@ -163,3 +163,9 @@ Resolved design precedents for Time of Life. Add a new entry here when a visual 
 
 - Start uses a subtle selection haptic, Stop/save uses success feedback, and invalid input uses error feedback. State transitions remain restrained; Reduce Motion replaces rotational/spring transitions with fades or immediate updates.
 - Reason: physical feedback marks consequential state changes without making routine navigation noisy; motion must clarify readiness, running, and saved state and remain optional.
+
+## D32 — Profile-owned local category management
+
+- Categories are managed from Profile for both signed-in and signed-out users. The local catalog is alphabetized and editable offline; assignment to Activities remains optional and ordered.
+- Category deletion is tag-only and uses the durable local undo buffer. Manage Categories registers the newest eligible deletion with `UndoManager` and shows a wall-clock countdown; this does not claim that activity/history undo UI is complete.
+- Reason: local-first capture must not depend on account state, while a dedicated Profile surface keeps capture uncluttered and gives category deletion an explicit, recoverable boundary.

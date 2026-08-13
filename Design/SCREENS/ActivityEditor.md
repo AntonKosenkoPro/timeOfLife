@@ -32,9 +32,9 @@ Presented as `.sheet` with `medium` detents (`.medium` + `.large()` if content s
    - `TextEditor(text: $vm.notes)` with `Theme.backgroundSecondary` fill, `Theme.hairline` 1 pt border, `Theme.cornerRadius`, min height ~96 pt
    - `accessibilityIdentifier("ActivityEditorNotesField")`
    - char counter beneath: `String(format: L10n.activityEditorNotesCounter.text, vm.notes.count)` — `.caption`, `Theme.textSecondary`, trailing-aligned; switches to `Theme.danger` when count > 280
-4. `SectionHeader(L10n.activityEditorTagsLabel)` + `TagSelector(options: vm.availableCategories, selected: $vm.selectedCategoryIds, accessibilityId: "ActivityEditorTags")`. If `vm.availableCategories.isEmpty`, show a hint `L10n.activityEditorNoTags` (`.caption`, `Theme.textSecondary`) with a tappable link `L10n.activityEditorAddCategory` (`.subheadline`, `Theme.accentPrimary`, `accessibilityIdentifier("ActivityEditorAddCategoryButton")`) → presents `CategoryEditor` create sheet.
+4. `SectionHeader(L10n.activityEditorTagsLabel)` + `TagSelector(options: vm.availableCategories, selected: Set(vm.selectedCategoryIDs), accessibilityId: "ActivityEditorTags")`. If `vm.availableCategories.isEmpty`, show a hint `L10n.activityEditorNoTags` (`.caption`, `Theme.textSecondary`) with a tappable link `L10n.activityEditorAddCategory` (`.subheadline`, `Theme.accentPrimary`, `accessibilityIdentifier("ActivityEditorAddCategoryButton")`) → presents `CategoryEditor` create sheet; a saved Category is refreshed and appended to the ordered draft selection.
 5. `ErrorBanner` if `vm.errorMessage != nil` — `accessibilityId: ActivityEditorErrorBanner`.
-6. Fixed reserve for the pinned bottom action bar (`Color.clear` matching the measured bar height plus `Theme.spacingLarge`).
+6. Semantic transparent reserve matching the measured pinned bar height plus `Theme.spacingLarge`.
 
 Background: `Theme.backgroundPrimary`.
 
@@ -102,7 +102,7 @@ The editor holds a draft:
 struct ActivityDraft {
     var name: String
     var notes: String?
-    var categoryIds: [String]
+    var categoryIDs: [String]
 }
 ```
 

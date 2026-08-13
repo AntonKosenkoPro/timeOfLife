@@ -39,7 +39,7 @@ info:
     undo window). Timer-screen suggestions are computed client-side from the
     synced `last_used_at` — there is no suggestions endpoint.
 
-  version: "1.2.0"
+  version: "1.3.0"
   contact:
     name: Anton Kosenko
 
@@ -1250,7 +1250,70 @@ components:
         name:
           type: string
         icon:
-          type: string
+          $ref: "#/components/schemas/CategoryIcon"
+
+    # Authoritative category icon catalog (category-management spec D1): the
+    # closed set of SF Symbol names the relay accepts. The Go validator
+    # (`internal/handlers.validIcons`) and the iOS `CatalogIcon` type mirror
+    # this exact list; the contract test `TestSpec_CategoryIconEnumMatchesGo`
+    # fails when they drift.
+    CategoryIcon:
+      type: string
+      description: |
+        The supported SF Symbol catalog for category icons. This enum is the
+        machine-readable canonical list; the Go `validIcons` set and the iOS
+        `CatalogIcon` type mirror it, and `Design/TOKENS.md` documents the
+        same set. The icon picker hides catalog symbols unavailable on the
+        running OS; a valid synchronized symbol that cannot render is
+        displayed as `tag` without changing the stored value.
+      enum:
+        - clock
+        - laptopcomputer
+        - briefcase
+        - book
+        - pencil.and.ruler
+        - brain.head.profile
+        - figure.walk
+        - figure.run
+        - figure.strengthtraining
+        - figure.yoga
+        - figure.cycling
+        - figure.swimming
+        - figure.soccer
+        - figure.basketball
+        - figure.tennis
+        - figure.gymnastics
+        - figure.mindandbody
+        - figure.core.training
+        - dumbbell
+        - bicycle
+        - books
+        - graduationcap
+        - desktopcomputer
+        - keyboard
+        - gamecontroller
+        - fork.knife
+        - cup.and.saucer
+        - bed.double
+        - moon.stars
+        - moon.zzz
+        - film
+        - music.note
+        - guitar
+        - camera
+        - tv
+        - musicalnotes
+        - paintbrush
+        - house
+        - car.fill
+        - airplane
+        - cart
+        - phone
+        - hammer
+        - heart
+        - leaf
+        - sparkles
+        - tag
 
     # ---------- Catalog request schemas ----------
 
@@ -1335,7 +1398,7 @@ components:
           minLength: 1
           maxLength: 60
         icon:
-          type: string
+          $ref: "#/components/schemas/CategoryIcon"
       example:
         id: "019639f1-7a3b-7abc-9def-100000000002"
         name: Sport
@@ -1352,7 +1415,7 @@ components:
           minLength: 1
           maxLength: 60
         icon:
-          type: string
+          $ref: "#/components/schemas/CategoryIcon"
         updated_at:
           type: string
           format: date-time
@@ -1489,7 +1552,7 @@ components:
           type: string
           maxLength: 60
         icon:
-          type: string
+          $ref: "#/components/schemas/CategoryIcon"
         created_at:
           type: string
           format: date-time

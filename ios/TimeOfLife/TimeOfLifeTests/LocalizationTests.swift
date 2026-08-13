@@ -63,6 +63,20 @@ struct LocalizationTests {
         }
     }
 
+    @Test("every catalog icon has a localized accessibility name")
+    func catalogIconNamesResolve() throws {
+        let main = Bundle.main
+        for locale in ["en", "ru"] {
+            let path = try #require(main.path(forResource: locale, ofType: "lproj"))
+            let bundle = try #require(Bundle(path: path))
+            for icon in CatalogIcon.allCases {
+                let value = L10n.catalogIconName(icon, in: bundle)
+                #expect(value != icon.rawValue, "Missing icon name for \(icon.rawValue) in \(locale)")
+                #expect(!value.isEmpty)
+            }
+        }
+    }
+
     // MARK: - Error codes
 
     @Test("known error codes resolve via ErrorLocalization without falling back to unknown")
@@ -122,9 +136,11 @@ struct LocalizationTests {
 
     @Test("L10n enum allCases count matches expected keys")
     func allCasesCount() {
-        // 92 prior keys - 5 removed (timerTitle, timerSavedDuration,
-        // signOutConfirmationTitle, signOutConfirmationMessage,
-        // signOutConfirm) = 87
-        #expect(l10nCases.count == 87)
+        // 87 prior keys + 38 category-management keys
+        // (7 starter categories, 3 undo, 6 manage categories, 5 delete
+        //  confirmation, 3 errors, 7 category editor, 2 category validation,
+        //  1 activity-editor invalid-association, 4 UI accessibility/countdown
+        //  keys) = 125
+        #expect(l10nCases.count == 125)
     }
 }

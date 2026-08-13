@@ -13,9 +13,7 @@ final class TimerService: ObservableObject {
 
     init(store: LocalStore) {
         self.store = store
-    }
-
-    /// Atomically creates an activity or resolves an existing identity by
+    }    /// Atomically creates an activity or resolves an existing identity by
     /// normalized name (unify-activity-preparation-flow spec, decision 6).
     /// The single transactional LocalStore operation replaces the previous
     /// lookup-then-insert race: uniqueness races are translated into
@@ -52,7 +50,7 @@ final class TimerService: ObservableObject {
     func stopTimer(activityID: String, startedAt: Date, endedAt: Date = Date()) async throws {
         let activity = try await store.activity(id: activityID)
         let entry = TimeEntry(
-            id: UUID().uuidString.lowercased(),
+            id: await store.newRecordID(),
             activityID: activityID,
             activityName: activity?.name ?? "",
             startedAt: startedAt,

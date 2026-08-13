@@ -100,7 +100,16 @@ struct ProfileView: View {
     private var librarySection: some View {
         Section(L10n.profileLibrary.text) {
             ListRow(title: L10n.profileActivities.text, icon: "square.grid.2x2")
-            ListRow(title: L10n.profileCategories.text, icon: "tag")
+            NavigationLink {
+                ManageCategoriesView(
+                    store: container.localStore,
+                    undoBuffer: container.undoBuffer
+                )
+                .environmentObject(container)
+            } label: {
+                ListRow(title: L10n.profileCategories.text, icon: "tag")
+            }
+            .accessibilityIdentifier("ProfileCategoriesRow")
         }
     }
 

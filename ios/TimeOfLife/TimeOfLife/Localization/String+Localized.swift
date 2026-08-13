@@ -108,6 +108,52 @@ enum L10n: String, CaseIterable {
     case insightsEmptyTitle = "insights.emptyTitle"
     case insightsEmptySubtitle = "insights.emptySubtitle"
 
+    // Starter categories (category-management spec, seed requirement)
+    case categorySeedWork = "category.seed.work"
+    case categorySeedHobby = "category.seed.hobby"
+    case categorySeedSport = "category.seed.sport"
+    case categorySeedEducation = "category.seed.education"
+    case categorySeedRelax = "category.seed.relax"
+    case categorySeedSleep = "category.seed.sleep"
+    case categorySeedEntertainment = "category.seed.entertainment"
+
+    // Undo (category-management D7)
+    case undoButton = "undo.button"
+    case undoDismiss = "undo.dismiss"
+    case undoCategoryDeleted = "undo.categoryDeleted"
+    case undoSelected = "undo.selected"
+    case undoNotSelected = "undo.notSelected"
+    case undoSecondsRemaining = "undo.secondsRemaining"
+
+    // Manage categories (category-management D4)
+    case manageCategoriesTitle = "manage.categories.title"
+    case manageCategoriesAdd = "manage.categories.add"
+    case manageCategoriesEmptyTitle = "manage.categories.emptyTitle"
+    case manageCategoriesEmptySubtitle = "manage.categories.emptySubtitle"
+    case manageCategoriesRowA11y = "manage.categories.rowA11y"
+    case manageCategoriesEditHint = "manage.categories.editHint"
+    case manageCategoriesLoading = "manage.categories.loading"
+    case deleteCategoryTitle = "delete.category.title"
+    case deleteCategoryMessage = "delete.category.message"
+    case deleteCategoryConfirm = "delete.category.confirm"
+    case deleteCategoryCancel = "delete.category.cancel"
+    case errorCategoryExists = "error.categoryExists"
+    case errorConflict = "error.conflict"
+    case errorLocalPersistence = "error.localPersistence"
+
+    // Category editor (category-management D4)
+    case categoryEditorCreateTitle = "categoryEditor.createTitle"
+    case categoryEditorEditTitle = "categoryEditor.editTitle"
+    case categoryEditorNameLabel = "categoryEditor.nameLabel"
+    case categoryEditorNamePlaceholder = "categoryEditor.namePlaceholder"
+    case categoryEditorIconLabel = "categoryEditor.iconLabel"
+    case categoryEditorIconUnavailable = "categoryEditor.iconUnavailable"
+    case categoryEditorSave = "categoryEditor.save"
+    case categoryEditorCancel = "categoryEditor.cancel"
+    case categoryNameRequired = "category.nameRequired"
+    case categoryNameTooLong = "category.nameTooLong"
+    case activityEditorInvalidAssociation = "activityEditor.invalidAssociation"
+
     // Sign out confirmation
     case signOutCancel = "signOut.cancel"
 
@@ -139,6 +185,15 @@ enum ErrorLocalization {
 }
 
 extension L10n {
+    /// Localized VoiceOver names for the closed CatalogIcon set. The dynamic
+    /// key keeps the enum focused on user-facing copy while still requiring
+    /// every supported symbol to have EN/RU accessibility text.
+    static func catalogIconName(_ icon: CatalogIcon, in bundle: Bundle = .main) -> String {
+        let key = "catalogIcon.\(icon.rawValue)"
+        let value = NSLocalizedString(key, bundle: bundle, comment: "")
+        return value == key ? icon.rawValue : value
+    }
+
     /// Looks up a server-error-style key (`error.<code>`) with fallback to
     /// `error.unknown`. Shared by view models and tests.
     static func text(in bundle: BundleProvider, code: String) -> String {

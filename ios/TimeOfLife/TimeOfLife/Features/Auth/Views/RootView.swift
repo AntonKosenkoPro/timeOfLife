@@ -25,7 +25,10 @@ struct RootView: View {
                     .animation(.easeInOut(duration: 0.2), value: container.connectivity.isConnected)
             }
             .background(Theme.backgroundPrimary.ignoresSafeArea())
-            .task { await container.authService.restoreSession() }
+            .task {
+                await container.authService.restoreSession()
+                await seedStarterCategoriesIfNeeded()
+            }
             .onChange(of: session.state) { newState in
                 switch newState {
                 case .signedIn:
@@ -47,6 +50,23 @@ struct RootView: View {
                     container.syncController.trigger()
                 }
             }
+    }
+
+    /// Seeds the seven localized starter categories on first local dataset
+    /// setup (category-management D2). Names are materialized in the active
+    /// supported language once; the marker prevents re-seeding, and the
+    /// operation is a no-op after the first launch.
+    private func seedStarterCategoriesIfNeeded() async {
+        let names = [
+            L10n.categorySeedWork.text,
+            L10n.categorySeedHobby.text,
+            L10n.categorySeedSport.text,
+            L10n.categorySeedEducation.text,
+            L10n.categorySeedRelax.text,
+            L10n.categorySeedSleep.text,
+            L10n.categorySeedEntertainment.text,
+        ]
+        _ = try? await container.localStore.seedStarterCategoriesIfNeeded(names: names)
     }
 }
 

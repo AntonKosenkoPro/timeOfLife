@@ -336,7 +336,7 @@ struct IconPickerGrid: View {
 }
 ```
 
-**Callers should pass `CatalogIcon.allowedSymbols` (or another caller-validated set).** The component itself does not filter invalid or duplicate symbol names; invalid names render as blank cells and duplicate names break `ForEach` identity. Use the typed seam (`CatalogIcon`) to guarantee a valid set.
+**Callers should pass `CatalogIcon.renderableSymbols` (plus a currently selected valid raw value when it is unavailable on the running OS).** The cell renders the `tag` fallback for an unavailable but valid synchronized symbol and never changes the stored raw value.
 
 ### Visual
 
@@ -353,8 +353,8 @@ struct IconPickerGrid: View {
 
 ### Requirements
 
-- `options` is the allowed category SF Symbols set (F2/U1); `selection` is the chosen symbol name. Callers must pass `CatalogIcon.allowedSymbols`.
-- Each cell `accessibilityIdentifier("\(accessibilityId)Cell(\(symbol))")`.
+- `options` is the renderable subset of the allowed category SF Symbols set (F2/U1); `selection` is the chosen raw symbol name. A valid unavailable selection may be included so it remains visible and editable.
+- Each cell `accessibilityIdentifier("\(accessibilityId)Cell(\(symbol))")` and a localized semantic icon label.
 - Min tap area 44 — matches the cell size exactly.
 - Tapping a cell sets `selection` to that symbol.
 
@@ -362,7 +362,7 @@ struct IconPickerGrid: View {
 
 ```swift
 IconPickerGrid(
-    options: CatalogIcon.allowedSymbols,
+    options: CatalogIcon.renderableSymbols,
     selection: $vm.icon,
     accessibilityId: "CategoryEditorIcon"
 )
@@ -370,47 +370,50 @@ IconPickerGrid(
 
 ### Accessibility
 
-- Each cell is a button element with `.accessibilityLabel("Icon, \(symbol)")`.
+- Each cell is a button element with a localized semantic icon label.
 - Selected cell exposes `.accessibilityValue("Selected")`.
 
 ---
 
 ## `TagSelector`
 
-Multi-select category chips for an activity (F3). Wrapping `FlowLayout` of tappable chips; toggling a chip adds/removes the category id from `selected`.
+Multi-select category chips for an activity (F3). A wrapping flow of content-sized tappable chips; toggling a chip adds/removes the category id from the parent-owned ordered selection.
 
 ### Signature
 
 ```swift
 struct TagSelector: View {
     let options: [Category]
-    @Binding var selected: Set<UUID>
+    let selected: Set<String>
+    let onToggle: (String) -> Void
     let accessibilityId: String
 }
 ```
 
 ### Visual
 
-- Wrapping `FlowLayout` (left-aligned, `Theme.spacingSmall` spacing).
-- Unselected chip: `Theme.backgroundSecondary` fill + 1 pt `Theme.hairline` border.
-- Selected chip: `Theme.accentPrimary` fill, white text, leading `checkmark` (`.caption`).
-- Each chip: category icon (`.caption`, `Theme.textSecondary`) + name (`.caption`), padding `Theme.spacingSmall` horizontal / 4 vertical, `Capsule` shape.
-- When `options` is empty, render a hint: `L10n.tagsEmptyHint` ("No categories yet — create one"), `.caption`, `Theme.textSecondary`.
+- Wrapping flow of content-sized chips (each chip as wide as its icon/checkmark, name, and uniform padding), left-aligned, equal `Theme.spacingSmall` gaps between chips and rows, compatible with iOS 15 (rows packed from measured chip widths).
+- Unselected chip: only the category icon (30% larger than `.caption`, scaling with Dynamic Type) + name (`.caption`); `Theme.backgroundSecondary` fill + 1 pt `Theme.hairline` border; no outline circle.
+- Selected chip: the icon is swapped for a `checkmark` of the same enlarged size (`.semibold`); `Theme.accentPrimary` fill, `Theme.textOnAccent` icon/checkmark and text; no outline circle.
+- Each chip: `Theme.spacingChip` (10 pt) uniform padding on all sides, `minHeight Theme.minTapArea` (44 pt — Apple HIG / WCAG 2.2 SC 2.5.5 AAA), `Capsule` shape; long names truncate with `lineLimit(1)`.
+- When `options` is empty, the selector renders no chips and the parent editor shows the localized Add-category action.
 
 ### States
 
 | State | Visual |
 |---|---|
-| Unselected | `Theme.backgroundSecondary` fill + `Theme.hairline` border |
-| Selected | `Theme.accentPrimary` fill, white text, `checkmark` |
-| Empty options | Centered `L10n.tagsEmptyHint` hint, no chips (U8) |
+| Unselected | `Theme.backgroundSecondary` fill + `Theme.hairline` border; enlarged category icon + name |
+| Selected | `Theme.accentPrimary` fill, `Theme.textOnAccent` text, enlarged `checkmark` in place of the icon |
+| Empty options | No chips; parent editor renders the Add-category action |
 
 ### Requirements
 
 - Tapping a chip toggles its id in `selected` (F3).
+- Chips are content-sized; gaps between chips are uniform (`Theme.spacingSmall`); toggling swaps the icon for the checkmark without re-packing rows.
+- Each chip's tap target is at least 44×44 pt (`Theme.minTapArea`).
 - Each chip `accessibilityIdentifier("\(accessibilityId)Chip(\(id))")`.
 - Tags are optional; an activity with no tags is valid (F3). The selector never forces a selection.
-- Empty-state hint follows U8 — guides toward creation without blocking the editor.
+- Empty-state action follows U8 — guides toward Category creation without blocking the editor.
 
 ### Usage
 
@@ -424,8 +427,9 @@ TagSelector(
 
 ### Accessibility
 
-- Each chip is a button element with `.accessibilityLabel("Category, \(name)")` and `.accessibilityValue(selected.contains(id) ? "Selected" : "Not selected")`.
-- The empty-state hint is `.accessibilityHidden(true)` decoration; the parent screen owns the "create category" action.
+- Each chip is a button element with a localized category label and localized selected/not-selected value.
+- The icon/checkmark is `.accessibilityHidden(true)` decoration; selection state is conveyed visually by the icon↔checkmark swap in addition to fill color, and announced by the button's selected/not-selected value.
+- The parent screen owns the empty-state "create category" action.
 
 ---
 
@@ -798,7 +802,7 @@ struct SectionHeader: View {
 
 ```swift
 SectionHeader(title: L10n.categoryEditorIconLabel)
-IconPickerGrid(options: CatalogIcon.allowedSymbols, selection: $vm.icon, accessibilityId: "CategoryEditorIcon")
+IconPickerGrid(options: CatalogIcon.renderableSymbols, selection: $vm.icon, accessibilityId: "CategoryEditorIcon")
 ```
 
 ### Accessibility

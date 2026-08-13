@@ -10,6 +10,8 @@ import (
 	"testing"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/antonkosenko/time-of-life/backend/internal/handlers"
 )
 
 // canonicalErrorCodes is the set of error codes the API contract defines.
@@ -95,6 +97,7 @@ type rawComponents struct {
 
 type rawSchemaDef struct {
 	Properties map[string]any `yaml:"properties"`
+	Enum       []any          `yaml:"enum"`
 }
 
 func loadSpec(t *testing.T) *rawSpec {
@@ -307,5 +310,48 @@ func TestSpec_EntryProvenanceDocumented(t *testing.T) {
 		if _, ok := create.Properties[field]; !ok {
 			t.Errorf("EntryCreate schema must document %q", field)
 		}
+	}
+}
+
+// Category icon catalog (v1.3.0, category-management D1): the OpenAPI
+// `CategoryIcon` enum is the authoritative machine-readable icon list. The
+// Go `validIcons` set and the iOS `CatalogIcon` type must mirror it exactly;
+// this test fails when the OpenAPI enum and the Go validator drift.
+func TestSpec_CategoryIconEnumMatchesGo(t *testing.T) {
+	s := loadSpec(t)
+	iconSchema, ok := s.Components.Schemas["CategoryIcon"]
+	if !ok {
+		t.Fatal("expected CategoryIcon schema")
+	}
+	if len(iconSchema.Enum) == 0 {
+		t.Fatal("CategoryIcon schema must declare an enum")
+	}
+	specIcons := map[string]bool{}
+	for _, v := range iconSchema.Enum {
+		name, ok := v.(string)
+		if !ok || name == "" {
+			t.Errorf("CategoryIcon enum entry must be a non-empty string, got %v", v)
+			continue
+		}
+		specIcons[name] = true
+	}
+
+	goIcons, err := handlers.ValidIcons()
+	if err != nil {
+		t.Fatalf("validIcons: %v", err)
+	}
+
+	for icon := range goIcons {
+		if !specIcons[icon] {
+			t.Errorf("Go validIcons contains %q which is absent from the OpenAPI CategoryIcon enum", icon)
+		}
+	}
+	for icon := range specIcons {
+		if !goIcons[icon] {
+			t.Errorf("OpenAPI CategoryIcon enum contains %q which is absent from the Go validIcons set", icon)
+		}
+	}
+	if len(goIcons) != len(specIcons) {
+		t.Errorf("icon set sizes differ: Go %d vs OpenAPI %d", len(goIcons), len(specIcons))
 	}
 }

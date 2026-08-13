@@ -112,7 +112,18 @@ final class SyncController: ObservableObject {
     /// Pulls the relay's state and merges it locally, server-wins on
     /// `updated_at` (LWW). Advances the per-resource cursor to the max
     /// `updated_at` received.
+    ///
+    /// Ordering (category-management D6): the full Category snapshot is
+    /// fetched and merged FIRST so every referenced category exists locally
+    /// before Activities are merged (local foreign keys stay enforced), then
+    /// Entries.
     private func pull(modifiedSince: Date?) async throws {
+        let categories = try await remote.fetchCategories()
+        try await reconcileCategories(categories)
+        for category in categories {
+            try await applyServer(category)
+        }
+
         let activityCursor: Date?
         if let modifiedSince {
             activityCursor = modifiedSince
@@ -125,11 +136,6 @@ final class SyncController: ObservableObject {
         }
         if let max = activities.map(\.updatedAt).max() {
             try await store.setLastSyncedAt(resource: "activity", date: max)
-        }
-
-        let categories = try await remote.fetchCategories()
-        for category in categories {
-            try await applyServer(category)
         }
 
         let entryCursor: Date?
@@ -149,11 +155,20 @@ final class SyncController: ObservableObject {
 
     /// Applies a server activity only if `server.updated_at > local.updated_at`.
     /// Uses the no-outbox merge path: the relay already holds this version.
+    ///
+    /// A referenced Category that is missing locally (a transient state — the
+    /// Category snapshot is pulled first, so this only happens when a local
+    /// Category delete raced the pull) skips the merge instead of failing the
+    /// whole cycle; the next pull retries.
     private func applyServer(_ activity: Activity) async throws {
         if let local = try await store.activity(id: activity.id) {
             guard activity.updatedAt > local.updatedAt else { return }
         }
-        try await store.mergeActivity(activity)
+        do {
+            try await store.mergeActivity(activity)
+        } catch AssociationError.invalidCategory {
+            // The category is absent locally; keep the current local version.
+        }
     }
 
     /// Applies a server category only if `server.updated_at > local.updated_at`.
@@ -162,6 +177,18 @@ final class SyncController: ObservableObject {
             guard category.updatedAt > local.updatedAt else { return }
         }
         try await store.mergeCategory(category)
+    }
+
+    // MARK: - Category snapshot reconciliation (category-management D6)
+
+    /// Reconciles the authoritative full Category snapshot: LWW-merges the
+    /// relay's categories, then removes clean local Categories absent from
+    /// the snapshot. Categories with pending create/update outbox work are
+    /// preserved (their create has not reached the relay yet). No outbox row
+    /// is ever created for the removals — the relay already lacks them.
+    private func reconcileCategories(_ categories: [Category]) async throws {
+        let relayIDs = Set(categories.map(\.id))
+        try await store.removeCategoriesAbsentFromRelay(relayIDs)
     }
 
     /// Applies a server entry only if `server.updated_at > local.updated_at`.
@@ -180,7 +207,13 @@ final class SyncController: ObservableObject {
     /// attempt.
     private func drainOutbox() async throws {
         let rows = try await store.outboxRows()
-        for row in rows {
+        for queuedRow in rows {
+            // Conflict recovery can remove or rewrite a later row while this
+            // drain is still iterating the initial snapshot. Always push the
+            // current persisted payload rather than a stale in-memory copy.
+            guard let row = try await store.outboxRow(id: queuedRow.id) else {
+                continue
+            }
             do {
                 try await push(row)
                 try await store.removeOutboxRow(id: row.id)
@@ -261,7 +294,12 @@ final class SyncController: ObservableObject {
         switch row.resource {
         case "activity":
             let server = try await remote.fetchActivity(id: row.recordID)
-            try await store.mergeActivity(server)
+            do {
+                try await store.mergeActivity(server)
+            } catch AssociationError.invalidCategory {
+                // Keep the current local version; the next pull retries once
+                // the Category snapshot is available.
+            }
         case "category":
             let server = try await remote.fetchCategory(id: row.recordID)
             try await store.mergeCategory(server)
@@ -296,13 +334,24 @@ final class SyncController: ObservableObject {
                 try await store.rewriteOutboxPayload(resource: "entry", recordID: entry.id, payload: updated)
             }
         case "category":
-            let activities = try await store.activities()
-            for activity in activities where activity.categoryIDs.contains(oldID) {
-                var updated = activity
-                updated.categoryIDs = activity.categoryIDs.map { $0 == oldID ? newID : $0 }
-                try await store.updateActivityLocal(updated)
-                try await store.rewriteOutboxPayload(resource: "activity", recordID: activity.id, payload: updated)
+            // category_exists recovery (category-management D6): the winner is
+            // authoritative. Fetch and merge it first (the FK on joins
+            // requires it to exist), then atomically remap local joins and
+            // pending Activity payloads, remove the losing local identity
+            // without emitting a delete, and clear the losing create row.
+            let winner: Category
+            do {
+                winner = try await remote.fetchCategory(id: newID)
+            } catch {
+                // The winner fetch failed (e.g. offline during a racing
+                // cycle); fall back to a stub so remapping can proceed and a
+                // full pull replaces it with the server's real version.
+                winner = Category(
+                    id: newID, name: oldID, icon: "tag",
+                    createdAt: Date(), updatedAt: Date()
+                )
             }
+            try await store.remapCategoryReferences(from: oldID, to: newID, winner: winner)
         default:
             break
         }

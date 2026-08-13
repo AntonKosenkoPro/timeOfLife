@@ -36,9 +36,17 @@ Narrative flows for the **Activity Catalog & Categories** feature. Each flow map
 
 ## 5. Manage activities and categories
 
-1. The user opens the **Manage Activities** screen.
-2. The user sees all Activities with their category metadata, ordered by most-recently-used, and can edit or delete them. A separate **Manage Categories** screen owns category create/edit/delete. No manual reorder is offered at MVP.
+1. The user opens Profile and selects **Categories**, or opens the existing **Manage Activities** surface.
+2. Manage Categories lists local Categories alphabetically and allows create/edit/delete; Manage Activities owns Activity editing/deletion and no manual reorder is offered at MVP.
 3. Editing an activity updates its name/notes/categories; existing past entries reflect the current category-derived representation at query time (entries store an `activity_id`, not a snapshot, while the activity exists).
+
+## 6a. Manage categories and undo
+
+1. The user opens Profile and selects Categories while signed out or offline.
+2. The app lists the local catalog alphabetically. Add opens a shared Category Editor with an empty name and the `tag` icon; selecting a row opens the same editor with current values.
+3. Save trims and validates the name, enforces the 60-character limit and case-insensitive uniqueness, and persists the Category plus outbox operation atomically.
+4. Confirmed deletion removes only the Category and its Activity associations, leaving Activities, entries, and timer state intact. The deletion enters the durable undo buffer and shows a 30-second wall-clock UndoToast.
+5. Tapping Undo or invoking system Undo restores the same Category identity and ordered associations. If the window expires, foreground reconciliation queues one Category DELETE for optional relay sync.
 
 ## 6. Delete an activity that has history
 

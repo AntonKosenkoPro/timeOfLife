@@ -264,3 +264,109 @@ func TestPostgres_CreateEntry_ProvenanceAndDuplicateImport(t *testing.T) {
 		t.Fatalf("expected ErrDuplicateImport, got %v", err)
 	}
 }
+
+// Parity (category-management D5): a PATCH that references a non-existent
+// category must roll back the whole activity mutation — no partial name/join
+// state survives.
+func TestPostgres_UpdateActivity_InvalidCategoryRollsBack(t *testing.T) {
+	store := newParityStore(t)
+	uid := parityUser(t, store, "pg-rollback@example.com")
+
+	cat, _, err := store.CreateCategory(context.Background(), Category{
+		ID: uuidV7(), UserID: uid, Name: "Sport", Icon: "tag",
+	})
+	if err != nil {
+		t.Fatalf("CreateCategory: %v", err)
+	}
+	a, _, err := store.CreateActivity(context.Background(), Activity{
+		ID: uuidV7(), UserID: uid, Name: "Gym",
+	}, []string{cat.ID})
+	if err != nil {
+		t.Fatalf("CreateActivity: %v", err)
+	}
+
+	name := "Renamed Gym"
+	_, err = store.UpdateActivity(context.Background(), uid, a.ID, ActivityPatch{
+		Name:        &name,
+		CategoryIDs: &[]string{cat.ID, uuidV7()}, // second id does not exist
+		UpdatedAt:   a.UpdatedAt.Add(time.Hour),
+	})
+	if !errors.Is(err, ErrInvalidCategoryID) {
+		t.Fatalf("expected ErrInvalidCategoryID, got %v", err)
+	}
+
+	got, err := store.GetActivity(context.Background(), uid, a.ID)
+	if err != nil {
+		t.Fatalf("GetActivity: %v", err)
+	}
+	if got.Name != "Gym" {
+		t.Errorf("name change was not rolled back: got %q", got.Name)
+	}
+	if len(got.Categories) != 1 || got.Categories[0].ID != cat.ID {
+		t.Errorf("association change was not rolled back: %+v", got.Categories)
+	}
+}
+
+// Parity (category-management D5): association order is preserved in the
+// response, and Category deletion leaves Activities and Entries intact.
+func TestPostgres_ActivityCategory_OrderAndDeletePreservesChildren(t *testing.T) {
+	store := newParityStore(t)
+	uid := parityUser(t, store, "pg-join@example.com")
+
+	var catIDs []string
+	for _, name := range []string{"Work", "Health", "Travel"} {
+		c, _, err := store.CreateCategory(context.Background(), Category{
+			ID: uuidV7(), UserID: uid, Name: name, Icon: "tag",
+		})
+		if err != nil {
+			t.Fatalf("CreateCategory %q: %v", name, err)
+		}
+		catIDs = append(catIDs, c.ID)
+	}
+
+	a, _, err := store.CreateActivity(context.Background(), Activity{
+		ID: uuidV7(), UserID: uid, Name: "Gym",
+	}, []string{catIDs[1], catIDs[0], catIDs[2]})
+	if err != nil {
+		t.Fatalf("CreateActivity: %v", err)
+	}
+	if len(a.Categories) != 3 ||
+		a.Categories[0].ID != catIDs[1] || a.Categories[1].ID != catIDs[0] || a.Categories[2].ID != catIDs[2] {
+		t.Fatalf("expected order [%s %s %s], got %+v", catIDs[1], catIDs[0], catIDs[2], a.Categories)
+	}
+
+	// An entry referencing the activity survives category deletion.
+	started := time.Date(2026, 7, 27, 9, 0, 0, 0, time.UTC)
+	ended := started.Add(time.Hour)
+	e, _, err := store.CreateEntry(context.Background(), Entry{
+		ID: uuidV7(), UserID: uid, ActivityID: &a.ID, StartedAt: started,
+		EndedAt: &ended,
+	})
+	if err != nil {
+		t.Fatalf("CreateEntry: %v", err)
+	}
+
+	if err := store.DeleteCategory(context.Background(), uid, catIDs[0]); err != nil {
+		t.Fatalf("DeleteCategory: %v", err)
+	}
+
+	got, err := store.GetActivity(context.Background(), uid, a.ID)
+	if err != nil {
+		t.Fatalf("GetActivity after category delete: %v", err)
+	}
+	if len(got.Categories) != 2 {
+		t.Errorf("expected 2 remaining tags, got %+v", got.Categories)
+	}
+	for _, tag := range got.Categories {
+		if tag.ID == catIDs[0] {
+			t.Errorf("deleted category still attached: %+v", got.Categories)
+		}
+	}
+
+	if _, err := store.GetEntry(context.Background(), uid, e.ID); err != nil {
+		t.Errorf("entry must survive category deletion: %v", err)
+	}
+	if _, err := store.GetActivity(context.Background(), uid, a.ID); err != nil {
+		t.Errorf("activity must survive category deletion: %v", err)
+	}
+}

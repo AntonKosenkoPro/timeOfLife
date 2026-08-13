@@ -11,6 +11,8 @@ struct ActivityEditorView: View {
     @Environment(\.dismiss)
     private var dismiss
     @FocusState private var isNameFocused: Bool
+    @State private var bottomBarHeight: CGFloat = 0
+    @State private var isShowingCategoryEditor = false
 
     init(
         store: LocalStore,
@@ -63,8 +65,8 @@ struct ActivityEditorView: View {
                         )
                     }
 
-                    Color.clear
-                        .frame(height: Theme.spacingLarge)
+                    Theme.transparent
+                        .frame(height: bottomBarHeight + Theme.spacingLarge)
                 }
                 .padding(.horizontal, Theme.screenHorizontalPadding)
                 .frame(maxWidth: Theme.maxContentWidth)
@@ -81,7 +83,7 @@ struct ActivityEditorView: View {
                     .accessibilityIdentifier("ActivityEditorCancelButton")
                 }
             }
-            .safeAreaInset(edge: .bottom) {
+            .measuredBottomBar(height: $bottomBarHeight) {
                 PrimaryButton(
                     title: L10n.activityEditorSave.text,
                     icon: nil,
@@ -101,6 +103,21 @@ struct ActivityEditorView: View {
         }
         .navigationViewStyle(.stack)
         .interactiveDismissDisabled(vm.isLoading)
+        .sheet(isPresented: $isShowingCategoryEditor) {
+            CategoryEditorView(
+                store: vm.categoryStore,
+                category: nil,
+                onSaved: { category in
+                    Task {
+                        await vm.reloadCategories()
+                        vm.selectCategory(category.id)
+                    }
+                },
+                onDuplicate: { _ in
+                    vm.errorMessage = L10n.errorCategoryExists.text
+                }
+            )
+        }
     }
 
     // MARK: - Notes
@@ -151,13 +168,25 @@ struct ActivityEditorView: View {
                 .foregroundStyle(Theme.textPrimary)
 
             if vm.availableCategories.isEmpty {
-                Text(L10n.activityEditorNoTags.text)
-                    .font(.caption)
-                    .foregroundStyle(Theme.textSecondary)
+                VStack(alignment: .leading, spacing: Theme.spacingSmall) {
+                    Text(L10n.activityEditorNoTags.text)
+                        .font(.caption)
+                        .foregroundStyle(Theme.textSecondary)
+                    Button(L10n.activityEditorAddCategory.text) {
+                        isShowingCategoryEditor = true
+                    }
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(Theme.accentPrimary)
+                    .frame(minHeight: Theme.minTapArea)
+                    .accessibilityIdentifier("ActivityEditorAddCategoryButton")
+                }
             } else {
                 TagSelector(
                     options: vm.availableCategories,
-                    selected: $vm.selectedCategoryIDs,
+                    selected: Set(vm.selectedCategoryIDs),
+                    onToggle: { categoryID in
+                        vm.toggleCategory(categoryID)
+                    },
                     accessibilityId: "ActivityEditorTags"
                 )
             }

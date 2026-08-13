@@ -5,14 +5,17 @@ import SwiftUI
 /// ActivityEditor.md), edit mode (refine-selected-activity-from-track
 /// change, design decision 3). Accepts the selected Activity, initializes
 /// name, notes, and selected Category identifiers from its persisted values,
-/// and saves via the atomic `LocalStore.refineActivity` operation. The
-/// caller owns the post-save commit boundary (replacing the associated
-/// Activity in the current TrackState without transitioning it).
+/// and saves via the atomic `LocalStore.refineActivity` operation. Category
+/// selection is zero-or-more and ORDERED (category-management D5/D6); the
+/// draft is preserved on an atomic save failure. The caller owns the
+/// post-save commit boundary.
 @MainActor
 final class ActivityEditorViewModel: ObservableObject {
     @Published var name: String
     @Published var notes: String
-    @Published var selectedCategoryIDs: Set<String>
+    /// Ordered multi-selection: selection order is preserved in the saved
+    /// Activity's `categoryIDs`.
+    @Published var selectedCategoryIDs: [String]
     @Published private(set) var availableCategories: [Category] = []
     @Published private(set) var fieldErrors: FieldErrors
     @Published var errorMessage: String?
@@ -27,6 +30,10 @@ final class ActivityEditorViewModel: ObservableObject {
     private let store: LocalStore
     private let onSaved: (Activity) -> Void
     private let onCollision: (Activity) -> Void
+
+    /// The injected store used by the optional in-editor Category creation
+    /// sheet.
+    var categoryStore: LocalStore { store }
 
     struct FieldErrors: Equatable {
         var name: String?
@@ -43,12 +50,24 @@ final class ActivityEditorViewModel: ObservableObject {
         self.activityID = activity.id
         self.name = activity.name
         self.notes = activity.notes ?? ""
-        self.selectedCategoryIDs = Set(activity.categoryIDs)
+        self.selectedCategoryIDs = activity.categoryIDs
         self.fieldErrors = FieldErrors()
         self.onSaved = onSaved
         self.onCollision = onCollision
         Task {
-            self.availableCategories = (try? await store.categories()) ?? []
+            await reloadCategories()
+        }
+    }
+
+    /// Refreshes the local Category catalog without changing the draft's
+    /// ordered selection. Keeping selected ids intact lets an atomic save
+    /// report a disappeared Category and preserve the user's retry context.
+    func reloadCategories() async {
+        do {
+            availableCategories = try await store.categories()
+        } catch {
+            availableCategories = []
+            errorMessage = L10n.errorLocalPersistence.text
         }
     }
 
@@ -56,6 +75,22 @@ final class ActivityEditorViewModel: ObservableObject {
     var canSave: Bool {
         if case .valid = ActivityName.validate(name) { return !isLoading }
         return false
+    }
+
+    /// Toggles a category in the ordered selection: selecting appends it at
+    /// the end; deselecting removes it, keeping the remaining order.
+    func toggleCategory(_ categoryID: String) {
+        if let index = selectedCategoryIDs.firstIndex(of: categoryID) {
+            selectedCategoryIDs.remove(at: index)
+        } else {
+            selectedCategoryIDs.append(categoryID)
+        }
+    }
+
+    /// Selects a newly created Category without disturbing existing order.
+    func selectCategory(_ categoryID: String) {
+        guard !selectedCategoryIDs.contains(categoryID) else { return }
+        selectedCategoryIDs.append(categoryID)
     }
 
     /// Validates the draft and clears field errors as the user edits.
@@ -87,7 +122,7 @@ final class ActivityEditorViewModel: ObservableObject {
 
     /// Saves the draft locally (atomic refine) and reports the typed outcome
     /// to the caller. The editor stays interactive on failure so the user
-    /// can retry.
+    /// can retry with the draft intact.
     func save() {
         validate()
         guard canSave else {
@@ -99,7 +134,7 @@ final class ActivityEditorViewModel: ObservableObject {
         let draft = ActivityDraft(
             name: ActivityName.normalized(name),
             notes: notes.isEmpty ? nil : notes,
-            categoryIDs: selectedCategoryIDs.sorted()
+            categoryIDs: selectedCategoryIDs
         )
         Task {
             do {
@@ -117,6 +152,10 @@ final class ActivityEditorViewModel: ObservableObject {
                     errorMessage = L10n.timerStalePreparationError.text
                 case .invalid:
                     validate()
+                case .invalidAssociation:
+                    // The draft is preserved; the user can drop the stale
+                    // selection and retry.
+                    errorMessage = L10n.activityEditorInvalidAssociation.text
                 case .failure:
                     errorMessage = L10n.text(in: .default, code: "error.unknown")
                 }

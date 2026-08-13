@@ -274,7 +274,16 @@ func (s *PostgresStore) CreateActivity(ctx context.Context, a Activity, category
 	}
 
 	now := time.Now().UTC()
-	if _, err := s.pool.Exec(ctx, `
+	// The activity row and the join replacement share one transaction: a
+	// failed category validation leaves no partial activity mutation
+	// (category-management D5).
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return Activity{}, false, fmt.Errorf("create activity begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	if _, err := tx.Exec(ctx, `
 		INSERT INTO activities (id, user_id, name, notes, last_used_at, created_at, updated_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $6)
 	`, a.ID, a.UserID, a.Name, pgStrPtr(a.Notes), a.LastUsedAt, now); err != nil {
@@ -286,8 +295,11 @@ func (s *PostgresStore) CreateActivity(ctx context.Context, a Activity, category
 		}
 		return Activity{}, false, fmt.Errorf("create activity: %w", err)
 	}
-	if err := s.pgReplaceActivityCategories(ctx, a.UserID, a.ID, categoryIDs); err != nil {
+	if err := s.pgReplaceActivityCategoriesTx(ctx, tx, a.UserID, a.ID, categoryIDs); err != nil {
 		return Activity{}, false, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return Activity{}, false, fmt.Errorf("create activity commit: %w", err)
 	}
 	created, err := s.GetActivity(ctx, a.UserID, a.ID)
 	if err != nil {
@@ -316,7 +328,17 @@ func (s *PostgresStore) UpdateActivity(ctx context.Context, userID, id string, p
 	args = append(args, id, userID, p.UpdatedAt)
 	query := `UPDATE activities SET ` + strings.Join(sets, ", ") +
 		fmt.Sprintf(" WHERE id = $%d AND user_id = $%d AND updated_at < $%d", n, n+1, n+2)
-	res, err := s.pool.Exec(ctx, query, args...)
+
+	// The field update and the join replacement share one transaction: a
+	// failed category validation rolls back the field changes too
+	// (category-management D5).
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return Activity{}, fmt.Errorf("update activity begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	res, err := tx.Exec(ctx, query, args...)
 	if err != nil {
 		if p.Name != nil && pgIsUniqueViolation(err) {
 			return Activity{}, fmt.Errorf("update activity: %w", ErrActivityExists)
@@ -336,20 +358,20 @@ func (s *PostgresStore) UpdateActivity(ctx context.Context, userID, id string, p
 		return current, fmt.Errorf("update activity: %w", ErrConflict)
 	}
 	if p.CategoryIDs != nil {
-		if err := s.pgReplaceActivityCategories(ctx, userID, id, *p.CategoryIDs); err != nil {
+		if err := s.pgReplaceActivityCategoriesTx(ctx, tx, userID, id, *p.CategoryIDs); err != nil {
 			return Activity{}, err
 		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return Activity{}, fmt.Errorf("update activity commit: %w", err)
 	}
 	return s.GetActivity(ctx, userID, id)
 }
 
-func (s *PostgresStore) pgReplaceActivityCategories(ctx context.Context, userID, activityID string, orderedIDs []string) error {
-	tx, err := s.pool.Begin(ctx)
-	if err != nil {
-		return fmt.Errorf("replace activity categories begin: %w", err)
-	}
-	defer func() { _ = tx.Rollback(ctx) }()
-
+// pgReplaceActivityCategoriesTx validates ownership and replaces an activity's
+// join rows within the caller's transaction. An invalid category_id aborts
+// the caller's whole mutation (category-management D5).
+func (s *PostgresStore) pgReplaceActivityCategoriesTx(ctx context.Context, tx pgx.Tx, userID, activityID string, orderedIDs []string) error {
 	if _, err := tx.Exec(ctx, `DELETE FROM activity_categories WHERE activity_id = $1`, activityID); err != nil {
 		return fmt.Errorf("replace activity categories delete: %w", err)
 	}
@@ -369,9 +391,6 @@ func (s *PostgresStore) pgReplaceActivityCategories(ctx context.Context, userID,
 		if _, err := tx.Exec(ctx, `INSERT INTO activity_categories (activity_id, category_id, position) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`, activityID, cid, i); err != nil {
 			return fmt.Errorf("replace activity categories insert: %w", err)
 		}
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("replace activity categories commit: %w", err)
 	}
 	return nil
 }

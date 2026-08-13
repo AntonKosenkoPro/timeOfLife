@@ -321,6 +321,57 @@ func (s *SQLiteStore) getActivityRowByName(ctx context.Context, userID, name str
 	return a, nil
 }
 
+// getActivityRowTx returns one activity row (no tags) by id on a tx.
+func (s *SQLiteStore) getActivityRowTx(ctx context.Context, tx *sql.Tx, userID, id string) (Activity, error) {
+	var a Activity
+	var notes sql.NullString
+	var lastUsed sql.NullString
+	var createdAt, updatedAt string
+	err := tx.QueryRowContext(ctx, `
+		SELECT id, name, notes, last_used_at, created_at, updated_at
+		FROM activities
+		WHERE user_id = ? AND id = ?
+	`, userID, id).Scan(&a.ID, &a.Name, &notes, &lastUsed, &createdAt, &updatedAt)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return Activity{}, fmt.Errorf("get activity: %w", ErrNotFound)
+		}
+		return Activity{}, fmt.Errorf("get activity: %w", err)
+	}
+	a.UserID = userID
+	a.Notes = notes.String
+	a.LastUsedAt = nullTimePtr(lastUsed)
+	a.CreatedAt = parseTime(createdAt)
+	a.UpdatedAt = parseTime(updatedAt)
+	return a, nil
+}
+
+// getActivityRowByNameTx returns one activity row (no tags) by case-insensitive
+// name on a tx (used inside held transactions to avoid pool deadlock).
+func (s *SQLiteStore) getActivityRowByNameTx(ctx context.Context, tx *sql.Tx, userID, name string) (Activity, error) {
+	var a Activity
+	var notes sql.NullString
+	var lastUsed sql.NullString
+	var createdAt, updatedAt string
+	err := tx.QueryRowContext(ctx, `
+		SELECT id, name, notes, last_used_at, created_at, updated_at
+		FROM activities
+		WHERE user_id = ? AND lower(name) = lower(?)
+	`, userID, name).Scan(&a.ID, &a.Name, &notes, &lastUsed, &createdAt, &updatedAt)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return Activity{}, fmt.Errorf("get activity by name: %w", ErrNotFound)
+		}
+		return Activity{}, fmt.Errorf("get activity by name: %w", err)
+	}
+	a.UserID = userID
+	a.Notes = notes.String
+	a.LastUsedAt = nullTimePtr(lastUsed)
+	a.CreatedAt = parseTime(createdAt)
+	a.UpdatedAt = parseTime(updatedAt)
+	return a, nil
+}
+
 // CreateActivity inserts a new activity, idempotent on id.
 func (s *SQLiteStore) CreateActivity(ctx context.Context, a Activity, categoryIDs []string) (Activity, bool, error) {
 	// Idempotent replay on id.
@@ -347,23 +398,37 @@ func (s *SQLiteStore) CreateActivity(ctx context.Context, a Activity, categoryID
 	}
 
 	now := time.Now().UTC()
-	if _, err := s.db.ExecContext(ctx, `
+	// The activity row, the join replacement, and the validation of every
+	// referenced category share one transaction: a failed association
+	// replacement leaves no partial activity mutation (category-management
+	// D5).
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return Activity{}, false, fmt.Errorf("create activity begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO activities (id, user_id, name, notes, last_used_at, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?)
 	`, a.ID, a.UserID, a.Name, nullStrArg(a.Notes), fmtTimeArg(a.LastUsedAt), fmtTime(now), fmtTime(now)); err != nil {
 		// A concurrent create that raced past the name pre-check surfaces as a
 		// UNIQUE-constraint failure on the INSERT; map it to ErrActivityExists
-		// (409) like the Postgres path, not a raw 500.
+		// (409) like the Postgres path, not a raw 500. The lookup runs on the
+		// tx itself — the pool has a single connection and would deadlock.
 		if isUniqueViolation(err) {
-			if clash, err2 := s.getActivityRowByName(ctx, a.UserID, a.Name); err2 == nil {
+			if clash, err2 := s.getActivityRowByNameTx(ctx, tx, a.UserID, a.Name); err2 == nil {
 				return clash, false, fmt.Errorf("create activity: %w", ErrActivityExists)
 			}
 			return Activity{}, false, fmt.Errorf("create activity: %w", ErrActivityExists)
 		}
 		return Activity{}, false, fmt.Errorf("create activity: %w", err)
 	}
-	if err := s.replaceActivityCategories(ctx, a.UserID, a.ID, categoryIDs); err != nil {
+	if err := s.replaceActivityCategoriesTx(ctx, tx, a.UserID, a.ID, categoryIDs); err != nil {
 		return Activity{}, false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return Activity{}, false, fmt.Errorf("create activity commit: %w", err)
 	}
 	created, err := s.GetActivity(ctx, a.UserID, a.ID)
 	if err != nil {
@@ -392,11 +457,22 @@ func (s *SQLiteStore) UpdateActivity(ctx context.Context, userID, id string, p A
 		UPDATE activities SET ` + strings.Join(sets, ", ") + `
 		WHERE id = ? AND user_id = ? AND updated_at < ?
 	`
-	res, err := s.db.ExecContext(ctx, query, args...)
+	// The field update and the join replacement share one transaction: a
+	// failed category validation rolls back the field changes too
+	// (category-management D5).
+	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		// Unique (user_id, lower(name)) collision → ErrActivityExists.
+		return Activity{}, fmt.Errorf("update activity begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	res, err := tx.ExecContext(ctx, query, args...)
+	if err != nil {
+		// Unique (user_id, lower(name)) collision → ErrActivityExists. The
+		// lookup runs on the tx itself — the pool has a single connection
+		// and would deadlock.
 		if p.Name != nil && isUniqueViolation(err) {
-			if clash, err2 := s.getActivityRowByName(ctx, userID, *p.Name); err2 == nil {
+			if clash, err2 := s.getActivityRowByNameTx(ctx, tx, userID, *p.Name); err2 == nil {
 				return clash, fmt.Errorf("update activity: %w", ErrActivityExists)
 			}
 			return Activity{}, fmt.Errorf("update activity: %w", ErrActivityExists)
@@ -408,11 +484,16 @@ func (s *SQLiteStore) UpdateActivity(ctx context.Context, userID, id string, p A
 		return Activity{}, fmt.Errorf("update activity rows: %w", err)
 	}
 	if affected == 0 {
-		// Not found or stale; distinguish.
-		if _, err := s.getActivityRow(ctx, userID, id); errors.Is(err, ErrNotFound) {
+		// Not found or stale; distinguish (on the tx to avoid pool deadlock).
+		if _, err := s.getActivityRowTx(ctx, tx, userID, id); errors.Is(err, ErrNotFound) {
 			return Activity{}, fmt.Errorf("update activity: %w", ErrNotFound)
 		} else if err != nil {
 			return Activity{}, err
+		}
+		// Stale write: roll back first so the single pool connection is
+		// released before re-reading the current version.
+		if err := tx.Rollback(); err != nil {
+			return Activity{}, fmt.Errorf("update activity rollback: %w", err)
 		}
 		current, err := s.GetActivity(ctx, userID, id)
 		if err != nil {
@@ -422,22 +503,20 @@ func (s *SQLiteStore) UpdateActivity(ctx context.Context, userID, id string, p A
 	}
 
 	if p.CategoryIDs != nil {
-		if err := s.replaceActivityCategories(ctx, userID, id, *p.CategoryIDs); err != nil {
+		if err := s.replaceActivityCategoriesTx(ctx, tx, userID, id, *p.CategoryIDs); err != nil {
 			return Activity{}, err
 		}
+	}
+	if err := tx.Commit(); err != nil {
+		return Activity{}, fmt.Errorf("update activity commit: %w", err)
 	}
 	return s.GetActivity(ctx, userID, id)
 }
 
-// replaceActivityCategories validates ownership, then atomically replaces an
-// activity's join rows.
-func (s *SQLiteStore) replaceActivityCategories(ctx context.Context, userID, activityID string, orderedIDs []string) error {
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("replace activity categories begin: %w", err)
-	}
-	defer func() { _ = tx.Rollback() }()
-
+// replaceActivityCategoriesTx validates ownership, then atomically replaces an
+// activity's join rows within the caller's transaction. An invalid
+// category_id aborts the caller's whole mutation (category-management D5).
+func (s *SQLiteStore) replaceActivityCategoriesTx(ctx context.Context, tx *sql.Tx, userID, activityID string, orderedIDs []string) error {
 	if _, err := tx.ExecContext(ctx, `DELETE FROM activity_categories WHERE activity_id = ?`, activityID); err != nil {
 		return fmt.Errorf("replace activity categories delete: %w", err)
 	}
@@ -457,9 +536,6 @@ func (s *SQLiteStore) replaceActivityCategories(ctx context.Context, userID, act
 		if _, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO activity_categories (activity_id, category_id, position) VALUES (?, ?, ?)`, activityID, cid, i); err != nil {
 			return fmt.Errorf("replace activity categories insert: %w", err)
 		}
-	}
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("replace activity categories commit: %w", err)
 	}
 	return nil
 }

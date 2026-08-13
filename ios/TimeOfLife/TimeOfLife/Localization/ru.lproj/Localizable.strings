@@ -131,3 +131,98 @@
 "history.emptySubtitle" = "Завершённые сессии появятся здесь в виде хронологии.";
 "insights.emptyTitle" = "Пока пусто";
 "insights.emptySubtitle" = "Закономерности появятся после небольшого объёма учёта времени.";
+
+// Starter categories (category-management spec, seed requirement)
+"category.seed.work" = "Работа";
+"category.seed.hobby" = "Хобби";
+"category.seed.sport" = "Спорт";
+"category.seed.education" = "Образование";
+"category.seed.relax" = "Отдых";
+"category.seed.sleep" = "Сон";
+"category.seed.entertainment" = "Развлечения";
+
+// Undo (category-management D7)
+"undo.button" = "Отменить";
+"undo.dismiss" = "Скрыть";
+"undo.categoryDeleted" = "Категория удалена";
+"undo.selected" = "Выбрано";
+"undo.notSelected" = "Не выбрано";
+"undo.secondsRemaining" = "Осталось: %d с";
+
+// Manage categories (category-management D4)
+"manage.categories.title" = "Категории";
+"manage.categories.add" = "Добавить категорию";
+"manage.categories.emptyTitle" = "Пока нет категорий";
+"manage.categories.emptySubtitle" = "Добавьте категорию, чтобы размечать активности.";
+"manage.categories.rowA11y" = "Категория";
+"manage.categories.editHint" = "Дважды коснитесь, чтобы изменить.";
+"manage.categories.loading" = "Загрузка категорий…";
+"delete.category.title" = "Удалить категорию?";
+"delete.category.message" = "%@ будет удалена со всех активностей. Записи сохранятся.";
+"delete.category.confirm" = "Удалить";
+"delete.category.cancel" = "Отмена";
+"error.categoryExists" = "Категория с таким названием уже существует.";
+"error.conflict" = "Изменено на другом устройстве. Показана актуальная версия.";
+"error.localPersistence" = "Не удалось сохранить локально. Попробуйте снова.";
+
+// Category editor (category-management D4)
+"categoryEditor.createTitle" = "Новая категория";
+"categoryEditor.editTitle" = "Изменить категорию";
+"categoryEditor.nameLabel" = "Название";
+"categoryEditor.namePlaceholder" = "напр. Спорт";
+"categoryEditor.iconLabel" = "Значок";
+"categoryEditor.iconUnavailable" = "Этот значок недоступен в этой версии iOS и отображается как тег.";
+"categoryEditor.save" = "Сохранить";
+"categoryEditor.cancel" = "Отмена";
+"category.nameRequired" = "Введите название категории.";
+"category.nameTooLong" = "Название должно быть не длиннее 60 символов.";
+"activityEditor.invalidAssociation" = "Одна из выбранных категорий больше не существует. Проверьте выбор и попробуйте снова.";
+
+// Catalog icon accessibility names
+"catalogIcon.clock" = "Часы";
+"catalogIcon.laptopcomputer" = "Ноутбук";
+"catalogIcon.briefcase" = "Портфель";
+"catalogIcon.book" = "Книга";
+"catalogIcon.pencil.and.ruler" = "Карандаш и линейка";
+"catalogIcon.brain.head.profile" = "Мозг";
+"catalogIcon.figure.walk" = "Ходьба";
+"catalogIcon.figure.run" = "Бег";
+"catalogIcon.figure.strengthtraining" = "Силовая тренировка";
+"catalogIcon.figure.yoga" = "Йога";
+"catalogIcon.figure.cycling" = "Велосипед";
+"catalogIcon.figure.swimming" = "Плавание";
+"catalogIcon.figure.soccer" = "Футбол";
+"catalogIcon.figure.basketball" = "Баскетбол";
+"catalogIcon.figure.tennis" = "Теннис";
+"catalogIcon.figure.gymnastics" = "Гимнастика";
+"catalogIcon.figure.mindandbody" = "Разум и тело";
+"catalogIcon.figure.core.training" = "Тренировка мышц корпуса";
+"catalogIcon.dumbbell" = "Гантель";
+"catalogIcon.bicycle" = "Велосипед";
+"catalogIcon.books" = "Книги";
+"catalogIcon.graduationcap" = "Академическая шапочка";
+"catalogIcon.desktopcomputer" = "Настольный компьютер";
+"catalogIcon.keyboard" = "Клавиатура";
+"catalogIcon.gamecontroller" = "Игровой контроллер";
+"catalogIcon.fork.knife" = "Вилка и нож";
+"catalogIcon.cup.and.saucer" = "Чашка и блюдце";
+"catalogIcon.bed.double" = "Кровать";
+"catalogIcon.moon.stars" = "Луна и звёзды";
+"catalogIcon.moon.zzz" = "Спящая луна";
+"catalogIcon.film" = "Фильм";
+"catalogIcon.music.note" = "Нота";
+"catalogIcon.guitar" = "Гитара";
+"catalogIcon.camera" = "Камера";
+"catalogIcon.tv" = "Телевизор";
+"catalogIcon.musicalnotes" = "Ноты";
+"catalogIcon.paintbrush" = "Кисть";
+"catalogIcon.house" = "Дом";
+"catalogIcon.car.fill" = "Автомобиль";
+"catalogIcon.airplane" = "Самолёт";
+"catalogIcon.cart" = "Корзина";
+"catalogIcon.phone" = "Телефон";
+"catalogIcon.hammer" = "Молоток";
+"catalogIcon.heart" = "Сердце";
+"catalogIcon.leaf" = "Лист";
+"catalogIcon.sparkles" = "Искры";
+"catalogIcon.tag" = "Тег";

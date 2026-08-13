@@ -25,6 +25,8 @@
 - [ ] 3.4 Supersession (U7): only the most-recent buffer row is undoable via shake/toast; older rows commit on their own 30s expiry (checked at foreground). *(UI — other change's responsibility)*
 - [ ] 3.5 Bulk-delete cap: deletes affecting > N records (default 50) bypass the buffer and confirm hard (reuse the F10 scope-confirm dialog); tune N per design open question. *(UI — other change's responsibility)*
 - [ ] 3.6 Wire shake-to-undo per `Design/INTERACTIONS.md` (`ShakeHostingController` for iOS 15/16; `.onShake` for iOS 17+) into `performUndo()` on the manage screens. *(UI — other change's responsibility)*
+
+> Category-specific deletion undo is implemented in the active `add-category-management` change: Manage Categories has a wall-clock `UndoToast`, durable category snapshot restore, and system `UndoManager` registration. Tasks 3.3–3.6 remain open for the other management/history surfaces and the bulk-delete cap.
 - [x] 3.7 Tests: undo within window restores + creates no outbox row; window-elapses-in-background commits on next foreground; supersession; bulk-delete bypass. *(store-level tests in scope; UI tests deferred)*
 
 ## 4. SyncController (optional, session-gated)

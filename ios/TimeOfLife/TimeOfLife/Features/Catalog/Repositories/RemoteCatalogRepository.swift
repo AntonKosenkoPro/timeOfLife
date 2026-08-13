@@ -1,3 +1,4 @@
+// swiftlint:disable file_length
 import Foundation
 
 /// The backend relay's catalog/entries contract (catalog feature + local-first
@@ -47,11 +48,12 @@ final class RemoteCatalogRepository: CatalogSending {
     }
 
     func fetchActivities(modifiedSince: Date?) async throws -> [Activity] {
-        try await client.send(
+        let response = try await client.send(
             APIEndpoint.value(method: .get, path: activitiesPath(modifiedSince: modifiedSince),
                               requiresAuth: true),
-            as: [Activity].self
+            as: [ActivityWireDTO].self
         )
+        return response.map(Self.localActivity(from:))
     }
 
     func fetchCategories() async throws -> [Category] {
@@ -71,10 +73,11 @@ final class RemoteCatalogRepository: CatalogSending {
     }
 
     func fetchActivity(id: String) async throws -> Activity {
-        try await client.send(
+        let dto = try await client.send(
             APIEndpoint.value(method: .get, path: "\(basePath)/activities/\(id)", requiresAuth: true),
-            as: Activity.self
+            as: ActivityWireDTO.self
         )
+        return Self.localActivity(from: dto)
     }
 
     func fetchCategory(id: String) async throws -> Category {
@@ -151,6 +154,20 @@ final class RemoteCatalogRepository: CatalogSending {
         )
     }
 
+    /// Maps the wire Activity (embedded `categories`) to the local model
+    /// (ordered `categoryIDs`) (category-management D5).
+    private static func localActivity(from dto: ActivityWireDTO) -> Activity {
+        Activity(
+            id: dto.id,
+            name: dto.name,
+            notes: dto.notes,
+            lastUsedAt: dto.lastUsedAt,
+            categoryIDs: dto.categories.map(\.id),
+            createdAt: dto.createdAt,
+            updatedAt: dto.updatedAt
+        )
+    }
+
     // MARK: - Paths
 
     private func activitiesPath(modifiedSince: Date?) -> String {
@@ -183,6 +200,94 @@ struct EntryListResponse: Decodable, Sendable {
     let items: [TimeEntry]
 }
 
+/// RFC 3339 date codec for the relay wire format (OpenAPI `format: date-time`).
+/// The default JSONDecoder/JSONEncoder use `Double` timestamps, which neither
+/// the OpenAPI contract nor the backend accepts — every wire DTO decodes
+/// dates through this type and every request body encodes them through it.
+enum WireDate {
+    /// Parses an RFC 3339 timestamp (with or without fractional seconds).
+    static func parse(_ string: String) -> Date? {
+        if let date = ISO8601DateFormatter.withFractional.date(from: string) {
+            return date
+        }
+        return ISO8601DateFormatter.plain.date(from: string)
+    }
+
+    /// Formats a Date as RFC 3339 with fractional seconds.
+    static func format(_ date: Date) -> String {
+        ISO8601DateFormatter.withFractional.string(from: date)
+    }
+}
+
+fileprivate extension ISO8601DateFormatter {
+    /// A fresh formatter per use — ISO8601DateFormatter is not Sendable and
+    /// the catalog client may be called from any actor.
+    static var withFractional: ISO8601DateFormatter {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter
+    }
+
+    static var plain: ISO8601DateFormatter {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime]
+        return formatter
+    }
+}
+
+/// The wire shape of an Activity as the relay returns it
+/// (category-management D5): the response embeds `categories` as CategoryTag
+/// objects and RFC 3339 timestamps, which the local `Activity` model does not
+/// decode directly. The repository maps this DTO to the local ordered
+/// `categoryIDs`.
+struct ActivityWireDTO: Decodable, Sendable {
+    let id: String
+    let name: String
+    let notes: String?
+    let lastUsedAt: Date?
+    let createdAt: Date
+    let updatedAt: Date
+    let categories: [CategoryTagDTO]
+
+    enum CodingKeys: String, CodingKey {
+        case id, name, notes
+        case lastUsedAt = "last_used_at"
+        case createdAt = "created_at"
+        case updatedAt = "updated_at"
+        case categories
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        name = try container.decode(String.self, forKey: .name)
+        notes = try container.decodeIfPresent(String.self, forKey: .notes)
+        categories = try container.decode([CategoryTagDTO].self, forKey: .categories)
+        func date(_ key: CodingKeys) throws -> Date {
+            let raw = try container.decode(String.self, forKey: key)
+            guard let parsed = WireDate.parse(raw) else {
+                throw DecodingError.dataCorruptedError(
+                    forKey: key,
+                    in: container,
+                    debugDescription: "Invalid RFC 3339 date: \(raw)"
+                )
+            }
+            return parsed
+        }
+        lastUsedAt = try container.decodeIfPresent(String.self, forKey: .lastUsedAt).flatMap(WireDate.parse)
+        createdAt = try date(.createdAt)
+        updatedAt = try date(.updatedAt)
+    }
+}
+
+/// An embedded category tag in an Activity/Entry response
+/// (OpenAPI `CategoryTag`).
+struct CategoryTagDTO: Decodable, Sendable {
+    let id: String
+    let name: String
+    let icon: String
+}
+
 // MARK: - Request bodies (mirror the OpenAPI contract)
 
 struct ActivityCreateBody: Encodable, Sendable {
@@ -208,7 +313,7 @@ struct ActivityUpdateBody: Encodable, Sendable {
     let name: String
     let notes: String?
     let categoryIDs: [String]
-    let updatedAt: Date
+    let updatedAt: String
 
     enum CodingKeys: String, CodingKey {
         case name, notes
@@ -220,7 +325,7 @@ struct ActivityUpdateBody: Encodable, Sendable {
         self.name = activity.name
         self.notes = activity.notes
         self.categoryIDs = activity.categoryIDs
-        self.updatedAt = activity.updatedAt
+        self.updatedAt = WireDate.format(activity.updatedAt)
     }
 }
 
@@ -239,7 +344,7 @@ struct CategoryCreateBody: Encodable, Sendable {
 struct CategoryUpdateBody: Encodable, Sendable {
     let name: String
     let icon: String
-    let updatedAt: Date
+    let updatedAt: String
 
     enum CodingKeys: String, CodingKey {
         case name, icon
@@ -249,15 +354,15 @@ struct CategoryUpdateBody: Encodable, Sendable {
     init(category: Category) {
         self.name = category.name
         self.icon = category.icon
-        self.updatedAt = category.updatedAt
+        self.updatedAt = WireDate.format(category.updatedAt)
     }
 }
 
 struct EntryCreateBody: Encodable, Sendable {
     let id: String
     let activityID: String
-    let startedAt: Date
-    let endedAt: Date?
+    let startedAt: String
+    let endedAt: String?
     let source: String
     let sourceRef: String?
 
@@ -273,17 +378,17 @@ struct EntryCreateBody: Encodable, Sendable {
     init(entry: TimeEntry) {
         self.id = entry.id
         self.activityID = entry.activityID
-        self.startedAt = entry.startedAt
-        self.endedAt = entry.endedAt
+        self.startedAt = WireDate.format(entry.startedAt)
+        self.endedAt = entry.endedAt.map(WireDate.format)
         self.source = entry.source
         self.sourceRef = entry.sourceRef
     }
 }
 
 struct EntryUpdateBody: Encodable, Sendable {
-    let startedAt: Date
-    let endedAt: Date?
-    let updatedAt: Date
+    let startedAt: String
+    let endedAt: String?
+    let updatedAt: String
 
     enum CodingKeys: String, CodingKey {
         case startedAt = "started_at"
@@ -292,8 +397,8 @@ struct EntryUpdateBody: Encodable, Sendable {
     }
 
     init(entry: TimeEntry) {
-        self.startedAt = entry.startedAt
-        self.endedAt = entry.endedAt
-        self.updatedAt = entry.updatedAt
+        self.startedAt = WireDate.format(entry.startedAt)
+        self.endedAt = entry.endedAt.map(WireDate.format)
+        self.updatedAt = WireDate.format(entry.updatedAt)
     }
 }

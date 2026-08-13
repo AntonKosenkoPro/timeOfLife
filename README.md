@@ -24,7 +24,7 @@ Entries, activities, categories, the running timer state, the outbox, and the un
 
 ### Local-first architecture
 
-The device is the source of truth; the backend is an **optional relay**; sync is a transport feature that activates on sign-in. Everything works offline with no account. Writes go through a transactional **outbox** (deletes are first-class), deletions sit in a durable **undo buffer** with a wall-clock 30 s window (committed on next foreground), and `SyncController` syncs via `?modified_since=` delta pulls with last-write-wins on `updated_at`. Specs: `openspec/changes/local-first-sync-architecture/`. Note: the undo toast/shake UI, the "Enable Sync" sign-in sheet, "via <Source>" labels, and the iOS 18 lock-screen Control are still **incomplete** — see `docs/project-context.md` → "Incomplete / deferred".
+The device is the source of truth; the backend is an **optional relay**; sync is a transport feature that activates on sign-in. Everything works offline with no account. Writes go through a transactional **outbox** (deletes are first-class), deletions sit in a durable **undo buffer** with a wall-clock 30 s window (committed on next foreground), and `SyncController` syncs via `?modified_since=` delta pulls with last-write-wins on `updated_at`. Specs: `openspec/changes/local-first-sync-architecture/` and `openspec/changes/add-category-management/`. Categories are seeded once per local dataset and managed from Profile; category deletion has a scoped countdown UndoToast and system Undo. App-wide activity/history undo UI, the "Enable Sync" sign-in sheet, "via <Source>" labels, and the iOS 18 lock-screen Control remain **incomplete** — see `docs/project-context.md` → "Incomplete / deferred".
 
 ## Security (R1)
 
@@ -86,6 +86,6 @@ The backend deploys to a **GCP Compute Engine VM** (`timeoflife-backend`, us-eas
 
 - **Sign in with Apple follow-ups** — account-deletion token revocation via Apple `/auth/revoke`, nonce replay defense, credential-state observation.
 - **iOS History list/edit UI** — the shell's History/Insights empty states landed; the full list UI is not implemented yet.
-- **Undo UI, "Enable Sync" sheet, "via <Source>" labels, lock-screen Control** — local-first storage/sync foundations are done; these UI surfaces are open tasks in `openspec/changes/local-first-sync-architecture/tasks.md`.
+- **App-wide Undo UI, "Enable Sync" sheet, "via <Source>" labels, lock-screen Control** — local-first storage/sync foundations are done; these UI surfaces are open tasks in `openspec/changes/local-first-sync-architecture/tasks.md`. Category-scoped undo in Manage Categories is implemented separately.
 - **Kafka** — deferred (S1 names it; not needed yet). **Rate-limit store** — in-memory; Redis before multi-instance.
 - **SwiftUI snapshot / on-device keychain tests** — not automated; verified manually in the simulator.
