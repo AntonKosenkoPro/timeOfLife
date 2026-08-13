@@ -14,7 +14,7 @@ Implements F2/U1/U2 of `Requirements/FURPS/Activity_Catalog_and_Categories.md`. 
 
 `.sheet` with `medium` and `large` detents on iOS 16+ (the iOS 15 fallback uses the system sheet height). `ScrollView` → `VStack(spacing: Theme.spacingLarge)` with horizontal padding `Theme.screenHorizontalPadding` and `Theme.maxContentWidth`:
 
-1. Title — `.title.bold()`, `Theme.textPrimary`. Create: `L10n.categoryEditorCreateTitle`; edit: `L10n.categoryEditorEditTitle`.
+1. Native collapsing navigation title via `EditorSheetScaffold`. Create: `L10n.categoryEditorCreateTitle`; edit: `L10n.categoryEditorEditTitle`. At the top edge the system renders its large-title form with Cancel in the top bar; scrolling collapses it into an inline material bar beside Cancel, and returning to the top expands it again.
 2. `TextFieldWithError` for name:
    - `accessibilityId`: `CategoryEditorNameField`
    - title / placeholder: `L10n.categoryEditorNameLabel` / `L10n.categoryEditorNamePlaceholder`
@@ -35,7 +35,7 @@ Pinned bottom action bar via `.safeAreaInset(edge: .bottom)` (D13):
   - title: `L10n.categoryEditorSave`
   - `accessibilityId`: `CategoryEditorSaveButton`
   - disabled while name is whitespace-only (trimmed) or `vm.isLoading`
-- Cancel via swipe-down and a toolbar `Cancel` button with `accessibilityIdentifier("CategoryEditorCancelButton")`.
+- Cancel via swipe-down and the scaffold's native cancellation toolbar item with `accessibilityIdentifier("CategoryEditorCancelButton")`; both dismiss paths are disabled while saving.
 
 ### Keyboard handling
 

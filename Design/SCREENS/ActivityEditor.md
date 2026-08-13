@@ -19,7 +19,7 @@ The existing-Activity edit mode is implemented (`refine-selected-activity-from-t
 
 Presented as `.sheet` with `medium` detents (`.medium` + `.large()` if content scrolls). `ScrollView` → `VStack(spacing: Theme.spacingLarge)` with horizontal padding `Theme.screenHorizontalPadding` and `maxWidth: Theme.maxContentWidth`:
 
-1. Title — `L10n.activityEditorEditTitle` — `.title.bold()`, `Theme.textPrimary`.
+1. Native collapsing navigation title via `EditorSheetScaffold` — `L10n.activityEditorEditTitle`. At the top edge the system renders its large-title form with Cancel in the top bar; scrolling collapses it into an inline material bar beside Cancel, and returning to the top expands it again.
 2. `TextFieldWithError` for name:
    - `accessibilityId`: `ActivityEditorNameField`
    - title/placeholder: `L10n.activityEditorNameLabel` / `L10n.activityEditorNamePlaceholder`
@@ -51,7 +51,7 @@ Via `.safeAreaInset(edge: .bottom)` (D13):
 Cancel mechanism (both present):
 
 - System swipe-down dismiss (sheet).
-- `.toolbar` Cancel item (`accessibilityIdentifier("ActivityEditorCancelButton")`) in the sheet's navigation bar — plain `Button(L10n.activityEditorCancel)`.
+- The scaffold's native cancellation toolbar item (`accessibilityIdentifier("ActivityEditorCancelButton")`) in the sheet's navigation bar — plain `Button(L10n.activityEditorCancel)`.
 
 **Cancel during save:** If the user dismisses (swipe-down or Cancel tap) while `isLoading == true`, the sheet stays visible until the in-flight request completes or fails. Cancel is deferred — the sheet dismisses on success, or shows the error and remains interactive on failure. The Cancel button is disabled while `isLoading`.
 

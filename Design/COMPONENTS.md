@@ -6,6 +6,36 @@ This file defines reusable component contracts. Implementations may live under `
 
 ---
 
+## `EditorSheetScaffold`
+
+Shared presentation shell for editor sheets. It owns the native collapsing large-title navigation header, localized Cancel action, standard scroll-content width and padding, measured bottom-bar reserve, keyboard-safe pinned action bar, loading-time dismissal lock, and optional iOS 16+ medium/large detents. Editor-specific fields, focus state, validation, and save behavior remain in the feature view.
+
+### Signature
+
+```swift
+struct EditorSheetScaffold<Content: View, BottomBar: View>: View {
+    init(
+        title: String,
+        cancelTitle: String,
+        isLoading: Bool,
+        cancelAccessibilityId: String,
+        usesMediumDetent: Bool,
+        onCancel: @escaping () -> Void,
+        @ViewBuilder content: () -> Content,
+        @ViewBuilder bottomBar: () -> BottomBar
+    )
+}
+```
+
+### Use
+
+- Use for Activity, Category, and future editor sheets that combine scrollable fields with a pinned primary action.
+- Supply existing localized title/Cancel strings and a stable Cancel accessibility identifier.
+- Keep `@FocusState`, dismiss-on-save observation, validation, and field sections in the calling editor.
+- Do not recreate the header with a custom title inside scroll content, scroll-offset tracking, top overlays, or `UINavigationBarAppearance` overrides.
+
+---
+
 ## `PrimaryButton`
 
 Full-width prominent action button.

@@ -11,7 +11,6 @@ struct ActivityEditorView: View {
     @Environment(\.dismiss)
     private var dismiss
     @FocusState private var isNameFocused: Bool
-    @State private var bottomBarHeight: CGFloat = 0
     @State private var isShowingCategoryEditor = false
 
     init(
@@ -29,61 +28,44 @@ struct ActivityEditorView: View {
     }
 
     var body: some View {
-        NavigationView {
-            ScrollView {
-                VStack(alignment: .leading, spacing: Theme.spacingLarge) {
-                    Text(L10n.activityEditorEditTitle.text)
-                        .font(.title.bold())
-                        .foregroundStyle(Theme.textPrimary)
-
-                    TextFieldWithError(
-                        title: L10n.activityEditorNameLabel.text,
-                        placeholder: L10n.activityEditorNamePlaceholder.text,
-                        text: $vm.name,
-                        error: vm.fieldErrors.name,
-                        keyboardType: .default,
-                        textContentType: nil,
-                        submitLabel: .done,
-                        autocapitalization: .sentences,
-                        accessibilityId: "ActivityEditorNameField"
-                    ) {
-                        isNameFocused = false
-                    }
-                    .focused($isNameFocused)
-                    .onChange(of: vm.name) { _ in
-                        vm.nameDidChange()
-                    }
-
-                    notesField
-
-                    categoriesSection
-
-                    if let errorMessage = vm.errorMessage {
-                        ErrorBanner(
-                            message: errorMessage,
-                            accessibilityId: "ActivityEditorErrorBanner"
-                        )
-                    }
-
-                    Theme.transparent
-                        .frame(height: bottomBarHeight + Theme.spacingLarge)
+        EditorSheetScaffold(
+            title: L10n.activityEditorEditTitle.text,
+            cancelTitle: L10n.activityEditorCancel.text,
+            isLoading: vm.isLoading,
+            cancelAccessibilityId: "ActivityEditorCancelButton",
+            usesMediumDetent: false,
+            onCancel: { dismiss() },
+            content: {
+                TextFieldWithError(
+                    title: L10n.activityEditorNameLabel.text,
+                    placeholder: L10n.activityEditorNamePlaceholder.text,
+                    text: $vm.name,
+                    error: vm.fieldErrors.name,
+                    keyboardType: .default,
+                    textContentType: nil,
+                    submitLabel: .done,
+                    autocapitalization: .sentences,
+                    accessibilityId: "ActivityEditorNameField"
+                ) {
+                    isNameFocused = false
                 }
-                .padding(.horizontal, Theme.screenHorizontalPadding)
-                .frame(maxWidth: Theme.maxContentWidth)
-                .frame(maxWidth: .infinity)
-            }
-            .background(Theme.backgroundPrimary)
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button(L10n.activityEditorCancel.text) {
-                        dismiss()
-                    }
-                    .disabled(vm.isLoading)
-                    .accessibilityIdentifier("ActivityEditorCancelButton")
+                .focused($isNameFocused)
+                .onChange(of: vm.name) { _ in
+                    vm.nameDidChange()
                 }
-            }
-            .measuredBottomBar(height: $bottomBarHeight) {
+
+                notesField
+
+                categoriesSection
+
+                if let errorMessage = vm.errorMessage {
+                    ErrorBanner(
+                        message: errorMessage,
+                        accessibilityId: "ActivityEditorErrorBanner"
+                    )
+                }
+            },
+            bottomBar: {
                 PrimaryButton(
                     title: L10n.activityEditorSave.text,
                     icon: nil,
@@ -97,12 +79,10 @@ struct ActivityEditorView: View {
                 .padding(.vertical, Theme.spacingSmall)
                 .background(Theme.backgroundPrimary)
             }
-            .onAppear {
-                isNameFocused = true
-            }
+        )
+        .onAppear {
+            isNameFocused = true
         }
-        .navigationViewStyle(.stack)
-        .interactiveDismissDisabled(vm.isLoading)
         .sheet(isPresented: $isShowingCategoryEditor) {
             CategoryEditorView(
                 store: vm.categoryStore,

@@ -9,9 +9,9 @@ but the CLI stays the source of truth.
 
 | Layer | Location | Meaning |
 |---|---|---|
-| **Baseline specs** | `openspec/specs/<capability>/spec.md` | The current merged contract. Today: `app-icon`, `app-shell`, `timer-capture-experience`, `category-management`. **Never edit directly** — behavior changes go through a change. |
+| **Baseline specs** | `openspec/specs/<capability>/spec.md` | The current merged contract. Today: `app-icon`, `app-shell`, `timer-capture-experience`, `category-management`, `editor-sheet-ux`. **Never edit directly** — behavior changes go through a change. |
 | **Active change (deltas)** | `openspec/changes/<change>/` | A proposal in flight. Its `specs/<capability>/spec.md` files are delta specs (ADDED/MODIFIED requirements) not yet in the baseline. Active change: **`local-first-sync-architecture`** (local-first store, sync client, provenance, and Controls). Check its `tasks.md` and `openspec status --change <name>`. |
-| **Archives** | `openspec/changes/archive/<change>/` | Completed changes; their deltas were already folded into the baselines by `openspec archive`. Read them only for history. Today: `redesign-track-experience`, `keep-timer-position-on-stop`, `unify-activity-preparation-flow`, `refine-selected-activity-from-track`, `add-category-management`, `integrate-app-icon`. |
+| **Archives** | `openspec/changes/archive/<change>/` | Completed changes; their deltas were already folded into the baselines by `openspec archive`. Read them only for history. Today: `redesign-track-experience`, `keep-timer-position-on-stop`, `unify-activity-preparation-flow`, `refine-selected-activity-from-track`, `add-category-management`, `integrate-app-icon`, `collapsing-editor-sheet-headers`. |
 
 **Which contract is in force?** The baselines plus the delta specs of the active change
 (deltas are the newest intent). Check the active change's `tasks.md` before implementing

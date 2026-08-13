@@ -10,7 +10,6 @@ struct CategoryEditorView: View {
     @Environment(\.dismiss)
     private var dismiss
     @FocusState private var isNameFocused: Bool
-    @State private var bottomBarHeight: CGFloat = 0
 
     init(
         store: LocalStore,
@@ -27,84 +26,56 @@ struct CategoryEditorView: View {
     }
 
     var body: some View {
-        Group {
-            if #available(iOS 16.0, *) {
-                editorContent
-                    .presentationDetents([.medium, .large])
-            } else {
-                editorContent
-            }
-        }
-    }
+        EditorSheetScaffold(
+            title: vm.isCreateMode ? L10n.categoryEditorCreateTitle.text : L10n.categoryEditorEditTitle.text,
+            cancelTitle: L10n.categoryEditorCancel.text,
+            isLoading: vm.isLoading,
+            cancelAccessibilityId: "CategoryEditorCancelButton",
+            usesMediumDetent: true,
+            onCancel: { dismiss() },
+            content: {
+                TextFieldWithError(
+                    title: L10n.categoryEditorNameLabel.text,
+                    placeholder: L10n.categoryEditorNamePlaceholder.text,
+                    text: $vm.name,
+                    error: vm.fieldErrors.name,
+                    keyboardType: .default,
+                    textContentType: nil,
+                    submitLabel: .done,
+                    autocapitalization: .sentences,
+                    accessibilityId: "CategoryEditorNameField"
+                ) {
+                    isNameFocused = false
+                }
+                .focused($isNameFocused)
+                .onChange(of: vm.name) { _ in
+                    vm.nameDidChange()
+                }
 
-    private var editorContent: some View {
-        NavigationView {
-            ScrollView {
-                VStack(alignment: .leading, spacing: Theme.spacingLarge) {
-                    Text(vm.isCreateMode ? L10n.categoryEditorCreateTitle.text : L10n.categoryEditorEditTitle.text)
-                        .font(.title.bold())
+                VStack(alignment: .leading, spacing: Theme.spacingSmall) {
+                    Text(L10n.categoryEditorIconLabel.text)
+                        .font(.title2.bold())
                         .foregroundStyle(Theme.textPrimary)
+                        .accessibilityAddTraits(.isHeader)
 
-                    TextFieldWithError(
-                        title: L10n.categoryEditorNameLabel.text,
-                        placeholder: L10n.categoryEditorNamePlaceholder.text,
-                        text: $vm.name,
-                        error: vm.fieldErrors.name,
-                        keyboardType: .default,
-                        textContentType: nil,
-                        submitLabel: .done,
-                        autocapitalization: .sentences,
-                        accessibilityId: "CategoryEditorNameField"
-                    ) {
-                        isNameFocused = false
-                    }
-                    .focused($isNameFocused)
-                    .onChange(of: vm.name) { _ in
-                        vm.nameDidChange()
-                    }
-
-                    VStack(alignment: .leading, spacing: Theme.spacingSmall) {
-                        Text(L10n.categoryEditorIconLabel.text)
-                            .font(.title2.bold())
-                            .foregroundStyle(Theme.textPrimary)
-                            .accessibilityAddTraits(.isHeader)
-
-                        IconPickerGrid(
-                            options: iconOptions,
-                            selection: Binding(
-                                get: { vm.icon.rawValue },
-                                set: { vm.icon = CatalogIcon(validated: $0) }
-                            ),
-                            accessibilityId: "CategoryEditorIcon"
-                        )
-                    }
-
-                    if let errorMessage = vm.errorMessage {
-                        ErrorBanner(
-                            message: errorMessage,
-                            accessibilityId: "CategoryEditorErrorBanner"
-                        )
-                    }
-
-                    Theme.transparent
-                        .frame(height: bottomBarHeight + Theme.spacingLarge)
+                    IconPickerGrid(
+                        options: iconOptions,
+                        selection: Binding(
+                            get: { vm.icon.rawValue },
+                            set: { vm.icon = CatalogIcon(validated: $0) }
+                        ),
+                        accessibilityId: "CategoryEditorIcon"
+                    )
                 }
-                .padding(.horizontal, Theme.screenHorizontalPadding)
-                .frame(maxWidth: Theme.maxContentWidth)
-                .frame(maxWidth: .infinity)
-            }
-            .background(Theme.backgroundPrimary)
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button(L10n.categoryEditorCancel.text) {
-                        dismiss()
-                    }
-                    .disabled(vm.isLoading)
-                    .accessibilityIdentifier("CategoryEditorCancelButton")
+
+                if let errorMessage = vm.errorMessage {
+                    ErrorBanner(
+                        message: errorMessage,
+                        accessibilityId: "CategoryEditorErrorBanner"
+                    )
                 }
-            }
-            .measuredBottomBar(height: $bottomBarHeight) {
+            },
+            bottomBar: {
                 PrimaryButton(
                     title: L10n.categoryEditorSave.text,
                     icon: nil,
@@ -118,19 +89,17 @@ struct CategoryEditorView: View {
                 .padding(.vertical, Theme.spacingSmall)
                 .background(Theme.backgroundPrimary)
             }
-            .onAppear {
-                isNameFocused = true
-            }
-            // Dismiss only after a successful save. Duplicate and stale
-            // outcomes keep the editor open with actionable context.
-            .onChange(of: vm.isSavedOrDuplicate) { saved in
-                if saved {
-                    dismiss()
-                }
+        )
+        .onAppear {
+            isNameFocused = true
+        }
+        // Dismiss only after a successful save. Duplicate and stale
+        // outcomes keep the editor open with actionable context.
+        .onChange(of: vm.isSavedOrDuplicate) { saved in
+            if saved {
+                dismiss()
             }
         }
-        .navigationViewStyle(.stack)
-        .interactiveDismissDisabled(vm.isLoading)
     }
 
     /// Keeps a valid synchronized icon visible in the picker even when the

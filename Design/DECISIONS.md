@@ -169,3 +169,8 @@ Resolved design precedents for Time of Life. Add a new entry here when a visual 
 - Categories are managed from Profile for both signed-in and signed-out users. The local catalog is alphabetized and editable offline; assignment to Activities remains optional and ordered.
 - Category deletion is tag-only and uses the durable local undo buffer. Manage Categories registers the newest eligible deletion with `UndoManager` and shows a wall-clock countdown; this does not claim that activity/history undo UI is complete.
 - Reason: local-first capture must not depend on account state, while a dedicated Profile surface keeps capture uncluttered and gives category deletion an explicit, recoverable boundary.
+
+## D33 — Editor sheets use one native collapsing-header scaffold
+
+- Activity, Category, and future editor sheets use `EditorSheetScaffold`: a native large navigation title with Cancel floating at rest, collapsing into the material navigation bar beside Cancel on scroll and expanding again at the top edge. The scaffold also owns the standard scroll container and keyboard-safe pinned action bar.
+- Reason: the previous custom title scrolled under an otherwise empty Cancel bar. The system large-title mechanism removes that overlap without custom header geometry or appearance code, while one scaffold keeps all present and future editors consistent. See `openspec/changes/archive/2026-08-13-collapsing-editor-sheet-headers/design.md`.
