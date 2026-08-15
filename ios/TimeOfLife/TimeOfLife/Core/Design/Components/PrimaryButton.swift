@@ -20,6 +20,11 @@ import SwiftUI
 /// when loading or explicitly disabled. Primary actions across the app use
 /// this component.
 struct PrimaryButton: View {
+    /// The shared minimum button height (54 pt). Also referenced by
+    /// `MainActionSlot` so the Track main action's fixed slot never dips
+    /// below the button's own minimum.
+    nonisolated static let minHeight: CGFloat = 54
+
     let title: String
     let icon: String?
     let isLoading: Bool
@@ -71,7 +76,7 @@ struct PrimaryButton: View {
                 }
             }
             .frame(maxWidth: .infinity)
-            .frame(minHeight: 54)
+            .frame(minHeight: Self.minHeight)
             .foregroundStyle(Theme.textOnAccent)
         .background(background)
         .clipShape(RoundedRectangle(cornerRadius: Theme.cornerRadius, style: .continuous))

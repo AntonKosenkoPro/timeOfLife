@@ -56,7 +56,6 @@
 "timer.start" = "Start";
 "timer.stop" = "Stop";
 "timer.stopHint" = "Stops the timer and saves the entry";
-"timer.offlineHint" = "Entries are saved locally and synced when you’re back online.";
 "timer.emptyActivityError" = "Enter an activity name.";
 "timer.signOut" = "Sign Out";
 "timer.chooseActivity" = "Choose an activity";
@@ -66,6 +65,7 @@
 "timer.running" = "Running";
 "timer.ready" = "Ready";
 "timer.chooserRecent" = "Recent";
+"timer.recentsEmptyHint" = "Activities you track will appear here.";
 "timer.selectActivity" = "Select %@";
 "timer.searchPrompt" = "Search or create";
 "timer.searchEmptyCatalogTitle" = "No activities yet";
@@ -77,8 +77,6 @@
 "timer.searchValidationEmpty" = "Enter an activity name.";
 "timer.searchValidationTooLong" = "Name must be at most 60 characters.";
 "timer.stalePreparationError" = "This activity no longer exists. Choose another one.";
-"timer.activityRefine" = "Refine";
-"timer.activityRefineHint" = "Edit the selected activity";
 
 // Activity editor
 "activityEditor.createTitle" = "New activity";

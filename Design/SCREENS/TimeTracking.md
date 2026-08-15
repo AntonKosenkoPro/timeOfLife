@@ -24,29 +24,17 @@ metadata for management and Insights; they are not part of capture selection.
 
 ### Layout
 
-Wrap the screen in the app shell's navigation container. Use a scrollable
-content column with horizontal `Theme.spacingLarge` padding and a pinned bottom
-action bar.
+Wrap the screen in the app shell's navigation container. Content is a
+scrollable column with horizontal `Theme.spacingLarge` padding and a dual-flow
+vertical composition; the adaptive spacers collapse to zero before scrolling
+engages.
 
-1. `OfflineBanner()` is rendered at the top by the root shell.
-2. Navigation title: `L10n.timerTitle` (`Track`).
-3. State-specific Activity preparation control below the numeric readout and
-   above Recents:
-   - Idle: the filled `+` button with `L10n.timerChooseActivity`, identifier
-     `TimerChooseActivityButton`, and minimum height 54 pt.
-   - Ready or saved: a search-styled picker with a magnifier, the prepared
-     Activity name, and identifier `TimerActivitySearchButton`.
-   - Running, saving, or recoverable error: a non-interactive prepared Activity
-     label with identifier `TimerActivityLabel`; search is unavailable while
-     timing is active.
-   - No state renders more than one preparation control.
-   - No control shows a Category icon or Category name.
-   - The selected-Activity row is an `HStack`: the state-specific control
-     (picker or label) takes flexible width, with a trailing Refine button
-     (`TimerActivityRefineButton`, localized visible label, minimum 44 pt
-     interaction area). Refine is visible in all non-idle states (ready,
-     running, saving, saved, error) and is disabled only while saving. The
-     search picker itself remains disabled outside ready/saved.
+Top-to-bottom order:
+
+1. Navigation title: `L10n.timerTitle` (`Track`).
+2. Top adaptive spacer (see adaptive spacing below).
+3. Completion-mark region: the saved-state confirmation appears here, above
+   the readout, without moving the timer content.
 4. Numeric timer readout:
    - Elapsed time formatted as `MM:SS` or `H:MM:SS`.
    - Centered in the main content region.
@@ -54,26 +42,91 @@ action bar.
      approved Theme equivalent.
    - Uses `Theme.textPrimary` and `.monospacedDigit()`.
    - Keeps a stable frame across all timer states.
-   - The saved-state blue checkmark is layered above the readout without
-     participating in layout, so its appearance does not move the timer.
    - `accessibilityIdentifier`: `TimerDisplay`.
 5. State label below the readout:
    - `READY`, `RUNNING`, `SAVING`, or `SAVED` as appropriate.
    - The exact elapsed value remains the primary state information.
-6. Reserve space for the pinned bottom action bar.
+6. Reserved non-field-error region, immediately above the central separator:
+   - Preserves its reserved height when no error is shown, without exposing
+     an empty accessibility element.
+   - Error text wraps fully and is never cut: when the wrapped error is taller
+     than the reservation, the region grows and the flexible spacing yields
+     first.
+   - `accessibilityIdentifier`: `TrackErrorBanner`.
+7. Central separator: receives free space beyond twice the shared cap (see
+   adaptive spacing below).
+8. Activity search/refine row (the selected-Activity row):
+   - Idle: the slot is reserved — the picker geometry is kept but invisible,
+     non-interactive, and absent from the accessibility tree — so preparing
+     an Activity never moves the main action below it.
+   - Ready or saved: a full-width search-styled picker with a magnifier, the
+     prepared Activity name, and identifier `TimerActivitySearchButton`.
+   - Running, saving, or recoverable error: a non-interactive prepared Activity
+     label with identifier `TimerActivityLabel`; search is unavailable while
+     timing is active.
+   - No state renders more than one preparation control.
+   - No control shows a Category icon or Category name.
+   - No editing affordance: the former beside-picker Refine and any "Edit
+     activity" variant are removed; editing placement is deferred to a later
+     change.
+9. State-specific main action in one stable region:
+   - `L10n.timerStart` with `play.fill` when ready, identifier
+     `TimerStartButton`.
+   - `L10n.timerStop` with `stop.fill` when running, identifier
+     `TimerStopButton`.
+   - Stop hint: `L10n.timerStopHint` - stops the timer and saves the entry.
+   - The region changes between these controls without moving; it sits above
+     Recents so Choose Activity / Start / Stop stays reachable without
+     scrolling.
+   - The action renders in a fixed-height slot equal to the tallest of its
+     state titles (Choose an activity / Start / Stop) at the active Dynamic
+     Type size, so the control's frame is identical in idle, ready, running,
+     saving, saved, and error states.
+10. Recents: the wrapping chip flow of the most-recently-used Activities (see
+    Recents below); hidden while a timer is running while its occupied
+    height is preserved, so the main action never moves.
+11. Bottom adaptive spacer (see adaptive spacing below).
+12. Tab bar.
 
-Pinned bottom action bar via `.safeAreaInset(edge: .bottom)`:
+Adaptive spacing:
 
-- Non-field error banner, when needed, above the primary action.
-- Primary control in one stable position:
-  - `L10n.timerStart` with `play.fill` when ready.
-  - `L10n.timerStop` with `stop.fill` when running.
-  - `TimerStartButton` / `TimerStopButton` identifiers.
-  - Stop hint: `L10n.timerStopHint` - stops the timer and saves the entry.
-- Offline hint below the primary control when appropriate.
+- The top and bottom spacers share one maximum-height token: **48 pt**,
+  selected from the 24/48/72/96 Pro Max spike comparison and validated on
+  iPhone SE (default and Large Dynamic Type).
+- With free space `slack = viewport - content`, each spacer resolves to
+  `min(cap, slack / 2)` — the two are always equal.
+- Surplus beyond twice the cap goes to the central separator between the
+  error region and the search/refine flow.
+- When space is constrained (short screens, large Dynamic Type), all three
+  flexible regions collapse to zero and the ordered content scrolls.
+- Main-action pinning (D10): the content height around the main action is
+  state-invariant (reserved idle preparation slot, preserved Recents height
+  while running, fixed-height action slot), so the equal split recomputes
+  identically in every state. A wrapped error's growth beyond the reserved
+  error height compresses the top spacer first, then the central separator —
+  both above the main action, keeping it stationary — and the bottom spacer
+  collapses only when both are exhausted, at which point the content
+  scrolls.
 
 The Track screen has no Dial, ring, sweep, goal, daily-total, or decorative
 progress visualization.
+
+### Recents
+
+- Wrapping chip flow of the most-recently-used Activities, capped at six,
+  most-recently-used first; no horizontal scrolling.
+- Each chip shows the icon of the first assigned Category (first by assignment
+  position) in a fixed symbol slot; categoryless Activities render name-only
+  chips with no icon and no placeholder glyph. Category names are never shown.
+- The prepared Activity's chip uses a filled accent presentation (accent
+  background, on-accent text, accent border) and keeps its icon; no checkmark.
+- Minimum 44 pt tap targets; a tap prepares the Activity without starting
+  timing.
+- Recents are hidden while a timer is running; their occupied height is
+  preserved so the main action does not move.
+- Empty catalog: a dedicated localized hint (`timer.recentsEmptyHint`,
+  "Activities you track will appear here." / «Здесь появятся активности,
+  которые вы отслеживаете.»), not the search sheet's empty-catalog copy.
 
 ### Activity search sheet
 
@@ -124,33 +177,32 @@ activates Start.
 ### Keyboard handling
 
 The Track screen does not keep a free-text field in the primary capture
-layout. Search and Activity editing follow `Design/INTERACTIONS.md` ->
-**Keyboard and primary input placement**. The native search field stays
-above the keyboard; the editor's Save action is pinned with
-`.safeAreaInset(edge: .bottom)`.
+layout. Search follows `Design/INTERACTIONS.md` -> **Keyboard and primary
+input placement**. The native search field stays above the keyboard; the
+editor's Save action is pinned with `.safeAreaInset(edge: .bottom)`.
 
 ### Layout stability rule
 
-- The numeric readout and state-specific preparation/primary controls keep
-  their interaction regions across idle, ready, running, saving, and saved
-  states.
+- The numeric readout, state-specific preparation control, and main action
+  keep their interaction regions across idle, ready, running, saving, and
+  saved states.
+- The main-action control's frame is identical in every state: the layout
+  reserves the preparation-row slot while idle, preserves Recents' occupied
+  height while running, renders the action in a fixed-height slot, and lets
+  wrapped-error growth yield from the top spacer before the central
+  separator.
 - Only the Activity state, readout value, label, button title/icon, and tint
   change.
 - No dial, ring, or progress card appears or disappears around the readout.
-- The primary action remains visible above the keyboard and safe-area inset.
+- The main action remains visible above the tab bar; adaptive spacing yields
+  before any content clips, overlaps, or becomes unreachable.
 
 ### Behaviors
 
-- Open Activity search from the state-specific preparation control below the
-  timer.
+- Open Activity search from the state-specific preparation control above
+  Recents.
 - Selecting a recent Activity prepares it without creating an entry.
 - Quick-creating an unmatched Activity prepares it locally without Categories.
-- Refine (visible in every non-idle state, disabled only while saving) opens
-  the shared Activity Editor prefilled with the selected Activity's name,
-  notes, and Categories. Saving replaces the Activity in place in the current
-  TrackState — no transition — preserving startedAt, duration, and the
-  ticker; cancelling or failing leaves the selected Activity and timer state
-  unchanged.
 - Start revalidates the prepared Activity by identifier; a prepared Activity
   that no longer exists clears preparation and returns to idle with a
   localized error (it is never silently recreated).
@@ -158,12 +210,15 @@ above the keyboard; the editor's Save action is pinned with
   emits selection feedback, and keeps the screen awake.
 - Stop calculates elapsed time, saves the entry locally, emits success feedback,
   and returns to the ready state for the same Activity.
-- Save errors preserve recoverable running state and appear above the primary
-  action without a blocking loader.
+- Save errors preserve recoverable running state and appear in the reserved
+  non-field-error region without a blocking loader; error text wraps fully and
+  is never cut.
 - A running timer remains visible above the tab bar on History and Insights;
   its Stop action saves in place.
 - Profile owns sign-out and account/sync controls rather than the Track toolbar.
-- Dynamic Type keeps the readout, Activity name, and Start/Stop action readable.
+- Dynamic Type keeps the readout, Activity name, and Start/Stop action readable;
+  the adaptive spacers and central separator collapse before any content is
+  clipped or unreachable.
 - Reduce Motion uses fades or immediate state changes rather than custom motion.
 
 ### States
@@ -173,10 +228,10 @@ above the keyboard; the editor's Save action is pinned with
 | Idle | No Activity selected; centered readout shows `00:00`; choose Activity prompt and Start are shown or Start is disabled according to validation policy. |
 | Ready | Selected Activity name; centered readout shows `00:00`; Start button shown. |
 | Search active | Searchable sheet with a native field; content area shows browse/filtered results, create or restore actions, empty-catalog guidance, or validation/error states; committed timer state unchanged. |
-| Running | Prepared Activity label remains visible; readout updates live; Stop button shown with destructive tint. |
+| Running | Prepared Activity label remains visible; readout updates live; Stop button shown with destructive tint; Recents hidden with its height preserved. |
 | Saving | Readout remains stable; Stop action shows progress while the save completes. |
-| Saved | Brief saved confirmation above the readout; the same Activity remains prepared with `00:00` and Start, and the timer stays in its prior position. |
-| Error | Localized non-field error appears above the primary action; recoverable running state is preserved. |
+| Saved | Brief saved confirmation in the completion-mark region above the readout; the same Activity remains prepared with `00:00` and Start, and the timer stays in its prior position. |
+| Error | Localized non-field error in the reserved region above the central separator; text wraps fully and the region grows past the reservation when needed, with the top spacer yielding first and then the central separator so the main action stays stationary; recoverable running state is preserved. |
 
 ### Data model
 
@@ -204,6 +259,7 @@ outbox row; the relay is the transport, not a per-record state).
 - [ ] Activity search, readout, and Start/Stop controls have stable identifiers.
 - [ ] Numeric readout is centered, fixed, and `.monospacedDigit()`.
 - [ ] Suggestions and search rows expose Activity names only.
+- [ ] Recents chips show the first assigned Category's icon only; no names.
 - [ ] Start follows explicit selection and persists running state.
 - [ ] Stop saves locally and preserves recoverable state on failure.
 - [ ] Compact timer is available above History and Insights navigation.
@@ -221,17 +277,22 @@ Add English and Russian values, then add corresponding `L10n` cases:
 "timer.stop" = "Stop";
 "timer.stopHint" = "Stops the timer and saves the entry";
 "timer.saved" = "Saved";
-"timer.suggestionsHeader" = "Recent activities";
+"timer.chooserRecent" = "Recent";
+"timer.recentsEmptyHint" = "Activities you track will appear here.";
+"timer.selectActivity" = "Select %@";
 "timer.quickAdd" = "New activity";
 "timer.manageActivities" = "Manage activities";
 ```
 
 ## Catalog behavior
 
-Suggestions are computed on-device from the local catalog and ranked by
-`last_used_at`. Each row contains the Activity name and recency only. Category
-icons and names belong in Manage Activities, Manage Categories, Activity Editor,
-and Insights, not in the capture search.
+Recents are computed on-device from the local catalog and ranked by
+`last_used_at`, capped at six, most-recently-used first. Each chip contains the
+Activity name and, when the Activity has Categories, the icon of the first
+assigned Category — never a Category name. Category icons belong in Manage
+Activities, Manage Categories, Activity Editor, and Insights; on Track they
+appear only in Recents chips. The search sheet and the selected-Activity row
+remain category-free.
 
 The search sheet offers a single full-width quick-create row that saves an
 Activity with no Categories. Starting with a new name still auto-creates a

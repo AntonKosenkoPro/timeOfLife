@@ -4,22 +4,26 @@ import SwiftUI
 /// numeric timer whose only purpose is displaying the exact duration while
 /// the user chooses, starts, or stops an activity.
 ///
-/// Layout is intentionally stable: the numeric readout and state-specific
-/// preparation/primary controls keep their interaction regions across idle,
-/// ready, running, saving, saved, and error states.
+/// Content uses the adaptive dual-flow layout (refine-track-recents D1):
+/// title → top spacer → completion mark → timer numbers/status → reserved
+/// error region → central separator → Activity search/refine → main action →
+/// Recents → bottom spacer → tab bar, with the top and bottom spacers capped
+/// at 48 pt and surplus slack going to the central separator. Track itself
+/// has no editing affordance and no offline hint.
 ///
 /// Activity preparation uses a full-height native searchable sheet
 /// (unify-activity-preparation-flow spec, decision 1). The operating system
 /// owns the search field, focus, keyboard, and cancellation while Track keeps
 /// its committed timer state untouched until a result is confirmed.
-/// Selected-Activity refinement is presented from Track as a sibling sheet
-/// (refine-selected-activity-from-track change, design decision 2).
+/// The Activity editor sheet and its presentation machinery remain wired for
+/// the future editing placement (refine-track-recents D9, currently
+/// unreachable from Track).
 struct TrackView: View {
     @ObservedObject var vm: TrackViewModel
     @EnvironmentObject var container: AppContainer
 
     var body: some View {
-        TrackContent(vm: vm)
+        content
             .navigationTitle(L10n.tabTrack.text)
             .navigationBarTitleDisplayMode(.inline)
             .task { await vm.load() }
@@ -43,6 +47,20 @@ struct TrackView: View {
             }
     }
 
+    /// DEBUG-only spike gate: launching with `TRACK_SPIKE=1` replaces the
+    /// Track content with the refine-track-recents layout harness (D7).
+    @ViewBuilder private var content: some View {
+        #if DEBUG
+        if ProcessInfo.processInfo.environment["TRACK_SPIKE"] == "1" {
+            TrackLayoutSpike()
+        } else {
+            TrackContent(vm: vm)
+        }
+        #else
+        TrackContent(vm: vm)
+        #endif
+    }
+
     private var searchPresentation: Binding<Bool> {
         Binding(
             get: { vm.isSearchActive },
@@ -58,310 +76,44 @@ struct TrackView: View {
     }
 }
 
-/// The stable Track timer layout. Activity-search draft state is rendered in
-/// `ActivitySearchSheet`, rather than replacing this body.
-private struct TrackContent: View {
-    @ObservedObject var vm: TrackViewModel
-
-    var body: some View {
-        timerContent
-            .background(Theme.backgroundPrimary.ignoresSafeArea())
-    }
-
-    // MARK: - Timer content
-
-    private var timerContent: some View {
-        ScrollView {
-            VStack(spacing: 0) {
-                NumericTimerReadout(state: vm.state, elapsed: vm.elapsed)
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 190)
-                    .padding(.top, Theme.spacingExtraLarge)
-
-                activityPreparationControl
-                    .padding(.top, Theme.spacingLarge)
-
-                primaryAction
-                    .padding(.top, Theme.spacingLarge)
-
-                if let errorMessage = vm.errorMessage {
-                    ErrorBanner(
-                        message: errorMessage,
-                        accessibilityId: "TrackErrorBanner"
-                    )
-                    .padding(.top, Theme.spacingMedium)
-                }
-
-                if !vm.state.isRunning {
-                    recentActivities
-                        .padding(.top, Theme.spacingExtraLarge)
-                } else {
-                    Text(L10n.timerOfflineHint.text)
-                        .font(.footnote)
-                        .foregroundStyle(Theme.textSecondary)
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal, Theme.spacingLarge)
-                        .padding(.top, Theme.spacingLarge)
-                }
-            }
-            .padding(.horizontal, Theme.screenHorizontalPadding)
-            .padding(.bottom, Theme.spacingLarge)
-            .frame(maxWidth: Theme.maxContentWidth)
-            .frame(maxWidth: .infinity)
-        }
-    }
-
-    // MARK: - Activity preparation
-
-    @ViewBuilder private var activityPreparationControl: some View {
-        switch vm.state {
-        case .idle:
-            chooseActivityButton
-        case .ready, .saved:
-            selectedActivityRow
-        case .running, .saving, .error:
-            selectedActivityRow
-        }
-    }
-
-    private var chooseActivityButton: some View {
-        PrimaryButton(
-            title: L10n.timerChooseActivity.text,
-            icon: "plus",
-            isLoading: false,
-            isDisabled: false,
-            accessibilityId: "TimerChooseActivityButton"
-        ) {
-            vm.activateSearch()
-        }
-    }
-
-    private var selectedActivityRow: some View {
-        HStack(spacing: Theme.spacingSmall) {
-            activityControl
-            refineButton
-        }
-    }
-
-    @ViewBuilder private var activityControl: some View {
-        switch vm.state {
-        case .ready, .saved:
-            activityPicker
-        case .running, .saving, .error:
-            preparedActivityLabel
-        default:
-            activityPicker
-        }
-    }
-
-    private var activityPicker: some View {
-        Button {
-            vm.activateSearch()
-        } label: {
-            HStack(spacing: Theme.spacingSmall) {
-                Image(systemName: "magnifyingglass")
-                    .foregroundStyle(Theme.textSecondary)
-                    .accessibilityHidden(true)
-                Text(vm.state.activity?.name ?? L10n.timerSearchPrompt.text)
-                    .lineLimit(1)
-                    .foregroundStyle(vm.state.activity == nil ? Theme.textSecondary : Theme.textPrimary)
-                Spacer()
-            }
-            .font(.body)
-            .padding(.horizontal, Theme.spacingMedium)
-            .frame(maxWidth: .infinity, minHeight: Theme.minTapArea)
-            .background(Theme.backgroundSecondary)
-            .clipShape(RoundedRectangle(cornerRadius: Theme.cornerRadius))
-            .overlay {
-                RoundedRectangle(cornerRadius: Theme.cornerRadius)
-                    .stroke(Theme.hairline, lineWidth: 0.7)
-            }
-        }
-        .disabled(vm.state.isRunning)
-        .opacity(vm.state.isRunning ? 0.72 : 1)
-        .accessibilityIdentifier("TimerActivitySearchButton")
-        .accessibilityLabel(vm.state.activity?.name ?? L10n.timerSearchPrompt.text)
-    }
-
-    private var preparedActivityLabel: some View {
-        HStack(spacing: Theme.spacingSmall) {
-            Image(systemName: "timer")
-                .foregroundStyle(Theme.textSecondary)
-                .accessibilityHidden(true)
-            Text(vm.state.activity?.name ?? L10n.timerSearchPrompt.text)
-                .lineLimit(1)
-                .foregroundStyle(Theme.textPrimary)
-            Spacer()
-        }
-        .font(.body)
-        .padding(.horizontal, Theme.spacingMedium)
-        .frame(maxWidth: .infinity, minHeight: Theme.minTapArea)
-        .background(Theme.backgroundSecondary)
-        .clipShape(RoundedRectangle(cornerRadius: Theme.cornerRadius))
-        .overlay {
-            RoundedRectangle(cornerRadius: Theme.cornerRadius)
-                .stroke(Theme.hairline, lineWidth: 0.7)
-        }
-        .accessibilityIdentifier("TimerActivityLabel")
-        .accessibilityLabel(vm.state.activity?.name ?? L10n.timerSearchPrompt.text)
-    }
-
-    private var refineButton: some View {
-        Button {
-            vm.presentRefinement()
-        } label: {
-            Text(L10n.timerActivityRefine.text)
-                .font(.subheadline.weight(.medium))
-                .foregroundStyle(Theme.accentPrimary)
-                .lineLimit(1)
-                .frame(minWidth: Theme.minTapArea, minHeight: Theme.minTapArea)
-        }
-        .disabled(vm.state.isSaving)
-        .opacity(vm.state.isSaving ? 0.5 : 1)
-        .accessibilityIdentifier("TimerActivityRefineButton")
-        .accessibilityLabel(L10n.timerActivityRefine.text)
-        .accessibilityHint(L10n.timerActivityRefineHint.text)
-    }
-
-    // MARK: - Primary action
-
-    @ViewBuilder private var primaryAction: some View {
-        if !isIdle {
-            PrimaryButton(
-                title: primaryTitle,
-                icon: primaryIcon,
-                isLoading: vm.state.isSaving,
-                isDisabled: primaryDisabled,
-                accessibilityId: primaryIdentifier,
-                tint: vm.state.isRunning ? Theme.danger : nil
-            ) {
-                switch vm.state {
-                case .idle:
-                    break
-                case .ready, .saved:
-                    vm.start()
-                case .running:
-                    Task { await vm.stop() }
-                case .saving:
-                    break
-                case .error:
-                    Task { await vm.retryStop() }
-                }
-            }
-            .accessibilityHint(primaryHint)
-        }
-    }
-
-    private var isIdle: Bool {
-        if case .idle = vm.state { return true }
-        return false
-    }
-
-    private var primaryTitle: String {
-        switch vm.state {
-        case .idle: L10n.timerChooseActivity.text
-        case .ready, .saved: L10n.timerStart.text
-        case .running, .saving: L10n.timerStop.text
-        case .error: L10n.timerStop.text
-        }
-    }
-
-    private var primaryIcon: String? {
-        switch vm.state {
-        case .idle: "plus"
-        case .ready, .saved: "play.fill"
-        case .running, .saving, .error: "stop.fill"
-        }
-    }
-
-    private var primaryDisabled: Bool {
-        switch vm.state {
-        case .saving: true
-        default: false
-        }
-    }
-
-    private var primaryIdentifier: String {
-        switch vm.state {
-        case .idle: "TimerChooseActivityButton"
-        case .ready, .saved: "TimerStartButton"
-        case .running, .saving, .error: "TimerStopButton"
-        }
-    }
-
-    private var primaryHint: String {
-        switch vm.state {
-        case .running, .saving, .error: L10n.timerStopHint.text
-        default: ""
-        }
-    }
-
-    // MARK: - Recent activities
-
-    private var recentActivities: some View {
-        VStack(alignment: .leading, spacing: Theme.spacingSmall) {
-            Text(L10n.timerChooserRecent.text)
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(Theme.textSecondary)
-
-            if vm.activities.isEmpty {
-                Text(L10n.timerSearchEmptyCatalogSubtitle.text)
-                    .font(.subheadline)
-                    .foregroundStyle(Theme.textSecondary)
-                    .padding(.vertical, Theme.spacingSmall)
-            } else {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: Theme.spacingSmall) {
-                        ForEach(vm.activities.prefix(5)) { activity in
-                            Button {
-                                vm.select(activity)
-                            } label: {
-                                Text(activity.name)
-                                    .font(.subheadline.weight(.medium))
-                                    .foregroundStyle(Theme.textPrimary)
-                                    .padding(.horizontal, Theme.spacingMedium)
-                                    .frame(height: Theme.minTapArea)
-                                    .background(Theme.backgroundSecondary)
-                                    .clipShape(Capsule())
-                                    .overlay {
-                                        Capsule().stroke(Theme.hairline, lineWidth: 0.7)
-                                    }
-                            }
-                            .accessibilityLabel(String(format: L10n.timerSelectActivity.text, activity.name))
-                            .accessibilityIdentifier("TimerSuggestion(\(activity.id))")
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
 #if DEBUG
 #Preview("Track — Idle EN Light") {
     TrackContent(vm: .preview())
 }
 
 #Preview("Track — Ready EN Light") {
-    let activity = Activity(id: "preview-ready-en", name: "Deep work")
-    TrackContent(vm: .preview(state: .ready(activity), activities: [activity]))
+    let categories = [
+        Category(id: "preview-c-work", name: "Work", icon: "laptopcomputer"),
+        Category(id: "preview-c-study", name: "Study", icon: "book")
+    ]
+    let activity = Activity(id: "preview-ready-en", name: "Deep work", categoryIDs: ["preview-c-work"])
+    TrackContent(vm: .preview(
+        state: .ready(activity),
+        activities: [activity],
+        categories: Dictionary(uniqueKeysWithValues: categories.map { ($0.id, $0) })
+    ))
 }
 
 #Preview("Track — Running EN Light") {
     let activity = Activity(id: "preview-running", name: "Reading")
-    TrackContent(vm: .preview(state: .running(activity, startedAt: Date().addingTimeInterval(-120))))
+    TrackContent(vm: .preview(state: .running(activity, startedAt: Date().addingTimeInterval(-120)), activities: [activity]))
 }
 
-#Preview("Track — RU Dark") {
-    let activity = Activity(id: "preview-ready", name: "Спортзал")
-    TrackContent(vm: .preview(state: .ready(activity), activities: [activity]))
-    .preferredColorScheme(.dark)
-    .environment(\.locale, .init(identifier: "ru"))
+#Preview("Track — Saved EN Light") {
+    let activity = Activity(id: "preview-saved", name: "Reading")
+    TrackContent(vm: .preview(state: .saved(activity, duration: 65), activities: [activity]))
 }
 
-#Preview("Track — Long Name Ready") {
+#Preview("Track — Error EN Light") {
+    let activity = Activity(id: "preview-error", name: "Reading")
+    let vm = TrackViewModel.preview(state: .error(activity, startedAt: Date().addingTimeInterval(-120)), activities: [activity])
+    vm.errorMessage = L10n.text(in: .default, code: "error.unknown")
+    return TrackContent(vm: vm)
+}
+
+#Preview("Track — Long Name, Empty Catalog") {
     let longName = String(repeating: "Very Long Activity Name ", count: 3)
     let activity = Activity(id: "preview-long", name: longName)
-    TrackContent(vm: .preview(state: .ready(activity), activities: [activity]))
+    TrackContent(vm: .preview(state: .ready(activity), activities: []))
 }
 #endif

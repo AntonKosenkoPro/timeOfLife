@@ -143,6 +143,55 @@ struct TrackViewModelTests {
         }
     }
 
+    // MARK: - Categories map (Recents chip icons, design D6)
+
+    @Test("load populates the categories map")
+    func loadPopulatesCategories() async throws {
+        let vm = makeViewModel()
+        let store = vm.service.store
+        let category = Category(id: "c1", name: "Work", icon: CatalogIcon.briefcase.rawValue)
+        try await store.createCategory(category)
+
+        await vm.load()
+
+        // Field comparison: the store round-trips dates at reduced precision.
+        #expect(vm.categories[category.id]?.name == category.name)
+        #expect(vm.categories[category.id]?.icon == category.icon)
+    }
+
+    @Test("load leaves the categories map empty on a fresh store")
+    func loadEmptyCategories() async throws {
+        let vm = makeViewModel()
+
+        await vm.load()
+
+        #expect(vm.categories.isEmpty)
+    }
+
+    @Test("saveRefinement refreshes the categories map")
+    func saveRefinementRefreshesCategories() async throws {
+        let vm = makeViewModel()
+        let store = vm.service.store
+        let category = Category(id: "c1", name: "Work", icon: CatalogIcon.briefcase.rawValue)
+        try await store.createCategory(category)
+        try await store.createActivity(Activity(id: "a1", name: "Coding", categoryIDs: [category.id]))
+        await vm.load()
+        vm.select(Activity(id: "a1", name: "Coding"))
+        #expect(vm.categories[category.id]?.icon == CatalogIcon.briefcase.rawValue)
+
+        let updated = Category(
+            id: category.id,
+            name: "Work",
+            icon: CatalogIcon.laptopcomputer.rawValue,
+            createdAt: category.createdAt,
+            updatedAt: Date()
+        )
+        #expect(try await store.updateCategory(updated))
+        await vm.saveRefinement(updated: Activity(id: "a1", name: "Coding"))
+
+        #expect(vm.categories[category.id]?.icon == CatalogIcon.laptopcomputer.rawValue)
+    }
+
     // MARK: - Helpers
 
     private func makeViewModel() -> TrackViewModel {

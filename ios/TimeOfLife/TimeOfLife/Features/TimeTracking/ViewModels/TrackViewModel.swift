@@ -1,3 +1,4 @@
+// swiftlint:disable file_length
 import Foundation
 import SwiftUI
 import Combine
@@ -16,6 +17,8 @@ final class TrackViewModel: ObservableObject {
     @Published var isSearchActive = false
     @Published private(set) var search = ActivitySearchState()
     @Published private(set) var activities: [Activity] = []
+    /// The id→Category map used to resolve Recents chip icons (design D6).
+    @Published private(set) var categories: [String: Category] = [:]
     /// The non-expired pending-deletion identity matching the current query,
     /// refreshed as the query changes (result-model input, decision 7).
     @Published private(set) var pendingDeletion: Activity?
@@ -37,6 +40,7 @@ final class TrackViewModel: ObservableObject {
     func load() async {
         do {
             activities = try await service.store.activities()
+            categories = Dictionary(uniqueKeysWithValues: try await service.store.categories().map { ($0.id, $0) })
             if let running = try await service.runningTimerState(),
                let activityID = running.activityID,
                let activity = try await service.store.activity(id: activityID) {
@@ -242,6 +246,9 @@ final class TrackViewModel: ObservableObject {
         if let refreshed = try? await service.store.activities() {
             activities = refreshed
         }
+        if let refreshedCategories = try? await service.store.categories() {
+            categories = Dictionary(uniqueKeysWithValues: refreshedCategories.map { ($0.id, $0) })
+        }
         replaceActivityInState(updated)
         refinementPresentation = nil
     }
@@ -372,6 +379,7 @@ extension TrackViewModel {
     static func preview(
         state: TrackState = .idle,
         activities: [Activity] = [],
+        categories: [String: Category] = [:],
         query: String = "",
         isSearchActive: Bool = false,
         refinementPresentation: RefinementPresentation? = nil
@@ -391,6 +399,7 @@ extension TrackViewModel {
         )
         vm.state = state
         vm.activities = activities
+        vm.categories = categories
         vm.search.query = query
         vm.isSearchActive = isSearchActive
         vm.refinementPresentation = refinementPresentation

@@ -85,8 +85,9 @@ Resolved design precedents for Time of Life. Add a new entry here when a visual 
 
 ## D16 — On-device recency suggestions
 
-- The timer's top-5 activity suggestions are computed locally from the synced catalog, ranked by `last_used_at`; there is no suggestions endpoint. Works fully offline. `last_used_at` still syncs so recency is shared across devices.
-- Capture suggestions show Activity names and recency only. Category icons and names are intentionally omitted from the timer surface; they belong to Activity management and Insights.
+- The timer's top recency suggestions are computed locally from the synced catalog, ranked by `last_used_at`; there is no suggestions endpoint. Works fully offline. `last_used_at` still syncs so recency is shared across devices.
+- Capture suggestions show Activity names and recency only; search results and the selected-Activity row remain category-free — Category icons and names are intentionally omitted from those surfaces; they belong to Activity management and Insights.
+- Revision (refine-track-recents, D3): the Recents chip flow is the single exception — each chip shows the icon of the first assigned Category (icon-only, never names), and categoryless Activities render name-only chips.
 - Reason: F5/P1 — the client already holds the synced catalog, so a server round-trip would buy nothing and break offline; the backend only keeps `last_used_at` correct on entry start.
 
 ## D17 — Soft-delete via client undo buffer
@@ -174,3 +175,10 @@ Resolved design precedents for Time of Life. Add a new entry here when a visual 
 
 - Activity, Category, and future editor sheets use `EditorSheetScaffold`: a native large navigation title with Cancel floating at rest, collapsing into the material navigation bar beside Cancel on scroll and expanding again at the top edge. The scaffold also owns the standard scroll container and keyboard-safe pinned action bar.
 - Reason: the previous custom title scrolled under an otherwise empty Cancel bar. The system large-title mechanism removes that overlap without custom header geometry or appearance code, while one scaffold keeps all present and future editors consistent. See `openspec/changes/archive/2026-08-13-collapsing-editor-sheet-headers/design.md`.
+
+## D34 — Track uses a dual-flow adaptive layout with a 48 pt spacer cap and no editing affordance
+
+- Track is one vertical composition in this order: navigation title → top adaptive spacer → completion-mark region → timer numbers → timer status → reserved non-field-error region → central separator → Activity search/refine row → state-specific main action → Recents → bottom adaptive spacer → tab bar.
+- The top and bottom spacers share one maximum-height token — **48 pt**, selected by the user from the 24/48/72/96 Pro Max spike comparison and validated on iPhone SE (default and Large Dynamic Type). With positive free space (`slack = viewport - content`) each spacer resolves to `min(cap, slack / 2)`, so the ends are always equal; surplus beyond twice the cap goes to the central separator between the error region and the search/refine flow. Under constraint all three flexible regions collapse to zero and the ordered content scrolls. The main action sits above Recents so Choose Activity / Start / Stop stays reachable without scrolling. The reserved error region preserves geometry when empty (no empty accessibility element), wraps error text fully, and grows past the reservation with the flexible spacing yielding first. The local-first Track screen shows no offline hint.
+- The Track editing affordance is removed — the former beside-picker Refine and the interim "Edit activity" variant are gone; its placement is deferred to a later change (the editor sheet machinery remains in `TrackViewModel`).
+- Reason: equal capped ends give the composition a symmetric rhythm (the timer stack hangs from the top, the control stack from the bottom), the central separator makes the cap visible on roomy screens, and a zero minimum ensures spacing disappears before controls overlap or become unreachable on short screens or under accessibility text sizes. The user rejected a pinned `.safeAreaInset` action bar, fixed padding, bottom-first surplus distribution, and a main action below Recents during the SE spike.

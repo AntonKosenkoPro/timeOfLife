@@ -463,6 +463,139 @@ TagSelector(
 
 ---
 
+## `RecentActivitiesChips`
+
+The Track Recents chip flow (D2/D3/D4): a wrapping flow of at most six
+most-recently-used Activities with 44 pt tap targets; chips wrap onto
+additional rows and never require horizontal scrolling. A single tap prepares
+the Activity without starting timing.
+
+### Signature
+
+```swift
+struct RecentActivitiesChips: View {
+    let activities: [Activity]
+    let categories: [String: Category]
+    let selectedID: String?
+    let onSelect: (Activity) -> Void
+}
+```
+
+### Visual
+
+- Wrapping flow of content-sized chips, left-aligned, equal `Theme.spacingSmall`
+  gaps between chips and rows. Rows are packed from measured chip widths (the
+  `Layout` protocol is iOS 16+ and the app supports iOS 15 — same greedy
+  packing algorithm as `TagSelector`, container width via `GeometryReader` +
+  preference key).
+- Cap of six, most-recently-used first (`activities.prefix(6)`; the store
+  already sorts by `last_used_at`).
+- Each chip: fixed icon slot with the first assigned Category's
+  `CatalogIcon(validated:).displaySymbol` + name (`.subheadline.weight(.medium)`,
+  one line, tail-truncated), `Theme.spacingMedium` horizontal / 12 pt vertical
+  padding, `minHeight Theme.minTapArea` (44 pt), `Capsule` shape.
+- Categoryless Activities render name-only chips with no icon and no
+  placeholder glyph.
+- Unselected chip: `Theme.backgroundSecondary` fill + `Theme.hairline` border;
+  icon and name in `Theme.textPrimary`.
+- Selected chip (the prepared Activity, `selectedID == activity.id`): filled
+  accent presentation — `Theme.accentPrimary` background, `Theme.textOnAccent`
+  text and icon, accent border; the Category icon is kept; no checkmark.
+- When `activities` is empty the component renders no chips; the parent screen
+  shows the dedicated empty copy (`timer.recentsEmptyHint`).
+
+### States
+
+| State | Visual |
+|---|---|
+| Unselected | `Theme.backgroundSecondary` fill + `Theme.hairline` border; icon + name |
+| Selected | `Theme.accentPrimary` fill, `Theme.textOnAccent` text/icon, accent border; icon kept |
+| Empty | No chips; parent shows `timer.recentsEmptyHint` |
+
+### Requirements
+
+- Tapping a chip calls `onSelect` — the parent prepares the Activity without
+  starting timing.
+- Chips are content-sized with uniform `Theme.spacingSmall` gaps; a chip wider
+  than the container renders at container width with a truncated name.
+- Each chip's tap target is at least 44×44 pt (`Theme.minTapArea`) in every
+  presentation (icon, no-icon, selected).
+- Recents are hidden while a timer is running.
+- Category names are never shown on chips; search results and the
+  selected-Activity row remain category-free (D16 revision).
+
+### Accessibility
+
+- Each chip is a button element with `.accessibilityLabel("Select \(activity.name)")`
+  (`L10n.timerSelectActivity`).
+- The prepared Activity's chip additionally gets `.accessibilityAddTraits(.isSelected)`
+  and `.accessibilityValue("Selected")`; unselected chips carry no value.
+- The icon is `.accessibilityHidden(true)` decoration.
+- `accessibilityIdentifier("TimerSuggestion(\(activity.id))")`.
+
+### Usage
+
+```swift
+RecentActivitiesChips(
+    activities: vm.activities,
+    categories: vm.categoryMap,
+    selectedID: state.activity?.id
+) { vm.prefill(from: $0) }
+```
+
+---
+
+## `AdaptiveVerticalLayout`
+
+Deterministic spacing budget for the Track dual-flow layout (D34/D1): a
+scrollable dual-flow vertical stack whose three flexible regions resolve from
+the remaining space instead of relying on `Spacer` flexibility (which cannot
+be capped).
+
+### Signature
+
+```swift
+struct AdaptiveVerticalLayout<TopContent: View, BottomContent: View>: View {
+    let spacerCap: CGFloat
+    let topContent: TopContent
+    let bottomContent: BottomContent
+
+    init(
+        spacerCap: CGFloat,
+        @ViewBuilder topContent: () -> TopContent,
+        @ViewBuilder bottomContent: () -> BottomContent
+    )
+}
+```
+
+### Behavior
+
+- `spacerCap` is the shared maximum height for the top and bottom spacers
+  (48 pt on Track, selected by the user from the 24/48/72/96 Pro Max spike
+  comparison).
+- With `slack = viewportHeight - contentHeight`:
+  - `slack <= 0` — no adaptive spacing; the ordered content scrolls.
+  - `0 < slack <= 2 * cap` — the slack splits evenly between the top and
+    bottom spacers (`min(cap, slack / 2)` each); the central separator is
+    zero.
+  - `slack > 2 * cap` — both spacers hold at the shared cap and the surplus
+    goes to the central separator between the top flow (completion mark…
+    error region) and the bottom flow (search/refine…main action).
+- Top and bottom flow heights are measured separately via `GeometryReader` +
+  preference keys.
+- On Track the top flow holds the completion-mark region through the error
+  region; the bottom flow holds the search/refine row through the main action,
+  with Recents below the main action inside the bottom flow.
+
+### Requirements
+
+- The three flexible regions never exceed the cap and never go negative; they
+  collapse to zero before content clips, overlaps, or becomes unreachable.
+- The main action sits above Recents so Choose Activity / Start / Stop stays
+  reachable without scrolling on short screens.
+
+---
+
 ## `NumericTimerReadout`
 
 The centered numeric timer on Track (D2/D23). Its only purpose is displaying the exact elapsed duration; it has no dial, ring, sweep, goal, daily-total, or decorative progress visualization.
@@ -482,8 +615,9 @@ struct NumericTimerReadout: View {
 - Elapsed time formatted as `MM:SS` or `H:MM:SS` (hours included once elapsed), `.monospacedDigit()`.
 - Font: `Theme.timerFont()` (`.system(size: 64, weight: .semibold, design: .rounded)`), `Theme.textPrimary`.
 - Centered in the main content region; keeps a stable frame across all timer states.
-- The saved-state checkmark is an overlay above the readout and does not change the
-  numeric timer's vertical position or the stack's measured height.
+- No checkmark overlay — the saved-state confirmation lives in the completion
+  region above the readout (refine-track-recents D1), so the readout itself
+  never renders a checkmark and the saved state does not move the timer.
 - A short state caption below the readout (`READY`, `RUNNING`, `SAVING`, `SAVED`, or the idle prompt) in `.caption`, `Theme.textSecondary`.
 - `accessibilityIdentifier("TimerDisplay")`.
 
@@ -495,8 +629,8 @@ struct NumericTimerReadout: View {
 | Ready | `00:00` + `READY` caption |
 | Running | Live exact elapsed value + `RUNNING` caption |
 | Saving | Readout stable; primary action shows progress |
-| Saved | Brief blue checkmark overlay and `SAVED` confirmation; readout returns to `00:00` without moving |
-| Error | Readout stable; localized non-field error above the primary action |
+| Saved | `SAVED` caption; confirmation is shown in the completion region above the readout; readout returns to `00:00` without moving |
+| Error | Readout stable; localized non-field error in the reserved region above the central separator |
 
 ### Accessibility
 
@@ -602,93 +736,23 @@ struct ActivitySearchSheet: View {
 
 ---
 
-## `TimerActivityRefineButton`
+## `TimerActivityRefineButton` (retired)
 
-The Refine affordance on the Track selected-Activity row (refine-selected-activity-from-track). Opens the shared Activity Editor prefilled with the selected Activity.
+The Refine affordance on the Track selected-Activity row was removed in
+refine-track-recents (D34/D9): Track has no editing affordance, and the
+component is superseded by `RecentActivitiesChips` for Track's
+preparation surface. The Activity editor sheet and its view-model
+presentation machinery remain wired but unreachable from Track; editing
+placement is deferred to a later change. Keep this section until a
+replacement placement is designed.
 
-### Signature
+## `SuggestionRow` (retired)
 
-```swift
-struct TimerActivityRefineButton: View {
-    let isDisabled: Bool
-    let action: () -> Void
-}
-```
-
-### Visual
-
-- Trailing member of the selected-Activity `HStack` on Track; the state-specific picker or label takes flexible width, the button sits at the trailing edge.
-- A `Button` with a visible localized text label (not icon-only); minimum 44 pt interaction area.
-- `accessibilityIdentifier("TimerActivityRefineButton")`.
-
-### States
-
-| State | Visual |
-|---|---|
-| Enabled | Visible text label, `Theme.accentPrimary`; present in ready, running, saved, and error states |
-| Disabled | Dimmed; disabled only while saving |
-
-### Requirements
-
-- Visible in all non-idle states (ready, running, saving, saved, error); disabled only during saving.
-- The search picker remains disabled outside ready/saved independently of Refine.
-- Activating Refine resolves the selected Activity from LocalStore; if it no longer exists, Track follows the stale-preparation behavior.
-
-### Accessibility
-
-- `.accessibilityLabel("Refine activity")` — the localized visible label.
-- `.accessibilityHint("Edits the selected activity's name, notes, and categories")`.
-
----
-
-## `SuggestionRow`
-
-Recency-based Activity suggestion row on the Track screen (F5/U3). One tap prepares the Activity and links the upcoming entry.
-
-### Signature
-
-```swift
-struct SuggestionRow: View {
-    let activity: Activity
-    let action: () -> Void
-}
-```
-
-### Visual
-
-- `Button`-styled `HStack(spacing: Theme.spacingMedium)`:
-  - Name in `.subheadline`, `Theme.textPrimary`.
-  - Optional recency subtitle in `.caption`, `Theme.textSecondary`.
-- Full width, min height `Theme.minTapArea`.
-- `accessibilityIdentifier("TimerSuggestion(\(activity.id))")`.
-
-### States
-
-| State | Visual |
-|---|---|
-| Default | `Theme.backgroundPrimary` row, full-width tap target |
-| Pressed | System highlight (no custom pressed style) |
-
-### Requirements
-
-- Renders inside the `TimerSuggestionList` container; ranking is computed on-device from the local catalog ordered by `last_used_at` (F5, P1).
-- Suggestions are hidden while the timer is running (F5).
-- Tapping calls `action` — the parent screen prepares the Activity and links `activity.id` to the upcoming entry (F4/U3).
-
-### Usage
-
-```swift
-ForEach(vm.suggestions) { a in
-    SuggestionRow(activity: a) { vm.prefill(from: a) }
-}
-```
-
-### Accessibility
-
-- `accessibilityIdentifier("TimerSuggestion(\(activity.id))")` (U3).
-- `.accessibilityLabel("Activity suggestion, \(activity.name)")`.
-- `.accessibilityHint("Prepares this activity for timing")`.
-- Category icons and names are intentionally not exposed by this capture component; they belong to Activity management and Insights.
+The single-row recency suggestion row on Track was replaced by
+`RecentActivitiesChips` in refine-track-recents (D2): a wrapping chip flow
+capped at six, with first-Category icons, a filled accent selected
+presentation, and dedicated empty copy. Keep this section only as history;
+Track no longer renders full-width suggestion rows.
 
 ---
 

@@ -121,7 +121,7 @@ A confirmed category deletion SHALL remain restorable for a wall-clock 30-second
 - **THEN** the deletion is finalized on foreground without relying on background execution
 
 ### Requirement: Activities support optional multiple category assignments
-The shared Activity editor SHALL display the available category catalog and allow zero, one, or multiple categories to be assigned to an Activity. Saving SHALL replace that Activity's category set as part of the same committed Activity edit. Category assignment SHALL remain optional and SHALL NOT be shown in Track search results or recency suggestions.
+The shared Activity editor SHALL display the available category catalog and allow zero, one, or multiple categories to be assigned to an Activity. Saving SHALL replace that Activity's category set as part of the same committed Activity edit. Category assignment SHALL remain optional. Track search results and the selected-Activity row SHALL NOT display Category metadata; Recents chips on Track SHALL display only the icon of the first Category assigned to an Activity (first by assignment position) and SHALL NOT display Category names.
 
 #### Scenario: Assign multiple categories
 - **WHEN** the user selects two or more categories in an Activity editor and saves
@@ -140,8 +140,12 @@ The shared Activity editor SHALL display the available category catalog and allo
 - **THEN** neither the Activity fields nor its persisted category set changes and the editor draft remains available for retry
 
 #### Scenario: Capture remains category-free
-- **WHEN** the user browses Track search results or recency suggestions
-- **THEN** no category is required or displayed as part of selecting or quick-creating an Activity
+- **WHEN** the user browses Track search results, the selected-Activity row, or Recents chips
+- **THEN** no category is required for selecting or quick-creating an Activity, no Category name appears, and only Recents chips may display the icon of the first assigned Category
+
+#### Scenario: Categoryless Activity chip has no icon
+- **WHEN** a Recents chip's Activity has no assigned categories
+- **THEN** the chip renders with the Activity name and no icon
 
 ### Requirement: Current assignments classify Activity history
 Entries SHALL continue to reference their Activity rather than store a category snapshot. Any category representation of an entry SHALL resolve the Activity's current category set, so assignment edits reclassify existing history without rewriting entries.

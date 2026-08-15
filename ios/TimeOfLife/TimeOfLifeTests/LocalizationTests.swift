@@ -136,11 +136,9 @@ struct LocalizationTests {
 
     @Test("L10n enum allCases count matches expected keys")
     func allCasesCount() {
-        // 87 prior keys + 38 category-management keys
-        // (7 starter categories, 3 undo, 6 manage categories, 5 delete
-        //  confirmation, 3 errors, 7 category editor, 2 category validation,
-        //  1 activity-editor invalid-association, 4 UI accessibility/countdown
-        //  keys) = 125
-        #expect(l10nCases.count == 125)
+        // 125 keys before refine-track-recents, +1 timer.recentsEmptyHint,
+        // −3 removed Track keys (offlineHint, activityRefine,
+        // activityRefineHint) = 123
+        #expect(l10nCases.count == 123)
     }
 }

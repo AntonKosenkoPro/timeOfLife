@@ -56,7 +56,6 @@
 "timer.start" = "Старт";
 "timer.stop" = "Стоп";
 "timer.stopHint" = "Останавливает таймер и сохраняет запись";
-"timer.offlineHint" = "Записи сохраняются локально и синхронизируются после появления сети.";
 "timer.emptyActivityError" = "Введите название активности.";
 "timer.signOut" = "Выйти";
 "timer.chooseActivity" = "Выбрать активность";
@@ -66,6 +65,7 @@
 "timer.running" = "Идёт";
 "timer.ready" = "Готово";
 "timer.chooserRecent" = "Недавние";
+"timer.recentsEmptyHint" = "Здесь появятся активности, которые вы отслеживаете.";
 "timer.selectActivity" = "Выбрать %@";
 "timer.searchPrompt" = "Поиск или создание";
 "timer.searchEmptyCatalogTitle" = "Пока нет активностей";
@@ -77,8 +77,6 @@
 "timer.searchValidationEmpty" = "Введите название активности.";
 "timer.searchValidationTooLong" = "Название должно быть не длиннее 60 символов.";
 "timer.stalePreparationError" = "Эта активность больше не существует. Выберите другую.";
-"timer.activityRefine" = "Изменить";
-"timer.activityRefineHint" = "Редактировать выбранную активность";
 
 // Activity editor
 "activityEditor.createTitle" = "Новая активность";
