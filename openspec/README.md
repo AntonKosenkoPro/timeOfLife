@@ -9,9 +9,9 @@ but the CLI stays the source of truth.
 
 | Layer | Location | Meaning |
 |---|---|---|
-| **Baseline specs** | `openspec/specs/<capability>/spec.md` | The current merged contract. Today: `app-icon`, `app-shell`, `timer-capture-experience`, `category-management`, `editor-sheet-ux`. **Never edit directly** — behavior changes go through a change. |
-| **Active change (deltas)** | `openspec/changes/<change>/` | A proposal in flight. Its `specs/<capability>/spec.md` files are delta specs (ADDED/MODIFIED requirements) not yet in the baseline. Active change: **`local-first-sync-architecture`** (local-first store, sync client, provenance, and Controls). Check its `tasks.md` and `openspec status --change <name>`. |
-| **Archives** | `openspec/changes/archive/<change>/` | Completed changes; their deltas were already folded into the baselines by `openspec archive`. Read them only for history. Today: `redesign-track-experience`, `keep-timer-position-on-stop`, `unify-activity-preparation-flow`, `refine-selected-activity-from-track`, `add-category-management`, `integrate-app-icon`, `collapsing-editor-sheet-headers`. |
+| **Baseline specs** | `openspec/specs/<capability>/spec.md` | The current merged contract. Today: `app-icon`, `app-shell`, `timer-capture-experience`, `category-management`, `editor-sheet-ux`, `local-first-store`, `sync-client`, `entry-provenance`, and `lock-screen-controls`. **Never edit directly** — behavior changes go through a change. |
+| **Active change (deltas)** | `openspec/changes/<change>/` | A proposal in flight. Its `specs/<capability>/spec.md` files are delta specs (ADDED/MODIFIED requirements) not yet in the baseline. Active change: **`history-entry-list`** (read-only, day-grouped History surface). Check its `tasks.md` and `openspec status --change <name>`. |
+| **Archives** | `openspec/changes/archive/<change>/` | Completed changes; their deltas were already folded into the baselines by `openspec archive`. Read them only for history. Today: `redesign-track-experience`, `keep-timer-position-on-stop`, `unify-activity-preparation-flow`, `refine-selected-activity-from-track`, `add-category-management`, `collapsing-editor-sheet-headers`, `integrate-app-icon`, `refine-track-recents`, and `local-first-sync-architecture`. |
 
 **Which contract is in force?** The baselines plus the delta specs of the active change
 (deltas are the newest intent). Check the active change's `tasks.md` before implementing
@@ -52,9 +52,9 @@ archived `changes/`. The CLI generates or updates workflow adapters on demand.
 - **Baselines never edited directly**; every behavior change adds a delta to a change.
 - **Incomplete UI surfaces must not be claimed done**: app-wide activity/history UndoToast/shake-to-undo, the "Enable
   Sync" `AuthFlowView` sheet (Profile currently does a silent `restoreSession()`), "via
-  <Source>" labels, and the iOS 18 lock-screen ControlWidget are open tasks in
-  `local-first-sync-architecture/tasks.md`. Category-scoped undo in Manage Categories is
-  implemented (archived `add-category-management`) and does not close the app-wide undo tasks.
+  <Source>" labels, and the iOS 18 lock-screen ControlWidget remain deferred after
+  `local-first-sync-architecture` was archived. Category-scoped undo in Manage Categories is
+  implemented (archived `add-category-management`) and does not close the app-wide undo work.
 - **OpenAPI is the authoritative API contract** (`backend/api/openapi.yaml`, S10): endpoint
   changes update both sides + the spec.
 - Per-iteration revising process (linters, tests, docs): `docs/project-context.md` → S5.

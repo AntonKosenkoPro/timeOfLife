@@ -12,14 +12,13 @@ context: |
   Sign in with Apple) and the Track experience (three-tab shell, numeric timer, Activity search +
   quick-create, Refine, Profile, compact cross-tab timer).
 
-  OpenSpec routing: baseline specs (`openspec/specs/<capability>/spec.md`, today `app-shell`
-  and `timer-capture-experience`) are the merged contract and are NEVER edited directly.
-  Behavior changes go through a change: delta specs under `openspec/changes/<change>/specs/`.
-  The only active change is `local-first-sync-architecture` (delta specs `local-first-store`,
-  `sync-client`, `entry-provenance`, `lock-screen-controls`; decisions
-  D1–D10 in its `design.md`). Archives (`openspec/changes/archive/`) are history already folded
-  into the baselines. Check the active change's `tasks.md` before implementing and mark tasks
-  as you complete them.
+  OpenSpec routing: baseline specs (`openspec/specs/<capability>/spec.md`) are the merged
+  contract and are NEVER edited directly. Behavior changes go through a change: delta specs
+  under `openspec/changes/<change>/specs/`. The local-first architecture now lives in the
+  `local-first-store`, `sync-client`, `entry-provenance`, and `lock-screen-controls` baselines.
+  Archives (`openspec/changes/archive/`) are history already folded into the baselines. Use
+  `openspec list` to identify active changes, then check the selected change's `tasks.md` before
+  implementing and mark tasks as you complete them.
 
   Non-negotiables: LocalStore is the single mutation chokepoint (GRDB, App Group
   `group.com.antonkosenko.timeoflife`) — no raw GRDB writes outside it. Several local-first UI
@@ -46,8 +45,8 @@ operations:
   apply:
     guidance:
       - Read `docs/project-context.md` first (canonical context; `AGENTS.md` is the short entrypoint).
-      - Check `openspec/changes/local-first-sync-architecture/tasks.md` before implementing and mark tasks `[x]` as you complete them; reconcile with the relevant `Requirements/FURPS/*.md` rows.
-      - Incomplete local-first UI surfaces (UndoToast/shake-to-undo, "Enable Sync" AuthFlowView sheet, "via <Source>" labels, lock-screen ControlWidget) must not be claimed done; update docs/project-context.md → "Incomplete / deferred" and the delta spec text accordingly.
+      - Check the selected change's `tasks.md` before implementing and mark tasks `[x]` as you complete them; reconcile with the relevant `Requirements/FURPS/*.md` rows.
+      - Deferred local-first UI surfaces (UndoToast/shake-to-undo, "Enable Sync" AuthFlowView sheet, "via <Source>" labels, lock-screen ControlWidget) must not be claimed done; update `docs/project-context.md` → "Incomplete / deferred" and any owning change artifacts accordingly.
       - If the OpenAPI contract changes, update `backend/api/openapi.yaml` and both client/server sides (S10); run the backend contract gate (`go test ./...` includes `internal/contract`).
       - Run linters + warning-as-error build + both test suites per `docs/project-context.md` → "Per-iteration revising process (S5)".
   archive:
