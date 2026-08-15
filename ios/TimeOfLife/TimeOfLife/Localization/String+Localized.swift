@@ -31,75 +31,30 @@ enum L10n: String, CaseIterable {
     case appleSignInError = "appleSignIn.error"
 
     // Timer
-    case timerTitle = "timer.title"
-    case timerActivityPlaceholder = "timer.activityPlaceholder"
     case timerStart = "timer.start"
     case timerStop = "timer.stop"
-    case timerOfflineHint = "timer.offlineHint"
+    case timerStopHint = "timer.stopHint"
     case timerEmptyActivityError = "timer.emptyActivityError"
     case timerSignOut = "timer.signOut"
-    case timerSuggestionsHeader = "timer.suggestionsHeader"
-    case timerManageActivities = "timer.manageActivities"
-
-    // Sign out confirmation
-    case signOutConfirmationTitle = "signOut.confirmationTitle"
-    case signOutConfirmationMessage = "signOut.confirmationMessage"
-    case signOutConfirm = "signOut.confirm"
-    case signOutCancel = "signOut.cancel"
-
-    // Catalog (Epic 1)
-    case tagsEmptyHint = "tags.emptyHint"
-    case undoButton = "undo.button"
-    case toastDismiss = "toast.dismiss"
-    case accessibilityCategory = "accessibility.category"
-    case accessibilityIcon = "accessibility.icon"
-    case accessibilitySuggestion = "accessibility.suggestion"
-    case accessibilitySuggestionHint = "accessibility.suggestionHint"
-    case accessibilitySelected = "accessibility.selected"
-    case accessibilityTagsCount = "accessibility.tagsCount"
-    case deleteActivityTitle = "delete.activity.title"
-    case deleteButton = "delete.button"
-    case deleteActivityMessage = "delete.activity.message"
-    case deleteActivityEntire = "delete.activity.entire"
-    case deleteActivityEntryOnly = "delete.activity.entryOnly"
-    case deleteActivityCancel = "delete.activity.cancel"
-    case activityLastUsed = "activity.lastUsed"
-
-    // Manage activities
-    case manageActivitiesTitle = "manage.activities.title"
-    case manageActivitiesEmptyTitle = "manage.activities.emptyTitle"
-    case manageActivitiesEmptySubtitle = "manage.activities.emptySubtitle"
-    case manageActivitiesCategories = "manage.activities.categories"
-    case undoActivityDeleted = "undo.activityDeleted"
-    case undoEntryDeleted = "undo.entryDeleted"
-    case errorActivityExists = "error.activityExists"
-    case errorConflict = "error.conflict"
-    case errorUndoFailed = "error.undoFailed"
-
-    // Manage categories
-    case manageCategoriesTitle = "manage.categories.title"
-    case manageCategoriesEmptyTitle = "manage.categories.emptyTitle"
-    case manageCategoriesEmptySubtitle = "manage.categories.emptySubtitle"
-    case deleteCategoryTitle = "delete.category.title"
-    case deleteCategoryMessage = "delete.category.message"
-    case deleteCategoryConfirm = "delete.category.confirm"
-    case deleteCategoryCancel = "delete.category.cancel"
-    case undoCategoryDeleted = "undo.categoryDeleted"
-    case errorCategoryExists = "error.categoryExists"
-    case categoryEditorCreateTitle = "categoryEditor.createTitle"
-    case categoryEditorEditTitle = "categoryEditor.editTitle"
-    case categoryEditorNameLabel = "categoryEditor.nameLabel"
-    case categoryEditorNamePlaceholder = "categoryEditor.namePlaceholder"
-    case categoryEditorIconLabel = "categoryEditor.iconLabel"
-    case categoryEditorSave = "categoryEditor.save"
-    case categoryEditorCancel = "categoryEditor.cancel"
-    case categorySeedWork = "category.seed.work"
-    case categorySeedHobby = "category.seed.hobby"
-    case categorySeedSport = "category.seed.sport"
-    case categorySeedEducation = "category.seed.education"
-    case categorySeedRelax = "category.seed.relax"
-    case categorySeedSleep = "category.seed.sleep"
-    case categorySeedEntertainment = "category.seed.entertainment"
+    case timerChooseActivity = "timer.chooseActivity"
+    case timerChooseActivityPrompt = "timer.chooseActivityPrompt"
+    case timerSaved = "timer.saved"
+    case timerSaving = "timer.saving"
+    case timerRunning = "timer.running"
+    case timerReady = "timer.ready"
+    case timerChooserRecent = "timer.chooserRecent"
+    case timerRecentsEmptyHint = "timer.recentsEmptyHint"
+    case timerSelectActivity = "timer.selectActivity"
+    case timerSearchPrompt = "timer.searchPrompt"
+    case timerSearchEmptyCatalogTitle = "timer.searchEmptyCatalogTitle"
+    case timerSearchEmptyCatalogSubtitle = "timer.searchEmptyCatalogSubtitle"
+    case timerSearchNoResults = "timer.searchNoResults"
+    case timerSearchCreate = "timer.searchCreate"
+    case timerSearchRestorePrompt = "timer.searchRestorePrompt"
+    case timerSearchRestore = "timer.searchRestore"
+    case timerSearchValidationEmpty = "timer.searchValidationEmpty"
+    case timerSearchValidationTooLong = "timer.searchValidationTooLong"
+    case timerStalePreparationError = "timer.stalePreparationError"
     case activityEditorCreateTitle = "activityEditor.createTitle"
     case activityEditorEditTitle = "activityEditor.editTitle"
     case activityEditorNameLabel = "activityEditor.nameLabel"
@@ -107,57 +62,102 @@ enum L10n: String, CaseIterable {
     case activityEditorNotesLabel = "activityEditor.notesLabel"
     case activityEditorNotesPlaceholder = "activityEditor.notesPlaceholder"
     case activityEditorNotesCounter = "activityEditor.notesCounter"
+    case activityEditorNotesTooLong = "activityEditor.notesTooLong"
     case activityEditorTagsLabel = "activityEditor.tagsLabel"
     case activityEditorNoTags = "activityEditor.noTags"
     case activityEditorAddCategory = "activityEditor.addCategory"
     case activityEditorSave = "activityEditor.save"
     case activityEditorCancel = "activityEditor.cancel"
-    case activityValidationNameEmpty = "validation.nameEmpty"
-    case activityValidationNameTooLong = "validation.nameTooLong"
-    case validationNamePrefix = "validation.name.prefix"
-    case validationNameRuleTooLong = "validation.name.rule.tooLong"
-    case activityValidationNotesTooLong = "validation.notesTooLong"
-    case validationCatalogIconInvalid = "validation.catalog.iconInvalid"
+    case timerCompactStop = "timer.compactStop"
+    case timerCompactReturnHint = "timer.compactReturnHint"
+    case timerCompactRunning = "timer.compactRunning"
+
+    // App shell
+    case tabTrack = "tab.track"
+    case tabHistory = "tab.history"
+    case tabInsights = "tab.insights"
+    case profileTitle = "profile.title"
+    case profileDone = "profile.done"
+    case profileAccount = "profile.account"
+    case profileEnableSync = "profile.enableSync"
+    case profileEnableSyncSubtitle = "profile.enableSyncSubtitle"
+    case profileSyncNow = "profile.syncNow"
+    case profileSyncing = "profile.syncing"
+    case profileLastSynced = "profile.lastSynced"
+    case profileSyncError = "profile.syncError"
+    case profileLibrary = "profile.library"
+    case profileActivities = "profile.activities"
+    case profileCategories = "profile.categories"
+    case profileConnections = "profile.connections"
+    case profileIntegrations = "profile.integrations"
+    case profileExport = "profile.export"
+    case profileApp = "profile.app"
+    case profileAppearance = "profile.appearance"
+    case profileDataAndPrivacy = "profile.dataAndPrivacy"
+    case profileEraseLocalData = "profile.eraseLocalData"
+    case profileEraseLocalDataConfirmTitle = "profile.eraseLocalDataConfirmTitle"
+    case profileEraseLocalDataConfirmMessage = "profile.eraseLocalDataConfirmMessage"
+    case profileEraseConfirm = "profile.eraseConfirm"
+    case profileEraseCancel = "profile.eraseCancel"
+
+    // Destination empty states
+    case historyEmptyTitle = "history.emptyTitle"
+    case historyEmptySubtitle = "history.emptySubtitle"
+    case insightsEmptyTitle = "insights.emptyTitle"
+    case insightsEmptySubtitle = "insights.emptySubtitle"
+
+    // Starter categories (category-management spec, seed requirement)
+    case categorySeedWork = "category.seed.work"
+    case categorySeedHobby = "category.seed.hobby"
+    case categorySeedSport = "category.seed.sport"
+    case categorySeedEducation = "category.seed.education"
+    case categorySeedRelax = "category.seed.relax"
+    case categorySeedSleep = "category.seed.sleep"
+    case categorySeedEntertainment = "category.seed.entertainment"
+
+    // Undo (category-management D7)
+    case undoButton = "undo.button"
+    case undoDismiss = "undo.dismiss"
+    case undoCategoryDeleted = "undo.categoryDeleted"
+    case undoSelected = "undo.selected"
+    case undoNotSelected = "undo.notSelected"
+    case undoSecondsRemaining = "undo.secondsRemaining"
+
+    // Manage categories (category-management D4)
+    case manageCategoriesTitle = "manage.categories.title"
+    case manageCategoriesAdd = "manage.categories.add"
+    case manageCategoriesEmptyTitle = "manage.categories.emptyTitle"
+    case manageCategoriesEmptySubtitle = "manage.categories.emptySubtitle"
+    case manageCategoriesRowA11y = "manage.categories.rowA11y"
+    case manageCategoriesEditHint = "manage.categories.editHint"
+    case manageCategoriesLoading = "manage.categories.loading"
+    case deleteCategoryTitle = "delete.category.title"
+    case deleteCategoryMessage = "delete.category.message"
+    case deleteCategoryConfirm = "delete.category.confirm"
+    case deleteCategoryCancel = "delete.category.cancel"
+    case errorCategoryExists = "error.categoryExists"
+    case errorConflict = "error.conflict"
+    case errorLocalPersistence = "error.localPersistence"
+
+    // Category editor (category-management D4)
+    case categoryEditorCreateTitle = "categoryEditor.createTitle"
+    case categoryEditorEditTitle = "categoryEditor.editTitle"
+    case categoryEditorNameLabel = "categoryEditor.nameLabel"
+    case categoryEditorNamePlaceholder = "categoryEditor.namePlaceholder"
+    case categoryEditorIconLabel = "categoryEditor.iconLabel"
+    case categoryEditorIconUnavailable = "categoryEditor.iconUnavailable"
+    case categoryEditorSave = "categoryEditor.save"
+    case categoryEditorCancel = "categoryEditor.cancel"
+    case categoryNameRequired = "category.nameRequired"
+    case categoryNameTooLong = "category.nameTooLong"
+    case activityEditorInvalidAssociation = "activityEditor.invalidAssociation"
+
+    // Sign out confirmation
+    case signOutCancel = "signOut.cancel"
 
     /// Resolves the key via `NSLocalizedString` against `Localizable.strings`.
     var text: String {
         NSLocalizedString(rawValue, comment: "")
-    }
-
-    /// Resolves the key with format arguments (e.g. `"%d entries"`).
-    func text(_ args: CVarArg...) -> String {
-        String(format: NSLocalizedString(rawValue, comment: ""), arguments: args)
-    }
-
-    /// Plural-aware resolution for a single integer argument. The stringsdict
-    /// path was removed because Foundation's strings lookup crashes when a key
-    /// has a plist-dict value on the current SDK; instead the plural-suffixed
-    /// keys (`<root>.<form>` in `Localizable.strings`) are selected in Swift
-    /// via `PluralForm.form(for:)`, then `String(format:)` substitutes `%d`.
-    /// For keys without a plural root the same call back to a single template
-    /// is preserved (so misc `Int` args still work).
-    func text(_ arg: Int) -> String {
-        let template = NSLocalizedString(templateKey(for: arg), comment: "")
-        return String(format: template, arg)
-    }
-
-    /// Returns the `.strings` key to look up for a count-aware `text(Int:)`
-    /// call. Keys declared with a `pluralRoot` replace their `<root>` with
-    /// `<root>.<form>`; every other key keeps its single form.
-    private func templateKey(for count: Int) -> String {
-        guard let root = pluralRoot else { return rawValue }
-        return "\(root).\(PluralForm.form(for: count).rawValue)"
-    }
-
-    /// For plural-rendered keys (`delete.activity.{message,entire}`), the
-    /// rawValue identifies the *root* key (e.g. `delete.activity.message`).
-    /// Per-form variants are stored as `<root>.<form>` in `Localizable.strings`.
-    private var pluralRoot: String? {
-        switch self {
-        case .deleteActivityMessage: return "delete.activity.message"
-        case .deleteActivityEntire: return "delete.activity.entire"
-        default: return nil
-        }
     }
 
 }
@@ -183,6 +183,15 @@ enum ErrorLocalization {
 }
 
 extension L10n {
+    /// Localized VoiceOver names for the closed CatalogIcon set. The dynamic
+    /// key keeps the enum focused on user-facing copy while still requiring
+    /// every supported symbol to have EN/RU accessibility text.
+    static func catalogIconName(_ icon: CatalogIcon, in bundle: Bundle = .main) -> String {
+        let key = "catalogIcon.\(icon.rawValue)"
+        let value = NSLocalizedString(key, bundle: bundle, comment: "")
+        return value == key ? icon.rawValue : value
+    }
+
     /// Looks up a server-error-style key (`error.<code>`) with fallback to
     /// `error.unknown`. Shared by view models and tests.
     static func text(in bundle: BundleProvider, code: String) -> String {
@@ -197,51 +206,4 @@ extension L10n {
 struct BundleProvider {
     let bundle: Bundle
     static var `default`: BundleProvider { BundleProvider(bundle: .main) }
-}
-
-/// Per-language plural-form selector. Replaces the `Localizable.stringsdict`
-/// machinery that crashes Foundation on the current SDK (see `L10n.text(_:)`).
-/// Only English (`one`/`other`) and Russian (`one`/`few`/`many`) pluantity are
-/// supported — both locales the app currently ships (Requirements U4).
-enum PluralForm: String {
-    case one
-    case few
-    case many
-    case other
-
-    /// Selects the plural form for `count` according to the selected UI
-    /// localization. The localization is read from the bundle's preferred
-    /// localizations so it stays consistent with whichever `Localizable.strings`
-    /// table `NSLocalizedString` will consult.
-    static func form(for count: Int) -> PluralForm {
-        let lang = Localization.preferredLanguageCode
-        switch lang {
-        case "ru":
-            let mod10 = count % 10
-            let mod100 = count % 100
-            if mod10 == 1, mod100 != 11 { return .one }
-            if mod10 >= 2, mod10 <= 4, !(mod100 >= 12 && mod100 <= 14) { return .few }
-            return .many
-        default:
-            return count == 1 ? .one : .other
-        }
-    }
-}
-
-/// Shared helpers for the localization layer.
-enum Localization {
-    /// Two-letter ISO code of the UI's preferred localization, falling back to
-    /// English when nothing is known. Uses `Bundle.main.preferredLocalizations`
-    /// first (matches whatever `NSLocalizedString` will resolve), then
-    /// `Locale.current` via iOS-16-guarded API.
-    static var preferredLanguageCode: String {
-        if let pref = Bundle.main.preferredLocalizations.first {
-            return String(pref.prefix(2))
-        }
-        if #available(iOS 16, *) {
-            return Locale.current.language.languageCode?.identifier ?? "en"
-        } else {
-            return Locale.current.languageCode ?? "en"
-        }
-    }
 }

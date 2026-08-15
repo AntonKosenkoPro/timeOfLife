@@ -1,148 +1,71 @@
 import Foundation
-import Combine
-import OSLog
 
-/// Orchestrates local storage and remote sync for time entries.
+/// Orchestrates the timer against the local database (local-first-store spec).
 ///
-/// The service is the single entry point for view models. It stores entries
-/// locally first, then attempts remote persistence, and finally marks the
-/// entry synced. If the remote call fails, the entry remains queued for later
-/// sync when connectivity returns.
-///
-/// POST-at-Stop strategy: the entry is created locally with `endedAt` set and
-/// POSTed to the backend as a completed entry (no PATCH-stop needed for the
-/// basic flow). The `stop(id:endedAt:updatedAt:)` path is for the running-entry
-/// case (Epic 2).
+/// The service is the single entry point for view models. It writes only to
+/// `LocalStore` — the device is the source of truth. Remote propagation is the
+/// responsibility of the background `SyncController` (the outbox row is
+/// written in the same transaction as the state change), so there is no
+/// remote-push path here.
 @MainActor
 final class TimerService: ObservableObject {
-    let store: TimerStoring
-    private let repository: EntriesRepository
-    private let connectivity: Connectivity
-    private let retryDelay: TimeInterval
-    private var connectivityCancellable: AnyCancellable?
-    private var retryTask: Task<Void, Never>?
-    private var isSyncing = false
-    private var syncRequested = false
-    private static let log = Logger(subsystem: "com.timeoflife", category: "timer-sync")
+    let store: LocalStore
 
-    init(
-        store: TimerStoring,
-        repository: EntriesRepository,
-        connectivity: Connectivity,
-        retryDelay: TimeInterval = 5
-    ) {
+    init(store: LocalStore) {
         self.store = store
-        self.repository = repository
-        self.connectivity = connectivity
-        self.retryDelay = retryDelay
-        connectivityCancellable = connectivity.$isConnected
-            .dropFirst()
-            .filter { $0 }
-            .sink { [weak self] _ in
-                Task { @MainActor in
-                    try? await self?.syncUnsyncedEntries()
-                }
-            }
-        if connectivity.isConnected {
-            Task { @MainActor [weak self] in
-                try? await self?.syncUnsyncedEntries()
-            }
-        }
+    }    /// Atomically creates an activity or resolves an existing identity by
+    /// normalized name (unify-activity-preparation-flow spec, decision 6).
+    /// The single transactional LocalStore operation replaces the previous
+    /// lookup-then-insert race: uniqueness races are translated into
+    /// deterministic `existing` outcomes by the store.
+    func prepareActivity(
+        named name: String,
+        notes: String? = nil,
+        categoryIDs: [String] = [],
+        now: Date = Date()
+    ) async throws -> LocalStore.CreateOrResolve {
+        try await store.createOrResolveActivity(
+            named: name,
+            notes: notes,
+            categoryIDs: categoryIDs,
+            now: now
+        )
     }
 
-    /// Saves a completed time entry. Local persistence is always attempted.
-    /// Remote persistence is attempted only when online; offline entries stay
-    /// queued for `syncUnsyncedEntries()`.
-    func saveEntry(activityId: UUID, duration: TimeInterval, startedAt: Date) async throws {
-        let endedAt = startedAt.addingTimeInterval(duration)
+    /// Starts a timer against the given activity, persisting the running
+    /// state (D8) so it survives a crash and is readable by widgets and
+    /// lock-screen Controls.
+    func startTimer(activityID: String, startedAt: Date = Date()) async throws {
+        let activity = try await store.activity(id: activityID)
+        try await store.startTimer(
+            activityID: activityID,
+            activityName: activity?.name ?? "",
+            startedAt: startedAt
+        )
+    }
+
+    /// Stops the running timer and saves the completed entry (with
+    /// `source='manual'`) in one transaction with its outbox row. Clears the
+    /// persisted running state.
+    func stopTimer(activityID: String, startedAt: Date, endedAt: Date = Date()) async throws {
+        let activity = try await store.activity(id: activityID)
         let entry = TimeEntry(
-            id: UUID.v7(),
-            activityId: activityId,
+            id: await store.newRecordID(),
+            activityID: activityID,
+            activityName: activity?.name ?? "",
             startedAt: startedAt,
             endedAt: endedAt,
-            synced: false
+            durationSeconds: Int(endedAt.timeIntervalSince(startedAt)),
+            source: "manual"
         )
-        try await store.save(entry)
-        guard connectivity.isConnected else { return }
-        do {
-            try await repository.create(entry)
-            try await store.markSynced(entry)
-        } catch {
-            scheduleRetry()
-            throw error
-        }
+        try await store.createEntry(entry)
+        try await store.stopTimer()
     }
 
-    /// Replays any unsynced entries to the remote repository.
-    func syncUnsyncedEntries() async throws {
-        guard connectivity.isConnected else { return }
-        guard !isSyncing else {
-            syncRequested = true
-            return
-        }
-
-        isSyncing = true
-        defer { isSyncing = false }
-        repeat {
-            syncRequested = false
-            let unsynced = await store.unsyncedEntries()
-            var shouldRetry = false
-            for entry in unsynced {
-                do {
-                    try await repository.create(entry)
-                    try await store.markSynced(entry)
-                } catch {
-                    if isPermanentError(error) {
-                        Self.log.warning("deferring entry \(entry.id.uuidString) after permanent error: \(error.localizedDescription)")
-                        // Leave the entry unsynced — it will be retried on the
-                        // next catalog sync completion (onSyncCompleted hook).
-                        continue
-                    }
-                    shouldRetry = true
-                    continue
-                }
-            }
-            if shouldRetry { scheduleRetry() }
-        } while syncRequested && connectivity.isConnected
-    }
-
-    /// Returns true for errors that will never succeed on retry.
-    private func isPermanentError(_ error: Error) -> Bool {
-        if let api = error as? APIError {
-            switch api {
-            case .unauthorized:
-                return true
-            case let .server(code, _, _):
-                // 404 activity_not_found: the referenced activity doesn't exist
-                // server-side; wait for catalog sync to create it.
-                // 422 validation_error: will never succeed.
-                return code == "activity_not_found" || code == "validation_error"
-            case .offline, .decoding, .transport, .invalidRequest, .unexpected:
-                return false
-            }
-        }
-        return false
-    }
-
-    /// Cancels any pending retry. Called on logout so the app stops hammering
-    /// the backend without a token.
-    func cancelRetry() {
-        retryTask?.cancel()
-        retryTask = nil
-    }
-
-    private func scheduleRetry() {
-        guard retryTask == nil else { return }
-        retryTask = Task { [weak self] in
-            guard let self else { return }
-            try? await Task.sleep(nanoseconds: UInt64(self.retryDelay * 1_000_000_000))
-            guard !Task.isCancelled else { return }
-            self.retryTask = nil
-            try? await self.syncUnsyncedEntries()
-        }
-    }
-
-    deinit {
-        retryTask?.cancel()
+    /// The persisted running-timer state, or nil when no timer is running.
+    /// Read on app launch to resume the running-timer UI after a crash or
+    /// relaunch (local-first-store spec).
+    func runningTimerState() async throws -> RunningTimerState? {
+        try await store.timerState()
     }
 }

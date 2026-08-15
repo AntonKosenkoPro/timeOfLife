@@ -63,10 +63,10 @@ Resolved design precedents for Time of Life. Add a new entry here when a visual 
 - Email submission works via the keyboard Return key and via a visible Continue button. Both trigger the same action.
 - Reason: Return key is a convenience for sighted users; the visible button is required for VoiceOver and Switch Control workflows.
 
-## D12 — Interim Sign Out on TimerView
+## D12 — Sign Out lives in Profile
 
-- Until a dedicated Account/Profile screen is built, Sign Out lives in the `TimerView` top toolbar as a destructive text button with a confirmation alert.
-- Reason: user request; keeps the low-frequency account action out of the primary time-tracking controls.
+- Sign Out is a destructive, low-frequency account action owned by the Profile destination (D30), not the Track toolbar. It shows a confirmation alert before clearing the local session, because local timer data may be lost.
+- Reason: user request; keeps the low-frequency account action out of the primary time-tracking controls. Supersedes the interim TimerView toolbar placement.
 
 ## D13 — Primary input and action stay above the keyboard
 
@@ -85,7 +85,9 @@ Resolved design precedents for Time of Life. Add a new entry here when a visual 
 
 ## D16 — On-device recency suggestions
 
-- The timer's top-5 activity suggestions are computed locally from the synced catalog, ranked by `last_used_at`; there is no suggestions endpoint. Works fully offline. `last_used_at` still syncs so recency is shared across devices.
+- The timer's top recency suggestions are computed locally from the synced catalog, ranked by `last_used_at`; there is no suggestions endpoint. Works fully offline. `last_used_at` still syncs so recency is shared across devices.
+- Capture suggestions show Activity names and recency only; search results and the selected-Activity row remain category-free — Category icons and names are intentionally omitted from those surfaces; they belong to Activity management and Insights.
+- Revision (refine-track-recents, D3): the Recents chip flow is the single exception — each chip shows the icon of the first assigned Category (icon-only, never names), and categoryless Activities render name-only chips.
 - Reason: F5/P1 — the client already holds the synced catalog, so a server round-trip would buy nothing and break offline; the backend only keeps `last_used_at` correct on entry start.
 
 ## D17 — Soft-delete via client undo buffer
@@ -115,5 +117,68 @@ Resolved design precedents for Time of Life. Add a new entry here when a visual 
 
 ## D22 — Categories have catalog icons
 
-- Categories carry one icon from the validated `CatalogIcon` set, defaulting to `tag`; category icons are used in category rows, selectors, and activity/suggestion representations.
+- Categories carry one icon from the validated `CatalogIcon` set, defaulting to `tag`; category icons are used in category rows, selectors, Activity management, and Insights representations, but not in capture suggestions.
 - This reverses the earlier “categories do not have icons” correction in `ManageCategories.md` and supersedes the retired color-palette decision (D15).
+
+## D23 — Centered numeric timer
+
+- Track uses a centered numeric readout for the exact elapsed duration. It has no Dial, ring, sweep, goal, daily-total, or decorative progress visualization.
+- Reason: the user rejected the Dial and chose a numbers-only treatment; exact elapsed time is sufficient for capture while History and Insights own retrospective meaning.
+
+## D24 — Categories are current Activity metadata
+
+- Activities are concrete tasks required for timing. Categories are optional zero-or-more analytics metadata managed separately from capture. Entries resolve an Activity's current Categories at query time, so editing an Activity's Categories reclassifies its existing history.
+- Reason: the current Activity/category API and entry model already use `activity_id` plus query-time tag resolution, and this keeps categoryless quick creation valid.
+
+## D25 — Track, History, and Insights are the primary destinations
+
+- The root is a three-tab shell (Track initially selected). Profile is opened from a consistent top-trailing person control and is not a fourth tab.
+- Reason: capture, retrospective review, and interpretation are durable intents with different frequencies; a tab per intent keeps History discoverable and maps directly to a future macOS sidebar. Profile holds low-frequency configuration and optional account state, so a tab would overstate its importance.
+
+## D26 — The numeric timer is a pure start instrument
+
+- Track uses a centered numeric readout with no dial, ring, sweep, daily-total, goal, or decorative progress visualization. The readout carries the exact elapsed time, including hours, and stays in the same central region across ready, running, saving, and saved states.
+- Reason: the user rejected the Dial and chose a centered numeric treatment; exact numbers are sufficient for capture, while History and Insights own retrospective meaning.
+
+## D27 — Activity selection is a native sheet
+
+- Tapping the selected Activity affordance opens a searchable sheet: recent names before search, case-insensitive matches while typing, `Create "Name"` for valid unmatched input, and Manage Activities as a secondary destination. Category names and icons are not shown. Selecting or creating prepares the Activity and dismisses the sheet.
+- Reason: the main screen stays calm and numeric while the sheet handles a potentially large catalog with familiar search and keyboard behavior; Categories are optional analytics metadata and must not compete with the concrete task being selected.
+
+## D28 — Start is explicit and Stop is spatially stable
+
+- Selection enters a ready state; a separate Start action begins timing. The same central/lower control region changes from Start to Stop without moving. After Stop succeeds, a restrained saved confirmation appears and the same Activity remains prepared.
+- Reason: explicit Start is predictable across recents, search, and creation; stable geometry supports muscle memory; retaining selection makes repeated sessions quick while still requiring explicit confirmation.
+
+## D29 — A compact timer is inset above non-Track tabs
+
+- While running, History and Insights show a compact timer immediately above the tab bar. Its main area returns to Track; a separate Stop button saves in place. Track does not duplicate it.
+- Reason: a running timer is global app state and must not disappear on navigation; a bottom safe-area inset stays close to primary navigation, avoids covering content, and creates a visual grammar reusable by widgets and Live Activities.
+
+## D30 — Profile is useful without an account
+
+- The person control opens Profile for all users. Its account section offers Enable Sync when signed out and sync/account management when signed in; local activity/category management, integrations, export, appearance, and data controls remain accessible independently.
+- Reason: local-first behavior means "profile" cannot be shorthand for a mandatory remote identity; one destination avoids separate Settings and Account concepts.
+
+## D31 — Motion and haptics explain state rather than decorate it
+
+- Start uses a subtle selection haptic, Stop/save uses success feedback, and invalid input uses error feedback. State transitions remain restrained; Reduce Motion replaces rotational/spring transitions with fades or immediate updates.
+- Reason: physical feedback marks consequential state changes without making routine navigation noisy; motion must clarify readiness, running, and saved state and remain optional.
+
+## D32 — Profile-owned local category management
+
+- Categories are managed from Profile for both signed-in and signed-out users. The local catalog is alphabetized and editable offline; assignment to Activities remains optional and ordered.
+- Category deletion is tag-only and uses the durable local undo buffer. Manage Categories registers the newest eligible deletion with `UndoManager` and shows a wall-clock countdown; this does not claim that activity/history undo UI is complete.
+- Reason: local-first capture must not depend on account state, while a dedicated Profile surface keeps capture uncluttered and gives category deletion an explicit, recoverable boundary.
+
+## D33 — Editor sheets use one native collapsing-header scaffold
+
+- Activity, Category, and future editor sheets use `EditorSheetScaffold`: a native large navigation title with Cancel floating at rest, collapsing into the material navigation bar beside Cancel on scroll and expanding again at the top edge. The scaffold also owns the standard scroll container and keyboard-safe pinned action bar.
+- Reason: the previous custom title scrolled under an otherwise empty Cancel bar. The system large-title mechanism removes that overlap without custom header geometry or appearance code, while one scaffold keeps all present and future editors consistent. See `openspec/changes/archive/2026-08-13-collapsing-editor-sheet-headers/design.md`.
+
+## D34 — Track uses a dual-flow adaptive layout with a 48 pt spacer cap and no editing affordance
+
+- Track is one vertical composition in this order: navigation title → top adaptive spacer → completion-mark region → timer numbers → timer status → reserved non-field-error region → central separator → Activity search/refine row → state-specific main action → Recents → bottom adaptive spacer → tab bar.
+- The top and bottom spacers share one maximum-height token — **48 pt**, selected by the user from the 24/48/72/96 Pro Max spike comparison and validated on iPhone SE (default and Large Dynamic Type). With positive free space (`slack = viewport - content`) each spacer resolves to `min(cap, slack / 2)`, so the ends are always equal; surplus beyond twice the cap goes to the central separator between the error region and the search/refine flow. Under constraint all three flexible regions collapse to zero and the ordered content scrolls. The main action sits above Recents so Choose Activity / Start / Stop stays reachable without scrolling. The reserved error region preserves geometry when empty (no empty accessibility element), wraps error text fully, and grows past the reservation with the flexible spacing yielding first. The local-first Track screen shows no offline hint.
+- The Track editing affordance is removed — the former beside-picker Refine and the interim "Edit activity" variant are gone; its placement is deferred to a later change (the editor sheet machinery remains in `TrackViewModel`).
+- Reason: equal capped ends give the composition a symmetric rhythm (the timer stack hangs from the top, the control stack from the bottom), the central separator makes the cap visible on roomy screens, and a zero minimum ensures spacing disappears before controls overlap or become unreachable on short screens or under accessibility text sizes. The user rejected a pinned `.safeAreaInset` action bar, fixed padding, bottom-first surplus distribution, and a main action below Recents during the SE spike.

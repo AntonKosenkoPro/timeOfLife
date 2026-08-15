@@ -2,8 +2,6 @@ package handlers
 
 import (
 	"testing"
-
-	"github.com/antonkosenko/time-of-life/backend/internal/db"
 )
 
 // Sample tests demonstrating the factory helpers. These factories exist so
@@ -11,8 +9,7 @@ import (
 // deterministically instead of hand-rolling request bodies.
 
 func TestFactory_NewActivityWithEntries_CreatesActivityAndEntries(t *testing.T) {
-	h, store, _, tok := newCatalogHandler(t)
-	t.Cleanup(func() { _ = store.Close() })
+	h, _, _, tok := newCatalogHandler(t)
 
 	id := newActivityWithEntries(t, h, tok, 2)
 
@@ -38,7 +35,6 @@ func TestFactory_TwoUsers_AreIsolated(t *testing.T) {
 	store := newTestStore(t)
 	h := newTestHandler(t, store)
 	_, tokA, _, tokB := twoUsers(t, store)
-	t.Cleanup(func() { _ = store.Close() })
 
 	// User A creates an activity; user B must not see it (ownership, R-014).
 	aID := newActivity(t, h, tokA)
@@ -50,5 +46,3 @@ func TestFactory_TwoUsers_AreIsolated(t *testing.T) {
 		t.Errorf("expected code not_found, got %q", code)
 	}
 }
-
-var _ db.Store

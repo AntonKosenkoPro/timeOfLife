@@ -137,8 +137,8 @@ func Load() (*Config, error) {
 		}
 	}
 
-	// Optional: Sign in with Apple. Empty APPLE_CLIENT_ID leaves the feature
-	// disabled (the /auth/apple route is not registered). When enabled, the
+	// Optional: Sign in with Apple. Empty APPLE_CLIENT_ID leaves verification
+	// disabled; the registered /auth/apple route returns 503. When enabled, the
 	// Apple identity token's `aud` claim for a native iOS app is the Bundle ID.
 	cfg.AppleClientID = os.Getenv("APPLE_CLIENT_ID")
 	cfg.AppleJWKSURL = os.Getenv("APPLE_JWKS_URL")

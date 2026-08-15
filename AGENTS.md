@@ -1,196 +1,72 @@
 # AGENTS.md
 
-Context for AI agents working in this repository. Read this first. (Requirements `Common.md` S7.)
+Agent entrypoint for this repo. **Read [`docs/project-context.md`](docs/project-context.md) first** — it holds the durable, accurate architecture and context (S7). This file only orients you and enforces the non-negotiables; it is deliberately short.
+
+## What this is
+
+**Time of Life** — a personal time-tracking iOS app (SwiftUI, iOS 15+, local-first) with a Go backend that acts as an **optional sync relay**. Current scope: auth MVP (passwordless email-OTP + Sign in with Apple) and the Track experience (three-tab shell, numeric timer, Activity search + quick-create, Refine, Profile, compact cross-tab timer).
+
+## OpenSpec routing (read this before touching behavior)
+
+The repo is spec-driven (`openspec/config.yaml`, `schema: spec-driven`). See `openspec/README.md` for the workflow; the essentials:
+
+- **Baseline specs** (`openspec/specs/<capability>/spec.md`): current contract (`app-shell`, `timer-capture-experience`). Never edit directly — behavior changes go through a change.
+- **Active deltas**: `openspec/changes/local-first-sync-architecture/` — the local-first contract (delta specs `local-first-store`, `sync-client`, `entry-provenance`, `lock-screen-controls`; decisions D1–D10 in `design.md`). Check its `tasks.md` and `openspec status --change local-first-sync-architecture` before implementing; mark tasks as you complete them.
+- **Archives** (`openspec/changes/archive/`): history (e.g. `redesign-track-experience`); their deltas are already folded into the baselines.
+
+## Non-negotiables
+
+- **LocalStore is the single mutation chokepoint** (GRDB in App Group `group.com.antonkosenko.timeoflife`) — no raw GRDB writes outside it.
+- **Incomplete UI surfaces — do not claim they are done**: UndoToast/shake-to-undo, the "Enable Sync" `AuthFlowView` sheet presentation (Profile currently does a silent `restoreSession()`), "via <Source>" labels, and the iOS 18 lock-screen ControlWidget (no target in `project.yml` yet). Full list: `docs/project-context.md` → "Incomplete / deferred", mirroring open tasks in `local-first-sync-architecture/tasks.md`.
+- **OpenAPI is the authoritative API contract** (`backend/api/openapi.yaml`, S10). Endpoint changes update both sides + the spec.
+- **No backward compat for on-disk formats** (pre-release): edit `Codable` shapes in place, no legacy branches.
+- **No passwords, no plaintext secrets** (R1); tokens in Keychain only; user-enumeration closed (`otp/request` always 202).
+- **iOS strings** go to both `en.lproj` and `ru.lproj` + `L10n` (U4).
+- **XcodeGen-managed** — edit `project.yml`, run `xcodegen generate`; never hand-edit the `.pbxproj`.
+- **SwiftUI views use `Theme` semantic colors only**; no raw `Color` literals.
+
+## Repo layout (short)
+
+```
+backend/                 Go (chi + pgx/Postgres; sqlite for tests) — relay: auth + activities/categories/entries
+ios/TimeOfLife/          SwiftUI app (iOS 15+), XcodeGen-managed
+  TimeOfLife/Features/{Auth,AppShell,TimeTracking,Catalog,Sync,AppleSignIn}
+  TimeOfLife/Core/Storage/   LocalStore.swift (GRDB), UndoBufferStore.swift, SessionCache.swift
+  TimeOfLife/Core/           networking, keychain, reachability, theme, navigation, DI, components
+docs/                    project-context.md (canonical context), ci.md
+openspec/                specs + changes (see above)
+Requirements/FURPS/      FURPS+ table (Common.md, Timetracking.md, Sign-up_and_Sign-in.md, Activity_Catalog_and_Categories.md)
+Design/                  text design system — see Design/README.md
+.github/workflows/       backend.yml + ios.yml (mandatory PR checks)
+```
+
+## Build, test, run
+
+### Backend (Go 1.24) — from `backend/`
+```bash
+go build ./...
+go test ./... -cover            # tests use SQLite — no Docker needed
+golangci-lint run && gofmt -l . && go vet ./...
+docker-compose up -d postgres && cp .env.example .env && go run ./cmd/server
+```
+
+### iOS (Xcode 16+, xcodegen, swiftlint) — from `ios/TimeOfLife/`
+```bash
+xcodegen generate
+swiftlint lint --strict         # --fix autocorrects
+xcodebuild -scheme TimeOfLife -destination 'generic/platform=iOS Simulator' build
+```
+
+## Required on every iteration (S5)
+
+1. Linters + build green; app/test target warnings are errors via `project.yml`; `gofmt -l .` empty.
+2. Both test suites green (`go test ./...`; `xcodebuild test -scheme TimeOfLife -destination '<available simulator>'`).
+3. Re-check the relevant `Requirements/FURPS/*.md` rows; fix conflicts.
+4. Update docs if architecture/contract/run steps or visual design changed: `docs/project-context.md`, `README.md`, `openspec/` artifacts + `openspec/config.yaml` guidance, relevant `Design/*.md`, `backend/api/openapi.yaml`. Keep `AGENTS.md` short — point to `docs/project-context.md`.
+5. Prefer existing utilities; remove dead code.
 
 ## Flow recommendations
 
 - Plan every not obvious task (that will consume over 100k tokens per session)
 - Use subagents whenever it's suitable
 - Ask the user to start a new session if the current context overwhelms 200k tokens
-
-## What this is
-**Time of Life** — a personal time-tracking iOS app. The repo contains the **auth MVP** (passwordless email-OTP sign-up/sign-in) and the first **time-tracking MVP** screen (start/stop timer with offline-first local persistence).
-
-Requirements live in `Requirements/FURPS/` (the FURPS+ table) and `Requirements/Usecases/` (use-case narratives). The auth requirements are `Requirements/FURPS/Sign-up_and_Sign-in.md`.
-
-The **design system** lives in `Design/` — see `Design/README.md`. All visual, component, and interaction decisions for iOS are specified there as Markdown so they can be implemented deterministically.
-
-**Epic 1 design materials** (FURPS S3): new screen specs `Design/SCREENS/ManageActivities.md`, `ManageCategories.md`, `ActivityEditor.md`, `CategoryEditor.md`; timer suggestions/quick-add spec in `Design/SCREENS/TimeTracking.md` (suggestions are client-side, no endpoint — F5/D16); category icon set in `Design/TOKENS.md`; new catalog components in `Design/COMPONENTS.md`; undo/delete-scope/sync-conflict interactions in `Design/INTERACTIONS.md`. The backend contract is `Design/BACKEND/Activity_Catalog_API.md`.
-
-## Repo layout
-```
-backend/                 Go backend (chi + pgx/Postgres; sqlite for tests)
-  api/openapi.yaml      OpenAPI 3.0 spec (S10 — authoritative API contract)
-  cmd/server/main.go     entrypoint (run() int pattern; os.Exit owns lifecycle)
-  internal/
-    auth/                token service (JWT + rotated refresh) + otp service
-    handlers/            HTTP handlers (auth + activity catalog/entries)
-    server/              chi router + middleware (recoverer, logger, jwtAuth)
-    db/                  Store interface + postgres + sqlite impls
-    migrations/          embedded SQL migrations (go:embed)
-    email/               Sender (console + AWS SES) + localized bodies
-    ratelimit/           in-memory token bucket
-    config/              env config (fail-fast JWT_SECRET ≥32 bytes)
-  Dockerfile             Multi-stage Docker build (alpine)
-  docker-compose.yml     Local dev: PostgreSQL service
-  docker-compose.prod.yml Production: PostgreSQL + backend + nginx (SSL)
-  nginx/                 Nginx configs (SSL termination, reverse proxy)
-  deploy.sh              CI/CD deploy script
-  Makefile               Common commands (build, test, lint, run, deploy)
-ios/TimeOfLife/          SwiftUI app (iOS 15+), XcodeGen-managed (project.yml)
-  TimeOfLife/Features/Auth/        passwordless flow: Welcome → EmailEntry → OtpEntry
-  TimeOfLife/Features/TimeTracking/  start/stop timer, TimeEntry model, TimerService + LocalTimerStore
-  TimeOfLife/Core/                 networking, keychain, reachability, theme, navigation, DI, design components
-  TimeOfLife/Localization/         en + ru Localizable.strings + L10n enum
-.github/workflows/       CI: backend.yml + ios.yml (mandatory on every PR)
-.golangci.yml            Go linters (run from backend/)
-ios/TimeOfLife/.swiftlint.yml   Swift linters (run from ios/TimeOfLife/)
-```
-
-## Build, test, run
-### Backend (Go 1.24)
-```bash
-cd backend
-go build ./...
-go test ./... -cover            # tests use SQLite — no Docker needed
-golangci-lint run               # linters (S6)
-gofmt -l .                      # must be empty
-go vet ./...
-# Real run (needs Postgres):
-cp .env.example .env            # DATABASE_URL, JWT_SECRET (≥32 bytes), EMAIL_BACKEND=console, OTP_*
-docker-compose up -d postgres
-go run ./cmd/server             # serves http://127.0.0.1:8080
-```
-### iOS (Xcode 16+, xcodegen, swiftlint)
-```bash
-cd ios/TimeOfLife
-xcodegen generate
-swiftlint lint --strict         # linters (S6); --fix autocorrects
-xcodebuild -scheme TimeOfLife \
-  -destination 'generic/platform=iOS Simulator' \
-  SWIFT_TREAT_WARNINGS_AS_ERRORS=YES \
-  GCC_TREAT_WARNINGS_AS_ERRORS=YES build
-```
-
-## API contract (`/api/v1`)
-
-**The authoritative API specification is [`backend/api/openapi.yaml`](backend/api/openapi.yaml) (OpenAPI 3.0, S10).** This table is a summary — always consult the OpenAPI spec for the full schema, error codes, and examples.
-
-Uniform error envelope: `{ "error": { "code": String, "message": String, "details": {} } }`.
-
-| Method | Path | Body | Success | Error codes |
-|---|---|---|---|---|
-| POST | `/auth/otp/request` | `{email}` | 202 (always) | `invalid_body`, `rate_limited` |
-| POST | `/auth/otp/verify` | `{email,code}` | 200 `{access_token,refresh_token,user}` | `invalid_otp`, `otp_expired`, `otp_attempts_exceeded`, `rate_limited`, `invalid_body` |
-| POST | `/auth/apple` | `{identity_token}` | 200 `{access_token,refresh_token,user}` | `invalid_body`, `invalid_apple_token`, `rate_limited`, `apple_not_configured` |
-| POST | `/auth/refresh` | `{refresh_token}` | 200 new pair | `invalid_refresh`, `token_reuse`, `token_expired` |
-| POST | `/auth/logout` | (Bearer) | 204 | (401) |
-| GET  | `/auth/me` | (Bearer) | 200 `user` | (401) |
-| GET  | `/activities` | (Bearer) | 200 `[{activity}]` (recency order; `?q=` typeahead) | (401) |
-| POST | `/activities` | `{id,name,notes?,category_ids?}` | 201/200 `{activity}` (idempotent on `id`) | `invalid_body`, `validation_error`, `activity_exists`, `conflict`, (401) |
-| GET  | `/activities/{id}` | (Bearer) | 200 `{activity}` | `not_found`, (401) |
-| PATCH | `/activities/{id}` | `{name?,notes?,category_ids?,updated_at}` | 200 `{activity}` | `invalid_body`, `validation_error`, `not_found`, `conflict`, `activity_exists`, (401) |
-| DELETE | `/activities/{id}` | (Bearer) | 204 (cascades to entries + tags) | `not_found`, (401) |
-| GET  | `/categories` | (Bearer) | 200 `[{category}]` (name order) | (401) |
-| POST | `/categories` | `{id,name,icon}` | 201/200 `{category}` (idempotent on `id`) | `invalid_body`, `validation_error`, `category_exists`, `conflict`, (401) |
-| PATCH | `/categories/{id}` | `{name?,icon?,updated_at}` | 200 `{category}` | `invalid_body`, `validation_error`, `not_found`, `conflict`, `category_exists`, (401) |
-| DELETE | `/categories/{id}` | (Bearer) | 204 (join rows cascade; entries unaffected) | `not_found`, (401) |
-| GET  | `/entries` | (Bearer) | 200 `{items,next_cursor?}` (`?from=&to=&activity_id=&category_id=&limit=&cursor=`) | (401) |
-| POST | `/entries` | `{id,activity_id,started_at,ended_at?}` | 201/200 `{entry}` (idempotent on `id`; `activity_id` required) | `invalid_body`, `validation_error`, `activity_not_found`, `conflict`, (401) |
-| GET  | `/entries/{id}` | (Bearer) | 200 `{entry}` | `not_found`, (401) |
-| PATCH | `/entries/{id}` | `{started_at?,ended_at?,updated_at}` | 200 `{entry}` (recomputes `duration_seconds`) | `invalid_body`, `validation_error`, `not_found`, `conflict`, (401) |
-| DELETE | `/entries/{id}` | (Bearer) | 204 | `not_found`, (401) |
-
-**Epic 1 (activity catalog & entries):** all `/activities`, `/categories`, `/entries` routes are Bearer-protected. Ids are **client-generated UUID v7** and `POST` is **idempotent on `id`** (a replay returns the existing record with 200, enabling offline create-then-sync). Writes use **last-write-wins on `updated_at`** (PATCH carries `updated_at`; a stale write returns 409 `conflict` with the server's current version in `details`). Deletes are hard (the client holds the 30 s undo buffer). `activity_exists`/`category_exists` (409) report a case-insensitive name collision and carry the winning record's `{id,name}` in `details`. Validation failures are 422 `validation_error` with `details` = `{field: message}`. **Suggestions are client-side** (F5): the client ranks its synced activities by `last_used_at` — there is no `/activities/suggestions` endpoint; `last_used_at` syncs so recency is shared across devices. Seeding (F6) is client-side via ordinary `POST /categories`. The authoritative contract is [`backend/api/openapi.yaml`](backend/api/openapi.yaml) (v1.1.0).
-
-The iOS `RemoteAuthRepository` mirrors these paths exactly. If you change an endpoint, change both sides and update [`backend/api/openapi.yaml`](backend/api/openapi.yaml).
-
-## Auth model (passwordless)
-Enter email → `otp/request` (always 202, account auto-created unverified) → server emails a 6-digit code → `otp/verify` → marks verified + issues JWT access (15 min) + rotated refresh. The OTP proves email ownership — there is no separate "verify email" step and no password anywhere (R1). OTP codes and refresh tokens are stored only as **SHA-256 hashes**; tokens live in the iOS **Keychain**. `otp/request` and `otp/verify` are rate-limited per IP+email. The client IP for rate limiting is resolved by `Handler.clientIP`, which honours `X-Forwarded-For`/`X-Real-IP` **only** when the direct TCP peer is in `TRUSTED_PROXIES` (comma-separated IPs/CIDRs; empty = trust nobody, the safe default that prevents rate-limit bypass via spoofed headers). The email body puts the 6-digit code on its own line for iOS `.oneTimeCode` autofill (U5); the template is configurable via `OTP_EMAIL_TEMPLATE` and may need empirical tuning.
-
-The iOS `APIClient` retries protected requests once after a 401 using the
-single-flight refresh path. A rejected or reused refresh token clears the
-Keychain/cache/session so `RootView` returns to sign-in; offline or transport
-failures are preserved and do not sign the user out.
-
-## Coding standards (Requirements S5)
-Keep code **minimal and standardized**, following modern best practices.
-- **Backend (Go):** idiomatic Go; `gofmt`-formatted (tabs); table-free errors via the domain error types in `internal/`; `context.Context` first param; no `panic` in request paths; `log/slog` only (never log codes/tokens/bodies/emails at info). No new deps without strong justification (S1: mainstream).
-- **iOS (Swift):** SwiftUI, MVVM + Repository, all dependencies injected via `AppContainer`; every layer replaceable in tests; `@MainActor` on view models; views use only `Theme` semantic colors (no raw `Color` literals); user-facing strings via `L10n`/`Localizable.strings` (never hard-coded); iOS 15+ only with availability guards for iOS 16+ APIs.
-- **Tests (S3):** logic layer ~100% covered. Backend `go test` (SQLite, no Docker); iOS SwiftTesting. Don't leave failing tests; don't lower coverage by deleting tests.
-- **Security (R1):** never persist/log passwords, OTP codes, or tokens in plaintext. Secrets from env. Keep user-enumeration closed (`otp/request` always 202).
-- **Locales (U4):** every new user-facing string must be added to **both** `en.lproj` and `ru.lproj`, and to the `L10n` enum's `allCases` in `LocalizationTests` if enumerated.
-
-## Per-iteration revising process (Requirements S5)
-On every iteration (feature/fix PR) the author MUST:
-1. Run both linters and fix every finding: `golangci-lint run` (backend), `swiftlint lint --strict` (iOS); run the iOS build with `SWIFT_TREAT_WARNINGS_AS_ERRORS=YES GCC_TREAT_WARNINGS_AS_ERRORS=YES` and inspect/fix every `xcodebuild` warning; `gofmt -l .` must be empty.
-2. Run both test suites green (`go test ./...`; `xcodebuild test`).
-3. Re-read the relevant `Requirements/FURPS/*.md` rows and confirm the change aligns; correct the requirements doc if rows conflict (see the passwordless correction as precedent).
-4. Update this `AGENTS.md`, the README, the relevant `Design/*.md` files, and [`backend/api/openapi.yaml`](backend/api/openapi.yaml) if architecture/contract/run steps or visual design changed. The OpenAPI spec is the authoritative API contract — keep it in sync with the handlers.
-5. Prefer reusing existing utilities/patterns over new code; remove dead code.
-
-## CI (Requirements S6)
-`.github/workflows/backend.yml` (Go: gofmt, go vet, golangci-lint, test + coverage) and `.github/workflows/ios.yml` (xcodegen, swiftlint, warning-as-error xcodebuild build, test) run on every PR and on pushes to `main`. Both are **mandatory** PR checks — a PR is not mergeable until both are green.
-
-## Deployment (S4)
-The backend is deployed to a **Google Cloud Compute Engine VM** (`timeoflife-backend`, us-east1-b). The production stack runs via Docker Compose:
-
-- **PostgreSQL 15** — database
-- **Backend** — Go API server (container image from GHCR)
-- **Nginx** — reverse proxy with SSL termination (Let's Encrypt)
-
-### CI/CD pipeline
-On every push to `main` that touches `backend/`, the CI/CD pipeline:
-1. Runs lint + test (same as PR checks)
-2. Builds the Docker image and pushes to `ghcr.io/antonkosenkopro/timeoflife/backend:latest`
-3. SSHs into the VM, pulls the new image, and restarts the backend container
-
-### Manual deploy
-```bash
-cd backend
-make deploy   # or push to main and let CI/CD handle it
-```
-
-### Production URL
-`https://timeoflife-api.antonkosenko.pro` (once DNS + SSL are configured)
-
-### Required GitHub Actions secrets
-| Secret | Description |
-|--------|-------------|
-| `VM_HOST` | VM external IP |
-| `VM_USER` | SSH user (`deploy`) |
-| `VM_SSH_KEY` | SSH private key for deployment |
-
-### iOS production config
-`API_BASE_URL` is per build configuration, injected into `Info.plist` via xcconfig:
-- `Debug` → `Config.Debug.xcconfig` → `http://127.0.0.1:8080` (local backend; ATS allows plain HTTP to `127.0.0.1` only).
-- `Release` → `Config.Release.xcconfig` → `https://timeoflife-api.antonkosenko.pro` (production, HTTPS — no ATS exception needed).
-
-`AppConfig` reads it at runtime and falls back to the dev URL if missing/malformed. The unit tests run under `Debug`, so they keep asserting `127.0.0.1:8080`.
-
-Code signing is disabled in `project.yml` (`DEVELOPMENT_TEAM: ""`, `CODE_SIGNING_REQUIRED: NO`) so simulator/CI builds need no Apple Developer account. **TestFlight/App Store distribution is deferred** — to enable it later: set `DEVELOPMENT_TEAM`, switch `CODE_SIGNING_REQUIRED`/`CODE_SIGN_IDENTITY` to distribution values, supply a provisioning profile, and add a fastlane/gym archive + upload CI job (needs an App Store Connect API key secret). The comment in `project.yml` marks the exact lines.
-
-## Pre-release policy
-
-The app is unreleased; there is no on-disk data in the wild. **No backward compatibility / migration for local on-disk formats is needed before release.** Do not add legacy-decode branches, `legacy*` fields, or `migrateIfNeeded` paths to local stores. On-disk schema changes are applied by editing the `Codable` shape in place; existing test fixtures and dev devices simply start fresh. Revisit this policy once a build ships to TestFlight or any external tester.
-
-## Deferred / out of scope
-- **Sign in with Apple follow-ups** — F2 itself is implemented (see below); still deferred: account-deletion token revocation via Apple `/auth/revoke` (App Store 5.1.1v, needs `.p8` + `APPLE_TEAM_ID`/`APPLE_KEY_ID`), nonce replay defense, and Apple credential-state/revocation observation on the client.
-- **Kafka** — deferred (S1 names it but auth MVP doesn't need an MQ).
-- **Rate-limit store** — in-memory; swap for Redis before multi-instance deploy.
-- **History/list UI for time entries** — the backend `/entries` resource + sync landed in Epic 1, but the iOS History list/edit UI is Epic 2.
-- **iOS catalog sync** — the backend `/activities`, `/categories`, `/entries` endpoints are implemented (Epic 1); the iOS remote repository + offline sync queue for them is separate work.
-- SwiftUI snapshot/on-device keychain tests — manual smoke checklist in README.
-
-## Sign in with Apple (F2)
-- iOS: `Features/AppleSignIn/` — `AppleSignInService` wraps an injectable `AppleAuthorizationProviding` (real `ASAuthorizationAppleIDProvider`-backed impl + a fake in tests). The `AppleSignInButton` (UIControl wrapper) now lives on `WelcomeView` and triggers `WelcomeViewModel.signInWithApple()`, which obtains Apple's identity token and posts it via `AuthService.signInWithApple` → `POST /auth/apple`. Success reuses `AuthService.persist` → `SessionStore` flips → `RootView` lands on the timer (no new navigation wiring).
-- Backend: `POST /api/v1/auth/apple` (`internal/handlers/auth.go` `AppleSignIn`) verifies Apple's RS256 identity-token JWT via `internal/apple` (JWKS fetched with `github.com/MicahParks/keyfunc/v3`, pinned `RS256`, `iss`/`aud`=Bundle ID/`exp`), upserts a user keyed by Apple's `sub` (`Store.UpsertUserByAppleSubject`, migration `002_apple.sql` adds `users.apple_subject`), and issues the same token pair as OTP verify.
-- **Config-gated**: the route is registered only when `APPLE_CLIENT_ID` is set (the app's Bundle ID — Apple puts the Bundle ID in the identity token's `aud` for a native app). Empty → feature off; the handler returns `apple_not_configured` (503) if hit directly. `APPLE_JWKS_URL` defaults to `https://appleid.apple.com/auth/keys`.
-- Running end-to-end requires the **Sign in with Apple** capability (entitlements file + portal App ID) and code signing enabled — both currently off. The code + unit tests (277) are green without them.
-
-## Decisions log (precedents to respect)
-- Backend language is **Go** (+3); mobile is **Swift** (+4). Do not reintroduce Swift/Vapor in the backend.
-- Auth is **passwordless** — do not reintroduce passwords.
-- Tests use **SQLite in-memory** so they run without Docker (S4 local + cloud).
-- The Xcode project is **XcodeGen-managed** — edit source, then `xcodegen generate`; do not hand-edit the `.pbxproj`.
-- **Sign in with Apple** (F2) verifies Apple's RS256 identity-token JWT with `github.com/MicahParks/keyfunc/v3` (JWKS) on the backend and is **config-gated** by `APPLE_CLIENT_ID` (Bundle ID); it reuses the OTP session machinery rather than a separate token type. Account-deletion revocation is deferred (App Store 5.1.1v).

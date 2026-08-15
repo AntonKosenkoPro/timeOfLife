@@ -47,6 +47,13 @@ func (h *Handler) ListEntries(w http.ResponseWriter, r *http.Request) {
 			f.Limit = n
 		}
 	}
+	if v := q.Get("modified_since"); v != "" {
+		if t, ok := parseRFC3339(v); ok {
+			f.ModifiedSince = &t
+		} else {
+			errs.add("modified_since", "modified_since must be a valid RFC 3339 timestamp")
+		}
+	}
 	if !errs.ok() {
 		writeValidation(w, errs)
 		return
@@ -98,6 +105,12 @@ func (h *Handler) CreateEntry(w http.ResponseWriter, r *http.Request) {
 	if req.EndedAt != nil {
 		validateTimestamp("ended_at", *req.EndedAt, false, errs)
 	}
+	// source is optional; when present it must be a known provenance value.
+	// source_ref is optional and free-form (an external identifier for the
+	// source, e.g. a Screen Time callback uuid or Garmin activity id).
+	if req.Source != "" && !validEntrySources[req.Source] {
+		errs.add("source", "source must be one of: manual, widget, siri, control, screentime, garmin, calendar, healthkit")
+	}
 	// ended_at must be after started_at when both are present and valid. The
 	// store independently guards the partial-PATCH merged value (and direct
 	// store calls); here we surface the plain both-present case with precise
@@ -126,6 +139,8 @@ func (h *Handler) CreateEntry(w http.ResponseWriter, r *http.Request) {
 		ActivityID: req.ActivityID,
 		StartedAt:  startedAt,
 		EndedAt:    endedAt,
+		Source:     req.Source,
+		SourceRef:  req.SourceRef,
 	}
 	created, isNew, err := h.store.CreateEntry(r.Context(), e)
 	if err != nil {

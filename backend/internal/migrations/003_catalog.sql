@@ -1,4 +1,4 @@
--- Epic 1: Activity Catalog & Categories. Introduces activities, categories,
+-- Activity Catalog & Categories. Introduces activities, categories,
 -- the many-to-many activity_categories tag join, and entries. Each entry
 -- references exactly one activity (activity_id is required); category tags
 -- are inferred from the activity at query time. All ids are client-generated

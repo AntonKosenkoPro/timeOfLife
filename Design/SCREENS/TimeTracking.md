@@ -1,256 +1,304 @@
-# Time Tracking Screen
+# Track Screen
 
-This is the first non-auth screen described for the app. `Requirements/FURPS/Timetracking.md` is currently empty, so this document bootstraps the MVP time-tracking experience: **start a timer for an activity, see elapsed time, stop and save the entry**.
-
-Future use cases (history, categories, widgets, shortcuts, account/profile) will extend this screen.
+This is the first non-auth screen described for the app. The local-first Track
+experience lets the user choose a concrete Activity, start a timer, see exact
+elapsed time, stop, and save the entry. Categories are optional Activity
+metadata for management and Insights; they are not part of capture selection.
 
 ## Use case
 
-1. User is signed in and lands on the time-tracking screen.
-2. User sees an activity name field and a large timer display.
-3. User types or selects an activity name.
-4. User taps **Start**.
-5. The timer counts up from 00:00.
-6. User taps **Stop** to finish the session.
-7. The app saves the elapsed time locally and remotely when online.
+1. The user launches locally and lands on Track.
+2. The user sees the selected Activity affordance, a centered numeric timer,
+   and an explicit Start action.
+3. The user selects a recent Activity, searches for one, or creates a new one.
+4. The user taps Start; selection alone never starts timing.
+5. The numeric timer counts up from `00:00`.
+6. The user taps Stop to finish the session.
+7. The app saves the elapsed entry locally and syncs it when online.
 
-## Screen: TimerView
+## Screen: TrackView
 
-- **File**: `ios/TimeOfLife/TimeOfLife/Features/TimeTracking/Views/TimerView.swift`
-- **Route**: `.timer`
-- **ViewModel**: `TimerViewModel`
+- **File**: `ios/TimeOfLife/TimeOfLife/Features/TimeTracking/Views/TrackView.swift`
+- **Route**: Track tab in the app shell
+- **ViewModel**: `TrackViewModel`
 
 ### Layout
 
-Wrap the screen in a `NavigationStack` (or add a `.toolbar` with an inline navigation title) so the top toolbar can render.
+Wrap the screen in the app shell's navigation container. Content is a
+scrollable column with horizontal `Theme.spacingLarge` padding and a dual-flow
+vertical composition; the adaptive spacers collapse to zero before scrolling
+engages.
 
-The main content uses a `ScrollView` → `VStack(spacing: Theme.spacingMedium)` with padding `Theme.spacingLarge`:
+Top-to-bottom order:
 
-1. `OfflineBanner()` is rendered at the top by `RootView`.
-2. Title: `L10n.timerTitle` — `.title.bold()`, `Theme.textPrimary`
-3. `Spacer` fixed to `Theme.spacingExtraLarge`
-4. `TextFieldWithError` for activity name:
-   - `accessibilityId`: `TimerActivityField`
-   - title: `L10n.timerActivityLabel`
-   - placeholder: `L10n.timerActivityPlaceholder`
-   - `submitLabel`: `.done`
-   - disabled while timer is running
-5. Large timer display:
+1. Navigation title: `L10n.timerTitle` (`Track`).
+2. Top adaptive spacer (see adaptive spacing below).
+3. Completion-mark region: the saved-state confirmation appears here, above
+   the readout, without moving the timer content.
+4. Numeric timer readout:
    - Elapsed time formatted as `MM:SS` or `H:MM:SS`.
-   - Font: `.system(size: 64, weight: .semibold, design: .rounded)`.
-   - Color: `Theme.textPrimary`.
-   - Fixed `minWidth: 220` and `.monospacedDigit()` so the digits do not shift as they change.
-   - `accessibilityIdentifier`: `TimerDisplay`
-6. `Spacer().frame(height: Theme.spacingLarge)`
-7. Fixed reserve for the pinned bottom action bar
+   - Centered in the main content region.
+   - Font: `.system(size: 78, weight: .ultraLight, design: .rounded)` or the
+     approved Theme equivalent.
+   - Uses `Theme.textPrimary` and `.monospacedDigit()`.
+   - Keeps a stable frame across all timer states.
+   - `accessibilityIdentifier`: `TimerDisplay`.
+5. State label below the readout:
+   - `READY`, `RUNNING`, `SAVING`, or `SAVED` as appropriate.
+   - The exact elapsed value remains the primary state information.
+6. Reserved non-field-error region, immediately above the central separator:
+   - Preserves its reserved height when no error is shown, without exposing
+     an empty accessibility element.
+   - Error text wraps fully and is never cut: when the wrapped error is taller
+     than the reservation, the region grows and the flexible spacing yields
+     first.
+   - `accessibilityIdentifier`: `TrackErrorBanner`.
+7. Central separator: receives free space beyond twice the shared cap (see
+   adaptive spacing below).
+8. Activity search/refine row (the selected-Activity row):
+   - Idle: the slot is reserved — the picker geometry is kept but invisible,
+     non-interactive, and absent from the accessibility tree — so preparing
+     an Activity never moves the main action below it.
+   - Ready or saved: a full-width search-styled picker with a magnifier, the
+     prepared Activity name, and identifier `TimerActivitySearchButton`.
+   - Running, saving, or recoverable error: a non-interactive prepared Activity
+     label with identifier `TimerActivityLabel`; search is unavailable while
+     timing is active.
+   - No state renders more than one preparation control.
+   - No control shows a Category icon or Category name.
+   - No editing affordance: the former beside-picker Refine and any "Edit
+     activity" variant are removed; editing placement is deferred to a later
+     change.
+9. State-specific main action in one stable region:
+   - `L10n.timerStart` with `play.fill` when ready, identifier
+     `TimerStartButton`.
+   - `L10n.timerStop` with `stop.fill` when running, identifier
+     `TimerStopButton`.
+   - Stop hint: `L10n.timerStopHint` - stops the timer and saves the entry.
+   - The region changes between these controls without moving; it sits above
+     Recents so Choose Activity / Start / Stop stays reachable without
+     scrolling.
+   - The action renders in a fixed-height slot equal to the tallest of its
+     state titles (Choose an activity / Start / Stop) at the active Dynamic
+     Type size, so the control's frame is identical in idle, ready, running,
+     saving, saved, and error states.
+10. Recents: the wrapping chip flow of the most-recently-used Activities (see
+    Recents below); hidden while a timer is running while its occupied
+    height is preserved, so the main action never moves.
+11. Bottom adaptive spacer (see adaptive spacing below).
+12. Tab bar.
 
-Top toolbar:
+Adaptive spacing:
 
-- `ToolbarItem(placement: .topBarTrailing)`:
-  - `Button(L10n.timerSignOut, role: .destructive)` — `.subheadline`, `accessibilityIdentifier("TimerSignOutButton")`
-  - Tapping it presents a confirmation alert with `L10n.signOutConfirmationTitle`, `L10n.signOutConfirmationMessage`, and primary/cancel actions `L10n.signOutConfirm` / `L10n.signOutCancel`.
+- The top and bottom spacers share one maximum-height token: **48 pt**,
+  selected from the 24/48/72/96 Pro Max spike comparison and validated on
+  iPhone SE (default and Large Dynamic Type).
+- With free space `slack = viewport - content`, each spacer resolves to
+  `min(cap, slack / 2)` — the two are always equal.
+- Surplus beyond twice the cap goes to the central separator between the
+  error region and the search/refine flow.
+- When space is constrained (short screens, large Dynamic Type), all three
+  flexible regions collapse to zero and the ordered content scrolls.
+- Main-action pinning (D10): the content height around the main action is
+  state-invariant (reserved idle preparation slot, preserved Recents height
+  while running, fixed-height action slot), so the equal split recomputes
+  identically in every state. A wrapped error's growth beyond the reserved
+  error height compresses the top spacer first, then the central separator —
+  both above the main action, keeping it stationary — and the bottom spacer
+  collapses only when both are exhausted, at which point the content
+  scrolls.
 
-Pinned bottom action bar via `.safeAreaInset(edge: .bottom)`:
+The Track screen has no Dial, ring, sweep, goal, daily-total, or decorative
+progress visualization.
 
-- Non-field error banner (if any):
-  - `ErrorBanner(message: vm.errorMessage, accessibilityId: "TimerErrorBanner")` rendered above the primary button.
-- Primary control button (same position for Start and Stop):
-  - Title/icon: `L10n.timerStart` + `play.fill` when idle; `L10n.timerStop` + `stop.fill` when running.
-  - Tint: `Theme.accentPrimary` when idle, `Theme.danger` when running.
-  - `accessibilityId`: `TimerStartButton` / `TimerStopButton`.
-  - Accessibility hint on Stop: `L10n.timerStopHint` — "Stops the timer and saves the entry".
-- Bottom hint (if offline):
-  - `L10n.timerOfflineHint` — `.caption`, `Theme.textSecondary`.
+### Recents
 
-Background: `Theme.backgroundPrimary`.
+- Wrapping chip flow of the most-recently-used Activities, capped at six,
+  most-recently-used first; no horizontal scrolling.
+- Each chip shows the icon of the first assigned Category (first by assignment
+  position) in a fixed symbol slot; categoryless Activities render name-only
+  chips with no icon and no placeholder glyph. Category names are never shown.
+- The prepared Activity's chip uses a filled accent presentation (accent
+  background, on-accent text, accent border) and keeps its icon; no checkmark.
+- Minimum 44 pt tap targets; a tap prepares the Activity without starting
+  timing.
+- Recents are hidden while a timer is running; their occupied height is
+  preserved so the main action does not move.
+- Empty catalog: a dedicated localized hint (`timer.recentsEmptyHint`,
+  "Activities you track will appear here." / «Здесь появятся активности,
+  которые вы отслеживаете.»), not the search sheet's empty-catalog copy.
+
+### Activity search sheet
+
+Tapping the idle `TimerChooseActivityButton` or the ready/saved
+`TimerActivitySearchButton` is the single Activity-search entry point for that
+state. It presents a full-height sheet containing a native, always-visible
+search field and ordinary result content. The operating system owns field
+placement, focus, keyboard, activation animation, and Cancel; the sheet owns
+its presentation and dismissal:
+
+- Empty query: the complete Activity catalog in recency order
+  (`last_used_at`), with the prepared Activity marked.
+- Non-empty query: case-insensitive containment matches in recency order.
+- Exact normalized match (trimmed, case-insensitive): identified first; no
+  create action is offered for that name.
+- Valid unmatched input: a single full-width quick-create row (categoryless)
+  that prepares the Activity directly.
+- Invalid input: existing search results stay available, creation is
+  suppressed, and localized validation guidance is shown.
+- A non-expired pending-deletion identity matching the query offers explicit
+  restoration instead of creation.
+- Empty catalog: the content area explains the empty state and prompts the
+  user to enter a name in the native search field — no separate alert.
+- The search content never requires a Category and never shows Category
+  metadata.
+
+Search input is a temporary draft: it never changes the committed prepared
+Activity. Native Cancel and swipe-down dismissal close the sheet and restore
+the prior ready or idle timer state exactly. Selecting, quick-creating, or
+restoring is the only commit boundary — it prepares the Activity and
+dismisses the sheet.
+
+Selection changes the ready state only. The timer starts only after the user
+activates Start.
+
+### Activity and Category relationship
+
+- **Activity** is the concrete task being timed and is required for an entry.
+- **Category** is optional analytics metadata; an Activity may have zero or more
+  Categories.
+- Manage Activities and Manage Categories are separate surfaces.
+- The full Activity Editor may assign or remove Categories.
+- Category assignment is not required to start a timer.
+- Entries reference `activity_id` and resolve the Activity's current Categories
+  at query time. Editing an Activity's Categories therefore reclassifies its
+  existing history in Insights.
 
 ### Keyboard handling
 
-Follows `Design/INTERACTIONS.md` → **Keyboard and primary input placement**. The activity field and timer display sit in the upper portion of the scrollable area so they remain visible when the keyboard opens. The Start/Stop button is pinned to `.safeAreaInset(edge: .bottom)` so it follows the keyboard and is always tappable. A measured bottom reserve prevents the timer display from being hidden behind the action bar on short screens.
+The Track screen does not keep a free-text field in the primary capture
+layout. Search follows `Design/INTERACTIONS.md` -> **Keyboard and primary
+input placement**. The native search field stays above the keyboard; the
+editor's Save action is pinned with `.safeAreaInset(edge: .bottom)`.
 
 ### Layout stability rule
 
-The timer screen must not tremble when the timer starts or stops. To guarantee this:
-
-- The timer display and the primary button always occupy the same slots.
-- Only the button label, icon, and tint change between Start and Stop.
-- No card with shadow appears/disappears in the main layout.
-- The activity field is disabled while running but stays visible in the same place.
-- The Sign Out toolbar item is always present and does not change size or position.
+- The numeric readout, state-specific preparation control, and main action
+  keep their interaction regions across idle, ready, running, saving, and
+  saved states.
+- The main-action control's frame is identical in every state: the layout
+  reserves the preparation-row slot while idle, preserves Recents' occupied
+  height while running, renders the action in a fixed-height slot, and lets
+  wrapped-error growth yield from the top spacer before the central
+  separator.
+- Only the Activity state, readout value, label, button title/icon, and tint
+  change.
+- No dial, ring, or progress card appears or disappears around the readout.
+- The main action remains visible above the tab bar; adaptive spacing yields
+  before any content clips, overlaps, or becomes unreachable.
 
 ### Behaviors
 
-- Focus the activity field on appear.
-- Validate that activity name is non-empty before starting.
-- Defocus the activity field when the timer starts (drop `@FocusState` and keep the field disabled while running).
-- Suggestions render only when the field is focused/idle and the typed name is empty or case-insensitively prefix-matches an existing activity. Hide suggestions while the user types a brand-new, non-matching name.
-- Preserve `selectedActivityId` when the user edits the typed name but the trimmed, case-folded name still matches the linked activity; clear it only when the name diverges.
-- Start timer updates `TimerViewModel.startDate` and begins a periodic `Timer.publish` to refresh display.
-- Stop timer calculates elapsed time, stops publisher, and calls `TimerService.saveEntry(activityId:duration:startedAt:)`.
-- If offline, save the entry locally and sync when connectivity returns.
-- Non-field save errors (network/offline/server) are shown in an `ErrorBanner` above the primary button; field errors stay under the activity field.
-- Reset input and timer display after successful save.
-- Haptic feedback on start (`selection`) and stop (`success`).
-- Keep screen awake while timer is running using `UIApplication.shared.isIdleTimerDisabled`.
-- **Sign Out**:
-  - Tapping the toolbar button shows a confirmation alert.
-  - On confirm, clear the local session (offline-safe) and let `RootView` return to the auth flow.
-  - Do not show a blocking loader; sign-out is local and immediate.
+- Open Activity search from the state-specific preparation control above
+  Recents.
+- Selecting a recent Activity prepares it without creating an entry.
+- Quick-creating an unmatched Activity prepares it locally without Categories.
+- Start revalidates the prepared Activity by identifier; a prepared Activity
+  that no longer exists clears preparation and returns to idle with a
+  localized error (it is never silently recreated).
+- Start persists the running timer immediately, begins periodic readout refresh,
+  emits selection feedback, and keeps the screen awake.
+- Stop calculates elapsed time, saves the entry locally, emits success feedback,
+  and returns to the ready state for the same Activity.
+- Save errors preserve recoverable running state and appear in the reserved
+  non-field-error region without a blocking loader; error text wraps fully and
+  is never cut.
+- A running timer remains visible above the tab bar on History and Insights;
+  its Stop action saves in place.
+- Profile owns sign-out and account/sync controls rather than the Track toolbar.
+- Dynamic Type keeps the readout, Activity name, and Start/Stop action readable;
+  the adaptive spacers and central separator collapse before any content is
+  clipped or unreachable.
+- Reduce Motion uses fades or immediate state changes rather than custom motion.
 
 ### States
 
 | State | Visual |
 |---|---|
-| Idle | Activity field enabled; timer shows `00:00`; Start button shown |
-| Idle with suggestions | Suggestions block visible below the activity field when the field is focused and the typed name is empty or matches an existing prefix (F5, D16) |
-| Idle, typing a new name | Suggestions hidden once the typed name does not case-insensitively match any existing activity |
-| Running | Activity field disabled and defocused; timer updates live; Stop button shown (destructive tint) |
-| Running (suggestions hidden) | Suggestions block hidden while `vm.isRunning` (F5) |
-| Saving | Stop button shows `ProgressView`; timer continues until save completes |
-| Error | Inline error below activity field or banner above controls |
-| Sign Out confirmation | Alert with destructive confirm and cancel |
+| Idle | No Activity selected; centered readout shows `00:00`; choose Activity prompt and Start are shown or Start is disabled according to validation policy. |
+| Ready | Selected Activity name; centered readout shows `00:00`; Start button shown. |
+| Search active | Searchable sheet with a native field; content area shows browse/filtered results, create or restore actions, empty-catalog guidance, or validation/error states; committed timer state unchanged. |
+| Running | Prepared Activity label remains visible; readout updates live; Stop button shown with destructive tint; Recents hidden with its height preserved. |
+| Saving | Readout remains stable; Stop action shows progress while the save completes. |
+| Saved | Brief saved confirmation in the completion-mark region above the readout; the same Activity remains prepared with `00:00` and Start, and the timer stays in its prior position. |
+| Error | Localized non-field error in the reserved region above the central separator; text wraps fully and the region grows past the reservation when needed, with the top spacer yielding first and then the central separator so the main action stays stationary; recoverable running state is preserved. |
 
 ### Data model
 
 ```swift
 struct TimeEntry: Identifiable, Codable, Sendable {
     let id: UUID
-    let activityName: String
+    let activityId: UUID
     let startedAt: Date
-    let endedAt: Date
-    var duration: TimeInterval { endedAt.timeIntervalSince(startedAt) }
-    var synced: Bool
+    let endedAt: Date?
+    var duration: TimeInterval { endedAt.map { $0.timeIntervalSince(startedAt) } ?? 0 }
+    var source: String
+    var sourceRef: String?
 }
 ```
+
+Activity name and Categories are resolved from the local catalog by
+`activityId`; they are not denormalized onto the entry. There is no `synced`
+flag on the model: sync is outbox-driven (every mutation writes a transactional
+outbox row; the relay is the transport, not a per-record state).
 
 ### Implementation checklist
 
 - [ ] All colors use `Theme.*` tokens.
-- [ ] All strings use `L10n.*` keys (add new keys to EN and RU).
-- [ ] Activity field has `TimerActivityField`; display has `TimerDisplay`.
-- [ ] Start/Stop buttons occupy the same position and have correct accessibility IDs.
-- [ ] Timer display has a fixed width and `.monospacedDigit()`.
-- [ ] Timer formatting is consistent and localized.
-- [ ] Offline save-and-sync behavior is implemented and tested.
-- [ ] Haptics follow `INTERACTIONS.md`.
-- [ ] Sign Out toolbar item has `TimerSignOutButton` and shows a confirmation alert.
-- [ ] Suggestions render idle-only via `TimerSuggestionList` / `TimerSuggestion(<id>)` (F5/U3, D16).
-- [ ] Quick-add button `TimerQuickAddButton` opens `ActivityEditor` as a sheet (F7, D21).
-- [ ] Auto-create reuses an existing activity case-insensitively; otherwise creates an activity with no categories (F4/D20).
-- [ ] Entry carries `activityId` (F9); `activityName` is derived, not stored.
-- [ ] Screen previews exist for light/dark and EN/RU.
-- [ ] SwiftLint passes with zero findings.
+- [ ] All strings use `L10n.*` keys in English and Russian.
+- [ ] Activity search, readout, and Start/Stop controls have stable identifiers.
+- [ ] Numeric readout is centered, fixed, and `.monospacedDigit()`.
+- [ ] Suggestions and search rows expose Activity names only.
+- [ ] Recents chips show the first assigned Category's icon only; no names.
+- [ ] Start follows explicit selection and persists running state.
+- [ ] Stop saves locally and preserves recoverable state on failure.
+- [ ] Compact timer is available above History and Insights navigation.
+- [x] VoiceOver, Dynamic Type, Reduce Motion, light/dark, and iOS 15 are tested.
+- [ ] SwiftLint and warning-as-error builds pass.
 
----
+## Localization keys
 
-## New localization keys required
-
-Add to `en.lproj/Localizable.strings` and `ru.lproj/Localizable.strings`, then to `L10n`:
+Add English and Russian values, then add corresponding `L10n` cases:
 
 ```text
-// Timer
-"timer.title" = "Timer";
-"timer.activityLabel" = "Activity";
-"timer.activityPlaceholder" = "What are you working on?";
+"timer.title" = "Track";
+"timer.chooseActivity" = "Choose an activity";
 "timer.start" = "Start";
 "timer.stop" = "Stop";
 "timer.stopHint" = "Stops the timer and saves the entry";
-"timer.offlineHint" = "Entries are saved locally and synced when you’re back online.";
-"timer.emptyActivityError" = "Enter an activity name.";
-"timer.signOut" = "Sign Out";
-
-// Sign out confirmation
-"signOut.confirmationTitle" = "Sign Out?";
-"signOut.confirmationMessage" = "This will clear your local session.";
-"signOut.confirm" = "Sign Out";
-"signOut.cancel" = "Cancel";
-
-// Epic 1 — suggestions + quick-add + manage
-"timer.suggestionsHeader" = "Recent";
+"timer.saved" = "Saved";
+"timer.chooserRecent" = "Recent";
+"timer.recentsEmptyHint" = "Activities you track will appear here.";
+"timer.selectActivity" = "Select %@";
 "timer.quickAdd" = "New activity";
 "timer.manageActivities" = "Manage activities";
 ```
 
-Russian:
+## Catalog behavior
 
-```text
-// Timer
-"timer.title" = "Таймер";
-"timer.activityLabel" = "Активность";
-"timer.activityPlaceholder" = "Над чем вы работаете?";
-"timer.start" = "Старт";
-"timer.stop" = "Стоп";
-"timer.stopHint" = "Останавливает таймер и сохраняет запись";
-"timer.offlineHint" = "Записи сохраняются локально и синхронизируются после появления сети.";
-"timer.emptyActivityError" = "Введите название активности.";
-"timer.signOut" = "Выйти";
+Recents are computed on-device from the local catalog and ranked by
+`last_used_at`, capped at six, most-recently-used first. Each chip contains the
+Activity name and, when the Activity has Categories, the icon of the first
+assigned Category — never a Category name. Category icons belong in Manage
+Activities, Manage Categories, Activity Editor, and Insights; on Track they
+appear only in Recents chips. The search sheet and the selected-Activity row
+remain category-free.
 
-// Sign out confirmation
-"signOut.confirmationTitle" = "Выйти?";
-"signOut.confirmationMessage" = "Это очистит локальную сессию.";
-"signOut.confirm" = "Выйти";
-"signOut.cancel" = "Отмена";
+The search sheet offers a single full-width quick-create row that saves an
+Activity with no Categories. Starting with a new name still auto-creates a
+categoryless Activity, reuses a case-insensitive match, and never forces the
+user into category management.
 
-// Epic 1 — предложения + быстрое добавление + управление
-"timer.suggestionsHeader" = "Недавние";
-"timer.quickAdd" = "Новая активность";
-"timer.manageActivities" = "Активности";
-```
-
----
-
-## Future extensions
-
-- `HistoryView` listing recent entries.
-- Activity suggestions based on history.
-- Widgets and shortcuts for one-tap start.
-- Categories with icons.
-- Dedicated **Account/Profile** screen that replaces the interim `TimerView` Sign Out toolbar item.
-
----
-
-## Epic 1 changes
-
-Epic 1 (Activity Catalog & Categories) extends the timer with recency suggestions (F5), a quick-add entry point (F7), auto-create-with-`activity_id` (F4), and an updated entry model (F9). Implements `Requirements/Usecases/Activity_Catalog_and_Categories.md` flows 2 and 3.
-
-### Suggestions (F5 / U3, D16 / D19)
-
-A new block rendered directly below `TextFieldWithError`, **idle only** — hidden while `vm.isRunning` because the activity field is disabled (F5). `TimerSuggestionList` wraps up to 5 `SuggestionRow`s (`COMPONENTS.md`) ranked by `last_used_at` on-device; each row uses the first category's icon and comma-separated category names; there is no suggestions endpoint, so it works fully offline (D16). `last_used_at` syncs, so recency is shared across devices (D19 — no manual reorder at MVP).
-
-- Container `accessibilityIdentifier("TimerSuggestionList")`.
-- Each row `accessibilityIdentifier("TimerSuggestion(\(activity.id))")` (U3).
-- One tap prefills `vm.activityName` with the activity's name AND sets `vm.selectedActivityId` so the entry links to it (F4/U3).
-- If the catalog is empty, render nothing — free-text start still works (D20). No `timer.suggestionsEmpty` key is needed; the `EmptyState` pattern belongs to Manage screens (U8).
-
-### Quick-add entry point (F7)
-
-An `IconButton` (`COMPONENTS.md`) with `square.and.pencil` (`TOKENS.md` → Management icons) sits beside the activity field, `accessibilityIdentifier("TimerQuickAddButton")`. Tapping it presents the real `ActivityEditorView` in create-from-timer mode as a sheet (D21); keyboard placement inside the sheet follows D13. On save, the new activity is selected on the timer (name prefilled + `selectedActivityId` set) and the sheet dismisses. Disabled while the timer is running (the field is disabled while running).
-
-### Auto-create behavior (F4 / D20)
-
-On Start, trim + casefold the typed name. If it matches an existing activity (case-insensitive), reuse it — no duplicate. Otherwise auto-create a new activity with no categories and link `activity_id`. The user is never forced into the catalog to start a timer. This mirrors the backend's `UNIQUE (user_id, lower(name))` constraint and the 409 `activity_exists` reuse path (`Design/BACKEND/Activity_Catalog_API.md` Sync & ids): a case-insensitive collision returns the winning record's `{id,name}` in `details` and the client re-maps to the surviving id.
-
-### Updated data model (F9)
-
-`TimeEntry` gains a required `activityId: UUID` and an optional `categories: [Category]?` resolved at query time; `activityName` becomes a convenience derived from the activity (no longer the source of truth). Entries reference `activity_id`; the activity's name and tags resolve at query time (nothing is denormalized onto the entry).
-
-```swift
-struct TimeEntry: Identifiable, Codable, Sendable {
-    let id: UUID
-    let activityId: UUID          // F9 — links to Activity.id
-    let startedAt: Date
-    let endedAt: Date
-    var duration: TimeInterval { endedAt.timeIntervalSince(startedAt) }
-    var categories: [Category]?   // resolved at query time
-    var activityName: String { /* derived from Activity via activityId */ }
-    var synced: Bool
-}
-```
-
-### Manage Activities / Categories entry points
-
-The timer toolbar (or a future account/menu destination) links to `.manageActivities`. The interim Sign Out toolbar item stays until Epic 3's dedicated Account/Profile screen replaces it (D12).
-
-### New localization keys
-
-Appended to the "New localization keys required" blocks above: `timer.suggestionsHeader`, `timer.quickAdd`, `timer.manageActivities` (EN + RU). No `timer.suggestionsEmpty` key — render nothing when the catalog is empty (D20).
+Manage Activities and Manage Categories are separate destinations/sheets. Both
+remain available offline and use the existing sync-conflict and 30-second
+undo rules.

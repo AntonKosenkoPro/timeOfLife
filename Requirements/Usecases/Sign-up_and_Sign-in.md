@@ -1,6 +1,6 @@
 ## User registration and sign-in
 
-1. User opens the app and sees the welcome screen showing the app name, tagline, **Sign in with Apple** button, and **Continue with Email** button.
+1. The app launches into the Track shell without requiring sign-in. To enable sync, the user opens Profile (person control, top-trailing on every tab) and taps **Enable Sync**, which presents the welcome screen showing the app name, tagline, **Sign in with Apple** button, and **Continue with Email** button.
 2. If the user taps **Continue with Email**, they navigate to the email entry screen.
 3. User types their email address into the email field.
 4. User submits the email by tapping the **Continue** button or pressing the keyboard Return key.
@@ -13,5 +13,5 @@
    4. If the user cannot receive the code, they can resend it after waiting for 30 seconds.
       1. After waiting for 30 seconds, the **Resend code** button becomes enabled.
       2. When the code is resent, the user gets an appropriate feedback message.
-   5. If the code is valid and accepted by the server, the user is signed in and the app shows the main time-tracking screen.
-6. If the user chooses **Sign in with Apple** on the welcome screen, the native Apple authorization sheet appears. On success, the user is signed in and the app shows the main time-tracking screen.
+    5. If the code is valid and accepted by the server, the user is signed in; `SyncController` activates and the app shell (Track) remains the root.
+6. If the user chooses **Sign in with Apple** on the welcome screen, the native Apple authorization sheet appears. On success, the user is signed in; `SyncController` activates and the app shell (Track) remains the root.

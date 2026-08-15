@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -26,6 +27,7 @@ func newTestServer(t *testing.T) *Server {
 	if err != nil {
 		t.Fatalf("failed to create SQLite store: %v", err)
 	}
+	t.Cleanup(func() { _ = store.Close() })
 	ctx := context.Background()
 	if err := migrations.RunSQLite(ctx, store.DB()); err != nil {
 		t.Fatalf("failed to run migrations: %v", err)
@@ -56,7 +58,7 @@ func newTestServer(t *testing.T) *Server {
 		HandlerCfg:   handlerCfg,
 	}
 
-	return New(cfg, deps)
+	return New(deps)
 }
 
 func TestHealthEndpoint(t *testing.T) {
@@ -82,21 +84,49 @@ func TestHealthEndpoint(t *testing.T) {
 func TestOTPRequestRoute(t *testing.T) {
 	s := newTestServer(t)
 
+	// A valid request through the real route must return 202 (always, to
+	// prevent user enumeration).
 	body := `{"email":"test@example.com"}`
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/otp/request", nil)
-	req.Body = http.NoBody
-	req = httptest.NewRequest(http.MethodPost, "/api/v1/auth/otp/request", http.NoBody)
-	_ = body
-	_ = req
-
-	// Test with proper body
-	req = httptest.NewRequest(http.MethodPost, "/api/v1/auth/otp/request", nil)
-	// Use a proper request
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/otp/request", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
-	s.handler.RequestOTP(w, req)
-	// This should return 400 because body is empty
+	s.ServeHTTP(w, req)
+
+	if w.Code != http.StatusAccepted {
+		t.Errorf("expected 202 for valid OTP request, got %d", w.Code)
+	}
+
+	// An empty body must fail validation with 400.
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/auth/otp/request", http.NoBody)
+	req.Header.Set("Content-Type", "application/json")
+	w = httptest.NewRecorder()
+	s.ServeHTTP(w, req)
+
 	if w.Code != http.StatusBadRequest {
-		t.Logf("expected 400 for empty body, got %d", w.Code)
+		t.Errorf("expected 400 for empty body, got %d", w.Code)
+	}
+}
+
+func TestAppleRouteReturnsConfiguredErrorWhenDisabled(t *testing.T) {
+	s := newTestServer(t)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/apple", strings.NewReader(`{"identity_token":"token"}`))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, req)
+
+	if w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503 when Apple sign-in is disabled, got %d", w.Code)
+	}
+	var response struct {
+		Error struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if response.Error.Code != "apple_not_configured" {
+		t.Errorf("expected apple_not_configured, got %q", response.Error.Code)
 	}
 }
 

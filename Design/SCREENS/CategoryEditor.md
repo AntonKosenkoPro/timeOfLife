@@ -12,9 +12,9 @@ Implements F2/U1/U2 of `Requirements/FURPS/Activity_Catalog_and_Categories.md`. 
 
 ### Layout
 
-`.sheet` with `medium` detents. `ScrollView` → `VStack(spacing: Theme.spacingLarge)` with horizontal padding `Theme.screenHorizontalPadding` and `Theme.maxContentWidth`:
+`.sheet` with `medium` and `large` detents on iOS 16+ (the iOS 15 fallback uses the system sheet height). `ScrollView` → `VStack(spacing: Theme.spacingLarge)` with horizontal padding `Theme.screenHorizontalPadding` and `Theme.maxContentWidth`:
 
-1. Title — `.title.bold()`, `Theme.textPrimary`. Create: `L10n.categoryEditorCreateTitle`; edit: `L10n.categoryEditorEditTitle`.
+1. Native collapsing navigation title via `EditorSheetScaffold`. Create: `L10n.categoryEditorCreateTitle`; edit: `L10n.categoryEditorEditTitle`. At the top edge the system renders its large-title form with Cancel in the top bar; scrolling collapses it into an inline material bar beside Cancel, and returning to the top expands it again.
 2. `TextFieldWithError` for name:
    - `accessibilityId`: `CategoryEditorNameField`
    - title / placeholder: `L10n.categoryEditorNameLabel` / `L10n.categoryEditorNamePlaceholder`
@@ -22,10 +22,10 @@ Implements F2/U1/U2 of `Requirements/FURPS/Activity_Catalog_and_Categories.md`. 
    - `autocapitalization`: `.sentences`
    - error: `vm.fieldErrors.name`
    - Focused on appear.
-3. `SectionHeader(L10n.categoryEditorIconLabel)` + `IconPickerGrid(options: CatalogIcon.allowedSymbols, selection: $vm.icon, accessibilityId: "CategoryEditorIcon")`.
+3. `SectionHeader(L10n.categoryEditorIconLabel)` + `IconPickerGrid(options: CatalogIcon.renderableSymbols, selection: $vm.icon, accessibilityId: "CategoryEditorIcon")`. A valid synchronized icon unavailable on the current OS remains selected by raw value and is displayed with the `tag` fallback until the user changes it.
 4. `ErrorBanner` if `vm.errorMessage != nil`:
    - `accessibilityId`: `CategoryEditorErrorBanner`
-5. Fixed reserve for the pinned bottom action bar.
+5. Reserve matching the measured pinned bottom action bar height.
 
 Background: `Theme.backgroundPrimary`.
 
@@ -35,7 +35,7 @@ Pinned bottom action bar via `.safeAreaInset(edge: .bottom)` (D13):
   - title: `L10n.categoryEditorSave`
   - `accessibilityId`: `CategoryEditorSaveButton`
   - disabled while name is whitespace-only (trimmed) or `vm.isLoading`
-- Cancel via swipe-down and a toolbar `Cancel` button with `accessibilityIdentifier("CategoryEditorCancelButton")`.
+- Cancel via swipe-down and the scaffold's native cancellation toolbar item with `accessibilityIdentifier("CategoryEditorCancelButton")`; both dismiss paths are disabled while saving.
 
 ### Keyboard handling
 
@@ -47,7 +47,7 @@ Follows `Design/INTERACTIONS.md` → **Editor sheets and keyboard placement** (D
 - Validate (U1/U2): name non-empty and ≤ 60 chars → unified `validation.name*` message; collapse multiple rules into a single message per field (U2).
 - Edit mode pre-fills `vm.name` and `vm.icon` from the passed-in `Category`.
 - On 422 show field errors beneath the name field.
-- On 409 `category_exists` (case-insensitive name collision), reuse the existing category per `Design/INTERACTIONS.md` → **Sync conflict**: dismiss the sheet and surface `L10n.errorCategoryExists` to the caller; re-map local references to the surviving id (no editor-level error).
+- On a normalized duplicate, keep the editor open with the draft intact, show `L10n.errorCategoryExists`, and allow correction. Relay collision recovery remaps local references to the surviving id in `SyncController`.
 - Save success: dismiss the sheet. If opened from the Activity Editor's add-category link, the new category appears pre-selected in the `TagSelector`.
 - Clear field error when `vm.name` changes.
 - Disable Save while `vm.isLoading` or name is empty/whitespace-only.
@@ -60,7 +60,7 @@ Follows `Design/INTERACTIONS.md` → **Editor sheets and keyboard placement** (D
 | Edit | Name + icon pre-filled from the existing `Category`, Save enabled |
 | Saving | Save button shows `ProgressView`; fields and swatches disabled |
 | Validation error | Name field border + error label in `Theme.danger`; Save disabled if name empty/invalid |
-| Conflict (409 `category_exists`) | Sheet dismissed; caller surfaces `error.categoryExists` banner |
+| Duplicate name | Editor remains open with the draft and a localized correction error |
 
 ### Data model
 
@@ -83,14 +83,15 @@ struct Category: Identifiable, Codable, Sendable {
 
 ### Implementation checklist
 
-- [ ] All strings use `L10n.*` keys (add new keys to EN and RU).
-- [ ] Accessibility identifiers: `CategoryEditorNameField`, `CategoryEditorIcon`, `CategoryEditorSaveButton`, `CategoryEditorCancelButton`, `CategoryEditorErrorBanner`.
-- [ ] Keyboard placement follows D13 (name upper, Save pinned bottom, measured reserve).
-- [ ] Validation uses unified `validation.name*` messages (U2).
-- [ ] 409 `category_exists` reuses the existing category and dismisses the editor (per `INTERACTIONS.md`).
-- [ ] Edit mode pre-fills name + icon from the passed-in `Category`.
+- [x] All strings use `L10n.*` keys (EN + RU).
+- [x] Accessibility identifiers: `CategoryEditorNameField`, `CategoryEditorIcon`, `CategoryEditorSaveButton`, `CategoryEditorCancelButton`, `CategoryEditorErrorBanner`.
+- [x] Keyboard placement follows D13 (name upper, Save pinned bottom, measured reserve).
+- [x] Validation uses unified category-name messages (U2).
+- [x] Duplicate names preserve the draft and keep the editor open.
+- [x] Edit mode pre-fills name + icon from the passed-in `Category`.
+- [x] iOS 16+ medium/large detents are availability guarded.
 - [ ] Screen previews exist for light/dark and EN/RU.
-- [ ] SwiftLint passes with zero findings.
+- [x] SwiftLint passes with zero findings.
 
 ---
 

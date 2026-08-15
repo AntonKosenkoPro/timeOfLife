@@ -68,7 +68,7 @@ func run() int {
 
 	// Create dependencies and server
 	deps := server.NewDefaultDependencies(cfg, store)
-	srv := server.New(cfg, deps)
+	srv := server.New(deps)
 
 	// Create HTTP server
 	httpServer := &http.Server{

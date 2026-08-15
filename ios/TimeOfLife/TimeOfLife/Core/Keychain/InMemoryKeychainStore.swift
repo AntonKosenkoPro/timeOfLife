@@ -20,9 +20,4 @@ actor InMemoryKeychainStore: KeychainStoring {
     func remove(key: KeychainKey) async {
         storage.removeValue(forKey: key)
     }
-
-    /// Test-only snapshot accessor.
-    func snapshot() async -> [KeychainKey: String] {
-        storage
-    }
 }

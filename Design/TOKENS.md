@@ -18,6 +18,8 @@ All colors are stored as color sets in `Assets.xcassets` with light/dark variant
 | `danger` | `#FF3B30` | `#FF453A` | `Theme.danger` | Errors, offline banner, destructive actions |
 | `success` | `#34C759` | `#30D158` | `Theme.success` | Success states |
 | `hairline` | `#E5E5EA` | `#38383C` | `Theme.hairline` | Borders, dividers |
+| `textOnAccent` | `#FFFFFF` | `#FFFFFF` | `Theme.textOnAccent` | Text and progress indicators on filled accent controls |
+| `transparent` | n/a | n/a | `Theme.transparent` | Semantic clear layout/reserve surfaces |
 
 ## Typography
 
@@ -41,6 +43,7 @@ Use Apple system fonts via SwiftUI text styles. Do not use custom fonts for the 
 |---|---|---|---|
 | `spacingExtraSmall` | `4` | `Theme.spacingExtraSmall` | Tight gaps |
 | `spacingSmall` | `8` | `Theme.spacingSmall` | Grouped elements |
+| `spacingChip` | `10` | `Theme.spacingChip` | Uniform chip inner padding |
 | `spacingMedium` | `16` | `Theme.spacingMedium` | Default padding |
 | `spacingLarge` | `24` | `Theme.spacingLarge` | Screen edge padding, section gaps |
 | `spacingExtraLarge` | `32` | `Theme.spacingExtraLarge` | Major section breaks |
@@ -66,7 +69,7 @@ Use SF Symbols. Prefer filled variants for active/primary actions.
 | Pause | `pause.fill` | Pause timer |
 | Stop | `stop.fill` | Stop and save entry |
 | History | `clock.arrow.circlepath` | History tab |
-| Settings | `gearshape.fill` | Settings tab |
+| Settings | `gearshape.fill` | Settings / configuration |
 | Plus | `plus.circle.fill` | Add activity |
 | Check | `checkmark.circle.fill` | Success state |
 | Exclamation | `exclamationmark.triangle.fill` | Error state |
@@ -75,7 +78,7 @@ Use SF Symbols. Prefer filled variants for active/primary actions.
 
 ### Catalog icons
 
-Allowed set for category icons (F2); default is `tag`. Validated against this exact set (U1).
+Allowed set for category icons (F2); default is `tag`. This is the documented mirror of the authoritative `CategoryIcon` enum in `backend/api/openapi.yaml` (category-management D1) — the Go `validIcons` set and the iOS `CatalogIcon` type use the exact same list, and contract/unit tests fail on drift.
 
 | SF Symbol | Usage |
 |---|---|
@@ -85,24 +88,42 @@ Allowed set for category icons (F2); default is `tag`. Validated against this ex
 | `book` | Education / reading |
 | `pencil.and.ruler` | Education / study |
 | `brain.head.profile` | Education / focus |
+| `figure.walk` | Sport / walking |
 | `figure.run` | Sport / running |
 | `figure.strengthtraining` | Sport / gym |
 | `figure.yoga` | Sport / yoga |
+| `figure.cycling` | Sport / cycling |
+| `figure.swimming` | Sport / swimming |
+| `figure.soccer` | Sport / soccer |
+| `figure.basketball` | Sport / basketball |
+| `figure.tennis` | Sport / tennis |
+| `figure.gymnastics` | Sport / gymnastics |
+| `figure.mindandbody` | Sport / mind & body |
+| `figure.core.training` | Sport / core training |
 | `dumbbell` | Sport / training |
 | `bicycle` | Sport / cycling |
+| `books` | Education / study |
+| `graduationcap` | Education / school |
+| `desktopcomputer` | Work / computer |
+| `keyboard` | Work / typing |
+| `gamecontroller` | Entertainment / games |
 | `fork.knife` | Eat / cooking |
 | `cup.and.saucer` | Eat / drink |
 | `bed.double` | Sleep / rest |
 | `moon.stars` | Sleep / night |
-| `gamecontroller` | Entertainment / games |
-| `tv` | Entertainment / TV |
+| `moon.zzz` | Sleep / rest |
 | `film` | Entertainment / movies |
 | `music.note` | Hobby / music |
 | `guitar` | Hobby / music |
-| `paintbrush` | Hobby / art |
 | `camera` | Hobby / photography |
-| `airplane` | Travel |
+| `tv` | Entertainment / TV |
+| `musicalnotes` | Hobby / music |
+| `paintbrush` | Hobby / art |
+| `house` | Home / household |
 | `car.fill` | Commute |
+| `airplane` | Travel |
+| `cart` | Shopping |
+| `phone` | Calls / communication |
 | `hammer` | DIY / build |
 | `heart` | Wellness |
 | `leaf` | Nature / outdoors |
@@ -111,7 +132,7 @@ Allowed set for category icons (F2); default is `tag`. Validated against this ex
 
 ### Management icons
 
-New for Epic 1 (Manage Activities, quick-add sheet, category management).
+New for the catalog feature (Manage Activities, quick-add sheet, category management).
 
 | SF Symbol | Usage |
 |---|---|
@@ -137,6 +158,6 @@ New for Epic 1 (Manage Activities, quick-add sheet, category management).
 
 `ThemeManager` is the seam for a future manual theme override. For the MVP it is `nil`, which means the app follows the system color scheme.
 
-## Implementation notes (Epic 1)
+## Implementation notes (catalog feature)
 
-- `success` and `cornerRadiusLarge` are already documented in this file but are not yet declared in `Core/Theme/Theme.swift`; add them when implementing Epic 1.
+- `cornerRadiusLarge`, `textOnAccent`, and `transparent` are declared in `Core/Theme/Theme.swift` and used by the category-management surfaces.

@@ -1,20 +1,25 @@
 # Activity Editor Screen
 
-Implements F1/F3/F7/U1/U2/U4 of `Requirements/FURPS/Activity_Catalog_and_Categories.md`. Shared sheet for creating and editing an activity; reused by the timer quick-add (F7) and Manage Activities (F8). Per decision D21.
+Implements F1/F3/F7/U1/U2/U4 of `Requirements/FURPS/Activity_Catalog_and_Categories.md`. Shared sheet for creating and editing an activity; reused by Manage Activities (F8). Per decision D21.
+
+The existing-Activity edit mode is implemented (`refine-selected-activity-from-track`): the editor accepts the selected Activity, initializes its name/notes/Categories from it, and saves via the atomic `LocalStore.refineActivity` operation. The saved Activity is replaced in place in the current TrackState without transitioning (preserving startedAt, duration, and the ticker); the Activity identifier and timer state are preserved, and cancel or failure leaves both unchanged.
 
 ---
 
 ## Screen: ActivityEditorView
 
 - **File**: `ios/TimeOfLife/TimeOfLife/Features/Catalog/Views/ActivityEditorView.swift`
-- **Route**: presented as a `.sheet` (not a nav route). Two modes: create / edit. In create-from-timer mode, on save it also selects the activity on the timer and links the upcoming entry (F7).
+- **Route**: presented as a `.sheet` (not a nav route). Edit mode is
+  implemented: it is presented from Track (Refine) prefilled with the selected
+  Activity and saves via `LocalStore.refineActivity`, replacing the Activity
+  in place without transitioning.
 - **ViewModel**: `ActivityEditorViewModel`
 
 ### Layout
 
 Presented as `.sheet` with `medium` detents (`.medium` + `.large()` if content scrolls). `ScrollView` → `VStack(spacing: Theme.spacingLarge)` with horizontal padding `Theme.screenHorizontalPadding` and `maxWidth: Theme.maxContentWidth`:
 
-1. Title — create: `L10n.activityEditorCreateTitle`; edit: `L10n.activityEditorEditTitle` — `.title.bold()`, `Theme.textPrimary`.
+1. Native collapsing navigation title via `EditorSheetScaffold` — `L10n.activityEditorEditTitle`. At the top edge the system renders its large-title form with Cancel in the top bar; scrolling collapses it into an inline material bar beside Cancel, and returning to the top expands it again.
 2. `TextFieldWithError` for name:
    - `accessibilityId`: `ActivityEditorNameField`
    - title/placeholder: `L10n.activityEditorNameLabel` / `L10n.activityEditorNamePlaceholder`
@@ -27,9 +32,9 @@ Presented as `.sheet` with `medium` detents (`.medium` + `.large()` if content s
    - `TextEditor(text: $vm.notes)` with `Theme.backgroundSecondary` fill, `Theme.hairline` 1 pt border, `Theme.cornerRadius`, min height ~96 pt
    - `accessibilityIdentifier("ActivityEditorNotesField")`
    - char counter beneath: `String(format: L10n.activityEditorNotesCounter.text, vm.notes.count)` — `.caption`, `Theme.textSecondary`, trailing-aligned; switches to `Theme.danger` when count > 280
-4. `SectionHeader(L10n.activityEditorTagsLabel)` + `TagSelector(options: vm.availableCategories, selected: $vm.selectedCategoryIds, accessibilityId: "ActivityEditorTags")`. If `vm.availableCategories.isEmpty`, show a hint `L10n.activityEditorNoTags` (`.caption`, `Theme.textSecondary`) with a tappable link `L10n.activityEditorAddCategory` (`.subheadline`, `Theme.accentPrimary`, `accessibilityIdentifier("ActivityEditorAddCategoryButton")`) → presents `CategoryEditor` create sheet.
+4. `SectionHeader(L10n.activityEditorTagsLabel)` + `TagSelector(options: vm.availableCategories, selected: Set(vm.selectedCategoryIDs), accessibilityId: "ActivityEditorTags")`. If `vm.availableCategories.isEmpty`, show a hint `L10n.activityEditorNoTags` (`.caption`, `Theme.textSecondary`) with a tappable link `L10n.activityEditorAddCategory` (`.subheadline`, `Theme.accentPrimary`, `accessibilityIdentifier("ActivityEditorAddCategoryButton")`) → presents `CategoryEditor` create sheet; a saved Category is refreshed and appended to the ordered draft selection.
 5. `ErrorBanner` if `vm.errorMessage != nil` — `accessibilityId: ActivityEditorErrorBanner`.
-6. Fixed reserve for the pinned bottom action bar (`Color.clear` matching the measured bar height plus `Theme.spacingLarge`).
+6. Semantic transparent reserve matching the measured pinned bar height plus `Theme.spacingLarge`.
 
 Background: `Theme.backgroundPrimary`.
 
@@ -46,7 +51,7 @@ Via `.safeAreaInset(edge: .bottom)` (D13):
 Cancel mechanism (both present):
 
 - System swipe-down dismiss (sheet).
-- `.toolbar` Cancel item (`accessibilityIdentifier("ActivityEditorCancelButton")`) in the sheet's navigation bar — plain `Button(L10n.activityEditorCancel)`.
+- The scaffold's native cancellation toolbar item (`accessibilityIdentifier("ActivityEditorCancelButton")`) in the sheet's navigation bar — plain `Button(L10n.activityEditorCancel)`.
 
 **Cancel during save:** If the user dismisses (swipe-down or Cancel tap) while `isLoading == true`, the sheet stays visible until the in-flight request completes or fails. Cancel is deferred — the sheet dismisses on success, or shows the error and remains interactive on failure. The Cancel button is disabled while `isLoading`.
 
@@ -60,22 +65,33 @@ Follows `Design/INTERACTIONS.md` → **Keyboard and primary input placement** an
 - Validate on save (U1/U2): name non-empty after trim & ≤ 60 → unified `validation.nameEmpty` / `validation.nameTooLong`; notes ≤ 280 → `validation.notesTooLong`. Multiple rules for one field collapse into a single unified message (U2).
 - Clear a field's error when the user edits that field.
 - On 422 `validation_error`: map `details` into `vm.fieldErrors` and show each beneath its field.
-- On 409 `activity_exists` (case-insensitive name collision on create): reuse the existing activity per INTERACTIONS — in create-from-timer mode, select that activity on the timer, link it to the upcoming entry (F7), and dismiss; in create-from-manage mode, dismiss and surface `error.activityExists` via `ErrorBanner`.
+- On a normalized-name collision during save: the editor stays open with the
+  draft intact and shows a localized error; retry is permitted. The selected
+  Activity and timer state remain unchanged.
 - On 409 `conflict` (LWW stale write, R2): show `ErrorBanner` and adopt the server's version as the source of truth (keep-latest); pre-fill the editor from the server version.
-- Save success: dismiss the sheet; create-from-timer also links the activity to the upcoming entry (F7) and prefills the timer field with the activity's name.
+- Save success: dismiss the editor, replace the selected Activity in place in
+  the current TrackState (no transition; startedAt, duration, and ticker
+  preserved), and leave Start explicit.
 - Dismiss the keyboard on save / cancel; do not leave it up after the sheet closes.
 - Haptic `.notification(.error)` on validation error (INTERACTIONS Haptics).
-- Offline: queue the create / edit locally and sync on reconnect (R1); the Save button stays tappable offline.
+- Offline: queue the edit locally and sync on reconnect (R1); the Save button stays tappable offline.
+
+### Edit-mode collision handling (refine-selected-activity-from-track)
+
+Refinement saves through the atomic local refine operation. When the save
+collides with an existing normalized name, the editor stays open with the
+draft intact and shows a localized error; retrying permits the user to choose
+a distinct name. The selected Activity and timer state remain unchanged, and
+the collision never silently updates the existing record.
 
 ### States
 
 | State | Visual |
 |---|---|
-| Create | Title `activityEditorCreateTitle`; Save disabled while name trim-empty |
-| Edit | Title `activityEditorEditTitle`; fields pre-filled from the activity; Save enabled if name non-empty and changed |
-| Saving | `PrimaryButton` shows `ProgressView`; Save disabled |
+| Edit | Title `activityEditorEditTitle`; fields pre-filled from the selected Activity; Save enabled if name non-empty and changed |
+| Saving | `PrimaryButton` shows `ProgressView`; Save disabled; Refine button disabled on Track |
 | Validation error | Field errors beneath name / notes; `.notification(.error)` haptic; Save re-enables after edit |
-| Conflict (409 `activity_exists`) | create-from-timer: dismiss and reuse; create-from-manage: `ErrorBanner` `error.activityExists` |
+| Conflict (409 `activity_exists`) | Editor stays open with the draft intact; localized error; retry permitted |
 | Conflict (409 `conflict`) | `ErrorBanner`; editor reset to server version (keep-latest) |
 
 ### Data model
@@ -86,22 +102,24 @@ The editor holds a draft:
 struct ActivityDraft {
     var name: String
     var notes: String?
-    var categoryIds: [UUID]
+    var categoryIDs: [String]
 }
 ```
 
-On save it produces an `Activity` (create) or a PATCH body (edit) carrying `updated_at` for LWW (R2). Category order is preserved in `categoryIds`.
+On save it produces the changes carried by the atomic refine operation with
+`updated_at` for LWW (R2). Category order is preserved in `categoryIds`. (The
+app's identifiers are `String`, not `UUID`.)
 
 ### Implementation checklist
 
-- [ ] All strings use `L10n.*` keys (add new keys to EN and RU).
-- [ ] Accessibility IDs: `ActivityEditorNameField`, `ActivityEditorNotesField`, `ActivityEditorTags`, `ActivityEditorSaveButton`, `ActivityEditorCancelButton`, `ActivityEditorAddCategoryButton`.
-- [ ] Keyboard placement follows D13 / D21: name upper, Save pinned bottom, measured reserve.
-- [ ] Validation uses unified messages (`validation.nameEmpty` / `validation.nameTooLong` / `validation.notesTooLong`); 409 `activity_exists` reuses the existing activity per INTERACTIONS.
-- [ ] 409 `conflict` adopts the server version (R2 keep-latest).
-- [ ] Sheet dismisses on save success and on cancel (swipe + toolbar Cancel).
-- [ ] Screen previews exist for light/dark and EN/RU, in both create and edit modes.
-- [ ] SwiftLint passes with zero findings.
+- [x] All strings use `L10n.*` keys (add new keys to EN and RU).
+- [x] Accessibility IDs: `ActivityEditorNameField`, `ActivityEditorNotesField`, `ActivityEditorTags`, `ActivityEditorSaveButton`, `ActivityEditorCancelButton`, `ActivityEditorAddCategoryButton`.
+- [x] Keyboard placement follows D13 / D21: name upper, Save pinned bottom, measured reserve.
+- [x] Validation uses unified messages (`validation.nameEmpty` / `validation.nameTooLong` / `validation.notesTooLong`); on collision the editor stays open with the draft intact per INTERACTIONS.
+- [x] 409 `conflict` adopts the server version (R2 keep-latest).
+- [x] Sheet dismisses on save success and on cancel (swipe + toolbar Cancel).
+- [ ] Screen previews exist for light/dark and EN/RU, in edit mode.
+- [x] SwiftLint passes with zero findings.
 
 ---
 

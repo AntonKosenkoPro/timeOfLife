@@ -108,6 +108,9 @@ function_parameter_count:
   warning: 6
   error: 8
 
+number_separator:
+  minimum_length: 5
+
 reporter: xcode
 
 analyzer_rules:

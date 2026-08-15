@@ -1,13 +1,23 @@
 import SwiftUI
+import Combine
 
-/// Root view. Decides between auth flow and signed-in placeholder based on
-/// `SessionStore`, and renders the offline banner.
+/// Root view. Always shows the app shell (D7): the app launches into Track
+/// with no account required. `SessionStore.state` gates `SyncController` (the
+/// optional paid sync feature), not the root view.
+///
+/// Also owns the lifecycle wiring for the local-first machinery:
+/// - foreground → commit expired undo buffers (D3, no background timer) and
+///   trigger a sync cycle (sync-client spec).
+/// - connectivity restored → trigger a sync cycle.
 struct RootView: View {
     @EnvironmentObject var session: SessionStore
     @EnvironmentObject var container: AppContainer
 
     var body: some View {
-        content
+        AppShellView(
+            vm: AppShellViewModel(service: container.timerService),
+            container: container
+        )
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .safeAreaInset(edge: .top) {
                 OfflineBanner()
@@ -15,34 +25,48 @@ struct RootView: View {
                     .animation(.easeInOut(duration: 0.2), value: container.connectivity.isConnected)
             }
             .background(Theme.backgroundPrimary.ignoresSafeArea())
-            .task { await container.authService.restoreSession() }
+            .task {
+                await container.authService.restoreSession()
+                await seedStarterCategoriesIfNeeded()
+            }
             .onChange(of: session.state) { newState in
-                // When the user signs out, drop any pushed auth routes so they land
-                // on the welcome screen instead of the last pushed screen (e.g. OTP).
-                // When the user signs in, drop stale auth routes so TimerView's
-                // NavigationStack doesn't push to EmptyView destinations.
-                if newState == .signedOut {
-                    container.navigation.popToRoot()
-                } else if case .signedIn = newState {
-                    container.navigation.popToRoot()
-                    Task { await container.catalogSeeder.seedIfNeeded() }
+                switch newState {
+                case .signedIn:
+                    container.syncController.activate()
+                case .signedOut:
+                    container.syncController.deactivate()
+                }
+            }
+            .onChange(of: container.connectivity.isConnected) { connected in
+                if connected {
+                    container.syncController.trigger()
+                }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
+                // Durable undo buffer: commit expired deletions on foreground
+                // (never in the background). Then run a sync cycle if signed in.
+                Task {
+                    try? await container.undoBuffer.commitExpired()
+                    container.syncController.trigger()
                 }
             }
     }
 
-    @ViewBuilder private var content: some View {
-        switch session.state {
-        case .signedOut:
-            AuthFlowView()
-        case .signedIn:
-            TimerView(vm: TimerViewModel(
-                service: container.timerService,
-                authService: container.authService,
-                connectivity: container.connectivity,
-                catalogStore: container.catalogStore,
-                catalogService: container.catalogService
-            ))
-        }
+    /// Seeds the seven localized starter categories on first local dataset
+    /// setup (category-management D2). Names are materialized in the active
+    /// supported language once; the marker prevents re-seeding, and the
+    /// operation is a no-op after the first launch.
+    private func seedStarterCategoriesIfNeeded() async {
+        let names = [
+            L10n.categorySeedWork.text,
+            L10n.categorySeedHobby.text,
+            L10n.categorySeedSport.text,
+            L10n.categorySeedEducation.text,
+            L10n.categorySeedRelax.text,
+            L10n.categorySeedSleep.text,
+            L10n.categorySeedEntertainment.text,
+        ]
+        _ = try? await container.localStore.seedStarterCategoriesIfNeeded(names: names)
     }
 }
 

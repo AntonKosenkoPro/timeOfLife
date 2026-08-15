@@ -152,3 +152,221 @@ func TestPostgres_CrossUserIsolation(t *testing.T) {
 		t.Fatalf("user B must not delete user A's activity, got %v", err)
 	}
 }
+
+// Parity: modified_since filtering on activities (delta pull-sync).
+func TestPostgres_ListActivities_ModifiedSince(t *testing.T) {
+	store := newParityStore(t)
+	uid := parityUser(t, store, "pg-modified-since@example.com")
+
+	a1 := parityActivity(t, store, uid, "Gym")
+	time.Sleep(5 * time.Millisecond)
+	a2 := parityActivity(t, store, uid, "Read")
+
+	cursor := a1.UpdatedAt
+	items, err := store.ListActivities(context.Background(), uid, "", &cursor)
+	if err != nil {
+		t.Fatalf("ListActivities: %v", err)
+	}
+	if len(items) != 1 || items[0].ID != a2.ID {
+		t.Errorf("expected only the newer activity, got %d items", len(items))
+	}
+
+	future := a2.UpdatedAt.Add(time.Hour)
+	items, err = store.ListActivities(context.Background(), uid, "", &future)
+	if err != nil {
+		t.Fatalf("ListActivities: %v", err)
+	}
+	if len(items) != 0 {
+		t.Errorf("expected 0 items with a future cursor, got %d", len(items))
+	}
+
+	items, err = store.ListActivities(context.Background(), uid, "", nil)
+	if err != nil {
+		t.Fatalf("ListActivities: %v", err)
+	}
+	if len(items) != 2 {
+		t.Errorf("expected 2 items on full pull, got %d", len(items))
+	}
+}
+
+// Parity: modified_since filtering on entries.
+func TestPostgres_ListEntries_ModifiedSince(t *testing.T) {
+	store := newParityStore(t)
+	uid := parityUser(t, store, "pg-entries-modified@example.com")
+	a := parityActivity(t, store, uid, "Gym")
+
+	base := time.Date(2026, 7, 27, 9, 0, 0, 0, time.UTC)
+	e1, _, err := store.CreateEntry(context.Background(), Entry{
+		ID: uuidV7(), UserID: uid, ActivityID: &a.ID, StartedAt: base,
+	})
+	if err != nil {
+		t.Fatalf("CreateEntry 1: %v", err)
+	}
+	time.Sleep(5 * time.Millisecond)
+	e2, _, err := store.CreateEntry(context.Background(), Entry{
+		ID: uuidV7(), UserID: uid, ActivityID: &a.ID, StartedAt: base.Add(time.Hour),
+	})
+	if err != nil {
+		t.Fatalf("CreateEntry 2: %v", err)
+	}
+
+	cursor := e1.UpdatedAt
+	items, _, err := store.ListEntries(context.Background(), uid, EntryFilter{ModifiedSince: &cursor})
+	if err != nil {
+		t.Fatalf("ListEntries: %v", err)
+	}
+	if len(items) != 1 || items[0].ID != e2.ID {
+		t.Errorf("expected only the newer entry, got %d items", len(items))
+	}
+}
+
+// Parity: provenance persistence + duplicate-import rejection.
+func TestPostgres_CreateEntry_ProvenanceAndDuplicateImport(t *testing.T) {
+	store := newParityStore(t)
+	uid := parityUser(t, store, "pg-provenance@example.com")
+	a := parityActivity(t, store, uid, "Gym")
+	base := time.Date(2026, 7, 27, 9, 0, 0, 0, time.UTC)
+	ref := "interval-42"
+
+	// Default provenance on entries created without it.
+	e1, _, err := store.CreateEntry(context.Background(), Entry{
+		ID: uuidV7(), UserID: uid, ActivityID: &a.ID, StartedAt: base,
+	})
+	if err != nil {
+		t.Fatalf("CreateEntry: %v", err)
+	}
+	if e1.Source != "manual" || e1.SourceRef != nil {
+		t.Errorf("expected manual/nil provenance, got %q/%v", e1.Source, e1.SourceRef)
+	}
+
+	// Explicit provenance persists and round-trips.
+	e2, _, err := store.CreateEntry(context.Background(), Entry{
+		ID: uuidV7(), UserID: uid, ActivityID: &a.ID, StartedAt: base.Add(time.Hour),
+		Source: "screentime", SourceRef: &ref,
+	})
+	if err != nil {
+		t.Fatalf("CreateEntry: %v", err)
+	}
+	got, err := store.GetEntry(context.Background(), uid, e2.ID)
+	if err != nil {
+		t.Fatalf("GetEntry: %v", err)
+	}
+	if got.Source != "screentime" || got.SourceRef == nil || *got.SourceRef != ref {
+		t.Errorf("round-trip: expected screentime/%s, got %q/%v", ref, got.Source, got.SourceRef)
+	}
+
+	// Duplicate (source, source_ref) is rejected.
+	_, _, err = store.CreateEntry(context.Background(), Entry{
+		ID: uuidV7(), UserID: uid, ActivityID: &a.ID, StartedAt: base.Add(2 * time.Hour),
+		Source: "screentime", SourceRef: &ref,
+	})
+	if !errors.Is(err, ErrDuplicateImport) {
+		t.Fatalf("expected ErrDuplicateImport, got %v", err)
+	}
+}
+
+// Parity (category-management D5): a PATCH that references a non-existent
+// category must roll back the whole activity mutation — no partial name/join
+// state survives.
+func TestPostgres_UpdateActivity_InvalidCategoryRollsBack(t *testing.T) {
+	store := newParityStore(t)
+	uid := parityUser(t, store, "pg-rollback@example.com")
+
+	cat, _, err := store.CreateCategory(context.Background(), Category{
+		ID: uuidV7(), UserID: uid, Name: "Sport", Icon: "tag",
+	})
+	if err != nil {
+		t.Fatalf("CreateCategory: %v", err)
+	}
+	a, _, err := store.CreateActivity(context.Background(), Activity{
+		ID: uuidV7(), UserID: uid, Name: "Gym",
+	}, []string{cat.ID})
+	if err != nil {
+		t.Fatalf("CreateActivity: %v", err)
+	}
+
+	name := "Renamed Gym"
+	_, err = store.UpdateActivity(context.Background(), uid, a.ID, ActivityPatch{
+		Name:        &name,
+		CategoryIDs: &[]string{cat.ID, uuidV7()}, // second id does not exist
+		UpdatedAt:   a.UpdatedAt.Add(time.Hour),
+	})
+	if !errors.Is(err, ErrInvalidCategoryID) {
+		t.Fatalf("expected ErrInvalidCategoryID, got %v", err)
+	}
+
+	got, err := store.GetActivity(context.Background(), uid, a.ID)
+	if err != nil {
+		t.Fatalf("GetActivity: %v", err)
+	}
+	if got.Name != "Gym" {
+		t.Errorf("name change was not rolled back: got %q", got.Name)
+	}
+	if len(got.Categories) != 1 || got.Categories[0].ID != cat.ID {
+		t.Errorf("association change was not rolled back: %+v", got.Categories)
+	}
+}
+
+// Parity (category-management D5): association order is preserved in the
+// response, and Category deletion leaves Activities and Entries intact.
+func TestPostgres_ActivityCategory_OrderAndDeletePreservesChildren(t *testing.T) {
+	store := newParityStore(t)
+	uid := parityUser(t, store, "pg-join@example.com")
+
+	var catIDs []string
+	for _, name := range []string{"Work", "Health", "Travel"} {
+		c, _, err := store.CreateCategory(context.Background(), Category{
+			ID: uuidV7(), UserID: uid, Name: name, Icon: "tag",
+		})
+		if err != nil {
+			t.Fatalf("CreateCategory %q: %v", name, err)
+		}
+		catIDs = append(catIDs, c.ID)
+	}
+
+	a, _, err := store.CreateActivity(context.Background(), Activity{
+		ID: uuidV7(), UserID: uid, Name: "Gym",
+	}, []string{catIDs[1], catIDs[0], catIDs[2]})
+	if err != nil {
+		t.Fatalf("CreateActivity: %v", err)
+	}
+	if len(a.Categories) != 3 ||
+		a.Categories[0].ID != catIDs[1] || a.Categories[1].ID != catIDs[0] || a.Categories[2].ID != catIDs[2] {
+		t.Fatalf("expected order [%s %s %s], got %+v", catIDs[1], catIDs[0], catIDs[2], a.Categories)
+	}
+
+	// An entry referencing the activity survives category deletion.
+	started := time.Date(2026, 7, 27, 9, 0, 0, 0, time.UTC)
+	ended := started.Add(time.Hour)
+	e, _, err := store.CreateEntry(context.Background(), Entry{
+		ID: uuidV7(), UserID: uid, ActivityID: &a.ID, StartedAt: started,
+		EndedAt: &ended,
+	})
+	if err != nil {
+		t.Fatalf("CreateEntry: %v", err)
+	}
+
+	if err := store.DeleteCategory(context.Background(), uid, catIDs[0]); err != nil {
+		t.Fatalf("DeleteCategory: %v", err)
+	}
+
+	got, err := store.GetActivity(context.Background(), uid, a.ID)
+	if err != nil {
+		t.Fatalf("GetActivity after category delete: %v", err)
+	}
+	if len(got.Categories) != 2 {
+		t.Errorf("expected 2 remaining tags, got %+v", got.Categories)
+	}
+	for _, tag := range got.Categories {
+		if tag.ID == catIDs[0] {
+			t.Errorf("deleted category still attached: %+v", got.Categories)
+		}
+	}
+
+	if _, err := store.GetEntry(context.Background(), uid, e.ID); err != nil {
+		t.Errorf("entry must survive category deletion: %v", err)
+	}
+	if _, err := store.GetActivity(context.Background(), uid, a.ID); err != nil {
+		t.Errorf("activity must survive category deletion: %v", err)
+	}
+}

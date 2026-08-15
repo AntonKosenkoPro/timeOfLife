@@ -1,209 +1,135 @@
-import Combine
 import Foundation
 
-enum CategoryEditorMode: Equatable, Sendable {
-    case create
-    case edit(Category)
-}
-
-enum CategorySaveResult: Equatable, Sendable {
-    case saved(Category)
-    case reused(Category)
-    case conflict(Category)
-    case cancelled
-}
-
-struct CategoryFieldErrors: Equatable, Sendable {
-    var name: String?
-    var icon: String?
-
-    init(name: String? = nil, icon: String? = nil) {
-        self.name = name
-        self.icon = icon
-    }
-
-    static let empty = CategoryFieldErrors()
-}
-
+/// View model for the shared Category Editor (Design/SCREENS/
+/// CategoryEditor.md, category-management D4): create/edit modes with a
+/// preserved draft, field-level validation, duplicate and persistence
+/// errors, and stale-conflict adoption. Saving goes through the atomic
+/// `LocalStore` category mutations (single chokepoint).
 @MainActor
 final class CategoryEditorViewModel: ObservableObject {
     @Published var name: String
     @Published var icon: CatalogIcon
-    @Published private(set) var fieldErrors = CategoryFieldErrors.empty
+    @Published private(set) var fieldErrors: FieldErrors
     @Published var errorMessage: String?
     @Published private(set) var isLoading = false
-    @Published var onSaveResult: CategorySaveResult?
+    @Published private(set) var isCreateMode: Bool
+    /// True after a successful save, so the view can dismiss itself. Duplicate
+    /// and stale outcomes keep this false so the draft remains actionable.
+    @Published private(set) var isSavedOrDuplicate = false
 
-    let mode: CategoryEditorMode
-    let id: UUID
-    let createdAt: Date
+    /// The id of the category being edited (nil in create mode).
+    let categoryID: String?
 
-    private let store: CatalogStoring
-    private let repository: CatalogRepository
-    private let service: CatalogService
-    private let connectivity: Connectivity
+    private let store: LocalStore
+    private let onSaved: (Category) -> Void
+    private let onDuplicate: (Category) -> Void
+
+    struct FieldErrors: Equatable {
+        var name: String?
+    }
 
     init(
-        mode: CategoryEditorMode,
-        store: CatalogStoring,
-        repository: CatalogRepository,
-        service: CatalogService,
-        connectivity: Connectivity,
-        now: Date = Date()
+        store: LocalStore,
+        category: Category?,
+        onSaved: @escaping (Category) -> Void,
+        onDuplicate: @escaping (Category) -> Void
     ) {
-        self.mode = mode
         self.store = store
-        self.repository = repository
-        self.service = service
-        self.connectivity = connectivity
+        self.categoryID = category?.id
+        self.isCreateMode = category == nil
+        self.name = category?.name ?? ""
+        self.icon = CatalogIcon(validated: category?.icon ?? "") // "" → tag default
+        self.fieldErrors = FieldErrors()
+        self.onSaved = onSaved
+        self.onDuplicate = onDuplicate
+    }
 
-        switch mode {
-        case .create:
-            id = UUID.v7()
-            name = ""
-            icon = .tag
-            createdAt = now
-        case let .edit(category):
-            id = category.id
-            name = category.name
-            icon = category.icon
-            createdAt = category.createdAt
+    /// True when the draft name is valid and the editor is not saving.
+    var canSave: Bool {
+        if case .valid = CategoryName.validate(name) { return !isLoading }
+        return false
+    }
+
+    /// Validates the draft, collapsing rules into one message per field (U2).
+    func validate() {
+        switch CategoryName.validate(name) {
+        case .valid:
+            fieldErrors.name = nil
+        case .empty:
+            fieldErrors.name = L10n.categoryNameRequired.text
+        case .tooLong:
+            fieldErrors.name = L10n.categoryNameTooLong.text
         }
     }
 
-    func clearNameError() {
+    /// Clears the name field error as the user edits.
+    func nameDidChange() {
         fieldErrors.name = nil
-        errorMessage = nil
     }
 
-    func clearIconError() {
-        fieldErrors.icon = nil
-    }
-
-#if DEBUG
-    func setPreviewValidation() {
-        fieldErrors.name = CategoryValidator.unifiedNameMessage(
-            CategoryValidator.validateName(name)
-        )
-    }
-
-    func setPreviewLoading() {
-        isLoading = true
-    }
-#endif
-
-    func cancel() {
-        guard !isLoading else { return }
-        onSaveResult = .cancelled
-    }
-
-    func save() async {
-        guard !isLoading else { return }
-        fieldErrors = CategoryFieldErrors(
-            name: CategoryValidator.unifiedNameMessage(
-                CategoryValidator.validateName(name)
-            ),
-            icon: CategoryValidator.unifiedIconMessage(
-                CategoryValidator.validateIcon(icon.rawValue)
-            )
-        )
-        guard fieldErrors == .empty else {
+    /// Saves the draft through the atomic LocalStore mutation. On success the
+    /// caller dismisses the editor; on duplicate the caller surfaces the
+    /// localized conflict and the draft stays available.
+    func save() {
+        validate()
+        guard canSave else {
             Haptics.error()
             return
         }
-
-        let candidate = Category(
-            id: id,
-            name: name.trimmingCharacters(in: .whitespacesAndNewlines),
-            icon: icon,
-            createdAt: createdAt,
-            updatedAt: Date()
-        )
-
         isLoading = true
         errorMessage = nil
-        defer { isLoading = false }
+        let draft = CategoryDraft(name: name, icon: icon)
+        Task {
+            do {
+                let outcome: LocalStore.CategoryMutation
+                if let categoryID {
+                    outcome = try await store.updateCategory(id: categoryID, draft: draft)
+                } else {
+                    outcome = try await store.createCategory(
+                        draft: draft,
+                        id: store.newRecordID()
+                    )
+                }
+                isLoading = false
+                switch outcome {
+                case let .saved(category):
+                    isSavedOrDuplicate = true
+                    onSaved(category)
+                case let .duplicate(winner):
+                    errorMessage = L10n.errorCategoryExists.text
+                    onDuplicate(winner)
+                case .invalid:
+                    validate()
+                case .stale, .missing:
+                    await adoptLatestCategory()
+                case .failure:
+                    errorMessage = L10n.errorLocalPersistence.text
+                }
+            } catch {
+                isLoading = false
+                errorMessage = L10n.errorLocalPersistence.text
+            }
+        }
+    }
 
+    /// Adopts the current local version after a stale edit so the user sees
+    /// the winning values and can make another explicit change.
+    private func adoptLatestCategory() async {
+        guard let categoryID else {
+            errorMessage = L10n.errorConflict.text
+            return
+        }
         do {
-            let saved = try await persist(candidate)
-            onSaveResult = .saved(saved)
-            Haptics.success()
+            guard let latest = try await store.category(id: categoryID) else {
+                errorMessage = L10n.errorConflict.text
+                return
+            }
+            name = latest.name
+            icon = CatalogIcon(validated: latest.icon)
+            fieldErrors = FieldErrors()
+            errorMessage = L10n.errorConflict.text
         } catch {
-            if case .categoryExists = CatalogError.map(error) {
-                await handle(error, candidate: candidate)
-            } else {
-                await rollback(candidate)
-                await handle(error, candidate: candidate)
-            }
+            errorMessage = L10n.errorConflict.text
         }
-    }
-
-    private func persist(_ candidate: Category) async throws -> Category {
-        switch mode {
-        case .create:
-            return try await service.createCategory(candidate)
-        case .edit:
-            return try await service.updateCategory(candidate)
-        }
-    }
-
-    private func handle(_ error: Error, candidate: Category) async {
-        let catalogError = CatalogError.map(error)
-        switch catalogError {
-        case let .validation(fields):
-            fieldErrors = CategoryFieldErrors(name: fields["name"], icon: fields["icon"])
-        case .conflict:
-            if let latest = await adoptServerVersion() {
-                errorMessage = L10n.errorConflict.text
-                onSaveResult = .conflict(latest)
-            } else {
-                errorMessage = L10n.errorConflict.text
-            }
-        case let .categoryExists(existingId, existingName):
-            let survivor = await resolveCategory(
-                id: existingId,
-                name: existingName,
-                fallback: candidate
-            )
-            await store.upsertCategory(survivor)
-            if survivor.id != candidate.id {
-                await store.replaceCategoryReferences(from: candidate.id, to: survivor.id)
-                await store.removeCategory(candidate.id)
-            }
-            onSaveResult = .reused(survivor)
-        case .offline:
-            errorMessage = L10n.text(in: .default, code: "offline")
-        default:
-            errorMessage = ErrorLocalization.message(for: catalogError)
-        }
-    }
-
-    private func rollback(_ candidate: Category) async {
-        if case let .edit(existing) = mode {
-            await store.upsertCategory(existing)
-        } else {
-            await store.removeCategory(candidate.id)
-        }
-    }
-
-    private func adoptServerVersion() async -> Category? {
-        guard let category = try? await repository.getCategory(id) else { return nil }
-        name = category.name
-        icon = category.icon
-        await store.upsertCategory(category)
-        return category
-    }
-
-    private func resolveCategory(id: UUID, name: String, fallback: Category) async -> Category {
-        if let category = try? await repository.getCategory(id) {
-            return category
-        }
-        return Category(
-            id: id,
-            name: name,
-            icon: fallback.icon,
-            createdAt: fallback.createdAt,
-            updatedAt: fallback.updatedAt
-        )
     }
 }

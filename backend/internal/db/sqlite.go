@@ -58,7 +58,7 @@ func (s *SQLiteStore) GetUserByEmail(ctx context.Context, email string) (User, e
 		}
 		return User{}, fmt.Errorf("get user by email: %w", err)
 	}
-	u.CreatedAt, _ = time.Parse("2006-01-02 15:04:05", createdAt)
+	u.CreatedAt = parseTime(createdAt)
 	return u, nil
 }
 
@@ -84,7 +84,7 @@ func (s *SQLiteStore) UpsertUser(ctx context.Context, email string) (User, error
 	if err != nil {
 		return User{}, fmt.Errorf("upsert user select: %w", err)
 	}
-	u.CreatedAt, _ = time.Parse("2006-01-02 15:04:05", createdAt)
+	u.CreatedAt = parseTime(createdAt)
 	return u, nil
 }
 
@@ -130,7 +130,7 @@ func (s *SQLiteStore) GetValidOTP(ctx context.Context, userID string) (OTP, erro
 		}
 		return OTP{}, fmt.Errorf("get valid otp: %w", err)
 	}
-	o.ExpiresAt, _ = time.Parse("2006-01-02 15:04:05", expiresAt)
+	o.ExpiresAt = parseTime(expiresAt)
 	return o, nil
 }
 
@@ -183,7 +183,7 @@ func (s *SQLiteStore) GetRefreshToken(ctx context.Context, tokenHash string) (Re
 		}
 		return RefreshToken{}, fmt.Errorf("get refresh token: %w", err)
 	}
-	t.CreatedAt, _ = time.Parse("2006-01-02 15:04:05", createdAt)
+	t.CreatedAt = parseTime(createdAt)
 	return t, nil
 }
 
@@ -224,7 +224,7 @@ func (s *SQLiteStore) GetUserByID(ctx context.Context, userID string) (User, err
 		}
 		return User{}, fmt.Errorf("get user by id: %w", err)
 	}
-	u.CreatedAt, _ = time.Parse("2006-01-02 15:04:05", createdAt)
+	u.CreatedAt = parseTime(createdAt)
 	return u, nil
 }
 
@@ -261,6 +261,6 @@ func (s *SQLiteStore) UpsertUserByAppleSubject(ctx context.Context, appleSubject
 		}
 		return User{}, fmt.Errorf("upsert apple user select: %w", err)
 	}
-	u.CreatedAt, _ = time.Parse("2006-01-02 15:04:05", createdAt)
+	u.CreatedAt = parseTime(createdAt)
 	return u, nil
 }

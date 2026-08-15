@@ -1,0 +1,10 @@
+steps:
+  - launch: com.antonkosenko.timeoflife
+  - tap: { x: 0.5, y: 0.245 }
+  - wait: 500
+  - tap: { x: 0.4, y: 0.105 }
+  - type: { into: magnifyingglass, text: "Hiking", submit: false }
+  - wait: 500
+  - tap: { x: 0.9055, y: 0.182 }
+  - wait: 1000
+  - echo: After configure tap

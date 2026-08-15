@@ -1,31 +1,39 @@
 import SwiftUI
 
+/// The shared Category Editor sheet (Design/SCREENS/CategoryEditor.md,
+/// category-management D4): name field, catalog icon grid, field validation,
+/// Cancel, and a keyboard-safe pinned Save bar. Create mode starts with an
+/// empty name and the default `tag` icon; edit mode prefills from the
+/// passed-in category.
 struct CategoryEditorView: View {
-    @ObservedObject var vm: CategoryEditorViewModel
+    @StateObject private var vm: CategoryEditorViewModel
     @Environment(\.dismiss)
     private var dismiss
     @FocusState private var isNameFocused: Bool
-    @State private var bottomBarHeight: CGFloat = 0
 
-    var body: some View {
-        Group {
-            if #available(iOS 16.0, *) {
-                NavigationStack { editorContent }
-            } else {
-                NavigationView { editorContent }
-                    .navigationViewStyle(.stack)
-            }
-        }
-        .modifier(CategoryEditorDetents())
+    init(
+        store: LocalStore,
+        category: Category?,
+        onSaved: @escaping (Category) -> Void,
+        onDuplicate: @escaping (Category) -> Void
+    ) {
+        _vm = StateObject(wrappedValue: CategoryEditorViewModel(
+            store: store,
+            category: category,
+            onSaved: onSaved,
+            onDuplicate: onDuplicate
+        ))
     }
 
-    private var editorContent: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: Theme.spacingLarge) {
-                Text(title)
-                    .font(.title.bold())
-                    .foregroundStyle(Theme.textPrimary)
-
+    var body: some View {
+        EditorSheetScaffold(
+            title: vm.isCreateMode ? L10n.categoryEditorCreateTitle.text : L10n.categoryEditorEditTitle.text,
+            cancelTitle: L10n.categoryEditorCancel.text,
+            isLoading: vm.isLoading,
+            cancelAccessibilityId: "CategoryEditorCancelButton",
+            usesMediumDetent: true,
+            onCancel: { dismiss() },
+            content: {
                 TextFieldWithError(
                     title: L10n.categoryEditorNameLabel.text,
                     placeholder: L10n.categoryEditorNamePlaceholder.text,
@@ -38,159 +46,99 @@ struct CategoryEditorView: View {
                     accessibilityId: "CategoryEditorNameField"
                 ) {
                     isNameFocused = false
-                    Task { await vm.save() }
                 }
                 .focused($isNameFocused)
-                .disabled(vm.isLoading)
-
-                SectionHeader(title: L10n.categoryEditorIconLabel.text)
-                IconPickerGrid(
-                    options: CatalogIcon.allowedSymbols,
-                    selection: Binding(
-                        get: { vm.icon.rawValue },
-                        set: { vm.icon = CatalogIcon(rawValue: $0) ?? .tag }
-                    ),
-                    accessibilityId: "CategoryEditorIcon"
-                )
-                .disabled(vm.isLoading)
-                if let error = vm.fieldErrors.icon {
-                    Text(error)
-                        .font(.caption)
-                        .foregroundStyle(Theme.danger)
+                .onChange(of: vm.name) { _ in
+                    vm.nameDidChange()
                 }
 
-                if let message = vm.errorMessage {
-                    ErrorBanner(message: message, accessibilityId: "CategoryEditorErrorBanner")
+                VStack(alignment: .leading, spacing: Theme.spacingSmall) {
+                    Text(L10n.categoryEditorIconLabel.text)
+                        .font(.title2.bold())
+                        .foregroundStyle(Theme.textPrimary)
+                        .accessibilityAddTraits(.isHeader)
+
+                    IconPickerGrid(
+                        options: iconOptions,
+                        selection: Binding(
+                            get: { vm.icon.rawValue },
+                            set: { vm.icon = CatalogIcon(validated: $0) }
+                        ),
+                        accessibilityId: "CategoryEditorIcon"
+                    )
                 }
 
-                Color.clear.frame(height: bottomBarHeight + Theme.spacingLarge)
-            }
-            .padding(.horizontal, Theme.screenHorizontalPadding)
-            .padding(.top, Theme.spacingLarge)
-            .frame(maxWidth: Theme.maxContentWidth)
-            .frame(maxWidth: .infinity, alignment: .leading)
-        }
-        .background(Theme.backgroundPrimary.ignoresSafeArea())
-        .measuredBottomBar(height: $bottomBarHeight) {
-            VStack(spacing: Theme.spacingSmall) {
-                Spacer().frame(height: Theme.spacingLarge)
+                if let errorMessage = vm.errorMessage {
+                    ErrorBanner(
+                        message: errorMessage,
+                        accessibilityId: "CategoryEditorErrorBanner"
+                    )
+                }
+            },
+            bottomBar: {
                 PrimaryButton(
                     title: L10n.categoryEditorSave.text,
                     icon: nil,
                     isLoading: vm.isLoading,
-                    isDisabled: vm.isLoading || vm.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                    isDisabled: !vm.canSave,
                     accessibilityId: "CategoryEditorSaveButton"
                 ) {
-                    isNameFocused = false
-                    Task { await vm.save() }
+                    vm.save()
                 }
+                .padding(.horizontal, Theme.screenHorizontalPadding)
+                .padding(.vertical, Theme.spacingSmall)
+                .background(Theme.backgroundPrimary)
             }
-            .padding(.horizontal, Theme.screenHorizontalPadding)
-            .padding(.vertical, Theme.spacingSmall)
-            .frame(maxWidth: Theme.maxContentWidth)
-            .frame(maxWidth: .infinity)
-            .background(Theme.backgroundPrimary)
+        )
+        .onAppear {
+            isNameFocused = true
         }
-        .navigationTitle(title)
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .navigationBarLeading) {
-                Button(L10n.categoryEditorCancel.text) { vm.cancel() }
-                    .disabled(vm.isLoading)
-                    .accessibilityIdentifier("CategoryEditorCancelButton")
-            }
-        }
-        .onAppear { isNameFocused = true }
-        .onChange(of: vm.name) { _ in vm.clearNameError() }
-        .onChange(of: vm.icon) { _ in vm.clearIconError() }
-        .onChange(of: vm.onSaveResult) { result in
-            guard let result else { return }
-            switch result {
-            case .saved, .reused, .cancelled:
-                isNameFocused = false
+        // Dismiss only after a successful save. Duplicate and stale
+        // outcomes keep the editor open with actionable context.
+        .onChange(of: vm.isSavedOrDuplicate) { saved in
+            if saved {
                 dismiss()
-            case .conflict:
-                break
             }
         }
     }
 
-    private var title: String {
-        switch vm.mode {
-        case .create:
-            return L10n.categoryEditorCreateTitle.text
-        case .edit:
-            return L10n.categoryEditorEditTitle.text
+    /// Keeps a valid synchronized icon visible in the picker even when the
+    /// current OS cannot render it. The cell displays the `tag` fallback while
+    /// preserving the stored raw value until the user explicitly changes it.
+    private var iconOptions: [String] {
+        let selected = vm.icon.rawValue
+        guard CatalogIcon.canRender(selected) || !CatalogIcon.allSymbols.contains(selected) else {
+            return CatalogIcon.renderableSymbols + [selected]
         }
-    }
-}
-
-private struct CategoryEditorDetents: ViewModifier {
-    @ViewBuilder
-    func body(content: Content) -> some View {
-        if #available(iOS 16.0, *) {
-            content.presentationDetents([.medium])
-        } else {
-            content
-        }
+        return CatalogIcon.renderableSymbols
     }
 }
 
 #if DEBUG
-
-#Preview("Category Editor — Create EN") {
+#Preview("Category Editor — Create EN Light") {
     let container = AppContainer.production()
-    return CategoryEditorView(vm: CategoryEditorViewModel(
-        mode: .create,
-        store: container.catalogStore,
-        repository: container.catalogRepository,
-        service: container.catalogService,
-        connectivity: container.connectivity
-    ))
+    CategoryEditorView(
+        store: container.localStore,
+        category: nil,
+        onSaved: { _ in },
+        onDuplicate: { _ in }
+    )
     .environmentObject(container)
 }
 
 #Preview("Category Editor — Edit RU Dark") {
     let container = AppContainer.production()
-    return CategoryEditorView(vm: CategoryEditorViewModel(
-        mode: .edit(.sampleBlue),
-        store: container.catalogStore,
-        repository: container.catalogRepository,
-        service: container.catalogService,
-        connectivity: container.connectivity
-    ))
+    CategoryEditorView(
+        store: container.localStore,
+        category: TimeOfLife.Category(
+            id: "preview", name: "Спорт", icon: "figure.run",
+            createdAt: Date(), updatedAt: Date()
+        ),
+        onSaved: { _ in },
+        onDuplicate: { _ in }
+    )
     .environmentObject(container)
     .preferredColorScheme(.dark)
     .environment(\.locale, .init(identifier: "ru"))
 }
-
-#Preview("Category Editor — Validation") {
-    let container = AppContainer.production()
-    let viewModel = CategoryEditorViewModel(
-        mode: .create,
-        store: container.catalogStore,
-        repository: container.catalogRepository,
-        service: container.catalogService,
-        connectivity: container.connectivity
-    )
-    viewModel.name = String(repeating: "x", count: 61)
-    viewModel.setPreviewValidation()
-    return CategoryEditorView(vm: viewModel)
-        .environmentObject(container)
-}
-
-#Preview("Category Editor — Saving") {
-    let container = AppContainer.production()
-    let viewModel = CategoryEditorViewModel(
-        mode: .edit(.sampleBlue),
-        store: container.catalogStore,
-        repository: container.catalogRepository,
-        service: container.catalogService,
-        connectivity: container.connectivity
-    )
-    viewModel.setPreviewLoading()
-    return CategoryEditorView(vm: viewModel)
-        .environmentObject(container)
-}
-
 #endif

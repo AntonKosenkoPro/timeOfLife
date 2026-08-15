@@ -19,12 +19,9 @@ extension AppContainer {
         let sessionStore = SessionStore()
         let navigation = AppNavigationStack()
         let connectivity = MockConnectivity(connected: true)
-        let entriesRepository = UITestingEntriesRepository()
-        let timerService = TimerService(
-            store: LocalTimerStore(),
-            repository: entriesRepository,
-            connectivity: connectivity
-        )
+        // swiftlint:disable:next force_try
+        let localStore = try! LocalStore(url: temporaryStoreURL())
+        let timerService = TimerService(store: localStore)
         let repository = UITestingAuthRepository()
         let authService = AuthService(
             repository: repository,
@@ -37,8 +34,13 @@ extension AppContainer {
         // with no token/refresh hooks against the configured base URL.
         let apiClient = APIClient(baseURL: AppConfig.baseURL, session: .shared)
         let appleService = AppleSignInService()
-
-        let catalog = makeUITestingCatalogGraph(connectivity: connectivity, entriesRepository: entriesRepository)
+        let catalog = RemoteCatalogRepository(client: apiClient)
+        let undoBuffer = UndoBufferStore(store: localStore)
+        let syncController = SyncController(
+            store: localStore,
+            remote: catalog,
+            connectivity: connectivity
+        )
 
         let container = AppContainer(
             baseURL: AppConfig.baseURL,
@@ -52,17 +54,9 @@ extension AppContainer {
             authService: authService,
             appleService: appleService,
             timerService: timerService,
-            catalogStore: catalog.store,
-            catalogRepository: catalog.repository,
-            syncQueue: catalog.queue,
-            undoBuffer: catalog.undoBuffer,
-            catalogService: catalog.service,
-            catalogSeeder: CatalogSeeder(
-                repository: catalog.repository,
-                service: catalog.service,
-                sessionCache: sessionCache
-            ),
-            activityEntryCounter: TimerStoreActivityEntryCounter(store: timerService.store),
+            localStore: localStore,
+            undoBuffer: undoBuffer,
+            syncController: syncController,
             clientHolder: nil
         )
 
@@ -70,26 +64,10 @@ extension AppContainer {
         return container
     }
 
-    /// Deterministic, offline catalog graph for UI testing: a temp-directory
-    /// store/queue + a stub repository so the catalog runs without a network.
-    private static func makeUITestingCatalogGraph(connectivity: Connectivity, entriesRepository: EntriesRepository)
-    -> (store: CatalogStore, repository: CatalogRepository,
-        queue: SyncQueue, undoBuffer: UndoBuffer, service: CatalogService) {
-        let tempDir = URL(fileURLWithPath: NSTemporaryDirectory())
-            .appendingPathComponent("TimeOfLifeUITesting", isDirectory: true)
-        let store = CatalogStore(directory: tempDir)
-        let repository = UITestingCatalogRepository()
-        let queue = SyncQueue(url: tempDir)
-        let undoBuffer = UndoBuffer()
-        let service = CatalogService(
-            store: store,
-            repository: repository,
-            syncQueue: queue,
-            undoBuffer: undoBuffer,
-            connectivity: connectivity,
-            entriesRepository: entriesRepository
-        )
-        return (store, repository, queue, undoBuffer, service)
+    private static func temporaryStoreURL() -> URL {
+        URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent(UUID().uuidString)
+            .appendingPathComponent("timeoflife.sqlite")
     }
 
     /// Places the app on a specific screen for inspection.
@@ -108,7 +86,7 @@ extension AppContainer {
             sessionStore.setSignedOut()
             navigation.path = [.otpEntry(email: "user@example.com")]
         case "signedIn":
-            // `RootView` renders `TimerView` when the session is signed in.
+            // `RootView` renders the app shell (Track) when the session is signed in.
             sessionStore.setSignedIn(CachedSession(
                 id: "ui-test", email: "user@example.com", emailVerified: true
             ))
@@ -156,49 +134,5 @@ struct UITestingAuthRepository: AuthRepository {
     func logout() async throws {}
 
     func me() async throws -> UserDTO { Self.user }
-}
-
-/// Stub `CatalogRepository` for the UI-feedback loop. Returns deterministic,
-/// empty results so catalog-driven screens render deterministically without a
-/// network. DEBUG-only; never ships. Stateless `Sendable` struct.
-struct UITestingCatalogRepository: CatalogRepository {
-    /// Fixed reference date for deterministic stub responses.
-    private static let stubDate = Date(timeIntervalSinceReferenceDate: 0)
-
-    func listActivities(query: String?) async throws -> [Activity] { [] }
-    func getActivity(_ id: UUID) async throws -> Activity {
-        Activity(id: id, name: "Activity", notes: nil,
-                 lastUsedAt: nil, categoryIds: [],
-                 createdAt: Self.stubDate, updatedAt: Self.stubDate)
-    }
-    func createActivity(_ activity: Activity) async throws -> Activity { activity }
-    func updateActivity(_ activity: Activity) async throws -> Activity { activity }
-    func deleteActivity(_ id: UUID) async throws {}
-    func listCategories() async throws -> [Category] { [] }
-    func getCategory(_ id: UUID) async throws -> Category {
-        Category(id: id, name: "Category", icon: .tag,
-                 createdAt: Self.stubDate, updatedAt: Self.stubDate)
-    }
-    func createCategory(_ category: Category) async throws -> Category { category }
-    func updateCategory(_ category: Category) async throws -> Category { category }
-    func deleteCategory(_ id: UUID) async throws {}
-}
-
-/// Stub `EntriesRepository` for the UI-feedback loop. Returns deterministic,
-/// no-op results so the timer screen renders without a network. DEBUG-only;
-/// never ships. Stateless `Sendable` struct.
-struct UITestingEntriesRepository: EntriesRepository {
-    func create(_ entry: TimeEntry) async throws {}
-    func stop(id: UUID, endedAt: Date, updatedAt: Date) async throws {}
-    func delete(id: UUID) async throws {}
-    func get(id: UUID) async throws -> EntryDTO {
-        EntryDTO(
-            id: id,
-            activityId: UUID(uuidString: "00000000-0000-0000-0000-000000000001")!,
-            startedAt: Date(timeIntervalSinceReferenceDate: 0),
-            createdAt: Date(timeIntervalSinceReferenceDate: 0),
-            updatedAt: Date(timeIntervalSinceReferenceDate: 0)
-        )
-    }
 }
 #endif

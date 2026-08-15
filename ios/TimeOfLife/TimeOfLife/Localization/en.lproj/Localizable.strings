@@ -23,9 +23,6 @@
 "offline.banner" = "You are offline. Some actions are unavailable.";
 
 // Sign out confirmation
-"signOut.confirmationTitle" = "Sign Out?";
-"signOut.confirmationMessage" = "This will clear your local session.";
-"signOut.confirm" = "Sign Out";
 "signOut.cancel" = "Cancel";
 
 // Validation (unified messages — Requirements U2/U4: one merged message per field)
@@ -40,98 +37,46 @@
 
 // Server errors (mapped from error codes)
 "error.invalid_body" = "Please check your input.";
+"error.internal_error" = "The server encountered an error. Please try again.";
 "error.rate_limited" = "Too many attempts. Try again later.";
 "error.invalid_otp" = "Incorrect code. Try again.";
 "error.otp_expired" = "This code has expired. Request a new one.";
 "error.otp_attempts_exceeded" = "Too many attempts. Request a new code.";
 "error.invalid_refresh" = "Session expired. Please sign in again.";
 "error.token_reuse" = "Session invalidated for security. Please sign in again.";
-"error.token_expired" = "Session expired. Please sign in again.";
 "error.offline" = "You are offline.";
 "error.unknown" = "Something went wrong. Please try again.";
 "error.unauthorized" = "Session expired. Please sign in again.";
-
-// Catalog server errors (mapped from error codes)
-"error.conflict" = "Edited on another device. Showing the latest version.";
-"error.activity_exists" = "An activity with this name already exists.";
-"error.category_exists" = "A category with this name already exists.";
-"error.validation_error" = "Please check your input.";
-"error.not_found" = "This item no longer exists.";
-
-// Catalog validation (one merged message per field — U2/U4)
-"validation.catalog.iconInvalid" = "Select a valid icon.";
 
 // Apple sign in
 "appleSignIn.title" = "Sign in with Apple";
 "appleSignIn.error" = "Sign in with Apple failed. Please try again.";
 
 // Timer
-"timer.title" = "Timer";
-"timer.activityPlaceholder" = "What are you working on?";
 "timer.start" = "Start";
 "timer.stop" = "Stop";
-"timer.offlineHint" = "Entries are saved locally and synced when you’re back online.";
+"timer.stopHint" = "Stops the timer and saves the entry";
 "timer.emptyActivityError" = "Enter an activity name.";
 "timer.signOut" = "Sign Out";
-
-// Catalog (Epic 1)
-"tags.emptyHint" = "No categories yet — create one";
-"undo.button" = "Undo";
-"accessibility.category" = "Category, %@";
-"accessibility.icon" = "Icon, %@";
-"accessibility.suggestion" = "Suggestion, %@";
-"accessibility.suggestionHint" = "Starts a timer for this activity";
-"accessibility.selected" = "Selected";
-"accessibility.tagsCount" = "%d tags";
-"delete.activity.title" = "Delete Activity";
-"delete.button" = "Delete";
-"delete.activity.message.one" = "This activity has %d time entry.";
-"delete.activity.message.other" = "This activity has %d time entries.";
-"delete.activity.entire.one" = "Delete activity and all %d entry";
-"delete.activity.entire.other" = "Delete activity and all %d entries";
-"delete.activity.entryOnly" = "Delete latest entry";
-"delete.activity.cancel" = "Cancel";
-"toast.dismiss" = "Dismiss";
-"activity.lastUsed" = "last used %@";
-
-// Timer — Epic 1 (suggestions, quick-add, manage)
-"timer.suggestionsHeader" = "Recent";
-"timer.manageActivities" = "Manage activities";
-
-// Manage activities
-"manage.activities.title" = "Activities";
-"manage.activities.emptyTitle" = "No activities yet";
-"manage.activities.emptySubtitle" = "Add one, or just type a name on the timer.";
-"manage.activities.categories" = "Categories";
-"undo.activityDeleted" = "Activity deleted";
-"undo.entryDeleted" = "Entry deleted";
-"error.activityExists" = "An activity with this name already exists.";
-"error.undoFailed" = "Could not undo — try again.";
-
-// Manage categories
-"manage.categories.title" = "Categories";
-"manage.categories.emptyTitle" = "No categories yet";
-"manage.categories.emptySubtitle" = "Add one to tag your activities.";
-"delete.category.title" = "Delete category?";
-"delete.category.message" = "%@ will be removed from all activities. Your entries are kept.";
-"delete.category.confirm" = "Delete";
-"delete.category.cancel" = "Cancel";
-"undo.categoryDeleted" = "Category deleted";
-"error.categoryExists" = "A category with this name already exists.";
-"categoryEditor.createTitle" = "New category";
-"categoryEditor.editTitle" = "Edit category";
-"categoryEditor.nameLabel" = "Name";
-"categoryEditor.namePlaceholder" = "e.g. Sport";
-"categoryEditor.iconLabel" = "Icon";
-"categoryEditor.save" = "Save";
-"categoryEditor.cancel" = "Cancel";
-"category.seed.work" = "Work";
-"category.seed.hobby" = "Hobby";
-"category.seed.sport" = "Sport";
-"category.seed.education" = "Education";
-"category.seed.relax" = "Relax";
-"category.seed.sleep" = "Sleep";
-"category.seed.entertainment" = "Entertainment";
+"timer.chooseActivity" = "Choose an activity";
+"timer.chooseActivityPrompt" = "Choose an activity to start";
+"timer.saved" = "Saved";
+"timer.saving" = "Saving…";
+"timer.running" = "Running";
+"timer.ready" = "Ready";
+"timer.chooserRecent" = "Recent";
+"timer.recentsEmptyHint" = "Activities you track will appear here.";
+"timer.selectActivity" = "Select %@";
+"timer.searchPrompt" = "Search or create";
+"timer.searchEmptyCatalogTitle" = "No activities yet";
+"timer.searchEmptyCatalogSubtitle" = "Enter a name in the search field to create your first activity.";
+"timer.searchNoResults" = "No matching activities";
+"timer.searchCreate" = "Create “%@”";
+"timer.searchRestorePrompt" = "“%@” was recently deleted and can be restored.";
+"timer.searchRestore" = "Restore";
+"timer.searchValidationEmpty" = "Enter an activity name.";
+"timer.searchValidationTooLong" = "Name must be at most 60 characters.";
+"timer.stalePreparationError" = "This activity no longer exists. Choose another one.";
 
 // Activity editor
 "activityEditor.createTitle" = "New activity";
@@ -141,13 +86,141 @@
 "activityEditor.notesLabel" = "Notes";
 "activityEditor.notesPlaceholder" = "Optional notes";
 "activityEditor.notesCounter" = "%d / 280";
+"activityEditor.notesTooLong" = "Notes must be at most 280 characters.";
 "activityEditor.tagsLabel" = "Categories";
 "activityEditor.noTags" = "No categories yet.";
 "activityEditor.addCategory" = "Add a category";
 "activityEditor.save" = "Save";
 "activityEditor.cancel" = "Cancel";
-"validation.nameEmpty" = "Name is required.";
-"validation.nameTooLong" = "Name must be at most 60 characters.";
-"validation.name.prefix" = "Name must";
-"validation.name.rule.tooLong" = "be at most 60 characters";
-"validation.notesTooLong" = "Notes must be at most 280 characters.";
+"timer.compactStop" = "Stop and save timer";
+"timer.compactReturnHint" = "Returns to Track";
+"timer.compactRunning" = "%@, timer running";
+
+// App shell
+"tab.track" = "Track";
+"tab.history" = "History";
+"tab.insights" = "Insights";
+"profile.title" = "Profile";
+"profile.done" = "Done";
+"profile.account" = "Account";
+"profile.enableSync" = "Enable Sync";
+"profile.enableSyncSubtitle" = "Optional account for your other devices";
+"profile.syncNow" = "Sync now";
+"profile.syncing" = "Syncing…";
+"profile.lastSynced" = "Last synced: %@";
+"profile.syncError" = "Sync failed. Try again.";
+"profile.library" = "Library";
+"profile.activities" = "Activities";
+"profile.categories" = "Categories";
+"profile.connections" = "Connections";
+"profile.integrations" = "Integrations";
+"profile.export" = "Export";
+"profile.app" = "App";
+"profile.appearance" = "Appearance";
+"profile.dataAndPrivacy" = "Data and Privacy";
+"profile.eraseLocalData" = "Erase local data";
+"profile.eraseLocalDataConfirmTitle" = "Erase local data?";
+"profile.eraseLocalDataConfirmMessage" = "This permanently deletes all activities, categories, entries, and pending sync data on this device.";
+"profile.eraseConfirm" = "Erase";
+"profile.eraseCancel" = "Cancel";
+
+// Destination empty states
+"history.emptyTitle" = "Nothing here yet";
+"history.emptySubtitle" = "Your completed sessions will form a timeline here.";
+"insights.emptyTitle" = "Nothing here yet";
+"insights.emptySubtitle" = "Patterns emerge after you have tracked a little time.";
+
+// Starter categories (category-management spec, seed requirement)
+"category.seed.work" = "Work";
+"category.seed.hobby" = "Hobby";
+"category.seed.sport" = "Sport";
+"category.seed.education" = "Education";
+"category.seed.relax" = "Relax";
+"category.seed.sleep" = "Sleep";
+"category.seed.entertainment" = "Entertainment";
+
+// Undo (category-management D7)
+"undo.button" = "Undo";
+"undo.dismiss" = "Dismiss";
+"undo.categoryDeleted" = "Category deleted";
+"undo.selected" = "Selected";
+"undo.notSelected" = "Not selected";
+"undo.secondsRemaining" = "%d s left";
+
+// Manage categories (category-management D4)
+"manage.categories.title" = "Categories";
+"manage.categories.add" = "Add category";
+"manage.categories.emptyTitle" = "No categories yet";
+"manage.categories.emptySubtitle" = "Add one to tag your activities.";
+"manage.categories.rowA11y" = "Category";
+"manage.categories.editHint" = "Double-tap to edit.";
+"manage.categories.loading" = "Loading categories…";
+"delete.category.title" = "Delete category?";
+"delete.category.message" = "%@ will be removed from all activities. Your entries are kept.";
+"delete.category.confirm" = "Delete";
+"delete.category.cancel" = "Cancel";
+"error.categoryExists" = "A category with this name already exists.";
+"error.conflict" = "Edited on another device. Showing the latest version.";
+"error.localPersistence" = "Could not save locally. Please try again.";
+
+// Category editor (category-management D4)
+"categoryEditor.createTitle" = "New category";
+"categoryEditor.editTitle" = "Edit category";
+"categoryEditor.nameLabel" = "Name";
+"categoryEditor.namePlaceholder" = "e.g. Sport";
+"categoryEditor.iconLabel" = "Icon";
+"categoryEditor.iconUnavailable" = "This icon is unavailable on this iOS version and is shown as a tag.";
+"categoryEditor.save" = "Save";
+"categoryEditor.cancel" = "Cancel";
+"category.nameRequired" = "Enter a category name.";
+"category.nameTooLong" = "Name must be at most 60 characters.";
+"activityEditor.invalidAssociation" = "One of the selected categories no longer exists. Review your selection and try again.";
+
+// Catalog icon accessibility names
+"catalogIcon.clock" = "Clock";
+"catalogIcon.laptopcomputer" = "Laptop";
+"catalogIcon.briefcase" = "Briefcase";
+"catalogIcon.book" = "Book";
+"catalogIcon.pencil.and.ruler" = "Pencil and ruler";
+"catalogIcon.brain.head.profile" = "Brain";
+"catalogIcon.figure.walk" = "Walking";
+"catalogIcon.figure.run" = "Running";
+"catalogIcon.figure.strengthtraining" = "Strength training";
+"catalogIcon.figure.yoga" = "Yoga";
+"catalogIcon.figure.cycling" = "Cycling";
+"catalogIcon.figure.swimming" = "Swimming";
+"catalogIcon.figure.soccer" = "Soccer";
+"catalogIcon.figure.basketball" = "Basketball";
+"catalogIcon.figure.tennis" = "Tennis";
+"catalogIcon.figure.gymnastics" = "Gymnastics";
+"catalogIcon.figure.mindandbody" = "Mind and body";
+"catalogIcon.figure.core.training" = "Core training";
+"catalogIcon.dumbbell" = "Dumbbell";
+"catalogIcon.bicycle" = "Bicycle";
+"catalogIcon.books" = "Books";
+"catalogIcon.graduationcap" = "Graduation cap";
+"catalogIcon.desktopcomputer" = "Desktop computer";
+"catalogIcon.keyboard" = "Keyboard";
+"catalogIcon.gamecontroller" = "Game controller";
+"catalogIcon.fork.knife" = "Fork and knife";
+"catalogIcon.cup.and.saucer" = "Cup and saucer";
+"catalogIcon.bed.double" = "Bed";
+"catalogIcon.moon.stars" = "Moon and stars";
+"catalogIcon.moon.zzz" = "Sleeping moon";
+"catalogIcon.film" = "Film";
+"catalogIcon.music.note" = "Music note";
+"catalogIcon.guitar" = "Guitar";
+"catalogIcon.camera" = "Camera";
+"catalogIcon.tv" = "Television";
+"catalogIcon.musicalnotes" = "Music notes";
+"catalogIcon.paintbrush" = "Paintbrush";
+"catalogIcon.house" = "House";
+"catalogIcon.car.fill" = "Car";
+"catalogIcon.airplane" = "Airplane";
+"catalogIcon.cart" = "Shopping cart";
+"catalogIcon.phone" = "Phone";
+"catalogIcon.hammer" = "Hammer";
+"catalogIcon.heart" = "Heart";
+"catalogIcon.leaf" = "Leaf";
+"catalogIcon.sparkles" = "Sparkles";
+"catalogIcon.tag" = "Tag";

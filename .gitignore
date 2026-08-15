@@ -44,11 +44,6 @@ Packages/
 .env.*
 !.env.example
 
-### BMAD / Claude user-specific and generated artifacts
-_bmad/config.user.toml
-_bmad-output/
-.claude/skills/
-
 ### Editor / OS
 .vscode/
 .idea/

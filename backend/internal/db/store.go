@@ -41,7 +41,7 @@ type CategoryTag struct {
 	Icon string `json:"icon"`
 }
 
-// Activity is a saved, reusable time-tracking target (Epic 1).
+// Activity is a saved, reusable time-tracking target.
 type Activity struct {
 	ID         string        `json:"id"`
 	UserID     string        `json:"-"`
@@ -53,7 +53,7 @@ type Activity struct {
 	UpdatedAt  time.Time     `json:"updated_at"`
 }
 
-// Category is a many-to-many tag that an activity may carry (Epic 1).
+// Category is a many-to-many tag that an activity may carry.
 type Category struct {
 	ID        string    `json:"id"`
 	UserID    string    `json:"-"`
@@ -63,10 +63,13 @@ type Category struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
-// Entry is one timed interval (Epic 1). Every entry references exactly one
+// Entry is one timed interval. Every entry references exactly one
 // activity (ActivityID is always set). Categories are inferred from the
 // activity's tags at read time; ActivityName is the activity's current name,
-// resolved at read time.
+// resolved at read time. Source/SourceRef record entry provenance (where the
+// entry came from: manual, widget, siri, control, screentime, garmin, ...);
+// Source defaults to "manual" and SourceRef is null for entries created
+// without them (back-compat with existing clients).
 type Entry struct {
 	ID              string        `json:"id"`
 	UserID          string        `json:"-"`
@@ -75,6 +78,8 @@ type Entry struct {
 	StartedAt       time.Time     `json:"started_at"`
 	EndedAt         *time.Time    `json:"ended_at"`
 	DurationSeconds *int          `json:"duration_seconds"`
+	Source          string        `json:"source"`
+	SourceRef       *string       `json:"source_ref"`
 	Categories      []CategoryTag `json:"categories"`
 	CreatedAt       time.Time     `json:"created_at"`
 	UpdatedAt       time.Time     `json:"updated_at"`
@@ -82,12 +87,13 @@ type Entry struct {
 
 // EntryFilter carries the optional GET /entries query parameters.
 type EntryFilter struct {
-	From       *time.Time // include entries with started_at >= From
-	To         *time.Time // include entries with started_at <= To (inclusive upper bound)
-	ActivityID string     // restrict to a single activity
-	CategoryID string     // restrict to entries whose activity is tagged
-	Limit      int        // page size; 0 → default
-	Cursor     string     // opaque pagination cursor from a previous response
+	From          *time.Time // include entries with started_at >= From
+	To            *time.Time // include entries with started_at <= To (inclusive upper bound)
+	ActivityID    string     // restrict to a single activity
+	CategoryID    string     // restrict to entries whose activity is tagged
+	Limit         int        // page size; 0 → default
+	Cursor        string     // opaque pagination cursor from a previous response
+	ModifiedSince *time.Time // include entries with updated_at > ModifiedSince (delta pull-sync; nil = full)
 }
 
 // NullableTime represents an optional timestamp on a partial update: Set=false
@@ -172,12 +178,13 @@ type Store interface {
 	// follow-up).
 	UpsertUserByAppleSubject(ctx context.Context, appleSubject, email string) (User, error)
 
-	// --- Activities (Epic 1) ---
+	// --- Activities ---
 
 	// ListActivities returns the user's activities ordered by last_used_at DESC
 	// (most-recently-used first). A non-empty q applies a case-insensitive
-	// name LIKE typeahead filter.
-	ListActivities(ctx context.Context, userID, q string) ([]Activity, error)
+	// name LIKE typeahead filter. A non-nil modifiedSince restricts the result
+	// to records with updated_at > modifiedSince (delta pull-sync; nil = full).
+	ListActivities(ctx context.Context, userID, q string, modifiedSince *time.Time) ([]Activity, error)
 
 	// GetActivity returns one activity (with its category tags) by id, scoped to
 	// the user. Returns ErrNotFound if missing or owned by another user.
@@ -203,7 +210,7 @@ type Store interface {
 	// join rows). Returns ErrNotFound if missing.
 	DeleteActivity(ctx context.Context, userID, id string) error
 
-	// --- Categories (Epic 1) ---
+	// --- Categories ---
 
 	// ListCategories returns the user's categories ordered by name.
 	ListCategories(ctx context.Context, userID string) ([]Category, error)
@@ -225,7 +232,7 @@ type Store interface {
 	// unaffected). Returns ErrNotFound if missing.
 	DeleteCategory(ctx context.Context, userID, id string) error
 
-	// --- Entries (Epic 1) ---
+	// --- Entries ---
 
 	// ListEntries returns one page of the user's entries ordered by started_at
 	// DESC, filtered by EntryFilter. nextCursor is the opaque cursor for the

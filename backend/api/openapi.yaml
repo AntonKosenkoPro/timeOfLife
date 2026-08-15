@@ -6,29 +6,30 @@ info:
     Backend API for the Time of Life personal time-tracking iOS app.
 
     ## Auth flow (passwordless email-OTP)
-    1. **Request OTP** — `POST /auth/otp/request` with an email address. Always returns 202
+    1. **Request OTP** — `POST /api/v1/auth/otp/request` with an email address. Always returns 202
        (prevents user enumeration). The server upserts the user, generates a 6-digit code,
        and sends it via email (console in dev/test, AWS SES in production).
-    2. **Verify OTP** — `POST /auth/otp/verify` with the email and 6-digit code. On success,
-       returns a JWT access token (15 min TTL) and an opaque refresh token (7 day TTL).
-    3. **Refresh** — `POST /auth/refresh` with the refresh token. Issues a new token pair
+    2. **Verify OTP** — `POST /api/v1/auth/otp/verify` with the email and 6-digit code. On success,
+       returns a JWT access token (15 min TTL) and an opaque refresh token.
+    3. **Refresh** — `POST /api/v1/auth/refresh` with the refresh token. Issues a new token pair
        and revokes the old one. Reuse of a revoked token revokes ALL user sessions.
-    4. **Logout** — `POST /auth/logout` with a Bearer access token. Revokes all sessions.
-    5. **Me** — `GET /auth/me` with a Bearer access token. Returns the user profile.
+    4. **Logout** — `POST /api/v1/auth/logout` with a Bearer access token. Revokes all sessions.
+    5. **Me** — `GET /api/v1/auth/me` with a Bearer access token. Returns the user profile.
 
     ## Auth flow (Sign in with Apple)
-    - **Apple** — `POST /auth/apple` with Apple's identity-token JWT (RS256). The server
+    - **Apple** — `POST /api/v1/auth/apple` with Apple's identity-token JWT (RS256). The server
       verifies it against Apple's JWKS (iss/aud/exp) and upserts a user keyed by Apple's
       stable `sub` claim, then issues the same access + refresh token pair as the OTP flow.
-      Config-gated: only registered when `APPLE_CLIENT_ID` is set.
+       The route is always registered; without `APPLE_CLIENT_ID` it returns 503
+       `apple_not_configured`.
 
     ## Security
     - No passwords. OTP codes and refresh tokens are stored only as SHA-256 hashes.
     - JWT access tokens use HS256 signing.
     - Rate limiting: 3 req/min for OTP request, 5 req/min for OTP verify (per IP+email).
-    - User enumeration is prevented: `/auth/otp/request` always returns 202.
+    - User enumeration is prevented: `/api/v1/auth/otp/request` always returns 202.
 
-    ## Activity catalog & entries (Epic 1)
+    ## Activity catalog & entries
     Activities, categories (many-to-many tags), and time entries are per-user
     resources — Bearer-auth and scoped to the authenticated user. Records use
     client-generated UUID v7 ids so they can be created offline and synced
@@ -38,14 +39,14 @@ info:
     undo window). Timer-screen suggestions are computed client-side from the
     synced `last_used_at` — there is no suggestions endpoint.
 
-  version: "1.2.0"
+  version: "1.3.0"
   contact:
     name: Anton Kosenko
 
 servers:
   - url: http://localhost:8080
     description: Local development
-  - url: https://api.timeoflife.example.com
+  - url: https://timeoflife-api.antonkosenko.pro
     description: Production
 
 paths:
@@ -190,6 +191,8 @@ paths:
                 error:
                   code: rate_limited
                   message: Too many attempts. Please try again later.
+        "500":
+          $ref: "#/components/responses/InternalError"
 
   /api/v1/auth/apple:
     post:
@@ -261,6 +264,8 @@ paths:
                 error:
                   code: apple_not_configured
                   message: Sign in with Apple is not configured
+        "500":
+          $ref: "#/components/responses/InternalError"
 
   /api/v1/auth/refresh:
     post:
@@ -316,6 +321,8 @@ paths:
                     error:
                       code: token_reuse
                       message: Token has been revoked. All sessions have been invalidated.
+        "500":
+          $ref: "#/components/responses/InternalError"
 
   /api/v1/auth/logout:
     post:
@@ -341,6 +348,8 @@ paths:
                 error:
                   code: unauthorized
                   message: Missing authorization header
+        "500":
+          $ref: "#/components/responses/InternalError"
 
   /api/v1/auth/me:
     get:
@@ -375,8 +384,10 @@ paths:
                 error:
                   code: unauthorized
                   message: Invalid or expired access token
+        "500":
+          $ref: "#/components/responses/InternalError"
 
-  # ---------- Activities (Epic 1) ----------
+  # ---------- Activities ----------
 
   /api/v1/activities:
     get:
@@ -385,7 +396,7 @@ paths:
       description: |
         Returns the authenticated user's activities ordered by most-recently-used
         (`last_used_at` DESC). The optional `q` filters by case-insensitive name
-        prefix for typeahead / quick-add lookup. Each activity includes its
+        substring for typeahead / quick-add lookup. Each activity includes its
         category tags. The client computes timer-screen suggestions locally from
         this list (F5); there is no suggestions endpoint.
       tags:
@@ -399,6 +410,15 @@ paths:
           schema:
             type: string
           description: Case-insensitive name filter (typeahead).
+        - name: modified_since
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+          description: |
+            Delta pull-sync: return only activities with `updated_at` strictly
+            greater than this RFC 3339 timestamp. Absent/empty = full pull.
       responses:
         "200":
           description: The user's activities, recency-ordered.
@@ -410,6 +430,8 @@ paths:
                   $ref: "#/components/schemas/Activity"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
     post:
       operationId: createActivity
       summary: Create an activity
@@ -449,6 +471,8 @@ paths:
           $ref: "#/components/responses/Conflict"
         "422":
           $ref: "#/components/responses/ValidationError"
+        "500":
+          $ref: "#/components/responses/InternalError"
 
   /api/v1/activities/{id}:
     get:
@@ -478,6 +502,8 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "404":
           $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
     patch:
       operationId: updateActivity
       summary: Update an activity
@@ -521,14 +547,15 @@ paths:
           $ref: "#/components/responses/Conflict"
         "422":
           $ref: "#/components/responses/ValidationError"
+        "500":
+          $ref: "#/components/responses/InternalError"
     delete:
       operationId: deleteActivity
       summary: Delete an activity
       description: |
         Hard-deletes an activity and cascades to its entries and tag-join rows
         (F10 "delete the entire activity and all its entries"). The 30 s undo
-        window is owned by the client; the server just hard-deletes. Deleting an
-        activity that has a running entry ends that entry first.
+        window is owned by the client; the server just hard-deletes.
       tags:
         - Activities
       security:
@@ -547,8 +574,10 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "404":
           $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
 
-  # ---------- Categories (Epic 1) ----------
+  # ---------- Categories ----------
 
   /api/v1/categories:
     get:
@@ -570,6 +599,8 @@ paths:
                   $ref: "#/components/schemas/Category"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
     post:
       operationId: createCategory
       summary: Create a category
@@ -607,6 +638,8 @@ paths:
           $ref: "#/components/responses/Conflict"
         "422":
           $ref: "#/components/responses/ValidationError"
+        "500":
+          $ref: "#/components/responses/InternalError"
 
   /api/v1/categories/{id}:
     get:
@@ -635,6 +668,8 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "404":
           $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
     patch:
       operationId: updateCategory
       summary: Update a category
@@ -675,6 +710,8 @@ paths:
           $ref: "#/components/responses/Conflict"
         "422":
           $ref: "#/components/responses/ValidationError"
+        "500":
+          $ref: "#/components/responses/InternalError"
     delete:
       operationId: deleteCategory
       summary: Delete a category
@@ -700,8 +737,10 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "404":
           $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
 
-  # ---------- Entries (Epic 1) ----------
+  # ---------- Entries ----------
 
   /api/v1/entries:
     get:
@@ -710,8 +749,8 @@ paths:
       description: |
         Returns the authenticated user's entries, newest first, with filters and
         cursor pagination. Each entry includes its category tags (inferred from
-        the entry's activity) and the activity's current name. Used by History
-        (Epic 2); the resource lands in Epic 1 so `activity_id` has a home and
+        the entry's activity) and the activity's current name. Used by History;
+        the resource lands with the catalog so `activity_id` has a home and
         entries sync cross-device from the start.
       tags:
         - Entries
@@ -759,6 +798,15 @@ paths:
           schema:
             type: string
           description: Opaque pagination cursor returned by a previous request.
+        - name: modified_since
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+          description: |
+            Delta pull-sync: return only entries with `updated_at` strictly
+            greater than this RFC 3339 timestamp. Absent/empty = full pull.
       responses:
         "200":
           description: A page of entries.
@@ -770,6 +818,8 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "422":
           $ref: "#/components/responses/ValidationError"
+        "500":
+          $ref: "#/components/responses/InternalError"
     post:
       operationId: createEntry
       summary: Create a time entry
@@ -820,6 +870,8 @@ paths:
           $ref: "#/components/responses/Conflict"
         "422":
           $ref: "#/components/responses/ValidationError"
+        "500":
+          $ref: "#/components/responses/InternalError"
 
   /api/v1/entries/{id}:
     get:
@@ -848,13 +900,15 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "404":
           $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
     patch:
       operationId: updateEntry
       summary: Update an entry
       description: |
         Updates an entry (last-write-wins on `updated_at`). Setting `ended_at`
         stops a running timer; `duration_seconds` is recomputed. Editing the
-        timer/UI is Epic 2; the endpoint lands in Epic 1.
+        timer/UI is the History feature; the endpoint lands with the catalog.
       tags:
         - Entries
       security:
@@ -889,6 +943,8 @@ paths:
           $ref: "#/components/responses/Conflict"
         "422":
           $ref: "#/components/responses/ValidationError"
+        "500":
+          $ref: "#/components/responses/InternalError"
     delete:
       operationId: deleteEntry
       summary: Delete an entry
@@ -911,6 +967,8 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "404":
           $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
 
 components:
   securitySchemes:
@@ -919,7 +977,7 @@ components:
       scheme: bearer
       bearerFormat: JWT
       description: |
-        JWT access token obtained from `/auth/otp/verify`, `/auth/apple`, or `/auth/refresh`.
+        JWT access token obtained from `/api/v1/auth/otp/verify`, `/api/v1/auth/apple`, or `/api/v1/auth/refresh`.
         Format: `Authorization: Bearer <token>`
 
   responses:
@@ -946,6 +1004,17 @@ components:
             error:
               code: invalid_body
               message: Invalid request body
+
+    InternalError:
+      description: An unexpected server-side failure occurred.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            error:
+              code: internal_error
+              message: An internal error occurred
 
     ValidationError:
       description: Field-level validation failed; `details` maps each invalid field to a single unified message.
@@ -977,6 +1046,8 @@ components:
         older than the server's); `details` carries the server's current version.
         `activity_exists` / `category_exists` — a case-insensitive name collision
         on create; `details` carries the existing record's id and name.
+        `duplicate_import` — an entry with the same (source, source_ref) already
+        exists (duplicate import prevention).
       content:
         application/json:
           schema:
@@ -1008,6 +1079,12 @@ components:
                   details:
                     id: "019639f1-7a3b-7abc-9def-100000000002"
                     name: Sport
+            duplicate_import:
+              summary: Entry with the same source and source_ref already exists
+              value:
+                error:
+                  code: duplicate_import
+                  message: An entry with this source and source_ref already exists.
 
   schemas:
     # ---------- Request schemas ----------
@@ -1156,7 +1233,7 @@ components:
               description: Optional additional error context
               example: {}
 
-    # ---------- Catalog & entries schemas (Epic 1) ----------
+    # ---------- Catalog & entries schemas ----------
 
     # Shared embedded tag (a category as it appears on an activity or entry).
     CategoryTag:
@@ -1173,7 +1250,70 @@ components:
         name:
           type: string
         icon:
-          type: string
+          $ref: "#/components/schemas/CategoryIcon"
+
+    # Authoritative category icon catalog (category-management spec D1): the
+    # closed set of SF Symbol names the relay accepts. The Go validator
+    # (`internal/handlers.validIcons`) and the iOS `CatalogIcon` type mirror
+    # this exact list; the contract test `TestSpec_CategoryIconEnumMatchesGo`
+    # fails when they drift.
+    CategoryIcon:
+      type: string
+      description: |
+        The supported SF Symbol catalog for category icons. This enum is the
+        machine-readable canonical list; the Go `validIcons` set and the iOS
+        `CatalogIcon` type mirror it, and `Design/TOKENS.md` documents the
+        same set. The icon picker hides catalog symbols unavailable on the
+        running OS; a valid synchronized symbol that cannot render is
+        displayed as `tag` without changing the stored value.
+      enum:
+        - clock
+        - laptopcomputer
+        - briefcase
+        - book
+        - pencil.and.ruler
+        - brain.head.profile
+        - figure.walk
+        - figure.run
+        - figure.strengthtraining
+        - figure.yoga
+        - figure.cycling
+        - figure.swimming
+        - figure.soccer
+        - figure.basketball
+        - figure.tennis
+        - figure.gymnastics
+        - figure.mindandbody
+        - figure.core.training
+        - dumbbell
+        - bicycle
+        - books
+        - graduationcap
+        - desktopcomputer
+        - keyboard
+        - gamecontroller
+        - fork.knife
+        - cup.and.saucer
+        - bed.double
+        - moon.stars
+        - moon.zzz
+        - film
+        - music.note
+        - guitar
+        - camera
+        - tv
+        - musicalnotes
+        - paintbrush
+        - house
+        - car.fill
+        - airplane
+        - cart
+        - phone
+        - hammer
+        - heart
+        - leaf
+        - sparkles
+        - tag
 
     # ---------- Catalog request schemas ----------
 
@@ -1258,7 +1398,7 @@ components:
           minLength: 1
           maxLength: 60
         icon:
-          type: string
+          $ref: "#/components/schemas/CategoryIcon"
       example:
         id: "019639f1-7a3b-7abc-9def-100000000002"
         name: Sport
@@ -1275,7 +1415,7 @@ components:
           minLength: 1
           maxLength: 60
         icon:
-          type: string
+          $ref: "#/components/schemas/CategoryIcon"
         updated_at:
           type: string
           format: date-time
@@ -1287,7 +1427,9 @@ components:
       description: |
         Request body for creating a time entry. `activity_id` is required and
         must belong to the user; the server resolves `activity_name` from the
-        activity. `ended_at` omitted/null means a running timer.
+        activity. `ended_at` omitted/null means a running timer. `source`
+        (default `manual`) and `source_ref` record provenance; a duplicate
+        (source, source_ref) is rejected with 409 `duplicate_import`.
       required:
         - id
         - activity_id
@@ -1309,10 +1451,20 @@ components:
           format: date-time
           nullable: true
           description: End time; null/omitted = running timer.
+        source:
+          type: string
+          enum: [manual, widget, siri, control, screentime, garmin, calendar, healthkit]
+          description: Entry provenance; defaults to `manual` when omitted.
+        source_ref:
+          type: string
+          nullable: true
+          description: External identifier for the source; null for manual entries.
       example:
         id: "019639f1-7a3b-7abc-9def-100000000003"
         activity_id: "019639f1-7a3b-7abc-9def-100000000001"
         started_at: "2026-07-27T09:00:00Z"
+        source: manual
+        source_ref: null
 
     EntryUpdate:
       type: object
@@ -1400,7 +1552,7 @@ components:
           type: string
           maxLength: 60
         icon:
-          type: string
+          $ref: "#/components/schemas/CategoryIcon"
         created_at:
           type: string
           format: date-time
@@ -1420,11 +1572,15 @@ components:
         A time entry. Every entry references exactly one activity. `categories`
         are inferred from the activity's tags at query time, and
         `activity_name` is the activity's current name, resolved at query time.
+        `source` records where the entry came from (provenance); `source_ref`
+        holds the external identifier for that source (e.g. a Screen Time
+        callback uuid or Garmin activity id) and is null for manual entries.
       required:
         - id
         - activity_id
         - activity_name
         - started_at
+        - source
         - created_at
         - updated_at
         - categories
@@ -1451,6 +1607,20 @@ components:
           type: integer
           nullable: true
           description: ended_at - started_at, in seconds; null while running.
+        source:
+          type: string
+          enum: [manual, widget, siri, control, screentime, garmin, calendar, healthkit]
+          description: |
+            Entry provenance — where the entry came from. `manual` is the
+            default for entries created without a source.
+        source_ref:
+          type: string
+          nullable: true
+          description: |
+            External identifier for the source (e.g. Screen Time callback uuid,
+            Garmin activity id, `.ics` UID). Null for manual entries. The
+            server enforces uniqueness on (user_id, source, source_ref) for
+            non-null source_ref, preventing duplicate imports.
         created_at:
           type: string
           format: date-time
@@ -1468,6 +1638,8 @@ components:
         started_at: "2026-07-27T09:00:00Z"
         ended_at: "2026-07-27T10:00:00Z"
         duration_seconds: 3600
+        source: manual
+        source_ref: null
         created_at: "2026-07-27T09:00:00Z"
         updated_at: "2026-07-27T10:00:00Z"
         categories:

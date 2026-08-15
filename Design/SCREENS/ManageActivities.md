@@ -1,6 +1,6 @@
 # Manage Activities Screen
 
-Implements F8/F10/F12/U8/R1–R3 of `Requirements/FURPS/Activity_Catalog_and_Categories.md`. Full CRUD surface for activities, reached from the timer screen (and a future account/menu destination).
+Implements F8/F10/F12/U8/R1–R3 of `Requirements/FURPS/Activity_Catalog_and_Categories.md`. Full CRUD surface for activities, reached from Profile (Library section).
 
 Flows 5 and 6 in `Requirements/Usecases/Activity_Catalog_and_Categories.md`.
 
@@ -9,7 +9,7 @@ Flows 5 and 6 in `Requirements/Usecases/Activity_Catalog_and_Categories.md`.
 ## Screen: ManageActivitiesView
 
 - **File**: `ios/TimeOfLife/TimeOfLife/Features/Catalog/Views/ManageActivitiesView.swift` (new Features/Catalog area)
-- **Route**: `.manageActivities` (new `AppRoute` case; add to the enum)
+- **Route**: reached from Profile → Library (Manage Activities row). Category management is Profile-owned and is opened from the Profile Categories row, not from this screen.
 - **ViewModel**: `ManageActivitiesViewModel`
 
 ### Layout
@@ -19,7 +19,7 @@ Wrap in a `NavigationStack` (iOS 16 `NavigationStack`, iOS 15 `NavigationView(.s
 Toolbar:
 
 - `ToolbarItem(placement: .topBarTrailing)` — `+` button: `Image(systemName: "plus")`, `accessibilityIdentifier("ManageActivitiesAddButton")`. Tapping presents `ActivityEditor` in create mode (sheet, D21).
-- `ToolbarItem(placement: .topBarTrailing)` — Categories button: `Image(systemName: "slider.horizontal.3")` (or `tag.fill`), `accessibilityIdentifier("ManageActivitiesCategoriesButton")`. Tapping pushes `.manageCategories`.
+- There is no Categories toolbar button on this screen; Profile owns the dedicated Manage Categories destination.
 
 Body: `List` of `ActivityRow`, ordered by `last_used_at` DESC (D19). Rows are lazy (`LazyVStack`-style lazy rows, P2, 60fps) — no work in row body. List background `Theme.backgroundPrimary`. `accessibilityIdentifier("ManageActivitiesList")` on the list.
 
@@ -41,7 +41,7 @@ N/A — this is a list screen with no text input.
 - Tap a row → `ActivityEditor` edit mode (sheet, pre-filled, D21).
 - Swipe-to-delete on a row → delete flow (see below).
 - `+` toolbar button → `ActivityEditor` create mode (sheet, D21).
-- Categories toolbar button → push `.manageCategories`.
+- Profile → Categories opens the dedicated Manage Categories destination.
 - Offline (F12 / D7): the list reads from the local store; CRUD is queued locally and synced when connectivity returns, per `Design/INTERACTIONS.md` → Offline. The `OfflineBanner` is rendered at the top by `RootView`.
 - Sync conflict (R2): on 409 `conflict`, show an inline `ErrorBanner` ("Edited on another device") and adopt the server's current version as the source of truth (keep-latest). See `Design/INTERACTIONS.md` → Sync conflict.
 - Seeding note: first-run seeds categories only (F6), not activities, so this list starts empty (U8). That is expected; the empty state guides toward creation and never blocks free-text timer start (D20).

@@ -9,7 +9,7 @@ import (
 	"unicode/utf8"
 )
 
-// Epic 1 introduces the catalog/entries endpoints. Unlike the auth handlers
+// The catalog feature introduces the catalog/entries endpoints. Unlike the auth handlers
 // (inline boolean validators → 400 invalid_body), these use a field→message
 // accumulator that returns 422 validation_error with details = {field: message},
 // matching the OpenAPI ValidationError response. Error codes are declared as
@@ -22,35 +22,56 @@ const (
 	codeActivityExists  = "activity_exists"
 	codeCategoryExists  = "category_exists"
 	codeActivityMissing = "activity_not_found"
+	codeDuplicateImport = "duplicate_import"
 )
 
-// validIcons is the allowed SF Symbol set for catalog icons. Must match
-// iOS CatalogIcon.validKeys (CatalogModels.swift). The backend is the
-// authoritative validator (U1); the client keeps the full union.
+// validIcons is the allowed SF Symbol set for catalog icons. This must match
+// the authoritative `Category.icon` enum in backend/api/openapi.yaml exactly;
+// the contract test TestSpec_CategoryIconEnumMatchesGo fails when the lists
+// drift. The iOS CatalogIcon type mirrors the same set, and Design/TOKENS.md
+// documents it.
 var validIcons = map[string]bool{
+	"clock": true, "laptopcomputer": true, "briefcase": true,
+	"book": true, "pencil.and.ruler": true, "brain.head.profile": true,
 	"figure.walk": true, "figure.run": true, "figure.strengthtraining": true,
 	"figure.yoga": true, "figure.cycling": true, "figure.swimming": true,
 	"figure.soccer": true, "figure.basketball": true, "figure.tennis": true,
 	"figure.gymnastics": true, "figure.mindandbody": true, "figure.core.training": true,
-	"book": true, "books": true, "graduationcap": true,
-	"laptopcomputer": true, "desktopcomputer": true, "keyboard": true,
-	"gamecontroller": true, "tv": true, "musicalnotes": true,
-	"paintbrush": true, "briefcase": true, "house": true,
-	"fork.knife": true, "cup.and.saucer": true, "moon.zzz": true,
-	"car.fill": true, "airplane": true, "cart": true, "phone": true,
-	"clock": true, "tag": true,
-	// iOS-only icons (CatalogIcon.validKeys union)
-	"pencil.and.ruler": true, "brain.head.profile": true,
 	"dumbbell": true, "bicycle": true,
-	"bed.double": true, "moon.stars": true,
+	"books": true, "graduationcap": true,
+	"desktopcomputer": true, "keyboard": true,
+	"gamecontroller": true, "fork.knife": true, "cup.and.saucer": true,
+	"bed.double": true, "moon.stars": true, "moon.zzz": true,
 	"film": true, "music.note": true, "guitar": true, "camera": true,
+	"tv": true, "musicalnotes": true,
+	"paintbrush": true, "house": true,
+	"car.fill": true, "airplane": true, "cart": true, "phone": true,
 	"hammer": true, "heart": true, "leaf": true, "sparkles": true,
+	"tag": true,
+}
+
+// ValidIcons returns a copy of the authoritative category icon set so the
+// OpenAPI contract tests can compare it against the spec's CategoryIcon enum.
+func ValidIcons() (map[string]bool, error) {
+	out := make(map[string]bool, len(validIcons))
+	for k := range validIcons {
+		out[k] = true
+	}
+	return out, nil
 }
 
 const (
 	maxNameLen  = 60
 	maxNotesLen = 280
 )
+
+// validEntrySources is the allowed provenance set for entries (entry-provenance
+// spec). The backend is the authoritative validator; the client keeps the
+// union. Future sources (e.g. a new integration) extend this list.
+var validEntrySources = map[string]bool{
+	"manual": true, "widget": true, "siri": true, "control": true,
+	"screentime": true, "garmin": true, "calendar": true, "healthkit": true,
+}
 
 var uuidV7Regex = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`)
 
@@ -162,6 +183,8 @@ type entryCreateReq struct {
 	ActivityID *string `json:"activity_id"`
 	StartedAt  string  `json:"started_at"`
 	EndedAt    *string `json:"ended_at"`
+	Source     string  `json:"source"`
+	SourceRef  *string `json:"source_ref"`
 }
 
 type entryUpdateReq struct {

@@ -1,160 +1,134 @@
 import Foundation
+import GRDB
 
-// MARK: - Catalog icons
-
-/// The allowed SF Symbols set shared by catalog activities and categories
-/// (F1 / TOKENS); default `.tag`.
+/// A saved, reusable time-tracking target.
 ///
-/// Raw values are the exact SF Symbol strings. This enum is the **union** of the
-/// backend's `validIcons` (`catalog_validators.go`) and the design set in
-/// `TOKENS.md`, so the client does not pre-reject icons from either source.
-/// The backend remains the authoritative validator (U1): an icon outside its
-/// set will still get a 422 from the server, but the client keeps the full
-/// union acceptable on-device. Decision: union, per the
-/// cross-doc icon-set variance (backend `validIcons` ≠ TOKENS.md; `clock` is
-/// not backend-valid).
-enum CatalogIcon: String, Codable, CaseIterable, Sendable {
-    // Shared by backend + TOKENS.md
-    case figureRun = "figure.run"
-    case figureStrengthtraining = "figure.strengthtraining"
-    case figureYoga = "figure.yoga"
-    case book
-    case laptopcomputer
-    case briefcase
-    case gamecontroller
-    case tv
-    case paintbrush
-    case forkKnife = "fork.knife"
-    case cupAndSaucer = "cup.and.saucer"
-    case carFill = "car.fill"
-    case airplane
-
-    // TOKENS.md only
-    case clock
-    case pencilAndRuler = "pencil.and.ruler"
-    case brainHeadProfile = "brain.head.profile"
-    case dumbbell
-    case bicycle
-    case bedDouble = "bed.double"
-    case moonStars = "moon.stars"
-    case film
-    case musicNote = "music.note"
-    case guitar
-    case camera
-    case hammer
-    case heart
-    case leaf
-    case sparkles
-    case tag
-
-    // Backend validIcons only
-    case figureWalk = "figure.walk"
-    case figureCycling = "figure.cycling"
-    case figureSwimming = "figure.swimming"
-    case figureSoccer = "figure.soccer"
-    case figureBasketball = "figure.basketball"
-    case figureTennis = "figure.tennis"
-    case figureGymnastics = "figure.gymnastics"
-    case figureMindandbody = "figure.mindandbody"
-    case figureCoreTraining = "figure.core.training"
-    case books
-    case graduationcap
-    case desktopcomputer
-    case keyboard
-    case musicalnotes
-    case house
-    case moonZzz = "moon.zzz"
-    case cart
-    case phone
-
-    /// Default icon for a newly created category (UX default per TOKENS.md).
-    static let `default` = CatalogIcon.tag
-
-    /// All valid raw SF Symbol names, for client-side pre-checks.
-    static var validKeys: Set<String> { Set(allCases.map(\.rawValue)) }
-
-    /// The approved design set of SF Symbol names for the `IconPickerGrid`.
-    /// Matches `TOKENS.md` → Category icons, plus the shared catalog defaults.
-    static let allowedSymbols: [String] = [
-        "tag", "clock", "laptopcomputer", "briefcase", "book",
-        "pencil.and.ruler", "brain.head.profile",
-        "figure.run", "figure.strengthtraining", "figure.yoga",
-        "dumbbell", "bicycle",
-        "fork.knife", "cup.and.saucer",
-        "bed.double", "moon.stars",
-        "gamecontroller", "tv", "film",
-        "music.note", "guitar", "paintbrush", "camera",
-        "airplane", "car.fill", "hammer",
-        "heart", "leaf", "sparkles",
-    ]
-}
-
-// MARK: - Preview fixtures
-
-#if DEBUG
-extension Category {
-    static let sampleBlue = Category(
-        id: UUID(uuidString: "00000000-0000-0000-0000-000000000001")!,
-        name: "Work",
-        icon: .briefcase,
-        createdAt: Date(),
-        updatedAt: Date()
-    )
-
-    static let sampleGreen = Category(
-        id: UUID(uuidString: "00000000-0000-0000-0000-000000000002")!,
-        name: "Fitness",
-        icon: .figureRun,
-        createdAt: Date(),
-        updatedAt: Date()
-    )
-
-    static let sampleOrange = Category(
-        id: UUID(uuidString: "00000000-0000-0000-0000-000000000003")!,
-        name: "Reading",
-        icon: .tag,
-        createdAt: Date(),
-        updatedAt: Date()
-    )
-}
-#endif
-
-// MARK: - Domain models
-
-/// A catalog activity. Persisted locally by `CatalogStore` (file-based JSON,
-/// deferred-to-date encoding) and synced via `RemoteCatalogRepository`.
-///
-/// `categoryIds` are the tags (F2/F3); the resolved `categories[]` are carried
-/// only on the GET DTOs. `Activity.id` is a client-generated UUID v7 (F9).
-struct Activity: Identifiable, Codable, Sendable, Equatable {
-    let id: UUID
+/// Not a GRDB record: `category_ids` is a join-derived value, not a column.
+/// `LocalStore` maps rows manually.
+struct Activity: Identifiable, Codable, Equatable, Sendable {
+    let id: String
     var name: String
     var notes: String?
     var lastUsedAt: Date?
-    var categoryIds: [UUID]
+    var categoryIDs: [String]
     var createdAt: Date
     var updatedAt: Date
+
+    init(
+        id: String,
+        name: String,
+        notes: String? = nil,
+        lastUsedAt: Date? = nil,
+        categoryIDs: [String] = [],
+        createdAt: Date = Date(),
+        updatedAt: Date = Date()
+    ) {
+        self.id = id
+        self.name = name
+        self.notes = notes
+        self.lastUsedAt = lastUsedAt
+        self.categoryIDs = categoryIDs
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+    }
 
     enum CodingKeys: String, CodingKey {
         case id, name, notes
         case lastUsedAt = "last_used_at"
-        case categoryIds = "category_ids"
+        case categoryIDs = "category_ids"
         case createdAt = "created_at"
         case updatedAt = "updated_at"
     }
 }
 
-/// A catalog category. Persisted locally by `CatalogStore` and synced via the
-/// remote repository. `Category.id` is a client-generated UUID v7.
-struct Category: Identifiable, Codable, Sendable, Equatable {
-    let id: UUID
+/// A many-to-many tag an activity may carry.
+///
+/// `icon` stores the raw SF Symbol name. It is validated against the closed
+/// `CatalogIcon` set at every mutation boundary; the stored value may be a
+/// catalog symbol that cannot render on this OS (rendered as `tag` fallback),
+/// but it is always within the authoritative catalog.
+struct Category: Identifiable, Codable, Equatable, Sendable, FetchableRecord, PersistableRecord {
+    static let databaseTableName = "categories"
+    let id: String
     var name: String
-    var icon: CatalogIcon
+    var icon: String
     var createdAt: Date
     var updatedAt: Date
 
+    init(
+        id: String,
+        name: String,
+        icon: String,
+        createdAt: Date = Date(),
+        updatedAt: Date = Date()
+    ) {
+        self.id = id
+        self.name = name
+        self.icon = icon
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+    }
+
     enum CodingKeys: String, CodingKey {
         case id, name, icon
+        case createdAt = "created_at"
+        case updatedAt = "updated_at"
+    }
+}
+
+/// One timed interval. `source` records provenance (where
+/// the entry came from: manual, widget, siri, control, screentime, garmin, ...);
+/// `sourceRef` holds the external identifier for that source and is null for
+/// manual entries. The backend enforces uniqueness on (user_id, source,
+/// source_ref) for non-null source_ref, preventing duplicate imports.
+///
+/// Not a GRDB record: `activity_name` is a join-derived value, not a column.
+/// `LocalStore` maps rows manually.
+struct TimeEntry: Identifiable, Codable, Equatable, Sendable {
+    let id: String
+    var activityID: String
+    var activityName: String
+    var startedAt: Date
+    var endedAt: Date?
+    var durationSeconds: Int?
+    var source: String
+    var sourceRef: String?
+    var createdAt: Date
+    var updatedAt: Date
+
+    init(
+        id: String,
+        activityID: String,
+        activityName: String,
+        startedAt: Date,
+        endedAt: Date? = nil,
+        durationSeconds: Int? = nil,
+        source: String = "manual",
+        sourceRef: String? = nil,
+        createdAt: Date = Date(),
+        updatedAt: Date = Date()
+    ) {
+        self.id = id
+        self.activityID = activityID
+        self.activityName = activityName
+        self.startedAt = startedAt
+        self.endedAt = endedAt
+        self.durationSeconds = durationSeconds
+        self.source = source
+        self.sourceRef = sourceRef
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case activityID = "activity_id"
+        case activityName = "activity_name"
+        case startedAt = "started_at"
+        case endedAt = "ended_at"
+        case durationSeconds = "duration_seconds"
+        case source
+        case sourceRef = "source_ref"
         case createdAt = "created_at"
         case updatedAt = "updated_at"
     }

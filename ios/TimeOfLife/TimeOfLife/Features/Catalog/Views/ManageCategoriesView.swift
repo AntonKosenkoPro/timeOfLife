@@ -1,185 +1,214 @@
 import SwiftUI
 
+/// Manage Categories (Design/SCREENS/ManageCategories.md, category-
+/// management D4): alphabetized list, empty state, Add/edit/swipe-delete
+/// controls, destructive copy explaining tag-only deletion, the UndoToast
+/// with a wall-clock countdown, system Undo registration for the newest
+/// eligible deletion, and the documented accessibility identifiers. All
+/// mutations go through `LocalStore`.
 struct ManageCategoriesView: View {
-    @ObservedObject var vm: ManageCategoriesViewModel
-    @EnvironmentObject private var container: AppContainer
+    @EnvironmentObject var container: AppContainer
+    @Environment(\.undoManager)
+    private var undoManager
+    @StateObject private var vm: ManageCategoriesViewModel
 
-    var body: some View {
-        contentWithToolbar
-            .background(Theme.backgroundPrimary.ignoresSafeArea())
-            .background(ShakeMotionBridge())
-            .task { await vm.loadCategories() }
-            .sheet(item: $vm.editorSheet) { state in
-                CategoryEditorSheet(
-                    viewModel: CategoryEditorViewModel(
-                        mode: state.mode,
-                        store: container.catalogStore,
-                        repository: container.catalogRepository,
-                        service: container.catalogService,
-                        connectivity: container.connectivity
-                    )
-                ) { vm.editorDidFinish($0) }
-            }
-            .onShake { vm.onShake() }
+    init(store: LocalStore, undoBuffer: UndoBufferStore) {
+        _vm = StateObject(wrappedValue: ManageCategoriesViewModel(
+            store: store,
+            undoBuffer: undoBuffer
+        ))
     }
 
-    private var contentWithToolbar: some View {
-        VStack(spacing: 0) {
-            if let message = vm.conflictMessage {
-                ErrorBanner(message: message, accessibilityId: "ManageCategoriesConflictBanner")
-                    .padding(.horizontal, Theme.screenHorizontalPadding)
-                    .padding(.vertical, Theme.spacingSmall)
-            }
-            if let message = vm.errorMessage {
-                ErrorBanner(message: message, accessibilityId: "ManageCategoriesErrorBanner")
-                    .padding(.horizontal, Theme.screenHorizontalPadding)
-                    .padding(.vertical, Theme.spacingSmall)
-            }
-
+    var body: some View {
+        Group {
             if vm.isLoading {
-                ProgressView()
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                VStack(spacing: Theme.spacingSmall) {
+                    ProgressView()
+                        .tint(Theme.accentPrimary)
+                    Text(L10n.manageCategoriesLoading.text)
+                        .font(.subheadline)
+                        .foregroundStyle(Theme.textSecondary)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .accessibilityIdentifier("ManageCategoriesLoading")
+            } else if let loadError = vm.loadError {
+                ErrorBanner(
+                    message: loadError,
+                    accessibilityId: "ManageCategoriesLoadError"
+                )
+                .padding(.horizontal, Theme.screenHorizontalPadding)
             } else if vm.categories.isEmpty {
                 EmptyState(
                     icon: "tag",
                     title: L10n.manageCategoriesEmptyTitle.text,
-                    subtitle: L10n.manageCategoriesEmptySubtitle.text
-                )
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    subtitle: L10n.manageCategoriesEmptySubtitle.text,
+                    actionTitle: L10n.manageCategoriesAdd.text,
+                    actionAccessibilityId: "ManageCategoriesEmptyAddButton"
+                ) { vm.addCategory() }
             } else {
-                categoryList
+                List {
+                    ForEach(vm.categories) { category in
+                        CategoryRow(category: category) {
+                            vm.edit(category)
+                        }
+                        .swipeActions(edge: .trailing) {
+                            Button(role: .destructive) {
+                                vm.confirmDelete(category)
+                            } label: {
+                                Label(L10n.deleteCategoryConfirm.text, systemImage: "trash")
+                            }
+                            .accessibilityIdentifier("CategoryRowDelete(\(category.id))")
+                        }
+                    }
+                }
+                .listStyle(.insetGrouped)
+                .accessibilityIdentifier("ManageCategoriesList")
             }
         }
         .navigationTitle(L10n.manageCategoriesTitle.text)
         .navigationBarTitleDisplayMode(.inline)
+        .background(Theme.backgroundPrimary.ignoresSafeArea())
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
-                Button { vm.openCreate() } label: {
+                Button {
+                    vm.addCategory()
+                } label: {
                     Image(systemName: "plus")
                 }
+                .accessibilityLabel(L10n.manageCategoriesAdd.text)
                 .accessibilityIdentifier("ManageCategoriesAddButton")
             }
         }
+        .safeAreaInset(edge: .bottom) {
+            VStack(spacing: 0) {
+                if let conflict = vm.conflictMessage {
+                    ErrorBanner(
+                        message: conflict,
+                        accessibilityId: "ManageCategoriesConflictBanner"
+                    )
+                    .padding(.horizontal, Theme.screenHorizontalPadding)
+                    .padding(.vertical, Theme.spacingSmall)
+                    .background(Theme.backgroundPrimary)
+                }
+                if let toast = vm.undoToast {
+                    UndoToast(
+                        message: L10n.undoCategoryDeleted.text,
+                        remainingSeconds: Int(toast.timeRemaining(now: vm.undoClock).rounded(.up)),
+                        onUndo: {
+                            Task { await vm.performUndo() }
+                        },
+                        onDismiss: {
+                            vm.dismissUndo()
+                        }
+                    )
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                }
+            }
+        }
+        .sheet(isPresented: $vm.isShowingEditor) {
+            CategoryEditorView(
+                store: container.localStore,
+                category: vm.editorCategory,
+                onSaved: { saved in
+                    Task { await vm.editorDidSave(saved) }
+                },
+                onDuplicate: { _ in
+                    vm.conflictMessage = L10n.errorCategoryExists.text
+                }
+            )
+            .environmentObject(container)
+        }
         .confirmationDialog(
             L10n.deleteCategoryTitle.text,
-            isPresented: $vm.showDeleteConfirm
-        ) {
+            isPresented: $vm.isShowingDeleteConfirm,
+            titleVisibility: .visible,
+            presenting: vm.pendingDeletion
+        ) { _ in
             Button(L10n.deleteCategoryConfirm.text, role: .destructive) {
-                guard let category = vm.pendingDelete else { return }
-                Task { await vm.confirmDeletePending(category) }
+                Task { await vm.deleteConfirmed() }
             }
-            Button(L10n.deleteCategoryCancel.text, role: .cancel) {}
-        } message: {
-            Text(String(format: L10n.deleteCategoryMessage.text, vm.pendingDelete?.name ?? ""))
+            Button(L10n.deleteCategoryCancel.text, role: .cancel) {
+                vm.pendingDeletion = nil
+            }
+        } message: { category in
+            Text(String(format: L10n.deleteCategoryMessage.text, category.name))
         }
-        .onChange(of: vm.showDeleteConfirm) { isPresented in
-            if !isPresented { vm.dialogDismissed() }
+        .task {
+            await vm.load()
         }
-        .safeAreaInset(edge: .bottom) {
-            if let toast = vm.undoToast {
-                UndoToast(
-                    message: toast.message,
-                    onUndo: { vm.onShake() },
-                    onDismiss: { vm.dismissUndo() }
-                )
-                .padding(.bottom, Theme.spacingSmall)
-                .background(Theme.backgroundPrimary)
+        .onChange(of: vm.undoToast?.bufferID) { _ in
+            vm.registerSystemUndo(with: undoManager)
+        }
+        .onChange(of: container.syncController.status) { status in
+            if case .idle = status {
+                Task { await vm.load() }
             }
         }
-    }
-
-    private var categoryList: some View {
-        List {
-            ForEach(vm.categories) { category in
-                CategoryRow(category: category) {
-                    vm.openEdit(category)
-                }
-                .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                    Button(role: .destructive) {
-                        vm.confirmDelete(category)
-                    } label: {
-                        Label(L10n.deleteCategoryConfirm.text, systemImage: "trash")
-                    }
-                    .tint(Theme.danger)
-                    .accessibilityIdentifier("CategoryRowDelete(\(category.id))")
-                }
-            }
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
+            Task { await vm.commitExpiredUndo() }
         }
-        .listStyle(.plain)
-        .background(Theme.backgroundPrimary)
-        .accessibilityIdentifier("ManageCategoriesList")
-    }
-
-}
-
-private struct CategoryEditorSheet: View {
-    @ObservedObject var viewModel: CategoryEditorViewModel
-    let onResult: (CategorySaveResult) -> Void
-
-    var body: some View {
-        CategoryEditorView(vm: viewModel)
-            .onChange(of: viewModel.onSaveResult) { result in
-                guard let result else { return }
-                onResult(result)
-            }
+        // System Undo gesture (shake-to-undo, U7): restores the newest
+        // eligible category deletion while this surface is active.
+        .onShake {
+            Task { await vm.performUndo() }
+        }
     }
 }
 
-private extension CategoryEditorSheetState {
-    var mode: CategoryEditorMode {
-        switch self {
-        case .create:
-            return .create
-        case let .edit(category):
-            return .edit(category)
+/// iOS 15/16-compatible shake detection via the responder chain
+/// (Design/INTERACTIONS.md Undo flow); on iOS 17+ `.onShake` on View would
+/// duplicate the gesture, so this stays the single path.
+extension View {
+    func onShake(_ perform: @escaping () -> Void) -> some View {
+        self.modifier(ShakeDetector(action: perform))
+    }
+}
+
+private struct ShakeDetector: ViewModifier {
+    let action: () -> Void
+
+    func body(content: Content) -> some View {
+        content
+            .background(ShakeCatcher(action: action))
+    }
+}
+
+/// UIKit-based shake catcher that works on iOS 15+.
+private final class ShakeCatcherController: UIViewController {
+    var onShake: (() -> Void)?
+
+    override func motionEnded(_ motion: UIEvent.EventSubtype, with event: UIEvent?) {
+        if motion == .motionShake {
+            onShake?()
         }
+        super.motionEnded(motion, with: event)
+    }
+}
+
+private struct ShakeCatcher: UIViewControllerRepresentable {
+    let action: () -> Void
+
+    func makeUIViewController(context: Context) -> ShakeCatcherController {
+        let controller = ShakeCatcherController()
+        controller.onShake = action
+        return controller
+    }
+
+    func updateUIViewController(_ uiViewController: ShakeCatcherController, context: Context) {
+        uiViewController.onShake = action
     }
 }
 
 #if DEBUG
-
-#Preview("Manage Categories — EN Light") {
+#Preview("Manage Categories") {
     let container = AppContainer.production()
-    let viewModel = ManageCategoriesViewModel(
-        store: container.catalogStore,
-        service: container.catalogService,
-        repository: container.catalogRepository,
-        undoBuffer: container.undoBuffer,
-        connectivity: container.connectivity,
-        initialCategories: [.sampleBlue, .sampleGreen, .sampleOrange]
-    )
-    return ManageCategoriesView(vm: viewModel)
+    NavigationView {
+        ManageCategoriesView(
+            store: container.localStore,
+            undoBuffer: container.undoBuffer
+        )
         .environmentObject(container)
+    }
+    .navigationViewStyle(.stack)
 }
-
-#Preview("Manage Categories — Empty RU Dark") {
-    let container = AppContainer.production()
-    let viewModel = ManageCategoriesViewModel(
-        store: container.catalogStore,
-        service: container.catalogService,
-        repository: container.catalogRepository,
-        undoBuffer: container.undoBuffer,
-        connectivity: container.connectivity
-    )
-    return ManageCategoriesView(vm: viewModel)
-        .environmentObject(container)
-        .preferredColorScheme(.dark)
-        .environment(\.locale, .init(identifier: "ru"))
-}
-
-#Preview("Manage Categories — Undo") {
-    let container = AppContainer.production()
-    let viewModel = ManageCategoriesViewModel(
-        store: container.catalogStore,
-        service: container.catalogService,
-        repository: container.catalogRepository,
-        undoBuffer: container.undoBuffer,
-        connectivity: container.connectivity,
-        initialCategories: [.sampleBlue]
-    )
-    viewModel.undoToast = UndoToastState(message: L10n.undoCategoryDeleted.text, startedAt: Date())
-    return ManageCategoriesView(vm: viewModel)
-        .environmentObject(container)
-}
-
 #endif

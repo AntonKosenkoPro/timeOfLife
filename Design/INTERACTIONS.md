@@ -82,10 +82,17 @@ When a screen’s main purpose is to collect input from a single field (email, O
 
 ### Sign Out
 
-- Sign Out is a destructive, low-frequency account action.
-- Until a dedicated Account/Profile screen exists, Sign Out lives in the `TimerView` top toolbar.
+- Sign Out is a destructive, low-frequency account action owned by Profile.
+- The Track toolbar does not expose account actions as a peer to capture.
 - Tapping Sign Out must show a confirmation alert before clearing the local session, because local timer data may be lost.
 - Sign Out must work offline by clearing the local session.
+
+### Profile destination
+
+- The person control opens Profile for all users — signed out and signed in.
+- Signed out, the account section offers **Enable Sync**; local activity/category management, integrations, export, appearance, and data controls remain accessible independently.
+- Signed in, the account section shows sync status ("Last synced"/"Syncing…"/error) and a manual "Sync now" action, plus sign-out.
+- "Erase local data" is a destructive, confirmed action that wipes the local database (state + outbox + undo buffer + sync cursors).
 
 ### Auth transitions
 
@@ -111,6 +118,18 @@ Keep haptics subtle. Do not vibrate on every keystroke.
 - iOS 15 uses `NavigationView(.stack)` with a hidden `NavigationLink` bound to `path.last`.
 - Do not use `NavigationLink` directly for programmatic navigation.
 
+## App shell (Track / History / Insights / Profile)
+
+D1 (OpenSpec change `redesign-track-experience`). The root is a three-tab shell, not a timer-only root:
+
+- **Track, History, Insights are the primary destinations.** Track is initially selected and is the only destination that starts or stops a timer.
+- **Profile is a sheet, not a tab.** A consistent top-trailing person control on every tab opens it. Profile owns account/sync, activity and category management, integrations, export, appearance, and destructive data controls.
+- **Switching destinations never changes timer state** and never discards the previous destination's state.
+- **The app launches into Track without authentication**; History and Insights are reachable unsigned. Auth is an optional "Enable Sync" action inside Profile.
+- **A running timer stays globally accessible.** While running, History and Insights show the compact timer immediately above the tab bar (`.safeAreaInset(edge: .bottom)`). Its main area returns to Track; its Stop button saves in place and keeps the current destination selected. Track does not duplicate it.
+- **Sign Out is owned by Profile**, not the Track toolbar. Tapping Sign Out shows a confirmation alert before clearing the local session, because local timer data may be lost. Sign Out must work offline by clearing the local session.
+- The hierarchy maps to a future macOS sidebar without changing meaning (Track/History/Insights primary; profile-owned features secondary).
+
 ## Accessibility identifiers
 
 - Every interactive element has a stable `accessibilityIdentifier`.
@@ -124,10 +143,20 @@ R3 / U6 / U7; decision D17. Applies to activity and category deletions from Mana
 - A deletion is **not** committed to the local store or pushed to sync immediately. It enters a client-side **undo buffer** and is only committed + synced after a 30 s window passes.
 - Present a transient `UndoToast` (`COMPONENTS.md`) at the bottom with an **Undo** button; auto-dismiss after 30 s.
 - **Undo** (tap, or system shake-to-undo) re-inserts the deleted item(s) from the buffer before the window elapses; nothing is synced.
-- The buffer is **superseded** by the next undoable action and cleared on app relaunch — only the most recent undoable deletion is restorable (matches U7 wording).
+- The buffer is **superseded** by the next undoable action — only the most recent undoable deletion is restorable (matches U7 wording).
 - After the window, commit locally (hard delete) and enqueue the `DELETE` for sync; the server hard-deletes (no trash, per `Activity_Catalog_API.md` Sync & ids).
 - Bulk deletions (delete activity + its entries, F10) are undoable as a unit — the buffer holds the whole set and Undo restores all of it.
 - **Undo API failure:** If the undo API call fails (network error, 404, 409), show an `ErrorBanner` ("Could not undo — try again") and keep the item in its edited state. The undo buffer is not cleared on failure, so the user can retry by triggering undo again (e.g. via a second UndoToast if still within the 30 s window).
+
+### Durable undo buffer (local-first)
+
+D3 (OpenSpec change `local-first-sync-architecture`). The undo buffer is **durable** — it lives in an `undo_buffer` table in the local GRDB database, not in memory:
+
+- The 30 s window is **wall-clock** (`deleted_at + 30s`), not a `Timer`. A `Timer` is only a UI convenience for the UndoToast countdown; the window itself is computed from the stored timestamp.
+- A deletion writes the buffer row (full serialized snapshot of the deleted records) and removes the records in **one transaction**; no outbox row is created while the deletion is in the buffer, so the relay is never notified of an undone deletion.
+- **Expired buffers commit on the next foreground** — never in the background, and there is no background timer. On foreground, the app detects expired buffers and commits (deletes the buffer row + inserts the outbox rows) in one transaction.
+- The buffer **survives suspension, kill, and cold launch**. After a cold launch within the window, no unsolicited UndoToast is shown; if the user navigates to the affected screen within the window, the deletion can still be undone from the durable buffer.
+- **Supersession (U7):** only the most recent undoable deletion is restorable via shake-to-undo / UndoToast; an older deletion commits when its own 30 s window elapses.
 
 ### Shake-to-undo wiring (U7)
 
@@ -136,6 +165,21 @@ U7 says "no custom shake detection" — use the iOS system motion event. The vie
 - **iOS 17+:** add a `.onShake { vm.performUndo() }` modifier on the manage screen.
 - **iOS 15/16:** create a small `ShakeHostingController` subclass of `UIHostingController` that overrides `motionEnded(_:with:)`. When the event is `UIEvent.EventType.motion` and the subtype is `.motionShake`, forward to the active manage screen's `performUndo()` (via a shared observable flag or `NotificationCenter`). Use the same controller subclass for the signed-in navigation stack so both `ManageActivitiesView` and `ManageCategoriesView` inherit the gesture.
 - Do not implement custom accelerometer/gyro logic.
+
+### Activity search and creation (unify-activity-preparation-flow)
+
+D3 (OpenSpec change `unify-activity-preparation-flow`). Track has one
+search-styled Activity affordance. It opens a full-height searchable sheet;
+the operating system owns search-field placement, focus, keyboard, activation
+animation, and the Cancel affordance. The search content area is ordinary
+sheet content:
+
+- **Draft vs. commit:** the search query is a temporary draft that never mutates the committed prepared Activity. Native Cancel or sheet dismissal without confirmation closes search and restores the prior ready or idle timer state exactly. Selecting, quick-creating, or restoring is the only commit boundary.
+- **Identity:** names are equal after trimming surrounding whitespace and case-insensitive comparison. Creation rechecks identity at confirmation time through the atomic local create-or-resolve operation; a concurrent duplicate resolves to the existing winning Activity.
+- **Pending-deletion identity:** when a non-expired pending-deletion Activity matches the query, the search content offers an explicit restore action instead of creation. Confirming restores the buffered snapshot transactionally (no outbox row) and prepares the restored Activity. Automatically restoring on typing is rejected — it would reverse a deletion without explicit confirmation.
+- **Refinement:** the Refine button on the selected-Activity row opens the shared Activity Editor prefilled with the selected Activity. Refinement is a Track-owned presentation independent from search. Activating Refine resolves the selected Activity from LocalStore; if it no longer exists, Track follows the stale-preparation behavior below. On save, the Activity is replaced in place in the current TrackState without transitioning — startedAt, duration, and the ticker are preserved, and the Activity identifier is kept. On cancel or failure, the Activity and timer state remain unchanged. On collision, the editor stays open with the draft intact and a localized error permits retry.
+- **Stale preparation:** Start revalidates the committed Activity identifier locally. A prepared Activity that no longer exists clears preparation, returns to idle, and shows a localized error — it is never silently recreated.
+- **Failures:** a failed quick creation keeps search active with the query preserved and shows a localized non-field error; a failed refinement keeps the editor draft intact and permits retry, leaving the Activity and timer state unchanged.
 
 ## Delete-scope confirmation (F10 / U5)
 
@@ -173,6 +217,16 @@ All manage-screen delete flows should follow this pattern consistently.
 | 409 `activity_exists` / `category_exists` | Re-map local refs to surviving id, proceed |
 | Idempotent POST (replay) | Treat as success; no error surfaced |
 
+## Sync client (local-first)
+
+D6 (OpenSpec change `local-first-sync-architecture`). Sync is an **optional transport feature**, not a prerequisite: the app works fully offline and unsigned; the `SyncController` activates only on sign-in and deactivates on sign-out.
+
+- **Triggers:** (1) app enters foreground, (2) connectivity restored (`.satisfied`), (3) manual "Sync now" in Profile. No background task scheduling on iOS (unreliable); macOS may add a timer-based background sync later.
+- **First-sync is pull-first:** on activation, pull the relay's full state, merge server-wins on `updated_at` conflicts, then drain the local outbox. Subsequent pulls are deltas via `?modified_since=` (per-resource cursor advanced to the max `updated_at` received).
+- **Outbox drain:** one HTTP call per outbox row, in `created_at` order; idempotent POST / LWW PATCH / hard DELETE make replays safe. 409 `conflict` on push → adopt the server version (keep-latest) and clear the row; 409 `activity_exists`/`category_exists` → re-map local references to the winning id and proceed without an error.
+- **Status display (Profile, visible only when signed in):** "Last synced: <relative time>" or "Syncing…" (button disabled while in progress) or an error state (button stays enabled to allow retry). The manual "Sync now" action calls the same drain+pull path as the automatic triggers.
+- **Sign-out preserves local data and the outbox**; an explicit "Erase local data" action in Profile wipes them (destructive, confirmed).
+
 ## Catalog empty states
 
 U8. Applies to Manage Activities and Manage Categories.
@@ -186,6 +240,14 @@ F8; decision D19.
 
 - The Manage Activities list and timer suggestions are ordered by `last_used_at` (most-recent first), computed on-device (D16). No manual drag-reorder at MVP.
 - `last_used_at` is bumped on every entry start and syncs across devices, so recency is shared (see `Activity_Catalog_API.md` Suggestions).
+
+## Activity and category semantics
+
+- An Activity is the concrete task selected for a timer and is required for an entry.
+- A Category is optional analytics metadata; an Activity may have zero or more Categories.
+- Track suggestions and the Activity picker show Activity names only. Category icons and names are omitted from capture.
+- Manage Activities and Manage Categories are separate surfaces. The full Activity Editor may assign or remove Categories.
+- Entries resolve the Activity's current Categories at query time. Changing an Activity's Categories reclassifies its existing history in Insights.
 
 ## Editor sheets and keyboard placement
 

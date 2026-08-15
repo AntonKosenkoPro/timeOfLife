@@ -23,9 +23,6 @@
 "offline.banner" = "Вы не в сети. Некоторые действия недоступны.";
 
 // Sign out confirmation
-"signOut.confirmationTitle" = "Выйти?";
-"signOut.confirmationMessage" = "Это очистит локальную сессию.";
-"signOut.confirm" = "Выйти";
 "signOut.cancel" = "Отмена";
 
 // Validation (unified messages — Requirements U2/U4: one merged message per field)
@@ -40,93 +37,100 @@
 
 // Server errors
 "error.invalid_body" = "Проверьте введённые данные.";
+"error.internal_error" = "На сервере произошла ошибка. Попробуйте снова.";
 "error.rate_limited" = "Слишком много попыток. Попробуйте позже.";
 "error.invalid_otp" = "Неверный код. Попробуйте снова.";
 "error.otp_expired" = "Срок действия кода истёк. Запросите новый.";
 "error.otp_attempts_exceeded" = "Слишком много попыток. Запросите новый код.";
 "error.invalid_refresh" = "Сессия истекла. Войдите снова.";
 "error.token_reuse" = "Сессия аннулирована. Войдите снова.";
-"error.token_expired" = "Сессия истекла. Войдите снова.";
 "error.offline" = "Вы не в сети.";
 "error.unknown" = "Что-то пошло не так. Попробуйте снова.";
 "error.unauthorized" = "Сессия истекла. Войдите снова.";
-
-// Catalog server errors (mapped from error codes)
-"error.conflict" = "Изменено на другом устройстве. Показана актуальная версия.";
-"error.activity_exists" = "Активность с таким названием уже существует.";
-"error.category_exists" = "Категория с таким названием уже существует.";
-"error.validation_error" = "Проверьте введённые данные.";
-"error.not_found" = "Этот элемент больше не существует.";
-
-// Catalog validation (one merged message per field — U2/U4)
-"validation.catalog.iconInvalid" = "Выберите допустимую иконку.";
 
 // Apple sign in
 "appleSignIn.title" = "Вход через Apple";
 "appleSignIn.error" = "Не удалось войти через Apple. Попробуйте снова.";
 
 // Timer
-"timer.title" = "Таймер";
-"timer.activityPlaceholder" = "Над чем вы работаете?";
 "timer.start" = "Старт";
 "timer.stop" = "Стоп";
-"timer.offlineHint" = "Записи сохраняются локально и синхронизируются после появления сети.";
+"timer.stopHint" = "Останавливает таймер и сохраняет запись";
 "timer.emptyActivityError" = "Введите название активности.";
 "timer.signOut" = "Выйти";
+"timer.chooseActivity" = "Выбрать активность";
+"timer.chooseActivityPrompt" = "Выберите активность, чтобы начать";
+"timer.saved" = "Сохранено";
+"timer.saving" = "Сохранение…";
+"timer.running" = "Идёт";
+"timer.ready" = "Готово";
+"timer.chooserRecent" = "Недавние";
+"timer.recentsEmptyHint" = "Здесь появятся активности, которые вы отслеживаете.";
+"timer.selectActivity" = "Выбрать %@";
+"timer.searchPrompt" = "Поиск или создание";
+"timer.searchEmptyCatalogTitle" = "Пока нет активностей";
+"timer.searchEmptyCatalogSubtitle" = "Введите название в поле поиска, чтобы создать первую активность.";
+"timer.searchNoResults" = "Нет подходящих активностей";
+"timer.searchCreate" = "Создать «%@»";
+"timer.searchRestorePrompt" = "«%@» недавно удалена и может быть восстановлена.";
+"timer.searchRestore" = "Восстановить";
+"timer.searchValidationEmpty" = "Введите название активности.";
+"timer.searchValidationTooLong" = "Название должно быть не длиннее 60 символов.";
+"timer.stalePreparationError" = "Эта активность больше не существует. Выберите другую.";
 
-// Catalog (Epic 1)
-"tags.emptyHint" = "Пока нет категорий — создайте одну";
-"undo.button" = "Отменить";
-"accessibility.category" = "Категория, %@";
-"accessibility.icon" = "Значок, %@";
-"accessibility.suggestion" = "Предложение, %@";
-"accessibility.suggestionHint" = "Запускает таймер для этой активности";
-"accessibility.selected" = "Выбрано";
-"accessibility.tagsCount" = "%d тегов";
-"delete.activity.title" = "Удалить активность";
-"delete.button" = "Удалить";
-"delete.activity.message.one" = "У этой активности %d запись о времени.";
-"delete.activity.message.few" = "У этой активности %d записи о времени.";
-"delete.activity.message.many" = "У этой активности %d записей о времени.";
-"delete.activity.entire.one" = "Удалить активность и всю %d запись";
-"delete.activity.entire.few" = "Удалить активность и все %d записи";
-"delete.activity.entire.many" = "Удалить активность и все %d записей";
-"delete.activity.entryOnly" = "Удалить последнюю запись";
-"delete.activity.cancel" = "Отмена";
-"toast.dismiss" = "Закрыть";
-"activity.lastUsed" = "последнее использование %@";
+// Activity editor
+"activityEditor.createTitle" = "Новая активность";
+"activityEditor.editTitle" = "Изменить активность";
+"activityEditor.nameLabel" = "Название";
+"activityEditor.namePlaceholder" = "напр. Спортзал";
+"activityEditor.notesLabel" = "Заметки";
+"activityEditor.notesPlaceholder" = "Необязательные заметки";
+"activityEditor.notesCounter" = "%d / 280";
+"activityEditor.notesTooLong" = "Заметки должны быть не длиннее 280 символов.";
+"activityEditor.tagsLabel" = "Категории";
+"activityEditor.noTags" = "Пока нет категорий.";
+"activityEditor.addCategory" = "Добавить категорию";
+"activityEditor.save" = "Сохранить";
+"activityEditor.cancel" = "Отмена";
+"timer.compactStop" = "Остановить и сохранить таймер";
+"timer.compactReturnHint" = "Вернуться в Трек";
+"timer.compactRunning" = "%@, таймер идёт";
 
-// Timer — Epic 1 (suggestions, quick-add, manage)
-"timer.suggestionsHeader" = "Недавние";
-"timer.manageActivities" = "Активности";
+// App shell
+"tab.track" = "Трек";
+"tab.history" = "История";
+"tab.insights" = "Аналитика";
+"profile.title" = "Профиль";
+"profile.done" = "Готово";
+"profile.account" = "Аккаунт";
+"profile.enableSync" = "Включить синхронизацию";
+"profile.enableSyncSubtitle" = "Необязательный аккаунт для других устройств";
+"profile.syncNow" = "Синхронизировать";
+"profile.syncing" = "Синхронизация…";
+"profile.lastSynced" = "Синхронизировано: %@";
+"profile.syncError" = "Не удалось синхронизировать. Попробуйте снова.";
+"profile.library" = "Библиотека";
+"profile.activities" = "Активности";
+"profile.categories" = "Категории";
+"profile.connections" = "Подключения";
+"profile.integrations" = "Интеграции";
+"profile.export" = "Экспорт";
+"profile.app" = "Приложение";
+"profile.appearance" = "Оформление";
+"profile.dataAndPrivacy" = "Данные и конфиденциальность";
+"profile.eraseLocalData" = "Стереть локальные данные";
+"profile.eraseLocalDataConfirmTitle" = "Стереть локальные данные?";
+"profile.eraseLocalDataConfirmMessage" = "Это навсегда удалит все активности, категории, записи и ожидающие синхронизацию данные на этом устройстве.";
+"profile.eraseConfirm" = "Стереть";
+"profile.eraseCancel" = "Отмена";
 
-// Управление активностями
-"manage.activities.title" = "Активности";
-"manage.activities.emptyTitle" = "Пока нет активностей";
-"manage.activities.emptySubtitle" = "Добавьте свою или просто введите название на таймере.";
-"manage.activities.categories" = "Категории";
-"undo.activityDeleted" = "Активность удалена";
-"undo.entryDeleted" = "Запись удалена";
-"error.activityExists" = "Активность с таким названием уже существует.";
-"error.undoFailed" = "Не удалось отменить действие — попробуйте снова.";
+// Destination empty states
+"history.emptyTitle" = "Пока пусто";
+"history.emptySubtitle" = "Завершённые сессии появятся здесь в виде хронологии.";
+"insights.emptyTitle" = "Пока пусто";
+"insights.emptySubtitle" = "Закономерности появятся после небольшого объёма учёта времени.";
 
-// Управление категориями
-"manage.categories.title" = "Категории";
-"manage.categories.emptyTitle" = "Пока нет категорий";
-"manage.categories.emptySubtitle" = "Добавьте категорию, чтобы размечать активности.";
-"delete.category.title" = "Удалить категорию?";
-"delete.category.message" = "%@ будет удалена со всех активностей. Записи сохранятся.";
-"delete.category.confirm" = "Удалить";
-"delete.category.cancel" = "Отмена";
-"undo.categoryDeleted" = "Категория удалена";
-"error.categoryExists" = "Категория с таким названием уже существует.";
-"categoryEditor.createTitle" = "Новая категория";
-"categoryEditor.editTitle" = "Изменить категорию";
-"categoryEditor.nameLabel" = "Название";
-"categoryEditor.namePlaceholder" = "напр. Спорт";
-"categoryEditor.iconLabel" = "Значок";
-"categoryEditor.save" = "Сохранить";
-"categoryEditor.cancel" = "Отмена";
+// Starter categories (category-management spec, seed requirement)
 "category.seed.work" = "Работа";
 "category.seed.hobby" = "Хобби";
 "category.seed.sport" = "Спорт";
@@ -135,21 +139,88 @@
 "category.seed.sleep" = "Сон";
 "category.seed.entertainment" = "Развлечения";
 
-// Редактор активности
-"activityEditor.createTitle" = "Новая активность";
-"activityEditor.editTitle" = "Изменить активность";
-"activityEditor.nameLabel" = "Название";
-"activityEditor.namePlaceholder" = "напр. Спортзал";
-"activityEditor.notesLabel" = "Заметки";
-"activityEditor.notesPlaceholder" = "Необязательные заметки";
-"activityEditor.notesCounter" = "%d / 280";
-"activityEditor.tagsLabel" = "Категории";
-"activityEditor.noTags" = "Пока нет категорий.";
-"activityEditor.addCategory" = "Добавить категорию";
-"activityEditor.save" = "Сохранить";
-"activityEditor.cancel" = "Отмена";
-"validation.nameEmpty" = "Введите название.";
-"validation.nameTooLong" = "Название должно быть не длиннее 60 символов.";
-"validation.name.prefix" = "Название должно";
-"validation.name.rule.tooLong" = "быть не длиннее 60 символов";
-"validation.notesTooLong" = "Заметки должны быть не длиннее 280 символов.";
+// Undo (category-management D7)
+"undo.button" = "Отменить";
+"undo.dismiss" = "Скрыть";
+"undo.categoryDeleted" = "Категория удалена";
+"undo.selected" = "Выбрано";
+"undo.notSelected" = "Не выбрано";
+"undo.secondsRemaining" = "Осталось: %d с";
+
+// Manage categories (category-management D4)
+"manage.categories.title" = "Категории";
+"manage.categories.add" = "Добавить категорию";
+"manage.categories.emptyTitle" = "Пока нет категорий";
+"manage.categories.emptySubtitle" = "Добавьте категорию, чтобы размечать активности.";
+"manage.categories.rowA11y" = "Категория";
+"manage.categories.editHint" = "Дважды коснитесь, чтобы изменить.";
+"manage.categories.loading" = "Загрузка категорий…";
+"delete.category.title" = "Удалить категорию?";
+"delete.category.message" = "%@ будет удалена со всех активностей. Записи сохранятся.";
+"delete.category.confirm" = "Удалить";
+"delete.category.cancel" = "Отмена";
+"error.categoryExists" = "Категория с таким названием уже существует.";
+"error.conflict" = "Изменено на другом устройстве. Показана актуальная версия.";
+"error.localPersistence" = "Не удалось сохранить локально. Попробуйте снова.";
+
+// Category editor (category-management D4)
+"categoryEditor.createTitle" = "Новая категория";
+"categoryEditor.editTitle" = "Изменить категорию";
+"categoryEditor.nameLabel" = "Название";
+"categoryEditor.namePlaceholder" = "напр. Спорт";
+"categoryEditor.iconLabel" = "Значок";
+"categoryEditor.iconUnavailable" = "Этот значок недоступен в этой версии iOS и отображается как тег.";
+"categoryEditor.save" = "Сохранить";
+"categoryEditor.cancel" = "Отмена";
+"category.nameRequired" = "Введите название категории.";
+"category.nameTooLong" = "Название должно быть не длиннее 60 символов.";
+"activityEditor.invalidAssociation" = "Одна из выбранных категорий больше не существует. Проверьте выбор и попробуйте снова.";
+
+// Catalog icon accessibility names
+"catalogIcon.clock" = "Часы";
+"catalogIcon.laptopcomputer" = "Ноутбук";
+"catalogIcon.briefcase" = "Портфель";
+"catalogIcon.book" = "Книга";
+"catalogIcon.pencil.and.ruler" = "Карандаш и линейка";
+"catalogIcon.brain.head.profile" = "Мозг";
+"catalogIcon.figure.walk" = "Ходьба";
+"catalogIcon.figure.run" = "Бег";
+"catalogIcon.figure.strengthtraining" = "Силовая тренировка";
+"catalogIcon.figure.yoga" = "Йога";
+"catalogIcon.figure.cycling" = "Велосипед";
+"catalogIcon.figure.swimming" = "Плавание";
+"catalogIcon.figure.soccer" = "Футбол";
+"catalogIcon.figure.basketball" = "Баскетбол";
+"catalogIcon.figure.tennis" = "Теннис";
+"catalogIcon.figure.gymnastics" = "Гимнастика";
+"catalogIcon.figure.mindandbody" = "Разум и тело";
+"catalogIcon.figure.core.training" = "Тренировка мышц корпуса";
+"catalogIcon.dumbbell" = "Гантель";
+"catalogIcon.bicycle" = "Велосипед";
+"catalogIcon.books" = "Книги";
+"catalogIcon.graduationcap" = "Академическая шапочка";
+"catalogIcon.desktopcomputer" = "Настольный компьютер";
+"catalogIcon.keyboard" = "Клавиатура";
+"catalogIcon.gamecontroller" = "Игровой контроллер";
+"catalogIcon.fork.knife" = "Вилка и нож";
+"catalogIcon.cup.and.saucer" = "Чашка и блюдце";
+"catalogIcon.bed.double" = "Кровать";
+"catalogIcon.moon.stars" = "Луна и звёзды";
+"catalogIcon.moon.zzz" = "Спящая луна";
+"catalogIcon.film" = "Фильм";
+"catalogIcon.music.note" = "Нота";
+"catalogIcon.guitar" = "Гитара";
+"catalogIcon.camera" = "Камера";
+"catalogIcon.tv" = "Телевизор";
+"catalogIcon.musicalnotes" = "Ноты";
+"catalogIcon.paintbrush" = "Кисть";
+"catalogIcon.house" = "Дом";
+"catalogIcon.car.fill" = "Автомобиль";
+"catalogIcon.airplane" = "Самолёт";
+"catalogIcon.cart" = "Корзина";
+"catalogIcon.phone" = "Телефон";
+"catalogIcon.hammer" = "Молоток";
+"catalogIcon.heart" = "Сердце";
+"catalogIcon.leaf" = "Лист";
+"catalogIcon.sparkles" = "Искры";
+"catalogIcon.tag" = "Тег";

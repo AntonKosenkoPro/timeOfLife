@@ -1,8 +1,38 @@
 # Component Library
 
-Each component listed here has a single SwiftUI implementation under `ios/TimeOfLife/TimeOfLife/Core/Design/Components/`. The spec below is the contract: an agent should implement the component to match the signature, states, accessibility identifier, and usage.
+This file defines reusable component contracts. Implementations may live under `Core/Design/Components/` or beside the feature that owns them; contracts for deferred surfaces may not have an implementation yet.
 
 > **Rule:** prefer reusing an existing component over creating a new view. If a new component is needed, add it here first.
+
+---
+
+## `EditorSheetScaffold`
+
+Shared presentation shell for editor sheets. It owns the native collapsing large-title navigation header, localized Cancel action, standard scroll-content width and padding, measured bottom-bar reserve, keyboard-safe pinned action bar, loading-time dismissal lock, and optional iOS 16+ medium/large detents. Editor-specific fields, focus state, validation, and save behavior remain in the feature view.
+
+### Signature
+
+```swift
+struct EditorSheetScaffold<Content: View, BottomBar: View>: View {
+    init(
+        title: String,
+        cancelTitle: String,
+        isLoading: Bool,
+        cancelAccessibilityId: String,
+        usesMediumDetent: Bool,
+        onCancel: @escaping () -> Void,
+        @ViewBuilder content: () -> Content,
+        @ViewBuilder bottomBar: () -> BottomBar
+    )
+}
+```
+
+### Use
+
+- Use for Activity, Category, and future editor sheets that combine scrollable fields with a pinned primary action.
+- Supply existing localized title/Cancel strings and a stable Cancel accessibility identifier.
+- Keep `@FocusState`, dismiss-on-save observation, validation, and field sections in the calling editor.
+- Do not recreate the header with a custom title inside scroll content, scroll-offset tracking, top overlays, or `UINavigationBarAppearance` overrides.
 
 ---
 
@@ -322,30 +352,6 @@ ListRow(
 
 ---
 
-## `IconButton`
-
-A circular button for icon-only actions.
-
-### Signature
-
-```swift
-struct IconButton: View {
-    let icon: String
-    let accessibilityId: String
-    let isDisabled: Bool
-    let action: () -> Void
-}
-```
-
-### Visual
-
-- `Button` with `Image(systemName: icon)` label.
-- Frame `Theme.minTapArea × Theme.minTapArea`.
-- Foreground `Theme.accentPrimary`.
-- Disabled when `isDisabled`.
-
----
-
 ## `IconPickerGrid`
 
 Selectable grid of allowed SF Symbols for categories (F2/U1).
@@ -360,11 +366,11 @@ struct IconPickerGrid: View {
 }
 ```
 
-**Callers should pass `CatalogIcon.allowedSymbols` (or another caller-validated set).** The component itself does not filter invalid or duplicate symbol names; invalid names render as blank cells and duplicate names break `ForEach` identity. Use the typed seam (`CatalogIcon`) to guarantee a valid set.
+**Callers should pass `CatalogIcon.renderableSymbols` (plus a currently selected valid raw value when it is unavailable on the running OS).** The cell renders the `tag` fallback for an unavailable but valid synchronized symbol and never changes the stored raw value.
 
 ### Visual
 
-- `LazyVGrid` of `IconButton`-style cells, 44 × 44 pt.
+- `LazyVGrid` of icon-only button cells, 44 × 44 pt.
 - Each cell: `Theme.backgroundSecondary` fill inside `RoundedRectangle(cornerRadius: Theme.cornerRadiusSmall, style: .continuous)`, with `Image(systemName: symbol)` in `Theme.textPrimary`, `.body`.
 - Selected cell gets a 2 pt `Theme.accentPrimary` border.
 
@@ -377,8 +383,8 @@ struct IconPickerGrid: View {
 
 ### Requirements
 
-- `options` is the allowed category SF Symbols set (F2/U1); `selection` is the chosen symbol name. Callers must pass `CatalogIcon.allowedSymbols`.
-- Each cell `accessibilityIdentifier("\(accessibilityId)Cell(\(symbol))")`.
+- `options` is the renderable subset of the allowed category SF Symbols set (F2/U1); `selection` is the chosen raw symbol name. A valid unavailable selection may be included so it remains visible and editable.
+- Each cell `accessibilityIdentifier("\(accessibilityId)Cell(\(symbol))")` and a localized semantic icon label.
 - Min tap area 44 — matches the cell size exactly.
 - Tapping a cell sets `selection` to that symbol.
 
@@ -386,7 +392,7 @@ struct IconPickerGrid: View {
 
 ```swift
 IconPickerGrid(
-    options: CatalogIcon.allowedSymbols,
+    options: CatalogIcon.renderableSymbols,
     selection: $vm.icon,
     accessibilityId: "CategoryEditorIcon"
 )
@@ -394,47 +400,50 @@ IconPickerGrid(
 
 ### Accessibility
 
-- Each cell is a button element with `.accessibilityLabel("Icon, \(symbol)")`.
+- Each cell is a button element with a localized semantic icon label.
 - Selected cell exposes `.accessibilityValue("Selected")`.
 
 ---
 
 ## `TagSelector`
 
-Multi-select category chips for an activity (F3). Wrapping `FlowLayout` of tappable chips; toggling a chip adds/removes the category id from `selected`.
+Multi-select category chips for an activity (F3). A wrapping flow of content-sized tappable chips; toggling a chip adds/removes the category id from the parent-owned ordered selection.
 
 ### Signature
 
 ```swift
 struct TagSelector: View {
     let options: [Category]
-    @Binding var selected: Set<UUID>
+    let selected: Set<String>
+    let onToggle: (String) -> Void
     let accessibilityId: String
 }
 ```
 
 ### Visual
 
-- Wrapping `FlowLayout` (left-aligned, `Theme.spacingSmall` spacing).
-- Unselected chip: `Theme.backgroundSecondary` fill + 1 pt `Theme.hairline` border.
-- Selected chip: `Theme.accentPrimary` fill, white text, leading `checkmark` (`.caption`).
-- Each chip: category icon (`.caption`, `Theme.textSecondary`) + name (`.caption`), padding `Theme.spacingSmall` horizontal / 4 vertical, `Capsule` shape.
-- When `options` is empty, render a hint: `L10n.tagsEmptyHint` ("No categories yet — create one"), `.caption`, `Theme.textSecondary`.
+- Wrapping flow of content-sized chips (each chip as wide as its icon/checkmark, name, and uniform padding), left-aligned, equal `Theme.spacingSmall` gaps between chips and rows, compatible with iOS 15 (rows packed from measured chip widths).
+- Unselected chip: only the category icon (30% larger than `.caption`, scaling with Dynamic Type) + name (`.caption`); `Theme.backgroundSecondary` fill + 1 pt `Theme.hairline` border; no outline circle.
+- Selected chip: the icon is swapped for a `checkmark` of the same enlarged size (`.semibold`); `Theme.accentPrimary` fill, `Theme.textOnAccent` icon/checkmark and text; no outline circle.
+- Each chip: `Theme.spacingChip` (10 pt) uniform padding on all sides, `minHeight Theme.minTapArea` (44 pt — Apple HIG / WCAG 2.2 SC 2.5.5 AAA), `Capsule` shape; long names truncate with `lineLimit(1)`.
+- When `options` is empty, the selector renders no chips and the parent editor shows the localized Add-category action.
 
 ### States
 
 | State | Visual |
 |---|---|
-| Unselected | `Theme.backgroundSecondary` fill + `Theme.hairline` border |
-| Selected | `Theme.accentPrimary` fill, white text, `checkmark` |
-| Empty options | Centered `L10n.tagsEmptyHint` hint, no chips (U8) |
+| Unselected | `Theme.backgroundSecondary` fill + `Theme.hairline` border; enlarged category icon + name |
+| Selected | `Theme.accentPrimary` fill, `Theme.textOnAccent` text, enlarged `checkmark` in place of the icon |
+| Empty options | No chips; parent editor renders the Add-category action |
 
 ### Requirements
 
 - Tapping a chip toggles its id in `selected` (F3).
+- Chips are content-sized; gaps between chips are uniform (`Theme.spacingSmall`); toggling swaps the icon for the checkmark without re-packing rows.
+- Each chip's tap target is at least 44×44 pt (`Theme.minTapArea`).
 - Each chip `accessibilityIdentifier("\(accessibilityId)Chip(\(id))")`.
 - Tags are optional; an activity with no tags is valid (F3). The selector never forces a selection.
-- Empty-state hint follows U8 — guides toward creation without blocking the editor.
+- Empty-state action follows U8 — guides toward Category creation without blocking the editor.
 
 ### Usage
 
@@ -448,60 +457,302 @@ TagSelector(
 
 ### Accessibility
 
-- Each chip is a button element with `.accessibilityLabel("Category, \(name)")` and `.accessibilityValue(selected.contains(id) ? "Selected" : "Not selected")`.
-- The empty-state hint is `.accessibilityHidden(true)` decoration; the parent screen owns the "create category" action.
+- Each chip is a button element with a localized category label and localized selected/not-selected value.
+- The icon/checkmark is `.accessibilityHidden(true)` decoration; selection state is conveyed visually by the icon↔checkmark swap in addition to fill color, and announced by the button's selected/not-selected value.
+- The parent screen owns the empty-state "create category" action.
 
 ---
 
-## `SuggestionRow`
+## `RecentActivitiesChips`
 
-Recency-based suggestion row on the timer screen (F5/U3). One tap prefills the activity name and links the activity to the entry.
+The Track Recents chip flow (D2/D3/D4): a wrapping flow of at most six
+most-recently-used Activities with 44 pt tap targets; chips wrap onto
+additional rows and never require horizontal scrolling. A single tap prepares
+the Activity without starting timing.
 
 ### Signature
 
 ```swift
-struct SuggestionRow: View {
-    let activity: Activity
-    let categories: [Category]
-    let action: () -> Void
+struct RecentActivitiesChips: View {
+    let activities: [Activity]
+    let categories: [String: Category]
+    let selectedID: String?
+    let onSelect: (Activity) -> Void
 }
 ```
 
 ### Visual
 
-- `Button`-styled `HStack(spacing: Theme.spacingMedium)`:
-  - The first category's icon in `Theme.textSecondary`, `.body`, when categories are present.
-  - Name in `.subheadline`, `Theme.textPrimary`.
-  - Category names joined with `", "` in `.caption`, `Theme.textSecondary`.
-- Full width, min height `Theme.minTapArea`.
-- `accessibilityIdentifier("TimerSuggestion(\(activity.id))")`.
+- Wrapping flow of content-sized chips, left-aligned, equal `Theme.spacingSmall`
+  gaps between chips and rows. Rows are packed from measured chip widths (the
+  `Layout` protocol is iOS 16+ and the app supports iOS 15 — same greedy
+  packing algorithm as `TagSelector`, container width via `GeometryReader` +
+  preference key).
+- Cap of six, most-recently-used first (`activities.prefix(6)`; the store
+  already sorts by `last_used_at`).
+- Each chip: fixed icon slot with the first assigned Category's
+  `CatalogIcon(validated:).displaySymbol` + name (`.subheadline.weight(.medium)`,
+  one line, tail-truncated), `Theme.spacingMedium` horizontal / 12 pt vertical
+  padding, `minHeight Theme.minTapArea` (44 pt), `Capsule` shape.
+- Categoryless Activities render name-only chips with no icon and no
+  placeholder glyph.
+- Unselected chip: `Theme.backgroundSecondary` fill + `Theme.hairline` border;
+  icon and name in `Theme.textPrimary`.
+- Selected chip (the prepared Activity, `selectedID == activity.id`): filled
+  accent presentation — `Theme.accentPrimary` background, `Theme.textOnAccent`
+  text and icon, accent border; the Category icon is kept; no checkmark.
+- When `activities` is empty the component renders no chips; the parent screen
+  shows the dedicated empty copy (`timer.recentsEmptyHint`).
 
 ### States
 
 | State | Visual |
 |---|---|
-| Default | `Theme.backgroundPrimary` row, full-width tap target |
-| Pressed | System highlight (no custom pressed style) |
+| Unselected | `Theme.backgroundSecondary` fill + `Theme.hairline` border; icon + name |
+| Selected | `Theme.accentPrimary` fill, `Theme.textOnAccent` text/icon, accent border; icon kept |
+| Empty | No chips; parent shows `timer.recentsEmptyHint` |
 
 ### Requirements
 
-- Renders inside the `TimerSuggestionList` container; ranking is computed on-device from the local catalog ordered by `last_used_at` (F5, P1).
-- Suggestions are hidden while the timer is running (F5).
-- Tapping calls `action` — the parent screen prefills the activity field and links `activity.id` to the entry (F4/U3).
+- Tapping a chip calls `onSelect` — the parent prepares the Activity without
+  starting timing.
+- Chips are content-sized with uniform `Theme.spacingSmall` gaps; a chip wider
+  than the container renders at container width with a truncated name.
+- Each chip's tap target is at least 44×44 pt (`Theme.minTapArea`) in every
+  presentation (icon, no-icon, selected).
+- Recents are hidden while a timer is running.
+- Category names are never shown on chips; search results and the
+  selected-Activity row remain category-free (D16 revision).
+
+### Accessibility
+
+- Each chip is a button element with `.accessibilityLabel("Select \(activity.name)")`
+  (`L10n.timerSelectActivity`).
+- The prepared Activity's chip additionally gets `.accessibilityAddTraits(.isSelected)`
+  and `.accessibilityValue("Selected")`; unselected chips carry no value.
+- The icon is `.accessibilityHidden(true)` decoration.
+- `accessibilityIdentifier("TimerSuggestion(\(activity.id))")`.
 
 ### Usage
 
 ```swift
-ForEach(vm.suggestions) { a in
-    SuggestionRow(activity: a, categories: vm.categories(for: a)) { vm.prefill(from: a) }
+RecentActivitiesChips(
+    activities: vm.activities,
+    categories: vm.categoryMap,
+    selectedID: state.activity?.id
+) { vm.prefill(from: $0) }
+```
+
+---
+
+## `AdaptiveVerticalLayout`
+
+Deterministic spacing budget for the Track dual-flow layout (D34/D1): a
+scrollable dual-flow vertical stack whose three flexible regions resolve from
+the remaining space instead of relying on `Spacer` flexibility (which cannot
+be capped).
+
+### Signature
+
+```swift
+struct AdaptiveVerticalLayout<TopContent: View, BottomContent: View>: View {
+    let spacerCap: CGFloat
+    let topContent: TopContent
+    let bottomContent: BottomContent
+
+    init(
+        spacerCap: CGFloat,
+        @ViewBuilder topContent: () -> TopContent,
+        @ViewBuilder bottomContent: () -> BottomContent
+    )
 }
 ```
 
+### Behavior
+
+- `spacerCap` is the shared maximum height for the top and bottom spacers
+  (48 pt on Track, selected by the user from the 24/48/72/96 Pro Max spike
+  comparison).
+- With `slack = viewportHeight - contentHeight`:
+  - `slack <= 0` — no adaptive spacing; the ordered content scrolls.
+  - `0 < slack <= 2 * cap` — the slack splits evenly between the top and
+    bottom spacers (`min(cap, slack / 2)` each); the central separator is
+    zero.
+  - `slack > 2 * cap` — both spacers hold at the shared cap and the surplus
+    goes to the central separator between the top flow (completion mark…
+    error region) and the bottom flow (search/refine…main action).
+- Top and bottom flow heights are measured separately via `GeometryReader` +
+  preference keys.
+- On Track the top flow holds the completion-mark region through the error
+  region; the bottom flow holds the search/refine row through the main action,
+  with Recents below the main action inside the bottom flow.
+
+### Requirements
+
+- The three flexible regions never exceed the cap and never go negative; they
+  collapse to zero before content clips, overlaps, or becomes unreachable.
+- The main action sits above Recents so Choose Activity / Start / Stop stays
+  reachable without scrolling on short screens.
+
+---
+
+## `NumericTimerReadout`
+
+The centered numeric timer on Track (D2/D23). Its only purpose is displaying the exact elapsed duration; it has no dial, ring, sweep, goal, daily-total, or decorative progress visualization.
+
+### Signature
+
+```swift
+struct NumericTimerReadout: View {
+    let state: TrackState // idle / ready / running / saving / saved / error
+    let elapsed: TimeInterval
+    let activityName: String?
+}
+```
+
+### Visual
+
+- Elapsed time formatted as `MM:SS` or `H:MM:SS` (hours included once elapsed), `.monospacedDigit()`.
+- Font: `Theme.timerFont()` (`.system(size: 64, weight: .semibold, design: .rounded)`), `Theme.textPrimary`.
+- Centered in the main content region; keeps a stable frame across all timer states.
+- No checkmark overlay — the saved-state confirmation lives in the completion
+  region above the readout (refine-track-recents D1), so the readout itself
+  never renders a checkmark and the saved state does not move the timer.
+- A short state caption below the readout (`READY`, `RUNNING`, `SAVING`, `SAVED`, or the idle prompt) in `.caption`, `Theme.textSecondary`.
+- `accessibilityIdentifier("TimerDisplay")`.
+
+### States
+
+| State | Visual |
+|---|---|
+| Idle | `00:00` + choose-an-Activity prompt |
+| Ready | `00:00` + `READY` caption |
+| Running | Live exact elapsed value + `RUNNING` caption |
+| Saving | Readout stable; primary action shows progress |
+| Saved | `SAVED` caption; confirmation is shown in the completion region above the readout; readout returns to `00:00` without moving |
+| Error | Readout stable; localized non-field error in the reserved region above the central separator |
+
 ### Accessibility
 
-- `accessibilityIdentifier("TimerSuggestion(\(activity.id))")` (U3).
-- `.accessibilityLabel("Suggestion, \(activity.name)")`; category names are included in the combined value when present.
-- `.accessibilityHint("Starts a timer for this activity")`.
+- Single accessible element: `.accessibilityElement(children: .combine)`.
+- `.accessibilityLabel` announces the selected Activity, timer state, and elapsed duration; `.accessibilityValue` carries the exact formatted duration.
+- `.accessibilityAddTraits(.updatesFrequently)` while running so VoiceOver announces the live value.
+
+---
+
+## `CompactTimer`
+
+The persistent running-timer surface shown above the tab bar on History and Insights (D5). Track does not render it — the full numeric readout is already visible there.
+
+### Signature
+
+```swift
+struct CompactTimer: View {
+    let activityName: String
+    let startedAt: Date
+    let openTrack: () -> Void
+    let stop: () -> Void
+}
+```
+
+### Visual
+
+- Inset above the tab bar via `.safeAreaInset(edge: .bottom)` on History/Insights roots.
+- `HStack`: a non-destructive main area (activity name + live elapsed duration, `.monospacedDigit()`) that returns to Track, and a separate 44 pt circular Stop button (`stop.fill`, `Theme.danger` or accent tint).
+- Surface: `Theme.backgroundSecondary` fill, `Theme.cornerRadius` continuous corners, `Theme.hairline` 1 pt stroke.
+- `accessibilityIdentifier("CompactTimer")`; Stop button `accessibilityIdentifier("CompactTimerStopButton")`.
+
+### States
+
+| State | Visual |
+|---|---|
+| Running | Activity name + live elapsed duration + Stop |
+| Stopped | Removed from the shell (entry saved in place) |
+
+### Accessibility
+
+- Main area: `.accessibilityLabel("\(activityName), timer running")`, `.accessibilityHint("Returns to Track")`.
+- Stop button: `.accessibilityLabel("Stop and save timer")`.
+- VoiceOver announces activity name, elapsed duration, running state, and available actions.
+- The Stop target is a distinct 44 pt target separated from the navigation area (D5 risk mitigation).
+
+---
+
+## `ActivitySearchSheet` and `ActivitySearchContent`
+
+`ActivitySearchSheet` is the full-height native-search presentation opened by
+the `TimerActivitySearchButton` affordance on Track. It owns the native search
+field and sheet dismissal. `ActivitySearchContent` is its results surface.
+The operating system owns field placement, focus, keyboard, and Cancel;
+Category names and icons are never shown here.
+
+### Signature
+
+```swift
+struct ActivitySearchSheet: View {
+    @ObservedObject var vm: TrackViewModel
+}
+```
+
+### Visual
+
+- Full-height sheet with an always-visible native search field and a native
+  `List` content surface. It does not replace the Track body.
+- Empty query: the complete catalog in recency order (`last_used_at`), with
+  the prepared Activity marked by a checkmark.
+- While typing: case-insensitive containment matches in recency order.
+- Exact normalized match: identified first; no create action for that name.
+- Valid unmatched input: one full-width quick-create button
+  (`ActivitySearchCreateButton`) with a localized accessibility label.
+- Non-expired pending-deletion identity: a restore row
+  (`ActivitySearchRestoreButton`) replaces creation for that name.
+- Empty catalog: `EmptyState` explaining the empty state and prompting the
+  user to enter a name in the native search field.
+- Invalid input: existing results stay available; localized validation
+  guidance (`ActivitySearchValidationError`) is shown.
+- Non-field errors: `ErrorBanner` (`ActivitySearchErrorBanner`).
+- Native Cancel and sheet swipe-down dismiss the sheet without changing the
+  committed ready/idle state. A confirmed result or creation prepares an
+  Activity and then dismisses the sheet.
+
+### States
+
+| State | Visual |
+|---|---|
+| Browse (empty query) | Recency-ordered catalog, prepared Activity marked |
+| Searching | Case-insensitive matches only |
+| Unmatched valid input | Create row: full-width quick-create button |
+| Pending-deletion identity | Restore row instead of creation |
+| Empty catalog | `EmptyState` + prompt to type a name |
+| Invalid input | Results + localized validation guidance |
+
+### Accessibility
+
+- Each result row: `.accessibilityLabel("Select \(activity.name)")`, with
+  `.accessibilityValue("Ready")` when it is the prepared Activity.
+- Create row: `.accessibilityLabel("Create \(name)")`.
+- Restore row: `.accessibilityLabel("Restore \(name)")`.
+- The content never requires a Category and never shows Category metadata.
+
+---
+
+## `TimerActivityRefineButton` (retired)
+
+The Refine affordance on the Track selected-Activity row was removed in
+refine-track-recents (D34/D9): Track has no editing affordance, and the
+component is superseded by `RecentActivitiesChips` for Track's
+preparation surface. The Activity editor sheet and its view-model
+presentation machinery remain wired but unreachable from Track; editing
+placement is deferred to a later change. Keep this section until a
+replacement placement is designed.
+
+## `SuggestionRow` (retired)
+
+The single-row recency suggestion row on Track was replaced by
+`RecentActivitiesChips` in refine-track-recents (D2): a wrapping chip flow
+capped at six, with first-Category icons, a filled accent selected
+presentation, and dedicated empty copy. Keep this section only as history;
+Track no longer renders full-width suggestion rows.
 
 ---
 
@@ -645,7 +896,7 @@ struct SectionHeader: View {
 
 ```swift
 SectionHeader(title: L10n.categoryEditorIconLabel)
-IconPickerGrid(options: CatalogIcon.allowedSymbols, selection: $vm.icon, accessibilityId: "CategoryEditorIcon")
+IconPickerGrid(options: CatalogIcon.renderableSymbols, selection: $vm.icon, accessibilityId: "CategoryEditorIcon")
 ```
 
 ### Accessibility
@@ -672,7 +923,7 @@ struct UndoToast: View {
 
 - Floating bottom banner via `.safeAreaInset(edge: .bottom)` or overlay.
 - `Theme.backgroundSecondary` fill with `Theme.shadowSmall`, `Theme.cornerRadiusLarge`.
-- `HStack`: message (`.subheadline`, `Theme.textPrimary`) + `IconButton`-style Undo button (`L10n.undoButton`, `Theme.accentPrimary` tint) + dismiss `xmark`.
+- `HStack`: message (`.subheadline`, `Theme.textPrimary`) + icon-only Undo button (`L10n.undoButton`, `Theme.accentPrimary` tint) + dismiss `xmark`.
 - `accessibilityIdentifier("UndoToastButton")` on the Undo button.
 
 ### States

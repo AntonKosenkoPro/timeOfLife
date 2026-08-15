@@ -181,6 +181,7 @@ func TestListEntries_InvalidParamsReturn422(t *testing.T) {
 		"/api/v1/entries?limit=0",
 		"/api/v1/entries?limit=201",
 		"/api/v1/entries?limit=abc",
+		"/api/v1/entries?modified_since=garbage",
 	}
 	for _, path := range cases {
 		w := serve(h, jsonReq(t, "GET", path, tok, nil))
@@ -191,5 +192,120 @@ func TestListEntries_InvalidParamsReturn422(t *testing.T) {
 		if code := errCode(t, w); code != "validation_error" {
 			t.Errorf("%s: expected validation_error, got %q", path, code)
 		}
+	}
+}
+
+// Delta pull-sync: GET /entries?modified_since= returns only entries updated
+// after the cursor; GET /activities?modified_since= behaves the same.
+func TestListEntries_ModifiedSince(t *testing.T) {
+	h, _, _, tok := newCatalogHandler(t)
+	activityID := newActivity(t, h, tok)
+
+	we1 := serve(h, jsonReq(t, "POST", "/api/v1/entries", tok, map[string]any{
+		"id": v7(), "activity_id": activityID, "started_at": "2026-07-27T09:00:00Z",
+	}))
+	var e1 entryResp
+	decodeBody(t, we1, &e1)
+
+	we2 := serve(h, jsonReq(t, "POST", "/api/v1/entries", tok, map[string]any{
+		"id": v7(), "activity_id": activityID, "started_at": "2026-07-27T10:00:00Z",
+	}))
+	var e2 entryResp
+	decodeBody(t, we2, &e2)
+
+	// Pin distinct updated_at values (SQLite stores second precision, so two
+	// creates in the same second share updated_at): e1 at T+1s, e2 at T+2s.
+	now := time.Now().UTC().Truncate(time.Second)
+	t1 := now.Add(time.Second).Format(time.RFC3339)
+	t2 := now.Add(2 * time.Second).Format(time.RFC3339)
+	if w := serve(h, jsonReq(t, "PATCH", "/api/v1/entries/"+e1.ID, tok, map[string]any{
+		"updated_at": t1,
+	})); w.Code != http.StatusOK {
+		t.Fatalf("pin e1: expected 200, got %d (body=%s)", w.Code, w.Body.String())
+	}
+	if w := serve(h, jsonReq(t, "PATCH", "/api/v1/entries/"+e2.ID, tok, map[string]any{
+		"updated_at": t2,
+	})); w.Code != http.StatusOK {
+		t.Fatalf("pin e2: expected 200, got %d (body=%s)", w.Code, w.Body.String())
+	}
+
+	w := serve(h, jsonReq(t, "GET", "/api/v1/entries?modified_since="+t1, tok, nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	var resp struct {
+		Items []entryResp `json:"items"`
+	}
+	decodeBody(t, w, &resp)
+	if len(resp.Items) != 1 || resp.Items[0].ID != e2.ID {
+		t.Errorf("expected only the newer entry, got %d items", len(resp.Items))
+	}
+}
+
+// Provenance: POST /entries accepts source/source_ref, defaults to manual,
+// and rejects an unknown source with 422.
+func TestCreateEntry_Provenance(t *testing.T) {
+	h, _, _, tok := newCatalogHandler(t)
+	activityID := newActivity(t, h, tok)
+
+	// Explicit provenance round-trips.
+	ref := "callback-42"
+	w := serve(h, jsonReq(t, "POST", "/api/v1/entries", tok, map[string]any{
+		"id": v7(), "activity_id": activityID, "started_at": "2026-07-27T09:00:00Z",
+		"source": "screentime", "source_ref": ref,
+	}))
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d (body=%s)", w.Code, w.Body.String())
+	}
+	var e entryResp
+	decodeBody(t, w, &e)
+	if e.Source != "screentime" || e.SourceRef == nil || *e.SourceRef != ref {
+		t.Errorf("expected screentime/%s, got %q/%v", ref, e.Source, e.SourceRef)
+	}
+
+	// Omitted provenance defaults to manual/null.
+	w2 := serve(h, jsonReq(t, "POST", "/api/v1/entries", tok, map[string]any{
+		"id": v7(), "activity_id": activityID, "started_at": "2026-07-27T10:00:00Z",
+	}))
+	var e2 entryResp
+	decodeBody(t, w2, &e2)
+	if e2.Source != "manual" || e2.SourceRef != nil {
+		t.Errorf("expected manual/nil, got %q/%v", e2.Source, e2.SourceRef)
+	}
+
+	// Unknown source → 422.
+	w3 := serve(h, jsonReq(t, "POST", "/api/v1/entries", tok, map[string]any{
+		"id": v7(), "activity_id": activityID, "started_at": "2026-07-27T11:00:00Z",
+		"source": "time-machine",
+	}))
+	if w3.Code != http.StatusUnprocessableEntity {
+		t.Errorf("expected 422 for unknown source, got %d (body=%s)", w3.Code, w3.Body.String())
+	}
+}
+
+// Duplicate import: a second POST with the same (source, source_ref) is
+// rejected with 409 duplicate_import.
+func TestCreateEntry_DuplicateImportRejected(t *testing.T) {
+	h, _, _, tok := newCatalogHandler(t)
+	activityID := newActivity(t, h, tok)
+	ref := "interval-7"
+
+	body := map[string]any{
+		"id": v7(), "activity_id": activityID, "started_at": "2026-07-27T09:00:00Z",
+		"source": "screentime", "source_ref": ref,
+	}
+	w1 := serve(h, jsonReq(t, "POST", "/api/v1/entries", tok, body))
+	if w1.Code != http.StatusCreated {
+		t.Fatalf("first create: expected 201, got %d (body=%s)", w1.Code, w1.Body.String())
+	}
+
+	body["id"] = v7()
+	body["started_at"] = "2026-07-27T10:00:00Z"
+	w2 := serve(h, jsonReq(t, "POST", "/api/v1/entries", tok, body))
+	if w2.Code != http.StatusConflict {
+		t.Fatalf("expected 409, got %d (body=%s)", w2.Code, w2.Body.String())
+	}
+	if code := errCode(t, w2); code != "duplicate_import" {
+		t.Errorf("expected code duplicate_import, got %q", code)
 	}
 }

@@ -13,11 +13,14 @@ enum Theme {
     static let accentPrimary = Color("AccentPrimary", bundle: .main)
     static let danger = Color("Danger", bundle: .main)
     static let hairline = Color("Hairline", bundle: .main)
+    static let textOnAccent = Color.white
+    static let transparent = Color.clear
 
     // MARK: - Spacing
 
     static let spacingExtraSmall: CGFloat = 4
     static let spacingSmall: CGFloat = 8
+    static let spacingChip: CGFloat = 10
     static let spacingMedium: CGFloat = 16
     static let spacingLarge: CGFloat = 24
     static let spacingExtraLarge: CGFloat = 32
@@ -31,6 +34,12 @@ enum Theme {
     static let screenHorizontalPadding: CGFloat = 24
     static let maxContentWidth: CGFloat = 420
 
+    // MARK: - Shadows
+
+    /// Small shadow for floating cards (Design/TOKENS.md `shadowSmall`:
+    /// radius 4, y 2, opacity 0.08).
+    static let shadowSmall = Color(uiColor: UIColor.black.withAlphaComponent(0.08))
+
     // MARK: - Helpers
 
     /// Returns a font suitable for the large timer display.
@@ -43,17 +52,4 @@ enum Theme {
     static func color(_ color: Color, alpha: Double) -> Color {
         Color(uiColor: UIColor(color).withAlphaComponent(alpha))
     }
-
-}
-
-/// Lightweight shadow description used by view modifiers.
-struct ShadowStyle {
-    let radius: CGFloat
-    let y: CGFloat
-    let opacity: Double
-}
-
-extension Theme {
-    /// Small card shadow: radius 4, y 2, opacity 0.08 (TOKENS.md → Shadows).
-    static let shadowSmall = ShadowStyle(radius: 4, y: 2, opacity: 0.08)
 }

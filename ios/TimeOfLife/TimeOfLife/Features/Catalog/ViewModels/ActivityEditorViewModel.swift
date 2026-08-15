@@ -1,252 +1,168 @@
 import Foundation
+import SwiftUI
 
-enum ActivityEditorMode: Equatable, Sendable {
-    case createFromManage
-    case createFromTimer
-    case edit(Activity)
-}
+/// View model for the shared Activity Editor (Design/SCREENS/
+/// ActivityEditor.md), edit mode (refine-selected-activity-from-track
+/// change, design decision 3). Accepts the selected Activity, initializes
+/// name, notes, and selected Category identifiers from its persisted values,
+/// and saves via the atomic `LocalStore.refineActivity` operation. Category
+/// selection is zero-or-more and ORDERED (category-management D5/D6); the
+/// draft is preserved on an atomic save failure. The caller owns the
+/// post-save commit boundary.
+@MainActor
+final class ActivityEditorViewModel: ObservableObject {
+    @Published var name: String
+    @Published var notes: String
+    /// Ordered multi-selection: selection order is preserved in the saved
+    /// Activity's `categoryIDs`.
+    @Published var selectedCategoryIDs: [String]
+    @Published private(set) var availableCategories: [Category] = []
+    @Published private(set) var fieldErrors: FieldErrors
+    @Published var errorMessage: String?
+    @Published private(set) var isLoading = false
 
-struct ActivityDraft: Equatable, Sendable {
-    let id: UUID
-    var name: String
-    var notes: String
-    var categoryIds: [UUID]
-    var lastUsedAt: Date?
-    let createdAt: Date
-    var updatedAt: Date
+    /// The maximum notes length in characters.
+    static let notesMaxLength = 280
 
-    init(mode: ActivityEditorMode, now: Date = Date()) {
-        switch mode {
-        case let .edit(activity):
-            id = activity.id
-            name = activity.name
-            notes = activity.notes ?? ""
-            categoryIds = activity.categoryIds
-            lastUsedAt = activity.lastUsedAt
-            createdAt = activity.createdAt
-            updatedAt = activity.updatedAt
-        case .createFromManage, .createFromTimer:
-            id = UUID.v7()
-            name = ""
-            notes = ""
-            categoryIds = []
-            lastUsedAt = nil
-            createdAt = now
-            updatedAt = now
+    /// The original Activity identifier being refined.
+    let activityID: String
+
+    private let store: LocalStore
+    private let onSaved: (Activity) -> Void
+    private let onCollision: (Activity) -> Void
+
+    /// The injected store used by the optional in-editor Category creation
+    /// sheet.
+    var categoryStore: LocalStore { store }
+
+    struct FieldErrors: Equatable {
+        var name: String?
+        var notes: String?
+    }
+
+    init(
+        store: LocalStore,
+        activity: Activity,
+        onSaved: @escaping (Activity) -> Void,
+        onCollision: @escaping (Activity) -> Void
+    ) {
+        self.store = store
+        self.activityID = activity.id
+        self.name = activity.name
+        self.notes = activity.notes ?? ""
+        self.selectedCategoryIDs = activity.categoryIDs
+        self.fieldErrors = FieldErrors()
+        self.onSaved = onSaved
+        self.onCollision = onCollision
+        Task {
+            await reloadCategories()
         }
     }
 
-    func toActivity() -> Activity {
-        Activity(
-            id: id,
-            name: name.trimmingCharacters(in: .whitespacesAndNewlines),
-            notes: notes.isEmpty ? nil : notes,
-            lastUsedAt: lastUsedAt,
-            categoryIds: categoryIds,
-            createdAt: createdAt,
-            updatedAt: updatedAt
-        )
+    /// Refreshes the local Category catalog without changing the draft's
+    /// ordered selection. Keeping selected ids intact lets an atomic save
+    /// report a disappeared Category and preserve the user's retry context.
+    func reloadCategories() async {
+        do {
+            availableCategories = try await store.categories()
+        } catch {
+            availableCategories = []
+            errorMessage = L10n.errorLocalPersistence.text
+        }
     }
 
-    mutating func adopt(_ activity: Activity) {
-        name = activity.name
-        notes = activity.notes ?? ""
-        categoryIds = activity.categoryIds
-        lastUsedAt = activity.lastUsedAt
-        updatedAt = activity.updatedAt
-    }
-}
-
-struct ActivityFieldErrors: Equatable, Sendable {
-    var name: String?
-    var notes: String?
-
-    init(name: String? = nil, notes: String? = nil) {
-        self.name = name
-        self.notes = notes
-    }
-}
-
-enum ActivitySaveResult: Equatable, Sendable {
-    case created(Activity, linkAndSelect: Bool)
-    case updated(Activity)
-    case reused(Activity)
-    case cancelled
-}
-
-@MainActor
-final class ActivityEditorViewModel: ObservableObject {
-    @Published var draft: ActivityDraft
-    @Published var fieldErrors = ActivityFieldErrors()
-    @Published var errorMessage: String?
-    @Published var isLoading = false
-    @Published var availableCategories: [Category]
-    @Published var onSaveResult: ActivitySaveResult?
-
-    let mode: ActivityEditorMode
-    let shouldFocusName: Bool
-
-    private let store: CatalogStoring
-    private let repository: CatalogRepository
-    private let service: CatalogService
-    private let connectivity: Connectivity
-
-    init(
-        mode: ActivityEditorMode,
-        store: CatalogStoring,
-        repository: CatalogRepository,
-        service: CatalogService,
-        connectivity: Connectivity,
-        availableCategories: [Category] = []
-    ) {
-        self.mode = mode
-        self.draft = ActivityDraft(mode: mode)
-        self.store = store
-        self.repository = repository
-        self.service = service
-        self.connectivity = connectivity
-        self.availableCategories = availableCategories
-        self.shouldFocusName = true
+    /// True when the draft name is valid and the editor is not saving.
+    var canSave: Bool {
+        if case .valid = ActivityName.validate(name) { return !isLoading }
+        return false
     }
 
-    func loadCategories() async {
-        availableCategories = await store.loadCategories()
+    /// Toggles a category in the ordered selection: selecting appends it at
+    /// the end; deselecting removes it, keeping the remaining order.
+    func toggleCategory(_ categoryID: String) {
+        if let index = selectedCategoryIDs.firstIndex(of: categoryID) {
+            selectedCategoryIDs.remove(at: index)
+        } else {
+            selectedCategoryIDs.append(categoryID)
+        }
     }
 
-    func clearNameError() {
+    /// Selects a newly created Category without disturbing existing order.
+    func selectCategory(_ categoryID: String) {
+        guard !selectedCategoryIDs.contains(categoryID) else { return }
+        selectedCategoryIDs.append(categoryID)
+    }
+
+    /// Validates the draft and clears field errors as the user edits.
+    func validate() {
+        switch ActivityName.validate(name) {
+        case .valid:
+            fieldErrors.name = nil
+        case .empty:
+            fieldErrors.name = L10n.timerSearchValidationEmpty.text
+        case .tooLong:
+            fieldErrors.name = L10n.timerSearchValidationTooLong.text
+        }
+        if notes.count > Self.notesMaxLength {
+            fieldErrors.notes = L10n.activityEditorNotesTooLong.text
+        } else {
+            fieldErrors.notes = nil
+        }
+    }
+
+    /// Clears the name field error when the user edits the name.
+    func nameDidChange() {
         fieldErrors.name = nil
     }
 
-    func clearNotesError() {
+    /// Clears the notes field error when the user edits the notes.
+    func notesDidChange() {
         fieldErrors.notes = nil
     }
 
-    func cancel() {
-        guard !isLoading else { return }
-        onSaveResult = .cancelled
-    }
-
-    func save() async {
-        guard !isLoading else { return }
-        fieldErrors = validateDraft()
-        guard fieldErrors == ActivityFieldErrors() else {
+    /// Saves the draft locally (atomic refine) and reports the typed outcome
+    /// to the caller. The editor stays interactive on failure so the user
+    /// can retry with the draft intact.
+    func save() {
+        validate()
+        guard canSave else {
             Haptics.error()
             return
         }
-
-        let validCategoryIds = Set(availableCategories.map(\.id))
-        draft.categoryIds.removeAll { !validCategoryIds.contains($0) }
-        if case .edit = mode {
-            // The backend accepts a patch only when its LWW timestamp advances.
-            draft.updatedAt = Date()
-        }
-        let candidate = draft.toActivity()
-
         isLoading = true
         errorMessage = nil
-        defer { isLoading = false }
-
-        do {
-            let saved = try await persist(candidate)
-            onSaveResult = result(for: saved)
-        } catch {
-            await handle(error)
-        }
-    }
-
-    private func persist(_ candidate: Activity) async throws -> Activity {
-        if connectivity.isConnected {
+        let draft = ActivityDraft(
+            name: ActivityName.normalized(name),
+            notes: notes.isEmpty ? nil : notes,
+            categoryIDs: selectedCategoryIDs
+        )
+        Task {
             do {
-                let saved = try await persistOnline(candidate)
-                await store.upsertActivity(saved)
-                return saved
+                let outcome = try await store.refineActivity(
+                    id: activityID,
+                    draft: draft
+                )
+                isLoading = false
+                switch outcome {
+                case let .updated(activity):
+                    onSaved(activity)
+                case let .collision(existing):
+                    onCollision(existing)
+                case .missing:
+                    errorMessage = L10n.timerStalePreparationError.text
+                case .invalid:
+                    validate()
+                case .invalidAssociation:
+                    // The draft is preserved; the user can drop the stale
+                    // selection and retry.
+                    errorMessage = L10n.activityEditorInvalidAssociation.text
+                case .failure:
+                    errorMessage = L10n.text(in: .default, code: "error.unknown")
+                }
             } catch {
-                guard case .offline = CatalogError.map(error) else { throw error }
+                isLoading = false
+                errorMessage = L10n.text(in: .default, code: "error.unknown")
             }
         }
-        return try await persistOffline(candidate)
-    }
-
-    private func persistOnline(_ candidate: Activity) async throws -> Activity {
-        switch mode {
-        case .edit:
-            return try await repository.updateActivity(candidate)
-        case .createFromManage, .createFromTimer:
-            return try await repository.createActivity(candidate)
-        }
-    }
-
-    private func persistOffline(_ candidate: Activity) async throws -> Activity {
-        switch mode {
-        case .edit:
-            return try await service.updateActivity(candidate)
-        case .createFromManage, .createFromTimer:
-            return try await service.createActivity(candidate)
-        }
-    }
-
-    private func result(for saved: Activity) -> ActivitySaveResult {
-        switch mode {
-        case .edit:
-            return .updated(saved)
-        case .createFromTimer:
-            return .created(saved, linkAndSelect: true)
-        case .createFromManage:
-            return .created(saved, linkAndSelect: false)
-        }
-    }
-
-    private func validateDraft() -> ActivityFieldErrors {
-        let nameErrors = ActivityValidator.validateName(draft.name)
-        let notesErrors = ActivityValidator.validateNotes(draft.notes)
-        return ActivityFieldErrors(
-            name: ActivityValidator.unifiedNameMessage(nameErrors),
-            notes: ActivityValidator.unifiedNotesMessage(notesErrors)
-        )
-    }
-
-    private func handle(_ error: Error) async {
-        let catalogError = error as? CatalogError ?? CatalogError.map(error)
-        switch catalogError {
-        case let .validation(fields):
-            fieldErrors = ActivityFieldErrors(
-                name: fields["name"],
-                notes: fields["notes"]
-            )
-        case .conflict:
-            await adoptServerVersion()
-            errorMessage = L10n.errorConflict.text
-        case let .activityExists(existingId, existingName):
-            let existing = await existingActivity(id: existingId, name: existingName)
-            if case .createFromTimer = mode {
-                onSaveResult = .reused(existing)
-            } else {
-                errorMessage = L10n.errorActivityExists.text
-            }
-        case .offline:
-            errorMessage = L10n.text(in: .default, code: "offline")
-        default:
-            errorMessage = ErrorLocalization.message(for: catalogError)
-        }
-    }
-
-    private func adoptServerVersion() async {
-        guard let server = try? await repository.getActivity(draft.id) else { return }
-        draft.adopt(server)
-        await store.upsertActivity(server)
-    }
-
-    private func existingActivity(id: UUID, name: String) async -> Activity {
-        if let activity = try? await repository.getActivity(id) { return activity }
-        let now = Date()
-        return Activity(
-            id: id,
-            name: name,
-            notes: nil,
-            lastUsedAt: nil,
-            categoryIds: [],
-            createdAt: now,
-            updatedAt: now
-        )
     }
 }

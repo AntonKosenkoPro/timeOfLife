@@ -1,5 +1,8 @@
 {
   "$schema": "https://opencode.ai/config.json",
+  "instructions": [
+    "AGENTS.md"
+  ],
   "agent": {
     "explore": {
       "model": "openai/gpt-5.6-luna",
@@ -10,12 +13,29 @@
       "reasoningEffort": "max"
     },
     "general": {
-      "model": "openai/gpt-5.6-luna",
+      "model": "ollama-cloud/deepseek-v4-flash:0731",
       "reasoningEffort": "max"
     },
     "plan": {
       "model": "opencode-go/kimi-k3",
-      "reasoningEffort": "max"
+      "reasoningEffort": "max",
+      "permission": {
+        "argent*": "deny"
+      }
     }
+  },
+  "mcp": {
+    "argent": {
+      "type": "local",
+      "command": [
+        "argent",
+        "mcp"
+      ],
+      "enabled": true
+    }
+  },
+  "subagent_depth": 2,
+  "tools": {
+    "argent*": true
   }
 }

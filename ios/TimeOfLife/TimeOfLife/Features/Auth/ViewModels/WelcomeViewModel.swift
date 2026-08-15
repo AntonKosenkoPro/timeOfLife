@@ -6,7 +6,7 @@ import SwiftUI
 /// The welcome screen leads with Sign in with Apple; the email/OTP path is a
 /// secondary option. Apple sign-in obtains the identity token and exchanges it
 /// for a session via `AuthService`; on success `SessionStore` flips and
-/// `RootView` transitions to `TimerView` automatically. Cancellation is silent
+/// `RootView` keeps the app shell (Track) as the root; sync activates. Cancellation is silent
 /// (no error banner); other failures surface `appleSignIn.error`.
 @MainActor
 final class WelcomeViewModel: ObservableObject {

@@ -137,6 +137,9 @@ type entryResp struct {
 	ActivityID      *string `json:"activity_id"`
 	ActivityName    string  `json:"activity_name"`
 	DurationSeconds *int    `json:"duration_seconds"`
+	Source          string  `json:"source"`
+	SourceRef       *string `json:"source_ref"`
+	UpdatedAt       string  `json:"updated_at"`
 }
 
 func newCatalogHandler(t *testing.T) (*Handler, db.Store, string, string) {

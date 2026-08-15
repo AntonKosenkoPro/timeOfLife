@@ -1,8 +1,8 @@
 # Manage Categories Screen
 
-Implements F2/F6/U8/R1/R3 of `Requirements/FURPS/Activity_Catalog_and_Categories.md`. Full CRUD surface for category tags, reached from Manage Activities.
+Implements F2/F6/U8/R1/R3 of `Requirements/FURPS/Activity_Catalog_and_Categories.md`. Full CRUD surface for category tags, reached from Profile for signed-in and signed-out users.
 
-A separate Manage Categories screen (per the user's decision) so category CRUD does not crowd the Manage Activities list. The screen lists all categories, lets the user create/edit/delete them, and seeds 7 localized defaults on first run after sign-in (F6). Deletions are undoable for 30 s (R3) and conflict with the server by last-write-wins (R2).
+A separate Manage Categories screen (per the user's decision) so category CRUD does not crowd the Manage Activities list. The screen lists all categories, lets the user create/edit/delete them, and seeds 7 localized defaults on first run (F6). Deletions are undoable for 30 s (R3) and conflict with the server by last-write-wins (R2).
 
 **Default categories (F6):**
 
@@ -16,25 +16,26 @@ A separate Manage Categories screen (per the user's decision) so category CRUD d
 | Sleep | `bed.double` |
 | Entertainment | `tv` |
 
-Seeded on first run after sign-in, only if the user has zero categories. Localized names via `L10n` (EN + RU). Categories have a validated catalog icon. The seed list matches `Requirements/FURPS/Activity_Catalog_and_Categories.md` F6.
+Seeded once per local dataset by the `category_starters_seeded` marker. Deleting all Categories does not reseed; Erase local data clears the marker so a genuinely new dataset receives the set again. Localized names use `L10n` (EN + RU), and Categories have a validated catalog icon.
 
 ---
 
 ## Screen: ManageCategoriesView
 
 - **File**: `ios/TimeOfLife/TimeOfLife/Features/Catalog/Views/ManageCategoriesView.swift`
-- **Route**: `.manageCategories`
+- **Route**: Profile → Categories (`NavigationLink`)
 - **ViewModel**: `ManageCategoriesViewModel`
 
 ### Layout
 
-Wrap in `NavigationStack` (iOS 16/15 polyfill like `TimerView`).
+Use the existing Profile-owned `NavigationView` stack (iOS 15-compatible).
 
 - Inline navigation title: `L10n.manageCategoriesTitle`.
 - Toolbar trailing: `Image(systemName: "plus")` button, `accessibilityIdentifier("ManageCategoriesAddButton")` → presents `CategoryEditor` in create mode (sheet, D21).
 - Body: `List` of `CategoryRow` (`COMPONENTS.md`) ordered by name ascending (alpha). List background `Theme.backgroundPrimary`. `accessibilityIdentifier("ManageCategoriesList")` on the list.
-- Empty state (U8): when `vm.categories.isEmpty` show `EmptyState(icon: "tag", title: L10n.manageCategoriesEmptyTitle, subtitle: L10n.manageCategoriesEmptySubtitle)` centered in the available space.
-- `UndoToast` (`COMPONENTS.md`) overlay via `.safeAreaInset(edge: .bottom)` when `vm.undoToast != nil` (R3/D17).
+- Loading state: show a progress indicator while the local catalog is read; a load failure is an error state, not a misleading empty state.
+- Empty state (U8): when `vm.categories.isEmpty` show `EmptyState(icon: "tag", title: L10n.manageCategoriesEmptyTitle, subtitle: L10n.manageCategoriesEmptySubtitle)` plus the Add action.
+- `UndoToast` (`COMPONENTS.md`) is pinned via `.safeAreaInset(edge: .bottom)` when `vm.undoToast != nil` (R3/D17), and includes the wall-clock seconds remaining.
 - `ErrorBanner` (`COMPONENTS.md`) when `vm.conflictMessage != nil`, `accessibilityId: "ManageCategoriesConflictBanner"` — shown above the list.
 
 ### Keyboard handling
@@ -48,8 +49,8 @@ N/A — the screen is a list with no text input; editors are handled in the `Cat
 - Swipe-to-delete on a row → single destructive confirm (see Delete flow below). On confirm enter the undo flow (30 s; R3/U6/D17). Undo re-applies the tag to all activities that carried it via the join cascade; after 30 s commit locally and enqueue `DELETE` for sync.
 - Toolbar `+` → `CategoryEditor` create mode (sheet, D21). On create conflict (409 `category_exists`, case-insensitive name collision) re-map local refs to the surviving id and proceed (R2); in the editor surface `L10n.errorCategoryExists`.
 - **Offline (R1):** list renders from the local store; create/edit/delete are queued locally and synced when connectivity returns. Disable no control here — list reads and optimistic mutations are offline-safe.
-- **Conflict (R2):** on 409 `conflict`, show the inline `ErrorBanner` (`L10n.errorConflict`) and adopt the server's version as the source of truth (keep-latest). No field-level merge at MVP.
-- **Seeding (F6):** on first run after sign-in, seed 7 localized categories — Work, Hobby, Sport, Education, Relax, Sleep, Entertainment — with their catalog icons via ordinary `POST /categories` requests. Seeds are first-class records: editable, icon-selectable, and deletable like any user-created category. Seeding is **idempotent** — it runs once, gated by a `categoriesSeeded` flag persisted locally; replays (same `POST` idempotently, or re-runs after relaunch before the flag is set) do not duplicate records.
+- **Conflict (R2):** on a stale local edit, show the inline `ErrorBanner` (`L10n.errorConflict`) and prefill the editor with the latest local/server-adopted version. No field-level merge at MVP.
+- **Seeding (F6):** on first local-dataset setup, seed 7 localized categories — Work, Hobby, Sport, Education, Relax, Sleep, Entertainment — with their catalog icons via ordinary outbox-backed Category creates. Seeds are first-class records: editable, icon-selectable, and deletable like any user-created category. Seeding is **idempotent** through the persisted `category_starters_seeded` marker.
 
 ### Delete flow
 
@@ -70,7 +71,7 @@ Reference: D17 and `Design/INTERACTIONS.md` → Undo flow + Delete-scope confirm
 
 | State | Visual |
 |---|---|
-| Loading | Empty `List` background; categories load from local store on appear (typically instant) |
+| Loading | Progress indicator while categories load from the local store |
 | Empty | `EmptyState` (`tag` icon, empty title/subtitle) — U8 |
 | Loaded | `List` of `CategoryRow` in alpha order |
 | Deleting (undo visible) | `UndoToast` pinned at bottom safe area for 30 s; row already removed from list |
@@ -90,16 +91,16 @@ struct Category: Identifiable, Codable, Sendable {
 
 ### Implementation checklist
 
-- [ ] All strings use `L10n.*` keys (EN + RU).
-- [ ] List has `accessibilityIdentifier("ManageCategoriesList")`.
-- [ ] Add button has `accessibilityIdentifier("ManageCategoriesAddButton")`.
-- [ ] Rows use `CategoryRow` with `CategoryRow(<id>)` identifiers (per `COMPONENTS.md`).
-- [ ] Swipe-to-delete button has `accessibilityIdentifier("CategoryRowDelete(<id>)")`.
-- [ ] Undo button uses `UndoToast` with `UndoToastButton` (per `COMPONENTS.md`).
-- [ ] Category delete is tag-only — join cascade removes the tag from activities; entries are unaffected (state in confirm copy).
-- [ ] Category icons use the validated `CatalogIcon` set.
-- [ ] Seeding runs once and is idempotent (`categoriesSeeded` flag); seeds are editable/deletable.
-- [ ] Offline queue handles create/edit/delete; conflict (409 `conflict`) shows `ErrorBanner` and adopts server version (R2).
+- [x] All strings use `L10n.*` keys (EN + RU), including icon VoiceOver names and countdown copy.
+- [x] List has `accessibilityIdentifier("ManageCategoriesList")`.
+- [x] Add button has `accessibilityIdentifier("ManageCategoriesAddButton")`.
+- [x] Rows use `CategoryRow` with `CategoryRow(<id>)` identifiers (per `COMPONENTS.md`).
+- [x] Swipe-to-delete button has `accessibilityIdentifier("CategoryRowDelete(<id>)")`.
+- [x] Undo button uses `UndoToast` with `UndoToastButton` (per `COMPONENTS.md`).
+- [x] Category delete is tag-only — the deletion transaction removes joins; entries and timer state are unaffected.
+- [x] Category icons use the validated `CatalogIcon` set with a renderable picker and fallback display.
+- [x] Seeding runs once and is idempotent (`category_starters_seeded` marker); seeds are editable/deletable.
+- [x] Offline queue handles create/edit/delete; stale edits adopt the latest persisted version.
 - [ ] Screen previews exist for light/dark and EN/RU.
 - [ ] SwiftLint passes with zero findings.
 
