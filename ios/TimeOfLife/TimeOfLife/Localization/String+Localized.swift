@@ -106,6 +106,12 @@ enum L10n: String, CaseIterable {
     case insightsEmptyTitle = "insights.emptyTitle"
     case insightsEmptySubtitle = "insights.emptySubtitle"
 
+    // History day groups (history-entry-list spec)
+    case historyDayToday = "history.day.today"
+    case historyDayYesterday = "history.day.yesterday"
+    case historyInProgress = "history.inProgress"
+    case historyTracked = "history.tracked"
+
     // Starter categories (category-management spec, seed requirement)
     case categorySeedWork = "category.seed.work"
     case categorySeedHobby = "category.seed.hobby"

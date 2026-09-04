@@ -197,11 +197,6 @@ actor LocalStore {
     struct StarterCategory: Sendable {
         let name: String
         let icon: CatalogIcon
-
-        init(name: String, icon: CatalogIcon) {
-            self.name = name
-            self.icon = icon
-        }
     }
 
     /// The seven starter category icons in creation order
@@ -1349,11 +1344,6 @@ actor LocalStore {
 
         let category: Category
         let activityIDs: [String]
-
-        init(category: Category, activityIDs: [String]) {
-            self.category = category
-            self.activityIDs = activityIDs
-        }
 
         /// The buffer payload: a standard `DeletionSnapshot` with the
         /// category record (so the generic undo machinery keeps working) plus

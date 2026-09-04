@@ -28,13 +28,11 @@ struct AppShellView: View {
             .accessibilityIdentifier("TabTrack")
 
             navigationRoot {
-                DestinationPlaceholder(
-                    title: L10n.tabHistory.text,
-                    symbol: "clock.arrow.circlepath",
-                    emptyTitle: L10n.historyEmptyTitle.text,
-                    emptySubtitle: L10n.historyEmptySubtitle.text
+                HistoryView(
+                    store: container.localStore,
+                    refreshSignal: vm.runningTimer?.activityID ?? ""
                 )
-                .safeAreaInset(edge: .bottom) { compactTimerIfNeeded }
+                    .safeAreaInset(edge: .bottom) { compactTimerIfNeeded }
             }
             .tabItem { Label(L10n.tabHistory.text, systemImage: "clock.arrow.circlepath") }
             .tag(AppShellViewModel.Tab.history)

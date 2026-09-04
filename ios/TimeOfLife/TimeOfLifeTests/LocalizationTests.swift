@@ -136,9 +136,9 @@ struct LocalizationTests {
 
     @Test("L10n enum allCases count matches expected keys")
     func allCasesCount() {
-        // 125 keys before refine-track-recents, +1 timer.recentsEmptyHint,
-        // −3 removed Track keys (offlineHint, activityRefine,
-        // activityRefineHint) = 123
-        #expect(l10nCases.count == 123)
+        // 123 keys after refine-track-recents; history-entry-list adds
+        // historyDayToday, historyDayYesterday, historyInProgress,
+        // historyTracked = 127
+        #expect(l10nCases.count == 127)
     }
 }

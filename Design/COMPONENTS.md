@@ -814,6 +814,73 @@ List {
 
 ---
 
+## `EntryRow`
+
+Read-only History row for a committed time entry (history-entry-list spec, Variant H layout). Purely presentational — grouping, category resolution, and duration formatting are owned by `HistoryViewModel`.
+
+### Signature
+
+```swift
+struct EntryRow: View {
+    let entry: TimeEntry
+    let icon: String
+    let categoryNames: String
+    let timeframeText: String
+    let durationText: String
+    let isInProgress: Bool
+}
+```
+
+### Visual
+
+Variant H (spike-confirmed, design.md D4):
+
+```
+  [icon]  Activity Name                    1h 20m
+          Health, Morning              14:00 – 15:20
+```
+
+- `HStack(alignment: .top, spacing: Theme.spacingMedium)`:
+  - Leading icon: first category's SF Symbol, `.title3`, `Theme.textSecondary`, 28 pt column, vertically spanning both text lines. Its optical top is top-aligned with the activity name's **cap-height top** (top of capital letters), not the text frame top — achieved with a negative top padding tuned for `.title3` icon + `.headline` name (`EntryRow.iconTopAdjustment`). If the font stack changes, the offset needs re-tuning.
+  - `VStack(alignment: .leading, spacing: 2)`:
+    - Line 1: activity name `.headline`, `Theme.textPrimary` (left, flexible) + duration `.headline`, `Theme.textPrimary`, `.monospacedDigit()` (right).
+    - Line 2: category names `.caption`, `Theme.textSecondary` (left, flexible) + timeframe `.caption`, `Theme.textSecondary`, `.monospacedDigit()` (right).
+- Min height `Theme.minTapArea`; dividers between rows lead after the icon column.
+
+### States
+
+| State | Visual |
+|---|---|
+| With categories | First category's icon leading; name + duration line 1; category names + timeframe line 2 |
+| No categories | `questionmark` fallback icon; line 2 shows only the timeframe |
+| In progress (no `endedAt`) | Duration slot shows the localized in-progress indicator; timeframe shows the start time |
+
+### Requirements
+
+- `accessibilityIdentifier("EntryRow(\(entry.id))")`.
+- Read-only: no tap action in this component (history-entry-list spec).
+- The caller (`HistoryViewModel`) resolves the icon and category names from the activity's current category set at read time (D6).
+
+### Usage
+
+```swift
+EntryRow(
+    entry: entry,
+    icon: vm.icon(for: entry),
+    categoryNames: vm.categoryNames(for: entry),
+    timeframeText: vm.timeframeText(for: entry),
+    durationText: vm.durationText(for: entry),
+    isInProgress: vm.isInProgress(entry)
+)
+```
+
+### Accessibility
+
+- `accessibilityIdentifier("EntryRow(\(entry.id))")`.
+- The whole row is a single element: category names, timeframe, and duration are `.accessibilityHidden(true)` and folded into the row label, so VoiceOver reads one line per entry.
+
+---
+
 ## `CategoryRow`
 
 Manage-categories list row for a category (F2). Tap opens `CategoryEditor`.
@@ -866,37 +933,57 @@ List {
 
 ## `SectionHeader`
 
-Simple section title used in editor screens to label input sections.
+Simple section title used in editor screens to label input sections, and in History as the day-group header.
 
 ### Signature
 
 ```swift
-struct SectionHeader: View {
+struct SectionHeader<Trailing: View>: View {
     let title: String
+    @ViewBuilder let trailing: () -> Trailing
+    /// Leading inset that visually aligns the title with a row's text column
+    /// (e.g. flush with `EntryRow`'s content past its icon column). When nil,
+    /// the title sits at the container's default leading inset.
+    let contentLeadingInset: CGFloat?
 }
 ```
 
 ### Visual
 
-- `Text(title).font(.title2.bold()).foregroundStyle(Theme.textPrimary)`.
-- Padded with `Theme.spacingMedium` leading / `Theme.spacingSmall` vertical.
+- `Text(title).font(.title2.bold()).foregroundStyle(Theme.textPrimary)` — or `.headline` when used as a History day-group header over `List` section rows (the editor usage keeps `.title2.bold()`).
+- Optional trailing view (right-aligned), e.g. the History day total.
+- Padded with `Theme.spacingMedium` leading / `Theme.spacingSmall` vertical (editors), or the History day-group paddings (see `SCREENS/History.md`).
+- History day-group usage (D8/D10): day label left-aligned to the `EntryRow` icon column's leading edge via `contentLeadingInset`; when the header is elevated (pinned at the top of the list), the trailing view shows the day's total tracked time, right-aligned to the `EntryRow` duration/timeframe trailing edge. In-list (not elevated), the header shows only the day label.
 
 ### States
 
 | State | Visual |
 |---|---|
-| Default | `.title2.bold()` title in `Theme.textPrimary` |
+| Default (editor) | `.title2.bold()` title in `Theme.textPrimary` |
+| Day-group in-list | Day label only |
+| Day-group elevated (pinned) | Day label + right-aligned total ("2h 35m tracked") |
 
 ### Requirements
 
 - Pure presentational — no state, no action.
-- Used in `CategoryEditor` to label the icon section.
+- Editor usage: labels the icon section in `CategoryEditor`.
+- History usage: day-group header. The parent gates the trailing total on the header's elevation state — the component itself has no notion of scrolling.
 
 ### Usage
 
 ```swift
 SectionHeader(title: L10n.categoryEditorIconLabel)
 IconPickerGrid(options: CatalogIcon.renderableSymbols, selection: $vm.icon, accessibilityId: "CategoryEditorIcon")
+
+// History day group (D8/D10):
+SectionHeader(title: dayGroup.label, contentLeadingInset: EntryRow.iconColumnWidth + Theme.spacingMedium) {
+    if isElevated {
+        Text("\(dayGroup.total) \(L10n.historyTracked.text)")
+            .font(.caption)
+            .foregroundStyle(Theme.textSecondary)
+            .monospacedDigit()
+    }
+}
 ```
 
 ### Accessibility

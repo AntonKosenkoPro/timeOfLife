@@ -130,6 +130,16 @@
 "insights.emptyTitle" = "Пока пусто";
 "insights.emptySubtitle" = "Закономерности появятся после небольшого объёма учёта времени.";
 
+// History day-group labels
+"history.day.today" = "Сегодня";
+"history.day.yesterday" = "Вчера";
+
+// In-progress indicator
+"history.inProgress" = "В процессе";
+
+// Day total suffix
+"history.tracked" = "отслеживано";
+
 // Starter categories (category-management spec, seed requirement)
 "category.seed.work" = "Работа";
 "category.seed.hobby" = "Хобби";
