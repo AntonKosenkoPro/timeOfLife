@@ -140,6 +140,31 @@
 // Day total suffix
 "history.tracked" = "tracked";
 
+// Entry provenance (entry-provenance spec, activity-detail-sheet)
+"provenance.via.widget" = "via Widget";
+"provenance.via.siri" = "via Siri";
+"provenance.via.control" = "via Control";
+"provenance.via.screentime" = "via Screen Time";
+"provenance.via.garmin" = "via Garmin";
+"provenance.via.calendar" = "via Calendar";
+"provenance.via.healthkit" = "via HealthKit";
+
+// Entry source names (activity-detail-sheet entry rows: sync icon + name)
+"provenance.name.widget" = "Widget";
+"provenance.name.siri" = "Siri";
+"provenance.name.control" = "Control";
+"provenance.name.screentime" = "Screen Time";
+"provenance.name.garmin" = "Garmin";
+"provenance.name.calendar" = "Calendar";
+"provenance.name.healthkit" = "HealthKit";
+
+// Activity detail sheet (activity-detail-sheet)
+"activityDetail.editActivity" = "Edit Activity";
+"activityDetail.categories" = "Categories";
+"activityDetail.noCategories" = "none";
+"activityDetail.entries" = "Entries";
+"activityDetail.total" = "Total: %@";
+
 // Starter categories (category-management spec, seed requirement)
 "category.seed.work" = "Work";
 "category.seed.hobby" = "Hobby";

@@ -112,6 +112,29 @@ enum L10n: String, CaseIterable {
     case historyInProgress = "history.inProgress"
     case historyTracked = "history.tracked"
 
+    // Entry provenance (entry-provenance spec, activity-detail-sheet)
+    case provenanceViaWidget = "provenance.via.widget"
+    case provenanceViaSiri = "provenance.via.siri"
+    case provenanceViaControl = "provenance.via.control"
+    case provenanceViaScreentime = "provenance.via.screentime"
+    case provenanceViaGarmin = "provenance.via.garmin"
+    case provenanceViaCalendar = "provenance.via.calendar"
+    case provenanceViaHealthkit = "provenance.via.healthkit"
+    case provenanceNameWidget = "provenance.name.widget"
+    case provenanceNameSiri = "provenance.name.siri"
+    case provenanceNameControl = "provenance.name.control"
+    case provenanceNameScreentime = "provenance.name.screentime"
+    case provenanceNameGarmin = "provenance.name.garmin"
+    case provenanceNameCalendar = "provenance.name.calendar"
+    case provenanceNameHealthkit = "provenance.name.healthkit"
+
+    // Activity detail sheet (activity-detail-sheet)
+    case activityDetailEditActivity = "activityDetail.editActivity"
+    case activityDetailCategories = "activityDetail.categories"
+    case activityDetailNoCategories = "activityDetail.noCategories"
+    case activityDetailEntries = "activityDetail.entries"
+    case activityDetailTotal = "activityDetail.total"
+
     // Starter categories (category-management spec, seed requirement)
     case categorySeedWork = "category.seed.work"
     case categorySeedHobby = "category.seed.hobby"

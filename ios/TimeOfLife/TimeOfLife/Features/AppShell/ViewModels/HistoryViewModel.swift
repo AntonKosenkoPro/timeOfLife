@@ -91,20 +91,26 @@ final class HistoryViewModel: ObservableObject {
         entry.endedAt == nil
     }
 
+    /// Localized "via <Source>" provenance label; empty for manual entries
+    /// (entry-provenance D7, activity-detail-sheet).
+    func viaText(for entry: TimeEntry) -> String {
+        EntryProvenance.viaText(for: entry.source)
+    }
+
     /// The start–end timeframe caption ("14:00 – 15:20"); an in-progress
     /// entry shows the start time followed by the in-progress indicator (D5).
     func timeframeText(for entry: TimeEntry) -> String {
-        let start = Self.timeFormatter.string(from: entry.startedAt)
+        let start = Self.timeText(for: entry.startedAt)
         if isInProgress(entry) {
             return "\(start) – \(L10n.historyInProgress.text)"
         }
         guard let endedAt = entry.endedAt else {
             return start
         }
-        return "\(start) – \(Self.timeFormatter.string(from: endedAt))"
+        return "\(start) – \(Self.timeText(for: endedAt))"
     }
 
-    /// Natural-language duration ("1h 20m"); in-progress entries show the
+    /// The entry's natural-language duration; an in-progress entry shows the
     /// localized in-progress indicator instead (D5).
     func durationText(for entry: TimeEntry) -> String {
         if isInProgress(entry) {
@@ -186,6 +192,44 @@ final class HistoryViewModel: ObservableObject {
         return "\(secs)s"
     }
 
+    /// Three-component duration for the activity detail sheet
+    /// (activity-detail-sheet D4a): up to three largest `w/d/h/m/s`
+    /// components, largest first, zero components omitted — except seconds
+    /// are appended when minutes are shown, even as `0s`, subject to the
+    /// three-component cap. Examples: `2w 5d 11h`, `1h 52m 31s`,
+    /// `1h 5m 0s`, `59m 50s`, `28s`.
+    nonisolated static func detailedDuration(_ seconds: Int) -> String {
+        let total = max(0, seconds)
+        let units: [(value: Int, suffix: String)] = [
+            (total / 604_800, "w"),
+            ((total % 604_800) / 86_400, "d"),
+            ((total % 86_400) / 3_600, "h"),
+            ((total % 3_600) / 60, "m"),
+            (total % 60, "s"),
+        ]
+        guard let first = units.firstIndex(where: { $0.value > 0 }) else {
+            return "0s"
+        }
+        var parts: [String] = []
+        var index = first
+        while index < units.count, parts.count < 3 {
+            if units[index].value > 0 {
+                parts.append("\(units[index].value)\(units[index].suffix)")
+            }
+            index += 1
+        }
+        if parts.count < 3, !parts.contains(where: { $0.hasSuffix("s") }),
+           parts.contains(where: { $0.hasSuffix("m") }) {
+            parts.append("0s")
+        }
+        return parts.joined(separator: " ")
+    }
+
+    /// Short-time caption ("14:00") shared with the activity detail sheet.
+    nonisolated static func timeText(for date: Date) -> String {
+        timeFormatter.string(from: date)
+    }
+
     private static func clampedSeconds(start: Date, end: Date?) -> Int {
         guard let end else { return 0 }
         return max(0, Int(end.timeIntervalSince(start).rounded()))
@@ -210,7 +254,7 @@ final class HistoryViewModel: ObservableObject {
         return calendar.date(from: comps) ?? Date()
     }
 
-    private static let timeFormatter: DateFormatter = {
+    nonisolated private static let timeFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.timeStyle = .short
         return formatter

@@ -628,6 +628,101 @@ struct LocalStoreTests {
         #expect(entries.count == 2)
     }
 
+    // MARK: - Per-activity queries (activity-detail-sheet)
+
+    @Test("entries(activityID:) returns only that activity's entries, newest first")
+    func perActivityEntries() async throws {
+        let store = try makeStore()
+        try await store.createActivity(makeActivity(id: "act-1", name: "Coding"))
+        try await store.createActivity(makeActivity(id: "act-2", name: "Reading"))
+        var older = makeEntry(id: "entry-1", activityID: "act-1")
+        older = TimeEntry(
+            id: older.id,
+            activityID: older.activityID,
+            activityName: older.activityName,
+            startedAt: Date(timeIntervalSinceReferenceDate: 2_500),
+            endedAt: older.endedAt,
+            durationSeconds: older.durationSeconds,
+            source: older.source,
+            sourceRef: older.sourceRef,
+            createdAt: older.createdAt,
+            updatedAt: older.updatedAt
+        )
+        var newer = makeEntry(id: "entry-2", activityID: "act-1", source: "garmin", sourceRef: "g-1")
+        newer = TimeEntry(
+            id: newer.id,
+            activityID: newer.activityID,
+            activityName: newer.activityName,
+            startedAt: Date(timeIntervalSinceReferenceDate: 9_500),
+            endedAt: newer.endedAt,
+            durationSeconds: newer.durationSeconds,
+            source: newer.source,
+            sourceRef: newer.sourceRef,
+            createdAt: newer.createdAt,
+            updatedAt: newer.updatedAt
+        )
+        let other = makeEntry(id: "entry-3", activityID: "act-2")
+        try await store.createEntry(older)
+        try await store.createEntry(newer)
+        try await store.createEntry(other)
+
+        let entries = try await store.entries(activityID: "act-1")
+        #expect(entries.map(\.id) == ["entry-2", "entry-1"])
+        #expect(entries.allSatisfy { $0.activityName == "Coding" })
+    }
+
+    @Test("entries(activityID:) returns an empty array for an activity with no entries")
+    func perActivityEntriesEmpty() async throws {
+        let store = try makeStore()
+        try await store.createActivity(makeActivity(id: "act-1"))
+
+        let entries = try await store.entries(activityID: "act-1")
+        #expect(entries.isEmpty)
+    }
+
+    @Test("entries(activityID:) returns nothing after the activity is cascade-deleted")
+    func perActivityEntriesAfterCascadeDelete() async throws {
+        let store = try makeStore()
+        try await store.createActivity(makeActivity(id: "act-1"))
+        try await store.createEntry(makeEntry(id: "entry-1", activityID: "act-1"))
+        try await store.deleteActivity(id: "act-1")
+
+        let entries = try await store.entries(activityID: "act-1")
+        #expect(entries.isEmpty)
+    }
+
+    @Test("totalDuration(activityID:) sums committed durations only, isolated per activity")
+    func totalDurationSumsCommittedOnly() async throws {
+        let store = try makeStore()
+        try await store.createActivity(makeActivity(id: "act-1", name: "Coding"))
+        try await store.createActivity(makeActivity(id: "act-2", name: "Reading"))
+        try await store.createEntry(makeEntry(id: "entry-1", activityID: "act-1"))
+
+        let running = TimeEntry(
+            id: "entry-2",
+            activityID: "act-1",
+            activityName: "Coding",
+            startedAt: Date(timeIntervalSinceReferenceDate: 2_500),
+            endedAt: nil,
+            durationSeconds: nil,
+            source: "manual",
+            sourceRef: nil,
+            createdAt: Date(timeIntervalSinceReferenceDate: 2_000),
+            updatedAt: Date(timeIntervalSinceReferenceDate: 3_000)
+        )
+        try await store.createEntry(running)
+        try await store.createEntry(makeEntry(id: "entry-3", activityID: "act-2"))
+
+        let total = try await store.totalDuration(activityID: "act-1")
+        #expect(total == 600)
+
+        let other = try await store.totalDuration(activityID: "act-2")
+        #expect(other == 600)
+
+        let none = try await store.totalDuration(activityID: "act-missing")
+        #expect(none == 0)
+    }
+
     // MARK: - eraseAll
 
     @Test("eraseAll wipes every table")

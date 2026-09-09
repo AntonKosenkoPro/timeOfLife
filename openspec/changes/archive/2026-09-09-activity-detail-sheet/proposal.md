@@ -5,9 +5,11 @@ History is shipped but deliberately inert: tapping an entry row does nothing, so
 ## What Changes
 
 - Tapping a History entry row opens an **Activity detail sheet** (medium detent, draggable to large).
-- The sheet shows the activity's identity (icon, name, category names), its **all-time tracked total** (right-aligned opposite the name, monospaced digits), an **Edit activity** button, and **all committed entries** of that activity, day-grouped like the History list (uncapped, lazily loaded).
+- The sheet toolbar shows the activity name and an **Edit activity** action. The body header shows each activity field **exactly once**: the activity icon, its categories (each with its own icon, under a "Categories" label), and the notes — never repeating the name.
+- A divider separates the activity header from the **Entries** section, whose header carries the **all-time tracked total** ("Total: 12h 40m 5s", three-component duration format).
+- The Entries section lists **all committed entries, day-grouped** like the History list (uncapped, lazily loaded), each row showing **only entry data**: start–finish times (day-prefixed when spanning midnight), provenance as a shared sync icon plus source name, and duration — no activity name/icon/categories.
 - Entry rows inside the sheet are not tappable. The running entry never appears in the sheet (same rule as History).
-- "via <Source>" provenance labels now appear on entry rows **everywhere** (History list rows and detail-sheet rows). Manual entries show no label. This retires the deferred "via <Source>" surface item for row labels (an entry-detail surface is explicitly not part of this change).
+- "via <Source>" provenance labels appear on **History list rows**; the detail sheet uses the compact sync-icon + source-name form. Manual entries show no label anywhere. This retires the deferred "via <Source>" surface item (an entry-detail surface is explicitly not part of this change).
 - History rows become tappable (they were intentionally inert per `history-entry-list`). No swipe actions, no long-press, no edit/delete of entries from History.
 - "Edit activity" presents the existing `ActivityEditorView` stacked on top of the detail sheet; dismissing returns to the detail sheet.
 - Non-goal (deferred): activity deletion UI with a destructive confirmation ("Delete Running and its 23 entries (12h 40m tracked)?") — separate change `delete-activity`. Cascade deletion semantics stay unchanged; entries die with their activity, so the sheet is unreachable for a deleted activity.

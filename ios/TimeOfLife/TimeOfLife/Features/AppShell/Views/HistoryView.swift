@@ -13,8 +13,12 @@ import SwiftUI
 /// scroll tracking. The list is read-only (no swipe actions), so `List`'s
 /// editing machinery is not needed.
 struct HistoryView: View {
+    @EnvironmentObject var container: AppContainer
     @StateObject private var vm: HistoryViewModel
     @State private var elevatedGroupID: String?
+    /// The activity whose detail sheet is presented (nil = none). Keyed on
+    /// the tapped entry's activity id (activity-detail-sheet spec).
+    @State private var detailActivityID: String?
     /// Changes whenever the shell's running timer starts or stops (nil on
     /// stop). Lets History reload an entry saved from the compact timer
     /// without leaving the tab.
@@ -60,6 +64,13 @@ struct HistoryView: View {
             vm.invalidate()
             Task { await vm.loadIfNeeded() }
         }
+        .sheet(item: Binding(
+            get: { detailActivityID.map(HistoryDetailTarget.init) },
+            set: { detailActivityID = $0?.activityID }
+        )) { target in
+            ActivityDetailView(store: container.localStore, activityID: target.activityID)
+                .environmentObject(container)
+        }
     }
 
     private var historyList: some View {
@@ -74,9 +85,15 @@ struct HistoryView: View {
                                 categoryNames: vm.categoryNames(for: entry),
                                 timeframeText: vm.timeframeText(for: entry),
                                 durationText: vm.durationText(for: entry),
-                                isInProgress: vm.isInProgress(entry)
+                                isInProgress: vm.isInProgress(entry),
+                                viaText: vm.viaText(for: entry)
                             )
                             .padding(.horizontal, Theme.spacingMedium)
+                            // Tap → activity detail sheet (activity-detail-
+                            // sheet spec). No swipe/long-press actions.
+                            .contentShape(Rectangle())
+                            .onTapGesture { detailActivityID = entry.activityID }
+                            .accessibilityAddTraits(.isButton)
                         }
                     } header: {
                         dayGroupHeader(group)
@@ -147,6 +164,13 @@ struct HistoryView: View {
 }
 
 // MARK: - Scroll preferences
+
+/// Identifiable wrapper so the History tap can drive `.sheet(item:)` with a
+/// bare activity id.
+private struct HistoryDetailTarget: Identifiable {
+    let activityID: String
+    var id: String { activityID }
+}
 
 private struct HeaderFrame: Equatable {
     let groupID: String

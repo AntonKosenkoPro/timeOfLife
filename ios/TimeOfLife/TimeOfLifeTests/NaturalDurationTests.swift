@@ -38,3 +38,34 @@ struct NaturalDurationTests {
         #expect(HistoryViewModel.naturalDuration(-5) == "0s")
     }
 }
+
+@Suite("Three-component duration formatter (detail sheet)")
+struct DetailedDurationTests {
+
+    @Test("zero and sub-minute durations")
+    func secondsOnly() {
+        #expect(HistoryViewModel.detailedDuration(0) == "0s")
+        #expect(HistoryViewModel.detailedDuration(28) == "28s")
+        #expect(HistoryViewModel.detailedDuration(-5) == "0s")
+    }
+
+    @Test("minutes with seconds")
+    func minutes() {
+        #expect(HistoryViewModel.detailedDuration(329) == "5m 29s")
+        #expect(HistoryViewModel.detailedDuration(3590) == "59m 50s")
+    }
+
+    @Test("hours show seconds, even as zero")
+    func hours() {
+        #expect(HistoryViewModel.detailedDuration(3600) == "1h")
+        #expect(HistoryViewModel.detailedDuration(3900) == "1h 5m 0s")
+        #expect(HistoryViewModel.detailedDuration(11511) == "3h 11m 51s")
+    }
+
+    @Test("days and weeks cap at three components")
+    func daysAndWeeks() {
+        #expect(HistoryViewModel.detailedDuration(90_000) == "1d 1h")
+        #expect(HistoryViewModel.detailedDuration(1_595_100) == "2w 4d 11h")
+        #expect(HistoryViewModel.detailedDuration(93_784) == "1d 2h 3m")
+    }
+}

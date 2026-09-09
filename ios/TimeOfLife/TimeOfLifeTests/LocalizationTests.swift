@@ -138,7 +138,10 @@ struct LocalizationTests {
     func allCasesCount() {
         // 123 keys after refine-track-recents; history-entry-list adds
         // historyDayToday, historyDayYesterday, historyInProgress,
-        // historyTracked = 127
-        #expect(l10nCases.count == 127)
+        // historyTracked = 127; activity-detail-sheet adds 7 provenance
+        // "via" labels + activityDetailEditActivity = 135; the sheet
+        // redesign adds 7 bare source names + categories/entries/total = 145;
+        // save-dismiss/empty-categories revision adds noCategories = 146
+        #expect(l10nCases.count == 146)
     }
 }

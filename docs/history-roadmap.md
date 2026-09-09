@@ -60,17 +60,18 @@ where it was opened from (History row or ActivityDetail entries list).
   pick-from-existing list for reassignment? Reassignment is error-prone;
   worth a deliberate control.
 
-### 3. ActivityDetail (new, read-first; optional in v1)
+### 3. ActivityDetail (new, read-first) — SHIPPED (superseded)
 
-- Reached from Manage-Activities row tap (or Recents), NOT from History rows.
-- Shows the activity definition (name, notes, categories) + a timeline/list
-  of its entries. "Edit" opens the existing `ActivityEditor` sheet (def
-  only). "Delete" opens `ScopeConfirmation` (delete all vs. entry-only).
-- This is the most expensive deferred piece (a whole new read-first screen).
-  Could be deferred beyond v1 of History; `ScopeConfirmation`'s
+- **Superseded by the `activity-detail-sheet` change** — but note the shipped
+  design inverts this item's original lean: the detail IS reached from
+  History rows (tap an entry → activity detail sheet at medium→large
+  detents), not from Manage-Activities. It shows the identity header with
+  the all-time total, the complete day-grouped entry list, and "Edit
+  Activity" stacking the existing editor. It is read-only (no delete; the
+  `delete-activity` change will add the destructive surface with
+  `ScopeConfirmation`-style confirmation). The remaining open piece below is
+  the entry-count scope choice at delete time.
   "delete only this entry" then finds its home on `EntryDetail` instead.
-- Open question: does per-activity timeline pull its weight on day one, or
-  is it v2?
 
 ### 4. Manual entry addition (no-timer start/end)
 
@@ -94,15 +95,13 @@ where it was opened from (History row or ActivityDetail entries list).
   existing `TagSelector` chip pattern is a candidate for Activity/Source
   multi-select.
 
-### 6. "via <Source>" provenance labels (U1)
+### 6. "via <Source>" provenance labels (U1) — SHIPPED
 
-- Non-`manual` entries show a localized "via <Source>" label in entry
-  detail/history; `manual` shows nothing. Storage is complete; the UI is
-  not (deferred per `local-first-sync-architecture` tasks).
-- Open spec clarification: does "history" in U1 mean the History list row,
-  the EntryDetail, or both? The row could get crowded with activity name +
-  categories + timeframe + timespan + "via Garmin"; detail is the natural
-  home, but the spec wording is ambiguous. Resolve when implementing.
+- **Delivered by the `activity-detail-sheet` change**: non-`manual` entries
+  show a localized "via <Source>" label appended to entry-row captions in
+  both the History list and the activity detail sheet (`EntryProvenance`).
+  The spec ambiguity was resolved toward rows everywhere; no entry-detail
+  surface exists.
 
 ### 7. Running / in-progress session in History
 

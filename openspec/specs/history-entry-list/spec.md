@@ -59,11 +59,26 @@ Day group headers SHALL use relative labels ("Today", "Yesterday") for the two m
 - **WHEN** a day group contains an entry with no end time
 - **THEN** the total counts only entries with a known `durationSeconds`; in-progress entries contribute zero to the total
 
-### Requirement: History is read-only
-History rows SHALL not respond to taps in this capability. No edit, delete, or navigation action SHALL be available from the History list.
+### Requirement: History offers no edit, delete, swipe, or long-press actions
+History rows SHALL NOT offer edit, delete, swipe, or long-press actions. Tapping an entry row navigates to the activity detail sheet (see "Tapping a History entry row opens the activity detail sheet").
 
-#### Scenario: Tap on entry row
+#### Scenario: No row actions
+- **WHEN** the user swipes or long-presses a History entry row
+- **THEN** no action is offered and nothing happens
+
+### Requirement: Tapping a History entry row opens the activity detail sheet
+The History list SHALL respond to a tap on an entry row by presenting the activity detail sheet for the entry's activity. The sheet is modal (a sheet, not a navigation push). History SHALL NOT offer swipe actions, long-press actions, or any edit/delete of entries. Tapping an entry row inside the detail sheet SHALL do nothing.
+
+#### Scenario: Tap opens the sheet
 - **WHEN** the user taps a History entry row
+- **THEN** the activity detail sheet for that entry's activity is presented
+
+#### Scenario: No other row actions
+- **WHEN** the user swipes or long-presses a History entry row
+- **THEN** no action is offered and nothing happens
+
+#### Scenario: Tap inside the detail sheet
+- **WHEN** the user taps an entry row inside the activity detail sheet
 - **THEN** nothing happens
 
 ### Requirement: History preserves compact timer access with a persistent nav bar

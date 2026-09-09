@@ -149,6 +149,11 @@ actor LocalStore {
             // NULL source_ref values are exempt by SQL semantics (NULLs never
             // collide in a UNIQUE index).
             try db.create(indexOn: "entries", columns: ["source", "source_ref"], options: [.unique])
+            // Per-activity entry lookups (activity-detail-sheet): the detail
+            // sheet and its all-time total query by activity_id, which has
+            // no index otherwise (only the PK and the unique provenance
+            // index above).
+            try db.create(indexOn: "entries", columns: ["activity_id"])
             try db.create(table: "timer_state") { t in
                 t.column("id", .text).primaryKey()
                 t.column("activity_id", .text)
@@ -925,6 +930,34 @@ actor LocalStore {
                 ORDER BY e.started_at DESC
                 """)
             return rows.map(Self.entry(from:))
+        }
+    }
+
+    /// All committed entries of one activity, newest first (activity-detail-sheet).
+    func entries(activityID: String) throws -> [TimeEntry] {
+        try dbQueue.read { db in
+            let rows = try Row.fetchAll(db, sql: """
+                SELECT e.*, a.name AS activity_name
+                FROM entries e
+                JOIN activities a ON a.id = e.activity_id
+                WHERE e.activity_id = ?
+                ORDER BY e.started_at DESC
+                """, arguments: [activityID])
+            return rows.map(Self.entry(from:))
+        }
+    }
+
+    /// All-time sum of committed durations for one activity, in seconds
+    /// (activity-detail-sheet). In-progress entries (NULL duration) and
+    /// NULL durations contribute zero via COALESCE.
+    func totalDuration(activityID: String) throws -> Int {
+        try dbQueue.read { db in
+            let row = try Row.fetchOne(db, sql: """
+                SELECT COALESCE(SUM(duration_seconds), 0) AS total
+                FROM entries
+                WHERE activity_id = ?
+                """, arguments: [activityID])
+            return row?["total"] ?? 0
         }
     }
 

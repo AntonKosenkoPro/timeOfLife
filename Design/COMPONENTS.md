@@ -816,7 +816,7 @@ List {
 
 ## `EntryRow`
 
-Read-only History row for a committed time entry (history-entry-list spec, Variant H layout). Purely presentational — grouping, category resolution, and duration formatting are owned by `HistoryViewModel`.
+Read-only History row for a committed time entry (history-entry-list spec, Variant H layout). Purely presentational — grouping, category resolution, and duration formatting are owned by `HistoryViewModel`. (The activity detail sheet uses the entry-only `ActivityEntryRow` instead.)
 
 ### Signature
 
@@ -828,6 +828,7 @@ struct EntryRow: View {
     let timeframeText: String
     let durationText: String
     let isInProgress: Bool
+    var viaText: String = ""   // localized "via <Source>"; empty for manual
 }
 ```
 
@@ -837,14 +838,14 @@ Variant H (spike-confirmed, design.md D4):
 
 ```
   [icon]  Activity Name                    1h 20m
-          Health, Morning              14:00 – 15:20
+          Health, Morning, via Garmin  14:00 – 15:20
 ```
 
 - `HStack(alignment: .top, spacing: Theme.spacingMedium)`:
   - Leading icon: first category's SF Symbol, `.title3`, `Theme.textSecondary`, 28 pt column, vertically spanning both text lines. Its optical top is top-aligned with the activity name's **cap-height top** (top of capital letters), not the text frame top — achieved with a negative top padding tuned for `.title3` icon + `.headline` name (`EntryRow.iconTopAdjustment`). If the font stack changes, the offset needs re-tuning.
   - `VStack(alignment: .leading, spacing: 2)`:
     - Line 1: activity name `.headline`, `Theme.textPrimary` (left, flexible) + duration `.headline`, `Theme.textPrimary`, `.monospacedDigit()` (right).
-    - Line 2: category names `.caption`, `Theme.textSecondary` (left, flexible) + timeframe `.caption`, `Theme.textSecondary`, `.monospacedDigit()` (right).
+    - Line 2: category names + provenance label `.caption`, `Theme.textSecondary` (left, flexible) + timeframe `.caption`, `Theme.textSecondary`, `.monospacedDigit()` (right). The "via <Source>" label (entry-provenance spec) is appended to the category caption after a comma; `manual` entries show nothing.
 - Min height `Theme.minTapArea`; dividers between rows lead after the icon column.
 
 ### States
@@ -852,7 +853,8 @@ Variant H (spike-confirmed, design.md D4):
 | State | Visual |
 |---|---|
 | With categories | First category's icon leading; name + duration line 1; category names + timeframe line 2 |
-| No categories | `questionmark` fallback icon; line 2 shows only the timeframe |
+| With provenance | The "via <Source>" label appended to line 2's left caption (after category names, or alone when no categories) |
+| No categories | `questionmark` fallback icon; line 2 shows only the timeframe (plus the "via" label when present) |
 | In progress (no `endedAt`) | Duration slot shows the localized in-progress indicator; timeframe shows the start time |
 
 ### Requirements
@@ -870,7 +872,8 @@ EntryRow(
     categoryNames: vm.categoryNames(for: entry),
     timeframeText: vm.timeframeText(for: entry),
     durationText: vm.durationText(for: entry),
-    isInProgress: vm.isInProgress(entry)
+    isInProgress: vm.isInProgress(entry),
+    viaText: vm.viaText(for: entry)
 )
 ```
 
@@ -1101,3 +1104,91 @@ ScopeConfirmation(
 
 - Relies on the system `.confirmationDialog` accessibility — no custom identifiers needed.
 - The dialog title and message are read together; destructive buttons are announced as "Delete" with the destructive trait.
+
+---
+
+## `ActivityDetailView`
+
+Activity detail sheet presented from a History entry tap (activity-detail-sheet spec). Toolbar holds the activity name and the "Edit Activity" action stacking the existing `ActivityEditorView`. The body header shows each activity field exactly once (icon, categories with icons, notes) below a divider-separated Entries section whose header carries the all-time total; the activity's complete day-grouped committed-entry list renders on inert entry-only rows. Presented at medium detent, draggable to large. If the activity is cascade-deleted while the sheet is open, the sheet dismisses itself.
+
+### Signature
+
+```swift
+struct ActivityDetailView: View {
+    init(store: LocalStore, activityID: String)
+}
+```
+
+### Visual
+
+```
+┌─ sheet (medium → large) ─────────────────────────────┐
+│  ── toolbar title = activity name · [Edit Activity] ─ │
+│  🏃  Categories: 🏷 Health, 🌅 Morning                │
+│      Activity description                            │
+│  ──────────────────────────────────────────────────  │
+│  Entries                              Total: 12h 40m │
+│    Today                                             │
+│    14:00 – 15:20          [sync] Garmin     1h 20m 5s│
+│    Yesterday, 23:34 – Today, 0:34            59m 50s │
+└──────────────────────────────────────────────────────┘
+```
+
+- Header: leading icon (first category's symbol, `EntryRow.iconColumnWidth` column, `.title2`); "Categories:" caption with each category's icon + name, or the localized "none" value when the activity has no categories (the line is always shown); optional activity notes `.subheadline` below when present. No name — the toolbar owns it.
+- A `Divider` separates the header from the Entries section. The Entries header is a `SectionHeader` ("Entries" + "Total: <three-component duration>" caption, monospaced digits).
+- Entries: `ScrollView` + `LazyVStack(pinnedViews: [.sectionHeaders])`, `Section`-grouped by day with plain `SectionHeader` day labels. No scroll-driven elevation — headers always show only the day label.
+- Reuses `HistoryViewModel.makeDayGroups` / `dayLabel` / `timeText` / `detailedDuration` pure helpers.
+
+### Requirements
+
+- Rows are inert: `ActivityEntryRow` receives no tap action; the whole sheet is read-only.
+- "Edit Activity" (`ActivityDetailEditButton`) presents `ActivityEditorView` stacked over the sheet; Save dismisses the editor (the presenter clears its sheet item in `onSaved`) and Cancel dismisses via the editor's own Cancel; on editor dismiss the sheet reloads identity, categories, and total.
+- Running sessions never appear (only committed entries; `totalDuration` sums `duration_seconds` only).
+- The running timer's compact cross-tab control remains visible beneath the sheet on History (sheet overlays the tab content only).
+
+### Usage
+
+```swift
+// In HistoryView, on entry-row tap:
+.sheet(item: $detailTarget) { target in
+    ActivityDetailView(store: container.localStore, activityID: target.activityID)
+        .environmentObject(container)
+}
+```
+
+### Accessibility
+
+- Edit button: `accessibilityIdentifier("ActivityDetailEditButton")`.
+- Entry rows (`ActivityEntryRow(id)`) are single elements folding range, provenance name, and duration.
+- Day headers keep `SectionHeader`'s `.isHeader` trait.
+
+---
+
+## `ActivityEntryRow`
+
+Entry-only row for the activity detail sheet (activity-detail-sheet spec): time range, provenance (shared `arrow.triangle.2.circlepath` sync icon + bare source name), duration. No activity identity. Purely presentational — the caller (`ActivityDetailViewModel`) computes all strings.
+
+### Signature
+
+```swift
+struct ActivityEntryRow: View {
+    static let provenanceIcon = "arrow.triangle.2.circlepath"
+    let timeRangeText: String
+    let provenanceName: String   // "" for manual entries
+    let durationText: String
+}
+```
+
+### Visual
+
+```
+  2:34 PM – 5:46 PM        [sync] Garmin       3h 11m 46s
+```
+
+- `HStack(alignment: .firstTextBaseline)`: range `.subheadline` `Theme.textPrimary` (left, flexible) + optional provenance `.caption` `Theme.textSecondary` + duration `.subheadline` `Theme.textPrimary` `.monospacedDigit()` (right).
+- Min height `Theme.minTapArea`.
+
+### Accessibility
+
+- `accessibilityIdentifier("ActivityEntryRow(\(entry.id))")` set by the parent.
+- Single element: range, provenance name, and duration folded into one label.

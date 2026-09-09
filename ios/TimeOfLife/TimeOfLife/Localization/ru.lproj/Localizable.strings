@@ -140,6 +140,31 @@
 // Day total suffix
 "history.tracked" = "отслеживано";
 
+// Entry provenance (entry-provenance spec, activity-detail-sheet)
+"provenance.via.widget" = "через Виджет";
+"provenance.via.siri" = "через Siri";
+"provenance.via.control" = "через Элемент управления";
+"provenance.via.screentime" = "через Экранное время";
+"provenance.via.garmin" = "через Garmin";
+"provenance.via.calendar" = "через Календарь";
+"provenance.via.healthkit" = "через Здоровье";
+
+// Entry source names (activity-detail-sheet entry rows: sync icon + name)
+"provenance.name.widget" = "Виджет";
+"provenance.name.siri" = "Siri";
+"provenance.name.control" = "Элемент управления";
+"provenance.name.screentime" = "Экранное время";
+"provenance.name.garmin" = "Garmin";
+"provenance.name.calendar" = "Календарь";
+"provenance.name.healthkit" = "Здоровье";
+
+// Activity detail sheet (activity-detail-sheet)
+"activityDetail.editActivity" = "Редактировать активность";
+"activityDetail.categories" = "Категории";
+"activityDetail.noCategories" = "нет";
+"activityDetail.entries" = "Записи";
+"activityDetail.total" = "Всего: %@";
+
 // Starter categories (category-management spec, seed requirement)
 "category.seed.work" = "Работа";
 "category.seed.hobby" = "Хобби";
