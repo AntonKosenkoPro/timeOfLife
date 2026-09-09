@@ -6,9 +6,11 @@ import UIKit
 /// creation, restoration, and error states consistently on iOS 15 and later.
 /// Configured creation and its editor/collision presentation have been
 /// removed (refine-selected-activity-from-track change); Track-owned
-/// refinement is presented by `TrackView` as a sibling sheet.
-struct ActivitySearchSheet: View {
-    @ObservedObject var vm: TrackViewModel
+/// refinement is presented by `TrackView` as a sibling sheet. The sheet is
+/// generic over its host (`ActivitySearchHosting`) so the Log Time sheet
+/// reuses the same presentation (manual-entry spec).
+struct ActivitySearchSheet<VM: ActivitySearchHosting>: View {
+    @ObservedObject var vm: VM
     @Environment(\.dismiss)
     private var dismiss
 
@@ -43,8 +45,8 @@ struct ActivitySearchSheet: View {
     }
 }
 
-private struct ActivitySearchSheetContainer: View {
-    @ObservedObject var vm: TrackViewModel
+private struct ActivitySearchSheetContainer<VM: ActivitySearchHosting>: View {
+    @ObservedObject var vm: VM
     let dismissSheet: DismissAction
 
     var body: some View {
@@ -55,8 +57,8 @@ private struct ActivitySearchSheetContainer: View {
 /// Observes the native search environment from below `.searchable`. Cancel is
 /// a presentation-level action in this flow, so leaving active search also
 /// dismisses the sheet and restores the unmodified committed timer state.
-private struct ActivitySearchSearchStateObserver: View {
-    @ObservedObject var vm: TrackViewModel
+private struct ActivitySearchSearchStateObserver<VM: ActivitySearchHosting>: View {
+    @ObservedObject var vm: VM
     let dismissSheet: DismissAction
     @Environment(\.isSearching)
     private var isSearching

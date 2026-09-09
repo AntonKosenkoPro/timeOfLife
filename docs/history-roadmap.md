@@ -73,16 +73,20 @@ where it was opened from (History row or ActivityDetail entries list).
   the entry-count scope choice at delete time.
   "delete only this entry" then finds its home on `EntryDetail` instead.
 
-### 4. Manual entry addition (no-timer start/end)
+### 4. Manual entry addition (no-timer start/end) — SHIPPED
 
-- A create path with no timer: pick activity, set start/end, save.
-- Candidate homes: a "+" on the History toolbar, a "Log time" on
-  ActivityDetail, or both.
-- Reuses `EntryEditor` in create mode (mirrors `ActivityEditor`'s
-  create/edit modes).
-- Open question: where is the entry point? History "+" is the most
-  discoverable for "log something I forgot"; ActivityDetail "Log time" is
-  more contextual.
+- **Delivered by the `add-manual-entry` change**: a Calendar-grammar
+  `LogTimeView` + `LogTimeViewModel` (`Features/ManualEntry`) with Activity /
+  Starts / Ends rows, inline single-open pickers, an Add validity gate,
+  5-min-floor/+1h defaults, and Calendar-style duration preservation.
+- Two entry points share the sheet: a "+" on the History toolbar and a
+  "Log time" action on the ActivityDetail sheet (pre-filled).
+- The Activity row reuses Track's searchable sheet with quick-create via
+  the shared `ActivitySearchHosting` protocol (not `EntryEditor` create
+  mode — no `EntryEditor` exists yet; when entry editing lands it gets its
+  own sheet per §2).
+- Persists via the existing `LocalStore.createEntry` (`source:"manual"` +
+  transactional outbox); overlaps and future end-times allowed.
 
 ### 5. History filtering
 
@@ -126,7 +130,7 @@ where it was opened from (History row or ActivityDetail entries list).
 
 1. History read-only list (step 1 — this change).
 2. EntryDetail + EntryEditor (tap-to-open + edit + delete/undo).
-3. Manual entry addition.
+3. Manual entry addition — SHIPPED (`add-manual-entry`; standalone sheet, both entry points).
 4. History filtering.
 5. ActivityDetail (if it earns its place) + per-activity timeline.
 6. Provenance labels (can land earlier on EntryDetail if desired).

@@ -30,9 +30,21 @@ A dedicated feature group (not code inside History/ActivityDetail) so both entry
 
 Starts/Ends rows keep Calendar's date-pill + time-pill grammar. The expanded picker is a SwiftUI `DatePicker` with `.datePickerStyle(.graphical)` (dates) / `.wheel` (times), shown inline below the pills; opening one collapses the other (single `expandedPicker` enum in the VM). Alternatives considered: one compact `.compact` DatePicker per row (rejected — its popover calendar doesn't match the observed inline Calendar UX and behaves inconsistently on iOS 15), custom month grid (rejected — new code for what the system provides).
 
-### D3: Reuse `ActivitySearchSheet` for the Activity row
+### D3: Reuse `ActivitySearchSheet` via an `ActivitySearchHosting` protocol
 
-The Activity row opens the existing Track searchable sheet. Requires extracting the search + quick-create logic out of `TrackViewModel` into a reusable unit (e.g. an `ActivityPicking` view-model used by both Track and the Log Time sheet) — the minimal extraction that keeps Track behavior identical. Alternatives considered: a simple `Menu`/list of activities (rejected — breaks down with many activities and loses quick-create, which the specs require), duplicating search logic (rejected — collision-rule drift risk).
+The Activity row opens the existing Track searchable sheet. The shared
+surface is factored as a host protocol (`ActivitySearchHosting`:
+results, draft query binding, committed-selection id, confirm/quick-create/
+restore operations) with `ActivitySearchSheet` / `ActivitySearchContentView`
+generic over it. `TrackViewModel` conforms with zero behavior change (only
+addition: `selectedActivityID`); `LogTimeViewModel` conforms with Log-Time
+commit semantics (confirm/quick-create select into the draft and close the
+picker). Alternatives considered: a `Menu`/plain list (rejected — breaks
+down with many activities, loses quick-create), duplicating the search views
+(rejected — collision-rule drift risk), composing a shared picker view-model
+inside both hosts (rejected — Track's search state is entangled with
+`TrackState` and its tests; the protocol shares the views, which is the
+valuable reuse, while each host keeps its own draft lifecycle).
 
 ### D4: Duration preservation lives in the VM, not the view
 

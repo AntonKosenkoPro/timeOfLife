@@ -9,6 +9,11 @@ struct AppShellView: View {
     @EnvironmentObject var container: AppContainer
     @StateObject private var trackVM: TrackViewModel
     @State private var isShowingProfile = false
+    /// Presents the Log Time sheet from History (manual-entry spec). Owned
+    /// here so the [+] lives in the same toolbar scope as the Profile
+    /// button — one scope renders on every supported iOS version; the
+    /// sheet itself stays in `HistoryView`, which owns the refresh.
+    @State private var isHistoryLogTimeActive = false
 
     init(vm: AppShellViewModel, container: AppContainer) {
         self.vm = vm
@@ -30,7 +35,8 @@ struct AppShellView: View {
             navigationRoot {
                 HistoryView(
                     store: container.localStore,
-                    refreshSignal: vm.runningTimer?.activityID ?? ""
+                    refreshSignal: vm.runningTimer?.activityID ?? "",
+                    logTimeActive: $isHistoryLogTimeActive
                 )
                     .safeAreaInset(edge: .bottom) { compactTimerIfNeeded }
             }
@@ -65,18 +71,11 @@ struct AppShellView: View {
             content()
                 .navigationTitle(navigationTitle)
                 .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .navigationBarTrailing) {
-                        Button {
-                            isShowingProfile = true
-                        } label: {
-                            Image(systemName: "person.crop.circle")
-                                .font(.system(size: 19, weight: .regular))
-                        }
-                        .accessibilityLabel(L10n.profileTitle.text)
-                        .accessibilityIdentifier("ProfileButton")
-                    }
-                }
+                .modifier(ShellToolbar(
+                    showsLogTime: vm.selectedTab == .history,
+                    onLogTime: { isHistoryLogTimeActive = true },
+                    onProfile: { isShowingProfile = true }
+                ))
         }
         .navigationViewStyle(.stack)
     }
@@ -108,6 +107,50 @@ struct AppShellView: View {
     }
 }
 
+/// The shell's navigation-bar scope (app-shell spec + manual-entry spec):
+/// the Profile button on every tab, plus the Log Time [+] on History only.
+/// One scope (never nested child scopes) so the bar renders identically on
+/// every supported iOS version. The `if/else` lives at the View level —
+/// `if` directly inside `.toolbar {}` needs iOS 16 — with the [+] branch
+/// duplicating the Profile item.
+private struct ShellToolbar: ViewModifier {
+    let showsLogTime: Bool
+    let onLogTime: () -> Void
+    let onProfile: () -> Void
+
+    func body(content: Content) -> some View {
+        if showsLogTime {
+            content.toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button(action: onLogTime) {
+                        Image(systemName: "plus")
+                    }
+                    .accessibilityLabel(L10n.historyLogTime.text)
+                    .accessibilityIdentifier("HistoryLogTimeButton")
+                }
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button(action: onProfile) {
+                        Image(systemName: "person.crop.circle")
+                            .font(.system(size: 19, weight: .regular))
+                    }
+                    .accessibilityLabel(L10n.profileTitle.text)
+                    .accessibilityIdentifier("ProfileButton")
+                }
+            }
+        } else {
+            content.toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button(action: onProfile) {
+                        Image(systemName: "person.crop.circle")
+                            .font(.system(size: 19, weight: .regular))
+                    }
+                    .accessibilityLabel(L10n.profileTitle.text)
+                    .accessibilityIdentifier("ProfileButton")
+                }
+            }
+        }
+    }
+}
 /// Honest empty state for History and Insights (app-shell spec: do not fill
 /// destinations with fake data in production).
 private struct DestinationPlaceholder: View {

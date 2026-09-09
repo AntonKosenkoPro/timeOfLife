@@ -10,7 +10,7 @@ import Combine
 /// elapsed-time ticker. Persistence is delegated to `TimerService`, which
 /// writes only to the local database (local-first-store spec).
 @MainActor
-final class TrackViewModel: ObservableObject {
+final class TrackViewModel: ObservableObject, ActivitySearchHosting {
     @Published private(set) var state: TrackState = .idle
     @Published var elapsed: TimeInterval = 0
     @Published var errorMessage: String?
@@ -55,9 +55,12 @@ final class TrackViewModel: ObservableObject {
 
     // MARK: - Activity selection
 
+    /// The committed selection's activity id (ActivitySearchHosting
+    /// checkmark input): the prepared activity, or nil while idle.
+    var selectedActivityID: String? { state.activity?.id }
+
     /// Prepares an activity (ready state) without starting a timer.
-    func select(_ activity: Activity) {
-        guard !state.isRunning else { return }
+    func select(_ activity: Activity) {        guard !state.isRunning else { return }
         state = .ready(activity)
         elapsed = 0
         isSearchActive = false

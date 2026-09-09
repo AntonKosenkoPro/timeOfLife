@@ -160,10 +160,24 @@
 
 // Activity detail sheet (activity-detail-sheet)
 "activityDetail.editActivity" = "Редактировать активность";
+"activityDetail.logTime" = "Записать время";
 "activityDetail.categories" = "Категории";
 "activityDetail.noCategories" = "нет";
 "activityDetail.entries" = "Записи";
 "activityDetail.total" = "Всего: %@";
+
+// Log Time sheet (manual-entry spec)
+"logTime.title" = "Записать время";
+"logTime.add" = "Добавить";
+"logTime.cancel" = "Отмена";
+"logTime.activity" = "Активность";
+"logTime.chooseActivity" = "Выбрать активность";
+"logTime.starts" = "Начало";
+"logTime.ends" = "Конец";
+"logTime.activityMissing" = "Выбранная активность больше не существует.";
+
+// History manual entry (add-manual-entry)
+"history.logTime" = "Записать время";
 
 // Starter categories (category-management spec, seed requirement)
 "category.seed.work" = "Работа";

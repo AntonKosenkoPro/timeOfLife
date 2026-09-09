@@ -160,10 +160,24 @@
 
 // Activity detail sheet (activity-detail-sheet)
 "activityDetail.editActivity" = "Edit Activity";
+"activityDetail.logTime" = "Log Time";
 "activityDetail.categories" = "Categories";
 "activityDetail.noCategories" = "none";
 "activityDetail.entries" = "Entries";
 "activityDetail.total" = "Total: %@";
+
+// Log Time sheet (manual-entry spec)
+"logTime.title" = "Log Time";
+"logTime.add" = "Add";
+"logTime.cancel" = "Cancel";
+"logTime.activity" = "Activity";
+"logTime.chooseActivity" = "Choose activity";
+"logTime.starts" = "Starts";
+"logTime.ends" = "Ends";
+"logTime.activityMissing" = "The selected activity no longer exists.";
+
+// History manual entry (add-manual-entry)
+"history.logTime" = "Log time";
 
 // Starter categories (category-management spec, seed requirement)
 "category.seed.work" = "Work";

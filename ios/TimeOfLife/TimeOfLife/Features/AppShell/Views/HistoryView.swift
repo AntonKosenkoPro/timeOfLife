@@ -19,14 +19,19 @@ struct HistoryView: View {
     /// The activity whose detail sheet is presented (nil = none). Keyed on
     /// the tapped entry's activity id (activity-detail-sheet spec).
     @State private var detailActivityID: String?
+    /// Presents the Log Time sheet (manual-entry spec). Owned by the shell
+    /// so the [+] shares the nav-bar toolbar scope (iOS 15 renders a single
+    /// scope reliably); the sheet and its refresh stay here.
+    @Binding var isLogTimeActive: Bool
     /// Changes whenever the shell's running timer starts or stops (nil on
     /// stop). Lets History reload an entry saved from the compact timer
     /// without leaving the tab.
     private let refreshSignal: String
 
-    init(store: LocalStore, refreshSignal: String = "") {
+    init(store: LocalStore, refreshSignal: String = "", logTimeActive: Binding<Bool> = .constant(false)) {
         _vm = StateObject(wrappedValue: HistoryViewModel(store: store))
         self.refreshSignal = refreshSignal
+        _isLogTimeActive = logTimeActive
     }
 
     var body: some View {
@@ -63,6 +68,12 @@ struct HistoryView: View {
         .onChange(of: refreshSignal) { _ in
             vm.invalidate()
             Task { await vm.loadIfNeeded() }
+        }
+        .sheet(isPresented: $isLogTimeActive) {
+            LogTimeView(service: container.timerService) {
+                vm.invalidate()
+                Task { await vm.loadIfNeeded() }
+            }
         }
         .sheet(item: Binding(
             get: { detailActivityID.map(HistoryDetailTarget.init) },

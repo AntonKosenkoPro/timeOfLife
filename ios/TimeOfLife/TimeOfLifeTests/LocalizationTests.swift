@@ -141,7 +141,9 @@ struct LocalizationTests {
         // historyTracked = 127; activity-detail-sheet adds 7 provenance
         // "via" labels + activityDetailEditActivity = 135; the sheet
         // redesign adds 7 bare source names + categories/entries/total = 145;
-        // save-dismiss/empty-categories revision adds noCategories = 146
-        #expect(l10nCases.count == 146)
+        // save-dismiss/empty-categories revision adds noCategories = 146;
+        // add-manual-entry adds activityDetailLogTime + 8 logTime.* +
+        // historyLogTime = 156
+        #expect(l10nCases.count == 156)
     }
 }

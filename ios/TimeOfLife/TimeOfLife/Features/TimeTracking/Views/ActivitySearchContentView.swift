@@ -6,9 +6,11 @@ import SwiftUI
 /// system owns the search field, focus, keyboard, and Cancel; this view owns
 /// the results surface: full-catalog browse, filtered matches, the prepared
 /// checkmark, the unmatched quick-create row, empty-catalog guidance, and
-/// localized validation/error states. Category metadata is never shown.
-struct ActivitySearchContentView: View {
-    @ObservedObject var vm: TrackViewModel
+/// localized validation/error states. Category metadata is never shown. The
+/// view is generic over its host (`ActivitySearchHosting`) so the Log Time
+/// sheet reuses the same content (manual-entry spec).
+struct ActivitySearchContentView<VM: ActivitySearchHosting>: View {
+    @ObservedObject var vm: VM
 
     var body: some View {
         Group {
@@ -136,7 +138,7 @@ struct ActivitySearchContentView: View {
                 Text(activity.name)
                     .foregroundStyle(Theme.textPrimary)
                 Spacer()
-                if vm.state.activity?.id == activity.id {
+                if vm.selectedActivityID == activity.id {
                     Image(systemName: "checkmark")
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(Theme.accentPrimary)
@@ -146,7 +148,7 @@ struct ActivitySearchContentView: View {
             .frame(minHeight: Theme.minTapArea)
         }
         .accessibilityLabel(String(format: L10n.timerSelectActivity.text, activity.name))
-        .accessibilityValue(vm.state.activity?.id == activity.id ? L10n.timerReady.text : "")
+        .accessibilityValue(vm.selectedActivityID == activity.id ? L10n.timerReady.text : "")
         .accessibilityIdentifier("ActivitySearchResult(\(activity.id))")
     }
 
@@ -183,20 +185,20 @@ struct ActivitySearchContentView: View {
 
 #if DEBUG
 #Preview("Search — Empty Catalog") {
-    ActivitySearchContentView(vm: .preview(isSearchActive: true))
+    ActivitySearchContentView(vm: TrackViewModel.preview(isSearchActive: true))
 }
 
 #Preview("Search — Browse Results") {
     let activities = [Activity(id: "reading", name: "Reading"), Activity(id: "work", name: "Deep work")]
-    return ActivitySearchContentView(vm: .preview(activities: activities, isSearchActive: true))
+    ActivitySearchContentView(vm: TrackViewModel.preview(activities: activities, isSearchActive: true))
 }
 
 #Preview("Search — Unmatched Creation") {
-    ActivitySearchContentView(vm: .preview(query: "Gym", isSearchActive: true))
+    ActivitySearchContentView(vm: TrackViewModel.preview(query: "Gym", isSearchActive: true))
 }
 
 #Preview("Search — Validation") {
-    ActivitySearchContentView(vm: .preview(
+    ActivitySearchContentView(vm: TrackViewModel.preview(
         query: String(repeating: "a", count: 61),
         isSearchActive: true
     ))
@@ -204,7 +206,7 @@ struct ActivitySearchContentView: View {
 
 #Preview("Search — Filtered Results") {
     let activities = [Activity(id: "reading", name: "Reading"), Activity(id: "work", name: "Deep work")]
-    return ActivitySearchContentView(vm: .preview(
+    ActivitySearchContentView(vm: TrackViewModel.preview(
         activities: activities,
         query: "read",
         isSearchActive: true

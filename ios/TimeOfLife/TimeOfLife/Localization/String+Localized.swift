@@ -130,10 +130,24 @@ enum L10n: String, CaseIterable {
 
     // Activity detail sheet (activity-detail-sheet)
     case activityDetailEditActivity = "activityDetail.editActivity"
+    case activityDetailLogTime = "activityDetail.logTime"
     case activityDetailCategories = "activityDetail.categories"
     case activityDetailNoCategories = "activityDetail.noCategories"
     case activityDetailEntries = "activityDetail.entries"
     case activityDetailTotal = "activityDetail.total"
+
+    // Log Time sheet (manual-entry spec)
+    case logTimeTitle = "logTime.title"
+    case logTimeAdd = "logTime.add"
+    case logTimeCancel = "logTime.cancel"
+    case logTimeActivity = "logTime.activity"
+    case logTimeChooseActivity = "logTime.chooseActivity"
+    case logTimeStarts = "logTime.starts"
+    case logTimeEnds = "logTime.ends"
+    case logTimeActivityMissing = "logTime.activityMissing"
+
+    // History manual entry (add-manual-entry)
+    case historyLogTime = "history.logTime"
 
     // Starter categories (category-management spec, seed requirement)
     case categorySeedWork = "category.seed.work"

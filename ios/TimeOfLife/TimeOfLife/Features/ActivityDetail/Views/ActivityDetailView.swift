@@ -9,16 +9,20 @@ import SwiftUI
 /// entry list on inert entry-only rows. Presented at medium detent,
 /// draggable to large. The running session never appears (its entry is
 /// uncommitted). If the activity vanishes (cascade delete) the sheet
-/// dismisses itself (design D6).
+/// dismisses itself (design D6). The "Log time" action opens the Log Time
+/// sheet pre-filled with the activity (manual-entry spec); a saved entry
+/// appears in the Entries list after the sheet dismisses.
 struct ActivityDetailView: View {
     @EnvironmentObject var container: AppContainer
     @StateObject private var vm: ActivityDetailViewModel
     @Environment(\.dismiss)
     private var dismiss
     @State private var editorActivity: Activity?
-    /// Set after the stacked editor dismisses so the next appear reloads
-    /// identity, categories, and total (design D5).
-    @State private var needsReloadAfterEditor = false
+    /// Set after a stacked sheet dismisses so the next appear reloads
+    /// identity, categories, entries, and total.
+    @State private var needsReloadAfterSheet = false
+    /// Presents the Log Time sheet pre-filled with this activity.
+    @State private var isLogTimeActive = false
 
     init(store: LocalStore, activityID: String) {
         _vm = StateObject(wrappedValue: ActivityDetailViewModel(
@@ -41,6 +45,13 @@ struct ActivityDetailView: View {
             .navigationTitle(vm.activity?.name ?? "")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button(L10n.activityDetailLogTime.text) {
+                        isLogTimeActive = true
+                    }
+                    .disabled(vm.activity == nil)
+                    .accessibilityIdentifier("ActivityDetailLogTimeButton")
+                }
                 ToolbarItem(placement: .primaryAction) {
                     Button(L10n.activityDetailEditActivity.text) {
                         editorActivity = vm.activity
@@ -52,13 +63,19 @@ struct ActivityDetailView: View {
         }
         .navigationViewStyle(.stack)
         .task { await vm.load() }
-        .onChange(of: needsReloadAfterEditor) { changed in
+        .onChange(of: needsReloadAfterSheet) { changed in
             guard changed else { return }
-            needsReloadAfterEditor = false
+            needsReloadAfterSheet = false
             Task { await vm.load() }
         }
         .onChange(of: vm.activityIsGone) { gone in
             if gone { dismiss() }
+        }
+        .sheet(isPresented: $isLogTimeActive, onDismiss: reloadAfterSheet) {
+            LogTimeView(
+                service: container.timerService,
+                initialActivity: vm.activity
+            )
         }
         .sheet(item: $editorActivity, onDismiss: reloadAfterEditor) { activity in
             ActivityEditorView(
@@ -81,7 +98,11 @@ struct ActivityDetailView: View {
     // MARK: - Header (each activity field exactly once; no name)
 
     private func reloadAfterEditor() {
-        needsReloadAfterEditor = true
+        needsReloadAfterSheet = true
+    }
+
+    private func reloadAfterSheet() {
+        needsReloadAfterSheet = true
     }
 
     @ViewBuilder private var header: some View {
