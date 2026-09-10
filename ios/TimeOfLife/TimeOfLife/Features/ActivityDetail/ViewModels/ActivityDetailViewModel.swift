@@ -21,10 +21,19 @@ final class ActivityDetailViewModel: ObservableObject {
 
     private let store: LocalStore
     private let activityID: String
+    private let undoBuffer: UndoBufferStore
+    private let nowProvider: () -> Date
 
-    init(store: LocalStore, activityID: String) {
+    init(
+        store: LocalStore,
+        activityID: String,
+        undoBuffer: UndoBufferStore? = nil,
+        now: @escaping () -> Date = Date.init
+    ) {
         self.store = store
         self.activityID = activityID
+        self.undoBuffer = undoBuffer ?? UndoBufferStore(store: store)
+        self.nowProvider = now
     }
 
     /// The store, surfaced so the view can construct the stacked editor
@@ -53,6 +62,10 @@ final class ActivityDetailViewModel: ObservableObject {
             icon = resolved.first.map { CatalogIcon(validated: $0.icon).displaySymbol } ?? "questionmark"
 
             let entries = try await store.entries(activityID: activityID)
+                // Committed entries only (edit-entry-from-activity-detail):
+                // in-progress sessions (no end time) never appear here and
+                // never contribute to the total.
+                .filter { $0.endedAt != nil }
             dayGroups = HistoryViewModel.makeDayGroups(entries: entries, now: Date())
 
             let totalSeconds = try await store.totalDuration(activityID: activityID)
@@ -64,7 +77,6 @@ final class ActivityDetailViewModel: ObservableObject {
     }
 
     // MARK: - Entry-only row presentation (no activity identity)
-
     /// Start–finish range: bare times when both endpoints share a calendar
     /// day, day-prefixed endpoints when the entry spans midnight
     /// ("Yesterday, 11:34 PM – Today, 0:34 AM").
@@ -94,5 +106,62 @@ final class ActivityDetailViewModel: ObservableObject {
     /// manual entries.
     func provenanceName(for entry: TimeEntry) -> String {
         EntryProvenance.name(for: entry.source)
+    }
+
+    // MARK: - Entry undo (shake → default confirmation → single restore)
+
+    /// Registers the newest restorable entry deletion with the system Undo
+    /// manager, so shaking surfaces the DEFAULT Undo confirmation and
+    /// confirming restores exactly one entry (the most recent buffer row).
+    /// Previous registrations are cleared first, so one shake+confirm can
+    /// never restore two deletions. Offers nothing when the buffer holds
+    /// no non-expired entry deletion — including when the newest row
+    /// belongs to another surface (U7 supersession: an entry delete
+    /// followed by a category delete leaves only the category undoable
+    /// here). After the registered undo runs, re-registers when a further
+    /// entry deletion is still restorable (one more shake restores one
+    /// more), otherwise the surface offers no Undo.
+    func registerSystemUndo(with undoManager: UndoManager?) async {
+        guard let undoManager else { return }
+        undoManager.removeAllActions(withTarget: self)
+        guard let recent = try? await undoBuffer.mostRecent(),
+              (try? await store.entryDeletionSnapshot(bufferID: recent.id)) != nil,
+              !recent.isExpired(now: nowProvider()) else { return }
+        undoManager.registerUndo(withTarget: self) { [weak undoManager] target in
+            Task { @MainActor in
+                await target.performUndo()
+                await target.registerSystemUndo(with: undoManager)
+            }
+        }
+        // Names the undoable action so the DEFAULT system confirmation
+        // states what Confirm will restore (without this the prompt's
+        // action slot is empty). Reuses the existing localized Delete
+        // string — no new strings, EN+RU already covered (U4).
+        undoManager.setActionName(L10n.entryDelete.text)
+    }
+
+    /// Restores the most recent entry deletion within the 30 s wall-clock
+    /// window (U7). Only entry deletions are restored here — buffer rows
+    /// owned by other surfaces are left for their owners. An expired row
+    /// commits on the spot so the list never shows a restorable-but-dead
+    /// deletion. No toast is shown in this change; the shake gesture is the
+    /// only affordance, and one shake restores at most one deletion.
+    func performUndo() async {
+        do {
+            guard let recent = try await undoBuffer.mostRecent() else { return }
+            guard try await store.entryDeletionSnapshot(bufferID: recent.id) != nil else { return }
+            let now = nowProvider()
+            if recent.isExpired(now: now) {
+                try? await undoBuffer.commitExpired(now: now)
+                await load()
+                return
+            }
+            if try await store.undoEntryDeletion(bufferID: recent.id) != nil {
+                await load()
+            }
+        } catch {
+            // Keep the last good snapshot; a transient failure must not
+            // blank the sheet (same philosophy as load()).
+        }
     }
 }

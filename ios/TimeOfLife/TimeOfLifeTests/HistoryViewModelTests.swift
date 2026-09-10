@@ -235,6 +235,63 @@ struct HistoryViewModelTests {
         #expect(vm.dayGroups.flatMap(\.entries).map(\.id) == ["e2", "e1"])
     }
 
+    // MARK: - Entry edit/delete propagation (edit-entry-from-activity-detail)
+
+    @Test("edited entry values appear after invalidate + reload")
+    func editedEntryReflectedAfterReload() async throws {
+        let store = try makeStore()
+        try await store.createActivity(Activity(id: "a1", name: "Running"))
+        let start = Date(timeIntervalSinceNow: -3600)
+        try await store.createEntry(entry(
+            id: "e1",
+            startedAt: start,
+            activityID: "a1",
+            durationSeconds: 60,
+            endedAt: start.addingTimeInterval(60)
+        ))
+
+        let vm = HistoryViewModel(store: store)
+        await vm.loadIfNeeded()
+        #expect(vm.durationText(for: vm.dayGroups[0].entries[0]) == "1m")
+
+        // Edit behind the detail sheet (the entry form's updateEntry path).
+        var updated = try #require(try await store.entry(id: "e1"))
+        updated.endedAt = start.addingTimeInterval(3_700)
+        updated.durationSeconds = 3_700
+        updated.updatedAt = Date()
+        #expect(try await store.updateEntry(updated))
+
+        vm.invalidate()
+        await vm.loadIfNeeded()
+        #expect(vm.dayGroups.flatMap(\.entries).map(\.id) == ["e1"])
+        #expect(vm.durationText(for: vm.dayGroups[0].entries[0]) == "1h 1m")
+    }
+
+    @Test("deleted entry disappears and empties its day group after reload")
+    func deletedEntryRemovedAfterReload() async throws {
+        let store = try makeStore()
+        try await store.createActivity(Activity(id: "a1", name: "Running"))
+        let start = Date(timeIntervalSinceNow: -3600)
+        try await store.createEntry(entry(
+            id: "e1",
+            startedAt: start,
+            activityID: "a1",
+            durationSeconds: 60,
+            endedAt: start.addingTimeInterval(60)
+        ))
+
+        let vm = HistoryViewModel(store: store)
+        await vm.loadIfNeeded()
+        #expect(vm.dayGroups.count == 1)
+
+        // Delete behind the detail sheet (the entry form's undoable path).
+        _ = try await store.deleteEntryUndoable(id: "e1", deletedAt: Date())
+
+        vm.invalidate()
+        await vm.loadIfNeeded()
+        #expect(vm.dayGroups.isEmpty)
+    }
+
     // MARK: - Helpers
 
     private static func date(_ iso: String, calendar: Calendar) -> Date {

@@ -6,7 +6,8 @@ import SwiftUI
 /// header showing each activity field exactly once (icon, categories with
 /// icons, notes); a divider-separated Entries section whose header carries
 /// the all-time total; and the activity's complete day-grouped committed
-/// entry list on inert entry-only rows. Presented at medium detent,
+/// entry list on tappable entry-only rows (each opens the unified entry
+/// form: EDIT for manual entries, LOCKED for imported ones). Presented at medium detent,
 /// draggable to large. The running session never appears (its entry is
 /// uncommitted). If the activity vanishes (cascade delete) the sheet
 /// dismisses itself (design D6). The "Log time" action opens the Log Time
@@ -14,20 +15,27 @@ import SwiftUI
 /// appears in the Entries list after the sheet dismisses.
 struct ActivityDetailView: View {
     @EnvironmentObject var container: AppContainer
+    @Environment(\.undoManager)
+    private var undoManager
     @StateObject private var vm: ActivityDetailViewModel
     @Environment(\.dismiss)
     private var dismiss
     @State private var editorActivity: Activity?
+    /// The entry opened in the unified entry form (nil = none). EDIT mode
+    /// for `manual` entries, LOCKED mode for imported ones
+    /// (entry-editor spec).
+    @State private var editingEntry: TimeEntry?
     /// Set after a stacked sheet dismisses so the next appear reloads
     /// identity, categories, entries, and total.
     @State private var needsReloadAfterSheet = false
     /// Presents the Log Time sheet pre-filled with this activity.
     @State private var isLogTimeActive = false
 
-    init(store: LocalStore, activityID: String) {
+    init(store: LocalStore, activityID: String, undoBuffer: UndoBufferStore? = nil) {
         _vm = StateObject(wrappedValue: ActivityDetailViewModel(
             store: store,
-            activityID: activityID
+            activityID: activityID,
+            undoBuffer: undoBuffer
         ))
     }
 
@@ -62,11 +70,26 @@ struct ActivityDetailView: View {
             }
         }
         .navigationViewStyle(.stack)
-        .task { await vm.load() }
+        .task {
+            await vm.load()
+            await vm.registerSystemUndo(with: undoManager)
+        }
+        // Shake-to-undo uses the DEFAULT system Undo confirmation (U7):
+        // shaking surfaces the Undo prompt and confirming restores exactly
+        // one entry — the most recent buffered deletion. Registration is
+        // cleared-then-single, so one shake+confirm can never restore two.
+        // The passive first-responder host below is what lets the shake
+        // reach the undo manager at all on this sheet (no editable text
+        // holds focus here); it deliberately handles NO motion itself, so
+        // the system shows its Undo prompt instead of restoring immediately.
+        .background(ShakeFirstResponderHost(undoManager: undoManager))
         .onChange(of: needsReloadAfterSheet) { changed in
             guard changed else { return }
             needsReloadAfterSheet = false
-            Task { await vm.load() }
+            Task {
+                await vm.load()
+                await vm.registerSystemUndo(with: undoManager)
+            }
         }
         .onChange(of: vm.activityIsGone) { gone in
             if gone { dismiss() }
@@ -75,6 +98,15 @@ struct ActivityDetailView: View {
             LogTimeView(
                 service: container.timerService,
                 initialActivity: vm.activity
+            )
+        }
+        // The unified entry form presents as a full-screen cover (not a
+        // third stacked sheet): EDIT for manual entries, LOCKED for
+        // imported ones. Dismissal reloads identity/entries/total.
+        .fullScreenCover(item: $editingEntry, onDismiss: reloadAfterSheet) { entry in
+            LogTimeView(
+                service: container.timerService,
+                editing: entry
             )
         }
         .sheet(item: $editorActivity, onDismiss: reloadAfterEditor) { activity in
@@ -175,17 +207,79 @@ struct ActivityDetailView: View {
         ForEach(vm.dayGroups) { group in
             Section {
                 ForEach(group.entries) { entry in
-                    ActivityEntryRow(
-                        timeRangeText: vm.timeRangeText(for: entry),
-                        provenanceName: vm.provenanceName(for: entry),
-                        durationText: vm.durationText(for: entry)
-                    )
+                    Button {
+                        editingEntry = entry
+                    } label: {
+                        ActivityEntryRow(
+                            timeRangeText: vm.timeRangeText(for: entry),
+                            provenanceName: vm.provenanceName(for: entry),
+                            durationText: vm.durationText(for: entry)
+                        )
+                        // Full-row tap target: the row's Spacer gaps render
+                        // nothing, so without an explicit shape only the
+                        // texts hit-test. Stretch + Rectangle makes the
+                        // whole item tappable (History rows do the same).
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
                     .accessibilityIdentifier("ActivityEntryRow(\(entry.id))")
                 }
             } header: {
                 SectionHeader(title: group.label)
                     .padding(.horizontal, Theme.spacingMedium)
                     .background(Theme.backgroundPrimary)
+            }
+        }
+    }
+}
+
+/// Passive motion first-responder host for the system shake-to-undo (U7).
+/// This sheet has no editable text to hold focus, so without this nothing
+/// is first responder and shakes never reach the undo manager. The view is
+/// transparent and background-placed (never intercepts touches), becomes
+/// first responder when it enters the window (re-acquiring after
+/// full-screen-cover dismissals via `updateUIView`), and deliberately
+/// handles NO motion itself — the shake propagates so the SYSTEM shows its
+/// default Undo prompt for the action `registerSystemUndo` registered.
+///
+/// It overrides `undoManager` to return the SAME instance the view
+/// registers with (`@Environment(\.undoManager)`): without this the shake
+/// resolves up the responder chain (typically the window's manager), which
+/// holds no registrations, so the system prompt never appears even though
+/// the environment manager `canUndo`.
+private struct ShakeFirstResponderHost: UIViewRepresentable {
+    var undoManager: UndoManager?
+
+    func makeUIView(context: Context) -> HostView {
+        let view = HostView()
+        view.backgroundColor = .clear
+        view.storedUndoManager = undoManager
+        return view
+    }
+
+    func updateUIView(_ uiView: HostView, context: Context) {
+        uiView.storedUndoManager = undoManager
+        if uiView.window != nil, !uiView.isFirstResponder {
+            DispatchQueue.main.async {
+                _ = uiView.becomeFirstResponder()
+            }
+        }
+    }
+
+    final class HostView: UIView {
+        var storedUndoManager: UndoManager?
+        override var canBecomeFirstResponder: Bool { true }
+        override var undoManager: UndoManager? {
+            storedUndoManager ?? super.undoManager
+        }
+
+        override func didMoveToWindow() {
+            super.didMoveToWindow()
+            if window != nil {
+                DispatchQueue.main.async { [weak self] in
+                    _ = self?.becomeFirstResponder()
+                }
             }
         }
     }

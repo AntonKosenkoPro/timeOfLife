@@ -143,7 +143,9 @@ struct LocalizationTests {
         // redesign adds 7 bare source names + categories/entries/total = 145;
         // save-dismiss/empty-categories revision adds noCategories = 146;
         // add-manual-entry adds activityDetailLogTime + 8 logTime.* +
-        // historyLogTime = 156
-        #expect(l10nCases.count == 156)
+        // historyLogTime = 156; edit-entry-from-activity-detail adds 9
+        // entry.* (edit/locked titles, save, delete + confirm, stale
+        // error, locked note) = 165
+        #expect(l10nCases.count == 165)
     }
 }

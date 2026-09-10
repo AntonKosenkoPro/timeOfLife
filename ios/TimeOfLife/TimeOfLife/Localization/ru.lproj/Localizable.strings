@@ -176,6 +176,17 @@
 "logTime.ends" = "Конец";
 "logTime.activityMissing" = "Выбранная активность больше не существует.";
 
+// Unified entry form (entry-editor spec: EDIT + LOCKED modes)
+"entry.editTitle" = "Редактировать запись";
+"entry.lockedTitle" = "Импортированная запись";
+"entry.save" = "Сохранить";
+"entry.delete" = "Удалить запись";
+"entry.deleteTitle" = "Удалить эту запись?";
+"entry.deleteMessage" = "Запись будет удалена. Отменить можно встряской в течение 30 секунд.";
+"entry.deleteConfirm" = "Удалить";
+"entry.staleError" = "Запись изменилась. Закройте и откройте её заново, затем повторите.";
+"entry.lockedNote" = "Импортировано через %@: редактирование отключено, чтобы избежать конфликтов с источником.";
+
 // History manual entry (add-manual-entry)
 "history.logTime" = "Записать время";
 

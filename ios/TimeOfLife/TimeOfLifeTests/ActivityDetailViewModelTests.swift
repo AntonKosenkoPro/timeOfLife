@@ -103,4 +103,236 @@ struct ActivityDetailViewModelTests {
         #expect(vm.activityIsGone == true)
         #expect(vm.activity == nil)
     }
+
+    @Test("performUndo restores a buffered entry deletion and reloads the list")
+    func undoRestoresBufferedEntryDeletion() async throws {
+        let store = try makeStore()
+        try await store.createActivity(makeActivity())
+        let start = Date().addingTimeInterval(-3_700)
+        try await store.createEntry(makeEntry(
+            startedAt: start,
+            endedAt: start.addingTimeInterval(3_700),
+            durationSeconds: 3_700
+        ))
+        _ = try await store.deleteEntryUndoable(id: "e1", deletedAt: Date())
+        let vm = ActivityDetailViewModel(
+            store: store,
+            activityID: "a1",
+            undoBuffer: UndoBufferStore(store: store)
+        )
+        await vm.load()
+        #expect(vm.dayGroups.isEmpty)
+
+        await vm.performUndo()
+
+        #expect(vm.dayGroups.flatMap(\.entries).map(\.id) == ["e1"])
+        #expect(vm.totalText == "1h 1m 40s")
+        #expect(try await store.outboxRows().allSatisfy { $0.op != "delete" })
+    }
+
+    @Test("performUndo commits an expired entry deletion instead of restoring")
+    func undoExpiredCommitsInsteadOfRestoring() async throws {
+        let store = try makeStore()
+        try await store.createActivity(makeActivity())
+        let start = Date().addingTimeInterval(-3_700)
+        try await store.createEntry(makeEntry(
+            startedAt: start,
+            endedAt: start.addingTimeInterval(3_700),
+            durationSeconds: 3_700
+        ))
+        _ = try await store.deleteEntryUndoable(
+            id: "e1",
+            deletedAt: Date().addingTimeInterval(-60)
+        )
+        let vm = ActivityDetailViewModel(
+            store: store,
+            activityID: "a1",
+            undoBuffer: UndoBufferStore(store: store)
+        )
+
+        await vm.performUndo()
+
+        #expect(vm.dayGroups.isEmpty)
+        let deletes = try await store.outboxRows().filter { $0.op == "delete" }
+        #expect(deletes.map(\.recordID) == ["e1"])
+    }
+
+    @Test("performUndo leaves buffer rows owned by other surfaces alone")
+    func undoIgnoresNonEntryBufferRows() async throws {
+        let store = try makeStore()
+        try await store.createCategory(TimeOfLife.Category(id: "c1", name: "Work", icon: "briefcase"))
+        _ = try await store.deleteCategoryUndoable(id: "c1", deletedAt: Date())
+        let vm = ActivityDetailViewModel(
+            store: store,
+            activityID: "a1",
+            undoBuffer: UndoBufferStore(store: store)
+        )
+
+        await vm.performUndo()
+
+        // The category deletion is untouched — its owner restores it.
+        #expect(try await store.category(id: "c1") == nil)
+        #expect(try await store.undoBufferMostRecent() != nil)
+        #expect(try await store.outboxRows().allSatisfy { $0.op != "delete" })
+    }
+
+    @Test("reassigned entry leaves the old activity's list with a recomputed total")
+    func reassignedEntryLeavesOldList() async throws {
+        let store = try makeStore()
+        try await store.createActivity(makeActivity())
+        try await store.createActivity(makeActivity(id: "a2", name: "Writing"))
+        let start = Date().addingTimeInterval(-3_700)
+        try await store.createEntry(makeEntry(
+            startedAt: start,
+            endedAt: start.addingTimeInterval(3_700),
+            durationSeconds: 3_700
+        ))
+        var moved = try #require(try await store.entry(id: "e1"))
+        moved.activityID = "a2"
+        moved.updatedAt = Date()
+        #expect(try await store.updateEntry(moved))
+
+        let vm = ActivityDetailViewModel(store: store, activityID: "a1")
+        await vm.load()
+
+        #expect(vm.dayGroups.isEmpty)
+        #expect(vm.totalText == "0s")
+        #expect(vm.activityIsGone == false)
+    }
+
+    @Test("performUndo restores only the newest of two buffered deletions per call")
+    func undoRestoresNewestFirstOneAtATime() async throws {
+        let store = try makeStore()
+        try await store.createActivity(makeActivity())
+        let start = Date().addingTimeInterval(-3_700)
+        try await store.createEntry(makeEntry(startedAt: start, endedAt: start.addingTimeInterval(3_700), id: "e1", durationSeconds: 3_700))
+        try await store.createEntry(makeEntry(startedAt: start, endedAt: start.addingTimeInterval(60), id: "e2", durationSeconds: 60))
+        let now = Date()
+        _ = try await store.deleteEntryUndoable(id: "e1", deletedAt: now.addingTimeInterval(-10))
+        _ = try await store.deleteEntryUndoable(id: "e2", deletedAt: now)
+        let vm = ActivityDetailViewModel(store: store, activityID: "a1", undoBuffer: UndoBufferStore(store: store))
+        await vm.load()
+        #expect(vm.dayGroups.isEmpty)
+        await vm.performUndo()
+        #expect(vm.dayGroups.flatMap(\.entries).map(\.id) == ["e2"])
+        await vm.performUndo()
+        #expect(Set(vm.dayGroups.flatMap(\.entries).map(\.id)) == ["e1", "e2"])
+    }
+    @Test("registerSystemUndo offers one undo when an entry deletion is restorable")
+    func registerOffersUndoWhenRestorable() async throws {
+        let store = try makeStore()
+        try await store.createActivity(makeActivity())
+        let start = Date().addingTimeInterval(-3_700)
+        try await store.createEntry(makeEntry(startedAt: start, endedAt: start.addingTimeInterval(3_700), durationSeconds: 3_700))
+        _ = try await store.deleteEntryUndoable(id: "e1", deletedAt: Date())
+        let vm = ActivityDetailViewModel(store: store, activityID: "a1", undoBuffer: UndoBufferStore(store: store))
+        let undoManager = UndoManager()
+        await vm.registerSystemUndo(with: undoManager)
+        #expect(undoManager.canUndo)
+        #expect(!undoManager.undoActionName.isEmpty)
+    }
+    @Test("registerSystemUndo offers nothing when the buffer is empty")
+    func registerOffersNothingWhenEmpty() async throws {
+        let store = try makeStore()
+        try await store.createActivity(makeActivity())
+        let vm = ActivityDetailViewModel(store: store, activityID: "a1", undoBuffer: UndoBufferStore(store: store))
+        let undoManager = UndoManager()
+        await vm.registerSystemUndo(with: undoManager)
+        #expect(!undoManager.canUndo)
+    }
+    @Test("registerSystemUndo offers nothing for non-entry buffer rows")
+    func registerIgnoresNonEntryBufferRows() async throws {
+        let store = try makeStore()
+        try await store.createCategory(TimeOfLife.Category(id: "c1", name: "Work", icon: "briefcase"))
+        _ = try await store.deleteCategoryUndoable(id: "c1", deletedAt: Date())
+        let vm = ActivityDetailViewModel(store: store, activityID: "a1", undoBuffer: UndoBufferStore(store: store))
+        let undoManager = UndoManager()
+        await vm.registerSystemUndo(with: undoManager)
+        #expect(!undoManager.canUndo)
+    }
+    @Test("registerSystemUndo offers nothing when the entry deletion expired")
+    func registerSkipsExpiredDeletion() async throws {
+        let store = try makeStore()
+        try await store.createActivity(makeActivity())
+        let start = Date().addingTimeInterval(-3_700)
+        try await store.createEntry(makeEntry(startedAt: start, endedAt: start.addingTimeInterval(3_700), durationSeconds: 3_700))
+        _ = try await store.deleteEntryUndoable(id: "e1", deletedAt: Date().addingTimeInterval(-60))
+        let vm = ActivityDetailViewModel(store: store, activityID: "a1", undoBuffer: UndoBufferStore(store: store))
+        let undoManager = UndoManager()
+        await vm.registerSystemUndo(with: undoManager)
+        #expect(!undoManager.canUndo)
+    }
+    @Test("registration after a restore offers nothing (single-shot)")
+    func registerClearedAfterRestore() async throws {
+        let store = try makeStore()
+        try await store.createActivity(makeActivity())
+        let start = Date().addingTimeInterval(-3_700)
+        try await store.createEntry(makeEntry(startedAt: start, endedAt: start.addingTimeInterval(3_700), durationSeconds: 3_700))
+        _ = try await store.deleteEntryUndoable(id: "e1", deletedAt: Date())
+        let vm = ActivityDetailViewModel(store: store, activityID: "a1", undoBuffer: UndoBufferStore(store: store))
+        let undoManager = UndoManager()
+        await vm.registerSystemUndo(with: undoManager)
+        #expect(undoManager.canUndo)
+        await vm.performUndo()
+        await vm.registerSystemUndo(with: undoManager)
+        #expect(!undoManager.canUndo)
+        #expect(vm.dayGroups.flatMap(\.entries).map(\.id) == ["e1"])
+    }
+
+    @Test("performUndo with an empty buffer is a no-op")
+    func undoEmptyBufferIsNoOp() async throws {
+        let store = try makeStore()
+        try await store.createActivity(makeActivity())
+        let vm = ActivityDetailViewModel(
+            store: store,
+            activityID: "a1",
+            undoBuffer: UndoBufferStore(store: store)
+        )
+        await vm.load()
+
+        await vm.performUndo()
+
+        #expect(vm.activity?.name == "Running")
+        #expect(vm.dayGroups.isEmpty)
+    }
+
+    @Test("load excludes in-progress entries from groups and total")
+    func loadExcludesInProgress() async throws {
+        let store = try makeStore()
+        try await store.createActivity(makeActivity())
+        let start = Date().addingTimeInterval(-3_700)
+        try await store.createEntry(makeEntry(
+            startedAt: start,
+            endedAt: start.addingTimeInterval(3_700),
+            durationSeconds: 3_700
+        ))
+        // In-progress entry (no end time): committed via createEntry with a
+        // nil end, like a synced uncommitted session.
+        try await store.createEntry(makeEntry(
+            startedAt: Date().addingTimeInterval(-600),
+            endedAt: nil,
+            id: "e-running",
+            durationSeconds: nil
+        ))
+        let vm = ActivityDetailViewModel(store: store, activityID: "a1")
+        await vm.load()
+        #expect(vm.dayGroups.flatMap(\.entries).map(\.id) == ["e1"])
+        #expect(vm.totalText == "1h 1m 40s")
+    }
+
+    @Test("only in-progress entries leave the sheet empty but present")
+    func onlyInProgressLeavesEmptyGroups() async throws {
+        let store = try makeStore()
+        try await store.createActivity(makeActivity())
+        try await store.createEntry(makeEntry(
+            startedAt: Date().addingTimeInterval(-600),
+            endedAt: nil,
+            durationSeconds: nil
+        ))
+        let vm = ActivityDetailViewModel(store: store, activityID: "a1")
+        await vm.load()
+        #expect(vm.dayGroups.isEmpty)
+        #expect(vm.totalText == "0s")
+        #expect(vm.activityIsGone == false)
+    }
 }

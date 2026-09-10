@@ -1,12 +1,15 @@
 import SwiftUI
 
-/// The manual time-logging sheet (manual-entry spec), styled on the iOS
-/// Calendar add-event form and trimmed to three rows: Activity (title over
-/// value, opening the shared searchable picker), Starts and Ends (date +
-/// time pills with inline single-open pickers). Cancel/Add live in the
-/// navigation bar; Add is a validity gate — disabled until an activity is
-/// chosen and End is strictly after Start. A save failure surfaces as a
-/// non-field error with the draft intact and the sheet open.
+/// The manual time-logging sheet (manual-entry spec) grown into the unified
+/// entry form (entry-editor spec), styled on the iOS Calendar add-event form
+/// and trimmed to three rows: Activity (title over value, opening the shared
+/// searchable picker), Starts and Ends (date + time pills with inline
+/// single-open pickers). Cancel/Add (CREATE) or Cancel/Save (EDIT) live in
+/// the navigation bar; the confirm action is a validity gate — disabled until
+/// an activity is chosen and End is strictly after Start. LOCKED mode (an
+/// imported entry) shows the values read-only with Cancel only. EDIT and
+/// LOCKED modes offer a bottom-of-page destructive Delete. A save failure
+/// surfaces as a non-field error with the draft intact and the form open.
 struct LogTimeView: View {
     @StateObject private var vm: LogTimeViewModel
     @Environment(\.dismiss)
@@ -14,6 +17,8 @@ struct LogTimeView: View {
     /// The currently expanded inline picker, if any (Calendar behavior:
     /// one open at a time; tapping the active pill collapses it).
     @State private var expandedPicker: InlinePicker?
+    /// Drives the delete confirmation alert (EDIT + LOCKED modes).
+    @State private var isShowingDeleteConfirm = false
     /// Called after a successful save so the presenter can refresh.
     let onSaved: (() -> Void)?
 
@@ -21,10 +26,16 @@ struct LogTimeView: View {
         case startDate, startTime, endDate, endTime
     }
 
-    init(service: TimerService, initialActivity: Activity? = nil, onSaved: (() -> Void)? = nil) {
+    init(
+        service: TimerService,
+        initialActivity: Activity? = nil,
+        editing entry: TimeEntry? = nil,
+        onSaved: (() -> Void)? = nil
+    ) {
         _vm = StateObject(wrappedValue: LogTimeViewModel(
             service: service,
-            initialActivity: initialActivity
+            initialActivity: initialActivity,
+            editing: entry
         ))
         self.onSaved = onSaved
     }
@@ -34,33 +45,65 @@ struct LogTimeView: View {
             ScrollView {
                 VStack(spacing: Theme.spacingMedium) {
                     activityCard
+                        .disabled(vm.isLocked)
+                        .opacity(vm.isLocked ? 0.6 : 1)
                     startsEndsCard
+                        .disabled(vm.isLocked)
+                        .opacity(vm.isLocked ? 0.6 : 1)
+                    if vm.isLocked {
+                        lockedNote
+                    }
                     if vm.errorMessage != nil {
                         errorSection
+                    }
+                    if vm.mode != .create {
+                        deleteSection
                     }
                 }
                 .padding(.horizontal, Theme.spacingMedium)
                 .padding(.vertical, Theme.spacingMedium)
             }
             .background(Theme.backgroundPrimary.ignoresSafeArea())
-            .navigationTitle(L10n.logTimeTitle.text)
+            .navigationTitle(formTitle)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button(L10n.logTimeCancel.text) { dismiss() }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button(L10n.logTimeAdd.text) {
-                        Task { await save() }
+                    if !vm.isLocked {
+                        Button(vm.mode == .edit ? L10n.entrySave.text : L10n.logTimeAdd.text) {
+                            Task { await save() }
+                        }
+                        .disabled(!vm.isAddEnabled)
+                        .accessibilityIdentifier(vm.mode == .edit ? "EntryEditSaveButton" : "LogTimeAddButton")
                     }
-                    .disabled(!vm.isAddEnabled)
-                    .accessibilityIdentifier("LogTimeAddButton")
                 }
+            }
+            .alert(
+                L10n.entryDeleteTitle.text,
+                isPresented: $isShowingDeleteConfirm
+            ) {
+                Button(L10n.entryDeleteConfirm.text, role: .destructive) {
+                    Task { await deleteEntry() }
+                }
+                Button(L10n.logTimeCancel.text, role: .cancel) {}
+            } message: {
+                Text(L10n.entryDeleteMessage.text)
             }
         }
         .navigationViewStyle(.stack)
         .sheet(isPresented: pickerPresentation, onDismiss: vm.cancelSearch) {
             ActivitySearchSheet(vm: vm)
+        }
+    }
+
+    /// Mode-specific navigation title (localized).
+    private var formTitle: String {
+        switch vm.mode {
+        case .create: L10n.logTimeTitle.text
+        case .edit: L10n.entryEditTitle.text
+        case .locked: L10n.entryLockedTitle.text
         }
     }
 
@@ -76,6 +119,55 @@ struct LogTimeView: View {
             onSaved?()
             dismiss()
         }
+    }
+
+    /// Deletes the entry into the durable undo buffer; dismisses on success
+    /// (the presenter reloads via the cover/sheet dismissal). On failure the
+    /// form stays open with the error banner.
+    private func deleteEntry() async {
+        if await vm.deleteConfirmed() {
+            dismiss()
+        }
+    }
+
+    // MARK: - Locked provenance note
+
+    /// Read-only note for imported entries (LOCKED mode): bare source name
+    /// plus why editing is disabled.
+    private var lockedNote: some View {
+        HStack(spacing: Theme.spacingExtraSmall) {
+            Image(systemName: ActivityEntryRow.provenanceIcon)
+            Text(String(
+                format: L10n.entryLockedNote.text,
+                locale: .current,
+                EntryProvenance.name(for: vm.editingEntry?.source ?? "manual")
+            ))
+        }
+        .font(.caption)
+        .foregroundStyle(Theme.textSecondary)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(Theme.spacingMedium)
+        .background(Theme.backgroundSecondary)
+        .clipShape(RoundedRectangle(cornerRadius: Theme.cornerRadius))
+        .accessibilityIdentifier("EntryLockedNote")
+    }
+
+    // MARK: - Delete
+
+    /// Bottom-of-page destructive Delete (EDIT + LOCKED modes only).
+    private var deleteSection: some View {
+        Button(role: .destructive) {
+            isShowingDeleteConfirm = true
+        } label: {
+            Text(L10n.entryDelete.text)
+                .font(.headline)
+                .foregroundStyle(Theme.danger)
+                .frame(maxWidth: .infinity, minHeight: Theme.minTapArea)
+                .contentShape(Rectangle())
+        }
+        .background(Theme.backgroundSecondary)
+        .clipShape(RoundedRectangle(cornerRadius: Theme.cornerRadius))
+        .accessibilityIdentifier("EntryDeleteButton")
     }
 
     // MARK: - Activity row

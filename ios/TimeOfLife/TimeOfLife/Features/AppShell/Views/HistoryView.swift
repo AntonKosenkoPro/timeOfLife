@@ -75,13 +75,26 @@ struct HistoryView: View {
                 Task { await vm.loadIfNeeded() }
             }
         }
-        .sheet(item: Binding(
-            get: { detailActivityID.map(HistoryDetailTarget.init) },
-            set: { detailActivityID = $0?.activityID }
-        )) { target in
-            ActivityDetailView(store: container.localStore, activityID: target.activityID)
-                .environmentObject(container)
-        }
+        .sheet(
+            item: Binding(
+                get: { detailActivityID.map(HistoryDetailTarget.init) },
+                set: { detailActivityID = $0?.activityID }
+            ),
+            onDismiss: {
+                // Entries may have been edited or deleted (with undo) behind
+                // the detail sheet — reload so the day groups reflect it.
+                vm.invalidate()
+                Task { await vm.loadIfNeeded() }
+            },
+            content: { target in
+                ActivityDetailView(
+                    store: container.localStore,
+                    activityID: target.activityID,
+                    undoBuffer: container.undoBuffer
+                )
+                    .environmentObject(container)
+            }
+        )
     }
 
     private var historyList: some View {

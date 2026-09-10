@@ -176,6 +176,17 @@
 "logTime.ends" = "Ends";
 "logTime.activityMissing" = "The selected activity no longer exists.";
 
+// Unified entry form (entry-editor spec: EDIT + LOCKED modes)
+"entry.editTitle" = "Edit entry";
+"entry.lockedTitle" = "Imported entry";
+"entry.save" = "Save";
+"entry.delete" = "Delete entry";
+"entry.deleteTitle" = "Delete this entry?";
+"entry.deleteMessage" = "This entry will be deleted. You can shake to undo within 30 seconds.";
+"entry.deleteConfirm" = "Delete";
+"entry.staleError" = "This entry changed elsewhere. Dismiss and reopen it, then try again.";
+"entry.lockedNote" = "Imported via %@ — editing is disabled to avoid conflicts with the source.";
+
 // History manual entry (add-manual-entry)
 "history.logTime" = "Log time";
 

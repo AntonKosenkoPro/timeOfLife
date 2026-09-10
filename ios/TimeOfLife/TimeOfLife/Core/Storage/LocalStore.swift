@@ -1496,6 +1496,104 @@ actor LocalStore {
         }
     }
 
+    // MARK: - Entry deletion & undo (edit-entry-from-activity-detail)
+
+    /// The outcome of `deleteEntryUndoable(...)`.
+    enum EntryDelete: Equatable {
+        /// The entry was removed; the snapshot is in the durable undo
+        /// buffer (no outbox row yet).
+        case deleted(TimeEntry)
+        /// The entry no longer exists.
+        case missing
+        /// The local write failed (persistence error).
+        case failure
+    }
+
+    /// One local Entry delete that is undoable for the wall-clock window.
+    /// The snapshot carries the full TimeEntry so undo restores it exactly.
+    /// Removes the entry in ONE transaction with the buffer insert. NO outbox
+    /// row is created while the deletion is in the buffer — the relay is
+    /// never notified of an undone deletion.
+    func deleteEntryUndoable(
+        id: String,
+        deletedAt: Date = Date()
+    ) throws -> EntryDelete {
+        try dbQueue.write { db in
+            guard let row = try Row.fetchOne(db, sql: """
+                SELECT e.*, a.name AS activity_name
+                FROM entries e
+                JOIN activities a ON a.id = e.activity_id
+                WHERE e.id = ?
+                """, arguments: [id]) else {
+                return .missing
+            }
+            let entry = Self.entry(from: row)
+            let payload = String(data: try JSONEncoder().encode(DeletionSnapshot(records: [
+                DeletionSnapshot.Record(
+                    resource: "entry",
+                    recordID: entry.id,
+                    data: try JSONEncoder().encode(entry)
+                ),
+            ])), encoding: .utf8)
+            do {
+                try db.execute(
+                    sql: """
+                        INSERT INTO undo_buffer (id, payload, deleted_at) VALUES (?, ?, ?)
+                        """,
+                    arguments: [UUID().uuidString, payload, deletedAt]
+                )
+                try db.execute(sql: "DELETE FROM entries WHERE id = ?", arguments: [id])
+            } catch {
+                return .failure
+            }
+            return .deleted(entry)
+        }
+    }
+
+    /// Decodes the entry-deletion snapshot held in a buffer row. Returns nil
+    /// when the row does not exist or does not carry an entry deletion.
+    func entryDeletionSnapshot(bufferID: String) throws -> TimeEntry? {
+        try dbQueue.read { db in
+            guard let row = try UndoBufferRow.fetchOne(db, key: bufferID) else {
+                return nil
+            }
+            let snapshot = try JSONDecoder().decode(DeletionSnapshot.self, from: Data(row.payload.utf8))
+            guard let record = snapshot.records.first(where: { $0.resource == "entry" }) else {
+                return nil
+            }
+            return try JSONDecoder().decode(TimeEntry.self, from: record.data)
+        }
+    }
+
+    /// Undoes an entry deletion within the window: re-inserts the entry and
+    /// removes the buffer row in one transaction. No outbox row is ever
+    /// created, so the relay is never notified of the deletion. Returns the
+    /// restored entry, or nil when the buffer row no longer holds an entry
+    /// snapshot.
+    @discardableResult
+    func undoEntryDeletion(bufferID: String) throws -> TimeEntry? {
+        try dbQueue.write { db in
+            guard let row = try UndoBufferRow.fetchOne(db, key: bufferID) else {
+                return nil
+            }
+            let snapshot = try JSONDecoder().decode(DeletionSnapshot.self, from: Data(row.payload.utf8))
+            guard let record = snapshot.records.first(where: { $0.resource == "entry" }) else {
+                return nil
+            }
+            let entry = try JSONDecoder().decode(TimeEntry.self, from: record.data)
+            try db.execute(
+                sql: """
+                    INSERT OR IGNORE INTO entries (id, activity_id, started_at, ended_at, duration_seconds,
+                                                   source, source_ref, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                arguments: [entry.id, entry.activityID, entry.startedAt, entry.endedAt, entry.durationSeconds, entry.source, entry.sourceRef, entry.createdAt, entry.updatedAt]
+            )
+            try db.execute(sql: "DELETE FROM undo_buffer WHERE id = ?", arguments: [bufferID])
+            return entry
+        }
+    }
+
     // MARK: - Erase local data (destructive, Settings)
 
     /// Wipes the entire local database (state + outbox + undo_buffer +

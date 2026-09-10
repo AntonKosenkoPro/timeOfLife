@@ -2053,3 +2053,132 @@ struct LocalStoreCategoryUndoTests {
         #expect(stored != nil)
     }
 }
+
+@Suite("LocalStore Entry Deletion & Undo (edit-entry-from-activity-detail)")
+struct LocalStoreEntryUndoTests {
+
+    private func temporaryStoreURL() -> URL {
+        URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent(UUID().uuidString)
+            .appendingPathComponent("timeoflife.sqlite")
+    }
+
+    private func makeStore() throws -> LocalStore {
+        try LocalStore(url: temporaryStoreURL())
+    }
+
+    private func makeEntry(id: String = "entry-1", source: String = "manual") -> TimeEntry {
+        TimeEntry(
+            id: id, activityID: "a1", activityName: "Running",
+            startedAt: Date(timeIntervalSinceReferenceDate: 1_000),
+            endedAt: Date(timeIntervalSinceReferenceDate: 1_600), durationSeconds: 600,
+            source: source
+        )
+    }
+
+    @Test("undoable entry deletion removes the entry and writes no outbox row")
+    func deleteRemovesEntryWithoutOutbox() async throws {
+        let store = try makeStore()
+        try await store.createActivity(Activity(id: "a1", name: "Running"))
+        try await store.createEntry(makeEntry())
+
+        let outcome = try await store.deleteEntryUndoable(
+            id: "entry-1",
+            deletedAt: Date(timeIntervalSinceReferenceDate: 3_000)
+        )
+
+        guard case let .deleted(snapshot) = outcome else {
+            Issue.record("expected deleted, got \(outcome)")
+            return
+        }
+        #expect(snapshot.id == "entry-1")
+        #expect(snapshot.activityID == "a1")
+        #expect(snapshot.durationSeconds == 600)
+        #expect(try await store.entry(id: "entry-1") == nil)
+        // The activity itself survives.
+        #expect(try await store.activity(id: "a1") != nil)
+        // No outbox row was created while the deletion is in the buffer.
+        let rows = try await store.outboxRows()
+        #expect(rows.allSatisfy { $0.op != "delete" })
+        // The buffer holds the snapshot.
+        let buffer = try #require(try await store.undoBufferMostRecent())
+        #expect(try await store.entryDeletionSnapshot(bufferID: buffer.id)?.id == "entry-1")
+    }
+
+    @Test("undo restores the same entry identity and values without any sync")
+    func undoRestoresEntryWithoutSync() async throws {
+        let store = try makeStore()
+        try await store.createActivity(Activity(id: "a1", name: "Running"))
+        try await store.createEntry(makeEntry(source: "garmin"))
+        _ = try await store.deleteEntryUndoable(id: "entry-1", deletedAt: Date())
+
+        let buffer = try #require(try await store.undoBufferMostRecent())
+        let restored = try await store.undoEntryDeletion(bufferID: buffer.id)
+
+        #expect(restored?.id == "entry-1")
+        #expect(restored?.activityID == "a1")
+        #expect(restored?.durationSeconds == 600)
+        #expect(restored?.source == "garmin")
+        let stored = try await store.entry(id: "entry-1")
+        #expect(stored?.activityName == "Running")
+        // Buffer row is gone; no outbox delete was ever created.
+        #expect(try await store.undoBufferMostRecent() == nil)
+        let rows = try await store.outboxRows()
+        #expect(rows.allSatisfy { $0.op != "delete" })
+    }
+
+    @Test("expiry commits exactly one entry delete outbox row")
+    func expiryCommitsOneEntryDelete() async throws {
+        let store = try makeStore()
+        try await store.createActivity(Activity(id: "a1", name: "Running"))
+        try await store.createEntry(makeEntry())
+        _ = try await store.deleteEntryUndoable(
+            id: "entry-1",
+            deletedAt: Date().addingTimeInterval(-60)
+        )
+
+        let undo = UndoBufferStore(store: store)
+        try await undo.commitExpired(now: Date())
+
+        let rows = try await store.outboxRows()
+        let deletes = rows.filter { $0.op == "delete" }
+        #expect(deletes.count == 1)
+        #expect(deletes.first?.resource == "entry")
+        #expect(deletes.first?.recordID == "entry-1")
+        #expect(try await store.undoBufferMostRecent() == nil)
+    }
+
+    @Test("deleting an unknown entry returns missing and buffers nothing")
+    func deleteMissingReturnsMissing() async throws {
+        let store = try makeStore()
+        let outcome = try await store.deleteEntryUndoable(id: "nonexistent")
+        #expect(outcome == .missing)
+        #expect(try await store.undoBufferMostRecent() == nil)
+    }
+
+    @Test("a newer entry deletion supersedes an older one for undo")
+    func supersessionKeepsNewestUndoable() async throws {
+        let store = try makeStore()
+        try await store.createActivity(Activity(id: "a1", name: "Running"))
+        try await store.createEntry(makeEntry(id: "entry-1"))
+        try await store.createEntry(makeEntry(id: "entry-2"))
+
+        _ = try await store.deleteEntryUndoable(
+            id: "entry-1",
+            deletedAt: Date().addingTimeInterval(-40)
+        )
+        _ = try await store.deleteEntryUndoable(id: "entry-2", deletedAt: Date())
+
+        let undo = UndoBufferStore(store: store)
+        let mostRecent = try await undo.mostRecent()
+        let payload = mostRecent.flatMap { String(data: $0.payload, encoding: .utf8) }
+        #expect(payload?.contains("entry-2") == true)
+
+        // Foreground expiry commits the older deletion only.
+        try await undo.commitExpired(now: Date())
+        let rows = try await store.outboxRows()
+        let deletes = rows.filter { $0.op == "delete" }
+        #expect(deletes.map(\.recordID) == ["entry-1"])
+        #expect(try await store.entry(id: "entry-2") == nil)
+    }
+}

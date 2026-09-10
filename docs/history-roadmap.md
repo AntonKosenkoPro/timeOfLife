@@ -39,26 +39,28 @@ where it was opened from (History row or ActivityDetail entries list).
 
 ## Deferred items
 
-### 1. Tap on entry → EntryDetail (push, read-first)
+### 1. Tap on entry → EntryDetail (push, read-first) — SUPERSEDED
 
-- A History row tap pushes `EntryDetail`, not a sheet. Separates "looking"
-  from "changing" — most History taps are review, not correction.
-- EntryDetail shows: activity name + categories, start/end/duration, source
-  provenance ("via Garmin"), an "Edit" affordance, and a "Delete" action.
-- Mirrors the Manage-Activities pattern: list row -> detail -> editor sheet.
-- Open question: does EntryDetail also show activity notes, or only
-  entry-specific data? (Probably entry-specific; activity notes live on
-  ActivityDetail.)
+- **Superseded by `edit-entry-from-activity-detail`**: no separate
+  read-first EntryDetail push exists. Tapping an ActivityDetail entry row
+  opens the unified entry form directly as a full-screen cover in EDIT mode
+  (`manual`) or LOCKED mode (imported, read-only with delete only).
+  History row taps still open the Activity detail sheet (not EntryDetail).
+- The original EntryDetail content (activity name + categories, start/end/
+  duration, provenance, Edit + Delete) now lives on that unified form.
 
-### 2. EntryEditor (sheet, mutation)
+### 2. EntryEditor (sheet, mutation) — SHIPPED (as unified form, cover)
 
-- Edits one interval: start, end, duration (auto-computed if both set),
-  and activity reassignment (change `activity_id`).
-- Distinct from `ActivityEditor` (which edits the definition: name/notes/
-  categories). Two objects, two mutation paths, two sheets.
-- Open question: full Activity picker (like Track's search) vs. a simpler
-  pick-from-existing list for reassignment? Reassignment is error-prone;
-  worth a deliberate control.
+- **Delivered by `edit-entry-from-activity-detail` as the unified
+  `LogTimeView` form** (CREATE / EDIT / LOCKED modes), presented as a
+  **full-screen cover** from ActivityDetail rows — not a third stacked
+  sheet, and not a separate EntryEditor type.
+- EDIT corrects one interval (activity reassignment via Track search +
+  quick-create, start/end with Calendar duration preservation, Save gated
+  on activity + end > start, LWW `updateEntry` with stale-write error);
+  LOCKED exposes imported entries read-only with delete as the only
+  mutation. Activity reassignment uses the full Activity picker
+  (resolving the §2 open question toward full search, not a simpler list).
 
 ### 3. ActivityDetail (new, read-first) — SHIPPED (superseded)
 
@@ -115,21 +117,23 @@ where it was opened from (History row or ActivityDetail entries list).
   read-only "in progress"? Currently it's only visible via the compact timer.
   Probably defer — the compact timer already covers cross-tab awareness.
 
-### 8. Entry delete/undo from History
+### 8. Entry delete/undo from History — PARTIALLY SHIPPED (detail cover)
 
-- `LocalStore.deleteEntry` + the durable undo buffer already exist for
-  entries. The app-wide Undo UI for entries is deferred (per
-  `local-first-sync-architecture` tasks 3.3-3.6).
-- When built, History rows get swipe-to-delete -> `UndoToast` (30s) +
-  durable restore, mirroring Manage-Activities. `EntryDetail`'s delete
-  action feeds the same flow.
-- The `ScopeConfirmation` "delete only this entry" language already
-  anticipates entries as first-class objects.
+- **Delivered by `edit-entry-from-activity-detail` for the ActivityDetail
+  surface**: the unified form's bottom Delete → destructive confirm titled
+  "Delete this entry?" (entry-focused, names no activity) → durable undo
+  buffer (no outbox row) → dismiss + reload; restore via the default system
+  Undo confirmation (shake → Undo prompt → confirm restores exactly the most
+  recent entry, 30 s wall-clock, U7 supersession, foreground `commitExpired`
+  via the existing global reconciliation). No UndoToast on this surface.
+- Still deferred: History-row swipe-to-delete and the app-wide UndoToast
+  rollout (`local-first-sync-architecture` tasks 3.3–3.6); History rows
+  stay swipe/long-press-free.
 
 ## Sequencing lean (to revisit)
 
 1. History read-only list (step 1 — this change).
-2. EntryDetail + EntryEditor (tap-to-open + edit + delete/undo).
+2. EntryDetail + EntryEditor (tap-to-open + edit + delete/undo) — SHIPPED as the unified entry form cover (`edit-entry-from-activity-detail`; no separate EntryDetail type).
 3. Manual entry addition — SHIPPED (`add-manual-entry`; standalone sheet, both entry points).
 4. History filtering.
 5. ActivityDetail (if it earns its place) + per-activity timeline.

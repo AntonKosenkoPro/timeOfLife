@@ -146,6 +146,17 @@ enum L10n: String, CaseIterable {
     case logTimeEnds = "logTime.ends"
     case logTimeActivityMissing = "logTime.activityMissing"
 
+    // Unified entry form (entry-editor spec: EDIT + LOCKED modes)
+    case entryEditTitle = "entry.editTitle"
+    case entryLockedTitle = "entry.lockedTitle"
+    case entrySave = "entry.save"
+    case entryDelete = "entry.delete"
+    case entryDeleteTitle = "entry.deleteTitle"
+    case entryDeleteMessage = "entry.deleteMessage"
+    case entryDeleteConfirm = "entry.deleteConfirm"
+    case entryStaleError = "entry.staleError"
+    case entryLockedNote = "entry.lockedNote"
+
     // History manual entry (add-manual-entry)
     case historyLogTime = "history.logTime"
 
