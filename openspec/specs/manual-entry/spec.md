@@ -8,7 +8,7 @@ Lets users log past time without the live timer: pick an activity, set a start a
 
 ### Requirement: Log Time sheet captures activity, start, and end
 
-The app SHALL provide a Log Time sheet styled on the iOS Calendar add-event form, containing exactly three input rows: Activity (title-over-value, like Calendar's "Calendar" row), Starts (date pill + time pill), and Ends (date pill + time pill). The sheet SHALL have Cancel and Add actions in the navigation bar; no title, location, all-day, repeat, or alert fields SHALL be present.
+The app SHALL provide the Log Time sheet as the CREATE mode of the unified entry form (see entry-editor capability): styled on the iOS Calendar add-event form, containing exactly three input rows: Activity (title-over-value, like Calendar's "Calendar" row), Starts (date pill + time pill), and Ends (date pill + time pill). CREATE mode SHALL keep the "Log time" title (localized) with Cancel and Add actions in the navigation bar, presented as a sheet from the existing entry points with unchanged defaults, gates, pickers, and save behavior. EDIT and LOCKED modes (titles, Save/locked rules, Delete button) are defined by the entry-editor capability; no title, location, all-day, repeat, or alert fields SHALL be present in any mode.
 
 #### Scenario: Sheet contents
 
@@ -19,6 +19,11 @@ The app SHALL provide a Log Time sheet styled on the iOS Calendar add-event form
 
 - **WHEN** the user activates Cancel
 - **THEN** the sheet dismisses and no entry is created
+
+#### Scenario: Create mode keeps its presentation
+
+- **WHEN** the sheet opens from History or from an activity detail sheet for logging new time
+- **THEN** it presents as a sheet (not a full-screen cover) with the "Log time" title and Cancel/Add actions
 
 ### Requirement: Starts and Ends use inline expanding pickers
 

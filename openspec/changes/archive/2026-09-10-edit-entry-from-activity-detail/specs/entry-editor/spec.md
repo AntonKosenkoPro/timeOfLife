@@ -49,7 +49,7 @@ EDIT mode SHALL prefill the Activity row and Starts/Ends pills from the entry. A
 
 ### Requirement: Entry delete needs confirmation and enters the undo buffer
 
-EDIT and LOCKED modes SHALL offer a destructive Delete action at the bottom of the form (below the input cards, red destructive styling). Activating it SHALL present a destructive confirmation alert naming the entry's activity; confirming SHALL remove the entry from all lists immediately, enter the durable undo buffer (full snapshot, no outbox row yet — the relay is never notified of an undone deletion), dismiss the form, and refresh the underlying lists. No UndoToast SHALL be shown in this change. Within the 30 s wall-clock window the deletion SHALL be restorable via the shake-to-undo gesture (system motion event plus UndoManager registration, mirroring Manage Categories). Expiry SHALL commit the deletion (outbox delete row) on the next foreground via the existing global reconciliation, never in the background. Only the most recent buffer row SHALL be restorable (U7 supersession, including across surfaces — an entry delete followed by a category delete leaves only the category undoable). Dismissing the confirm alert SHALL leave the entry and the draft unchanged.
+EDIT and LOCKED modes SHALL offer a destructive Delete action at the bottom of the form (below the input cards, red destructive styling). Activating it SHALL present a destructive confirmation alert titled "Delete this entry?" with an entry-focused message naming no activity (naming the activity reads as deleting the activity); confirming SHALL remove the entry from all lists immediately, enter the durable undo buffer (full snapshot, no outbox row yet — the relay is never notified of an undone deletion), dismiss the form, and refresh the underlying lists. No UndoToast SHALL be shown in this change. Within the 30 s wall-clock window the deletion SHALL be restorable through the DEFAULT system Undo confirmation: shaking the device surfaces the system Undo prompt, and confirming restores exactly one entry — the most recent buffered deletion (the registration is cleared-then-single, so one shake+confirm can never restore two). Expiry SHALL commit the deletion (outbox delete row) on the next foreground via the existing global reconciliation, never in the background. Only the most recent buffer row SHALL be restorable (U7 supersession, including across surfaces — an entry delete followed by a category delete leaves only the category undoable on this surface). Dismissing the confirm alert SHALL leave the entry and the draft unchanged.
 
 #### Scenario: Confirmed delete removes the entry
 
@@ -61,10 +61,10 @@ EDIT and LOCKED modes SHALL offer a destructive Delete action at the bottom of t
 - **WHEN** the user dismisses the delete confirmation without confirming
 - **THEN** the entry is unchanged and the form draft is intact
 
-#### Scenario: Shake restores within the window
+#### Scenario: Shake offers the system Undo confirmation, confirm restores one entry
 
 - **WHEN** the user shakes the device within 30 s of confirming an entry deletion
-- **THEN** the entry is restored with its identity and values and reappears in its day group, with nothing synced
+- **THEN** the system Undo confirmation is offered, and confirming restores the entry with its identity and values back into its day group, with nothing synced (one shake+confirm restores at most one deletion — the most recent one)
 
 #### Scenario: Expired deletion commits on foreground
 

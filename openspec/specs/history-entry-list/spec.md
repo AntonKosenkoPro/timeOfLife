@@ -67,7 +67,7 @@ History rows SHALL NOT offer edit, delete, swipe, or long-press actions. Tapping
 - **THEN** no action is offered and nothing happens
 
 ### Requirement: Tapping a History entry row opens the activity detail sheet
-The History list SHALL respond to a tap on an entry row by presenting the activity detail sheet for the entry's activity. The sheet is modal (a sheet, not a navigation push). History SHALL NOT offer swipe actions, long-press actions, or any edit/delete of entries. Tapping an entry row inside the detail sheet SHALL do nothing.
+The History list SHALL respond to a tap on an entry row by presenting the activity detail sheet for the entry's activity. The sheet is modal (a sheet, not a navigation push). History SHALL NOT offer swipe actions, long-press actions, or any edit/delete of entries. Tapping an entry row inside the detail sheet SHALL open the unified entry form (see entry-editor capability) as a full-screen cover.
 
 #### Scenario: Tap opens the sheet
 - **WHEN** the user taps a History entry row
@@ -79,7 +79,7 @@ The History list SHALL respond to a tap on an entry row by presenting the activi
 
 #### Scenario: Tap inside the detail sheet
 - **WHEN** the user taps an entry row inside the activity detail sheet
-- **THEN** nothing happens
+- **THEN** the unified entry form opens for that entry — editable for `manual` entries, read-only (delete-only) for imported entries
 
 ### Requirement: History preserves compact timer access with a persistent nav bar
 The History destination SHALL keep the compact cross-tab running timer visible and stoppable, matching the app-shell "Running timer remains globally accessible" requirement. The History destination SHALL keep the navigation bar (inline "History" title and Profile button) permanently visible while History is on screen, regardless of list scroll position. The Profile button is reachable at all times on History.
@@ -106,3 +106,14 @@ The History destination SHALL offer a `[+]` action in the navigation bar that op
 #### Scenario: Saved entry appears
 - **WHEN** the user saves a manual entry from the sheet opened via `[+]`
 - **THEN** the sheet dismisses and the entry appears in its day group in the list
+
+### Requirement: History reflects entry edits and deletes
+Edits saved in the entry form SHALL appear in the History list with updated values in the correct day group when the user returns to it. Entries deleted via the entry form SHALL disappear from the History list (removing the day group when it becomes empty, recomputing the day total) via the existing invalidate/reload chain.
+
+#### Scenario: Edited entry shows new values
+- **WHEN** the user edits an entry's interval and returns to History
+- **THEN** the entry shows the new timeframe and duration in its day group
+
+#### Scenario: Deleted entry disappears
+- **WHEN** the user confirms deletion of an entry and returns to History
+- **THEN** the entry is gone and its day group is removed when empty
