@@ -130,8 +130,8 @@ struct ActivityDetailViewModelTests {
         #expect(try await store.outboxRows().allSatisfy { $0.op != "delete" })
     }
 
-    @Test("performUndo commits an expired entry deletion instead of restoring")
-    func undoExpiredCommitsInsteadOfRestoring() async throws {
+    @Test("performUndo restores an old buffered entry deletion (no window)")
+    func undoOldBufferedDeletionRestores() async throws {
         let store = try makeStore()
         try await store.createActivity(makeActivity())
         let start = Date().addingTimeInterval(-3_700)
@@ -142,7 +142,7 @@ struct ActivityDetailViewModelTests {
         ))
         _ = try await store.deleteEntryUndoable(
             id: "e1",
-            deletedAt: Date().addingTimeInterval(-60)
+            deletedAt: Date().addingTimeInterval(-3_600)
         )
         let vm = ActivityDetailViewModel(
             store: store,
@@ -152,9 +152,8 @@ struct ActivityDetailViewModelTests {
 
         await vm.performUndo()
 
-        #expect(vm.dayGroups.isEmpty)
-        let deletes = try await store.outboxRows().filter { $0.op == "delete" }
-        #expect(deletes.map(\.recordID) == ["e1"])
+        #expect(vm.dayGroups.flatMap(\.entries).map(\.id) == ["e1"])
+        #expect(try await store.outboxRows().allSatisfy { $0.op != "delete" })
     }
 
     @Test("performUndo leaves buffer rows owned by other surfaces alone")
@@ -250,17 +249,17 @@ struct ActivityDetailViewModelTests {
         await vm.registerSystemUndo(with: undoManager)
         #expect(!undoManager.canUndo)
     }
-    @Test("registerSystemUndo offers nothing when the entry deletion expired")
-    func registerSkipsExpiredDeletion() async throws {
+    @Test("registerSystemUndo offers an old buffered entry deletion (no window)")
+    func registerOffersOldBufferedDeletion() async throws {
         let store = try makeStore()
         try await store.createActivity(makeActivity())
         let start = Date().addingTimeInterval(-3_700)
         try await store.createEntry(makeEntry(startedAt: start, endedAt: start.addingTimeInterval(3_700), durationSeconds: 3_700))
-        _ = try await store.deleteEntryUndoable(id: "e1", deletedAt: Date().addingTimeInterval(-60))
+        _ = try await store.deleteEntryUndoable(id: "e1", deletedAt: Date().addingTimeInterval(-3_600))
         let vm = ActivityDetailViewModel(store: store, activityID: "a1", undoBuffer: UndoBufferStore(store: store))
         let undoManager = UndoManager()
         await vm.registerSystemUndo(with: undoManager)
-        #expect(!undoManager.canUndo)
+        #expect(undoManager.canUndo)
     }
     @Test("registration after a restore offers nothing (single-shot)")
     func registerClearedAfterRestore() async throws {

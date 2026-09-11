@@ -22,11 +22,19 @@ final class HistoryViewModel: ObservableObject {
     @Published private(set) var isLoading = false
 
     private let store: LocalStore
+    private let undoBuffer: UndoBufferStore
+    private let nowProvider: () -> Date
     private var needsReload = true
     private var categoriesByActivityID: [String: [Category]] = [:]
 
-    init(store: LocalStore) {
+    init(
+        store: LocalStore,
+        undoBuffer: UndoBufferStore? = nil,
+        now: @escaping () -> Date = Date.init
+    ) {
         self.store = store
+        self.undoBuffer = undoBuffer ?? UndoBufferStore(store: store)
+        self.nowProvider = now
     }
 
     /// Reloads entries, activities, and categories and rebuilds the day
@@ -69,6 +77,52 @@ final class HistoryViewModel: ObservableObject {
     /// Marks the data stale so the next History appear reloads it.
     func invalidate() {
         needsReload = true
+    }
+
+    // MARK: - Activity undo (shake → default confirmation → single restore)
+
+    /// Registers the newest restorable activity deletion with the system Undo
+    /// manager, so shaking surfaces the DEFAULT Undo confirmation and
+    /// confirming restores exactly one activity — the most recent buffered
+    /// one (deleted from the detail sheet's stacked editor). Previous
+    /// registrations are cleared first, so one shake+confirm can never
+    /// restore two deletions. Offers nothing when the buffer holds no
+    /// activity deletion — including when the newest row belongs
+    /// to another surface (U7 supersession).
+    func registerActivityUndo(with undoManager: UndoManager?) async {
+        guard let undoManager else { return }
+        undoManager.removeAllActions(withTarget: self)
+        guard let recent = try? await undoBuffer.mostRecent(),
+              (try? await store.activityDeletionSnapshot(bufferID: recent.id)) != nil else { return }
+        undoManager.registerUndo(withTarget: self) { [weak undoManager] target in
+            Task { @MainActor in
+                await target.performActivityUndo()
+                await target.registerActivityUndo(with: undoManager)
+            }
+        }
+        // Names the undoable action so the DEFAULT system confirmation
+        // states what Confirm will restore. Reuses the existing localized
+        // Delete string — no new strings (U4).
+        undoManager.setActionName(L10n.activityEditorDelete.text)
+    }
+
+    /// Restores the most recent activity deletion (buffered deletions stay
+    /// restorable until the app restarts) and reloads the list so the
+    /// restored entries reappear.
+    /// Only activity deletions are restored here — buffer rows owned by other
+    /// surfaces are left for their owners.
+    /// No toast is shown; one shake restores at most one deletion.
+    func performActivityUndo() async {
+        do {
+            guard let recent = try await undoBuffer.mostRecent() else { return }
+            guard try await store.activityDeletionSnapshot(bufferID: recent.id) != nil else { return }
+            if try await store.undoActivityDeletion(bufferID: recent.id) != nil {
+                await load()
+            }
+        } catch {
+            // Keep the last good snapshot; a transient failure must not
+            // blank the list (same philosophy as load()).
+        }
     }
 
     // MARK: - Row presentation (EntryRow inputs)

@@ -241,87 +241,100 @@ struct ManageCategoriesViewModelTests {
         #expect(vm.editorCategory?.id == "c1")
     }
 
-    @Test("a confirmed deletion removes the category and presents the undo toast")
-    func deleteShowsUndoToast() async throws {
+    @Test("an editor deletion removes the category from the list with no outbox row")
+    func editorDeleteUpdatesList() async throws {
         let store = try makeStore()
         try await store.createCategory(draft: CategoryDraft(name: "Work", icon: .briefcase), id: "c1", now: Date())
         let vm = ManageCategoriesViewModel(store: store, undoBuffer: UndoBufferStore(store: store))
         await vm.load()
 
-        vm.confirmDelete(try #require(vm.categories.first))
-        vm.isShowingDeleteConfirm = false
-        await vm.deleteConfirmed()
+        // The editor performs the deletion; the list settles on its callback.
+        _ = try await store.deleteCategoryUndoable(id: "c1", deletedAt: Date())
+        await vm.editorDidDelete()
 
         #expect(try await store.category(id: "c1") == nil)
         #expect(vm.categories.isEmpty)
-        #expect(vm.undoToast != nil)
-        #expect(vm.undoToast?.category.id == "c1")
-        // No outbox delete before expiry.
+        // No outbox delete while the deletion is buffered.
         let rows = try await store.outboxRows()
         #expect(rows.allSatisfy { $0.op != "delete" })
     }
 
-    @Test("undo restores the category and clears the toast")
+    @Test("undo restores the category and refreshes the list")
     func undoRestores() async throws {
         let store = try makeStore()
         try await store.createCategory(draft: CategoryDraft(name: "Work", icon: .briefcase), id: "c1", now: Date())
         let vm = ManageCategoriesViewModel(store: store, undoBuffer: UndoBufferStore(store: store))
         await vm.load()
-        vm.confirmDelete(try #require(vm.categories.first))
-        vm.isShowingDeleteConfirm = false
-        await vm.deleteConfirmed()
+        _ = try await store.deleteCategoryUndoable(id: "c1", deletedAt: Date())
+        await vm.editorDidDelete()
 
         await vm.performUndo()
 
         #expect(try await store.category(id: "c1") != nil)
-        #expect(vm.undoToast == nil)
         #expect(vm.categories.map(\.id).contains("c1"))
         let rows = try await store.outboxRows()
         #expect(rows.allSatisfy { $0.op != "delete" })
     }
 
-    @Test("dismissing the toast keeps system undo backed by the durable buffer")
-    func dismissedToastRemainsUndoable() async throws {
+    @Test("the system undo registration targets the newest category deletion")
+    func systemUndoRegistersCategoryDeletion() async throws {
         let store = try makeStore()
-        try await store.createCategory(
-            draft: CategoryDraft(name: "Work", icon: .briefcase),
-            id: "c1",
-            now: Date()
-        )
+        try await store.createCategory(draft: CategoryDraft(name: "Work", icon: .briefcase), id: "c1", now: Date())
+        _ = try await store.deleteCategoryUndoable(id: "c1", deletedAt: Date())
         let vm = ManageCategoriesViewModel(store: store, undoBuffer: UndoBufferStore(store: store))
-        await vm.load()
-        vm.confirmDelete(try #require(vm.categories.first))
-        vm.isShowingDeleteConfirm = false
-        await vm.deleteConfirmed()
+        let undoManager = UndoManager()
 
-        vm.dismissUndo()
-        #expect(vm.undoToast == nil)
-        await vm.performUndo()
+        await vm.registerSystemUndo(with: undoManager)
 
-        #expect(try await store.category(id: "c1") != nil)
-        #expect(try await store.undoBufferMostRecent() == nil)
+        #expect(undoManager.canUndo)
+        #expect(undoManager.undoActionName == L10n.deleteCategoryConfirm.text)
     }
 
-    @Test("an expired undo commits the delete outbox row")
-    func expiredUndoCommitsDelete() async throws {
+    @Test("foreign snapshots are ignored by category undo")
+    func foreignSnapshotIgnored() async throws {
+        let store = try makeStore()
+        try await store.createActivity(Activity(id: "a1", name: "Running"))
+        try await store.createEntry(TimeEntry(
+            id: "e1", activityID: "a1", activityName: "Running",
+            startedAt: Date(timeIntervalSinceReferenceDate: 1_000),
+            endedAt: Date(timeIntervalSinceReferenceDate: 1_600), durationSeconds: 600,
+            source: "manual"
+        ))
+        _ = try await store.deleteEntryUndoable(id: "e1", deletedAt: Date())
+        let vm = ManageCategoriesViewModel(store: store, undoBuffer: UndoBufferStore(store: store))
+        let undoManager = UndoManager()
+
+        await vm.registerSystemUndo(with: undoManager)
+        await vm.performUndo()
+
+        #expect(!undoManager.canUndo)
+        // The foreign buffer row is untouched.
+        #expect(try await store.undoBufferMostRecent() != nil)
+        #expect(try await store.entry(id: "e1") == nil)
+    }
+
+    @Test("an old buffered deletion stays restorable until the app restarts")
+    func oldBufferedDeletionStaysRestorable() async throws {
         let store = try makeStore()
         try await store.createCategory(draft: CategoryDraft(name: "Work"), id: "c1", now: Date())
-        // Simulate a deletion that happened more than 30 s ago.
-        let outcome = try await store.deleteCategoryUndoable(
-            id: "c1",
-            deletedAt: Date().addingTimeInterval(-60)
-        )
-        guard case .deleted = outcome else {
-            Issue.record("expected deleted")
-            return
-        }
+        _ = try await store.deleteCategoryUndoable(id: "c1", deletedAt: Date().addingTimeInterval(-3_600))
         let vm = ManageCategoriesViewModel(store: store, undoBuffer: UndoBufferStore(store: store))
         await vm.load()
+        let undoManager = UndoManager()
+        await vm.registerSystemUndo(with: undoManager)
+        #expect(undoManager.canUndo)
+        await vm.performUndo()
+        #expect(try await store.category(id: "c1") != nil)
+        #expect(try await store.outboxRows().allSatisfy { $0.op != "delete" })
+    }
 
-        await vm.commitExpiredUndo()
-
-        let rows = try await store.outboxRows()
-        let deletes = rows.filter { $0.op == "delete" }
+    @Test("commitAll finalizes buffered deletions (cold launch)")
+    func commitAllFinalizesBufferedDeletion() async throws {
+        let store = try makeStore()
+        try await store.createCategory(draft: CategoryDraft(name: "Work"), id: "c1", now: Date())
+        _ = try await store.deleteCategoryUndoable(id: "c1", deletedAt: Date())
+        try await UndoBufferStore(store: store).commitAll()
+        let deletes = try await store.outboxRows().filter { $0.op == "delete" }
         #expect(deletes.count == 1)
         #expect(deletes.first?.recordID == "c1")
     }
@@ -342,8 +355,8 @@ struct ManageCategoriesViewModelTests {
         #expect(vm.categories.map(\.name) == ["Travel", "Zen"])
     }
 
-    @Test("a cold-launch deletion within the window is adoptable for undo")
-    func coldLaunchAdoptsUndo() async throws {
+    @Test("a buffered deletion is restorable without any toast")
+    func bufferedDeletionAdoptsUndo() async throws {
         let store = try makeStore()
         try await store.createCategory(draft: CategoryDraft(name: "Work"), id: "c1", now: Date())
         _ = try await store.deleteCategoryUndoable(id: "c1", deletedAt: Date())
@@ -351,7 +364,7 @@ struct ManageCategoriesViewModelTests {
 
         await vm.load()
 
-        #expect(vm.undoToast?.category.id == "c1")
+        // No toast exists anymore; the durable buffer backs the system undo.
         await vm.performUndo()
         #expect(try await store.category(id: "c1") != nil)
     }
@@ -366,9 +379,9 @@ struct ManageCategoriesViewModelTests {
 
         await vm.load()
         vm.addCategory()
-        vm.confirmDelete(try #require(vm.categories.first))
-        vm.isShowingDeleteConfirm = false
-        await vm.deleteConfirmed()
+        // Deletion happens in the editor now; the list surface only reloads.
+        _ = try await store.deleteCategoryUndoable(id: "c1", deletedAt: Date())
+        await vm.editorDidDelete()
 
         // The running timer is untouched by category browsing/deletion.
         let state = try await store.timerState()

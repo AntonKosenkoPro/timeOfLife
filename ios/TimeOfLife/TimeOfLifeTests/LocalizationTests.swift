@@ -145,7 +145,9 @@ struct LocalizationTests {
         // add-manual-entry adds activityDetailLogTime + 8 logTime.* +
         // historyLogTime = 156; edit-entry-from-activity-detail adds 9
         // entry.* (edit/locked titles, save, delete + confirm, stale
-        // error, locked note) = 165
-        #expect(l10nCases.count == 165)
+        // error, locked note) = 165; unify-catalog-deletion adds 6
+        // (activityEditor.delete, 4 activity.delete.*, categoryEditor.delete)
+        // and removes 5 (4 undo toast keys + delete.category.cancel) = 166
+        #expect(l10nCases.count == 166)
     }
 }

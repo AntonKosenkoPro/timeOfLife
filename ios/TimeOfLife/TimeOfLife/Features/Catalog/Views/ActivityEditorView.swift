@@ -12,12 +12,18 @@ struct ActivityEditorView: View {
     private var dismiss
     @FocusState private var isNameFocused: Bool
     @State private var isShowingCategoryEditor = false
+    /// Drives the delete confirmation alert.
+    @State private var isShowingDeleteConfirm = false
+    /// Called after a confirmed deletion so the presenter can settle
+    /// (Track clears its selection; the detail sheet reloads and dismisses).
+    private let onDeleted: (() -> Void)?
 
     init(
         store: LocalStore,
         activity: Activity,
         onSaved: @escaping (Activity) -> Void,
-        onCollision: @escaping (Activity) -> Void
+        onCollision: @escaping (Activity) -> Void,
+        onDeleted: (() -> Void)? = nil
     ) {
         _vm = StateObject(wrappedValue: ActivityEditorViewModel(
             store: store,
@@ -25,6 +31,7 @@ struct ActivityEditorView: View {
             onSaved: onSaved,
             onCollision: onCollision
         ))
+        self.onDeleted = onDeleted
     }
 
     var body: some View {
@@ -64,6 +71,8 @@ struct ActivityEditorView: View {
                         accessibilityId: "ActivityEditorErrorBanner"
                     )
                 }
+
+                deleteSection
             },
             bottomBar: {
                 PrimaryButton(
@@ -83,6 +92,23 @@ struct ActivityEditorView: View {
         .onAppear {
             isNameFocused = true
         }
+        .alert(
+            L10n.activityDeleteTitle.text,
+            isPresented: $isShowingDeleteConfirm
+        ) {
+            Button(L10n.activityDeleteConfirm.text, role: .destructive) {
+                Task { await deleteActivity() }
+            }
+            Button(L10n.activityEditorCancel.text, role: .cancel) {}
+        } message: {
+            Text(String(
+                format: L10n.activityDeleteMessage.text,
+                locale: .current,
+                vm.originalName,
+                vm.committedEntryCount,
+                vm.committedTotalText
+            ))
+        }
         .sheet(isPresented: $isShowingCategoryEditor) {
             CategoryEditorView(
                 store: vm.categoryStore,
@@ -97,6 +123,36 @@ struct ActivityEditorView: View {
                     vm.errorMessage = L10n.errorCategoryExists.text
                 }
             )
+        }
+    }
+
+    // MARK: - Delete
+
+    /// Bottom-of-page destructive Delete (edit mode; the Activity editor has
+    /// no create mode). Mirrors the entry form's delete section.
+    private var deleteSection: some View {
+        Button(role: .destructive) {
+            isShowingDeleteConfirm = true
+        } label: {
+            Text(L10n.activityEditorDelete.text)
+                .font(.headline)
+                .foregroundStyle(Theme.danger)
+                .frame(maxWidth: .infinity, minHeight: Theme.minTapArea)
+                .contentShape(Rectangle())
+        }
+        .background(Theme.backgroundSecondary)
+        .clipShape(RoundedRectangle(cornerRadius: Theme.cornerRadius))
+        .accessibilityIdentifier("ActivityEditorDeleteButton")
+    }
+
+    /// Deletes the activity into the durable undo buffer; notifies the
+    /// presenter and dismisses on success (the presenter settles via
+    /// `onDeleted` and the sheet dismissal). On failure the editor stays open
+    /// with the error banner.
+    private func deleteActivity() async {
+        if await vm.deleteConfirmed() {
+            onDeleted?()
+            dismiss()
         }
     }
 

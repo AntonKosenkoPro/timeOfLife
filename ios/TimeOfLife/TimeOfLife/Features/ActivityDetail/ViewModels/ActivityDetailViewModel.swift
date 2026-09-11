@@ -115,7 +115,7 @@ final class ActivityDetailViewModel: ObservableObject {
     /// confirming restores exactly one entry (the most recent buffer row).
     /// Previous registrations are cleared first, so one shake+confirm can
     /// never restore two deletions. Offers nothing when the buffer holds
-    /// no non-expired entry deletion — including when the newest row
+    /// no entry deletion — including when the newest row
     /// belongs to another surface (U7 supersession: an entry delete
     /// followed by a category delete leaves only the category undoable
     /// here). After the registered undo runs, re-registers when a further
@@ -125,8 +125,7 @@ final class ActivityDetailViewModel: ObservableObject {
         guard let undoManager else { return }
         undoManager.removeAllActions(withTarget: self)
         guard let recent = try? await undoBuffer.mostRecent(),
-              (try? await store.entryDeletionSnapshot(bufferID: recent.id)) != nil,
-              !recent.isExpired(now: nowProvider()) else { return }
+              (try? await store.entryDeletionSnapshot(bufferID: recent.id)) != nil else { return }
         undoManager.registerUndo(withTarget: self) { [weak undoManager] target in
             Task { @MainActor in
                 await target.performUndo()
@@ -140,22 +139,15 @@ final class ActivityDetailViewModel: ObservableObject {
         undoManager.setActionName(L10n.entryDelete.text)
     }
 
-    /// Restores the most recent entry deletion within the 30 s wall-clock
-    /// window (U7). Only entry deletions are restored here — buffer rows
-    /// owned by other surfaces are left for their owners. An expired row
-    /// commits on the spot so the list never shows a restorable-but-dead
-    /// deletion. No toast is shown in this change; the shake gesture is the
+    /// Restores the most recent entry deletion (buffered deletions stay
+    /// restorable until the app restarts). Only entry deletions are restored
+    /// here — buffer rows owned by other surfaces are left for their owners.
+    /// No toast is shown in this change; the shake gesture is the
     /// only affordance, and one shake restores at most one deletion.
     func performUndo() async {
         do {
             guard let recent = try await undoBuffer.mostRecent() else { return }
             guard try await store.entryDeletionSnapshot(bufferID: recent.id) != nil else { return }
-            let now = nowProvider()
-            if recent.isExpired(now: now) {
-                try? await undoBuffer.commitExpired(now: now)
-                await load()
-                return
-            }
             if try await store.undoEntryDeletion(bufferID: recent.id) != nil {
                 await load()
             }

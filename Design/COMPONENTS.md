@@ -997,6 +997,8 @@ SectionHeader(title: dayGroup.label, contentLeadingInset: EntryRow.iconColumnWid
 
 ## `UndoToast`
 
+> **Removed** by `unify-catalog-deletion`: deletions undo through the DEFAULT system Undo confirmation only (see `INTERACTIONS.md` → Undo flow). The component, its `L10n.undo.*` keys (except the chip-selection `undo.selected` / `undo.notSelected`), and all call sites are deleted. The spec below is history.
+
 Transient 30-second undo affordance shown after a delete (R3/U6). Purely presentational — the auto-dismiss timer and the 30 s undo window are owned by the parent ViewModel.
 
 ### Signature

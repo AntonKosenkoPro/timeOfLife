@@ -124,8 +124,8 @@ where it was opened from (History row or ActivityDetail entries list).
   "Delete this entry?" (entry-focused, names no activity) → durable undo
   buffer (no outbox row) → dismiss + reload; restore via the default system
   Undo confirmation (shake → Undo prompt → confirm restores exactly the most
-  recent entry, 30 s wall-clock, U7 supersession, foreground `commitExpired`
-  via the existing global reconciliation). No UndoToast on this surface.
+  recent entry, restorable until the app restarts, U7 supersession, cold-launch
+  commit via the global reconciliation). No UndoToast on this surface.
 - Still deferred: History-row swipe-to-delete and the app-wide UndoToast
   rollout (`local-first-sync-architecture` tasks 3.3–3.6); History rows
   stay swipe/long-press-free.

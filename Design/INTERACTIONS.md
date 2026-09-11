@@ -138,33 +138,32 @@ D1 (OpenSpec change `redesign-track-experience`). The root is a three-tab shell,
 
 ## Undo flow (catalog deletions)
 
-R3 / U6 / U7; decision D17. Applies to activity and category deletions from Manage Activities / Manage Categories.
+R3 / U6 / U7; decisions D17 + `unify-catalog-deletion`. Applies to entry, activity, and category deletions, all confirmed from their editing forms (entry form, activity editor, category editor — no list swipes, no toasts).
 
-- A deletion is **not** committed to the local store or pushed to sync immediately. It enters a client-side **undo buffer** and is only committed + synced after a 30 s window passes.
-- Present a transient `UndoToast` (`COMPONENTS.md`) at the bottom with an **Undo** button; auto-dismiss after 30 s.
-- **Undo** (tap, or system shake-to-undo) re-inserts the deleted item(s) from the buffer before the window elapses; nothing is synced.
-- The buffer is **superseded** by the next undoable action — only the most recent undoable deletion is restorable (matches U7 wording).
-- After the window, commit locally (hard delete) and enqueue the `DELETE` for sync; the server hard-deletes (no trash, per `Activity_Catalog_API.md` Sync & ids).
+- A deletion is **not** committed to the local store or pushed to sync immediately. It enters the client-side **durable undo buffer** and stays restorable until the app restarts; a cold launch commits whatever is still buffered.
+- No `UndoToast` is shown. Undo is the DEFAULT system Undo confirmation only: shaking on the presenting surface shows the system prompt, and confirming restores exactly the most recent buffered deletion (registrations are cleared-then-single).
+- The buffer is **superseded** by the next undoable action — only the most recent buffered deletion is restorable, including across surfaces (an entry delete followed by a category delete leaves only the category undoable, and vice versa; each surface filters snapshots by resource; older rows stay buffered until undone or the app restarts).
+- On restart, commit locally (hard delete) and enqueue the `DELETE` for sync; the server hard-deletes (no trash, per `Activity_Catalog_API.md` Sync & ids).
 - Bulk deletions (delete activity + its entries, F10) are undoable as a unit — the buffer holds the whole set and Undo restores all of it.
-- **Undo API failure:** If the undo API call fails (network error, 404, 409), show an `ErrorBanner` ("Could not undo — try again") and keep the item in its edited state. The undo buffer is not cleared on failure, so the user can retry by triggering undo again (e.g. via a second UndoToast if still within the 30 s window).
+- **Undo failure:** undo is a local transaction (no API call); on a local failure the surface keeps its last good snapshot and the buffer row is preserved for retry until the app restarts.
 
 ### Durable undo buffer (local-first)
 
 D3 (OpenSpec change `local-first-sync-architecture`). The undo buffer is **durable** — it lives in an `undo_buffer` table in the local GRDB database, not in memory:
 
-- The 30 s window is **wall-clock** (`deleted_at + 30s`), not a `Timer`. A `Timer` is only a UI convenience for the UndoToast countdown; the window itself is computed from the stored timestamp.
+- There is no wall-clock undo window: a buffered deletion stays restorable until the app restarts. There is no countdown UI.
 - A deletion writes the buffer row (full serialized snapshot of the deleted records) and removes the records in **one transaction**; no outbox row is created while the deletion is in the buffer, so the relay is never notified of an undone deletion.
-- **Expired buffers commit on the next foreground** — never in the background, and there is no background timer. On foreground, the app detects expired buffers and commits (deletes the buffer row + inserts the outbox rows) in one transaction.
-- The buffer **survives suspension, kill, and cold launch**. After a cold launch within the window, no unsolicited UndoToast is shown; if the user navigates to the affected screen within the window, the deletion can still be undone from the durable buffer.
-- **Supersession (U7):** only the most recent undoable deletion is restorable via shake-to-undo / UndoToast; an older deletion commits when its own 30 s window elapses.
+- **A cold launch commits everything still buffered** — never while the process is alive, and there is no background timer. The commit deletes each buffer row + inserts the outbox rows in one transaction.
+- The buffer **survives suspension and backgrounding**. After a restart, buffered deletions are finalized with no restore path.
+- **Supersession (U7):** only the most recent buffered deletion is restorable via the system shake-to-undo; older rows stay buffered until undone or the app restarts.
 
 ### Shake-to-undo wiring (U7)
 
 U7 says "no custom shake detection" — use the iOS system motion event. The view layer owns the binding:
 
-- **iOS 17+:** add a `.onShake { vm.performUndo() }` modifier on the manage screen.
-- **iOS 15/16:** create a small `ShakeHostingController` subclass of `UIHostingController` that overrides `motionEnded(_:with:)`. When the event is `UIEvent.EventType.motion` and the subtype is `.motionShake`, forward to the active manage screen's `performUndo()` (via a shared observable flag or `NotificationCenter`). Use the same controller subclass for the signed-in navigation stack so both `ManageActivitiesView` and `ManageCategoriesView` inherit the gesture.
-- Do not implement custom accelerometer/gyro logic.
+- Every surface that can follow a deletion (Track, History, Manage Categories, activity detail sheet) hosts the shared passive `ShakeFirstResponderHost` (transparent, background-placed, holds first responder, handles NO motion itself) bound to its own `@Environment(\.undoManager)`.
+- After a deletion lands, the surface registers the newest eligible buffer row cleared-then-single with `setActionName`, filtered by snapshot resource — so one shake+confirm restores at most one deletion, and foreign-surface rows are left for their owners.
+- Do not implement custom accelerometer/gyro logic, and do not restore immediately on shake — the system prompt is the only confirmation.
 
 ### Activity search and creation (unify-activity-preparation-flow)
 

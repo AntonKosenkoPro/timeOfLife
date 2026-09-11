@@ -92,6 +92,13 @@
 "activityEditor.addCategory" = "Добавить категорию";
 "activityEditor.save" = "Сохранить";
 "activityEditor.cancel" = "Отмена";
+"activityEditor.delete" = "Удалить активность";
+
+// Activity deletion (unify-catalog-deletion)
+"activity.delete.title" = "Удалить эту активность?";
+"activity.delete.message" = "Удалить «%@» и её историю? Записей: %d, всего: %@. Активность будет удалена. Отменить можно встряской до перезапуска приложения.";
+"activity.delete.confirm" = "Удалить";
+"activity.delete.running" = "Остановите запущенный таймер, прежде чем удалять активность.";
 "timer.compactStop" = "Остановить и сохранить таймер";
 "timer.compactReturnHint" = "Вернуться в Трек";
 "timer.compactRunning" = "%@, таймер идёт";
@@ -182,7 +189,7 @@
 "entry.save" = "Сохранить";
 "entry.delete" = "Удалить запись";
 "entry.deleteTitle" = "Удалить эту запись?";
-"entry.deleteMessage" = "Запись будет удалена. Отменить можно встряской в течение 30 секунд.";
+"entry.deleteMessage" = "Запись будет удалена. Отменить можно встряской до перезапуска приложения.";
 "entry.deleteConfirm" = "Удалить";
 "entry.staleError" = "Запись изменилась. Закройте и откройте её заново, затем повторите.";
 "entry.lockedNote" = "Импортировано через %@: редактирование отключено, чтобы избежать конфликтов с источником.";
@@ -199,13 +206,9 @@
 "category.seed.sleep" = "Сон";
 "category.seed.entertainment" = "Развлечения";
 
-// Undo (category-management D7)
-"undo.button" = "Отменить";
-"undo.dismiss" = "Скрыть";
-"undo.categoryDeleted" = "Категория удалена";
+// Undo (chip selection accessibility)
 "undo.selected" = "Выбрано";
 "undo.notSelected" = "Не выбрано";
-"undo.secondsRemaining" = "Осталось: %d с";
 
 // Manage categories (category-management D4)
 "manage.categories.title" = "Категории";
@@ -216,9 +219,8 @@
 "manage.categories.editHint" = "Дважды коснитесь, чтобы изменить.";
 "manage.categories.loading" = "Загрузка категорий…";
 "delete.category.title" = "Удалить категорию?";
-"delete.category.message" = "%@ будет удалена со всех активностей. Записи сохранятся.";
+"delete.category.message" = "%@ будет удалена со всех активностей. Записи сохранятся. Отменить можно встряской до перезапуска приложения.";
 "delete.category.confirm" = "Удалить";
-"delete.category.cancel" = "Отмена";
 "error.categoryExists" = "Категория с таким названием уже существует.";
 "error.conflict" = "Изменено на другом устройстве. Показана актуальная версия.";
 "error.localPersistence" = "Не удалось сохранить локально. Попробуйте снова.";
@@ -232,6 +234,7 @@
 "categoryEditor.iconUnavailable" = "Этот значок недоступен в этой версии iOS и отображается как тег.";
 "categoryEditor.save" = "Сохранить";
 "categoryEditor.cancel" = "Отмена";
+"categoryEditor.delete" = "Удалить категорию";
 "category.nameRequired" = "Введите название категории.";
 "category.nameTooLong" = "Название должно быть не длиннее 60 символов.";
 "activityEditor.invalidAssociation" = "Одна из выбранных категорий больше не существует. Проверьте выбор и попробуйте снова.";

@@ -295,7 +295,8 @@ final class LogTimeViewModel: ObservableObject, ActivitySearchHosting {
                 pendingRestore = nil
                 select(restored)
             } else {
-                // The window elapsed or the buffer was superseded: fall back
+                // The buffer row is gone (restored elsewhere or the app
+                // restarted and it committed): fall back
                 // to ordinary creation.
                 pendingRestore = nil
                 await quickCreateFromSearch()

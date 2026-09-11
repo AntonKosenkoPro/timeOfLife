@@ -20,12 +20,19 @@ final class ActivityEditorViewModel: ObservableObject {
     @Published private(set) var fieldErrors: FieldErrors
     @Published var errorMessage: String?
     @Published private(set) var isLoading = false
+    /// Committed-entry scope for the delete confirmation (count + formatted
+    /// all-time total), loaded on open.
+    @Published private(set) var committedEntryCount = 0
+    @Published private(set) var committedTotalText = ""
 
     /// The maximum notes length in characters.
     static let notesMaxLength = 280
 
     /// The original Activity identifier being refined.
     let activityID: String
+    /// The persisted name at open time: the delete confirmation names this,
+    /// never the in-progress draft.
+    let originalName: String
 
     private let store: LocalStore
     private let onSaved: (Activity) -> Void
@@ -48,6 +55,7 @@ final class ActivityEditorViewModel: ObservableObject {
     ) {
         self.store = store
         self.activityID = activity.id
+        self.originalName = activity.name
         self.name = activity.name
         self.notes = activity.notes ?? ""
         self.selectedCategoryIDs = activity.categoryIDs
@@ -56,6 +64,7 @@ final class ActivityEditorViewModel: ObservableObject {
         self.onCollision = onCollision
         Task {
             await reloadCategories()
+            await reloadDeleteScope()
         }
     }
 
@@ -68,6 +77,49 @@ final class ActivityEditorViewModel: ObservableObject {
         } catch {
             availableCategories = []
             errorMessage = L10n.errorLocalPersistence.text
+        }
+    }
+
+    /// Loads the committed-entry scope shown in the delete confirmation
+    /// (count + all-time total). In-progress sessions are excluded, matching
+    /// the detail sheet.
+    func reloadDeleteScope() async {
+        do {
+            let entries = try await store.entries(activityID: activityID)
+                .filter { $0.endedAt != nil }
+            committedEntryCount = entries.count
+            committedTotalText = HistoryViewModel.detailedDuration(
+                try await store.totalDuration(activityID: activityID)
+            )
+        } catch {
+            committedEntryCount = 0
+            committedTotalText = ""
+        }
+    }
+
+    /// Deletes the edited activity into the durable undo buffer (no outbox
+    /// row yet — shake-to-undo restores it with its entries until the app
+    /// restarts, when a cold launch commits it). Returns true when the caller
+    /// should dismiss the editor
+    /// (deleted, or already gone elsewhere); false keeps the editor open with
+    /// `errorMessage` set (running timer blocks, persistence failure keeps
+    /// the draft intact).
+    func deleteConfirmed() async -> Bool {
+        do {
+            switch try await store.deleteActivityUndoable(id: activityID) {
+            case .deleted, .missing:
+                // Already gone elsewhere — the desired end state holds.
+                return true
+            case .runBlocked:
+                errorMessage = L10n.activityDeleteRunning.text
+                return false
+            case .failure:
+                errorMessage = L10n.errorLocalPersistence.text
+                return false
+            }
+        } catch {
+            errorMessage = L10n.errorLocalPersistence.text
+            return false
         }
     }
 

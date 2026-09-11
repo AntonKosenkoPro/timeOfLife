@@ -341,7 +341,7 @@ actor LocalStore {
         case created(Activity)
         /// An existing activity with the same normalized name was reused.
         case existing(Activity)
-        /// A non-expired pending-deletion activity with the same normalized
+        /// A pending-deletion activity with the same normalized
         /// name exists; the caller must confirm restoration explicitly.
         case restorableDeletion(Activity)
         /// The candidate name failed validation.
@@ -382,7 +382,7 @@ actor LocalStore {
             if let existing = try Self.fetchActivity(db, name: trimmed) {
                 return .existing(existing)
             }
-            if let pending = try Self.fetchPendingDeletionActivity(db, name: trimmed, now: now) {
+            if let pending = try Self.fetchPendingDeletionActivity(db, name: trimmed) {
                 return .restorableDeletion(pending)
             }
             let deduplicated = Self.deduplicate(categoryIDs)
@@ -1217,32 +1217,32 @@ actor LocalStore {
         }
     }
 
-    /// A non-expired pending-deletion activity whose normalized name matches
+    /// A pending-deletion activity whose normalized name matches
     /// `name` case-insensitively, or nil (unify-activity-preparation-flow
     /// spec, decision 7). The returned activity is the full snapshot so the
     /// caller can offer explicit restoration.
-    func pendingDeletionActivity(named name: String, now: Date = Date()) throws -> Activity? {
+    func pendingDeletionActivity(named name: String) throws -> Activity? {
         let trimmed = ActivityName.normalized(name)
         return try dbQueue.read { db in
-            try Self.fetchPendingDeletionActivity(db, name: trimmed, now: now)
+            try Self.fetchPendingDeletionActivity(db, name: trimmed)
         }
     }
 
-    /// Explicitly restores the non-expired pending-deletion activity whose
+    /// Explicitly restores the pending-deletion activity whose
     /// normalized name matches `name` case-insensitively (unify-activity-
     /// preparation-flow spec, decision 7). The snapshot records are
     /// re-inserted and the buffer row removed in one transaction; no outbox
     /// row is ever created, so the relay is never notified of the deletion.
-    /// Returns the restored activity, or nil when no matching non-expired
-    /// buffer row exists.
+    /// Returns the restored activity, or nil when no matching
+    /// buffer row exists. Buffered deletions stay pending until the app
+    /// restarts, so any buffered row still matches.
     @discardableResult
-    func restorePendingDeletionActivity(named name: String, now: Date = Date()) throws -> Activity? {
+    func restorePendingDeletionActivity(named name: String) throws -> Activity? {
         let trimmed = ActivityName.normalized(name)
         return try dbQueue.write { db in
-            let cutoff = now.addingTimeInterval(-UndoBufferStore.window)
             let rows = try UndoBufferRow.fetchAll(db, sql: """
-                SELECT * FROM undo_buffer WHERE deleted_at >= ?
-                """, arguments: [cutoff])
+                SELECT * FROM undo_buffer
+                """)
             for row in rows {
                 let snapshot = try JSONDecoder().decode(DeletionSnapshot.self, from: Data(row.payload.utf8))
                 for record in snapshot.records where record.resource == "activity" {
@@ -1283,18 +1283,19 @@ actor LocalStore {
         }
     }
 
-    /// Commits every expired buffer row: deletes the buffer row and inserts
+    /// Commits every buffered row: deletes each buffer row and inserts
     /// the outbox rows for the deletion in one transaction. Called on
-    /// foreground reconciliation (never in the background). The internal
+    /// cold launch (an app restart finalizes whatever is still buffered),
+    /// never while the process is alive. The internal
     /// `category_associations` record is part of a category-deletion snapshot
     /// (category-management D7), not a resource — it never produces an outbox
     /// row; the single category DELETE row does.
-    func undoBufferCommitExpired(now: Date) throws {
+    func undoBufferCommitAll() throws {
         try dbQueue.write { db in
-            let expired = try UndoBufferRow.fetchAll(db, sql: """
-                SELECT * FROM undo_buffer WHERE deleted_at < ?
-                """, arguments: [now.addingTimeInterval(-UndoBufferStore.window)])
-            for row in expired {
+            let buffered = try UndoBufferRow.fetchAll(db, sql: """
+                SELECT * FROM undo_buffer
+                """)
+            for row in buffered {
                 let snapshot = try JSONDecoder().decode(DeletionSnapshot.self, from: Data(row.payload.utf8))
                 for record in snapshot.records
                 where record.resource != CategoryDeletionSnapshot.associationsResource {
@@ -1355,6 +1356,22 @@ actor LocalStore {
 
     // MARK: - Category deletion & undo (category-management D7)
 
+    /// Which deletion owns a buffer payload (unify-catalog-deletion D10).
+    /// Activity snapshots carry entry records, so bare resource presence
+    /// cannot tell owners apart: an activity row also "contains" an entry.
+    /// Ownership is exclusive and deterministic — activity wins over
+    /// category wins over entry (the `category_associations` pseudo-record
+    /// never owns a row alone). Every typed decoder and undo below honors
+    /// only rows owned by its own resource, so no surface can claim or shred
+    /// another surface's buffered deletion.
+    private static func owner(of snapshot: DeletionSnapshot) -> String? {
+        let resources = Set(snapshot.records.map(\.resource))
+        if resources.contains("activity") { return "activity" }
+        if resources.contains("category") { return "category" }
+        if resources.contains("entry") { return "entry" }
+        return nil
+    }
+
     /// The outcome of `deleteCategoryUndoable(...)`.
     enum CategoryDelete: Equatable {
         /// The category was removed; the snapshot is in the durable undo
@@ -1366,7 +1383,7 @@ actor LocalStore {
         case failure
     }
 
-    /// One local Category delete that is undoable for the wall-clock window.
+    /// One local Category delete that is undoable until the app restarts.
     /// The snapshot carries the Category plus its ordered Activity
     /// associations so undo can restore both exactly.
     struct CategoryDeletionSnapshot: Codable, Equatable, Sendable {
@@ -1438,13 +1455,15 @@ actor LocalStore {
 
     /// Decodes the category-deletion snapshot held in a buffer row
     /// (category-management D7). Returns nil when the row does not exist or
-    /// does not carry a category deletion.
+    /// does not carry a category-OWNED deletion (D10 — activity/entry rows
+    /// are left for their owners).
     func categoryDeletionSnapshot(bufferID: String) throws -> CategoryDeletionSnapshot? {
         try dbQueue.read { db in
             guard let row = try UndoBufferRow.fetchOne(db, key: bufferID) else {
                 return nil
             }
             let snapshot = try JSONDecoder().decode(DeletionSnapshot.self, from: Data(row.payload.utf8))
+            guard Self.owner(of: snapshot) == "category" else { return nil }
             guard let categoryRecord = snapshot.records.first(where: { $0.resource == "category" }) else {
                 return nil
             }
@@ -1459,12 +1478,12 @@ actor LocalStore {
         }
     }
 
-    /// Undoes a category deletion within the window: restores the same
+    /// Undoes a category deletion: restores the same
     /// Category identity and its ordered Activity associations in one
     /// transaction and removes the buffer row (category-management D7).
     /// No outbox row is ever created, so the relay is never notified of the
     /// deletion. Returns the restored category, or nil when the buffer row
-    /// no longer holds a category snapshot.
+    /// no longer holds a category-OWNED snapshot (D10).
     @discardableResult
     func undoCategoryDeletion(bufferID: String) throws -> Category? {
         try dbQueue.write { db in
@@ -1472,6 +1491,7 @@ actor LocalStore {
                 return nil
             }
             let snapshot = try JSONDecoder().decode(DeletionSnapshot.self, from: Data(row.payload.utf8))
+            guard Self.owner(of: snapshot) == "category" else { return nil }
             guard let record = snapshot.records.first(where: { $0.resource == "category" }) else {
                 return nil
             }
@@ -1509,7 +1529,7 @@ actor LocalStore {
         case failure
     }
 
-    /// One local Entry delete that is undoable for the wall-clock window.
+    /// One local Entry delete that is undoable until the app restarts.
     /// The snapshot carries the full TimeEntry so undo restores it exactly.
     /// Removes the entry in ONE transaction with the buffer insert. NO outbox
     /// row is created while the deletion is in the buffer — the relay is
@@ -1551,13 +1571,16 @@ actor LocalStore {
     }
 
     /// Decodes the entry-deletion snapshot held in a buffer row. Returns nil
-    /// when the row does not exist or does not carry an entry deletion.
+    /// when the row does not exist or does not carry an entry-OWNED deletion
+    /// (D10 — activity rows carry entry records but belong to the activity
+    /// surface).
     func entryDeletionSnapshot(bufferID: String) throws -> TimeEntry? {
         try dbQueue.read { db in
             guard let row = try UndoBufferRow.fetchOne(db, key: bufferID) else {
                 return nil
             }
             let snapshot = try JSONDecoder().decode(DeletionSnapshot.self, from: Data(row.payload.utf8))
+            guard Self.owner(of: snapshot) == "entry" else { return nil }
             guard let record = snapshot.records.first(where: { $0.resource == "entry" }) else {
                 return nil
             }
@@ -1565,11 +1588,12 @@ actor LocalStore {
         }
     }
 
-    /// Undoes an entry deletion within the window: re-inserts the entry and
+    /// Undoes an entry deletion: re-inserts the entry and
     /// removes the buffer row in one transaction. No outbox row is ever
     /// created, so the relay is never notified of the deletion. Returns the
-    /// restored entry, or nil when the buffer row no longer holds an entry
-    /// snapshot.
+    /// restored entry, or nil when the buffer row no longer holds an
+    /// entry-OWNED snapshot (D10 — refusing here is what keeps an entry
+    /// undo from shredding an activity snapshot into an orphan entry).
     @discardableResult
     func undoEntryDeletion(bufferID: String) throws -> TimeEntry? {
         try dbQueue.write { db in
@@ -1577,6 +1601,7 @@ actor LocalStore {
                 return nil
             }
             let snapshot = try JSONDecoder().decode(DeletionSnapshot.self, from: Data(row.payload.utf8))
+            guard Self.owner(of: snapshot) == "entry" else { return nil }
             guard let record = snapshot.records.first(where: { $0.resource == "entry" }) else {
                 return nil
             }
@@ -1592,6 +1617,156 @@ actor LocalStore {
             try db.execute(sql: "DELETE FROM undo_buffer WHERE id = ?", arguments: [bufferID])
             return entry
         }
+    }
+
+    // MARK: - Activity deletion & undo (unify-catalog-deletion)
+
+    /// The outcome of `deleteActivityUndoable(...)`.
+    enum ActivityDelete: Equatable {
+        /// The activity was removed with its entries; the snapshot is in the
+        /// durable undo buffer (no outbox row yet).
+        case deleted(ActivityDeletionSnapshot)
+        /// The activity no longer exists.
+        case missing
+        /// A timer is running against the activity: nothing was removed and
+        /// nothing was buffered.
+        case runBlocked
+        /// The local write failed (persistence error).
+        case failure
+    }
+
+    /// One local Activity delete that is undoable until the app restarts.
+    /// The snapshot carries the full Activity (identity, values, ordered
+    /// category assignments) plus every committed entry of the activity, so
+    /// undo restores the activity WITH its history.
+    struct ActivityDeletionSnapshot: Codable, Equatable, Sendable {
+        let activity: Activity
+        let entries: [TimeEntry]
+
+        /// The buffer payload: the activity record first (so restore inserts
+        /// the parent before the entries that reference it), followed by one
+        /// `entry` record per committed entry.
+        func bufferPayload() throws -> Data {
+            var records = [
+                DeletionSnapshot.Record(
+                    resource: "activity",
+                    recordID: activity.id,
+                    data: try JSONEncoder().encode(activity)
+                ),
+            ]
+            records += try entries.map {
+                DeletionSnapshot.Record(
+                    resource: "entry",
+                    recordID: $0.id,
+                    data: try JSONEncoder().encode($0)
+                )
+            }
+            return try JSONEncoder().encode(DeletionSnapshot(records: records))
+        }
+    }
+
+    /// Confirms an activity deletion by entering the durable undo buffer and
+    /// removing the activity, its join rows, and its entries in ONE
+    /// transaction (unify-catalog-deletion D1). NO outbox row is created while
+    /// the deletion is in the buffer — the relay is never notified of an
+    /// undone deletion. Refuses with `.runBlocked` (removing and buffering
+    /// nothing) when a timer is running against the activity (D3): the
+    /// running session has no entry row to snapshot and `timer_state` must
+    /// never dangle.
+    func deleteActivityUndoable(
+        id: String,
+        deletedAt: Date = Date()
+    ) throws -> ActivityDelete {
+        try dbQueue.write { db in
+            if let state = try RunningTimerState.fetchOne(db),
+               state.status == "running", state.activityID == id {
+                return .runBlocked
+            }
+            guard let activity = try Self.fetchActivity(db, id: id) else {
+                return .missing
+            }
+            let rows = try Row.fetchAll(db, sql: """
+                SELECT e.*, a.name AS activity_name
+                FROM entries e
+                JOIN activities a ON a.id = e.activity_id
+                WHERE e.activity_id = ?
+                ORDER BY e.started_at DESC
+                """, arguments: [id])
+            let snapshot = ActivityDeletionSnapshot(
+                activity: activity,
+                entries: rows.map(Self.entry(from:))
+            )
+            let payload = String(data: try snapshot.bufferPayload(), encoding: .utf8)
+            do {
+                try db.execute(
+                    sql: """
+                        INSERT INTO undo_buffer (id, payload, deleted_at) VALUES (?, ?, ?)
+                        """,
+                    arguments: [UUID().uuidString, payload, deletedAt]
+                )
+                try db.execute(sql: "DELETE FROM entries WHERE activity_id = ?", arguments: [id])
+                try db.execute(sql: "DELETE FROM activity_categories WHERE activity_id = ?", arguments: [id])
+                try db.execute(sql: "DELETE FROM activities WHERE id = ?", arguments: [id])
+            } catch {
+                return .failure
+            }
+            return .deleted(snapshot)
+        }
+    }
+
+    /// Decodes the activity-deletion snapshot held in a buffer row. Returns nil
+    /// when the row does not exist or does not carry an activity-OWNED
+    /// deletion (D10 — entry/category rows are left for their owners).
+    func activityDeletionSnapshot(bufferID: String) throws -> ActivityDeletionSnapshot? {
+        try dbQueue.read { db in
+            guard let row = try UndoBufferRow.fetchOne(db, key: bufferID) else {
+                return nil
+            }
+            let snapshot = try JSONDecoder().decode(DeletionSnapshot.self, from: Data(row.payload.utf8))
+            guard Self.owner(of: snapshot) == "activity" else { return nil }
+            guard let activityRecord = snapshot.records.first(where: { $0.resource == "activity" }) else {
+                return nil
+            }
+            let activity = try JSONDecoder().decode(Activity.self, from: activityRecord.data)
+            let entries = try snapshot.records
+                .filter { $0.resource == "entry" }
+                .map { try JSONDecoder().decode(TimeEntry.self, from: $0.data) }
+            return ActivityDeletionSnapshot(activity: activity, entries: entries)
+        }
+    }
+
+    /// Undoes an activity deletion: re-inserts the activity,
+    /// its category assignments, and all snapshotted entries, and removes the
+    /// buffer row in one transaction. No outbox row is ever created, so the
+    /// relay is never notified of the deletion. Returns the restored
+    /// snapshot, or nil when the buffer row no longer holds an
+    /// activity-OWNED snapshot (D10).
+    @discardableResult
+    func undoActivityDeletion(bufferID: String) throws -> ActivityDeletionSnapshot? {
+        try dbQueue.write { db in
+            guard let row = try UndoBufferRow.fetchOne(db, key: bufferID) else {
+                return nil
+            }
+            let snapshot = try JSONDecoder().decode(DeletionSnapshot.self, from: Data(row.payload.utf8))
+            guard Self.owner(of: snapshot) == "activity" else { return nil }
+            try Self.applySnapshot(db, snapshot)
+            try db.execute(sql: "DELETE FROM undo_buffer WHERE id = ?", arguments: [bufferID])
+            return try Self.decodedActivitySnapshot(snapshot)
+        }
+    }
+
+    /// Decodes an already-parsed buffer payload into the typed activity
+    /// snapshot (shared by the read and write paths above).
+    private static func decodedActivitySnapshot(_ snapshot: DeletionSnapshot) throws -> ActivityDeletionSnapshot? {
+        guard let activityRecord = snapshot.records.first(where: { $0.resource == "activity" }) else {
+            return nil
+        }
+        return ActivityDeletionSnapshot(
+            activity: try JSONDecoder().decode(Activity.self, from: activityRecord.data),
+            entries: try snapshot.records
+                .filter { $0.resource == "entry" }
+                .map { try JSONDecoder().decode(TimeEntry.self, from: $0.data) }
+        )
     }
 
     // MARK: - Erase local data (destructive, Settings)
@@ -1651,18 +1826,17 @@ actor LocalStore {
             """, arguments: [name])
     }
 
-    /// Finds a non-expired pending-deletion activity whose normalized name    /// matches `name` case-insensitively (unify-activity-preparation-flow
+    /// Finds a pending-deletion activity whose normalized name
+    /// matches `name` case-insensitively (unify-activity-preparation-flow
     /// spec, decision 7). Returns the full snapshot activity so the caller
     /// can offer explicit restoration.
     private static func fetchPendingDeletionActivity(
         _ db: Database,
-        name: String,
-        now: Date
+        name: String
     ) throws -> Activity? {
-        let cutoff = now.addingTimeInterval(-UndoBufferStore.window)
         let rows = try UndoBufferRow.fetchAll(db, sql: """
-            SELECT * FROM undo_buffer WHERE deleted_at >= ?
-            """, arguments: [cutoff])
+            SELECT * FROM undo_buffer
+            """)
         for row in rows {
             let snapshot = try JSONDecoder().decode(DeletionSnapshot.self, from: Data(row.payload.utf8))
             for record in snapshot.records where record.resource == "activity" {

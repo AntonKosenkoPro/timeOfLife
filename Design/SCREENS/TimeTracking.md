@@ -300,5 +300,5 @@ categoryless Activity, reuses a case-insensitive match, and never forces the
 user into category management.
 
 Manage Activities and Manage Categories are separate destinations/sheets. Both
-remain available offline and use the existing sync-conflict and 30-second
-undo rules.
+remain available offline and use the existing sync-conflict and undo-until-restart
+rules.

@@ -14,6 +14,8 @@ import SwiftUI
 /// editing machinery is not needed.
 struct HistoryView: View {
     @EnvironmentObject var container: AppContainer
+    @Environment(\.undoManager)
+    private var undoManager
     @StateObject private var vm: HistoryViewModel
     @State private var elevatedGroupID: String?
     /// The activity whose detail sheet is presented (nil = none). Keyed on
@@ -60,6 +62,12 @@ struct HistoryView: View {
         // The load is guarded by `needsReload` inside the VM.
         .task { await vm.loadIfNeeded() }
         .onAppear { Task { await vm.loadIfNeeded() } }
+        .task { await vm.registerActivityUndo(with: undoManager) }
+        // Passive host for the system shake-to-undo (U7): the list has no
+        // editable text to hold focus, so without this shakes never reach
+        // the undo manager. Handles no motion itself — the system shows its
+        // default Undo prompt for the registered activity deletion.
+        .background(ShakeFirstResponderHost(undoManager: undoManager))
         // Entries can be saved on Track (or from the compact timer) while
         // History is off-screen; mark stale on leave so the next appear
         // reloads. Without this the `needsReload` guard serves the first
@@ -82,9 +90,15 @@ struct HistoryView: View {
             ),
             onDismiss: {
                 // Entries may have been edited or deleted (with undo) behind
-                // the detail sheet — reload so the day groups reflect it.
+                // the detail sheet — reload so the day groups reflect it. An
+                // activity may have been deleted from the stacked editor, so
+                // re-register its system undo (the appear-time registration
+                // predates the deletion).
                 vm.invalidate()
-                Task { await vm.loadIfNeeded() }
+                Task {
+                    await vm.loadIfNeeded()
+                    await vm.registerActivityUndo(with: undoManager)
+                }
             },
             content: { target in
                 ActivityDetailView(

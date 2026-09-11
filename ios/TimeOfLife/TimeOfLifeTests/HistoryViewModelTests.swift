@@ -292,6 +292,73 @@ struct HistoryViewModelTests {
         #expect(vm.dayGroups.isEmpty)
     }
 
+    // MARK: - Activity undo (unify-catalog-deletion)
+
+    @Test("performActivityUndo restores the activity entries into the list")
+    func activityUndoReloadsList() async throws {
+        let store = try makeStore()
+        try await store.createActivity(Activity(id: "a1", name: "Running"))
+        let start = Date(timeIntervalSinceNow: -3600)
+        try await store.createEntry(entry(
+            id: "e1",
+            startedAt: start,
+            activityID: "a1",
+            durationSeconds: 60,
+            endedAt: start.addingTimeInterval(60)
+        ))
+
+        let vm = HistoryViewModel(store: store)
+        await vm.loadIfNeeded()
+        #expect(vm.dayGroups.count == 1)
+
+        // Delete behind the detail sheet's stacked editor.
+        _ = try await store.deleteActivityUndoable(id: "a1", deletedAt: Date())
+        vm.invalidate()
+        await vm.loadIfNeeded()
+        #expect(vm.dayGroups.isEmpty)
+
+        await vm.performActivityUndo()
+
+        #expect(vm.dayGroups.flatMap(\.entries).map(\.id) == ["e1"])
+    }
+
+    @Test("activity undo ignores foreign snapshots")
+    func activityUndoIgnoresForeign() async throws {
+        let store = try makeStore()
+        try await store.createActivity(Activity(id: "a1", name: "Running"))
+        let start = Date(timeIntervalSinceNow: -3600)
+        try await store.createEntry(entry(
+            id: "e1",
+            startedAt: start,
+            activityID: "a1",
+            durationSeconds: 60,
+            endedAt: start.addingTimeInterval(60)
+        ))
+        _ = try await store.deleteEntryUndoable(id: "e1", deletedAt: Date())
+
+        let vm = HistoryViewModel(store: store)
+        let undoManager = UndoManager()
+        await vm.registerActivityUndo(with: undoManager)
+        await vm.performActivityUndo()
+
+        #expect(!undoManager.canUndo)
+        #expect(try await store.undoBufferMostRecent() != nil)
+    }
+
+    @Test("system undo registers for activity deletions")
+    func systemUndoRegistersActivityDeletion() async throws {
+        let store = try makeStore()
+        try await store.createActivity(Activity(id: "a1", name: "Running"))
+        _ = try await store.deleteActivityUndoable(id: "a1", deletedAt: Date())
+
+        let vm = HistoryViewModel(store: store)
+        let undoManager = UndoManager()
+        await vm.registerActivityUndo(with: undoManager)
+
+        #expect(undoManager.canUndo)
+        #expect(undoManager.undoActionName == L10n.activityEditorDelete.text)
+    }
+
     // MARK: - Helpers
 
     private static func date(_ iso: String, calendar: Calendar) -> Date {

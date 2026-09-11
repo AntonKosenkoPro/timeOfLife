@@ -68,6 +68,14 @@ enum L10n: String, CaseIterable {
     case activityEditorAddCategory = "activityEditor.addCategory"
     case activityEditorSave = "activityEditor.save"
     case activityEditorCancel = "activityEditor.cancel"
+    case activityEditorDelete = "activityEditor.delete"
+
+    // Activity deletion (unify-catalog-deletion): editor Delete with scope
+    // confirmation, running-timer block, system-prompt undo.
+    case activityDeleteTitle = "activity.delete.title"
+    case activityDeleteMessage = "activity.delete.message"
+    case activityDeleteConfirm = "activity.delete.confirm"
+    case activityDeleteRunning = "activity.delete.running"
     case timerCompactStop = "timer.compactStop"
     case timerCompactReturnHint = "timer.compactReturnHint"
     case timerCompactRunning = "timer.compactRunning"
@@ -169,13 +177,10 @@ enum L10n: String, CaseIterable {
     case categorySeedSleep = "category.seed.sleep"
     case categorySeedEntertainment = "category.seed.entertainment"
 
-    // Undo (category-management D7)
-    case undoButton = "undo.button"
-    case undoDismiss = "undo.dismiss"
-    case undoCategoryDeleted = "undo.categoryDeleted"
+    // Undo (chip selection accessibility; the category UndoToast is gone —
+    // deletions undo through the system Undo confirmation instead)
     case undoSelected = "undo.selected"
     case undoNotSelected = "undo.notSelected"
-    case undoSecondsRemaining = "undo.secondsRemaining"
 
     // Manage categories (category-management D4)
     case manageCategoriesTitle = "manage.categories.title"
@@ -188,7 +193,6 @@ enum L10n: String, CaseIterable {
     case deleteCategoryTitle = "delete.category.title"
     case deleteCategoryMessage = "delete.category.message"
     case deleteCategoryConfirm = "delete.category.confirm"
-    case deleteCategoryCancel = "delete.category.cancel"
     case errorCategoryExists = "error.categoryExists"
     case errorConflict = "error.conflict"
     case errorLocalPersistence = "error.localPersistence"
@@ -202,6 +206,7 @@ enum L10n: String, CaseIterable {
     case categoryEditorIconUnavailable = "categoryEditor.iconUnavailable"
     case categoryEditorSave = "categoryEditor.save"
     case categoryEditorCancel = "categoryEditor.cancel"
+    case categoryEditorDelete = "categoryEditor.delete"
     case categoryNameRequired = "category.nameRequired"
     case categoryNameTooLong = "category.nameTooLong"
     case activityEditorInvalidAssociation = "activityEditor.invalidAssociation"
