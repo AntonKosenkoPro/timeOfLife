@@ -24,6 +24,10 @@ final class HistoryViewModel: ObservableObject {
     private let store: LocalStore
     private let undoBuffer: UndoBufferStore
     private let nowProvider: () -> Date
+    /// The UndoManager the current registration belongs to, held weakly so
+    /// the re-registration after an undo targets the same manager without
+    /// capturing a non-Sendable value in the undo handler closure.
+    private weak var registeredUndoManager: UndoManager?
     private var needsReload = true
     private var categoriesByActivityID: [String: [Category]] = [:]
 
@@ -91,13 +95,14 @@ final class HistoryViewModel: ObservableObject {
     /// to another surface (U7 supersession).
     func registerActivityUndo(with undoManager: UndoManager?) async {
         guard let undoManager else { return }
+        registeredUndoManager = undoManager
         undoManager.removeAllActions(withTarget: self)
         guard let recent = try? await undoBuffer.mostRecent(),
               (try? await store.activityDeletionSnapshot(bufferID: recent.id)) != nil else { return }
-        undoManager.registerUndo(withTarget: self) { [weak undoManager] target in
+        undoManager.registerUndo(withTarget: self) { target in
             Task { @MainActor in
                 await target.performActivityUndo()
-                await target.registerActivityUndo(with: undoManager)
+                await target.registerActivityUndo(with: target.registeredUndoManager)
             }
         }
         // Names the undoable action so the DEFAULT system confirmation

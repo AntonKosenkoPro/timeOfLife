@@ -359,6 +359,29 @@ struct HistoryViewModelTests {
         #expect(undoManager.undoActionName == L10n.activityEditorDelete.text)
     }
 
+    @Test("firing the system undo restores and re-registers the next deletion")
+    func systemUndoFiresAndChains() async throws {
+        let store = try makeStore()
+        for (id, name) in [("a1", "Running"), ("a2", "Reading")] {
+            try await store.createActivity(Activity(id: id, name: name))
+            _ = try await store.deleteActivityUndoable(id: id, deletedAt: Date())
+        }
+        let vm = HistoryViewModel(store: store)
+        let undoManager = UndoManager()
+        await vm.registerActivityUndo(with: undoManager)
+        // Firing the handler restores; its re-registration runs after undo()
+        // returns, so a second undo restores the older row.
+        undoManager.undo()
+        try? await Task.sleep(nanoseconds: 100_000_000)
+        #expect(try await store.activity(id: "a2") != nil)
+        #expect(try await store.activity(id: "a1") == nil)
+        #expect(undoManager.canUndo)
+        undoManager.undo()
+        try? await Task.sleep(nanoseconds: 100_000_000)
+        #expect(try await store.activity(id: "a1") != nil)
+        #expect(try await store.undoBufferMostRecent() == nil)
+    }
+
     // MARK: - Helpers
 
     private static func date(_ iso: String, calendar: Calendar) -> Date {

@@ -19,6 +19,10 @@ final class ManageCategoriesViewModel: ObservableObject {
     private let store: LocalStore
     private let undoBuffer: UndoBufferStore
     private let nowProvider: () -> Date
+    /// The UndoManager the current registration belongs to, held weakly so
+    /// the re-registration after an undo targets the same manager without
+    /// capturing a non-Sendable value in the undo handler closure.
+    private weak var registeredUndoManager: UndoManager?
 
     init(
         store: LocalStore,
@@ -68,13 +72,14 @@ final class ManageCategoriesViewModel: ObservableObject {
     /// belongs to another surface (U7 supersession).
     func registerSystemUndo(with undoManager: UndoManager?) async {
         guard let undoManager else { return }
+        registeredUndoManager = undoManager
         undoManager.removeAllActions(withTarget: self)
         guard let recent = try? await undoBuffer.mostRecent(),
               (try? await store.categoryDeletionSnapshot(bufferID: recent.id)) != nil else { return }
-        undoManager.registerUndo(withTarget: self) { [weak undoManager] target in
+        undoManager.registerUndo(withTarget: self) { target in
             Task { @MainActor in
                 await target.performUndo()
-                await target.registerSystemUndo(with: undoManager)
+                await target.registerSystemUndo(with: target.registeredUndoManager)
             }
         }
         // Names the undoable action so the DEFAULT system confirmation
