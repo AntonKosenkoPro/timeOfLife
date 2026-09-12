@@ -84,6 +84,22 @@ draft intact and shows a localized error; retrying permits the user to choose
 a distinct name. The selected Activity and timer state remain unchanged, and
 the collision never silently updates the existing record.
 
+### Delete flow (unify-catalog-deletion)
+
+The editor is the single deletion chokepoint for activities (no delete on the
+detail sheet, no list swipe): a bottom destructive Delete button
+(`ActivityEditorDeleteButton`, `Theme.danger`, entry-form grammar) opens a
+destructive confirmation alert naming the persisted activity and its scope
+(`L10n.activityDeleteMessage`: entry count + all-time total) and teaching the
+until-restart shake-to-undo. Confirming enters the durable undo buffer (activity +
+all its entries, no outbox row), notifies the presenter via `onDeleted`, and
+dismisses; Track clears a matching selection back to idle, the detail sheet
+reloads and dismisses (missing activity), History drops the entries. Until
+the app restarts, the system Undo confirmation on the presenter restores activity +
+entries; a restart commits hard deletes on cold launch. Confirming while the
+timer runs against the activity is blocked (`L10n.activityDeleteRunning`,
+editor stays open, draft intact) so `timer_state` never dangles.
+
 ### States
 
 | State | Visual |
@@ -113,7 +129,7 @@ app's identifiers are `String`, not `UUID`.)
 ### Implementation checklist
 
 - [x] All strings use `L10n.*` keys (add new keys to EN and RU).
-- [x] Accessibility IDs: `ActivityEditorNameField`, `ActivityEditorNotesField`, `ActivityEditorTags`, `ActivityEditorSaveButton`, `ActivityEditorCancelButton`, `ActivityEditorAddCategoryButton`.
+- [x] Accessibility IDs: `ActivityEditorNameField`, `ActivityEditorNotesField`, `ActivityEditorTags`, `ActivityEditorSaveButton`, `ActivityEditorCancelButton`, `ActivityEditorAddCategoryButton`, `ActivityEditorDeleteButton`.
 - [x] Keyboard placement follows D13 / D21: name upper, Save pinned bottom, measured reserve.
 - [x] Validation uses unified messages (`validation.nameEmpty` / `validation.nameTooLong` / `validation.notesTooLong`); on collision the editor stays open with the draft intact per INTERACTIONS.
 - [x] 409 `conflict` adopts the server version (R2 keep-latest).

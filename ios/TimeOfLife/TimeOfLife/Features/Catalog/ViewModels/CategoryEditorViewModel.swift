@@ -112,6 +112,28 @@ final class CategoryEditorViewModel: ObservableObject {
         }
     }
 
+    /// Deletes the edited category (edit mode only) into the durable undo
+    /// buffer (no outbox row yet — shake-to-undo restores it with its
+    /// activity assignments; expiry commits on foreground). Returns true when
+    /// the caller should dismiss the editor (deleted, or already gone
+    /// elsewhere); false keeps the editor open with `errorMessage` set.
+    func deleteConfirmed() async -> Bool {
+        guard let categoryID else { return false }
+        do {
+            switch try await store.deleteCategoryUndoable(id: categoryID) {
+            case .deleted, .missing:
+                // Already gone elsewhere — the desired end state holds.
+                return true
+            case .failure:
+                errorMessage = L10n.errorLocalPersistence.text
+                return false
+            }
+        } catch {
+            errorMessage = L10n.errorLocalPersistence.text
+            return false
+        }
+    }
+
     /// Adopts the current local version after a stale edit so the user sees
     /// the winning values and can make another explicit change.
     private func adoptLatestCategory() async {

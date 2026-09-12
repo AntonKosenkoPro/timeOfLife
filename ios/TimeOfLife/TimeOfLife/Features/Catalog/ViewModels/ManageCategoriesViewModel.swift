@@ -1,44 +1,28 @@
 import Foundation
-import Combine
 
 /// View model for Manage Categories (Design/SCREENS/ManageCategories.md,
 /// category-management D4): alphabetized local loading, editor presentation,
-/// delete confirmation, conflict messaging, refresh after mutation, and
-/// category-scoped undo state with a wall-clock 30-second window. All
-/// mutations go through `LocalStore`.
+/// conflict messaging, refresh after mutation, and category-deletion undo
+/// through the DEFAULT system Undo confirmation (shake → prompt → confirm
+/// restores the newest eligible deletion; buffered deletions stay restorable
+/// until the app restarts). Deletion itself lives in the category editor; the
+/// list offers no delete affordance. All mutations go through `LocalStore`.
 @MainActor
 final class ManageCategoriesViewModel: ObservableObject {
     @Published private(set) var categories: [Category] = []
     @Published var editorCategory: Category?
     @Published var isShowingEditor = false
-    @Published var pendingDeletion: Category?
-    @Published var isShowingDeleteConfirm = false
     @Published var conflictMessage: String?
     @Published private(set) var loadError: String?
-    @Published private(set) var undoToast: UndoToastState?
-    @Published private(set) var undoClock = Date()
     @Published private(set) var isLoading = false
-
-    /// Undo affordance state: the deleted category, the durable buffer row
-    /// that can restore it, and the wall-clock expiry.
-    struct UndoToastState: Equatable {
-        let category: Category
-        let bufferID: String
-        let expiresAt: Date
-
-        func timeRemaining(now: Date) -> TimeInterval {
-            max(0, expiresAt.timeIntervalSince(now))
-        }
-
-        func isExpired(now: Date) -> Bool {
-            now >= expiresAt
-        }
-    }
 
     private let store: LocalStore
     private let undoBuffer: UndoBufferStore
     private let nowProvider: () -> Date
-    private var ticker: AnyCancellable?
+    /// The UndoManager the current registration belongs to, held weakly so
+    /// the re-registration after an undo targets the same manager without
+    /// capturing a non-Sendable value in the undo handler closure.
+    private weak var registeredUndoManager: UndoManager?
 
     init(
         store: LocalStore,
@@ -50,10 +34,9 @@ final class ManageCategoriesViewModel: ObservableObject {
         self.nowProvider = now
     }
 
-    /// Loads the local catalog (alphabetized by the store) and checks whether
-    /// a category deletion is still restorable after a cold launch within the
-    /// window (INTERACTIONS.md: no unsolicited toast, but undo stays
-    /// available on the screen).
+    /// Loads the local catalog (alphabetized by the store). A deletion
+    /// buffered by the editor stays restorable through the system Undo
+    /// confirmation until the app restarts — the view registers it on appear.
     func load() async {
         isLoading = true
         loadError = nil
@@ -65,7 +48,6 @@ final class ManageCategoriesViewModel: ObservableObject {
             categories = []
             loadError = L10n.errorLocalPersistence.text
         }
-        await adoptPendingUndoIfAny()
     }
 
     /// Opens the editor for a new category (default `tag` icon).
@@ -75,100 +57,52 @@ final class ManageCategoriesViewModel: ObservableObject {
     }
 
     /// Opens the editor prefilled with the category's current values.
+    /// Deletion is reached from inside the editor.
     func edit(_ category: Category) {
         editorCategory = category
         isShowingEditor = true
     }
 
-    /// Presents the destructive confirmation for a category deletion.
-    func confirmDelete(_ category: Category) {
-        pendingDeletion = category
-        isShowingDeleteConfirm = true
-    }
-
-    /// Confirms the deletion: enters the durable undo buffer and removes the
-    /// category/joins in one transaction (no outbox row), then shows the
-    /// wall-clock UndoToast for the newest eligible deletion (D7/U7).
-    func deleteConfirmed() async {
-        guard let category = pendingDeletion else { return }
-        pendingDeletion = nil
-        do {
-            let deletedAt = nowProvider()
-            let outcome = try await store.deleteCategoryUndoable(
-                id: category.id,
-                deletedAt: deletedAt
-            )
-            guard case let .deleted(snapshot) = outcome else { return }
-            let buffer = try await store.undoBufferMostRecent()
-            guard let buffer,
-                  let bufferSnapshot = try await store.categoryDeletionSnapshot(bufferID: buffer.id),
-                  bufferSnapshot.category.id == category.id else { return }
-            undoToast = UndoToastState(
-                category: snapshot.category,
-                bufferID: buffer.id,
-                expiresAt: deletedAt.addingTimeInterval(UndoBufferStore.window)
-            )
-            undoClock = deletedAt
-            categories.removeAll { $0.id == category.id }
-            startTicker()
-        } catch {
-            conflictMessage = L10n.errorLocalPersistence.text
+    /// Registers the newest restorable category deletion with the system Undo
+    /// manager, so shaking surfaces the DEFAULT Undo confirmation and
+    /// confirming restores exactly one category — the most recent buffered
+    /// one. Previous registrations are cleared first, so one shake+confirm
+    /// can never restore two deletions. Offers nothing when the buffer holds
+    /// no category deletion — including when the newest row
+    /// belongs to another surface (U7 supersession).
+    func registerSystemUndo(with undoManager: UndoManager?) async {
+        guard let undoManager else { return }
+        registeredUndoManager = undoManager
+        undoManager.removeAllActions(withTarget: self)
+        guard let recent = try? await undoBuffer.mostRecent(),
+              (try? await store.categoryDeletionSnapshot(bufferID: recent.id)) != nil else { return }
+        undoManager.registerUndo(withTarget: self) { target in
+            Task { @MainActor in
+                await target.performUndo()
+                await target.registerSystemUndo(with: target.registeredUndoManager)
+            }
         }
+        // Names the undoable action so the DEFAULT system confirmation
+        // states what Confirm will restore. Reuses the existing localized
+        // Delete string — no new strings (U4).
+        undoManager.setActionName(L10n.deleteCategoryConfirm.text)
     }
 
-    /// Undoes the most recent category deletion within the window: restores
+    /// Undoes the most recent category deletion: restores
     /// the same category identity and assignments, removes the buffer row,
-    /// and refreshes the list. Nothing is synced.
+    /// and refreshes the list. Only category deletions are restored here —
+    /// buffer rows owned by other surfaces are left for their owners.
+    /// Nothing is synced.
     func performUndo() async {
-        guard let toast = await currentUndoState() else {
-            await expireUndo()
-            return
-        }
-        guard !toast.isExpired(now: nowProvider()) else {
-            await expireUndo()
-            return
-        }
         do {
-            if let restored = try await store.undoCategoryDeletion(bufferID: toast.bufferID) {
+            guard let recent = try await undoBuffer.mostRecent() else { return }
+            guard try await store.categoryDeletionSnapshot(bufferID: recent.id) != nil else { return }
+            if let restored = try await store.undoCategoryDeletion(bufferID: recent.id) {
                 categories.insert(restored, at: insertionIndex(for: restored))
-                undoToast = nil
-                stopTicker()
                 conflictMessage = nil
             }
         } catch {
             conflictMessage = L10n.errorLocalPersistence.text
-        }
-    }
-
-    /// Dismisses the toast (the buffer row stays until its window elapses —
-    /// the system Undo gesture remains able to restore it).
-    func dismissUndo() {
-        undoToast = nil
-        stopTicker()
-    }
-
-    /// Registers the newest category deletion with the system Undo manager.
-    /// The handler resolves the durable buffer again, so dismissing the toast
-    /// does not make the deletion impossible to undo.
-    func registerSystemUndo(with undoManager: UndoManager?) {
-        guard undoToast != nil, let undoManager else { return }
-        undoManager.removeAllActions(withTarget: self)
-        undoManager.registerUndo(withTarget: self) { target in
-            Task { @MainActor in
-                await target.performUndo()
-            }
-        }
-    }
-
-    /// Commits expired deletions on foreground: the generic machinery
-    /// finalizes one Category DELETE outbox row per expired buffer.
-    func commitExpiredUndo() async {
-        let now = nowProvider()
-        undoClock = now
-        try? await undoBuffer.commitExpired(now: now)
-        if let toast = undoToast, toast.isExpired(now: now) {
-            undoToast = nil
-            stopTicker()
         }
     }
 
@@ -180,73 +114,14 @@ final class ManageCategoriesViewModel: ObservableObject {
         conflictMessage = nil
     }
 
+    /// Refreshes the list after the editor deleted a category: the deleted
+    /// row is gone and the buffer holds the restorable snapshot (offered
+    /// through the system Undo confirmation).
+    func editorDidDelete() async {
+        await load()
+    }
+
     // MARK: - Private
-
-    private func startTicker() {
-        ticker?.cancel()
-        ticker = Timer.publish(every: 1, on: .main, in: .common)
-            .autoconnect()
-            .sink { [weak self] _ in
-                Task { @MainActor in
-                    guard let self else { return }
-                    let now = self.nowProvider()
-                    self.undoClock = now
-                    if let toast = self.undoToast, toast.isExpired(now: now) {
-                        await self.expireUndo()
-                    }
-                }
-            }
-    }
-
-    private func stopTicker() {
-        ticker?.cancel()
-        ticker = nil
-    }
-
-    private func expireUndo() async {
-        try? await undoBuffer.commitExpired(now: nowProvider())
-        undoToast = nil
-        stopTicker()
-    }
-
-    /// Restores the newest category deletion from durable storage when the
-    /// visible toast was dismissed or the app was relaunched.
-    private func currentUndoState() async -> UndoToastState? {
-        if let undoToast {
-            return undoToast
-        }
-        guard let buffer = try? await store.undoBufferMostRecent(),
-              let snapshot = try? await store.categoryDeletionSnapshot(bufferID: buffer.id) else {
-            return nil
-        }
-        let expiresAt = buffer.deletedAt.addingTimeInterval(UndoBufferStore.window)
-        guard expiresAt > nowProvider() else { return nil }
-        let state = UndoToastState(
-            category: snapshot.category,
-            bufferID: buffer.id,
-            expiresAt: expiresAt
-        )
-        undoToast = state
-        undoClock = nowProvider()
-        startTicker()
-        return state
-    }
-
-    /// After a cold launch within the window, adopt the newest eligible
-    /// category deletion as the undoable one without showing a toast.
-    private func adoptPendingUndoIfAny() async {
-        guard let buffer = try? await store.undoBufferMostRecent(),
-              let snapshot = try? await store.categoryDeletionSnapshot(bufferID: buffer.id) else { return }
-        let expiresAt = buffer.deletedAt.addingTimeInterval(UndoBufferStore.window)
-        guard expiresAt > nowProvider() else { return }
-        undoToast = UndoToastState(
-            category: snapshot.category,
-            bufferID: buffer.id,
-            expiresAt: expiresAt
-        )
-        undoClock = nowProvider()
-        startTicker()
-    }
 
     /// The insertion index that keeps the list alphabetized by name.
     private func insertionIndex(for category: Category) -> Int {

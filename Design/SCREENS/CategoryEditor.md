@@ -52,6 +52,19 @@ Follows `Design/INTERACTIONS.md` → **Editor sheets and keyboard placement** (D
 - Clear field error when `vm.name` changes.
 - Disable Save while `vm.isLoading` or name is empty/whitespace-only.
 
+### Delete flow (unify-catalog-deletion, edit mode only)
+
+The editor is the single deletion chokepoint for categories (the Manage
+Categories list offers no delete affordance): a bottom destructive Delete
+button (`CategoryEditorDeleteButton`, `Theme.danger`, entry-form grammar)
+opens the tag-only destructive confirmation alert (`L10n.deleteCategoryTitle`
+/ message naming the category, entries kept, until-restart shake hint). Confirming
+enters the durable undo buffer (category + ordered activity assignments, no
+outbox row), notifies the presenter via `onDeleted`, and dismisses; the list
+reloads. Until the app restarts, the system Undo confirmation on Manage Categories
+restores identity + assignments; a restart commits the hard delete on
+cold launch. Create mode offers no Delete.
+
 ### States
 
 | State | Visual |
@@ -84,7 +97,7 @@ struct Category: Identifiable, Codable, Sendable {
 ### Implementation checklist
 
 - [x] All strings use `L10n.*` keys (EN + RU).
-- [x] Accessibility identifiers: `CategoryEditorNameField`, `CategoryEditorIcon`, `CategoryEditorSaveButton`, `CategoryEditorCancelButton`, `CategoryEditorErrorBanner`.
+- [x] Accessibility identifiers: `CategoryEditorNameField`, `CategoryEditorIcon`, `CategoryEditorSaveButton`, `CategoryEditorCancelButton`, `CategoryEditorErrorBanner`, `CategoryEditorDeleteButton` (edit mode).
 - [x] Keyboard placement follows D13 (name upper, Save pinned bottom, measured reserve).
 - [x] Validation uses unified category-name messages (U2).
 - [x] Duplicate names preserve the draft and keep the editor open.

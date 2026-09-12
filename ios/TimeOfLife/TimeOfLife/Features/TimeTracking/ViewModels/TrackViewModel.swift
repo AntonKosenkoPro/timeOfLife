@@ -10,7 +10,7 @@ import Combine
 /// elapsed-time ticker. Persistence is delegated to `TimerService`, which
 /// writes only to the local database (local-first-store spec).
 @MainActor
-final class TrackViewModel: ObservableObject {
+final class TrackViewModel: ObservableObject, ActivitySearchHosting {
     @Published private(set) var state: TrackState = .idle
     @Published var elapsed: TimeInterval = 0
     @Published var errorMessage: String?
@@ -25,12 +25,25 @@ final class TrackViewModel: ObservableObject {
 
     let service: TimerService
     private let connectivity: Connectivity
+    private let undoBuffer: UndoBufferStore
+    private let nowProvider: () -> Date
+    /// The UndoManager the current registration belongs to, held weakly so
+    /// the re-registration after an undo targets the same manager without
+    /// capturing a non-Sendable value in the undo handler closure.
+    private weak var registeredUndoManager: UndoManager?
     private var ticker: AnyCancellable?
     private var savedResetTask: Task<Void, Never>?
 
-    init(service: TimerService, connectivity: Connectivity) {
+    init(
+        service: TimerService,
+        connectivity: Connectivity,
+        undoBuffer: UndoBufferStore? = nil,
+        now: @escaping () -> Date = Date.init
+    ) {
         self.service = service
         self.connectivity = connectivity
+        self.undoBuffer = undoBuffer ?? UndoBufferStore(store: service.store)
+        self.nowProvider = now
     }
 
     // MARK: - Lifecycle
@@ -55,9 +68,12 @@ final class TrackViewModel: ObservableObject {
 
     // MARK: - Activity selection
 
+    /// The committed selection's activity id (ActivitySearchHosting
+    /// checkmark input): the prepared activity, or nil while idle.
+    var selectedActivityID: String? { state.activity?.id }
+
     /// Prepares an activity (ready state) without starting a timer.
-    func select(_ activity: Activity) {
-        guard !state.isRunning else { return }
+    func select(_ activity: Activity) {        guard !state.isRunning else { return }
         state = .ready(activity)
         elapsed = 0
         isSearchActive = false
@@ -193,8 +209,8 @@ final class TrackViewModel: ObservableObject {
                 pendingRestore = nil
                 select(restored)
             } else {
-                // The window elapsed or the buffer was superseded: fall back
-                // to ordinary creation.
+                // The buffer row is gone (restored elsewhere or the app
+                // restarted and it committed): fall back to ordinary creation.
                 pendingRestore = nil
                 await quickCreateFromSearch()
             }
@@ -251,6 +267,71 @@ final class TrackViewModel: ObservableObject {
         }
         replaceActivityInState(updated)
         refinementPresentation = nil
+    }
+
+    /// On refinement-editor delete, refreshes the catalog and clears the
+    /// deleted activity from the committed state back to idle (unify-catalog-
+    /// deletion D7). The editor dismisses itself; the sheet's onDismiss nils
+    /// the presentation.
+    func deleteRefinement(id: String) async {
+        if let refreshed = try? await service.store.activities() {
+            activities = refreshed
+        }
+        if let refreshedCategories = try? await service.store.categories() {
+            categories = Dictionary(uniqueKeysWithValues: refreshedCategories.map { ($0.id, $0) })
+        }
+        if state.activity?.id == id {
+            state = .idle
+            elapsed = 0
+        }
+        refinementPresentation = nil
+    }
+
+    // MARK: - Activity undo (shake → default confirmation → single restore)
+
+    /// Registers the newest restorable activity deletion with the system Undo
+    /// manager, so shaking surfaces the DEFAULT Undo confirmation and
+    /// confirming restores exactly one activity — the most recent buffered
+    /// one. Previous registrations are cleared first, so one shake+confirm
+    /// can never restore two deletions. Offers nothing when the buffer holds
+    /// no activity deletion — including when the newest row
+    /// belongs to another surface (U7 supersession).
+    func registerActivityUndo(with undoManager: UndoManager?) async {
+        guard let undoManager else { return }
+        registeredUndoManager = undoManager
+        undoManager.removeAllActions(withTarget: self)
+        guard let recent = try? await undoBuffer.mostRecent(),
+              (try? await service.store.activityDeletionSnapshot(bufferID: recent.id)) != nil else { return }
+        undoManager.registerUndo(withTarget: self) { target in
+            Task { @MainActor in
+                await target.performActivityUndo()
+                await target.registerActivityUndo(with: target.registeredUndoManager)
+            }
+        }
+        // Names the undoable action so the DEFAULT system confirmation
+        // states what Confirm will restore. Reuses the existing localized
+        // Delete string — no new strings (U4).
+        undoManager.setActionName(L10n.activityEditorDelete.text)
+    }
+
+    /// Restores the most recent activity deletion (buffered deletions stay
+    /// restorable until the app restarts). Only activity deletions are
+    /// restored here — buffer rows owned by other surfaces are left for their
+    /// owners. No toast is shown; one shake restores at most one
+    /// deletion. The restored activity reappears in the catalog; the
+    /// committed Track state stays as it was (idle after a delete).
+    func performActivityUndo() async {
+        do {
+            guard let recent = try await undoBuffer.mostRecent() else { return }
+            guard try await service.store.activityDeletionSnapshot(bufferID: recent.id) != nil else { return }
+            if try await service.store.undoActivityDeletion(bufferID: recent.id) != nil {
+                if let refreshed = try? await service.store.activities() {
+                    activities = refreshed
+                }
+            }
+        } catch {
+            errorMessage = L10n.text(in: .default, code: "error.unknown")
+        }
     }
 
     /// Replaces the Activity in the current state without transitioning,

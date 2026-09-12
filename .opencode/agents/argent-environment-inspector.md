@@ -1,5 +1,7 @@
 ---
 name: argent-environment-inspector
+model: ollama-cloud/glm-5.3-flash
+reasoningEffort: high
 description: >
   Inspects a mobile app project's environment and returns structured JSON covering
   project type, platform support, build and startup commands, bundler config, env

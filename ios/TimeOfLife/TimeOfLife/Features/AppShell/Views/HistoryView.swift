@@ -1,0 +1,246 @@
+import SwiftUI
+
+/// Read-only, day-grouped list of committed time entries (history-entry-list
+/// spec). Owns the elevation-gated day-header total (D8); `HistoryViewModel`
+/// owns data only. The navigation bar stays visible at every scroll position
+/// (the scroll-driven collapse from the original change was reverted — see
+/// the `revert-history-nav-collapse` change).
+///
+/// Uses `ScrollView` + `LazyVStack(pinnedViews:)` rather than `List`:
+/// pinned section headers in a SwiftUI `List` are re-hosted in a separate
+/// UIKit layer, so GeometryReader preferences attached to them never reach
+/// the scroll-tracking modifiers — the elevation-gated total depends on that
+/// scroll tracking. The list is read-only (no swipe actions), so `List`'s
+/// editing machinery is not needed.
+struct HistoryView: View {
+    @EnvironmentObject var container: AppContainer
+    @Environment(\.undoManager)
+    private var undoManager
+    @StateObject private var vm: HistoryViewModel
+    @State private var elevatedGroupID: String?
+    /// The activity whose detail sheet is presented (nil = none). Keyed on
+    /// the tapped entry's activity id (activity-detail-sheet spec).
+    @State private var detailActivityID: String?
+    /// Presents the Log Time sheet (manual-entry spec). Owned by the shell
+    /// so the [+] shares the nav-bar toolbar scope (iOS 15 renders a single
+    /// scope reliably); the sheet and its refresh stay here.
+    @Binding var isLogTimeActive: Bool
+    /// Changes whenever the shell's running timer starts or stops (nil on
+    /// stop). Lets History reload an entry saved from the compact timer
+    /// without leaving the tab.
+    private let refreshSignal: String
+
+    init(store: LocalStore, refreshSignal: String = "", logTimeActive: Binding<Bool> = .constant(false)) {
+        _vm = StateObject(wrappedValue: HistoryViewModel(store: store))
+        self.refreshSignal = refreshSignal
+        _isLogTimeActive = logTimeActive
+    }
+
+    var body: some View {
+        // ZStack, not Group: the lifecycle modifiers below must hang on a
+        // structurally stable container. On a bare conditional, every
+        // `isLoading`/`dayGroups` branch flip re-fires `.task`/`onAppear`/
+        // `onDisappear` — and `onDisappear` invalidates, so each load fed
+        // the next one (infinite spinner loop).
+        ZStack {
+            if vm.isLoading && vm.dayGroups.isEmpty {
+                ProgressView()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if vm.dayGroups.isEmpty {
+                EmptyState(
+                    icon: "clock.arrow.circlepath",
+                    title: L10n.historyEmptyTitle.text,
+                    subtitle: L10n.historyEmptySubtitle.text
+                )
+            } else {
+                historyList
+            }
+        }
+        .background(Theme.backgroundPrimary.ignoresSafeArea())
+        // `.task` alone misses re-entry after saving an entry on Track; a
+        // plain `onAppear` reload would re-fire on every inner re-render.
+        // The load is guarded by `needsReload` inside the VM.
+        .task { await vm.loadIfNeeded() }
+        .onAppear { Task { await vm.loadIfNeeded() } }
+        .task { await vm.registerActivityUndo(with: undoManager) }
+        // Passive host for the system shake-to-undo (U7): the list has no
+        // editable text to hold focus, so without this shakes never reach
+        // the undo manager. Handles no motion itself — the system shows its
+        // default Undo prompt for the registered activity deletion.
+        .background(ShakeFirstResponderHost(undoManager: undoManager))
+        // Entries can be saved on Track (or from the compact timer) while
+        // History is off-screen; mark stale on leave so the next appear
+        // reloads. Without this the `needsReload` guard serves the first
+        // snapshot forever.
+        .onDisappear { vm.invalidate() }
+        .onChange(of: refreshSignal) { _ in
+            vm.invalidate()
+            Task { await vm.loadIfNeeded() }
+        }
+        .sheet(isPresented: $isLogTimeActive) {
+            LogTimeView(service: container.timerService) {
+                vm.invalidate()
+                Task { await vm.loadIfNeeded() }
+            }
+        }
+        .sheet(
+            item: Binding(
+                get: { detailActivityID.map(HistoryDetailTarget.init) },
+                set: { detailActivityID = $0?.activityID }
+            ),
+            onDismiss: {
+                // Entries may have been edited or deleted (with undo) behind
+                // the detail sheet — reload so the day groups reflect it. An
+                // activity may have been deleted from the stacked editor, so
+                // re-register its system undo (the appear-time registration
+                // predates the deletion).
+                vm.invalidate()
+                Task {
+                    await vm.loadIfNeeded()
+                    await vm.registerActivityUndo(with: undoManager)
+                }
+            },
+            content: { target in
+                ActivityDetailView(
+                    store: container.localStore,
+                    activityID: target.activityID,
+                    undoBuffer: container.undoBuffer
+                )
+                    .environmentObject(container)
+            }
+        )
+    }
+
+    private var historyList: some View {
+        ScrollView {
+            LazyVStack(spacing: 0, pinnedViews: [.sectionHeaders]) {
+                ForEach(vm.dayGroups) { group in
+                    Section {
+                        ForEach(group.entries) { entry in
+                            EntryRow(
+                                entry: entry,
+                                icon: vm.icon(for: entry),
+                                categoryNames: vm.categoryNames(for: entry),
+                                timeframeText: vm.timeframeText(for: entry),
+                                durationText: vm.durationText(for: entry),
+                                isInProgress: vm.isInProgress(entry),
+                                viaText: vm.viaText(for: entry)
+                            )
+                            .padding(.horizontal, Theme.spacingMedium)
+                            // Tap → activity detail sheet (activity-detail-
+                            // sheet spec). No swipe/long-press actions.
+                            .contentShape(Rectangle())
+                            .onTapGesture { detailActivityID = entry.activityID }
+                            .accessibilityAddTraits(.isButton)
+                        }
+                    } header: {
+                        dayGroupHeader(group)
+                    }
+                }
+            }
+        }
+        .coordinateSpace(name: Self.scrollSpace)
+        .accessibilityIdentifier("HistoryList")
+        .onPreferenceChange(HeaderFramePreferenceKey.self) { frames in
+            updateElevatedGroup(with: frames)
+        }
+    }
+
+    // MARK: - Day-group header (D8/D10)
+
+    /// The total renders only when the header is elevated (pinned at the top
+    /// while the list is scrolled); in-list headers show only the day label.
+    @ViewBuilder
+    private func dayGroupHeader(_ group: DayGroup) -> some View {
+        SectionHeader(title: group.label) {
+            if isElevated(group) {
+                Text("\(group.total) \(L10n.historyTracked.text)")
+                    .font(.caption)
+                    .foregroundStyle(Theme.textSecondary)
+                    .monospacedDigit()
+            }
+        }
+        .padding(.horizontal, Theme.spacingMedium)
+        .background(Theme.backgroundPrimary)
+        .background(
+            GeometryReader { geo in
+                Color.clear.preference(
+                    key: HeaderFramePreferenceKey.self,
+                    value: [HeaderFrame(groupID: group.id, minY: geo.frame(in: .named(Self.scrollSpace)).minY)]
+                )
+            }
+        )
+    }
+
+    private func isElevated(_ group: DayGroup) -> Bool {
+        elevatedGroupID == group.id
+    }
+
+    /// Derives the elevated header (D8) from the day-header frames: a pinned
+    /// header clamps at `minY ≈ 0`. Uses hysteresis-friendly semantics (only
+    /// set on a clamp, never cleared transiently) and no explicit animation —
+    /// a hair-trigger threshold makes layout effects feed back into the
+    /// measurement and oscillate.
+    private func updateElevatedGroup(with frames: [HeaderFrame]) {
+        // Elevated header (D8): the pinned one — the last header whose frame
+        // clamps at the top of the visible area. Only ever set on a clamp;
+        // never clear on an empty/transient report, so animation frames that
+        // briefly move every header off zero cannot flap the total (a stale
+        // id simply matches no header once the groups change).
+        if let pinned = frames.last(where: { abs($0.minY) <= Self.headerEpsilon }) {
+            if pinned.groupID != elevatedGroupID {
+                elevatedGroupID = pinned.groupID
+            }
+        }
+    }
+
+    // MARK: - Layout constants
+
+    private static let scrollSpace = "HistoryScroll"
+    /// Pinned headers clamp at `minY ≈ 0`.
+    private static let headerEpsilon: CGFloat = 1
+}
+
+// MARK: - Scroll preferences
+
+/// Identifiable wrapper so the History tap can drive `.sheet(item:)` with a
+/// bare activity id.
+private struct HistoryDetailTarget: Identifiable {
+    let activityID: String
+    var id: String { activityID }
+}
+
+private struct HeaderFrame: Equatable {
+    let groupID: String
+    let minY: CGFloat
+}
+
+/// Preference values are read and written only on the main actor (SwiftUI
+/// layout passes); `nonisolated(unsafe)` satisfies the strict-concurrency
+/// check for the required mutable `defaultValue`.
+private struct HeaderFramePreferenceKey: PreferenceKey {
+    nonisolated(unsafe) static var defaultValue: [HeaderFrame] = []
+    static func reduce(value: inout [HeaderFrame], nextValue: () -> [HeaderFrame]) {
+        value += nextValue()
+    }
+}
+
+#if DEBUG
+#Preview("History with entries") {
+    let container = AppContainer.production()
+    NavigationView {
+        HistoryView(store: container.localStore)
+    }
+    .navigationViewStyle(.stack)
+    .environmentObject(container)
+}
+
+#Preview("History empty") {
+    let container = AppContainer.production()
+    NavigationView {
+        HistoryView(store: container.localStore)
+    }
+    .navigationViewStyle(.stack)
+    .environmentObject(container)
+}
+#endif

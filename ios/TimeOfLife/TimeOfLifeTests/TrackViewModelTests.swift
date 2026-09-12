@@ -192,6 +192,98 @@ struct TrackViewModelTests {
         #expect(vm.categories[category.id]?.icon == CatalogIcon.laptopcomputer.rawValue)
     }
 
+    // MARK: - Refinement deletion (unify-catalog-deletion)
+
+    @Test("deleteRefinement clears the deleted activity back to idle and refreshes the catalog")
+    func deleteRefinementClearsSelection() async throws {
+        let vm = makeViewModel()
+        let store = vm.service.store
+        try await store.createActivity(Activity(id: "a1", name: "Gym"))
+        try await store.createActivity(Activity(id: "a2", name: "Reading"))
+        await vm.load()
+        vm.select(try #require(await store.activity(id: "a1")))
+        #expect(vm.selectedActivityID == "a1")
+
+        _ = try await store.deleteActivityUndoable(id: "a1", deletedAt: Date())
+        await vm.deleteRefinement(id: "a1")
+
+        #expect(vm.selectedActivityID == nil)
+        #expect(vm.activities.map(\.id) == ["a2"])
+    }
+
+    @Test("deleteRefinement keeps another selected activity")
+    func deleteRefinementKeepsOtherSelection() async throws {
+        let vm = makeViewModel()
+        let store = vm.service.store
+        try await store.createActivity(Activity(id: "a1", name: "Gym"))
+        try await store.createActivity(Activity(id: "a2", name: "Reading"))
+        await vm.load()
+        vm.select(try #require(await store.activity(id: "a2")))
+
+        _ = try await store.deleteActivityUndoable(id: "a1", deletedAt: Date())
+        await vm.deleteRefinement(id: "a1")
+
+        #expect(vm.selectedActivityID == "a2")
+    }
+
+    @Test("performActivityUndo restores the activity into the catalog")
+    func activityUndoRestores() async throws {
+        let vm = makeViewModel()
+        let store = vm.service.store
+        try await store.createActivity(Activity(id: "a1", name: "Gym"))
+        try await store.createEntry(TimeEntry(
+            id: "e1", activityID: "a1", activityName: "Gym",
+            startedAt: Date(timeIntervalSinceReferenceDate: 1_000),
+            endedAt: Date(timeIntervalSinceReferenceDate: 1_600), durationSeconds: 600,
+            source: "manual"
+        ))
+        await vm.load()
+        _ = try await store.deleteActivityUndoable(id: "a1", deletedAt: Date())
+        await vm.deleteRefinement(id: "a1")
+        #expect(!vm.activities.map(\.id).contains("a1"))
+
+        await vm.performActivityUndo()
+
+        #expect(vm.activities.map(\.id).contains("a1"))
+        #expect(try await store.entry(id: "e1") != nil)
+    }
+
+    @Test("activity undo ignores foreign snapshots")
+    func activityUndoIgnoresForeign() async throws {
+        let vm = makeViewModel()
+        let store = vm.service.store
+        try await store.createActivity(Activity(id: "a1", name: "Gym"))
+        try await store.createEntry(TimeEntry(
+            id: "e1", activityID: "a1", activityName: "Gym",
+            startedAt: Date(timeIntervalSinceReferenceDate: 1_000),
+            endedAt: Date(timeIntervalSinceReferenceDate: 1_600), durationSeconds: 600,
+            source: "manual"
+        ))
+        _ = try await store.deleteEntryUndoable(id: "e1", deletedAt: Date())
+        let undoManager = UndoManager()
+
+        await vm.registerActivityUndo(with: undoManager)
+        await vm.performActivityUndo()
+
+        #expect(!undoManager.canUndo)
+        #expect(try await store.undoBufferMostRecent() != nil)
+        #expect(try await store.entry(id: "e1") == nil)
+    }
+
+    @Test("system undo registers for activity deletions")
+    func systemUndoRegistersActivityDeletion() async throws {
+        let vm = makeViewModel()
+        let store = vm.service.store
+        try await store.createActivity(Activity(id: "a1", name: "Gym"))
+        _ = try await store.deleteActivityUndoable(id: "a1", deletedAt: Date())
+        let undoManager = UndoManager()
+
+        await vm.registerActivityUndo(with: undoManager)
+
+        #expect(undoManager.canUndo)
+        #expect(undoManager.undoActionName == L10n.activityEditorDelete.text)
+    }
+
     // MARK: - Helpers
 
     private func makeViewModel() -> TrackViewModel {

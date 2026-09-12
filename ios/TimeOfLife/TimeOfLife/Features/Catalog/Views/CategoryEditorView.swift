@@ -10,12 +10,17 @@ struct CategoryEditorView: View {
     @Environment(\.dismiss)
     private var dismiss
     @FocusState private var isNameFocused: Bool
+    /// Drives the delete confirmation alert (edit mode).
+    @State private var isShowingDeleteConfirm = false
+    /// Called after a confirmed deletion so the presenter can reload.
+    private let onDeleted: (() -> Void)?
 
     init(
         store: LocalStore,
         category: Category?,
         onSaved: @escaping (Category) -> Void,
-        onDuplicate: @escaping (Category) -> Void
+        onDuplicate: @escaping (Category) -> Void,
+        onDeleted: (() -> Void)? = nil
     ) {
         _vm = StateObject(wrappedValue: CategoryEditorViewModel(
             store: store,
@@ -23,6 +28,7 @@ struct CategoryEditorView: View {
             onSaved: onSaved,
             onDuplicate: onDuplicate
         ))
+        self.onDeleted = onDeleted
     }
 
     var body: some View {
@@ -74,6 +80,10 @@ struct CategoryEditorView: View {
                         accessibilityId: "CategoryEditorErrorBanner"
                     )
                 }
+
+                if !vm.isCreateMode {
+                    deleteSection
+                }
             },
             bottomBar: {
                 PrimaryButton(
@@ -93,12 +103,52 @@ struct CategoryEditorView: View {
         .onAppear {
             isNameFocused = true
         }
+        .alert(
+            L10n.deleteCategoryTitle.text,
+            isPresented: $isShowingDeleteConfirm
+        ) {
+            Button(L10n.deleteCategoryConfirm.text, role: .destructive) {
+                Task { await deleteCategory() }
+            }
+            Button(L10n.categoryEditorCancel.text, role: .cancel) {}
+        } message: {
+            Text(String(format: L10n.deleteCategoryMessage.text, vm.name))
+        }
         // Dismiss only after a successful save. Duplicate and stale
         // outcomes keep the editor open with actionable context.
         .onChange(of: vm.isSavedOrDuplicate) { saved in
             if saved {
                 dismiss()
             }
+        }
+    }
+
+    // MARK: - Delete
+
+    /// Bottom-of-page destructive Delete (edit mode only). Mirrors the entry
+    /// form's delete section.
+    private var deleteSection: some View {
+        Button(role: .destructive) {
+            isShowingDeleteConfirm = true
+        } label: {
+            Text(L10n.categoryEditorDelete.text)
+                .font(.headline)
+                .foregroundStyle(Theme.danger)
+                .frame(maxWidth: .infinity, minHeight: Theme.minTapArea)
+                .contentShape(Rectangle())
+        }
+        .background(Theme.backgroundSecondary)
+        .clipShape(RoundedRectangle(cornerRadius: Theme.cornerRadius))
+        .accessibilityIdentifier("CategoryEditorDeleteButton")
+    }
+
+    /// Deletes the category into the durable undo buffer; notifies the
+    /// presenter and dismisses on success. On failure the editor stays open
+    /// with the error banner.
+    private func deleteCategory() async {
+        if await vm.deleteConfirmed() {
+            onDeleted?()
+            dismiss()
         }
     }
 

@@ -6,9 +6,13 @@ import Combine
 /// optional paid sync feature), not the root view.
 ///
 /// Also owns the lifecycle wiring for the local-first machinery:
-/// - foreground → commit expired undo buffers (D3, no background timer) and
+/// - cold launch → commit buffered deletions left over from the previous
+///   process (an app restart finalizes whatever is still buffered) and
 ///   trigger a sync cycle (sync-client spec).
 /// - connectivity restored → trigger a sync cycle.
+///
+/// While the process is alive nothing expires: foreground/background cycles
+/// never commit the undo buffer.
 struct RootView: View {
     @EnvironmentObject var session: SessionStore
     @EnvironmentObject var container: AppContainer
@@ -27,6 +31,10 @@ struct RootView: View {
             .background(Theme.backgroundPrimary.ignoresSafeArea())
             .task {
                 await container.authService.restoreSession()
+                // A restart finalizes deletions buffered by the previous
+                // process; only then run the first sync cycle.
+                try? await container.undoBuffer.commitAll()
+                container.syncController.trigger()
                 await seedStarterCategoriesIfNeeded()
             }
             .onChange(of: session.state) { newState in
@@ -43,10 +51,10 @@ struct RootView: View {
                 }
             }
             .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
-                // Durable undo buffer: commit expired deletions on foreground
-                // (never in the background). Then run a sync cycle if signed in.
+                // Foregrounding never touches the undo buffer (buffered
+                // deletions stay restorable until the app restarts).
+                // Then run a sync cycle if signed in.
                 Task {
-                    try? await container.undoBuffer.commitExpired()
                     container.syncController.trigger()
                 }
             }

@@ -36,6 +36,7 @@ Keep design under version control as plain Markdown so:
 | `SCREENS/Auth.md` | Auth flow screens (Welcome, EmailEntry, OtpEntry). |
 | `SCREENS/AppShell.md` | App shell: Track/History/Insights tabs, Profile destination, compact timer placement. |
 | `SCREENS/TimeTracking.md` | Track screen — the capture destination; covers the numeric timer state machine + activity chooser. |
+| `SCREENS/History.md` | History screen — read-only, day-grouped list of committed time entries (EntryRow, day totals, persistent nav bar). |
 | `SCREENS/ManageActivities.md` | Manage Activities screen — full activity CRUD, delete scope, undo. |
 | `SCREENS/ManageCategories.md` | Manage Categories screen — category CRUD, seeding, undo. |
 | `SCREENS/ActivityEditor.md` | Shared sheet to create/edit an activity (quick-add + manage). |

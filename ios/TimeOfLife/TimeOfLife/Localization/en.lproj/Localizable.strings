@@ -92,6 +92,13 @@
 "activityEditor.addCategory" = "Add a category";
 "activityEditor.save" = "Save";
 "activityEditor.cancel" = "Cancel";
+"activityEditor.delete" = "Delete activity";
+
+// Activity deletion (unify-catalog-deletion)
+"activity.delete.title" = "Delete this activity?";
+"activity.delete.message" = "Delete \"%@\" and its history? Entries: %d, total: %@. The activity will be removed. You can shake to undo until you restart the app.";
+"activity.delete.confirm" = "Delete";
+"activity.delete.running" = "Stop the running timer before deleting this activity.";
 "timer.compactStop" = "Stop and save timer";
 "timer.compactReturnHint" = "Returns to Track";
 "timer.compactRunning" = "%@, timer running";
@@ -130,6 +137,66 @@
 "insights.emptyTitle" = "Nothing here yet";
 "insights.emptySubtitle" = "Patterns emerge after you have tracked a little time.";
 
+// History day-group labels
+"history.day.today" = "Today";
+"history.day.yesterday" = "Yesterday";
+
+// In-progress indicator
+"history.inProgress" = "In progress";
+
+// Day total suffix
+"history.tracked" = "tracked";
+
+// Entry provenance (entry-provenance spec, activity-detail-sheet)
+"provenance.via.widget" = "via Widget";
+"provenance.via.siri" = "via Siri";
+"provenance.via.control" = "via Control";
+"provenance.via.screentime" = "via Screen Time";
+"provenance.via.garmin" = "via Garmin";
+"provenance.via.calendar" = "via Calendar";
+"provenance.via.healthkit" = "via HealthKit";
+
+// Entry source names (activity-detail-sheet entry rows: sync icon + name)
+"provenance.name.widget" = "Widget";
+"provenance.name.siri" = "Siri";
+"provenance.name.control" = "Control";
+"provenance.name.screentime" = "Screen Time";
+"provenance.name.garmin" = "Garmin";
+"provenance.name.calendar" = "Calendar";
+"provenance.name.healthkit" = "HealthKit";
+
+// Activity detail sheet (activity-detail-sheet)
+"activityDetail.editActivity" = "Edit Activity";
+"activityDetail.logTime" = "Log Time";
+"activityDetail.categories" = "Categories";
+"activityDetail.noCategories" = "none";
+"activityDetail.entries" = "Entries";
+"activityDetail.total" = "Total: %@";
+
+// Log Time sheet (manual-entry spec)
+"logTime.title" = "Log Time";
+"logTime.add" = "Add";
+"logTime.cancel" = "Cancel";
+"logTime.activity" = "Activity";
+"logTime.chooseActivity" = "Choose activity";
+"logTime.starts" = "Starts";
+"logTime.ends" = "Ends";
+"logTime.activityMissing" = "The selected activity no longer exists.";
+
+// Unified entry form (entry-editor spec: EDIT + LOCKED modes)
+"entry.editTitle" = "Edit entry";
+"entry.lockedTitle" = "Imported entry";
+"entry.save" = "Save";
+"entry.delete" = "Delete entry";
+"entry.deleteTitle" = "Delete this entry?";
+"entry.deleteMessage" = "This entry will be deleted. You can shake to undo until you restart the app.";
+"entry.deleteConfirm" = "Delete";
+"entry.staleError" = "This entry changed elsewhere. Dismiss and reopen it, then try again.";
+"entry.lockedNote" = "Imported via %@ — editing is disabled to avoid conflicts with the source.";
+
+// History manual entry (add-manual-entry)
+"history.logTime" = "Log time";
+
 // Starter categories (category-management spec, seed requirement)
 "category.seed.work" = "Work";
 "category.seed.hobby" = "Hobby";
@@ -139,13 +206,9 @@
 "category.seed.sleep" = "Sleep";
 "category.seed.entertainment" = "Entertainment";
 
-// Undo (category-management D7)
-"undo.button" = "Undo";
-"undo.dismiss" = "Dismiss";
-"undo.categoryDeleted" = "Category deleted";
+// Undo (chip selection accessibility)
 "undo.selected" = "Selected";
 "undo.notSelected" = "Not selected";
-"undo.secondsRemaining" = "%d s left";
 
 // Manage categories (category-management D4)
 "manage.categories.title" = "Categories";
@@ -156,9 +219,8 @@
 "manage.categories.editHint" = "Double-tap to edit.";
 "manage.categories.loading" = "Loading categories…";
 "delete.category.title" = "Delete category?";
-"delete.category.message" = "%@ will be removed from all activities. Your entries are kept.";
+"delete.category.message" = "%@ will be removed from all activities. Your entries are kept. You can shake to undo until you restart the app.";
 "delete.category.confirm" = "Delete";
-"delete.category.cancel" = "Cancel";
 "error.categoryExists" = "A category with this name already exists.";
 "error.conflict" = "Edited on another device. Showing the latest version.";
 "error.localPersistence" = "Could not save locally. Please try again.";
@@ -172,6 +234,7 @@
 "categoryEditor.iconUnavailable" = "This icon is unavailable on this iOS version and is shown as a tag.";
 "categoryEditor.save" = "Save";
 "categoryEditor.cancel" = "Cancel";
+"categoryEditor.delete" = "Delete category";
 "category.nameRequired" = "Enter a category name.";
 "category.nameTooLong" = "Name must be at most 60 characters.";
 "activityEditor.invalidAssociation" = "One of the selected categories no longer exists. Review your selection and try again.";

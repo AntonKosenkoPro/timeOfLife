@@ -92,6 +92,13 @@
 "activityEditor.addCategory" = "Добавить категорию";
 "activityEditor.save" = "Сохранить";
 "activityEditor.cancel" = "Отмена";
+"activityEditor.delete" = "Удалить активность";
+
+// Activity deletion (unify-catalog-deletion)
+"activity.delete.title" = "Удалить эту активность?";
+"activity.delete.message" = "Удалить «%@» и её историю? Записей: %d, всего: %@. Активность будет удалена. Отменить можно встряской до перезапуска приложения.";
+"activity.delete.confirm" = "Удалить";
+"activity.delete.running" = "Остановите запущенный таймер, прежде чем удалять активность.";
 "timer.compactStop" = "Остановить и сохранить таймер";
 "timer.compactReturnHint" = "Вернуться в Трек";
 "timer.compactRunning" = "%@, таймер идёт";
@@ -130,6 +137,66 @@
 "insights.emptyTitle" = "Пока пусто";
 "insights.emptySubtitle" = "Закономерности появятся после небольшого объёма учёта времени.";
 
+// History day-group labels
+"history.day.today" = "Сегодня";
+"history.day.yesterday" = "Вчера";
+
+// In-progress indicator
+"history.inProgress" = "В процессе";
+
+// Day total suffix
+"history.tracked" = "отслеживано";
+
+// Entry provenance (entry-provenance spec, activity-detail-sheet)
+"provenance.via.widget" = "через Виджет";
+"provenance.via.siri" = "через Siri";
+"provenance.via.control" = "через Элемент управления";
+"provenance.via.screentime" = "через Экранное время";
+"provenance.via.garmin" = "через Garmin";
+"provenance.via.calendar" = "через Календарь";
+"provenance.via.healthkit" = "через Здоровье";
+
+// Entry source names (activity-detail-sheet entry rows: sync icon + name)
+"provenance.name.widget" = "Виджет";
+"provenance.name.siri" = "Siri";
+"provenance.name.control" = "Элемент управления";
+"provenance.name.screentime" = "Экранное время";
+"provenance.name.garmin" = "Garmin";
+"provenance.name.calendar" = "Календарь";
+"provenance.name.healthkit" = "Здоровье";
+
+// Activity detail sheet (activity-detail-sheet)
+"activityDetail.editActivity" = "Редактировать активность";
+"activityDetail.logTime" = "Записать время";
+"activityDetail.categories" = "Категории";
+"activityDetail.noCategories" = "нет";
+"activityDetail.entries" = "Записи";
+"activityDetail.total" = "Всего: %@";
+
+// Log Time sheet (manual-entry spec)
+"logTime.title" = "Записать время";
+"logTime.add" = "Добавить";
+"logTime.cancel" = "Отмена";
+"logTime.activity" = "Активность";
+"logTime.chooseActivity" = "Выбрать активность";
+"logTime.starts" = "Начало";
+"logTime.ends" = "Конец";
+"logTime.activityMissing" = "Выбранная активность больше не существует.";
+
+// Unified entry form (entry-editor spec: EDIT + LOCKED modes)
+"entry.editTitle" = "Редактировать запись";
+"entry.lockedTitle" = "Импортированная запись";
+"entry.save" = "Сохранить";
+"entry.delete" = "Удалить запись";
+"entry.deleteTitle" = "Удалить эту запись?";
+"entry.deleteMessage" = "Запись будет удалена. Отменить можно встряской до перезапуска приложения.";
+"entry.deleteConfirm" = "Удалить";
+"entry.staleError" = "Запись изменилась. Закройте и откройте её заново, затем повторите.";
+"entry.lockedNote" = "Импортировано через %@: редактирование отключено, чтобы избежать конфликтов с источником.";
+
+// History manual entry (add-manual-entry)
+"history.logTime" = "Записать время";
+
 // Starter categories (category-management spec, seed requirement)
 "category.seed.work" = "Работа";
 "category.seed.hobby" = "Хобби";
@@ -139,13 +206,9 @@
 "category.seed.sleep" = "Сон";
 "category.seed.entertainment" = "Развлечения";
 
-// Undo (category-management D7)
-"undo.button" = "Отменить";
-"undo.dismiss" = "Скрыть";
-"undo.categoryDeleted" = "Категория удалена";
+// Undo (chip selection accessibility)
 "undo.selected" = "Выбрано";
 "undo.notSelected" = "Не выбрано";
-"undo.secondsRemaining" = "Осталось: %d с";
 
 // Manage categories (category-management D4)
 "manage.categories.title" = "Категории";
@@ -156,9 +219,8 @@
 "manage.categories.editHint" = "Дважды коснитесь, чтобы изменить.";
 "manage.categories.loading" = "Загрузка категорий…";
 "delete.category.title" = "Удалить категорию?";
-"delete.category.message" = "%@ будет удалена со всех активностей. Записи сохранятся.";
+"delete.category.message" = "%@ будет удалена со всех активностей. Записи сохранятся. Отменить можно встряской до перезапуска приложения.";
 "delete.category.confirm" = "Удалить";
-"delete.category.cancel" = "Отмена";
 "error.categoryExists" = "Категория с таким названием уже существует.";
 "error.conflict" = "Изменено на другом устройстве. Показана актуальная версия.";
 "error.localPersistence" = "Не удалось сохранить локально. Попробуйте снова.";
@@ -172,6 +234,7 @@
 "categoryEditor.iconUnavailable" = "Этот значок недоступен в этой версии iOS и отображается как тег.";
 "categoryEditor.save" = "Сохранить";
 "categoryEditor.cancel" = "Отмена";
+"categoryEditor.delete" = "Удалить категорию";
 "category.nameRequired" = "Введите название категории.";
 "category.nameTooLong" = "Название должно быть не длиннее 60 символов.";
 "activityEditor.invalidAssociation" = "Одна из выбранных категорий больше не существует. Проверьте выбор и попробуйте снова.";

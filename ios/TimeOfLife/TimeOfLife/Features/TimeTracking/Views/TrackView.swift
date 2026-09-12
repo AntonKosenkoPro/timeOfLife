@@ -21,12 +21,20 @@ import SwiftUI
 struct TrackView: View {
     @ObservedObject var vm: TrackViewModel
     @EnvironmentObject var container: AppContainer
+    @Environment(\.undoManager)
+    private var undoManager
 
     var body: some View {
         content
             .navigationTitle(L10n.tabTrack.text)
             .navigationBarTitleDisplayMode(.inline)
             .task { await vm.load() }
+            .task { await vm.registerActivityUndo(with: undoManager) }
+            // Passive host for the system shake-to-undo (U7): Track has no
+            // editable text to hold focus, so without this shakes never reach
+            // the undo manager. Handles no motion itself — the system shows
+            // its default Undo prompt for the registered activity deletion.
+            .background(ShakeFirstResponderHost(undoManager: undoManager))
             .sheet(isPresented: searchPresentation, onDismiss: vm.cancelSearch) {
                 ActivitySearchSheet(vm: vm)
                     .environmentObject(container)
@@ -41,6 +49,12 @@ struct TrackView: View {
                     onCollision: { _ in
                         // The editor stays open with the draft intact; the
                         // editor's own error message surfaces the collision.
+                    },
+                    onDeleted: {
+                        Task {
+                            await vm.deleteRefinement(id: presentation.activity.id)
+                            await vm.registerActivityUndo(with: undoManager)
+                        }
                     }
                 )
                 .environmentObject(container)

@@ -5,7 +5,7 @@
   ],
   "agent": {
     "explore": {
-      "model": "openai/gpt-5.6-luna",
+      "model": "ollama-cloud/glm-5.3-flash",
       "reasoningEffort": "high"
     },
     "build": {
@@ -13,8 +13,8 @@
       "reasoningEffort": "max"
     },
     "general": {
-      "model": "ollama-cloud/deepseek-v4-flash:0731",
-      "reasoningEffort": "max"
+      "model": "ollama-cloud/glm-5.3-flash",
+      "reasoningEffort": "high"
     },
     "plan": {
       "model": "opencode-go/kimi-k3",
