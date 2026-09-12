@@ -7,7 +7,7 @@ This capability answers "where does my time actually go?" — a read-only, perio
 ## ADDED Requirements
 
 ### Requirement: Period-scoped breakdown with hero total
-The Insights destination SHALL present a hero total of committed tracked time for the selected period plus a proportional breakdown of that time, scoped by a period switch (`Today | This week | All time`, default `This week`). Only committed entries (`endedAt != nil`, NULL durations contributing zero) SHALL contribute; the running timer is excluded from all numbers. Entries are bucketed by the calendar day of `startedAt` (device calendar, same day-boundary rule as History); `Today` covers start-of-day to now, `This week` covers the locale week interval containing now, `All time` covers everything.
+The Insights destination SHALL present a hero total of committed tracked time for the selected period plus a proportional breakdown of that time, scoped by a period switch (`Today | This week | All time`, default `This week`). Only committed entries (`endedAt != nil`, NULL durations contributing zero) SHALL contribute; the running timer is excluded from all numbers. Entries are bucketed by the calendar day of `startedAt` (device calendar, same day-boundary rule as History); `Today` covers the calendar day containing now (start-of-day to start-of-next-day, so future-dated manual entries count by `startedAt` with no special-casing), `This week` covers the locale week interval containing now, `All time` covers everything.
 
 #### Scenario: Default view
 - **WHEN** the user opens Insights with tracked time in the current week

@@ -45,11 +45,9 @@ struct AppShellView: View {
             .accessibilityIdentifier("TabHistory")
 
             navigationRoot {
-                DestinationPlaceholder(
-                    title: L10n.tabInsights.text,
-                    symbol: "chart.line.uptrend.xyaxis",
-                    emptyTitle: L10n.insightsEmptyTitle.text,
-                    emptySubtitle: L10n.insightsEmptySubtitle.text
+                InsightsView(
+                    store: container.localStore,
+                    refreshSignal: vm.runningTimer?.activityID ?? ""
                 )
                 .safeAreaInset(edge: .bottom) { compactTimerIfNeeded }
             }
@@ -151,21 +149,6 @@ private struct ShellToolbar: ViewModifier {
         }
     }
 }
-/// Honest empty state for History and Insights (app-shell spec: do not fill
-/// destinations with fake data in production).
-private struct DestinationPlaceholder: View {
-    let title: String
-    let symbol: String
-    let emptyTitle: String
-    let emptySubtitle: String
-
-    var body: some View {
-        EmptyState(icon: symbol, title: emptyTitle, subtitle: emptySubtitle)
-            .background(Theme.backgroundPrimary.ignoresSafeArea())
-            .accessibilityLabel("\(title), \(emptyTitle). \(emptySubtitle)")
-    }
-}
-
 #if DEBUG
 #Preview("App Shell") {
     let container = AppContainer.production()
