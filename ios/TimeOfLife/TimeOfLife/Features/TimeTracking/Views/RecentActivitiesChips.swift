@@ -29,7 +29,8 @@ struct RecentActivitiesChips: View {
     private var recents: [Activity] { Self.recents(from: activities) }
 
     /// The capped, most-recently-used-first slice of the given activities.
-    static func recents(from activities: [Activity], limit: Int = 6) -> [Activity] {
+    /// Pure (no view state), so `nonisolated` like `EntryRow.accessibilityLabel`.
+    nonisolated static func recents(from activities: [Activity], limit: Int = 6) -> [Activity] {
         Array(activities.prefix(limit))
     }
 
