@@ -8,7 +8,7 @@ Implements the `app-shell` capability (OpenSpec change `redesign-track-experienc
 TabView (Track | History | Insights)
   ├─ Track      — capture: activity chooser + numeric timer (SCREENS/TimeTracking.md)
   ├─ History    — retrospective review (empty state in this change)
-  └─ Insights   — analysis (empty state in this change)
+  └─ Insights   — analysis: period breakdown with hero total (insights-breakdown)
 Profile (sheet, top-trailing person control on every tab)
   ├─ Account    — Enable Sync (signed out) / account + sync management (signed in)
   ├─ Library    — Manage Activities, Manage Categories
@@ -40,6 +40,7 @@ Profile (sheet, top-trailing person control on every tab)
 
 - Switching destinations never changes timer state and never discards the previous destination's state (tab state is preserved by `TabView`).
 - The app launches into Track without requiring authentication; History and Insights are reachable unsigned.
+- Insights shows a mirror-only breakdown of committed time: a `Today | This week | All time` period switch (default `This week`), a hero period total, a `By category | By activity` lens toggle (default `By category`), and proportional rows with max-scaled bars. Category rows attribute the full duration to every attached category (rows may sum above the hero) with a one-line footnote naming the rule; rows are not tappable; empty periods show a one-line sentence, and the true-zero state keeps the honest placeholder.
 - Profile opens for all users. Signed out, local configuration remains available and account sync is presented as an optional "Enable Sync" action.
 - Dismissing Profile restores the previously selected destination and its state.
 - The compact timer's main area returns to Track; its Stop button saves in place and keeps the current destination selected.

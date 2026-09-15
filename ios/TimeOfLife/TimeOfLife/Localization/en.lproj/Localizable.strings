@@ -147,6 +147,17 @@
 // Day total suffix
 "history.tracked" = "tracked";
 
+// Insights breakdown (insights-breakdown)
+"insights.period.today" = "Today";
+"insights.period.week" = "This week";
+"insights.period.all" = "All time";
+"insights.lens.category" = "By category";
+"insights.lens.activity" = "By activity";
+"insights.noCategory" = "Without category";
+"insights.footnote" = "An activity with several categories counts fully toward each.";
+"insights.empty.today" = "Nothing tracked today yet.";
+"insights.empty.week" = "Nothing tracked this week yet.";
+
 // Entry provenance (entry-provenance spec, activity-detail-sheet)
 "provenance.via.widget" = "via Widget";
 "provenance.via.siri" = "via Siri";

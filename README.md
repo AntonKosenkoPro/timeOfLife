@@ -85,7 +85,7 @@ The backend deploys to a **GCP Compute Engine VM** (`timeoflife-backend`, us-eas
 ## Deferred / out of scope
 
 - **Sign in with Apple follow-ups** — account-deletion token revocation via Apple `/auth/revoke`, nonce replay defense, credential-state observation.
-- **iOS History list/edit UI** — the shell's History/Insights empty states landed; the full list UI is not implemented yet.
+- **iOS History list/edit UI** — the History day-grouped list, activity detail sheet, and entry editing have shipped (deferred filtering lives in `docs/history-roadmap.md`); the Insights breakdown v1 (period switch + category/activity lenses, mirror-only) is implemented.
 - **App-wide Undo UI, "Enable Sync" sheet, "via <Source>" labels, lock-screen Control** — local-first storage/sync foundations are done; these UI surfaces are open tasks in `openspec/changes/local-first-sync-architecture/tasks.md`. Category-scoped undo in Manage Categories is implemented separately.
 - **Kafka** — deferred (S1 names it; not needed yet). **Rate-limit store** — in-memory; Redis before multi-instance.
 - **SwiftUI snapshot / on-device keychain tests** — not automated; verified manually in the simulator.

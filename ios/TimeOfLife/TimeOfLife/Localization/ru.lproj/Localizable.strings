@@ -147,6 +147,17 @@
 // Day total suffix
 "history.tracked" = "отслеживано";
 
+// Insights breakdown (insights-breakdown)
+"insights.period.today" = "Сегодня";
+"insights.period.week" = "Эта неделя";
+"insights.period.all" = "Всё время";
+"insights.lens.category" = "По категориям";
+"insights.lens.activity" = "По активностям";
+"insights.noCategory" = "Без категории";
+"insights.footnote" = "Активность с несколькими категориями учитывается в каждой из них.";
+"insights.empty.today" = "Сегодня пока ничего не учтено.";
+"insights.empty.week" = "На этой неделе пока ничего не учтено.";
+
 // Entry provenance (entry-provenance spec, activity-detail-sheet)
 "provenance.via.widget" = "через Виджет";
 "provenance.via.siri" = "через Siri";

@@ -120,6 +120,17 @@ enum L10n: String, CaseIterable {
     case historyInProgress = "history.inProgress"
     case historyTracked = "history.tracked"
 
+    // Insights breakdown (insights-breakdown)
+    case insightsPeriodToday = "insights.period.today"
+    case insightsPeriodWeek = "insights.period.week"
+    case insightsPeriodAll = "insights.period.all"
+    case insightsLensCategory = "insights.lens.category"
+    case insightsLensActivity = "insights.lens.activity"
+    case insightsNoCategory = "insights.noCategory"
+    case insightsFootnote = "insights.footnote"
+    case insightsEmptyToday = "insights.empty.today"
+    case insightsEmptyWeek = "insights.empty.week"
+
     // Entry provenance (entry-provenance spec, activity-detail-sheet)
     case provenanceViaWidget = "provenance.via.widget"
     case provenanceViaSiri = "provenance.via.siri"
