@@ -5,6 +5,7 @@
   ],
   "agent": {
     "explore": {
+      "description": "Fast read-only codebase explorer. Delegate independent exploration in parallel: file searches, pattern hunts, architecture questions. Fan out 2-3 explore agents at once over disjoint areas (backend vs iOS vs specs/docs).",
       "model": "ollama-cloud/glm-5.3-flash",
       "reasoningEffort": "high"
     },
@@ -13,6 +14,7 @@
       "reasoningEffort": "max"
     },
     "general": {
+      "description": "General-purpose worker for independent units of work. Delegate parallelizable backend, iOS, or specs/docs tasks via the Task tool. Default fan-out is 4 agents, hard ceiling 6, explore-only work stays at 3.",
       "model": "ollama-cloud/glm-5.3-flash",
       "reasoningEffort": "high"
     },
