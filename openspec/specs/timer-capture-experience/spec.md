@@ -3,9 +3,7 @@
 ## Purpose
 
 Defines a focused, local-first timer capture journey in which a centered numeric timer communicates exact actionable timer state and every start follows an explicit Activity selection.
-
 ## Requirements
-
 ### Requirement: Numeric timer is an instrumental readout
 The Track numeric timer SHALL represent only timer readiness and exact elapsed timing; it SHALL NOT display fabricated progress, daily totals, goals, rings, sweeps, or history while idle.
 
@@ -317,7 +315,7 @@ Activity search, creation, and selected-Activity refinement SHALL recover from l
 - **THEN** the app clears the invalid preparation, returns to idle, and does not silently recreate the deleted Activity
 
 ### Requirement: Stop saves with stable feedback
-Stopping a running timer SHALL save the completed entry locally, communicate success without a blocking loader, and retain the activity in the ready state for an optional later restart.
+Stopping a running timer SHALL save the completed entry locally, communicate success without a blocking loader, and retain the activity in the ready state for an optional later restart. When the persisted running timer is gone but Track still holds a `.running` state (the timer was stopped from the compact timer on another destination), Track SHALL reconcile on next load: stop the elapsed ticker, re-enable the idle timer, reset elapsed to zero, and return to `.ready` for the same activity — or `.idle` when that activity no longer exists — instead of counting elapsed time forever.
 
 #### Scenario: Successful stop
 - **WHEN** the user activates Stop on a running timer
@@ -326,6 +324,10 @@ Stopping a running timer SHALL save the completed entry locally, communicate suc
 #### Scenario: Save failure
 - **WHEN** the local store cannot save the completed entry
 - **THEN** the app preserves recoverable running state and presents a localized non-field error without silently losing elapsed time
+
+#### Scenario: External stop reconciles Track
+- **WHEN** Track holds a running state for an activity whose persisted timer no longer exists (stopped from the compact timer elsewhere)
+- **THEN** Track leaves the running state on next load: the ticker stops, elapsed resets to zero, and the screen shows the ready timer for the same activity (or idle when the activity is gone)
 
 ### Requirement: Timer states remain visually and physically stable
 The idle, ready, running, saving, saved, and error states SHALL preserve the numeric timer's position and primary control geometry, support light and dark appearance, respect Reduce Motion, and expose accessible state. Transient saved-state feedback displayed above the numeric timer SHALL NOT change the timer's vertical position.
@@ -345,3 +347,4 @@ The idle, ready, running, saving, saved, and error states SHALL preserve the num
 #### Scenario: VoiceOver reads numeric timer
 - **WHEN** VoiceOver focuses the numeric timer
 - **THEN** it announces the selected Activity, timer state, elapsed duration, and the available primary action
+

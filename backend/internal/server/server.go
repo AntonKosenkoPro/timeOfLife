@@ -160,6 +160,8 @@ func New(deps Dependencies) *Server {
 			r.Get("/entries/{id}", h.GetEntry)
 			r.Patch("/entries/{id}", h.UpdateEntry)
 			r.Delete("/entries/{id}", h.DeleteEntry)
+			// Deletion tombstones (cross-device delete propagation).
+			r.Get("/deletions", h.ListDeletions)
 		})
 	})
 

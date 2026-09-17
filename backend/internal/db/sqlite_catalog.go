@@ -427,6 +427,12 @@ func (s *SQLiteStore) CreateActivity(ctx context.Context, a Activity, categoryID
 	if err := s.replaceActivityCategoriesTx(ctx, tx, a.UserID, a.ID, categoryIDs); err != nil {
 		return Activity{}, false, err
 	}
+	// A recreation clears its stale tombstone (harmless when none exists).
+	if _, err := tx.ExecContext(ctx, `
+		DELETE FROM tombstones WHERE user_id = ? AND resource = 'activity' AND record_id = ?
+	`, a.UserID, a.ID); err != nil {
+		return Activity{}, false, fmt.Errorf("clear activity tombstone: %w", err)
+	}
 	if err := tx.Commit(); err != nil {
 		return Activity{}, false, fmt.Errorf("create activity commit: %w", err)
 	}
@@ -565,6 +571,9 @@ func (s *SQLiteStore) DeleteActivity(ctx context.Context, userID, id string) err
 	if affected == 0 {
 		return fmt.Errorf("delete activity: %w", ErrNotFound)
 	}
+	if err := upsertTombstone(ctx, tx, userID, "activity", id); err != nil {
+		return err
+	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("delete activity commit: %w", err)
 	}
@@ -638,6 +647,10 @@ func (s *SQLiteStore) CreateCategory(ctx context.Context, c Category) (Category,
 			return Category{}, false, fmt.Errorf("create category: %w", ErrCategoryExists)
 		}
 		return Category{}, false, fmt.Errorf("create category: %w", err)
+	}
+	// A recreation clears its stale tombstone (harmless when none exists).
+	if err := clearTombstone(ctx, s.db, c.UserID, "category", c.ID); err != nil {
+		return Category{}, false, err
 	}
 	created, err := s.getCategoryRow(ctx, c.UserID, c.ID)
 	if err != nil {
@@ -750,6 +763,9 @@ func (s *SQLiteStore) DeleteCategory(ctx context.Context, userID, id string) err
 	}
 	if affected == 0 {
 		return fmt.Errorf("delete category: %w", ErrNotFound)
+	}
+	if err := upsertTombstone(ctx, tx, userID, "category", id); err != nil {
+		return err
 	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("delete category commit: %w", err)
@@ -933,6 +949,12 @@ func (s *SQLiteStore) CreateEntry(ctx context.Context, e Entry) (Entry, bool, er
 	`, fmtTime(e.StartedAt), *e.ActivityID, e.UserID, fmtTime(e.StartedAt)); err != nil {
 		return Entry{}, false, fmt.Errorf("bump activity last_used_at: %w", err)
 	}
+	// A recreation clears its stale tombstone (harmless when none exists).
+	if _, err := tx.ExecContext(ctx, `
+		DELETE FROM tombstones WHERE user_id = ? AND resource = 'entry' AND record_id = ?
+	`, e.UserID, e.ID); err != nil {
+		return Entry{}, false, fmt.Errorf("clear entry tombstone: %w", err)
+	}
 	if err := tx.Commit(); err != nil {
 		return Entry{}, false, fmt.Errorf("create entry commit: %w", err)
 	}
@@ -1037,10 +1059,72 @@ func (s *SQLiteStore) DeleteEntry(ctx context.Context, userID, id string) error 
 	if affected == 0 {
 		return fmt.Errorf("delete entry: %w", ErrNotFound)
 	}
+	if err := upsertTombstone(ctx, tx, userID, "entry", id); err != nil {
+		return err
+	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("delete entry commit: %w", err)
 	}
 	return nil
+}
+
+// upsertTombstone records (or refreshes) a deletion tombstone for one hard
+// delete, inside the caller's transaction. Cascade-deleted children get no
+// tombstones — one row per user intent.
+func upsertTombstone(ctx context.Context, tx *sql.Tx, userID, resource, recordID string) error {
+	_, err := tx.ExecContext(ctx, `
+		INSERT INTO tombstones (user_id, resource, record_id, deleted_at)
+		VALUES (?, ?, ?, ?)
+		ON CONFLICT (user_id, resource, record_id)
+		DO UPDATE SET deleted_at = excluded.deleted_at
+	`, userID, resource, recordID, fmtTime(time.Now().UTC()))
+	if err != nil {
+		return fmt.Errorf("upsert tombstone: %w", err)
+	}
+	return nil
+}
+
+// clearTombstone removes a record's tombstone so a recreation never meets its
+// own stale tombstone. Harmless when no tombstone exists.
+func clearTombstone(ctx context.Context, db *sql.DB, userID, resource, recordID string) error {
+	if _, err := db.ExecContext(ctx, `
+		DELETE FROM tombstones WHERE user_id = ? AND resource = ? AND record_id = ?
+	`, userID, resource, recordID); err != nil {
+		return fmt.Errorf("clear tombstone: %w", err)
+	}
+	return nil
+}
+
+// ListDeletions returns the user's tombstones with deleted_at > since
+// (nil/zero = all), ordered by deleted_at ASC.
+func (s *SQLiteStore) ListDeletions(ctx context.Context, userID string, since *time.Time) ([]Tombstone, error) {
+	if since != nil && since.IsZero() {
+		since = nil
+	}
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT resource, record_id, deleted_at
+		FROM tombstones
+		WHERE user_id = ? AND (? IS NULL OR deleted_at > ?)
+		ORDER BY deleted_at ASC
+	`, userID, fmtTimeArg(since), fmtTimeArg(since))
+	if err != nil {
+		return nil, fmt.Errorf("list deletions: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var out []Tombstone
+	for rows.Next() {
+		var t Tombstone
+		var deletedAt string
+		if err := rows.Scan(&t.Resource, &t.ID, &deletedAt); err != nil {
+			return nil, fmt.Errorf("list deletions scan: %w", err)
+		}
+		t.DeletedAt = parseTime(deletedAt)
+		out = append(out, t)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list deletions rows: %w", err)
+	}
+	return out, nil
 }
 
 // isUniqueViolation reports whether err is a SQLite UNIQUE constraint failure.

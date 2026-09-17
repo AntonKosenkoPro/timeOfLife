@@ -89,9 +89,12 @@ final class SyncController: ObservableObject {
 
     // MARK: - Cycle
 
-    /// One drain+pull cycle. First sync is pull-first (D4): the relay's ids
+    /// One sync cycle. First sync is pull-first (D4): the relay's ids
     /// arrive before local pushes, so cross-device name collisions mostly
-    /// resolve during merge rather than on push.
+    /// resolve during merge rather than on push. Tombstones apply before the
+    /// drain (steady) or right after the pull (first sync): a tombstone
+    /// drops stale pending create/update rows pre-drain, so a 404 is never
+    /// pushed for a record the relay already deleted.
     private func runCycle(firstSync: Bool) async {
         defer { cycleTask = nil }
         guard connectivity.isConnected else {
@@ -105,6 +108,7 @@ final class SyncController: ObservableObject {
             if firstSync {
                 try await pull(modifiedSince: nil)
             }
+            try await applyTombstones()
             try await drainOutbox()
             if !firstSync {
                 try await pull(modifiedSince: nil)
@@ -178,6 +182,14 @@ final class SyncController: ObservableObject {
     /// server record (and, downstream, its entries) is skipped. Either way the
     /// pull never fails on the normalized-name unique index.
     private func applyServer(_ activity: Activity, serverCategories: [String: Category]) async throws {
+        // Delete-wins: the user deleted this record locally (buffered undoable
+        // deletion or committed outbox delete) and the relay has not converged
+        // yet. Merging the server copy back would resurrect it — the queued
+        // DELETE removes it from the relay on drain instead.
+        if try await store.isLocallyDeleted(resource: "activity", recordID: activity.id) {
+            Self.logger.info("sync pull skips locally deleted activity \(activity.id, privacy: .public)")
+            return
+        }
         if let local = try await store.activity(id: activity.id) {
             guard activity.updatedAt > local.updatedAt else { return }
         }
@@ -237,6 +249,12 @@ final class SyncController: ObservableObject {
     /// throwing SQLite 19 on `index_categories_on_lower_name` and aborting
     /// the cycle before the outbox ever drained.
     private func applyServer(_ category: Category) async throws {
+        // Delete-wins (see applyServer(_:serverCategories:)): never resurrect
+        // a locally deleted category from the full snapshot.
+        if try await store.isLocallyDeleted(resource: "category", recordID: category.id) {
+            Self.logger.info("sync pull skips locally deleted category \(category.id, privacy: .public)")
+            return
+        }
         if let local = try await store.category(id: category.id) {
             guard category.updatedAt > local.updatedAt else { return }
         }
@@ -268,6 +286,12 @@ final class SyncController: ObservableObject {
     /// is skipped with a log instead of failing the cycle on the join
     /// foreign key; the next pull retries after the activity lands.
     private func applyServer(_ entry: TimeEntry) async throws {
+        // Delete-wins (see applyServer(_:serverCategories:)): never resurrect
+        // a locally deleted entry.
+        if try await store.isLocallyDeleted(resource: "entry", recordID: entry.id) {
+            Self.logger.info("sync pull skips locally deleted entry \(entry.id, privacy: .public)")
+            return
+        }
         if let local = try await store.entry(id: entry.id) {
             guard entry.updatedAt > local.updatedAt else { return }
         }
@@ -276,6 +300,28 @@ final class SyncController: ObservableObject {
             return
         }
         try await store.mergeEntry(entry)
+    }
+
+    // MARK: - Deletion tombstones (cross-device-delete-propagation)
+
+    /// Fetches and applies the relay's deletion tombstones since the
+    /// `deletions` cursor, in server (oldest-first) order. Advances the
+    /// cursor to the max `deleted_at` received, and keeps it unchanged when
+    /// the list is empty (the no-change-keeps-cursor convention). A
+    /// tombstone for an unknown id is a no-op that still advances the
+    /// cursor.
+    private func applyTombstones() async throws {
+        let cursor = try await store.lastSyncedAt(resource: "deletions")
+        let deletions = try await remote.fetchDeletions(since: cursor)
+        for deletion in deletions {
+            try await store.applyDeletionTombstone(deletion)
+        }
+        if let max = deletions.map(\.deletedAt).max() {
+            try await store.setLastSyncedAt(resource: "deletions", date: max)
+        }
+        if !deletions.isEmpty {
+            Self.logger.info("sync applied \(deletions.count) deletion tombstones")
+        }
     }
 
     // MARK: - Outbox drain (idempotent replay, D2)
@@ -369,7 +415,15 @@ final class SyncController: ObservableObject {
 
     /// Adopts the server's current version of a record (keep-latest). Uses
     /// the no-outbox merge path — the relay already holds this version.
+    /// Skipped when the record was deleted locally after the conflicting row
+    /// was queued: adopting would resurrect it, and the queued DELETE row
+    /// converges the relay on its own.
     private func adoptServerVersion(_ row: OutboxRow) async throws {
+        let deleted = try await store.isLocallyDeleted(resource: row.resource, recordID: row.recordID)
+        if deleted {
+            Self.logger.info("sync conflict keeps local deletion of \(row.resource, privacy: .public) \(row.recordID, privacy: .public)")
+            return
+        }
         switch row.resource {
         case "activity":
             let server = try await remote.fetchActivity(id: row.recordID)

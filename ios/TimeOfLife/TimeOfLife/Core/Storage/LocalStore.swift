@@ -1182,6 +1182,133 @@ actor LocalStore {
         }
     }
 
+    // MARK: - Local deletion tombstones (delete-wins on pull)
+
+    /// Whether `(resource, recordID)` has a pending outbox DELETE: a
+    /// committed local deletion that has not reached the relay yet. A pull
+    /// that runs before the drain pushes it (first-sync is pull-first) still
+    /// sees the record on the relay and must not merge it back.
+    func hasPendingDelete(resource: String, recordID: String) throws -> Bool {
+        try dbQueue.read { db in
+            let count = try Int.fetchOne(db, sql: """
+                SELECT COUNT(*) FROM outbox
+                WHERE resource = ? AND record_id = ? AND op = 'delete'
+                """, arguments: [resource, recordID]) ?? 0
+            return count > 0
+        }
+    }
+
+    /// Whether `(resource, recordID)` sits in the durable undo buffer: a
+    /// deletion the user can still undo, with no outbox row yet. The relay
+    /// still holds the record, so an unguarded pull would resurrect it and
+    /// the later commit would leave a permanent zombie behind.
+    func isBufferedForDeletion(resource: String, recordID: String) throws -> Bool {
+        try dbQueue.read { db in
+            let rows = try UndoBufferRow.fetchAll(db, sql: "SELECT * FROM undo_buffer")
+            for row in rows {
+                guard let data = row.payload.data(using: .utf8),
+                      let snapshot = try? JSONDecoder().decode(DeletionSnapshot.self, from: data),
+                      snapshot.records.contains(where: { $0.resource == resource && $0.recordID == recordID })
+                else { continue }
+                return true
+            }
+            return false
+        }
+    }
+
+    /// Whether a pull-merge must skip this record: the user deleted it
+    /// locally (buffered undoable deletion or committed outbox delete) and
+    /// the relay has not converged yet. Undo restores the row and clears the
+    /// buffer, and a successful drain clears the outbox row — both lift the
+    /// guard, so newer server versions merge normally afterwards.
+    func isLocallyDeleted(resource: String, recordID: String) throws -> Bool {
+        try hasPendingDelete(resource: resource, recordID: recordID)
+            || isBufferedForDeletion(resource: resource, recordID: recordID)
+    }
+
+    /// Applies one relay deletion tombstone (cross-device-delete-propagation):
+    /// removes the local row — entries and join rows cascade for activities —
+    /// WITHOUT creating an outbox row (the relay already lacks the record),
+    /// and drops every pending create/update outbox row for the affected ids
+    /// (an activity id plus its entry ids; the single id otherwise). Pending
+    /// DELETE rows are left untouched — the drain converges them via the
+    /// existing 404-as-success rule. A clean local row newer than the
+    /// tombstone (`updated_at > deleted_at`, no pending create/update) is
+    /// kept: a stale tombstone after a recreation (R1). An unknown id is a
+    /// no-op.
+    func applyDeletionTombstone(_ deletion: Deletion) throws {
+        try dbQueue.write { db in
+            switch deletion.resource {
+            case "activity":
+                let entryIDs = try String.fetchAll(db, sql: """
+                    SELECT id FROM entries WHERE activity_id = ? ORDER BY id
+                    """, arguments: [deletion.recordID])
+                if let local = try Self.fetchActivity(db, id: deletion.recordID),
+                   try !Self.hasPendingCreateOrUpdate(db, resource: "activity", recordID: local.id),
+                   local.updatedAt > deletion.deletedAt {
+                    return // R1: the recreation already won.
+                }
+                try db.execute(sql: "DELETE FROM entries WHERE activity_id = ?", arguments: [deletion.recordID])
+                try db.execute(sql: "DELETE FROM activity_categories WHERE activity_id = ?", arguments: [deletion.recordID])
+                try db.execute(sql: "DELETE FROM activities WHERE id = ?", arguments: [deletion.recordID])
+                try Self.dropPendingCreateOrUpdate(db, resource: "activity", recordID: deletion.recordID)
+                for id in entryIDs {
+                    try Self.dropPendingCreateOrUpdate(db, resource: "entry", recordID: id)
+                }
+            case "entry":
+                if let row = try Row.fetchOne(db, sql: """
+                    SELECT updated_at FROM entries WHERE id = ?
+                    """, arguments: [deletion.recordID]),
+                   try !Self.hasPendingCreateOrUpdate(db, resource: "entry", recordID: deletion.recordID),
+                   let updatedAt: Date = row["updated_at"],
+                   updatedAt > deletion.deletedAt {
+                    return // R1: the recreation already won.
+                }
+                try db.execute(sql: "DELETE FROM entries WHERE id = ?", arguments: [deletion.recordID])
+                try Self.dropPendingCreateOrUpdate(db, resource: "entry", recordID: deletion.recordID)
+            case "category":
+                if let local = try Category.fetchOne(db, key: deletion.recordID),
+                   try !Self.hasPendingCreateOrUpdate(db, resource: "category", recordID: local.id),
+                   local.updatedAt > deletion.deletedAt {
+                    return // R1: the recreation already won.
+                }
+                try db.execute(sql: "DELETE FROM activity_categories WHERE category_id = ?", arguments: [deletion.recordID])
+                try db.execute(sql: "DELETE FROM categories WHERE id = ?", arguments: [deletion.recordID])
+                try Self.dropPendingCreateOrUpdate(db, resource: "category", recordID: deletion.recordID)
+            default:
+                break
+            }
+        }
+    }
+
+    /// Whether `(resource, record_id)` has a pending create or update outbox
+    /// row (an unpushed local mutation that the relay does not know yet).
+    private static func hasPendingCreateOrUpdate(
+        _ db: Database,
+        resource: String,
+        recordID: String
+    ) throws -> Bool {
+        let count = try Int.fetchOne(db, sql: """
+            SELECT COUNT(*) FROM outbox
+            WHERE resource = ? AND record_id = ? AND op IN ('create', 'update')
+            """, arguments: [resource, recordID]) ?? 0
+        return count > 0
+    }
+
+    /// Removes every pending create/update outbox row for
+    /// `(resource, record_id)`. Pending DELETE rows are left alone: the drain
+    /// converges them via the existing 404-as-success rule.
+    private static func dropPendingCreateOrUpdate(
+        _ db: Database,
+        resource: String,
+        recordID: String
+    ) throws {
+        try db.execute(
+            sql: "DELETE FROM outbox WHERE resource = ? AND record_id = ? AND op IN ('create', 'update')",
+            arguments: [resource, recordID]
+        )
+    }
+
     /// Rewrites the payload of every pending outbox row for (resource,
     /// record_id) — used after a name-collision remap so a later drain pushes
     /// the corrected reference instead of the stale one.

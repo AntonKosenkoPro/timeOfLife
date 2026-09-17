@@ -332,3 +332,34 @@ func (h *Handler) DeleteCategory(w http.ResponseWriter, r *http.Request) {
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
+
+// ---------- Deletion tombstones ----------
+
+// ListDeletions handles GET /deletions (?deleted_since= delta pull). Returns
+// the user's deletion tombstones ordered by deleted_at ASC; a nil result
+// serializes as [] so the client never decodes null.
+func (h *Handler) ListDeletions(w http.ResponseWriter, r *http.Request) {
+	userID, ok := h.requireUserID(w, r)
+	if !ok {
+		return
+	}
+	var deletedSince *time.Time
+	if v := r.URL.Query().Get("deleted_since"); v != "" {
+		t, ok := parseRFC3339(v)
+		if !ok {
+			writeValidation(w, validationErrs{"deleted_since": "deleted_since must be a valid RFC 3339 timestamp"})
+			return
+		}
+		deletedSince = &t
+	}
+	tombstones, err := h.store.ListDeletions(r.Context(), userID, deletedSince)
+	if err != nil {
+		h.logger.Error("list deletions failed", "error", err)
+		writeError(w, http.StatusInternalServerError, "internal_error", "An internal error occurred", nil)
+		return
+	}
+	if tombstones == nil {
+		tombstones = []db.Tombstone{}
+	}
+	writeJSON(w, http.StatusOK, tombstones)
+}

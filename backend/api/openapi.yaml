@@ -35,11 +35,12 @@ info:
     client-generated UUID v7 ids so they can be created offline and synced
     later; `POST` is idempotent on `id`. Mutations use last-write-wins on
     `updated_at` (409 `conflict` on a stale write; the server's current version
-    is returned for reconciliation). Deletes are hard (the client owns the 30 s
-    undo window). Timer-screen suggestions are computed client-side from the
+    is returned for reconciliation). Deletes are hard but leave a tombstone
+    (`GET /api/v1/deletions`) so other devices converge; recreating an id
+    clears its tombstone. Timer-screen suggestions are computed client-side from the
     synced `last_used_at` — there is no suggestions endpoint.
 
-  version: "1.3.0"
+  version: "1.4.0"
   contact:
     name: Anton Kosenko
 
@@ -970,6 +971,50 @@ paths:
         "500":
           $ref: "#/components/responses/InternalError"
 
+  # ---------- Cross-device deletions ----------
+
+  /api/v1/deletions:
+    get:
+      operationId: listDeletions
+      summary: List deletion tombstones
+      description: |
+        Returns the authenticated user's deletion tombstones ordered by
+        `deleted_at` ascending (cursor-friendly). Every hard DELETE of an
+        activity, category, or entry records one tombstone, so a device that
+        missed the delete converges by removing its local copy. Recreating an
+        id clears its tombstone, so a tombstone older than a live record's
+        `updated_at` is stale and ignored. Tombstones are retained (no GC);
+        `deleted_at` enables a future retention policy.
+      tags:
+        - Sync
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: deleted_since
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+          description: |
+            Return only tombstones with `deleted_at` strictly greater than
+            this RFC 3339 timestamp. Absent/empty = full list.
+      responses:
+        "200":
+          description: The user's deletion tombstones, oldest first.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Deletion"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
 components:
   securitySchemes:
     BearerAuth:
@@ -1660,4 +1705,29 @@ components:
         next_cursor:
           type: string
           nullable: true
-          description: Opaque cursor for the next page; null/absent when exhausted.
+
+    Deletion:
+      type: object
+      description: |
+        A deletion tombstone: a record of a hard delete so devices that missed
+        it converge by removing their local copy. `resource` mirrors the sync
+        outbox resource strings.
+      required:
+        - resource
+        - id
+        - deleted_at
+      properties:
+        resource:
+          type: string
+          enum: [activity, category, entry]
+        id:
+          type: string
+          format: uuid
+          description: The deleted record's id.
+        deleted_at:
+          type: string
+          format: date-time
+      example:
+        resource: activity
+        id: "019639f1-7a3b-7abc-9def-100000000001"
+        deleted_at: "2026-07-27T11:00:00Z"

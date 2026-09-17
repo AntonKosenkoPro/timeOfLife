@@ -11,6 +11,9 @@ protocol CatalogSending: Sendable {
     func fetchCategories() async throws -> [Category]
     /// `GET /entries?modified_since=` — full pull when `modifiedSince` is nil.
     func fetchEntries(modifiedSince: Date?) async throws -> [TimeEntry]
+    /// `GET /deletions?deleted_since=` — full list when `since` is nil
+    /// (cross-device-delete-propagation).
+    func fetchDeletions(since: Date?) async throws -> [Deletion]
     /// `GET /activities/{id}` — used to adopt the server's version on conflict.
     func fetchActivity(id: String) async throws -> Activity
     /// `GET /categories/{id}` — used to adopt the server's version on conflict.
@@ -71,6 +74,14 @@ final class RemoteCatalogRepository: CatalogSending {
             as: EntryListResponse.self
         )
         return response.items.map(Self.localEntry(from:))
+    }
+
+    func fetchDeletions(since: Date?) async throws -> [Deletion] {
+        let response = try await client.send(
+            APIEndpoint.value(method: .get, path: deletionsPath(since: since), requiresAuth: true),
+            as: [DeletionWireDTO].self
+        )
+        return response.map(Self.localDeletion(from:))
     }
 
     func fetchActivity(id: String) async throws -> Activity {
@@ -198,6 +209,11 @@ final class RemoteCatalogRepository: CatalogSending {
         )
     }
 
+    /// Maps the wire Deletion tombstone (RFC 3339 timestamps) to the local model.
+    private static func localDeletion(from dto: DeletionWireDTO) -> Deletion {
+        Deletion(resource: dto.resource, recordID: dto.id, deletedAt: dto.deletedAt)
+    }
+
     // MARK: - Paths
 
     private func activitiesPath(modifiedSince: Date?) -> String {
@@ -212,6 +228,14 @@ final class RemoteCatalogRepository: CatalogSending {
         var path = "\(basePath)/entries"
         if let modifiedSince {
             path += "?modified_since=\(Self.rfc3339(modifiedSince))"
+        }
+        return path
+    }
+
+    private func deletionsPath(since: Date?) -> String {
+        var path = "\(basePath)/deletions"
+        if let since {
+            path += "?deleted_since=\(Self.rfc3339(since))"
         }
         return path
     }
@@ -416,7 +440,26 @@ struct EntryWireDTO: Decodable, Sendable {
     }
 }
 
-// MARK: - Request bodies (mirror the OpenAPI contract)
+/// The wire shape of a Deletion tombstone as the relay returns it
+/// (OpenAPI `Deletion`, cross-device-delete-propagation): RFC 3339
+/// timestamps, which the local `Deletion` model does not decode directly.
+struct DeletionWireDTO: Decodable, Sendable {
+    let resource: String
+    let id: String
+    let deletedAt: Date
+
+    enum CodingKeys: String, CodingKey {
+        case resource, id
+        case deletedAt = "deleted_at"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        resource = try container.decode(String.self, forKey: .resource)
+        id = try container.decode(String.self, forKey: .id)
+        deletedAt = try WireDate.decode(container, forKey: .deletedAt)
+    }
+}
 
 struct ActivityCreateBody: Encodable, Sendable {
     let id: String

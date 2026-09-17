@@ -3,9 +3,7 @@
 ## Purpose
 
 The optional background sync layer that, when the user signs in, keeps the local database and the backend relay eventually consistent by draining the outbox and pulling deltas. Activated on sign-in, deactivated on sign-out; the app works fully without it.
-
 ## Requirements
-
 ### Requirement: Sync is optional and gated on sign-in
 The system SHALL activate the sync client only when the user has a signed-in session. When no session is active, no sync network traffic occurs, no outbox is drained, and no delta pull runs.
 
@@ -132,3 +130,67 @@ The client SHALL decode every relay timestamp as RFC 3339 (`format: date-time`) 
 #### Scenario: Non-empty pull decodes
 - **WHEN** the relay returns categories or entries with RFC 3339 timestamps (with or without fractional seconds)
 - **THEN** the pull merges them and the cycle completes; no `typeMismatch` on `created_at`/`updated_at`
+
+### Requirement: Delete-wins on pull-merge
+
+On pull, the sync client SHALL NOT apply a server record the user deleted locally — a deletion sitting in the durable undo buffer (no outbox row yet) or a committed deletion with a pending outbox DELETE row. Such records SHALL be skipped with a secret-free log, and the cycle SHALL continue; the queued DELETE (once committed and drained) converges the relay. Undoing the deletion or successfully draining the DELETE lifts the exclusion, after which newer server versions merge under the normal last-write-wins rule.
+
+#### Scenario: First-sync with a pending activity delete
+
+- **WHEN** the outbox holds an activity DELETE and the relay still returns that activity (pull-first runs before the drain pushes the DELETE)
+- **THEN** the pull skips the record, the drain pushes the DELETE, the outbox clears, and the activity stays deleted locally with an idle cycle
+
+#### Scenario: Buffered activity deletion survives a pull
+
+- **WHEN** an activity deletion sits in the undo buffer (no outbox row) and a pull returns the relay's copy
+- **THEN** the pull skips the record, the local row stays gone, the buffer row stays restorable, and the cycle completes
+
+#### Scenario: Buffered category deletion survives the full snapshot
+
+- **WHEN** a category deletion sits in the undo buffer and the authoritative category snapshot still contains it
+- **THEN** the pull skips the record (snapshot reconciliation never re-creates it via merge) and the buffer row stays restorable
+
+#### Scenario: Buffered entry deletion survives a pull
+
+- **WHEN** an entry deletion sits in the undo buffer and a pull returns the relay's copy
+- **THEN** the pull skips the record and the buffer row stays restorable
+
+#### Scenario: Push-conflict adoption respects a superseding delete
+
+- **WHEN** an outbox update (or create) push receives 409 `conflict` but a DELETE for the same record is queued behind it in the same drain
+- **THEN** the client skips adopting the server version (the local deletion stands), clears the conflicting row, and the queued DELETE converges the relay
+
+### Requirement: Tombstone fetch and apply
+
+Every sync cycle SHALL fetch the relay's deletion tombstones since the `deletions` cursor and apply them locally BEFORE draining the outbox. Applying a tombstone SHALL delete the local row (activities cascade to entries and joins) with no outbox row, drop pending create/update outbox rows for the affected ids, and leave pending DELETE rows to converge via the existing 404-as-success. The cursor SHALL advance to the max `deleted_at` received, and stay unchanged when the list is empty. A tombstone for an unknown id is a no-op that still advances the cursor.
+
+#### Scenario: Activity deleted on another device converges
+
+- **WHEN** the relay holds an activity tombstone and this device holds the live activity with committed entries
+- **THEN** after a sync the activity, its entries, and its joins are gone locally, no outbox row exists for them, the cycle is idle, and the cursor advanced past the tombstone
+
+#### Scenario: Entry deleted on another device converges
+
+- **WHEN** the relay holds an entry tombstone and this device holds the live entry
+- **THEN** after a sync the entry is gone locally with no outbox row and the cycle is idle
+
+#### Scenario: Category deleted on another device converges
+
+- **WHEN** the relay holds a category tombstone and this device holds the live category attached to an activity
+- **THEN** after a sync the category and its joins are gone, the activity survives untagged, and no outbox row exists
+
+#### Scenario: Tombstones apply before the drain
+
+- **WHEN** this device holds a stale pending update for a record the relay tombstoned
+- **THEN** the tombstone step drops the update row before the drain runs, so no 404 is ever pushed for it and the cycle stays idle
+
+#### Scenario: Stale tombstone never kills a recreation (R1)
+
+- **WHEN** the local row is clean (no pending create/update) and newer than the tombstone (`updated_at > deleted_at`)
+- **THEN** the row is kept and the tombstone is buried by the cursor advance
+
+#### Scenario: Empty deletions keep the cursor
+
+- **WHEN** the deletions fetch returns no tombstones
+- **THEN** the cursor is unchanged and no local state is touched
+

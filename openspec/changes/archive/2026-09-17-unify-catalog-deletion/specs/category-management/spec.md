@@ -29,6 +29,8 @@ The system SHALL provide a Categories destination from Profile to all users, reg
 - **WHEN** the user swipes a category row or long-presses it
 - **THEN** no delete affordance appears; the row opens the editor, where Delete lives
 
+## ADDED Requirements
+
 ### Requirement: Category deletion is undoable until the app restarts
 
 A confirmed category deletion SHALL remain restorable until the app restarts — there is no wall-clock undo window. The category editor (edit mode) SHALL offer the destructive Delete action at the bottom of the form; confirming the destructive confirmation (which names the category and explains that Activity tags will be removed while entries remain available) SHALL enter the durable undo buffer, dismiss the editor, and refresh the list. Until a restart, the Manage Categories surface SHALL offer restore through the DEFAULT system Undo confirmation only: shaking the device surfaces the system Undo prompt, and confirming restores exactly one deletion — the most recent buffered one. No UndoToast SHALL be shown. No deletion SHALL be sent to the relay while it is buffered. Undo SHALL restore the same category identity, values, and Activity assignments.
@@ -57,3 +59,7 @@ A confirmed category deletion SHALL remain restorable until the app restarts —
 
 - **WHEN** the user cancels the destructive confirmation
 - **THEN** the category and all of its Activity assignments remain unchanged
+
+## REMOVED Requirements
+
+### Requirement: Category deletion is undoable for 30 seconds

@@ -3,11 +3,9 @@
 ## Purpose
 
 Lets users correct and remove logged time with one shared surface: the entry form used for manual creation also edits a committed entry's activity and interval, or deletes it with confirmation and shake-to-undo — while imported entries stay read-only except for delete.
-
 ## Requirements
-
 ### Requirement: Unified entry form with CREATE, EDIT, and LOCKED modes
-The app SHALL provide a single entry form with three modes sharing one Calendar-grammar layout (Activity row opening the shared searchable activity picker; Starts and Ends rows with date + time pills and inline single-open pickers; device locale and calendar) and one validity gate (the confirm action is enabled only when an activity is chosen AND the end is strictly after the start; otherwise disabled with no error text). CREATE mode SHALL behave per the manual-entry capability (Log Time copy, Cancel/Add, sheet presentation). EDIT mode SHALL be titled "Edit entry" (localized) with Cancel/Save actions in the navigation bar. LOCKED mode SHALL show the entry read-only with a Cancel action and no confirm action. The form SHALL use Theme semantic colors only, with all user-facing strings localized (EN + RU).
+The app SHALL provide a single entry form with three modes sharing one Calendar-grammar layout (Activity row opening the shared searchable activity picker; Starts and Ends rows with date + time pills and inline single-open pickers; device locale and calendar) and one validity gate (the confirm action is enabled only when an activity is chosen AND the end is strictly after the start; otherwise disabled with no error text). CREATE mode SHALL behave per the manual-entry capability (Log Time copy, Cancel/Add, sheet presentation). EDIT mode SHALL be titled "Edit entry" (localized) with Cancel/Save actions in the navigation bar. LOCKED mode SHALL show the entry read-only with a Cancel action and no confirm action. The form SHALL use Theme semantic colors only, with all user-facing strings localized (EN + RU). With any inline picker expanded, the form SHALL keep its card margins on 320 pt screens: no card goes edge-to-edge and no content clips at the screen edges.
 
 #### Scenario: Edit mode titles and actions
 - **WHEN** the form opens for an existing `manual` entry
@@ -20,6 +18,10 @@ The app SHALL provide a single entry form with three modes sharing one Calendar-
 #### Scenario: Locked mode titles and actions
 - **WHEN** the form opens for an entry with a non-`manual` source
 - **THEN** the title identifies the entry as imported with a Cancel action and no Save action
+
+#### Scenario: Expanded picker stays inside the cards on small screens
+- **WHEN** the user expands a date or time picker on a 320 pt screen in any mode
+- **THEN** the cards keep their horizontal margins, the picker renders within the card width, and no text or control touches or clips at the screen edges
 
 ### Requirement: EDIT mode saves through last-write-wins update
 EDIT mode SHALL prefill the Activity row and Starts/Ends pills from the entry. Activating Save on a valid form SHALL persist the changes through the local store's last-write-wins entry update (bumping `updated_at`, enqueuing the sync outbox row in the same transaction), dismiss the form, and refresh the underlying lists so the entry appears with its new values in the correct day group. Overlapping entries and future end-times SHALL be allowed, matching creation. Reassigning the activity SHALL move the entry to the new activity. When the record changed underneath (stale write), the app SHALL show a localized error with the draft intact and the form open.
@@ -69,3 +71,4 @@ Entries with a non-`manual` source SHALL open in LOCKED mode: the Activity row, 
 #### Scenario: Imported entry can still be deleted
 - **WHEN** the user deletes an imported entry and confirms
 - **THEN** the entry enters the undo buffer exactly like a manual entry (restorable by shake within 30 s)
+

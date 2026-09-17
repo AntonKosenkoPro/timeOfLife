@@ -827,6 +827,149 @@ struct LocalStoreTests {
         #expect(rows[0].createdAt <= rows[1].createdAt)
         #expect(rows[1].createdAt <= rows[2].createdAt)
     }
+
+    // MARK: - Deletion tombstones (cross-device-delete-propagation)
+
+    @Test("activity tombstone cascades entries and joins without an outbox row and drops pending creates")
+    func activityTombstoneCascades() async throws {
+        let store = try makeStore()
+        try await store.createCategory(makeCategory(id: "cat-1", name: "Work"))
+        let outcome = try await store.createOrResolveActivity(named: "Coding", categoryIDs: ["cat-1"])
+        guard case let .created(activity) = outcome else {
+            Issue.record("expected created outcome, got \(outcome)")
+            return
+        }
+        try await store.createEntry(makeEntry(id: "entry-1", activityID: activity.id))
+
+        // Pending create rows exist for the activity and its entry.
+        #expect(try await store.outboxRows().count == 3)
+
+        try await store.applyDeletionTombstone(
+            Deletion(resource: "activity", recordID: activity.id, deletedAt: Date(timeIntervalSinceReferenceDate: 9_000))
+        )
+
+        #expect(try await store.activity(id: activity.id) == nil)
+        #expect(try await store.entry(id: "entry-1") == nil)
+        #expect(try await store.category(id: "cat-1") != nil)
+        // Only the category's create row survives — the activity's and the
+        // entry's pending create rows were dropped.
+        let rows = try await store.outboxRows()
+        #expect(rows.count == 1)
+        #expect(rows.first?.resource == "category")
+    }
+
+    @Test("entry tombstone removes the row and drops its pending create/update rows")
+    func entryTombstoneDropsPendingRows() async throws {
+        let store = try makeStore()
+        try await store.createActivity(makeActivity())
+        try await store.createEntry(makeEntry())
+        try? await Task.sleep(nanoseconds: 20_000_000)
+        _ = try await store.updateEntry(makeEntry(updatedAt: Date(timeIntervalSinceReferenceDate: 5_000)))
+
+        try await store.applyDeletionTombstone(
+            Deletion(resource: "entry", recordID: "entry-1", deletedAt: Date(timeIntervalSinceReferenceDate: 9_000))
+        )
+
+        #expect(try await store.entry(id: "entry-1") == nil)
+        // The activity's create row survives; only the entry's rows were dropped.
+        let rows = try await store.outboxRows()
+        #expect(rows.count == 1)
+        #expect(rows.first?.resource == "activity")
+    }
+
+    @Test("category tombstone removes joins and the row while the activity survives untagged")
+    func categoryTombstoneRemovesJoinsOnly() async throws {
+        let store = try makeStore()
+        try await store.createCategory(makeCategory(id: "cat-1", name: "Work"))
+        let outcome = try await store.createOrResolveActivity(named: "Coding", categoryIDs: ["cat-1"])
+        guard case let .created(activity) = outcome else {
+            Issue.record("expected created outcome, got \(outcome)")
+            return
+        }
+
+        try await store.applyDeletionTombstone(
+            Deletion(resource: "category", recordID: "cat-1", deletedAt: Date(timeIntervalSinceReferenceDate: 9_000))
+        )
+
+        #expect(try await store.category(id: "cat-1") == nil)
+        let stored = try await store.activity(id: activity.id)
+        #expect(stored?.categoryIDs.isEmpty == true)
+        // The activity's create row is untouched.
+        let rows = try await store.outboxRows()
+        #expect(rows.count == 1)
+        #expect(rows.first?.resource == "activity")
+        #expect(rows.first?.recordID == activity.id)
+    }
+
+    @Test("a pending DELETE outbox row survives tombstone application")
+    func tombstoneKeepsPendingDeleteRow() async throws {
+        let store = try makeStore()
+        try await store.createActivity(makeActivity())
+        try? await Task.sleep(nanoseconds: 20_000_000)
+        try await store.deleteActivity(id: "act-1")
+        // Before: one activity-create row (drained? no) — the delete row plus
+        // the original create row. The tombstone must keep the delete row.
+        try await store.applyDeletionTombstone(
+            Deletion(resource: "activity", recordID: "act-1", deletedAt: Date(timeIntervalSinceReferenceDate: 9_000))
+        )
+
+        let rows = try await store.outboxRows()
+        #expect(rows.contains { $0.resource == "activity" && $0.recordID == "act-1" && $0.op == "delete" })
+        // The pending create row was dropped; the delete row is the only survivor.
+        #expect(rows.count == 1)
+        #expect(rows.first?.op == "delete")
+    }
+
+    @Test("a clean local row newer than the tombstone is kept (R1)")
+    func staleTombstoneKeepsCleanNewerRow() async throws {
+        let store = try makeStore()
+        // A clean relay-merged row (no outbox rows) recreated after the
+        // tombstone's deleted_at.
+        let recreated = makeActivity(updatedAt: Date(timeIntervalSinceReferenceDate: 8_000))
+        try await store.mergeActivity(recreated)
+
+        try await store.applyDeletionTombstone(
+            Deletion(resource: "activity", recordID: "act-1", deletedAt: Date(timeIntervalSinceReferenceDate: 5_000))
+        )
+
+        #expect(try await store.activity(id: "act-1") == recreated)
+        #expect(try await store.outboxRows().isEmpty)
+    }
+
+    @Test("a dirty row older than the tombstone is still deleted and its pending rows dropped")
+    func tombstoneDeletesDirtyRow() async throws {
+        let store = try makeStore()
+        try await store.createActivity(makeActivity(updatedAt: Date(timeIntervalSinceReferenceDate: 8_000)))
+        try? await Task.sleep(nanoseconds: 20_000_000)
+        _ = try await store.updateActivity(makeActivity(name: "Coding+", updatedAt: Date(timeIntervalSinceReferenceDate: 9_000)))
+        try? await Task.sleep(nanoseconds: 20_000_000)
+        let entry = makeEntry(updatedAt: Date(timeIntervalSinceReferenceDate: 9_000))
+        try await store.createEntry(entry)
+
+        try await store.applyDeletionTombstone(
+            Deletion(resource: "activity", recordID: "act-1", deletedAt: Date(timeIntervalSinceReferenceDate: 7_000))
+        )
+
+        #expect(try await store.activity(id: "act-1") == nil)
+        #expect(try await store.entry(id: entry.id) == nil)
+        // Even though the row was newer than the tombstone, the pending
+        // update row made it dirty — delete-wins applies.
+        #expect(try await store.outboxRows().isEmpty)
+    }
+
+    @Test("a tombstone for an unknown id is a no-op")
+    func unknownIDTombstoneIsNoOp() async throws {
+        let store = try makeStore()
+        try await store.createActivity(makeActivity())
+
+        try await store.applyDeletionTombstone(
+            Deletion(resource: "category", recordID: "unknown", deletedAt: Date(timeIntervalSinceReferenceDate: 9_000))
+        )
+
+        #expect(try await store.activity(id: "act-1") != nil)
+        let rows = try await store.outboxRows()
+        #expect(rows.count == 1)
+    }
 }
 
 @Suite("LocalStore Starter Seeding")

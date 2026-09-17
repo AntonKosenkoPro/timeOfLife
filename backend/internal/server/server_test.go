@@ -177,6 +177,7 @@ func TestCatalogRoutesProtected(t *testing.T) {
 		"/api/v1/activities",
 		"/api/v1/categories",
 		"/api/v1/entries",
+		"/api/v1/deletions",
 	} {
 		req := httptest.NewRequest(http.MethodGet, path, nil)
 		w := httptest.NewRecorder()
