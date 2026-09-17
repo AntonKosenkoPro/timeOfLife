@@ -1,5 +1,6 @@
 import Foundation
 import Combine
+import os
 
 /// The optional background sync layer (sync-client spec): when the user is
 /// signed in, drains the transactional outbox to the backend relay and pulls
@@ -34,6 +35,10 @@ final class SyncController: ObservableObject {
     /// Single-flight guard: concurrent triggers (foreground + connectivity +
     /// manual) share one cycle instead of racing.
     private var cycleTask: Task<Void, Never>?
+
+    /// Cycle diagnostics (Console): secret-free strings only — the same codes
+    /// and messages surfaced in UI. Never tokens, bodies, or emails.
+    private static let logger = Logger(subsystem: "com.antonkosenko.timeoflifeapp", category: "sync")
 
     init(
         store: LocalStore,
@@ -89,10 +94,12 @@ final class SyncController: ObservableObject {
     private func runCycle(firstSync: Bool) async {
         defer { cycleTask = nil }
         guard connectivity.isConnected else {
+            Self.logger.error("sync cycle skipped: offline")
             status = .error("offline")
             return
         }
         status = .syncing
+        Self.logger.info("sync cycle start firstSync=\(firstSync)")
         do {
             if firstSync {
                 try await pull(modifiedSince: nil)
@@ -102,7 +109,9 @@ final class SyncController: ObservableObject {
                 try await pull(modifiedSince: nil)
             }
             status = .idle(Date())
+            Self.logger.info("sync cycle finished")
         } catch {
+            Self.logger.error("sync cycle failed: \(error.localizedDescription, privacy: .public)")
             status = .error(error.localizedDescription)
         }
     }
@@ -312,26 +321,28 @@ final class SyncController: ObservableObject {
     }
 
     /// Re-maps local references (entries, tags) from a losing id to the
-    /// winning id after a name-collision 409. The winning record is merged
-    /// locally first (the relay holds it; the FK on entries requires it to
-    /// exist), and pending outbox payloads are rewritten in place so a later
-    /// drain pushes the corrected references.
+    /// winning id after a name-collision 409. The winning record is fetched
+    /// and merged first (the relay is authoritative; the FK on entries and
+    /// joins requires it to exist), and pending outbox payloads are rewritten
+    /// in place so a later drain pushes the corrected references.
+    ///
+    /// Never synthesizes record content: a winner-fetch failure rethrows, so
+    /// the outbox row stays queued and the next cycle retries with local
+    /// names intact. (A stub named with an id would be LWW-immortal —
+    /// `updated_at = now` beats every later server version — and corrupt
+    /// user-visible names permanently.)
     private func remapReferences(from oldID: String, to newID: String, resource: String) async throws {
         switch resource {
         case "activity":
-            // Merge a stub of the winning activity (the relay is authoritative;
-            // a full pull will replace it with the server's real version).
-            if try await store.activity(id: newID) == nil {
-                try await store.mergeActivity(Activity(
-                    id: newID, name: oldID, createdAt: Date(), updatedAt: Date()
-                ))
-            }
-            let entries = try await store.entries()
-            for entry in entries where entry.activityID == oldID {
-                var updated = entry
-                updated.activityID = newID
-                try await store.updateEntryLocal(updated)
-                try await store.rewriteOutboxPayload(resource: "entry", recordID: entry.id, payload: updated)
+            // The relay is authoritative: fetch the winner, adopt its identity
+            // atomically (tombstone → merge → move entries → remove loser),
+            // then rewrite the moved entries' pending payloads in place.
+            let winner = try await remote.fetchActivity(id: newID)
+            let movedIDs = try await store.remapActivityReferences(from: oldID, to: newID, winner: winner)
+            for id in movedIDs {
+                if let updated = try await store.entry(id: id) {
+                    try await store.rewriteOutboxPayload(resource: "entry", recordID: id, payload: updated)
+                }
             }
         case "category":
             // category_exists recovery (category-management D6): the winner is
@@ -339,18 +350,7 @@ final class SyncController: ObservableObject {
             // requires it to exist), then atomically remap local joins and
             // pending Activity payloads, remove the losing local identity
             // without emitting a delete, and clear the losing create row.
-            let winner: Category
-            do {
-                winner = try await remote.fetchCategory(id: newID)
-            } catch {
-                // The winner fetch failed (e.g. offline during a racing
-                // cycle); fall back to a stub so remapping can proceed and a
-                // full pull replaces it with the server's real version.
-                winner = Category(
-                    id: newID, name: oldID, icon: "tag",
-                    createdAt: Date(), updatedAt: Date()
-                )
-            }
+            let winner = try await remote.fetchCategory(id: newID)
             try await store.remapCategoryReferences(from: oldID, to: newID, winner: winner)
         default:
             break

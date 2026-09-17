@@ -57,10 +57,11 @@ final class RemoteCatalogRepository: CatalogSending {
     }
 
     func fetchCategories() async throws -> [Category] {
-        try await client.send(
+        let response = try await client.send(
             APIEndpoint.value(method: .get, path: "\(basePath)/categories", requiresAuth: true),
-            as: [Category].self
+            as: [CategoryWireDTO].self
         )
+        return response.map(Self.localCategory(from:))
     }
 
     func fetchEntries(modifiedSince: Date?) async throws -> [TimeEntry] {
@@ -69,7 +70,7 @@ final class RemoteCatalogRepository: CatalogSending {
                               requiresAuth: true),
             as: EntryListResponse.self
         )
-        return response.items
+        return response.items.map(Self.localEntry(from:))
     }
 
     func fetchActivity(id: String) async throws -> Activity {
@@ -81,17 +82,19 @@ final class RemoteCatalogRepository: CatalogSending {
     }
 
     func fetchCategory(id: String) async throws -> Category {
-        try await client.send(
+        let dto = try await client.send(
             APIEndpoint.value(method: .get, path: "\(basePath)/categories/\(id)", requiresAuth: true),
-            as: Category.self
+            as: CategoryWireDTO.self
         )
+        return Self.localCategory(from: dto)
     }
 
     func fetchEntry(id: String) async throws -> TimeEntry {
-        try await client.send(
+        let dto = try await client.send(
             APIEndpoint.value(method: .get, path: "\(basePath)/entries/\(id)", requiresAuth: true),
-            as: TimeEntry.self
+            as: EntryWireDTO.self
         )
+        return Self.localEntry(from: dto)
     }
 
     func createActivity(_ activity: Activity) async throws {
@@ -168,6 +171,33 @@ final class RemoteCatalogRepository: CatalogSending {
         )
     }
 
+    /// Maps the wire Category (RFC 3339 timestamps) to the local model.
+    private static func localCategory(from dto: CategoryWireDTO) -> Category {
+        Category(
+            id: dto.id,
+            name: dto.name,
+            icon: dto.icon,
+            createdAt: dto.createdAt,
+            updatedAt: dto.updatedAt
+        )
+    }
+
+    /// Maps the wire Entry (RFC 3339 timestamps) to the local model.
+    private static func localEntry(from dto: EntryWireDTO) -> TimeEntry {
+        TimeEntry(
+            id: dto.id,
+            activityID: dto.activityID,
+            activityName: dto.activityName,
+            startedAt: dto.startedAt,
+            endedAt: dto.endedAt,
+            durationSeconds: dto.durationSeconds,
+            source: dto.source,
+            sourceRef: dto.sourceRef,
+            createdAt: dto.createdAt,
+            updatedAt: dto.updatedAt
+        )
+    }
+
     // MARK: - Paths
 
     private func activitiesPath(modifiedSince: Date?) -> String {
@@ -197,7 +227,7 @@ final class RemoteCatalogRepository: CatalogSending {
 
 /// `GET /entries` response envelope.
 struct EntryListResponse: Decodable, Sendable {
-    let items: [TimeEntry]
+    let items: [EntryWireDTO]
 }
 
 /// RFC 3339 date codec for the relay wire format (OpenAPI `format: date-time`).
@@ -216,6 +246,30 @@ enum WireDate {
     /// Formats a Date as RFC 3339 with fractional seconds.
     static func format(_ date: Date) -> String {
         ISO8601DateFormatter.withFractional.string(from: date)
+    }
+
+    /// Decodes a required RFC 3339 date from a keyed container.
+    static func decode<K: CodingKey>(
+        _ container: KeyedDecodingContainer<K>,
+        forKey key: K
+    ) throws -> Date {
+        let raw = try container.decode(String.self, forKey: key)
+        guard let parsed = parse(raw) else {
+            throw DecodingError.dataCorruptedError(
+                forKey: key,
+                in: container,
+                debugDescription: "Invalid RFC 3339 date: \(raw)"
+            )
+        }
+        return parsed
+    }
+
+    /// Decodes an optional RFC 3339 date from a keyed container.
+    static func decodeIfPresent<K: CodingKey>(
+        _ container: KeyedDecodingContainer<K>,
+        forKey key: K
+    ) throws -> Date? {
+        try container.decodeIfPresent(String.self, forKey: key).flatMap(parse)
     }
 }
 
@@ -286,6 +340,77 @@ struct CategoryTagDTO: Decodable, Sendable {
     let id: String
     let name: String
     let icon: String
+}
+
+/// The wire shape of a Category as the relay returns it: RFC 3339
+/// timestamps, which the local `Category` model does not decode directly
+/// (default Codable expects `Double`). Same split as `ActivityWireDTO` —
+/// decoding the local model from the wire broke every non-empty category
+/// pull (`typeMismatch` on `created_at`).
+struct CategoryWireDTO: Decodable, Sendable {
+    let id: String
+    let name: String
+    let icon: String
+    let createdAt: Date
+    let updatedAt: Date
+
+    enum CodingKeys: String, CodingKey {
+        case id, name, icon
+        case createdAt = "created_at"
+        case updatedAt = "updated_at"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        name = try container.decode(String.self, forKey: .name)
+        icon = try container.decode(String.self, forKey: .icon)
+        createdAt = try WireDate.decode(container, forKey: .createdAt)
+        updatedAt = try WireDate.decode(container, forKey: .updatedAt)
+    }
+}
+
+/// The wire shape of an Entry as the relay returns it (OpenAPI `Entry`):
+/// RFC 3339 timestamps plus the read-time `activity_name`; the embedded
+/// `categories` are not needed locally (tags resolve from the activity).
+struct EntryWireDTO: Decodable, Sendable {
+    let id: String
+    let activityID: String
+    let activityName: String
+    let startedAt: Date
+    let endedAt: Date?
+    let durationSeconds: Int?
+    let source: String
+    let sourceRef: String?
+    let createdAt: Date
+    let updatedAt: Date
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case activityID = "activity_id"
+        case activityName = "activity_name"
+        case startedAt = "started_at"
+        case endedAt = "ended_at"
+        case durationSeconds = "duration_seconds"
+        case source
+        case sourceRef = "source_ref"
+        case createdAt = "created_at"
+        case updatedAt = "updated_at"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        activityID = try container.decode(String.self, forKey: .activityID)
+        activityName = try container.decode(String.self, forKey: .activityName)
+        startedAt = try WireDate.decode(container, forKey: .startedAt)
+        endedAt = try WireDate.decodeIfPresent(container, forKey: .endedAt)
+        durationSeconds = try container.decodeIfPresent(Int.self, forKey: .durationSeconds)
+        source = try container.decode(String.self, forKey: .source)
+        sourceRef = try container.decodeIfPresent(String.self, forKey: .sourceRef)
+        createdAt = try WireDate.decode(container, forKey: .createdAt)
+        updatedAt = try WireDate.decode(container, forKey: .updatedAt)
+    }
 }
 
 // MARK: - Request bodies (mirror the OpenAPI contract)

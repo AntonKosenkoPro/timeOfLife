@@ -483,6 +483,42 @@ struct LocalStoreTests {
         #expect(updateRow.resource == "category")
     }
 
+    @Test("renaming a UUID-named row heals it and enqueues an update")
+    func renameHealsUuidNamedRow() async throws {
+        let store = try makeStore()
+        // Poisoned shape left by the old remap stub: the winner id carries a
+        // UUID name and no outbox row (the losing create row was cleared).
+        try await store.createCategory(TimeOfLife.Category(
+            id: "server-id", name: "0193a5c2-7b1e-7c8d-9e8f-605663513c5a", icon: "tag"
+        ))
+        for row in try await store.outboxRows() {
+            try await store.removeOutboxRow(id: row.id)
+        }
+
+        // The user-facing repair is rename (never delete — that would push a
+        // real delete of the winner). The rename bumps updated_at, so the
+        // LWW push adopts the real name on both sides.
+        let outcome = try await store.updateCategory(
+            id: "server-id",
+            draft: CategoryDraft(name: "Sport", icon: .figureRun)
+        )
+        guard case let .saved(updated) = outcome else {
+            Issue.record("expected saved, got \(outcome)")
+            return
+        }
+        #expect(updated.name == "Sport")
+
+        let rows = try await store.outboxRows()
+        #expect(rows.count == 1)
+        let updateRow = try #require(rows.first)
+        #expect(updateRow.resource == "category")
+        #expect(updateRow.op == "update")
+        #expect(updateRow.recordID == "server-id")
+        let payload = try #require(updateRow.payload)
+        let decoded = try JSONDecoder().decode(TimeOfLife.Category.self, from: Data(payload.utf8))
+        #expect(decoded.name == "Sport")
+    }
+
     @Test("stale updateEntry returns false and changes nothing")
     func staleEntryUpdateIsRejected() async throws {
         let store = try makeStore()

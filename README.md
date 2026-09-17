@@ -20,7 +20,7 @@ Current scope: **auth MVP** (passwordless email-OTP + Sign in with Apple) and th
 4. **Stop** — saves the entry to the local GRDB database and enqueues an outbox row; if signed in, the `SyncController` drains the outbox and pulls deltas on foreground/connectivity/manual "Sync now".
 5. **Switch tabs freely** — a running timer stays visible above the tab bar on History and Insights with return-to-Track and in-place Stop.
 
-Entries, activities, categories, the running timer state, the outbox, and the undo buffer live in the App Group shared container (`group.com.antonkosenko.timeoflife`), ready for future cross-process system integrations.
+Entries, activities, categories, the running timer state, the outbox, and the undo buffer live in the App Group shared container (`group.com.antonkosenko.timeoflifeapp`), ready for future cross-process system integrations.
 
 ### Local-first architecture
 

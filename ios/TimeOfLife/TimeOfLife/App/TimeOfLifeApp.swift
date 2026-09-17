@@ -79,6 +79,11 @@ struct TimeOfLifeApp: App {
             .environmentObject(container)
             .environmentObject(session)
             .environmentObject(navigation)
+            // Sync status is read directly by Profile (status row, Sync now
+            // state) and Manage Categories (reload on idle): it needs its own
+            // object in the environment — nested reads through `container`
+            // never invalidate the view (the container publishes nothing).
+            .environmentObject(container.syncController)
             .preferredColorScheme(nil) // follow system
     }
 }

@@ -152,6 +152,7 @@ struct SyncControllerTests {
                 details: ["id": "server-id", "name": "Gym"]
             )
         }
+        mock.fetchActivityHandler = { _ in Activity(id: "server-id", name: "Gym") }
 
         controller.activate()
         await waitForCycle(controller)
@@ -162,6 +163,81 @@ struct SyncControllerTests {
         let remaining = try await store.outboxRows()
         #expect(remaining.allSatisfy { $0.resource == "entry" && $0.op == "update" })
         #expect(isIdle(controller.status))
+    }
+
+    @Test("activity_exists with failing winner fetch keeps the row and merges nothing")
+    func activityExistsFetchFailureKeepsRow() async throws {
+        let (store, mock, controller) = makeContext()
+        try await store.createActivity(Activity(id: "a1", name: "Gym"))
+        try await store.createEntry(
+            TimeEntry(id: "e1", activityID: "a1", activityName: "Gym", startedAt: Date())
+        )
+
+        mock.createActivityHandler = { _ in
+            throw APIError.server(
+                code: "activity_exists", message: "exists",
+                details: ["id": "server-id", "name": "Gym"]
+            )
+        }
+        mock.fetchActivityHandler = { _ in throw APIError.offline }
+
+        controller.activate()
+        await waitForCycle(controller)
+
+        // No stub merged: no UUID-named record, the local keeps its real name,
+        // and entries still reference it.
+        #expect(try await store.activity(id: "server-id") == nil)
+        #expect(try await store.activity(id: "a1")?.name == "Gym")
+        #expect(try await store.entry(id: "e1")?.activityID == "a1")
+        // The outbox row stays queued for retry; the cycle surfaces the failure.
+        let rows = try await store.outboxRows()
+        #expect(rows.contains { $0.resource == "activity" && $0.op == "create" && $0.recordID == "a1" })
+        guard case .error = controller.status else {
+            Issue.record("expected error status, got \(controller.status)")
+            return
+        }
+    }
+
+    @Test("category_exists with failing winner fetch keeps the row and merges nothing")
+    func categoryExistsFetchFailureKeepsRow() async throws {
+        let (store, mock, controller) = makeContext()
+        try await store.createCategory(TimeOfLife.Category(id: "local-id", name: "Sport", icon: "figure.run"))
+
+        mock.createCategoryHandler = { _ in
+            throw APIError.server(
+                code: "category_exists", message: "exists",
+                details: ["id": "server-id", "name": "Sport"]
+            )
+        }
+        mock.fetchCategoryHandler = { _ in throw APIError.offline }
+
+        controller.activate()
+        await waitForCycle(controller)
+
+        // No stub merged: the losing identity keeps its real name.
+        #expect(try await store.category(id: "server-id") == nil)
+        #expect(try await store.category(id: "local-id")?.name == "Sport")
+        // The outbox row stays queued for retry; the cycle surfaces the failure.
+        let rows = try await store.outboxRows()
+        #expect(rows.contains { $0.resource == "category" && $0.op == "create" && $0.recordID == "local-id" })
+        guard case .error = controller.status else {
+            Issue.record("expected error status, got \(controller.status)")
+            return
+        }
+    }
+
+    @Test("failed cycle exposes its message through status")
+    func failedCycleExposesMessage() async {
+        let (store, mock, controller) = makeContext()
+        try? await store.createCategory(TimeOfLife.Category(id: "c1", name: "Sport", icon: "figure.run"))
+        mock.createCategoryHandler = { _ in
+            throw APIError.server(code: "internal_error", message: "boom", details: [:])
+        }
+
+        controller.activate()
+        await waitForCycle(controller)
+
+        #expect(controller.status == .error("server(internal_error): boom"))
     }
 
     @Test("not_found on delete is treated as success")

@@ -57,8 +57,11 @@ struct AppShellView: View {
         }
         .tint(Theme.accentPrimary)
         .sheet(isPresented: $isShowingProfile) {
-            ProfileView()
-                .environmentObject(container)
+            ProfileView(enableSync: EnableSyncPresenter(
+                authService: container.authService,
+                sessionStore: container.sessionStore
+            ))
+            .environmentObject(container)
         }
         .task { await vm.load() }
     }

@@ -150,7 +150,8 @@ struct LocalizationTests {
         // and removes 5 (4 undo toast keys + delete.category.cancel) = 166;
         // insights-v1-breakdown adds 9 (3 insights.period.*,
         // 2 insights.lens.*, insights.noCategory, insights.footnote,
-        // insights.empty.today, insights.empty.week) = 175
-        #expect(l10nCases.count == 175)
+        // insights.empty.today, insights.empty.week) = 175;
+        // present-enable-sync-sheet adds sync.cancel = 176
+        #expect(l10nCases.count == 176)
     }
 }

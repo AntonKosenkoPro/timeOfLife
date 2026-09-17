@@ -17,7 +17,7 @@ import GRDB
 /// once since boot.
 actor LocalStore {
     /// The App Group shared container identifier (local-first-store spec).
-    static let appGroupID = "group.com.antonkosenko.timeoflife"
+    static let appGroupID = "group.com.antonkosenko.timeoflifeapp"
 
     /// The database file name inside the App Group container.
     static let databaseFileName = "timeoflife.sqlite"
@@ -603,6 +603,49 @@ actor LocalStore {
         }
     }
 
+    /// Atomically adopts a winning Activity identity after a relay
+    /// `activity_exists` response (sync-client never-synthesize rule).
+    /// The losing row is renamed to a collision-proof tombstone BEFORE the
+    /// winner is inserted — the normalized-name unique index would otherwise
+    /// turn the merge into a constraint failure. Entries move to the winner
+    /// while it exists (foreign keys stay enforced throughout); the loser and
+    /// its joins are then removed. No outbox row is ever created; the losing
+    /// create row is cleared separately by the caller. The tombstone never
+    /// escapes the transaction, so a crash can never leave a UUID-named row
+    /// behind. Returns the moved entry ids so the caller can rewrite their
+    /// pending outbox payloads.
+    func remapActivityReferences(from oldID: String, to newID: String, winner: Activity) throws -> [String] {
+        try dbQueue.write { db in
+            try db.execute(
+                sql: "UPDATE activities SET name = ?, updated_at = ? WHERE id = ?",
+                arguments: [oldID, winner.updatedAt, oldID]
+            )
+            try db.execute(
+                sql: """
+                    INSERT INTO activities (id, name, notes, last_used_at, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(id) DO UPDATE SET
+                        name = excluded.name,
+                        notes = excluded.notes,
+                        last_used_at = excluded.last_used_at,
+                        updated_at = excluded.updated_at
+                    """,
+                arguments: [winner.id, winner.name, winner.notes, winner.lastUsedAt, winner.createdAt, winner.updatedAt]
+            )
+            try Self.replaceActivityCategories(db: db, activityID: winner.id, categoryIDs: winner.categoryIDs)
+            let movedIDs = try String.fetchAll(db, sql: """
+                SELECT id FROM entries WHERE activity_id = ? ORDER BY id
+                """, arguments: [oldID])
+            try db.execute(
+                sql: "UPDATE entries SET activity_id = ? WHERE activity_id = ?",
+                arguments: [newID, oldID]
+            )
+            try db.execute(sql: "DELETE FROM activity_categories WHERE activity_id = ?", arguments: [oldID])
+            try db.execute(sql: "DELETE FROM activities WHERE id = ?", arguments: [oldID])
+            return movedIDs
+        }
+    }
+
     // MARK: - Categories
 
     /// All categories, name-ordered.
@@ -1149,24 +1192,7 @@ actor LocalStore {
         }
     }
 
-    /// Updates an entry row locally WITHOUT enqueuing an outbox row — used by
-    /// sync conflict remapping, where the pending outbox payload is rewritten
-    /// in place instead (the record has not been pushed yet).
-    func updateEntryLocal(_ entry: TimeEntry) throws {
-        try dbQueue.write { db in
-            try db.execute(
-                sql: """
-                    UPDATE entries
-                    SET activity_id = ?, started_at = ?, ended_at = ?, duration_seconds = ?, updated_at = ?
-                    WHERE id = ?
-                    """,
-                arguments: [entry.activityID, entry.startedAt, entry.endedAt, entry.durationSeconds, entry.updatedAt, entry.id]
-            )
-        }
-    }
-
-    /// Updates an activity row locally WITHOUT enqueuing an outbox row — used
-    /// by sync conflict remapping (see `updateEntryLocal`).
+    /// Updates an activity row locally WITHOUT enqueuing an outbox row.
     func updateActivityLocal(_ activity: Activity) throws {
         try dbQueue.write { db in
             try db.execute(

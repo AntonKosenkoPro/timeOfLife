@@ -59,6 +59,10 @@ struct CompactTimer: View {
             }
             .padding(.horizontal, Theme.spacingSmall)
             .padding(.top, Theme.spacingExtraSmall)
+            // Daylight between the surface and the tab bar (the inset slot
+            // has no implicit bottom gap — without this the timer reads as
+            // overlapping the bar by a pixel or two).
+            .padding(.bottom, Theme.spacingExtraSmall)
         }
         .background(Theme.backgroundPrimary)
         .accessibilityIdentifier("CompactTimer")

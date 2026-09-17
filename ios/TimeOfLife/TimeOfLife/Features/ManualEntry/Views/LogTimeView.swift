@@ -251,23 +251,31 @@ struct LogTimeView: View {
             .animation(.none, value: expandedPicker)
             VStack(spacing: 0) {
                 if expandedPicker == datePicker {
-                    DatePicker(
-                        "",
-                        selection: dateBinding(for: datePicker),
-                        displayedComponents: .date
-                    )
-                    .datePickerStyle(.graphical)
-                    .labelsHidden()
+                    GeometryReader { proxy in
+                        DatePicker(
+                            "",
+                            selection: dateBinding(for: datePicker),
+                            displayedComponents: .date
+                        )
+                        .datePickerStyle(.graphical)
+                        .labelsHidden()
+                        .frame(width: proxy.size.width)
+                    }
+                    .frame(height: Self.graphicalPickerHeight)
                     .transition(.opacity)
                 }
                 if expandedPicker == timePicker {
-                    DatePicker(
-                        "",
-                        selection: dateBinding(for: timePicker),
-                        displayedComponents: .hourAndMinute
-                    )
-                    .datePickerStyle(.wheel)
-                    .labelsHidden()
+                    GeometryReader { proxy in
+                        DatePicker(
+                            "",
+                            selection: dateBinding(for: timePicker),
+                            displayedComponents: .hourAndMinute
+                        )
+                        .datePickerStyle(.wheel)
+                        .labelsHidden()
+                        .frame(width: proxy.size.width)
+                    }
+                    .frame(height: Self.wheelPickerHeight)
                     .transition(.opacity)
                 }
             }
@@ -330,6 +338,13 @@ struct LogTimeView: View {
     }
 
     // MARK: - Formatting
+
+    /// Fixed wheel-picker height (standard `UIPickerView` height): the
+    /// GeometryReader container needs an explicit height.
+    private static let wheelPickerHeight: CGFloat = 216
+    /// Fixed calendar-picker height: large enough for six-week months on
+    /// iOS 15 without clipping.
+    private static let graphicalPickerHeight: CGFloat = 360
 
     private static let dateFormatter: DateFormatter = {
         let formatter = DateFormatter()
