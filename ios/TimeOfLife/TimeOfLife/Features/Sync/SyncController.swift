@@ -1,6 +1,7 @@
 import Foundation
 import Combine
 import os
+// swiftlint:disable file_length
 
 /// The optional background sync layer (sync-client spec): when the user is
 /// signed in, drains the transactional outbox to the backend relay and pulls
@@ -140,8 +141,9 @@ final class SyncController: ObservableObject {
             activityCursor = try await store.lastSyncedAt(resource: "activity")
         }
         let activities = try await remote.fetchActivities(modifiedSince: activityCursor)
+        let serverCategoriesByID = Dictionary(uniqueKeysWithValues: categories.map { ($0.id, $0) })
         for activity in activities {
-            try await applyServer(activity)
+            try await applyServer(activity, serverCategories: serverCategoriesByID)
         }
         if let max = activities.map(\.updatedAt).max() {
             try await store.setLastSyncedAt(resource: "activity", date: max)
@@ -169,21 +171,82 @@ final class SyncController: ObservableObject {
     /// Category snapshot is pulled first, so this only happens when a local
     /// Category delete raced the pull) skips the merge instead of failing the
     /// whole cycle; the next pull retries.
-    private func applyServer(_ activity: Activity) async throws {
+    ///
+    /// A same-name/different-id rival (seed-vs-relay first-sync collision)
+    /// resolves by newer-owns-the-name: a newer server record is adopted via
+    /// the atomic identity remap; otherwise the local record is kept and the
+    /// server record (and, downstream, its entries) is skipped. Either way the
+    /// pull never fails on the normalized-name unique index.
+    private func applyServer(_ activity: Activity, serverCategories: [String: Category]) async throws {
         if let local = try await store.activity(id: activity.id) {
             guard activity.updatedAt > local.updatedAt else { return }
         }
+        if let rival = try await store.activity(named: activity.name), rival.id != activity.id {
+            if activity.updatedAt > rival.updatedAt {
+                let winner = try await resolveActivityForMerge(activity, serverCategories: serverCategories)
+                let movedIDs = try await store.remapActivityReferences(from: rival.id, to: activity.id, winner: winner)
+                for id in movedIDs {
+                    if let updated = try await store.entry(id: id) {
+                        try await store.rewriteOutboxPayload(resource: "entry", recordID: id, payload: updated)
+                    }
+                }
+                // The rival's queued rows reference a dead identity (the
+                // category remap clears its own; the activity one does not).
+                try await store.removeOutboxRow(resource: "activity", recordID: rival.id)
+            } else {
+                Self.logger.info("sync pull keeps local activity \(rival.id, privacy: .public); skipping server \(activity.id, privacy: .public)")
+            }
+            return
+        }
         do {
-            try await store.mergeActivity(activity)
+            try await store.mergeActivity(await resolveActivityForMerge(activity, serverCategories: serverCategories))
         } catch AssociationError.invalidCategory {
             // The category is absent locally; keep the current local version.
         }
     }
 
+    /// Rewrites a server activity's category references to local ids before it
+    /// enters the store: a referenced server category may have been skipped
+    /// (local counterpart kept), and its server id would violate the join
+    /// foreign key. Unknown references throw `invalidCategory` (existing
+    /// skip-and-retry contract); the full snapshot makes this a backstop.
+    private func resolveActivityForMerge(
+        _ activity: Activity,
+        serverCategories: [String: Category]
+    ) async throws -> Activity {
+        var categoryIDs: [String] = []
+        categoryIDs.reserveCapacity(activity.categoryIDs.count)
+        for categoryID in activity.categoryIDs {
+            if try await store.category(id: categoryID) != nil {
+                categoryIDs.append(categoryID)
+            } else if let serverCategory = serverCategories[categoryID],
+                      let local = try await store.category(named: serverCategory.name) {
+                categoryIDs.append(local.id)
+            } else {
+                throw AssociationError.invalidCategory(categoryID)
+            }
+        }
+        var resolved = activity
+        resolved.categoryIDs = categoryIDs
+        return resolved
+    }
+
     /// Applies a server category only if `server.updated_at > local.updated_at`.
+    /// Same-name/different-id rivals resolve by newer-owns-the-name, exactly
+    /// like activities above: the reported cloud failure was this merge
+    /// throwing SQLite 19 on `index_categories_on_lower_name` and aborting
+    /// the cycle before the outbox ever drained.
     private func applyServer(_ category: Category) async throws {
         if let local = try await store.category(id: category.id) {
             guard category.updatedAt > local.updatedAt else { return }
+        }
+        if let rival = try await store.category(named: category.name), rival.id != category.id {
+            if category.updatedAt > rival.updatedAt {
+                try await store.remapCategoryReferences(from: rival.id, to: category.id, winner: category)
+            } else {
+                Self.logger.info("sync pull keeps local category \(rival.id, privacy: .public); skipping server \(category.id, privacy: .public)")
+            }
+            return
         }
         try await store.mergeCategory(category)
     }
@@ -201,9 +264,16 @@ final class SyncController: ObservableObject {
     }
 
     /// Applies a server entry only if `server.updated_at > local.updated_at`.
+    /// An entry whose activity is absent locally (a skipped server branch)
+    /// is skipped with a log instead of failing the cycle on the join
+    /// foreign key; the next pull retries after the activity lands.
     private func applyServer(_ entry: TimeEntry) async throws {
         if let local = try await store.entry(id: entry.id) {
             guard entry.updatedAt > local.updatedAt else { return }
+        }
+        guard try await store.activity(id: entry.activityID) != nil else {
+            Self.logger.info("sync pull skips entry \(entry.id, privacy: .public) with missing activity; retrying next pull")
+            return
         }
         try await store.mergeEntry(entry)
     }
@@ -304,7 +374,12 @@ final class SyncController: ObservableObject {
         case "activity":
             let server = try await remote.fetchActivity(id: row.recordID)
             do {
-                try await store.mergeActivity(server)
+                // Translate tags against a fresh snapshot: skipped server
+                // categories would otherwise break the join foreign key here
+                // exactly as in the pull path.
+                let snapshot = try await remote.fetchCategories()
+                let byID = Dictionary(uniqueKeysWithValues: snapshot.map { ($0.id, $0) })
+                try await store.mergeActivity(await resolveActivityForMerge(server, serverCategories: byID))
             } catch AssociationError.invalidCategory {
                 // Keep the current local version; the next pull retries once
                 // the Category snapshot is available.

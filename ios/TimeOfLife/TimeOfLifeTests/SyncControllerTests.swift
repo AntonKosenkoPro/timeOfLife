@@ -226,6 +226,155 @@ struct SyncControllerTests {
         }
     }
 
+    @Test("pull adopts newer server category on seed name collision")
+    func pullAdoptsNewerServerCategory() async throws {
+        let (store, mock, controller) = makeContext()
+        let old = Date(timeIntervalSince1970: 1_600_000_000)
+        let new = Date(timeIntervalSince1970: 1_700_000_000)
+        // Fresh-device seed (older) with its queued create row.
+        try await store.createCategory(
+            TimeOfLife.Category(
+                id: "local-sport", name: "Sport", icon: "figure.run",
+                createdAt: old, updatedAt: old
+            )
+        )
+        mock.categoriesResult = [
+            TimeOfLife.Category(
+                id: "server-sport", name: "Sport", icon: "figure.run",
+                createdAt: old, updatedAt: new
+            )
+        ]
+
+        controller.activate()
+        await waitForCycle(controller)
+
+        // Server identity adopted during pull — no push round-trip, no failure
+        // (previously SQLite 19 on index_categories_on_lower_name).
+        #expect(isIdle(controller.status))
+        #expect(try await store.category(id: "local-sport") == nil)
+        #expect(try await store.category(id: "server-sport")?.name == "Sport")
+        #expect(try await store.outboxRows().isEmpty)
+        #expect(mock.calls.allSatisfy { $0.method != "createCategory" })
+    }
+
+    @Test("pull keeps newer local seed, translates tags, and push-409 heals identity")
+    func pullKeepsNewerSeedAndPushHeals() async throws {
+        let (store, mock, controller) = makeContext()
+        let old = Date(timeIntervalSince1970: 1_600_000_000)
+        let new = Date(timeIntervalSince1970: 1_700_000_000)
+        try await store.createCategory(
+            TimeOfLife.Category(
+                id: "local-sport", name: "Sport", icon: "figure.run",
+                createdAt: new, updatedAt: new
+            )
+        )
+        let serverCategory = TimeOfLife.Category(
+            id: "server-sport", name: "Sport", icon: "figure.run",
+            createdAt: old, updatedAt: old
+        )
+        mock.categoriesResult = [serverCategory]
+        mock.activitiesResult = [
+            Activity(
+                id: "server-gym", name: "Gym", categoryIDs: ["server-sport"],
+                createdAt: old, updatedAt: old
+            )
+        ]
+        mock.entriesResult = [
+            TimeEntry(
+                id: "e1", activityID: "server-gym", activityName: "Gym",
+                startedAt: old, createdAt: old, updatedAt: old
+            )
+        ]
+        mock.createCategoryHandler = { _ in
+            throw APIError.server(
+                code: "category_exists", message: "exists",
+                details: ["id": "server-sport", "name": "Sport"]
+            )
+        }
+        mock.fetchCategoryHandler = { _ in serverCategory }
+
+        controller.activate()
+        await waitForCycle(controller)
+
+        #expect(isIdle(controller.status))
+        #expect(try await store.category(id: "local-sport") == nil)
+        #expect(try await store.category(id: "server-sport")?.name == "Sport")
+        // The server activity merged with the translated (local, then healed)
+        // tag, and its entry followed.
+        #expect(try await store.activity(id: "server-gym")?.categoryIDs == ["server-sport"])
+        #expect(try await store.entry(id: "e1")?.activityID == "server-gym")
+        #expect(try await store.outboxRows().isEmpty)
+    }
+
+    @Test("pull adopts newer server activity and moves entries")
+    func pullAdoptsNewerServerActivity() async throws {
+        let (store, mock, controller) = makeContext()
+        let old = Date(timeIntervalSince1970: 1_600_000_000)
+        let new = Date(timeIntervalSince1970: 1_700_000_000)
+        try await store.createActivity(
+            Activity(
+                id: "local-gym", name: "Gym",
+                createdAt: old, updatedAt: old
+            )
+        )
+        try await store.createEntry(
+            TimeEntry(
+                id: "e1", activityID: "local-gym", activityName: "Gym",
+                startedAt: old, createdAt: old, updatedAt: old
+            )
+        )
+        mock.activitiesResult = [
+            Activity(
+                id: "server-gym", name: "Gym",
+                createdAt: old, updatedAt: new
+            )
+        ]
+
+        controller.activate()
+        await waitForCycle(controller)
+
+        #expect(isIdle(controller.status))
+        #expect(try await store.activity(id: "local-gym") == nil)
+        #expect(try await store.activity(id: "server-gym")?.name == "Gym")
+        #expect(try await store.entry(id: "e1")?.activityID == "server-gym")
+        #expect(try await store.outboxRows().isEmpty)
+    }
+
+    @Test("pull keeps newer local activity and skips the server branch")
+    func pullKeepsNewerLocalActivityBranch() async throws {
+        let (store, mock, controller) = makeContext()
+        let old = Date(timeIntervalSince1970: 1_600_000_000)
+        let new = Date(timeIntervalSince1970: 1_700_000_000)
+        try await store.createActivity(
+            Activity(
+                id: "local-gym", name: "Gym",
+                createdAt: new, updatedAt: new
+            )
+        )
+        mock.activitiesResult = [
+            Activity(
+                id: "server-gym", name: "Gym",
+                createdAt: old, updatedAt: old
+            )
+        ]
+        mock.entriesResult = [
+            TimeEntry(
+                id: "e1", activityID: "server-gym", activityName: "Gym",
+                startedAt: old, createdAt: old, updatedAt: old
+            )
+        ]
+
+        controller.activate()
+        await waitForCycle(controller)
+
+        // Kept local, skipped server + its dangling entry — and the cycle
+        // completed instead of failing on the unique index or the entry FK.
+        #expect(isIdle(controller.status))
+        #expect(try await store.activity(id: "local-gym")?.name == "Gym")
+        #expect(try await store.activity(id: "server-gym") == nil)
+        #expect(try await store.entry(id: "e1") == nil)
+    }
+
     @Test("failed cycle exposes its message through status")
     func failedCycleExposesMessage() async {
         let (store, mock, controller) = makeContext()

@@ -239,6 +239,11 @@ actor LocalStore {
     /// Clearing all local data removes the marker, so the next new local
     /// dataset receives a new starter set.
     ///
+    /// Names already present (normalized match — e.g. relay-merged rows after
+    /// an erase) are skipped, not re-inserted: a blind insert would violate
+    /// the normalized-name unique index and abort the whole seeding, leaving
+    /// the dataset seedless with no error.
+    ///
     /// - Parameters:
     ///   - names: The seven localized starter names in the active supported
     ///     language, in `starterCategoryIcons` order. Materialized once at
@@ -258,6 +263,9 @@ actor LocalStore {
             }
             var seeded: [Category] = []
             for (index, icon) in Self.starterCategoryIcons.enumerated() {
+                if try Self.fetchCategoryByName(db, name: names[index]) != nil {
+                    continue
+                }
                 let category = Category(
                     id: recordIDGenerator.newID(),
                     name: names[index],

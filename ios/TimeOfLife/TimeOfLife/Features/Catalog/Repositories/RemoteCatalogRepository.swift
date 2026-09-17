@@ -406,7 +406,10 @@ struct EntryWireDTO: Decodable, Sendable {
         startedAt = try WireDate.decode(container, forKey: .startedAt)
         endedAt = try WireDate.decodeIfPresent(container, forKey: .endedAt)
         durationSeconds = try container.decodeIfPresent(Int.self, forKey: .durationSeconds)
-        source = try container.decode(String.self, forKey: .source)
+        // Older relays predate entry provenance and omit `source`; the
+        // backend itself defaults those to "manual" (back-compat), so do the
+        // same instead of failing the whole pull on keyNotFound.
+        source = try container.decodeIfPresent(String.self, forKey: .source) ?? "manual"
         sourceRef = try container.decodeIfPresent(String.self, forKey: .sourceRef)
         createdAt = try WireDate.decode(container, forKey: .createdAt)
         updatedAt = try WireDate.decode(container, forKey: .updatedAt)

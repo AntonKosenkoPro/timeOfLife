@@ -936,6 +936,31 @@ struct LocalStoreSeedingTests {
         #expect(seeded.map(\.name) == ruNames)
     }
 
+    @Test("seeding skips names already present instead of failing the whole set")
+    func seedsSkipExistingNames() async throws {
+        let store = try makeStore()
+        // Relay-merged rows present without the marker (erase-then-sync shape).
+        try await store.createCategory(
+            TimeOfLife.Category(id: "server-sport", name: "Sport", icon: "figure.run")
+        )
+
+        let result = try await store.seedStarterCategoriesIfNeeded(names: enNames)
+
+        guard case let .seeded(seeded) = result else {
+            Issue.record("expected seeded outcome")
+            return
+        }
+        // Six inserted; the present name kept its identity and got no new row.
+        #expect(seeded.count == 6)
+        #expect(seeded.allSatisfy { $0.name != "Sport" })
+        #expect(try await store.category(id: "server-sport")?.name == "Sport")
+        let stored = try await store.categories()
+        #expect(stored.count == 7)
+        let rows = try await store.outboxRows()
+        #expect(rows.count == 7)
+        #expect(try await store.categoryStartersSeeded())
+    }
+
     @Test("seeded names persist as ordinary records and do not auto-rename")
     func seededNamesAreOrdinaryRecords() async throws {
         let store = try makeStore()

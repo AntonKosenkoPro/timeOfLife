@@ -179,6 +179,10 @@ struct ProfileView: View {
         do {
             try await container.localStore.eraseAll()
             await container.authService.logout()
+            // Stale auth routes (e.g. OTP for the erased account) would otherwise
+            // re-present in the next Enable Sync sheet; shell tabs keep their own
+            // NavigationViews, so this only clears the auth sheet's path.
+            container.navigation.path = []
         } catch {
             // Erase failure: keep the session; the user can retry.
         }

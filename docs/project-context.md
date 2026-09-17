@@ -38,6 +38,7 @@ The device is the **source of truth**; the backend is an **optional relay**; syn
 - **First-sync is pull-first** (D4): full pull + server-wins merge, then drain the outbox.
 - Delta pulls use `?modified_since=` (per-resource cursor advanced to max `updated_at` received).
 - Conflicts resolve **LWW on `updated_at`** (D5): on pull, apply only if `server.updated_at > local.updated_at`; on push, 409 `conflict` → adopt server version (keep-latest) and clear the outbox row. 409 `activity_exists`/`category_exists` → re-map local references to the winning id. 404 on DELETE → treat as success. Conflict recovery never synthesizes record content: a winner-fetch failure rethrows and keeps the outbox row queued (a stub named with an id would be LWW-immortal).
+- Pull resolves same-name/different-id collisions by newer-owns-the-name (adopt via identity remap, else skip + heal on push); activity merges translate server category ids to local ids; dangling entries skip with a log. Seeding skips present names instead of failing the set.
 - Outbox drain is idempotent (one HTTP call per row, in `created_at` order).
 - Exposes `@Published status` ("Last synced" / "Syncing…" / error) + manual "Sync now" in Profile, visible only when signed in. Views observe `SyncController` directly (nested reads through `AppContainer` never invalidate); relay dates decode as RFC 3339 via wire DTOs, never the local `Double`-timestamp Codable.
 - Sign-out preserves local data and the outbox; an explicit "Erase local data" action wipes them.
