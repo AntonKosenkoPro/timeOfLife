@@ -116,8 +116,8 @@ struct TrackViewModelTests {
 
     // MARK: - Recoverable save failure
 
-    @Test("stop failure preserves running state and error message")
-    func stopFailurePreservesRunning() async {
+    @Test("stop after the activity was deleted settles idle with a message")
+    func stopAfterActivityDeleted() async {
         let vm = makeViewModel()
         let activity = Activity(id: "a1", name: "Work")
         try? await vm.service.store.createActivity(activity)
@@ -125,22 +125,22 @@ struct TrackViewModelTests {
         vm.start()
         try? await Task.sleep(nanoseconds: 10_000_000)
 
-        // Simulate a store failure: delete the activity row so the entry
-        // insert fails on the FK constraint (foreign_keys = ON), while the
-        // timer_state row still exists. The service stopTimer throws when the
-        // entry insert fails, so the state must remain recoverable.
+        // The activity was deleted on another device mid-session: the timer
+        // state still exists but the activity row is gone. Stopping must
+        // settle idle with an explanatory message — never a retry loop.
         let store = vm.service.store
         try? await store.deleteActivity(id: activity.id)
 
         await vm.stop()
 
-        if case .error = vm.state {
-            #expect(vm.errorMessage != nil)
-        } else {
-            // If the store accepted the entry (no FK enforcement in this
-            // configuration), the save succeeded — acceptable.
-            #expect(vm.state.isRunning == false)
-        }
+        #expect(vm.state == .idle)
+        #expect(vm.elapsed == 0)
+        #expect(vm.errorMessage == L10n.timerActivityDeleted.text)
+        #expect(vm.errorMessage != L10n.text(in: .default, code: "error.unknown"))
+        let state = try? await store.timerState()
+        #expect(state == nil)
+        // Nothing unpushable was queued for the deleted activity.
+        #expect((try? await store.outboxRows())?.allSatisfy { $0.resource != "entry" } == true)
     }
 
     // MARK: - Categories map (Recents chip icons, design D6)

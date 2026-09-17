@@ -93,6 +93,29 @@ struct TimerServiceTests {
         }
     }
 
+    @Test("stopTimer on a missing activity clears the timer and throws activityDeleted")
+    func stopOnMissingActivity() async throws {
+        let service = makeService()
+        let startedAt = Date(timeIntervalSince1970: 1_600_000_000)
+        // A timer left running on an activity deleted on another device:
+        // the timer state exists but the activity row is gone.
+        try await service.store.startTimer(activityID: "ghost", activityName: "Ghost", startedAt: startedAt)
+
+        do {
+            try await service.stopTimer(activityID: "ghost", startedAt: startedAt)
+            Issue.record("expected activityDeleted")
+        } catch let error as TimerServiceError {
+            #expect(error == .activityDeleted)
+        }
+
+        // The timer is cleared (stopping again is a no-op, never a wedge),
+        // and no entry or entry outbox row was created for the deleted
+        // activity.
+        #expect(try await service.store.timerState() == nil)
+        #expect(try await service.store.entries().isEmpty)
+        #expect(try await service.store.outboxRows().allSatisfy { $0.resource != "entry" })
+    }
+
     // MARK: - Helpers
 
     private func makeService() -> TimerService {

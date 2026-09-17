@@ -939,6 +939,247 @@ struct SyncControllerTests {
         #expect(try await store.lastSyncedAt(resource: "deletions") == deletedAt)
     }
 
+    // MARK: - Push-404 resurrection (push-404-resurrect)
+
+    @Test("entry push against a forgotten parent resurrects and retries")
+    func entryCreateAgainstDeletedActivityResurrects() async throws {
+        let (store, mock, controller) = makeContext()
+        let old = Date(timeIntervalSince1970: 1_600_000_000)
+        // The parent is gone relay-side with no tombstone on file
+        // (pre-deployment ghost), but the full local rows exist.
+        try await store.mergeActivity(Activity(id: "a1", name: "Gym", createdAt: old, updatedAt: old))
+        try await store.createEntry(
+            TimeEntry(id: "e1", activityID: "a1", activityName: "Gym", startedAt: old, createdAt: old, updatedAt: old)
+        )
+        var healedParents: [String] = []
+        mock.createActivityHandler = { activity in healedParents.append(activity.id) }
+        mock.createEntryHandler = { entry in
+            // First attempt (pre-heal parent): relay answers parent-missing.
+            if healedParents.isEmpty {
+                throw APIError.server(code: "activity_not_found", message: "Referenced activity not found", details: [:])
+            }
+            #expect(entry.id == "e1")
+            #expect(entry.activityID == "a1")
+        }
+
+        controller.activate()
+        await waitForCycle(controller)
+
+        // Parent re-posted, entry retried: everything intact, nothing queued.
+        #expect(healedParents == ["a1"])
+        #expect(try await store.activity(id: "a1")?.name == "Gym")
+        #expect(try await store.entry(id: "e1") != nil)
+        #expect(try await store.outboxRows().isEmpty)
+        #expect(isIdle(controller.status))
+    }
+
+    @Test("stale entry update re-posts as create")
+    func entryUpdateNotFoundRepostsAsCreate() async throws {
+        let (store, mock, controller) = makeContext()
+        let t0 = Date(timeIntervalSince1970: 1_600_000_000)
+        let t1 = Date(timeIntervalSince1970: 1_650_000_000)
+        try await store.mergeActivity(Activity(id: "a1", name: "Gym", createdAt: t0, updatedAt: t0))
+        try await store.mergeEntry(
+            TimeEntry(id: "e1", activityID: "a1", activityName: "Gym", startedAt: t0, createdAt: t0, updatedAt: t0)
+        )
+        _ = try await store.updateEntry(
+            TimeEntry(id: "e1", activityID: "a1", activityName: "Gym", startedAt: t0, createdAt: t0, updatedAt: t1)
+        )
+        mock.updateEntryHandler = { _ in
+            throw APIError.server(code: "not_found", message: "gone", details: [:])
+        }
+        var createdIDs: [String] = []
+        mock.createEntryHandler = { createdIDs.append($0.id) }
+
+        controller.activate()
+        await waitForCycle(controller)
+
+        #expect(createdIDs == ["e1"])
+        #expect(try await store.entry(id: "e1") != nil)
+        #expect(try await store.outboxRows().isEmpty)
+        #expect(isIdle(controller.status))
+    }
+
+    @Test("stale activity update re-posts the full local row as create")
+    func activityUpdateNotFoundRepostsAsCreate() async throws {
+        let (store, mock, controller) = makeContext()
+        let t0 = Date(timeIntervalSince1970: 1_600_000_000)
+        let t1 = Date(timeIntervalSince1970: 1_650_000_000)
+        try await store.mergeActivity(Activity(id: "a1", name: "Gym", createdAt: t0, updatedAt: t0))
+        try await store.mergeEntry(
+            TimeEntry(id: "e1", activityID: "a1", activityName: "Gym", startedAt: t0, createdAt: t0, updatedAt: t0)
+        )
+        _ = try await store.updateActivity(Activity(id: "a1", name: "Gym v2", createdAt: t0, updatedAt: t1))
+        mock.updateActivityHandler = { _ in
+            throw APIError.server(code: "not_found", message: "gone", details: [:])
+        }
+        var createdIDs: [String] = []
+        mock.createActivityHandler = { createdIDs.append($0.id) }
+
+        controller.activate()
+        await waitForCycle(controller)
+
+        #expect(createdIDs == ["a1"])
+        #expect(try await store.activity(id: "a1")?.name == "Gym v2")
+        #expect(try await store.entry(id: "e1") != nil)
+        #expect(try await store.outboxRows().isEmpty)
+        #expect(isIdle(controller.status))
+    }
+
+    @Test("stale category update re-posts the full local row as create")
+    func categoryUpdateNotFoundRepostsAsCreate() async throws {
+        let (store, mock, controller) = makeContext()
+        let t0 = Date(timeIntervalSince1970: 1_600_000_000)
+        let t1 = Date(timeIntervalSince1970: 1_650_000_000)
+        try await store.mergeCategory(
+            TimeOfLife.Category(id: "c1", name: "Sport", icon: "figure.run", createdAt: t0, updatedAt: t0)
+        )
+        try await store.mergeActivity(Activity(id: "a1", name: "Gym", categoryIDs: ["c1"], createdAt: t0, updatedAt: t0))
+        _ = try await store.updateCategory(
+            TimeOfLife.Category(id: "c1", name: "Sport", icon: "tag", createdAt: t0, updatedAt: t1)
+        )
+        mock.updateCategoryHandler = { _ in
+            throw APIError.server(code: "not_found", message: "gone", details: [:])
+        }
+        var createdIDs: [String] = []
+        mock.createCategoryHandler = { createdIDs.append($0.id) }
+
+        controller.activate()
+        await waitForCycle(controller)
+
+        #expect(createdIDs == ["c1"])
+        #expect(try await store.category(id: "c1")?.icon == "tag")
+        #expect(try await store.activity(id: "a1")?.categoryIDs == ["c1"])
+        #expect(try await store.outboxRows().isEmpty)
+        #expect(isIdle(controller.status))
+    }
+
+    @Test("parent heal through a name collision remaps and retries")
+    func entryHealViaCollisionRemap() async throws {
+        let (store, mock, controller) = makeContext()
+        let old = Date(timeIntervalSince1970: 1_600_000_000)
+        try await store.mergeActivity(Activity(id: "local-gym", name: "Gym", createdAt: old, updatedAt: old))
+        try await store.createEntry(
+            TimeEntry(id: "e1", activityID: "local-gym", activityName: "Gym", startedAt: old, createdAt: old, updatedAt: old)
+        )
+        mock.createEntryHandler = { entry in
+            if entry.activityID == "local-gym" {
+                throw APIError.server(code: "activity_not_found", message: "Referenced activity not found", details: [:])
+            }
+            #expect(entry.activityID == "server-gym")
+        }
+        mock.createActivityHandler = { _ in
+            throw APIError.server(code: "activity_exists", message: "exists", details: ["id": "server-gym", "name": "Gym"])
+        }
+        mock.fetchActivityHandler = { _ in Activity(id: "server-gym", name: "Gym") }
+
+        controller.activate()
+        await waitForCycle(controller)
+
+        // Entries moved to the winner, payloads rewritten, retry pushed.
+        #expect(try await store.activity(id: "local-gym") == nil)
+        #expect(try await store.entry(id: "e1")?.activityID == "server-gym")
+        #expect(try await store.outboxRows().isEmpty)
+        #expect(isIdle(controller.status))
+    }
+
+    @Test("failed parent heal surfaces the original error with rows retained")
+    func entryHealFailureRethrowsOriginal() async throws {
+        let (store, mock, controller) = makeContext()
+        let old = Date(timeIntervalSince1970: 1_600_000_000)
+        try await store.mergeActivity(Activity(id: "a1", name: "Gym", createdAt: old, updatedAt: old))
+        try await store.createEntry(
+            TimeEntry(id: "e1", activityID: "a1", activityName: "Gym", startedAt: old, createdAt: old, updatedAt: old)
+        )
+        mock.createEntryHandler = { _ in
+            throw APIError.server(code: "activity_not_found", message: "Referenced activity not found", details: [:])
+        }
+        mock.createActivityHandler = { _ in
+            throw APIError.server(code: "internal_error", message: "boom", details: [:])
+        }
+
+        controller.activate()
+        await waitForCycle(controller)
+
+        // Nothing converged, nothing lost: the rows stay queued and the cycle
+        // reports the original push failure.
+        let rows = try await store.outboxRows()
+        #expect(rows.contains { $0.resource == "entry" && $0.op == "create" && $0.recordID == "e1" })
+        #expect(try await store.entry(id: "e1") != nil)
+        #expect(controller.status == .error("server(activity_not_found): Referenced activity not found"))
+    }
+
+    @Test("remap-leftover update clears without pushing")
+    func remapLeftoverUpdateClears() async throws {
+        let (store, mock, controller) = makeContext()
+        let t0 = Date(timeIntervalSince1970: 1_600_000_000)
+        let t1 = Date(timeIntervalSince1970: 1_650_000_000)
+        // A create that will 409-remap, plus a stacked update for the same
+        // losing id: after the remap the loser is gone locally and the
+        // update would 404 forever (the pre-existing stacked-remap wedge).
+        try await store.createActivity(Activity(id: "local-2", name: "Gym", createdAt: t0, updatedAt: t0))
+        _ = try await store.updateActivity(Activity(id: "local-2", name: "Gym v2", createdAt: t0, updatedAt: t1))
+        mock.createActivityHandler = { activity in
+            if activity.id == "local-2" {
+                throw APIError.server(code: "activity_exists", message: "exists", details: ["id": "server-gym", "name": "Gym"])
+            }
+        }
+        mock.fetchActivityHandler = { _ in Activity(id: "server-gym", name: "Gym") }
+        // The stale loser update must never be pushed: the repush path finds
+        // no local row (remap already moved on) and clears the row.
+        var updateCalls = 0
+        mock.updateActivityHandler = { _ in
+            updateCalls += 1
+            throw APIError.server(code: "not_found", message: "gone", details: [:])
+        }
+
+        controller.activate()
+        await waitForCycle(controller)
+
+        #expect(updateCalls == 0)
+        #expect(try await store.activity(id: "local-2") == nil)
+        #expect(try await store.activity(id: "server-gym")?.name == "Gym")
+        #expect(try await store.outboxRows().isEmpty)
+        #expect(isIdle(controller.status))
+    }
+
+    @Test("pre-tombstone relay does not fail the cycle")
+    func fetchDeletionsNotFoundSkipsTombstones() async throws {
+        let (store, mock, controller) = makeContext()
+        try await store.createActivity(Activity(id: "a1", name: "Gym"))
+        mock.fetchDeletionsHandler = { _ in
+            throw APIError.server(code: "not_found", message: "gone", details: [:])
+        }
+
+        controller.activate()
+        await waitForCycle(controller)
+
+        // Drain and pull ran normally around the skipped tombstone step.
+        #expect(mock.calls.contains(Call("createActivity", "activity", "a1")))
+        #expect(mock.calls.contains(Call("fetchActivities", "activity", nil)))
+        #expect(try await store.outboxRows().isEmpty)
+        #expect(try await store.lastSyncedAt(resource: "deletions") == nil)
+        #expect(isIdle(controller.status))
+    }
+
+    @Test("activity create 404 still throws loudly")
+    func activityCreateNotFoundThrows() async throws {
+        let (store, mock, controller) = makeContext()
+        try await store.createActivity(Activity(id: "a1", name: "Gym"))
+        mock.createActivityHandler = { _ in
+            throw APIError.server(code: "not_found", message: "gone", details: [:])
+        }
+
+        controller.activate()
+        await waitForCycle(controller)
+
+        // No convergence for creates (impossible per routes): the row stays
+        // queued and the cycle surfaces the failure.
+        let rows = try await store.outboxRows()
+        #expect(rows.contains { $0.resource == "activity" && $0.op == "create" && $0.recordID == "a1" })
+        #expect(controller.status == .error("server(not_found): gone"))
+    }
+
     // MARK: - Helpers
 
     private func makeContext(

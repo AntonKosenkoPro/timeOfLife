@@ -312,7 +312,18 @@ final class SyncController: ObservableObject {
     /// cursor.
     private func applyTombstones() async throws {
         let cursor = try await store.lastSyncedAt(resource: "deletions")
-        let deletions = try await remote.fetchDeletions(since: cursor)
+        let deletions: [Deletion]
+        do {
+            deletions = try await remote.fetchDeletions(since: cursor)
+        } catch let error as APIError where error.code == "not_found" {
+            // Pre-tombstone relay (no /deletions route): skip statelessly and
+            // run drain+pull anyway — a later relay upgrade just starts
+            // working, and push-404 convergence below still heals per-record
+            // wedges against such relays. Any other fetch error still fails
+            // the cycle.
+            Self.logger.info("sync tombstones unsupported by relay; skipping")
+            return
+        }
         for deletion in deletions {
             try await store.applyDeletionTombstone(deletion)
         }
@@ -339,6 +350,14 @@ final class SyncController: ObservableObject {
             guard let row = try await store.outboxRow(id: queuedRow.id) else {
                 continue
             }
+            // Stale updates for locally-missing records (remap leftovers,
+            // updates superseded by a queued delete) can never succeed: drop
+            // without pushing instead of discovering it via a doomed 404.
+            if row.op == "update", try await isLocallyMissing(row) {
+                Self.logger.info("sync drain drops stale update for missing \(row.resource, privacy: .public) \(row.recordID, privacy: .public)")
+                try await store.removeOutboxRow(id: row.id)
+                continue
+            }
             do {
                 try await push(row)
                 try await store.removeOutboxRow(id: row.id)
@@ -346,10 +365,16 @@ final class SyncController: ObservableObject {
                 switch error.code {
                 case "conflict", "activity_exists", "category_exists", "duplicate_import":
                     try await resolveConflict(row, code: error.code ?? "", details: error.details)
-                case "not_found":
-                    // 404 on DELETE → treat as success (already gone).
+                case "not_found", "activity_not_found":
+                    // 404 on DELETE → treat as success (already gone). A push
+                    // for a tombstone-less relay-missing record resurrects
+                    // from local data and retries once (see
+                    // resurrectAndRetry) instead of wedging the cycle on a
+                    // doomed retry; anything else still throws.
                     if row.op == "delete" {
                         try await store.removeOutboxRow(id: row.id)
+                    } else if try await resurrectAndRetry(row) {
+                        break
                     } else {
                         throw error
                     }
@@ -390,6 +415,147 @@ final class SyncController: ObservableObject {
         default:
             throw SyncError.unknownOutboxOp(row.resource, row.op)
         }
+    }
+
+    /// Whether an update row references a record with no local row: a remap
+    /// leftover, or an update superseded by a queued delete. Unknown
+    /// resources return false so the push path still rejects them loudly.
+    private func isLocallyMissing(_ row: OutboxRow) async throws -> Bool {
+        switch row.resource {
+        case "activity":
+            return try await store.activity(id: row.recordID) == nil
+        case "category":
+            return try await store.category(id: row.recordID) == nil
+        case "entry":
+            return try await store.entry(id: row.recordID) == nil
+        default:
+            return false
+        }
+    }
+
+    /// Resurrects a push for a record the relay lacks with no tombstone on
+    /// file (pre-deployment ghost, wipe/restore, or a seconds-wide
+    /// delete-vs-push race) and retries exactly once. Tombstoned records
+    /// never reach here (tombstones-first drops their rows pre-drain), so a
+    /// 404 here always meets the fuller local record — resurrecting heals
+    /// relay and device together, while deleting would silently discard user
+    /// data (and strand future sessions against the surviving ghost).
+    /// Returns whether the row was resolved (anything else rethrows the
+    /// original error loudly — nothing is ever silently dropped).
+    ///
+    /// - entry create/update + `activity_not_found`/`not_found`: re-post the
+    ///   fresh local entry as a create (idempotent); a missing parent is
+    ///   re-posted first, then the entry retries once.
+    /// - activity/category update + `not_found`: re-post the full local row
+    ///   as a create (queued updates PATCH normally afterward).
+    /// - activity/category create + 404: impossible per routes: returns false.
+    private func resurrectAndRetry(_ row: OutboxRow) async throws -> Bool {
+        switch (row.resource, row.op) {
+        case ("entry", "create"), ("entry", "update"):
+            return try await pushEntryWithHealedParent(row)
+        case ("activity", "update"), ("category", "update"):
+            return try await repushRecordAsCreate(row)
+        default:
+            return false
+        }
+    }
+
+    /// Re-posts an entry as a create and, when the relay answers that its
+    /// parent is gone, heals the parent first. `duplicate_import` reuses the
+    /// existing resolver (relay already has it — clear the row).
+    private func pushEntryWithHealedParent(_ row: OutboxRow) async throws -> Bool {
+        guard let entry = try await store.entry(id: row.recordID) else {
+            // No local entry to resurrect from (remap-leftover shape): clear
+            // this record's rows without pushing.
+            try await store.removeOutboxRow(resource: row.resource, recordID: row.recordID)
+            return true
+        }
+        do {
+            // Always the fresh local row (identical to the payload for these
+            // ops, but immune to stale in-memory copies).
+            try await remote.createEntry(entry)
+            try await store.removeOutboxRow(id: row.id)
+            return true
+        } catch let error as APIError {
+            switch error.code {
+            case "activity_not_found":
+                return try await healParentAndRetryEntry(row)
+            case "duplicate_import":
+                try await resolveConflict(row, code: "duplicate_import", details: error.details)
+                return true
+            default:
+                return false
+            }
+        }
+    }
+
+    /// Re-posts a forgotten parent from its full local row (idempotent),
+    /// then retries the entry exactly once. A name collision on the heal
+    /// reuses the remap flow (entries move, payloads rewritten in place).
+    /// A locally-missing parent cannot be resurrected from nothing: the
+    /// entry's rows clear and the local entry is kept (unreachable via FK
+    /// paths — defensive).
+    private func healParentAndRetryEntry(_ row: OutboxRow) async throws -> Bool {
+        guard let entry = try await store.entry(id: row.recordID),
+              let parent = try await store.activity(id: entry.activityID) else {
+            try await store.removeOutboxRow(resource: row.resource, recordID: row.recordID)
+            return true
+        }
+        do {
+            try await remote.createActivity(parent)
+        } catch let error as APIError {
+            switch error.code {
+            case "activity_exists":
+                guard let winningID = error.details["id"] else { return false }
+                try await remapReferences(from: parent.id, to: winningID, resource: "activity")
+            default:
+                return false
+            }
+        }
+        guard let retry = try await store.outboxRow(id: row.id) else { return true }
+        do {
+            try await push(retry)
+            try await store.removeOutboxRow(id: retry.id)
+            return true
+        } catch {
+            return false
+        }
+    }
+
+    /// Re-posts a full local activity/category row as a create (idempotent;
+    /// queued updates PATCH normally afterward). A 409 reuses the existing
+    /// conflict resolver; a locally-missing row (name-collision remap
+    /// leftover) just clears its rows — which also heals the pre-existing
+    /// stacked-remap wedge, where the surviving update row 404'd forever.
+    private func repushRecordAsCreate(_ row: OutboxRow) async throws -> Bool {
+        switch row.resource {
+        case "activity":
+            guard let activity = try await store.activity(id: row.recordID) else {
+                try await store.removeOutboxRow(resource: row.resource, recordID: row.recordID)
+                return true
+            }
+            do {
+                try await remote.createActivity(activity)
+            } catch let error as APIError {
+                guard error.code == "activity_exists" else { return false }
+                try await resolveConflict(row, code: "activity_exists", details: error.details)
+            }
+        case "category":
+            guard let category = try await store.category(id: row.recordID) else {
+                try await store.removeOutboxRow(resource: row.resource, recordID: row.recordID)
+                return true
+            }
+            do {
+                try await remote.createCategory(category)
+            } catch let error as APIError {
+                guard error.code == "category_exists" else { return false }
+                try await resolveConflict(row, code: "category_exists", details: error.details)
+            }
+        default:
+            return false
+        }
+        try await store.removeOutboxRow(id: row.id)
+        return true
     }
 
     /// Resolves a push conflict per the sync-client spec:

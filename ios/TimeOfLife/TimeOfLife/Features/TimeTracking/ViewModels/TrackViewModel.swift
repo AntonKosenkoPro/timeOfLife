@@ -431,6 +431,14 @@ final class TrackViewModel: ObservableObject, ActivitySearchHosting {
             UIApplication.shared.isIdleTimerDisabled = false
             Haptics.success()
             scheduleSavedReset()
+        } catch let error as TimerServiceError where error == .activityDeleted {
+            // The activity was deleted on another device mid-session: the
+            // session is discarded (nothing to save to), so settle idle with
+            // an explanatory message — retrying would loop a failing save.
+            state = .idle
+            elapsed = 0
+            errorMessage = L10n.timerActivityDeleted.text
+            UIApplication.shared.isIdleTimerDisabled = false
         } catch {
             // Recoverable: preserve running state so elapsed time is not lost.
             state = .error(activity, startedAt: startedAt)

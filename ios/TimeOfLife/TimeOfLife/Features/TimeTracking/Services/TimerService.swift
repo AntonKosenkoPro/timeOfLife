@@ -47,12 +47,23 @@ final class TimerService: ObservableObject {
     /// Stops the running timer and saves the completed entry (with
     /// `source='manual'`) in one transaction with its outbox row. Clears the
     /// persisted running state.
+    ///
+    /// When the activity is gone (deleted on another device while the timer
+    /// ran), the timer state is still cleared but no entry is saved — an
+    /// entry for a deleted activity is unrenderable and unpushable — and the
+    /// typed `activityDeleted` error lets the caller settle the UI instead of
+    /// looping a failing save. Clearing first (rather than only after a
+    /// successful save) applies to this path alone; ordinary save failures
+    /// keep the existing recoverable behavior.
     func stopTimer(activityID: String, startedAt: Date, endedAt: Date = Date()) async throws {
-        let activity = try await store.activity(id: activityID)
+        guard let activity = try await store.activity(id: activityID) else {
+            try await store.stopTimer()
+            throw TimerServiceError.activityDeleted
+        }
         let entry = TimeEntry(
             id: await store.newRecordID(),
             activityID: activityID,
-            activityName: activity?.name ?? "",
+            activityName: activity.name,
             startedAt: startedAt,
             endedAt: endedAt,
             durationSeconds: Int(endedAt.timeIntervalSince(startedAt)),
@@ -68,4 +79,11 @@ final class TimerService: ObservableObject {
     func runningTimerState() async throws -> RunningTimerState? {
         try await store.timerState()
     }
+}
+
+/// Typed stop failures so the UI can settle correctly.
+enum TimerServiceError: Error, Equatable, Sendable {
+    /// The activity was deleted (on another device) while its timer ran: the
+    /// session is discarded, not saved. Settling, not retrying, is correct.
+    case activityDeleted
 }

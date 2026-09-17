@@ -151,7 +151,8 @@ struct LocalizationTests {
         // insights-v1-breakdown adds 9 (3 insights.period.*,
         // 2 insights.lens.*, insights.noCategory, insights.footnote,
         // insights.empty.today, insights.empty.week) = 175;
-        // present-enable-sync-sheet adds sync.cancel = 176
-        #expect(l10nCases.count == 176)
+        // present-enable-sync-sheet adds sync.cancel = 176;
+        // drain-404-convergence adds timer.activityDeleted = 177
+        #expect(l10nCases.count == 177)
     }
 }
