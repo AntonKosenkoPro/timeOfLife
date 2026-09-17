@@ -5,7 +5,7 @@
   ],
   "agent": {
     "explore": {
-      "description": "Fast read-only codebase explorer. Delegate independent exploration in parallel: file searches, pattern hunts, architecture questions. Fan out 2-3 explore agents at once over disjoint areas (backend vs iOS vs specs/docs).",
+      "description": "Fast read-only codebase explorer. Use PROACTIVELY instead of reading/searching files yourself: any question spanning 2+ areas (backend vs iOS vs specs/docs) or needing file/pattern searches MUST be fanned out as 2-3 parallel explore Task calls in ONE message, one per disjoint area. Explore-only work stays at 3 agents max.",
       "model": "ollama-cloud/glm-5.3-flash",
       "reasoningEffort": "high"
     },
@@ -14,7 +14,7 @@
       "reasoningEffort": "max"
     },
     "general": {
-      "description": "General-purpose worker for independent units of work. Delegate parallelizable backend, iOS, or specs/docs tasks via the Task tool. Default fan-out is 4 agents, hard ceiling 6, explore-only work stays at 3.",
+      "description": "General-purpose worker for independent units of work. Use PROACTIVELY instead of working sequentially: any task touching 2+ of backend/ vs ios/TimeOfLife/ vs specs-docs MUST be split into parallel Task calls (one per area, single message) before doing anything yourself. Backend verify and iOS verify always run on separate agents in parallel. Default fan-out 4 agents, hard ceiling 6.",
       "model": "ollama-cloud/glm-5.3-flash",
       "reasoningEffort": "high"
     },
