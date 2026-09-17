@@ -5,9 +5,24 @@ import SwiftUI
 /// category management, integrations, export, appearance, and data controls.
 struct ProfileView: View {
     @EnvironmentObject var container: AppContainer
+    /// Observed directly (not via `container`): `AppContainer` publishes
+    /// nothing, so nested reads like `container.syncController.status` never
+    /// invalidate this view — the status row froze on "Syncing…" and the
+    /// Sync now button never re-enabled. Separate environment objects (as in
+    /// `TimeOfLifeApp`) subscribe to the real publishers.
+    @EnvironmentObject var sync: SyncController
+    @EnvironmentObject var session: SessionStore
     @Environment(\.dismiss)
     private var dismiss
     @State private var isShowingEraseConfirm = false
+    /// Owns the Enable Sync tap branching (restore-then-sheet) and the
+    /// sheet flag (app-shell spec). Constructed at the presentation site
+    /// because `container` is not available in `init`.
+    @StateObject private var enableSync: EnableSyncPresenter
+
+    init(enableSync: EnableSyncPresenter) {
+        _enableSync = StateObject(wrappedValue: enableSync)
+    }
     var body: some View {
         NavigationView {
             List {
@@ -31,6 +46,17 @@ struct ProfileView: View {
             } message: {
                 Text(L10n.profileEraseLocalDataConfirmMessage.text)
             }
+            // Enable Sync sheet (app-shell spec): the auth flow, presented
+            // only when the silent restore left the session signed out.
+            // The custom binding routes system dismissal through the
+            // presenter; sign-in flips clear the flag from the presenter.
+            .sheet(isPresented: Binding(
+                get: { enableSync.isSheetPresented },
+                set: { if !$0 { enableSync.dismiss() } }
+            )) {
+                EnableSyncSheet()
+                    .environmentObject(container)
+            }
         }
         .navigationViewStyle(.stack)
         .accessibilityIdentifier("Profile")
@@ -40,10 +66,10 @@ struct ProfileView: View {
 
     private var accountSection: some View {
         Section(L10n.profileAccount.text) {
-            switch container.sessionStore.state {
+            switch session.state {
             case .signedOut:
                 Button {
-                    Task { await container.authService.restoreSession() }
+                    Task { await enableSync.enableSync() }
                 } label: {
                     ListRow(
                         title: L10n.profileEnableSync.text,
@@ -51,15 +77,20 @@ struct ProfileView: View {
                         subtitle: L10n.profileEnableSyncSubtitle.text
                     )
                 }
+                .disabled(enableSync.isRestoring)
                 .accessibilityIdentifier("ProfileEnableSyncButton")
             case .signedIn:
                 syncStatusRow
                 Button {
-                    Task { await container.syncController.syncNow() }
+                    Task { await sync.syncNow() }
                 } label: {
                     ListRow(title: syncNowTitle, icon: "arrow.triangle.2.circlepath")
                 }
-                .disabled(container.syncController.status == .syncing)
+                .disabled(sync.status == .syncing)
+                // `.disabled` alone does not restyle a custom label — without
+                // this the button looks tappable while syncing (WelcomeView
+                // precedent for the 0.6 value).
+                .opacity(sync.status == .syncing ? 0.6 : 1)
                 .accessibilityIdentifier("ProfileSyncNowButton")
                 Button(L10n.timerSignOut.text, role: .destructive) {
                     Task { await container.authService.logout() }
@@ -70,7 +101,7 @@ struct ProfileView: View {
     }
 
     @ViewBuilder private var syncStatusRow: some View {
-        switch container.syncController.status {
+        switch sync.status {
         case .inactive:
             EmptyView()
         case .syncing:
@@ -80,13 +111,19 @@ struct ProfileView: View {
                 title: String(format: L10n.profileLastSynced.text, Self.relativeTime(date)),
                 icon: "checkmark.icloud"
             )
-        case .error:
-            ListRow(title: L10n.profileSyncError.text, icon: "exclamationmark.icloud")
+        case let .error(message):
+            ListRow(
+                title: L10n.profileSyncError.text,
+                icon: "exclamationmark.icloud",
+                subtitle: message.isEmpty ? nil : message
+            )
         }
     }
 
+    /// The Sync Now action title never doubles as a status indicator — the
+    /// status row above owns "Syncing…" alone (sync-client spec).
     private var syncNowTitle: String {
-        container.syncController.status == .syncing ? L10n.profileSyncing.text : L10n.profileSyncNow.text
+        L10n.profileSyncNow.text
     }
 
     private static func relativeTime(_ date: Date) -> String {
@@ -142,16 +179,35 @@ struct ProfileView: View {
         do {
             try await container.localStore.eraseAll()
             await container.authService.logout()
+            // Stale auth routes (e.g. OTP for the erased account) would otherwise
+            // re-present in the next Enable Sync sheet; shell tabs keep their own
+            // NavigationViews, so this only clears the auth sheet's path.
+            container.navigation.path = []
         } catch {
             // Erase failure: keep the session; the user can retry.
         }
     }
 }
 
+/// Auth sheet for Enable Sync (app-shell spec): the existing auth flow with
+/// sheet chrome. Cancel and swipe-to-dismiss return unsigned with local data
+/// untouched; any sign-in path clears the presenter's flag and dismisses.
+private struct EnableSyncSheet: View {
+    var body: some View {
+        AuthFlowView()
+            .accessibilityIdentifier("EnableSyncSheet")
+    }
+}
+
 #if DEBUG
 #Preview("Profile") {
     let container = AppContainer.production()
-    ProfileView()
-        .environmentObject(container)
+    ProfileView(enableSync: EnableSyncPresenter(
+        authService: container.authService,
+        sessionStore: container.sessionStore
+    ))
+    .environmentObject(container)
+    .environmentObject(container.sessionStore)
+    .environmentObject(container.syncController)
 }
 #endif

@@ -3,9 +3,7 @@
 ## Purpose
 
 The on-device source of truth for the user's time-tracking data — a SQLite database in the App Group shared container that the app, widgets, extensions, and lock-screen Controls all read and write cross-process.
-
 ## Requirements
-
 ### Requirement: Device is the source of truth
 The system SHALL treat the local SQLite database in the App Group shared container as the authoritative source of the user's activities, categories, entries, and running timer state. All app features (timer, catalog, history, insights) SHALL operate against this local database and SHALL function fully with no network connectivity and no signed-in account.
 
@@ -89,7 +87,7 @@ The system SHALL hold deletions in a durable `undo_buffer` table (not in-memory)
 - **THEN** only the most recent deletion is restorable via shake-to-undo / UndoToast (per existing U7); the older deletion commits when its own 30s window elapses
 
 ### Requirement: Sign-out preserves local data
-The system SHALL NOT wipe the local database or the outbox when the user signs out of sync. The user's local data persists; an explicit "Erase local data" action is available in Profile for shared-device or privacy cases.
+The system SHALL NOT wipe the local database or the outbox when the user signs out of sync. The user's local data persists; an explicit "Erase local data" action is available in Profile for shared-device or privacy cases. Confirming "Erase local data" SHALL additionally reset the auth navigation so the auth flow starts over from its first step.
 
 #### Scenario: Sign out keeps data
 - **WHEN** the user signs out of sync
@@ -98,3 +96,64 @@ The system SHALL NOT wipe the local database or the outbox when the user signs o
 #### Scenario: Explicit erase
 - **WHEN** the user taps "Erase local data" in Profile and confirms
 - **THEN** the local database is wiped (including the outbox and undo buffer); the action is destructive and irreversible
+
+#### Scenario: Erase resets auth flow
+- **WHEN** the erase is confirmed
+- **THEN** the auth navigation resets so "Enable Sync" starts at email entry with no previous address
+
+### Requirement: Local deletion tombstone reads
+
+The local store SHALL expose read-only tombstone queries over the existing outbox and undo-buffer tables (no schema change): whether `(resource, record_id)` has a pending outbox DELETE, whether it sits in a buffered deletion snapshot (activity snapshots cover their entries' ids), and the combined exclusion used by the sync client.
+
+#### Scenario: Committed delete is a tombstone until drained
+
+- **WHEN** a deletion commits (outbox DELETE row exists) and has not been drained
+- **THEN** the tombstone query reports it deleted; after the drain clears the row, it no longer does
+
+#### Scenario: Buffered delete is a tombstone until undone or committed
+
+- **WHEN** a deletion enters the undo buffer
+- **THEN** the tombstone query reports every snapshotted `(resource, record_id)` deleted; after undo (row restored, buffer cleared) or cold-launch commit (buffer cleared, outbox DELETEs queued), the buffered tombstone no longer applies (the outbox one does, until drained)
+
+### Requirement: Tombstone application
+
+The local store SHALL apply a relay tombstone `(resource, record_id, deleted_at)` by removing the local row — entries and join rows cascade for activities — in a single write transaction with no outbox row, and by dropping pending create/update outbox rows for every affected id (the activity id plus its entry ids; the single id otherwise). Pending DELETE rows SHALL be left untouched. A clean local row newer than the tombstone SHALL be kept (stale tombstone after a recreation).
+
+#### Scenario: Activity tombstone cascades without outbox
+
+- **WHEN** an activity tombstone is applied and the activity has entries and category joins
+- **THEN** the entries, joins, and row are removed in one transaction, no outbox row is created, and pending create/update rows for the activity and its entries are gone
+
+#### Scenario: Pending deletes survive tombstone application
+
+- **WHEN** an outbox DELETE row exists for the tombstoned id
+- **THEN** the DELETE row remains queued (it converges via 404-as-success on drain)
+
+### Requirement: Activity deletions enter the durable undo buffer with full snapshots
+
+Confirming an activity deletion SHALL write one undo-buffer row carrying the full activity record (identity, values, ordered category assignments) plus every committed entry of that activity, and remove the activity, its join rows, and its entries in the same transaction. No outbox row SHALL be created while the deletion is buffered. Restoring (at any time before the app restarts) SHALL re-insert the activity, its assignments, and its entries and delete the buffer row in one transaction, with no outbox row ever created. On app restart, the cold-launch commit SHALL enqueue one outbox DELETE row per snapshotted record (the activity plus each entry); entry rows that the relay already removed via cascade resolve as success (404-treats-as-success) and never fail the drain.
+
+#### Scenario: Activity delete enters buffer atomically
+
+- **WHEN** the user confirms an activity deletion
+- **THEN** the system writes one undo-buffer row with the activity and all its entries and removes those records in one transaction; no outbox row is created
+
+#### Scenario: Undo restores activity and entries
+
+- **WHEN** the user triggers undo (at any time before restarting the app)
+- **THEN** the system restores the activity, its category assignments, and all snapshotted entries from the payload and deletes the buffer row in one transaction; the relay is never notified
+
+#### Scenario: Restarted app commits buffered deletions to the outbox
+
+- **WHEN** the app restarts with buffered activity deletions
+- **THEN** the cold-launch commit deletes each buffer row and inserts one outbox DELETE row for the activity and one per entry in one transaction; already-cascaded entry rows succeed as 404s
+
+### Requirement: Running-timer activity deletion is refused at the store boundary
+
+The undoable activity delete SHALL refuse when a timer is running against that activity: nothing is removed, no buffer row is written, and the caller receives a distinct blocked outcome so the UI can explain that the timer must be stopped first. The running `timer_state` row SHALL never reference a deleted activity.
+
+#### Scenario: Delete refused for the running activity
+
+- **WHEN** an undoable delete is requested for the activity with the running timer
+- **THEN** the store removes nothing, buffers nothing, and reports the run-blocked outcome
+

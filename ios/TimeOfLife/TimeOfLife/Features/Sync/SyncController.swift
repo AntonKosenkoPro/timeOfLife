@@ -1,5 +1,7 @@
 import Foundation
 import Combine
+import os
+// swiftlint:disable file_length
 
 /// The optional background sync layer (sync-client spec): when the user is
 /// signed in, drains the transactional outbox to the backend relay and pulls
@@ -34,6 +36,10 @@ final class SyncController: ObservableObject {
     /// Single-flight guard: concurrent triggers (foreground + connectivity +
     /// manual) share one cycle instead of racing.
     private var cycleTask: Task<Void, Never>?
+
+    /// Cycle diagnostics (Console): secret-free strings only — the same codes
+    /// and messages surfaced in UI. Never tokens, bodies, or emails.
+    private static let logger = Logger(subsystem: "com.antonkosenko.timeoflifeapp", category: "sync")
 
     init(
         store: LocalStore,
@@ -83,26 +89,34 @@ final class SyncController: ObservableObject {
 
     // MARK: - Cycle
 
-    /// One drain+pull cycle. First sync is pull-first (D4): the relay's ids
+    /// One sync cycle. First sync is pull-first (D4): the relay's ids
     /// arrive before local pushes, so cross-device name collisions mostly
-    /// resolve during merge rather than on push.
+    /// resolve during merge rather than on push. Tombstones apply before the
+    /// drain (steady) or right after the pull (first sync): a tombstone
+    /// drops stale pending create/update rows pre-drain, so a 404 is never
+    /// pushed for a record the relay already deleted.
     private func runCycle(firstSync: Bool) async {
         defer { cycleTask = nil }
         guard connectivity.isConnected else {
+            Self.logger.error("sync cycle skipped: offline")
             status = .error("offline")
             return
         }
         status = .syncing
+        Self.logger.info("sync cycle start firstSync=\(firstSync)")
         do {
             if firstSync {
                 try await pull(modifiedSince: nil)
             }
+            try await applyTombstones()
             try await drainOutbox()
             if !firstSync {
                 try await pull(modifiedSince: nil)
             }
             status = .idle(Date())
+            Self.logger.info("sync cycle finished")
         } catch {
+            Self.logger.error("sync cycle failed: \(error.localizedDescription, privacy: .public)")
             status = .error(error.localizedDescription)
         }
     }
@@ -131,8 +145,9 @@ final class SyncController: ObservableObject {
             activityCursor = try await store.lastSyncedAt(resource: "activity")
         }
         let activities = try await remote.fetchActivities(modifiedSince: activityCursor)
+        let serverCategoriesByID = Dictionary(uniqueKeysWithValues: categories.map { ($0.id, $0) })
         for activity in activities {
-            try await applyServer(activity)
+            try await applyServer(activity, serverCategories: serverCategoriesByID)
         }
         if let max = activities.map(\.updatedAt).max() {
             try await store.setLastSyncedAt(resource: "activity", date: max)
@@ -160,21 +175,96 @@ final class SyncController: ObservableObject {
     /// Category snapshot is pulled first, so this only happens when a local
     /// Category delete raced the pull) skips the merge instead of failing the
     /// whole cycle; the next pull retries.
-    private func applyServer(_ activity: Activity) async throws {
+    ///
+    /// A same-name/different-id rival (seed-vs-relay first-sync collision)
+    /// resolves by newer-owns-the-name: a newer server record is adopted via
+    /// the atomic identity remap; otherwise the local record is kept and the
+    /// server record (and, downstream, its entries) is skipped. Either way the
+    /// pull never fails on the normalized-name unique index.
+    private func applyServer(_ activity: Activity, serverCategories: [String: Category]) async throws {
+        // Delete-wins: the user deleted this record locally (buffered undoable
+        // deletion or committed outbox delete) and the relay has not converged
+        // yet. Merging the server copy back would resurrect it — the queued
+        // DELETE removes it from the relay on drain instead.
+        if try await store.isLocallyDeleted(resource: "activity", recordID: activity.id) {
+            Self.logger.info("sync pull skips locally deleted activity \(activity.id, privacy: .public)")
+            return
+        }
         if let local = try await store.activity(id: activity.id) {
             guard activity.updatedAt > local.updatedAt else { return }
         }
+        if let rival = try await store.activity(named: activity.name), rival.id != activity.id {
+            if activity.updatedAt > rival.updatedAt {
+                let winner = try await resolveActivityForMerge(activity, serverCategories: serverCategories)
+                let movedIDs = try await store.remapActivityReferences(from: rival.id, to: activity.id, winner: winner)
+                for id in movedIDs {
+                    if let updated = try await store.entry(id: id) {
+                        try await store.rewriteOutboxPayload(resource: "entry", recordID: id, payload: updated)
+                    }
+                }
+                // The rival's queued rows reference a dead identity (the
+                // category remap clears its own; the activity one does not).
+                try await store.removeOutboxRow(resource: "activity", recordID: rival.id)
+            } else {
+                Self.logger.info("sync pull keeps local activity \(rival.id, privacy: .public); skipping server \(activity.id, privacy: .public)")
+            }
+            return
+        }
         do {
-            try await store.mergeActivity(activity)
+            try await store.mergeActivity(await resolveActivityForMerge(activity, serverCategories: serverCategories))
         } catch AssociationError.invalidCategory {
             // The category is absent locally; keep the current local version.
         }
     }
 
+    /// Rewrites a server activity's category references to local ids before it
+    /// enters the store: a referenced server category may have been skipped
+    /// (local counterpart kept), and its server id would violate the join
+    /// foreign key. Unknown references throw `invalidCategory` (existing
+    /// skip-and-retry contract); the full snapshot makes this a backstop.
+    private func resolveActivityForMerge(
+        _ activity: Activity,
+        serverCategories: [String: Category]
+    ) async throws -> Activity {
+        var categoryIDs: [String] = []
+        categoryIDs.reserveCapacity(activity.categoryIDs.count)
+        for categoryID in activity.categoryIDs {
+            if try await store.category(id: categoryID) != nil {
+                categoryIDs.append(categoryID)
+            } else if let serverCategory = serverCategories[categoryID],
+                      let local = try await store.category(named: serverCategory.name) {
+                categoryIDs.append(local.id)
+            } else {
+                throw AssociationError.invalidCategory(categoryID)
+            }
+        }
+        var resolved = activity
+        resolved.categoryIDs = categoryIDs
+        return resolved
+    }
+
     /// Applies a server category only if `server.updated_at > local.updated_at`.
+    /// Same-name/different-id rivals resolve by newer-owns-the-name, exactly
+    /// like activities above: the reported cloud failure was this merge
+    /// throwing SQLite 19 on `index_categories_on_lower_name` and aborting
+    /// the cycle before the outbox ever drained.
     private func applyServer(_ category: Category) async throws {
+        // Delete-wins (see applyServer(_:serverCategories:)): never resurrect
+        // a locally deleted category from the full snapshot.
+        if try await store.isLocallyDeleted(resource: "category", recordID: category.id) {
+            Self.logger.info("sync pull skips locally deleted category \(category.id, privacy: .public)")
+            return
+        }
         if let local = try await store.category(id: category.id) {
             guard category.updatedAt > local.updatedAt else { return }
+        }
+        if let rival = try await store.category(named: category.name), rival.id != category.id {
+            if category.updatedAt > rival.updatedAt {
+                try await store.remapCategoryReferences(from: rival.id, to: category.id, winner: category)
+            } else {
+                Self.logger.info("sync pull keeps local category \(rival.id, privacy: .public); skipping server \(category.id, privacy: .public)")
+            }
+            return
         }
         try await store.mergeCategory(category)
     }
@@ -192,11 +282,46 @@ final class SyncController: ObservableObject {
     }
 
     /// Applies a server entry only if `server.updated_at > local.updated_at`.
+    /// An entry whose activity is absent locally (a skipped server branch)
+    /// is skipped with a log instead of failing the cycle on the join
+    /// foreign key; the next pull retries after the activity lands.
     private func applyServer(_ entry: TimeEntry) async throws {
+        // Delete-wins (see applyServer(_:serverCategories:)): never resurrect
+        // a locally deleted entry.
+        if try await store.isLocallyDeleted(resource: "entry", recordID: entry.id) {
+            Self.logger.info("sync pull skips locally deleted entry \(entry.id, privacy: .public)")
+            return
+        }
         if let local = try await store.entry(id: entry.id) {
             guard entry.updatedAt > local.updatedAt else { return }
         }
+        guard try await store.activity(id: entry.activityID) != nil else {
+            Self.logger.info("sync pull skips entry \(entry.id, privacy: .public) with missing activity; retrying next pull")
+            return
+        }
         try await store.mergeEntry(entry)
+    }
+
+    // MARK: - Deletion tombstones (cross-device-delete-propagation)
+
+    /// Fetches and applies the relay's deletion tombstones since the
+    /// `deletions` cursor, in server (oldest-first) order. Advances the
+    /// cursor to the max `deleted_at` received, and keeps it unchanged when
+    /// the list is empty (the no-change-keeps-cursor convention). A
+    /// tombstone for an unknown id is a no-op that still advances the
+    /// cursor.
+    private func applyTombstones() async throws {
+        let cursor = try await store.lastSyncedAt(resource: "deletions")
+        let deletions = try await remote.fetchDeletions(since: cursor)
+        for deletion in deletions {
+            try await store.applyDeletionTombstone(deletion)
+        }
+        if let max = deletions.map(\.deletedAt).max() {
+            try await store.setLastSyncedAt(resource: "deletions", date: max)
+        }
+        if !deletions.isEmpty {
+            Self.logger.info("sync applied \(deletions.count) deletion tombstones")
+        }
     }
 
     // MARK: - Outbox drain (idempotent replay, D2)
@@ -290,12 +415,25 @@ final class SyncController: ObservableObject {
 
     /// Adopts the server's current version of a record (keep-latest). Uses
     /// the no-outbox merge path — the relay already holds this version.
+    /// Skipped when the record was deleted locally after the conflicting row
+    /// was queued: adopting would resurrect it, and the queued DELETE row
+    /// converges the relay on its own.
     private func adoptServerVersion(_ row: OutboxRow) async throws {
+        let deleted = try await store.isLocallyDeleted(resource: row.resource, recordID: row.recordID)
+        if deleted {
+            Self.logger.info("sync conflict keeps local deletion of \(row.resource, privacy: .public) \(row.recordID, privacy: .public)")
+            return
+        }
         switch row.resource {
         case "activity":
             let server = try await remote.fetchActivity(id: row.recordID)
             do {
-                try await store.mergeActivity(server)
+                // Translate tags against a fresh snapshot: skipped server
+                // categories would otherwise break the join foreign key here
+                // exactly as in the pull path.
+                let snapshot = try await remote.fetchCategories()
+                let byID = Dictionary(uniqueKeysWithValues: snapshot.map { ($0.id, $0) })
+                try await store.mergeActivity(await resolveActivityForMerge(server, serverCategories: byID))
             } catch AssociationError.invalidCategory {
                 // Keep the current local version; the next pull retries once
                 // the Category snapshot is available.
@@ -312,26 +450,28 @@ final class SyncController: ObservableObject {
     }
 
     /// Re-maps local references (entries, tags) from a losing id to the
-    /// winning id after a name-collision 409. The winning record is merged
-    /// locally first (the relay holds it; the FK on entries requires it to
-    /// exist), and pending outbox payloads are rewritten in place so a later
-    /// drain pushes the corrected references.
+    /// winning id after a name-collision 409. The winning record is fetched
+    /// and merged first (the relay is authoritative; the FK on entries and
+    /// joins requires it to exist), and pending outbox payloads are rewritten
+    /// in place so a later drain pushes the corrected references.
+    ///
+    /// Never synthesizes record content: a winner-fetch failure rethrows, so
+    /// the outbox row stays queued and the next cycle retries with local
+    /// names intact. (A stub named with an id would be LWW-immortal —
+    /// `updated_at = now` beats every later server version — and corrupt
+    /// user-visible names permanently.)
     private func remapReferences(from oldID: String, to newID: String, resource: String) async throws {
         switch resource {
         case "activity":
-            // Merge a stub of the winning activity (the relay is authoritative;
-            // a full pull will replace it with the server's real version).
-            if try await store.activity(id: newID) == nil {
-                try await store.mergeActivity(Activity(
-                    id: newID, name: oldID, createdAt: Date(), updatedAt: Date()
-                ))
-            }
-            let entries = try await store.entries()
-            for entry in entries where entry.activityID == oldID {
-                var updated = entry
-                updated.activityID = newID
-                try await store.updateEntryLocal(updated)
-                try await store.rewriteOutboxPayload(resource: "entry", recordID: entry.id, payload: updated)
+            // The relay is authoritative: fetch the winner, adopt its identity
+            // atomically (tombstone → merge → move entries → remove loser),
+            // then rewrite the moved entries' pending payloads in place.
+            let winner = try await remote.fetchActivity(id: newID)
+            let movedIDs = try await store.remapActivityReferences(from: oldID, to: newID, winner: winner)
+            for id in movedIDs {
+                if let updated = try await store.entry(id: id) {
+                    try await store.rewriteOutboxPayload(resource: "entry", recordID: id, payload: updated)
+                }
             }
         case "category":
             // category_exists recovery (category-management D6): the winner is
@@ -339,18 +479,7 @@ final class SyncController: ObservableObject {
             // requires it to exist), then atomically remap local joins and
             // pending Activity payloads, remove the losing local identity
             // without emitting a delete, and clear the losing create row.
-            let winner: Category
-            do {
-                winner = try await remote.fetchCategory(id: newID)
-            } catch {
-                // The winner fetch failed (e.g. offline during a racing
-                // cycle); fall back to a stub so remapping can proceed and a
-                // full pull replaces it with the server's real version.
-                winner = Category(
-                    id: newID, name: oldID, icon: "tag",
-                    createdAt: Date(), updatedAt: Date()
-                )
-            }
+            let winner = try await remote.fetchCategory(id: newID)
             try await store.remapCategoryReferences(from: oldID, to: newID, winner: winner)
         default:
             break

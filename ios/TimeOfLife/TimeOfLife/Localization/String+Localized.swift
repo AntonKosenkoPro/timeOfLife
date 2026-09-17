@@ -90,6 +90,7 @@ enum L10n: String, CaseIterable {
     case profileEnableSync = "profile.enableSync"
     case profileEnableSyncSubtitle = "profile.enableSyncSubtitle"
     case profileSyncNow = "profile.syncNow"
+    case syncCancel = "sync.cancel"
     case profileSyncing = "profile.syncing"
     case profileLastSynced = "profile.lastSynced"
     case profileSyncError = "profile.syncError"

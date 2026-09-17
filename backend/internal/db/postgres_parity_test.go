@@ -370,3 +370,214 @@ func TestPostgres_ActivityCategory_OrderAndDeletePreservesChildren(t *testing.T)
 		t.Errorf("activity must survive category deletion: %v", err)
 	}
 }
+
+// Parity: every hard DELETE writes one tombstone; deleting an activity with
+// entries writes EXACTLY ONE (the activity's) — cascade-deleted entries get
+// no tombstones.
+func TestPostgres_DeleteWritesTombstones(t *testing.T) {
+	store := newParityStore(t)
+	uid := parityUser(t, store, "pg-tomb@example.com")
+
+	a := parityActivity(t, store, uid, "Gym")
+	c, _, err := store.CreateCategory(context.Background(), Category{
+		ID: uuidV7(), UserID: uid, Name: "Sport", Icon: "tag",
+	})
+	if err != nil {
+		t.Fatalf("CreateCategory: %v", err)
+	}
+	started := time.Date(2026, 7, 27, 9, 0, 0, 0, time.UTC)
+	e, _, err := store.CreateEntry(context.Background(), Entry{
+		ID: uuidV7(), UserID: uid, ActivityID: &a.ID, StartedAt: started,
+	})
+	if err != nil {
+		t.Fatalf("CreateEntry: %v", err)
+	}
+
+	// Delete the entry first — deleting the activity cascades its entries away.
+	if err := store.DeleteEntry(context.Background(), uid, e.ID); err != nil {
+		t.Fatalf("DeleteEntry: %v", err)
+	}
+	if err := store.DeleteCategory(context.Background(), uid, c.ID); err != nil {
+		t.Fatalf("DeleteCategory: %v", err)
+	}
+	if err := store.DeleteActivity(context.Background(), uid, a.ID); err != nil {
+		t.Fatalf("DeleteActivity: %v", err)
+	}
+
+	tombs, err := store.ListDeletions(context.Background(), uid, nil)
+	if err != nil {
+		t.Fatalf("ListDeletions: %v", err)
+	}
+	if len(tombs) != 3 {
+		t.Fatalf("expected 3 tombstones, got %d: %+v", len(tombs), tombs)
+	}
+	byResource := map[string]Tombstone{}
+	for _, tomb := range tombs {
+		byResource[tomb.Resource] = tomb
+	}
+	for resource, wantID := range map[string]string{
+		"activity": a.ID, "category": c.ID, "entry": e.ID,
+	} {
+		tomb, ok := byResource[resource]
+		if !ok {
+			t.Errorf("expected a %s tombstone, got %+v", resource, tombs)
+			continue
+		}
+		if tomb.ID != wantID {
+			t.Errorf("%s tombstone: expected id %q, got %q", resource, wantID, tomb.ID)
+		}
+	}
+
+	// Cascade: exactly one tombstone for an activity delete with entries.
+	a2 := parityActivity(t, store, uid, "Run")
+	cascadeEntryIDs := make([]string, 0, 2)
+	for i := 0; i < 2; i++ {
+		ei, _, err := store.CreateEntry(context.Background(), Entry{
+			ID: uuidV7(), UserID: uid, ActivityID: &a2.ID,
+			StartedAt: started.Add(time.Duration(i+1) * time.Hour),
+		})
+		if err != nil {
+			t.Fatalf("CreateEntry %d: %v", i, err)
+		}
+		cascadeEntryIDs = append(cascadeEntryIDs, ei.ID)
+	}
+	if err := store.DeleteActivity(context.Background(), uid, a2.ID); err != nil {
+		t.Fatalf("DeleteActivity 2: %v", err)
+	}
+	tombs, err = store.ListDeletions(context.Background(), uid, nil)
+	if err != nil {
+		t.Fatalf("ListDeletions 2: %v", err)
+	}
+	activityTombs := 0
+	for _, tomb := range tombs {
+		if tomb.Resource == "activity" {
+			activityTombs++
+		}
+		for _, cascadeID := range cascadeEntryIDs {
+			if tomb.Resource == "entry" && tomb.ID == cascadeID {
+				t.Errorf("cascade-deleted entry must have no tombstone: %+v", tomb)
+			}
+		}
+	}
+	if activityTombs != 2 {
+		t.Errorf("expected 2 activity tombstones (one per user intent), got %d: %+v", activityTombs, tombs)
+	}
+}
+
+// Parity: since-filter and ASC ordering on ListDeletions.
+func TestPostgres_ListDeletions_SinceFilter(t *testing.T) {
+	store := newParityStore(t)
+	uid := parityUser(t, store, "pg-tomb-since@example.com")
+
+	a1 := parityActivity(t, store, uid, "Gym")
+	time.Sleep(5 * time.Millisecond)
+	a2 := parityActivity(t, store, uid, "Read")
+
+	if err := store.DeleteActivity(context.Background(), uid, a1.ID); err != nil {
+		t.Fatalf("DeleteActivity 1: %v", err)
+	}
+	time.Sleep(5 * time.Millisecond)
+	cursor := time.Now().UTC()
+	time.Sleep(5 * time.Millisecond)
+	if err := store.DeleteActivity(context.Background(), uid, a2.ID); err != nil {
+		t.Fatalf("DeleteActivity 2: %v", err)
+	}
+
+	tombs, err := store.ListDeletions(context.Background(), uid, &cursor)
+	if err != nil {
+		t.Fatalf("ListDeletions: %v", err)
+	}
+	if len(tombs) != 1 || tombs[0].ID != a2.ID {
+		t.Errorf("expected only the newer tombstone, got %+v", tombs)
+	}
+
+	future := cursor.Add(time.Hour)
+	tombs, err = store.ListDeletions(context.Background(), uid, &future)
+	if err != nil {
+		t.Fatalf("ListDeletions future: %v", err)
+	}
+	if len(tombs) != 0 {
+		t.Errorf("expected 0 tombstones with a future cursor, got %d", len(tombs))
+	}
+
+	tombs, err = store.ListDeletions(context.Background(), uid, nil)
+	if err != nil {
+		t.Fatalf("ListDeletions full: %v", err)
+	}
+	if len(tombs) != 2 || tombs[0].ID != a1.ID || tombs[1].ID != a2.ID {
+		t.Errorf("expected full list oldest-first, got %+v", tombs)
+	}
+}
+
+// Parity: recreating an id clears its tombstone; a double delete keeps the
+// tombstone and returns ErrNotFound.
+func TestPostgres_RecreateClearsAndDoubleDeleteKeeps(t *testing.T) {
+	store := newParityStore(t)
+	uid := parityUser(t, store, "pg-tomb-recreate@example.com")
+	ctx := context.Background()
+
+	a := parityActivity(t, store, uid, "Gym")
+	if err := store.DeleteActivity(ctx, uid, a.ID); err != nil {
+		t.Fatalf("DeleteActivity: %v", err)
+	}
+	// Recreate the same id clears the tombstone.
+	if _, created, err := store.CreateActivity(ctx, Activity{
+		ID: a.ID, UserID: uid, Name: "Gym",
+	}, nil); err != nil || !created {
+		t.Fatalf("recreate: created=%v err=%v", created, err)
+	}
+	tombs, err := store.ListDeletions(ctx, uid, nil)
+	if err != nil {
+		t.Fatalf("ListDeletions: %v", err)
+	}
+	if len(tombs) != 0 {
+		t.Errorf("expected recreation to clear the tombstone, got %+v", tombs)
+	}
+
+	// Double delete: ErrNotFound, tombstone kept (re-created then deleted).
+	if err := store.DeleteActivity(ctx, uid, a.ID); err != nil {
+		t.Fatalf("DeleteActivity (recreated row): %v", err)
+	}
+	if err := store.DeleteActivity(ctx, uid, a.ID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("expected ErrNotFound on second delete, got %v", err)
+	}
+	tombs, err = store.ListDeletions(ctx, uid, nil)
+	if err != nil {
+		t.Fatalf("ListDeletions 2: %v", err)
+	}
+	if len(tombs) != 1 || tombs[0].Resource != "activity" || tombs[0].ID != a.ID {
+		t.Errorf("expected exactly one activity tombstone kept, got %+v", tombs)
+	}
+}
+
+// Parity: tombstones are scoped per user.
+func TestPostgres_ListDeletions_UserScoping(t *testing.T) {
+	store := newParityStore(t)
+	uidA := parityUser(t, store, "pg-tomb-a@example.com")
+	uidB := parityUser(t, store, "pg-tomb-b@example.com")
+	ctx := context.Background()
+
+	aA := parityActivity(t, store, uidA, "Mine")
+	aB := parityActivity(t, store, uidB, "Theirs")
+	if err := store.DeleteActivity(ctx, uidA, aA.ID); err != nil {
+		t.Fatalf("DeleteActivity A: %v", err)
+	}
+	if err := store.DeleteActivity(ctx, uidB, aB.ID); err != nil {
+		t.Fatalf("DeleteActivity B: %v", err)
+	}
+
+	tombsA, err := store.ListDeletions(ctx, uidA, nil)
+	if err != nil {
+		t.Fatalf("ListDeletions A: %v", err)
+	}
+	if len(tombsA) != 1 || tombsA[0].ID != aA.ID {
+		t.Errorf("user A: expected only their tombstone, got %+v", tombsA)
+	}
+	tombsB, err := store.ListDeletions(ctx, uidB, nil)
+	if err != nil {
+		t.Fatalf("ListDeletions B: %v", err)
+	}
+	if len(tombsB) != 1 || tombsB[0].ID != aB.ID {
+		t.Errorf("user B: expected only their tombstone, got %+v", tombsB)
+	}
+}

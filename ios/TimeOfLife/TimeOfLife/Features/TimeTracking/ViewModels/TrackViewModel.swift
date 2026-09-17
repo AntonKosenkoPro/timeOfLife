@@ -49,20 +49,42 @@ final class TrackViewModel: ObservableObject, ActivitySearchHosting {
     // MARK: - Lifecycle
 
     /// Loads the catalog and restores a persisted running timer (R2: the
-    /// running timer survives app crashes). Call on appear.
+    /// running timer survives app crashes). Reconciles an externally stopped
+    /// timer: a `.running` state with no persisted timer (stopped from the
+    /// compact timer on another destination) returns to `.ready`/`.idle`
+    /// instead of counting elapsed time forever. Call on appear.
     func load() async {
         do {
             activities = try await service.store.activities()
             categories = Dictionary(uniqueKeysWithValues: try await service.store.categories().map { ($0.id, $0) })
-            if let running = try await service.runningTimerState(),
-               let activityID = running.activityID,
+            let persisted = try await service.runningTimerState()
+            if let persisted, let activityID = persisted.activityID,
                let activity = try await service.store.activity(id: activityID) {
-                let startedAt = running.startedAt ?? Date()
+                let startedAt = persisted.startedAt ?? Date()
                 state = .running(activity, startedAt: startedAt)
                 startTicker(from: startedAt)
+            } else if case let .running(activity, _) = state {
+                await reconcileExternalStop(activity: activity)
             }
         } catch {
             errorMessage = L10n.text(in: .default, code: "error.unknown")
+        }
+    }
+
+    /// Leaves a `.running` state whose persisted timer is gone (stopped from
+    /// the compact timer): stops the elapsed ticker, re-enables the idle
+    /// timer, resets elapsed to zero, and returns to `.ready` for the same
+    /// activity — or `.idle` when the activity no longer exists.
+    /// `.saving`/`.error` are deliberately untouched: mid-flight own-stop
+    /// states that self-resolve through their async paths.
+    private func reconcileExternalStop(activity: Activity) async {
+        stopTicker()
+        UIApplication.shared.isIdleTimerDisabled = false
+        elapsed = 0
+        if let resolved = try? await service.store.activity(id: activity.id) {
+            state = .ready(resolved)
+        } else {
+            state = .idle
         }
     }
 

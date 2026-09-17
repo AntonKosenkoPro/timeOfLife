@@ -18,6 +18,7 @@ final class MockCatalogRepository: CatalogSending, @unchecked Sendable {
     private let lock = NSLock()
     private var _calls: [Call] = []
     private var _fetchedModifiedSince: [Date?] = []
+    private var _fetchedDeletionsSince: [Date?] = []
 
     var calls: [Call] {
         lock.lock(); defer { lock.unlock() }
@@ -29,16 +30,23 @@ final class MockCatalogRepository: CatalogSending, @unchecked Sendable {
         return _fetchedModifiedSince
     }
 
+    var fetchedDeletionsSince: [Date?] {
+        lock.lock(); defer { lock.unlock() }
+        return _fetchedDeletionsSince
+    }
+
     func clearLog() {
         lock.lock()
         _calls = []
         _fetchedModifiedSince = []
+        _fetchedDeletionsSince = []
         lock.unlock()
     }
 
     var activitiesResult: [Activity] = []
     var categoriesResult: [TimeOfLife.Category] = []
     var entriesResult: [TimeEntry] = []
+    var deletionsResult: [Deletion] = []
 
     var fetchActivityHandler: ((String) throws -> Activity)?
     var fetchCategoryHandler: ((String) throws -> TimeOfLife.Category)?
@@ -65,6 +73,12 @@ final class MockCatalogRepository: CatalogSending, @unchecked Sendable {
         lock.unlock()
     }
 
+    private func recordDeletionsPull(_ since: Date?) {
+        lock.lock()
+        _fetchedDeletionsSince.append(since)
+        lock.unlock()
+    }
+
     func fetchActivities(modifiedSince: Date?) async throws -> [Activity] {
         record("fetchActivities", "activity")
         recordPull(modifiedSince)
@@ -80,6 +94,12 @@ final class MockCatalogRepository: CatalogSending, @unchecked Sendable {
         record("fetchEntries", "entry")
         recordPull(modifiedSince)
         return entriesResult
+    }
+
+    func fetchDeletions(since: Date?) async throws -> [Deletion] {
+        record("fetchDeletions", "deletion")
+        recordDeletionsPull(since)
+        return deletionsResult
     }
 
     func fetchActivity(id: String) async throws -> Activity {

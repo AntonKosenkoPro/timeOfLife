@@ -63,5 +63,5 @@ enum AppConfig {
 
 @available(iOS 14.0, *)
 private extension Logger {
-    static let appConfig = Logger(subsystem: "com.antonkosenko.timeoflife", category: "AppConfig")
+    static let appConfig = Logger(subsystem: "com.antonkosenko.timeoflifeapp", category: "AppConfig")
 }

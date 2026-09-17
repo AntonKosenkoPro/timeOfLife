@@ -8,6 +8,10 @@ import SwiftUI
 /// editor. All mutations go through `LocalStore`.
 struct ManageCategoriesView: View {
     @EnvironmentObject var container: AppContainer
+    /// Observed directly: `container` publishes nothing, so
+    /// `.onChange(of: container.syncController.status)` below would never
+    /// fire after the first render (same staleness as Profile's status row).
+    @EnvironmentObject var sync: SyncController
     @Environment(\.undoManager)
     private var undoManager
     @StateObject private var vm: ManageCategoriesViewModel
@@ -102,14 +106,15 @@ struct ManageCategoriesView: View {
                     }
                 }
             )
-            .environmentObject(container)
+        .environmentObject(container)
+        .environmentObject(container.syncController)
         }
         .task {
             await vm.load()
             await vm.registerSystemUndo(with: undoManager)
         }
         .background(ShakeFirstResponderHost(undoManager: undoManager))
-        .onChange(of: container.syncController.status) { status in
+        .onChange(of: sync.status) { status in
             if case .idle = status {
                 Task { await vm.load() }
             }

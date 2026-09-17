@@ -483,6 +483,42 @@ struct LocalStoreTests {
         #expect(updateRow.resource == "category")
     }
 
+    @Test("renaming a UUID-named row heals it and enqueues an update")
+    func renameHealsUuidNamedRow() async throws {
+        let store = try makeStore()
+        // Poisoned shape left by the old remap stub: the winner id carries a
+        // UUID name and no outbox row (the losing create row was cleared).
+        try await store.createCategory(TimeOfLife.Category(
+            id: "server-id", name: "0193a5c2-7b1e-7c8d-9e8f-605663513c5a", icon: "tag"
+        ))
+        for row in try await store.outboxRows() {
+            try await store.removeOutboxRow(id: row.id)
+        }
+
+        // The user-facing repair is rename (never delete — that would push a
+        // real delete of the winner). The rename bumps updated_at, so the
+        // LWW push adopts the real name on both sides.
+        let outcome = try await store.updateCategory(
+            id: "server-id",
+            draft: CategoryDraft(name: "Sport", icon: .figureRun)
+        )
+        guard case let .saved(updated) = outcome else {
+            Issue.record("expected saved, got \(outcome)")
+            return
+        }
+        #expect(updated.name == "Sport")
+
+        let rows = try await store.outboxRows()
+        #expect(rows.count == 1)
+        let updateRow = try #require(rows.first)
+        #expect(updateRow.resource == "category")
+        #expect(updateRow.op == "update")
+        #expect(updateRow.recordID == "server-id")
+        let payload = try #require(updateRow.payload)
+        let decoded = try JSONDecoder().decode(TimeOfLife.Category.self, from: Data(payload.utf8))
+        #expect(decoded.name == "Sport")
+    }
+
     @Test("stale updateEntry returns false and changes nothing")
     func staleEntryUpdateIsRejected() async throws {
         let store = try makeStore()
@@ -791,6 +827,149 @@ struct LocalStoreTests {
         #expect(rows[0].createdAt <= rows[1].createdAt)
         #expect(rows[1].createdAt <= rows[2].createdAt)
     }
+
+    // MARK: - Deletion tombstones (cross-device-delete-propagation)
+
+    @Test("activity tombstone cascades entries and joins without an outbox row and drops pending creates")
+    func activityTombstoneCascades() async throws {
+        let store = try makeStore()
+        try await store.createCategory(makeCategory(id: "cat-1", name: "Work"))
+        let outcome = try await store.createOrResolveActivity(named: "Coding", categoryIDs: ["cat-1"])
+        guard case let .created(activity) = outcome else {
+            Issue.record("expected created outcome, got \(outcome)")
+            return
+        }
+        try await store.createEntry(makeEntry(id: "entry-1", activityID: activity.id))
+
+        // Pending create rows exist for the activity and its entry.
+        #expect(try await store.outboxRows().count == 3)
+
+        try await store.applyDeletionTombstone(
+            Deletion(resource: "activity", recordID: activity.id, deletedAt: Date(timeIntervalSinceReferenceDate: 9_000))
+        )
+
+        #expect(try await store.activity(id: activity.id) == nil)
+        #expect(try await store.entry(id: "entry-1") == nil)
+        #expect(try await store.category(id: "cat-1") != nil)
+        // Only the category's create row survives — the activity's and the
+        // entry's pending create rows were dropped.
+        let rows = try await store.outboxRows()
+        #expect(rows.count == 1)
+        #expect(rows.first?.resource == "category")
+    }
+
+    @Test("entry tombstone removes the row and drops its pending create/update rows")
+    func entryTombstoneDropsPendingRows() async throws {
+        let store = try makeStore()
+        try await store.createActivity(makeActivity())
+        try await store.createEntry(makeEntry())
+        try? await Task.sleep(nanoseconds: 20_000_000)
+        _ = try await store.updateEntry(makeEntry(updatedAt: Date(timeIntervalSinceReferenceDate: 5_000)))
+
+        try await store.applyDeletionTombstone(
+            Deletion(resource: "entry", recordID: "entry-1", deletedAt: Date(timeIntervalSinceReferenceDate: 9_000))
+        )
+
+        #expect(try await store.entry(id: "entry-1") == nil)
+        // The activity's create row survives; only the entry's rows were dropped.
+        let rows = try await store.outboxRows()
+        #expect(rows.count == 1)
+        #expect(rows.first?.resource == "activity")
+    }
+
+    @Test("category tombstone removes joins and the row while the activity survives untagged")
+    func categoryTombstoneRemovesJoinsOnly() async throws {
+        let store = try makeStore()
+        try await store.createCategory(makeCategory(id: "cat-1", name: "Work"))
+        let outcome = try await store.createOrResolveActivity(named: "Coding", categoryIDs: ["cat-1"])
+        guard case let .created(activity) = outcome else {
+            Issue.record("expected created outcome, got \(outcome)")
+            return
+        }
+
+        try await store.applyDeletionTombstone(
+            Deletion(resource: "category", recordID: "cat-1", deletedAt: Date(timeIntervalSinceReferenceDate: 9_000))
+        )
+
+        #expect(try await store.category(id: "cat-1") == nil)
+        let stored = try await store.activity(id: activity.id)
+        #expect(stored?.categoryIDs.isEmpty == true)
+        // The activity's create row is untouched.
+        let rows = try await store.outboxRows()
+        #expect(rows.count == 1)
+        #expect(rows.first?.resource == "activity")
+        #expect(rows.first?.recordID == activity.id)
+    }
+
+    @Test("a pending DELETE outbox row survives tombstone application")
+    func tombstoneKeepsPendingDeleteRow() async throws {
+        let store = try makeStore()
+        try await store.createActivity(makeActivity())
+        try? await Task.sleep(nanoseconds: 20_000_000)
+        try await store.deleteActivity(id: "act-1")
+        // Before: one activity-create row (drained? no) — the delete row plus
+        // the original create row. The tombstone must keep the delete row.
+        try await store.applyDeletionTombstone(
+            Deletion(resource: "activity", recordID: "act-1", deletedAt: Date(timeIntervalSinceReferenceDate: 9_000))
+        )
+
+        let rows = try await store.outboxRows()
+        #expect(rows.contains { $0.resource == "activity" && $0.recordID == "act-1" && $0.op == "delete" })
+        // The pending create row was dropped; the delete row is the only survivor.
+        #expect(rows.count == 1)
+        #expect(rows.first?.op == "delete")
+    }
+
+    @Test("a clean local row newer than the tombstone is kept (R1)")
+    func staleTombstoneKeepsCleanNewerRow() async throws {
+        let store = try makeStore()
+        // A clean relay-merged row (no outbox rows) recreated after the
+        // tombstone's deleted_at.
+        let recreated = makeActivity(updatedAt: Date(timeIntervalSinceReferenceDate: 8_000))
+        try await store.mergeActivity(recreated)
+
+        try await store.applyDeletionTombstone(
+            Deletion(resource: "activity", recordID: "act-1", deletedAt: Date(timeIntervalSinceReferenceDate: 5_000))
+        )
+
+        #expect(try await store.activity(id: "act-1") == recreated)
+        #expect(try await store.outboxRows().isEmpty)
+    }
+
+    @Test("a dirty row older than the tombstone is still deleted and its pending rows dropped")
+    func tombstoneDeletesDirtyRow() async throws {
+        let store = try makeStore()
+        try await store.createActivity(makeActivity(updatedAt: Date(timeIntervalSinceReferenceDate: 8_000)))
+        try? await Task.sleep(nanoseconds: 20_000_000)
+        _ = try await store.updateActivity(makeActivity(name: "Coding+", updatedAt: Date(timeIntervalSinceReferenceDate: 9_000)))
+        try? await Task.sleep(nanoseconds: 20_000_000)
+        let entry = makeEntry(updatedAt: Date(timeIntervalSinceReferenceDate: 9_000))
+        try await store.createEntry(entry)
+
+        try await store.applyDeletionTombstone(
+            Deletion(resource: "activity", recordID: "act-1", deletedAt: Date(timeIntervalSinceReferenceDate: 7_000))
+        )
+
+        #expect(try await store.activity(id: "act-1") == nil)
+        #expect(try await store.entry(id: entry.id) == nil)
+        // Even though the row was newer than the tombstone, the pending
+        // update row made it dirty — delete-wins applies.
+        #expect(try await store.outboxRows().isEmpty)
+    }
+
+    @Test("a tombstone for an unknown id is a no-op")
+    func unknownIDTombstoneIsNoOp() async throws {
+        let store = try makeStore()
+        try await store.createActivity(makeActivity())
+
+        try await store.applyDeletionTombstone(
+            Deletion(resource: "category", recordID: "unknown", deletedAt: Date(timeIntervalSinceReferenceDate: 9_000))
+        )
+
+        #expect(try await store.activity(id: "act-1") != nil)
+        let rows = try await store.outboxRows()
+        #expect(rows.count == 1)
+    }
 }
 
 @Suite("LocalStore Starter Seeding")
@@ -898,6 +1077,31 @@ struct LocalStoreSeedingTests {
             return
         }
         #expect(seeded.map(\.name) == ruNames)
+    }
+
+    @Test("seeding skips names already present instead of failing the whole set")
+    func seedsSkipExistingNames() async throws {
+        let store = try makeStore()
+        // Relay-merged rows present without the marker (erase-then-sync shape).
+        try await store.createCategory(
+            TimeOfLife.Category(id: "server-sport", name: "Sport", icon: "figure.run")
+        )
+
+        let result = try await store.seedStarterCategoriesIfNeeded(names: enNames)
+
+        guard case let .seeded(seeded) = result else {
+            Issue.record("expected seeded outcome")
+            return
+        }
+        // Six inserted; the present name kept its identity and got no new row.
+        #expect(seeded.count == 6)
+        #expect(seeded.allSatisfy { $0.name != "Sport" })
+        #expect(try await store.category(id: "server-sport")?.name == "Sport")
+        let stored = try await store.categories()
+        #expect(stored.count == 7)
+        let rows = try await store.outboxRows()
+        #expect(rows.count == 7)
+        #expect(try await store.categoryStartersSeeded())
     }
 
     @Test("seeded names persist as ordinary records and do not auto-rename")

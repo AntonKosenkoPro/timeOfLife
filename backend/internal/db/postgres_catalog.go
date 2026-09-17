@@ -9,6 +9,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // ---------- Postgres catalog helpers ----------
@@ -298,6 +299,12 @@ func (s *PostgresStore) CreateActivity(ctx context.Context, a Activity, category
 	if err := s.pgReplaceActivityCategoriesTx(ctx, tx, a.UserID, a.ID, categoryIDs); err != nil {
 		return Activity{}, false, err
 	}
+	// A recreation clears its stale tombstone (harmless when none exists).
+	if _, err := tx.Exec(ctx, `
+		DELETE FROM tombstones WHERE user_id = $1 AND resource = 'activity' AND record_id = $2
+	`, a.UserID, a.ID); err != nil {
+		return Activity{}, false, fmt.Errorf("clear activity tombstone: %w", err)
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return Activity{}, false, fmt.Errorf("create activity commit: %w", err)
 	}
@@ -416,6 +423,9 @@ func (s *PostgresStore) DeleteActivity(ctx context.Context, userID, id string) e
 	if res.RowsAffected() == 0 {
 		return fmt.Errorf("delete activity: %w", ErrNotFound)
 	}
+	if err := pgUpsertTombstone(ctx, tx, userID, "activity", id); err != nil {
+		return err
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("delete activity commit: %w", err)
 	}
@@ -481,6 +491,10 @@ func (s *PostgresStore) CreateCategory(ctx context.Context, c Category) (Categor
 			return Category{}, false, fmt.Errorf("create category: %w", ErrCategoryExists)
 		}
 		return Category{}, false, fmt.Errorf("create category: %w", err)
+	}
+	// A recreation clears its stale tombstone (harmless when none exists).
+	if err := pgClearTombstone(ctx, s.pool, c.UserID, "category", c.ID); err != nil {
+		return Category{}, false, err
 	}
 	created, err := s.pgGetCategoryRow(ctx, c.UserID, c.ID)
 	if err != nil {
@@ -581,6 +595,9 @@ func (s *PostgresStore) DeleteCategory(ctx context.Context, userID, id string) e
 	}
 	if res.RowsAffected() == 0 {
 		return fmt.Errorf("delete category: %w", ErrNotFound)
+	}
+	if err := pgUpsertTombstone(ctx, tx, userID, "category", id); err != nil {
+		return err
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("delete category commit: %w", err)
@@ -756,6 +773,12 @@ func (s *PostgresStore) CreateEntry(ctx context.Context, e Entry) (Entry, bool, 
 	`, e.StartedAt, *e.ActivityID, e.UserID); err != nil {
 		return Entry{}, false, fmt.Errorf("bump activity last_used_at: %w", err)
 	}
+	// A recreation clears its stale tombstone (harmless when none exists).
+	if _, err := tx.Exec(ctx, `
+		DELETE FROM tombstones WHERE user_id = $1 AND resource = 'entry' AND record_id = $2
+	`, e.UserID, e.ID); err != nil {
+		return Entry{}, false, fmt.Errorf("clear entry tombstone: %w", err)
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return Entry{}, false, fmt.Errorf("create entry commit: %w", err)
 	}
@@ -845,10 +868,70 @@ func (s *PostgresStore) DeleteEntry(ctx context.Context, userID, id string) erro
 	if res.RowsAffected() == 0 {
 		return fmt.Errorf("delete entry: %w", ErrNotFound)
 	}
+	if err := pgUpsertTombstone(ctx, tx, userID, "entry", id); err != nil {
+		return err
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("delete entry commit: %w", err)
 	}
 	return nil
+}
+
+// pgUpsertTombstone records (or refreshes) a deletion tombstone for one hard
+// delete, inside the caller's transaction. Cascade-deleted children get no
+// tombstones — one row per user intent.
+func pgUpsertTombstone(ctx context.Context, tx pgx.Tx, userID, resource, recordID string) error {
+	_, err := tx.Exec(ctx, `
+		INSERT INTO tombstones (user_id, resource, record_id, deleted_at)
+		VALUES ($1, $2, $3, $4)
+		ON CONFLICT (user_id, resource, record_id)
+		DO UPDATE SET deleted_at = excluded.deleted_at
+	`, userID, resource, recordID, time.Now().UTC())
+	if err != nil {
+		return fmt.Errorf("upsert tombstone: %w", err)
+	}
+	return nil
+}
+
+// pgClearTombstone removes a record's tombstone so a recreation never meets
+// its own stale tombstone. Harmless when no tombstone exists.
+func pgClearTombstone(ctx context.Context, pool *pgxpool.Pool, userID, resource, recordID string) error {
+	if _, err := pool.Exec(ctx, `
+		DELETE FROM tombstones WHERE user_id = $1 AND resource = $2 AND record_id = $3
+	`, userID, resource, recordID); err != nil {
+		return fmt.Errorf("clear tombstone: %w", err)
+	}
+	return nil
+}
+
+// ListDeletions returns the user's tombstones with deleted_at > since
+// (nil/zero = all), ordered by deleted_at ASC.
+func (s *PostgresStore) ListDeletions(ctx context.Context, userID string, since *time.Time) ([]Tombstone, error) {
+	if since != nil && since.IsZero() {
+		since = nil
+	}
+	rows, err := s.pool.Query(ctx, `
+		SELECT resource, record_id, deleted_at
+		FROM tombstones
+		WHERE user_id = $1 AND ($2::timestamptz IS NULL OR deleted_at > $2)
+		ORDER BY deleted_at ASC
+	`, userID, since)
+	if err != nil {
+		return nil, fmt.Errorf("list deletions: %w", err)
+	}
+	defer rows.Close()
+	var out []Tombstone
+	for rows.Next() {
+		var t Tombstone
+		if err := rows.Scan(&t.Resource, &t.ID, &t.DeletedAt); err != nil {
+			return nil, fmt.Errorf("list deletions scan: %w", err)
+		}
+		out = append(out, t)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list deletions rows: %w", err)
+	}
+	return out, nil
 }
 
 // pgIsUniqueViolation reports whether err is a Postgres unique-constraint failure.

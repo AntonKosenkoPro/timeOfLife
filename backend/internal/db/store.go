@@ -85,6 +85,13 @@ type Entry struct {
 	UpdatedAt       time.Time     `json:"updated_at"`
 }
 
+// Tombstone records a hard delete that other devices must apply.
+type Tombstone struct {
+	Resource  string    `json:"resource"`
+	ID        string    `json:"id"`
+	DeletedAt time.Time `json:"deleted_at"`
+}
+
 // EntryFilter carries the optional GET /entries query parameters.
 type EntryFilter struct {
 	From          *time.Time // include entries with started_at >= From
@@ -255,6 +262,12 @@ type Store interface {
 
 	// DeleteEntry hard-deletes an entry. Returns ErrNotFound if missing.
 	DeleteEntry(ctx context.Context, userID, id string) error
+
+	// --- Deletion tombstones ---
+
+	// ListDeletions returns the user's tombstones with deleted_at > since
+	// (nil/zero = all), ordered by deleted_at ASC.
+	ListDeletions(ctx context.Context, userID string, since *time.Time) ([]Tombstone, error)
 
 	// Close closes the database connection.
 	Close() error

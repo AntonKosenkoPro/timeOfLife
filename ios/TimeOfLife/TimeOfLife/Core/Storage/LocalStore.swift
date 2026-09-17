@@ -17,7 +17,7 @@ import GRDB
 /// once since boot.
 actor LocalStore {
     /// The App Group shared container identifier (local-first-store spec).
-    static let appGroupID = "group.com.antonkosenko.timeoflife"
+    static let appGroupID = "group.com.antonkosenko.timeoflifeapp"
 
     /// The database file name inside the App Group container.
     static let databaseFileName = "timeoflife.sqlite"
@@ -239,6 +239,11 @@ actor LocalStore {
     /// Clearing all local data removes the marker, so the next new local
     /// dataset receives a new starter set.
     ///
+    /// Names already present (normalized match — e.g. relay-merged rows after
+    /// an erase) are skipped, not re-inserted: a blind insert would violate
+    /// the normalized-name unique index and abort the whole seeding, leaving
+    /// the dataset seedless with no error.
+    ///
     /// - Parameters:
     ///   - names: The seven localized starter names in the active supported
     ///     language, in `starterCategoryIcons` order. Materialized once at
@@ -258,6 +263,9 @@ actor LocalStore {
             }
             var seeded: [Category] = []
             for (index, icon) in Self.starterCategoryIcons.enumerated() {
+                if try Self.fetchCategoryByName(db, name: names[index]) != nil {
+                    continue
+                }
                 let category = Category(
                     id: recordIDGenerator.newID(),
                     name: names[index],
@@ -600,6 +608,49 @@ actor LocalStore {
                 arguments: [activity.id, activity.name, activity.notes, activity.lastUsedAt, activity.createdAt, activity.updatedAt]
             )
             try Self.replaceActivityCategories(db: db, activityID: activity.id, categoryIDs: activity.categoryIDs)
+        }
+    }
+
+    /// Atomically adopts a winning Activity identity after a relay
+    /// `activity_exists` response (sync-client never-synthesize rule).
+    /// The losing row is renamed to a collision-proof tombstone BEFORE the
+    /// winner is inserted — the normalized-name unique index would otherwise
+    /// turn the merge into a constraint failure. Entries move to the winner
+    /// while it exists (foreign keys stay enforced throughout); the loser and
+    /// its joins are then removed. No outbox row is ever created; the losing
+    /// create row is cleared separately by the caller. The tombstone never
+    /// escapes the transaction, so a crash can never leave a UUID-named row
+    /// behind. Returns the moved entry ids so the caller can rewrite their
+    /// pending outbox payloads.
+    func remapActivityReferences(from oldID: String, to newID: String, winner: Activity) throws -> [String] {
+        try dbQueue.write { db in
+            try db.execute(
+                sql: "UPDATE activities SET name = ?, updated_at = ? WHERE id = ?",
+                arguments: [oldID, winner.updatedAt, oldID]
+            )
+            try db.execute(
+                sql: """
+                    INSERT INTO activities (id, name, notes, last_used_at, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(id) DO UPDATE SET
+                        name = excluded.name,
+                        notes = excluded.notes,
+                        last_used_at = excluded.last_used_at,
+                        updated_at = excluded.updated_at
+                    """,
+                arguments: [winner.id, winner.name, winner.notes, winner.lastUsedAt, winner.createdAt, winner.updatedAt]
+            )
+            try Self.replaceActivityCategories(db: db, activityID: winner.id, categoryIDs: winner.categoryIDs)
+            let movedIDs = try String.fetchAll(db, sql: """
+                SELECT id FROM entries WHERE activity_id = ? ORDER BY id
+                """, arguments: [oldID])
+            try db.execute(
+                sql: "UPDATE entries SET activity_id = ? WHERE activity_id = ?",
+                arguments: [newID, oldID]
+            )
+            try db.execute(sql: "DELETE FROM activity_categories WHERE activity_id = ?", arguments: [oldID])
+            try db.execute(sql: "DELETE FROM activities WHERE id = ?", arguments: [oldID])
+            return movedIDs
         }
     }
 
@@ -1131,6 +1182,133 @@ actor LocalStore {
         }
     }
 
+    // MARK: - Local deletion tombstones (delete-wins on pull)
+
+    /// Whether `(resource, recordID)` has a pending outbox DELETE: a
+    /// committed local deletion that has not reached the relay yet. A pull
+    /// that runs before the drain pushes it (first-sync is pull-first) still
+    /// sees the record on the relay and must not merge it back.
+    func hasPendingDelete(resource: String, recordID: String) throws -> Bool {
+        try dbQueue.read { db in
+            let count = try Int.fetchOne(db, sql: """
+                SELECT COUNT(*) FROM outbox
+                WHERE resource = ? AND record_id = ? AND op = 'delete'
+                """, arguments: [resource, recordID]) ?? 0
+            return count > 0
+        }
+    }
+
+    /// Whether `(resource, recordID)` sits in the durable undo buffer: a
+    /// deletion the user can still undo, with no outbox row yet. The relay
+    /// still holds the record, so an unguarded pull would resurrect it and
+    /// the later commit would leave a permanent zombie behind.
+    func isBufferedForDeletion(resource: String, recordID: String) throws -> Bool {
+        try dbQueue.read { db in
+            let rows = try UndoBufferRow.fetchAll(db, sql: "SELECT * FROM undo_buffer")
+            for row in rows {
+                guard let data = row.payload.data(using: .utf8),
+                      let snapshot = try? JSONDecoder().decode(DeletionSnapshot.self, from: data),
+                      snapshot.records.contains(where: { $0.resource == resource && $0.recordID == recordID })
+                else { continue }
+                return true
+            }
+            return false
+        }
+    }
+
+    /// Whether a pull-merge must skip this record: the user deleted it
+    /// locally (buffered undoable deletion or committed outbox delete) and
+    /// the relay has not converged yet. Undo restores the row and clears the
+    /// buffer, and a successful drain clears the outbox row — both lift the
+    /// guard, so newer server versions merge normally afterwards.
+    func isLocallyDeleted(resource: String, recordID: String) throws -> Bool {
+        try hasPendingDelete(resource: resource, recordID: recordID)
+            || isBufferedForDeletion(resource: resource, recordID: recordID)
+    }
+
+    /// Applies one relay deletion tombstone (cross-device-delete-propagation):
+    /// removes the local row — entries and join rows cascade for activities —
+    /// WITHOUT creating an outbox row (the relay already lacks the record),
+    /// and drops every pending create/update outbox row for the affected ids
+    /// (an activity id plus its entry ids; the single id otherwise). Pending
+    /// DELETE rows are left untouched — the drain converges them via the
+    /// existing 404-as-success rule. A clean local row newer than the
+    /// tombstone (`updated_at > deleted_at`, no pending create/update) is
+    /// kept: a stale tombstone after a recreation (R1). An unknown id is a
+    /// no-op.
+    func applyDeletionTombstone(_ deletion: Deletion) throws {
+        try dbQueue.write { db in
+            switch deletion.resource {
+            case "activity":
+                let entryIDs = try String.fetchAll(db, sql: """
+                    SELECT id FROM entries WHERE activity_id = ? ORDER BY id
+                    """, arguments: [deletion.recordID])
+                if let local = try Self.fetchActivity(db, id: deletion.recordID),
+                   try !Self.hasPendingCreateOrUpdate(db, resource: "activity", recordID: local.id),
+                   local.updatedAt > deletion.deletedAt {
+                    return // R1: the recreation already won.
+                }
+                try db.execute(sql: "DELETE FROM entries WHERE activity_id = ?", arguments: [deletion.recordID])
+                try db.execute(sql: "DELETE FROM activity_categories WHERE activity_id = ?", arguments: [deletion.recordID])
+                try db.execute(sql: "DELETE FROM activities WHERE id = ?", arguments: [deletion.recordID])
+                try Self.dropPendingCreateOrUpdate(db, resource: "activity", recordID: deletion.recordID)
+                for id in entryIDs {
+                    try Self.dropPendingCreateOrUpdate(db, resource: "entry", recordID: id)
+                }
+            case "entry":
+                if let row = try Row.fetchOne(db, sql: """
+                    SELECT updated_at FROM entries WHERE id = ?
+                    """, arguments: [deletion.recordID]),
+                   try !Self.hasPendingCreateOrUpdate(db, resource: "entry", recordID: deletion.recordID),
+                   let updatedAt: Date = row["updated_at"],
+                   updatedAt > deletion.deletedAt {
+                    return // R1: the recreation already won.
+                }
+                try db.execute(sql: "DELETE FROM entries WHERE id = ?", arguments: [deletion.recordID])
+                try Self.dropPendingCreateOrUpdate(db, resource: "entry", recordID: deletion.recordID)
+            case "category":
+                if let local = try Category.fetchOne(db, key: deletion.recordID),
+                   try !Self.hasPendingCreateOrUpdate(db, resource: "category", recordID: local.id),
+                   local.updatedAt > deletion.deletedAt {
+                    return // R1: the recreation already won.
+                }
+                try db.execute(sql: "DELETE FROM activity_categories WHERE category_id = ?", arguments: [deletion.recordID])
+                try db.execute(sql: "DELETE FROM categories WHERE id = ?", arguments: [deletion.recordID])
+                try Self.dropPendingCreateOrUpdate(db, resource: "category", recordID: deletion.recordID)
+            default:
+                break
+            }
+        }
+    }
+
+    /// Whether `(resource, record_id)` has a pending create or update outbox
+    /// row (an unpushed local mutation that the relay does not know yet).
+    private static func hasPendingCreateOrUpdate(
+        _ db: Database,
+        resource: String,
+        recordID: String
+    ) throws -> Bool {
+        let count = try Int.fetchOne(db, sql: """
+            SELECT COUNT(*) FROM outbox
+            WHERE resource = ? AND record_id = ? AND op IN ('create', 'update')
+            """, arguments: [resource, recordID]) ?? 0
+        return count > 0
+    }
+
+    /// Removes every pending create/update outbox row for
+    /// `(resource, record_id)`. Pending DELETE rows are left alone: the drain
+    /// converges them via the existing 404-as-success rule.
+    private static func dropPendingCreateOrUpdate(
+        _ db: Database,
+        resource: String,
+        recordID: String
+    ) throws {
+        try db.execute(
+            sql: "DELETE FROM outbox WHERE resource = ? AND record_id = ? AND op IN ('create', 'update')",
+            arguments: [resource, recordID]
+        )
+    }
+
     /// Rewrites the payload of every pending outbox row for (resource,
     /// record_id) — used after a name-collision remap so a later drain pushes
     /// the corrected reference instead of the stale one.
@@ -1149,24 +1327,7 @@ actor LocalStore {
         }
     }
 
-    /// Updates an entry row locally WITHOUT enqueuing an outbox row — used by
-    /// sync conflict remapping, where the pending outbox payload is rewritten
-    /// in place instead (the record has not been pushed yet).
-    func updateEntryLocal(_ entry: TimeEntry) throws {
-        try dbQueue.write { db in
-            try db.execute(
-                sql: """
-                    UPDATE entries
-                    SET activity_id = ?, started_at = ?, ended_at = ?, duration_seconds = ?, updated_at = ?
-                    WHERE id = ?
-                    """,
-                arguments: [entry.activityID, entry.startedAt, entry.endedAt, entry.durationSeconds, entry.updatedAt, entry.id]
-            )
-        }
-    }
-
-    /// Updates an activity row locally WITHOUT enqueuing an outbox row — used
-    /// by sync conflict remapping (see `updateEntryLocal`).
+    /// Updates an activity row locally WITHOUT enqueuing an outbox row.
     func updateActivityLocal(_ activity: Activity) throws {
         try dbQueue.write { db in
             try db.execute(

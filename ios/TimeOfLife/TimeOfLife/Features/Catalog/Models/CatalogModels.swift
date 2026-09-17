@@ -133,3 +133,13 @@ struct TimeEntry: Identifiable, Codable, Equatable, Sendable {
         case updatedAt = "updated_at"
     }
 }
+
+/// A relay deletion tombstone (cross-device-delete-propagation): the record
+/// of a hard delete so a device that missed it converges by removing its
+/// local copy. `resource` mirrors the sync outbox resource strings
+/// (`activity`, `category`, `entry`).
+struct Deletion: Equatable, Sendable {
+    let resource: String
+    let recordID: String
+    let deletedAt: Date
+}

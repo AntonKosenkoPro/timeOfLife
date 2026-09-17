@@ -75,7 +75,7 @@ Deleting a category removes the tag from all activities (cascade on the join) bu
 
 - **Client-generated UUID v7 ids** for activities/categories/entries. The client creates records offline (e.g. auto-create an activity, start an entry against it) and references the id locally; on reconnect it `POST`s with the id already known. The server validates the id format and uses it. `POST` is **idempotent on `id`** — a replay of the same id returns the existing record (no duplicate), which makes the offline queue safe to replay.
 - **Last-write-wins on `updated_at`** (R2): every mutable request (`PATCH`) carries the client's `updated_at`. The server applies the write only if `client.updated_at > server.updated_at` (optimistic `UPDATE … WHERE updated_at < $client_updated_at`). On a stale write the server returns **409 `conflict`** with its current version so the client can reconcile. No field-level merge at MVP.
-- **Hard deletes** (R3): no server-side trash. The client holds buffered deletions (restorable until the app restarts); the `DELETE` is only sent to the server after a restart commits the buffer (or is never sent if undone). The server just hard-deletes.
+- **Hard deletes + tombstones** (R3): no server-side trash. The client holds buffered deletions (restorable until the app restarts); the `DELETE` is only sent to the server after a restart commits the buffer (or is never sent if undone). Each hard delete upserts a `(user_id, resource, record_id, deleted_at)` tombstone in the same transaction (cascade-deleted entries get none — one row per user intent); recreating an id clears its tombstone. `GET /deletions?deleted_since=` lists tombstones oldest-first for cross-device convergence; no GC yet (rows are tiny, personal scale; `deleted_at` enables a future policy).
 - **Cross-device name collision** (two devices create "Gym" offline with different ids): the `UNIQUE (user_id, lower(name))` constraint rejects the second `POST` with **409 `activity_exists`** (carrying the winning activity in `details`). The client re-maps its local entries/entry references to the surviving id. Noted as the one LWW edge case the client must handle.
 - **Delta pull-sync**: `GET /activities` and `GET /entries` accept an optional `modified_since` (RFC 3339) that filters to records with `updated_at` **strictly greater** than the timestamp; absent/empty = full pull. The client advances a per-resource cursor to the max `updated_at` received, so integrations (hundreds/thousands of entries) don't force full re-pulls.
 - **Entry provenance**: entries carry `source` (default `manual`) and nullable `source_ref`. The `UNIQUE (user_id, source, source_ref)` constraint rejects a duplicate import with **409 `duplicate_import`** — a source re-sending the same record (Screen Time firing twice, Garmin re-sync) cannot create a duplicate. Deleting an imported entry is a hard delete; a later re-import of the same `(source, source_ref)` does not resurrect it.
@@ -94,7 +94,7 @@ All `401 unauthorized` on missing/invalid token (existing `AuthMiddleware`). All
 | GET | `/activities/{id}` | — | 200 `{activity…}` with `categories[]` | 404 `not_found`, (401) |
 | POST | `/activities` | `{id, name, notes?, category_ids?}` | 201 `{activity…}`; idempotent on `id` (replay → 200 existing) | 400 `invalid_body`, 422 `validation_error`, 409 `activity_exists`/`conflict`, (401) |
 | PATCH | `/activities/{id}` | `{name?, notes?, category_ids?, updated_at}` | 200 `{activity…}` (full `category_ids` = replace-all tags) | 400, 404 `not_found`, 409 `conflict`/`activity_exists`, 422, (401) |
-| DELETE | `/activities/{id}` | — | 204 (cascades to entries + join rows) | 404 `not_found`, (401) |
+| DELETE | `/activities/{id}` | — | 204 (cascades to entries + join rows; one activity tombstone) | 404 `not_found`, (401) |
 
 ### Categories
 
@@ -103,7 +103,7 @@ All `401 unauthorized` on missing/invalid token (existing `AuthMiddleware`). All
 | GET | `/categories` | — | 200 `[{category…}]` ordered by name | (401) |
 | POST | `/categories` | `{id, name, icon}` | 201 `{category…}`; idempotent on `id` | 400, 422, 409 `category_exists`/`conflict`, (401) |
 | PATCH | `/categories/{id}` | `{name?, icon?, updated_at}` | 200 `{category…}` | 400, 404, 409 `conflict`/`category_exists`, 422, (401) |
-| DELETE | `/categories/{id}` | — | 204 (join rows cascade; entries unaffected) | 404, (401) |
+| DELETE | `/categories/{id}` | — | 204 (join rows cascade; entries unaffected; one category tombstone) | 404, (401) |
 
 ### Entries
 
@@ -113,7 +113,13 @@ All `401 unauthorized` on missing/invalid token (existing `AuthMiddleware`). All
 | GET | `/entries/{id}` | — | 200 `{entry…}` with `categories[]` (inferred from the activity) and `activity_name` (the activity's current name) | 404, (401) |
 | POST | `/entries` | `{id, activity_id, started_at, ended_at?, source?, source_ref?}` | 201 `{entry…}`; `activity_id` is required and must belong to the user; `ended_at` null = running; `source` defaults to `manual`; duplicate `(source, source_ref)` → 409 `duplicate_import` | 400, 422, 404 `activity_not_found` (when `activity_id` doesn't belong to user), 409 `conflict`/`duplicate_import`, (401) |
 | PATCH | `/entries/{id}` | `{started_at?, ended_at?, updated_at}` | 200 `{entry…}` (stop a running timer = set `ended_at`; recompute `duration_seconds`) | 400, 404, 409 `conflict`, 422, (401) |
-| DELETE | `/entries/{id}` | — | 204 (hard delete) | 404, (401) |
+| DELETE | `/entries/{id}` | — | 204 (hard delete + entry tombstone) | 404, (401) |
+
+### Deletions (cross-device delete propagation)
+
+| Method | Path | Body | Success | Errors |
+|---|---|---|---|---|
+| GET | `/deletions` | — | 200 `[{resource, id, deleted_at}]` ordered by `deleted_at ASC`; optional `?deleted_since=` (tombstones with `deleted_at > deleted_since`; absent/empty = full list) | 422 `validation_error` (garbage timestamp), (401) |
 
 > `activity_id` on `POST /entries` is required — every entry must reference an activity. The activity's name and tags are resolved at query time, so no name is stored on the entry.
 

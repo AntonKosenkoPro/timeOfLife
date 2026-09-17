@@ -113,6 +113,7 @@
 "profile.enableSync" = "Enable Sync";
 "profile.enableSyncSubtitle" = "Optional account for your other devices";
 "profile.syncNow" = "Sync now";
+"sync.cancel" = "Cancel";
 "profile.syncing" = "Syncing…";
 "profile.lastSynced" = "Last synced: %@";
 "profile.syncError" = "Sync failed. Try again.";

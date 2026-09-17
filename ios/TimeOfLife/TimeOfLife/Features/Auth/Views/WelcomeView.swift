@@ -12,6 +12,10 @@ struct WelcomeView: View {
     @ObservedObject var vm: WelcomeViewModel
     @EnvironmentObject var navigation: AppNavigationStack
     @EnvironmentObject var container: AppContainer
+    // No-op outside a sheet; the flow's only presentation today is the
+    // Enable Sync sheet, whose Cancel closes it (app-shell spec).
+    @Environment(\.dismiss)
+    private var dismiss
 
     private var isOffline: Bool { !container.connectivity.isConnected }
     private var appleButtonDisabled: Bool { isOffline || vm.isLoading }
@@ -90,6 +94,18 @@ struct WelcomeView: View {
             .background(Theme.backgroundPrimary)
         }
         .onAppear { vm.reset() }
+        // Sheet chrome for the flow's Enable Sync presentation: the flow sets
+        // no titles of its own, so the root names it (this also renders the
+        // bar — and the Cancel item — on iOS 16+, where a titleless
+        // NavigationStack shows no bar at all). Pushed screens keep the title
+        // with their Back button; swipe-to-dismiss works throughout.
+        .navigationTitle(L10n.profileEnableSync.text)
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .cancellationAction) {
+                Button(L10n.syncCancel.text) { dismiss() }
+            }
+        }
     }
 
     @State private var bottomBarHeight: CGFloat = 0
