@@ -60,6 +60,7 @@
 "timer.signOut" = "Выйти";
 "timer.chooseActivity" = "Выбрать активность";
 "timer.chooseActivityPrompt" = "Выберите активность, чтобы начать";
+"timer.activityDeleted" = "Эта активность была удалена на другом устройстве.";
 "timer.saved" = "Сохранено";
 "timer.saving" = "Сохранение…";
 "timer.running" = "Идёт";

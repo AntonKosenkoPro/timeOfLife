@@ -60,6 +60,7 @@
 "timer.signOut" = "Sign Out";
 "timer.chooseActivity" = "Choose an activity";
 "timer.chooseActivityPrompt" = "Choose an activity to start";
+"timer.activityDeleted" = "This activity was deleted on another device.";
 "timer.saved" = "Saved";
 "timer.saving" = "Saving…";
 "timer.running" = "Running";

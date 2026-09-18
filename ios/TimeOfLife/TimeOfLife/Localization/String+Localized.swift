@@ -78,6 +78,7 @@ enum L10n: String, CaseIterable {
     case activityDeleteRunning = "activity.delete.running"
     case timerCompactStop = "timer.compactStop"
     case timerCompactReturnHint = "timer.compactReturnHint"
+    case timerActivityDeleted = "timer.activityDeleted"
     case timerCompactRunning = "timer.compactRunning"
 
     // App shell

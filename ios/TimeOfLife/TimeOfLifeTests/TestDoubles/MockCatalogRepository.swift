@@ -51,6 +51,7 @@ final class MockCatalogRepository: CatalogSending, @unchecked Sendable {
     var fetchActivityHandler: ((String) throws -> Activity)?
     var fetchCategoryHandler: ((String) throws -> TimeOfLife.Category)?
     var fetchEntryHandler: ((String) throws -> TimeEntry)?
+    var fetchDeletionsHandler: ((Date?) throws -> [Deletion])?
     var createActivityHandler: ((Activity) throws -> Void)?
     var updateActivityHandler: ((Activity) throws -> Void)?
     var deleteActivityHandler: ((String) throws -> Void)?
@@ -99,6 +100,7 @@ final class MockCatalogRepository: CatalogSending, @unchecked Sendable {
     func fetchDeletions(since: Date?) async throws -> [Deletion] {
         record("fetchDeletions", "deletion")
         recordDeletionsPull(since)
+        if let fetchDeletionsHandler { return try fetchDeletionsHandler(since) }
         return deletionsResult
     }
 
