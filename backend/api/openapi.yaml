@@ -1,9 +1,9 @@
 openapi: "3.0.3"
 
 info:
-  title: Time of Life API
+  title: Lifio API
   description: |
-    Backend API for the Time of Life personal time-tracking iOS app.
+    Backend API for the Lifio personal time-tracking iOS app.
 
     ## Auth flow (passwordless email-OTP)
     1. **Request OTP** — `POST /api/v1/auth/otp/request` with an email address. Always returns 202

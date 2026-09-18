@@ -1,4 +1,4 @@
-# Time of Life — Project Context
+# Lifio — Project Context
 
 Durable architecture and repository context for AI agents working in this repo.
 This is the **canonical context file** (S7): `AGENTS.md`, `openspec/README.md`,
@@ -8,7 +8,7 @@ and the active OpenSpec change; update it in the same iteration as the code.
 
 ## What this is
 
-**Time of Life** — a personal time-tracking iOS app (SwiftUI, iOS 15+, local-first).
+**Lifio** — a personal time-tracking iOS app (SwiftUI, iOS 15+, local-first).
 The repository contains a **Go backend** (optional sync relay) and an **iOS app**.
 
 Current product scope:

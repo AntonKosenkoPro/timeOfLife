@@ -1,7 +1,7 @@
-/* Time of Life — Russian */
+/* Lifio — Russian */
 
 // App
-"app.name" = "Time of Life";
+"app.name" = "Lifio";
 
 // Welcome
 "welcome.tagline" = "Личный трекер времени.";

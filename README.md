@@ -1,4 +1,4 @@
-# Time of Life
+# Lifio
 
 A personal time-tracking app for iOS — minimal-effort tracking of where your time goes (widgets, shortcuts, integrations). **Local-first:** your device is the source of truth; the Go backend is an optional sync relay you can enable later.
 

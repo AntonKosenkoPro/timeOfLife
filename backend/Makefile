@@ -1,4 +1,4 @@
-# Time of Life backend — common commands
+# Lifio backend — common commands
 .PHONY: build test lint run deploy help
 
 help: ## Show this help

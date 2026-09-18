@@ -1,6 +1,6 @@
 # CI Pipeline Guide
 
-GitHub Actions quality pipeline for Time of Life. Two path-filtered workflows provide the applicable mandatory PR checks (Requirements S6):
+GitHub Actions quality pipeline for Lifio. Two path-filtered workflows provide the applicable mandatory PR checks (Requirements S6):
 
 - **`backend.yml`** — Go: gofmt, go vet, golangci-lint, race tests, OpenAPI contract gate, coverage gate, deploy
 - **`ios.yml`** — Swift: xcodegen, swiftlint `--strict`, warnings-as-errors build, unit tests
