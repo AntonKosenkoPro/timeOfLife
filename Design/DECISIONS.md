@@ -1,6 +1,6 @@
 # Design Decisions
 
-Resolved design precedents for Time of Life. Add a new entry here when a visual or interaction decision has project-wide impact.
+Resolved design precedents for Lifio. Add a new entry here when a visual or interaction decision has project-wide impact.
 
 ## D1 — Minimalistic, native iOS design
 

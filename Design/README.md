@@ -1,6 +1,6 @@
-# Design System — Time of Life
+# Design System — Lifio
 
-This directory contains the textual design system for the Time of Life iOS app. It is the single source of truth for visual design, reusable components, screen layouts, and interaction patterns.
+This directory contains the textual design system for the Lifio iOS app. It is the single source of truth for visual design, reusable components, screen layouts, and interaction patterns.
 
 ## Goal
 

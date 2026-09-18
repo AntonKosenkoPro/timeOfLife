@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Defines the approved visual identity used for the Time of Life iOS application icon and the platform configurations in which that identity must be available.
+Defines the approved visual identity used for the Lifio iOS application icon and the platform configurations in which that identity must be available.
 
 ## Requirements
 
@@ -10,8 +10,8 @@ Defines the approved visual identity used for the Time of Life iOS application i
 The iOS application SHALL use the approved icon artwork from `Design/icon/ios/` without substituting placeholder or system-provided imagery.
 
 #### Scenario: Installed app is shown by the operating system
-- **WHEN** the Time of Life application is installed on a supported iPhone or iPad
-- **THEN** the operating system displays the approved Time of Life artwork as the application icon
+- **WHEN** the Lifio application is installed on a supported iPhone or iPad
+- **THEN** the operating system displays the approved Lifio artwork as the application icon
 
 #### Scenario: App Store presentation is prepared
 - **WHEN** the application icon catalog is validated for distribution

@@ -16,7 +16,7 @@ The system SHALL treat the local SQLite database in the App Group shared contain
 - **THEN** all app features continue to work against the local database; no feature is gated on the presence of a backend connection
 
 ### Requirement: App Group shared container
-The system SHALL store the local database in an App Group shared container (`group.com.antonkosenko.timeoflife`) so that the main app, widget extensions, Screen Time extension, and lock-screen Control intents can read and write the same data cross-process.
+The system SHALL store the local database in an App Group shared container (`group.com.antonkosenko.timeoflifeapp`) so that the main app, widget extensions, Screen Time extension, and lock-screen Control intents can read and write the same data cross-process.
 
 #### Scenario: Widget reads catalog
 - **WHEN** a home-screen widget renders and reads the activities table from the shared container

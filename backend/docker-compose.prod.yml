@@ -1,4 +1,4 @@
-# Production docker-compose file for Time of Life backend.
+# Production docker-compose file for Lifio backend.
 # Used by the CI/CD pipeline to deploy to the GCP VM.
 # Environment variables are loaded from .env (or set in the CI/CD environment).
 

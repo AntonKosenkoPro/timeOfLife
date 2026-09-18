@@ -51,7 +51,7 @@ The Control SHALL be available only on iOS 18+ and SHALL be absent (no Control o
 
 #### Scenario: iOS 18+ device
 - **WHEN** the user runs the app on iOS 18 or later
-- **THEN** the Time of Life Control is available to add to the lock screen / Control Center
+- **THEN** the Lifio Control is available to add to the lock screen / Control Center
 
 #### Scenario: iOS 15–17 device
 - **WHEN** the user runs the app on iOS 15, 16, or 17

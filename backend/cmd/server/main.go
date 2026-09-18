@@ -1,4 +1,4 @@
-// Command server is the entry point for the Time of Life backend API server.
+// Command server is the entry point for the Lifio backend API server.
 package main
 
 import (

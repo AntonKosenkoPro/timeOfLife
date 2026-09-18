@@ -7,7 +7,7 @@ context: |
   it is the canonical context for this repo (architecture, OpenSpec routing, API contract,
   incomplete surfaces, standards, build/test/run).
 
-  What this is: Time of Life — a personal time-tracking iOS app (SwiftUI, iOS 15+, local-first)
+  What this is: Lifio — a personal time-tracking iOS app (SwiftUI, iOS 15+, local-first)
   with a Go backend that is an OPTIONAL sync relay. Auth MVP (passwordless email-OTP +
   Sign in with Apple) and the Track experience (three-tab shell, numeric timer, Activity search +
   quick-create, Refine, Profile, compact cross-tab timer).
@@ -21,7 +21,7 @@ context: |
   implementing and mark tasks as you complete them.
 
   Non-negotiables: LocalStore is the single mutation chokepoint (GRDB, App Group
-  `group.com.antonkosenko.timeoflife`) — no raw GRDB writes outside it. Several local-first UI
+  `group.com.antonkosenko.timeoflifeapp`) — no raw GRDB writes outside it. Several local-first UI
   surfaces are INCOMPLETE (see docs/project-context.md → "Incomplete / deferred"): UndoToast /
   shake-to-undo, the "Enable Sync" AuthFlowView sheet (Profile currently does a silent
   `restoreSession()`), "via <Source>" labels, and the iOS 18 lock-screen ControlWidget (no

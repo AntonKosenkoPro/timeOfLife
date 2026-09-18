@@ -1,7 +1,7 @@
-/* Time of Life — English */
+/* Lifio — English */
 
 // App
-"app.name" = "Time of Life";
+"app.name" = "Lifio";
 
 // Welcome
 "welcome.tagline" = "Personal time tracker.";

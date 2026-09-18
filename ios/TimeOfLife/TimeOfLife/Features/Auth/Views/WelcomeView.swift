@@ -2,7 +2,7 @@ import SwiftUI
 
 /// Welcome screen — the root of the signed-out flow.
 ///
-/// Introduces the app ("Time of Life — personal time tracker") and leads with
+/// Introduces the app ("Lifio — personal time tracker") and leads with
 /// Sign in with Apple as the primary, default auth method. Email/OTP is a
 /// secondary option reached via a plain text button that pushes `.emailEntry`.
 /// The email button is always tappable (it only navigates); it is disabled only

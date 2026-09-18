@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Entry point of the Time of Life app.
+/// Entry point of the Lifio app.
 ///
 /// Owns the composition root (`AppContainer`). Auth is passwordless: the user
 /// enters their email, receives a 6-digit code, and types it on the OTP

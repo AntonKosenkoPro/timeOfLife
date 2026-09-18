@@ -4,7 +4,7 @@ Agent entrypoint for this repo. **Read [`docs/project-context.md`](docs/project-
 
 ## What this is
 
-**Time of Life** — a personal time-tracking iOS app (SwiftUI, iOS 15+, local-first) with a Go backend that acts as an **optional sync relay**. Current scope: auth MVP (passwordless email-OTP + Sign in with Apple) and the Track experience (three-tab shell, numeric timer, Activity search + quick-create, Refine, Profile, compact cross-tab timer).
+**Lifio** — a personal time-tracking iOS app (SwiftUI, iOS 15+, local-first) with a Go backend that acts as an **optional sync relay**. Current scope: auth MVP (passwordless email-OTP + Sign in with Apple) and the Track experience (three-tab shell, numeric timer, Activity search + quick-create, Refine, Profile, compact cross-tab timer).
 
 ## OpenSpec routing (read this before touching behavior)
 
@@ -16,7 +16,7 @@ The repo is spec-driven (`openspec/config.yaml`, `schema: spec-driven`). See `op
 
 ## Non-negotiables
 
-- **LocalStore is the single mutation chokepoint** (GRDB in App Group `group.com.antonkosenko.timeoflife`) — no raw GRDB writes outside it.
+- **LocalStore is the single mutation chokepoint** (GRDB in App Group `group.com.antonkosenko.timeoflifeapp`) — no raw GRDB writes outside it.
 - **Incomplete UI surfaces — do not claim they are done**: UndoToast/shake-to-undo, the "Enable Sync" `AuthFlowView` sheet presentation (Profile currently does a silent `restoreSession()`), "via <Source>" labels, and the iOS 18 lock-screen ControlWidget (no target in `project.yml` yet). Full list: `docs/project-context.md` → "Incomplete / deferred", mirroring open tasks in `local-first-sync-architecture/tasks.md`.
 - **OpenAPI is the authoritative API contract** (`backend/api/openapi.yaml`, S10). Endpoint changes update both sides + the spec.
 - **No backward compat for on-disk formats** (pre-release): edit `Codable` shapes in place, no legacy branches.
