@@ -8,27 +8,23 @@ struct InsightsBreakdownTests {
     private func entry(
         id: String,
         startedAt: Date,
-        activityID: String = "a1",
-        activityName: String? = nil,
+        text: String = "Reading",
+        categoryIDs: [String] = [],
         durationSeconds: Int? = nil,
         endedAt: Date? = nil
     ) -> TimeEntry {
         TimeEntry(
             id: id,
-            activityID: activityID,
-            activityName: activityName ?? "Activity \(activityID)",
+            activityText: text,
             startedAt: startedAt,
             endedAt: endedAt,
-            durationSeconds: durationSeconds
+            durationSeconds: durationSeconds,
+            categoryIDs: categoryIDs
         )
     }
 
-    private func makeActivity(id: String, name: String, categoryIDs: [String] = []) -> Activity {
-        Activity(id: id, name: name, categoryIDs: categoryIDs)
-    }
-
-    private func makeCategory(id: String, name: String, icon: String = "briefcase") -> TimeOfLife.Category {
-        TimeOfLife.Category(id: id, name: name, icon: icon)
+    private func makeCategory(id: String, name: String, icon: String = "briefcase") -> Category {
+        Category(id: id, name: name, icon: icon)
     }
 
     /// Monday-start week so `weekOfYear` boundaries are deterministic
@@ -64,7 +60,6 @@ struct InsightsBreakdownTests {
     func periodFiltering() {
         let calendar = mondayCalendar()
         let now = Self.date("2026-09-03 15:00", calendar: calendar)
-        let activities = [makeActivity(id: "a1", name: "Reading")]
         let entries = [
             entry(id: "today", startedAt: Self.date("2026-09-03 09:00", calendar: calendar),
                   durationSeconds: 3600, endedAt: Self.date("2026-09-03 10:00", calendar: calendar)),
@@ -77,19 +72,19 @@ struct InsightsBreakdownTests {
         ]
 
         let today = InsightsViewModel.makeBreakdown(
-            entries: entries, activities: activities, categories: [],
+            entries: entries, categories: [],
             interval: InsightsPeriod.today.interval(now: now, calendar: calendar), lens: .activity)
         // Future-dated entries count by startedAt with no special-casing.
         #expect(today.totalSeconds == 3900)
-        #expect(today.rows.map(\.id) == ["a1"])
+        #expect(today.rows.count == 1)
 
         let week = InsightsViewModel.makeBreakdown(
-            entries: entries, activities: activities, categories: [],
+            entries: entries, categories: [],
             interval: InsightsPeriod.week.interval(now: now, calendar: calendar), lens: .activity)
         #expect(week.totalSeconds == 5700)
 
         let all = InsightsViewModel.makeBreakdown(
-            entries: entries, activities: activities, categories: [],
+            entries: entries, categories: [],
             interval: nil, lens: .activity)
         #expect(all.totalSeconds == 6300)
     }
@@ -99,19 +94,15 @@ struct InsightsBreakdownTests {
     @Test("in-progress entries are excluded; nil durations contribute zero")
     func committedOnly() {
         let calendar = mondayCalendar()
-        let activities = [makeActivity(id: "a1", name: "Reading")]
         let breakdown = InsightsViewModel.makeBreakdown(
             entries: [
                 entry(id: "done", startedAt: Self.date("2026-09-03 09:00", calendar: calendar),
-                      activityID: "a1", durationSeconds: 3600,
+                      durationSeconds: 3600,
                       endedAt: Self.date("2026-09-03 10:00", calendar: calendar)),
-                entry(id: "running", startedAt: Self.date("2026-09-03 14:00", calendar: calendar),
-                      activityID: "a1"),
+                entry(id: "running", startedAt: Self.date("2026-09-03 14:00", calendar: calendar)),
                 entry(id: "no-duration", startedAt: Self.date("2026-09-03 11:00", calendar: calendar),
-                      activityID: "a1",
                       endedAt: Self.date("2026-09-03 11:05", calendar: calendar))
             ],
-            activities: activities,
             categories: [],
             interval: nil,
             lens: .activity
@@ -131,15 +122,11 @@ struct InsightsBreakdownTests {
         let breakdown = InsightsViewModel.makeBreakdown(
             entries: [
                 entry(id: "e1", startedAt: Self.date("2026-09-03 09:00", calendar: calendar),
-                      activityID: "a1", durationSeconds: 3600,
+                      categoryIDs: ["c1", "c2"], durationSeconds: 3600,
                       endedAt: Self.date("2026-09-03 10:00", calendar: calendar)),
                 entry(id: "e2", startedAt: Self.date("2026-09-03 11:00", calendar: calendar),
-                      activityID: "a2", durationSeconds: 600,
+                      categoryIDs: ["c2"], durationSeconds: 600,
                       endedAt: Self.date("2026-09-03 11:10", calendar: calendar))
-            ],
-            activities: [
-                makeActivity(id: "a1", name: "Course", categoryIDs: ["c1", "c2"]),
-                makeActivity(id: "a2", name: "Run", categoryIDs: ["c2"])
             ],
             categories: [
                 makeCategory(id: "c1", name: "Education"),
@@ -158,16 +145,15 @@ struct InsightsBreakdownTests {
         #expect(byID["c2"]?.icon == "figure.run")
     }
 
-    @Test("activities without categories aggregate into the uncategorized bucket")
+    @Test("entries without categories aggregate into the uncategorized bucket")
     func uncategorizedBucket() {
         let calendar = mondayCalendar()
         let breakdown = InsightsViewModel.makeBreakdown(
             entries: [
                 entry(id: "e1", startedAt: Self.date("2026-09-03 09:00", calendar: calendar),
-                      activityID: "a1", durationSeconds: 600,
+                      durationSeconds: 600,
                       endedAt: Self.date("2026-09-03 09:10", calendar: calendar))
             ],
-            activities: [makeActivity(id: "a1", name: "Staring")],
             categories: [makeCategory(id: "c1", name: "Work")],
             interval: nil,
             lens: .category
@@ -185,10 +171,9 @@ struct InsightsBreakdownTests {
         let breakdown = InsightsViewModel.makeBreakdown(
             entries: [
                 entry(id: "e1", startedAt: Self.date("2026-09-03 09:00", calendar: calendar),
-                      activityID: "a1", durationSeconds: 600,
+                      categoryIDs: ["deleted"], durationSeconds: 600,
                       endedAt: Self.date("2026-09-03 09:10", calendar: calendar))
             ],
-            activities: [makeActivity(id: "a1", name: "Reading", categoryIDs: ["deleted"])],
             categories: [makeCategory(id: "c1", name: "Work")],
             interval: nil,
             lens: .category
@@ -196,26 +181,22 @@ struct InsightsBreakdownTests {
         #expect(breakdown.rows.map(\.id) == [InsightsBucket.uncategorizedID])
     }
 
-    // MARK: - Activity lens
+    // MARK: - Activity lens: exact-text grouping (remove-activities-layer 4.5)
 
-    @Test("activity rows sum to the hero and use first-category icons")
+    @Test("activity rows group by exact text, sum to the hero, and use entry-owned icons")
     func activityLens() {
         let calendar = mondayCalendar()
         let breakdown = InsightsViewModel.makeBreakdown(
             entries: [
                 entry(id: "e1", startedAt: Self.date("2026-09-03 09:00", calendar: calendar),
-                      activityID: "a1", durationSeconds: 3600,
+                      text: "Reading", categoryIDs: ["c1"], durationSeconds: 3600,
                       endedAt: Self.date("2026-09-03 10:00", calendar: calendar)),
                 entry(id: "e2", startedAt: Self.date("2026-09-03 11:00", calendar: calendar),
-                      activityID: "a1", durationSeconds: 600,
+                      text: "Reading", durationSeconds: 600,
                       endedAt: Self.date("2026-09-03 11:10", calendar: calendar)),
                 entry(id: "e3", startedAt: Self.date("2026-09-03 12:00", calendar: calendar),
-                      activityID: "a2", durationSeconds: 1200,
+                      text: "Meditation", durationSeconds: 1200,
                       endedAt: Self.date("2026-09-03 12:20", calendar: calendar))
-            ],
-            activities: [
-                makeActivity(id: "a1", name: "Reading", categoryIDs: ["c1"]),
-                makeActivity(id: "a2", name: "Meditation")
             ],
             categories: [makeCategory(id: "c1", name: "Education", icon: "book")],
             interval: nil,
@@ -223,28 +204,49 @@ struct InsightsBreakdownTests {
         )
         #expect(breakdown.totalSeconds == 5400)
         #expect(breakdown.rows.reduce(0) { $0 + $1.totalSeconds } == breakdown.totalSeconds)
-        #expect(breakdown.rows.map(\.id) == ["a1", "a2"])
+        #expect(breakdown.rows.map(\.name) == ["Reading", "Meditation"])
         #expect(breakdown.rows[0].icon == "book")
         #expect(breakdown.rows[1].icon == "questionmark")
         #expect(breakdown.rows[0].entryIDs == ["e1", "e2"])
     }
 
-    @Test("activity missing from the catalog falls back to the entry activity name")
-    func unknownActivityFallback() {
+    @Test("Gym and GYM are distinct activity-lens rows")
+    func exactTextIdentity() {
+        let now = Date()
         let breakdown = InsightsViewModel.makeBreakdown(
             entries: [
-                entry(id: "e1", startedAt: Date(timeIntervalSinceNow: -3600),
-                      activityID: "gone", activityName: "Deleted",
-                      durationSeconds: 60, endedAt: Date(timeIntervalSinceNow: -3540))
+                entry(id: "e1", startedAt: now.addingTimeInterval(-3600), text: "Gym",
+                      durationSeconds: 600, endedAt: now.addingTimeInterval(-3000)),
+                entry(id: "e2", startedAt: now.addingTimeInterval(-1800), text: "GYM",
+                      durationSeconds: 300, endedAt: now.addingTimeInterval(-1500))
             ],
-            activities: [],
             categories: [],
             interval: nil,
             lens: .activity
         )
-        #expect(breakdown.rows.count == 1)
-        #expect(breakdown.rows[0].name == "Deleted")
-        #expect(breakdown.rows[0].icon == "questionmark")
+        #expect(breakdown.rows.count == 2)
+        #expect(Set(breakdown.rows.map(\.name)) == ["Gym", "GYM"])
+        #expect(breakdown.rows.reduce(0) { $0 + $1.totalSeconds } == 900)
+    }
+
+    @Test("retagging one entry never reclassifies another same-text entry")
+    func perEntryIsolation() {
+        // e1 owns c1; e2 owns nothing. Both share the exact text — the
+        // category lens must attribute each entry's own categories only.
+        let breakdown = InsightsViewModel.makeBreakdown(
+            entries: [
+                entry(id: "e1", startedAt: Date(timeIntervalSinceNow: -3600), text: "Reading",
+                      categoryIDs: ["c1"], durationSeconds: 600, endedAt: Date(timeIntervalSinceNow: -3000)),
+                entry(id: "e2", startedAt: Date(timeIntervalSinceNow: -1800), text: "Reading",
+                      durationSeconds: 300, endedAt: Date(timeIntervalSinceNow: -1500))
+            ],
+            categories: [makeCategory(id: "c1", name: "Work")],
+            interval: nil,
+            lens: .category
+        )
+        let byID: [String: InsightsBucket] = Dictionary(uniqueKeysWithValues: breakdown.rows.map { ($0.id, $0) })
+        #expect(byID["c1"]?.entryIDs == ["e1"])
+        #expect(byID[InsightsBucket.uncategorizedID]?.entryIDs == ["e2"])
     }
 
     // MARK: - Ordering and emptiness
@@ -255,17 +257,12 @@ struct InsightsBreakdownTests {
         let start = now.addingTimeInterval(-3600)
         let breakdown = InsightsViewModel.makeBreakdown(
             entries: [
-                entry(id: "e1", startedAt: start, activityID: "b-id",
+                entry(id: "e1", startedAt: start, text: "Beta",
                       durationSeconds: 600, endedAt: start.addingTimeInterval(600)),
-                entry(id: "e2", startedAt: start, activityID: "a-id",
+                entry(id: "e2", startedAt: start, text: "Alpha",
                       durationSeconds: 600, endedAt: start.addingTimeInterval(600)),
-                entry(id: "e3", startedAt: start, activityID: "c-id",
+                entry(id: "e3", startedAt: start, text: "Gamma",
                       durationSeconds: 60, endedAt: start.addingTimeInterval(60))
-            ],
-            activities: [
-                makeActivity(id: "b-id", name: "Beta"),
-                makeActivity(id: "a-id", name: "Alpha"),
-                makeActivity(id: "c-id", name: "Gamma")
             ],
             categories: [],
             interval: nil,
@@ -274,7 +271,7 @@ struct InsightsBreakdownTests {
         #expect(breakdown.rows.map(\.name) == ["Alpha", "Beta", "Gamma"])
 
         let empty = InsightsViewModel.makeBreakdown(
-            entries: [], activities: [], categories: [], interval: nil, lens: .category)
+            entries: [], categories: [], interval: nil, lens: .category)
         #expect(empty.totalSeconds == 0)
         #expect(empty.rows.isEmpty)
     }

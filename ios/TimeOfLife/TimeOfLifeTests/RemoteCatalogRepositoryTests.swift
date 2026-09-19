@@ -2,11 +2,11 @@ import Testing
 import Foundation
 @testable import TimeOfLife
 
-/// RemoteCatalogRepository mapping tests (category-management D5): the relay
-/// embeds `categories` (CategoryTag objects) in Activity responses; the
-/// repository must map them to the local ordered `categoryIDs` and encode
-/// `category_ids` on writes. Uses `URLProtocolStub` to serve representative
-/// OpenAPI responses.
+/// RemoteCatalogRepository mapping tests (remove-activities-layer 5.1): the
+/// relay's entries carry `activity_text`, ordered `category_ids`, and
+/// `notes`; the repository must map them to the local model and encode them
+/// on writes. Uses `URLProtocolStub` to serve representative OpenAPI
+/// responses.
 @Suite("RemoteCatalogRepository DTO mapping")
 struct RemoteCatalogRepositoryTests {
 
@@ -30,86 +30,6 @@ struct RemoteCatalogRepositoryTests {
             )!
             return (data, response)
         }
-    }
-
-    @Test("fetchActivities maps embedded categories to ordered categoryIDs")
-    func fetchActivitiesMapsEmbeddedCategories() async throws {
-        stubJSON("""
-        [
-          {
-            "id": "019639f1-7a3b-7abc-9def-100000000001",
-            "name": "Gym",
-            "notes": "",
-            "last_used_at": "2026-07-27T09:00:00Z",
-            "created_at": "2026-07-20T08:00:00Z",
-            "updated_at": "2026-07-27T09:00:00Z",
-            "categories": [
-              { "id": "cat-2", "name": "Health", "icon": "heart" },
-              { "id": "cat-1", "name": "Sport", "icon": "figure.run" }
-            ]
-          }
-        ]
-        """)
-        defer { URLProtocolStub.clear() }
-        let repository = RemoteCatalogRepository(client: makeClient())
-
-        let activities = try await repository.fetchActivities(modifiedSince: nil)
-
-        #expect(activities.count == 1)
-        let activity = try #require(activities.first)
-        #expect(activity.name == "Gym")
-        // Embedded order is preserved as the ordered local categoryIDs.
-        #expect(activity.categoryIDs == ["cat-2", "cat-1"])
-        #expect(activity.notes?.isEmpty == true)
-    }
-
-    @Test("fetchActivity maps a single activity with embedded categories")
-    func fetchActivityMapsEmbeddedCategories() async throws {
-        stubJSON("""
-        {
-          "id": "a1",
-          "name": "Reading",
-          "notes": null,
-          "last_used_at": null,
-          "created_at": "2026-07-20T08:00:00Z",
-          "updated_at": "2026-07-21T08:00:00Z",
-          "categories": [
-            { "id": "cat-9", "name": "Education", "icon": "book" }
-          ]
-        }
-        """)
-        defer { URLProtocolStub.clear() }
-        let repository = RemoteCatalogRepository(client: makeClient())
-
-        let activity = try await repository.fetchActivity(id: "a1")
-
-        #expect(activity.id == "a1")
-        #expect(activity.categoryIDs == ["cat-9"])
-        #expect(activity.notes == nil)
-        #expect(activity.lastUsedAt == nil)
-    }
-
-    @Test("fetchActivities handles an empty categories array")
-    func fetchActivitiesEmptyCategories() async throws {
-        stubJSON("""
-        [
-          {
-            "id": "a1",
-            "name": "No tags",
-            "notes": null,
-            "last_used_at": null,
-            "created_at": "2026-07-20T08:00:00Z",
-            "updated_at": "2026-07-21T08:00:00Z",
-            "categories": []
-          }
-        ]
-        """)
-        defer { URLProtocolStub.clear() }
-        let repository = RemoteCatalogRepository(client: makeClient())
-
-        let activities = try await repository.fetchActivities(modifiedSince: nil)
-
-        #expect(activities.first?.categoryIDs.isEmpty == true)
     }
 
     @Test("fetchCategories decodes RFC 3339 timestamps from the relay")
@@ -161,34 +81,34 @@ struct RemoteCatalogRepositoryTests {
         #expect(category.name == "Education")
     }
 
-    @Test("fetchEntries decodes the envelope with RFC 3339 timestamps")
+    @Test("fetchEntries decodes the envelope with entry-owned text, tags, and notes")
     func fetchEntriesDecodesWireDates() async throws {
         stubJSON("""
         {
           "items": [
             {
               "id": "e1",
-              "activity_id": "a1",
-              "activity_name": "Gym",
+              "activity_text": "Gym",
+              "category_ids": ["cat-2", "cat-1"],
+              "notes": "Leg day",
               "started_at": "2026-07-27T09:00:00Z",
               "ended_at": "2026-07-27T10:00:00Z",
               "duration_seconds": 3600,
               "source": "manual",
               "source_ref": null,
-              "categories": [],
               "created_at": "2026-07-27T10:00:00Z",
               "updated_at": "2026-07-27T10:00:00Z"
             },
             {
               "id": "e2",
-              "activity_id": "a1",
-              "activity_name": "Gym",
+              "activity_text": "Reading",
+              "category_ids": [],
+              "notes": "",
               "started_at": "2026-07-28T09:00:00.500Z",
               "ended_at": null,
               "duration_seconds": null,
               "source": "manual",
               "source_ref": null,
-              "categories": [],
               "created_at": "2026-07-28T09:00:00.500Z",
               "updated_at": "2026-07-28T09:00:00.500Z"
             }
@@ -202,7 +122,10 @@ struct RemoteCatalogRepositoryTests {
 
         #expect(entries.count == 2)
         let finished = try #require(entries.first)
-        #expect(finished.activityName == "Gym")
+        #expect(finished.activityText == "Gym")
+        // Embedded order is preserved as the ordered local categoryIDs.
+        #expect(finished.categoryIDs == ["cat-2", "cat-1"])
+        #expect(finished.notes == "Leg day")
         #expect(finished.durationSeconds == 3600)
         #expect(finished.endedAt != nil)
         let running = try #require(entries.last)
@@ -212,17 +135,18 @@ struct RemoteCatalogRepositoryTests {
     }
 
     @Test("fetchEntry decodes a single wire entry")
-    func fetchEntryDecodesWireEntry() async throws {        stubJSON("""
+    func fetchEntryDecodesWireEntry() async throws {
+        stubJSON("""
         {
           "id": "e1",
-          "activity_id": "a1",
-          "activity_name": "Gym",
+          "activity_text": "Gym",
+          "category_ids": ["cat-1"],
+          "notes": "",
           "started_at": "2026-07-27T09:00:00Z",
           "ended_at": "2026-07-27T10:00:00Z",
           "duration_seconds": 3600,
           "source": "manual",
           "source_ref": null,
-          "categories": [],
           "created_at": "2026-07-27T10:00:00Z",
           "updated_at": "2026-07-27T10:00:00Z"
         }
@@ -233,7 +157,8 @@ struct RemoteCatalogRepositoryTests {
         let entry = try await repository.fetchEntry(id: "e1")
 
         #expect(entry.id == "e1")
-        #expect(entry.activityID == "a1")
+        #expect(entry.activityText == "Gym")
+        #expect(entry.categoryIDs == ["cat-1"])
         #expect(entry.durationSeconds == 3600)
     }
 
@@ -255,8 +180,8 @@ struct RemoteCatalogRepositoryTests {
         return data
     }
 
-    @Test("createActivity encodes category_ids in the request body")
-    func createActivityEncodesCategoryIDs() async throws {
+    @Test("createEntry encodes the entries-only payload")
+    func createEntryEncodesEntriesOnlyPayload() async throws {
         var capturedBody: Data?
         URLProtocolStub.responseHandler = { request in
             capturedBody = self.captureBody(from: request)
@@ -269,23 +194,28 @@ struct RemoteCatalogRepositoryTests {
         }
         defer { URLProtocolStub.clear() }
         let repository = RemoteCatalogRepository(client: makeClient())
-        let activity = Activity(
-            id: "a1", name: "Gym", notes: nil,
+        let startedAt = Date(timeIntervalSince1970: 1_000)
+        let entry = TimeEntry(
+            id: "e1", activityText: "Gym",
+            startedAt: startedAt,
+            endedAt: startedAt.addingTimeInterval(600),
+            durationSeconds: 600,
             categoryIDs: ["cat-1", "cat-2"],
-            createdAt: Date(timeIntervalSince1970: 1_000),
-            updatedAt: Date(timeIntervalSince1970: 1_000)
+            notes: "Focused"
         )
 
-        try await repository.createActivity(activity)
+        try await repository.createEntry(entry)
 
         let body = try #require(capturedBody)
         let json = try #require(try JSONSerialization.jsonObject(with: body) as? [String: Any])
-        let categoryIDs = try #require(json["category_ids"] as? [String])
-        #expect(categoryIDs == ["cat-1", "cat-2"])
+        #expect(json["activity_text"] as? String == "Gym")
+        #expect(json["category_ids"] as? [String] == ["cat-1", "cat-2"])
+        #expect(json["notes"] as? String == "Focused")
+        #expect(json["activity_id"] == nil)
     }
 
-    @Test("updateActivity encodes the full ordered category set")
-    func updateActivityEncodesFullCategorySet() async throws {
+    @Test("updateEntry encodes the full ordered category set and text")
+    func updateEntryEncodesFullCategorySet() async throws {
         var capturedBody: Data?
         URLProtocolStub.responseHandler = { request in
             capturedBody = self.captureBody(from: request)
@@ -298,18 +228,23 @@ struct RemoteCatalogRepositoryTests {
         }
         defer { URLProtocolStub.clear() }
         let repository = RemoteCatalogRepository(client: makeClient())
-        let activity = Activity(
-            id: "a1", name: "Gym", categoryIDs: ["cat-2", "cat-1"],
-            createdAt: Date(timeIntervalSince1970: 1_000),
+        let startedAt = Date(timeIntervalSince1970: 1_000)
+        let entry = TimeEntry(
+            id: "e1", activityText: "Reading",
+            startedAt: startedAt,
+            endedAt: startedAt.addingTimeInterval(60),
+            durationSeconds: 60,
+            categoryIDs: ["cat-2", "cat-1"],
+            notes: "",
             updatedAt: Date(timeIntervalSince1970: 2_000)
         )
 
-        try await repository.updateActivity(activity)
+        try await repository.updateEntry(entry)
 
         let body = try #require(capturedBody)
         let json = try #require(try JSONSerialization.jsonObject(with: body) as? [String: Any])
         #expect(json["category_ids"] as? [String] == ["cat-2", "cat-1"])
-        #expect(json["name"] as? String == "Gym")
+        #expect(json["activity_text"] as? String == "Reading")
     }
 
     @Test("fetchEntries defaults a missing source to manual (pre-provenance relays)")
@@ -319,12 +254,10 @@ struct RemoteCatalogRepositoryTests {
           "items": [
             {
               "id": "e1",
-              "activity_id": "a1",
-              "activity_name": "Gym",
+              "activity_text": "Gym",
               "started_at": "2026-07-27T09:00:00Z",
               "ended_at": "2026-07-27T10:00:00Z",
               "duration_seconds": 3600,
-              "categories": [],
               "created_at": "2026-07-27T10:00:00Z",
               "updated_at": "2026-07-27T10:00:00Z"
             }
@@ -339,5 +272,8 @@ struct RemoteCatalogRepositoryTests {
         #expect(entries.count == 1)
         #expect(entries.first?.source == "manual")
         #expect(entries.first?.sourceRef == nil)
+        // Missing optional entry-owned fields default instead of failing.
+        #expect(entries.first?.categoryIDs.isEmpty == true)
+        #expect(entries.first?.notes.isEmpty == true)
     }
 }

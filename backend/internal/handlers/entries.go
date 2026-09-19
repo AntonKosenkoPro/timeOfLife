@@ -3,6 +3,7 @@ package handlers
 import (
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -12,7 +13,7 @@ import (
 
 // ---------- Entries ----------
 
-// ListEntries handles GET /entries (filters: from,to,activity_id,category_id,limit,cursor).
+// ListEntries handles GET /entries (filters: from,to,category_id,limit,cursor,modified_since).
 func (h *Handler) ListEntries(w http.ResponseWriter, r *http.Request) {
 	userID, ok := h.requireUserID(w, r)
 	if !ok {
@@ -21,7 +22,6 @@ func (h *Handler) ListEntries(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	errs := validationErrs{}
 	f := db.EntryFilter{
-		ActivityID: q.Get("activity_id"),
 		CategoryID: q.Get("category_id"),
 		Cursor:     q.Get("cursor"),
 	}
@@ -75,7 +75,39 @@ func (h *Handler) ListEntries(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
-// CreateEntry handles POST /entries (idempotent on id).
+// ListRecents handles GET /entries/recents (the recents experience, D5):
+// up to 6 entries, one per exact activity_text (the group's newest wins),
+// newest-first. Recents are otherwise computed client-side — this endpoint
+// just mirrors the shared query for signed-in devices.
+func (h *Handler) ListRecents(w http.ResponseWriter, r *http.Request) {
+	userID, ok := h.requireUserID(w, r)
+	if !ok {
+		return
+	}
+	limit := 6
+	if v := r.URL.Query().Get("limit"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 1 || n > 20 {
+			writeValidation(w, validationErrs{"limit": "limit must be between 1 and 20"})
+			return
+		}
+		limit = n
+	}
+	items, err := h.store.ListRecents(r.Context(), userID, limit)
+	if err != nil {
+		h.logger.Error("list recents failed", "error", err)
+		writeError(w, http.StatusInternalServerError, "internal_error", "An internal error occurred", nil)
+		return
+	}
+	if items == nil {
+		items = []db.Entry{}
+	}
+	writeJSON(w, http.StatusOK, items)
+}
+
+// CreateEntry handles POST /entries (idempotent on id). The entry owns its
+// activity_text, ordered category_ids, and notes; unknown category ids are
+// rejected with 422 on create (merges prune instead).
 func (h *Handler) CreateEntry(w http.ResponseWriter, r *http.Request) {
 	userID, ok := h.requireUserID(w, r)
 	if !ok {
@@ -94,14 +126,18 @@ func (h *Handler) CreateEntry(w http.ResponseWriter, r *http.Request) {
 		req.EndedAt = nil
 	}
 
+	text := strings.TrimSpace(req.ActivityText)
 	errs := validationErrs{}
 	validateID(req.ID, errs)
-	validateTimestamp("started_at", req.StartedAt, true, errs)
-	if req.ActivityID == nil {
-		errs.add("activity_id", "activity_id is required")
-	} else if !validateUUIDv7(*req.ActivityID) {
-		errs.add("activity_id", "activity_id must be a valid UUID v7")
+	validateEntryText(text, errs)
+	if req.Notes != nil {
+		validateNotes(*req.Notes, errs)
 	}
+	// Malformed ids can never match a category, so on create they prune to
+	// nothing at the store (they cannot be "unknown category, keep remainder"
+	// candidates) — the loud format check is unnecessary; ownership is the
+	// real create-time gate and it fails with 422 ErrInvalidCategoryID.
+	validateTimestamp("started_at", req.StartedAt, true, errs)
 	if req.EndedAt != nil {
 		validateTimestamp("ended_at", *req.EndedAt, false, errs)
 	}
@@ -133,14 +169,22 @@ func (h *Handler) CreateEntry(w http.ResponseWriter, r *http.Request) {
 		et, _ := parseRFC3339(*req.EndedAt)
 		endedAt = &et
 	}
+	var notes string
+	if req.Notes != nil {
+		notes = *req.Notes
+	}
 	e := db.Entry{
-		ID:         req.ID,
-		UserID:     userID,
-		ActivityID: req.ActivityID,
-		StartedAt:  startedAt,
-		EndedAt:    endedAt,
-		Source:     req.Source,
-		SourceRef:  req.SourceRef,
+		ID:           req.ID,
+		UserID:       userID,
+		ActivityText: text,
+		Notes:        notes,
+		StartedAt:    startedAt,
+		EndedAt:      endedAt,
+		Source:       req.Source,
+		SourceRef:    req.SourceRef,
+	}
+	if req.CategoryIDs != nil {
+		e.Categories = entryTags(req.CategoryIDs)
 	}
 	created, isNew, err := h.store.CreateEntry(r.Context(), e)
 	if err != nil {
@@ -170,6 +214,7 @@ func (h *Handler) GetEntry(w http.ResponseWriter, r *http.Request) {
 }
 
 // UpdateEntry handles PATCH /entries/{id} (partial, LWW; recomputes duration).
+// category_ids, if present, is a full replace; unknown ids are pruned.
 func (h *Handler) UpdateEntry(w http.ResponseWriter, r *http.Request) {
 	userID, ok := h.requireUserID(w, r)
 	if !ok {
@@ -183,6 +228,16 @@ func (h *Handler) UpdateEntry(w http.ResponseWriter, r *http.Request) {
 	}
 
 	errs := validationErrs{}
+	if req.ActivityText != nil {
+		t := strings.TrimSpace(*req.ActivityText)
+		validateEntryText(t, errs)
+		req.ActivityText = &t
+	}
+	if req.Notes != nil {
+		validateNotes(*req.Notes, errs)
+	}
+	// Malformed category ids can never match a category (any format), so they
+	// prune on merge (D7) — no loud format check here either.
 	if req.StartedAt != nil {
 		validateTimestamp("started_at", *req.StartedAt, false, errs)
 	}
@@ -195,17 +250,28 @@ func (h *Handler) UpdateEntry(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	var patch db.EntryPatch
+	if req.ActivityText != nil {
+		patch.ActivityText = req.ActivityText
+	}
+	if req.Notes != nil {
+		patch.Notes = req.Notes
+	}
+	if req.CategoryIDs != nil {
+		tags := entryTags(*req.CategoryIDs)
+		patch.CategoryIDs = &tags
+	}
 	var startedAt *time.Time
 	if req.StartedAt != nil {
 		st, _ := parseRFC3339(*req.StartedAt)
 		startedAt = &st
 	}
-	var endedAt db.NullableTime
+	patch.StartedAt = startedAt
 	if req.EndedAt.Set {
-		endedAt = db.NullableTime{Set: true, Valid: req.EndedAt.Valid, Value: req.EndedAt.Value}
+		patch.EndedAt = db.NullableTime{Set: true, Valid: req.EndedAt.Valid, Value: req.EndedAt.Value}
 	}
 	updatedAt, _ := parseRFC3339(req.UpdatedAt)
-	patch := db.EntryPatch{StartedAt: startedAt, EndedAt: endedAt, UpdatedAt: updatedAt}
+	patch.UpdatedAt = updatedAt
 	updated, err := h.store.UpdateEntry(r.Context(), userID, chi.URLParam(r, "id"), patch)
 	if err != nil {
 		h.writeCatalogStoreErr(w, updated, err, "update entry")

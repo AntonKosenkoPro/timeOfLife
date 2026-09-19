@@ -25,7 +25,7 @@ struct CategoryEditorViewModelTests {
     @Test("edit mode prefills name and icon")
     func editModePrefills() async throws {
         let store = try makeStore()
-        let category = TimeOfLife.Category(id: "c1", name: "Sport", icon: "figure.run")
+        let category = Category(id: "c1", name: "Sport", icon: "figure.run")
         let vm = CategoryEditorViewModel(store: store, category: category, onSaved: { _ in }, onDuplicate: { _ in })
         #expect(!vm.isCreateMode)
         #expect(vm.name == "Sport")
@@ -36,7 +36,7 @@ struct CategoryEditorViewModelTests {
     @Test("an unsupported stored icon prefills as tag without crashing")
     func unsupportedIconPrefillsAsTag() async throws {
         let store = try makeStore()
-        let category = TimeOfLife.Category(id: "c1", name: "Old", icon: "not-a-real-symbol")
+        let category = Category(id: "c1", name: "Old", icon: "not-a-real-symbol")
         let vm = CategoryEditorViewModel(store: store, category: category, onSaved: { _ in }, onDuplicate: { _ in })
         #expect(vm.icon == .tag)
     }
@@ -73,7 +73,7 @@ struct CategoryEditorViewModelTests {
     @Test("a valid create saves and reports the category")
     func createSaves() async throws {
         let store = try makeStore()
-        var saved: TimeOfLife.Category?
+        var saved: Category?
         let vm = CategoryEditorViewModel(
             store: store,
             category: nil,
@@ -99,8 +99,8 @@ struct CategoryEditorViewModelTests {
             id: "existing",
             now: Date()
         )
-        var winner: TimeOfLife.Category?
-        var saved: TimeOfLife.Category?
+        var winner: Category?
+        var saved: Category?
         let vm = CategoryEditorViewModel(
             store: store,
             category: nil,
@@ -126,7 +126,7 @@ struct CategoryEditorViewModelTests {
             id: "c1",
             now: Date(timeIntervalSinceReferenceDate: 1_000)
         )
-        var saved: TimeOfLife.Category?
+        var saved: Category?
         let existing = try await store.category(id: "c1")
         let category = try #require(existing)
         let vm = CategoryEditorViewModel(
@@ -176,7 +176,7 @@ struct CategoryEditorViewModelTests {
     @Test("a persistence failure shows an error and keeps the draft")
     func persistenceFailureShowsError() async throws {
         let store = try makeStore()
-        var saved: TimeOfLife.Category?
+        var saved: Category?
         let vm = CategoryEditorViewModel(
             store: store,
             category: nil,
@@ -293,9 +293,8 @@ struct ManageCategoriesViewModelTests {
     @Test("foreign snapshots are ignored by category undo")
     func foreignSnapshotIgnored() async throws {
         let store = try makeStore()
-        try await store.createActivity(Activity(id: "a1", name: "Running"))
         try await store.createEntry(TimeEntry(
-            id: "e1", activityID: "a1", activityName: "Running",
+            id: "e1", activityText: "Running",
             startedAt: Date(timeIntervalSinceReferenceDate: 1_000),
             endedAt: Date(timeIntervalSinceReferenceDate: 1_600), durationSeconds: 600,
             source: "manual"
@@ -346,11 +345,11 @@ struct ManageCategoriesViewModelTests {
         let vm = ManageCategoriesViewModel(store: store, undoBuffer: UndoBufferStore(store: store))
         await vm.load()
 
-        let renamed = TimeOfLife.Category(id: "c1", name: "Zen", icon: "sparkles", createdAt: Date(), updatedAt: Date())
+        let renamed = Category(id: "c1", name: "Zen", icon: "sparkles", createdAt: Date(), updatedAt: Date())
         await vm.editorDidSave(renamed)
         #expect(vm.categories.map(\.id) == ["c1"])
 
-        let newCategory = TimeOfLife.Category(id: "c2", name: "Travel", icon: "airplane", createdAt: Date(), updatedAt: Date())
+        let newCategory = Category(id: "c2", name: "Travel", icon: "airplane", createdAt: Date(), updatedAt: Date())
         await vm.editorDidSave(newCategory)
         #expect(vm.categories.map(\.name) == ["Travel", "Zen"])
     }
@@ -373,8 +372,7 @@ struct ManageCategoriesViewModelTests {
     func browsingDoesNotDisturbTimer() async throws {
         let store = try makeStore()
         try await store.createCategory(draft: CategoryDraft(name: "Work"), id: "c1", now: Date())
-        try await store.createActivity(Activity(id: "a1", name: "Gym"))
-        try await store.startTimer(activityID: "a1", activityName: "Gym", startedAt: Date())
+        try await store.saveTimerDraft(activityText: "Gym", categoryIDs: [], startedAt: Date())
         let vm = ManageCategoriesViewModel(store: store, undoBuffer: UndoBufferStore(store: store))
 
         await vm.load()
@@ -383,9 +381,9 @@ struct ManageCategoriesViewModelTests {
         _ = try await store.deleteCategoryUndoable(id: "c1", deletedAt: Date())
         await vm.editorDidDelete()
 
-        // The running timer is untouched by category browsing/deletion.
-        let state = try await store.timerState()
-        #expect(state?.activityID == "a1")
+        // The running draft is untouched by category browsing/deletion.
+        let state = try await store.timerDraft()
+        #expect(state?.activityText == "Gym")
         #expect(state?.status == "running")
     }
 }

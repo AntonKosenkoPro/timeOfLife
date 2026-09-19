@@ -2,7 +2,7 @@
 
 A personal time-tracking app for iOS — minimal-effort tracking of where your time goes (widgets, shortcuts, integrations). **Local-first:** your device is the source of truth; the Go backend is an optional sync relay you can enable later.
 
-Current scope: **auth MVP** (passwordless email-OTP + Sign in with Apple) and the **Track experience** — a three-tab shell (Track/History/Insights) with a centered numeric timer, platform-native Activity search with quick-create, a Refine action for editing the selected Activity, a Profile destination, and a compact cross-tab running timer.
+Current scope: **auth MVP** (passwordless email-OTP + Sign in with Apple) and the **Track experience** — a three-tab shell (Track/History/Insights) with a centered numeric timer, a plain-text name field with exact-text Recents chips, a live tag selector while running, a Profile destination, and a compact cross-tab running timer. There is no activity entity: entries own their text, ordered categories, and notes.
 
 | Doc | What it's for |
 |---|---|
@@ -15,16 +15,16 @@ Current scope: **auth MVP** (passwordless email-OTP + Sign in with Apple) and th
 ## The app in one minute
 
 1. **Launch into Track** — no sign-in required; auth is an optional "Enable Sync" action in Profile.
-2. **Choose an activity** — pick a recent one, or use native search to browse, filter, or quick-create (selection never starts timing). Tap **Refine** beside the Activity to edit its name, notes, or Categories in place.
+2. **Name it** — type a name or tap a recent chip (exact match inherits that entry's categories; typing never starts timing).
 3. **Start** — the centered numeric timer counts up while the device stays awake.
 4. **Stop** — saves the entry to the local GRDB database and enqueues an outbox row; if signed in, the `SyncController` drains the outbox and pulls deltas on foreground/connectivity/manual "Sync now".
 5. **Switch tabs freely** — a running timer stays visible above the tab bar on History and Insights with return-to-Track and in-place Stop.
 
-Entries, activities, categories, the running timer state, the outbox, and the undo buffer live in the App Group shared container (`group.com.antonkosenko.timeoflifeapp`), ready for future cross-process system integrations.
+Entries, categories, the running timer state, the outbox, and the undo buffer live in the App Group shared container (`group.com.antonkosenko.timeoflifeapp`), ready for future cross-process system integrations.
 
 ### Local-first architecture
 
-The device is the source of truth; the backend is an **optional relay**; sync is a transport feature that activates on sign-in. Everything works offline with no account. Writes go through a transactional **outbox** (deletes are first-class), deletions sit in a durable **undo buffer** restorable until the app restarts (committed on cold launch), and `SyncController` syncs via `?modified_since=` delta pulls with last-write-wins on `updated_at`. Specs: `openspec/changes/local-first-sync-architecture/` and `openspec/changes/add-category-management/`. Categories are seeded once per local dataset and managed from Profile; entry, activity, and category deletions share the editor-Delete + shake-to-undo system confirmation grammar. The "Enable Sync" sign-in sheet, "via <Source>" labels, and the iOS 18 lock-screen Control remain **incomplete** — see `docs/project-context.md` → "Incomplete / deferred".
+The device is the source of truth; the backend is an **optional relay**; sync is a transport feature that activates on sign-in. Everything works offline with no account. Writes go through a transactional **outbox** (deletes are first-class), deletions sit in a durable **undo buffer** restorable until the app restarts (committed on cold launch), and `SyncController` syncs via `?modified_since=` delta pulls with last-write-wins on `updated_at`. Specs: `openspec/specs/` baselines (synced from the archived `remove-activities-layer` change). Categories are seeded once per local dataset and managed from Profile; entry and category deletions share the editor-Delete + shake-to-undo system confirmation grammar. The "Enable Sync" sign-in sheet, "via <Source>" labels, and the iOS 18 lock-screen Control remain **incomplete** — see `docs/project-context.md` → "Incomplete / deferred".
 
 ## Security (R1)
 
@@ -85,7 +85,7 @@ The backend deploys to a **GCP Compute Engine VM** (`timeoflife-backend`, us-eas
 ## Deferred / out of scope
 
 - **Sign in with Apple follow-ups** — account-deletion token revocation via Apple `/auth/revoke`, nonce replay defense, credential-state observation.
-- **iOS History list/edit UI** — the History day-grouped list, activity detail sheet, and entry editing have shipped (deferred filtering lives in `docs/history-roadmap.md`); the Insights breakdown v1 (period switch + category/activity lenses, mirror-only) is implemented.
+- **iOS History list/edit UI** — the History day-grouped list and entry editing (tap a row → unified entry form) have shipped (deferred filtering lives in `docs/history-roadmap.md`); the Insights breakdown v1 (period switch + category/text lenses, mirror-only) is implemented.
 - **App-wide Undo UI, "Enable Sync" sheet, "via <Source>" labels, lock-screen Control** — local-first storage/sync foundations are done; these UI surfaces are open tasks in `openspec/changes/local-first-sync-architecture/tasks.md`. Category-scoped undo in Manage Categories is implemented separately.
 - **Kafka** — deferred (S1 names it; not needed yet). **Rate-limit store** — in-memory; Redis before multi-instance.
 - **SwiftUI snapshot / on-device keychain tests** — not automated; verified manually in the simulator.

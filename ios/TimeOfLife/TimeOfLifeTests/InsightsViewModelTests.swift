@@ -15,17 +15,18 @@ struct InsightsViewModelTests {
     private func entry(
         id: String,
         startedAt: Date,
-        activityID: String = "a1",
+        text: String = "Reading",
+        categoryIDs: [String] = [],
         durationSeconds: Int? = nil,
         endedAt: Date? = nil
     ) -> TimeEntry {
         TimeEntry(
             id: id,
-            activityID: activityID,
-            activityName: "Activity \(id)",
+            activityText: text,
             startedAt: startedAt,
             endedAt: endedAt,
-            durationSeconds: durationSeconds
+            durationSeconds: durationSeconds,
+            categoryIDs: categoryIDs
         )
     }
 
@@ -45,19 +46,18 @@ struct InsightsViewModelTests {
         // Thursday 2026-09-03 15:00.
         let now = Self.date("2026-09-03 15:00", calendar: calendar)
         let store = try makeStore()
-        try await store.createActivity(Activity(id: "a1", name: "Reading"))
         for (id, start, seconds) in [
             ("today", Self.date("2026-09-03 09:00", calendar: calendar), 3600),
             ("yesterday", Self.date("2026-09-02 10:00", calendar: calendar), 1800),
             ("last-week", Self.date("2026-08-25 10:00", calendar: calendar), 600)
         ] as [(String, Date, Int)] {
             try await store.createEntry(entry(
-                id: id, startedAt: start, activityID: "a1",
+                id: id, startedAt: start,
                 durationSeconds: seconds, endedAt: start.addingTimeInterval(TimeInterval(seconds))))
         }
         // In-progress entries never contribute.
         try await store.createEntry(entry(
-            id: "running", startedAt: Self.date("2026-09-03 14:00", calendar: calendar), activityID: "a1"))
+            id: "running", startedAt: Self.date("2026-09-03 14:00", calendar: calendar)))
 
         let vm = InsightsViewModel(store: store) { now }
         await vm.loadIfNeeded()
@@ -70,17 +70,16 @@ struct InsightsViewModelTests {
 
     // MARK: - Lenses share one snapshot
 
-    @Test("lens switch preserves the period and resolves current categories")
+    @Test("lens switch preserves the period and attributes from entry-owned categories")
     func lensSwitchPreservesPeriod() async throws {
         let calendar = mondayCalendar()
         let now = Self.date("2026-09-03 15:00", calendar: calendar)
         let store = try makeStore()
-        try await store.createCategory(TimeOfLife.Category(id: "c1", name: "Work", icon: "briefcase"))
-        try await store.createCategory(TimeOfLife.Category(id: "c2", name: "Study", icon: "book"))
-        try await store.createActivity(Activity(id: "a1", name: "Course", categoryIDs: ["c1", "c2"]))
+        try await store.createCategory(Category(id: "c1", name: "Work", icon: "briefcase"))
+        try await store.createCategory(Category(id: "c2", name: "Study", icon: "book"))
         let start = Self.date("2026-09-03 09:00", calendar: calendar)
         try await store.createEntry(entry(
-            id: "e1", startedAt: start, activityID: "a1",
+            id: "e1", startedAt: start, text: "Course", categoryIDs: ["c1", "c2"],
             durationSeconds: 3600, endedAt: start.addingTimeInterval(3600)))
 
         let vm = InsightsViewModel(store: store) { now }
@@ -91,6 +90,7 @@ struct InsightsViewModelTests {
         #expect(categories.totalSeconds == activities.totalSeconds)
         #expect(categories.rows.count == 2)
         #expect(activities.rows.count == 1)
+        #expect(activities.rows.first?.name == "Course")
         #expect(activities.rows.reduce(0) { $0 + $1.totalSeconds } == activities.totalSeconds)
     }
 
@@ -99,10 +99,9 @@ struct InsightsViewModelTests {
     @Test("loadIfNeeded serves the cached snapshot until invalidate, then reloads")
     func reloadAfterInvalidate() async throws {
         let store = try makeStore()
-        try await store.createActivity(Activity(id: "a1", name: "Reading"))
         let start = Date(timeIntervalSinceNow: -3600)
         try await store.createEntry(entry(
-            id: "e1", startedAt: start, activityID: "a1",
+            id: "e1", startedAt: start,
             durationSeconds: 60, endedAt: start.addingTimeInterval(60)))
 
         let vm = InsightsViewModel(store: store)
@@ -112,7 +111,7 @@ struct InsightsViewModelTests {
         // Entry saved elsewhere (Track tab, compact timer) while Insights is
         // off-screen must not leak into the cached snapshot…
         try await store.createEntry(entry(
-            id: "e2", startedAt: Date(timeIntervalSinceNow: -600), activityID: "a1",
+            id: "e2", startedAt: Date(timeIntervalSinceNow: -600),
             durationSeconds: 30, endedAt: Date(timeIntervalSinceNow: -570)))
         await vm.loadIfNeeded()
         #expect(vm.breakdown(period: .all, lens: .activity).totalSeconds == 60)

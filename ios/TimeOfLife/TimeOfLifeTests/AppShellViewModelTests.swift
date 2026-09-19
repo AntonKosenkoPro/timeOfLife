@@ -23,34 +23,32 @@ struct AppShellViewModelTests {
         #expect(vm.selectedTab == .track)
     }
 
-    @Test("no running timer shows no compact state")
+    @Test("no running draft shows no compact state")
     func noRunningTimer() async throws {
         let vm = makeViewModel()
         await vm.load()
         #expect(vm.runningTimer == nil)
     }
 
-    @Test("running timer is observed after load")
+    @Test("running draft is observed after load")
     func runningTimerObserved() async throws {
         let vm = makeViewModel()
         let store = vm.service.store
-        let activity = Activity(id: "a1", name: "Deep work")
-        try await store.createActivity(activity)
-        try await store.startTimer(activityID: activity.id, activityName: activity.name, startedAt: Date())
+        try await store.saveTimerDraft(activityText: "Deep work", categoryIDs: ["c1"], startedAt: Date())
 
         await vm.load()
         #expect(vm.runningTimer != nil)
-        #expect(vm.runningTimer?.activityID == "a1")
+        #expect(vm.runningTimer?.activityText == "Deep work")
     }
 
-    @Test("compact stop saves entry and clears running state")
+    @Test("compact stop saves entry with the draft's final categories and clears the draft")
     func compactStopSaves() async throws {
         let vm = makeViewModel()
         let store = vm.service.store
-        let activity = Activity(id: "a1", name: "Reading")
-        try await store.createActivity(activity)
+        try await store.createCategory(Category(id: "c1", name: "Work", icon: CatalogIcon.briefcase.rawValue))
+        try await store.createCategory(Category(id: "c2", name: "Health", icon: CatalogIcon.briefcase.rawValue))
         let startedAt = Date().addingTimeInterval(-120)
-        try await store.startTimer(activityID: activity.id, activityName: activity.name, startedAt: startedAt)
+        try await store.saveTimerDraft(activityText: "Reading", categoryIDs: ["c1", "c2"], startedAt: startedAt)
 
         await vm.load()
         #expect(vm.runningTimer != nil)
@@ -60,7 +58,8 @@ struct AppShellViewModelTests {
 
         let entries = try await store.entries()
         #expect(entries.count == 1)
-        #expect(entries.first?.activityID == "a1")
+        #expect(entries.first?.activityText == "Reading")
+        #expect(entries.first?.categoryIDs == ["c1", "c2"])
         #expect(entries.first?.durationSeconds == 120)
     }
 
@@ -68,9 +67,7 @@ struct AppShellViewModelTests {
     func compactStopKeepsDestination() async throws {
         let vm = makeViewModel()
         let store = vm.service.store
-        let activity = Activity(id: "a1", name: "Work")
-        try await store.createActivity(activity)
-        try await store.startTimer(activityID: activity.id, activityName: activity.name, startedAt: Date())
+        try await store.saveTimerDraft(activityText: "Work", categoryIDs: [], startedAt: Date())
 
         await vm.load()
         vm.selectedTab = .history

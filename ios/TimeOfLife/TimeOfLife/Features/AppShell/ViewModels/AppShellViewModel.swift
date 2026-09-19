@@ -2,7 +2,7 @@ import Foundation
 import Combine
 
 /// View model for the app shell (app-shell spec): owns the selected
-/// destination and observes the persisted running timer so History and
+/// destination and observes the persisted running draft so History and
 /// Insights can show the compact timer.
 @MainActor
 final class AppShellViewModel: ObservableObject {
@@ -13,7 +13,7 @@ final class AppShellViewModel: ObservableObject {
     }
 
     @Published var selectedTab: Tab = .track
-    @Published private(set) var runningTimer: RunningTimerState?
+    @Published private(set) var runningTimer: RunningTimerDraft?
 
     let service: TimerService
     private var ticker: AnyCancellable?
@@ -22,25 +22,31 @@ final class AppShellViewModel: ObservableObject {
         self.service = service
     }
 
-    /// Loads the persisted running timer (R2) and starts a periodic refresh so
+    /// Loads the persisted running draft (R2) and starts a periodic refresh so
     /// the compact timer stays live. Call on appear.
     func load() async {
         do {
-            runningTimer = try await service.runningTimerState()
+            runningTimer = try await service.runningTimerDraft()
         } catch {
             runningTimer = nil
         }
         startTicker()
     }
 
-    /// Stops the running timer from the compact surface, saving the entry in
-    /// place (app-shell spec: keeps the current destination selected).
+    /// Stops the running timer from the compact surface, saving the entry
+    /// with the draft's final categories in place (app-shell spec: keeps the
+    /// current destination selected).
     func stopFromCompact() async {
         guard let running = runningTimer,
-              let activityID = running.activityID,
+              !running.activityText.isEmpty,
               let startedAt = running.startedAt else { return }
         do {
-            try await service.stopTimer(activityID: activityID, startedAt: startedAt, endedAt: Date())
+            try await service.stopTimerDraft(
+                text: running.activityText,
+                categoryIDs: running.categoryIDs,
+                startedAt: startedAt,
+                endedAt: Date()
+            )
             runningTimer = nil
         } catch {
             // Recoverable: keep the compact timer so the user can retry.
@@ -54,7 +60,7 @@ final class AppShellViewModel: ObservableObject {
             .sink { [weak self] _ in
                 Task { @MainActor in
                     guard let self else { return }
-                    self.runningTimer = try? await self.service.runningTimerState()
+                    self.runningTimer = try? await self.service.runningTimerDraft()
                 }
             }
     }

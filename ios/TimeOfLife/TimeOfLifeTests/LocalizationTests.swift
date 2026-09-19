@@ -115,8 +115,6 @@ struct LocalizationTests {
             "validation.otpEmpty",
             "validation.otp.prefix",
             "validation.otp.rule.invalid",
-            "timer.searchValidationEmpty",
-            "timer.searchValidationTooLong",
         ]
         let main = Bundle.main
 
@@ -152,7 +150,12 @@ struct LocalizationTests {
         // 2 insights.lens.*, insights.noCategory, insights.footnote,
         // insights.empty.today, insights.empty.week) = 175;
         // present-enable-sync-sheet adds sync.cancel = 176;
-        // drain-404-convergence adds timer.activityDeleted = 177
-        #expect(l10nCases.count == 177)
+        // drain-404-convergence adds timer.activityDeleted = 177;
+        // remove-activities-layer removes 43 dead activity-catalog keys
+        // (timer.search.*, activityEditor.*, activity.delete.*,
+        // activityDetail.*, profile.activities, logTime.activity.*,
+        // choose/stale/deleted copy) and adds 7 plain-text entry keys
+        // (timer.idlePrompt/namePlaceholder, 5 entry.*) = 141
+        #expect(l10nCases.count == 141)
     }
 }

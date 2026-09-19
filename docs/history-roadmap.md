@@ -1,5 +1,11 @@
 # History Screen — Roadmap
 
+> Note (`remove-activities-layer`): the activities layer is gone — no activity
+> definitions, no Manage Activities, no activity detail sheet, no activity
+> editor. Entries own their exact text, ordered categories, and notes; History
+> row taps open the unified entry form directly. The exploration below is
+> preserved as archaeology; "Activity" references in it are stale.
+
 Captures the deferred decisions and future steps for the History experience,
 extracted from an explore-mode session. Step 1 (read-only entry list grouped
 by day) is tracked separately as its own OpenSpec change; this file holds

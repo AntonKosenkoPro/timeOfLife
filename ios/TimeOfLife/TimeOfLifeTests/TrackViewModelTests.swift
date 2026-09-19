@@ -8,89 +8,132 @@ struct TrackViewModelTests {
 
     // MARK: - State transitions
 
-    @Test("initial state is idle with no activity")
+    @Test("initial state is idle with no draft")
     func initialState() {
         let vm = makeViewModel()
         #expect(vm.state == .idle)
-        #expect(vm.state.activity == nil)
+        #expect(vm.state.draft == nil)
         #expect(vm.elapsed == 0)
-        #expect(!vm.isSearchActive)
+        #expect(!vm.canStart)
     }
 
-    @Test("selecting an activity prepares it without starting")
-    func selectPrepares() {
+    @Test("empty trimmed text cannot start")
+    func emptyTextCannotStart() {
         let vm = makeViewModel()
-        let activity = Activity(id: "a1", name: "Deep work")
-        vm.select(activity)
-
-        #expect(vm.state == .ready(activity))
-        #expect(vm.elapsed == 0)
-        #expect(!vm.state.isRunning)
-        #expect(!vm.isSearchActive)
-    }
-
-    @Test("start requires a prepared activity")
-    func startRequiresSelection() {
-        let vm = makeViewModel()
+        vm.nameDraft = "   "
+        vm.state = .ready(TrackState.Draft(text: "   "))
+        #expect(!vm.canStart)
         vm.start()
-        #expect(vm.state == .idle)
+        #expect(vm.state == .ready(TrackState.Draft(text: "   ")))
     }
 
-    @Test("start transitions ready to running and persists state")
+    @Test("start transitions ready to running and persists the draft")
     func startRuns() async throws {
         let vm = makeViewModel()
-        let activity = Activity(id: "a1", name: "Coding")
-        try await vm.service.store.createActivity(activity)
-        vm.select(activity)
+        let store = vm.service.store
+        try await store.createCategory(Category(id: "c1", name: "Work", icon: CatalogIcon.briefcase.rawValue))
+        try await store.createEntry(makeEntry(id: "e1", text: "Coding", categoryIDs: ["c1"]))
+        vm.recents = try await storeRecents(store)
+        vm.nameDraft = "Coding"
+        vm.state = .ready(TrackState.Draft(text: "Coding", categoryIDs: ["c1"]))
         vm.start()
 
         try? await Task.sleep(nanoseconds: 50_000_000)
-        guard case let .running(selected, _) = vm.state else {
+        guard case let .running(draft, _) = vm.state else {
             Issue.record("expected running state")
             return
         }
-        #expect(selected.id == activity.id)
+        #expect(draft.text == "Coding")
+        // Exact-recent match inherits its full ordered categories.
+        #expect(draft.categoryIDs == ["c1"])
         #expect(vm.state.isRunning)
 
-        let state = try await vm.service.store.timerState()
+        let state = try await vm.service.runningTimerDraft()
         #expect(state != nil)
         #expect(state?.status == "running")
-        #expect(state?.activityID == activity.id)
+        #expect(state?.activityText == "Coding")
     }
 
-    @Test("stop saves entry and returns to saved then ready")
+    @Test("start without an exact recents match starts with empty categories")
+    func startInheritsNothingWithoutMatch() async throws {
+        let vm = makeViewModel()
+        vm.nameDraft = "Novel"
+        vm.state = .ready(TrackState.Draft(text: "Novel"))
+        vm.start()
+
+        try? await Task.sleep(nanoseconds: 50_000_000)
+        guard case let .running(draft, _) = vm.state else {
+            Issue.record("expected running state")
+            return
+        }
+        #expect(draft.categoryIDs.isEmpty)
+    }
+
+    @Test("stop saves entry with final tags and returns to saved then ready")
     func stopSaves() async {
         let vm = makeViewModel()
-        let activity = Activity(id: "a1", name: "Reading")
-        try? await vm.service.store.createActivity(activity)
-        vm.select(activity)
+        try? await vm.service.store.createCategory(Category(id: "c9", name: "Health", icon: CatalogIcon.briefcase.rawValue))
+        vm.nameDraft = "Reading"
+        vm.state = .ready(TrackState.Draft(text: "Reading"))
         vm.start()
         try? await Task.sleep(nanoseconds: 10_000_000)
+        guard case .running = vm.state else {
+            Issue.record("expected running state")
+            return
+        }
+        vm.toggleDraftCategory("c9")
 
         await vm.stop()
 
-        guard case let .saved(selected, duration) = vm.state else {
+        guard case let .saved(draft, duration) = vm.state else {
             Issue.record("expected saved state")
             return
         }
-        #expect(selected.id == activity.id)
+        #expect(draft.text == "Reading")
+        #expect(draft.categoryIDs == ["c9"])
         #expect(duration >= 0)
         #expect(!vm.state.isRunning)
 
         let entries = try? await vm.service.store.entries()
         #expect(entries?.count == 1)
         #expect(entries?.first?.source == "manual")
-        #expect(entries?.first?.activityName == "Reading")
+        #expect(entries?.first?.activityText == "Reading")
+        #expect(entries?.first?.categoryIDs == ["c9"])
+        #expect(entries?.first?.notes.isEmpty == true)
 
-        let state = try? await vm.service.store.timerState()
+        let state = try? await vm.service.runningTimerDraft()
         #expect(state == nil)
+    }
+
+    @Test("toggling tags mid-run rewrites only the running draft snapshot")
+    func toggleRewritesDraftOnly() async throws {
+        let vm = makeViewModel()
+        vm.nameDraft = "Work"
+        vm.state = .ready(TrackState.Draft(text: "Work", categoryIDs: ["c1"]))
+        vm.start()
+        try? await Task.sleep(nanoseconds: 10_000_000)
+
+        vm.toggleDraftCategory("c1") // deselect
+        vm.toggleDraftCategory("c2") // select
+
+        guard case let .running(draft, _) = vm.state else {
+            Issue.record("expected running state")
+            return
+        }
+        // Order preserved: the surviving selection appends in toggle order.
+        #expect(draft.categoryIDs == ["c2"])
+        #expect(try await vm.service.store.entries().isEmpty)
+        let persisted = try await vm.service.runningTimerDraft()
+        #expect(persisted?.categoryIDs == ["c2"])
+        // No entry exists mid-run; nothing entered History.
+        #expect(try await vm.service.store.outboxRows().allSatisfy { $0.resource != "entry" })
     }
 
     @Test("elapsed formatting matches TimeFormatter")
     func elapsedFormatting() {
         let vm = makeViewModel()
-        let activity = Activity(id: "a1", name: "Work")
-        vm.select(activity)
+        vm.nameDraft = "Work"
+        vm.state = .ready(TrackState.Draft(text: "Work"))
         vm.start()
         vm.elapsed = 125
 
@@ -98,193 +141,114 @@ struct TrackViewModelTests {
         #expect(TimeFormatter.formattedDuration(3661) == "1:01:01")
     }
 
-    // MARK: - Empty catalog
+    // MARK: - Recents
 
-    @Test("empty catalog shows no activities and idle state")
-    func emptyCatalog() async throws {
+    @Test("load populates the recents and the categories map")
+    func loadPopulatesRecents() async throws {
         let vm = makeViewModel()
+        let store = vm.service.store
+        try await store.createCategory(Category(id: "c1", name: "Work", icon: CatalogIcon.briefcase.rawValue))
+        try await store.createEntry(makeEntry(id: "e1", text: "Coding", categoryIDs: ["c1"]))
+
         await vm.load()
-        #expect(vm.activities.isEmpty)
-        #expect(vm.state == .idle)
-        vm.activateSearch()
-        guard case let .browsing(activities) = vm.searchResults else {
-            Issue.record("expected browsing results")
-            return
-        }
-        #expect(activities.isEmpty)
+
+        #expect(vm.recents.map(\.text) == ["Coding"])
+        #expect(vm.recents.first?.firstCategoryID == "c1")
+        #expect(vm.categories["c1"]?.name == "Work")
+    }
+
+    @Test("load leaves the recents empty on a fresh store")
+    func loadEmptyRecents() async throws {
+        let vm = makeViewModel()
+
+        await vm.load()
+
+        #expect(vm.recents.isEmpty)
+        #expect(vm.categories.isEmpty)
+    }
+
+    @Test("exact text identity: Gym and GYM are separate recents")
+    func exactRecentsIdentity() async throws {
+        let vm = makeViewModel()
+        let store = vm.service.store
+        try await store.createEntry(makeEntry(id: "e1", text: "Gym", startedAt: Date(timeIntervalSinceNow: -100)))
+        try await store.createEntry(makeEntry(id: "e2", text: "GYM"))
+
+        await vm.load()
+
+        #expect(Set(vm.recents.map(\.text)) == ["Gym", "GYM"])
+        // Newest first by that text's newest started_at.
+        #expect(vm.recents.first?.text == "GYM")
+    }
+
+    @Test("selecting a recents chip prepares it without starting")
+    func selectChipPrepares() async throws {
+        let vm = makeViewModel()
+        vm.recents = [TrackViewModel.RecentEntry(text: "Reading", categoryIDs: ["c1"], firstCategoryID: "c1")]
+
+        vm.select(vm.recents[0])
+
+        #expect(vm.state == .ready(TrackState.Draft(text: "Reading", categoryIDs: ["c1"])))
+        #expect(vm.elapsed == 0)
+        #expect(!vm.state.isRunning)
+        #expect(try await vm.service.store.entries().isEmpty)
     }
 
     // MARK: - Recoverable save failure
 
-    @Test("stop after the activity was deleted settles idle with a message")
-    func stopAfterActivityDeleted() async {
+    @Test("stop retry after a recoverable failure preserves elapsed state")
+    func retryStopPreservesState() async {
         let vm = makeViewModel()
-        let activity = Activity(id: "a1", name: "Work")
-        try? await vm.service.store.createActivity(activity)
-        vm.select(activity)
+        vm.nameDraft = "Reading"
+        vm.state = .ready(TrackState.Draft(text: "Reading"))
         vm.start()
         try? await Task.sleep(nanoseconds: 10_000_000)
+        guard case let .running(draft, startedAt) = vm.state else {
+            Issue.record("expected running state")
+            return
+        }
 
-        // The activity was deleted on another device mid-session: the timer
-        // state still exists but the activity row is gone. Stopping must
-        // settle idle with an explanatory message — never a retry loop.
-        let store = vm.service.store
-        try? await store.deleteActivity(id: activity.id)
+        // Simulate the recoverable error path.
+        vm.state = .error(draft, startedAt: startedAt)
+        await vm.retryStop()
 
-        await vm.stop()
-
-        #expect(vm.state == .idle)
-        #expect(vm.elapsed == 0)
-        #expect(vm.errorMessage == L10n.timerActivityDeleted.text)
-        #expect(vm.errorMessage != L10n.text(in: .default, code: "error.unknown"))
-        let state = try? await store.timerState()
-        #expect(state == nil)
-        // Nothing unpushable was queued for the deleted activity.
-        #expect((try? await store.outboxRows())?.allSatisfy { $0.resource != "entry" } == true)
-    }
-
-    // MARK: - Categories map (Recents chip icons, design D6)
-
-    @Test("load populates the categories map")
-    func loadPopulatesCategories() async throws {
-        let vm = makeViewModel()
-        let store = vm.service.store
-        let category = Category(id: "c1", name: "Work", icon: CatalogIcon.briefcase.rawValue)
-        try await store.createCategory(category)
-
-        await vm.load()
-
-        // Field comparison: the store round-trips dates at reduced precision.
-        #expect(vm.categories[category.id]?.name == category.name)
-        #expect(vm.categories[category.id]?.icon == category.icon)
-    }
-
-    @Test("load leaves the categories map empty on a fresh store")
-    func loadEmptyCategories() async throws {
-        let vm = makeViewModel()
-
-        await vm.load()
-
-        #expect(vm.categories.isEmpty)
-    }
-
-    @Test("saveRefinement refreshes the categories map")
-    func saveRefinementRefreshesCategories() async throws {
-        let vm = makeViewModel()
-        let store = vm.service.store
-        let category = Category(id: "c1", name: "Work", icon: CatalogIcon.briefcase.rawValue)
-        try await store.createCategory(category)
-        try await store.createActivity(Activity(id: "a1", name: "Coding", categoryIDs: [category.id]))
-        await vm.load()
-        vm.select(Activity(id: "a1", name: "Coding"))
-        #expect(vm.categories[category.id]?.icon == CatalogIcon.briefcase.rawValue)
-
-        let updated = Category(
-            id: category.id,
-            name: "Work",
-            icon: CatalogIcon.laptopcomputer.rawValue,
-            createdAt: category.createdAt,
-            updatedAt: Date()
-        )
-        #expect(try await store.updateCategory(updated))
-        await vm.saveRefinement(updated: Activity(id: "a1", name: "Coding"))
-
-        #expect(vm.categories[category.id]?.icon == CatalogIcon.laptopcomputer.rawValue)
-    }
-
-    // MARK: - Refinement deletion (unify-catalog-deletion)
-
-    @Test("deleteRefinement clears the deleted activity back to idle and refreshes the catalog")
-    func deleteRefinementClearsSelection() async throws {
-        let vm = makeViewModel()
-        let store = vm.service.store
-        try await store.createActivity(Activity(id: "a1", name: "Gym"))
-        try await store.createActivity(Activity(id: "a2", name: "Reading"))
-        await vm.load()
-        vm.select(try #require(await store.activity(id: "a1")))
-        #expect(vm.selectedActivityID == "a1")
-
-        _ = try await store.deleteActivityUndoable(id: "a1", deletedAt: Date())
-        await vm.deleteRefinement(id: "a1")
-
-        #expect(vm.selectedActivityID == nil)
-        #expect(vm.activities.map(\.id) == ["a2"])
-    }
-
-    @Test("deleteRefinement keeps another selected activity")
-    func deleteRefinementKeepsOtherSelection() async throws {
-        let vm = makeViewModel()
-        let store = vm.service.store
-        try await store.createActivity(Activity(id: "a1", name: "Gym"))
-        try await store.createActivity(Activity(id: "a2", name: "Reading"))
-        await vm.load()
-        vm.select(try #require(await store.activity(id: "a2")))
-
-        _ = try await store.deleteActivityUndoable(id: "a1", deletedAt: Date())
-        await vm.deleteRefinement(id: "a1")
-
-        #expect(vm.selectedActivityID == "a2")
-    }
-
-    @Test("performActivityUndo restores the activity into the catalog")
-    func activityUndoRestores() async throws {
-        let vm = makeViewModel()
-        let store = vm.service.store
-        try await store.createActivity(Activity(id: "a1", name: "Gym"))
-        try await store.createEntry(TimeEntry(
-            id: "e1", activityID: "a1", activityName: "Gym",
-            startedAt: Date(timeIntervalSinceReferenceDate: 1_000),
-            endedAt: Date(timeIntervalSinceReferenceDate: 1_600), durationSeconds: 600,
-            source: "manual"
-        ))
-        await vm.load()
-        _ = try await store.deleteActivityUndoable(id: "a1", deletedAt: Date())
-        await vm.deleteRefinement(id: "a1")
-        #expect(!vm.activities.map(\.id).contains("a1"))
-
-        await vm.performActivityUndo()
-
-        #expect(vm.activities.map(\.id).contains("a1"))
-        #expect(try await store.entry(id: "e1") != nil)
-    }
-
-    @Test("activity undo ignores foreign snapshots")
-    func activityUndoIgnoresForeign() async throws {
-        let vm = makeViewModel()
-        let store = vm.service.store
-        try await store.createActivity(Activity(id: "a1", name: "Gym"))
-        try await store.createEntry(TimeEntry(
-            id: "e1", activityID: "a1", activityName: "Gym",
-            startedAt: Date(timeIntervalSinceReferenceDate: 1_000),
-            endedAt: Date(timeIntervalSinceReferenceDate: 1_600), durationSeconds: 600,
-            source: "manual"
-        ))
-        _ = try await store.deleteEntryUndoable(id: "e1", deletedAt: Date())
-        let undoManager = UndoManager()
-
-        await vm.registerActivityUndo(with: undoManager)
-        await vm.performActivityUndo()
-
-        #expect(!undoManager.canUndo)
-        #expect(try await store.undoBufferMostRecent() != nil)
-        #expect(try await store.entry(id: "e1") == nil)
-    }
-
-    @Test("system undo registers for activity deletions")
-    func systemUndoRegistersActivityDeletion() async throws {
-        let vm = makeViewModel()
-        let store = vm.service.store
-        try await store.createActivity(Activity(id: "a1", name: "Gym"))
-        _ = try await store.deleteActivityUndoable(id: "a1", deletedAt: Date())
-        let undoManager = UndoManager()
-
-        await vm.registerActivityUndo(with: undoManager)
-
-        #expect(undoManager.canUndo)
-        #expect(undoManager.undoActionName == L10n.activityEditorDelete.text)
+        guard case let .saved(saved, _) = vm.state else {
+            Issue.record("expected saved state")
+            return
+        }
+        #expect(saved.text == "Reading")
+        #expect((try? await vm.service.store.entries().count) == 1)
     }
 
     // MARK: - Helpers
+
+    private func makeEntry(
+        id: String,
+        text: String,
+        categoryIDs: [String] = [],
+        startedAt: Date = Date(),
+        duration: Int = 60
+    ) -> TimeEntry {
+        TimeEntry(
+            id: id,
+            activityText: text,
+            startedAt: startedAt,
+            endedAt: startedAt.addingTimeInterval(TimeInterval(duration)),
+            durationSeconds: duration,
+            source: "manual",
+            categoryIDs: categoryIDs
+        )
+    }
+
+    private func storeRecents(_ store: LocalStore) async throws -> [TrackViewModel.RecentEntry] {
+        try await store.recents(limit: 6).map { recent in
+            TrackViewModel.RecentEntry(
+                text: recent.activityText,
+                categoryIDs: recent.categoryIDs,
+                firstCategoryID: recent.categoryIDs.first
+            )
+        }
+    }
 
     private func makeViewModel() -> TrackViewModel {
         let connectivity = MockConnectivity(connected: true)

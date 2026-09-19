@@ -2,7 +2,7 @@
 
 Implements the `history-entry-list` capability (`openspec/specs/history-entry-list/spec.md`): a read-only, day-grouped list of committed time entries in the History tab. Deferred items live in `docs/history-roadmap.md`.
 
-The History destination answers "what did I spend time on and when?" — a chronology of timed events (entries), not activity definitions. Entries are grouped by the calendar day they started on; categories are resolved from each activity's current category set at read time (no denormalization, design D6).
+The History destination answers "what did I spend time on and when?" — a chronology of timed events (entries), not definitions. Entries are grouped by the calendar day they started on; each entry owns its text, ordered categories, and notes at write time (no resolution, no retroactive mutation).
 
 ---
 
@@ -24,8 +24,8 @@ The History destination answers "what did I spend time on and when?" — a chron
 
 ### Behaviors
 
-- On appear, load entries (`LocalStore.entries()`), activities (`LocalStore.activities()`), and categories (`LocalStore.categories()`); rebuild day groups. Read-only — no mutation paths on this screen.
-- Rows do not respond to taps in this capability (see roadmap: tap-to-detail is deferred).
+- On appear, load entries (`LocalStore.entries()`) and categories (`LocalStore.categories()`); rebuild day groups. Read-only — no mutation paths on this screen.
+- Tapping a row opens the unified entry form as a full-screen cover (EDIT for `manual`, LOCKED read-only for imported with delete only); there is no intermediate detail surface.
 - Elevated-header tracking is view state owned by `HistoryView`; `HistoryViewModel` owns data only (design risk note).
 
 ### States
@@ -35,7 +35,6 @@ The History destination answers "what did I spend time on and when?" — a chron
 | Loading | Progress indicator while the local store is read |
 | Empty | `EmptyState` (`clock.arrow.circlepath`, `historyEmptyTitle` / `historyEmptySubtitle`) |
 | Loaded | Day-grouped `List` of `EntryRow` |
-| In-progress entry | Row shows the start time + localized in-progress indicator in place of end time and duration |
 | Elevated header | Pinned day-group header shows the day total ("2h 35m tracked"); in-list headers show only the day label |
 
 ### Data model
@@ -81,9 +80,6 @@ Add to `en.lproj/Localizable.strings` and `ru.lproj/Localizable.strings`, then t
 "history.day.today" = "Today";
 "history.day.yesterday" = "Yesterday";
 
-// In-progress indicator
-"history.inProgress" = "In progress";
-
 // Day total suffix
 "history.tracked" = "tracked";
 ```
@@ -94,9 +90,6 @@ Russian:
 // History day-group labels
 "history.day.today" = "Сегодня";
 "history.day.yesterday" = "Вчера";
-
-// In-progress indicator
-"history.inProgress" = "В процессе";
 
 // Day total suffix
 "history.tracked" = "отслеживано";

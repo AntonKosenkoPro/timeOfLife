@@ -63,5 +63,8 @@ CREATE TABLE IF NOT EXISTS entries (
 CREATE INDEX IF NOT EXISTS idx_entries_user_started
     ON entries(user_id, started_at DESC);
 
-CREATE INDEX IF NOT EXISTS idx_entries_user_activity
-    ON entries(user_id, activity_id);
+-- Note: the historical idx_entries_user_activity index was removed with the
+-- activities layer (007); the recents index 007 creates
+-- (idx_entries_user_text_started) covers entry reads by text instead. This
+-- migration is idempotent and re-applies on every server start — 007 always
+-- follows and re-drops the legacy tables/columns it re-creates here.

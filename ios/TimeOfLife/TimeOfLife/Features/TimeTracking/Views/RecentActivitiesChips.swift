@@ -1,45 +1,48 @@
 import SwiftUI
 
 /// The Track Recents chip flow (timer-capture-experience spec,
-/// refine-track-recents D2/D3/D4). Presents up to six most-recently-used
-/// Activities as a wrapping flow of chips with 44 pt tap targets; chips wrap
-/// onto additional rows and never require horizontal scrolling.
+/// design D5). Presents up to six most-recently-used exact entry texts as a
+/// wrapping flow of chips with 44 pt tap targets; chips wrap onto additional
+/// rows and never require horizontal scrolling.
 ///
-/// Each chip shows the icon of the first Category assigned to its Activity
-/// (first by assignment position, resolved through the id-to-Category map);
-/// Activities without Categories render name-only. The prepared Activity's
-/// chip keeps its icon and switches to a filled accent presentation (accent
-/// background, on-accent text, accent border) — the same non-color-only
-/// selected treatment as `TagSelector` (fill + contrast, no checkmark, so
-/// chips stay compact). Rows are packed from measured chip widths because
-/// the `Layout` protocol is iOS 16+ and the app supports iOS 15 (same
-/// algorithm as `TagSelector`, category-management D9).
+/// Each chip shows the icon of the first category of that exact text's
+/// newest committed entry (first by stored position, resolved through the
+/// id-to-Category map); texts without categories render name-only. The
+/// prepared text's chip keeps its icon and switches to a filled accent
+/// presentation (accent background, on-accent text, accent border) — the
+/// same non-color-only selected treatment as `TagSelector` (fill + contrast,
+/// no checkmark, so chips stay compact). Rows are packed from measured chip
+/// widths because the `Layout` protocol is iOS 16+ and the app supports
+/// iOS 15 (same algorithm as `TagSelector`, category-management D9).
 struct RecentActivitiesChips: View {
-    let activities: [Activity]
+    let recents: [TrackViewModel.RecentEntry]
     let categories: [String: Category]
-    let selectedID: String?
-    let onSelect: (Activity) -> Void
+    let selectedText: String?
+    let onSelect: (TrackViewModel.RecentEntry) -> Void
 
     @Environment(\.dynamicTypeSize)
     private var dynamicTypeSize
     @State private var containerWidth: CGFloat = 0
 
     /// The capped, most-recently-used-first slice (the store already sorts
-    /// by `last_used_at`).
-    private var recents: [Activity] { Self.recents(from: activities) }
+    /// by the text's newest `started_at`).
+    private var capped: [TrackViewModel.RecentEntry] { Self.recents(from: recents) }
 
-    /// The capped, most-recently-used-first slice of the given activities.
+    /// The capped, most-recently-used-first slice of the given recents.
     /// Pure (no view state), so `nonisolated` like `EntryRow.accessibilityLabel`.
-    nonisolated static func recents(from activities: [Activity], limit: Int = 6) -> [Activity] {
-        Array(activities.prefix(limit))
+    nonisolated static func recents(
+        from recents: [TrackViewModel.RecentEntry],
+        limit: Int = 6
+    ) -> [TrackViewModel.RecentEntry] {
+        Array(recents.prefix(limit))
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.spacingSmall) {
             ForEach(rows.indices, id: \.self) { rowIndex in
                 HStack(spacing: Theme.spacingSmall) {
-                    ForEach(rows[rowIndex]) { activity in
-                        chip(activity)
+                    ForEach(rows[rowIndex]) { recent in
+                        chip(recent)
                     }
                 }
             }
@@ -85,9 +88,9 @@ struct RecentActivitiesChips: View {
 
     /// Natural chip width: optional icon slot + name + uniform horizontal
     /// padding.
-    private func chipWidth(for activity: Activity) -> CGFloat {
-        let name = activity.name.size(withAttributes: [.font: nameFont]).width
-        let iconWidth = activity.categoryIDs.first != nil
+    private func chipWidth(for recent: TrackViewModel.RecentEntry) -> CGFloat {
+        let name = recent.text.size(withAttributes: [.font: nameFont]).width
+        let iconWidth = recent.firstCategoryID != nil
             ? symbolSlotSize + Theme.spacingExtraSmall
             : 0
         return iconWidth + name + Theme.spacingMedium * 2
@@ -96,20 +99,20 @@ struct RecentActivitiesChips: View {
     /// Greedy packing: fill each row with as many content-sized chips as fit,
     /// keeping equal `Theme.spacingSmall` gaps. Until the container width is
     /// measured, every chip sits on its own row (single pass, no flicker).
-    private var rows: [[Activity]] {
-        guard containerWidth > 0 else { return recents.map { [$0] } }
-        var result: [[Activity]] = []
-        var current: [Activity] = []
+    private var rows: [[TrackViewModel.RecentEntry]] {
+        guard containerWidth > 0 else { return capped.map { [$0] } }
+        var result: [[TrackViewModel.RecentEntry]] = []
+        var current: [TrackViewModel.RecentEntry] = []
         var currentWidth: CGFloat = 0
-        for activity in recents {
-            let width = min(chipWidth(for: activity), containerWidth)
+        for recent in capped {
+            let width = min(chipWidth(for: recent), containerWidth)
             let projected = currentWidth + (current.isEmpty ? 0 : Theme.spacingSmall) + width
             if current.isEmpty || projected <= containerWidth {
-                current.append(activity)
+                current.append(recent)
                 currentWidth = projected
             } else {
                 result.append(current)
-                current = [activity]
+                current = [recent]
                 currentWidth = width
             }
         }
@@ -120,44 +123,44 @@ struct RecentActivitiesChips: View {
     // MARK: - Chip
 
     @ViewBuilder
-    private func chip(_ activity: Activity) -> some View {
-        let isSelected = selectedID == activity.id
-        let label = chipLabel(activity: activity, isSelected: isSelected)
+    private func chip(_ recent: TrackViewModel.RecentEntry) -> some View {
+        let isSelected = selectedText == recent.text
+        let label = chipLabel(recent: recent, isSelected: isSelected)
         // A chip wider than the container gets a fixed container-width frame
         // so its name truncates instead of overflowing.
-        if containerWidth > 0, chipWidth(for: activity) > containerWidth {
+        if containerWidth > 0, chipWidth(for: recent) > containerWidth {
             Button {
-                onSelect(activity)
+                onSelect(recent)
             } label: {
                 label.frame(width: containerWidth)
             }
-            .accessibilityLabel(String(format: L10n.timerSelectActivity.text, activity.name))
+            .accessibilityLabel(String(format: L10n.timerSelectActivity.text, recent.text))
             .accessibilityValue(isSelected ? L10n.undoSelected.text : "")
             .accessibilityAddTraits(isSelected ? .isSelected : [])
-            .accessibilityIdentifier("TimerSuggestion(\(activity.id))")
+            .accessibilityIdentifier("TimerSuggestion(\(recent.text))")
         } else {
             Button {
-                onSelect(activity)
+                onSelect(recent)
             } label: {
                 label
             }
-            .accessibilityLabel(String(format: L10n.timerSelectActivity.text, activity.name))
+            .accessibilityLabel(String(format: L10n.timerSelectActivity.text, recent.text))
             .accessibilityValue(isSelected ? L10n.undoSelected.text : "")
             .accessibilityAddTraits(isSelected ? .isSelected : [])
-            .accessibilityIdentifier("TimerSuggestion(\(activity.id))")
+            .accessibilityIdentifier("TimerSuggestion(\(recent.text))")
         }
     }
 
-    private func chipLabel(activity: Activity, isSelected: Bool) -> some View {
+    private func chipLabel(recent: TrackViewModel.RecentEntry, isSelected: Bool) -> some View {
         HStack(spacing: Theme.spacingExtraSmall) {
-            if let categoryID = activity.categoryIDs.first,
+            if let categoryID = recent.firstCategoryID,
                let category = categories[categoryID] {
                 Image(systemName: CatalogIcon(validated: category.icon).displaySymbol)
                     .font(.system(size: symbolFontSize))
                     .frame(width: symbolSlotSize)
                     .accessibilityHidden(true)
             }
-            Text(activity.name)
+            Text(recent.text)
                 .font(.subheadline.weight(.medium))
                 .lineLimit(1)
                 .truncationMode(.tail)
@@ -213,17 +216,17 @@ extension DynamicTypeSize {
         Category(id: "c2", name: "Study", icon: "book"),
         Category(id: "c3", name: "Sport", icon: "figure.run")
     ]
-    let activities = [
-        Activity(id: "a1", name: "Deep work", categoryIDs: ["c1"]),
-        Activity(id: "a2", name: "Reading", categoryIDs: ["c2"]),
-        Activity(id: "a3", name: "Gym session", categoryIDs: ["c3"]),
-        Activity(id: "a4", name: "Planning", categoryIDs: []),
-        Activity(id: "a5", name: "A very long activity name that truncates", categoryIDs: ["c1"])
+    let recents = [
+        TrackViewModel.RecentEntry(text: "Deep work", categoryIDs: ["c1"], firstCategoryID: "c1"),
+        TrackViewModel.RecentEntry(text: "Reading", categoryIDs: ["c2"], firstCategoryID: "c2"),
+        TrackViewModel.RecentEntry(text: "Gym session", categoryIDs: ["c3"], firstCategoryID: "c3"),
+        TrackViewModel.RecentEntry(text: "Planning", categoryIDs: [], firstCategoryID: nil),
+        TrackViewModel.RecentEntry(text: "A very long entry name that truncates", categoryIDs: ["c1"], firstCategoryID: "c1")
     ]
     return RecentActivitiesChips(
-        activities: activities,
+        recents: recents,
         categories: Dictionary(uniqueKeysWithValues: categories.map { ($0.id, $0) }),
-        selectedID: "a1"
+        selectedText: "Deep work"
     ) { _ in }
     .padding()
     .background(Theme.backgroundPrimary)
@@ -231,9 +234,9 @@ extension DynamicTypeSize {
 
 #Preview("Recents — Empty") {
     RecentActivitiesChips(
-        activities: [],
+        recents: [],
         categories: [:],
-        selectedID: nil
+        selectedText: nil
     ) { _ in }
     .padding()
     .background(Theme.backgroundPrimary)

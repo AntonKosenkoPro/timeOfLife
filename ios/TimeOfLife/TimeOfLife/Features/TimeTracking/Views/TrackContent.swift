@@ -2,14 +2,17 @@ import SwiftUI
 
 /// The stable Track timer layout, built on the adaptive dual-flow stack
 /// (refine-track-recents D1): navigation title, top spacer, completion mark,
-/// timer numbers/status, reserved error region, central separator, Activity
-/// search/refine, main action, Recents, bottom spacer, tab bar. The top and
-/// bottom spacers share a 48 pt cap and split slack equally; surplus beyond
-/// twice the cap goes to the central separator. D10 makes the content height
-/// around the main action state-invariant (reserved idle preparation slot,
-/// hidden-but-reserved Recents, fixed-height action slot) and pins the
-/// bottom flow under wrapped-error growth. Activity-search draft state is
-/// rendered in `ActivitySearchSheet`, rather than replacing this body.
+/// timer numbers/status, reserved error region, central separator, name
+/// field / locked name, main action, Recents, bottom spacer, tab bar. The
+/// top and bottom spacers share a 48 pt cap and split slack equally; surplus
+/// beyond twice the cap goes to the central separator. D10 makes the content
+/// height around the main action state-invariant (reserved idle preparation
+/// slot, hidden-but-reserved Recents, fixed-height action slot) and pins the
+/// bottom flow under wrapped-error growth.
+///
+/// Capture is plain text (remove-activities-layer): the name field is the
+/// only idle input; while running the name locks and the shared ordered
+/// `TagSelector` occupies the preparation region (D4).
 struct TrackContent: View {
     @ObservedObject var vm: TrackViewModel
     @Environment(\.dynamicTypeSize)
@@ -73,7 +76,7 @@ struct TrackContent: View {
             .frame(height: 28)
     }
 
-    /// Reserved non-field-error region immediately above the search/refine
+    /// Reserved non-field-error region immediately above the name/tags
     /// flow. When empty it preserves geometry; when an error shows, the
     /// banner keeps its production identifier, wraps without being cut, and
     /// grows past the reserved height. Both branches measure their height so
@@ -126,7 +129,11 @@ struct TrackContent: View {
 
     private var bottomFlow: some View {
         VStack(spacing: 0) {
-            activityPreparationControl
+            nameControl
+            if case .running = vm.state {
+                runningTagSelector
+                    .padding(.top, Theme.spacingMedium)
+            }
             primaryAction
                 .padding(.top, Theme.spacingLarge)
             recentActivities
@@ -137,59 +144,50 @@ struct TrackContent: View {
         .frame(maxWidth: .infinity)
     }
 
-    // MARK: - Activity preparation
+    // MARK: - Name capture (plain text, remove-activities-layer 4.1/4.2)
 
-    @ViewBuilder private var activityPreparationControl: some View {
+    /// Idle/ready/saved: the plain-text name field. Running/saving/error:
+    /// the locked name label (name is non-editable after Start).
+    @ViewBuilder private var nameControl: some View {
         switch vm.state {
-        case .idle:
-            // D10: the slot is reserved in every state. The hidden picker
-            // keeps the exact picker/label geometry but is invisible,
-            // non-interactive, and absent from the accessibility tree.
-            activityPicker
-                .hidden()
-                .accessibilityHidden(true)
-        case .ready, .saved:
-            activityPicker
+        case .idle, .ready, .saved:
+            nameField
         case .running, .saving, .error:
-            preparedActivityLabel
+            lockedNameLabel
         }
     }
 
-    private var activityPicker: some View {
-        Button {
-            vm.activateSearch()
-        } label: {
-            HStack(spacing: Theme.spacingSmall) {
-                Image(systemName: "magnifyingglass")
-                    .foregroundStyle(Theme.textSecondary)
-                    .accessibilityHidden(true)
-                Text(vm.state.activity?.name ?? L10n.timerSearchPrompt.text)
-                    .lineLimit(1)
-                    .foregroundStyle(vm.state.activity == nil ? Theme.textSecondary : Theme.textPrimary)
-                Spacer()
-            }
-            .font(.body)
-            .padding(.horizontal, Theme.spacingMedium)
-            .frame(maxWidth: .infinity, minHeight: Theme.minTapArea)
-            .background(Theme.backgroundSecondary)
-            .clipShape(RoundedRectangle(cornerRadius: Theme.cornerRadius))
-            .overlay {
-                RoundedRectangle(cornerRadius: Theme.cornerRadius)
-                    .stroke(Theme.hairline, lineWidth: 0.7)
-            }
+    private var nameField: some View {
+        TextField(
+            L10n.timerNamePlaceholder.text,
+            text: $vm.nameDraft,
+            onEditingChanged: { editing in
+                guard !editing else { return }
+                vm.syncReadyFromDraft()
+            },
+            onCommit: { vm.syncReadyFromDraft() }
+        )
+        .submitLabel(.done)
+        .font(.body)
+        .padding(.horizontal, Theme.spacingMedium)
+        .frame(maxWidth: .infinity, minHeight: Theme.minTapArea)
+        .background(Theme.backgroundSecondary)
+        .clipShape(RoundedRectangle(cornerRadius: Theme.cornerRadius))
+        .overlay {
+            RoundedRectangle(cornerRadius: Theme.cornerRadius)
+                .stroke(Theme.hairline, lineWidth: 0.7)
         }
         .disabled(vm.state.isRunning)
-        .opacity(vm.state.isRunning ? 0.72 : 1)
-        .accessibilityIdentifier("TimerActivitySearchButton")
-        .accessibilityLabel(vm.state.activity?.name ?? L10n.timerSearchPrompt.text)
+        .accessibilityIdentifier("TimerNameField")
+        .accessibilityLabel(L10n.timerNamePlaceholder.text)
     }
 
-    private var preparedActivityLabel: some View {
+    private var lockedNameLabel: some View {
         HStack(spacing: Theme.spacingSmall) {
             Image(systemName: "timer")
                 .foregroundStyle(Theme.textSecondary)
                 .accessibilityHidden(true)
-            Text(vm.state.activity?.name ?? L10n.timerSearchPrompt.text)
+            Text(vm.state.draft?.text ?? "")
                 .lineLimit(1)
                 .foregroundStyle(Theme.textPrimary)
             Spacer()
@@ -203,8 +201,32 @@ struct TrackContent: View {
             RoundedRectangle(cornerRadius: Theme.cornerRadius)
                 .stroke(Theme.hairline, lineWidth: 0.7)
         }
-        .accessibilityIdentifier("TimerActivityLabel")
-        .accessibilityLabel(vm.state.activity?.name ?? L10n.timerSearchPrompt.text)
+        .accessibilityIdentifier("TimerNameLabel")
+        .accessibilityLabel(vm.state.draft?.text ?? "")
+    }
+
+    // MARK: - Running TagSelector (remove-activities-layer 4.2)
+
+    /// The shared ordered TagSelector while running (select-only from
+    /// existing categories, zero allowed, order preserved). Toggles rewrite
+    /// only the running draft snapshot.
+    @ViewBuilder private var runningTagSelector: some View {
+        if case let .running(draft, _) = vm.state {
+            VStack(alignment: .leading, spacing: Theme.spacingExtraSmall) {
+                Text(L10n.entryCategoriesLabel.text)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(Theme.textSecondary)
+                TagSelector(
+                    options: Array(vm.categories.values).sorted { $0.name < $1.name },
+                    selected: Set(draft.categoryIDs),
+                    onToggle: { toggledID in
+                        vm.toggleDraftCategory(toggledID)
+                    },
+                    accessibilityId: "RunningTags"
+                )
+            }
+            .accessibilityIdentifier("RunningTagSelector")
+        }
     }
 
     // MARK: - Primary action
@@ -219,9 +241,7 @@ struct TrackContent: View {
             tint: vm.state.isRunning ? Theme.danger : nil
         ) {
             switch vm.state {
-            case .idle:
-                vm.activateSearch()
-            case .ready, .saved:
+            case .idle, .ready, .saved:
                 vm.start()
             case .running, .saving:
                 Task { await vm.stop() }
@@ -243,8 +263,8 @@ struct TrackContent: View {
 
     /// D10: the fixed-height slot for the state-specific main action. The
     /// slot equals the tallest title presentation at the active Dynamic
-    /// Type size, so the Choose Activity / Start / Stop swap never resizes
-    /// or moves the control.
+    /// Type size, so the Start / Stop swap never resizes or moves the
+    /// control.
     private var actionSlotHeight: CGFloat {
         MainActionSlot.height(
             titles: primaryTitles,
@@ -254,37 +274,34 @@ struct TrackContent: View {
     }
 
     private var primaryTitles: [String] {
-        [L10n.timerChooseActivity.text, L10n.timerStart.text, L10n.timerStop.text]
+        [L10n.timerStart.text, L10n.timerStop.text]
     }
 
     private var primaryTitle: String {
         switch vm.state {
-        case .idle: L10n.timerChooseActivity.text
-        case .ready, .saved: L10n.timerStart.text
-        case .running, .saving: L10n.timerStop.text
-        case .error: L10n.timerStop.text
+        case .idle, .ready, .saved: L10n.timerStart.text
+        case .running, .saving, .error: L10n.timerStop.text
         }
     }
 
     private var primaryIcon: String? {
         switch vm.state {
-        case .idle: "plus"
-        case .ready, .saved: "play.fill"
+        case .idle, .ready, .saved: "play.fill"
         case .running, .saving, .error: "stop.fill"
         }
     }
 
     private var primaryDisabled: Bool {
         switch vm.state {
+        case .idle, .ready, .saved: !vm.canStart
         case .saving: true
-        default: false
+        case .running, .error: false
         }
     }
 
     private var primaryIdentifier: String {
         switch vm.state {
-        case .idle: "TimerChooseActivityButton"
-        case .ready, .saved: "TimerStartButton"
+        case .idle, .ready, .saved: "TimerStartButton"
         case .running, .saving, .error: "TimerStopButton"
         }
     }
@@ -310,15 +327,15 @@ struct TrackContent: View {
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(Theme.textSecondary)
 
-            if vm.activities.isEmpty {
+            if vm.recents.isEmpty {
                 Text(L10n.timerRecentsEmptyHint.text)
                     .font(.subheadline)
                     .foregroundStyle(Theme.textSecondary)
             } else {
                 RecentActivitiesChips(
-                    activities: vm.activities,
+                    recents: vm.recents,
                     categories: vm.categories,
-                    selectedID: vm.state.activity?.id
+                    selectedText: vm.state.draft?.text
                 ) { vm.select($0) }
             }
         }

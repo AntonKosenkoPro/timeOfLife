@@ -4,7 +4,7 @@ import SwiftUI
 /// and Insights (Design/COMPONENTS.md, `CompactTimer`). Track does not render
 /// it — the full numeric readout is already visible there.
 struct CompactTimer: View {
-    let activityName: String
+    let entryText: String
     let startedAt: Date
     let openTrack: () -> Void
     let stop: () -> Void
@@ -22,7 +22,7 @@ struct CompactTimer: View {
                             .clipShape(Circle())
 
                         VStack(alignment: .leading, spacing: 2) {
-                            Text(activityName)
+                            Text(entryText)
                                 .font(.subheadline.weight(.semibold))
                                 .foregroundStyle(Theme.textPrimary)
                                 .lineLimit(1)
@@ -34,7 +34,7 @@ struct CompactTimer: View {
                     }
                     .contentShape(Rectangle())
                 }
-                .accessibilityLabel(String(format: L10n.timerCompactRunning.text, activityName))
+                .accessibilityLabel(String(format: L10n.timerCompactRunning.text, entryText))
                 .accessibilityHint(L10n.timerCompactReturnHint.text)
 
                 Button(action: stop) {
@@ -72,7 +72,7 @@ struct CompactTimer: View {
 #if DEBUG
 #Preview("Compact Timer") {
     CompactTimer(
-        activityName: "Deep work",
+        entryText: "Deep work",
         startedAt: Date().addingTimeInterval(-125),
         openTrack: {},
         stop: {}

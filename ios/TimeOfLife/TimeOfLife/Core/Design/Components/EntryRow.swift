@@ -75,7 +75,7 @@ struct EntryRow: View {
                 .padding(.top, Self.iconTopAdjustment)
             VStack(alignment: .leading, spacing: 2) {
                 HStack(alignment: .firstTextBaseline) {
-                    Text(entry.activityName)
+                    Text(entry.activityText)
                         .font(.headline)
                         .foregroundStyle(Theme.textPrimary)
                     Spacer(minLength: Theme.spacingSmall)
@@ -101,7 +101,7 @@ struct EntryRow: View {
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(
             Self.accessibilityLabel(
-                activityName: entry.activityName,
+                entryText: entry.activityText,
                 categoryNames: categoryNames,
                 timeframeText: timeframeText,
                 durationText: durationText,
@@ -115,14 +115,14 @@ struct EntryRow: View {
     /// The row is a single element whose label folds in the category names,
     /// provenance, and timing (history-entry-list a11y requirement).
     nonisolated static func accessibilityLabel(
-        activityName: String,
+        entryText: String,
         categoryNames: String,
         timeframeText: String,
         durationText: String,
         isInProgress: Bool,
         viaText: String = ""
     ) -> String {
-        var parts = [activityName, durationText]
+        var parts = [entryText, durationText]
         if !categoryNames.isEmpty { parts.append(categoryNames) }
         if !viaText.isEmpty { parts.append(viaText) }
         parts.append(timeframeText)
@@ -136,8 +136,7 @@ struct EntryRow: View {
     EntryRow(
         entry: TimeEntry(
             id: "e1",
-            activityID: "a1",
-            activityName: "Deep work",
+            activityText: "Deep work",
             startedAt: Date(timeIntervalSinceNow: -4800),
             endedAt: Date(),
             durationSeconds: 4800
@@ -157,8 +156,7 @@ struct EntryRow: View {
     EntryRow(
         entry: TimeEntry(
             id: "e2",
-            activityID: "a2",
-            activityName: "Reading",
+            activityText: "Reading",
             startedAt: Date(timeIntervalSinceNow: -1980),
             endedAt: Date(),
             durationSeconds: 1980

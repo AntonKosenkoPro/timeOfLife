@@ -1,8 +1,9 @@
 import SwiftUI
 
 /// The Profile destination (app-shell spec, D6/D30): useful without an
-/// account. Account/sync controls live here alongside local activity and
-/// category management, integrations, export, appearance, and data controls.
+/// account. Account/sync controls live here alongside local category
+/// management, integrations, export, appearance, and data controls. No
+/// activity management exists (no activity catalog — remove-activities-layer).
 struct ProfileView: View {
     @EnvironmentObject var container: AppContainer
     /// Observed directly (not via `container`): `AppContainer` publishes
@@ -136,7 +137,6 @@ struct ProfileView: View {
 
     private var librarySection: some View {
         Section(L10n.profileLibrary.text) {
-            ListRow(title: L10n.profileActivities.text, icon: "square.grid.2x2")
             NavigationLink {
                 ManageCategoriesView(
                     store: container.localStore,

@@ -21,14 +21,9 @@ func (h *Handler) writeCatalogStoreErr(w http.ResponseWriter, record any, err er
 	case errors.Is(err, db.ErrConflict):
 		writeError(w, http.StatusConflict, codeConflict,
 			"Outdated version; a newer record exists on the server.", versionDetails(record))
-	case errors.Is(err, db.ErrActivityExists):
-		writeError(w, http.StatusConflict, codeActivityExists,
-			"An activity with this name already exists.", idNameDetails(record))
 	case errors.Is(err, db.ErrCategoryExists):
 		writeError(w, http.StatusConflict, codeCategoryExists,
 			"A category with this name already exists.", idNameDetails(record))
-	case errors.Is(err, db.ErrActivityNotFound):
-		writeError(w, http.StatusNotFound, codeActivityMissing, "Referenced activity not found", nil)
 	case errors.Is(err, db.ErrDuplicateImport):
 		writeError(w, http.StatusConflict, codeDuplicateImport,
 			"An entry with this source and source_ref already exists.", nil)
@@ -46,8 +41,6 @@ func (h *Handler) writeCatalogStoreErr(w http.ResponseWriter, record any, err er
 func versionDetails(record any) any {
 	var t time.Time
 	switch v := record.(type) {
-	case db.Activity:
-		t = v.UpdatedAt
 	case db.Category:
 		t = v.UpdatedAt
 	case db.Entry:
@@ -60,154 +53,10 @@ func versionDetails(record any) any {
 
 // idNameDetails returns {id, name} of the winning record for a *_exists 409.
 func idNameDetails(record any) any {
-	switch v := record.(type) {
-	case db.Activity:
-		return map[string]string{"id": v.ID, "name": v.Name}
-	case db.Category:
+	if v, ok := record.(db.Category); ok {
 		return map[string]string{"id": v.ID, "name": v.Name}
 	}
 	return nil
-}
-
-// ---------- Activities ----------
-
-// ListActivities handles GET /activities (?q= typeahead filter, ?modified_since= delta pull).
-func (h *Handler) ListActivities(w http.ResponseWriter, r *http.Request) {
-	userID, ok := h.requireUserID(w, r)
-	if !ok {
-		return
-	}
-	q := r.URL.Query()
-	var modifiedSince *time.Time
-	if v := q.Get("modified_since"); v != "" {
-		t, ok := parseRFC3339(v)
-		if !ok {
-			writeValidation(w, validationErrs{"modified_since": "modified_since must be a valid RFC 3339 timestamp"})
-			return
-		}
-		modifiedSince = &t
-	}
-	acts, err := h.store.ListActivities(r.Context(), userID, q.Get("q"), modifiedSince)
-	if err != nil {
-		h.logger.Error("list activities failed", "error", err)
-		writeError(w, http.StatusInternalServerError, "internal_error", "An internal error occurred", nil)
-		return
-	}
-	if acts == nil {
-		acts = []db.Activity{}
-	}
-	writeJSON(w, http.StatusOK, acts)
-}
-
-// CreateActivity handles POST /activities (idempotent on id).
-func (h *Handler) CreateActivity(w http.ResponseWriter, r *http.Request) {
-	userID, ok := h.requireUserID(w, r)
-	if !ok {
-		return
-	}
-	var req activityCreateReq
-	if err := decodeJSON(r, &req); err != nil {
-		h.logger.Warn("invalid create activity body", "error", err)
-		writeError(w, http.StatusBadRequest, "invalid_body", "Invalid request body", nil)
-		return
-	}
-	name := strings.TrimSpace(req.Name)
-	errs := validationErrs{}
-	validateID(req.ID, errs)
-	validateName("name", name, errs)
-	validateNotes(req.Notes, errs)
-	if !errs.ok() {
-		writeValidation(w, errs)
-		return
-	}
-
-	a := db.Activity{ID: req.ID, UserID: userID, Name: name, Notes: req.Notes}
-	created, isNew, err := h.store.CreateActivity(r.Context(), a, req.CategoryIDs)
-	if err != nil {
-		h.writeCatalogStoreErr(w, created, err, "create activity")
-		return
-	}
-	status := http.StatusCreated
-	if !isNew {
-		status = http.StatusOK
-	}
-	h.logger.Info("activity saved", "userID", userID, "activityID", created.ID, "created", isNew)
-	writeJSON(w, status, created)
-}
-
-// GetActivity handles GET /activities/{id}.
-func (h *Handler) GetActivity(w http.ResponseWriter, r *http.Request) {
-	userID, ok := h.requireUserID(w, r)
-	if !ok {
-		return
-	}
-	a, err := h.store.GetActivity(r.Context(), userID, chi.URLParam(r, "id"))
-	if err != nil {
-		h.writeCatalogStoreErr(w, a, err, "get activity")
-		return
-	}
-	writeJSON(w, http.StatusOK, a)
-}
-
-// UpdateActivity handles PATCH /activities/{id} (partial, LWW).
-func (h *Handler) UpdateActivity(w http.ResponseWriter, r *http.Request) {
-	userID, ok := h.requireUserID(w, r)
-	if !ok {
-		return
-	}
-	var req activityUpdateReq
-	if err := decodeJSON(r, &req); err != nil {
-		h.logger.Warn("invalid update activity body", "error", err)
-		writeError(w, http.StatusBadRequest, "invalid_body", "Invalid request body", nil)
-		return
-	}
-	errs := validationErrs{}
-	if req.Name != nil {
-		n := strings.TrimSpace(*req.Name)
-		validateName("name", n, errs)
-		req.Name = &n
-	}
-	if req.Notes != nil {
-		validateNotes(*req.Notes, errs)
-	}
-	if req.CategoryIDs != nil {
-		for _, cid := range *req.CategoryIDs {
-			if !validateUUIDv7(cid) {
-				errs.add("category_ids", "category_ids must be valid UUIDs")
-				break
-			}
-		}
-	}
-	validateTimestamp("updated_at", req.UpdatedAt, true, errs)
-	if !errs.ok() {
-		writeValidation(w, errs)
-		return
-	}
-
-	updatedAt, _ := parseRFC3339(req.UpdatedAt)
-	patch := db.ActivityPatch{
-		Name: req.Name, Notes: req.Notes,
-		CategoryIDs: req.CategoryIDs, UpdatedAt: updatedAt,
-	}
-	updated, err := h.store.UpdateActivity(r.Context(), userID, chi.URLParam(r, "id"), patch)
-	if err != nil {
-		h.writeCatalogStoreErr(w, updated, err, "update activity")
-		return
-	}
-	writeJSON(w, http.StatusOK, updated)
-}
-
-// DeleteActivity handles DELETE /activities/{id} (hard delete, cascades).
-func (h *Handler) DeleteActivity(w http.ResponseWriter, r *http.Request) {
-	userID, ok := h.requireUserID(w, r)
-	if !ok {
-		return
-	}
-	if err := h.store.DeleteActivity(r.Context(), userID, chi.URLParam(r, "id")); err != nil {
-		h.writeCatalogStoreErr(w, nil, err, "delete activity")
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
 }
 
 // ---------- Categories ----------

@@ -30,14 +30,13 @@ enum L10n: String, CaseIterable {
     case appleSignInTitle = "appleSignIn.title"
     case appleSignInError = "appleSignIn.error"
 
-    // Timer
+    // Timer (plain-text capture, remove-activities-layer)
     case timerStart = "timer.start"
     case timerStop = "timer.stop"
     case timerStopHint = "timer.stopHint"
-    case timerEmptyActivityError = "timer.emptyActivityError"
     case timerSignOut = "timer.signOut"
-    case timerChooseActivity = "timer.chooseActivity"
-    case timerChooseActivityPrompt = "timer.chooseActivityPrompt"
+    case timerIdlePrompt = "timer.idlePrompt"
+    case timerNamePlaceholder = "timer.namePlaceholder"
     case timerSaved = "timer.saved"
     case timerSaving = "timer.saving"
     case timerRunning = "timer.running"
@@ -45,40 +44,8 @@ enum L10n: String, CaseIterable {
     case timerChooserRecent = "timer.chooserRecent"
     case timerRecentsEmptyHint = "timer.recentsEmptyHint"
     case timerSelectActivity = "timer.selectActivity"
-    case timerSearchPrompt = "timer.searchPrompt"
-    case timerSearchEmptyCatalogTitle = "timer.searchEmptyCatalogTitle"
-    case timerSearchEmptyCatalogSubtitle = "timer.searchEmptyCatalogSubtitle"
-    case timerSearchNoResults = "timer.searchNoResults"
-    case timerSearchCreate = "timer.searchCreate"
-    case timerSearchRestorePrompt = "timer.searchRestorePrompt"
-    case timerSearchRestore = "timer.searchRestore"
-    case timerSearchValidationEmpty = "timer.searchValidationEmpty"
-    case timerSearchValidationTooLong = "timer.searchValidationTooLong"
-    case timerStalePreparationError = "timer.stalePreparationError"
-    case activityEditorCreateTitle = "activityEditor.createTitle"
-    case activityEditorEditTitle = "activityEditor.editTitle"
-    case activityEditorNameLabel = "activityEditor.nameLabel"
-    case activityEditorNamePlaceholder = "activityEditor.namePlaceholder"
-    case activityEditorNotesLabel = "activityEditor.notesLabel"
-    case activityEditorNotesPlaceholder = "activityEditor.notesPlaceholder"
-    case activityEditorNotesCounter = "activityEditor.notesCounter"
-    case activityEditorNotesTooLong = "activityEditor.notesTooLong"
-    case activityEditorTagsLabel = "activityEditor.tagsLabel"
-    case activityEditorNoTags = "activityEditor.noTags"
-    case activityEditorAddCategory = "activityEditor.addCategory"
-    case activityEditorSave = "activityEditor.save"
-    case activityEditorCancel = "activityEditor.cancel"
-    case activityEditorDelete = "activityEditor.delete"
-
-    // Activity deletion (unify-catalog-deletion): editor Delete with scope
-    // confirmation, running-timer block, system-prompt undo.
-    case activityDeleteTitle = "activity.delete.title"
-    case activityDeleteMessage = "activity.delete.message"
-    case activityDeleteConfirm = "activity.delete.confirm"
-    case activityDeleteRunning = "activity.delete.running"
     case timerCompactStop = "timer.compactStop"
     case timerCompactReturnHint = "timer.compactReturnHint"
-    case timerActivityDeleted = "timer.activityDeleted"
     case timerCompactRunning = "timer.compactRunning"
 
     // App shell
@@ -96,7 +63,6 @@ enum L10n: String, CaseIterable {
     case profileLastSynced = "profile.lastSynced"
     case profileSyncError = "profile.syncError"
     case profileLibrary = "profile.library"
-    case profileActivities = "profile.activities"
     case profileCategories = "profile.categories"
     case profileConnections = "profile.connections"
     case profileIntegrations = "profile.integrations"
@@ -133,7 +99,7 @@ enum L10n: String, CaseIterable {
     case insightsEmptyToday = "insights.empty.today"
     case insightsEmptyWeek = "insights.empty.week"
 
-    // Entry provenance (entry-provenance spec, activity-detail-sheet)
+    // Entry provenance (entry-provenance spec)
     case provenanceViaWidget = "provenance.via.widget"
     case provenanceViaSiri = "provenance.via.siri"
     case provenanceViaControl = "provenance.via.control"
@@ -149,25 +115,14 @@ enum L10n: String, CaseIterable {
     case provenanceNameCalendar = "provenance.name.calendar"
     case provenanceNameHealthkit = "provenance.name.healthkit"
 
-    // Activity detail sheet (activity-detail-sheet)
-    case activityDetailEditActivity = "activityDetail.editActivity"
-    case activityDetailLogTime = "activityDetail.logTime"
-    case activityDetailCategories = "activityDetail.categories"
-    case activityDetailNoCategories = "activityDetail.noCategories"
-    case activityDetailEntries = "activityDetail.entries"
-    case activityDetailTotal = "activityDetail.total"
-
     // Log Time sheet (manual-entry spec)
     case logTimeTitle = "logTime.title"
     case logTimeAdd = "logTime.add"
     case logTimeCancel = "logTime.cancel"
-    case logTimeActivity = "logTime.activity"
-    case logTimeChooseActivity = "logTime.chooseActivity"
     case logTimeStarts = "logTime.starts"
     case logTimeEnds = "logTime.ends"
-    case logTimeActivityMissing = "logTime.activityMissing"
 
-    // Unified entry form (entry-editor spec: EDIT + LOCKED modes)
+    // Unified entry form (entry-editor spec: CREATE + EDIT + LOCKED modes)
     case entryEditTitle = "entry.editTitle"
     case entryLockedTitle = "entry.lockedTitle"
     case entrySave = "entry.save"
@@ -177,6 +132,11 @@ enum L10n: String, CaseIterable {
     case entryDeleteConfirm = "entry.deleteConfirm"
     case entryStaleError = "entry.staleError"
     case entryLockedNote = "entry.lockedNote"
+    case entryNameLabel = "entry.nameLabel"
+    case entryNamePlaceholder = "entry.namePlaceholder"
+    case entryCategoriesLabel = "entry.categoriesLabel"
+    case entryNotesLabel = "entry.notesLabel"
+    case entryNotesPlaceholder = "entry.notesPlaceholder"
 
     // History manual entry (add-manual-entry)
     case historyLogTime = "history.logTime"
@@ -222,7 +182,6 @@ enum L10n: String, CaseIterable {
     case categoryEditorDelete = "categoryEditor.delete"
     case categoryNameRequired = "category.nameRequired"
     case categoryNameTooLong = "category.nameTooLong"
-    case activityEditorInvalidAssociation = "activityEditor.invalidAssociation"
 
     // Sign out confirmation
     case signOutCancel = "signOut.cancel"

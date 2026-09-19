@@ -5,20 +5,24 @@ import Foundation
 @Suite("RecentActivitiesChips.recents")
 struct RecentActivitiesChipsTests {
 
-    @Test("caps at six activities, preserving the input order")
-    func capsAtSix() {
-        let activities = (0..<8).map { Activity(id: "a\($0)", name: "Activity \($0)") }
-        let recents = RecentActivitiesChips.recents(from: activities)
-        #expect(recents.count == 6)
-        #expect(recents.map(\.id) == (0..<6).map { "a\($0)" })
+    private func recent(_ id: String) -> TrackViewModel.RecentEntry {
+        TrackViewModel.RecentEntry(text: id, categoryIDs: [], firstCategoryID: nil)
     }
 
-    @Test("returns all activities when fewer than the cap")
+    @Test("caps at six recents, preserving the input order")
+    func capsAtSix() {
+        let recents = (0..<8).map { recent("a\($0)") }
+        let capped = RecentActivitiesChips.recents(from: recents)
+        #expect(capped.count == 6)
+        #expect(capped.map(\.text) == (0..<6).map { "a\($0)" })
+    }
+
+    @Test("returns all recents when fewer than the cap")
     func fewerThanCap() {
-        let activities = (0..<3).map { Activity(id: "a\($0)", name: "Activity \($0)") }
-        let recents = RecentActivitiesChips.recents(from: activities)
-        #expect(recents.count == 3)
-        #expect(recents.map(\.id) == activities.map(\.id))
+        let recents = (0..<3).map { recent("a\($0)") }
+        let capped = RecentActivitiesChips.recents(from: recents)
+        #expect(capped.count == 3)
+        #expect(capped.map(\.text) == recents.map(\.text))
     }
 
     @Test("returns nothing for an empty input")
@@ -28,17 +32,13 @@ struct RecentActivitiesChipsTests {
 
     @Test("preserves the store-sorted order exactly")
     func preservesOrder() {
-        let activities = [
-            Activity(id: "oldest", name: "Oldest"),
-            Activity(id: "middle", name: "Middle"),
-            Activity(id: "newest", name: "Newest")
-        ]
-        #expect(RecentActivitiesChips.recents(from: activities).map(\.id) == ["oldest", "middle", "newest"])
+        let recents = [recent("oldest"), recent("middle"), recent("newest")]
+        #expect(RecentActivitiesChips.recents(from: recents).map(\.text) == ["oldest", "middle", "newest"])
     }
 
     @Test("honours a custom limit")
     func customLimit() {
-        let activities = (0..<4).map { Activity(id: "a\($0)", name: "Activity \($0)") }
-        #expect(RecentActivitiesChips.recents(from: activities, limit: 2).count == 2)
+        let recents = (0..<4).map { recent("a\($0)") }
+        #expect(RecentActivitiesChips.recents(from: recents, limit: 2).count == 2)
     }
 }

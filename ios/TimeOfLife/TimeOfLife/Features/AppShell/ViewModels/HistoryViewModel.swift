@@ -16,20 +16,18 @@ struct DayGroup: Identifiable, Equatable {
 /// Loads committed time entries from the local store and groups them by
 /// calendar day for the History list (history-entry-list spec, design D2/D6).
 /// Read-only: owns data only — scroll/chrome state lives in `HistoryView`.
+/// Rows resolve categories from the entry itself (remove-activities-layer):
+/// entries own their ordered category set, so there is no query-time
+/// resolution through any other record.
 @MainActor
 final class HistoryViewModel: ObservableObject {
     @Published private(set) var dayGroups: [DayGroup] = []
     @Published private(set) var isLoading = false
 
     private let store: LocalStore
-    private let undoBuffer: UndoBufferStore
     private let nowProvider: () -> Date
-    /// The UndoManager the current registration belongs to, held weakly so
-    /// the re-registration after an undo targets the same manager without
-    /// capturing a non-Sendable value in the undo handler closure.
-    private weak var registeredUndoManager: UndoManager?
     private var needsReload = true
-    private var categoriesByActivityID: [String: [Category]] = [:]
+    private var categoriesByID: [String: Category] = [:]
 
     init(
         store: LocalStore,
@@ -37,30 +35,18 @@ final class HistoryViewModel: ObservableObject {
         now: @escaping () -> Date = Date.init
     ) {
         self.store = store
-        self.undoBuffer = undoBuffer ?? UndoBufferStore(store: store)
         self.nowProvider = now
     }
 
-    /// Reloads entries, activities, and categories and rebuilds the day
-    /// groups. Called on appear.
+    /// Reloads entries and categories and rebuilds the day groups. Called on
+    /// appear.
     func load() async {
         isLoading = true
         defer { isLoading = false }
         do {
             let entries = try await store.entries()
-            let activities = try await store.activities()
             let categories = try await store.categories()
-
-            var byActivity: [String: [Category]] = [:]
-            var categoriesByID: [String: Category] = [:]
-            for category in categories {
-                categoriesByID[category.id] = category
-            }
-            for activity in activities {
-                byActivity[activity.id] = activity.categoryIDs
-                    .compactMap { categoriesByID[$0] }
-            }
-            categoriesByActivityID = byActivity
+            categoriesByID = Dictionary(uniqueKeysWithValues: categories.map { ($0.id, $0) })
 
             dayGroups = Self.makeDayGroups(entries: entries, now: Date())
         } catch {
@@ -83,57 +69,10 @@ final class HistoryViewModel: ObservableObject {
         needsReload = true
     }
 
-    // MARK: - Activity undo (shake → default confirmation → single restore)
-
-    /// Registers the newest restorable activity deletion with the system Undo
-    /// manager, so shaking surfaces the DEFAULT Undo confirmation and
-    /// confirming restores exactly one activity — the most recent buffered
-    /// one (deleted from the detail sheet's stacked editor). Previous
-    /// registrations are cleared first, so one shake+confirm can never
-    /// restore two deletions. Offers nothing when the buffer holds no
-    /// activity deletion — including when the newest row belongs
-    /// to another surface (U7 supersession).
-    func registerActivityUndo(with undoManager: UndoManager?) async {
-        guard let undoManager else { return }
-        registeredUndoManager = undoManager
-        undoManager.removeAllActions(withTarget: self)
-        guard let recent = try? await undoBuffer.mostRecent(),
-              (try? await store.activityDeletionSnapshot(bufferID: recent.id)) != nil else { return }
-        undoManager.registerUndo(withTarget: self) { target in
-            Task { @MainActor in
-                await target.performActivityUndo()
-                await target.registerActivityUndo(with: target.registeredUndoManager)
-            }
-        }
-        // Names the undoable action so the DEFAULT system confirmation
-        // states what Confirm will restore. Reuses the existing localized
-        // Delete string — no new strings (U4).
-        undoManager.setActionName(L10n.activityEditorDelete.text)
-    }
-
-    /// Restores the most recent activity deletion (buffered deletions stay
-    /// restorable until the app restarts) and reloads the list so the
-    /// restored entries reappear.
-    /// Only activity deletions are restored here — buffer rows owned by other
-    /// surfaces are left for their owners.
-    /// No toast is shown; one shake restores at most one deletion.
-    func performActivityUndo() async {
-        do {
-            guard let recent = try await undoBuffer.mostRecent() else { return }
-            guard try await store.activityDeletionSnapshot(bufferID: recent.id) != nil else { return }
-            if try await store.undoActivityDeletion(bufferID: recent.id) != nil {
-                await load()
-            }
-        } catch {
-            // Keep the last good snapshot; a transient failure must not
-            // blank the list (same philosophy as load()).
-        }
-    }
-
     // MARK: - Row presentation (EntryRow inputs)
 
     /// First category's validated SF Symbol, or the `questionmark` fallback
-    /// when the activity has no categories (D6).
+    /// when the entry has no categories (D6).
     func icon(for entry: TimeEntry) -> String {
         guard let first = categories(for: entry).first else {
             return "questionmark"
@@ -151,7 +90,7 @@ final class HistoryViewModel: ObservableObject {
     }
 
     /// Localized "via <Source>" provenance label; empty for manual entries
-    /// (entry-provenance D7, activity-detail-sheet).
+    /// (entry-provenance D7).
     func viaText(for entry: TimeEntry) -> String {
         EntryProvenance.viaText(for: entry.source)
     }
@@ -182,8 +121,10 @@ final class HistoryViewModel: ObservableObject {
         return Self.naturalDuration(seconds)
     }
 
+    /// The entry's own ordered categories, position-preserved, unknown ids
+    /// skipped (entries own their categories; nothing resolves elsewhere).
     func categories(for entry: TimeEntry) -> [Category] {
-        categoriesByActivityID[entry.activityID] ?? []
+        entry.categoryIDs.compactMap { categoriesByID[$0] }
     }
 
     // MARK: - Grouping (pure, unit-tested)
@@ -251,40 +192,7 @@ final class HistoryViewModel: ObservableObject {
         return "\(secs)s"
     }
 
-    /// Three-component duration for the activity detail sheet
-    /// (activity-detail-sheet D4a): up to three largest `w/d/h/m/s`
-    /// components, largest first, zero components omitted — except seconds
-    /// are appended when minutes are shown, even as `0s`, subject to the
-    /// three-component cap. Examples: `2w 5d 11h`, `1h 52m 31s`,
-    /// `1h 5m 0s`, `59m 50s`, `28s`.
-    nonisolated static func detailedDuration(_ seconds: Int) -> String {
-        let total = max(0, seconds)
-        let units: [(value: Int, suffix: String)] = [
-            (total / 604_800, "w"),
-            ((total % 604_800) / 86_400, "d"),
-            ((total % 86_400) / 3_600, "h"),
-            ((total % 3_600) / 60, "m"),
-            (total % 60, "s"),
-        ]
-        guard let first = units.firstIndex(where: { $0.value > 0 }) else {
-            return "0s"
-        }
-        var parts: [String] = []
-        var index = first
-        while index < units.count, parts.count < 3 {
-            if units[index].value > 0 {
-                parts.append("\(units[index].value)\(units[index].suffix)")
-            }
-            index += 1
-        }
-        if parts.count < 3, !parts.contains(where: { $0.hasSuffix("s") }),
-           parts.contains(where: { $0.hasSuffix("m") }) {
-            parts.append("0s")
-        }
-        return parts.joined(separator: " ")
-    }
-
-    /// Short-time caption ("14:00") shared with the activity detail sheet.
+    /// Short-time caption ("14:00").
     nonisolated static func timeText(for date: Date) -> String {
         timeFormatter.string(from: date)
     }

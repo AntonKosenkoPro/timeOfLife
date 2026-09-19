@@ -35,7 +35,7 @@ struct AppShellView: View {
             navigationRoot {
                 HistoryView(
                     store: container.localStore,
-                    refreshSignal: vm.runningTimer?.activityID ?? "",
+                    refreshSignal: vm.runningTimer?.activityText ?? "",
                     logTimeActive: $isHistoryLogTimeActive
                 )
                     .safeAreaInset(edge: .bottom) { compactTimerIfNeeded }
@@ -47,7 +47,7 @@ struct AppShellView: View {
             navigationRoot {
                 InsightsView(
                     store: container.localStore,
-                    refreshSignal: vm.runningTimer?.activityID ?? ""
+                    refreshSignal: vm.runningTimer?.activityText ?? ""
                 )
                 .safeAreaInset(edge: .bottom) { compactTimerIfNeeded }
             }
@@ -91,10 +91,10 @@ struct AppShellView: View {
 
     @ViewBuilder private var compactTimerIfNeeded: some View {
         if let running = vm.runningTimer,
-           let activityID = running.activityID,
+           !running.activityText.isEmpty,
            let startedAt = running.startedAt {
             CompactTimer(
-                activityName: running.activityName ?? "",
+                entryText: running.activityText,
                 startedAt: startedAt,
                 openTrack: {
                     vm.selectedTab = .track
@@ -103,7 +103,7 @@ struct AppShellView: View {
                     Task { await vm.stopFromCompact() }
                 }
             )
-            .accessibilityIdentifier("CompactTimer(\(activityID))")
+            .accessibilityIdentifier("CompactTimer")
         }
     }
 }

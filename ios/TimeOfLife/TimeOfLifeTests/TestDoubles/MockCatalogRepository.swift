@@ -43,20 +43,15 @@ final class MockCatalogRepository: CatalogSending, @unchecked Sendable {
         lock.unlock()
     }
 
-    var activitiesResult: [Activity] = []
-    var categoriesResult: [TimeOfLife.Category] = []
+    var categoriesResult: [Category] = []
     var entriesResult: [TimeEntry] = []
     var deletionsResult: [Deletion] = []
 
-    var fetchActivityHandler: ((String) throws -> Activity)?
-    var fetchCategoryHandler: ((String) throws -> TimeOfLife.Category)?
+    var fetchCategoryHandler: ((String) throws -> Category)?
     var fetchEntryHandler: ((String) throws -> TimeEntry)?
     var fetchDeletionsHandler: ((Date?) throws -> [Deletion])?
-    var createActivityHandler: ((Activity) throws -> Void)?
-    var updateActivityHandler: ((Activity) throws -> Void)?
-    var deleteActivityHandler: ((String) throws -> Void)?
-    var createCategoryHandler: ((TimeOfLife.Category) throws -> Void)?
-    var updateCategoryHandler: ((TimeOfLife.Category) throws -> Void)?
+    var createCategoryHandler: ((Category) throws -> Void)?
+    var updateCategoryHandler: ((Category) throws -> Void)?
     var deleteCategoryHandler: ((String) throws -> Void)?
     var createEntryHandler: ((TimeEntry) throws -> Void)?
     var updateEntryHandler: ((TimeEntry) throws -> Void)?
@@ -80,13 +75,7 @@ final class MockCatalogRepository: CatalogSending, @unchecked Sendable {
         lock.unlock()
     }
 
-    func fetchActivities(modifiedSince: Date?) async throws -> [Activity] {
-        record("fetchActivities", "activity")
-        recordPull(modifiedSince)
-        return activitiesResult
-    }
-
-    func fetchCategories() async throws -> [TimeOfLife.Category] {
+    func fetchCategories() async throws -> [Category] {
         record("fetchCategories", "category")
         return categoriesResult
     }
@@ -104,14 +93,7 @@ final class MockCatalogRepository: CatalogSending, @unchecked Sendable {
         return deletionsResult
     }
 
-    func fetchActivity(id: String) async throws -> Activity {
-        record("fetchActivity", "activity", id)
-        if let fetchActivityHandler { return try fetchActivityHandler(id) }
-        if let match = activitiesResult.first(where: { $0.id == id }) { return match }
-        throw APIError.unexpected
-    }
-
-    func fetchCategory(id: String) async throws -> TimeOfLife.Category {
+    func fetchCategory(id: String) async throws -> Category {
         record("fetchCategory", "category", id)
         if let fetchCategoryHandler { return try fetchCategoryHandler(id) }
         if let match = categoriesResult.first(where: { $0.id == id }) { return match }
@@ -125,27 +107,12 @@ final class MockCatalogRepository: CatalogSending, @unchecked Sendable {
         throw APIError.unexpected
     }
 
-    func createActivity(_ activity: Activity) async throws {
-        record("createActivity", "activity", activity.id)
-        if let createActivityHandler { try createActivityHandler(activity) }
-    }
-
-    func updateActivity(_ activity: Activity) async throws {
-        record("updateActivity", "activity", activity.id)
-        if let updateActivityHandler { try updateActivityHandler(activity) }
-    }
-
-    func deleteActivity(id: String) async throws {
-        record("deleteActivity", "activity", id)
-        if let deleteActivityHandler { try deleteActivityHandler(id) }
-    }
-
-    func createCategory(_ category: TimeOfLife.Category) async throws {
+    func createCategory(_ category: Category) async throws {
         record("createCategory", "category", category.id)
         if let createCategoryHandler { try createCategoryHandler(category) }
     }
 
-    func updateCategory(_ category: TimeOfLife.Category) async throws {
+    func updateCategory(_ category: Category) async throws {
         record("updateCategory", "category", category.id)
         if let updateCategoryHandler { try updateCategoryHandler(category) }
     }

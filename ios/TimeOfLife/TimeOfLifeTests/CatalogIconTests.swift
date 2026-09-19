@@ -78,7 +78,7 @@ struct CatalogIconTests {
         let symbol = "figure.strengthtraining"
         let renderable = CatalogIcon.allSymbols.filter { $0 != symbol }
         #expect(!renderable.contains(symbol))
-        let category = TimeOfLife.Category(id: "c1", name: "Gym", icon: symbol)
+        let category = Category(id: "c1", name: "Gym", icon: symbol)
         #expect(category.icon == symbol)
         #expect(CatalogIcon(validated: category.icon).rawValue == symbol)
     }

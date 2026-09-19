@@ -49,7 +49,8 @@ enum InsightsPeriod: String, CaseIterable, Identifiable, Sendable {
 }
 
 /// The breakdown key (insights-breakdown spec): per-category rows with
-/// full-credit attribution, or per-activity rows that sum to the hero total.
+/// full-credit attribution, or per-exact-text rows that sum to the hero
+/// total.
 enum InsightsLens: String, CaseIterable, Identifiable, Sendable {
     case category
     case activity
@@ -69,8 +70,8 @@ enum InsightsLens: String, CaseIterable, Identifiable, Sendable {
 /// The id sets cost nothing now and are what v2 overlap work (shared-hours,
 /// stacked segments, combination rows) builds on without store changes.
 struct InsightsBucket: Identifiable, Equatable, Sendable {
-    /// Category id, activity id, or `uncategorizedID` (never collides: real
-    /// ids are UUID v7).
+    /// Category id, `text:<exact text>` (activity lens), or `uncategorizedID`
+    /// (never collides: real ids are UUID v7).
     static let uncategorizedID = "uncategorized"
 
     let id: String

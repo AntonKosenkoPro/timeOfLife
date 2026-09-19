@@ -10,8 +10,8 @@ import (
 	"github.com/antonkosenko/time-of-life/backend/internal/migrations"
 )
 
-// PostgreSQL parity suite (R-007 / 1.1-API-007): the same critical catalog
-// semantics the SQLite store is tested against, executed against real
+// PostgreSQL parity suite (R-007 / 1.1-API-007): the same critical entry/
+// category semantics the SQLite store is tested against, executed against real
 // PostgreSQL so SQLite-only CI cannot mask production behavior drift.
 //
 // Gated on TEST_PG_DSN — `make test:pg` sets it against docker-compose.
@@ -37,7 +37,7 @@ func newParityStore(t *testing.T) *PostgresStore {
 
 	// Truncate for isolation (migrations are idempotent IF NOT EXISTS).
 	if _, err := store.Pool().Exec(ctx, `
-		TRUNCATE entries, activity_categories, activities, categories,
+		TRUNCATE entry_categories, entries, categories,
 		         refresh_tokens, otp_codes, users RESTART IDENTITY CASCADE
 	`); err != nil {
 		t.Fatalf("truncate: %v", err)
@@ -54,30 +54,44 @@ func parityUser(t *testing.T, store *PostgresStore, email string) string {
 	return u.ID
 }
 
-func parityActivity(t *testing.T, store *PostgresStore, userID, name string) Activity {
+func parityCategory(t *testing.T, store *PostgresStore, userID, name string) Category {
 	t.Helper()
-	a, created, err := store.CreateActivity(context.Background(), Activity{
-		ID: uuidV7(), UserID: userID, Name: name,
-	}, nil)
+	c, created, err := store.CreateCategory(context.Background(), Category{
+		ID: uuidV7(), UserID: userID, Name: name, Icon: "tag",
+	})
 	if err != nil {
-		t.Fatalf("CreateActivity: %v", err)
+		t.Fatalf("CreateCategory: %v", err)
 	}
 	if !created {
-		t.Fatalf("CreateActivity: expected created=true for %q", name)
+		t.Fatalf("CreateCategory: expected created=true for %q", name)
 	}
-	return a
+	return c
 }
 
-func TestPostgres_CreateActivity_IdempotentReplay(t *testing.T) {
+func parityEntry(t *testing.T, store *PostgresStore, userID, text string, cats []CategoryTag, started time.Time) Entry {
+	t.Helper()
+	e, created, err := store.CreateEntry(context.Background(), Entry{
+		ID: uuidV7(), UserID: userID, ActivityText: text, Categories: cats, StartedAt: started,
+	})
+	if err != nil {
+		t.Fatalf("CreateEntry %q: %v", text, err)
+	}
+	if !created {
+		t.Fatalf("CreateEntry: expected created=true for %q", text)
+	}
+	return e
+}
+
+func TestPostgres_CreateCategory_IdempotentReplay(t *testing.T) {
 	store := newParityStore(t)
 	uid := parityUser(t, store, "replay@example.com")
 
-	a := Activity{ID: uuidV7(), UserID: uid, Name: "Gym"}
-	_, created, err := store.CreateActivity(context.Background(), a, nil)
+	c := Category{ID: uuidV7(), UserID: uid, Name: "Sport", Icon: "tag"}
+	_, created, err := store.CreateCategory(context.Background(), c)
 	if err != nil || !created {
 		t.Fatalf("first create: created=%v err=%v", created, err)
 	}
-	_, created, err = store.CreateActivity(context.Background(), a, nil)
+	_, created, err = store.CreateCategory(context.Background(), c)
 	if err != nil {
 		t.Fatalf("replay: %v", err)
 	}
@@ -86,27 +100,27 @@ func TestPostgres_CreateActivity_IdempotentReplay(t *testing.T) {
 	}
 }
 
-func TestPostgres_CreateActivity_NameCollision(t *testing.T) {
+func TestPostgres_CreateCategory_NameCollision(t *testing.T) {
 	store := newParityStore(t)
 	uid := parityUser(t, store, "collision@example.com")
 
-	parityActivity(t, store, uid, "Gym")
-	_, _, err := store.CreateActivity(context.Background(), Activity{
-		ID: uuidV7(), UserID: uid, Name: "gym",
-	}, nil)
-	if !errors.Is(err, ErrActivityExists) {
-		t.Fatalf("expected ErrActivityExists, got %v", err)
+	parityCategory(t, store, uid, "Sport")
+	_, _, err := store.CreateCategory(context.Background(), Category{
+		ID: uuidV7(), UserID: uid, Name: "sport", Icon: "tag",
+	})
+	if !errors.Is(err, ErrCategoryExists) {
+		t.Fatalf("expected ErrCategoryExists, got %v", err)
 	}
 }
 
-func TestPostgres_UpdateActivity_LWWConflict(t *testing.T) {
+func TestPostgres_UpdateCategory_LWWConflict(t *testing.T) {
 	store := newParityStore(t)
 	uid := parityUser(t, store, "lww@example.com")
-	a := parityActivity(t, store, uid, "Gym")
+	c := parityCategory(t, store, uid, "Sport")
 
-	stale := a.UpdatedAt.Add(-time.Hour)
+	stale := c.UpdatedAt.Add(-time.Hour)
 	name := "Renamed"
-	_, err := store.UpdateActivity(context.Background(), uid, a.ID, ActivityPatch{
+	_, err := store.UpdateCategory(context.Background(), uid, c.ID, CategoryPatch{
 		Name: &name, UpdatedAt: stale,
 	})
 	if !errors.Is(err, ErrConflict) {
@@ -114,78 +128,148 @@ func TestPostgres_UpdateActivity_LWWConflict(t *testing.T) {
 	}
 }
 
-func TestPostgres_DeleteActivity_CascadesEntries(t *testing.T) {
-	store := newParityStore(t)
-	uid := parityUser(t, store, "cascade@example.com")
-	a := parityActivity(t, store, uid, "Gym")
-
-	started := time.Date(2026, 7, 27, 9, 0, 0, 0, time.UTC)
-	ended := started.Add(time.Hour)
-	if _, _, err := store.CreateEntry(context.Background(), Entry{
-		ID: uuidV7(), UserID: uid, ActivityID: &a.ID, StartedAt: started, EndedAt: &ended,
-	}); err != nil {
-		t.Fatalf("CreateEntry: %v", err)
-	}
-
-	if err := store.DeleteActivity(context.Background(), uid, a.ID); err != nil {
-		t.Fatalf("DeleteActivity: %v", err)
-	}
-	items, _, err := store.ListEntries(context.Background(), uid, EntryFilter{})
-	if err != nil {
-		t.Fatalf("ListEntries: %v", err)
-	}
-	if len(items) != 0 {
-		t.Fatalf("expected 0 entries after cascade, got %d", len(items))
-	}
-}
-
 func TestPostgres_CrossUserIsolation(t *testing.T) {
 	store := newParityStore(t)
 	uidA := parityUser(t, store, "owner-a@example.com")
 	uidB := parityUser(t, store, "owner-b@example.com")
-	a := parityActivity(t, store, uidA, "Private")
+	c := parityCategory(t, store, uidA, "Private")
 
-	if _, err := store.GetActivity(context.Background(), uidB, a.ID); !errors.Is(err, ErrNotFound) {
-		t.Fatalf("user B must not see user A's activity, got %v", err)
+	if _, err := store.GetCategory(context.Background(), uidB, c.ID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("user B must not see user A's category, got %v", err)
 	}
-	if err := store.DeleteActivity(context.Background(), uidB, a.ID); !errors.Is(err, ErrNotFound) {
-		t.Fatalf("user B must not delete user A's activity, got %v", err)
+	if err := store.DeleteCategory(context.Background(), uidB, c.ID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("user B must not delete user A's category, got %v", err)
 	}
 }
 
-// Parity: modified_since filtering on activities (delta pull-sync).
-func TestPostgres_ListActivities_ModifiedSince(t *testing.T) {
+// Parity: entries own their text/categories/notes; per-entry isolation.
+func TestPostgres_EntryOwnsFields_Isolation(t *testing.T) {
 	store := newParityStore(t)
-	uid := parityUser(t, store, "pg-modified-since@example.com")
+	uid := parityUser(t, store, "pg-own@example.com")
+	c1 := parityCategory(t, store, uid, "Sport")
+	c2 := parityCategory(t, store, uid, "Work")
 
-	a1 := parityActivity(t, store, uid, "Gym")
-	time.Sleep(5 * time.Millisecond)
-	a2 := parityActivity(t, store, uid, "Read")
+	base := time.Date(2026, 7, 27, 9, 0, 0, 0, time.UTC)
+	e1 := parityEntry(t, store, uid, "Gym", []CategoryTag{{ID: c1.ID}}, base)
+	e2 := parityEntry(t, store, uid, "Gym", []CategoryTag{{ID: c2.ID}}, base.Add(time.Hour))
 
-	cursor := a1.UpdatedAt
-	items, err := store.ListActivities(context.Background(), uid, "", &cursor)
+	// Retext/retag e1 only; e2 must not move.
+	updated, err := store.UpdateEntry(context.Background(), uid, e1.ID, EntryPatch{
+		ActivityText: ptr("GYM"),
+		Notes:        ptr("notes-1"),
+		CategoryIDs:  &[]CategoryTag{{ID: c2.ID}},
+		UpdatedAt:    e1.UpdatedAt.Add(time.Second),
+	})
 	if err != nil {
-		t.Fatalf("ListActivities: %v", err)
+		t.Fatalf("UpdateEntry: %v", err)
 	}
-	if len(items) != 1 || items[0].ID != a2.ID {
-		t.Errorf("expected only the newer activity, got %d items", len(items))
+	if updated.ActivityText != "GYM" || updated.Notes != "notes-1" {
+		t.Errorf("expected GYM/notes-1, got %q/%q", updated.ActivityText, updated.Notes)
+	}
+	got2, err := store.GetEntry(context.Background(), uid, e2.ID)
+	if err != nil {
+		t.Fatalf("GetEntry e2: %v", err)
+	}
+	if got2.ActivityText != "Gym" || got2.Notes != "" {
+		t.Errorf("e2 must be unchanged, got %q/%q", got2.ActivityText, got2.Notes)
+	}
+	if len(got2.Categories) != 1 || got2.Categories[0].ID != c2.ID {
+		t.Errorf("e2 categories must be unchanged, got %+v", got2.Categories)
+	}
+}
+
+// Parity (D1/D5): recents group by exact activity_text — `Gym` ≠ `GYM` — with
+// per-group newest wins, newest-first.
+func TestPostgres_ListRecents_ExactTextIdentity(t *testing.T) {
+	store := newParityStore(t)
+	uid := parityUser(t, store, "pg-recents@example.com")
+
+	base := time.Date(2026, 7, 27, 9, 0, 0, 0, time.UTC)
+	parityEntry(t, store, uid, "Gym", nil, base)
+	parityEntry(t, store, uid, "GYM", nil, base.Add(time.Hour))
+	parityEntry(t, store, uid, "Gym", nil, base.Add(2*time.Hour))
+
+	recents, err := store.ListRecents(context.Background(), uid, 6)
+	if err != nil {
+		t.Fatalf("ListRecents: %v", err)
+	}
+	if len(recents) != 2 {
+		t.Fatalf("expected 2 exact-text groups, got %d: %+v", len(recents), recents)
+	}
+	if recents[0].ActivityText != "Gym" || recents[1].ActivityText != "GYM" {
+		t.Errorf("expected newest-first [Gym GYM], got [%s %s]", recents[0].ActivityText, recents[1].ActivityText)
+	}
+	if !recents[0].StartedAt.Equal(base.Add(2 * time.Hour)) {
+		t.Errorf("each group's newest entry wins, got %v", recents[0].StartedAt)
+	}
+}
+
+// Parity (D7): a merge prunes unknown category ids and keeps the remainder.
+func TestPostgres_UpdateEntry_PruneUnknownCategories(t *testing.T) {
+	store := newParityStore(t)
+	uid := parityUser(t, store, "pg-prune@example.com")
+	c1 := parityCategory(t, store, uid, "Sport")
+	c2 := parityCategory(t, store, uid, "Work")
+
+	base := time.Date(2026, 7, 27, 9, 0, 0, 0, time.UTC)
+	e := parityEntry(t, store, uid, "Gym", []CategoryTag{{ID: c1.ID}}, base)
+
+	ids := []CategoryTag{{ID: c2.ID}, {ID: "unknown"}, {ID: c1.ID}, {ID: ""}, {ID: c2.ID}}
+	updated, err := store.UpdateEntry(context.Background(), uid, e.ID, EntryPatch{
+		CategoryIDs: &ids, UpdatedAt: e.UpdatedAt.Add(time.Second),
+	})
+	if err != nil {
+		t.Fatalf("UpdateEntry prune: %v", err)
+	}
+	if len(updated.Categories) != 2 || updated.Categories[0].ID != c2.ID || updated.Categories[1].ID != c1.ID {
+		t.Errorf("expected pruned ordered [Work Sport], got %+v", updated.Categories)
+	}
+}
+
+// Parity (category-management D5): association order is preserved in the
+// response, and Category deletion leaves entries intact.
+func TestPostgres_EntryCategories_OrderAndDeletePreservesEntries(t *testing.T) {
+	store := newParityStore(t)
+	uid := parityUser(t, store, "pg-join@example.com")
+
+	var catIDs []string
+	for _, name := range []string{"Work", "Health", "Travel"} {
+		c := parityCategory(t, store, uid, name)
+		catIDs = append(catIDs, c.ID)
 	}
 
-	future := a2.UpdatedAt.Add(time.Hour)
-	items, err = store.ListActivities(context.Background(), uid, "", &future)
+	base := time.Date(2026, 7, 27, 9, 0, 0, 0, time.UTC)
+	e, _, err := store.CreateEntry(context.Background(), Entry{
+		ID: uuidV7(), UserID: uid, ActivityText: "Gym",
+		Categories: []CategoryTag{{ID: catIDs[1]}, {ID: catIDs[0]}, {ID: catIDs[2]}},
+		StartedAt:  base,
+	})
 	if err != nil {
-		t.Fatalf("ListActivities: %v", err)
+		t.Fatalf("CreateEntry: %v", err)
 	}
-	if len(items) != 0 {
-		t.Errorf("expected 0 items with a future cursor, got %d", len(items))
+	if len(e.Categories) != 3 ||
+		e.Categories[0].ID != catIDs[1] || e.Categories[1].ID != catIDs[0] || e.Categories[2].ID != catIDs[2] {
+		t.Fatalf("expected order [%s %s %s], got %+v", catIDs[1], catIDs[0], catIDs[2], e.Categories)
 	}
 
-	items, err = store.ListActivities(context.Background(), uid, "", nil)
-	if err != nil {
-		t.Fatalf("ListActivities: %v", err)
+	if err := store.DeleteCategory(context.Background(), uid, catIDs[0]); err != nil {
+		t.Fatalf("DeleteCategory: %v", err)
 	}
-	if len(items) != 2 {
-		t.Errorf("expected 2 items on full pull, got %d", len(items))
+
+	got, err := store.GetEntry(context.Background(), uid, e.ID)
+	if err != nil {
+		t.Fatalf("GetEntry after category delete: %v", err)
+	}
+	if len(got.Categories) != 2 {
+		t.Errorf("expected 2 remaining tags, got %+v", got.Categories)
+	}
+	for _, tag := range got.Categories {
+		if tag.ID == catIDs[0] {
+			t.Errorf("deleted category still attached: %+v", got.Categories)
+		}
+	}
+	if got.ActivityText != "Gym" {
+		t.Errorf("entry text must survive category deletion, got %q", got.ActivityText)
 	}
 }
 
@@ -193,18 +277,17 @@ func TestPostgres_ListActivities_ModifiedSince(t *testing.T) {
 func TestPostgres_ListEntries_ModifiedSince(t *testing.T) {
 	store := newParityStore(t)
 	uid := parityUser(t, store, "pg-entries-modified@example.com")
-	a := parityActivity(t, store, uid, "Gym")
 
 	base := time.Date(2026, 7, 27, 9, 0, 0, 0, time.UTC)
 	e1, _, err := store.CreateEntry(context.Background(), Entry{
-		ID: uuidV7(), UserID: uid, ActivityID: &a.ID, StartedAt: base,
+		ID: uuidV7(), UserID: uid, ActivityText: "Gym", StartedAt: base,
 	})
 	if err != nil {
 		t.Fatalf("CreateEntry 1: %v", err)
 	}
 	time.Sleep(5 * time.Millisecond)
 	e2, _, err := store.CreateEntry(context.Background(), Entry{
-		ID: uuidV7(), UserID: uid, ActivityID: &a.ID, StartedAt: base.Add(time.Hour),
+		ID: uuidV7(), UserID: uid, ActivityText: "Read", StartedAt: base.Add(time.Hour),
 	})
 	if err != nil {
 		t.Fatalf("CreateEntry 2: %v", err)
@@ -224,13 +307,12 @@ func TestPostgres_ListEntries_ModifiedSince(t *testing.T) {
 func TestPostgres_CreateEntry_ProvenanceAndDuplicateImport(t *testing.T) {
 	store := newParityStore(t)
 	uid := parityUser(t, store, "pg-provenance@example.com")
-	a := parityActivity(t, store, uid, "Gym")
 	base := time.Date(2026, 7, 27, 9, 0, 0, 0, time.UTC)
 	ref := "interval-42"
 
 	// Default provenance on entries created without it.
 	e1, _, err := store.CreateEntry(context.Background(), Entry{
-		ID: uuidV7(), UserID: uid, ActivityID: &a.ID, StartedAt: base,
+		ID: uuidV7(), UserID: uid, ActivityText: "Gym", StartedAt: base,
 	})
 	if err != nil {
 		t.Fatalf("CreateEntry: %v", err)
@@ -241,7 +323,7 @@ func TestPostgres_CreateEntry_ProvenanceAndDuplicateImport(t *testing.T) {
 
 	// Explicit provenance persists and round-trips.
 	e2, _, err := store.CreateEntry(context.Background(), Entry{
-		ID: uuidV7(), UserID: uid, ActivityID: &a.ID, StartedAt: base.Add(time.Hour),
+		ID: uuidV7(), UserID: uid, ActivityText: "Read", StartedAt: base.Add(time.Hour),
 		Source: "screentime", SourceRef: &ref,
 	})
 	if err != nil {
@@ -257,7 +339,7 @@ func TestPostgres_CreateEntry_ProvenanceAndDuplicateImport(t *testing.T) {
 
 	// Duplicate (source, source_ref) is rejected.
 	_, _, err = store.CreateEntry(context.Background(), Entry{
-		ID: uuidV7(), UserID: uid, ActivityID: &a.ID, StartedAt: base.Add(2 * time.Hour),
+		ID: uuidV7(), UserID: uid, ActivityText: "Gym", StartedAt: base.Add(2 * time.Hour),
 		Source: "screentime", SourceRef: &ref,
 	})
 	if !errors.Is(err, ErrDuplicateImport) {
@@ -265,120 +347,51 @@ func TestPostgres_CreateEntry_ProvenanceAndDuplicateImport(t *testing.T) {
 	}
 }
 
-// Parity (category-management D5): a PATCH that references a non-existent
-// category must roll back the whole activity mutation — no partial name/join
-// state survives.
-func TestPostgres_UpdateActivity_InvalidCategoryRollsBack(t *testing.T) {
+// Parity (category-management D5): a PATCH merge that touches joins inside one
+// transaction rolls back the whole entry mutation on failure — no partial
+// field/join state survives.
+func TestPostgres_UpdateEntry_JoinRollsBackAtomically(t *testing.T) {
 	store := newParityStore(t)
 	uid := parityUser(t, store, "pg-rollback@example.com")
 
-	cat, _, err := store.CreateCategory(context.Background(), Category{
-		ID: uuidV7(), UserID: uid, Name: "Sport", Icon: "tag",
-	})
-	if err != nil {
-		t.Fatalf("CreateCategory: %v", err)
-	}
-	a, _, err := store.CreateActivity(context.Background(), Activity{
-		ID: uuidV7(), UserID: uid, Name: "Gym",
-	}, []string{cat.ID})
-	if err != nil {
-		t.Fatalf("CreateActivity: %v", err)
-	}
-
-	name := "Renamed Gym"
-	_, err = store.UpdateActivity(context.Background(), uid, a.ID, ActivityPatch{
-		Name:        &name,
-		CategoryIDs: &[]string{cat.ID, uuidV7()}, // second id does not exist
-		UpdatedAt:   a.UpdatedAt.Add(time.Hour),
-	})
-	if !errors.Is(err, ErrInvalidCategoryID) {
-		t.Fatalf("expected ErrInvalidCategoryID, got %v", err)
-	}
-
-	got, err := store.GetActivity(context.Background(), uid, a.ID)
-	if err != nil {
-		t.Fatalf("GetActivity: %v", err)
-	}
-	if got.Name != "Gym" {
-		t.Errorf("name change was not rolled back: got %q", got.Name)
-	}
-	if len(got.Categories) != 1 || got.Categories[0].ID != cat.ID {
-		t.Errorf("association change was not rolled back: %+v", got.Categories)
-	}
-}
-
-// Parity (category-management D5): association order is preserved in the
-// response, and Category deletion leaves Activities and Entries intact.
-func TestPostgres_ActivityCategory_OrderAndDeletePreservesChildren(t *testing.T) {
-	store := newParityStore(t)
-	uid := parityUser(t, store, "pg-join@example.com")
-
-	var catIDs []string
-	for _, name := range []string{"Work", "Health", "Travel"} {
-		c, _, err := store.CreateCategory(context.Background(), Category{
-			ID: uuidV7(), UserID: uid, Name: name, Icon: "tag",
-		})
-		if err != nil {
-			t.Fatalf("CreateCategory %q: %v", name, err)
-		}
-		catIDs = append(catIDs, c.ID)
-	}
-
-	a, _, err := store.CreateActivity(context.Background(), Activity{
-		ID: uuidV7(), UserID: uid, Name: "Gym",
-	}, []string{catIDs[1], catIDs[0], catIDs[2]})
-	if err != nil {
-		t.Fatalf("CreateActivity: %v", err)
-	}
-	if len(a.Categories) != 3 ||
-		a.Categories[0].ID != catIDs[1] || a.Categories[1].ID != catIDs[0] || a.Categories[2].ID != catIDs[2] {
-		t.Fatalf("expected order [%s %s %s], got %+v", catIDs[1], catIDs[0], catIDs[2], a.Categories)
-	}
-
-	// An entry referencing the activity survives category deletion.
-	started := time.Date(2026, 7, 27, 9, 0, 0, 0, time.UTC)
-	ended := started.Add(time.Hour)
+	cat := parityCategory(t, store, uid, "Sport")
+	base := time.Date(2026, 7, 27, 9, 0, 0, 0, time.UTC)
 	e, _, err := store.CreateEntry(context.Background(), Entry{
-		ID: uuidV7(), UserID: uid, ActivityID: &a.ID, StartedAt: started,
-		EndedAt: &ended,
+		ID: uuidV7(), UserID: uid, ActivityText: "Gym",
+		Categories: []CategoryTag{{ID: cat.ID}}, StartedAt: base,
 	})
 	if err != nil {
 		t.Fatalf("CreateEntry: %v", err)
 	}
 
-	if err := store.DeleteCategory(context.Background(), uid, catIDs[0]); err != nil {
-		t.Fatalf("DeleteCategory: %v", err)
+	text := "Renamed Gym"
+	ids := []CategoryTag{{ID: cat.ID}, {ID: uuidV7()}} // second id does not exist
+	if _, err := store.UpdateEntry(context.Background(), uid, e.ID, EntryPatch{
+		ActivityText: &text,
+		CategoryIDs:  &ids,
+		UpdatedAt:    e.UpdatedAt.Add(time.Hour),
+	}); err != nil {
+		t.Fatalf("UpdateEntry with unknown id must prune, not fail: %v", err)
 	}
 
-	got, err := store.GetActivity(context.Background(), uid, a.ID)
+	got, err := store.GetEntry(context.Background(), uid, e.ID)
 	if err != nil {
-		t.Fatalf("GetActivity after category delete: %v", err)
+		t.Fatalf("GetEntry: %v", err)
 	}
-	if len(got.Categories) != 2 {
-		t.Errorf("expected 2 remaining tags, got %+v", got.Categories)
+	if got.ActivityText != "Renamed Gym" {
+		t.Errorf("expected the text change to apply, got %q", got.ActivityText)
 	}
-	for _, tag := range got.Categories {
-		if tag.ID == catIDs[0] {
-			t.Errorf("deleted category still attached: %+v", got.Categories)
-		}
-	}
-
-	if _, err := store.GetEntry(context.Background(), uid, e.ID); err != nil {
-		t.Errorf("entry must survive category deletion: %v", err)
-	}
-	if _, err := store.GetActivity(context.Background(), uid, a.ID); err != nil {
-		t.Errorf("activity must survive category deletion: %v", err)
+	if len(got.Categories) != 1 || got.Categories[0].ID != cat.ID {
+		t.Errorf("expected the unknown id pruned and the known id kept, got %+v", got.Categories)
 	}
 }
 
-// Parity: every hard DELETE writes one tombstone; deleting an activity with
-// entries writes EXACTLY ONE (the activity's) — cascade-deleted entries get
-// no tombstones.
+// Parity: every hard DELETE writes one tombstone; tombstones are
+// entries/categories only — no resource can emit an activity tombstone.
 func TestPostgres_DeleteWritesTombstones(t *testing.T) {
 	store := newParityStore(t)
 	uid := parityUser(t, store, "pg-tomb@example.com")
 
-	a := parityActivity(t, store, uid, "Gym")
 	c, _, err := store.CreateCategory(context.Background(), Category{
 		ID: uuidV7(), UserID: uid, Name: "Sport", Icon: "tag",
 	})
@@ -387,36 +400,32 @@ func TestPostgres_DeleteWritesTombstones(t *testing.T) {
 	}
 	started := time.Date(2026, 7, 27, 9, 0, 0, 0, time.UTC)
 	e, _, err := store.CreateEntry(context.Background(), Entry{
-		ID: uuidV7(), UserID: uid, ActivityID: &a.ID, StartedAt: started,
+		ID: uuidV7(), UserID: uid, ActivityText: "Gym", StartedAt: started,
 	})
 	if err != nil {
 		t.Fatalf("CreateEntry: %v", err)
 	}
 
-	// Delete the entry first — deleting the activity cascades its entries away.
 	if err := store.DeleteEntry(context.Background(), uid, e.ID); err != nil {
 		t.Fatalf("DeleteEntry: %v", err)
 	}
 	if err := store.DeleteCategory(context.Background(), uid, c.ID); err != nil {
 		t.Fatalf("DeleteCategory: %v", err)
 	}
-	if err := store.DeleteActivity(context.Background(), uid, a.ID); err != nil {
-		t.Fatalf("DeleteActivity: %v", err)
-	}
 
 	tombs, err := store.ListDeletions(context.Background(), uid, nil)
 	if err != nil {
 		t.Fatalf("ListDeletions: %v", err)
 	}
-	if len(tombs) != 3 {
-		t.Fatalf("expected 3 tombstones, got %d: %+v", len(tombs), tombs)
+	if len(tombs) != 2 {
+		t.Fatalf("expected 2 tombstones, got %d: %+v", len(tombs), tombs)
 	}
 	byResource := map[string]Tombstone{}
 	for _, tomb := range tombs {
 		byResource[tomb.Resource] = tomb
 	}
 	for resource, wantID := range map[string]string{
-		"activity": a.ID, "category": c.ID, "entry": e.ID,
+		"category": c.ID, "entry": e.ID,
 	} {
 		tomb, ok := byResource[resource]
 		if !ok {
@@ -427,41 +436,6 @@ func TestPostgres_DeleteWritesTombstones(t *testing.T) {
 			t.Errorf("%s tombstone: expected id %q, got %q", resource, wantID, tomb.ID)
 		}
 	}
-
-	// Cascade: exactly one tombstone for an activity delete with entries.
-	a2 := parityActivity(t, store, uid, "Run")
-	cascadeEntryIDs := make([]string, 0, 2)
-	for i := 0; i < 2; i++ {
-		ei, _, err := store.CreateEntry(context.Background(), Entry{
-			ID: uuidV7(), UserID: uid, ActivityID: &a2.ID,
-			StartedAt: started.Add(time.Duration(i+1) * time.Hour),
-		})
-		if err != nil {
-			t.Fatalf("CreateEntry %d: %v", i, err)
-		}
-		cascadeEntryIDs = append(cascadeEntryIDs, ei.ID)
-	}
-	if err := store.DeleteActivity(context.Background(), uid, a2.ID); err != nil {
-		t.Fatalf("DeleteActivity 2: %v", err)
-	}
-	tombs, err = store.ListDeletions(context.Background(), uid, nil)
-	if err != nil {
-		t.Fatalf("ListDeletions 2: %v", err)
-	}
-	activityTombs := 0
-	for _, tomb := range tombs {
-		if tomb.Resource == "activity" {
-			activityTombs++
-		}
-		for _, cascadeID := range cascadeEntryIDs {
-			if tomb.Resource == "entry" && tomb.ID == cascadeID {
-				t.Errorf("cascade-deleted entry must have no tombstone: %+v", tomb)
-			}
-		}
-	}
-	if activityTombs != 2 {
-		t.Errorf("expected 2 activity tombstones (one per user intent), got %d: %+v", activityTombs, tombs)
-	}
 }
 
 // Parity: since-filter and ASC ordering on ListDeletions.
@@ -469,25 +443,25 @@ func TestPostgres_ListDeletions_SinceFilter(t *testing.T) {
 	store := newParityStore(t)
 	uid := parityUser(t, store, "pg-tomb-since@example.com")
 
-	a1 := parityActivity(t, store, uid, "Gym")
+	e1 := parityEntry(t, store, uid, "Gym", nil, time.Date(2026, 7, 27, 9, 0, 0, 0, time.UTC))
 	time.Sleep(5 * time.Millisecond)
-	a2 := parityActivity(t, store, uid, "Read")
+	e2 := parityEntry(t, store, uid, "Read", nil, time.Date(2026, 7, 27, 10, 0, 0, 0, time.UTC))
 
-	if err := store.DeleteActivity(context.Background(), uid, a1.ID); err != nil {
-		t.Fatalf("DeleteActivity 1: %v", err)
+	if err := store.DeleteEntry(context.Background(), uid, e1.ID); err != nil {
+		t.Fatalf("DeleteEntry 1: %v", err)
 	}
 	time.Sleep(5 * time.Millisecond)
 	cursor := time.Now().UTC()
 	time.Sleep(5 * time.Millisecond)
-	if err := store.DeleteActivity(context.Background(), uid, a2.ID); err != nil {
-		t.Fatalf("DeleteActivity 2: %v", err)
+	if err := store.DeleteEntry(context.Background(), uid, e2.ID); err != nil {
+		t.Fatalf("DeleteEntry 2: %v", err)
 	}
 
 	tombs, err := store.ListDeletions(context.Background(), uid, &cursor)
 	if err != nil {
 		t.Fatalf("ListDeletions: %v", err)
 	}
-	if len(tombs) != 1 || tombs[0].ID != a2.ID {
+	if len(tombs) != 1 || tombs[0].ID != e2.ID {
 		t.Errorf("expected only the newer tombstone, got %+v", tombs)
 	}
 
@@ -504,7 +478,7 @@ func TestPostgres_ListDeletions_SinceFilter(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListDeletions full: %v", err)
 	}
-	if len(tombs) != 2 || tombs[0].ID != a1.ID || tombs[1].ID != a2.ID {
+	if len(tombs) != 2 || tombs[0].ID != e1.ID || tombs[1].ID != e2.ID {
 		t.Errorf("expected full list oldest-first, got %+v", tombs)
 	}
 }
@@ -516,14 +490,15 @@ func TestPostgres_RecreateClearsAndDoubleDeleteKeeps(t *testing.T) {
 	uid := parityUser(t, store, "pg-tomb-recreate@example.com")
 	ctx := context.Background()
 
-	a := parityActivity(t, store, uid, "Gym")
-	if err := store.DeleteActivity(ctx, uid, a.ID); err != nil {
-		t.Fatalf("DeleteActivity: %v", err)
+	base := time.Date(2026, 7, 27, 9, 0, 0, 0, time.UTC)
+	e := parityEntry(t, store, uid, "Gym", nil, base)
+	if err := store.DeleteEntry(ctx, uid, e.ID); err != nil {
+		t.Fatalf("DeleteEntry: %v", err)
 	}
 	// Recreate the same id clears the tombstone.
-	if _, created, err := store.CreateActivity(ctx, Activity{
-		ID: a.ID, UserID: uid, Name: "Gym",
-	}, nil); err != nil || !created {
+	if _, created, err := store.CreateEntry(ctx, Entry{
+		ID: e.ID, UserID: uid, ActivityText: "Gym", StartedAt: base,
+	}); err != nil || !created {
 		t.Fatalf("recreate: created=%v err=%v", created, err)
 	}
 	tombs, err := store.ListDeletions(ctx, uid, nil)
@@ -535,18 +510,18 @@ func TestPostgres_RecreateClearsAndDoubleDeleteKeeps(t *testing.T) {
 	}
 
 	// Double delete: ErrNotFound, tombstone kept (re-created then deleted).
-	if err := store.DeleteActivity(ctx, uid, a.ID); err != nil {
-		t.Fatalf("DeleteActivity (recreated row): %v", err)
+	if err := store.DeleteEntry(ctx, uid, e.ID); err != nil {
+		t.Fatalf("DeleteEntry (recreated row): %v", err)
 	}
-	if err := store.DeleteActivity(ctx, uid, a.ID); !errors.Is(err, ErrNotFound) {
+	if err := store.DeleteEntry(ctx, uid, e.ID); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("expected ErrNotFound on second delete, got %v", err)
 	}
 	tombs, err = store.ListDeletions(ctx, uid, nil)
 	if err != nil {
 		t.Fatalf("ListDeletions 2: %v", err)
 	}
-	if len(tombs) != 1 || tombs[0].Resource != "activity" || tombs[0].ID != a.ID {
-		t.Errorf("expected exactly one activity tombstone kept, got %+v", tombs)
+	if len(tombs) != 1 || tombs[0].Resource != "entry" || tombs[0].ID != e.ID {
+		t.Errorf("expected exactly one entry tombstone kept, got %+v", tombs)
 	}
 }
 
@@ -557,27 +532,28 @@ func TestPostgres_ListDeletions_UserScoping(t *testing.T) {
 	uidB := parityUser(t, store, "pg-tomb-b@example.com")
 	ctx := context.Background()
 
-	aA := parityActivity(t, store, uidA, "Mine")
-	aB := parityActivity(t, store, uidB, "Theirs")
-	if err := store.DeleteActivity(ctx, uidA, aA.ID); err != nil {
-		t.Fatalf("DeleteActivity A: %v", err)
+	base := time.Date(2026, 7, 27, 9, 0, 0, 0, time.UTC)
+	eA := parityEntry(t, store, uidA, "Mine", nil, base)
+	eB := parityEntry(t, store, uidB, "Theirs", nil, base)
+	if err := store.DeleteEntry(ctx, uidA, eA.ID); err != nil {
+		t.Fatalf("DeleteEntry A: %v", err)
 	}
-	if err := store.DeleteActivity(ctx, uidB, aB.ID); err != nil {
-		t.Fatalf("DeleteActivity B: %v", err)
+	if err := store.DeleteEntry(ctx, uidB, eB.ID); err != nil {
+		t.Fatalf("DeleteEntry B: %v", err)
 	}
 
 	tombsA, err := store.ListDeletions(ctx, uidA, nil)
 	if err != nil {
 		t.Fatalf("ListDeletions A: %v", err)
 	}
-	if len(tombsA) != 1 || tombsA[0].ID != aA.ID {
+	if len(tombsA) != 1 || tombsA[0].ID != eA.ID {
 		t.Errorf("user A: expected only their tombstone, got %+v", tombsA)
 	}
 	tombsB, err := store.ListDeletions(ctx, uidB, nil)
 	if err != nil {
 		t.Fatalf("ListDeletions B: %v", err)
 	}
-	if len(tombsB) != 1 || tombsB[0].ID != aB.ID {
+	if len(tombsB) != 1 || tombsB[0].ID != eB.ID {
 		t.Errorf("user B: expected only their tombstone, got %+v", tombsB)
 	}
 }

@@ -56,50 +56,16 @@
 "timer.start" = "Start";
 "timer.stop" = "Stop";
 "timer.stopHint" = "Stops the timer and saves the entry";
-"timer.emptyActivityError" = "Enter an activity name.";
 "timer.signOut" = "Sign Out";
-"timer.chooseActivity" = "Choose an activity";
-"timer.chooseActivityPrompt" = "Choose an activity to start";
-"timer.activityDeleted" = "This activity was deleted on another device.";
+"timer.idlePrompt" = "Enter a name to start";
+"timer.namePlaceholder" = "What did you work on?";
 "timer.saved" = "Saved";
 "timer.saving" = "Saving…";
 "timer.running" = "Running";
 "timer.ready" = "Ready";
 "timer.chooserRecent" = "Recent";
-"timer.recentsEmptyHint" = "Activities you track will appear here.";
+"timer.recentsEmptyHint" = "Names you track will appear here.";
 "timer.selectActivity" = "Select %@";
-"timer.searchPrompt" = "Search or create";
-"timer.searchEmptyCatalogTitle" = "No activities yet";
-"timer.searchEmptyCatalogSubtitle" = "Enter a name in the search field to create your first activity.";
-"timer.searchNoResults" = "No matching activities";
-"timer.searchCreate" = "Create “%@”";
-"timer.searchRestorePrompt" = "“%@” was recently deleted and can be restored.";
-"timer.searchRestore" = "Restore";
-"timer.searchValidationEmpty" = "Enter an activity name.";
-"timer.searchValidationTooLong" = "Name must be at most 60 characters.";
-"timer.stalePreparationError" = "This activity no longer exists. Choose another one.";
-
-// Activity editor
-"activityEditor.createTitle" = "New activity";
-"activityEditor.editTitle" = "Edit activity";
-"activityEditor.nameLabel" = "Name";
-"activityEditor.namePlaceholder" = "e.g. Gym";
-"activityEditor.notesLabel" = "Notes";
-"activityEditor.notesPlaceholder" = "Optional notes";
-"activityEditor.notesCounter" = "%d / 280";
-"activityEditor.notesTooLong" = "Notes must be at most 280 characters.";
-"activityEditor.tagsLabel" = "Categories";
-"activityEditor.noTags" = "No categories yet.";
-"activityEditor.addCategory" = "Add a category";
-"activityEditor.save" = "Save";
-"activityEditor.cancel" = "Cancel";
-"activityEditor.delete" = "Delete activity";
-
-// Activity deletion (unify-catalog-deletion)
-"activity.delete.title" = "Delete this activity?";
-"activity.delete.message" = "Delete \"%@\" and its history? Entries: %d, total: %@. The activity will be removed. You can shake to undo until you restart the app.";
-"activity.delete.confirm" = "Delete";
-"activity.delete.running" = "Stop the running timer before deleting this activity.";
 "timer.compactStop" = "Stop and save timer";
 "timer.compactReturnHint" = "Returns to Track";
 "timer.compactRunning" = "%@, timer running";
@@ -119,7 +85,6 @@
 "profile.lastSynced" = "Last synced: %@";
 "profile.syncError" = "Sync failed. Try again.";
 "profile.library" = "Library";
-"profile.activities" = "Activities";
 "profile.categories" = "Categories";
 "profile.connections" = "Connections";
 "profile.integrations" = "Integrations";
@@ -129,7 +94,7 @@
 "profile.dataAndPrivacy" = "Data and Privacy";
 "profile.eraseLocalData" = "Erase local data";
 "profile.eraseLocalDataConfirmTitle" = "Erase local data?";
-"profile.eraseLocalDataConfirmMessage" = "This permanently deletes all activities, categories, entries, and pending sync data on this device.";
+"profile.eraseLocalDataConfirmMessage" = "This permanently deletes all categories, entries, and pending sync data on this device.";
 "profile.eraseConfirm" = "Erase";
 "profile.eraseCancel" = "Cancel";
 
@@ -156,7 +121,7 @@
 "insights.lens.category" = "By category";
 "insights.lens.activity" = "By activity";
 "insights.noCategory" = "Without category";
-"insights.footnote" = "An activity with several categories counts fully toward each.";
+"insights.footnote" = "An entry with several categories counts fully toward each.";
 "insights.empty.today" = "Nothing tracked today yet.";
 "insights.empty.week" = "Nothing tracked this week yet.";
 
@@ -178,23 +143,12 @@
 "provenance.name.calendar" = "Calendar";
 "provenance.name.healthkit" = "HealthKit";
 
-// Activity detail sheet (activity-detail-sheet)
-"activityDetail.editActivity" = "Edit Activity";
-"activityDetail.logTime" = "Log Time";
-"activityDetail.categories" = "Categories";
-"activityDetail.noCategories" = "none";
-"activityDetail.entries" = "Entries";
-"activityDetail.total" = "Total: %@";
-
 // Log Time sheet (manual-entry spec)
 "logTime.title" = "Log Time";
 "logTime.add" = "Add";
 "logTime.cancel" = "Cancel";
-"logTime.activity" = "Activity";
-"logTime.chooseActivity" = "Choose activity";
 "logTime.starts" = "Starts";
 "logTime.ends" = "Ends";
-"logTime.activityMissing" = "The selected activity no longer exists.";
 
 // Unified entry form (entry-editor spec: EDIT + LOCKED modes)
 "entry.editTitle" = "Edit entry";
@@ -206,6 +160,11 @@
 "entry.deleteConfirm" = "Delete";
 "entry.staleError" = "This entry changed elsewhere. Dismiss and reopen it, then try again.";
 "entry.lockedNote" = "Imported via %@ — editing is disabled to avoid conflicts with the source.";
+"entry.nameLabel" = "Name";
+"entry.namePlaceholder" = "e.g. Gym";
+"entry.categoriesLabel" = "Categories";
+"entry.notesLabel" = "Notes";
+"entry.notesPlaceholder" = "Optional notes";
 
 // History manual entry (add-manual-entry)
 "history.logTime" = "Log time";
@@ -227,12 +186,12 @@
 "manage.categories.title" = "Categories";
 "manage.categories.add" = "Add category";
 "manage.categories.emptyTitle" = "No categories yet";
-"manage.categories.emptySubtitle" = "Add one to tag your activities.";
+"manage.categories.emptySubtitle" = "Add one to tag your entries.";
 "manage.categories.rowA11y" = "Category";
 "manage.categories.editHint" = "Double-tap to edit.";
 "manage.categories.loading" = "Loading categories…";
 "delete.category.title" = "Delete category?";
-"delete.category.message" = "%@ will be removed from all activities. Your entries are kept. You can shake to undo until you restart the app.";
+"delete.category.message" = "%@ will be untagged from all entries. Your entries are kept. You can shake to undo until you restart the app.";
 "delete.category.confirm" = "Delete";
 "error.categoryExists" = "A category with this name already exists.";
 "error.conflict" = "Edited on another device. Showing the latest version.";
@@ -250,7 +209,6 @@
 "categoryEditor.delete" = "Delete category";
 "category.nameRequired" = "Enter a category name.";
 "category.nameTooLong" = "Name must be at most 60 characters.";
-"activityEditor.invalidAssociation" = "One of the selected categories no longer exists. Review your selection and try again.";
 
 // Catalog icon accessibility names
 "catalogIcon.clock" = "Clock";

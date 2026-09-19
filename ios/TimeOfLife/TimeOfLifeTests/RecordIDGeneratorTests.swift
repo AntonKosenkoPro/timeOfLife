@@ -83,7 +83,7 @@ struct UUIDv7GeneratorTests {
 @Suite("RecordID injection")
 struct RecordIDInjectionTests {
 
-    @Test("LocalStore uses the injected generator for new activity ids")
+    @Test("LocalStore uses the injected generator for new entry ids")
     func storeUsesInjectedGenerator() async throws {
         let generator = SequenceIDGenerator(["019639f1-7a3b-7abc-9def-100000000001"])
         let store = try LocalStore(
@@ -92,12 +92,16 @@ struct RecordIDInjectionTests {
                 .appendingPathComponent("timeoflife.sqlite"),
             recordIDGenerator: generator
         )
-        let outcome = try await store.createOrResolveActivity(named: "Gym")
-        guard case let .created(activity) = outcome else {
-            Issue.record("expected created")
-            return
-        }
-        #expect(activity.id == "019639f1-7a3b-7abc-9def-100000000001")
+        let entry = TimeEntry(
+            id: await store.newRecordID(),
+            activityText: "Gym",
+            startedAt: Date(),
+            endedAt: Date().addingTimeInterval(60),
+            durationSeconds: 60
+        )
+        _ = try await store.createEntry(entry)
+        let stored = try await store.entry(id: "019639f1-7a3b-7abc-9def-100000000001")
+        #expect(stored != nil)
     }
 
     @Test("newRecordID exposes the injected generator")

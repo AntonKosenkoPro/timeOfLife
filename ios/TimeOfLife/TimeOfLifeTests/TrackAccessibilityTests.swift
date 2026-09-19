@@ -6,36 +6,35 @@ import Foundation
 @Suite("Track Accessibility")
 struct TrackAccessibilityTests {
 
-    @Test("idle readout announces choose-activity prompt")
+    private let draft = TrackState.Draft(text: "Deep work", categoryIDs: ["c1"])
+
+    @Test("idle readout announces the idle prompt")
     func idleReadoutLabel() {
         let state = TrackState.idle
-        #expect(state.readoutAccessibilityLabel == L10n.timerChooseActivityPrompt.text)
+        #expect(state.readoutAccessibilityLabel == L10n.timerIdlePrompt.text)
         #expect(state.elapsed(at: Date()) == 0)
     }
 
-    @Test("ready readout announces activity and ready state")
+    @Test("ready readout announces name and ready state")
     func readyReadoutLabel() {
-        let activity = Activity(id: "a1", name: "Deep work")
-        let state = TrackState.ready(activity)
-        #expect(state.readoutAccessibilityLabel.contains(activity.name))
+        let state = TrackState.ready(draft)
+        #expect(state.readoutAccessibilityLabel.contains(draft.text))
         #expect(state.readoutAccessibilityLabel.contains(L10n.timerReady.text))
         #expect(state.elapsed(at: Date()) == 0)
     }
 
-    @Test("running readout announces activity and live elapsed")
+    @Test("running readout announces name and live elapsed")
     func runningReadoutLabel() {
-        let activity = Activity(id: "a1", name: "Reading")
         let startedAt = Date().addingTimeInterval(-125)
-        let state = TrackState.running(activity, startedAt: startedAt)
-        #expect(state.readoutAccessibilityLabel.contains(activity.name))
+        let state = TrackState.running(draft, startedAt: startedAt)
+        #expect(state.readoutAccessibilityLabel.contains(draft.text))
         #expect(state.isRunning)
-        #expect(state.elapsed(at: Date()) >= 125)
+        #expect(state.elapsed(at: startedAt.addingTimeInterval(125)) >= 125)
     }
 
     @Test("saved readout announces saved state and duration")
     func savedReadoutLabel() {
-        let activity = Activity(id: "a1", name: "Work")
-        let state = TrackState.saved(activity, duration: 90)
+        let state = TrackState.saved(draft, duration: 90)
         #expect(state.readoutAccessibilityLabel.contains(L10n.timerSaved.text))
         #expect(state.elapsed(at: Date()) == 90)
         #expect(!state.isRunning)
@@ -43,48 +42,43 @@ struct TrackAccessibilityTests {
 
     @Test("error state preserves running semantics")
     func errorPreservesRunning() {
-        let activity = Activity(id: "a1", name: "Work")
         let startedAt = Date().addingTimeInterval(-60)
-        let state = TrackState.error(activity, startedAt: startedAt)
+        let state = TrackState.error(draft, startedAt: startedAt)
         #expect(state.isRunning)
-        #expect(state.elapsed(at: Date()) >= 60)
+        #expect(state.elapsed(at: startedAt.addingTimeInterval(60)) >= 60)
     }
 
-    @Test("compact label announces activity and running state")
+    @Test("compact label announces name and running state")
     func compactLabel() {
-        let activity = Activity(id: "a1", name: "Deep work")
-        let state = TrackState.running(activity, startedAt: Date())
-        #expect(state.compactAccessibilityLabel == String(format: L10n.timerCompactRunning.text, activity.name))
-        #expect(state.compactAccessibilityLabel.contains(activity.name))
+        let state = TrackState.running(draft, startedAt: Date())
+        #expect(state.compactAccessibilityLabel == String(format: L10n.timerCompactRunning.text, draft.text))
+        #expect(state.compactAccessibilityLabel.contains(draft.text))
     }
 
     @Test("saving state is not running and reports saving")
     func savingState() {
-        let activity = Activity(id: "a1", name: "Work")
-        let state = TrackState.saving(activity, startedAt: Date())
+        let state = TrackState.saving(draft, startedAt: Date())
         #expect(state.isSaving)
         #expect(!state.isRunning)
     }
 
-    @Test("non-idle states expose a selected Activity for Refine")
-    func nonIdleStatesHaveActivity() {
-        let activity = Activity(id: "a1", name: "Deep work")
-        #expect(TrackState.ready(activity).activity != nil)
-        #expect(TrackState.running(activity, startedAt: Date()).activity != nil)
-        #expect(TrackState.saving(activity, startedAt: Date()).activity != nil)
-        #expect(TrackState.saved(activity, duration: 60).activity != nil)
-        #expect(TrackState.error(activity, startedAt: Date()).activity != nil)
+    @Test("non-idle states expose a draft")
+    func nonIdleStatesHaveDraft() {
+        #expect(TrackState.ready(draft).draft != nil)
+        #expect(TrackState.running(draft, startedAt: Date()).draft != nil)
+        #expect(TrackState.saving(draft, startedAt: Date()).draft != nil)
+        #expect(TrackState.saved(draft, duration: 60).draft != nil)
+        #expect(TrackState.error(draft, startedAt: Date()).draft != nil)
     }
 
-    @Test("idle state exposes no Activity for Refine")
-    func idleStateHasNoActivity() {
-        #expect(TrackState.idle.activity == nil)
+    @Test("idle state exposes no draft")
+    func idleStateHasNoDraft() {
+        #expect(TrackState.idle.draft == nil)
     }
 
-    @Test("saving state disables Refine")
-    func savingStateDisablesRefine() {
-        let activity = Activity(id: "a1", name: "Work")
-        let state = TrackState.saving(activity, startedAt: Date())
-        #expect(state.isSaving)
+    @Test("exact-text identity is case-sensitive")
+    func exactTextIdentity() {
+        #expect(TrackState.Draft(text: "Gym") != TrackState.Draft(text: "GYM"))
+        #expect(TrackState.ready(TrackState.Draft(text: "Gym")) != TrackState.ready(TrackState.Draft(text: "GYM")))
     }
 }

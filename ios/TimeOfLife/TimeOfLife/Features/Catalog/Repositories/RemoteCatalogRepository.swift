@@ -1,31 +1,22 @@
 // swiftlint:disable file_length
 import Foundation
 
-/// The backend relay's catalog/entries contract (catalog feature + local-first
-/// additions). The backend is an optional relay, not the source of truth:
-/// the client pushes outbox rows and pulls deltas via `modified_since`.
+/// The backend relay's categories/entries contract (catalog feature + local-
+/// first additions, remove-activities-layer: no activity routes). The backend
+/// is an optional relay, not the source of truth: the client pushes outbox
+/// rows and pulls deltas via `modified_since`.
 protocol CatalogSending: Sendable {
-    /// `GET /activities?modified_since=` — full pull when `modifiedSince` is nil.
-    func fetchActivities(modifiedSince: Date?) async throws -> [Activity]
-    /// `GET /categories` — full pull (categories have no delta cursor yet).
+    /// `GET /categories` — full pull (the authoritative category snapshot).
     func fetchCategories() async throws -> [Category]
     /// `GET /entries?modified_since=` — full pull when `modifiedSince` is nil.
     func fetchEntries(modifiedSince: Date?) async throws -> [TimeEntry]
     /// `GET /deletions?deleted_since=` — full list when `since` is nil
-    /// (cross-device-delete-propagation).
+    /// (cross-device-delete-propagation; entries and categories only).
     func fetchDeletions(since: Date?) async throws -> [Deletion]
-    /// `GET /activities/{id}` — used to adopt the server's version on conflict.
-    func fetchActivity(id: String) async throws -> Activity
     /// `GET /categories/{id}` — used to adopt the server's version on conflict.
     func fetchCategory(id: String) async throws -> Category
     /// `GET /entries/{id}` — used to adopt the server's version on conflict.
     func fetchEntry(id: String) async throws -> TimeEntry
-    /// `POST /activities` — idempotent on `id`.
-    func createActivity(_ activity: Activity) async throws
-    /// `PATCH /activities/{id}` — LWW on `updated_at`.
-    func updateActivity(_ activity: Activity) async throws
-    /// `DELETE /activities/{id}`.
-    func deleteActivity(id: String) async throws
     /// `POST /categories` — idempotent on `id`.
     func createCategory(_ category: Category) async throws
     /// `PATCH /categories/{id}` — LWW on `updated_at`.
@@ -48,15 +39,6 @@ final class RemoteCatalogRepository: CatalogSending {
 
     init(client: APISending) {
         self.client = client
-    }
-
-    func fetchActivities(modifiedSince: Date?) async throws -> [Activity] {
-        let response = try await client.send(
-            APIEndpoint.value(method: .get, path: activitiesPath(modifiedSince: modifiedSince),
-                              requiresAuth: true),
-            as: [ActivityWireDTO].self
-        )
-        return response.map(Self.localActivity(from:))
     }
 
     func fetchCategories() async throws -> [Category] {
@@ -84,14 +66,6 @@ final class RemoteCatalogRepository: CatalogSending {
         return response.map(Self.localDeletion(from:))
     }
 
-    func fetchActivity(id: String) async throws -> Activity {
-        let dto = try await client.send(
-            APIEndpoint.value(method: .get, path: "\(basePath)/activities/\(id)", requiresAuth: true),
-            as: ActivityWireDTO.self
-        )
-        return Self.localActivity(from: dto)
-    }
-
     func fetchCategory(id: String) async throws -> Category {
         let dto = try await client.send(
             APIEndpoint.value(method: .get, path: "\(basePath)/categories/\(id)", requiresAuth: true),
@@ -106,26 +80,6 @@ final class RemoteCatalogRepository: CatalogSending {
             as: EntryWireDTO.self
         )
         return Self.localEntry(from: dto)
-    }
-
-    func createActivity(_ activity: Activity) async throws {
-        try await client.sendVoid(
-            APIEndpoint(method: .post, path: "\(basePath)/activities",
-                        body: ActivityCreateBody(activity: activity), requiresAuth: true)
-        )
-    }
-
-    func updateActivity(_ activity: Activity) async throws {
-        try await client.sendVoid(
-            APIEndpoint(method: .patch, path: "\(basePath)/activities/\(activity.id)",
-                        body: ActivityUpdateBody(activity: activity), requiresAuth: true)
-        )
-    }
-
-    func deleteActivity(id: String) async throws {
-        try await client.sendVoid(
-            APIEndpoint.value(method: .delete, path: "\(basePath)/activities/\(id)", requiresAuth: true)
-        )
     }
 
     func createCategory(_ category: Category) async throws {
@@ -168,20 +122,6 @@ final class RemoteCatalogRepository: CatalogSending {
         )
     }
 
-    /// Maps the wire Activity (embedded `categories`) to the local model
-    /// (ordered `categoryIDs`) (category-management D5).
-    private static func localActivity(from dto: ActivityWireDTO) -> Activity {
-        Activity(
-            id: dto.id,
-            name: dto.name,
-            notes: dto.notes,
-            lastUsedAt: dto.lastUsedAt,
-            categoryIDs: dto.categories.map(\.id),
-            createdAt: dto.createdAt,
-            updatedAt: dto.updatedAt
-        )
-    }
-
     /// Maps the wire Category (RFC 3339 timestamps) to the local model.
     private static func localCategory(from dto: CategoryWireDTO) -> Category {
         Category(
@@ -193,17 +133,19 @@ final class RemoteCatalogRepository: CatalogSending {
         )
     }
 
-    /// Maps the wire Entry (RFC 3339 timestamps) to the local model.
+    /// Maps the wire Entry (RFC 3339 timestamps, ordered `category_ids`)
+    /// to the local model.
     private static func localEntry(from dto: EntryWireDTO) -> TimeEntry {
         TimeEntry(
             id: dto.id,
-            activityID: dto.activityID,
-            activityName: dto.activityName,
+            activityText: dto.activityText,
             startedAt: dto.startedAt,
             endedAt: dto.endedAt,
             durationSeconds: dto.durationSeconds,
             source: dto.source,
             sourceRef: dto.sourceRef,
+            categoryIDs: dto.categoryIDs,
+            notes: dto.notes,
             createdAt: dto.createdAt,
             updatedAt: dto.updatedAt
         )
@@ -215,14 +157,6 @@ final class RemoteCatalogRepository: CatalogSending {
     }
 
     // MARK: - Paths
-
-    private func activitiesPath(modifiedSince: Date?) -> String {
-        var path = "\(basePath)/activities"
-        if let modifiedSince {
-            path += "?modified_since=\(Self.rfc3339(modifiedSince))"
-        }
-        return path
-    }
 
     private func entriesPath(modifiedSince: Date?) -> String {
         var path = "\(basePath)/entries"
@@ -313,64 +247,9 @@ fileprivate extension ISO8601DateFormatter {
     }
 }
 
-/// The wire shape of an Activity as the relay returns it
-/// (category-management D5): the response embeds `categories` as CategoryTag
-/// objects and RFC 3339 timestamps, which the local `Activity` model does not
-/// decode directly. The repository maps this DTO to the local ordered
-/// `categoryIDs`.
-struct ActivityWireDTO: Decodable, Sendable {
-    let id: String
-    let name: String
-    let notes: String?
-    let lastUsedAt: Date?
-    let createdAt: Date
-    let updatedAt: Date
-    let categories: [CategoryTagDTO]
-
-    enum CodingKeys: String, CodingKey {
-        case id, name, notes
-        case lastUsedAt = "last_used_at"
-        case createdAt = "created_at"
-        case updatedAt = "updated_at"
-        case categories
-    }
-
-    init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        id = try container.decode(String.self, forKey: .id)
-        name = try container.decode(String.self, forKey: .name)
-        notes = try container.decodeIfPresent(String.self, forKey: .notes)
-        categories = try container.decode([CategoryTagDTO].self, forKey: .categories)
-        func date(_ key: CodingKeys) throws -> Date {
-            let raw = try container.decode(String.self, forKey: key)
-            guard let parsed = WireDate.parse(raw) else {
-                throw DecodingError.dataCorruptedError(
-                    forKey: key,
-                    in: container,
-                    debugDescription: "Invalid RFC 3339 date: \(raw)"
-                )
-            }
-            return parsed
-        }
-        lastUsedAt = try container.decodeIfPresent(String.self, forKey: .lastUsedAt).flatMap(WireDate.parse)
-        createdAt = try date(.createdAt)
-        updatedAt = try date(.updatedAt)
-    }
-}
-
-/// An embedded category tag in an Activity/Entry response
-/// (OpenAPI `CategoryTag`).
-struct CategoryTagDTO: Decodable, Sendable {
-    let id: String
-    let name: String
-    let icon: String
-}
-
 /// The wire shape of a Category as the relay returns it: RFC 3339
 /// timestamps, which the local `Category` model does not decode directly
-/// (default Codable expects `Double`). Same split as `ActivityWireDTO` —
-/// decoding the local model from the wire broke every non-empty category
-/// pull (`typeMismatch` on `created_at`).
+/// (default Codable expects `Double`).
 struct CategoryWireDTO: Decodable, Sendable {
     let id: String
     let name: String
@@ -395,12 +274,13 @@ struct CategoryWireDTO: Decodable, Sendable {
 }
 
 /// The wire shape of an Entry as the relay returns it (OpenAPI `Entry`):
-/// RFC 3339 timestamps plus the read-time `activity_name`; the embedded
-/// `categories` are not needed locally (tags resolve from the activity).
+/// RFC 3339 timestamps plus the entry-owned `activity_text`, ordered
+/// `category_ids`, and `notes` (remove-activities-layer; no `activity_id`).
 struct EntryWireDTO: Decodable, Sendable {
     let id: String
-    let activityID: String
-    let activityName: String
+    let activityText: String
+    let categoryIDs: [String]
+    let notes: String
     let startedAt: Date
     let endedAt: Date?
     let durationSeconds: Int?
@@ -411,8 +291,9 @@ struct EntryWireDTO: Decodable, Sendable {
 
     enum CodingKeys: String, CodingKey {
         case id
-        case activityID = "activity_id"
-        case activityName = "activity_name"
+        case activityText = "activity_text"
+        case categoryIDs = "category_ids"
+        case notes
         case startedAt = "started_at"
         case endedAt = "ended_at"
         case durationSeconds = "duration_seconds"
@@ -425,8 +306,9 @@ struct EntryWireDTO: Decodable, Sendable {
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(String.self, forKey: .id)
-        activityID = try container.decode(String.self, forKey: .activityID)
-        activityName = try container.decode(String.self, forKey: .activityName)
+        activityText = try container.decode(String.self, forKey: .activityText)
+        categoryIDs = try container.decodeIfPresent([String].self, forKey: .categoryIDs) ?? []
+        notes = try container.decodeIfPresent(String.self, forKey: .notes) ?? ""
         startedAt = try WireDate.decode(container, forKey: .startedAt)
         endedAt = try WireDate.decodeIfPresent(container, forKey: .endedAt)
         durationSeconds = try container.decodeIfPresent(Int.self, forKey: .durationSeconds)
@@ -461,45 +343,6 @@ struct DeletionWireDTO: Decodable, Sendable {
     }
 }
 
-struct ActivityCreateBody: Encodable, Sendable {
-    let id: String
-    let name: String
-    let notes: String?
-    let categoryIDs: [String]
-
-    enum CodingKeys: String, CodingKey {
-        case id, name, notes
-        case categoryIDs = "category_ids"
-    }
-
-    init(activity: Activity) {
-        self.id = activity.id
-        self.name = activity.name
-        self.notes = activity.notes
-        self.categoryIDs = activity.categoryIDs
-    }
-}
-
-struct ActivityUpdateBody: Encodable, Sendable {
-    let name: String
-    let notes: String?
-    let categoryIDs: [String]
-    let updatedAt: String
-
-    enum CodingKeys: String, CodingKey {
-        case name, notes
-        case categoryIDs = "category_ids"
-        case updatedAt = "updated_at"
-    }
-
-    init(activity: Activity) {
-        self.name = activity.name
-        self.notes = activity.notes
-        self.categoryIDs = activity.categoryIDs
-        self.updatedAt = WireDate.format(activity.updatedAt)
-    }
-}
-
 struct CategoryCreateBody: Encodable, Sendable {
     let id: String
     let name: String
@@ -531,7 +374,9 @@ struct CategoryUpdateBody: Encodable, Sendable {
 
 struct EntryCreateBody: Encodable, Sendable {
     let id: String
-    let activityID: String
+    let activityText: String
+    let categoryIDs: [String]
+    let notes: String
     let startedAt: String
     let endedAt: String?
     let source: String
@@ -539,7 +384,9 @@ struct EntryCreateBody: Encodable, Sendable {
 
     enum CodingKeys: String, CodingKey {
         case id
-        case activityID = "activity_id"
+        case activityText = "activity_text"
+        case categoryIDs = "category_ids"
+        case notes
         case startedAt = "started_at"
         case endedAt = "ended_at"
         case source
@@ -548,7 +395,9 @@ struct EntryCreateBody: Encodable, Sendable {
 
     init(entry: TimeEntry) {
         self.id = entry.id
-        self.activityID = entry.activityID
+        self.activityText = entry.activityText
+        self.categoryIDs = entry.categoryIDs
+        self.notes = entry.notes
         self.startedAt = WireDate.format(entry.startedAt)
         self.endedAt = entry.endedAt.map(WireDate.format)
         self.source = entry.source
@@ -557,17 +406,26 @@ struct EntryCreateBody: Encodable, Sendable {
 }
 
 struct EntryUpdateBody: Encodable, Sendable {
+    let activityText: String
+    let categoryIDs: [String]
+    let notes: String
     let startedAt: String
     let endedAt: String?
     let updatedAt: String
 
     enum CodingKeys: String, CodingKey {
+        case activityText = "activity_text"
+        case categoryIDs = "category_ids"
+        case notes
         case startedAt = "started_at"
         case endedAt = "ended_at"
         case updatedAt = "updated_at"
     }
 
     init(entry: TimeEntry) {
+        self.activityText = entry.activityText
+        self.categoryIDs = entry.categoryIDs
+        self.notes = entry.notes
         self.startedAt = WireDate.format(entry.startedAt)
         self.endedAt = entry.endedAt.map(WireDate.format)
         self.updatedAt = WireDate.format(entry.updatedAt)

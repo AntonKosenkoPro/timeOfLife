@@ -90,7 +90,7 @@ When a screen’s main purpose is to collect input from a single field (email, O
 ### Profile destination
 
 - The person control opens Profile for all users — signed out and signed in.
-- Signed out, the account section offers **Enable Sync**; local activity/category management, integrations, export, appearance, and data controls remain accessible independently.
+- Signed out, the account section offers **Enable Sync**; local entry/category management, integrations, export, appearance, and data controls remain accessible independently.
 - Signed in, the account section shows sync status ("Last synced"/"Syncing…"/error) and a manual "Sync now" action, plus sign-out.
 - "Erase local data" is a destructive, confirmed action that wipes the local database (state + outbox + undo buffer + sync cursors).
 
@@ -123,7 +123,7 @@ Keep haptics subtle. Do not vibrate on every keystroke.
 D1 (OpenSpec change `redesign-track-experience`). The root is a three-tab shell, not a timer-only root:
 
 - **Track, History, Insights are the primary destinations.** Track is initially selected and is the only destination that starts or stops a timer.
-- **Profile is a sheet, not a tab.** A consistent top-trailing person control on every tab opens it. Profile owns account/sync, activity and category management, integrations, export, appearance, and destructive data controls.
+- **Profile is a sheet, not a tab.** A consistent top-trailing person control on every tab opens it. Profile owns account/sync, category management, integrations, export, appearance, and destructive data controls.
 - **Switching destinations never changes timer state** and never discards the previous destination's state.
 - **The app launches into Track without authentication**; History and Insights are reachable unsigned. Auth is an optional "Enable Sync" action inside Profile.
 - **A running timer stays globally accessible.** While running, History and Insights show the compact timer immediately above the tab bar (`.safeAreaInset(edge: .bottom)`). Its main area returns to Track; its Stop button saves in place and keeps the current destination selected. Track does not duplicate it.
@@ -138,13 +138,12 @@ D1 (OpenSpec change `redesign-track-experience`). The root is a three-tab shell,
 
 ## Undo flow (catalog deletions)
 
-R3 / U6 / U7; decisions D17 + `unify-catalog-deletion`. Applies to entry, activity, and category deletions, all confirmed from their editing forms (entry form, activity editor, category editor — no list swipes, no toasts).
+R3 / U6 / U7; decisions D17 + `unify-catalog-deletion`. Applies to entry and category deletions, all confirmed from their editing forms (entry form, category editor — no list swipes, no toasts).
 
 - A deletion is **not** committed to the local store or pushed to sync immediately. It enters the client-side **durable undo buffer** and stays restorable until the app restarts; a cold launch commits whatever is still buffered.
 - No `UndoToast` is shown. Undo is the DEFAULT system Undo confirmation only: shaking on the presenting surface shows the system prompt, and confirming restores exactly the most recent buffered deletion (registrations are cleared-then-single).
 - The buffer is **superseded** by the next undoable action — only the most recent buffered deletion is restorable, including across surfaces (an entry delete followed by a category delete leaves only the category undoable, and vice versa; each surface filters snapshots by resource; older rows stay buffered until undone or the app restarts).
 - On restart, commit locally (hard delete) and enqueue the `DELETE` for sync; the server hard-deletes (no trash, per `Activity_Catalog_API.md` Sync & ids).
-- Bulk deletions (delete activity + its entries, F10) are undoable as a unit — the buffer holds the whole set and Undo restores all of it.
 - **Undo failure:** undo is a local transaction (no API call); on a local failure the surface keeps its last good snapshot and the buffer row is preserved for retry until the app restarts.
 
 ### Durable undo buffer (local-first)
@@ -161,33 +160,27 @@ D3 (OpenSpec change `local-first-sync-architecture`). The undo buffer is **durab
 
 U7 says "no custom shake detection" — use the iOS system motion event. The view layer owns the binding:
 
-- Every surface that can follow a deletion (Track, History, Manage Categories, activity detail sheet) hosts the shared passive `ShakeFirstResponderHost` (transparent, background-placed, holds first responder, handles NO motion itself) bound to its own `@Environment(\.undoManager)`.
+- Every surface that can follow a deletion (Track, History, Manage Categories, entry form) hosts the shared passive `ShakeFirstResponderHost` (transparent, background-placed, holds first responder, handles NO motion itself) bound to its own `@Environment(\.undoManager)`.
 - After a deletion lands, the surface registers the newest eligible buffer row cleared-then-single with `setActionName`, filtered by snapshot resource — so one shake+confirm restores at most one deletion, and foreign-surface rows are left for their owners.
 - Do not implement custom accelerometer/gyro logic, and do not restore immediately on shake — the system prompt is the only confirmation.
 
-### Activity search and creation (unify-activity-preparation-flow)
+### Plain-text capture (remove-activities-layer)
 
-D3 (OpenSpec change `unify-activity-preparation-flow`). Track has one
-search-styled Activity affordance. It opens a full-height searchable sheet;
-the operating system owns search-field placement, focus, keyboard, activation
-animation, and the Cancel affordance. The search content area is ordinary
-sheet content:
+Track has one plain-text name field plus Recents chips. There is no search
+sheet, no quick-create, and no catalog:
 
-- **Draft vs. commit:** the search query is a temporary draft that never mutates the committed prepared Activity. Native Cancel or sheet dismissal without confirmation closes search and restores the prior ready or idle timer state exactly. Selecting, quick-creating, or restoring is the only commit boundary.
-- **Identity:** names are equal after trimming surrounding whitespace and case-insensitive comparison. Creation rechecks identity at confirmation time through the atomic local create-or-resolve operation; a concurrent duplicate resolves to the existing winning Activity.
-- **Pending-deletion identity:** when a non-expired pending-deletion Activity matches the query, the search content offers an explicit restore action instead of creation. Confirming restores the buffered snapshot transactionally (no outbox row) and prepares the restored Activity. Automatically restoring on typing is rejected — it would reverse a deletion without explicit confirmation.
-- **Refinement:** the Refine button on the selected-Activity row opens the shared Activity Editor prefilled with the selected Activity. Refinement is a Track-owned presentation independent from search. Activating Refine resolves the selected Activity from LocalStore; if it no longer exists, Track follows the stale-preparation behavior below. On save, the Activity is replaced in place in the current TrackState without transitioning — startedAt, duration, and the ticker are preserved, and the Activity identifier is kept. On cancel or failure, the Activity and timer state remain unchanged. On collision, the editor stays open with the draft intact and a localized error permits retry.
-- **Stale preparation:** Start revalidates the committed Activity identifier locally. A prepared Activity that no longer exists clears preparation, returns to idle, and shows a localized error — it is never silently recreated.
-- **Failures:** a failed quick creation keeps search active with the query preserved and shows a localized non-field error; a failed refinement keeps the editor draft intact and permits retry, leaving the Activity and timer state unchanged.
+- **Draft vs. commit:** the field content is a temporary draft that never mutates committed history. Stopping the timer is the only commit boundary — it creates exactly one entry plus one outbox row.
+- **Identity:** names are equal only as exact trimmed text (byte-exact, case-sensitive: `Gym` ≠ `GYM`). An exact match against a recent entry inherits that entry's full ordered category set at Start; otherwise the draft starts categoryless.
+- **Running lock:** the name cannot be edited while running. The shared ordered tag selector stays live (select-only, zero allowed); toggles rewrite the draft snapshot only and never touch committed entries.
+- **Validation:** Start is gated on trimmed non-empty text (≤ 60 chars); invalid input keeps Start disabled with localized guidance, never a blocking alert.
 
-## Delete-scope confirmation (F10 / U5)
+## Delete confirmation (F10 / U5)
 
-Decision D18. The confirm pattern depends on what is being deleted.
+Decision D18 (as superseded). The confirm pattern depends on what is being deleted.
 
-- **Activity with no entries:** single destructive confirm → undo flow.
-- **Activity with entries:** `ScopeConfirmation` (`COMPONENTS.md`) offering two destructive choices, both naming the affected entry count: (a) delete the entire activity + all N entries, (b) delete only the current entry. Both are destructive and enter the undo flow as a unit.
+- **Entry:** single destructive confirm naming the entry text → undo flow. There is no cascade and no scope choice.
 - Destructive buttons use `role: .destructive` / `Theme.danger` tint.
-- **Category:** single destructive confirm; the category's tag is removed from all activities (join cascade), entries are unaffected — state this clearly in the confirm copy. Still undoable for 30 s (Undo re-applies the tags).
+- **Category:** single destructive confirm; the category's tag is removed from all entries (join cascade), entries themselves are unaffected — state this clearly in the confirm copy.
 
 ## Sync conflict (last-write-wins)
 
@@ -196,7 +189,7 @@ R2. Reuses the Offline sync path; do not duplicate the Offline section above.
 - Every mutable request carries the client `updated_at`. The server applies the write only if `client.updated_at > server.updated_at`; otherwise it returns **409 `conflict`** with the server's current version in `details`.
 - On 409 `conflict`, the client shows an inline `ErrorBanner` ("Edited on another device") and adopts the server's version as the source of truth (keep-latest). No field-level merge at MVP.
 - If the user dismisses the conflict `ErrorBanner` without choosing, default to keep-latest (adopt server version) — the banner is informational, not blocking.
-- On 409 `activity_exists` / `category_exists` (case-insensitive name collision on create), the client re-maps local references to the surviving id (see `Activity_Catalog_API.md` Sync & ids) and proceeds; in the editor this means "reuse the existing activity" rather than surfacing an error.
+- On 409 `category_exists` (case-insensitive name collision on create), the client re-maps local references to the surviving id (see `Activity_Catalog_API.md` Sync & ids) and proceeds without an error.
 - Idempotent `POST` (same id replayed) returns the existing record — the offline queue is safe to replay; do not surface this as an error.
 
 ### Confirmation-dialog cleanup
@@ -213,7 +206,7 @@ All manage-screen delete flows should follow this pattern consistently.
 | 200/201 success | Apply locally, clear outbound queue entry |
 | 404 not found (on DELETE) | Treat as success — item was already removed elsewhere; remove row locally, clear outbound queue entry |
 | 409 `conflict` | `ErrorBanner`, adopt server version, keep-latest |
-| 409 `activity_exists` / `category_exists` | Re-map local refs to surviving id, proceed |
+| 409 `category_exists` | Re-map local refs to surviving id, proceed |
 | Idempotent POST (replay) | Treat as success; no error surfaced |
 
 ## Sync client (local-first)
@@ -222,31 +215,28 @@ D6 (OpenSpec change `local-first-sync-architecture`). Sync is an **optional tran
 
 - **Triggers:** (1) app enters foreground, (2) connectivity restored (`.satisfied`), (3) manual "Sync now" in Profile. No background task scheduling on iOS (unreliable); macOS may add a timer-based background sync later.
 - **First-sync is pull-first:** on activation, pull the relay's full state, merge server-wins on `updated_at` conflicts, then drain the local outbox. Subsequent pulls are deltas via `?modified_since=` (per-resource cursor advanced to the max `updated_at` received).
-- **Outbox drain:** one HTTP call per outbox row, in `created_at` order; idempotent POST / LWW PATCH / hard DELETE make replays safe. 409 `conflict` on push → adopt the server version (keep-latest) and clear the row; 409 `activity_exists`/`category_exists` → re-map local references to the winning id and proceed without an error.
+- **Outbox drain:** one HTTP call per outbox row, in `created_at` order; idempotent POST / LWW PATCH / hard DELETE make replays safe. 409 `conflict` on push → adopt the server version (keep-latest) and clear the row; 409 `category_exists` → re-map local references to the winning id and proceed without an error.
 - **Status display (Profile, visible only when signed in):** "Last synced: <relative time>" or "Syncing…" (button disabled while in progress) or an error state (button stays enabled to allow retry). The manual "Sync now" action calls the same drain+pull path as the automatic triggers.
 - **Sign-out preserves local data and the outbox**; an explicit "Erase local data" action in Profile wipes them (destructive, confirmed).
 
-## Catalog empty states
+## Category empty states
 
-U8. Applies to Manage Activities and Manage Categories.
+U8. Applies to Manage Categories and the Track Recents area.
 
-- Show `EmptyState` (`COMPONENTS.md`) when there are zero activities / zero categories (e.g. after deleting all, or if seeds are declined on first run).
-- Empty states guide toward creation ("Add an activity") and **never block** free-text timer start — typing a name and starting always works (F4 / D20).
+- Show `EmptyState` (`COMPONENTS.md`) when there are zero categories (e.g. after deleting all, or if seeds are declined on first run).
+- Empty states guide toward creation ("Add a category") and **never block** free-text timer start — typing a name and starting always works (F4 / D20).
 
 ## Recency ordering
 
-F8; decision D19.
+Timer Recents are up-to-6 exact texts computed on-device from committed entries (`GROUP BY activity_text`, newest `started_at` wins per group). No manual drag-reorder at MVP. The Manage Categories list is name-ordered.
 
-- The Manage Activities list and timer suggestions are ordered by `last_used_at` (most-recent first), computed on-device (D16). No manual drag-reorder at MVP.
-- `last_used_at` is bumped on every entry start and syncs across devices, so recency is shared (see `Activity_Catalog_API.md` Suggestions).
+## Text and category semantics
 
-## Activity and category semantics
-
-- An Activity is the concrete task selected for a timer and is required for an entry.
-- A Category is optional analytics metadata; an Activity may have zero or more Categories.
-- Track suggestions and the Activity picker show Activity names only. Category icons and names are omitted from capture.
-- Manage Activities and Manage Categories are separate surfaces. The full Activity Editor may assign or remove Categories.
-- Entries resolve the Activity's current Categories at query time. Changing an Activity's Categories reclassifies its existing history in Insights.
+- An entry owns the exact text being timed plus zero or more Categories in an explicit order; all three are written at creation and owned per entry.
+- A Category is optional analytics metadata; the first-position category supplies chip/row icons.
+- Track Recents and the running tag selector show exact texts and icons only. Category names are omitted from capture.
+- Manage Categories is a separate surface. The entry form may assign or remove Categories for one entry.
+- Editing one entry never reclassifies any other entry: history is immutable except through its own entry form.
 
 ## Editor sheets and keyboard placement
 
