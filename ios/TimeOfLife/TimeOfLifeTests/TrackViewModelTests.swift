@@ -194,6 +194,58 @@ struct TrackViewModelTests {
         #expect(try await vm.service.store.entries().isEmpty)
     }
 
+    @Test("editing after a chip selection re-derives the draft from the field")
+    func editAfterChipReselects() async throws {
+        let vm = makeViewModel()
+        let store = vm.service.store
+        try await store.createCategory(Category(id: "c1", name: "Work", icon: CatalogIcon.briefcase.rawValue))
+        try await store.createEntry(makeEntry(id: "e1", text: "Gym", categoryIDs: ["c1"]))
+        vm.recents = try await storeRecents(store)
+        vm.select(vm.recents[0])
+        #expect(vm.state == .ready(TrackState.Draft(text: "Gym", categoryIDs: ["c1"])))
+
+        // Typing a different text must follow the field, not the stale chip.
+        vm.nameDraft = "Gym2"
+        vm.syncReadyFromDraft()
+        #expect(vm.state == .ready(TrackState.Draft(text: "Gym2", categoryIDs: [])))
+
+        // Clearing the field returns to idle.
+        vm.nameDraft = "   "
+        vm.syncReadyFromDraft()
+        #expect(vm.state == .idle)
+    }
+
+    @Test("typing a history-tagged name inherits its categories after reload")
+    func typingInheritsAfterHistoryEdit() async throws {
+        let vm = makeViewModel()
+        let store = vm.service.store
+        try await store.createCategory(Category(id: "c1", name: "Sport", icon: CatalogIcon.briefcase.rawValue))
+        // Entry first saved categoryless (e.g. from the timer), then tagged
+        // from the History entry form.
+        try await store.createEntry(makeEntry(id: "e1", text: "Gym"))
+        var tagged = try #require(try await store.entry(id: "e1"))
+        tagged.categoryIDs = ["c1"]
+        tagged.updatedAt = Date().addingTimeInterval(10)
+        #expect(try await store.updateEntry(tagged))
+
+        // Returning to Track reloads recents + categories (AppShellView).
+        await vm.load()
+        #expect(vm.recents.first?.categoryIDs == ["c1"])
+        #expect(vm.categories["c1"]?.name == "Sport")
+
+        vm.nameDraft = "Gym"
+        vm.syncReadyFromDraft()
+        #expect(vm.state == .ready(TrackState.Draft(text: "Gym", categoryIDs: ["c1"])))
+
+        vm.start()
+        try? await Task.sleep(nanoseconds: 50_000_000)
+        guard case let .running(draft, _) = vm.state else {
+            Issue.record("expected running state")
+            return
+        }
+        #expect(draft.categoryIDs == ["c1"])
+    }
+
     // MARK: - Recoverable save failure
 
     @Test("stop retry after a recoverable failure preserves elapsed state")

@@ -121,16 +121,13 @@ final class TrackViewModel: ObservableObject {
     /// Keeps the committed `.ready`/`.idle` state in step with the typed
     /// name draft while not running: a trimmed non-empty name prepares it
     /// (inheriting the exact recents match's categories), clearing the field
-    /// returns to idle. Typing never starts anything and never commits a
-    /// partial draft. Called by the name field's edit/commit callbacks.
+    /// returns to idle. Any edit re-derives the draft — including edits after
+    /// a chip selection, which is just a fill. Typing never starts anything
+    /// and never commits a partial draft. Called by the name field's
+    /// edit/commit callbacks.
     func syncReadyFromDraft() {
         guard !state.isRunning, !state.isSaving else { return }
         let trimmed = nameDraft.trimmingCharacters(in: .whitespacesAndNewlines)
-        // Chip-selected ready states are only resynced while the field still
-        // mirrors the committed draft (no unrelated mid-composition edits).
-        if case let .ready(draft) = state, trimmed != draft.text, !nameDraftWasCommittedFromField {
-            return
-        }
         guard !trimmed.isEmpty else {
             if state != .idle {
                 state = .idle
@@ -144,12 +141,7 @@ final class TrackViewModel: ObservableObject {
             state = .ready(draft)
             elapsed = 0
         }
-        nameDraftWasCommittedFromField = true
     }
-
-    /// True while the current `.ready` draft originated from the name field
-    /// (as opposed to a recents chip), so field edits may re-sync it.
-    private var nameDraftWasCommittedFromField = false
 
     /// Selects a recents chip: fills the exact text plus that recent's full
     /// ordered categories without starting timing and without creating
@@ -157,7 +149,6 @@ final class TrackViewModel: ObservableObject {
     func select(_ recent: RecentEntry) {
         guard !state.isRunning else { return }
         nameDraft = recent.text
-        nameDraftWasCommittedFromField = false
         state = .ready(TrackState.Draft(text: recent.text, categoryIDs: recent.categoryIDs))
         elapsed = 0
         Haptics.selection()

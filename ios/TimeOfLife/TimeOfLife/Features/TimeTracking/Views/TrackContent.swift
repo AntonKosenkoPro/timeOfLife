@@ -3,16 +3,17 @@ import SwiftUI
 /// The stable Track timer layout, built on the adaptive dual-flow stack
 /// (refine-track-recents D1): navigation title, top spacer, completion mark,
 /// timer numbers/status, reserved error region, central separator, name
-/// field / locked name, main action, Recents, bottom spacer, tab bar. The
-/// top and bottom spacers share a 48 pt cap and split slack equally; surplus
-/// beyond twice the cap goes to the central separator. D10 makes the content
-/// height around the main action state-invariant (reserved idle preparation
-/// slot, hidden-but-reserved Recents, fixed-height action slot) and pins the
-/// bottom flow under wrapped-error growth.
+/// field / locked name, main action, running tags / Recents, bottom spacer,
+/// tab bar. The top and bottom spacers share a 48 pt cap and split slack
+/// equally; surplus beyond twice the cap goes to the central separator. D10
+/// makes the content height around the main action state-invariant (reserved
+/// idle preparation slot, fixed-height action slot) and pins the bottom flow
+/// under wrapped-error growth.
 ///
 /// Capture is plain text (remove-activities-layer): the name field is the
 /// only idle input; while running the name locks and the shared ordered
-/// `TagSelector` occupies the preparation region (D4).
+/// `TagSelector` takes the below-button slot where Recents was (D4) — the
+/// field and the button never move on state switch.
 struct TrackContent: View {
     @ObservedObject var vm: TrackViewModel
     @Environment(\.dynamicTypeSize)
@@ -130,18 +131,26 @@ struct TrackContent: View {
     private var bottomFlow: some View {
         VStack(spacing: 0) {
             nameControl
-            if case .running = vm.state {
-                runningTagSelector
-                    .padding(.top, Theme.spacingMedium)
-            }
             primaryAction
                 .padding(.top, Theme.spacingLarge)
-            recentActivities
+            belowActionSlot
                 .padding(.top, Theme.spacingLarge)
         }
         .padding(.horizontal, Theme.screenHorizontalPadding)
         .frame(maxWidth: Theme.maxContentWidth)
         .frame(maxWidth: .infinity)
+    }
+
+    /// Below the Start/Stop button: Recents while idle, the live tag
+    /// selector while running. The name field and the button above never
+    /// move on state switch — only this slot swaps content, so the tags sit
+    /// where Recents was instead of pushing the button down.
+    @ViewBuilder private var belowActionSlot: some View {
+        if vm.state.isRunning {
+            runningTagSelector
+        } else {
+            recentActivities
+        }
     }
 
     // MARK: - Name capture (plain text, remove-activities-layer 4.1/4.2)
@@ -315,12 +324,8 @@ struct TrackContent: View {
 
     // MARK: - Recent activities
 
-    /// D10: Recents keeps its occupied height while hidden during running
-    /// and error states, so the bottom content height is state-invariant and
-    /// the adaptive spacers recompute identically — the main action above
-    /// Recents does not move. Opacity-based hiding preserves layout on
-    /// iOS 15; hit testing and accessibility are disabled while hidden, and
-    /// the chips reappear in place for saving/saved.
+    /// Recents while idle (the running tag selector takes this slot while
+    /// running, see `belowActionSlot`).
     private var recentActivities: some View {
         VStack(alignment: .leading, spacing: Theme.spacingSmall) {
             Text(L10n.timerChooserRecent.text)
@@ -339,9 +344,6 @@ struct TrackContent: View {
                 ) { vm.select($0) }
             }
         }
-        .opacity(vm.state.isRunning ? 0 : 1)
-        .allowsHitTesting(!vm.state.isRunning)
-        .accessibilityHidden(vm.state.isRunning)
     }
 }
 

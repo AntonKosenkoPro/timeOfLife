@@ -6,8 +6,8 @@ import SwiftUI
 ///
 /// Content uses the adaptive dual-flow layout (refine-track-recents D1):
 /// title → top spacer → completion mark → timer numbers/status → reserved
-/// error region → central separator → name field / running tags → main
-/// action → Recents → bottom spacer → tab bar, with the top and bottom
+/// error region → central separator → name field → main action → running
+/// tags / Recents → bottom spacer → tab bar, with the top and bottom
 /// spacers capped at 48 pt and surplus slack going to the central separator.
 /// Track itself has no editing affordance and no offline hint.
 ///
@@ -21,6 +21,9 @@ struct TrackView: View {
         content
             .navigationTitle(L10n.tabTrack.text)
             .navigationBarTitleDisplayMode(.inline)
+            // First appear: pull recents + categories and restore a persisted
+            // running draft. Returns to this tab refresh via AppShellView.
+            .task { await vm.load() }
     }
 
     /// DEBUG-only spike gate: launching with `TRACK_SPIKE=1` replaces the
