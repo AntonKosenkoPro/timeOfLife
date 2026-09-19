@@ -4,87 +4,39 @@
 
 Defines a focused, local-first timer capture journey in which a centered numeric timer communicates exact actionable timer state and every start follows an explicit Activity selection.
 ## Requirements
+
 ### Requirement: Numeric timer is an instrumental readout
 The Track numeric timer SHALL represent only timer readiness and exact elapsed timing; it SHALL NOT display fabricated progress, daily totals, goals, rings, sweeps, or history while idle.
 
 #### Scenario: Nothing selected
-- **WHEN** no activity is selected and no timer is running
-- **THEN** the numeric timer presents `00:00` and a clear action to choose an Activity
+- **WHEN** no name is entered and no timer is running
+- **THEN** the numeric timer presents `00:00` and a clear action to enter a name
 
 #### Scenario: Activity prepared
-- **WHEN** the user selects or creates an activity
-- **THEN** the numeric timer presents that Activity in a ready state with an explicit Start action and zero elapsed duration
+- **WHEN** the user enters a trimmed non-empty name or taps a recent
+- **THEN** the numeric timer presents that name in a ready state with an explicit Start action and zero elapsed duration
 
 #### Scenario: Timer running
-- **WHEN** the user starts the prepared activity
+- **WHEN** the user starts the prepared name
 - **THEN** the numeric timer displays the exact live elapsed duration, including completed hours, without a secondary progress visualization
-
 ### Requirement: Starting always requires explicit confirmation
-Selecting a recent, searched, or newly created Activity SHALL prepare it without starting a timer; the timer SHALL begin only after the user activates Start. Temporary or unresolved search input SHALL NOT be treated as a prepared Activity.
+Selecting a recent or typing a name SHALL prepare it without starting a timer; the timer SHALL begin only after the user activates Start. Unconfirmed typed input SHALL NOT start a timer or create an entry.
 
 #### Scenario: Select recent activity
-- **WHEN** the user taps a recent activity
-- **THEN** the app selects it and shows the ready numeric timer without creating an entry
+- **WHEN** the user taps a recent chip
+- **THEN** the app fills the exact text plus that recent's full ordered categories and shows the ready numeric timer without creating an entry
 
 #### Scenario: Select or create through search
-- **WHEN** the user confirms an existing search result or completes Activity creation
-- **THEN** the app dismisses the search presentation, prepares that Activity, and shows the ready numeric timer without starting timing
+- **WHEN** the user types a trimmed non-empty name, whether or not it exactly matches a recent (no search sheet exists; typing is the only input)
+- **THEN** the app shows the ready numeric timer without starting timing; an exact-recent match prefills that recent's categories, otherwise categories start empty
 
 #### Scenario: Search input remains unresolved
-- **WHEN** the user has entered text but has not selected an existing Activity or confirmed creation
-- **THEN** the app does not enable that text to start a timer or associate it with an entry
+- **WHEN** the user has typed text but has not activated Start
+- **THEN** nothing starts, no entry is created, and the typed text stays editable in the name field
 
 #### Scenario: Start selected activity
-- **WHEN** an activity is prepared and the user activates Start
-- **THEN** the app persists the running timer immediately, begins elapsed-time presentation, and emits a subtle selection haptic
-
-### Requirement: Activity chooser supports selection and creation
-Track SHALL provide one platform-native search presentation for browsing, filtering, selecting, and quick-creating Activities without requiring network access. The presentation SHALL be a searchable sheet opened by the idle `+ Choose an activity` main action or by the Activity picker within the selected-Activity row. When an Activity is selected, the row SHALL present the Activity picker or the non-interactive Activity label as a full-width control with no editing affordance (editing placement is deferred). The operating system SHALL own search-field placement, focus, keyboard, activation animation, and cancellation affordances inside the sheet. The search content SHALL NOT display Category metadata on existing Activity results and SHALL NOT offer configured creation or open the Activity Editor before creation.
-
-#### Scenario: Activate Activity search from idle
-- **WHEN** no Activity is prepared and the user activates `+ Choose an activity`
-- **THEN** the searchable sheet presents Activity-selection content with an empty, focused native search field without changing the committed timer state
-
-#### Scenario: Activate Activity search from ready
-- **WHEN** an Activity is prepared and the user activates the Activity picker
-- **THEN** the searchable sheet presents Activity-selection content with the selected Activity name pre-filled and the native search field focused without changing the committed timer state
-
-#### Scenario: Show state-specific preparation actions
-- **WHEN** Track is idle
-- **THEN** it presents one `+ Choose an activity` control in the stable main-action region above the bottom adaptive spacing, with no Refine action
-
-#### Scenario: Show selected-Activity actions
-- **WHEN** Track has a selected Activity
-- **THEN** it presents the Activity picker or non-interactive Activity label as a full-width row below the reserved error region and above Recents, with no editing affordance on Track
-
-#### Scenario: Browse with an empty query
-- **WHEN** search is active, the query is empty, and Activities exist
-- **THEN** the content area presents the complete Activity catalog in recency order and permits selection with one activation
-
-#### Scenario: Search existing activities
-- **WHEN** the user enters a query matching existing Activity names case-insensitively
-- **THEN** the content area presents matching Activities in recency order without changing the committed selection
-
-#### Scenario: Exact normalized match
-- **WHEN** the trimmed query case-insensitively equals an existing Activity name
-- **THEN** the existing Activity is presented as the exact result and no create action is offered for that name
-
-#### Scenario: Unmatched valid input
-- **WHEN** the trimmed query passes Activity-name validation and has no case-insensitive exact match
-- **THEN** the content area offers one quick-create action for that exact name and no configured-create or Refine action
-
-#### Scenario: Quick-create an unmatched activity
-- **WHEN** the user confirms quick creation for an unmatched valid name
-- **THEN** the app creates the Activity locally without notes or Categories, dismisses the search presentation, and prepares it
-
-#### Scenario: Invalid creation input
-- **WHEN** the trimmed query is empty or violates Activity-name validation
-- **THEN** no create action is enabled and a localized validation explanation is available without preventing search of existing Activities
-
-#### Scenario: Dismiss the search presentation
-- **WHEN** the user activates the native search cancellation affordance or dismisses the sheet without confirming
-- **THEN** the search presentation ends and Track restores the Activity that was prepared before search, or idle state if none was prepared
-
+- **WHEN** a name is prepared and the user activates Start
+- **THEN** the app persists the running draft immediately, begins elapsed-time presentation, and emits a subtle selection haptic
 ### Requirement: Track uses an adaptive two-ended vertical layout
 Track SHALL arrange its content in this top-to-bottom order: navigation title, top adaptive spacing, completion mark region, timer numbers, timer status, reserved non-field-error region, central separator, Activity search/refine row when applicable, the state-specific main action, Recents when applicable, bottom adaptive spacing, and the tab bar. The top and bottom adaptive spacing regions SHALL use one shared maximum height selected through approved layout spikes, SHALL resolve to equal heights from the remaining space, SHALL shrink toward zero when vertical space is constrained, and SHALL yield before content clips, overlaps, or becomes unreachable. Free space beyond twice the shared maximum SHALL go to the central separator between the error region and the search/refine flow. Placing the main action above Recents SHALL keep the Choose Activity, Start, and Stop controls reachable without scrolling. The local-first Track screen SHALL NOT display an offline hint.
 
@@ -152,15 +104,15 @@ Track SHALL present the state-specific main action in one main-action region who
 - **THEN** the main-action frame does not change; only when both are exhausted does the content scroll
 
 ### Requirement: Recents present a capped wrapping chip flow
-Track SHALL present its most-recently-used Activities as a wrapping chip flow below the preparation row, ordered most-recently-used first, and SHALL cap the flow at six chips. Chips SHALL wrap onto additional rows as needed and SHALL NOT require horizontal scrolling. A single tap on a chip SHALL prepare that Activity without starting timing. Recents SHALL NOT be presented while a timer is running.
+Track SHALL present its most-recently-used exact entry texts as a wrapping chip flow below the name field, ordered by each text's newest committed `started_at` first, and SHALL cap the flow at six chips. Identity SHALL be trimmed exact text (case-sensitive: `Gym` and `GYM` are distinct). Chips SHALL wrap onto additional rows as needed and SHALL NOT require horizontal scrolling. A single tap on a chip SHALL fill the name plus that recent's full ordered categories without starting timing. Recents SHALL NOT be presented while a timer is running (the running TagSelector occupies that region).
 
 #### Scenario: More Activities than the cap
-- **WHEN** the user has more than six Activities
-- **THEN** Recents presents the six most-recently-used Activities and omits the rest
+- **WHEN** the user has more than six distinct exact texts
+- **THEN** Recents presents the six with the newest committed entries and omits the rest
 
 #### Scenario: Six or fewer Activities
-- **WHEN** the user has between one and six Activities
-- **THEN** Recents presents all of them in most-recently-used order
+- **WHEN** the user has between one and six distinct exact texts
+- **THEN** Recents presents all of them newest-first
 
 #### Scenario: Chips wrap
 - **WHEN** the Recents chips cannot fit on one row
@@ -168,171 +120,62 @@ Track SHALL present its most-recently-used Activities as a wrapping chip flow be
 
 #### Scenario: Tap a Recents chip
 - **WHEN** the user taps a Recents chip
-- **THEN** the Activity is prepared, the ready numeric timer appears, and no timer starts and no entry is created
+- **THEN** the name field fills with that exact text plus its newest entry's ordered categories, the ready numeric timer appears, and no timer starts and no entry is created
 
 #### Scenario: Timing hides Recents
 - **WHEN** a timer is running
 - **THEN** Recents is not presented and its occupied height is preserved so the main action does not move
-
-### Requirement: Recents chips show the first assigned Category icon
-A Recents chip SHALL display the icon of the first Category assigned to its Activity (first by assignment position). An Activity with no Categories SHALL render its chip without an icon. Recents chips SHALL NOT display Category names. The selected-Activity row and search results SHALL remain free of Category metadata.
-
-#### Scenario: Activity with one Category
-- **WHEN** a Recents chip's Activity has exactly one assigned Category
-- **THEN** the chip displays that Category's icon
-
-#### Scenario: Activity with multiple Categories
-- **WHEN** a Recents chip's Activity has two or more assigned Categories
-- **THEN** the chip displays only the icon of the Category that is first by assignment position
-
-#### Scenario: Activity without Categories
-- **WHEN** a Recents chip's Activity has no assigned Categories
-- **THEN** the chip renders with the Activity name and no icon, keeping the full tap target
-
-#### Scenario: Icon cannot render on this OS
-- **WHEN** the first assigned Category's icon is unavailable on the running iOS version
-- **THEN** the chip falls back to the tag glyph used elsewhere for unavailable Category icons
-
-#### Scenario: Other capture surfaces stay category-free
-- **WHEN** the user browses Track search results or the selected-Activity row
-- **THEN** no Category icon or name is displayed
-
-### Requirement: Recents highlight the prepared Activity
-When an Activity is prepared, its Recents chip SHALL indicate the selected state with a filled accent presentation — accent background, on-accent text, and accent border, keeping the Category icon — a visible affordance that does not rely on color alone, and assistive technologies SHALL be told that the chip is selected. No chip SHALL appear selected while Track is idle.
+### Requirement: Recents highlight the prepared text
+When an exact text is prepared, its Recents chip SHALL indicate the selected state with a filled accent presentation — accent background, on-accent text, and accent border, keeping the Category icon — a visible affordance that does not rely on color alone, and assistive technologies SHALL be told that the chip is selected. No chip SHALL appear selected while Track is idle.
 
 #### Scenario: Chip shows selection affordance
-- **WHEN** the user prepares an Activity that is present in Recents
-- **THEN** that Activity's chip switches to the filled accent presentation, distinct from the unselected chips, without losing its Category icon and without adding a checkmark
+- **WHEN** the user prepares an exact text that is present in Recents
+- **THEN** that text's chip switches to the filled accent presentation, distinct from the unselected chips, without losing its Category icon and without adding a checkmark
 
 #### Scenario: Selection moves
-- **WHEN** the user prepares a different Activity
-- **THEN** the selection affordance moves to the newly prepared Activity's chip and the previous chip returns to the unselected presentation
+- **WHEN** the user prepares a different text
+- **THEN** the selection affordance moves to the newly prepared text's chip and the previous chip returns to the unselected presentation
 
 #### Scenario: No selection while idle
-- **WHEN** no Activity is prepared
+- **WHEN** no text is prepared
 - **THEN** no Recents chip displays the selection affordance
 
 #### Scenario: VoiceOver announces the selected chip
-- **WHEN** VoiceOver focuses the prepared Activity's Recents chip
-- **THEN** it announces the Activity name and that the chip is selected
+- **WHEN** VoiceOver focuses the prepared text's Recents chip
+- **THEN** it announces the text and that the chip is selected
 
 #### Scenario: Chips keep full tap targets
 - **WHEN** a Recents chip renders with an icon, without an icon, or in the selected presentation
 - **THEN** its interactive area remains at least 44×44 points
 
 ### Requirement: Recents explain their empty state
-When no Activities exist, Recents SHALL present dedicated localized copy explaining that Activities the user tracks will appear there. The copy SHALL be the Recents section's own text, not the search sheet's empty-catalog copy.
+When no committed entries exist, Recents SHALL present dedicated localized copy explaining that names the user tracks will appear there.
 
 #### Scenario: Empty catalog
-- **WHEN** Track is idle and the catalog has no Activities
-- **THEN** Recents shows the dedicated localized hint that tracked Activities will appear there
+- **WHEN** Track is idle and no committed entries exist
+- **THEN** Recents shows the dedicated localized hint that tracked names will appear there
 
 #### Scenario: First Activity created
-- **WHEN** the user quick-creates the first Activity and returns to Track
-- **THEN** the empty hint is replaced by Recents chips containing that Activity
-
-### Requirement: Categories remain optional and separate from capture
-The app SHALL treat Categories as optional, zero-or-more metadata on an Activity. Category management SHALL have its own surface, and an Activity created from capture SHALL be valid without notes or Categories. Activity search SHALL quick-create before any optional refinement and SHALL NOT display Category metadata in search results. Existing entries SHALL resolve the Activity's current Categories at query time.
-
-#### Scenario: Create without categories
-- **WHEN** the user quick-creates an unmatched Activity from search
-- **THEN** the Activity is prepared and can start with no Categories assigned
-
-#### Scenario: Assign categories to an existing Activity
-- **WHEN** the user selects an existing Activity and opens the Activity Editor
-- **THEN** the user may assign or remove zero or more Categories without making any Category required for timing
-
-#### Scenario: Reclassify history
-- **WHEN** the user changes an Activity's Categories
-- **THEN** existing entries for that Activity use the updated Category set in Insights
-
-### Requirement: First use is contextual
-The app SHALL guide first-time users through their first Activity and timer through the ordinary native search-and-quick-create presentation, without a separate creation alert, configured-creation branch, blocking onboarding carousel, or account requirement.
-
-#### Scenario: First local launch
-- **WHEN** the user reaches Track with an empty catalog
-- **THEN** the idle numeric timer and supporting copy direct the user to activate Activity search
-
-#### Scenario: Search an empty catalog
-- **WHEN** Activity search is active with an empty catalog and an empty query
-- **THEN** the content area explains that no Activities exist and prompts the user to enter a name in the search field
-
-#### Scenario: Enter the first valid name
-- **WHEN** the empty-catalog user enters an unmatched valid name
-- **THEN** one quick-create action becomes available and no configured-create action is presented
-
-#### Scenario: First entry completed
-- **WHEN** the user saves their first entry
-- **THEN** the app confirms the result in context and does not interrupt the capture flow with unrelated sync, integration, or subscription prompts
-
-### Requirement: Search drafts do not mutate committed preparation
-Activity search SHALL maintain its query as a temporary draft separate from the committed prepared Activity until the user selects or creates an Activity.
-
-#### Scenario: Search while an activity is ready
-- **WHEN** the user activates the Activity picker while an Activity is prepared
-- **THEN** search pre-fills and focuses the selected Activity name, retains that Activity as the committed selection, and does not replace it until another Activity is confirmed
-
-#### Scenario: Edit the search query
-- **WHEN** the user changes or clears the active search query
-- **THEN** the prepared Activity and its identifier remain unchanged unless and until another Activity is confirmed
-
-#### Scenario: Leave search without confirmation
-- **WHEN** the search presentation ends without selecting or creating an Activity
-- **THEN** the prior ready or idle timer state is restored exactly
-
-### Requirement: Activity name collisions preserve one identity
-Activity preparation and refinement SHALL treat names as equal after trimming surrounding whitespace and applying case-insensitive comparison. Creation and refinement SHALL recheck that identity at confirmation time so concurrent local or synchronized changes cannot create an intentionally duplicated Activity or silently merge two existing Activity identities.
-
-#### Scenario: Case or surrounding whitespace differs
-- **WHEN** the entered name differs from an existing Activity only by letter case or surrounding whitespace
-- **THEN** the existing Activity is reused during creation and a duplicate is not created
-
-#### Scenario: Collision occurs during quick creation
-- **WHEN** another Activity with the same normalized name becomes available before quick creation commits
-- **THEN** the app prepares the existing winning Activity instead of creating a duplicate
-
-#### Scenario: Collision occurs during refinement
-- **WHEN** refinement attempts to rename the selected Activity to another Activity's normalized name
-- **THEN** the app keeps the original Activity selected, preserves the editor draft, presents a localized collision error, and does not overwrite or merge either Activity
-
-#### Scenario: Matching Activity is pending deletion
-- **WHEN** an Activity with the same normalized name remains restorable in the active deletion undo window
-- **THEN** the app does not create a second identity and offers restoration of the pending-deletion Activity for preparation
-
-### Requirement: Preparation failures preserve user intent
-Activity search, creation, and selected-Activity refinement SHALL recover from local persistence failures without losing the user's search query or editor draft, replacing the committed prepared Activity, or changing timer state.
-
-#### Scenario: Quick creation fails
-- **WHEN** the local store cannot create an unmatched Activity
-- **THEN** the search presentation remains active, the query is preserved, the previous committed timer state is unchanged, and a localized non-field error is presented
-
-#### Scenario: Refinement fails
-- **WHEN** the local store cannot save changes to the selected Activity
-- **THEN** the editor remains available with its draft intact, the same Activity remains selected with its persisted values, the timer state is unchanged, and a localized error permits retry
-
-#### Scenario: Prepared activity was deleted
-- **WHEN** the committed prepared Activity no longer exists before Start is activated
-- **THEN** the app clears the invalid preparation, returns to idle, and does not silently recreate the deleted Activity
-
+- **WHEN** the user saves the first entry and returns to Track
+- **THEN** the empty hint is replaced by Recents chips containing that exact text
 ### Requirement: Stop saves with stable feedback
-Stopping a running timer SHALL save the completed entry locally, communicate success without a blocking loader, and retain the activity in the ready state for an optional later restart. When the persisted running timer is gone but Track still holds a `.running` state (the timer was stopped from the compact timer on another destination), Track SHALL reconcile on next load: stop the elapsed ticker, re-enable the idle timer, reset elapsed to zero, and return to `.ready` for the same activity — or `.idle` when that activity no longer exists — instead of counting elapsed time forever. When the activity itself was deleted (on another device) while its timer was running, stopping SHALL clear the running state, discard the session (no entry is saved for a deleted activity), and settle Track to `.idle` with a localized "deleted on another device" message instead of looping a failing save.
+Stopping a running timer SHALL save the completed entry locally, communicate success without a blocking loader, and retain the entered text in the ready state for an optional later restart. When the persisted running draft is gone but Track still holds a `.running` state (the timer was stopped from the compact timer on another destination), Track SHALL reconcile on next load: stop the elapsed ticker, re-enable the idle timer, reset elapsed to zero, and return to `.ready` for the same text — or `.idle` when nothing was entered — instead of counting elapsed time forever.
 
 #### Scenario: Successful stop
 - **WHEN** the user activates Stop on a running timer
-- **THEN** the app persists the completed entry, clears running state, emits a success haptic, briefly confirms the saved duration, and returns to the ready numeric timer for the same Activity
+- **THEN** the app persists the completed entry, clears running state, emits a success haptic, briefly confirms the saved duration, and returns to the ready numeric timer for the same text
 
 #### Scenario: Save failure
 - **WHEN** the local store cannot save the completed entry
 - **THEN** the app preserves recoverable running state and presents a localized non-field error without silently losing elapsed time
 
 #### Scenario: External stop reconciles Track
-- **WHEN** Track holds a running state for an activity whose persisted timer no longer exists (stopped from the compact timer elsewhere)
-- **THEN** Track leaves the running state on next load: the ticker stops, elapsed resets to zero, and the screen shows the ready timer for the same activity (or idle when the activity is gone)
+- **WHEN** Track holds a running state whose persisted draft no longer exists (stopped from the compact timer elsewhere)
+- **THEN** Track leaves the running state on next load: the ticker stops, elapsed resets to zero, and the screen shows the ready timer for the same text (or idle when empty)
 
 #### Scenario: Stop after the activity was deleted elsewhere
-- **WHEN** the user stops a timer whose activity no longer exists locally (deleted on another device)
-- **THEN** the running state clears, no entry is saved, and Track shows `.idle` with a localized message naming the deletion — never a retry loop
-
+- **WHEN** the user stops a timer (no deletable parent exists; entries and drafts cannot be deleted out from under a run)
+- **THEN** the entry always saves normally; this scenario is retained as a no-op for archive continuity
 ### Requirement: Timer states remain visually and physically stable
 The idle, ready, running, saving, saved, and error states SHALL preserve the numeric timer's position and primary control geometry, support light and dark appearance, respect Reduce Motion, and expose accessible state. Transient saved-state feedback displayed above the numeric timer SHALL NOT change the timer's vertical position.
 
@@ -352,3 +195,63 @@ The idle, ready, running, saving, saved, and error states SHALL preserve the num
 - **WHEN** VoiceOver focuses the numeric timer
 - **THEN** it announces the selected Activity, timer state, elapsed duration, and the available primary action
 
+### Requirement: Plain-text name capture
+Track SHALL capture the entry name as plain trimmed text with no catalog, no search sheet, and no quick-create. The idle screen SHALL show a plain-text name field plus the 6 exact-match recents chips. Start SHALL be enabled only when the trimmed text is non-empty. Typing a name that exactly matches a recent SHALL NOT start anything until Start is activated.
+
+#### Scenario: Type a new name
+- **WHEN** the user types a trimmed non-empty name with no exact recent match
+- **THEN** Start becomes enabled and no catalog record is created
+
+#### Scenario: Empty text cannot start
+- **WHEN** the name field holds only whitespace
+- **THEN** Start stays disabled with no error text
+
+#### Scenario: Exact text identity
+- **WHEN** the trimmed text differs from an existing recent only by letter case (e.g. `Gym` vs `GYM`)
+- **THEN** the two are treated as different names with separate recents and separate inherited categories
+### Requirement: Running timer hosts the category TagSelector
+While a timer is running, Track SHALL show the shared ordered `TagSelector` (select-only from existing categories, zero allowed, order preserved) below the readout. The name SHALL be locked after Start; tags SHALL stay live until Stop. Toggles SHALL rewrite only the running draft (persisted `timer_state` snapshot) and SHALL never touch history. Stop SHALL save the entry with the final ordered categories.
+
+#### Scenario: Toggle tags mid-run
+- **WHEN** the user toggles a category while the timer runs
+- **THEN** the draft selection updates, the persisted draft snapshot updates, and no entry or history row changes
+
+#### Scenario: Name locked while running
+- **WHEN** the timer is running
+- **THEN** the name field is non-editable until Stop
+
+#### Scenario: Category-less run allowed
+- **WHEN** the user deselects every category mid-run
+- **THEN** the run stays valid and Stop saves a category-less entry
+
+#### Scenario: Stop saves final tags
+- **WHEN** the user activates Stop
+- **THEN** the entry is created with the trimmed locked text, the final ordered categories, empty notes, and derived duration, plus a single outbox row
+### Requirement: Recents chips show the first inherited Category icon
+A Recents chip SHALL display the icon of the first category of that exact text's newest committed entry (first by stored position). A text whose newest entry has no categories SHALL render its chip without an icon. Recents chips SHALL NOT display category names.
+
+#### Scenario: Recent with one Category
+- **WHEN** a Recents chip's newest entry has exactly one category
+- **THEN** the chip displays that category's icon
+
+#### Scenario: Recent with multiple Categories
+- **WHEN** a Recents chip's newest entry has two or more categories
+- **THEN** the chip displays only the icon of the category that is first by stored position
+
+#### Scenario: Recent without Categories
+- **WHEN** a Recents chip's newest entry has no categories
+- **THEN** the chip renders with the exact text and no icon, keeping the full tap target
+
+#### Scenario: Icon cannot render on this OS
+- **WHEN** the first category's icon is unavailable on the running iOS version
+- **THEN** the chip falls back to the tag glyph used elsewhere for unavailable category icons
+### Requirement: Categories are per-entry and never retroactive
+The app SHALL treat categories as optional, zero-or-more metadata owned by each entry at creation. Editing categories on one entry (or on the running draft) SHALL NOT change any other entry. There SHALL be no query-time category resolution through any other record.
+
+#### Scenario: Create without categories
+- **WHEN** the user starts a timer for a name with no inherited categories
+- **THEN** the run is valid with no categories assigned
+
+#### Scenario: Retag affects one entry only
+- **WHEN** the user changes an entry's categories
+- **THEN** no other entry with the same text changes

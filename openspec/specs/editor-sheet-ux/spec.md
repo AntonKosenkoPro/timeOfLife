@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Defines the shared presentation contract for editor sheets (Category create/edit, Activity edit/refine, and future quick-create): a system-owned collapsing large-title header with an always-available Cancel affordance, rendered by one reusable scaffold.
+Defines the shared presentation contract for editor sheets (Category create/edit): a system-owned collapsing large-title header with an always-available Cancel affordance, rendered by one reusable scaffold.
 
 ## Requirements
 
@@ -31,10 +31,6 @@ All editor sheets in the app SHALL render their header, Cancel affordance, scrol
 #### Scenario: Category editor uses the shared scaffold
 - **WHEN** the Category editor is presented in create or edit mode
 - **THEN** it renders through the shared scaffold with its create or edit title and its Cancel affordance
-
-#### Scenario: Activity editor uses the shared scaffold
-- **WHEN** the Activity editor is presented in edit or refine mode
-- **THEN** it renders through the shared scaffold with its edit title and its Cancel affordance
 
 #### Scenario: A future editor sheet is added
 - **WHEN** a new editor sheet is added to the app

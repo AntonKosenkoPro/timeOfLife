@@ -6,24 +6,6 @@ Lets users log past time without the live timer: pick an activity, set a start a
 
 ## Requirements
 
-### Requirement: Log Time sheet captures activity, start, and end
-
-The app SHALL provide the Log Time sheet as the CREATE mode of the unified entry form (see entry-editor capability): styled on the iOS Calendar add-event form, containing exactly three input rows: Activity (title-over-value, like Calendar's "Calendar" row), Starts (date pill + time pill), and Ends (date pill + time pill). CREATE mode SHALL keep the "Log time" title (localized) with Cancel and Add actions in the navigation bar, presented as a sheet from the existing entry points with unchanged defaults, gates, pickers, and save behavior. EDIT and LOCKED modes (titles, Save/locked rules, Delete button) are defined by the entry-editor capability; no title, location, all-day, repeat, or alert fields SHALL be present in any mode.
-
-#### Scenario: Sheet contents
-
-- **WHEN** the Log Time sheet is open
-- **THEN** it shows an Activity row, a Starts row with date and time pills, an Ends row with date and time pills, and Cancel/Add actions — and nothing else
-
-#### Scenario: Cancel discards the draft
-
-- **WHEN** the user activates Cancel
-- **THEN** the sheet dismisses and no entry is created
-
-#### Scenario: Create mode keeps its presentation
-
-- **WHEN** the sheet opens from History or from an activity detail sheet for logging new time
-- **THEN** it presents as a sheet (not a full-screen cover) with the "Log time" title and Cancel/Add actions
 
 ### Requirement: Starts and Ends use inline expanding pickers
 
@@ -40,38 +22,29 @@ Tapping a date pill SHALL expand an inline graphical month picker below the pill
 - **THEN** the date picker collapses and the wheel picker expands
 
 ### Requirement: Add is a validity gate
-
-The Add action SHALL be enabled only when an activity is chosen AND the end is strictly after the start. Otherwise it SHALL be disabled. No error text or alert SHALL be shown for the disabled state.
+The Add action SHALL be enabled only when the trimmed name is non-empty AND the end is strictly after the start. Otherwise it SHALL be disabled. No error text or alert SHALL be shown for the disabled state.
 
 #### Scenario: No activity chosen
-
-- **WHEN** the sheet is open and no activity is chosen
+- **WHEN** the sheet is open and the trimmed name is empty (no text has been entered)
 - **THEN** Add is disabled
 
 #### Scenario: End not after start
-
 - **WHEN** the chosen end is equal to or before the start
 - **THEN** Add is disabled
 
 #### Scenario: Valid form
-
-- **WHEN** an activity is chosen and the end is after the start
+- **WHEN** a non-empty name is entered and the end is after the start
 - **THEN** Add is enabled
-
 ### Requirement: Sheet opens with sensible defaults
-
-The sheet SHALL open with Start set to the current time floored to 5 minutes and End set to Start plus one hour, unless the entry point supplies a day or activity context (ActivityDetail pre-fills the activity; no other defaults change).
+The sheet SHALL open with Name empty (or the exact recent's text when opened with a text context), Categories empty (or that text's inherited ordered set when a text context is supplied), Notes empty, Start set to the current time floored to 5 minutes and End set to Start plus one hour.
 
 #### Scenario: Default times
-
 - **WHEN** the sheet opens from History at 2:37 PM
-- **THEN** Start shows 2:35 PM and End shows 3:35 PM on the same day
+- **THEN** Start shows 2:35 PM and End shows 3:35 PM on the same day with empty name, categories, and notes
 
 #### Scenario: Pre-filled activity
-
-- **WHEN** the sheet opens from an activity detail sheet
-- **THEN** the Activity row shows that activity and the time defaults are unchanged
-
+- **WHEN** the sheet opens from any entry point (History or otherwise)
+- **THEN** no activity is pre-filled: the Name row is empty and categories and notes start empty, with only the time defaults applied
 ### Requirement: Moving Start preserves duration Calendar-style
 
 When the user moves Start to a time at or after the current End, the End SHALL auto-advance to keep the previous duration. Moving Start earlier SHALL NOT move End. Moving End SHALL never move Start.
@@ -86,35 +59,27 @@ When the user moves Start to a time at or after the current End, the End SHALL a
 - **WHEN** the form holds Start 2:35 PM / End 3:35 PM and the user moves Start to 1:00 PM
 - **THEN** End stays at 3:35 PM
 
-### Requirement: Activity picking supports search and quick-create
-
-Tapping the Activity row SHALL open the Track-style searchable activity sheet (browse, filter, quick-create with the normalized-name collision rule). Confirming an existing activity selects it; confirming quick-create creates the activity locally and selects it. Dismissing without confirming SHALL leave the previously selected activity (or none) unchanged. An empty catalog SHALL route directly to quick-create for the typed name with no dead end.
-
-#### Scenario: Pick an existing activity
-
-- **WHEN** the user confirms an existing activity in the picker
-- **THEN** the picker dismisses and the Activity row shows that activity
-
-#### Scenario: Quick-create from the picker
-
-- **WHEN** the user confirms quick-create for an unmatched valid name
-- **THEN** the activity is created locally, the picker dismisses, and the Activity row shows it
-
-#### Scenario: Dismiss without choosing
-
-- **WHEN** the user dismisses the picker without confirming
-- **THEN** the Activity row is unchanged
-
 ### Requirement: Saving creates a committed manual entry
-
-Activating Add SHALL persist a committed entry via `LocalStore.createEntry` with `source:"manual"` and null `source_ref` (client-generated UUID v7 id, `duration_seconds` derived from end minus start), enqueueing the sync outbox row in the same transaction and bumping the activity's `last_used_at`. The sheet SHALL dismiss and the underlying list SHALL refresh to include the entry in its day group. Overlapping entries and future end-times SHALL be allowed.
+Activating Add SHALL persist a committed entry via `LocalStore.createEntry` with `source:"manual"` and null `source_ref` (client-generated UUID v7 id, trimmed `activity_text`, ordered `category_ids`, `notes`, `duration_seconds` derived from end minus start), enqueueing the sync outbox row in the same transaction. The sheet SHALL dismiss and the underlying list SHALL refresh to include the entry in its day group. Overlapping entries and future end-times SHALL be allowed.
 
 #### Scenario: Successful save
-
 - **WHEN** the user activates Add on a valid form
-- **THEN** a committed manual entry exists with the chosen activity, start, end, and derived duration, and the sheet dismisses
+- **THEN** a committed manual entry exists with the entered text, categories, notes, start, end, and derived duration, and the sheet dismisses
 
 #### Scenario: Overlap is allowed
-
 - **WHEN** the chosen interval overlaps an existing entry or a running timer session
 - **THEN** Add stays enabled and saving succeeds
+### Requirement: Log Time sheet captures name, categories, notes, start, and end
+The app SHALL provide the Log Time sheet as the CREATE mode of the unified entry form (see entry-editor capability): containing Name (plain-text field), Categories (ordered TagSelector), Notes (plain-text field, empty by default), Starts (date pill + time pill), and Ends (date pill + time pill). CREATE mode SHALL keep the "Log time" title (localized) with Cancel and Add actions in the navigation bar, presented as a sheet from the existing entry points with unchanged defaults, gates, pickers, and save behavior. EDIT and LOCKED modes are defined by the entry-editor capability; no title, location, all-day, repeat, or alert fields SHALL be present in any mode.
+
+#### Scenario: Sheet contents
+- **WHEN** the Log Time sheet is open
+- **THEN** it shows a Name row, a Categories row, a Notes row, a Starts row with date and time pills, an Ends row with date and time pills, and Cancel/Add actions — and nothing else
+
+#### Scenario: Cancel discards the draft
+- **WHEN** the user activates Cancel
+- **THEN** the sheet dismisses and no entry is created
+
+#### Scenario: Create mode keeps its presentation
+- **WHEN** the sheet opens from History for logging new time
+- **THEN** it presents as a sheet (not a full-screen cover) with the "Log time" title and Cancel/Add actions

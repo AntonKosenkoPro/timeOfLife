@@ -9,8 +9,9 @@ context: |
 
   What this is: Lifio — a personal time-tracking iOS app (SwiftUI, iOS 15+, local-first)
   with a Go backend that is an OPTIONAL sync relay. Auth MVP (passwordless email-OTP +
-  Sign in with Apple) and the Track experience (three-tab shell, numeric timer, Activity search +
-  quick-create, Refine, Profile, compact cross-tab timer).
+  Sign in with Apple) and the Track experience (three-tab shell, numeric timer, plain-text
+  capture + Recents, running tag selector, Profile, compact cross-tab timer). There is no
+  activity entity — entries own their text, ordered categories, and notes.
 
   OpenSpec routing: baseline specs (`openspec/specs/<capability>/spec.md`) are the merged
   contract and are NEVER edited directly. Behavior changes go through a change: delta specs
