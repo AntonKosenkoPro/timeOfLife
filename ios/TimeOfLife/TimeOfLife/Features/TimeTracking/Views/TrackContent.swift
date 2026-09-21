@@ -337,8 +337,8 @@ struct TrackContent: View {
 
     private var primaryDisabled: Bool {
         switch vm.state {
-        case .idle, .ready, .saved: !vm.canStart
-        case .saving: true
+        case .idle, .ready: !vm.canStart
+        case .saved, .saving: true
         case .running, .error: false
         }
     }
