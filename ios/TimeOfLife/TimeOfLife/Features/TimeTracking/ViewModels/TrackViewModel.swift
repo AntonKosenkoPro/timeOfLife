@@ -29,6 +29,13 @@ final class TrackViewModel: ObservableObject {
     private let nowProvider: () -> Date
     private var ticker: AnyCancellable?
     private var savedResetTask: Task<Void, Never>?
+    /// Name-field focus from the view: a focused Start tap resigns first and
+    /// the swap waits out the keyboard slide, so Stop appears in place.
+    var nameFieldFocused = false
+    /// A Start deferred until the keyboard finishes dismissing (see above).
+    /// Cancelled by any draft change before it fires, so a stale draft can
+    /// never start.
+    private var pendingStart: Task<Void, Never>?
 
     init(
         service: TimerService,
@@ -65,6 +72,12 @@ final class TrackViewModel: ObservableObject {
     /// appear.
     func load() async {
         do {
+            // Seed first: on a fresh install the seeding task in RootView
+            // can still be in flight when this first load runs, which used
+            // to leave the running tag selector empty until the next tab
+            // switch. Seeding is idempotent (marker-guarded), so racing it
+            // here is safe.
+            _ = try? await service.store.seedStarterCategoriesIfNeeded(names: String.starterCategoryNames)
             recents = try await storeRecents()
             categories = Dictionary(uniqueKeysWithValues: try await service.store.categories().map { ($0.id, $0) })
             let persisted = try await service.runningTimerDraft()
@@ -131,6 +144,8 @@ final class TrackViewModel: ObservableObject {
         guard !trimmed.isEmpty else {
             if state != .idle {
                 state = .idle
+                pendingStart?.cancel()
+                pendingStart = nil
             }
             elapsed = 0
             return
@@ -139,6 +154,12 @@ final class TrackViewModel: ObservableObject {
         let draft = TrackState.Draft(text: trimmed, categoryIDs: inherited)
         if state != .ready(draft) {
             state = .ready(draft)
+            // The draft changed under a deferred Start (e.g. the resign
+            // after a tap recomputed it): a changed draft cancels the
+            // pending start so a stale draft can never start. An unchanged
+            // recompute keeps a pending start valid.
+            pendingStart?.cancel()
+            pendingStart = nil
             elapsed = 0
         }
     }
@@ -148,6 +169,8 @@ final class TrackViewModel: ObservableObject {
     /// anything.
     func select(_ recent: RecentEntry) {
         guard !state.isRunning else { return }
+        pendingStart?.cancel()
+        pendingStart = nil
         nameDraft = recent.text
         state = .ready(TrackState.Draft(text: recent.text, categoryIDs: recent.categoryIDs))
         elapsed = 0
@@ -163,22 +186,68 @@ final class TrackViewModel: ObservableObject {
     /// user's back. Only from `.idle` (a Start tap that raced the field's
     /// focus-resign) is the field synced first; an invalid `.ready` draft
     /// (empty text) is left untouched and Start does nothing.
+    ///
+    /// When the field is focused, the tap also resigns it: the keyboard
+    /// slide and the running swap must not coincide, so the swap waits for
+    /// the keyboard to actually finish dismissing (see
+    /// `waitForKeyboardDismissal`) while the haptic fires immediately and
+    /// `startedAt` stays the tap time. When nothing is focused (chip flow),
+    /// Start is immediate.
     func start() {
         if case .idle = state {
             syncReadyFromDraft()
         }
         guard case let .ready(draft) = state, canStart else { return }
-        beginRunning(draft: draft)
+        if nameFieldFocused {
+            nameFieldFocused = false
+            Haptics.selection()
+            let startedAt = Date()
+            pendingStart?.cancel()
+            pendingStart = Task { [weak self] in
+                await Self.waitForKeyboardDismissal()
+                guard !Task.isCancelled else { return }
+                guard let self, case .ready = self.state else { return }
+                self.beginRunning(draft: draft, startedAt: startedAt)
+            }
+        } else {
+            Haptics.selection()
+            beginRunning(draft: draft, startedAt: Date())
+        }
     }
 
-    private func beginRunning(draft: TrackState.Draft) {
-        let startedAt = Date()
+    /// Waits for the keyboard-dismissal slide to finish so the running swap
+    /// lands on a settled layout. Fires on the real `didHide` notification —
+    /// a fixed delay guesses wrong on devices whose slide outlasts it — with
+    /// a bounded fallback for hardware keyboards, where no dismissal fires.
+    private static func waitForKeyboardDismissal() async {
+        await withTaskGroup(of: String.self) { group in
+            group.addTask {
+                let dismissed = NotificationCenter.default.notifications(
+                    named: UIResponder.keyboardDidHideNotification
+                )
+                for await _ in dismissed.prefix(1) { break }
+                return "didHide"
+            }
+            group.addTask {
+                try? await Task.sleep(nanoseconds: Self.keyboardDismissFallback)
+                return "fallback"
+            }
+            _ = await group.next()
+            group.cancelAll()
+        }
+    }
+
+    /// Upper bound for the dismissal wait (hardware keyboards never notify).
+    private static let keyboardDismissFallback: UInt64 = 600_000_000
+
+    private func beginRunning(draft: TrackState.Draft, startedAt: Date) {
+        pendingStart?.cancel()
+        pendingStart = nil
         state = .running(draft, startedAt: startedAt)
         elapsed = 0
         errorMessage = nil
         startTicker(from: startedAt)
         UIApplication.shared.isIdleTimerDisabled = true
-        Haptics.selection()
         Task {
             do {
                 try await service.startTimerDraft(text: draft.text, categoryIDs: draft.categoryIDs, startedAt: startedAt)

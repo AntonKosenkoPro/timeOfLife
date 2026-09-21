@@ -16,6 +16,7 @@ import SwiftUI
 /// field and the button never move on state switch.
 struct TrackContent: View {
     @ObservedObject var vm: TrackViewModel
+    @FocusState private var nameFieldFocused: Bool
     @Environment(\.dynamicTypeSize)
     private var dynamicTypeSize
     @State private var actionSlotWidth: CGFloat = 0
@@ -139,17 +140,30 @@ struct TrackContent: View {
         .padding(.horizontal, Theme.screenHorizontalPadding)
         .frame(maxWidth: Theme.maxContentWidth)
         .frame(maxWidth: .infinity)
+        // State swaps must be instant: Start resigns the field, so the swap
+        // lands inside the keyboard-dismissal animation transaction — without
+        // this the button tint/label crossfades and slides ("bubbles") with
+        // the keyboard instead of appearing in place.
+        .transaction { $0.animation = nil }
     }
 
     /// Below the Start/Stop button: Recents while idle, the live tag
-    /// selector while running. The name field and the button above never
-    /// move on state switch — only this slot swaps content, so the tags sit
-    /// where Recents was instead of pushing the button down.
+    /// selector while running. Both branches stay mounted and the inactive
+    /// one hides via opacity, so the slot keeps the taller branch's height
+    /// in every state — the name field and the button above never move on
+    /// state switch, and the tags sit where Recents was instead of pushing
+    /// the button down. Hit testing and accessibility follow the visible
+    /// branch (opacity hiding preserves layout on iOS 15).
     @ViewBuilder private var belowActionSlot: some View {
-        if vm.state.isRunning {
-            runningTagSelector
-        } else {
+        ZStack(alignment: .top) {
             recentActivities
+                .opacity(vm.state.isRunning ? 0 : 1)
+                .allowsHitTesting(!vm.state.isRunning)
+                .accessibilityHidden(vm.state.isRunning)
+            runningTagSelector
+                .opacity(vm.state.isRunning ? 1 : 0)
+                .allowsHitTesting(vm.state.isRunning)
+                .accessibilityHidden(!vm.state.isRunning)
         }
     }
 
@@ -171,11 +185,13 @@ struct TrackContent: View {
             L10n.timerNamePlaceholder.text,
             text: $vm.nameDraft,
             onEditingChanged: { editing in
+                vm.nameFieldFocused = editing
                 guard !editing else { return }
                 vm.syncReadyFromDraft()
             },
             onCommit: { vm.syncReadyFromDraft() }
         )
+        .focused($nameFieldFocused)
         .submitLabel(.done)
         .font(.body)
         .padding(.horizontal, Theme.spacingMedium)
@@ -216,25 +232,38 @@ struct TrackContent: View {
 
     // MARK: - Running TagSelector (remove-activities-layer 4.2)
 
-    /// The shared ordered TagSelector while running (select-only from
-    /// existing categories, zero allowed, order preserved). Toggles rewrite
-    /// only the running draft snapshot.
-    @ViewBuilder private var runningTagSelector: some View {
+    /// The shared ordered TagSelector (select-only from existing categories,
+    /// zero allowed, order preserved). Toggles rewrite only the running
+    /// draft snapshot. Always mounted — even when idle with an empty
+    /// selection — so its height never changes on state switch: the rows
+    /// depend only on the category options, never on the selection, which
+    /// keeps the below-button slot (and everything above it) pixel-stable.
+    /// Visibility is opacity-only (see `belowActionSlot`).
+    private var runningTagSelector: some View {
+        VStack(alignment: .leading, spacing: Theme.spacingExtraSmall) {
+            Text(L10n.entryCategoriesLabel.text)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(Theme.textSecondary)
+            TagSelector(
+                options: Array(vm.categories.values).sorted { $0.name < $1.name },
+                selected: runningSelectedIDs,
+                onToggle: { toggledID in
+                    vm.toggleDraftCategory(toggledID)
+                },
+                accessibilityId: "RunningTags"
+            )
+        }
+        .accessibilityIdentifier("RunningTagSelector")
+    }
+
+    /// The running draft's ordered selection while running, empty otherwise.
+    /// Selection never affects the selector's geometry (rows come from the
+    /// options alone).
+    private var runningSelectedIDs: Set<String> {
         if case let .running(draft, _) = vm.state {
-            VStack(alignment: .leading, spacing: Theme.spacingExtraSmall) {
-                Text(L10n.entryCategoriesLabel.text)
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(Theme.textSecondary)
-                TagSelector(
-                    options: Array(vm.categories.values).sorted { $0.name < $1.name },
-                    selected: Set(draft.categoryIDs),
-                    onToggle: { toggledID in
-                        vm.toggleDraftCategory(toggledID)
-                    },
-                    accessibilityId: "RunningTags"
-                )
-            }
-            .accessibilityIdentifier("RunningTagSelector")
+            Set(draft.categoryIDs)
+        } else {
+            []
         }
     }
 
@@ -247,10 +276,16 @@ struct TrackContent: View {
             isLoading: vm.state.isSaving,
             isDisabled: primaryDisabled,
             accessibilityId: primaryIdentifier,
-            tint: vm.state.isRunning ? Theme.danger : nil
+            tint: vm.state.isRunning ? Theme.danger : nil,
+            animateStateChanges: false
         ) {
             switch vm.state {
             case .idle, .ready, .saved:
+                // Push focus into the VM before resigning: a focused Start
+                // tap resigns first and the swap waits out the keyboard
+                // slide (see `TrackViewModel.start()`).
+                vm.nameFieldFocused = nameFieldFocused
+                nameFieldFocused = false
                 vm.start()
             case .running, .saving:
                 Task { await vm.stop() }

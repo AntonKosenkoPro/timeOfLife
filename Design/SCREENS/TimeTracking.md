@@ -60,15 +60,10 @@ Top-to-bottom order:
    - `accessibilityIdentifier`: `TrackErrorBanner`.
 7. Central separator: receives free space beyond twice the shared cap (see
    adaptive spacing below).
-8. Name field + running tags (the preparation row):
-    - Idle: a plain-text field with the name placeholder; typing fills the
-      draft. Identifier `TimerNameField`.
-    - Ready: the field keeps the prepared text; Start is gated on trimmed
-      non-empty input.
-    - Running: a locked name label with identifier `TimerActivityLabel` plus
-      the shared ordered `TagSelector` (select-only, zero allowed); toggles
-      rewrite the running draft snapshot and never touch committed history.
-    - No state renders more than one preparation control.
+8. Name field (idle/ready/saved) or locked name label (running/saving/
+   error): a plain-text field with the name placeholder while idle
+   (`TimerNameField`); the label (`TimerActivityLabel`) is non-editable
+   after Start. No state renders more than one preparation control.
     - No control shows a Category name.
     - No editing affordance for past entries: history is corrected from the
       entry form; editing placement on Track is deferred to a later change.
@@ -79,15 +74,19 @@ Top-to-bottom order:
      `TimerStopButton`.
    - Stop hint: `L10n.timerStopHint` - stops the timer and saves the entry.
    - The region changes between these controls without moving; it sits above
-     Recents so Choose Activity / Start / Stop stays reachable without
+     the tags/Recents slot so Start / Stop stays reachable without
      scrolling.
     - The action renders in a fixed-height slot equal to the tallest of its
       state titles (name prompt / Start / Stop) at the active Dynamic
       Type size, so the control's frame is identical in idle, ready, running,
       saving, saved, and error states.
-10. Recents: the wrapping chip flow of the most-recently-used Activities (see
-    Recents below); hidden while a timer is running while its occupied
-    height is preserved, so the main action never moves.
+    - The swap itself never animates: no fade, slide, or spring of its own —
+      the incoming control appears in place.
+10. Tags / Recents slot below the button: Recents while idle, the shared
+    ordered `TagSelector` (select-only, zero allowed) while running (see
+    Recents below). Both branches stay mounted and the inactive one hides
+    via opacity, so the slot keeps the taller branch's height in every
+    state — the field and the button above never move on state switch.
 11. Bottom adaptive spacer (see adaptive spacing below).
 12. Tab bar.
 
@@ -103,9 +102,9 @@ Adaptive spacing:
 - When space is constrained (short screens, large Dynamic Type), all three
   flexible regions collapse to zero and the ordered content scrolls.
 - Main-action pinning (D10): the content height around the main action is
-  state-invariant (reserved idle preparation slot, preserved Recents height
-  while running, fixed-height action slot), so the equal split recomputes
-  identically in every state. A wrapped error's growth beyond the reserved
+  state-invariant (fixed-height action slot; both below-button branches
+  mounted so the slot keeps the taller branch's height), so the equal
+  split recomputes identically in every state. A wrapped error's growth beyond the reserved
   error height compresses the top spacer first, then the central separator —
   both above the main action, keeping it stationary — and the bottom spacer
   collapses only when both are exhausted, at which point the content
@@ -126,8 +125,9 @@ progress visualization.
   background, on-accent text, accent border) and keeps its icon; no checkmark.
 - Minimum 44 pt tap targets; a tap fills the field (ready state) and inherits
   that entry's full ordered category set. Tapping never starts timing.
-- Recents are hidden while a timer is running; their occupied height is
-  preserved so the main action does not move.
+- Recents yield the below-button slot to the running tag selector while a
+  timer is running (opacity-hidden, height preserved via the mounted
+  taller branch), so the main action does not move.
 - Empty store: a dedicated localized hint (`timer.recentsEmptyHint`,
   "Texts you track will appear here." / «Здесь появятся названия,
   которые вы отслеживаете.»), inviting free-text start.
@@ -166,16 +166,23 @@ layout. The field follows `Design/INTERACTIONS.md` -> **Keyboard and primary
 input placement**: it stays above the keyboard while focused; there is no
 Save action on Track (Stop commits).
 
+A focused Start tap resigns the field first: the haptic fires and
+`startedAt` is captured at tap time, but the running swap waits for the
+keyboard to actually finish dismissing (real `didHide`, bounded fallback
+for hardware keyboards) before cutting to Stop in place. Swapping inside
+the dismissal slide is what made Stop bubble up with the moving layout.
+Any field edit or chip tap before the swap fires cancels the deferred
+start, so a stale draft can never start.
+
 ### Layout stability rule
 
 - The numeric readout, state-specific preparation control, and main action
   keep their interaction regions across idle, ready, running, saving, and
   saved states.
-- The main-action control's frame is identical in every state: the layout
-  reserves the preparation-row slot while idle, preserves Recents' occupied
-  height while running, renders the action in a fixed-height slot, and lets
-  wrapped-error growth yield from the top spacer before the central
-  separator.
+- The main-action control's frame is identical in every state: the action
+  renders in a fixed-height slot, both below-button branches stay mounted
+  so the slot never changes height, and wrapped-error growth yields from
+  the top spacer before the central separator.
 - Only the prepared text, readout value, label, button title/icon, and tint
   change.
 - No dial, ring, or progress card appears or disappears around the readout.
@@ -193,6 +200,10 @@ Save action on Track (Stop commits).
   categories at start time.
 - Start persists the running timer immediately, begins periodic readout refresh,
   emits selection feedback, and keeps the screen awake.
+- Returning to Track (tab switch back, Profile sheet dismiss) reloads
+  recents and categories — including seeding the starter set first on a
+  fresh install — so History edits and new categories are inherited and
+  chip icons stay current.
 - Stop calculates elapsed time, saves the entry locally, emits success feedback,
   and returns to the ready state for the same text.
 - Save errors preserve recoverable running state and appear in the reserved
@@ -213,7 +224,7 @@ Save action on Track (Stop commits).
 | Idle | No text entered; centered readout shows `00:00`; name prompt and Start are shown or Start is disabled according to validation policy. |
 | Ready | Prepared text shown; centered readout shows `00:00`; Start button shown. |
 | Search active | (Removed — no search sheet. Capture is the plain-text field plus Recents chips.) |
-| Running | Locked name label remains visible; readout updates live; Stop button shown with destructive tint; Recents hidden with its height preserved. |
+| Running | Locked name label remains visible; readout updates live; Stop button shown with destructive tint; Recents yield the below-button slot to the running tag selector. |
 | Saving | Readout remains stable; Stop action shows progress while the save completes. |
 | Saved | Brief saved confirmation in the completion-mark region above the readout; the same text remains prepared with `00:00` and Start, and the timer stays in its prior position. |
 | Error | Localized non-field error in the reserved region above the central separator; text wraps fully and the region grows past the reservation when needed, with the top spacer yielding first and then the central separator so the main action stays stationary; recoverable running state is preserved. |

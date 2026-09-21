@@ -199,6 +199,20 @@ extension String {
     static func localized(_ key: String) -> String {
         NSLocalizedString(key, comment: "")
     }
+
+    /// The seven localized starter category names in creation order (the
+    /// single source for seeding; used by `RootView` and `TrackViewModel`).
+    static var starterCategoryNames: [String] {
+        [
+            L10n.categorySeedWork.text,
+            L10n.categorySeedHobby.text,
+            L10n.categorySeedSport.text,
+            L10n.categorySeedEducation.text,
+            L10n.categorySeedRelax.text,
+            L10n.categorySeedSleep.text,
+            L10n.categorySeedEntertainment.text,
+        ]
+    }
 }
 
 /// Maps an `APIError` to a localized user-facing string via its error `code`.

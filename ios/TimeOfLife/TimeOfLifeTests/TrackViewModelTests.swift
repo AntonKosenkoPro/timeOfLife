@@ -157,14 +157,17 @@ struct TrackViewModelTests {
         #expect(vm.categories["c1"]?.name == "Work")
     }
 
-    @Test("load leaves the recents empty on a fresh store")
+    @Test("load seeds the starter categories on a fresh store")
     func loadEmptyRecents() async throws {
         let vm = makeViewModel()
 
         await vm.load()
 
         #expect(vm.recents.isEmpty)
-        #expect(vm.categories.isEmpty)
+        // First load seeds the seven starter categories (no collision on a
+        // fresh dataset), so the running tag selector is never empty.
+        #expect(vm.categories.count == 7)
+        #expect(vm.categories.values.map(\.name).contains("Work"))
     }
 
     @Test("exact text identity: Gym and GYM are separate recents")
@@ -244,6 +247,46 @@ struct TrackViewModelTests {
             return
         }
         #expect(draft.categoryIDs == ["c1"])
+    }
+
+    @Test("focused start waits out the keyboard slide, keeping tap-time start")
+    func focusedStartDefers() async {
+        let vm = makeViewModel()
+        vm.nameDraft = "Gym"
+        vm.state = .ready(TrackState.Draft(text: "Gym"))
+        vm.nameFieldFocused = true
+
+        let tapTime = Date()
+        vm.start()
+        // Still ready immediately — the swap waits for the slide.
+        #expect(vm.state == .ready(TrackState.Draft(text: "Gym")))
+
+        // No keyboard dismissal fires in tests, so the bounded fallback
+        // (600 ms) triggers the swap.
+        try? await Task.sleep(nanoseconds: 900_000_000)
+        guard case let .running(draft, startedAt) = vm.state else {
+            Issue.record("expected running state after the delay")
+            return
+        }
+        #expect(draft.text == "Gym")
+        #expect(startedAt >= tapTime)
+        #expect(startedAt.timeIntervalSince(tapTime) < 1)
+    }
+
+    @Test("a draft edit cancels a deferred start")
+    func draftEditCancelsDeferredStart() async {
+        let vm = makeViewModel()
+        vm.nameDraft = "Gym"
+        vm.state = .ready(TrackState.Draft(text: "Gym"))
+        vm.nameFieldFocused = true
+        vm.start()
+
+        vm.nameDraft = "Gym2"
+        vm.syncReadyFromDraft()
+
+        try? await Task.sleep(nanoseconds: 500_000_000)
+        #expect(!vm.state.isRunning)
+        #expect(vm.state == .ready(TrackState.Draft(text: "Gym2", categoryIDs: [])))
     }
 
     // MARK: - Recoverable save failure
