@@ -240,7 +240,7 @@ struct TrackContent: View {
     /// keeps the below-button slot (and everything above it) pixel-stable.
     /// Visibility is opacity-only (see `belowActionSlot`).
     private var runningTagSelector: some View {
-        VStack(alignment: .leading, spacing: Theme.spacingExtraSmall) {
+        VStack(alignment: .leading, spacing: Theme.spacingSmall) {
             Text(L10n.entryCategoriesLabel.text)
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(Theme.textSecondary)

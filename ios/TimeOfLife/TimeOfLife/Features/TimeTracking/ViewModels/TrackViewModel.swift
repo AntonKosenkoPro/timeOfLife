@@ -194,8 +194,20 @@ final class TrackViewModel: ObservableObject {
     /// `startedAt` stays the tap time. When nothing is focused (chip flow),
     /// Start is immediate.
     func start() {
-        if case .idle = state {
+        // Tap-time sync (see `syncReadyFromDraft`): a carried-over `.ready`
+        // (e.g. after a stop) may hold a stale draft for the field's current
+        // text. Syncing first means the deferred swap below captures the
+        // fresh draft, so the tap's own focus-resign finds nothing to cancel.
+        // Matching text needs no sync — this preserves programmatically
+        // prepared categories and the empty-text state. `.saved` is excluded:
+        // the disabled Start button is the only caller and cannot fire there.
+        switch state {
+        case .idle:
             syncReadyFromDraft()
+        case .ready(let draft) where draft.text != nameDraft:
+            syncReadyFromDraft()
+        default:
+            break
         }
         guard case let .ready(draft) = state, canStart else { return }
         if nameFieldFocused {

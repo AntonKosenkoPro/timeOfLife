@@ -21,7 +21,7 @@ The Track numeric timer SHALL represent only timer readiness and exact elapsed t
 - **WHEN** the user starts the prepared name
 - **THEN** the numeric timer displays the exact live elapsed duration, including completed hours, without a secondary progress visualization
 ### Requirement: Starting always requires explicit confirmation
-Selecting a recent or typing a name SHALL prepare it without starting a timer; the timer SHALL begin only after the user activates Start. Unconfirmed typed input SHALL NOT start a timer or create an entry. A focused Start tap SHALL resign the field immediately (selection haptic fires and `started_at` is captured at tap time) and delay the running swap until the keyboard finishes dismissing (real `didHide`, bounded fallback for hardware keyboards); the swap SHALL then render instantly with no animation of its own. Any field edit or chip tap before the swap fires SHALL cancel the deferred start.
+Selecting a recent or typing a name SHALL prepare it without starting a timer; the timer SHALL begin only after the user activates Start. Unconfirmed typed input SHALL NOT start a timer or create an entry. A focused Start tap SHALL resign the field immediately (selection haptic fires and `started_at` is captured at tap time) and delay the running swap until the keyboard finishes dismissing (real `didHide`, bounded fallback for hardware keyboards); the swap SHALL then render instantly with no animation of its own. A Start tap SHALL start timing on the first tap using the field's current text, even when the committed preparation went stale (for example edited after a stop): the tap SHALL bring the preparation up to date before the swap is scheduled, so the resign that follows finds nothing to cancel. Any other field edit or chip tap before the swap fires SHALL cancel the deferred start.
 
 #### Scenario: Select recent activity
 - **WHEN** the user taps a recent chip
@@ -46,6 +46,10 @@ Selecting a recent or typing a name SHALL prepare it without starting a timer; t
 #### Scenario: Deferred start cancels on edit
 - **WHEN** the user edits the field or taps a chip after a focused Start tap but before the swap fires
 - **THEN** the deferred start is cancelled and no timer starts with the stale draft
+
+#### Scenario: Start after a post-stop edit starts on the first tap
+- **WHEN** the user edits the name after a stop (the committed preparation is stale for the field's current text) and activates Start with the field focused
+- **THEN** the timer starts on that first tap with the field's current text once the keyboard dismisses; no second tap is needed
 
 #### Scenario: Running swap renders instantly
 - **WHEN** the running swap fires
@@ -175,7 +179,7 @@ When no committed entries exist, Recents SHALL present dedicated localized copy 
 - **WHEN** the user saves the first entry and returns to Track
 - **THEN** the empty hint is replaced by Recents chips containing that exact text
 ### Requirement: Stop saves with stable feedback
-Stopping a running timer SHALL save the completed entry locally, communicate success without a blocking loader, and retain the entered text in the ready state for an optional later restart. When the persisted running draft is gone but Track still holds a `.running` state (the timer was stopped from the compact timer on another destination), Track SHALL reconcile on next load: stop the elapsed ticker, re-enable the idle timer, reset elapsed to zero, and return to `.ready` for the same text — or `.idle` when nothing was entered — instead of counting elapsed time forever.
+Stopping a running timer SHALL save the completed entry locally, communicate success without a blocking loader, and retain the entered text in the ready state for an optional later restart. While the saved confirmation is showing, the Start button SHALL render disabled (dimmed, non-interactive) since starting is not possible until the state settles back to ready; it SHALL re-enable with the return to ready. Editing the name while the saved confirmation is showing SHALL return to ready for the new text at once, ending the confirmation early. When the persisted running draft is gone but Track still holds a `.running` state (the timer was stopped from the compact timer on another destination), Track SHALL reconcile on next load: stop the elapsed ticker, re-enable the idle timer, reset elapsed to zero, and return to `.ready` for the same text — or `.idle` when nothing was entered — instead of counting elapsed time forever.
 
 #### Scenario: Successful stop
 - **WHEN** the user activates Stop on a running timer
@@ -192,6 +196,14 @@ Stopping a running timer SHALL save the completed entry locally, communicate suc
 #### Scenario: Stop after the activity was deleted elsewhere
 - **WHEN** the user stops a timer (no deletable parent exists; entries and drafts cannot be deleted out from under a run)
 - **THEN** the entry always saves normally; this scenario is retained as a no-op for archive continuity
+
+#### Scenario: Start is disabled during the saved confirmation
+- **WHEN** the saved confirmation is showing after a stop
+- **THEN** the Start button renders dimmed and ignores taps; it re-enables when the state settles back to ready
+
+#### Scenario: Edit during the saved confirmation returns to ready
+- **WHEN** the user edits the name while the saved confirmation is showing
+- **THEN** the screen returns to ready for the new text at once, ending the confirmation early instead of waiting out the window
 ### Requirement: Timer states remain visually and physically stable
 The idle, ready, running, saving, saved, and error states SHALL preserve the numeric timer's position and primary control geometry, support light and dark appearance, respect Reduce Motion, and expose accessible state. Transient saved-state feedback displayed above the numeric timer SHALL NOT change the timer's vertical position.
 

@@ -289,6 +289,41 @@ struct TrackViewModelTests {
         #expect(vm.state == .ready(TrackState.Draft(text: "Gym2", categoryIDs: [])))
     }
 
+    @Test("focused start after a post-stop edit starts on the first tap")
+    func staleDraftFirstTapStarts() async {
+        let vm = makeViewModel()
+        // Post-stop state: the committed draft is stale for the edited field.
+        vm.nameDraft = "Gym"
+        vm.state = .ready(TrackState.Draft(text: "Gym"))
+        vm.nameDraft = "Gym2"
+        vm.nameFieldFocused = true
+
+        vm.start()
+        // Tap-time sync brings the preparation up to date at once.
+        #expect(vm.state == .ready(TrackState.Draft(text: "Gym2", categoryIDs: [])))
+
+        // No keyboard dismissal fires in tests, so the bounded fallback
+        // (600 ms) triggers the swap — with the edited text, first tap.
+        try? await Task.sleep(nanoseconds: 900_000_000)
+        guard case let .running(draft, _) = vm.state else {
+            Issue.record("expected running state after the first tap")
+            return
+        }
+        #expect(draft.text == "Gym2")
+    }
+
+    @Test("editing during the saved confirmation returns to ready at once")
+    func editDuringSavedReturnsToReady() {
+        let vm = makeViewModel()
+        vm.nameDraft = "Reading"
+        vm.state = .saved(TrackState.Draft(text: "Reading"), duration: 65)
+
+        vm.nameDraft = "Gym"
+        vm.syncReadyFromDraft()
+
+        #expect(vm.state == .ready(TrackState.Draft(text: "Gym", categoryIDs: [])))
+    }
+
     // MARK: - Recoverable save failure
 
     @Test("stop retry after a recoverable failure preserves elapsed state")
