@@ -19,6 +19,11 @@ import SwiftUI
 /// activity detail sheet.
 struct HistoryView: View {
     @EnvironmentObject var container: AppContainer
+    /// Observed directly (not via `container`): `AppContainer` publishes
+    /// nothing, so nested reads like `container.syncController.status` never
+    /// invalidate this view — the status change would be missed and the list
+    /// would stay stale after a sync (ProfileView precedent).
+    @EnvironmentObject var sync: SyncController
     @StateObject private var vm: HistoryViewModel
     @State private var elevatedGroupID: String?
     /// The entry opened in the unified entry form (nil = none). EDIT mode
@@ -74,6 +79,20 @@ struct HistoryView: View {
         .onChange(of: refreshSignal) { _ in
             vm.invalidate()
             Task { await vm.loadIfNeeded() }
+        }
+        // A sync cycle merges relay state into LocalStore behind this view:
+        // the Profile sheet covers History without firing onDisappear, so the
+        // guarded reload above never runs. Observe the cycle directly and
+        // reload on exit from `.syncing` (idle or error — a failed cycle may
+        // have applied partial merges before throwing).
+        .onChange(of: sync.status) { status in
+            switch status {
+            case .idle, .error:
+                vm.invalidate()
+                Task { await vm.loadIfNeeded() }
+            case .inactive, .syncing:
+                break
+            }
         }
         .sheet(isPresented: $isLogTimeActive) {
             LogTimeView(service: container.timerService) {
@@ -212,6 +231,7 @@ private struct HeaderFramePreferenceKey: PreferenceKey {
     }
     .navigationViewStyle(.stack)
     .environmentObject(container)
+    .environmentObject(container.syncController)
 }
 
 #Preview("History empty") {
@@ -221,5 +241,6 @@ private struct HeaderFramePreferenceKey: PreferenceKey {
     }
     .navigationViewStyle(.stack)
     .environmentObject(container)
+    .environmentObject(container.syncController)
 }
 #endif

@@ -197,8 +197,13 @@ final class SyncController: ObservableObject {
     }
 
     /// Applies a server entry only if `server.updated_at > local.updated_at`.
-    /// Unknown category ids are pruned with the remainder kept (logged,
-    /// secret-free) — the merge never fails the cycle on a dangling join.
+    /// Relay-known-but-locally-missing category ids are adopted or remapped
+    /// (see `resolveEntryCategoryIDs`) instead of stripped; snapshot-unknown
+    /// ids are pruned with the remainder kept (logged, secret-free) — the
+    /// merge never fails the cycle on a dangling join. When the server
+    /// version is not newer but the local category set strictly supersets it
+    /// via clean local rows, a healing update is enqueued instead (see
+    /// `healCategoryForkIfNeeded`) and the local copy is kept.
     private func applyServer(_ entry: TimeEntry, serverCategories: [String: Category]) async throws {
         // Delete-wins (see applyServer(_:)): never resurrect a locally
         // deleted entry.
@@ -207,18 +212,115 @@ final class SyncController: ObservableObject {
             return
         }
         if let local = try await store.entry(id: entry.id) {
-            guard entry.updatedAt > local.updatedAt else { return }
+            guard entry.updatedAt > local.updatedAt else {
+                try await healCategoryForkIfNeeded(
+                    server: entry, local: local, isTie: entry.updatedAt == local.updatedAt,
+                    serverCategories: serverCategories
+                )
+                return
+            }
         }
-        var pruned = entry
-        let knownIDs = entry.categoryIDs.filter { id in
-            if serverCategories[id] != nil { return true }
-            Self.logger.info("sync pull prunes unknown category \(id, privacy: .public) from entry \(entry.id, privacy: .public)")
-            return false
+        var merged = entry
+        merged.categoryIDs = try await resolveEntryCategoryIDs(entry, serverCategories: serverCategories)
+        try await store.mergeEntry(merged)
+    }
+
+    /// Resolves an entry's category ids against the relay snapshot,
+    /// order-preserved and deduped. Snapshot-unknown ids are dropped (logged);
+    /// locally-present ids are kept; locally-deleted ids are dropped
+    /// (delete-wins); an id missing locally but present in the snapshot is
+    /// remapped to a same-name local rival when one exists (local-only
+    /// rewrite — the caller merges with no outbox row, so it is never
+    /// enqueued) or merged from the snapshot row otherwise. Shared by the
+    /// pull merge and the conflict-adoption path so both converge identically.
+    private func resolveEntryCategoryIDs(
+        _ entry: TimeEntry,
+        serverCategories: [String: Category]
+    ) async throws -> [String] {
+        var resolved: [String] = []
+        for id in entry.categoryIDs {
+            guard let snapshotRow = serverCategories[id] else {
+                Self.logger.info("sync pull prunes unknown category \(id, privacy: .public) from entry \(entry.id, privacy: .public)")
+                continue
+            }
+            if try await store.category(id: id) != nil {
+                if !resolved.contains(id) {
+                    resolved.append(id)
+                }
+                continue
+            }
+            if try await store.isLocallyDeleted(resource: "category", recordID: id) {
+                Self.logger.info("sync pull skips locally deleted category \(id, privacy: .public) for entry \(entry.id, privacy: .public)")
+                continue
+            }
+            if let rival = try await store.category(named: snapshotRow.name), rival.id != id {
+                Self.logger.info("sync pull remaps category \(id, privacy: .public) to local rival \(rival.id, privacy: .public) for entry \(entry.id, privacy: .public)")
+                if !resolved.contains(rival.id) {
+                    resolved.append(rival.id)
+                }
+                continue
+            }
+            try await store.mergeCategory(snapshotRow)
+            if !resolved.contains(id) {
+                resolved.append(id)
+            }
         }
-        if knownIDs.count != entry.categoryIDs.count {
-            pruned.categoryIDs = knownIDs
+        return resolved
+    }
+
+    /// Heals a silently forked category set: the server version is not newer
+    /// (tie or older, so LWW keeps local) but the local category set strictly
+    /// supersets the server set. Only extras backed by existing clean local
+    /// rows (none pending deletion) count; when the server holds any id the
+    /// local copy lacks, the sets are incomparable and healing is skipped
+    /// entirely. The healed copy carries the full local set with a bumped
+    /// `updatedAt` (strictly newer even under second-precision truncation, so
+    /// the relay PATCH LWW guard passes) and `updateEntry` enqueues the
+    /// update for the next drain. When the update loses its LWW race, there
+    /// is nothing to heal. Secret-free logs only.
+    ///
+    /// The mirror case heals too: on a TIE the server set strictly supersets
+    /// the local set. Sub-millisecond wire precision (relay stamps
+    /// microseconds, the wire codec keeps milliseconds) makes a server
+    /// `.385574` tie with a local `.385` forever, so a join lost by an
+    /// older buggy pull would otherwise never reconverge. The server ids
+    /// are adopted locally (remap-aware, no outbox row — the relay already
+    /// holds this version), mirroring the rival-remap rewrite. A
+    /// server-older superset is a legitimate relay prune (delete-wins on
+    /// another device) and keeps local.
+    private func healCategoryForkIfNeeded(
+        server: TimeEntry,
+        local: TimeEntry,
+        isTie: Bool,
+        serverCategories: [String: Category]
+    ) async throws {
+        let serverSet = Set(server.categoryIDs)
+        let localSet = Set(local.categoryIDs)
+        if isTie, localSet != serverSet, serverSet.isSuperset(of: localSet) {
+            var healed = local
+            healed.categoryIDs = try await resolveEntryCategoryIDs(server, serverCategories: serverCategories)
+            guard healed.categoryIDs != local.categoryIDs else { return }
+            try await store.mergeEntry(healed)
+            Self.logger.info("sync pull heals category fork on entry \(local.id, privacy: .public)")
+            return
         }
-        try await store.mergeEntry(pruned)
+        let extras = localSet.subtracting(serverSet)
+        guard !extras.isEmpty, serverSet.isSubset(of: localSet) else { return }
+        var cleanExtras = false
+        for id in local.categoryIDs where extras.contains(id) {
+            guard try await store.category(id: id) != nil else { continue }
+            if try await store.isLocallyDeleted(resource: "category", recordID: id) { continue }
+            cleanExtras = true
+            break
+        }
+        guard cleanExtras else { return }
+        var healed = local
+        healed.updatedAt = max(
+            Date(),
+            max(server.updatedAt.addingTimeInterval(1), local.updatedAt.addingTimeInterval(1))
+        )
+        guard try await store.updateEntry(healed) else { return }
+        Self.logger.info("sync pull heals category fork on entry \(local.id, privacy: .public)")
     }
 
     // MARK: - Category snapshot reconciliation (category-management D6)
@@ -285,11 +387,14 @@ final class SyncController: ObservableObject {
     /// as the first attempt.
     private func drainOutbox() async throws {
         let rows = try await store.outboxRows()
+        // One relay category snapshot per drain, fetched lazily: only when
+        // the drain actually holds an entry create/update row.
+        var relayCategoryIDs: Set<String>?
         for queuedRow in Self.orderedForDrain(rows) {
             // Conflict recovery can remove or rewrite a later row while this
             // drain is still iterating the initial snapshot. Always push the
             // current persisted payload rather than a stale in-memory copy.
-            guard let row = try await store.outboxRow(id: queuedRow.id) else {
+            guard var row = try await store.outboxRow(id: queuedRow.id) else {
                 continue
             }
             // Stale updates for locally-missing records (updates superseded
@@ -299,6 +404,15 @@ final class SyncController: ObservableObject {
                 Self.logger.info("sync drain drops stale update for missing \(row.resource, privacy: .public) \(row.recordID, privacy: .public)")
                 try await store.removeOutboxRow(id: row.id)
                 continue
+            }
+            if row.resource == "entry" && (row.op == "create" || row.op == "update") {
+                if relayCategoryIDs == nil {
+                    let snapshot = try await remote.fetchCategories()
+                    relayCategoryIDs = Set(snapshot.map(\.id))
+                }
+                var knownIDs = relayCategoryIDs ?? []
+                row = try await ensureEntryCategories(for: row, knownIDs: &knownIDs)
+                relayCategoryIDs = knownIDs
             }
             do {
                 try await push(row)
@@ -365,6 +479,46 @@ final class SyncController: ObservableObject {
         default:
             return 2
         }
+    }
+
+    /// Ensures every category id referenced by an entry create/update exists
+    /// on the relay before the entry push, so the push carries the full set
+    /// (no 422, no prune, no local loss). Ids missing from the per-drain
+    /// cached relay snapshot but present locally and not pending deletion are
+    /// created on the relay first (idempotent; a `category_exists` 409 remaps
+    /// local references to the winning id and the entry push re-reads its
+    /// payload). Dangling ids (no local row) and delete-wins ids are left
+    /// for the last-resort prune-and-retry heal. Any other creation error
+    /// throws, aborting the cycle with the row still queued — nothing is ever
+    /// silently pruned here. Returns the row to push (possibly re-read after
+    /// a remap rewrote its payload).
+    private func ensureEntryCategories(for row: OutboxRow, knownIDs: inout Set<String>) async throws -> OutboxRow {
+        var currentRow = row
+        // At most two passes: the initial scan plus one re-check after a
+        // remap (the entry then carries the winner id).
+        for _ in 0..<2 {
+            let entry = try decodePayload(currentRow, as: TimeEntry.self)
+            var didRemap = false
+            for id in entry.categoryIDs where !knownIDs.contains(id) {
+                guard let local = try await store.category(id: id) else { continue }
+                if try await store.isLocallyDeleted(resource: "category", recordID: id) { continue }
+                do {
+                    try await remote.createCategory(local)
+                    knownIDs.insert(id)
+                } catch let error as APIError where error.code == "category_exists" {
+                    guard let winningID = error.details["id"] else { throw error }
+                    try await remapCategoryReferences(from: id, to: winningID)
+                    knownIDs.insert(winningID)
+                    if let fresh = try await store.outboxRow(id: row.id) {
+                        currentRow = fresh
+                    }
+                    didRemap = true
+                    break
+                }
+            }
+            if !didRemap { break }
+        }
+        return currentRow
     }
 
     /// Recovers an entry create/update rejected with 422 `category_ids`:
@@ -558,23 +712,18 @@ final class SyncController: ObservableObject {
         try await store.remapCategoryReferences(from: oldID, to: newID, winner: winner)
     }
 
-    /// Prunes unknown category ids from a server entry before merge: any id
-    /// absent from the fresh category snapshot is dropped, the remainder is
-    /// kept (secret-free log), and the merge never fails the cycle.
+    /// Resolves a server entry's category ids before a conflict-adoption
+    /// merge, identically to the pull path (see `resolveEntryCategoryIDs`):
+    /// relay-known-but-locally-missing ids are adopted or remapped to a
+    /// same-name local rival, snapshot-unknown ids are dropped with the
+    /// remainder kept (secret-free log), and the merge never fails the cycle.
     private func prunedEntry(_ entry: TimeEntry) async throws -> TimeEntry {
         guard !entry.categoryIDs.isEmpty else { return entry }
         let snapshot = try await remote.fetchCategories()
-        let knownIDs = Set(snapshot.map(\.id))
-        let known = entry.categoryIDs.filter { knownIDs.contains($0) }
-        if known.count == entry.categoryIDs.count {
-            return entry
-        }
-        var pruned = entry
-        for id in entry.categoryIDs where !knownIDs.contains(id) {
-            Self.logger.info("sync merge prunes unknown category \(id, privacy: .public) from entry \(entry.id, privacy: .public)")
-        }
-        pruned.categoryIDs = known
-        return pruned
+        let serverCategories = Dictionary(uniqueKeysWithValues: snapshot.map { ($0.id, $0) })
+        var resolved = entry
+        resolved.categoryIDs = try await resolveEntryCategoryIDs(entry, serverCategories: serverCategories)
+        return resolved
     }
 
     /// Decodes an outbox row's payload into a model.

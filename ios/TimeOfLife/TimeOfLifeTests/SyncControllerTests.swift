@@ -961,18 +961,64 @@ struct SyncControllerTests {
         #expect(try await store.outboxRows().isEmpty)
     }
 
-    @Test("entry push 422 on unknown category prunes and retries to idle")
+    @Test("entry push creates a relay-unknown category first and pushes the full set")
     func entryPushValidationHealsByPruning() async throws {
         let (store, mock, controller) = makeContext()
+        mock.categoriesResult = [Category(id: "c-keep", name: "Sport", icon: "figure.run")]
+
+        controller.activate()
+        await waitForCycle(controller)
+
+        // Clean local rows (no outbox): the relay knows c-keep but not c-new,
+        // so only the drain's ensure step can create c-new before pushing.
         try await store.mergeCategory(Category(id: "c-keep", name: "Sport", icon: "figure.run"))
-        try await store.mergeCategory(Category(id: "c-unknown", name: "Ghost", icon: "tag"))
-        try await store.createEntry(makeEntry(id: "e1", text: "Gym", categoryIDs: ["c-keep", "c-unknown"]))
-        // Relay knows only c-keep: the first push 422s, heal prunes c-unknown.
+        try await store.mergeCategory(Category(id: "c-new", name: "Music", icon: "music.note"))
+        try await store.createEntry(makeEntry(id: "e1", text: "Gym", categoryIDs: ["c-keep", "c-new"]))
+        var pushed: [TimeEntry] = []
+        var createdCategoryIDs: [String] = []
+        mock.createCategoryHandler = { category in
+            createdCategoryIDs.append(category.id)
+            // Simulate the relay now owning the created category.
+            if !mock.categoriesResult.contains(where: { $0.id == category.id }) {
+                mock.categoriesResult.append(category)
+            }
+        }
+        mock.createEntryHandler = { entry in
+            pushed.append(entry)
+            let known = Set(mock.categoriesResult.map(\.id))
+            if !Set(entry.categoryIDs).isSubset(of: known) {
+                throw APIError.server(
+                    code: "validation_error", message: "Validation failed",
+                    details: ["category_ids": "One or more categories do not exist"]
+                )
+            }
+        }
+
+        await controller.syncNow()
+
+        #expect(createdCategoryIDs == ["c-new"])
+        #expect(pushed.count == 1)
+        #expect(pushed.first?.categoryIDs == ["c-keep", "c-new"])
+        #expect(try await store.entry(id: "e1")?.categoryIDs == ["c-keep", "c-new"])
+        #expect(try await store.outboxRows().isEmpty)
+        #expect(isIdle(controller.status))
+    }
+
+    @Test("entry push with a row-less dangling category id still prunes as a last resort")
+    func entryPushValidationHealsDanglingID() async throws {
+        let (store, mock, controller) = makeContext()
+        try await store.mergeCategory(Category(id: "c-keep", name: "Sport", icon: "figure.run"))
+        try await store.createEntry(makeEntry(id: "e1", text: "Gym", categoryIDs: ["c-keep"]))
+        // Rewrite the queued payload to reference a dangling id with no local
+        // row: ensure must skip it, the push 422s, and the last-resort heal
+        // prunes it.
+        let dangling = makeEntry(id: "e1", text: "Gym", categoryIDs: ["c-keep", "c-ghost"])
+        try await store.rewriteOutboxPayload(resource: "entry", recordID: "e1", payload: dangling)
         mock.categoriesResult = [Category(id: "c-keep", name: "Sport", icon: "figure.run")]
         var pushed: [TimeEntry] = []
         mock.createEntryHandler = { entry in
             pushed.append(entry)
-            if entry.categoryIDs.contains("c-unknown") {
+            if entry.categoryIDs.contains("c-ghost") {
                 throw APIError.server(
                     code: "validation_error", message: "Validation failed",
                     details: ["category_ids": "One or more categories do not exist"]
@@ -985,6 +1031,7 @@ struct SyncControllerTests {
 
         #expect(pushed.count == 2)
         #expect(pushed.last?.categoryIDs == ["c-keep"])
+        #expect(mock.calls.allSatisfy { $0.method != "createCategory" })
         #expect(try await store.outboxRows().isEmpty)
         #expect(isIdle(controller.status))
     }
@@ -1010,6 +1057,158 @@ struct SyncControllerTests {
             return
         }
         #expect(!(try await store.outboxRows()).isEmpty)
+    }
+
+    @Test("pull remaps a relay-known id to a newer same-name local rival and adopts snapshot-only ids")
+    func pullAdoptsOrRemapsRelayKnownCategories() async throws {
+        let (store, mock, controller) = makeContext()
+        let old = Date(timeIntervalSince1970: 1_600_000_000)
+        let new = Date(timeIntervalSince1970: 1_700_000_000)
+        // The local "Sport" rival is newer than the relay row, so the pull
+        // keeps it; it stays dirty (pending create) so snapshot
+        // reconciliation preserves it.
+        try await store.createCategory(Category(
+            id: "local-sport", name: "Sport", icon: "figure.run",
+            createdAt: new, updatedAt: new
+        ))
+        mock.categoriesResult = [
+            Category(
+                id: "server-sport", name: "Sport", icon: "figure.run",
+                createdAt: old, updatedAt: old
+            ),
+            Category(
+                id: "server-only", name: "Music", icon: "music.note",
+                createdAt: old, updatedAt: old
+            ),
+        ]
+        mock.entriesResult = [
+            makeEntry(
+                id: "e1", text: "Gym", categoryIDs: ["server-sport", "server-only"],
+                createdAt: old, updatedAt: old
+            )
+        ]
+
+        controller.activate()
+        await waitForCycle(controller)
+
+        // server-sport remapped to the local rival, server-only adopted: the
+        // entry keeps a category for both, with no outbox row enqueued for
+        // the remap itself.
+        #expect(try await store.entry(id: "e1")?.categoryIDs == ["local-sport", "server-only"])
+        #expect(try await store.category(id: "local-sport")?.name == "Sport")
+        #expect(try await store.category(id: "server-only")?.name == "Music")
+        #expect(try await store.category(id: "server-sport") == nil)
+        #expect(try await store.outboxRows().isEmpty)
+        #expect(isIdle(controller.status))
+    }
+
+    @Test("a tie pull with a local category superset enqueues a healing update that drains with the full set")
+    func tiePullHealsCategoryFork() async throws {
+        let (store, mock, controller) = makeContext()
+        let stamp = Date(timeIntervalSince1970: 1_700_000_000)
+        try await store.mergeCategory(Category(
+            id: "c1", name: "Sport", icon: "figure.run", createdAt: stamp, updatedAt: stamp
+        ))
+        try await store.mergeCategory(Category(
+            id: "c2", name: "Music", icon: "music.note", createdAt: stamp, updatedAt: stamp
+        ))
+        try await store.mergeEntry(makeEntry(
+            id: "e1", text: "Gym", categoryIDs: ["c1", "c2"], createdAt: stamp, updatedAt: stamp
+        ))
+        // The relay silently pruned c2 while storing the client timestamp
+        // verbatim: the tie keeps local and must heal.
+        mock.categoriesResult = [
+            Category(
+                id: "c1", name: "Sport", icon: "figure.run", createdAt: stamp, updatedAt: stamp
+            ),
+            Category(
+                id: "c2", name: "Music", icon: "music.note", createdAt: stamp, updatedAt: stamp
+            ),
+        ]
+        mock.entriesResult = [
+            makeEntry(id: "e1", text: "Gym", categoryIDs: ["c1"], createdAt: stamp, updatedAt: stamp)
+        ]
+        var updated: [TimeEntry] = []
+        mock.updateEntryHandler = { updated.append($0) }
+
+        controller.activate()
+        await waitForCycle(controller)
+
+        #expect(updated.count == 1)
+        #expect(updated.first?.categoryIDs == ["c1", "c2"])
+        #expect(updated.first.map { $0.updatedAt > stamp } == true)
+        #expect(try await store.entry(id: "e1")?.categoryIDs == ["c1", "c2"])
+        #expect(try await store.outboxRows().isEmpty)
+        #expect(isIdle(controller.status))
+    }
+
+    @Test("a tie pull with a server category superset adopts the joins locally without enqueueing")
+    func tiePullAdoptsServerCategorySuperset() async throws {
+        let (store, mock, controller) = makeContext()
+        let stamp = Date(timeIntervalSince1970: 1_700_000_000)
+        try await store.mergeCategory(Category(
+            id: "c1", name: "Sport", icon: "figure.run", createdAt: stamp, updatedAt: stamp
+        ))
+        try await store.mergeCategory(Category(
+            id: "c2", name: "Music", icon: "music.note", createdAt: stamp, updatedAt: stamp
+        ))
+        // A pre-fix pull wiped the join; the entry's ms timestamp ties with
+        // the relay's sub-ms one forever (whole-row LWW never adopts).
+        try await store.mergeEntry(makeEntry(
+            id: "e1", text: "Gym", categoryIDs: [], createdAt: stamp, updatedAt: stamp
+        ))
+        mock.categoriesResult = [
+            Category(
+                id: "c1", name: "Sport", icon: "figure.run", createdAt: stamp, updatedAt: stamp
+            ),
+            Category(
+                id: "c2", name: "Music", icon: "music.note", createdAt: stamp, updatedAt: stamp
+            ),
+        ]
+        mock.entriesResult = [
+            makeEntry(id: "e1", text: "Gym", categoryIDs: ["c1", "c2"], createdAt: stamp, updatedAt: stamp)
+        ]
+
+        controller.activate()
+        await waitForCycle(controller)
+
+        // Local-only adoption: joins restored, timestamp unchanged, no push.
+        let entry = try await store.entry(id: "e1")
+        #expect(entry?.categoryIDs == ["c1", "c2"])
+        #expect(entry?.updatedAt == stamp)
+        #expect(try await store.outboxRows().isEmpty)
+        #expect(isIdle(controller.status))
+    }
+
+    @Test("a server-older pull keeps local joins even when the server set supersets")
+    func serverOlderPullDoesNotAdoptServerSuperset() async throws {
+        let (store, mock, controller) = makeContext()
+        let stamp = Date(timeIntervalSince1970: 1_700_000_000)
+        let older = stamp.addingTimeInterval(-10)
+        try await store.mergeCategory(Category(
+            id: "c1", name: "Sport", icon: "figure.run", createdAt: older, updatedAt: older
+        ))
+        try await store.mergeEntry(makeEntry(
+            id: "e1", text: "Gym", categoryIDs: [], createdAt: older, updatedAt: stamp
+        ))
+        mock.categoriesResult = [
+            Category(id: "c1", name: "Sport", icon: "figure.run", createdAt: older, updatedAt: older)
+        ]
+        // A legitimate relay prune on another device: older server version
+        // with the pruned (here empty→untagged) set. Server set is a strict
+        // superset of the (empty) local set but the tie is absent: keep local.
+        mock.entriesResult = [
+            makeEntry(id: "e1", text: "Gym", categoryIDs: [], createdAt: older, updatedAt: older)
+        ]
+
+        controller.activate()
+        await waitForCycle(controller)
+
+        let entry = try await store.entry(id: "e1")
+        #expect(entry?.categoryIDs.isEmpty == true)
+        #expect(entry?.updatedAt == stamp)
+        #expect(try await store.outboxRows().isEmpty)
+        #expect(isIdle(controller.status))
     }
 
     // MARK: - Helpers

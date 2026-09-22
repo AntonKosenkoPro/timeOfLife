@@ -89,7 +89,10 @@ struct RemoteCatalogRepositoryTests {
             {
               "id": "e1",
               "activity_text": "Gym",
-              "category_ids": ["cat-2", "cat-1"],
+              "categories": [
+                {"id": "cat-2", "name": "Reading", "icon": "book"},
+                {"id": "cat-1", "name": "Work", "icon": "briefcase"}
+              ],
               "notes": "Leg day",
               "started_at": "2026-07-27T09:00:00Z",
               "ended_at": "2026-07-27T10:00:00Z",
@@ -102,7 +105,7 @@ struct RemoteCatalogRepositoryTests {
             {
               "id": "e2",
               "activity_text": "Reading",
-              "category_ids": [],
+              "categories": [],
               "notes": "",
               "started_at": "2026-07-28T09:00:00.500Z",
               "ended_at": null,
@@ -140,7 +143,7 @@ struct RemoteCatalogRepositoryTests {
         {
           "id": "e1",
           "activity_text": "Gym",
-          "category_ids": ["cat-1"],
+          "categories": [{"id": "cat-1", "name": "Work", "icon": "briefcase"}],
           "notes": "",
           "started_at": "2026-07-27T09:00:00Z",
           "ended_at": "2026-07-27T10:00:00Z",

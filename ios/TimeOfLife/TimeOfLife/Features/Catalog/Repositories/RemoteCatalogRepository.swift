@@ -275,7 +275,9 @@ struct CategoryWireDTO: Decodable, Sendable {
 
 /// The wire shape of an Entry as the relay returns it (OpenAPI `Entry`):
 /// RFC 3339 timestamps plus the entry-owned `activity_text`, ordered
-/// `category_ids`, and `notes` (remove-activities-layer; no `activity_id`).
+/// `categories` tags (`CategoryTag` id/name/icon objects — ids are read
+/// back into `categoryIDs`), and `notes` (remove-activities-layer; no
+/// `activity_id`).
 struct EntryWireDTO: Decodable, Sendable {
     let id: String
     let activityText: String
@@ -292,7 +294,7 @@ struct EntryWireDTO: Decodable, Sendable {
     enum CodingKeys: String, CodingKey {
         case id
         case activityText = "activity_text"
-        case categoryIDs = "category_ids"
+        case categories
         case notes
         case startedAt = "started_at"
         case endedAt = "ended_at"
@@ -303,11 +305,18 @@ struct EntryWireDTO: Decodable, Sendable {
         case updatedAt = "updated_at"
     }
 
+    private struct CategoryTagDTO: Decodable, Sendable {
+        let id: String
+    }
+
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(String.self, forKey: .id)
         activityText = try container.decode(String.self, forKey: .activityText)
-        categoryIDs = try container.decodeIfPresent([String].self, forKey: .categoryIDs) ?? []
+        // The relay embeds ordered category tags (id/name/icon objects per
+        // the OpenAPI `Entry` schema); only the ids feed the local join model.
+        categoryIDs = try container.decodeIfPresent([CategoryTagDTO].self, forKey: .categories)?
+            .map(\.id) ?? []
         notes = try container.decodeIfPresent(String.self, forKey: .notes) ?? ""
         startedAt = try WireDate.decode(container, forKey: .startedAt)
         endedAt = try WireDate.decodeIfPresent(container, forKey: .endedAt)

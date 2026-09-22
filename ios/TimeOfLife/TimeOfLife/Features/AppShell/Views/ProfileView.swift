@@ -148,11 +148,14 @@ struct ProfileView: View {
                 ListRow(title: L10n.profileCategories.text, icon: "tag")
             }
             .accessibilityIdentifier("ProfileCategoriesRow")
-            Button {
+            Button(role: .destructive) {
                 isShowingEraseConfirm = true
             } label: {
-                ListRow(title: L10n.profileEraseLocalData.text, icon: "trash")
-                    .foregroundStyle(Theme.danger)
+                ListRow(
+                    title: L10n.profileEraseLocalData.text,
+                    icon: "trash",
+                    tint: Theme.danger
+                )
             }
             .accessibilityIdentifier("ProfileEraseLocalDataButton")
         }

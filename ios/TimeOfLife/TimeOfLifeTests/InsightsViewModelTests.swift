@@ -137,6 +137,35 @@ struct InsightsViewModelTests {
         #expect(breakdown.rows.isEmpty)
     }
 
+    // MARK: - Sync merge propagation (fix-history-sync-refresh)
+
+    @Test("synced pull recomputes the breakdown after invalidate + reload")
+    func syncMergeReflectedAfterReload() async throws {
+        let store = try makeStore()
+        let start = Date(timeIntervalSinceNow: -3600)
+        try await store.createEntry(entry(
+            id: "local", startedAt: start,
+            durationSeconds: 60, endedAt: start.addingTimeInterval(60)))
+
+        let vm = InsightsViewModel(store: store)
+        await vm.loadIfNeeded()
+        #expect(vm.breakdown(period: .all, lens: .activity).totalSeconds == 60)
+
+        // A sync pull merges a cross-device entry behind the visible screen.
+        let remoteStart = Date(timeIntervalSinceNow: -600)
+        try await store.mergeEntry(entry(
+            id: "remote", startedAt: remoteStart, text: "Remote",
+            durationSeconds: 30, endedAt: remoteStart.addingTimeInterval(30)))
+        // The guarded snapshot hides it — the stale-breakdown bug.
+        await vm.loadIfNeeded()
+        #expect(vm.breakdown(period: .all, lens: .activity).totalSeconds == 60)
+
+        // The view's sync observer runs invalidate + loadIfNeeded on cycle end.
+        vm.invalidate()
+        await vm.loadIfNeeded()
+        #expect(vm.breakdown(period: .all, lens: .activity).totalSeconds == 90)
+    }
+
     // MARK: - Helpers
 
     private static func date(_ iso: String, calendar: Calendar) -> Date {
