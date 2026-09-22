@@ -162,7 +162,7 @@ On every iteration (feature/fix PR) the author MUST:
 
 ## CI (Requirements S6)
 
-`.github/workflows/backend.yml` (Go: gofmt, go vet, golangci-lint, test + coverage) and `.github/workflows/ios.yml` (xcodegen, swiftlint, warning-as-error xcodebuild build, test) run on pull requests that touch their subsystem and on similarly path-filtered pushes to `main`. Both are **mandatory** PR checks when triggered — a PR is not mergeable until the applicable checks are green. See `docs/ci.md` for the full pipeline guide.
+`.github/workflows/backend.yml` (Go: gofmt, go vet, golangci-lint, test + coverage) and `.github/workflows/ios.yml` (xcodegen, swiftlint, warning-as-error xcodebuild build, test) run on pull requests that touch their subsystem and on similarly path-filtered pushes to `main`. Both are **mandatory** PR checks when triggered — a PR is not mergeable until the applicable checks are green. `.github/workflows/openspec.yml` additionally enforces `openspec validate --all --strict` on every PR. An **advisory** AI review (`ai-review.yml`) comments on every PR but never blocks — the two-stage review process (AI stage 1 → human stage 2) is defined in [`docs/review-process.md`](review-process.md). See `docs/ci.md` for the full pipeline guide.
 
 ## Deployment (S4)
 

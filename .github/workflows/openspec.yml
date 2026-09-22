@@ -1,0 +1,27 @@
+name: openspec
+# Spec-integrity gate for the spec-driven workflow (openspec/README.md).
+# Fails PRs that break OpenSpec structure or strict validation.
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: openspec-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+
+      - name: Install OpenSpec CLI
+        run: npm install -g @fission-ai/openspec@1.8.0
+
+      - name: Validate all specs and changes (strict)
+        run: openspec validate --all --strict --no-color
