@@ -936,6 +936,82 @@ struct SyncControllerTests {
         #expect(fetches.count == 1)
     }
 
+    // MARK: - Category-before-entry drain (fix-entry-category-sync)
+
+    @Test("drain pushes categories before entries even when the entry was queued first")
+    func drainPushesCategoriesBeforeEntries() async throws {
+        let (store, mock, controller) = makeContext()
+        // Entry queued first (no categories so it can exist before c1), then
+        // the category. Global created_at order would push the entry first;
+        // dependency ordering must push the category first.
+        try await store.createEntry(makeEntry(id: "e1", text: "Gym"))
+        try await store.createCategory(Category(id: "c1", name: "Sport", icon: "figure.run"))
+
+        controller.activate()
+        await waitForCycle(controller)
+
+        let categoryIndex = mock.calls.firstIndex { $0.method == "createCategory" }
+        let entryIndex = mock.calls.firstIndex { $0.method == "createEntry" }
+        #expect(categoryIndex != nil)
+        #expect(entryIndex != nil)
+        if let categoryIndex, let entryIndex {
+            #expect(categoryIndex < entryIndex)
+        }
+        #expect(isIdle(controller.status))
+        #expect(try await store.outboxRows().isEmpty)
+    }
+
+    @Test("entry push 422 on unknown category prunes and retries to idle")
+    func entryPushValidationHealsByPruning() async throws {
+        let (store, mock, controller) = makeContext()
+        try await store.mergeCategory(Category(id: "c-keep", name: "Sport", icon: "figure.run"))
+        try await store.mergeCategory(Category(id: "c-unknown", name: "Ghost", icon: "tag"))
+        try await store.createEntry(makeEntry(id: "e1", text: "Gym", categoryIDs: ["c-keep", "c-unknown"]))
+        // Relay knows only c-keep: the first push 422s, heal prunes c-unknown.
+        mock.categoriesResult = [Category(id: "c-keep", name: "Sport", icon: "figure.run")]
+        var pushed: [TimeEntry] = []
+        mock.createEntryHandler = { entry in
+            pushed.append(entry)
+            if entry.categoryIDs.contains("c-unknown") {
+                throw APIError.server(
+                    code: "validation_error", message: "Validation failed",
+                    details: ["category_ids": "One or more categories do not exist"]
+                )
+            }
+        }
+
+        controller.activate()
+        await waitForCycle(controller)
+
+        #expect(pushed.count == 2)
+        #expect(pushed.last?.categoryIDs == ["c-keep"])
+        #expect(try await store.outboxRows().isEmpty)
+        #expect(isIdle(controller.status))
+    }
+
+    @Test("entry push 422 with nothing to prune still fails loudly")
+    func entryPushValidationWithoutPruneFails() async throws {
+        let (store, mock, controller) = makeContext()
+        try await store.mergeCategory(Category(id: "c1", name: "Sport", icon: "figure.run"))
+        try await store.createEntry(makeEntry(id: "e1", text: "Gym", categoryIDs: ["c1"]))
+        mock.categoriesResult = [Category(id: "c1", name: "Sport", icon: "figure.run")]
+        mock.createEntryHandler = { _ in
+            throw APIError.server(
+                code: "validation_error", message: "Validation failed",
+                details: ["category_ids": "One or more categories do not exist"]
+            )
+        }
+
+        controller.activate()
+        await waitForCycle(controller)
+
+        guard case .error = controller.status else {
+            Issue.record("expected error status, got \(controller.status)")
+            return
+        }
+        #expect(!(try await store.outboxRows()).isEmpty)
+    }
+
     // MARK: - Helpers
 
     private func makeEntry(

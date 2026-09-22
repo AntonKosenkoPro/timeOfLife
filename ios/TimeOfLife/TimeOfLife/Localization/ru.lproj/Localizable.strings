@@ -84,14 +84,9 @@
 "profile.syncing" = "Синхронизация…";
 "profile.lastSynced" = "Синхронизировано: %@";
 "profile.syncError" = "Не удалось синхронизировать. Попробуйте снова.";
-"profile.library" = "Библиотека";
 "profile.categories" = "Категории";
-"profile.connections" = "Подключения";
-"profile.integrations" = "Интеграции";
-"profile.export" = "Экспорт";
-"profile.app" = "Приложение";
-"profile.appearance" = "Оформление";
-"profile.dataAndPrivacy" = "Данные и конфиденциальность";
+"profile.onDevice" = "На этом устройстве";
+"profile.onDeviceFooter" = "Категории и записи хранятся на этом устройстве. Синхронизация необязательна.";
 "profile.eraseLocalData" = "Стереть локальные данные";
 "profile.eraseLocalDataConfirmTitle" = "Стереть локальные данные?";
 "profile.eraseLocalDataConfirmMessage" = "Это навсегда удалит все категории, записи и ожидающие синхронизацию данные на этом устройстве.";

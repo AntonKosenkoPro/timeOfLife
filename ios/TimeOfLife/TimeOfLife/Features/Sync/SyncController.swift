@@ -276,13 +276,16 @@ final class SyncController: ObservableObject {
 
     // MARK: - Outbox drain (idempotent replay, D2)
 
-    /// Drains the outbox in `created_at` order, one HTTP request per row.
-    /// POST is idempotent on `id` and PATCH carries `updated_at` (LWW), so a
-    /// replay after a crash or relapse produces the same result as the first
-    /// attempt.
+    /// Drains the outbox in dependency order, one HTTP request per row.
+    /// `category` rows push before `entry` rows (`POST /entries` rejects
+    /// unknown `category_ids` with 422, so referenced categories must exist
+    /// on the relay first); `created_at, id` order is preserved within each
+    /// resource. POST is idempotent on `id` and PATCH carries `updated_at`
+    /// (LWW), so a replay after a crash or relapse produces the same result
+    /// as the first attempt.
     private func drainOutbox() async throws {
         let rows = try await store.outboxRows()
-        for queuedRow in rows {
+        for queuedRow in Self.orderedForDrain(rows) {
             // Conflict recovery can remove or rewrite a later row while this
             // drain is still iterating the initial snapshot. Always push the
             // current persisted payload rather than a stale in-memory copy.
@@ -301,27 +304,109 @@ final class SyncController: ObservableObject {
                 try await push(row)
                 try await store.removeOutboxRow(id: row.id)
             } catch let error as APIError {
-                switch error.code {
-                case "conflict", "category_exists", "duplicate_import":
-                    try await resolveConflict(row, code: error.code ?? "", details: error.details)
-                case "not_found":
-                    // 404 on DELETE → treat as success (already gone). A push
-                    // for a tombstone-less relay-missing record resurrects
-                    // from local data and retries once (see
-                    // resurrectAndRetry) instead of wedging the cycle on a
-                    // doomed retry; anything else still throws.
-                    if row.op == "delete" {
-                        try await store.removeOutboxRow(id: row.id)
-                    } else if try await resurrectAndRetry(row) {
-                        break
-                    } else {
-                        throw error
-                    }
-                default:
-                    throw error
+                if try await resolvePushError(row, error: error) {
+                    continue
                 }
+                throw error
             }
         }
+    }
+
+    /// Dependency order for the drain snapshot: `category` rows before
+    /// `entry` rows, `created_at, id` within each resource.
+    private static func orderedForDrain(_ rows: [OutboxRow]) -> [OutboxRow] {
+        rows.sorted { lhs, rhs in
+            let leftRank = drainRank(lhs.resource)
+            let rightRank = drainRank(rhs.resource)
+            if leftRank != rightRank { return leftRank < rightRank }
+            if lhs.createdAt != rhs.createdAt { return lhs.createdAt < rhs.createdAt }
+            return lhs.id < rhs.id
+        }
+    }
+
+    /// Resolves one failed push. Returns true when the row is resolved and
+    /// the drain may continue; false rethrows the original error loudly.
+    private func resolvePushError(_ row: OutboxRow, error: APIError) async throws -> Bool {
+        switch error.code {
+        case "conflict", "category_exists", "duplicate_import":
+            try await resolveConflict(row, code: error.code ?? "", details: error.details)
+            return true
+        case "not_found":
+            // 404 on DELETE → treat as success (already gone). A push
+            // for a tombstone-less relay-missing record resurrects
+            // from local data and retries once (see
+            // resurrectAndRetry) instead of wedging the cycle on a
+            // doomed retry; anything else still throws.
+            if row.op == "delete" {
+                try await store.removeOutboxRow(id: row.id)
+                return true
+            }
+            return try await resurrectAndRetry(row)
+        case "validation_error":
+            // 422 unknown `category_ids` on entry create/update →
+            // prune to the relay-known remainder and retry once (see
+            // healUnknownCategoryIDs). Anything else still throws.
+            guard error.details["category_ids"] != nil else { return false }
+            return try await healUnknownCategoryIDs(row)
+        default:
+            return false
+        }
+    }
+
+    /// Drain ordering rank: categories push before entries so `POST /entries`
+    /// never references a category the relay has not seen yet. Unknown
+    /// resources drain last so the push path still rejects them loudly.
+    private static func drainRank(_ resource: String) -> Int {
+        switch resource {
+        case "category":
+            return 0
+        case "entry":
+            return 1
+        default:
+            return 2
+        }
+    }
+
+    /// Recovers an entry create/update rejected with 422 `category_ids`:
+    /// fetches the relay categories, drops unknown ids from the queued
+    /// payload keeping the remainder (secret-free log), rewrites the outbox
+    /// payload, retries the push exactly once, and clears the row on success.
+    /// Returns whether the row was resolved (anything else rethrows loudly).
+    /// The following pull converges the local copy via LWW (the pruned server
+    /// version is newer), so local joins are left untouched here.
+    private func healUnknownCategoryIDs(_ row: OutboxRow) async throws -> Bool {
+        guard row.resource == "entry", row.op == "create" || row.op == "update" else {
+            return false
+        }
+        guard let current = try await store.outboxRow(id: row.id) else {
+            return true
+        }
+        let entry: TimeEntry
+        do {
+            entry = try decodePayload(current, as: TimeEntry.self)
+        } catch {
+            return false
+        }
+        guard !entry.categoryIDs.isEmpty else { return false }
+        let snapshot = try await remote.fetchCategories()
+        let knownIDs = Set(snapshot.map(\.id))
+        let prunedIDs = entry.categoryIDs.filter { knownIDs.contains($0) }
+        guard prunedIDs.count != entry.categoryIDs.count else {
+            return false
+        }
+        var pruned = entry
+        pruned.categoryIDs = prunedIDs
+        for id in entry.categoryIDs where !knownIDs.contains(id) {
+            Self.logger.info("sync drain prunes unknown category \(id, privacy: .public) from entry \(entry.id, privacy: .public)")
+        }
+        try await store.rewriteOutboxPayload(resource: row.resource, recordID: row.recordID, payload: pruned)
+        if row.op == "create" {
+            try await remote.createEntry(pruned)
+        } else {
+            try await remote.updateEntry(pruned)
+        }
+        try await store.removeOutboxRow(id: row.id)
+        return true
     }
 
     /// Pushes one outbox row to the relay.

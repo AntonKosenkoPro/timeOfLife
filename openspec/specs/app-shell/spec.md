@@ -25,7 +25,7 @@ The app SHALL provide Track, History, and Insights as its primary destinations, 
 - **THEN** the period breakdown with hero total is shown instead of the empty-state placeholder
 
 ### Requirement: Profile owns secondary destinations
-The app SHALL expose account, sync, category management, integrations, export, appearance, and destructive data controls from a profile destination rather than as a primary tab. Activity management SHALL NOT appear in Profile (no activity catalog exists). The Profile "Enable Sync" action SHALL first attempt a silent session restore; when the session is still signed out afterward, it SHALL present the auth flow (`AuthFlowView`) as a sheet framed as optional cross-device sync. The sheet SHALL dismiss on successful sign-in and offer an explicit Cancel close path; dismissing unsigned SHALL return to Profile with local data untouched.
+The app SHALL expose account, sync, category management, and destructive data controls from a profile destination rather than as a primary tab. The profile destination SHALL NOT expose integrations, export, appearance, or data-and-privacy placeholder rows. Activity management SHALL NOT appear in Profile (no activity catalog exists). The Profile "Enable Sync" action SHALL first attempt a silent session restore; when the session is still signed out afterward, it SHALL present the auth flow (`AuthFlowView`) as a sheet framed as optional cross-device sync. The sheet SHALL dismiss on successful sign-in and offer an explicit Cancel close path; dismissing unsigned SHALL return to Profile with local data untouched.
 
 #### Scenario: Open profile while signed out
 - **WHEN** a user without an account opens the profile destination
@@ -50,6 +50,10 @@ The app SHALL expose account, sync, category management, integrations, export, a
 #### Scenario: Dismiss the sheet unsigned
 - **WHEN** the user cancels the sheet without signing in
 - **THEN** Profile returns unsigned with local data and the outbox untouched
+
+#### Scenario: No placeholder rows
+- **WHEN** the user opens Profile in any auth state
+- **THEN** no Integrations, Export, Appearance, or Data & Privacy rows are shown, and every visible row is tappable or a live status
 ### Requirement: Running timer remains globally accessible
 The app SHALL keep an active timer visible and directly stoppable while History or Insights is selected. The compact timer SHALL float above the tab bar with a visible gap — never overlapping or touching it.
 
