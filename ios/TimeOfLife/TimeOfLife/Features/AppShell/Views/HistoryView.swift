@@ -12,15 +12,19 @@ import SwiftUI
 /// the scroll-tracking modifiers — the elevation-gated total depends on that
 /// scroll tracking. The list is read-only (no swipe actions), so `List`'s
 /// editing machinery is not needed.
+///
+/// Tapping an entry row opens the unified entry form directly as a
+/// full-screen cover (remove-activities-layer D6; entry-editor spec):
+/// editable for `manual` entries, read-only for imported ones. There is no
+/// activity detail sheet.
 struct HistoryView: View {
     @EnvironmentObject var container: AppContainer
-    @Environment(\.undoManager)
-    private var undoManager
     @StateObject private var vm: HistoryViewModel
     @State private var elevatedGroupID: String?
-    /// The activity whose detail sheet is presented (nil = none). Keyed on
-    /// the tapped entry's activity id (activity-detail-sheet spec).
-    @State private var detailActivityID: String?
+    /// The entry opened in the unified entry form (nil = none). EDIT mode
+    /// for `manual` entries, LOCKED mode for imported ones (entry-editor
+    /// spec, history D6).
+    @State private var editingEntry: TimeEntry?
     /// Presents the Log Time sheet (manual-entry spec). Owned by the shell
     /// so the [+] shares the nav-bar toolbar scope (iOS 15 renders a single
     /// scope reliably); the sheet and its refresh stay here.
@@ -62,12 +66,6 @@ struct HistoryView: View {
         // The load is guarded by `needsReload` inside the VM.
         .task { await vm.loadIfNeeded() }
         .onAppear { Task { await vm.loadIfNeeded() } }
-        .task { await vm.registerActivityUndo(with: undoManager) }
-        // Passive host for the system shake-to-undo (U7): the list has no
-        // editable text to hold focus, so without this shakes never reach
-        // the undo manager. Handles no motion itself — the system shows its
-        // default Undo prompt for the registered activity deletion.
-        .background(ShakeFirstResponderHost(undoManager: undoManager))
         // Entries can be saved on Track (or from the compact timer) while
         // History is off-screen; mark stale on leave so the next appear
         // reloads. Without this the `needsReload` guard serves the first
@@ -83,29 +81,17 @@ struct HistoryView: View {
                 Task { await vm.loadIfNeeded() }
             }
         }
-        .sheet(
-            item: Binding(
-                get: { detailActivityID.map(HistoryDetailTarget.init) },
-                set: { detailActivityID = $0?.activityID }
-            ),
+        // The unified entry form presents as a full-screen cover (D6):
+        // EDIT for manual entries, LOCKED for imported ones. Dismissal
+        // reloads the day groups (edits and deletes both land here).
+        .fullScreenCover(
+            item: $editingEntry,
             onDismiss: {
-                // Entries may have been edited or deleted (with undo) behind
-                // the detail sheet — reload so the day groups reflect it. An
-                // activity may have been deleted from the stacked editor, so
-                // re-register its system undo (the appear-time registration
-                // predates the deletion).
                 vm.invalidate()
-                Task {
-                    await vm.loadIfNeeded()
-                    await vm.registerActivityUndo(with: undoManager)
-                }
+                Task { await vm.loadIfNeeded() }
             },
-            content: { target in
-                ActivityDetailView(
-                    store: container.localStore,
-                    activityID: target.activityID,
-                    undoBuffer: container.undoBuffer
-                )
+            content: { entry in
+                LogTimeView(service: container.timerService, editing: entry)
                     .environmentObject(container)
             }
         )
@@ -127,10 +113,10 @@ struct HistoryView: View {
                                 viaText: vm.viaText(for: entry)
                             )
                             .padding(.horizontal, Theme.spacingMedium)
-                            // Tap → activity detail sheet (activity-detail-
-                            // sheet spec). No swipe/long-press actions.
+                            // Tap → unified entry form cover (history
+                            // D6). No swipe/long-press actions.
                             .contentShape(Rectangle())
-                            .onTapGesture { detailActivityID = entry.activityID }
+                            .onTapGesture { editingEntry = entry }
                             .accessibilityAddTraits(.isButton)
                         }
                     } header: {
@@ -202,13 +188,6 @@ struct HistoryView: View {
 }
 
 // MARK: - Scroll preferences
-
-/// Identifiable wrapper so the History tap can drive `.sheet(item:)` with a
-/// bare activity id.
-private struct HistoryDetailTarget: Identifiable {
-    let activityID: String
-    var id: String { activityID }
-}
 
 private struct HeaderFrame: Equatable {
     let groupID: String

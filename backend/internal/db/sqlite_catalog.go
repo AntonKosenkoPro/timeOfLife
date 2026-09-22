@@ -52,14 +52,6 @@ func fmtTimeArg(t *time.Time) any {
 	return t.UTC().Format("2006-01-02 15:04:05")
 }
 
-// nullStrArg turns an empty string into a NULL placeholder.
-func nullStrArg(s string) any {
-	if s == "" {
-		return nil
-	}
-	return s
-}
-
 // nullIntArg turns a nil *int into a NULL placeholder.
 func nullIntArg(n *int) any {
 	if n == nil {
@@ -71,22 +63,20 @@ func nullIntArg(n *int) any {
 // scanEntry scans one entry row (without user_id) into an Entry.
 func scanEntry(sc rowScanner, userID string) (Entry, error) {
 	var (
-		e          Entry
-		activityID sql.NullString
-		startedAt  string
-		endedAt    sql.NullString
-		dur        sql.NullInt64
-		sourceRef  sql.NullString
-		createdAt  string
-		updatedAt  string
+		e         Entry
+		startedAt string
+		endedAt   sql.NullString
+		dur       sql.NullInt64
+		sourceRef sql.NullString
+		notes     sql.NullString
+		createdAt string
+		updatedAt string
 	)
-	if err := sc.Scan(&e.ID, &activityID, &startedAt, &endedAt, &dur, &sourceRef, &e.Source, &createdAt, &updatedAt); err != nil {
+	if err := sc.Scan(&e.ID, &e.ActivityText, &notes, &startedAt, &endedAt, &dur, &sourceRef, &e.Source, &createdAt, &updatedAt); err != nil {
 		return Entry{}, err
 	}
 	e.UserID = userID
-	if activityID.Valid && activityID.String != "" {
-		e.ActivityID = &activityID.String
-	}
+	e.Notes = notes.String
 	e.StartedAt = parseTime(startedAt)
 	e.EndedAt = nullTimePtr(endedAt)
 	e.DurationSeconds = nullIntPtr(dur)
@@ -98,484 +88,60 @@ func scanEntry(sc rowScanner, userID string) (Entry, error) {
 	return e, nil
 }
 
-const entryColumns = `id, activity_id, started_at, ended_at, duration_seconds, source_ref, source, created_at, updated_at`
+const entryColumns = `id, activity_text, notes, started_at, ended_at, duration_seconds, source_ref, source, created_at, updated_at`
 
-// listActivityTagsBatch returns category tags keyed by activity_id for the
-// given activities (entries reuse this by their activity_id).
-func (s *SQLiteStore) listActivityTagsBatch(ctx context.Context, userID string, activityIDs []string) (map[string][]CategoryTag, error) {
+// listEntryTagsBatch returns category tags keyed by entry_id, position order
+// preserved (the entry's own snapshot — no query-time resolution).
+func (s *SQLiteStore) listEntryTagsBatch(ctx context.Context, userID string, entryIDs []string) (map[string][]CategoryTag, error) {
 	out := map[string][]CategoryTag{}
-	if len(activityIDs) == 0 {
+	if len(entryIDs) == 0 {
 		return out, nil
 	}
-	placeholders := strings.Repeat("?,", len(activityIDs))
+	placeholders := strings.Repeat("?,", len(entryIDs))
 	placeholders = placeholders[:len(placeholders)-1]
-	args := make([]any, 0, len(activityIDs)+1)
+	args := make([]any, 0, len(entryIDs)+1)
 	args = append(args, userID)
-	for _, id := range activityIDs {
+	for _, id := range entryIDs {
 		args = append(args, id)
 	}
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT ac.activity_id, c.id, c.name, c.icon
-		FROM activity_categories ac
-		JOIN categories c ON c.id = ac.category_id
-		WHERE c.user_id = ? AND ac.activity_id IN (`+placeholders+`)
-		ORDER BY ac.position, c.name
+		SELECT ec.entry_id, c.id, c.name, c.icon
+		FROM entry_categories ec
+		JOIN categories c ON c.id = ec.category_id
+		WHERE c.user_id = ? AND ec.entry_id IN (`+placeholders+`)
+		ORDER BY ec.position, c.name
 	`, args...)
 	if err != nil {
-		return nil, fmt.Errorf("list activity tags: %w", err)
+		return nil, fmt.Errorf("list entry tags: %w", err)
 	}
 	defer func() { _ = rows.Close() }()
 	for rows.Next() {
-		var activityID string
+		var entryID string
 		var t CategoryTag
-		if err := rows.Scan(&activityID, &t.ID, &t.Name, &t.Icon); err != nil {
-			return nil, fmt.Errorf("list activity tags scan: %w", err)
+		if err := rows.Scan(&entryID, &t.ID, &t.Name, &t.Icon); err != nil {
+			return nil, fmt.Errorf("list entry tags scan: %w", err)
 		}
-		out[activityID] = append(out[activityID], t)
+		out[entryID] = append(out[entryID], t)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("list activity tags rows: %w", err)
+		return nil, fmt.Errorf("list entry tags rows: %w", err)
 	}
 	return out, nil
 }
 
-// attachEntryActivity populates Categories (inferred from each entry's
-// activity's tags) and ActivityName (the activity's current name) on each entry
-// via two batched queries keyed by activity_id.
-func (s *SQLiteStore) attachEntryActivity(ctx context.Context, userID string, items []Entry) error {
-	activityIDs := make([]string, 0, len(items))
+// attachEntryTags populates Categories (the entry's own ordered tags) on each
+// entry via one batched query keyed by entry_id.
+func (s *SQLiteStore) attachEntryTags(ctx context.Context, userID string, items []Entry) error {
+	entryIDs := make([]string, 0, len(items))
 	for _, e := range items {
-		if e.ActivityID != nil {
-			activityIDs = append(activityIDs, *e.ActivityID)
-		}
+		entryIDs = append(entryIDs, e.ID)
 	}
-	tagsByActivity, err := s.listActivityTagsBatch(ctx, userID, activityIDs)
-	if err != nil {
-		return err
-	}
-	namesByActivity, err := s.listActivityNamesBatch(ctx, activityIDs)
+	tagsByEntry, err := s.listEntryTagsBatch(ctx, userID, entryIDs)
 	if err != nil {
 		return err
 	}
 	for i := range items {
-		if items[i].ActivityID != nil {
-			items[i].Categories = ensureCategories(tagsByActivity[*items[i].ActivityID])
-			items[i].ActivityName = namesByActivity[*items[i].ActivityID]
-		}
-	}
-	return nil
-}
-
-// listActivityNamesBatch returns activity names keyed by activity_id.
-func (s *SQLiteStore) listActivityNamesBatch(ctx context.Context, activityIDs []string) (map[string]string, error) {
-	out := map[string]string{}
-	if len(activityIDs) == 0 {
-		return out, nil
-	}
-	placeholders := strings.Repeat("?,", len(activityIDs))
-	placeholders = placeholders[:len(placeholders)-1]
-	args := make([]any, 0, len(activityIDs))
-	for _, id := range activityIDs {
-		args = append(args, id)
-	}
-	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, name
-		FROM activities
-		WHERE id IN (`+placeholders+`)
-	`, args...)
-	if err != nil {
-		return nil, fmt.Errorf("list activity names: %w", err)
-	}
-	defer func() { _ = rows.Close() }()
-	for rows.Next() {
-		var id, name string
-		if err := rows.Scan(&id, &name); err != nil {
-			return nil, fmt.Errorf("list activity names scan: %w", err)
-		}
-		out[id] = name
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("list activity names rows: %w", err)
-	}
-	return out, nil
-}
-
-// ---------- Activities ----------
-
-// ListActivities returns the user's activities ordered by last_used_at DESC.
-func (s *SQLiteStore) ListActivities(ctx context.Context, userID, q string, modifiedSince *time.Time) ([]Activity, error) {
-	var rows *sql.Rows
-	var err error
-	if q != "" {
-		rows, err = s.db.QueryContext(ctx, `
-			SELECT id, name, notes, last_used_at, created_at, updated_at
-			FROM activities
-			WHERE user_id = ? AND lower(name) LIKE ? AND (? IS NULL OR updated_at > ?)
-			ORDER BY (last_used_at IS NULL), last_used_at DESC, updated_at DESC
-		`, userID, "%"+strings.ToLower(q)+"%", fmtTimeArg(modifiedSince), fmtTimeArg(modifiedSince))
-	} else {
-		rows, err = s.db.QueryContext(ctx, `
-			SELECT id, name, notes, last_used_at, created_at, updated_at
-			FROM activities
-			WHERE user_id = ? AND (? IS NULL OR updated_at > ?)
-			ORDER BY (last_used_at IS NULL), last_used_at DESC, updated_at DESC
-		`, userID, fmtTimeArg(modifiedSince), fmtTimeArg(modifiedSince))
-	}
-	if err != nil {
-		return nil, fmt.Errorf("list activities: %w", err)
-	}
-	defer func() { _ = rows.Close() }()
-
-	var out []Activity
-	ids := make([]string, 0)
-	for rows.Next() {
-		var a Activity
-		var notes sql.NullString
-		var lastUsed sql.NullString
-		var createdAt, updatedAt string
-		if err := rows.Scan(&a.ID, &a.Name, &notes, &lastUsed, &createdAt, &updatedAt); err != nil {
-			return nil, fmt.Errorf("list activities scan: %w", err)
-		}
-		a.UserID = userID
-		a.Notes = notes.String
-		a.LastUsedAt = nullTimePtr(lastUsed)
-		a.CreatedAt = parseTime(createdAt)
-		a.UpdatedAt = parseTime(updatedAt)
-		out = append(out, a)
-		ids = append(ids, a.ID)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("list activities rows: %w", err)
-	}
-	tags, err := s.listActivityTagsBatch(ctx, userID, ids)
-	if err != nil {
-		return nil, err
-	}
-	for i := range out {
-		out[i].Categories = ensureCategories(tags[out[i].ID])
-	}
-	return out, nil
-}
-
-// GetActivity returns one activity by id with its category tags.
-func (s *SQLiteStore) GetActivity(ctx context.Context, userID, id string) (Activity, error) {
-	a, err := s.getActivityRow(ctx, userID, id)
-	if err != nil {
-		return Activity{}, err
-	}
-	tags, err := s.listActivityTagsBatch(ctx, userID, []string{a.ID})
-	if err != nil {
-		return Activity{}, err
-	}
-	a.Categories = ensureCategories(tags[a.ID])
-	return a, nil
-}
-
-// getActivityRow returns one activity row (no tags).
-func (s *SQLiteStore) getActivityRow(ctx context.Context, userID, id string) (Activity, error) {
-	var a Activity
-	var notes sql.NullString
-	var lastUsed sql.NullString
-	var createdAt, updatedAt string
-	err := s.db.QueryRowContext(ctx, `
-		SELECT id, name, notes, last_used_at, created_at, updated_at
-		FROM activities
-		WHERE user_id = ? AND id = ?
-	`, userID, id).Scan(&a.ID, &a.Name, &notes, &lastUsed, &createdAt, &updatedAt)
-	if err != nil {
-		if err == sql.ErrNoRows {
-			return Activity{}, fmt.Errorf("get activity: %w", ErrNotFound)
-		}
-		return Activity{}, fmt.Errorf("get activity: %w", err)
-	}
-	a.UserID = userID
-	a.Notes = notes.String
-	a.LastUsedAt = nullTimePtr(lastUsed)
-	a.CreatedAt = parseTime(createdAt)
-	a.UpdatedAt = parseTime(updatedAt)
-	return a, nil
-}
-
-// getActivityRowByName returns one activity row (no tags) by case-insensitive name.
-func (s *SQLiteStore) getActivityRowByName(ctx context.Context, userID, name string) (Activity, error) {
-	var a Activity
-	var notes sql.NullString
-	var lastUsed sql.NullString
-	var createdAt, updatedAt string
-	err := s.db.QueryRowContext(ctx, `
-		SELECT id, name, notes, last_used_at, created_at, updated_at
-		FROM activities
-		WHERE user_id = ? AND lower(name) = lower(?)
-	`, userID, name).Scan(&a.ID, &a.Name, &notes, &lastUsed, &createdAt, &updatedAt)
-	if err != nil {
-		if err == sql.ErrNoRows {
-			return Activity{}, fmt.Errorf("get activity by name: %w", ErrNotFound)
-		}
-		return Activity{}, fmt.Errorf("get activity by name: %w", err)
-	}
-	a.UserID = userID
-	a.Notes = notes.String
-	a.LastUsedAt = nullTimePtr(lastUsed)
-	a.CreatedAt = parseTime(createdAt)
-	a.UpdatedAt = parseTime(updatedAt)
-	return a, nil
-}
-
-// getActivityRowTx returns one activity row (no tags) by id on a tx.
-func (s *SQLiteStore) getActivityRowTx(ctx context.Context, tx *sql.Tx, userID, id string) (Activity, error) {
-	var a Activity
-	var notes sql.NullString
-	var lastUsed sql.NullString
-	var createdAt, updatedAt string
-	err := tx.QueryRowContext(ctx, `
-		SELECT id, name, notes, last_used_at, created_at, updated_at
-		FROM activities
-		WHERE user_id = ? AND id = ?
-	`, userID, id).Scan(&a.ID, &a.Name, &notes, &lastUsed, &createdAt, &updatedAt)
-	if err != nil {
-		if err == sql.ErrNoRows {
-			return Activity{}, fmt.Errorf("get activity: %w", ErrNotFound)
-		}
-		return Activity{}, fmt.Errorf("get activity: %w", err)
-	}
-	a.UserID = userID
-	a.Notes = notes.String
-	a.LastUsedAt = nullTimePtr(lastUsed)
-	a.CreatedAt = parseTime(createdAt)
-	a.UpdatedAt = parseTime(updatedAt)
-	return a, nil
-}
-
-// getActivityRowByNameTx returns one activity row (no tags) by case-insensitive
-// name on a tx (used inside held transactions to avoid pool deadlock).
-func (s *SQLiteStore) getActivityRowByNameTx(ctx context.Context, tx *sql.Tx, userID, name string) (Activity, error) {
-	var a Activity
-	var notes sql.NullString
-	var lastUsed sql.NullString
-	var createdAt, updatedAt string
-	err := tx.QueryRowContext(ctx, `
-		SELECT id, name, notes, last_used_at, created_at, updated_at
-		FROM activities
-		WHERE user_id = ? AND lower(name) = lower(?)
-	`, userID, name).Scan(&a.ID, &a.Name, &notes, &lastUsed, &createdAt, &updatedAt)
-	if err != nil {
-		if err == sql.ErrNoRows {
-			return Activity{}, fmt.Errorf("get activity by name: %w", ErrNotFound)
-		}
-		return Activity{}, fmt.Errorf("get activity by name: %w", err)
-	}
-	a.UserID = userID
-	a.Notes = notes.String
-	a.LastUsedAt = nullTimePtr(lastUsed)
-	a.CreatedAt = parseTime(createdAt)
-	a.UpdatedAt = parseTime(updatedAt)
-	return a, nil
-}
-
-// CreateActivity inserts a new activity, idempotent on id.
-func (s *SQLiteStore) CreateActivity(ctx context.Context, a Activity, categoryIDs []string) (Activity, bool, error) {
-	// Idempotent replay on id.
-	if existing, err := s.getActivityRow(ctx, a.UserID, a.ID); err == nil {
-		tags, err := s.listActivityTagsBatch(ctx, a.UserID, []string{existing.ID})
-		if err != nil {
-			return Activity{}, false, err
-		}
-		existing.Categories = ensureCategories(tags[existing.ID])
-		return existing, false, nil
-	} else if !errors.Is(err, ErrNotFound) {
-		return Activity{}, false, err
-	}
-	// Case-insensitive name collision.
-	if clash, err := s.getActivityRowByName(ctx, a.UserID, a.Name); err == nil {
-		tags, err := s.listActivityTagsBatch(ctx, a.UserID, []string{clash.ID})
-		if err != nil {
-			return Activity{}, false, err
-		}
-		clash.Categories = ensureCategories(tags[clash.ID])
-		return clash, false, ErrActivityExists
-	} else if !errors.Is(err, ErrNotFound) {
-		return Activity{}, false, err
-	}
-
-	now := time.Now().UTC()
-	// The activity row, the join replacement, and the validation of every
-	// referenced category share one transaction: a failed association
-	// replacement leaves no partial activity mutation (category-management
-	// D5).
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return Activity{}, false, fmt.Errorf("create activity begin: %w", err)
-	}
-	defer func() { _ = tx.Rollback() }()
-
-	if _, err := tx.ExecContext(ctx, `
-		INSERT INTO activities (id, user_id, name, notes, last_used_at, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?)
-	`, a.ID, a.UserID, a.Name, nullStrArg(a.Notes), fmtTimeArg(a.LastUsedAt), fmtTime(now), fmtTime(now)); err != nil {
-		// A concurrent create that raced past the name pre-check surfaces as a
-		// UNIQUE-constraint failure on the INSERT; map it to ErrActivityExists
-		// (409) like the Postgres path, not a raw 500. The lookup runs on the
-		// tx itself — the pool has a single connection and would deadlock.
-		if isUniqueViolation(err) {
-			if clash, err2 := s.getActivityRowByNameTx(ctx, tx, a.UserID, a.Name); err2 == nil {
-				return clash, false, fmt.Errorf("create activity: %w", ErrActivityExists)
-			}
-			return Activity{}, false, fmt.Errorf("create activity: %w", ErrActivityExists)
-		}
-		return Activity{}, false, fmt.Errorf("create activity: %w", err)
-	}
-	if err := s.replaceActivityCategoriesTx(ctx, tx, a.UserID, a.ID, categoryIDs); err != nil {
-		return Activity{}, false, err
-	}
-	// A recreation clears its stale tombstone (harmless when none exists).
-	if _, err := tx.ExecContext(ctx, `
-		DELETE FROM tombstones WHERE user_id = ? AND resource = 'activity' AND record_id = ?
-	`, a.UserID, a.ID); err != nil {
-		return Activity{}, false, fmt.Errorf("clear activity tombstone: %w", err)
-	}
-	if err := tx.Commit(); err != nil {
-		return Activity{}, false, fmt.Errorf("create activity commit: %w", err)
-	}
-	created, err := s.GetActivity(ctx, a.UserID, a.ID)
-	if err != nil {
-		return Activity{}, false, err
-	}
-	return created, true, nil
-}
-
-// UpdateActivity applies a partial LWW update and optional tag replacement.
-func (s *SQLiteStore) UpdateActivity(ctx context.Context, userID, id string, p ActivityPatch) (Activity, error) {
-	sets := []string{}
-	args := []any{}
-	if p.Name != nil {
-		sets = append(sets, "name = ?")
-		args = append(args, *p.Name)
-	}
-	if p.Notes != nil {
-		sets = append(sets, "notes = ?")
-		args = append(args, nullStrArg(*p.Notes))
-	}
-	sets = append(sets, "updated_at = ?")
-	args = append(args, fmtTime(p.UpdatedAt))
-
-	args = append(args, id, userID, fmtTime(p.UpdatedAt))
-	query := `
-		UPDATE activities SET ` + strings.Join(sets, ", ") + `
-		WHERE id = ? AND user_id = ? AND updated_at < ?
-	`
-	// The field update and the join replacement share one transaction: a
-	// failed category validation rolls back the field changes too
-	// (category-management D5).
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return Activity{}, fmt.Errorf("update activity begin: %w", err)
-	}
-	defer func() { _ = tx.Rollback() }()
-
-	res, err := tx.ExecContext(ctx, query, args...)
-	if err != nil {
-		// Unique (user_id, lower(name)) collision → ErrActivityExists. The
-		// lookup runs on the tx itself — the pool has a single connection
-		// and would deadlock.
-		if p.Name != nil && isUniqueViolation(err) {
-			if clash, err2 := s.getActivityRowByNameTx(ctx, tx, userID, *p.Name); err2 == nil {
-				return clash, fmt.Errorf("update activity: %w", ErrActivityExists)
-			}
-			return Activity{}, fmt.Errorf("update activity: %w", ErrActivityExists)
-		}
-		return Activity{}, fmt.Errorf("update activity: %w", err)
-	}
-	affected, err := res.RowsAffected()
-	if err != nil {
-		return Activity{}, fmt.Errorf("update activity rows: %w", err)
-	}
-	if affected == 0 {
-		// Not found or stale; distinguish (on the tx to avoid pool deadlock).
-		if _, err := s.getActivityRowTx(ctx, tx, userID, id); errors.Is(err, ErrNotFound) {
-			return Activity{}, fmt.Errorf("update activity: %w", ErrNotFound)
-		} else if err != nil {
-			return Activity{}, err
-		}
-		// Stale write: roll back first so the single pool connection is
-		// released before re-reading the current version.
-		if err := tx.Rollback(); err != nil {
-			return Activity{}, fmt.Errorf("update activity rollback: %w", err)
-		}
-		current, err := s.GetActivity(ctx, userID, id)
-		if err != nil {
-			return Activity{}, err
-		}
-		return current, fmt.Errorf("update activity: %w", ErrConflict)
-	}
-
-	if p.CategoryIDs != nil {
-		if err := s.replaceActivityCategoriesTx(ctx, tx, userID, id, *p.CategoryIDs); err != nil {
-			return Activity{}, err
-		}
-	}
-	if err := tx.Commit(); err != nil {
-		return Activity{}, fmt.Errorf("update activity commit: %w", err)
-	}
-	return s.GetActivity(ctx, userID, id)
-}
-
-// replaceActivityCategoriesTx validates ownership, then atomically replaces an
-// activity's join rows within the caller's transaction. An invalid
-// category_id aborts the caller's whole mutation (category-management D5).
-func (s *SQLiteStore) replaceActivityCategoriesTx(ctx context.Context, tx *sql.Tx, userID, activityID string, orderedIDs []string) error {
-	if _, err := tx.ExecContext(ctx, `DELETE FROM activity_categories WHERE activity_id = ?`, activityID); err != nil {
-		return fmt.Errorf("replace activity categories delete: %w", err)
-	}
-	seen := map[string]bool{}
-	for i, cid := range orderedIDs {
-		if cid == "" || seen[cid] {
-			continue
-		}
-		seen[cid] = true
-		var exists int
-		if err := tx.QueryRowContext(ctx, `SELECT 1 FROM categories WHERE id = ? AND user_id = ?`, cid, userID).Scan(&exists); err != nil {
-			if err == sql.ErrNoRows {
-				return fmt.Errorf("replace activity categories: %w", ErrInvalidCategoryID)
-			}
-			return fmt.Errorf("replace activity categories check: %w", err)
-		}
-		if _, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO activity_categories (activity_id, category_id, position) VALUES (?, ?, ?)`, activityID, cid, i); err != nil {
-			return fmt.Errorf("replace activity categories insert: %w", err)
-		}
-	}
-	return nil
-}
-
-// DeleteActivity hard-deletes an activity and its child rows.
-func (s *SQLiteStore) DeleteActivity(ctx context.Context, userID, id string) error {
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("delete activity begin: %w", err)
-	}
-	defer func() { _ = tx.Rollback() }()
-
-	if _, err := tx.ExecContext(ctx, `DELETE FROM entries WHERE activity_id = ? AND user_id = ?`, id, userID); err != nil {
-		return fmt.Errorf("delete activity entries: %w", err)
-	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM activity_categories WHERE activity_id = ?`, id); err != nil {
-		return fmt.Errorf("delete activity tags: %w", err)
-	}
-	res, err := tx.ExecContext(ctx, `DELETE FROM activities WHERE id = ? AND user_id = ?`, id, userID)
-	if err != nil {
-		return fmt.Errorf("delete activity: %w", err)
-	}
-	affected, err := res.RowsAffected()
-	if err != nil {
-		return fmt.Errorf("delete activity rows: %w", err)
-	}
-	if affected == 0 {
-		return fmt.Errorf("delete activity: %w", ErrNotFound)
-	}
-	if err := upsertTombstone(ctx, tx, userID, "activity", id); err != nil {
-		return err
-	}
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("delete activity commit: %w", err)
+		items[i].Categories = ensureCategories(tagsByEntry[items[i].ID])
 	}
 	return nil
 }
@@ -743,15 +309,16 @@ func (s *SQLiteStore) UpdateCategory(ctx context.Context, userID, id string, c C
 	return s.getCategoryRow(ctx, userID, id)
 }
 
-// DeleteCategory hard-deletes a category and its join rows (entries unaffected).
+// DeleteCategory hard-deletes a category and its entry join rows (entries are
+// unaffected — their text, notes, and timings stay intact).
 func (s *SQLiteStore) DeleteCategory(ctx context.Context, userID, id string) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("delete category begin: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	if _, err := tx.ExecContext(ctx, `DELETE FROM activity_categories WHERE category_id = ?`, id); err != nil {
-		return fmt.Errorf("delete category tags: %w", err)
+	if _, err := tx.ExecContext(ctx, `DELETE FROM entry_categories WHERE category_id = ?`, id); err != nil {
+		return fmt.Errorf("delete category joins: %w", err)
 	}
 	res, err := tx.ExecContext(ctx, `DELETE FROM categories WHERE id = ? AND user_id = ?`, id, userID)
 	if err != nil {
@@ -787,12 +354,8 @@ func (s *SQLiteStore) ListEntries(ctx context.Context, userID string, f EntryFil
 		conds = append(conds, "started_at <= ?")
 		args = append(args, fmtTime(*f.To))
 	}
-	if f.ActivityID != "" {
-		conds = append(conds, "activity_id = ?")
-		args = append(args, f.ActivityID)
-	}
 	if f.CategoryID != "" {
-		conds = append(conds, "activity_id IN (SELECT activity_id FROM activity_categories WHERE category_id = ?)")
+		conds = append(conds, "id IN (SELECT entry_id FROM entry_categories WHERE category_id = ?)")
 		args = append(args, f.CategoryID)
 	}
 	if f.ModifiedSince != nil {
@@ -834,13 +397,55 @@ func (s *SQLiteStore) ListEntries(ctx context.Context, userID string, f EntryFil
 		nextCursor = encodeCursor(last.StartedAt, last.ID)
 		items = items[:limit]
 	}
-	if err := s.attachEntryActivity(ctx, userID, items); err != nil {
+	if err := s.attachEntryTags(ctx, userID, items); err != nil {
 		return nil, "", err
 	}
 	return items, nextCursor, nil
 }
 
-// GetEntry returns one entry by id with its categories.
+// ListRecents implements the recents experience (design D5): entries grouped
+// by exact activity_text, per group the newest started_at wins (id DESC as a
+// stable tiebreak), ordered by that newest started_at DESC, LIMIT n. The
+// winning entry carries the group's categories.
+func (s *SQLiteStore) ListRecents(ctx context.Context, userID string, limit int) ([]Entry, error) {
+	if limit <= 0 {
+		limit = 6
+	}
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT `+entryColumns+`
+		FROM entries e
+		WHERE e.user_id = ? AND e.activity_text != ''
+		  AND e.id = (
+			SELECT e2.id FROM entries e2
+			WHERE e2.user_id = e.user_id AND e2.activity_text = e.activity_text
+			ORDER BY e2.started_at DESC, e2.id DESC
+			LIMIT 1
+		  )
+		ORDER BY e.started_at DESC, e.id DESC
+		LIMIT ?
+	`, userID, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list recents: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	items := []Entry{}
+	for rows.Next() {
+		e, err := scanEntry(rows, userID)
+		if err != nil {
+			return nil, fmt.Errorf("list recents scan: %w", err)
+		}
+		items = append(items, e)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list recents rows: %w", err)
+	}
+	if err := s.attachEntryTags(ctx, userID, items); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+// GetEntry returns one entry by id with its own ordered categories.
 func (s *SQLiteStore) GetEntry(ctx context.Context, userID, id string) (Entry, error) {
 	row := s.db.QueryRowContext(ctx, `
 		SELECT `+entryColumns+`
@@ -855,7 +460,7 @@ func (s *SQLiteStore) GetEntry(ctx context.Context, userID, id string) (Entry, e
 		return Entry{}, fmt.Errorf("get entry: %w", err)
 	}
 	items := []Entry{e}
-	if err := s.attachEntryActivity(ctx, userID, items); err != nil {
+	if err := s.attachEntryTags(ctx, userID, items); err != nil {
 		return Entry{}, err
 	}
 	return items[0], nil
@@ -883,7 +488,7 @@ func (s *SQLiteStore) CreateEntry(ctx context.Context, e Entry) (Entry, bool, er
 	// Idempotent replay on id.
 	if existing, err := s.getEntryRow(ctx, e.UserID, e.ID); err == nil {
 		items := []Entry{existing}
-		if err := s.attachEntryActivity(ctx, e.UserID, items); err != nil {
+		if err := s.attachEntryTags(ctx, e.UserID, items); err != nil {
 			return Entry{}, false, err
 		}
 		return items[0], false, nil
@@ -891,24 +496,17 @@ func (s *SQLiteStore) CreateEntry(ctx context.Context, e Entry) (Entry, bool, er
 		return Entry{}, false, err
 	}
 
-	// An entry must reference one of the user's activities. The handler
-	// enforces a non-nil activity_id; this also guards direct store calls.
-	if e.ActivityID == nil {
-		return Entry{}, false, fmt.Errorf("create entry: %w", ErrActivityNotFound)
+	// Trim is part of the identity rule (D1): the stored value is the trimmed
+	// text, byte-exact in case (`Gym` ≠ `GYM`). Empty after trim → rejected.
+	e.ActivityText = strings.TrimSpace(e.ActivityText)
+	if e.ActivityText == "" {
+		return Entry{}, false, fmt.Errorf("create entry: %w", ErrInvalidEntryText)
 	}
-	if _, err := s.getActivityRow(ctx, e.UserID, *e.ActivityID); err != nil {
-		if errors.Is(err, ErrNotFound) {
-			return Entry{}, false, fmt.Errorf("create entry: %w", ErrActivityNotFound)
-		}
-		return Entry{}, false, err
-	}
-
 	// Reject ended_at <= started_at (the handler validates the both-present
 	// case; this also guards direct store calls and a stray zero-time ended_at).
 	if e.EndedAt != nil && !e.EndedAt.After(e.StartedAt) {
 		return Entry{}, false, fmt.Errorf("create entry: %w", ErrEndBeforeStart)
 	}
-
 	// Compute duration when ended.
 	var dur *int
 	if e.EndedAt != nil {
@@ -929,9 +527,9 @@ func (s *SQLiteStore) CreateEntry(ctx context.Context, e Entry) (Entry, bool, er
 	defer func() { _ = tx.Rollback() }()
 
 	if _, err := tx.ExecContext(ctx, `
-		INSERT INTO entries (id, user_id, activity_id, started_at, ended_at, duration_seconds, source, source_ref, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`, e.ID, e.UserID, strPtrArg(e.ActivityID), fmtTime(e.StartedAt), fmtTimeArg(e.EndedAt), nullIntArg(dur), source, strPtrArg(e.SourceRef), fmtTime(now), fmtTime(now)); err != nil {
+		INSERT INTO entries (id, user_id, activity_text, notes, started_at, ended_at, duration_seconds, source, source_ref, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, e.ID, e.UserID, e.ActivityText, e.Notes, fmtTime(e.StartedAt), fmtTimeArg(e.EndedAt), nullIntArg(dur), source, strPtrArg(e.SourceRef), fmtTime(now), fmtTime(now)); err != nil {
 		// A duplicate import (same user_id, source, source_ref) surfaces as a
 		// UNIQUE-constraint failure on the partial index; map it to a clear
 		// error rather than a raw 500.
@@ -940,14 +538,11 @@ func (s *SQLiteStore) CreateEntry(ctx context.Context, e Entry) (Entry, bool, er
 		}
 		return Entry{}, false, fmt.Errorf("create entry: %w", err)
 	}
-	// Bump the activity's last_used_at to the entry's started_at (recency for
-	// suggestions, F5). Only advance it forward so a historical entry does not
-	// regress recency. Skipped on idempotent replay (which returns above).
-	if _, err := tx.ExecContext(ctx, `
-		UPDATE activities SET last_used_at = ?
-		WHERE id = ? AND user_id = ? AND (last_used_at IS NULL OR ? > last_used_at)
-	`, fmtTime(e.StartedAt), *e.ActivityID, e.UserID, fmtTime(e.StartedAt)); err != nil {
-		return Entry{}, false, fmt.Errorf("bump activity last_used_at: %w", err)
+	if err := s.strictEntryCategoriesTx(ctx, tx, e.UserID, e.Categories); err != nil {
+		return Entry{}, false, err
+	}
+	if err := s.replaceEntryCategoriesTx(ctx, tx, e.UserID, e.ID, e.Categories); err != nil {
+		return Entry{}, false, err
 	}
 	// A recreation clears its stale tombstone (harmless when none exists).
 	if _, err := tx.ExecContext(ctx, `
@@ -974,6 +569,8 @@ func strPtrArg(s *string) any {
 }
 
 // UpdateEntry applies a partial LWW update and recomputes duration_seconds.
+// CategoryIDs non-nil replaces the entry's ordered tags; unknown or non-owned
+// ids are pruned with the remainder kept (never fails the cycle — D7).
 func (s *SQLiteStore) UpdateEntry(ctx context.Context, userID, id string, p EntryPatch) (Entry, error) {
 	// Fetch current to recompute duration when only one of started_at/ended_at changed.
 	current, err := s.getEntryRow(ctx, userID, id)
@@ -1007,6 +604,18 @@ func (s *SQLiteStore) UpdateEntry(ctx context.Context, userID, id string, p Entr
 
 	sets := []string{"duration_seconds = ?", "updated_at = ?"}
 	args := []any{nullIntArg(dur), fmtTime(p.UpdatedAt)}
+	if p.ActivityText != nil {
+		text := strings.TrimSpace(*p.ActivityText)
+		if text == "" {
+			return Entry{}, fmt.Errorf("update entry: %w", ErrInvalidEntryText)
+		}
+		sets = append([]string{"activity_text = ?"}, sets...)
+		args = append([]any{text}, args...)
+	}
+	if p.Notes != nil {
+		sets = append([]string{"notes = ?"}, sets...)
+		args = append([]any{*p.Notes}, args...)
+	}
 	if p.StartedAt != nil {
 		sets = append([]string{"started_at = ?"}, sets...)
 		args = append([]any{fmtTime(*p.StartedAt)}, args...)
@@ -1016,7 +625,17 @@ func (s *SQLiteStore) UpdateEntry(ctx context.Context, userID, id string, p Entr
 		args = append([]any{fmtTimeArg(endedAt)}, args...)
 	}
 	args = append(args, id, userID, fmtTime(p.UpdatedAt))
-	res, err := s.db.ExecContext(ctx, `
+
+	// The field update and the join replacement share one transaction: a
+	// failed join write rolls back the field changes too (no partial entry
+	// state ever survives).
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return Entry{}, fmt.Errorf("update entry begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	res, err := tx.ExecContext(ctx, `
 		UPDATE entries SET `+strings.Join(sets, ", ")+`
 		WHERE id = ? AND user_id = ? AND updated_at < ?
 	`, args...)
@@ -1028,17 +647,86 @@ func (s *SQLiteStore) UpdateEntry(ctx context.Context, userID, id string, p Entr
 		return Entry{}, fmt.Errorf("update entry rows: %w", err)
 	}
 	if affected == 0 {
-		// The row may have been deleted between the fetch above and this UPDATE;
-		// re-check existence so a concurrent delete returns ErrNotFound (404),
-		// not a stale ErrConflict (409), mirroring UpdateActivity/UpdateCategory.
+		// Not found, or the row was deleted between the fetch above and this
+		// UPDATE — distinguish so a concurrent delete returns ErrNotFound.
 		if _, err := s.getEntryRow(ctx, userID, id); errors.Is(err, ErrNotFound) {
 			return Entry{}, fmt.Errorf("update entry: %w", ErrNotFound)
 		} else if err != nil {
 			return Entry{}, err
 		}
-		return current, fmt.Errorf("update entry: %w", ErrConflict)
+		// Stale write: roll back first so the single pool connection is
+		// released before re-reading the current version.
+		if err := tx.Rollback(); err != nil {
+			return Entry{}, fmt.Errorf("update entry rollback: %w", err)
+		}
+		fresh, err := s.GetEntry(ctx, userID, id)
+		if err != nil {
+			return Entry{}, err
+		}
+		return fresh, fmt.Errorf("update entry: %w", ErrConflict)
+	}
+
+	if p.CategoryIDs != nil {
+		if err := s.replaceEntryCategoriesTx(ctx, tx, userID, id, *p.CategoryIDs); err != nil {
+			return Entry{}, err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return Entry{}, fmt.Errorf("update entry commit: %w", err)
 	}
 	return s.GetEntry(ctx, userID, id)
+}
+
+// replaceEntryCategoriesTx replaces an entry's ordered join rows within the
+// caller's transaction. Unknown or non-owned category ids are pruned (the
+// remainder keeps its relative order); empty strings and duplicates are
+// skipped. A merge never fails the sync cycle (D7).
+func (s *SQLiteStore) replaceEntryCategoriesTx(ctx context.Context, tx *sql.Tx, userID, entryID string, orderedTags []CategoryTag) error {
+	if _, err := tx.ExecContext(ctx, `DELETE FROM entry_categories WHERE entry_id = ?`, entryID); err != nil {
+		return fmt.Errorf("replace entry categories delete: %w", err)
+	}
+	seen := map[string]bool{}
+	position := 0
+	for _, tag := range orderedTags {
+		cid := tag.ID
+		if cid == "" || seen[cid] {
+			continue
+		}
+		seen[cid] = true
+		var exists int
+		if err := tx.QueryRowContext(ctx, `SELECT 1 FROM categories WHERE id = ? AND user_id = ?`, cid, userID).Scan(&exists); err != nil {
+			if err == sql.ErrNoRows {
+				continue // prune unknown category id, keep the remainder
+			}
+			return fmt.Errorf("replace entry categories check: %w", err)
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO entry_categories (entry_id, category_id, position) VALUES (?, ?, ?)`, entryID, cid, position); err != nil {
+			return fmt.Errorf("replace entry categories insert: %w", err)
+		}
+		position++
+	}
+	return nil
+}
+
+// strictEntryCategoriesTx validates every category id exists and belongs to
+// the user (a create is a first-party write, not a merge — it fails loudly
+// with ErrInvalidCategoryID rather than pruning, D7).
+func (s *SQLiteStore) strictEntryCategoriesTx(ctx context.Context, tx *sql.Tx, userID string, orderedTags []CategoryTag) error {
+	seen := map[string]bool{}
+	for _, tag := range orderedTags {
+		if tag.ID == "" || seen[tag.ID] {
+			continue
+		}
+		seen[tag.ID] = true
+		var exists int
+		if err := tx.QueryRowContext(ctx, `SELECT 1 FROM categories WHERE id = ? AND user_id = ?`, tag.ID, userID).Scan(&exists); err != nil {
+			if err == sql.ErrNoRows {
+				return fmt.Errorf("create entry: %w", ErrInvalidCategoryID)
+			}
+			return fmt.Errorf("create entry categories check: %w", err)
+		}
+	}
+	return nil
 }
 
 // DeleteEntry hard-deletes an entry.

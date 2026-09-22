@@ -30,9 +30,7 @@ var canonicalErrorCodes = []string{
 	"unauthorized",
 	"not_found",
 	"conflict",
-	"activity_exists",
 	"category_exists",
-	"activity_not_found",
 	"duplicate_import",
 	"validation_error",
 }
@@ -42,8 +40,6 @@ var canonicalErrorCodes = []string{
 var bearerProtectedPaths = []string{
 	"/api/v1/auth/logout",
 	"/api/v1/auth/me",
-	"/api/v1/activities",
-	"/api/v1/activities/{id}",
 	"/api/v1/categories",
 	"/api/v1/categories/{id}",
 	"/api/v1/entries",
@@ -248,7 +244,6 @@ func TestSpec_ErrorResponsesUseEnvelope(t *testing.T) {
 func TestSpec_IdempotentPostsDocument200And201(t *testing.T) {
 	s := loadSpec(t)
 	for _, path := range []string{
-		"/api/v1/activities",
 		"/api/v1/categories",
 		"/api/v1/entries",
 	} {
@@ -266,11 +261,11 @@ func TestSpec_IdempotentPostsDocument200And201(t *testing.T) {
 	}
 }
 
-// Delta pull-sync (v1.2.0): GET /activities and GET /entries must document the
-// optional modified_since query parameter.
+// Delta pull-sync (v1.2.0): GET /entries must document the optional
+// modified_since query parameter (activities no longer exist).
 func TestSpec_ModifiedSinceDocumentedOnListEndpoints(t *testing.T) {
 	s := loadSpec(t)
-	for _, path := range []string{"/api/v1/activities", "/api/v1/entries"} {
+	for _, path := range []string{"/api/v1/entries"} {
 		get, ok := s.Paths[path]["get"]
 		if !ok {
 			t.Errorf("expected GET %s", path)
@@ -309,6 +304,61 @@ func TestSpec_EntryProvenanceDocumented(t *testing.T) {
 	for _, field := range []string{"source", "source_ref"} {
 		if _, ok := create.Properties[field]; !ok {
 			t.Errorf("EntryCreate schema must document %q", field)
+		}
+	}
+}
+
+// Entries own their text/categories/notes (remove-activities-layer): the
+// Entry schema carries activity_text + notes + categories, EntryCreate
+// requires activity_text, and no activities resource exists.
+func TestSpec_EntriesOwnTextCategoriesNotes(t *testing.T) {
+	s := loadSpec(t)
+	if _, ok := s.Paths["/api/v1/activities"]; ok {
+		t.Error("/api/v1/activities must be removed from the spec")
+	}
+	if _, ok := s.Paths["/api/v1/activities/{id}"]; ok {
+		t.Error("/api/v1/activities/{id} must be removed from the spec")
+	}
+	entry, ok := s.Components.Schemas["Entry"]
+	if !ok {
+		t.Fatal("expected Entry schema")
+	}
+	for _, field := range []string{"activity_text", "notes", "categories", "started_at"} {
+		if _, ok := entry.Properties[field]; !ok {
+			t.Errorf("Entry schema must document %q", field)
+		}
+	}
+	if _, ok := entry.Properties["activity_id"]; ok {
+		t.Error("Entry schema must not document activity_id (entries own their text)")
+	}
+	if _, ok := s.Components.Schemas["Activity"]; ok {
+		t.Error("Activity schema must be removed from the spec")
+	}
+	create, ok := s.Components.Schemas["EntryCreate"]
+	if !ok {
+		t.Fatal("expected EntryCreate schema")
+	}
+	for _, field := range []string{"activity_text", "category_ids", "notes"} {
+		if _, ok := create.Properties[field]; !ok {
+			t.Errorf("EntryCreate schema must document %q", field)
+		}
+	}
+	deletion, ok := s.Components.Schemas["Deletion"]
+	if !ok {
+		t.Fatal("expected Deletion schema")
+	}
+	if enum, ok := deletion.Properties["resource"].([]any); ok {
+		for _, v := range enum {
+			if name, ok := v.(string); ok && name == "activity" {
+				t.Error("Deletion.resource enum must not include activity (entries/categories only)")
+			}
+		}
+	} else {
+		// rawSchemaDef.Properties is map[string]any; walk via yaml node if the
+		// direct cast failed.
+		res := deletion.Properties["resource"]
+		if res == nil {
+			t.Error("Deletion schema must document resource")
 		}
 	}
 }

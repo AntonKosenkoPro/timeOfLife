@@ -34,6 +34,10 @@ struct PrimaryButton: View {
     /// `Theme.accentPrimary`; pass `Theme.danger` to render a destructive
     /// primary action.
     let tint: Color?
+    /// When false, state-driven content changes (tint, dimming, spinner)
+    /// apply instantly instead of crossfading. Track opts out: its Start /
+    /// Stop swaps must appear in place with no motion of their own.
+    let animateStateChanges: Bool
     let action: () -> Void
 
     init(
@@ -43,6 +47,7 @@ struct PrimaryButton: View {
         isDisabled: Bool,
         accessibilityId: String,
         tint: Color? = nil,
+        animateStateChanges: Bool = true,
         action: @escaping () -> Void
     ) {
         self.title = title
@@ -51,6 +56,7 @@ struct PrimaryButton: View {
         self.isDisabled = isDisabled
         self.accessibilityId = accessibilityId
         self.tint = tint
+        self.animateStateChanges = animateStateChanges
         self.action = action
     }
 
@@ -83,7 +89,7 @@ struct PrimaryButton: View {
         .contentShape(RoundedRectangle(cornerRadius: Theme.cornerRadius, style: .continuous))
         }
         .disabled(isLoading || isDisabled)
-        .animation(.easeInOut(duration: 0.15), value: isLoading || isDisabled)
+        .animation(animateStateChanges ? .easeInOut(duration: 0.15) : nil, value: isLoading || isDisabled)
         .accessibilityElement(children: .ignore)
         .accessibilityAddTraits(.isButton)
         .accessibilityIdentifier(accessibilityId)

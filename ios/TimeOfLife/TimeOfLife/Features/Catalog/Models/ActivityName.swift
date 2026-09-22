@@ -1,10 +1,10 @@
 import Foundation
 
-/// Shared Activity-name normalization and validation (unify-activity-
-/// preparation-flow spec): identity is the trimmed name compared
-/// case-insensitively, and a valid name is non-empty and at most 60
-/// characters. Used by Track search/creation and the Activity Editor so
-/// every creation path applies the same rules.
+/// Shared entry-name normalization and validation (remove-activities-layer
+/// D1): identity is the trimmed exact text compared case-SENSITIVELY
+/// (`Gym` ≠ `GYM`), and a valid name is non-empty and at most 60 characters.
+/// Used by Track capture, recents chips, and the entry form so every path
+/// applies the same rules. Trim stays to avoid `"Gym "` ghosts.
 enum ActivityName {
     /// The maximum name length in characters.
     static let maxLength = 60

@@ -1,3 +1,4 @@
+import Combine
 import SwiftUI
 
 /// The app shell (app-shell spec): Track, History, and Insights as primary
@@ -35,7 +36,7 @@ struct AppShellView: View {
             navigationRoot {
                 HistoryView(
                     store: container.localStore,
-                    refreshSignal: vm.runningTimer?.activityID ?? "",
+                    refreshSignal: vm.runningTimer?.activityText ?? "",
                     logTimeActive: $isHistoryLogTimeActive
                 )
                     .safeAreaInset(edge: .bottom) { compactTimerIfNeeded }
@@ -47,7 +48,7 @@ struct AppShellView: View {
             navigationRoot {
                 InsightsView(
                     store: container.localStore,
-                    refreshSignal: vm.runningTimer?.activityID ?? ""
+                    refreshSignal: vm.runningTimer?.activityText ?? ""
                 )
                 .safeAreaInset(edge: .bottom) { compactTimerIfNeeded }
             }
@@ -56,14 +57,24 @@ struct AppShellView: View {
             .accessibilityIdentifier("TabInsights")
         }
         .tint(Theme.accentPrimary)
-        .sheet(isPresented: $isShowingProfile) {
+        .sheet(isPresented: $isShowingProfile, onDismiss: {
+            // A category created in Profile must be toggleable immediately.
+            Task { await trackVM.load() }
+        }, content: {
             ProfileView(enableSync: EnableSyncPresenter(
                 authService: container.authService,
                 sessionStore: container.sessionStore
             ))
             .environmentObject(container)
-        }
+        })
         .task { await vm.load() }
+        // TabView keeps mounted tabs alive, so Track's own `.task` runs only
+        // on first appear: refresh recents + categories on every return, so
+        // History edits are inherited and chip icons stay current.
+        // `dropFirst` skips the initial value (already covered by `.task`).
+        .onReceive(vm.$selectedTab.dropFirst().filter { $0 == .track }) { _ in
+            Task { await trackVM.load() }
+        }
     }
 
     @ViewBuilder
@@ -91,10 +102,10 @@ struct AppShellView: View {
 
     @ViewBuilder private var compactTimerIfNeeded: some View {
         if let running = vm.runningTimer,
-           let activityID = running.activityID,
+           !running.activityText.isEmpty,
            let startedAt = running.startedAt {
             CompactTimer(
-                activityName: running.activityName ?? "",
+                entryText: running.activityText,
                 startedAt: startedAt,
                 openTrack: {
                     vm.selectedTab = .track
@@ -103,7 +114,7 @@ struct AppShellView: View {
                     Task { await vm.stopFromCompact() }
                 }
             )
-            .accessibilityIdentifier("CompactTimer(\(activityID))")
+            .accessibilityIdentifier("CompactTimer")
         }
     }
 }

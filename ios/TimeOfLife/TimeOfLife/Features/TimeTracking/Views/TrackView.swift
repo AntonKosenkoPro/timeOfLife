@@ -2,63 +2,28 @@ import SwiftUI
 
 /// The Track capture screen (timer-capture-experience spec): a centered
 /// numeric timer whose only purpose is displaying the exact duration while
-/// the user chooses, starts, or stops an activity.
+/// the user enters, starts, or stops a name.
 ///
 /// Content uses the adaptive dual-flow layout (refine-track-recents D1):
 /// title → top spacer → completion mark → timer numbers/status → reserved
-/// error region → central separator → Activity search/refine → main action →
-/// Recents → bottom spacer → tab bar, with the top and bottom spacers capped
-/// at 48 pt and surplus slack going to the central separator. Track itself
-/// has no editing affordance and no offline hint.
+/// error region → central separator → name field → main action → running
+/// tags / Recents → bottom spacer → tab bar, with the top and bottom
+/// spacers capped at 48 pt and surplus slack going to the central separator.
+/// Track itself has no editing affordance and no offline hint.
 ///
-/// Activity preparation uses a full-height native searchable sheet
-/// (unify-activity-preparation-flow spec, decision 1). The operating system
-/// owns the search field, focus, keyboard, and cancellation while Track keeps
-/// its committed timer state untouched until a result is confirmed.
-/// The Activity editor sheet and its presentation machinery remain wired for
-/// the future editing placement (refine-track-recents D9, currently
-/// unreachable from Track).
+/// Capture is plain text (remove-activities-layer): no search sheet, no
+/// quick-create, no refinement editor, no activity undo — typing is the only
+/// input and the recents chips are exact-text shortcuts.
 struct TrackView: View {
     @ObservedObject var vm: TrackViewModel
-    @EnvironmentObject var container: AppContainer
-    @Environment(\.undoManager)
-    private var undoManager
 
     var body: some View {
         content
             .navigationTitle(L10n.tabTrack.text)
             .navigationBarTitleDisplayMode(.inline)
+            // First appear: pull recents + categories and restore a persisted
+            // running draft. Returns to this tab refresh via AppShellView.
             .task { await vm.load() }
-            .task { await vm.registerActivityUndo(with: undoManager) }
-            // Passive host for the system shake-to-undo (U7): Track has no
-            // editable text to hold focus, so without this shakes never reach
-            // the undo manager. Handles no motion itself — the system shows
-            // its default Undo prompt for the registered activity deletion.
-            .background(ShakeFirstResponderHost(undoManager: undoManager))
-            .sheet(isPresented: searchPresentation, onDismiss: vm.cancelSearch) {
-                ActivitySearchSheet(vm: vm)
-                    .environmentObject(container)
-            }
-            .sheet(item: refinementPresentation, onDismiss: vm.dismissRefinement) { presentation in
-                ActivityEditorView(
-                    store: container.localStore,
-                    activity: presentation.activity,
-                    onSaved: { updated in
-                        Task { await vm.saveRefinement(updated: updated) }
-                    },
-                    onCollision: { _ in
-                        // The editor stays open with the draft intact; the
-                        // editor's own error message surfaces the collision.
-                    },
-                    onDeleted: {
-                        Task {
-                            await vm.deleteRefinement(id: presentation.activity.id)
-                            await vm.registerActivityUndo(with: undoManager)
-                        }
-                    }
-                )
-                .environmentObject(container)
-            }
     }
 
     /// DEBUG-only spike gate: launching with `TRACK_SPIKE=1` replaces the
@@ -74,20 +39,6 @@ struct TrackView: View {
         TrackContent(vm: vm)
         #endif
     }
-
-    private var searchPresentation: Binding<Bool> {
-        Binding(
-            get: { vm.isSearchActive },
-            set: { if !$0 { vm.cancelSearch() } }
-        )
-    }
-
-    private var refinementPresentation: Binding<TrackViewModel.RefinementPresentation?> {
-        Binding(
-            get: { vm.refinementPresentation },
-            set: { if $0 == nil { vm.dismissRefinement() } }
-        )
-    }
 }
 
 #if DEBUG
@@ -100,34 +51,37 @@ struct TrackView: View {
         Category(id: "preview-c-work", name: "Work", icon: "laptopcomputer"),
         Category(id: "preview-c-study", name: "Study", icon: "book")
     ]
-    let activity = Activity(id: "preview-ready-en", name: "Deep work", categoryIDs: ["preview-c-work"])
     TrackContent(vm: .preview(
-        state: .ready(activity),
-        activities: [activity],
+        state: .ready(TrackState.Draft(text: "Deep work", categoryIDs: ["preview-c-work"])),
+        recents: [
+            TrackViewModel.RecentEntry(text: "Deep work", categoryIDs: ["preview-c-work"], firstCategoryID: "preview-c-work")
+        ],
         categories: Dictionary(uniqueKeysWithValues: categories.map { ($0.id, $0) })
     ))
 }
 
 #Preview("Track — Running EN Light") {
-    let activity = Activity(id: "preview-running", name: "Reading")
-    TrackContent(vm: .preview(state: .running(activity, startedAt: Date().addingTimeInterval(-120)), activities: [activity]))
+    TrackContent(vm: .preview(
+        state: .running(TrackState.Draft(text: "Reading"), startedAt: Date().addingTimeInterval(-120))
+    ))
 }
 
 #Preview("Track — Saved EN Light") {
-    let activity = Activity(id: "preview-saved", name: "Reading")
-    TrackContent(vm: .preview(state: .saved(activity, duration: 65), activities: [activity]))
+    TrackContent(vm: .preview(
+        state: .saved(TrackState.Draft(text: "Reading"), duration: 65)
+    ))
 }
 
 #Preview("Track — Error EN Light") {
-    let activity = Activity(id: "preview-error", name: "Reading")
-    let vm = TrackViewModel.preview(state: .error(activity, startedAt: Date().addingTimeInterval(-120)), activities: [activity])
+    let vm = TrackViewModel.preview(
+        state: .error(TrackState.Draft(text: "Reading"), startedAt: Date().addingTimeInterval(-120))
+    )
     vm.errorMessage = L10n.text(in: .default, code: "error.unknown")
     return TrackContent(vm: vm)
 }
 
-#Preview("Track — Long Name, Empty Catalog") {
-    let longName = String(repeating: "Very Long Activity Name ", count: 3)
-    let activity = Activity(id: "preview-long", name: longName)
-    TrackContent(vm: .preview(state: .ready(activity), activities: []))
+#Preview("Track — Long Name, Empty Recents") {
+    let longName = String(repeating: "Very Long Entry Name ", count: 3)
+    TrackContent(vm: .preview(state: .ready(TrackState.Draft(text: longName)), recents: []))
 }
 #endif

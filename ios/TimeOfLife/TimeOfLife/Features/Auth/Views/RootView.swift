@@ -65,16 +65,7 @@ struct RootView: View {
     /// supported language once; the marker prevents re-seeding, and the
     /// operation is a no-op after the first launch.
     private func seedStarterCategoriesIfNeeded() async {
-        let names = [
-            L10n.categorySeedWork.text,
-            L10n.categorySeedHobby.text,
-            L10n.categorySeedSport.text,
-            L10n.categorySeedEducation.text,
-            L10n.categorySeedRelax.text,
-            L10n.categorySeedSleep.text,
-            L10n.categorySeedEntertainment.text,
-        ]
-        _ = try? await container.localStore.seedStarterCategoriesIfNeeded(names: names)
+        _ = try? await container.localStore.seedStarterCategoriesIfNeeded(names: String.starterCategoryNames)
     }
 }
 

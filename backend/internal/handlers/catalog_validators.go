@@ -7,6 +7,8 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"github.com/antonkosenko/time-of-life/backend/internal/db"
 )
 
 // The catalog feature introduces the catalog/entries endpoints. Unlike the auth handlers
@@ -19,9 +21,7 @@ const (
 	codeValidation      = "validation_error"
 	codeNotFound        = "not_found"
 	codeConflict        = "conflict"
-	codeActivityExists  = "activity_exists"
 	codeCategoryExists  = "category_exists"
-	codeActivityMissing = "activity_not_found"
 	codeDuplicateImport = "duplicate_import"
 )
 
@@ -152,20 +152,6 @@ func (h *Handler) requireUserID(w http.ResponseWriter, r *http.Request) (string,
 
 // ---------- request structs ----------
 
-type activityCreateReq struct {
-	ID          string   `json:"id"`
-	Name        string   `json:"name"`
-	Notes       string   `json:"notes"`
-	CategoryIDs []string `json:"category_ids"`
-}
-
-type activityUpdateReq struct {
-	Name        *string   `json:"name"`
-	Notes       *string   `json:"notes"`
-	CategoryIDs *[]string `json:"category_ids"`
-	UpdatedAt   string    `json:"updated_at"`
-}
-
 type categoryCreateReq struct {
 	ID   string `json:"id"`
 	Name string `json:"name"`
@@ -179,18 +165,23 @@ type categoryUpdateReq struct {
 }
 
 type entryCreateReq struct {
-	ID         string  `json:"id"`
-	ActivityID *string `json:"activity_id"`
-	StartedAt  string  `json:"started_at"`
-	EndedAt    *string `json:"ended_at"`
-	Source     string  `json:"source"`
-	SourceRef  *string `json:"source_ref"`
+	ID           string   `json:"id"`
+	ActivityText string   `json:"activity_text"`
+	Notes        *string  `json:"notes"`
+	CategoryIDs  []string `json:"category_ids"`
+	StartedAt    string   `json:"started_at"`
+	EndedAt      *string  `json:"ended_at"`
+	Source       string   `json:"source"`
+	SourceRef    *string  `json:"source_ref"`
 }
 
 type entryUpdateReq struct {
-	StartedAt *string `json:"started_at"`
-	EndedAt   optTime `json:"ended_at"`
-	UpdatedAt string  `json:"updated_at"`
+	ActivityText *string   `json:"activity_text"`
+	Notes        *string   `json:"notes"`
+	CategoryIDs  *[]string `json:"category_ids"`
+	StartedAt    *string   `json:"started_at"`
+	EndedAt      optTime   `json:"ended_at"`
+	UpdatedAt    string    `json:"updated_at"`
 }
 
 // ---------- field validators ----------
@@ -202,6 +193,28 @@ func validateName(field, name string, errs validationErrs) {
 	} else if utf8.RuneCountInString(n) > maxNameLen {
 		errs.add(field, "Name must be 60 characters or fewer")
 	}
+}
+
+// validateEntryText validates an entry's owned display text: trimmed,
+// non-empty, max 60 chars. Identity is case-sensitive (`Gym` ≠ `GYM`) — no
+// uniqueness or normalization beyond trimming.
+func validateEntryText(text string, errs validationErrs) {
+	if text == "" {
+		errs.add("activity_text", "activity_text must not be empty")
+	} else if utf8.RuneCountInString(text) > maxNameLen {
+		errs.add("activity_text", "activity_text must be 60 characters or fewer")
+	}
+}
+
+// entryTags converts client-supplied ordered category ids into the CategoryTag
+// shape the store join-writer consumes (only ids; names/icons resolve from the
+// categories table on read).
+func entryTags(ids []string) []db.CategoryTag {
+	tags := make([]db.CategoryTag, 0, len(ids))
+	for _, id := range ids {
+		tags = append(tags, db.CategoryTag{ID: id})
+	}
+	return tags
 }
 
 func validateNotes(n string, errs validationErrs) {

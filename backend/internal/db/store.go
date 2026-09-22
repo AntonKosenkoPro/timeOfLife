@@ -34,26 +34,14 @@ type RefreshToken struct {
 }
 
 // CategoryTag is a denormalized category (id + name + icon) attached to an
-// activity or entry in API responses. It is never written on its own.
+// entry in API responses. It is never written on its own.
 type CategoryTag struct {
 	ID   string `json:"id"`
 	Name string `json:"name"`
 	Icon string `json:"icon"`
 }
 
-// Activity is a saved, reusable time-tracking target.
-type Activity struct {
-	ID         string        `json:"id"`
-	UserID     string        `json:"-"`
-	Name       string        `json:"name"`
-	Notes      string        `json:"notes"`
-	LastUsedAt *time.Time    `json:"last_used_at"`
-	Categories []CategoryTag `json:"categories"`
-	CreatedAt  time.Time     `json:"created_at"`
-	UpdatedAt  time.Time     `json:"updated_at"`
-}
-
-// Category is a many-to-many tag that an activity may carry.
+// Category is a many-to-many tag an entry may carry.
 type Category struct {
 	ID        string    `json:"id"`
 	UserID    string    `json:"-"`
@@ -63,18 +51,19 @@ type Category struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
-// Entry is one timed interval. Every entry references exactly one
-// activity (ActivityID is always set). Categories are inferred from the
-// activity's tags at read time; ActivityName is the activity's current name,
-// resolved at read time. Source/SourceRef record entry provenance (where the
-// entry came from: manual, widget, siri, control, screentime, garmin, ...);
-// Source defaults to "manual" and SourceRef is null for entries created
-// without them (back-compat with existing clients).
+// Entry is one timed interval. Entries are self-contained: ActivityText is
+// the entry's own display text (trimmed, case-sensitive identity — `Gym` ≠
+// `GYM`), Categories are the entry's own ordered tags (stored via
+// entry_categories), and Notes belong to the entry. Nothing is resolved from
+// another record at read time, so history never mutates retroactively.
+// Source/SourceRef record entry provenance (where the entry came from:
+// manual, widget, siri, control, screentime, garmin, ...); Source defaults
+// to "manual" and SourceRef is null for entries created without them.
 type Entry struct {
 	ID              string        `json:"id"`
 	UserID          string        `json:"-"`
-	ActivityID      *string       `json:"activity_id"`
-	ActivityName    string        `json:"activity_name"`
+	ActivityText    string        `json:"activity_text"`
+	Notes           string        `json:"notes"`
 	StartedAt       time.Time     `json:"started_at"`
 	EndedAt         *time.Time    `json:"ended_at"`
 	DurationSeconds *int          `json:"duration_seconds"`
@@ -96,8 +85,7 @@ type Tombstone struct {
 type EntryFilter struct {
 	From          *time.Time // include entries with started_at >= From
 	To            *time.Time // include entries with started_at <= To (inclusive upper bound)
-	ActivityID    string     // restrict to a single activity
-	CategoryID    string     // restrict to entries whose activity is tagged
+	CategoryID    string     // restrict to entries carrying this category tag
 	Limit         int        // page size; 0 → default
 	Cursor        string     // opaque pagination cursor from a previous response
 	ModifiedSince *time.Time // include entries with updated_at > ModifiedSince (delta pull-sync; nil = full)
@@ -112,23 +100,18 @@ type NullableTime struct {
 	Value time.Time
 }
 
-// ActivityPatch is a partial update for an activity (PATCH /activities/{id}).
-// Nil pointer fields are left unchanged. CategoryIDs nil leaves tags; a non-nil
-// slice replaces them (an empty slice clears). UpdatedAt is the LWW version
-// (required): the write applies only if newer than the stored updated_at.
-type ActivityPatch struct {
-	Name        *string
-	Notes       *string
-	CategoryIDs *[]string
-	UpdatedAt   time.Time
-}
-
 // EntryPatch is a partial update for an entry (PATCH /entries/{id}). Nil/zero
-// fields are left unchanged. UpdatedAt is the LWW version (required).
+// fields are left unchanged. CategoryIDs nil leaves the entry's tags; a
+// non-nil slice replaces them in order (unknown or non-owned ids are pruned,
+// the remainder kept — a merge never fails the sync cycle). UpdatedAt is the
+// LWW version (required).
 type EntryPatch struct {
-	StartedAt *time.Time
-	EndedAt   NullableTime // Set=false leaves ended_at unchanged
-	UpdatedAt time.Time
+	ActivityText *string
+	Notes        *string
+	CategoryIDs  *[]CategoryTag
+	StartedAt    *time.Time
+	EndedAt      NullableTime // Set=false leaves ended_at unchanged
+	UpdatedAt    time.Time
 }
 
 // CategoryPatch is a partial update for a category (PATCH /categories/{id}).
@@ -185,38 +168,6 @@ type Store interface {
 	// follow-up).
 	UpsertUserByAppleSubject(ctx context.Context, appleSubject, email string) (User, error)
 
-	// --- Activities ---
-
-	// ListActivities returns the user's activities ordered by last_used_at DESC
-	// (most-recently-used first). A non-empty q applies a case-insensitive
-	// name LIKE typeahead filter. A non-nil modifiedSince restricts the result
-	// to records with updated_at > modifiedSince (delta pull-sync; nil = full).
-	ListActivities(ctx context.Context, userID, q string, modifiedSince *time.Time) ([]Activity, error)
-
-	// GetActivity returns one activity (with its category tags) by id, scoped to
-	// the user. Returns ErrNotFound if missing or owned by another user.
-	GetActivity(ctx context.Context, userID, id string) (Activity, error)
-
-	// CreateActivity inserts a new activity using its client-generated id. It is
-	// idempotent on id: a replay of the same id returns the existing record with
-	// created=false. A case-insensitive name collision with a different id
-	// returns ErrActivityExists carrying the existing activity. categoryIDs
-	// (nil/empty = no tags) are linked to the new activity. The returned bool is
-	// true when a new row was created.
-	CreateActivity(ctx context.Context, a Activity, categoryIDs []string) (Activity, bool, error)
-
-	// UpdateActivity applies a partial LWW update (only if p.UpdatedAt is newer
-	// than the stored updated_at). p.CategoryIDs non-nil replaces the activity's
-	// tags (an empty non-nil slice clears them); nil leaves tags untouched.
-	// Returns ErrNotFound if missing, ErrConflict on a stale updated_at, or
-	// ErrActivityExists on a name collision. ErrInvalidCategoryID if a linked
-	// category_id does not belong to the user.
-	UpdateActivity(ctx context.Context, userID, id string, p ActivityPatch) (Activity, error)
-
-	// DeleteActivity hard-deletes an activity and its child rows (entries and
-	// join rows). Returns ErrNotFound if missing.
-	DeleteActivity(ctx context.Context, userID, id string) error
-
 	// --- Categories ---
 
 	// ListCategories returns the user's categories ordered by name.
@@ -242,23 +193,34 @@ type Store interface {
 	// --- Entries ---
 
 	// ListEntries returns one page of the user's entries ordered by started_at
-	// DESC, filtered by EntryFilter. nextCursor is the opaque cursor for the
-	// next page, or empty when the page is the last.
+	// DESC, filtered by EntryFilter, each with its own ordered category tags.
+	// nextCursor is the opaque cursor for the next page, or empty when the
+	// page is the last.
 	ListEntries(ctx context.Context, userID string, f EntryFilter) (items []Entry, nextCursor string, err error)
 
-	// GetEntry returns one entry by id with its categories (inferred from the
-	// activity) and activity name. Returns ErrNotFound if missing/foreign.
+	// GetEntry returns one entry by id with its own ordered categories.
+	// Returns ErrNotFound if missing/foreign.
 	GetEntry(ctx context.Context, userID, id string) (Entry, error)
 
 	// CreateEntry inserts a new entry using its client-generated id, idempotent
-	// on id (replay → created=false). ActivityID must belong to the user (else
-	// ErrActivityNotFound). duration_seconds is computed from ended_at -
-	// started_at when ended_at is present.
+	// on id (replay → created=false). ActivityText is the entry's own trimmed
+	// display text; CategoryIDs (nil/empty = untagged) are stored via the
+	// entry_categories join with order preserved — unknown or non-owned ids
+	// are pruned with the remainder kept (a merge never fails the sync
+	// cycle). duration_seconds is computed from ended_at - started_at when
+	// ended_at is present.
 	CreateEntry(ctx context.Context, e Entry) (Entry, bool, error)
 
-	// UpdateEntry applies a partial LWW update on started_at/ended_at and
-	// recomputes duration_seconds. Returns ErrNotFound or ErrConflict.
+	// UpdateEntry applies a partial LWW update on activity_text/notes/
+	// category_ids/started_at/ended_at and recomputes duration_seconds.
+	// Returns ErrNotFound or ErrConflict.
 	UpdateEntry(ctx context.Context, userID, id string, p EntryPatch) (Entry, error)
+
+	// ListRecents returns up to limit representative entries for the
+	// recents experience (design D5): entries grouped by exact activity_text,
+	// where per group the newest started_at wins (id DESC tiebreak), ordered
+	// by that newest started_at DESC, each with its own ordered categories.
+	ListRecents(ctx context.Context, userID string, limit int) ([]Entry, error)
 
 	// DeleteEntry hard-deletes an entry. Returns ErrNotFound if missing.
 	DeleteEntry(ctx context.Context, userID, id string) error

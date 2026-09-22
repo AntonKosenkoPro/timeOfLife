@@ -18,416 +18,78 @@ type pgxScanner interface {
 	Scan(dest ...any) error
 }
 
-// pgStrPtr returns a *string for a string value, or nil for "" (so the column
-// is stored as NULL, mirroring the SQLite nullStrArg convention).
-func pgStrPtr(s string) *string {
-	if s == "" {
-		return nil
-	}
-	return &s
-}
-
 // pgScanEntry scans one entry row (without user_id) into an Entry. Postgres
 // scans nullable columns directly into pointers (NULL → nil).
 func pgScanEntry(sc pgxScanner, userID string) (Entry, error) {
 	var (
-		e          Entry
-		activityID *string
-		endedAt    *time.Time
-		dur        *int
-		sourceRef  *string
+		e         Entry
+		startedAt time.Time
+		endedAt   *time.Time
+		dur       *int
+		sourceRef *string
+		notes     *string
 	)
-	if err := sc.Scan(&e.ID, &activityID, &e.StartedAt, &endedAt, &dur, &sourceRef, &e.Source, &e.CreatedAt, &e.UpdatedAt); err != nil {
+	if err := sc.Scan(&e.ID, &e.ActivityText, &notes, &startedAt, &endedAt, &dur, &sourceRef, &e.Source, &e.CreatedAt, &e.UpdatedAt); err != nil {
 		return Entry{}, err
 	}
 	e.UserID = userID
-	e.ActivityID = activityID
+	if notes != nil {
+		e.Notes = *notes
+	}
+	e.StartedAt = startedAt
 	e.EndedAt = endedAt
 	e.DurationSeconds = dur
 	e.SourceRef = sourceRef
 	return e, nil
 }
 
-const pgEntryColumns = `id, activity_id, started_at, ended_at, duration_seconds, source_ref, source, created_at, updated_at`
+const pgEntryColumns = `id, activity_text, notes, started_at, ended_at, duration_seconds, source_ref, source, created_at, updated_at`
 
-// pgListActivityTagsBatch returns category tags keyed by activity_id.
-func (s *PostgresStore) pgListActivityTagsBatch(ctx context.Context, userID string, activityIDs []string) (map[string][]CategoryTag, error) {
+// pgListEntryTagsBatch returns category tags keyed by entry_id, position
+// order preserved (the entry's own snapshot — no query-time resolution).
+func (s *PostgresStore) pgListEntryTagsBatch(ctx context.Context, userID string, entryIDs []string) (map[string][]CategoryTag, error) {
 	out := map[string][]CategoryTag{}
-	if len(activityIDs) == 0 {
+	if len(entryIDs) == 0 {
 		return out, nil
 	}
 	rows, err := s.pool.Query(ctx, `
-		SELECT ac.activity_id, c.id, c.name, c.icon
-		FROM activity_categories ac
-		JOIN categories c ON c.id = ac.category_id
-		WHERE c.user_id = $1 AND ac.activity_id = ANY($2)
-		ORDER BY ac.position, c.name
-	`, userID, activityIDs)
+		SELECT ec.entry_id, c.id, c.name, c.icon
+		FROM entry_categories ec
+		JOIN categories c ON c.id = ec.category_id
+		WHERE c.user_id = $1 AND ec.entry_id = ANY($2)
+		ORDER BY ec.position, c.name
+	`, userID, entryIDs)
 	if err != nil {
-		return nil, fmt.Errorf("list activity tags: %w", err)
+		return nil, fmt.Errorf("list entry tags: %w", err)
 	}
 	defer rows.Close()
 	for rows.Next() {
-		var activityID string
+		var entryID string
 		var t CategoryTag
-		if err := rows.Scan(&activityID, &t.ID, &t.Name, &t.Icon); err != nil {
-			return nil, fmt.Errorf("list activity tags scan: %w", err)
+		if err := rows.Scan(&entryID, &t.ID, &t.Name, &t.Icon); err != nil {
+			return nil, fmt.Errorf("list entry tags scan: %w", err)
 		}
-		out[activityID] = append(out[activityID], t)
+		out[entryID] = append(out[entryID], t)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("list activity tags rows: %w", err)
+		return nil, fmt.Errorf("list entry tags rows: %w", err)
 	}
 	return out, nil
 }
 
-// pgAttachEntryActivity populates Categories (inferred from each entry's
-// activity's tags) and ActivityName (the activity's current name) on each entry
-// via two batched lookups keyed by activity_id.
-func (s *PostgresStore) pgAttachEntryActivity(ctx context.Context, userID string, items []Entry) error {
-	activityIDs := make([]string, 0, len(items))
+// pgAttachEntryTags populates Categories (the entry's own ordered tags) on
+// each entry via one batched lookup keyed by entry_id.
+func (s *PostgresStore) pgAttachEntryTags(ctx context.Context, userID string, items []Entry) error {
+	entryIDs := make([]string, 0, len(items))
 	for _, e := range items {
-		if e.ActivityID != nil {
-			activityIDs = append(activityIDs, *e.ActivityID)
-		}
+		entryIDs = append(entryIDs, e.ID)
 	}
-	tagsByActivity, err := s.pgListActivityTagsBatch(ctx, userID, activityIDs)
-	if err != nil {
-		return err
-	}
-	namesByActivity, err := s.pgListActivityNamesBatch(ctx, activityIDs)
+	tagsByEntry, err := s.pgListEntryTagsBatch(ctx, userID, entryIDs)
 	if err != nil {
 		return err
 	}
 	for i := range items {
-		if items[i].ActivityID != nil {
-			items[i].Categories = ensureCategories(tagsByActivity[*items[i].ActivityID])
-			items[i].ActivityName = namesByActivity[*items[i].ActivityID]
-		}
-	}
-	return nil
-}
-
-// pgListActivityNamesBatch returns activity names keyed by activity_id.
-func (s *PostgresStore) pgListActivityNamesBatch(ctx context.Context, activityIDs []string) (map[string]string, error) {
-	out := map[string]string{}
-	if len(activityIDs) == 0 {
-		return out, nil
-	}
-	rows, err := s.pool.Query(ctx, `
-		SELECT id, name
-		FROM activities
-		WHERE id = ANY($1)
-	`, activityIDs)
-	if err != nil {
-		return nil, fmt.Errorf("list activity names: %w", err)
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var id, name string
-		if err := rows.Scan(&id, &name); err != nil {
-			return nil, fmt.Errorf("list activity names scan: %w", err)
-		}
-		out[id] = name
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("list activity names rows: %w", err)
-	}
-	return out, nil
-}
-
-// ---------- Activities ----------
-
-// ListActivities returns the user's activities ordered by last_used_at DESC.
-func (s *PostgresStore) ListActivities(ctx context.Context, userID, q string, modifiedSince *time.Time) ([]Activity, error) {
-	var rows pgx.Rows
-	var err error
-	if q != "" {
-		rows, err = s.pool.Query(ctx, `
-			SELECT id, name, notes, last_used_at, created_at, updated_at
-			FROM activities
-			WHERE user_id = $1 AND lower(name) LIKE $2 AND ($3::timestamptz IS NULL OR updated_at > $3)
-			ORDER BY (last_used_at IS NULL), last_used_at DESC, updated_at DESC
-		`, userID, "%"+strings.ToLower(q)+"%", modifiedSince)
-	} else {
-		rows, err = s.pool.Query(ctx, `
-			SELECT id, name, notes, last_used_at, created_at, updated_at
-			FROM activities
-			WHERE user_id = $1 AND ($2::timestamptz IS NULL OR updated_at > $2)
-			ORDER BY (last_used_at IS NULL), last_used_at DESC, updated_at DESC
-		`, userID, modifiedSince)
-	}
-	if err != nil {
-		return nil, fmt.Errorf("list activities: %w", err)
-	}
-	defer rows.Close()
-	var out []Activity
-	ids := make([]string, 0)
-	for rows.Next() {
-		var a Activity
-		var notes *string
-		var lastUsed *time.Time
-		if err := rows.Scan(&a.ID, &a.Name, &notes, &lastUsed, &a.CreatedAt, &a.UpdatedAt); err != nil {
-			return nil, fmt.Errorf("list activities scan: %w", err)
-		}
-		a.UserID = userID
-		if notes != nil {
-			a.Notes = *notes
-		}
-		a.LastUsedAt = lastUsed
-		out = append(out, a)
-		ids = append(ids, a.ID)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("list activities rows: %w", err)
-	}
-	tags, err := s.pgListActivityTagsBatch(ctx, userID, ids)
-	if err != nil {
-		return nil, err
-	}
-	for i := range out {
-		out[i].Categories = ensureCategories(tags[out[i].ID])
-	}
-	return out, nil
-}
-
-// GetActivity returns one activity by id with its category tags.
-func (s *PostgresStore) GetActivity(ctx context.Context, userID, id string) (Activity, error) {
-	a, err := s.pgGetActivityRow(ctx, userID, id)
-	if err != nil {
-		return Activity{}, err
-	}
-	tags, err := s.pgListActivityTagsBatch(ctx, userID, []string{a.ID})
-	if err != nil {
-		return Activity{}, err
-	}
-	a.Categories = ensureCategories(tags[a.ID])
-	return a, nil
-}
-
-func (s *PostgresStore) pgGetActivityRow(ctx context.Context, userID, id string) (Activity, error) {
-	var a Activity
-	var notes *string
-	var lastUsed *time.Time
-	err := s.pool.QueryRow(ctx, `
-		SELECT id, name, notes, last_used_at, created_at, updated_at
-		FROM activities
-		WHERE user_id = $1 AND id = $2
-	`, userID, id).Scan(&a.ID, &a.Name, &notes, &lastUsed, &a.CreatedAt, &a.UpdatedAt)
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return Activity{}, fmt.Errorf("get activity: %w", ErrNotFound)
-		}
-		return Activity{}, fmt.Errorf("get activity: %w", err)
-	}
-	a.UserID = userID
-	if notes != nil {
-		a.Notes = *notes
-	}
-	a.LastUsedAt = lastUsed
-	return a, nil
-}
-
-func (s *PostgresStore) pgGetActivityRowByName(ctx context.Context, userID, name string) (Activity, error) {
-	var a Activity
-	var notes *string
-	var lastUsed *time.Time
-	err := s.pool.QueryRow(ctx, `
-		SELECT id, name, notes, last_used_at, created_at, updated_at
-		FROM activities
-		WHERE user_id = $1 AND lower(name) = lower($2)
-	`, userID, name).Scan(&a.ID, &a.Name, &notes, &lastUsed, &a.CreatedAt, &a.UpdatedAt)
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return Activity{}, fmt.Errorf("get activity by name: %w", ErrNotFound)
-		}
-		return Activity{}, fmt.Errorf("get activity by name: %w", err)
-	}
-	a.UserID = userID
-	if notes != nil {
-		a.Notes = *notes
-	}
-	a.LastUsedAt = lastUsed
-	return a, nil
-}
-
-// CreateActivity inserts a new activity, idempotent on id.
-func (s *PostgresStore) CreateActivity(ctx context.Context, a Activity, categoryIDs []string) (Activity, bool, error) {
-	if existing, err := s.pgGetActivityRow(ctx, a.UserID, a.ID); err == nil {
-		tags, err := s.pgListActivityTagsBatch(ctx, a.UserID, []string{existing.ID})
-		if err != nil {
-			return Activity{}, false, err
-		}
-		existing.Categories = ensureCategories(tags[existing.ID])
-		return existing, false, nil
-	} else if !errors.Is(err, ErrNotFound) {
-		return Activity{}, false, err
-	}
-	if clash, err := s.pgGetActivityRowByName(ctx, a.UserID, a.Name); err == nil {
-		tags, err := s.pgListActivityTagsBatch(ctx, a.UserID, []string{clash.ID})
-		if err != nil {
-			return Activity{}, false, err
-		}
-		clash.Categories = ensureCategories(tags[clash.ID])
-		return clash, false, ErrActivityExists
-	} else if !errors.Is(err, ErrNotFound) {
-		return Activity{}, false, err
-	}
-
-	now := time.Now().UTC()
-	// The activity row and the join replacement share one transaction: a
-	// failed category validation leaves no partial activity mutation
-	// (category-management D5).
-	tx, err := s.pool.Begin(ctx)
-	if err != nil {
-		return Activity{}, false, fmt.Errorf("create activity begin: %w", err)
-	}
-	defer func() { _ = tx.Rollback(ctx) }()
-
-	if _, err := tx.Exec(ctx, `
-		INSERT INTO activities (id, user_id, name, notes, last_used_at, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $6)
-	`, a.ID, a.UserID, a.Name, pgStrPtr(a.Notes), a.LastUsedAt, now); err != nil {
-		if pgIsUniqueViolation(err) {
-			if clash, err2 := s.pgGetActivityRowByName(ctx, a.UserID, a.Name); err2 == nil {
-				return clash, false, fmt.Errorf("create activity: %w", ErrActivityExists)
-			}
-			return Activity{}, false, fmt.Errorf("create activity: %w", ErrActivityExists)
-		}
-		return Activity{}, false, fmt.Errorf("create activity: %w", err)
-	}
-	if err := s.pgReplaceActivityCategoriesTx(ctx, tx, a.UserID, a.ID, categoryIDs); err != nil {
-		return Activity{}, false, err
-	}
-	// A recreation clears its stale tombstone (harmless when none exists).
-	if _, err := tx.Exec(ctx, `
-		DELETE FROM tombstones WHERE user_id = $1 AND resource = 'activity' AND record_id = $2
-	`, a.UserID, a.ID); err != nil {
-		return Activity{}, false, fmt.Errorf("clear activity tombstone: %w", err)
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return Activity{}, false, fmt.Errorf("create activity commit: %w", err)
-	}
-	created, err := s.GetActivity(ctx, a.UserID, a.ID)
-	if err != nil {
-		return Activity{}, false, err
-	}
-	return created, true, nil
-}
-
-// UpdateActivity applies a partial LWW update and optional tag replacement.
-func (s *PostgresStore) UpdateActivity(ctx context.Context, userID, id string, p ActivityPatch) (Activity, error) {
-	sets := []string{}
-	args := []any{}
-	n := 1
-	add := func(col string, val any) {
-		sets = append(sets, fmt.Sprintf("%s = $%d", col, n))
-		args = append(args, val)
-		n++
-	}
-	if p.Name != nil {
-		add("name", *p.Name)
-	}
-	if p.Notes != nil {
-		add("notes", pgStrPtr(*p.Notes))
-	}
-	add("updated_at", p.UpdatedAt)
-	args = append(args, id, userID, p.UpdatedAt)
-	query := `UPDATE activities SET ` + strings.Join(sets, ", ") +
-		fmt.Sprintf(" WHERE id = $%d AND user_id = $%d AND updated_at < $%d", n, n+1, n+2)
-
-	// The field update and the join replacement share one transaction: a
-	// failed category validation rolls back the field changes too
-	// (category-management D5).
-	tx, err := s.pool.Begin(ctx)
-	if err != nil {
-		return Activity{}, fmt.Errorf("update activity begin: %w", err)
-	}
-	defer func() { _ = tx.Rollback(ctx) }()
-
-	res, err := tx.Exec(ctx, query, args...)
-	if err != nil {
-		if p.Name != nil && pgIsUniqueViolation(err) {
-			return Activity{}, fmt.Errorf("update activity: %w", ErrActivityExists)
-		}
-		return Activity{}, fmt.Errorf("update activity: %w", err)
-	}
-	if res.RowsAffected() == 0 {
-		if _, err := s.pgGetActivityRow(ctx, userID, id); errors.Is(err, ErrNotFound) {
-			return Activity{}, fmt.Errorf("update activity: %w", ErrNotFound)
-		} else if err != nil {
-			return Activity{}, err
-		}
-		current, err := s.GetActivity(ctx, userID, id)
-		if err != nil {
-			return Activity{}, err
-		}
-		return current, fmt.Errorf("update activity: %w", ErrConflict)
-	}
-	if p.CategoryIDs != nil {
-		if err := s.pgReplaceActivityCategoriesTx(ctx, tx, userID, id, *p.CategoryIDs); err != nil {
-			return Activity{}, err
-		}
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return Activity{}, fmt.Errorf("update activity commit: %w", err)
-	}
-	return s.GetActivity(ctx, userID, id)
-}
-
-// pgReplaceActivityCategoriesTx validates ownership and replaces an activity's
-// join rows within the caller's transaction. An invalid category_id aborts
-// the caller's whole mutation (category-management D5).
-func (s *PostgresStore) pgReplaceActivityCategoriesTx(ctx context.Context, tx pgx.Tx, userID, activityID string, orderedIDs []string) error {
-	if _, err := tx.Exec(ctx, `DELETE FROM activity_categories WHERE activity_id = $1`, activityID); err != nil {
-		return fmt.Errorf("replace activity categories delete: %w", err)
-	}
-	seen := map[string]bool{}
-	for i, cid := range orderedIDs {
-		if cid == "" || seen[cid] {
-			continue
-		}
-		seen[cid] = true
-		var exists int
-		if err := tx.QueryRow(ctx, `SELECT 1 FROM categories WHERE id = $1 AND user_id = $2`, cid, userID).Scan(&exists); err != nil {
-			if errors.Is(err, pgx.ErrNoRows) {
-				return fmt.Errorf("replace activity categories: %w", ErrInvalidCategoryID)
-			}
-			return fmt.Errorf("replace activity categories check: %w", err)
-		}
-		if _, err := tx.Exec(ctx, `INSERT INTO activity_categories (activity_id, category_id, position) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`, activityID, cid, i); err != nil {
-			return fmt.Errorf("replace activity categories insert: %w", err)
-		}
-	}
-	return nil
-}
-
-// DeleteActivity hard-deletes an activity and its child rows.
-func (s *PostgresStore) DeleteActivity(ctx context.Context, userID, id string) error {
-	tx, err := s.pool.Begin(ctx)
-	if err != nil {
-		return fmt.Errorf("delete activity begin: %w", err)
-	}
-	defer func() { _ = tx.Rollback(ctx) }()
-
-	if _, err := tx.Exec(ctx, `DELETE FROM entries WHERE activity_id = $1 AND user_id = $2`, id, userID); err != nil {
-		return fmt.Errorf("delete activity entries: %w", err)
-	}
-	if _, err := tx.Exec(ctx, `DELETE FROM activity_categories WHERE activity_id = $1`, id); err != nil {
-		return fmt.Errorf("delete activity tags: %w", err)
-	}
-	res, err := tx.Exec(ctx, `DELETE FROM activities WHERE id = $1 AND user_id = $2`, id, userID)
-	if err != nil {
-		return fmt.Errorf("delete activity: %w", err)
-	}
-	if res.RowsAffected() == 0 {
-		return fmt.Errorf("delete activity: %w", ErrNotFound)
-	}
-	if err := pgUpsertTombstone(ctx, tx, userID, "activity", id); err != nil {
-		return err
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("delete activity commit: %w", err)
+		items[i].Categories = ensureCategories(tagsByEntry[items[i].ID])
 	}
 	return nil
 }
@@ -579,15 +241,16 @@ func (s *PostgresStore) UpdateCategory(ctx context.Context, userID, id string, p
 	return s.pgGetCategoryRow(ctx, userID, id)
 }
 
-// DeleteCategory hard-deletes a category and its join rows (entries unaffected).
+// DeleteCategory hard-deletes a category and its entry join rows (entries are
+// unaffected — their text, notes, and timings stay intact).
 func (s *PostgresStore) DeleteCategory(ctx context.Context, userID, id string) error {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("delete category begin: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
-	if _, err := tx.Exec(ctx, `DELETE FROM activity_categories WHERE category_id = $1`, id); err != nil {
-		return fmt.Errorf("delete category tags: %w", err)
+	if _, err := tx.Exec(ctx, `DELETE FROM entry_categories WHERE category_id = $1`, id); err != nil {
+		return fmt.Errorf("delete category joins: %w", err)
 	}
 	res, err := tx.Exec(ctx, `DELETE FROM categories WHERE id = $1 AND user_id = $2`, id, userID)
 	if err != nil {
@@ -623,11 +286,8 @@ func (s *PostgresStore) ListEntries(ctx context.Context, userID string, f EntryF
 	if f.To != nil {
 		addc("started_at <= $%d", *f.To)
 	}
-	if f.ActivityID != "" {
-		addc("activity_id = $%d", f.ActivityID)
-	}
 	if f.CategoryID != "" {
-		addc("activity_id IN (SELECT activity_id FROM activity_categories WHERE category_id = $%d)", f.CategoryID)
+		addc("id IN (SELECT entry_id FROM entry_categories WHERE category_id = $%d)", f.CategoryID)
 	}
 	if f.ModifiedSince != nil {
 		addc("updated_at > $%d", *f.ModifiedSince)
@@ -663,13 +323,55 @@ func (s *PostgresStore) ListEntries(ctx context.Context, userID string, f EntryF
 		nextCursor = encodeCursor(last.StartedAt, last.ID)
 		items = items[:limit]
 	}
-	if err := s.pgAttachEntryActivity(ctx, userID, items); err != nil {
+	if err := s.pgAttachEntryTags(ctx, userID, items); err != nil {
 		return nil, "", err
 	}
 	return items, nextCursor, nil
 }
 
-// GetEntry returns one entry by id with its categories.
+// ListRecents implements the recents experience (design D5): entries grouped
+// by exact activity_text, per group the newest started_at wins (id DESC as a
+// stable tiebreak), ordered by that newest started_at DESC, LIMIT n. The
+// winning entry carries the group's categories.
+func (s *PostgresStore) ListRecents(ctx context.Context, userID string, limit int) ([]Entry, error) {
+	if limit <= 0 {
+		limit = 6
+	}
+	rows, err := s.pool.Query(ctx, `
+		SELECT `+pgEntryColumns+`
+		FROM entries e
+		WHERE e.user_id = $1 AND e.activity_text != ''
+		  AND e.id = (
+			SELECT e2.id FROM entries e2
+			WHERE e2.user_id = e.user_id AND e2.activity_text = e.activity_text
+			ORDER BY e2.started_at DESC, e2.id DESC
+			LIMIT 1
+		  )
+		ORDER BY e.started_at DESC, e.id DESC
+		LIMIT $2
+	`, userID, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list recents: %w", err)
+	}
+	defer rows.Close()
+	items := []Entry{}
+	for rows.Next() {
+		e, err := pgScanEntry(rows, userID)
+		if err != nil {
+			return nil, fmt.Errorf("list recents scan: %w", err)
+		}
+		items = append(items, e)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list recents rows: %w", err)
+	}
+	if err := s.pgAttachEntryTags(ctx, userID, items); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+// GetEntry returns one entry by id with its own ordered categories.
 func (s *PostgresStore) GetEntry(ctx context.Context, userID, id string) (Entry, error) {
 	e, err := pgScanEntry(s.pool.QueryRow(ctx, `
 		SELECT `+pgEntryColumns+`
@@ -683,7 +385,7 @@ func (s *PostgresStore) GetEntry(ctx context.Context, userID, id string) (Entry,
 		return Entry{}, fmt.Errorf("get entry: %w", err)
 	}
 	items := []Entry{e}
-	if err := s.pgAttachEntryActivity(ctx, userID, items); err != nil {
+	if err := s.pgAttachEntryTags(ctx, userID, items); err != nil {
 		return Entry{}, err
 	}
 	return items[0], nil
@@ -708,7 +410,7 @@ func (s *PostgresStore) pgGetEntryRow(ctx context.Context, userID, id string) (E
 func (s *PostgresStore) CreateEntry(ctx context.Context, e Entry) (Entry, bool, error) {
 	if existing, err := s.pgGetEntryRow(ctx, e.UserID, e.ID); err == nil {
 		items := []Entry{existing}
-		if err := s.pgAttachEntryActivity(ctx, e.UserID, items); err != nil {
+		if err := s.pgAttachEntryTags(ctx, e.UserID, items); err != nil {
 			return Entry{}, false, err
 		}
 		return items[0], false, nil
@@ -716,18 +418,12 @@ func (s *PostgresStore) CreateEntry(ctx context.Context, e Entry) (Entry, bool, 
 		return Entry{}, false, err
 	}
 
-	// An entry must reference one of the user's activities. The handler
-	// enforces a non-nil activity_id; this also guards direct store calls.
-	if e.ActivityID == nil {
-		return Entry{}, false, fmt.Errorf("create entry: %w", ErrActivityNotFound)
+	// Trim is part of the identity rule (D1): the stored value is the trimmed
+	// text, byte-exact in case (`Gym` ≠ `GYM`). Empty after trim → rejected.
+	e.ActivityText = strings.TrimSpace(e.ActivityText)
+	if e.ActivityText == "" {
+		return Entry{}, false, fmt.Errorf("create entry: %w", ErrInvalidEntryText)
 	}
-	if _, err := s.pgGetActivityRow(ctx, e.UserID, *e.ActivityID); err != nil {
-		if errors.Is(err, ErrNotFound) {
-			return Entry{}, false, fmt.Errorf("create entry: %w", ErrActivityNotFound)
-		}
-		return Entry{}, false, err
-	}
-
 	// Reject ended_at <= started_at (the handler validates the both-present
 	// case; this also guards direct store calls and a stray zero-time ended_at).
 	if e.EndedAt != nil && !e.EndedAt.After(e.StartedAt) {
@@ -753,9 +449,9 @@ func (s *PostgresStore) CreateEntry(ctx context.Context, e Entry) (Entry, bool, 
 	defer func() { _ = tx.Rollback(ctx) }()
 
 	if _, err := tx.Exec(ctx, `
-		INSERT INTO entries (id, user_id, activity_id, started_at, ended_at, duration_seconds, source, source_ref, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $9)
-	`, e.ID, e.UserID, e.ActivityID, e.StartedAt, e.EndedAt, dur, source, e.SourceRef, now); err != nil {
+		INSERT INTO entries (id, user_id, activity_text, notes, started_at, ended_at, duration_seconds, source, source_ref, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $10)
+	`, e.ID, e.UserID, e.ActivityText, e.Notes, e.StartedAt, e.EndedAt, dur, source, e.SourceRef, now); err != nil {
 		// A duplicate import (same user_id, source, source_ref) surfaces as a
 		// UNIQUE-constraint failure on the partial index; map it to a clear
 		// error rather than a raw 500.
@@ -764,14 +460,11 @@ func (s *PostgresStore) CreateEntry(ctx context.Context, e Entry) (Entry, bool, 
 		}
 		return Entry{}, false, fmt.Errorf("create entry: %w", err)
 	}
-	// Bump the activity's last_used_at to the entry's started_at (recency for
-	// suggestions, F5). Only advance it forward so a historical entry does not
-	// regress recency. Skipped on idempotent replay (which returns above).
-	if _, err := tx.Exec(ctx, `
-		UPDATE activities SET last_used_at = $1
-		WHERE id = $2 AND user_id = $3 AND (last_used_at IS NULL OR $1 > last_used_at)
-	`, e.StartedAt, *e.ActivityID, e.UserID); err != nil {
-		return Entry{}, false, fmt.Errorf("bump activity last_used_at: %w", err)
+	if err := s.pgStrictEntryCategoriesTx(ctx, tx, e.UserID, e.Categories); err != nil {
+		return Entry{}, false, err
+	}
+	if err := s.pgReplaceEntryCategoriesTx(ctx, tx, e.UserID, e.ID, e.Categories); err != nil {
+		return Entry{}, false, err
 	}
 	// A recreation clears its stale tombstone (harmless when none exists).
 	if _, err := tx.Exec(ctx, `
@@ -790,6 +483,8 @@ func (s *PostgresStore) CreateEntry(ctx context.Context, e Entry) (Entry, bool, 
 }
 
 // UpdateEntry applies a partial LWW update and recomputes duration_seconds.
+// CategoryIDs non-nil replaces the entry's ordered tags; unknown or non-owned
+// ids are pruned with the remainder kept (never fails the cycle — D7).
 func (s *PostgresStore) UpdateEntry(ctx context.Context, userID, id string, p EntryPatch) (Entry, error) {
 	current, err := s.pgGetEntryRow(ctx, userID, id)
 	if err != nil {
@@ -820,38 +515,135 @@ func (s *PostgresStore) UpdateEntry(ctx context.Context, userID, id string, p En
 		dur = &d
 	}
 
-	sets := []string{"duration_seconds = $1", "updated_at = $2"}
-	args := []any{dur, p.UpdatedAt}
-	n := 3
-	if p.StartedAt != nil {
-		sets = append([]string{fmt.Sprintf("started_at = $%d", n)}, sets...)
-		args = append([]any{*p.StartedAt}, args...)
+	sets := []string{}
+	args := []any{}
+	n := 1
+	add := func(col string, val any) {
+		sets = append(sets, fmt.Sprintf("%s = $%d", col, n))
+		args = append(args, val)
 		n++
 	}
+	add("duration_seconds", dur)
+	add("updated_at", p.UpdatedAt)
+	if p.ActivityText != nil {
+		text := strings.TrimSpace(*p.ActivityText)
+		if text == "" {
+			return Entry{}, fmt.Errorf("update entry: %w", ErrInvalidEntryText)
+		}
+		add("activity_text", text)
+	}
+	if p.Notes != nil {
+		add("notes", *p.Notes)
+	}
+	if p.StartedAt != nil {
+		add("started_at", *p.StartedAt)
+	}
 	if p.EndedAt.Set {
-		sets = append([]string{fmt.Sprintf("ended_at = $%d", n)}, sets...)
-		args = append([]any{endedAt}, args...)
-		n++
+		add("ended_at", endedAt)
 	}
 	args = append(args, id, userID, p.UpdatedAt)
 	query := `UPDATE entries SET ` + strings.Join(sets, ", ") +
 		fmt.Sprintf(" WHERE id = $%d AND user_id = $%d AND updated_at < $%d", n, n+1, n+2)
-	res, err := s.pool.Exec(ctx, query, args...)
+
+	// The field update and the join replacement share one transaction: a
+	// failed join write rolls back the field changes too (no partial entry
+	// state ever survives).
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return Entry{}, fmt.Errorf("update entry begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	res, err := tx.Exec(ctx, query, args...)
 	if err != nil {
 		return Entry{}, fmt.Errorf("update entry: %w", err)
 	}
 	if res.RowsAffected() == 0 {
 		// The row may have been deleted between the fetch above and this UPDATE;
 		// re-check existence so a concurrent delete returns ErrNotFound (404),
-		// not a stale ErrConflict (409), mirroring UpdateActivity/UpdateCategory.
+		// not a stale ErrConflict (409), mirroring UpdateEntry on SQLite and
+		// UpdateCategory on both engines.
 		if _, err := s.pgGetEntryRow(ctx, userID, id); errors.Is(err, ErrNotFound) {
 			return Entry{}, fmt.Errorf("update entry: %w", ErrNotFound)
 		} else if err != nil {
 			return Entry{}, err
 		}
-		return current, fmt.Errorf("update entry: %w", ErrConflict)
+		// Stale write: roll back first so the pooled connection is released
+		// before re-reading the current version.
+		if err := tx.Rollback(ctx); err != nil {
+			return Entry{}, fmt.Errorf("update entry rollback: %w", err)
+		}
+		fresh, err := s.GetEntry(ctx, userID, id)
+		if err != nil {
+			return Entry{}, err
+		}
+		return fresh, fmt.Errorf("update entry: %w", ErrConflict)
+	}
+
+	if p.CategoryIDs != nil {
+		if err := s.pgReplaceEntryCategoriesTx(ctx, tx, userID, id, *p.CategoryIDs); err != nil {
+			return Entry{}, err
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return Entry{}, fmt.Errorf("update entry commit: %w", err)
 	}
 	return s.GetEntry(ctx, userID, id)
+}
+
+// pgReplaceEntryCategoriesTx replaces an entry's ordered join rows within the
+// caller's transaction. Unknown or non-owned category ids are pruned (the
+// remainder keeps its relative order); empty strings and duplicates are
+// skipped. A merge never fails the sync cycle (D7).
+func (s *PostgresStore) pgReplaceEntryCategoriesTx(ctx context.Context, tx pgx.Tx, userID, entryID string, orderedTags []CategoryTag) error {
+	if _, err := tx.Exec(ctx, `DELETE FROM entry_categories WHERE entry_id = $1`, entryID); err != nil {
+		return fmt.Errorf("replace entry categories delete: %w", err)
+	}
+	seen := map[string]bool{}
+	position := 0
+	for _, tag := range orderedTags {
+		cid := tag.ID
+		if cid == "" || seen[cid] {
+			continue
+		}
+		seen[cid] = true
+		// A malformed uuid would abort the transaction on a plain typed
+		// lookup (22P02 poisons the tx); cast through text so an unknown
+		// (missing, malformed, or foreign) id reads as no-rows and is pruned
+		// — the merge keeps the remainder and never fails the cycle (D7).
+		var exists int
+		if err := tx.QueryRow(ctx, `SELECT 1 FROM categories WHERE id::text = $1 AND user_id::text = $2`, cid, userID).Scan(&exists); err != nil {
+			continue // prune unknown category id, keep the remainder
+		}
+		if _, err := tx.Exec(ctx, `INSERT INTO entry_categories (entry_id, category_id, position) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`, entryID, cid, position); err != nil {
+			return fmt.Errorf("replace entry categories insert: %w", err)
+		}
+		position++
+	}
+	return nil
+}
+
+// pgStrictEntryCategoriesTx validates every category id exists and belongs to
+// the user — a create fails loudly with ErrInvalidCategoryID rather than
+// pruning (it is a first-party write, not a merge, D7).
+func (s *PostgresStore) pgStrictEntryCategoriesTx(ctx context.Context, tx pgx.Tx, userID string, orderedTags []CategoryTag) error {
+	seen := map[string]bool{}
+	for _, tag := range orderedTags {
+		if tag.ID == "" || seen[tag.ID] {
+			continue
+		}
+		seen[tag.ID] = true
+		// Cast through text: a malformed uuid must surface as ErrNoRows
+		// (→ ErrInvalidCategoryID, 422), not as a tx-poisoning 22P02.
+		var exists int
+		if err := tx.QueryRow(ctx, `SELECT 1 FROM categories WHERE id::text = $1 AND user_id::text = $2`, tag.ID, userID).Scan(&exists); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return fmt.Errorf("create entry: %w", ErrInvalidCategoryID)
+			}
+			return fmt.Errorf("create entry categories check: %w", err)
+		}
+	}
+	return nil
 }
 
 // DeleteEntry hard-deletes an entry.

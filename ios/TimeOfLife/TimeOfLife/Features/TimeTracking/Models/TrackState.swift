@@ -3,27 +3,44 @@ import Foundation
 /// Pure, testable state machine for the Track capture flow
 /// (timer-capture-experience spec). The view model owns transitions; this
 /// type has no UIKit or persistence dependencies.
+///
+/// Identity is the trimmed exact text (case-sensitive: `Gym` ≠ `GYM`);
+/// there is no Activity object anywhere. The draft's ordered categories are
+/// inherited from the exact recents match at preparation time and stay live
+/// while running.
 enum TrackState: Equatable {
-    /// No activity selected and no timer running.
+    /// A prepared (or running) capture: the locked trimmed text plus the
+    /// ordered category draft.
+    struct Draft: Equatable {
+        let text: String
+        var categoryIDs: [String]
+
+        init(text: String, categoryIDs: [String] = []) {
+            self.text = text
+            self.categoryIDs = categoryIDs
+        }
+    }
+
+    /// No name entered and no timer running.
     case idle
-    /// An activity is prepared; an explicit Start is the only way to begin.
-    case ready(Activity)
-    /// The timer is running against a prepared activity.
-    case running(Activity, startedAt: Date)
+    /// A name is prepared; an explicit Start is the only way to begin.
+    case ready(Draft)
+    /// The timer is running against the prepared draft.
+    case running(Draft, startedAt: Date)
     /// Stop was activated; the completed entry is being saved locally.
-    case saving(Activity, startedAt: Date)
+    case saving(Draft, startedAt: Date)
     /// The entry was saved; a brief confirmation is shown, then the same
-    /// activity returns to ready.
-    case saved(Activity, duration: TimeInterval)
+    /// name returns to ready.
+    case saved(Draft, duration: TimeInterval)
     /// A recoverable save failure: running state is preserved so the user
     /// can retry Stop without losing elapsed time.
-    case error(Activity, startedAt: Date)
+    case error(Draft, startedAt: Date)
 
-    var activity: Activity? {
+    var draft: Draft? {
         switch self {
         case .idle: nil
-        case let .ready(activity), let .running(activity, _), let .saving(activity, _),
-             let .saved(activity, _), let .error(activity, _): activity
+        case let .ready(draft), let .running(draft, _), let .saving(draft, _),
+             let .saved(draft, _), let .error(draft, _): draft
         }
     }
 
@@ -55,23 +72,23 @@ enum TrackState: Equatable {
 
 extension TrackState {
     /// VoiceOver label for the numeric readout (timer-capture-experience spec):
-    /// announces the selected Activity, timer state, and elapsed duration.
+    /// announces the prepared name, timer state, and elapsed duration.
     var readoutAccessibilityLabel: String {
         switch self {
         case .idle:
-            return L10n.timerChooseActivityPrompt.text
-        case let .ready(activity):
-            return "\(activity.name), \(L10n.timerReady.text)"
-        case let .running(activity, _), let .saving(activity, _), let .error(activity, _):
-            return String(format: L10n.timerCompactRunning.text, activity.name)
-        case let .saved(activity, _):
-            return "\(activity.name), \(L10n.timerSaved.text)"
+            return L10n.timerIdlePrompt.text
+        case let .ready(draft):
+            return "\(draft.text), \(L10n.timerReady.text)"
+        case let .running(draft, _), let .saving(draft, _), let .error(draft, _):
+            return String(format: L10n.timerCompactRunning.text, draft.text)
+        case let .saved(draft, _):
+            return "\(draft.text), \(L10n.timerSaved.text)"
         }
     }
 
     /// VoiceOver label for the compact timer (app-shell spec).
     var compactAccessibilityLabel: String {
-        guard let activity = activity else { return L10n.timerCompactStop.text }
-        return String(format: L10n.timerCompactRunning.text, activity.name)
+        guard let draft = draft else { return L10n.timerCompactStop.text }
+        return String(format: L10n.timerCompactRunning.text, draft.text)
     }
 }

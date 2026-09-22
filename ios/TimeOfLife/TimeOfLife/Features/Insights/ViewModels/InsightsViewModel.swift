@@ -18,7 +18,6 @@ final class InsightsViewModel: ObservableObject {
 
     private struct Snapshot {
         var entries: [TimeEntry] = []
-        var activities: [Activity] = []
         var categories: [Category] = []
     }
 
@@ -38,9 +37,8 @@ final class InsightsViewModel: ObservableObject {
         }
         do {
             let entries = try await store.entries()
-            let activities = try await store.activities()
             let categories = try await store.categories()
-            snapshot = Snapshot(entries: entries, activities: activities, categories: categories)
+            snapshot = Snapshot(entries: entries, categories: categories)
             hasCommittedAllTime = entries.contains { $0.endedAt != nil }
         } catch {
             // Keep the last good snapshot (same philosophy as History load).
@@ -69,7 +67,6 @@ final class InsightsViewModel: ObservableObject {
     ) -> InsightsBreakdown {
         Self.makeBreakdown(
             entries: snapshot.entries,
-            activities: snapshot.activities,
             categories: snapshot.categories,
             interval: period.interval(now: nowProvider(), calendar: calendar),
             lens: lens
@@ -80,29 +77,22 @@ final class InsightsViewModel: ObservableObject {
 
     /// Builds the hero total plus breakdown rows from committed entries only
     /// (insights-breakdown spec): in-progress entries (`endedAt == nil`) are
-    /// excluded and NULL durations contribute zero (D8 precedent). Entries
-    /// resolve the activity's *current* categories at query time, so
-    /// recategorization reclassifies history. The category lens attributes
-    /// the full duration to *every* attached category; activities with no
-    /// (resolvable) categories aggregate into the uncategorized bucket.
+    /// excluded and NULL durations contribute zero (D8 precedent). The
+    /// activity lens groups by trimmed exact text (`Gym` ≠ `GYM`); the
+    /// category lens attributes the full duration to *every* category stored
+    /// on the entry (rows may sum above the hero — full-credit by design).
+    /// Entries with no categories aggregate into the uncategorized bucket.
     nonisolated static func makeBreakdown(
         entries: [TimeEntry],
-        activities: [Activity],
         categories: [Category],
         interval: DateInterval?,
         lens: InsightsLens
     ) -> InsightsBreakdown {
         let inPeriod = committedEntries(entries, in: interval)
-        let activitiesByID = Dictionary(uniqueKeysWithValues: activities.map { ($0.id, $0) })
         let categoriesByID = Dictionary(uniqueKeysWithValues: categories.map { ($0.id, $0) })
         var attribution = BreakdownAttribution()
         for entry in inPeriod {
-            attribution.attribute(
-                entry,
-                activitiesByID: activitiesByID,
-                categoriesByID: categoriesByID,
-                lens: lens
-            )
+            attribution.attribute(entry, categoriesByID: categoriesByID, lens: lens)
         }
         return InsightsBreakdown(
             totalSeconds: inPeriod.reduce(0) { $0 + ($1.durationSeconds ?? 0) },
@@ -125,7 +115,7 @@ final class InsightsViewModel: ObservableObject {
     }
 
     /// First category's validated SF Symbol, or the `questionmark` fallback
-    /// when the activity has no (resolvable) categories (History D6 rule).
+    /// when the entry has no (resolvable) categories (History D6 rule).
     nonisolated static func icon(
         categoryIDs: [String],
         categoriesByID: [String: Category]
@@ -162,27 +152,26 @@ private struct BreakdownAttribution {
 
     mutating func attribute(
         _ entry: TimeEntry,
-        activitiesByID: [String: Activity],
         categoriesByID: [String: Category],
         lens: InsightsLens
     ) {
         let seconds = entry.durationSeconds ?? 0
         switch lens {
         case .activity:
-            let activity = activitiesByID[entry.activityID]
+            // Exact trimmed text is the grouping identity (`Gym` ≠ `GYM`);
+            // each entry's full duration attributes to its text row.
             add(
-                id: entry.activityID,
-                name: activity?.name ?? entry.activityName,
+                id: "text:\(entry.activityText)",
+                name: entry.activityText,
                 icon: InsightsViewModel.icon(
-                    categoryIDs: activity?.categoryIDs ?? [],
+                    categoryIDs: entry.categoryIDs,
                     categoriesByID: categoriesByID
                 ),
                 seconds: seconds,
                 entryID: entry.id
             )
         case .category:
-            let resolved = (activitiesByID[entry.activityID]?.categoryIDs ?? [])
-                .compactMap { categoriesByID[$0] }
+            let resolved = entry.categoryIDs.compactMap { categoriesByID[$0] }
             if resolved.isEmpty {
                 add(
                     id: InsightsBucket.uncategorizedID,
@@ -208,6 +197,10 @@ private struct BreakdownAttribution {
     private mutating func add(id: String, name: String, icon: String, seconds: Int, entryID: String) {
         totals[id, default: 0] += seconds
         members[id, default: []].append(entryID)
-        display[id] = (name, icon)
+        // First-seen display wins: a later zero-duration member (e.g. a
+        // failed short entry) must not clobber the row's name/icon.
+        if display[id] == nil {
+            display[id] = (name, icon)
+        }
     }
 }

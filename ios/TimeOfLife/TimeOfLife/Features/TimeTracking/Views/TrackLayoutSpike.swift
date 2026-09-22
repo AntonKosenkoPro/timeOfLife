@@ -20,13 +20,12 @@ import SwiftUI
 ///   TRACK_SPIKE_CAP=<pt>       shared spacer cap; default 48
 ///   TRACK_SPIKE_STATE=<name>   idle | ready | running | saving | saved | error
 ///   TRACK_SPIKE_DYNAMIC_TYPE=1 applies `.dynamicTypeSize(.accessibility5)`
-///   TRACK_SPIKE_EMPTY=1        empty catalog (empty-Recents hint)
+///   TRACK_SPIKE_EMPTY=1        empty recents (empty-Recents hint)
 ///   TRACK_SPIKE_LONG_ERROR=1   a long error message (wrapped-error growth)
 ///
 /// Frames are read from the accessibility tree via the production
-/// identifiers (TimerDisplay, TimerActivitySearchButton/TimerActivityLabel,
-/// TimerStartButton/TimerStopButton/TimerChooseActivityButton,
-/// TimerSuggestion(...)).
+/// identifiers (TimerDisplay, TimerNameField/TimerNameLabel,
+/// TimerStartButton/TimerStopButton, TimerSuggestion(...)).
 struct TrackLayoutSpike: View {
     private let cap: CGFloat
     private let dynamicType: Bool
@@ -37,30 +36,31 @@ struct TrackLayoutSpike: View {
         cap = env["TRACK_SPIKE_CAP"].flatMap(Double.init).map { CGFloat($0) } ?? 48
         dynamicType = env["TRACK_SPIKE_DYNAMIC_TYPE"] == "1"
         let empty = env["TRACK_SPIKE_EMPTY"] == "1"
-        let catalog = empty ? [] : Self.spikeCatalog
+        let catalog = empty ? [] : Self.spikeRecents
         let categories = Dictionary(uniqueKeysWithValues: Self.spikeCategories.map { ($0.id, $0) })
         let state: TrackState
         if let prepared = catalog.first {
+            let draft = TrackState.Draft(text: prepared.text, categoryIDs: prepared.categoryIDs)
             switch env["TRACK_SPIKE_STATE"] ?? "ready" {
             case "idle":
                 state = .idle
             case "running":
-                state = .running(prepared, startedAt: Date().addingTimeInterval(-42))
+                state = .running(draft, startedAt: Date().addingTimeInterval(-42))
             case "saving":
-                state = .saving(prepared, startedAt: Date().addingTimeInterval(-42))
+                state = .saving(draft, startedAt: Date().addingTimeInterval(-42))
             case "saved":
-                state = .saved(prepared, duration: 65)
+                state = .saved(draft, duration: 65)
             case "error":
-                state = .error(prepared, startedAt: Date().addingTimeInterval(-42))
+                state = .error(draft, startedAt: Date().addingTimeInterval(-42))
             default:
-                state = .ready(prepared)
+                state = .ready(draft)
             }
         } else {
             state = .idle
         }
         let viewModel = TrackViewModel.preview(
             state: state,
-            activities: catalog,
+            recents: catalog,
             categories: categories
         )
         if case .error = state {
@@ -102,14 +102,14 @@ struct TrackLayoutSpike: View {
         ]
     }
 
-    private static var spikeCatalog: [Activity] {
+    private static var spikeRecents: [TrackViewModel.RecentEntry] {
         [
-            Activity(id: "spike-a-deepwork", name: "Deep work", categoryIDs: ["spike-c-work"]),
-            Activity(id: "spike-a-reading", name: "Reading", categoryIDs: ["spike-c-study"]),
-            Activity(id: "spike-a-gym", name: "Gym session", categoryIDs: ["spike-c-sport"]),
-            Activity(id: "spike-a-emails", name: "Emails", categoryIDs: ["spike-c-mail"]),
-            Activity(id: "spike-a-walk", name: "Walk the dog", categoryIDs: ["spike-c-home"]),
-            Activity(id: "spike-a-meditation", name: "Meditation", categoryIDs: ["spike-c-health"])
+            TrackViewModel.RecentEntry(text: "Deep work", categoryIDs: ["spike-c-work"], firstCategoryID: "spike-c-work"),
+            TrackViewModel.RecentEntry(text: "Reading", categoryIDs: ["spike-c-study"], firstCategoryID: "spike-c-study"),
+            TrackViewModel.RecentEntry(text: "Gym session", categoryIDs: ["spike-c-sport"], firstCategoryID: "spike-c-sport"),
+            TrackViewModel.RecentEntry(text: "Emails", categoryIDs: ["spike-c-mail"], firstCategoryID: "spike-c-mail"),
+            TrackViewModel.RecentEntry(text: "Walk the dog", categoryIDs: ["spike-c-home"], firstCategoryID: "spike-c-home"),
+            TrackViewModel.RecentEntry(text: "Meditation", categoryIDs: ["spike-c-health"], firstCategoryID: "spike-c-health")
         ]
     }
 }

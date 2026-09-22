@@ -1,415 +1,268 @@
-// swiftlint:disable file_length
+import Combine
 import Foundation
 import SwiftUI
-import Combine
 
 /// View model for the Track capture screen (timer-capture-experience spec).
 ///
-/// Owns the `TrackState` state machine, the temporary Activity-search
-/// interaction state (unify-activity-preparation-flow spec), and the
-/// elapsed-time ticker. Persistence is delegated to `TimerService`, which
-/// writes only to the local database (local-first-store spec).
+/// Owns the `TrackState` state machine and the elapsed-time ticker. Capture
+/// is plain text: no catalog, no search sheet, no quick-create — the name
+/// field is the only input, and the recents chips are exact-text shortcuts.
+/// Persistence is delegated to `TimerService`, which writes only to the
+/// local database (local-first-store spec).
 @MainActor
-final class TrackViewModel: ObservableObject, ActivitySearchHosting {
-    @Published private(set) var state: TrackState = .idle
+final class TrackViewModel: ObservableObject {
+    /// Settable (not `private(set)`) so tests can seed exact `.ready`/`.error`
+    /// states directly instead of driving them through async store paths.
+    @Published var state: TrackState = .idle
     @Published var elapsed: TimeInterval = 0
     @Published var errorMessage: String?
-    @Published var isSearchActive = false
-    @Published private(set) var search = ActivitySearchState()
-    @Published private(set) var activities: [Activity] = []
-    /// The id→Category map used to resolve Recents chip icons (design D6).
+    /// The name-field draft (trimmed at Start; a draft, never committed).
+    @Published var nameDraft = ""
+    /// The 6 exact-text recents (newest first, first-category icon data).
+    /// Settable for the same test-seeding reason as `state`.
+    @Published var recents: [RecentEntry] = []
+    /// The id→Category map used to resolve recents chip icons (design D5).
     @Published private(set) var categories: [String: Category] = [:]
-    /// The non-expired pending-deletion identity matching the current query,
-    /// refreshed as the query changes (result-model input, decision 7).
-    @Published private(set) var pendingDeletion: Activity?
 
     let service: TimerService
     private let connectivity: Connectivity
-    private let undoBuffer: UndoBufferStore
     private let nowProvider: () -> Date
-    /// The UndoManager the current registration belongs to, held weakly so
-    /// the re-registration after an undo targets the same manager without
-    /// capturing a non-Sendable value in the undo handler closure.
-    private weak var registeredUndoManager: UndoManager?
     private var ticker: AnyCancellable?
     private var savedResetTask: Task<Void, Never>?
+    /// Name-field focus from the view: a focused Start tap resigns first and
+    /// the swap waits out the keyboard slide, so Stop appears in place.
+    var nameFieldFocused = false
+    /// A Start deferred until the keyboard finishes dismissing (see above).
+    /// Cancelled by any draft change before it fires, so a stale draft can
+    /// never start.
+    private var pendingStart: Task<Void, Never>?
 
     init(
         service: TimerService,
         connectivity: Connectivity,
-        undoBuffer: UndoBufferStore? = nil,
         now: @escaping () -> Date = Date.init
     ) {
         self.service = service
         self.connectivity = connectivity
-        self.undoBuffer = undoBuffer ?? UndoBufferStore(store: service.store)
         self.nowProvider = now
+    }
+
+    // MARK: - Recents model
+
+    /// One recents chip: the exact text, its newest entry's first-position
+    /// category (icon source), and the full ordered categories a tap
+    /// inherits (design D5).
+    struct RecentEntry: Identifiable, Equatable {
+        let text: String
+        let categoryIDs: [String]
+        /// The first-position category id, or nil when the newest entry has
+        /// no categories (the chip renders without an icon).
+        let firstCategoryID: String?
+
+        var id: String { text }
     }
 
     // MARK: - Lifecycle
 
-    /// Loads the catalog and restores a persisted running timer (R2: the
-    /// running timer survives app crashes). Reconciles an externally stopped
-    /// timer: a `.running` state with no persisted timer (stopped from the
-    /// compact timer on another destination) returns to `.ready`/`.idle`
-    /// instead of counting elapsed time forever. Call on appear.
+    /// Loads the recents and categories and restores a persisted running
+    /// draft (R2: the running draft survives app crashes). Reconciles an
+    /// externally stopped timer: a `.running` state with no persisted draft
+    /// (stopped from the compact timer on another destination) returns to
+    /// `.ready`/`.idle` instead of counting elapsed time forever. Call on
+    /// appear.
     func load() async {
         do {
-            activities = try await service.store.activities()
+            // Seed first: on a fresh install the seeding task in RootView
+            // can still be in flight when this first load runs, which used
+            // to leave the running tag selector empty until the next tab
+            // switch. Seeding is idempotent (marker-guarded), so racing it
+            // here is safe.
+            _ = try? await service.store.seedStarterCategoriesIfNeeded(names: String.starterCategoryNames)
+            recents = try await storeRecents()
             categories = Dictionary(uniqueKeysWithValues: try await service.store.categories().map { ($0.id, $0) })
-            let persisted = try await service.runningTimerState()
-            if let persisted, let activityID = persisted.activityID,
-               let activity = try await service.store.activity(id: activityID) {
+            let persisted = try await service.runningTimerDraft()
+            if let persisted, !persisted.activityText.isEmpty {
                 let startedAt = persisted.startedAt ?? Date()
-                state = .running(activity, startedAt: startedAt)
+                state = .running(
+                    TrackState.Draft(text: persisted.activityText, categoryIDs: persisted.categoryIDs),
+                    startedAt: startedAt
+                )
+                nameDraft = persisted.activityText
                 startTicker(from: startedAt)
-            } else if case let .running(activity, _) = state {
-                await reconcileExternalStop(activity: activity)
+            } else if case let .running(draft, _) = state {
+                await reconcileExternalStop(draft: draft)
             }
         } catch {
             errorMessage = L10n.text(in: .default, code: "error.unknown")
         }
     }
 
-    /// Leaves a `.running` state whose persisted timer is gone (stopped from
+    private func storeRecents() async throws -> [RecentEntry] {
+        try await service.store.recents(limit: 6).map { recent in
+            RecentEntry(
+                text: recent.activityText,
+                categoryIDs: recent.categoryIDs,
+                firstCategoryID: recent.categoryIDs.first
+            )
+        }
+    }
+
+    /// Leaves a `.running` state whose persisted draft is gone (stopped from
     /// the compact timer): stops the elapsed ticker, re-enables the idle
     /// timer, resets elapsed to zero, and returns to `.ready` for the same
-    /// activity — or `.idle` when the activity no longer exists.
+    /// text — or `.idle` when nothing was entered.
     /// `.saving`/`.error` are deliberately untouched: mid-flight own-stop
     /// states that self-resolve through their async paths.
-    private func reconcileExternalStop(activity: Activity) async {
+    private func reconcileExternalStop(draft: TrackState.Draft) async {
         stopTicker()
         UIApplication.shared.isIdleTimerDisabled = false
         elapsed = 0
-        if let resolved = try? await service.store.activity(id: activity.id) {
-            state = .ready(resolved)
-        } else {
-            state = .idle
+        state = draft.text.isEmpty ? .idle : .ready(draft)
+    }
+
+    // MARK: - Capture (plain text)
+
+    /// True when the trimmed name draft is non-empty (the Start gate).
+    var canStart: Bool {
+        !trimmedName.isEmpty
+    }
+
+    private var trimmedName: String {
+        nameDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// Keeps the committed `.ready`/`.idle` state in step with the typed
+    /// name draft while not running: a trimmed non-empty name prepares it
+    /// (inheriting the exact recents match's categories), clearing the field
+    /// returns to idle. Any edit re-derives the draft — including edits after
+    /// a chip selection, which is just a fill. Typing never starts anything
+    /// and never commits a partial draft. Called by the name field's
+    /// edit/commit callbacks.
+    func syncReadyFromDraft() {
+        guard !state.isRunning, !state.isSaving else { return }
+        let trimmed = nameDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            if state != .idle {
+                state = .idle
+                pendingStart?.cancel()
+                pendingStart = nil
+            }
+            elapsed = 0
+            return
+        }
+        let inherited = recents.first { $0.text == trimmed }?.categoryIDs ?? []
+        let draft = TrackState.Draft(text: trimmed, categoryIDs: inherited)
+        if state != .ready(draft) {
+            state = .ready(draft)
+            // The draft changed under a deferred Start (e.g. the resign
+            // after a tap recomputed it): a changed draft cancels the
+            // pending start so a stale draft can never start. An unchanged
+            // recompute keeps a pending start valid.
+            pendingStart?.cancel()
+            pendingStart = nil
+            elapsed = 0
         }
     }
 
-    // MARK: - Activity selection
-
-    /// The committed selection's activity id (ActivitySearchHosting
-    /// checkmark input): the prepared activity, or nil while idle.
-    var selectedActivityID: String? { state.activity?.id }
-
-    /// Prepares an activity (ready state) without starting a timer.
-    func select(_ activity: Activity) {        guard !state.isRunning else { return }
-        state = .ready(activity)
+    /// Selects a recents chip: fills the exact text plus that recent's full
+    /// ordered categories without starting timing and without creating
+    /// anything.
+    func select(_ recent: RecentEntry) {
+        guard !state.isRunning else { return }
+        pendingStart?.cancel()
+        pendingStart = nil
+        nameDraft = recent.text
+        state = .ready(TrackState.Draft(text: recent.text, categoryIDs: recent.categoryIDs))
         elapsed = 0
-        isSearchActive = false
-        search = ActivitySearchState()
         Haptics.selection()
     }
 
-    // MARK: - Activity search (unify-activity-preparation-flow spec)
-
-    /// The deterministic result model for the active search content. The
-    /// non-expired pending-deletion identity (if any) is resolved from the
-    /// store so the restore action can replace creation.
-    var searchResults: ActivitySearchResults {
-        ActivitySearchResults.derive(
-            query: search.query,
-            activities: activities,
-            pendingDeletion: pendingDeletion
-        )
-    }
-
-    /// A binding to the search query for the native search field. The query
-    /// is a draft: it never mutates the committed `TrackState`.
-    var searchQueryBinding: Binding<String> {
-        Binding(
-            get: { self.search.query },
-            set: { self.setSearchQuery($0) }
-        )
-    }
-
-    /// Sets the search query (draft). Used by the native search field binding
-    /// and by tests; never mutates the committed `TrackState`. Refreshes the
-    /// pending-deletion identity for the result model.
-    func setSearchQuery(_ query: String) {
-        search.query = query
-        refreshPendingDeletion()
-    }
-
-    /// Refreshes the non-expired pending-deletion identity matching the
-    /// trimmed query (result-model input, decision 7).
-    private func refreshPendingDeletion() {
-        let trimmed = search.trimmedQuery
-        guard !trimmed.isEmpty else {
-            pendingDeletion = nil
-            return
-        }
-        Task {
-            pendingDeletion = try? await service.store.pendingDeletionActivity(named: trimmed)
-        }
-    }
-
-    /// Activates Activity search. Idle search begins empty; ready and saved
-    /// search begins with the committed Activity name so it can be replaced
-    /// directly. The query remains a draft and the committed Activity is
-    /// retained as the fallback until a result is confirmed.
-    func activateSearch() {
-        guard !state.isRunning else { return }
-        let initialQuery: String
-        switch state {
-        case let .ready(activity), let .saved(activity, _):
-            initialQuery = activity.name
-        case .idle, .running, .saving, .error:
-            initialQuery = ""
-        }
-        search = ActivitySearchState(query: initialQuery)
-        isSearchActive = true
-        refreshPendingDeletion()
-    }
-
-    /// Syncs the native search environment state into the view model. The
-    /// operating system owns activation and cancellation; this keeps the
-    /// committed timer state untouched for unresolved input.
-    func setSearchActive(_ active: Bool) {
-        guard isSearchActive != active else { return }
-        isSearchActive = active
-        if !active {
-            search = ActivitySearchState()
-        }
-    }
-
-    /// Ends search without confirmation: the prior ready or idle timer state
-    /// is restored exactly (the draft never mutated it).
-    func cancelSearch() {
-        isSearchActive = false
-        search = ActivitySearchState()
-    }
-
-    /// Dismisses the pending-deletion restore prompt without acting.
-    func dismissPendingRestore() {
-        pendingRestore = nil
-    }
-
-    /// Confirms an existing search result: prepares it and dismisses search.
-    func confirmSearchResult(_ activity: Activity) {
-        select(activity)
-    }
-
-    /// Quick-creates the unmatched valid query (categoryless) and prepares
-    /// it. On failure the search stays active with the query preserved and a
-    /// localized non-field error is shown. When a pending-deletion identity
-    /// surfaces at confirmation time, the explicit restore prompt is shown
-    /// instead of creating a duplicate.
-    func quickCreateFromSearch() async {
-        let trimmed = search.trimmedQuery
-        guard !trimmed.isEmpty else { return }
-        do {
-            let outcome = try await service.prepareActivity(named: trimmed)
-            switch outcome {
-            case let .created(activity), let .existing(activity):
-                activities = try await service.store.activities()
-                select(activity)
-            case let .restorableDeletion(activity):
-                pendingRestore = activity
-            case .invalid:
-                search.errorMessage = L10n.timerEmptyActivityError.text
-            case .failure:
-                search.errorMessage = L10n.text(in: .default, code: "error.unknown")
-            }
-        } catch {
-            search.errorMessage = L10n.text(in: .default, code: "error.unknown")
-        }
-    }
-
-    /// The pending-deletion activity awaiting explicit restoration.
-    private(set) var pendingRestore: Activity?
-
-    /// Explicitly restores the pending-deletion activity and prepares it.
-    /// No outbox row is created (the deletion was never committed).
-    func restorePendingDeletion() async {
-        guard let pending = pendingRestore else { return }
-        do {
-            if let restored = try await service.store.restorePendingDeletionActivity(named: pending.name) {
-                activities = try await service.store.activities()
-                pendingRestore = nil
-                select(restored)
-            } else {
-                // The buffer row is gone (restored elsewhere or the app
-                // restarted and it committed): fall back to ordinary creation.
-                pendingRestore = nil
-                await quickCreateFromSearch()
-            }
-        } catch {
-            search.errorMessage = L10n.text(in: .default, code: "error.unknown")
-        }
-    }
-
-    // MARK: - Selected-Activity refinement (refine-selected-activity-from-track)
-
-    @Published private(set) var refinementPresentation: RefinementPresentation?
-
-    struct RefinementPresentation: Identifiable, Equatable {
-        let activity: Activity
-        var id: String { activity.id }
-    }
-
-    /// Activates refinement for the selected Activity. Resolves from
-    /// `LocalStore` first; stale preparation clears to idle.
-    func presentRefinement() {
-        guard let activity = state.activity else { return }
-        Task {
-            do {
-                guard let resolved = try await service.store.activity(id: activity.id) else {
-                    state = .idle
-                    elapsed = 0
-                    errorMessage = L10n.timerStalePreparationError.text
-                    return
-                }
-                refinementPresentation = RefinementPresentation(activity: resolved)
-            } catch {
-                errorMessage = L10n.text(in: .default, code: "error.unknown")
-            }
-        }
-    }
-
-    /// Dismisses the refinement editor without acting (Cancel).
-    func dismissRefinement() {
-        refinementPresentation = nil
-    }
-
-    /// On refinement save, refreshes the catalog and replaces the Activity
-    /// in the current state while preserving the state case and all
-    /// associated timer data (decision 5): ready stays ready, running
-    /// preserves startedAt and the active ticker, saving preserves
-    /// startedAt, saved preserves duration, error preserves startedAt and
-    /// retry behavior.
-    func saveRefinement(updated: Activity) async {
-        if let refreshed = try? await service.store.activities() {
-            activities = refreshed
-        }
-        if let refreshedCategories = try? await service.store.categories() {
-            categories = Dictionary(uniqueKeysWithValues: refreshedCategories.map { ($0.id, $0) })
-        }
-        replaceActivityInState(updated)
-        refinementPresentation = nil
-    }
-
-    /// On refinement-editor delete, refreshes the catalog and clears the
-    /// deleted activity from the committed state back to idle (unify-catalog-
-    /// deletion D7). The editor dismisses itself; the sheet's onDismiss nils
-    /// the presentation.
-    func deleteRefinement(id: String) async {
-        if let refreshed = try? await service.store.activities() {
-            activities = refreshed
-        }
-        if let refreshedCategories = try? await service.store.categories() {
-            categories = Dictionary(uniqueKeysWithValues: refreshedCategories.map { ($0.id, $0) })
-        }
-        if state.activity?.id == id {
-            state = .idle
-            elapsed = 0
-        }
-        refinementPresentation = nil
-    }
-
-    // MARK: - Activity undo (shake → default confirmation → single restore)
-
-    /// Registers the newest restorable activity deletion with the system Undo
-    /// manager, so shaking surfaces the DEFAULT Undo confirmation and
-    /// confirming restores exactly one activity — the most recent buffered
-    /// one. Previous registrations are cleared first, so one shake+confirm
-    /// can never restore two deletions. Offers nothing when the buffer holds
-    /// no activity deletion — including when the newest row
-    /// belongs to another surface (U7 supersession).
-    func registerActivityUndo(with undoManager: UndoManager?) async {
-        guard let undoManager else { return }
-        registeredUndoManager = undoManager
-        undoManager.removeAllActions(withTarget: self)
-        guard let recent = try? await undoBuffer.mostRecent(),
-              (try? await service.store.activityDeletionSnapshot(bufferID: recent.id)) != nil else { return }
-        undoManager.registerUndo(withTarget: self) { target in
-            Task { @MainActor in
-                await target.performActivityUndo()
-                await target.registerActivityUndo(with: target.registeredUndoManager)
-            }
-        }
-        // Names the undoable action so the DEFAULT system confirmation
-        // states what Confirm will restore. Reuses the existing localized
-        // Delete string — no new strings (U4).
-        undoManager.setActionName(L10n.activityEditorDelete.text)
-    }
-
-    /// Restores the most recent activity deletion (buffered deletions stay
-    /// restorable until the app restarts). Only activity deletions are
-    /// restored here — buffer rows owned by other surfaces are left for their
-    /// owners. No toast is shown; one shake restores at most one
-    /// deletion. The restored activity reappears in the catalog; the
-    /// committed Track state stays as it was (idle after a delete).
-    func performActivityUndo() async {
-        do {
-            guard let recent = try await undoBuffer.mostRecent() else { return }
-            guard try await service.store.activityDeletionSnapshot(bufferID: recent.id) != nil else { return }
-            if try await service.store.undoActivityDeletion(bufferID: recent.id) != nil {
-                if let refreshed = try? await service.store.activities() {
-                    activities = refreshed
-                }
-            }
-        } catch {
-            errorMessage = L10n.text(in: .default, code: "error.unknown")
-        }
-    }
-
-    /// Replaces the Activity in the current state without transitioning,
-    /// preserving all associated timer data.
-    private func replaceActivityInState(_ updated: Activity) {
+    /// Starts the prepared name (timer-capture-experience spec); typing or
+    /// chip selection alone never starts timing. Start is gated on the
+    /// trimmed text being non-empty. A committed `.ready` draft starts
+    /// exactly as prepared — typing already inherited the exact-recents
+    /// match (or empty) in `syncReadyFromDraft`, and chip selection filled
+    /// it in `select` — so Start never re-derives categories behind the
+    /// user's back. Only from `.idle` (a Start tap that raced the field's
+    /// focus-resign) is the field synced first; an invalid `.ready` draft
+    /// (empty text) is left untouched and Start does nothing.
+    ///
+    /// When the field is focused, the tap also resigns it: the keyboard
+    /// slide and the running swap must not coincide, so the swap waits for
+    /// the keyboard to actually finish dismissing (see
+    /// `waitForKeyboardDismissal`) while the haptic fires immediately and
+    /// `startedAt` stays the tap time. When nothing is focused (chip flow),
+    /// Start is immediate.
+    func start() {
+        // Tap-time sync (see `syncReadyFromDraft`): a carried-over `.ready`
+        // (e.g. after a stop) may hold a stale draft for the field's current
+        // text. Syncing first means the deferred swap below captures the
+        // fresh draft, so the tap's own focus-resign finds nothing to cancel.
+        // Matching text needs no sync — this preserves programmatically
+        // prepared categories and the empty-text state. `.saved` is excluded:
+        // the disabled Start button is the only caller and cannot fire there.
         switch state {
         case .idle:
+            syncReadyFromDraft()
+        case .ready(let draft) where draft.text != nameDraft:
+            syncReadyFromDraft()
+        default:
             break
-        case .ready:
-            state = .ready(updated)
-        case let .running(_, startedAt):
-            state = .running(updated, startedAt: startedAt)
-        case let .saving(_, startedAt):
-            state = .saving(updated, startedAt: startedAt)
-        case let .saved(_, duration):
-            state = .saved(updated, duration: duration)
-        case let .error(_, startedAt):
-            state = .error(updated, startedAt: startedAt)
         }
-    }
-
-    // MARK: - Start / Stop
-
-    /// Starts the prepared activity. Selection alone never starts timing
-    /// (timer-capture-experience spec); Start is the only entry to running.
-    /// The committed Activity identifier is revalidated first: a prepared
-    /// Activity that no longer exists clears preparation and returns to idle
-    /// with a localized error instead of being recreated.
-    func start() {
-        guard case let .ready(activity) = state else { return }
-        Task {
-            do {
-                guard try await service.store.activity(id: activity.id) != nil else {
-                    state = .idle
-                    elapsed = 0
-                    errorMessage = L10n.timerStalePreparationError.text
-                    return
-                }
-                beginRunning(activity: activity)
-            } catch {
-                errorMessage = L10n.text(in: .default, code: "error.unknown")
+        guard case let .ready(draft) = state, canStart else { return }
+        if nameFieldFocused {
+            nameFieldFocused = false
+            Haptics.selection()
+            let startedAt = Date()
+            pendingStart?.cancel()
+            pendingStart = Task { [weak self] in
+                await Self.waitForKeyboardDismissal()
+                guard !Task.isCancelled else { return }
+                guard let self, case .ready = self.state else { return }
+                self.beginRunning(draft: draft, startedAt: startedAt)
             }
+        } else {
+            Haptics.selection()
+            beginRunning(draft: draft, startedAt: Date())
         }
     }
 
-    private func beginRunning(activity: Activity) {
-        let startedAt = Date()
-        state = .running(activity, startedAt: startedAt)
+    /// Waits for the keyboard-dismissal slide to finish so the running swap
+    /// lands on a settled layout. Fires on the real `didHide` notification —
+    /// a fixed delay guesses wrong on devices whose slide outlasts it — with
+    /// a bounded fallback for hardware keyboards, where no dismissal fires.
+    private static func waitForKeyboardDismissal() async {
+        await withTaskGroup(of: String.self) { group in
+            group.addTask {
+                let dismissed = NotificationCenter.default.notifications(
+                    named: UIResponder.keyboardDidHideNotification
+                )
+                for await _ in dismissed.prefix(1) { break }
+                return "didHide"
+            }
+            group.addTask {
+                try? await Task.sleep(nanoseconds: Self.keyboardDismissFallback)
+                return "fallback"
+            }
+            _ = await group.next()
+            group.cancelAll()
+        }
+    }
+
+    /// Upper bound for the dismissal wait (hardware keyboards never notify).
+    private static let keyboardDismissFallback: UInt64 = 600_000_000
+
+    private func beginRunning(draft: TrackState.Draft, startedAt: Date) {
+        pendingStart?.cancel()
+        pendingStart = nil
+        state = .running(draft, startedAt: startedAt)
         elapsed = 0
         errorMessage = nil
         startTicker(from: startedAt)
         UIApplication.shared.isIdleTimerDisabled = true
-        Haptics.selection()
         Task {
             do {
-                try await service.startTimer(activityID: activity.id, startedAt: startedAt)
+                try await service.startTimerDraft(text: draft.text, categoryIDs: draft.categoryIDs, startedAt: startedAt)
             } catch {
                 // Local persistence failure: keep the timer running in memory
                 // so the user can still stop and retry (recoverable error).
@@ -418,30 +271,49 @@ final class TrackViewModel: ObservableObject, ActivitySearchHosting {
         }
     }
 
-    /// Stops the running timer and saves the completed entry locally.
+    /// Toggles a category on the running draft (D4): rewrites only the
+    /// running draft snapshot — never an entry, history row, or recents.
+    func toggleDraftCategory(_ categoryID: String) {
+        guard case let .running(draft, startedAt) = state else { return }
+        var updated = draft
+        if let index = updated.categoryIDs.firstIndex(of: categoryID) {
+            updated.categoryIDs.remove(at: index)
+        } else {
+            updated.categoryIDs.append(categoryID)
+        }
+        state = .running(updated, startedAt: startedAt)
+        Task {
+            try? await service.startTimerDraft(
+                text: updated.text,
+                categoryIDs: updated.categoryIDs,
+                startedAt: startedAt
+            )
+        }
+    }
+
+    /// Stops the running timer and saves the completed entry locally with
+    /// the final ordered categories (empty notes) and a single outbox row.
     func stop() async {
-        guard case let .running(activity, startedAt) = state else { return }
-        state = .saving(activity, startedAt: startedAt)
+        guard case let .running(draft, startedAt) = state else { return }
+        state = .saving(draft, startedAt: startedAt)
         stopTicker()
         do {
-            try await service.stopTimer(activityID: activity.id, startedAt: startedAt, endedAt: Date())
+            try await service.stopTimerDraft(
+                text: draft.text,
+                categoryIDs: draft.categoryIDs,
+                startedAt: startedAt,
+                endedAt: Date()
+            )
             let duration = max(0, Date().timeIntervalSince(startedAt))
-            state = .saved(activity, duration: duration)
+            state = .saved(draft, duration: duration)
             elapsed = duration
             UIApplication.shared.isIdleTimerDisabled = false
             Haptics.success()
             scheduleSavedReset()
-        } catch let error as TimerServiceError where error == .activityDeleted {
-            // The activity was deleted on another device mid-session: the
-            // session is discarded (nothing to save to), so settle idle with
-            // an explanatory message — retrying would loop a failing save.
-            state = .idle
-            elapsed = 0
-            errorMessage = L10n.timerActivityDeleted.text
-            UIApplication.shared.isIdleTimerDisabled = false
+            recents = (try? await storeRecents()) ?? recents
         } catch {
             // Recoverable: preserve running state so elapsed time is not lost.
-            state = .error(activity, startedAt: startedAt)
+            state = .error(draft, startedAt: startedAt)
             errorMessage = L10n.text(in: .default, code: "error.unknown")
             Haptics.error()
             startTicker(from: startedAt)
@@ -450,8 +322,8 @@ final class TrackViewModel: ObservableObject, ActivitySearchHosting {
 
     /// Retries Stop after a recoverable save failure.
     func retryStop() async {
-        guard case let .error(activity, startedAt) = state else { return }
-        state = .running(activity, startedAt: startedAt)
+        guard case let .error(draft, startedAt) = state else { return }
+        state = .running(draft, startedAt: startedAt)
         await stop()
     }
 
@@ -471,15 +343,15 @@ final class TrackViewModel: ObservableObject, ActivitySearchHosting {
         ticker = nil
     }
 
-    /// Returns the state to ready for the same activity after the brief
-    /// saved confirmation (timer-capture-experience spec).
+    /// Returns the state to ready for the same text after the brief saved
+    /// confirmation (timer-capture-experience spec).
     private func scheduleSavedReset() {
         savedResetTask?.cancel()
         savedResetTask = Task { [weak self] in
             try? await Task.sleep(nanoseconds: 1_600_000_000)
             guard !Task.isCancelled else { return }
-            guard let self, case let .saved(activity, _) = self.state else { return }
-            self.state = .ready(activity)
+            guard let self, case let .saved(draft, _) = self.state else { return }
+            self.state = .ready(draft)
             self.elapsed = 0
         }
     }
@@ -489,11 +361,9 @@ final class TrackViewModel: ObservableObject, ActivitySearchHosting {
 extension TrackViewModel {
     static func preview(
         state: TrackState = .idle,
-        activities: [Activity] = [],
+        recents: [RecentEntry] = [],
         categories: [String: Category] = [:],
-        query: String = "",
-        isSearchActive: Bool = false,
-        refinementPresentation: RefinementPresentation? = nil
+        nameDraft: String = ""
     ) -> TrackViewModel {
         let url = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent(UUID().uuidString)
@@ -509,11 +379,9 @@ extension TrackViewModel {
             connectivity: MockConnectivity(connected: true)
         )
         vm.state = state
-        vm.activities = activities
+        vm.recents = recents
         vm.categories = categories
-        vm.search.query = query
-        vm.isSearchActive = isSearchActive
-        vm.refinementPresentation = refinementPresentation
+        vm.nameDraft = nameDraft
         return vm
     }
 }

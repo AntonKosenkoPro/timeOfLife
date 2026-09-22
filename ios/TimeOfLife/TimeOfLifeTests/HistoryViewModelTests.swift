@@ -15,17 +15,18 @@ struct HistoryViewModelTests {
     private func entry(
         id: String,
         startedAt: Date,
-        activityID: String = "a1",
+        text: String? = nil,
+        categoryIDs: [String] = [],
         durationSeconds: Int? = nil,
         endedAt: Date? = nil
     ) -> TimeEntry {
         TimeEntry(
             id: id,
-            activityID: activityID,
-            activityName: "Activity \(id)",
+            activityText: text ?? "Entry \(id)",
             startedAt: startedAt,
             endedAt: endedAt,
-            durationSeconds: durationSeconds
+            durationSeconds: durationSeconds,
+            categoryIDs: categoryIDs
         )
     }
 
@@ -146,25 +147,25 @@ struct HistoryViewModelTests {
         #expect(total == "0s")
     }
 
-    // MARK: - Category resolution (D6)
+    // MARK: - Entry-owned category resolution (remove-activities-layer 4.4)
 
-    @Test("loads entries and resolves categories from the store")
+    @Test("rows read categories from the entry itself, position-preserved")
     func loadsAndResolvesCategories() async throws {
         let store = try makeStore()
         try await store.createCategory(Category(id: "c1", name: "Health", icon: "figure.run"))
-        try await store.createActivity(Activity(id: "a1", name: "Running", categoryIDs: ["c1"]))
-        try await store.createActivity(Activity(id: "a2", name: "Meditation", categoryIDs: []))
+        try await store.createCategory(Category(id: "c2", name: "Work", icon: "briefcase"))
         try await store.createEntry(entry(
             id: "e1",
             startedAt: Date(timeIntervalSinceNow: -3600),
-            activityID: "a1",
+            text: "Running",
+            categoryIDs: ["c2", "c1"],
             durationSeconds: 3600,
             endedAt: Date()
         ))
         try await store.createEntry(entry(
             id: "e2",
             startedAt: Date(timeIntervalSinceNow: -7200),
-            activityID: "a2",
+            text: "Meditation",
             durationSeconds: 600,
             endedAt: Date(timeIntervalSinceNow: -6000)
         ))
@@ -176,19 +177,44 @@ struct HistoryViewModelTests {
         #expect(vm.dayGroups[0].entries.count == 2)
 
         let running = vm.dayGroups[0].entries.first { $0.id == "e1" }!
-        #expect(vm.icon(for: running) == "figure.run")
-        #expect(vm.categoryNames(for: running) == "Health")
+        #expect(vm.icon(for: running) == "briefcase")
+        #expect(vm.categoryNames(for: running) == "Work, Health")
 
         let meditation = vm.dayGroups[0].entries.first { $0.id == "e2" }!
         #expect(vm.icon(for: meditation) == "questionmark")
         #expect(vm.categoryNames(for: meditation).isEmpty)
     }
 
+    @Test("a deleted category vanishes from rows while entries survive")
+    func deletedCategoryStripsRows() async throws {
+        let store = try makeStore()
+        try await store.createCategory(Category(id: "c1", name: "Health", icon: "figure.run"))
+        try await store.createEntry(entry(
+            id: "e1",
+            startedAt: Date(timeIntervalSinceNow: -3600),
+            text: "Running",
+            categoryIDs: ["c1"],
+            durationSeconds: 60,
+            endedAt: Date(timeIntervalSinceNow: -3540)
+        ))
+
+        let vm = HistoryViewModel(store: store)
+        await vm.loadIfNeeded()
+        #expect(vm.categoryNames(for: vm.dayGroups[0].entries[0]) == "Health")
+
+        try await store.deleteCategory(id: "c1")
+        vm.invalidate()
+        await vm.loadIfNeeded()
+
+        #expect(vm.dayGroups.count == 1)
+        #expect(vm.icon(for: vm.dayGroups[0].entries[0]) == "questionmark")
+        #expect(vm.categoryNames(for: vm.dayGroups[0].entries[0]).isEmpty)
+    }
+
     @Test("in-progress entry shows the in-progress indicator")
     func inProgressDisplay() async throws {
         let store = try makeStore()
-        try await store.createActivity(Activity(id: "a1", name: "Running"))
-        try await store.createEntry(entry(id: "e1", startedAt: Date(timeIntervalSinceNow: -60), activityID: "a1"))
+        try await store.createEntry(entry(id: "e1", startedAt: Date(timeIntervalSinceNow: -60)))
 
         let vm = HistoryViewModel(store: store)
         await vm.load()
@@ -204,11 +230,9 @@ struct HistoryViewModelTests {
     @Test("loadIfNeeded serves the cached snapshot until invalidate, then reloads")
     func reloadAfterInvalidate() async throws {
         let store = try makeStore()
-        try await store.createActivity(Activity(id: "a1", name: "Running"))
         try await store.createEntry(entry(
             id: "e1",
             startedAt: Date(timeIntervalSinceNow: -3600),
-            activityID: "a1",
             durationSeconds: 60,
             endedAt: Date(timeIntervalSinceNow: -3540)
         ))
@@ -222,7 +246,6 @@ struct HistoryViewModelTests {
         try await store.createEntry(entry(
             id: "e2",
             startedAt: Date(timeIntervalSinceNow: -600),
-            activityID: "a1",
             durationSeconds: 30,
             endedAt: Date(timeIntervalSinceNow: -570)
         ))
@@ -235,17 +258,15 @@ struct HistoryViewModelTests {
         #expect(vm.dayGroups.flatMap(\.entries).map(\.id) == ["e2", "e1"])
     }
 
-    // MARK: - Entry edit/delete propagation (edit-entry-from-activity-detail)
+    // MARK: - Entry edit/delete propagation (entry-editor)
 
     @Test("edited entry values appear after invalidate + reload")
     func editedEntryReflectedAfterReload() async throws {
         let store = try makeStore()
-        try await store.createActivity(Activity(id: "a1", name: "Running"))
         let start = Date(timeIntervalSinceNow: -3600)
         try await store.createEntry(entry(
             id: "e1",
             startedAt: start,
-            activityID: "a1",
             durationSeconds: 60,
             endedAt: start.addingTimeInterval(60)
         ))
@@ -254,7 +275,7 @@ struct HistoryViewModelTests {
         await vm.loadIfNeeded()
         #expect(vm.durationText(for: vm.dayGroups[0].entries[0]) == "1m")
 
-        // Edit behind the detail sheet (the entry form's updateEntry path).
+        // Edit behind the entry form cover (the updateEntry path).
         var updated = try #require(try await store.entry(id: "e1"))
         updated.endedAt = start.addingTimeInterval(3_700)
         updated.durationSeconds = 3_700
@@ -270,12 +291,10 @@ struct HistoryViewModelTests {
     @Test("deleted entry disappears and empties its day group after reload")
     func deletedEntryRemovedAfterReload() async throws {
         let store = try makeStore()
-        try await store.createActivity(Activity(id: "a1", name: "Running"))
         let start = Date(timeIntervalSinceNow: -3600)
         try await store.createEntry(entry(
             id: "e1",
             startedAt: start,
-            activityID: "a1",
             durationSeconds: 60,
             endedAt: start.addingTimeInterval(60)
         ))
@@ -284,102 +303,12 @@ struct HistoryViewModelTests {
         await vm.loadIfNeeded()
         #expect(vm.dayGroups.count == 1)
 
-        // Delete behind the detail sheet (the entry form's undoable path).
+        // Delete behind the entry form (the undoable path).
         _ = try await store.deleteEntryUndoable(id: "e1", deletedAt: Date())
 
         vm.invalidate()
         await vm.loadIfNeeded()
         #expect(vm.dayGroups.isEmpty)
-    }
-
-    // MARK: - Activity undo (unify-catalog-deletion)
-
-    @Test("performActivityUndo restores the activity entries into the list")
-    func activityUndoReloadsList() async throws {
-        let store = try makeStore()
-        try await store.createActivity(Activity(id: "a1", name: "Running"))
-        let start = Date(timeIntervalSinceNow: -3600)
-        try await store.createEntry(entry(
-            id: "e1",
-            startedAt: start,
-            activityID: "a1",
-            durationSeconds: 60,
-            endedAt: start.addingTimeInterval(60)
-        ))
-
-        let vm = HistoryViewModel(store: store)
-        await vm.loadIfNeeded()
-        #expect(vm.dayGroups.count == 1)
-
-        // Delete behind the detail sheet's stacked editor.
-        _ = try await store.deleteActivityUndoable(id: "a1", deletedAt: Date())
-        vm.invalidate()
-        await vm.loadIfNeeded()
-        #expect(vm.dayGroups.isEmpty)
-
-        await vm.performActivityUndo()
-
-        #expect(vm.dayGroups.flatMap(\.entries).map(\.id) == ["e1"])
-    }
-
-    @Test("activity undo ignores foreign snapshots")
-    func activityUndoIgnoresForeign() async throws {
-        let store = try makeStore()
-        try await store.createActivity(Activity(id: "a1", name: "Running"))
-        let start = Date(timeIntervalSinceNow: -3600)
-        try await store.createEntry(entry(
-            id: "e1",
-            startedAt: start,
-            activityID: "a1",
-            durationSeconds: 60,
-            endedAt: start.addingTimeInterval(60)
-        ))
-        _ = try await store.deleteEntryUndoable(id: "e1", deletedAt: Date())
-
-        let vm = HistoryViewModel(store: store)
-        let undoManager = UndoManager()
-        await vm.registerActivityUndo(with: undoManager)
-        await vm.performActivityUndo()
-
-        #expect(!undoManager.canUndo)
-        #expect(try await store.undoBufferMostRecent() != nil)
-    }
-
-    @Test("system undo registers for activity deletions")
-    func systemUndoRegistersActivityDeletion() async throws {
-        let store = try makeStore()
-        try await store.createActivity(Activity(id: "a1", name: "Running"))
-        _ = try await store.deleteActivityUndoable(id: "a1", deletedAt: Date())
-
-        let vm = HistoryViewModel(store: store)
-        let undoManager = UndoManager()
-        await vm.registerActivityUndo(with: undoManager)
-
-        #expect(undoManager.canUndo)
-        #expect(undoManager.undoActionName == L10n.activityEditorDelete.text)
-    }
-
-    @Test("firing the system undo restores and re-registers the next deletion")
-    func systemUndoFiresAndChains() async throws {
-        let store = try makeStore()
-        for (id, name) in [("a1", "Running"), ("a2", "Reading")] {
-            try await store.createActivity(Activity(id: id, name: name))
-            _ = try await store.deleteActivityUndoable(id: id, deletedAt: Date())
-        }
-        let vm = HistoryViewModel(store: store)
-        let undoManager = UndoManager()
-        await vm.registerActivityUndo(with: undoManager)
-        // Firing the handler restores; its re-registration runs after undo()
-        // returns, so a second undo restores the older row.
-        undoManager.undo()
-        try? await Task.sleep(nanoseconds: 100_000_000)
-        #expect(try await store.activity(id: "a2") != nil)
-        #expect(try await store.activity(id: "a1") == nil)
-        #expect(undoManager.canUndo)
-        undoManager.undo()
-        try? await Task.sleep(nanoseconds: 100_000_000)
-        #expect(try await store.activity(id: "a1") != nil)
-        #expect(try await store.undoBufferMostRecent() == nil)
     }
 
     // MARK: - Helpers

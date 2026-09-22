@@ -1,17 +1,17 @@
 import SwiftUI
 
-/// The manual time-logging sheet (manual-entry spec) grown into the unified
-/// entry form (entry-editor spec), styled on the iOS Calendar add-event form
-/// and trimmed to three rows: Activity (title over value, opening the shared
-/// searchable picker), Starts and Ends (date + time pills with inline
-/// single-open pickers). Cancel/Add (CREATE) or Cancel/Save (EDIT) live in
-/// the navigation bar; the confirm action is a validity gate — disabled until
-/// an activity is chosen and End is strictly after Start. LOCKED mode (an
-/// imported entry) shows the values read-only with Cancel only. EDIT and
-/// LOCKED modes offer a bottom-of-page destructive Delete. A save failure
+/// The unified entry form (entry-editor spec + manual-entry CREATE mode),
+/// styled on the iOS Calendar add-event form and trimmed to four rows: Name,
+/// Categories (shared ordered `TagSelector`), Notes, Starts and Ends (date +
+/// time pills with inline single-open pickers). Cancel/Add (CREATE) or
+/// Cancel/Save (EDIT) live in the navigation bar; the confirm action is a
+/// validity gate — disabled until the trimmed name is non-empty and End is
+/// strictly after Start. LOCKED mode shows the values read-only with Cancel
+/// only; EDIT and LOCKED offer a bottom destructive Delete. A save failure
 /// surfaces as a non-field error with the draft intact and the form open.
 struct LogTimeView: View {
     @StateObject private var vm: LogTimeViewModel
+    @EnvironmentObject var container: AppContainer
     @Environment(\.dismiss)
     private var dismiss
     /// The currently expanded inline picker, if any (Calendar behavior:
@@ -28,13 +28,15 @@ struct LogTimeView: View {
 
     init(
         service: TimerService,
-        initialActivity: Activity? = nil,
+        initialText: String = "",
+        initialCategoryIDs: [String] = [],
         editing entry: TimeEntry? = nil,
         onSaved: (() -> Void)? = nil
     ) {
         _vm = StateObject(wrappedValue: LogTimeViewModel(
             service: service,
-            initialActivity: initialActivity,
+            initialText: initialText,
+            initialCategoryIDs: initialCategoryIDs,
             editing: entry
         ))
         self.onSaved = onSaved
@@ -44,7 +46,13 @@ struct LogTimeView: View {
         NavigationView {
             ScrollView {
                 VStack(spacing: Theme.spacingMedium) {
-                    activityCard
+                    nameCard
+                        .disabled(vm.isLocked)
+                        .opacity(vm.isLocked ? 0.6 : 1)
+                    categoriesCard
+                        .disabled(vm.isLocked)
+                        .opacity(vm.isLocked ? 0.6 : 1)
+                    notesCard
                         .disabled(vm.isLocked)
                         .opacity(vm.isLocked ? 0.6 : 1)
                     startsEndsCard
@@ -91,11 +99,11 @@ struct LogTimeView: View {
             } message: {
                 Text(L10n.entryDeleteMessage.text)
             }
+            .task {
+                await vm.loadCategoriesIfNeeded(store: container.localStore)
+            }
         }
         .navigationViewStyle(.stack)
-        .sheet(isPresented: pickerPresentation, onDismiss: vm.cancelSearch) {
-            ActivitySearchSheet(vm: vm)
-        }
     }
 
     /// Mode-specific navigation title (localized).
@@ -105,13 +113,6 @@ struct LogTimeView: View {
         case .edit: L10n.entryEditTitle.text
         case .locked: L10n.entryLockedTitle.text
         }
-    }
-
-    private var pickerPresentation: Binding<Bool> {
-        Binding(
-            get: { vm.isPickerActive },
-            set: { if !$0 { vm.cancelSearch() } }
-        )
     }
 
     private func save() async {
@@ -130,13 +131,69 @@ struct LogTimeView: View {
         }
     }
 
+    // MARK: - Name row
+
+    private var nameCard: some View {
+        VStack(alignment: .leading, spacing: Theme.spacingExtraSmall) {
+            Text(L10n.entryNameLabel.text)
+                .font(.caption)
+                .foregroundStyle(Theme.textSecondary)
+            TextField(L10n.entryNamePlaceholder.text, text: $vm.name)
+                .submitLabel(.done)
+                .font(.body)
+                .frame(minHeight: Theme.minTapArea)
+        }
+        .padding(Theme.spacingMedium)
+        .background(Theme.backgroundSecondary)
+        .clipShape(RoundedRectangle(cornerRadius: Theme.cornerRadius))
+        .accessibilityIdentifier("EntryNameRow")
+    }
+
+    // MARK: - Categories row
+
+    private var categoriesCard: some View {
+        VStack(alignment: .leading, spacing: Theme.spacingExtraSmall) {
+            Text(L10n.entryCategoriesLabel.text)
+                .font(.caption)
+                .foregroundStyle(Theme.textSecondary)
+            TagSelector(
+                options: vm.availableCategories,
+                selected: Set(vm.categoryIDs),
+                onToggle: { vm.toggleCategory($0) },
+                accessibilityId: "EntryCategories"
+            )
+        }
+        .padding(Theme.spacingMedium)
+        .background(Theme.backgroundSecondary)
+        .clipShape(RoundedRectangle(cornerRadius: Theme.cornerRadius))
+        .accessibilityIdentifier("EntryCategoriesRow")
+    }
+
+    // MARK: - Notes row
+
+    private var notesCard: some View {
+        VStack(alignment: .leading, spacing: Theme.spacingExtraSmall) {
+            Text(L10n.entryNotesLabel.text)
+                .font(.caption)
+                .foregroundStyle(Theme.textSecondary)
+            TextField(L10n.entryNotesPlaceholder.text, text: $vm.notes)
+                .submitLabel(.done)
+                .font(.body)
+                .frame(minHeight: Theme.minTapArea)
+        }
+        .padding(Theme.spacingMedium)
+        .background(Theme.backgroundSecondary)
+        .clipShape(RoundedRectangle(cornerRadius: Theme.cornerRadius))
+        .accessibilityIdentifier("EntryNotesRow")
+    }
+
     // MARK: - Locked provenance note
 
     /// Read-only note for imported entries (LOCKED mode): bare source name
     /// plus why editing is disabled.
     private var lockedNote: some View {
         HStack(spacing: Theme.spacingExtraSmall) {
-            Image(systemName: ActivityEntryRow.provenanceIcon)
+            Image(systemName: "arrow.triangle.2.circlepath")
             Text(String(
                 format: L10n.entryLockedNote.text,
                 locale: .current,
@@ -168,35 +225,6 @@ struct LogTimeView: View {
         .background(Theme.backgroundSecondary)
         .clipShape(RoundedRectangle(cornerRadius: Theme.cornerRadius))
         .accessibilityIdentifier("EntryDeleteButton")
-    }
-
-    // MARK: - Activity row
-
-    private var activityCard: some View {
-        Button {
-            vm.activateSearch()
-        } label: {
-            VStack(alignment: .leading, spacing: Theme.spacingExtraSmall) {
-                Text(L10n.logTimeActivity.text)
-                    .font(.caption)
-                    .foregroundStyle(Theme.textSecondary)
-                HStack {
-                    Text(vm.selectedActivity?.name ?? L10n.logTimeChooseActivity.text)
-                        .foregroundStyle(vm.selectedActivity == nil ? Theme.textSecondary : Theme.textPrimary)
-                    Spacer()
-                    Image(systemName: "chevron.right")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(Theme.textSecondary)
-                        .accessibilityHidden(true)
-                }
-                .frame(minHeight: Theme.minTapArea)
-            }
-            .padding(Theme.spacingMedium)
-            .contentShape(Rectangle())
-        }
-        .background(Theme.backgroundSecondary)
-        .clipShape(RoundedRectangle(cornerRadius: Theme.cornerRadius))
-        .accessibilityIdentifier("LogTimeActivityRow")
     }
 
     // MARK: - Starts / Ends rows
@@ -362,13 +390,6 @@ struct LogTimeView: View {
 #Preview("Log Time — Empty") {
     let container = AppContainer.production()
     LogTimeView(service: container.timerService)
-        .environmentObject(container)
-}
-
-#Preview("Log Time — RU locale") {
-    let container = AppContainer.production()
-    LogTimeView(service: container.timerService)
-        .environment(\.locale, .init(identifier: "ru"))
         .environmentObject(container)
 }
 #endif

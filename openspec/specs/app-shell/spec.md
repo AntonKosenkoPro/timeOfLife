@@ -4,6 +4,7 @@
 
 Defines a stable product hierarchy for frequent capture, retrospective review, and analysis while keeping account and configuration tasks secondary and preserving access to a running timer.
 ## Requirements
+
 ### Requirement: Three primary destinations
 The app SHALL provide Track, History, and Insights as its primary destinations, and SHALL identify Track as the destination for starting and controlling a timer. The History destination SHALL present committed time entries as a day-grouped, read-only list (see `history-entry-list` capability). The Insights destination SHALL present a period-scoped breakdown of committed tracked time with a hero total (see `insights-breakdown` capability), replacing the empty-state placeholder whenever committed entries exist. The History destination SHALL show the navigation bar (inline title and Profile button) at rest and collapse it on scroll; the Profile button remains present on Track and Insights.
 
@@ -24,7 +25,7 @@ The app SHALL provide Track, History, and Insights as its primary destinations, 
 - **THEN** the period breakdown with hero total is shown instead of the empty-state placeholder
 
 ### Requirement: Profile owns secondary destinations
-The app SHALL expose account, sync, activity and category management, integrations, export, appearance, and destructive data controls from a profile destination rather than as a primary tab. The Profile "Enable Sync" action SHALL first attempt a silent session restore; when the session is still signed out afterward, it SHALL present the auth flow (`AuthFlowView`) as a sheet framed as optional cross-device sync. The sheet SHALL dismiss on successful sign-in and offer an explicit Cancel close path; dismissing unsigned SHALL return to Profile with local data untouched.
+The app SHALL expose account, sync, category management, integrations, export, appearance, and destructive data controls from a profile destination rather than as a primary tab. Activity management SHALL NOT appear in Profile (no activity catalog exists). The Profile "Enable Sync" action SHALL first attempt a silent session restore; when the session is still signed out afterward, it SHALL present the auth flow (`AuthFlowView`) as a sheet framed as optional cross-device sync. The sheet SHALL dismiss on successful sign-in and offer an explicit Cancel close path; dismissing unsigned SHALL return to Profile with local data untouched.
 
 #### Scenario: Open profile while signed out
 - **WHEN** a user without an account opens the profile destination
@@ -49,17 +50,16 @@ The app SHALL expose account, sync, activity and category management, integratio
 #### Scenario: Dismiss the sheet unsigned
 - **WHEN** the user cancels the sheet without signing in
 - **THEN** Profile returns unsigned with local data and the outbox untouched
-
 ### Requirement: Running timer remains globally accessible
 The app SHALL keep an active timer visible and directly stoppable while History or Insights is selected. The compact timer SHALL float above the tab bar with a visible gap — never overlapping or touching it.
 
 #### Scenario: Browse while timing
 - **WHEN** a timer is running and the user switches from Track to History or Insights
-- **THEN** a compact timer displays the activity and live elapsed duration without obscuring primary navigation
+- **THEN** a compact timer displays the entry text and live elapsed duration without obscuring primary navigation
 
 #### Scenario: Stop outside Track
 - **WHEN** the user activates Stop on the compact timer
-- **THEN** the app saves the entry, removes the compact timer, and keeps the current destination selected
+- **THEN** the app saves the entry with the draft's final categories, removes the compact timer, and keeps the current destination selected
 
 #### Scenario: Return to full timer
 - **WHEN** the user activates the non-destructive area of the compact timer
@@ -71,8 +71,7 @@ The app SHALL keep an active timer visible and directly stoppable while History 
 
 #### Scenario: Track settles after an external stop
 - **WHEN** the user returns to Track after stopping the timer from the compact timer
-- **THEN** Track shows the settled post-stop state for the same activity — never a running timer counting from the stopped start time
-
+- **THEN** Track shows the settled post-stop state for the same text — never a running timer counting from the stopped start time
 ### Requirement: Navigation is accessible and stateful
 Primary navigation and the compact timer SHALL expose stable accessibility labels, values, hints, and identifiers, and SHALL remain operable with VoiceOver and Dynamic Type.
 
@@ -90,4 +89,3 @@ The product SHALL preserve Track, History, Insights, and profile-owned secondary
 #### Scenario: macOS hierarchy
 - **WHEN** the product hierarchy is implemented on macOS
 - **THEN** Track, History, and Insights appear as primary sidebar destinations and profile-owned features remain secondary without changing their meaning
-

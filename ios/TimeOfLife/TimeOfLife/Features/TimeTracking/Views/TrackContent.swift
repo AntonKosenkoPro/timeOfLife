@@ -2,16 +2,21 @@ import SwiftUI
 
 /// The stable Track timer layout, built on the adaptive dual-flow stack
 /// (refine-track-recents D1): navigation title, top spacer, completion mark,
-/// timer numbers/status, reserved error region, central separator, Activity
-/// search/refine, main action, Recents, bottom spacer, tab bar. The top and
-/// bottom spacers share a 48 pt cap and split slack equally; surplus beyond
-/// twice the cap goes to the central separator. D10 makes the content height
-/// around the main action state-invariant (reserved idle preparation slot,
-/// hidden-but-reserved Recents, fixed-height action slot) and pins the
-/// bottom flow under wrapped-error growth. Activity-search draft state is
-/// rendered in `ActivitySearchSheet`, rather than replacing this body.
+/// timer numbers/status, reserved error region, central separator, name
+/// field / locked name, main action, running tags / Recents, bottom spacer,
+/// tab bar. The top and bottom spacers share a 48 pt cap and split slack
+/// equally; surplus beyond twice the cap goes to the central separator. D10
+/// makes the content height around the main action state-invariant (reserved
+/// idle preparation slot, fixed-height action slot) and pins the bottom flow
+/// under wrapped-error growth.
+///
+/// Capture is plain text (remove-activities-layer): the name field is the
+/// only idle input; while running the name locks and the shared ordered
+/// `TagSelector` takes the below-button slot where Recents was (D4) — the
+/// field and the button never move on state switch.
 struct TrackContent: View {
     @ObservedObject var vm: TrackViewModel
+    @FocusState private var nameFieldFocused: Bool
     @Environment(\.dynamicTypeSize)
     private var dynamicTypeSize
     @State private var actionSlotWidth: CGFloat = 0
@@ -73,7 +78,7 @@ struct TrackContent: View {
             .frame(height: 28)
     }
 
-    /// Reserved non-field-error region immediately above the search/refine
+    /// Reserved non-field-error region immediately above the name/tags
     /// flow. When empty it preserves geometry; when an error shows, the
     /// banner keeps its production identifier, wraps without being cut, and
     /// grows past the reserved height. Both branches measure their height so
@@ -126,70 +131,88 @@ struct TrackContent: View {
 
     private var bottomFlow: some View {
         VStack(spacing: 0) {
-            activityPreparationControl
+            nameControl
             primaryAction
                 .padding(.top, Theme.spacingLarge)
-            recentActivities
+            belowActionSlot
                 .padding(.top, Theme.spacingLarge)
         }
         .padding(.horizontal, Theme.screenHorizontalPadding)
         .frame(maxWidth: Theme.maxContentWidth)
         .frame(maxWidth: .infinity)
+        // State swaps must be instant: Start resigns the field, so the swap
+        // lands inside the keyboard-dismissal animation transaction — without
+        // this the button tint/label crossfades and slides ("bubbles") with
+        // the keyboard instead of appearing in place.
+        .transaction { $0.animation = nil }
     }
 
-    // MARK: - Activity preparation
-
-    @ViewBuilder private var activityPreparationControl: some View {
-        switch vm.state {
-        case .idle:
-            // D10: the slot is reserved in every state. The hidden picker
-            // keeps the exact picker/label geometry but is invisible,
-            // non-interactive, and absent from the accessibility tree.
-            activityPicker
-                .hidden()
-                .accessibilityHidden(true)
-        case .ready, .saved:
-            activityPicker
-        case .running, .saving, .error:
-            preparedActivityLabel
+    /// Below the Start/Stop button: Recents while idle, the live tag
+    /// selector while running. Both branches stay mounted and the inactive
+    /// one hides via opacity, so the slot keeps the taller branch's height
+    /// in every state — the name field and the button above never move on
+    /// state switch, and the tags sit where Recents was instead of pushing
+    /// the button down. Hit testing and accessibility follow the visible
+    /// branch (opacity hiding preserves layout on iOS 15).
+    @ViewBuilder private var belowActionSlot: some View {
+        ZStack(alignment: .top) {
+            recentActivities
+                .opacity(vm.state.isRunning ? 0 : 1)
+                .allowsHitTesting(!vm.state.isRunning)
+                .accessibilityHidden(vm.state.isRunning)
+            runningTagSelector
+                .opacity(vm.state.isRunning ? 1 : 0)
+                .allowsHitTesting(vm.state.isRunning)
+                .accessibilityHidden(!vm.state.isRunning)
         }
     }
 
-    private var activityPicker: some View {
-        Button {
-            vm.activateSearch()
-        } label: {
-            HStack(spacing: Theme.spacingSmall) {
-                Image(systemName: "magnifyingglass")
-                    .foregroundStyle(Theme.textSecondary)
-                    .accessibilityHidden(true)
-                Text(vm.state.activity?.name ?? L10n.timerSearchPrompt.text)
-                    .lineLimit(1)
-                    .foregroundStyle(vm.state.activity == nil ? Theme.textSecondary : Theme.textPrimary)
-                Spacer()
-            }
-            .font(.body)
-            .padding(.horizontal, Theme.spacingMedium)
-            .frame(maxWidth: .infinity, minHeight: Theme.minTapArea)
-            .background(Theme.backgroundSecondary)
-            .clipShape(RoundedRectangle(cornerRadius: Theme.cornerRadius))
-            .overlay {
-                RoundedRectangle(cornerRadius: Theme.cornerRadius)
-                    .stroke(Theme.hairline, lineWidth: 0.7)
-            }
+    // MARK: - Name capture (plain text, remove-activities-layer 4.1/4.2)
+
+    /// Idle/ready/saved: the plain-text name field. Running/saving/error:
+    /// the locked name label (name is non-editable after Start).
+    @ViewBuilder private var nameControl: some View {
+        switch vm.state {
+        case .idle, .ready, .saved:
+            nameField
+        case .running, .saving, .error:
+            lockedNameLabel
+        }
+    }
+
+    private var nameField: some View {
+        TextField(
+            L10n.timerNamePlaceholder.text,
+            text: $vm.nameDraft,
+            onEditingChanged: { editing in
+                vm.nameFieldFocused = editing
+                guard !editing else { return }
+                vm.syncReadyFromDraft()
+            },
+            onCommit: { vm.syncReadyFromDraft() }
+        )
+        .focused($nameFieldFocused)
+        .submitLabel(.done)
+        .font(.body)
+        .padding(.horizontal, Theme.spacingMedium)
+        .frame(maxWidth: .infinity, minHeight: Theme.minTapArea)
+        .background(Theme.backgroundSecondary)
+        .clipShape(RoundedRectangle(cornerRadius: Theme.cornerRadius))
+        .overlay {
+            RoundedRectangle(cornerRadius: Theme.cornerRadius)
+                .stroke(Theme.hairline, lineWidth: 0.7)
         }
         .disabled(vm.state.isRunning)
-        .opacity(vm.state.isRunning ? 0.72 : 1)
-        .accessibilityIdentifier("TimerActivitySearchButton")
-        .accessibilityLabel(vm.state.activity?.name ?? L10n.timerSearchPrompt.text)
+        .accessibilityIdentifier("TimerNameField")
+        .accessibilityLabel(L10n.timerNamePlaceholder.text)
     }
 
-    private var preparedActivityLabel: some View {
+    private var lockedNameLabel: some View {
         HStack(spacing: Theme.spacingSmall) {
             Image(systemName: "timer")
                 .foregroundStyle(Theme.textSecondary)
                 .accessibilityHidden(true)
-            Text(vm.state.activity?.name ?? L10n.timerSearchPrompt.text)
+            Text(vm.state.draft?.text ?? "")
                 .lineLimit(1)
                 .foregroundStyle(Theme.textPrimary)
             Spacer()
@@ -203,8 +226,45 @@ struct TrackContent: View {
             RoundedRectangle(cornerRadius: Theme.cornerRadius)
                 .stroke(Theme.hairline, lineWidth: 0.7)
         }
-        .accessibilityIdentifier("TimerActivityLabel")
-        .accessibilityLabel(vm.state.activity?.name ?? L10n.timerSearchPrompt.text)
+        .accessibilityIdentifier("TimerNameLabel")
+        .accessibilityLabel(vm.state.draft?.text ?? "")
+    }
+
+    // MARK: - Running TagSelector (remove-activities-layer 4.2)
+
+    /// The shared ordered TagSelector (select-only from existing categories,
+    /// zero allowed, order preserved). Toggles rewrite only the running
+    /// draft snapshot. Always mounted — even when idle with an empty
+    /// selection — so its height never changes on state switch: the rows
+    /// depend only on the category options, never on the selection, which
+    /// keeps the below-button slot (and everything above it) pixel-stable.
+    /// Visibility is opacity-only (see `belowActionSlot`).
+    private var runningTagSelector: some View {
+        VStack(alignment: .leading, spacing: Theme.spacingSmall) {
+            Text(L10n.entryCategoriesLabel.text)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(Theme.textSecondary)
+            TagSelector(
+                options: Array(vm.categories.values).sorted { $0.name < $1.name },
+                selected: runningSelectedIDs,
+                onToggle: { toggledID in
+                    vm.toggleDraftCategory(toggledID)
+                },
+                accessibilityId: "RunningTags"
+            )
+        }
+        .accessibilityIdentifier("RunningTagSelector")
+    }
+
+    /// The running draft's ordered selection while running, empty otherwise.
+    /// Selection never affects the selector's geometry (rows come from the
+    /// options alone).
+    private var runningSelectedIDs: Set<String> {
+        if case let .running(draft, _) = vm.state {
+            Set(draft.categoryIDs)
+        } else {
+            []
+        }
     }
 
     // MARK: - Primary action
@@ -216,12 +276,16 @@ struct TrackContent: View {
             isLoading: vm.state.isSaving,
             isDisabled: primaryDisabled,
             accessibilityId: primaryIdentifier,
-            tint: vm.state.isRunning ? Theme.danger : nil
+            tint: vm.state.isRunning ? Theme.danger : nil,
+            animateStateChanges: false
         ) {
             switch vm.state {
-            case .idle:
-                vm.activateSearch()
-            case .ready, .saved:
+            case .idle, .ready, .saved:
+                // Push focus into the VM before resigning: a focused Start
+                // tap resigns first and the swap waits out the keyboard
+                // slide (see `TrackViewModel.start()`).
+                vm.nameFieldFocused = nameFieldFocused
+                nameFieldFocused = false
                 vm.start()
             case .running, .saving:
                 Task { await vm.stop() }
@@ -243,8 +307,8 @@ struct TrackContent: View {
 
     /// D10: the fixed-height slot for the state-specific main action. The
     /// slot equals the tallest title presentation at the active Dynamic
-    /// Type size, so the Choose Activity / Start / Stop swap never resizes
-    /// or moves the control.
+    /// Type size, so the Start / Stop swap never resizes or moves the
+    /// control.
     private var actionSlotHeight: CGFloat {
         MainActionSlot.height(
             titles: primaryTitles,
@@ -254,37 +318,34 @@ struct TrackContent: View {
     }
 
     private var primaryTitles: [String] {
-        [L10n.timerChooseActivity.text, L10n.timerStart.text, L10n.timerStop.text]
+        [L10n.timerStart.text, L10n.timerStop.text]
     }
 
     private var primaryTitle: String {
         switch vm.state {
-        case .idle: L10n.timerChooseActivity.text
-        case .ready, .saved: L10n.timerStart.text
-        case .running, .saving: L10n.timerStop.text
-        case .error: L10n.timerStop.text
+        case .idle, .ready, .saved: L10n.timerStart.text
+        case .running, .saving, .error: L10n.timerStop.text
         }
     }
 
     private var primaryIcon: String? {
         switch vm.state {
-        case .idle: "plus"
-        case .ready, .saved: "play.fill"
+        case .idle, .ready, .saved: "play.fill"
         case .running, .saving, .error: "stop.fill"
         }
     }
 
     private var primaryDisabled: Bool {
         switch vm.state {
-        case .saving: true
-        default: false
+        case .idle, .ready: !vm.canStart
+        case .saved, .saving: true
+        case .running, .error: false
         }
     }
 
     private var primaryIdentifier: String {
         switch vm.state {
-        case .idle: "TimerChooseActivityButton"
-        case .ready, .saved: "TimerStartButton"
+        case .idle, .ready, .saved: "TimerStartButton"
         case .running, .saving, .error: "TimerStopButton"
         }
     }
@@ -298,33 +359,26 @@ struct TrackContent: View {
 
     // MARK: - Recent activities
 
-    /// D10: Recents keeps its occupied height while hidden during running
-    /// and error states, so the bottom content height is state-invariant and
-    /// the adaptive spacers recompute identically — the main action above
-    /// Recents does not move. Opacity-based hiding preserves layout on
-    /// iOS 15; hit testing and accessibility are disabled while hidden, and
-    /// the chips reappear in place for saving/saved.
+    /// Recents while idle (the running tag selector takes this slot while
+    /// running, see `belowActionSlot`).
     private var recentActivities: some View {
         VStack(alignment: .leading, spacing: Theme.spacingSmall) {
             Text(L10n.timerChooserRecent.text)
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(Theme.textSecondary)
 
-            if vm.activities.isEmpty {
+            if vm.recents.isEmpty {
                 Text(L10n.timerRecentsEmptyHint.text)
                     .font(.subheadline)
                     .foregroundStyle(Theme.textSecondary)
             } else {
                 RecentActivitiesChips(
-                    activities: vm.activities,
+                    recents: vm.recents,
                     categories: vm.categories,
-                    selectedID: vm.state.activity?.id
+                    selectedText: vm.state.draft?.text
                 ) { vm.select($0) }
             }
         }
-        .opacity(vm.state.isRunning ? 0 : 1)
-        .allowsHitTesting(!vm.state.isRunning)
-        .accessibilityHidden(vm.state.isRunning)
     }
 }
 

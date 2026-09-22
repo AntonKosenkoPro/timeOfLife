@@ -32,14 +32,14 @@ func TestListDeletions_Empty(t *testing.T) {
 	}
 }
 
-// Deleting an activity/category/entry via the API records tombstones listed
-// by GET /deletions, oldest first.
+// Deleting a category/entry via the API records tombstones listed by
+// GET /deletions, oldest first. Tombstones are entries/categories only —
+// activity tombstones no longer exist.
 func TestListDeletions_AfterDeletes(t *testing.T) {
 	h, tok := newDeletionsHandler(t)
 
 	catID := createCategoryHelper(t, h, tok, "Sport", "tag")
-	actID := newActivityWithCategories(t, h, tok, catID)
-	entryID := newEntryHelper(t, h, tok, actID)
+	entryID := newEntryHelper(t, h, tok, "Gym", []string{catID})
 
 	delEntry := serve(h, jsonReq(t, "DELETE", "/api/v1/entries/"+entryID, tok, nil))
 	if delEntry.Code != http.StatusNoContent {
@@ -49,10 +49,6 @@ func TestListDeletions_AfterDeletes(t *testing.T) {
 	if delCat.Code != http.StatusNoContent {
 		t.Fatalf("delete category: expected 204, got %d", delCat.Code)
 	}
-	delAct := serve(h, jsonReq(t, "DELETE", "/api/v1/activities/"+actID, tok, nil))
-	if delAct.Code != http.StatusNoContent {
-		t.Fatalf("delete activity: expected 204, got %d", delAct.Code)
-	}
 
 	w := serve(h, jsonReq(t, "GET", "/api/v1/deletions", tok, nil))
 	if w.Code != http.StatusOK {
@@ -60,8 +56,8 @@ func TestListDeletions_AfterDeletes(t *testing.T) {
 	}
 	var list []tombstoneResp
 	decodeBody(t, w, &list)
-	if len(list) != 3 {
-		t.Fatalf("expected 3 tombstones, got %d: %+v", len(list), list)
+	if len(list) != 2 {
+		t.Fatalf("expected 2 tombstones, got %d: %+v", len(list), list)
 	}
 	byResource := map[string]tombstoneResp{}
 	for _, tomb := range list {
@@ -69,8 +65,11 @@ func TestListDeletions_AfterDeletes(t *testing.T) {
 		if tomb.DeletedAt == "" {
 			t.Errorf("expected non-empty deleted_at, got %+v", tomb)
 		}
+		if tomb.Resource != "entry" && tomb.Resource != "category" {
+			t.Errorf("unexpected tombstone resource %q (entries/categories only): %+v", tomb.Resource, tomb)
+		}
 	}
-	if byResource["activity"].ID != actID || byResource["category"].ID != catID || byResource["entry"].ID != entryID {
+	if byResource["category"].ID != catID || byResource["entry"].ID != entryID {
 		t.Errorf("tombstone ids do not match the deleted records: %+v", list)
 	}
 	// Ordering: deleted_at ASC.
@@ -119,8 +118,8 @@ func TestListDeletions_DeletedSinceValidation(t *testing.T) {
 func TestListDeletions_DeletedSinceFilter(t *testing.T) {
 	h, tok := newDeletionsHandler(t)
 
-	actID := newActivity(t, h, tok)
-	del1 := serve(h, jsonReq(t, "DELETE", "/api/v1/activities/"+actID, tok, nil))
+	actID := newEntry(t, h, tok)
+	del1 := serve(h, jsonReq(t, "DELETE", "/api/v1/entries/"+actID, tok, nil))
 	if del1.Code != http.StatusNoContent {
 		t.Fatalf("delete 1: expected 204, got %d", del1.Code)
 	}
@@ -130,8 +129,8 @@ func TestListDeletions_DeletedSinceFilter(t *testing.T) {
 	cursor := time.Now().UTC().Truncate(time.Second)
 	time.Sleep(1100 * time.Millisecond)
 
-	actID2 := newActivity(t, h, tok)
-	del2 := serve(h, jsonReq(t, "DELETE", "/api/v1/activities/"+actID2, tok, nil))
+	actID2 := newEntry(t, h, tok)
+	del2 := serve(h, jsonReq(t, "DELETE", "/api/v1/entries/"+actID2, tok, nil))
 	if del2.Code != http.StatusNoContent {
 		t.Fatalf("delete 2: expected 204, got %d", del2.Code)
 	}

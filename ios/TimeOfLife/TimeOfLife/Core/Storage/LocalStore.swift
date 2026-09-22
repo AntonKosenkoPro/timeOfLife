@@ -28,7 +28,7 @@ actor LocalStore {
     private let dbQueue: DatabaseQueue
 
     /// Generates client record IDs (UUID v7) for new relay resources —
-    /// Categories, Activities, and Entries (category-management D3). One
+    /// Categories and Entries (category-management D3). One
     /// dependency-injectable generator is shared by every creation path so
     /// tests can inject deterministic ids.
     private let recordIDGenerator: RecordIDGenerating
@@ -55,8 +55,8 @@ actor LocalStore {
         )
         var configuration = Configuration()
         configuration.prepareDatabase { db in
-            // Foreign keys are enforced so a delete of an activity cascades to
-            // its entries and join rows, mirroring the backend relay.
+            // Foreign keys are enforced so a delete of a category or entry
+            // cascades to its join rows, mirroring the backend relay.
             try db.execute(sql: "PRAGMA foreign_keys = ON")
         }
         self.dbQueue = try DatabaseQueue(path: databaseURL.path, configuration: configuration)
@@ -76,10 +76,14 @@ actor LocalStore {
 
     // MARK: - Schema
 
-    /// The typed schema (local-first-store spec): state tables (activities,
-    /// categories, activity_categories, entries, timer_state), the
-    /// transactional outbox, the durable undo buffer, and per-resource sync
-    /// cursors.
+    /// The typed schema (local-first-store spec, remove-activities-layer
+    /// D1/D2/D8): state tables (categories, entry_categories, entries,
+    /// timer_state), the transactional outbox, the durable undo buffer, and
+    /// per-resource sync cursors. v2 transposes the schema: entries own
+    /// `activity_text`, their ordered categories (via `entry_categories`),
+    /// and `notes`; the `activities`/`activity_categories` entity layer is
+    /// gone. Pre-release rule: no backward-compat branches — v1 databases
+    /// backfill once and the old tables are dropped.
     static func migrator() -> DatabaseMigrator { // swiftlint:disable:this function_body_length
         var migrator = DatabaseMigrator()
         migrator.registerMigration("v1") { db in
@@ -91,11 +95,6 @@ actor LocalStore {
                 t.column("created_at", .datetime).notNull()
                 t.column("updated_at", .datetime).notNull()
             }
-            // Normalized Activity-name uniqueness (unify-activity-preparation-
-            // flow spec): names are equal after trimming surrounding
-            // whitespace and case-insensitive comparison, mirroring the
-            // relay's per-user index for the single local catalog. The unique
-            // index is the final race guard for create-or-resolve.
             try db.execute(sql: """
                 CREATE UNIQUE INDEX index_activities_on_lower_name
                 ON activities (lower(name))
@@ -107,18 +106,10 @@ actor LocalStore {
                 t.column("created_at", .datetime).notNull()
                 t.column("updated_at", .datetime).notNull()
             }
-            // Normalized Category-name uniqueness (category-management D1):
-            // names are equal after trimming surrounding whitespace and
-            // case-insensitive comparison, mirroring the relay's per-user
-            // index. The unique index is the final race guard for create and
-            // rename paths.
             try db.execute(sql: """
                 CREATE UNIQUE INDEX index_categories_on_lower_name
                 ON categories (lower(name))
                 """)
-            // Local metadata (category-management D2): the
-            // `category_starters_seeded` marker ensures the starter set is
-            // created exactly once per local dataset.
             try db.create(table: "local_metadata") { t in
                 t.column("key", .text).primaryKey()
                 t.column("value", .text).notNull()
@@ -143,16 +134,7 @@ actor LocalStore {
                 t.column("created_at", .datetime).notNull()
                 t.column("updated_at", .datetime).notNull()
             }
-            // Duplicate-import prevention (entry-provenance spec): a source
-            // re-sending the same record must not create a duplicate. SQLite
-            // has no partial indexes, so the unique index covers all rows and
-            // NULL source_ref values are exempt by SQL semantics (NULLs never
-            // collide in a UNIQUE index).
             try db.create(indexOn: "entries", columns: ["source", "source_ref"], options: [.unique])
-            // Per-activity entry lookups (activity-detail-sheet): the detail
-            // sheet and its all-time total query by activity_id, which has
-            // no index otherwise (only the PK and the unique provenance
-            // index above).
             try db.create(indexOn: "entries", columns: ["activity_id"])
             try db.create(table: "timer_state") { t in
                 t.column("id", .text).primaryKey()
@@ -180,13 +162,123 @@ actor LocalStore {
                 t.column("last_synced_at", .datetime)
             }
         }
+        migrator.registerMigration("v2") { db in
+            // The old table keeps its `activity_id` for the backfill joins —
+            // rename it out of the way first.
+            try db.rename(table: "entries", to: "entries_old")
+            // New entries shape: text, notes, and timing only — the display
+            // name moves onto the entry (D1). `notes` defaults to ''.
+            try db.create(table: "entries_new") { t in
+                t.column("id", .text).primaryKey()
+                t.column("activity_text", .text).notNull()
+                t.column("notes", .text).notNull().defaults(to: "")
+                t.column("started_at", .datetime).notNull()
+                t.column("ended_at", .datetime)
+                t.column("duration_seconds", .integer)
+                t.column("source", .text).notNull().defaults(to: "manual")
+                t.column("source_ref", .text)
+                t.column("created_at", .datetime).notNull()
+                t.column("updated_at", .datetime).notNull()
+            }
+            // Backfill each entry from its activity's CURRENT name and notes
+            // (D8): history freezes the values as of the migration.
+            try db.execute(sql: """
+                INSERT INTO entries_new
+                    (id, activity_text, notes, started_at, ended_at, duration_seconds,
+                     source, source_ref, created_at, updated_at)
+                SELECT e.id, COALESCE(a.name, ''), COALESCE(a.notes, ''),
+                       e.started_at, e.ended_at, e.duration_seconds,
+                       e.source, e.source_ref, e.created_at, e.updated_at
+                FROM entries_old e
+                LEFT JOIN activities a ON a.id = e.activity_id
+                """)
+            // Copy the old per-activity category order into a staging table
+            // BEFORE entries_old is dropped (its cascading foreign keys would
+            // otherwise delete the freshly backfilled entries when it goes).
+            try db.create(table: "entry_categories_staging") { t in
+                t.column("entry_id", .text).notNull()
+                t.column("category_id", .text).notNull()
+                t.column("position", .integer).notNull()
+                t.primaryKey(["entry_id", "category_id"])
+            }
+            try db.execute(sql: """
+                INSERT INTO entry_categories_staging (entry_id, category_id, position)
+                SELECT e.id, ac.category_id, ac.position
+                FROM entries_new e
+                JOIN entries_old o ON o.id = e.id
+                JOIN activity_categories ac ON ac.activity_id = o.activity_id
+                """)
+            // Recents-query index (D5): per-user exact-text grouping ordered
+            // by the newest commit. A single local user exists, so user_id is
+            // constant — the index leads with it to mirror the relay. The
+            // leading column is an expression constant (SQLite identifiers
+            // and quoted strings share the `"` form in indexes).
+            try db.execute(sql: """
+                CREATE INDEX index_entries_on_user_activity_text_started_at
+                ON entries_new (cast('__local_user__' AS TEXT), activity_text, started_at)
+                """)
+            try db.drop(table: "entries_old")
+            try db.rename(table: "entries_new", to: "entries")
+            try db.create(indexOn: "entries", columns: ["source", "source_ref"], options: [.unique])
+            // Ordered per-entry categories (D2): the old
+            // activity_categories(position) shape, re-anchored to entries —
+            // now with the live cascade to the final `entries` table.
+            try db.create(table: "entry_categories") { t in
+                t.column("entry_id", .text).notNull()
+                    .references("entries", onDelete: .cascade)
+                t.column("category_id", .text).notNull()
+                    .references("categories", onDelete: .cascade)
+                t.column("position", .integer).notNull()
+                t.primaryKey(["entry_id", "category_id"])
+            }
+            try db.execute(sql: """
+                INSERT INTO entry_categories (entry_id, category_id, position)
+                SELECT entry_id, category_id, position FROM entry_categories_staging
+                """)
+            try db.drop(table: "entry_categories_staging")
+            // Transposed timer draft (D3): the running draft holds the locked
+            // text and the live ordered category-id snapshot. A running
+            // v1 draft cannot be mapped (its activity may backfill to a
+            // different text) — it is discarded with the old table.
+            try db.drop(table: "timer_state")
+            try db.create(table: "timer_state") { t in
+                t.column("id", .text).primaryKey()
+                t.column("activity_text", .text)
+                t.column("category_ids", .text)
+                t.column("started_at", .datetime)
+                t.column("status", .text).notNull()
+            }
+            // The entity layer is gone (D8). Orphan activities (no entries
+            // backfilled from them) vanish with the table.
+            try db.drop(table: "activity_categories")
+            try db.drop(table: "activities")
+            // Buffered activity snapshots reference a dropped record type:
+            // commit them (they only ever fan out to activity/entry delete
+            // rows) so a restart cannot trip on undecodable payloads.
+            try Self.dropActivityUndoRows(db)
+        }
         return migrator
+    }
+
+    /// Removes undo-buffer rows owned by the deleted activity surface inside
+    /// the v2 migration. Only rows whose payload decodes as an activity-owned
+    /// snapshot (a resource set containing "activity") are removed; entry-
+    /// and category-owned rows are left for their owners.
+    private static func dropActivityUndoRows(_ db: Database) throws {
+        let rows = try UndoBufferRow.fetchAll(db, sql: "SELECT * FROM undo_buffer")
+        for row in rows {
+            guard let data = row.payload.data(using: .utf8),
+                  let snapshot = try? JSONDecoder().decode(DeletionSnapshot.self, from: data),
+                  snapshot.records.contains(where: { $0.resource == "activity" })
+            else { continue }
+            try db.execute(sql: "DELETE FROM undo_buffer WHERE id = ?", arguments: [row.id])
+        }
     }
 
     // MARK: - Record IDs (UUID v7, D3)
 
     /// A new UUID v7 record id from the shared injectable generator, used for
-    /// new Category, Activity, and Entry relay resources.
+    /// new Category and Entry relay resources.
     func newRecordID() -> String {
         recordIDGenerator.newID()
     }
@@ -299,359 +391,6 @@ actor LocalStore {
         try String.fetchOne(db, sql: """
             SELECT value FROM local_metadata WHERE key = ?
             """, arguments: [key])
-    }
-
-    // MARK: - Activities
-
-    /// All activities, most-recently-used first (nil last).
-    func activities() throws -> [Activity] {
-        try dbQueue.read { db in
-            let rows = try Row.fetchAll(db, sql: """
-                SELECT a.*, (
-                    SELECT GROUP_CONCAT(ac.category_id)
-                    FROM (SELECT category_id FROM activity_categories
-                          WHERE activity_id = a.id ORDER BY position) ac
-                ) AS category_ids
-                FROM activities a
-                ORDER BY (a.last_used_at IS NULL), a.last_used_at DESC, a.updated_at DESC
-                """)
-            return rows.map { row in
-                Activity(
-                    id: row["id"],
-                    name: row["name"],
-                    notes: row["notes"],
-                    lastUsedAt: row["last_used_at"],
-                    categoryIDs: Self.categoryIDs(from: row["category_ids"]),
-                    createdAt: row["created_at"],
-                    updatedAt: row["updated_at"]
-                )
-            }
-        }
-    }
-
-    /// One activity by id, or nil.
-    func activity(id: String) throws -> Activity? {
-        try dbQueue.read { db in
-            try Self.fetchActivity(db, id: id)
-        }
-    }
-
-    /// One activity by case-insensitive name, or nil.
-    func activity(named name: String) throws -> Activity? {
-        try dbQueue.read { db in
-            try Self.fetchActivity(db, name: name)
-        }
-    }
-
-    /// The typed outcome of `createOrResolveActivity(named:...)`.
-    enum CreateOrResolve: Equatable {
-        /// A new activity was inserted (with its outbox create row).
-        case created(Activity)
-        /// An existing activity with the same normalized name was reused.
-        case existing(Activity)
-        /// A pending-deletion activity with the same normalized
-        /// name exists; the caller must confirm restoration explicitly.
-        case restorableDeletion(Activity)
-        /// The candidate name failed validation.
-        case invalid(ActivityName.Validation)
-        /// The local write failed (persistence error).
-        case failure
-    }
-
-    /// Atomically creates an activity or resolves an existing identity by
-    /// normalized name (unify-activity-preparation-flow spec, decision 6).
-    ///
-    /// The operation trims and validates the candidate name, resolves an
-    /// existing row using the database's case-insensitive comparison, and
-    /// inserts the activity plus its outbox row in one transaction only when
-    /// no active or restorable identity exists. The unique index on
-    /// `lower(name)` remains the final race guard: a concurrent insert that
-    /// wins the race is translated into an `existing` outcome.
-    ///
-    /// - Parameters:
-    ///   - name: The candidate name (surrounding whitespace is trimmed).
-    ///   - notes: Optional notes for a newly created activity.
-    ///   - categoryIDs: Optional category ids for a newly created activity.
-    ///   - now: The creation timestamp (injectable for tests).
-    func createOrResolveActivity(
-        named name: String,
-        notes: String? = nil,
-        categoryIDs: [String] = [],
-        now: Date = Date()
-    ) throws -> CreateOrResolve {
-        let trimmed = ActivityName.normalized(name)
-        switch ActivityName.validate(trimmed) {
-        case .empty, .tooLong:
-            return .invalid(ActivityName.validate(trimmed))
-        case .valid:
-            break
-        }
-        return try dbQueue.write { db in
-            if let existing = try Self.fetchActivity(db, name: trimmed) {
-                return .existing(existing)
-            }
-            if let pending = try Self.fetchPendingDeletionActivity(db, name: trimmed) {
-                return .restorableDeletion(pending)
-            }
-            let deduplicated = Self.deduplicate(categoryIDs)
-            let activity = Activity(
-                id: recordIDGenerator.newID(),
-                name: trimmed,
-                notes: notes,
-                categoryIDs: deduplicated,
-                createdAt: now,
-                updatedAt: now
-            )
-            do {
-                try db.execute(
-                    sql: """
-                        INSERT INTO activities (id, name, notes, last_used_at, created_at, updated_at)
-                        VALUES (?, ?, ?, ?, ?, ?)
-                        """,
-                    arguments: [activity.id, activity.name, activity.notes, activity.lastUsedAt, activity.createdAt, activity.updatedAt]
-                )
-            } catch {
-                // The unique index on lower(name) is the final race guard: a
-                // concurrent create-or-resolve that inserted the same
-                // normalized name wins, and this attempt resolves to it.
-                if let existing = try? Self.fetchActivity(db, name: trimmed) {
-                    return .existing(existing)
-                }
-                return .failure
-            }
-            try Self.replaceActivityCategories(db: db, activityID: activity.id, categoryIDs: categoryIDs)
-            try Self.enqueueOutbox(db: db, resource: "activity", recordID: activity.id,
-                                   op: "create", payload: activity)
-            return .created(activity)
-        }
-    }
-
-    /// Creates an activity and enqueues the outbox row in one transaction.
-    /// Idempotent on `id`: a replay returns the existing record.
-    func createActivity(_ activity: Activity) throws {
-        try dbQueue.write { db in
-            if try Self.fetchActivity(db, id: activity.id) != nil {
-                return
-            }
-            try db.execute(
-                sql: """
-                    INSERT INTO activities (id, name, notes, last_used_at, created_at, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?)
-                    """,
-                arguments: [activity.id, activity.name, activity.notes, activity.lastUsedAt, activity.createdAt, activity.updatedAt]
-            )
-            try Self.replaceActivityCategories(db: db, activityID: activity.id, categoryIDs: activity.categoryIDs)
-            try Self.enqueueOutbox(db: db, resource: "activity", recordID: activity.id,
-                                   op: "create", payload: activity)
-        }
-    }
-
-    /// Applies a last-write-wins update: the write applies only if
-    /// `activity.updatedAt` is newer than the stored `updated_at`. Returns
-    /// false when the write was stale (the local version is kept).
-    @discardableResult
-    func updateActivity(_ activity: Activity) throws -> Bool {
-        try dbQueue.write { db in
-            try db.execute(
-                sql: """
-                    UPDATE activities
-                    SET name = ?, notes = ?, last_used_at = ?, updated_at = ?
-                    WHERE id = ? AND updated_at < ?
-                    """,
-                arguments: [activity.name, activity.notes, activity.lastUsedAt, activity.updatedAt, activity.id, activity.updatedAt]
-            )
-            guard db.changesCount > 0 else { return false }
-            try Self.replaceActivityCategories(db: db, activityID: activity.id, categoryIDs: activity.categoryIDs)
-            try Self.enqueueOutbox(db: db, resource: "activity", recordID: activity.id,
-                                   op: "update", payload: activity)
-            return true
-        }
-    }
-
-    /// The typed outcome of `refineActivity(...)` (refine-selected-activity-
-    /// from-track change, design decision 4).
-    enum RefineActivity: Equatable {
-        /// The activity was updated (with its outbox update row).
-        case updated(Activity)
-        /// The original activity no longer exists.
-        case missing
-        /// Another active activity owns the same normalized name.
-        case collision(Activity)
-        /// The draft name failed validation.
-        case invalid(ActivityName.Validation)
-        /// One or more selected categories do not exist locally; the edit was
-        /// rolled back in full (category-management D5).
-        case invalidAssociation
-        /// The local write failed (persistence error).
-        case failure
-    }
-
-    /// Thrown inside the refine write transaction when an association is
-    /// invalid; the caller maps it to `.invalidAssociation` after the rollback.
-    private enum RefineAssociationError: Error {
-        case invalidCategory
-    }
-
-    /// Atomically refines an existing activity (refine-selected-activity-
-    /// from-track change, design decision 4). Accepts the original activity
-    /// identifier, a validated draft, and a timestamp. In one write
-    /// transaction it:
-    ///
-    /// 1. Fetches the original activity by id; returns `.missing` if absent.
-    /// 2. Normalizes and validates the draft name; returns `.invalid` on
-    ///    failure.
-    /// 3. Checks for another active activity with the same normalized name,
-    ///    excluding the original id; returns `.collision` if one exists.
-    /// 4. Updates name, notes, Categories, and `updated_at` on the original
-    ///    row.
-    /// 5. Enqueues one update outbox operation containing the complete updated
-    ///    activity.
-    /// 6. Returns the updated activity.
-    ///
-    /// The database unique index on `lower(name)` is the final race guard: a
-    /// constraint failure is translated to `.collision` when the winning row
-    /// can be resolved. The operation never creates a new identity or
-    /// restores a pending deletion.
-    func refineActivity( // swiftlint:disable:this function_body_length
-        id: String,
-        draft: ActivityDraft,
-        now: Date = Date()
-    ) throws -> RefineActivity {
-        let trimmed = ActivityName.normalized(draft.name)
-        switch ActivityName.validate(trimmed) {
-        case .empty, .tooLong:
-            return .invalid(ActivityName.validate(trimmed))
-        case .valid:
-            break
-        }
-        let trimmedNotes = draft.notes?.trimmingCharacters(in: .whitespacesAndNewlines)
-        let notes = (trimmedNotes?.isEmpty ?? true) ? nil : trimmedNotes
-        do {
-            return try dbQueue.write { db in
-                guard let original = try Self.fetchActivity(db, id: id) else {
-                    return .missing
-                }
-                if trimmed.caseInsensitiveCompare(original.name) != .orderedSame {
-                    if let other = try Self.fetchActivity(db, name: trimmed), other.id != id {
-                        return .collision(other)
-                    }
-                }
-                let updated = Activity(
-                    id: original.id,
-                    name: trimmed,
-                    notes: notes,
-                    lastUsedAt: original.lastUsedAt,
-                    categoryIDs: draft.categoryIDs,
-                    createdAt: original.createdAt,
-                    updatedAt: now
-                )
-                do {
-                    try db.execute(
-                        sql: """
-                            UPDATE activities
-                            SET name = ?, notes = ?, last_used_at = ?, updated_at = ?
-                            WHERE id = ?
-                            """,
-                        arguments: [updated.name, updated.notes, updated.lastUsedAt, updated.updatedAt, updated.id]
-                    )
-                } catch {
-                    if let winner = try? Self.fetchActivity(db, name: trimmed), winner.id != id {
-                        return .collision(winner)
-                    }
-                    return .failure
-                }
-                do {
-                    try Self.replaceActivityCategories(db: db, activityID: updated.id, categoryIDs: draft.categoryIDs)
-                } catch AssociationError.invalidCategory {
-                    // Throw so the transaction ROLLS BACK the activity-field
-                    // update, the join deletes, and the outbox write together
-                    // (category-management D5); the caller maps it.
-                    throw RefineAssociationError.invalidCategory
-                }
-                try Self.enqueueOutbox(db: db, resource: "activity", recordID: updated.id,
-                                       op: "update", payload: updated)
-                return .updated(updated)
-            }
-        } catch RefineAssociationError.invalidCategory {
-            return .invalidAssociation
-        }
-    }
-
-    /// Deletes an activity and its child rows (entries + join rows) in one
-    /// transaction, enqueuing a delete outbox row. The outbox row persists
-    /// even though the activity row is gone (deletes are first-class).
-    func deleteActivity(id: String) throws {
-        try dbQueue.write { db in
-            try db.execute(sql: "DELETE FROM entries WHERE activity_id = ?", arguments: [id])
-            try db.execute(sql: "DELETE FROM activity_categories WHERE activity_id = ?", arguments: [id])
-            try db.execute(sql: "DELETE FROM activities WHERE id = ?", arguments: [id])
-            try Self.enqueueOutbox(db: db, resource: "activity", recordID: id, op: "delete", payload: nil)
-        }
-    }
-
-    /// Upserts a server record during a pull-merge: replaces the local row
-    /// (or inserts it) WITHOUT enqueuing an outbox row — the relay already
-    /// holds this version. The LWW check is done by the caller
-    /// (`SyncController` applies only when `server.updated_at > local.updated_at`).
-    func mergeActivity(_ activity: Activity) throws {
-        try dbQueue.write { db in
-            try db.execute(
-                sql: """
-                    INSERT INTO activities (id, name, notes, last_used_at, created_at, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?)
-                    ON CONFLICT(id) DO UPDATE SET
-                        name = excluded.name,
-                        notes = excluded.notes,
-                        last_used_at = excluded.last_used_at,
-                        updated_at = excluded.updated_at
-                    """,
-                arguments: [activity.id, activity.name, activity.notes, activity.lastUsedAt, activity.createdAt, activity.updatedAt]
-            )
-            try Self.replaceActivityCategories(db: db, activityID: activity.id, categoryIDs: activity.categoryIDs)
-        }
-    }
-
-    /// Atomically adopts a winning Activity identity after a relay
-    /// `activity_exists` response (sync-client never-synthesize rule).
-    /// The losing row is renamed to a collision-proof tombstone BEFORE the
-    /// winner is inserted — the normalized-name unique index would otherwise
-    /// turn the merge into a constraint failure. Entries move to the winner
-    /// while it exists (foreign keys stay enforced throughout); the loser and
-    /// its joins are then removed. No outbox row is ever created; the losing
-    /// create row is cleared separately by the caller. The tombstone never
-    /// escapes the transaction, so a crash can never leave a UUID-named row
-    /// behind. Returns the moved entry ids so the caller can rewrite their
-    /// pending outbox payloads.
-    func remapActivityReferences(from oldID: String, to newID: String, winner: Activity) throws -> [String] {
-        try dbQueue.write { db in
-            try db.execute(
-                sql: "UPDATE activities SET name = ?, updated_at = ? WHERE id = ?",
-                arguments: [oldID, winner.updatedAt, oldID]
-            )
-            try db.execute(
-                sql: """
-                    INSERT INTO activities (id, name, notes, last_used_at, created_at, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?)
-                    ON CONFLICT(id) DO UPDATE SET
-                        name = excluded.name,
-                        notes = excluded.notes,
-                        last_used_at = excluded.last_used_at,
-                        updated_at = excluded.updated_at
-                    """,
-                arguments: [winner.id, winner.name, winner.notes, winner.lastUsedAt, winner.createdAt, winner.updatedAt]
-            )
-            try Self.replaceActivityCategories(db: db, activityID: winner.id, categoryIDs: winner.categoryIDs)
-            let movedIDs = try String.fetchAll(db, sql: """
-                SELECT id FROM entries WHERE activity_id = ? ORDER BY id
-                """, arguments: [oldID])
-            try db.execute(
-                sql: "UPDATE entries SET activity_id = ? WHERE activity_id = ?",
-                arguments: [newID, oldID]
-            )
-            try db.execute(sql: "DELETE FROM activity_categories WHERE activity_id = ?", arguments: [oldID])
-            try db.execute(sql: "DELETE FROM activities WHERE id = ?", arguments: [oldID])
-            return movedIDs
-        }
     }
 
     // MARK: - Categories
@@ -830,7 +569,7 @@ actor LocalStore {
     /// delete outbox row.
     func deleteCategory(id: String) throws {
         try dbQueue.write { db in
-            try db.execute(sql: "DELETE FROM activity_categories WHERE category_id = ?", arguments: [id])
+            try db.execute(sql: "DELETE FROM entry_categories WHERE category_id = ?", arguments: [id])
             try db.execute(sql: "DELETE FROM categories WHERE id = ?", arguments: [id])
             try Self.enqueueOutbox(db: db, resource: "category", recordID: id, op: "delete", payload: nil)
         }
@@ -842,7 +581,7 @@ actor LocalStore {
     /// (category-management D6).
     func removeCategoryLocal(id: String) throws {
         try dbQueue.write { db in
-            try db.execute(sql: "DELETE FROM activity_categories WHERE category_id = ?", arguments: [id])
+            try db.execute(sql: "DELETE FROM entry_categories WHERE category_id = ?", arguments: [id])
             try db.execute(sql: "DELETE FROM categories WHERE id = ?", arguments: [id])
         }
     }
@@ -850,8 +589,8 @@ actor LocalStore {
     /// Atomically adopts a winning Category identity after a relay
     /// `category_exists` response. The losing row is removed before the
     /// winner is inserted so the normalized-name unique index cannot turn a
-    /// valid collision recovery into a stub category. Activity joins and
-    /// pending Activity payloads are rewritten in the same transaction, and
+    /// valid collision recovery into a stub category. Entry joins and
+    /// pending Entry payloads are rewritten in the same transaction, and
     /// the losing Category's create row is discarded without emitting DELETE.
     func remapCategoryReferences( // swiftlint:disable:this function_body_length
         from oldID: String,
@@ -860,16 +599,16 @@ actor LocalStore {
     ) throws {
         try dbQueue.write { db in
             let affectedIDs = try String.fetchAll(db, sql: """
-                SELECT activity_id FROM activity_categories
-                WHERE category_id = ? ORDER BY activity_id
+                SELECT entry_id FROM entry_categories
+                WHERE category_id = ? ORDER BY entry_id
                 """, arguments: [oldID])
 
-            let affectedActivities = try affectedIDs.compactMap {
-                try Self.fetchActivity(db, id: $0)
+            let affectedEntries = try affectedIDs.compactMap {
+                try Self.fetchEntryRow(db, id: $0)
             }
 
             if oldID != newID {
-                try db.execute(sql: "DELETE FROM activity_categories WHERE category_id = ?", arguments: [oldID])
+                try db.execute(sql: "DELETE FROM entry_categories WHERE category_id = ?", arguments: [oldID])
                 try db.execute(sql: "DELETE FROM categories WHERE id = ?", arguments: [oldID])
             }
 
@@ -885,16 +624,17 @@ actor LocalStore {
                 arguments: [winner.id, winner.name, winner.icon, winner.createdAt, winner.updatedAt]
             )
 
-            for activity in affectedActivities {
-                var updated = activity
-                updated.categoryIDs = Self.deduplicate(
-                    activity.categoryIDs.map { $0 == oldID ? newID : $0 }
+            for snapshot in affectedEntries {
+                let updatedCategoryIDs = Self.deduplicate(
+                    snapshot.categoryIDs.map { $0 == oldID ? newID : $0 }
                 )
-                try Self.replaceActivityCategories(
+                try Self.replaceEntryCategories(
                     db: db,
-                    activityID: updated.id,
-                    categoryIDs: updated.categoryIDs
+                    entryID: snapshot.id,
+                    categoryIDs: updatedCategoryIDs
                 )
+                var updated = snapshot.entry
+                updated.categoryIDs = updatedCategoryIDs
                 let payload = try String(
                     data: JSONEncoder().encode(updated),
                     encoding: .utf8
@@ -903,10 +643,10 @@ actor LocalStore {
                     sql: """
                         UPDATE outbox
                         SET payload = ?
-                        WHERE resource = 'activity' AND record_id = ?
+                        WHERE resource = 'entry' AND record_id = ?
                           AND op IN ('create', 'update')
                         """,
-                    arguments: [payload, updated.id]
+                    arguments: [payload, snapshot.id]
                 )
             }
 
@@ -971,44 +711,15 @@ actor LocalStore {
 
     // MARK: - Entries
 
-    /// All entries, newest first.
+    /// All committed entries, newest first. Categories resolve from the
+    /// entry's own `entry_categories` rows (per-entry snapshot rule — no
+    /// query-time resolution through any other record).
     func entries() throws -> [TimeEntry] {
         try dbQueue.read { db in
             let rows = try Row.fetchAll(db, sql: """
-                SELECT e.*, a.name AS activity_name
-                FROM entries e
-                JOIN activities a ON a.id = e.activity_id
-                ORDER BY e.started_at DESC
+                SELECT * FROM entries ORDER BY started_at DESC
                 """)
-            return rows.map(Self.entry(from:))
-        }
-    }
-
-    /// All committed entries of one activity, newest first (activity-detail-sheet).
-    func entries(activityID: String) throws -> [TimeEntry] {
-        try dbQueue.read { db in
-            let rows = try Row.fetchAll(db, sql: """
-                SELECT e.*, a.name AS activity_name
-                FROM entries e
-                JOIN activities a ON a.id = e.activity_id
-                WHERE e.activity_id = ?
-                ORDER BY e.started_at DESC
-                """, arguments: [activityID])
-            return rows.map(Self.entry(from:))
-        }
-    }
-
-    /// All-time sum of committed durations for one activity, in seconds
-    /// (activity-detail-sheet). In-progress entries (NULL duration) and
-    /// NULL durations contribute zero via COALESCE.
-    func totalDuration(activityID: String) throws -> Int {
-        try dbQueue.read { db in
-            let row = try Row.fetchOne(db, sql: """
-                SELECT COALESCE(SUM(duration_seconds), 0) AS total
-                FROM entries
-                WHERE activity_id = ?
-                """, arguments: [activityID])
-            return row?["total"] ?? 0
+            return try rows.map { try Self.entry(from: $0, db: db) }
         }
     }
 
@@ -1016,80 +727,130 @@ actor LocalStore {
     func entry(id: String) throws -> TimeEntry? {
         try dbQueue.read { db in
             guard let row = try Row.fetchOne(db, sql: """
-                SELECT e.*, a.name AS activity_name
-                FROM entries e
-                JOIN activities a ON a.id = e.activity_id
-                WHERE e.id = ?
+                SELECT * FROM entries WHERE id = ?
                 """, arguments: [id]) else { return nil }
-            return Self.entry(from: row)
+            return try Self.entry(from: row, db: db)
         }
     }
 
-    /// Maps an entries row (with the joined activity_name) into a TimeEntry.
-    private static func entry(from row: Row) -> TimeEntry {
-        TimeEntry(
+    /// Maps an entries row into a TimeEntry, resolving its ordered categories
+    /// from `entry_categories`.
+    private static func entry(from row: Row, db: Database) throws -> TimeEntry {
+        let categoryIDs = try String.fetchAll(db, sql: """
+            SELECT category_id FROM entry_categories
+            WHERE entry_id = ? ORDER BY position
+            """, arguments: [row["id"]])
+        return TimeEntry(
             id: row["id"],
-            activityID: row["activity_id"],
-            activityName: row["activity_name"],
+            activityText: row["activity_text"],
             startedAt: row["started_at"],
             endedAt: row["ended_at"],
             durationSeconds: row["duration_seconds"],
             source: row["source"],
             sourceRef: row["source_ref"],
+            categoryIDs: categoryIDs,
+            notes: row["notes"],
             createdAt: row["created_at"],
             updatedAt: row["updated_at"]
         )
     }
 
-    /// Creates an entry and enqueues the outbox row in one transaction.
-    /// Idempotent on `id`: a replay returns the existing record. Bumps the
-    /// activity's `last_used_at` (recency for suggestions, F5).
-    func createEntry(_ entry: TimeEntry) throws {
-        try dbQueue.write { db in
-            if try Row.fetchOne(db, sql: "SELECT id FROM entries WHERE id = ?",
-                                arguments: [entry.id]) != nil {
-                return
+    /// The typed outcome of `createEntry(_:)`.
+    enum EntryMutation: Equatable {
+        /// The entry was created (with its outbox create row).
+        case created(TimeEntry)
+        /// A pending-deletion entry with the same id exists in the undo
+        /// buffer; the caller must confirm restoration explicitly.
+        case restorableDeletion(TimeEntry)
+        /// The text failed validation (non-empty trim, 60 chars).
+        case invalid(ActivityName.Validation)
+        /// The local write failed (persistence error).
+        case failure
+    }
+
+    /// Creates an entry (text + ordered categories + notes) and enqueues the
+    /// single outbox row in one transaction. Idempotent on `id`: a replay
+    /// returns the existing record. Referenced categories must exist locally;
+    /// an unknown id throws `AssociationError.invalidCategory` and rolls the
+    /// whole write back (category-management D5).
+    @discardableResult
+    func createEntry(_ entry: TimeEntry) throws -> EntryMutation {
+        let trimmed = ActivityName.normalized(entry.activityText)
+        switch ActivityName.validate(trimmed) {
+        case .empty, .tooLong:
+            return .invalid(ActivityName.validate(trimmed))
+        case .valid:
+            break
+        }
+        return try dbQueue.write { db in
+            if let row = try Row.fetchOne(db, sql: """
+                SELECT * FROM entries WHERE id = ?
+                """, arguments: [entry.id]) {
+                // Idempotent replay: return the existing committed record.
+                return .created(try Self.entry(from: row, db: db))
             }
-            try db.execute(
-                sql: """
-                    INSERT INTO entries (id, activity_id, started_at, ended_at, duration_seconds,
-                                         source, source_ref, created_at, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                arguments: [entry.id, entry.activityID, entry.startedAt, entry.endedAt, entry.durationSeconds, entry.source, entry.sourceRef, entry.createdAt, entry.updatedAt]
-            )
-            try db.execute(
-                sql: """
-                    UPDATE activities SET last_used_at = ?
-                    WHERE id = ? AND (last_used_at IS NULL OR ? > last_used_at)
-                    """,
-                arguments: [entry.startedAt, entry.activityID, entry.startedAt]
-            )
+            do {
+                try db.execute(
+                    sql: """
+                        INSERT INTO entries (id, activity_text, notes, started_at, ended_at, duration_seconds,
+                                             source, source_ref, created_at, updated_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                    arguments: [
+                        entry.id, trimmed, entry.notes, entry.startedAt, entry.endedAt,
+                        entry.durationSeconds, entry.source, entry.sourceRef,
+                        entry.createdAt, entry.updatedAt,
+                    ]
+                )
+                try Self.replaceEntryCategories(db: db, entryID: entry.id, categoryIDs: entry.categoryIDs)
+            } catch let error as AssociationError {
+                throw error
+            } catch {
+                return .failure
+            }
             try Self.enqueueOutbox(db: db, resource: "entry", recordID: entry.id,
                                    op: "create", payload: entry)
+            var saved = entry
+            saved.activityText = trimmed
+            saved.categoryIDs = Self.deduplicate(entry.categoryIDs)
+            return .created(saved)
         }
     }
 
-    /// Applies a last-write-wins update. Returns false when stale.
+    /// Applies a last-write-wins update to every entry-owned field (text,
+    /// ordered categories, notes, timing). Returns false when stale. Referenced
+    /// categories must exist locally; an unknown id throws
+    /// `AssociationError.invalidCategory` and rolls the whole write back.
     @discardableResult
     func updateEntry(_ entry: TimeEntry) throws -> Bool {
-        try dbQueue.write { db in
+        let trimmed = ActivityName.normalized(entry.activityText)
+        guard case .valid = ActivityName.validate(trimmed) else { return false }
+        return try dbQueue.write { db in
             try db.execute(
                 sql: """
                     UPDATE entries
-                    SET activity_id = ?, started_at = ?, ended_at = ?, duration_seconds = ?, updated_at = ?
+                    SET activity_text = ?, notes = ?, started_at = ?, ended_at = ?,
+                        duration_seconds = ?, updated_at = ?
                     WHERE id = ? AND updated_at < ?
                     """,
-                arguments: [entry.activityID, entry.startedAt, entry.endedAt, entry.durationSeconds, entry.updatedAt, entry.id, entry.updatedAt]
+                arguments: [
+                    trimmed, entry.notes, entry.startedAt, entry.endedAt,
+                    entry.durationSeconds, entry.updatedAt, entry.id, entry.updatedAt,
+                ]
             )
             guard db.changesCount > 0 else { return false }
+            do {
+                try Self.replaceEntryCategories(db: db, entryID: entry.id, categoryIDs: entry.categoryIDs)
+            } catch let error as AssociationError {
+                throw error
+            }
             try Self.enqueueOutbox(db: db, resource: "entry", recordID: entry.id,
                                    op: "update", payload: entry)
             return true
         }
     }
 
-    /// Deletes an entry, enqueuing a delete outbox row.
+    /// Deletes an entry (its join rows cascade), enqueuing a delete outbox row.
     func deleteEntry(id: String) throws {
         try dbQueue.write { db in
             try db.execute(sql: "DELETE FROM entries WHERE id = ?", arguments: [id])
@@ -1099,15 +860,19 @@ actor LocalStore {
 
     /// Upserts a server entry during a pull-merge without an outbox row (the
     /// relay already holds this version). LWW check is the caller's job.
+    /// Category ids the relay still references but the local catalog lacks
+    /// are PRUNED (remainder kept, logged by the caller per D7) instead of
+    /// failing the merge on the join foreign key.
     func mergeEntry(_ entry: TimeEntry) throws {
         try dbQueue.write { db in
             try db.execute(
                 sql: """
-                    INSERT INTO entries (id, activity_id, started_at, ended_at, duration_seconds,
+                    INSERT INTO entries (id, activity_text, notes, started_at, ended_at, duration_seconds,
                                          source, source_ref, created_at, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(id) DO UPDATE SET
-                        activity_id = excluded.activity_id,
+                        activity_text = excluded.activity_text,
+                        notes = excluded.notes,
                         started_at = excluded.started_at,
                         ended_at = excluded.ended_at,
                         duration_seconds = excluded.duration_seconds,
@@ -1115,40 +880,154 @@ actor LocalStore {
                         source_ref = excluded.source_ref,
                         updated_at = excluded.updated_at
                     """,
-                arguments: [entry.id, entry.activityID, entry.startedAt, entry.endedAt, entry.durationSeconds, entry.source, entry.sourceRef, entry.createdAt, entry.updatedAt]
+                arguments: [
+                    entry.id, entry.activityText, entry.notes, entry.startedAt,
+                    entry.endedAt, entry.durationSeconds, entry.source, entry.sourceRef,
+                    entry.createdAt, entry.updatedAt,
+                ]
+            )
+            let known = try entry.categoryIDs.filter { categoryID in
+                try Category.fetchOne(db, key: categoryID) != nil
+            }
+            try Self.replaceEntryCategories(db: db, entryID: entry.id, categoryIDs: known)
+        }
+    }
+
+    /// Fetches one entry row (for remap payload rewriting). Categories are
+    /// resolved lazily by the caller when needed.
+    private struct EntryRowSnapshot {
+        let id: String
+        let categoryIDs: [String]
+        let entry: TimeEntry
+    }
+
+    /// Loads one entry with its categories as a remappable snapshot.
+    private static func fetchEntryRow(_ db: Database, id: String) throws -> EntryRowSnapshot? {
+        guard let row = try Row.fetchOne(db, sql: """
+            SELECT * FROM entries WHERE id = ?
+            """, arguments: [id]) else { return nil }
+        let categoryIDs = try String.fetchAll(db, sql: """
+            SELECT category_id FROM entry_categories
+            WHERE entry_id = ? ORDER BY position
+            """, arguments: [id])
+        let entry = TimeEntry(
+            id: row["id"],
+            activityText: row["activity_text"],
+            startedAt: row["started_at"],
+            endedAt: row["ended_at"],
+            durationSeconds: row["duration_seconds"],
+            source: row["source"],
+            sourceRef: row["source_ref"],
+            categoryIDs: categoryIDs,
+            notes: row["notes"],
+            createdAt: row["created_at"],
+            updatedAt: row["updated_at"]
+        )
+        return EntryRowSnapshot(id: entry.id, categoryIDs: categoryIDs, entry: entry)
+    }
+
+    // MARK: - Recents (timer-capture-experience D5)
+
+    /// The recents chips: one `RecentEntry` per distinct exact
+    /// `activity_text`, keeping the row with the newest `started_at` of each
+    /// group (its casing, ordered categories, and date), groups ordered by
+    /// that max DESC, capped at `limit`. Index
+    /// `index_entries_on_user_activity_text_started_at` keeps the scan cheap.
+    func recents(limit: Int = 6) throws -> [RecentEntry] {
+        try dbQueue.read { db in
+            let rows = try Row.fetchAll(db, sql: """
+                SELECT e.activity_text, e.started_at, e.id
+                FROM entries e
+                WHERE e.id = (
+                    SELECT e2.id FROM entries e2
+                    WHERE e2.activity_text = e.activity_text
+                    ORDER BY e2.started_at DESC, e2.id DESC
+                    LIMIT 1
+                )
+                ORDER BY e.started_at DESC, e.id DESC
+                LIMIT ?
+                """, arguments: [limit])
+            return try rows.map { row in
+                let text: String = row["activity_text"]
+                let categoryIDs = try String.fetchAll(db, sql: """
+                    SELECT category_id FROM entry_categories
+                    WHERE entry_id = ? ORDER BY position
+                    """, arguments: [row["id"]])
+                let startedAt: Date = row["started_at"]
+                return RecentEntry(
+                    activityText: text,
+                    categoryIDs: categoryIDs,
+                    startedAt: startedAt
+                )
+            }
+        }
+    }
+
+    // MARK: - Timer draft (running timer persistence, D3/D4)
+
+    /// The persisted running-timer draft, or nil when no timer is running.
+    /// `categoryIDs` is the live ordered snapshot; `activityText` is locked
+    /// from Start until Stop.
+    func timerDraft() throws -> RunningTimerDraft? {
+        try dbQueue.read { db in
+            guard let row = try Row.fetchOne(db, sql: """
+                SELECT * FROM timer_state WHERE id = 'singleton'
+                """) else { return nil }
+            let text: String? = row["activity_text"]
+            let joined: String? = row["category_ids"]
+            let startedAt: Date? = row["started_at"]
+            let status: String = row["status"]
+            return RunningTimerDraft(
+                activityText: text ?? "",
+                categoryIDs: Self.categoryIDs(from: joined),
+                startedAt: startedAt,
+                status: status
             )
         }
     }
 
-    // MARK: - Timer state (running timer persistence, D8)
-
-    /// The persisted running-timer state, or nil when no timer is running.
-    func timerState() throws -> RunningTimerState? {
-        try dbQueue.read { db in
-            try RunningTimerState.fetchOne(db)
-        }
-    }
-
-    /// Persists the running timer (start). The singleton row is upserted.
-    func startTimer(activityID: String, activityName: String, startedAt: Date) throws {
+    /// Persists the running draft (Start): locked text plus the initial
+    /// ordered category snapshot. The singleton row is upserted; any prior
+    /// draft is replaced.
+    func saveTimerDraft(
+        activityText: String,
+        categoryIDs: [String],
+        startedAt: Date
+    ) throws {
+        let trimmed = ActivityName.normalized(activityText)
+        let joined = Self.deduplicate(categoryIDs).joined(separator: ",")
         try dbQueue.write { db in
             try db.execute(
                 sql: """
-                    INSERT INTO timer_state (id, activity_id, activity_name, started_at, status)
+                    INSERT INTO timer_state (id, activity_text, category_ids, started_at, status)
                     VALUES ('singleton', ?, ?, ?, 'running')
                     ON CONFLICT(id) DO UPDATE SET
-                        activity_id = excluded.activity_id,
-                        activity_name = excluded.activity_name,
+                        activity_text = excluded.activity_text,
+                        category_ids = excluded.category_ids,
                         started_at = excluded.started_at,
                         status = 'running'
                     """,
-                arguments: [activityID, activityName, startedAt]
+                arguments: [trimmed, joined, startedAt]
             )
         }
     }
 
-    /// Clears the persisted running timer (stop).
-    func stopTimer() throws {
+    /// Rewrites only the running draft's live category snapshot (a mid-run
+    /// toggle, D4). The locked text and `started_at` are untouched. A no-op
+    /// when no draft exists.
+    func updateTimerDraftCategoryIDs(_ categoryIDs: [String]) throws {
+        let joined = Self.deduplicate(categoryIDs).joined(separator: ",")
+        try dbQueue.write { db in
+            try db.execute(
+                sql: "UPDATE timer_state SET category_ids = ? WHERE id = 'singleton'",
+                arguments: [joined]
+            )
+        }
+    }
+
+    /// Clears the persisted running draft (Stop). Creating the entry from the
+    /// draft is the caller's separate transaction (one outbox row per entry).
+    func clearTimerDraft() throws {
         try dbQueue.write { db in
             try db.execute(sql: "DELETE FROM timer_state WHERE id = 'singleton'")
         }
@@ -1227,34 +1106,18 @@ actor LocalStore {
     }
 
     /// Applies one relay deletion tombstone (cross-device-delete-propagation):
-    /// removes the local row — entries and join rows cascade for activities —
+    /// removes the local row — entry-category joins cascade for entries —
     /// WITHOUT creating an outbox row (the relay already lacks the record),
-    /// and drops every pending create/update outbox row for the affected ids
-    /// (an activity id plus its entry ids; the single id otherwise). Pending
-    /// DELETE rows are left untouched — the drain converges them via the
-    /// existing 404-as-success rule. A clean local row newer than the
+    /// and drops every pending create/update outbox row for the affected id.
+    /// Pending DELETE rows are left untouched — the drain converges them via
+    /// the existing 404-as-success rule. A clean local row newer than the
     /// tombstone (`updated_at > deleted_at`, no pending create/update) is
     /// kept: a stale tombstone after a recreation (R1). An unknown id is a
-    /// no-op.
+    /// no-op. Activity tombstones no longer exist; the "activity" resource is
+    /// an unknown id and a no-op.
     func applyDeletionTombstone(_ deletion: Deletion) throws {
         try dbQueue.write { db in
             switch deletion.resource {
-            case "activity":
-                let entryIDs = try String.fetchAll(db, sql: """
-                    SELECT id FROM entries WHERE activity_id = ? ORDER BY id
-                    """, arguments: [deletion.recordID])
-                if let local = try Self.fetchActivity(db, id: deletion.recordID),
-                   try !Self.hasPendingCreateOrUpdate(db, resource: "activity", recordID: local.id),
-                   local.updatedAt > deletion.deletedAt {
-                    return // R1: the recreation already won.
-                }
-                try db.execute(sql: "DELETE FROM entries WHERE activity_id = ?", arguments: [deletion.recordID])
-                try db.execute(sql: "DELETE FROM activity_categories WHERE activity_id = ?", arguments: [deletion.recordID])
-                try db.execute(sql: "DELETE FROM activities WHERE id = ?", arguments: [deletion.recordID])
-                try Self.dropPendingCreateOrUpdate(db, resource: "activity", recordID: deletion.recordID)
-                for id in entryIDs {
-                    try Self.dropPendingCreateOrUpdate(db, resource: "entry", recordID: id)
-                }
             case "entry":
                 if let row = try Row.fetchOne(db, sql: """
                     SELECT updated_at FROM entries WHERE id = ?
@@ -1272,7 +1135,7 @@ actor LocalStore {
                    local.updatedAt > deletion.deletedAt {
                     return // R1: the recreation already won.
                 }
-                try db.execute(sql: "DELETE FROM activity_categories WHERE category_id = ?", arguments: [deletion.recordID])
+                try db.execute(sql: "DELETE FROM entry_categories WHERE category_id = ?", arguments: [deletion.recordID])
                 try db.execute(sql: "DELETE FROM categories WHERE id = ?", arguments: [deletion.recordID])
                 try Self.dropPendingCreateOrUpdate(db, resource: "category", recordID: deletion.recordID)
             default:
@@ -1327,22 +1190,6 @@ actor LocalStore {
         }
     }
 
-    /// Updates an activity row locally WITHOUT enqueuing an outbox row.
-    func updateActivityLocal(_ activity: Activity) throws {
-        try dbQueue.write { db in
-            try db.execute(
-                sql: """
-                    UPDATE activities
-                    SET name = ?, notes = ?, last_used_at = ?, updated_at = ?
-                    WHERE id = ?
-                    """,
-                arguments: [activity.name, activity.notes, activity.lastUsedAt, activity.updatedAt, activity.id]
-            )
-            try Self.replaceActivityCategories(db: db, activityID: activity.id,
-                                               categoryIDs: activity.categoryIDs)
-        }
-    }
-
     // MARK: - Sync state (per-resource cursors)
 
     /// The last-synced cursor for a resource, or nil on first sync.
@@ -1375,47 +1222,6 @@ actor LocalStore {
             try UndoBufferRow.fetchOne(db, sql: """
                 SELECT * FROM undo_buffer ORDER BY deleted_at DESC, id DESC LIMIT 1
                 """)
-        }
-    }
-
-    /// A pending-deletion activity whose normalized name matches
-    /// `name` case-insensitively, or nil (unify-activity-preparation-flow
-    /// spec, decision 7). The returned activity is the full snapshot so the
-    /// caller can offer explicit restoration.
-    func pendingDeletionActivity(named name: String) throws -> Activity? {
-        let trimmed = ActivityName.normalized(name)
-        return try dbQueue.read { db in
-            try Self.fetchPendingDeletionActivity(db, name: trimmed)
-        }
-    }
-
-    /// Explicitly restores the pending-deletion activity whose
-    /// normalized name matches `name` case-insensitively (unify-activity-
-    /// preparation-flow spec, decision 7). The snapshot records are
-    /// re-inserted and the buffer row removed in one transaction; no outbox
-    /// row is ever created, so the relay is never notified of the deletion.
-    /// Returns the restored activity, or nil when no matching
-    /// buffer row exists. Buffered deletions stay pending until the app
-    /// restarts, so any buffered row still matches.
-    @discardableResult
-    func restorePendingDeletionActivity(named name: String) throws -> Activity? {
-        let trimmed = ActivityName.normalized(name)
-        return try dbQueue.write { db in
-            let rows = try UndoBufferRow.fetchAll(db, sql: """
-                SELECT * FROM undo_buffer
-                """)
-            for row in rows {
-                let snapshot = try JSONDecoder().decode(DeletionSnapshot.self, from: Data(row.payload.utf8))
-                for record in snapshot.records where record.resource == "activity" {
-                    let activity = try JSONDecoder().decode(Activity.self, from: record.data)
-                    if activity.name.caseInsensitiveCompare(trimmed) == .orderedSame {
-                        try Self.applySnapshot(db, snapshot)
-                        try db.execute(sql: "DELETE FROM undo_buffer WHERE id = ?", arguments: [row.id])
-                        return activity
-                    }
-                }
-            }
-            return nil
         }
     }
 
@@ -1472,24 +1278,6 @@ actor LocalStore {
     private static func applySnapshot(_ db: Database, _ snapshot: DeletionSnapshot) throws {
         for record in snapshot.records {
             switch record.resource {
-            case "activity":
-                let activity = try JSONDecoder().decode(Activity.self, from: record.data)
-                try db.execute(
-                    sql: """
-                        INSERT OR IGNORE INTO activities (id, name, notes, last_used_at, created_at, updated_at)
-                        VALUES (?, ?, ?, ?, ?, ?)
-                        """,
-                    arguments: [activity.id, activity.name, activity.notes, activity.lastUsedAt, activity.createdAt, activity.updatedAt]
-                )
-                for (index, categoryID) in activity.categoryIDs.enumerated() {
-                    try db.execute(
-                        sql: """
-                            INSERT OR IGNORE INTO activity_categories (activity_id, category_id, position)
-                            VALUES (?, ?, ?)
-                            """,
-                        arguments: [activity.id, categoryID, index]
-                    )
-                }
             case "category":
                 let category = try JSONDecoder().decode(Category.self, from: record.data)
                 try db.execute(
@@ -1503,12 +1291,25 @@ actor LocalStore {
                 let entry = try JSONDecoder().decode(TimeEntry.self, from: record.data)
                 try db.execute(
                     sql: """
-                        INSERT OR IGNORE INTO entries (id, activity_id, started_at, ended_at, duration_seconds,
+                        INSERT OR IGNORE INTO entries (id, activity_text, notes, started_at, ended_at, duration_seconds,
                                                        source, source_ref, created_at, updated_at)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """,
-                    arguments: [entry.id, entry.activityID, entry.startedAt, entry.endedAt, entry.durationSeconds, entry.source, entry.sourceRef, entry.createdAt, entry.updatedAt]
+                    arguments: [
+                        entry.id, entry.activityText, entry.notes, entry.startedAt,
+                        entry.endedAt, entry.durationSeconds, entry.source,
+                        entry.sourceRef, entry.createdAt, entry.updatedAt,
+                    ]
                 )
+                for (index, categoryID) in entry.categoryIDs.enumerated() {
+                    try db.execute(
+                        sql: """
+                            INSERT OR IGNORE INTO entry_categories (entry_id, category_id, position)
+                            VALUES (?, ?, ?)
+                            """,
+                        arguments: [entry.id, categoryID, index]
+                    )
+                }
             default:
                 break
             }
@@ -1518,16 +1319,13 @@ actor LocalStore {
     // MARK: - Category deletion & undo (category-management D7)
 
     /// Which deletion owns a buffer payload (unify-catalog-deletion D10).
-    /// Activity snapshots carry entry records, so bare resource presence
-    /// cannot tell owners apart: an activity row also "contains" an entry.
-    /// Ownership is exclusive and deterministic — activity wins over
-    /// category wins over entry (the `category_associations` pseudo-record
-    /// never owns a row alone). Every typed decoder and undo below honors
-    /// only rows owned by its own resource, so no surface can claim or shred
-    /// another surface's buffered deletion.
+    /// Ownership is exclusive and deterministic — category wins over entry
+    /// (the `category_associations` pseudo-record never owns a row alone).
+    /// Every typed decoder and undo below honors only rows owned by its own
+    /// resource, so no surface can claim or shred another surface's buffered
+    /// deletion.
     private static func owner(of snapshot: DeletionSnapshot) -> String? {
         let resources = Set(snapshot.records.map(\.resource))
-        if resources.contains("activity") { return "activity" }
         if resources.contains("category") { return "category" }
         if resources.contains("entry") { return "entry" }
         return nil
@@ -1545,20 +1343,20 @@ actor LocalStore {
     }
 
     /// One local Category delete that is undoable until the app restarts.
-    /// The snapshot carries the Category plus its ordered Activity
-    /// associations so undo can restore both exactly.
+    /// The snapshot carries the Category plus its ordered entry associations
+    /// so undo can restore both exactly.
     struct CategoryDeletionSnapshot: Codable, Equatable, Sendable {
-        /// The buffer payload record resource for the ordered Activity
+        /// The buffer payload record resource for the ordered entry
         /// associations (the category itself uses the standard
         /// `DeletionSnapshot` "category" record).
         static let associationsResource = "category_associations"
 
         let category: Category
-        let activityIDs: [String]
+        let entryIDs: [String]
 
         /// The buffer payload: a standard `DeletionSnapshot` with the
         /// category record (so the generic undo machinery keeps working) plus
-        /// an associations record carrying the ordered Activity ids.
+        /// an associations record carrying the ordered entry ids.
         func bufferPayload() throws -> Data {
             try JSONEncoder().encode(DeletionSnapshot(records: [
                 DeletionSnapshot.Record(
@@ -1569,7 +1367,7 @@ actor LocalStore {
                 DeletionSnapshot.Record(
                     resource: Self.associationsResource,
                     recordID: category.id,
-                    data: try JSONEncoder().encode(activityIDs)
+                    data: try JSONEncoder().encode(entryIDs)
                 ),
             ]))
         }
@@ -1577,10 +1375,11 @@ actor LocalStore {
 
     /// Confirms a category deletion by entering the durable undo buffer and
     /// removing the category/joins in ONE transaction (category-management
-    /// D7). The snapshot carries the Category and its ordered Activity
+    /// D7). The snapshot carries the Category and its ordered entry
     /// associations. NO outbox row is created while the deletion is in the
-    /// buffer — the relay is never notified of an undone deletion. Activities,
-    /// entries, and timer state are untouched.
+    /// buffer — the relay is never notified of an undone deletion. Entries,
+    /// their texts/notes/timings, and the timer draft are untouched; only the
+    /// join rows disappear.
     func deleteCategoryUndoable(
         id: String,
         deletedAt: Date = Date()
@@ -1589,13 +1388,13 @@ actor LocalStore {
             guard let category = try Category.fetchOne(db, key: id) else {
                 return .missing
             }
-            let activityIDs = try String.fetchAll(db, sql: """
-                SELECT activity_id FROM activity_categories
+            let entryIDs = try String.fetchAll(db, sql: """
+                SELECT entry_id FROM entry_categories
                 WHERE category_id = ? ORDER BY position
                 """, arguments: [id])
             let snapshot = CategoryDeletionSnapshot(
                 category: category,
-                activityIDs: activityIDs
+                entryIDs: entryIDs
             )
             let payload = String(data: try snapshot.bufferPayload(), encoding: .utf8)
             do {
@@ -1605,7 +1404,7 @@ actor LocalStore {
                         """,
                     arguments: [UUID().uuidString, payload, deletedAt]
                 )
-                try db.execute(sql: "DELETE FROM activity_categories WHERE category_id = ?", arguments: [id])
+                try db.execute(sql: "DELETE FROM entry_categories WHERE category_id = ?", arguments: [id])
                 try db.execute(sql: "DELETE FROM categories WHERE id = ?", arguments: [id])
             } catch {
                 return .failure
@@ -1616,7 +1415,7 @@ actor LocalStore {
 
     /// Decodes the category-deletion snapshot held in a buffer row
     /// (category-management D7). Returns nil when the row does not exist or
-    /// does not carry a category-OWNED deletion (D10 — activity/entry rows
+    /// does not carry a category-OWNED deletion (D10 — entry rows
     /// are left for their owners).
     func categoryDeletionSnapshot(bufferID: String) throws -> CategoryDeletionSnapshot? {
         try dbQueue.read { db in
@@ -1629,18 +1428,18 @@ actor LocalStore {
                 return nil
             }
             let category = try JSONDecoder().decode(Category.self, from: categoryRecord.data)
-            var activityIDs: [String] = []
+            var entryIDs: [String] = []
             if let associations = snapshot.records.first(where: {
                 $0.resource == CategoryDeletionSnapshot.associationsResource
             }) {
-                activityIDs = try JSONDecoder().decode([String].self, from: associations.data)
+                entryIDs = try JSONDecoder().decode([String].self, from: associations.data)
             }
-            return CategoryDeletionSnapshot(category: category, activityIDs: activityIDs)
+            return CategoryDeletionSnapshot(category: category, entryIDs: entryIDs)
         }
     }
 
     /// Undoes a category deletion: restores the same
-    /// Category identity and its ordered Activity associations in one
+    /// Category identity and its ordered entry associations in one
     /// transaction and removes the buffer row (category-management D7).
     /// No outbox row is ever created, so the relay is never notified of the
     /// deletion. Returns the restored category, or nil when the buffer row
@@ -1661,14 +1460,14 @@ actor LocalStore {
             if let associations = snapshot.records.first(where: {
                 $0.resource == CategoryDeletionSnapshot.associationsResource
             }) {
-                let activityIDs = try JSONDecoder().decode([String].self, from: associations.data)
-                for (index, activityID) in activityIDs.enumerated() {
+                let entryIDs = try JSONDecoder().decode([String].self, from: associations.data)
+                for (index, entryID) in entryIDs.enumerated() {
                     try db.execute(
                         sql: """
-                            INSERT OR IGNORE INTO activity_categories (activity_id, category_id, position)
+                            INSERT OR IGNORE INTO entry_categories (entry_id, category_id, position)
                             VALUES (?, ?, ?)
                             """,
-                        arguments: [activityID, category.id, index]
+                        arguments: [entryID, category.id, index]
                     )
                 }
             }
@@ -1677,7 +1476,7 @@ actor LocalStore {
         }
     }
 
-    // MARK: - Entry deletion & undo (edit-entry-from-activity-detail)
+    // MARK: - Entry deletion & undo (entry-editor)
 
     /// The outcome of `deleteEntryUndoable(...)`.
     enum EntryDelete: Equatable {
@@ -1691,24 +1490,21 @@ actor LocalStore {
     }
 
     /// One local Entry delete that is undoable until the app restarts.
-    /// The snapshot carries the full TimeEntry so undo restores it exactly.
-    /// Removes the entry in ONE transaction with the buffer insert. NO outbox
-    /// row is created while the deletion is in the buffer — the relay is
-    /// never notified of an undone deletion.
+    /// The snapshot carries the full TimeEntry (with its ordered categories)
+    /// so undo restores it exactly. Removes the entry in ONE transaction with
+    /// the buffer insert. NO outbox row is created while the deletion is in
+    /// the buffer — the relay is never notified of an undone deletion.
     func deleteEntryUndoable(
         id: String,
         deletedAt: Date = Date()
     ) throws -> EntryDelete {
         try dbQueue.write { db in
             guard let row = try Row.fetchOne(db, sql: """
-                SELECT e.*, a.name AS activity_name
-                FROM entries e
-                JOIN activities a ON a.id = e.activity_id
-                WHERE e.id = ?
+                SELECT * FROM entries WHERE id = ?
                 """, arguments: [id]) else {
                 return .missing
             }
-            let entry = Self.entry(from: row)
+            let entry = try Self.entry(from: row, db: db)
             let payload = String(data: try JSONEncoder().encode(DeletionSnapshot(records: [
                 DeletionSnapshot.Record(
                     resource: "entry",
@@ -1733,8 +1529,7 @@ actor LocalStore {
 
     /// Decodes the entry-deletion snapshot held in a buffer row. Returns nil
     /// when the row does not exist or does not carry an entry-OWNED deletion
-    /// (D10 — activity rows carry entry records but belong to the activity
-    /// surface).
+    /// (D10 — category rows are left for their owners).
     func entryDeletionSnapshot(bufferID: String) throws -> TimeEntry? {
         try dbQueue.read { db in
             guard let row = try UndoBufferRow.fetchOne(db, key: bufferID) else {
@@ -1749,12 +1544,12 @@ actor LocalStore {
         }
     }
 
-    /// Undoes an entry deletion: re-inserts the entry and
-    /// removes the buffer row in one transaction. No outbox row is ever
-    /// created, so the relay is never notified of the deletion. Returns the
-    /// restored entry, or nil when the buffer row no longer holds an
-    /// entry-OWNED snapshot (D10 — refusing here is what keeps an entry
-    /// undo from shredding an activity snapshot into an orphan entry).
+    /// Undoes an entry deletion: re-inserts the entry with its ordered
+    /// categories and removes the buffer row in one transaction. No outbox
+    /// row is ever created, so the relay is never notified of the deletion.
+    /// Returns the restored entry, or nil when the buffer row no longer holds
+    /// an entry-OWNED snapshot (D10 — refusing here is what keeps an entry
+    /// undo from shredding a category snapshot into an orphan entry).
     @discardableResult
     func undoEntryDeletion(bufferID: String) throws -> TimeEntry? {
         try dbQueue.write { db in
@@ -1769,165 +1564,28 @@ actor LocalStore {
             let entry = try JSONDecoder().decode(TimeEntry.self, from: record.data)
             try db.execute(
                 sql: """
-                    INSERT OR IGNORE INTO entries (id, activity_id, started_at, ended_at, duration_seconds,
+                    INSERT OR IGNORE INTO entries (id, activity_text, notes, started_at, ended_at, duration_seconds,
                                                    source, source_ref, created_at, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
-                arguments: [entry.id, entry.activityID, entry.startedAt, entry.endedAt, entry.durationSeconds, entry.source, entry.sourceRef, entry.createdAt, entry.updatedAt]
+                arguments: [
+                    entry.id, entry.activityText, entry.notes, entry.startedAt,
+                    entry.endedAt, entry.durationSeconds, entry.source,
+                    entry.sourceRef, entry.createdAt, entry.updatedAt,
+                ]
             )
+            for (index, categoryID) in entry.categoryIDs.enumerated() {
+                try db.execute(
+                    sql: """
+                        INSERT OR IGNORE INTO entry_categories (entry_id, category_id, position)
+                        VALUES (?, ?, ?)
+                        """,
+                    arguments: [entry.id, categoryID, index]
+                )
+            }
             try db.execute(sql: "DELETE FROM undo_buffer WHERE id = ?", arguments: [bufferID])
             return entry
         }
-    }
-
-    // MARK: - Activity deletion & undo (unify-catalog-deletion)
-
-    /// The outcome of `deleteActivityUndoable(...)`.
-    enum ActivityDelete: Equatable {
-        /// The activity was removed with its entries; the snapshot is in the
-        /// durable undo buffer (no outbox row yet).
-        case deleted(ActivityDeletionSnapshot)
-        /// The activity no longer exists.
-        case missing
-        /// A timer is running against the activity: nothing was removed and
-        /// nothing was buffered.
-        case runBlocked
-        /// The local write failed (persistence error).
-        case failure
-    }
-
-    /// One local Activity delete that is undoable until the app restarts.
-    /// The snapshot carries the full Activity (identity, values, ordered
-    /// category assignments) plus every committed entry of the activity, so
-    /// undo restores the activity WITH its history.
-    struct ActivityDeletionSnapshot: Codable, Equatable, Sendable {
-        let activity: Activity
-        let entries: [TimeEntry]
-
-        /// The buffer payload: the activity record first (so restore inserts
-        /// the parent before the entries that reference it), followed by one
-        /// `entry` record per committed entry.
-        func bufferPayload() throws -> Data {
-            var records = [
-                DeletionSnapshot.Record(
-                    resource: "activity",
-                    recordID: activity.id,
-                    data: try JSONEncoder().encode(activity)
-                ),
-            ]
-            records += try entries.map {
-                DeletionSnapshot.Record(
-                    resource: "entry",
-                    recordID: $0.id,
-                    data: try JSONEncoder().encode($0)
-                )
-            }
-            return try JSONEncoder().encode(DeletionSnapshot(records: records))
-        }
-    }
-
-    /// Confirms an activity deletion by entering the durable undo buffer and
-    /// removing the activity, its join rows, and its entries in ONE
-    /// transaction (unify-catalog-deletion D1). NO outbox row is created while
-    /// the deletion is in the buffer — the relay is never notified of an
-    /// undone deletion. Refuses with `.runBlocked` (removing and buffering
-    /// nothing) when a timer is running against the activity (D3): the
-    /// running session has no entry row to snapshot and `timer_state` must
-    /// never dangle.
-    func deleteActivityUndoable(
-        id: String,
-        deletedAt: Date = Date()
-    ) throws -> ActivityDelete {
-        try dbQueue.write { db in
-            if let state = try RunningTimerState.fetchOne(db),
-               state.status == "running", state.activityID == id {
-                return .runBlocked
-            }
-            guard let activity = try Self.fetchActivity(db, id: id) else {
-                return .missing
-            }
-            let rows = try Row.fetchAll(db, sql: """
-                SELECT e.*, a.name AS activity_name
-                FROM entries e
-                JOIN activities a ON a.id = e.activity_id
-                WHERE e.activity_id = ?
-                ORDER BY e.started_at DESC
-                """, arguments: [id])
-            let snapshot = ActivityDeletionSnapshot(
-                activity: activity,
-                entries: rows.map(Self.entry(from:))
-            )
-            let payload = String(data: try snapshot.bufferPayload(), encoding: .utf8)
-            do {
-                try db.execute(
-                    sql: """
-                        INSERT INTO undo_buffer (id, payload, deleted_at) VALUES (?, ?, ?)
-                        """,
-                    arguments: [UUID().uuidString, payload, deletedAt]
-                )
-                try db.execute(sql: "DELETE FROM entries WHERE activity_id = ?", arguments: [id])
-                try db.execute(sql: "DELETE FROM activity_categories WHERE activity_id = ?", arguments: [id])
-                try db.execute(sql: "DELETE FROM activities WHERE id = ?", arguments: [id])
-            } catch {
-                return .failure
-            }
-            return .deleted(snapshot)
-        }
-    }
-
-    /// Decodes the activity-deletion snapshot held in a buffer row. Returns nil
-    /// when the row does not exist or does not carry an activity-OWNED
-    /// deletion (D10 — entry/category rows are left for their owners).
-    func activityDeletionSnapshot(bufferID: String) throws -> ActivityDeletionSnapshot? {
-        try dbQueue.read { db in
-            guard let row = try UndoBufferRow.fetchOne(db, key: bufferID) else {
-                return nil
-            }
-            let snapshot = try JSONDecoder().decode(DeletionSnapshot.self, from: Data(row.payload.utf8))
-            guard Self.owner(of: snapshot) == "activity" else { return nil }
-            guard let activityRecord = snapshot.records.first(where: { $0.resource == "activity" }) else {
-                return nil
-            }
-            let activity = try JSONDecoder().decode(Activity.self, from: activityRecord.data)
-            let entries = try snapshot.records
-                .filter { $0.resource == "entry" }
-                .map { try JSONDecoder().decode(TimeEntry.self, from: $0.data) }
-            return ActivityDeletionSnapshot(activity: activity, entries: entries)
-        }
-    }
-
-    /// Undoes an activity deletion: re-inserts the activity,
-    /// its category assignments, and all snapshotted entries, and removes the
-    /// buffer row in one transaction. No outbox row is ever created, so the
-    /// relay is never notified of the deletion. Returns the restored
-    /// snapshot, or nil when the buffer row no longer holds an
-    /// activity-OWNED snapshot (D10).
-    @discardableResult
-    func undoActivityDeletion(bufferID: String) throws -> ActivityDeletionSnapshot? {
-        try dbQueue.write { db in
-            guard let row = try UndoBufferRow.fetchOne(db, key: bufferID) else {
-                return nil
-            }
-            let snapshot = try JSONDecoder().decode(DeletionSnapshot.self, from: Data(row.payload.utf8))
-            guard Self.owner(of: snapshot) == "activity" else { return nil }
-            try Self.applySnapshot(db, snapshot)
-            try db.execute(sql: "DELETE FROM undo_buffer WHERE id = ?", arguments: [bufferID])
-            return try Self.decodedActivitySnapshot(snapshot)
-        }
-    }
-
-    /// Decodes an already-parsed buffer payload into the typed activity
-    /// snapshot (shared by the read and write paths above).
-    private static func decodedActivitySnapshot(_ snapshot: DeletionSnapshot) throws -> ActivityDeletionSnapshot? {
-        guard let activityRecord = snapshot.records.first(where: { $0.resource == "activity" }) else {
-            return nil
-        }
-        return ActivityDeletionSnapshot(
-            activity: try JSONDecoder().decode(Activity.self, from: activityRecord.data),
-            entries: try snapshot.records
-                .filter { $0.resource == "entry" }
-                .map { try JSONDecoder().decode(TimeEntry.self, from: $0.data) }
-        )
     }
 
     // MARK: - Erase local data (destructive, Settings)
@@ -1936,9 +1594,8 @@ actor LocalStore {
     /// sync_state). Used by the "Erase local data" Settings action.
     func eraseAll() throws {
         try dbQueue.write { db in
+            try db.execute(sql: "DELETE FROM entry_categories")
             try db.execute(sql: "DELETE FROM entries")
-            try db.execute(sql: "DELETE FROM activity_categories")
-            try db.execute(sql: "DELETE FROM activities")
             try db.execute(sql: "DELETE FROM categories")
             try db.execute(sql: "DELETE FROM timer_state")
             try db.execute(sql: "DELETE FROM outbox")
@@ -1950,36 +1607,6 @@ actor LocalStore {
 
     // MARK: - Internals
 
-    /// Fetches one activity row with its category ids.
-    private static func fetchActivity(_ db: Database, id: String) throws -> Activity? {
-        let row = try Row.fetchOne(db, sql: """
-            SELECT a.*, (
-                SELECT GROUP_CONCAT(ac.category_id)
-                FROM (SELECT category_id FROM activity_categories
-                      WHERE activity_id = a.id ORDER BY position) ac
-            ) AS category_ids
-            FROM activities a
-            WHERE a.id = ?
-            """, arguments: [id])
-        guard let row else { return nil }
-        return activity(from: row)
-    }
-
-    /// Fetches one activity row by case-insensitive name.
-    private static func fetchActivity(_ db: Database, name: String) throws -> Activity? {
-        let row = try Row.fetchOne(db, sql: """
-            SELECT a.*, (
-                SELECT GROUP_CONCAT(ac.category_id)
-                FROM (SELECT category_id FROM activity_categories
-                      WHERE activity_id = a.id ORDER BY position) ac
-            ) AS category_ids
-            FROM activities a
-            WHERE lower(a.name) = lower(?)
-            """, arguments: [name])
-        guard let row else { return nil }
-        return activity(from: row)
-    }
-
     /// Fetches one category row by case-insensitive name.
     private static func fetchCategoryByName(_ db: Database, name: String) throws -> Category? {
         try Category.fetchOne(db, sql: """
@@ -1987,43 +1614,7 @@ actor LocalStore {
             """, arguments: [name])
     }
 
-    /// Finds a pending-deletion activity whose normalized name
-    /// matches `name` case-insensitively (unify-activity-preparation-flow
-    /// spec, decision 7). Returns the full snapshot activity so the caller
-    /// can offer explicit restoration.
-    private static func fetchPendingDeletionActivity(
-        _ db: Database,
-        name: String
-    ) throws -> Activity? {
-        let rows = try UndoBufferRow.fetchAll(db, sql: """
-            SELECT * FROM undo_buffer
-            """)
-        for row in rows {
-            let snapshot = try JSONDecoder().decode(DeletionSnapshot.self, from: Data(row.payload.utf8))
-            for record in snapshot.records where record.resource == "activity" {
-                let activity = try JSONDecoder().decode(Activity.self, from: record.data)
-                if activity.name.caseInsensitiveCompare(name) == .orderedSame {
-                    return activity
-                }
-            }
-        }
-        return nil
-    }
-
-    /// Maps an activities row (with the joined category_ids) into an Activity.
-    private static func activity(from row: Row) -> Activity {
-        Activity(
-            id: row["id"],
-            name: row["name"],
-            notes: row["notes"],
-            lastUsedAt: row["last_used_at"],
-            categoryIDs: Self.categoryIDs(from: row["category_ids"]),
-            createdAt: row["created_at"],
-            updatedAt: row["updated_at"]
-        )
-    }
-
-    /// Splits a GROUP_CONCAT string into category ids (empty → []).
+    /// Splits a joined category-ids string into ids (empty → []).
     private static func categoryIDs(from joined: String?) -> [String] {
         guard let joined, !joined.isEmpty else { return [] }
         return joined.split(separator: ",").map(String.init)
@@ -2041,18 +1632,18 @@ actor LocalStore {
         return result
     }
 
-    /// Atomically replaces an activity's join rows. Every referenced category
+    /// Atomically replaces an entry's join rows. Every referenced category
     /// must exist locally; an invalid reference throws `AssociationError
-    /// .invalidCategory` so the caller rolls back the whole activity edit
+    /// .invalidCategory` so the caller rolls back the whole entry write
     /// (category-management D5). IDs are de-duplicated while preserving
     /// selection order.
-    private static func replaceActivityCategories(
+    private static func replaceEntryCategories(
         db: Database,
-        activityID: String,
+        entryID: String,
         categoryIDs: [String]
     ) throws {
-        try db.execute(sql: "DELETE FROM activity_categories WHERE activity_id = ?",
-                       arguments: [activityID])
+        try db.execute(sql: "DELETE FROM entry_categories WHERE entry_id = ?",
+                       arguments: [entryID])
         var seen = Set<String>()
         var position = 0
         for categoryID in categoryIDs {
@@ -2065,10 +1656,10 @@ actor LocalStore {
             }
             try db.execute(
                 sql: """
-                    INSERT INTO activity_categories (activity_id, category_id, position)
+                    INSERT INTO entry_categories (entry_id, category_id, position)
                     VALUES (?, ?, ?)
                     """,
-                arguments: [activityID, categoryID, position]
+                arguments: [entryID, categoryID, position]
             )
             position += 1
         }
@@ -2101,23 +1692,17 @@ actor LocalStore {
 
 // MARK: - GRDB records
 
-/// GRDB record for the `timer_state` singleton row (D8).
-struct RunningTimerState: Codable, Equatable, FetchableRecord, MutablePersistableRecord {
-    static let databaseTableName = "timer_state"
-
-    var id: String
-    var activityID: String?
-    var activityName: String?
+/// The persisted running-timer draft (remove-activities-layer D3/D4): the
+/// locked trimmed text plus the live ordered category-id snapshot. Backed by
+/// the `timer_state` singleton row; readable by widgets and lock-screen
+/// Controls.
+struct RunningTimerDraft: Codable, Equatable, Sendable {
+    /// The locked trimmed entry text.
+    var activityText: String
+    /// The live ordered category-id snapshot (rewritable while running).
+    var categoryIDs: [String]
     var startedAt: Date?
     var status: String
-
-    enum CodingKeys: String, CodingKey {
-        case id
-        case activityID = "activity_id"
-        case activityName = "activity_name"
-        case startedAt = "started_at"
-        case status
-    }
 }
 
 /// GRDB record for the transactional outbox (D2).
@@ -2165,9 +1750,9 @@ struct DeletionSnapshot: Codable, Equatable, Sendable {
     let records: [Record]
 }
 
-/// Errors thrown by the Activity-category association replacement
+/// Errors thrown by the entry-category association replacement
 /// (category-management D5). A thrown association error rolls back the whole
-/// Activity mutation (fields, joins, outbox) in the caller's transaction.
+/// entry mutation (fields, joins, outbox) in the caller's transaction.
 enum AssociationError: Error, Equatable, Sendable {
     /// A referenced category does not exist locally.
     case invalidCategory(String)

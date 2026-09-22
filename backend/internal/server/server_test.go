@@ -174,7 +174,6 @@ func TestCatalogRoutesProtected(t *testing.T) {
 	s := newTestServer(t)
 
 	for _, path := range []string{
-		"/api/v1/activities",
 		"/api/v1/categories",
 		"/api/v1/entries",
 		"/api/v1/deletions",

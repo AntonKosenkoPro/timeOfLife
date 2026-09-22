@@ -4,6 +4,7 @@
 
 Defines a local-first category catalog that users can manage from Profile and apply as optional, reusable tags to one or more Activities.
 ## Requirements
+
 ### Requirement: A starter category set is created once
 The system SHALL create exactly one starter set for a new local dataset containing Work (`briefcase`), Hobby (`paintbrush`), Sport (`figure.run`), Education (`book`), Relax (`cup.and.saucer`), Sleep (`bed.double`), and Entertainment (`tv`). Starter names SHALL use the app's active supported language when the records are first created. Starter categories SHALL thereafter behave as ordinary user records and SHALL NOT be recreated merely because the user edits or deletes them.
 
@@ -98,74 +99,24 @@ The category editor SHALL preserve its draft until the user saves or cancels. Sa
 - **WHEN** synchronization reports that another device has a newer version of the category
 - **THEN** the latest version becomes visible and the user receives a non-blocking localized conflict explanation
 
-### Requirement: Category deletion preserves Activities and entries
-Deleting a category SHALL remove that category from every associated Activity but SHALL NOT delete or otherwise modify any Activity, entry, or timer state. Before deletion, the system SHALL present a destructive confirmation that names the category and explains that Activity tags will be removed while entries remain available.
-
-#### Scenario: Delete an assigned category
-- **WHEN** the user confirms deletion of a category assigned to one or more Activities
-- **THEN** the category disappears from the catalog and those Activities, while the Activities, their entries, and timer state remain intact
-
-#### Scenario: Cancel category deletion
-- **WHEN** the user cancels the destructive confirmation
-- **THEN** the category and all of its Activity assignments remain unchanged
-
-### Requirement: Activities support optional multiple category assignments
-The shared Activity editor SHALL display the available category catalog and allow zero, one, or multiple categories to be assigned to an Activity. Saving SHALL replace that Activity's category set as part of the same committed Activity edit. Category assignment SHALL remain optional. Track search results and the selected-Activity row SHALL NOT display Category metadata; Recents chips on Track SHALL display only the icon of the first Category assigned to an Activity (first by assignment position) and SHALL NOT display Category names.
-
-#### Scenario: Assign multiple categories
-- **WHEN** the user selects two or more categories in an Activity editor and saves
-- **THEN** the Activity is associated with every selected category and the saved editor state reflects all selections
-
-#### Scenario: Remove one assignment
-- **WHEN** the user deselects one category while leaving others selected and saves
-- **THEN** only the deselected association is removed
-
-#### Scenario: Clear all assignments
-- **WHEN** the user deselects every category and saves
-- **THEN** the Activity remains valid with no categories and can still be prepared and timed
-
-#### Scenario: Assignment save fails
-- **WHEN** the Activity and its selected category set cannot be committed together
-- **THEN** neither the Activity fields nor its persisted category set changes and the editor draft remains available for retry
-
-#### Scenario: Capture remains category-free
-- **WHEN** the user browses Track search results, the selected-Activity row, or Recents chips
-- **THEN** no category is required for selecting or quick-creating an Activity, no Category name appears, and only Recents chips may display the icon of the first assigned Category
-
-#### Scenario: Categoryless Activity chip has no icon
-- **WHEN** a Recents chip's Activity has no assigned categories
-- **THEN** the chip renders with the Activity name and no icon
-
-### Requirement: Current assignments classify Activity history
-Entries SHALL continue to reference their Activity rather than store a category snapshot. Any category representation of an entry SHALL resolve the Activity's current category set, so assignment edits reclassify existing history without rewriting entries.
-
-#### Scenario: Add a category to an Activity with history
-- **WHEN** the user adds a category to an Activity that already has entries
-- **THEN** subsequent history or insights queries classify those entries under the Activity's updated category set
-
-#### Scenario: Delete an assigned category
-- **WHEN** an assigned category is deleted
-- **THEN** existing entries cease to resolve that category while retaining their Activity and timing data
-
 ### Requirement: Category changes are local-first and synchronizable
-Starter creation, category CRUD, deletion finalization, and Activity-category assignment changes SHALL commit to the local source of truth without requiring an account or network. When sync is active, category records and complete Activity category sets SHALL converge through the optional relay using the existing idempotent creation, last-write-wins update, and name-collision rules.
+Starter creation, category CRUD, deletion finalization, and entry-category assignment changes SHALL commit to the local source of truth without requiring an account or network. When sync is active, category records and complete per-entry category sets SHALL converge through the optional relay using the existing idempotent creation, last-write-wins update, and name-collision rules for category records themselves.
 
 #### Scenario: Manage categories offline
 - **WHEN** the user creates, edits, deletes, or assigns categories without connectivity
 - **THEN** each successful action is immediately reflected locally and retained for later synchronization
 
 #### Scenario: Synchronize category assignments
-- **WHEN** an offline Activity-category edit later synchronizes successfully
-- **THEN** another signed-in device receives the complete current category set for that Activity
+- **WHEN** an offline per-entry category edit later synchronizes successfully
+- **THEN** another signed-in device receives the complete current category set for that entry
 
 #### Scenario: Cross-device category name collision
 - **WHEN** two devices create categories with equivalent normalized names and the relay selects one winning identity
-- **THEN** local Activity references are remapped to the winning category, the winning category is available locally, and no Activity or entry is lost
+- **THEN** local entry references are remapped to the winning category, the winning category is available locally, and no entry is lost
 
 #### Scenario: Remote category deletion arrives
 - **WHEN** a finalized category deletion from another device is received through synchronization
-- **THEN** the category and its local Activity associations are removed while Activities and entries remain intact
-
+- **THEN** the category and its local entry associations are removed while entries remain intact
 ### Requirement: Category management is localized and accessible
 All category-management copy SHALL be available in English and Russian, all interactive controls SHALL expose stable accessibility identifiers and meaningful labels, and category icons SHALL include the category name as accessible context rather than relying on the symbol alone. Interactive category controls SHALL expose a tap target of at least 44×44 points, and category chip selection SHALL be indicated by a visible check affordance rather than color alone.
 
@@ -214,3 +165,49 @@ A confirmed category deletion SHALL remain restorable until the app restarts —
 - **WHEN** the user cancels the destructive confirmation
 - **THEN** the category and all of its Activity assignments remain unchanged
 
+### Requirement: Category deletion preserves entries
+Deleting a category SHALL remove that category's joins from every entry but SHALL NOT delete or otherwise modify any entry or timer draft. Before deletion, the system SHALL present a destructive confirmation that names the category and explains that entry tags will be removed while entries remain available.
+
+#### Scenario: Delete an assigned category
+- **WHEN** the user confirms deletion of a category assigned to one or more entries
+- **THEN** the category disappears from the catalog and those entries, while the entries, their texts, notes, timings, and timer draft remain intact
+
+#### Scenario: Cancel category deletion
+- **WHEN** the user cancels the destructive confirmation
+- **THEN** the category and all of its entry assignments remain unchanged
+### Requirement: Entries support optional multiple category assignments
+The unified entry form and the running timer's `TagSelector` SHALL display the available category catalog and allow zero, one, or multiple categories per entry with order preserved. Saving SHALL persist that entry's ordered category set. Category assignment SHALL remain optional. Recents chips SHALL display only the icon of the first category of each exact text's newest entry and SHALL NOT display category names.
+
+#### Scenario: Assign multiple categories
+- **WHEN** the user selects two or more categories for an entry and saves
+- **THEN** the entry is associated with every selected category in the chosen order
+
+#### Scenario: Remove one assignment
+- **WHEN** the user deselects one category while leaving others selected and saves
+- **THEN** only the deselected association is removed
+
+#### Scenario: Clear all assignments
+- **WHEN** the user deselects every category and saves
+- **THEN** the entry remains valid with no categories
+
+#### Scenario: Assignment save fails
+- **WHEN** the entry and its selected category set cannot be committed together
+- **THEN** neither the entry fields nor its persisted category set changes and the draft remains available for retry
+
+#### Scenario: Capture inherits but never requires
+- **WHEN** the user starts a timer or opens the entry form
+- **THEN** no category is required, no category name appears except on Recents icons, and inherited categories remain fully editable
+
+#### Scenario: Categoryless entry chip has no icon
+- **WHEN** a Recents chip's newest entry has no categories
+- **THEN** the chip renders with the exact text and no icon
+### Requirement: Each entry snapshots its own categories
+Entries SHALL store their own ordered category set at creation. Later category edits on other entries, renames of categories, or retags elsewhere SHALL NOT reclassify existing entries. Deleting a category SHALL strip it from all entries without touching their texts, notes, or timings.
+
+#### Scenario: Retag affects one entry only
+- **WHEN** the user changes one entry's categories
+- **THEN** no other entry with the same text changes
+
+#### Scenario: Delete an assigned category
+- **WHEN** an assigned category is deleted
+- **THEN** existing entries cease to list that category while retaining their text, notes, and timing data

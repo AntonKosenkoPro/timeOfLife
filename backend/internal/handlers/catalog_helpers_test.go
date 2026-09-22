@@ -71,17 +71,13 @@ func catalogRouter(h *Handler) http.Handler {
 	r.Route("/api/v1", func(r chi.Router) {
 		r.Group(func(r chi.Router) {
 			r.Use(h.AuthMiddleware)
-			r.Get("/activities", h.ListActivities)
-			r.Post("/activities", h.CreateActivity)
-			r.Get("/activities/{id}", h.GetActivity)
-			r.Patch("/activities/{id}", h.UpdateActivity)
-			r.Delete("/activities/{id}", h.DeleteActivity)
 			r.Get("/categories", h.ListCategories)
 			r.Post("/categories", h.CreateCategory)
 			r.Patch("/categories/{id}", h.UpdateCategory)
 			r.Delete("/categories/{id}", h.DeleteCategory)
 			r.Get("/entries", h.ListEntries)
 			r.Post("/entries", h.CreateEntry)
+			r.Get("/entries/recents", h.ListRecents)
 			r.Get("/entries/{id}", h.GetEntry)
 			r.Patch("/entries/{id}", h.UpdateEntry)
 			r.Delete("/entries/{id}", h.DeleteEntry)
@@ -119,28 +115,26 @@ func errCode(t *testing.T, w *httptest.ResponseRecorder) string {
 	return resp.Error.Code
 }
 
-// activityResp mirrors the Activity response for test assertions.
-type activityResp struct {
-	ID         string `json:"id"`
-	Name       string `json:"name"`
-	Notes      string `json:"notes"`
-	UpdatedAt  string `json:"updated_at"`
-	Categories []struct {
+// entryResp mirrors the Entry response for test assertions.
+type entryResp struct {
+	ID           string `json:"id"`
+	ActivityText string `json:"activity_text"`
+	Notes        string `json:"notes"`
+	UpdatedAt    string `json:"updated_at"`
+	Categories   []struct {
 		ID   string `json:"id"`
 		Name string `json:"name"`
 		Icon string `json:"icon"`
 	} `json:"categories"`
 }
 
-// entryResp mirrors the Entry response for test assertions.
-type entryResp struct {
+// entryMetaResp mirrors the timing/provenance part of the Entry response.
+type entryMetaResp struct {
 	ID              string  `json:"id"`
-	ActivityID      *string `json:"activity_id"`
-	ActivityName    string  `json:"activity_name"`
+	StartedAt       string  `json:"started_at"`
 	DurationSeconds *int    `json:"duration_seconds"`
 	Source          string  `json:"source"`
 	SourceRef       *string `json:"source_ref"`
-	UpdatedAt       string  `json:"updated_at"`
 }
 
 func newCatalogHandler(t *testing.T) (*Handler, db.Store, string, string) {
@@ -151,39 +145,42 @@ func newCatalogHandler(t *testing.T) (*Handler, db.Store, string, string) {
 	return h, store, uid, tok
 }
 
-// newActivity creates an activity for the authenticated user and returns its id.
-func newActivity(t *testing.T, h *Handler, tok string) string {
+// newEntry creates a Gym entry for the authenticated user and returns its id.
+func newEntry(t *testing.T, h *Handler, tok string) string {
 	t.Helper()
-	w := serve(h, jsonReq(t, "POST", "/api/v1/activities", tok, map[string]any{
-		"id": v7(), "name": "Gym",
+	w := serve(h, jsonReq(t, "POST", "/api/v1/entries", tok, map[string]any{
+		"id": v7(), "activity_text": "Gym", "started_at": "2026-07-27T09:00:00Z",
 	}))
 	if w.Code != http.StatusCreated {
-		t.Fatalf("create activity: expected 201, got %d (body=%s)", w.Code, w.Body.String())
+		t.Fatalf("create entry: expected 201, got %d (body=%s)", w.Code, w.Body.String())
 	}
-	var a activityResp
-	decodeBody(t, w, &a)
-	return a.ID
+	var e entryResp
+	decodeBody(t, w, &e)
+	return e.ID
 }
 
-// newActivityWithEntries creates an activity plus n time entries for the
-// authenticated user and returns the activity id. Entries use deterministic
-// 1-hour slots ending at a fixed anchor so durations are reproducible.
-func newActivityWithEntries(t *testing.T, h *Handler, tok string, n int) string {
+// newEntriesWithTexts creates n time entries (one per given text) for the
+// authenticated user. Entries use deterministic 1-hour slots ending at a
+// fixed anchor so durations are reproducible.
+func newEntriesWithTexts(t *testing.T, h *Handler, tok string, texts []string) []string {
 	t.Helper()
-	id := newActivity(t, h, tok)
 	anchor := time.Date(2026, 7, 27, 9, 0, 0, 0, time.UTC)
-	for i := 0; i < n; i++ {
+	ids := make([]string, 0, len(texts))
+	for i, text := range texts {
 		w := serve(h, jsonReq(t, "POST", "/api/v1/entries", tok, map[string]any{
-			"id":          v7(),
-			"activity_id": id,
-			"started_at":  anchor.Add(time.Duration(i) * time.Hour).Format(time.RFC3339),
-			"ended_at":    anchor.Add(time.Duration(i+1) * time.Hour).Format(time.RFC3339),
+			"id":            v7(),
+			"activity_text": text,
+			"started_at":    anchor.Add(time.Duration(i) * time.Hour).Format(time.RFC3339),
+			"ended_at":      anchor.Add(time.Duration(i+1) * time.Hour).Format(time.RFC3339),
 		}))
 		if w.Code != http.StatusCreated {
 			t.Fatalf("create entry %d: expected 201, got %d (body=%s)", i, w.Code, w.Body.String())
 		}
+		var e entryResp
+		decodeBody(t, w, &e)
+		ids = append(ids, e.ID)
 	}
-	return id
+	return ids
 }
 
 // twoUsers creates two independent users with valid bearer tokens, for

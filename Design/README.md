@@ -35,16 +35,14 @@ Keep design under version control as plain Markdown so:
 | `INTERACTIONS.md` | Shared patterns: loading, errors, offline, empty states, haptics, focus. |
 | `SCREENS/Auth.md` | Auth flow screens (Welcome, EmailEntry, OtpEntry). |
 | `SCREENS/AppShell.md` | App shell: Track/History/Insights tabs, Profile destination, compact timer placement. |
-| `SCREENS/TimeTracking.md` | Track screen — the capture destination; covers the numeric timer state machine + activity chooser. |
+| `SCREENS/TimeTracking.md` | Track screen — the capture destination; covers the numeric timer state machine + plain-text field and Recents chips. |
 | `SCREENS/History.md` | History screen — read-only, day-grouped list of committed time entries (EntryRow, day totals, persistent nav bar). |
-| `SCREENS/ManageActivities.md` | Manage Activities screen — full activity CRUD, delete scope, undo. |
 | `SCREENS/ManageCategories.md` | Manage Categories screen — category CRUD, seeding, undo. |
-| `SCREENS/ActivityEditor.md` | Shared sheet to create/edit an activity (quick-add + manage). |
 | `SCREENS/CategoryEditor.md` | Shared sheet to create/edit a category. |
 | `DECISIONS.md` | Design precedents and rationale. |
 | `icon/ios/` | Authoritative iOS app-icon artwork and asset-catalog metadata. |
 
-> The catalog feature introduces the editors (`ActivityEditor`, `CategoryEditor`, `ManageActivities`, `ManageCategories`) and the timer suggestions/quick-add spec in `TimeTracking.md`.
+> Category management introduces the editors (`CategoryEditor`, `ManageCategories`) and the Recents/tag-selector spec in `TimeTracking.md`. The activities layer (`ActivityEditor`, `ManageActivities`, the search sheet) was removed by `remove-activities-layer` — entries own their text and tags.
 
 ## Global rules
 

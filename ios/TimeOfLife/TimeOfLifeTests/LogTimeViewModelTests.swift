@@ -27,19 +27,34 @@ struct LogTimeViewModelTests {
         #expect(vm.endsAt.timeIntervalSince(vm.startsAt) == 3_600)
     }
 
-    @Test("Add is disabled with no activity chosen")
-    func gateRequiresActivity() {
+    @Test("sheet opens with empty name, categories, and notes")
+    func defaultEmptyFields() {
         let vm = makeViewModel()
-
+        #expect(vm.name.isEmpty)
+        #expect(vm.categoryIDs.isEmpty)
+        #expect(vm.notes.isEmpty)
         #expect(!vm.isAddEnabled)
     }
 
     // MARK: - Validity gate
 
-    @Test("Add enables when an activity is chosen and End is after Start")
+    @Test("Add is disabled with an empty name")
+    func gateRequiresName() {
+        let vm = makeViewModel()
+        #expect(!vm.isAddEnabled)
+    }
+
+    @Test("Add is disabled with a whitespace-only name")
+    func gateWhitespaceName() {
+        let vm = makeViewModel()
+        vm.name = "   "
+        #expect(!vm.isAddEnabled)
+    }
+
+    @Test("Add enables when the trimmed name is non-empty and End is after Start")
     func gateValidForm() {
         let vm = makeViewModel()
-        vm.select(Activity(id: "a1", name: "Reading"))
+        vm.name = " Reading "
 
         #expect(vm.isAddEnabled)
     }
@@ -47,7 +62,7 @@ struct LogTimeViewModelTests {
     @Test("Add disables when End moves to Start")
     func gateEndEqualStart() {
         let vm = makeViewModel()
-        vm.select(Activity(id: "a1", name: "Reading"))
+        vm.name = "Reading"
 
         vm.setEndsAt(vm.startsAt)
 
@@ -57,7 +72,7 @@ struct LogTimeViewModelTests {
     @Test("Add disables when End moves before Start")
     func gateEndBeforeStart() {
         let vm = makeViewModel()
-        vm.select(Activity(id: "a1", name: "Reading"))
+        vm.name = "Reading"
 
         vm.setEndsAt(vm.startsAt.addingTimeInterval(-60))
 
@@ -89,6 +104,7 @@ struct LogTimeViewModelTests {
     @Test("a shortened custom duration is the one preserved on push")
     func customDurationPreserved() {
         let vm = makeViewModel()
+        vm.name = "Reading"
         vm.setEndsAt(vm.startsAt.addingTimeInterval(30 * 60))
 
         vm.setStartsAt(vm.startsAt.addingTimeInterval(2 * 3_600))
@@ -106,38 +122,45 @@ struct LogTimeViewModelTests {
         #expect(vm.startsAt == originalStart)
     }
 
+    // MARK: - Category selection
+
+    @Test("toggling categories preserves selection order")
+    func togglePreservesOrder() {
+        let vm = makeViewModel()
+        vm.toggleCategory("c1")
+        vm.toggleCategory("c2")
+        vm.toggleCategory("c3")
+        #expect(vm.categoryIDs == ["c1", "c2", "c3"])
+
+        vm.toggleCategory("c2")
+        #expect(vm.categoryIDs == ["c1", "c3"])
+    }
+
     // MARK: - Save
 
-    @Test("save persists a manual entry with derived duration")
+    @Test("save persists a manual entry with text, tags, notes, and derived duration")
     func savePersistsManualEntry() async throws {
         let vm = makeViewModel()
-        let activity = Activity(id: "a1", name: "Reading")
-        try await vm.service.store.createActivity(activity)
-        vm.select(activity)
+        try? await vm.service.store.createCategory(Category(id: "c1", name: "Work", icon: CatalogIcon.briefcase.rawValue))
+        try? await vm.service.store.createCategory(Category(id: "c2", name: "Health", icon: CatalogIcon.briefcase.rawValue))
+        vm.name = "  Reading  "
+        vm.notes = "Chapter 4"
+        vm.toggleCategory("c1")
+        vm.toggleCategory("c2")
 
         let saved = await vm.save()
 
         #expect(saved)
         let entries = try await vm.service.store.entries()
         #expect(entries.count == 1)
-        #expect(entries[0].activityID == "a1")
-        #expect(entries[0].activityName == "Reading")
+        #expect(entries[0].activityText == "Reading")
+        #expect(entries[0].categoryIDs == ["c1", "c2"])
+        #expect(entries[0].notes == "Chapter 4")
         #expect(entries[0].startedAt == vm.startsAt)
         #expect(entries[0].endedAt == vm.endsAt)
         #expect(entries[0].durationSeconds == 3_600)
         #expect(entries[0].source == "manual")
         #expect(entries[0].sourceRef == nil)
-    }
-
-    @Test("save fails gracefully when the activity no longer exists")
-    func saveMissingActivity() async {
-        let vm = makeViewModel()
-        vm.select(Activity(id: "gone", name: "Gone"))
-
-        let saved = await vm.save()
-
-        #expect(!saved)
-        #expect(vm.errorMessage == L10n.logTimeActivityMissing.text)
     }
 
     @Test("save on an invalid form returns false without an error")
@@ -150,6 +173,17 @@ struct LogTimeViewModelTests {
         #expect(vm.errorMessage == nil)
     }
 
+    @Test("save never re-resolves an activity — the entry owns its text")
+    func saveWithoutActivityResolve() async throws {
+        let vm = makeViewModel()
+        vm.name = "Gym"
+
+        let saved = await vm.save()
+
+        #expect(saved)
+        #expect(try await vm.service.store.entries().first?.activityText == "Gym")
+    }
+
     // MARK: - Modes
 
     @Test("mode routing: none is create, manual is edit, imported is locked")
@@ -160,15 +194,16 @@ struct LogTimeViewModelTests {
         #expect(LogTimeViewModel.mode(for: storedEntry(source: "healthkit")) == .locked)
     }
 
-    @Test("EDIT prefills activity and interval from the entry")
+    @Test("EDIT prefills name, categories, notes, and interval from the entry")
     func editPrefillsFromEntry() async throws {
-        let entry = storedEntry()
+        let entry = storedEntry(categoryIDs: ["c1", "c2"], notes: "Some notes")
         let vm = makeViewModel(editing: entry)
 
         #expect(vm.mode == .edit)
         #expect(!vm.isLocked)
-        #expect(vm.selectedActivity?.id == "a1")
-        #expect(vm.selectedActivity?.name == "Reading")
+        #expect(vm.name == "Reading")
+        #expect(vm.categoryIDs == ["c1", "c2"])
+        #expect(vm.notes == "Some notes")
         #expect(vm.startsAt == entry.startedAt)
         #expect(vm.endsAt == entry.endedAt)
         #expect(vm.isAddEnabled)
@@ -181,7 +216,7 @@ struct LogTimeViewModelTests {
 
         #expect(vm.mode == .locked)
         #expect(vm.isLocked)
-        #expect(vm.selectedActivity?.id == "a1")
+        #expect(vm.name == "Reading")
         #expect(vm.startsAt == entry.startedAt)
 
         #expect(await vm.save() == false)
@@ -213,7 +248,7 @@ struct LogTimeViewModelTests {
 
     @Test("EDIT save persists the new interval through updateEntry")
     func editSavePersistsUpdate() async throws {
-        let store = try await makeEditStore()
+        let store = try await makeStore()
         let entry = storedEntry()
         try await store.createEntry(entry)
         let vm = makeViewModel(store: store, editing: entry)
@@ -230,9 +265,30 @@ struct LogTimeViewModelTests {
         #expect(updates.count == 1)
     }
 
+    @Test("EDIT save retexts and retags only this entry")
+    func editSaveRetextsRetags() async throws {
+        let store = try await makeStore()
+        let entry = storedEntry()
+        try await store.createEntry(entry)
+        let other = storedEntry(id: "e2")
+        try await store.createEntry(other)
+        try await store.createCategory(Category(id: "c9", name: "Health", icon: CatalogIcon.briefcase.rawValue))
+        let vm = makeViewModel(store: store, editing: entry)
+        vm.name = "Workout"
+        vm.toggleCategory("c9")
+
+        #expect(await vm.save())
+
+        #expect(try await store.entry(id: "e1")?.activityText == "Workout")
+        #expect(try await store.entry(id: "e1")?.categoryIDs == ["c9"])
+        // No other entry with the same text changes (per-entry isolation).
+        #expect(try await store.entry(id: "e2")?.activityText == "Reading")
+        #expect(try await store.entry(id: "e2")?.categoryIDs.isEmpty == true)
+    }
+
     @Test("EDIT save fails with the draft intact on a stale write")
     func editSaveStaleKeepsDraft() async throws {
-        let store = try await makeEditStore()
+        let store = try await makeStore()
         let entry = storedEntry()
         try await store.createEntry(entry)
         let vm = makeViewModel(store: store, editing: entry)
@@ -253,36 +309,11 @@ struct LogTimeViewModelTests {
         #expect(vm.endsAt == keptEnd)
     }
 
-    @Test("EDIT save reassigns the entry to another activity")
-    func editSaveReassignsActivity() async throws {
-        let store = try await makeEditStore()
-        try await store.createActivity(Activity(id: "a2", name: "Writing"))
-        let entry = storedEntry()
-        try await store.createEntry(entry)
-        let vm = makeViewModel(store: store, editing: entry)
-        vm.select(Activity(id: "a2", name: "Writing"))
-
-        #expect(await vm.save())
-        #expect(try await store.entry(id: "e1")?.activityID == "a2")
-    }
-
-    @Test("EDIT save fails gracefully when the activity no longer exists")
-    func editSaveMissingActivity() async throws {
-        let store = try await makeEditStore()
-        let entry = storedEntry()
-        try await store.createEntry(entry)
-        let vm = makeViewModel(store: store, editing: entry)
-        vm.select(Activity(id: "gone", name: "Gone"))
-
-        #expect(await vm.save() == false)
-        #expect(vm.errorMessage == L10n.logTimeActivityMissing.text)
-    }
-
     // MARK: - Delete into the undo buffer
 
     @Test("deleteConfirmed removes the entry into the buffer without syncing")
     func deleteConfirmedBuffersWithoutSync() async throws {
-        let store = try await makeEditStore()
+        let store = try await makeStore()
         let entry = storedEntry()
         try await store.createEntry(entry)
         let vm = makeViewModel(store: store, editing: entry)
@@ -296,7 +327,7 @@ struct LogTimeViewModelTests {
 
     @Test("deleteConfirmed on an already-gone entry still dismisses")
     func deleteConfirmedMissingDismisses() async throws {
-        let store = try await makeEditStore()
+        let store = try await makeStore()
         let vm = makeViewModel(store: store, editing: storedEntry())
 
         #expect(await vm.deleteConfirmed())
@@ -304,7 +335,7 @@ struct LogTimeViewModelTests {
 
     @Test("deleteConfirmed in CREATE mode does nothing")
     func deleteConfirmedCreateDoesNothing() async throws {
-        let store = try await makeEditStore()
+        let store = try await makeStore()
         let vm = makeViewModel(store: store)
 
         #expect(await vm.deleteConfirmed() == false)
@@ -313,39 +344,41 @@ struct LogTimeViewModelTests {
 
     // MARK: - Helpers
 
-    private func storedEntry(source: String = "manual") -> TimeEntry {
+    private func storedEntry(
+        id: String = "e1",
+        source: String = "manual",
+        categoryIDs: [String] = [],
+        notes: String = ""
+    ) -> TimeEntry {
         let start = Date(timeIntervalSinceReferenceDate: 10_000)
         return TimeEntry(
-            id: "e1", activityID: "a1", activityName: "Reading",
+            id: id, activityText: "Reading",
             startedAt: start, endedAt: start.addingTimeInterval(3_600),
             durationSeconds: 3_600, source: source,
+            categoryIDs: categoryIDs, notes: notes,
             createdAt: start, updatedAt: start
         )
     }
 
-    private func makeEditStore() async throws -> LocalStore {
-        let store = try LocalStore(url: temporaryStoreURL())
-        try await store.createActivity(Activity(id: "a1", name: "Reading"))
-        return store
+    private func makeStore() async throws -> LocalStore {
+        try LocalStore(url: temporaryStoreURL())
     }
 
     private func makeViewModel(
-        now: Date = Date(),
-        initialActivity: Activity? = nil
+        now: Date = Date()
     ) -> LogTimeViewModel {
         // swiftlint:disable:next force_try
         let store = try! LocalStore(url: temporaryStoreURL())
         let service = TimerService(store: store)
-        return LogTimeViewModel(service: service, initialActivity: initialActivity, now: now)
+        return LogTimeViewModel(service: service, now: now)
     }
 
     private func makeViewModel(
         store: LocalStore,
-        editing entry: TimeEntry? = nil,
-        initialActivity: Activity? = nil
+        editing entry: TimeEntry? = nil
     ) -> LogTimeViewModel {
         let service = TimerService(store: store)
-        return LogTimeViewModel(service: service, initialActivity: initialActivity, editing: entry)
+        return LogTimeViewModel(service: service, editing: entry)
     }
 
     private func makeViewModel(editing entry: TimeEntry) -> LogTimeViewModel {

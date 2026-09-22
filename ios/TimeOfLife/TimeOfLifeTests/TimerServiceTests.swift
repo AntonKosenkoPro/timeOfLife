@@ -6,114 +6,52 @@ import Foundation
 @Suite("TimerService")
 struct TimerServiceTests {
 
-    @Test("prepareActivity creates a categoryless activity")
-    func prepareCreates() async throws {
+    @Test("stopTimerDraft saves the entry with the final tags and clears the draft")
+    func stopSavesEntryAndClearsDraft() async throws {
         let service = makeService()
-        let outcome = try await service.prepareActivity(named: "  Gym  ")
+        let store = service.store
+        try await store.createCategory(Category(id: "c1", name: "Work", icon: CatalogIcon.briefcase.rawValue))
+        let startedAt = Date(timeIntervalSince1970: 1_600_000_000)
+        try await store.saveTimerDraft(activityText: "Gym", categoryIDs: ["c1"], startedAt: startedAt)
 
-        guard case let .created(activity) = outcome else {
-            Issue.record("expected created outcome, got \(outcome)")
-            return
-        }
-        #expect(activity.name == "Gym")
-        #expect(activity.categoryIDs.isEmpty)
-        let stored = try await service.store.activity(id: activity.id)
-        #expect(stored?.name == "Gym")
-        #expect(stored?.categoryIDs.isEmpty == true)
-    }
-
-    @Test("prepareActivity reuses a case-insensitive existing activity")
-    func prepareReusesExisting() async throws {
-        let service = makeService()
-        try await service.store.createActivity(Activity(id: "a1", name: "Deep work"))
-
-        let outcome = try await service.prepareActivity(named: "DEEP WORK")
-        guard case let .existing(activity) = outcome else {
-            Issue.record("expected existing outcome, got \(outcome)")
-            return
-        }
-        #expect(activity.id == "a1")
-        let count = try await service.store.activities().count
-        #expect(count == 1)
-    }
-
-    @Test("prepareActivity trims surrounding whitespace before identity resolution")
-    func prepareTrimsWhitespace() async throws {
-        let service = makeService()
-        try await service.store.createActivity(Activity(id: "a1", name: "Reading"))
-
-        let outcome = try await service.prepareActivity(named: "  reading  ")
-        guard case let .existing(activity) = outcome else {
-            Issue.record("expected existing outcome, got \(outcome)")
-            return
-        }
-        #expect(activity.id == "a1")
-    }
-
-    @Test("prepareActivity reports a pending deletion as restorable")
-    func prepareFindsPendingDeletion() async throws {
-        let service = makeService()
-        let activity = Activity(id: "a1", name: "Coding")
-        let snapshot = DeletionSnapshot(records: [
-            DeletionSnapshot.Record(
-                resource: "activity",
-                recordID: activity.id,
-                data: try JSONEncoder().encode(activity)
-            ),
-        ])
-        try await service.store.undoBufferEnter(
-            payload: try JSONEncoder().encode(snapshot),
-            deletedAt: Date()
+        let endedAt = startedAt.addingTimeInterval(600)
+        try await service.stopTimerDraft(
+            text: "Gym",
+            categoryIDs: ["c1"],
+            startedAt: startedAt,
+            endedAt: endedAt
         )
 
-        let outcome = try await service.prepareActivity(named: "coding")
-        guard case let .restorableDeletion(pending) = outcome else {
-            Issue.record("expected restorableDeletion outcome, got \(outcome)")
-            return
-        }
-        #expect(pending.id == "a1")
+        let entries = try await store.entries()
+        #expect(entries.count == 1)
+        #expect(entries.first?.activityText == "Gym")
+        #expect(entries.first?.categoryIDs == ["c1"])
+        #expect(entries.first?.notes.isEmpty == true)
+        #expect(entries.first?.durationSeconds == 600)
+        #expect(entries.first?.source == "manual")
+        #expect(try await store.outboxRows().filter { $0.resource == "entry" }.count == 1)
+        #expect(try await service.runningTimerDraft() == nil)
     }
 
-    @Test("prepareActivity validates the name")
-    func prepareValidates() async throws {
-        let service = makeService()
-        let empty = try await service.prepareActivity(named: "   ")
-        #expect(empty == .invalid(.empty))
-        let long = try await service.prepareActivity(named: String(repeating: "a", count: 61))
-        #expect(long == .invalid(.tooLong))
-    }
-
-    @Test("prepareActivity works offline")
-    func prepareOffline() async throws {
-        let service = makeService()
-        let outcome = try await service.prepareActivity(named: "Offline")
-        guard case .created = outcome else {
-            Issue.record("expected created outcome, got \(outcome)")
-            return
-        }
-    }
-
-    @Test("stopTimer on a missing activity clears the timer and throws activityDeleted")
-    func stopOnMissingActivity() async throws {
+    @Test("startTimerDraft persists the running draft for crash recovery")
+    func startPersistsDraft() async throws {
         let service = makeService()
         let startedAt = Date(timeIntervalSince1970: 1_600_000_000)
-        // A timer left running on an activity deleted on another device:
-        // the timer state exists but the activity row is gone.
-        try await service.store.startTimer(activityID: "ghost", activityName: "Ghost", startedAt: startedAt)
 
-        do {
-            try await service.stopTimer(activityID: "ghost", startedAt: startedAt)
-            Issue.record("expected activityDeleted")
-        } catch let error as TimerServiceError {
-            #expect(error == .activityDeleted)
-        }
+        try await service.startTimerDraft(text: "  Gym  ", categoryIDs: ["c2", "c1"], startedAt: startedAt)
 
-        // The timer is cleared (stopping again is a no-op, never a wedge),
-        // and no entry or entry outbox row was created for the deleted
-        // activity.
-        #expect(try await service.store.timerState() == nil)
-        #expect(try await service.store.entries().isEmpty)
-        #expect(try await service.store.outboxRows().allSatisfy { $0.resource != "entry" })
+        let draft = try await service.runningTimerDraft()
+        #expect(draft?.activityText == "Gym")
+        #expect(draft?.categoryIDs == ["c2", "c1"])
+        #expect(draft?.status == "running")
+    }
+
+    @Test("in-progress drafts never enter the outbox")
+    func draftsNeverSync() async throws {
+        let service = makeService()
+        try await service.startTimerDraft(text: "Work", categoryIDs: [], startedAt: Date())
+
+        #expect(try await service.store.outboxRows().isEmpty)
     }
 
     // MARK: - Helpers

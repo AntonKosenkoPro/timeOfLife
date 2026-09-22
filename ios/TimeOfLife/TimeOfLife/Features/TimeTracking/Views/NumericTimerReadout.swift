@@ -83,7 +83,7 @@ struct NumericTimerReadout: View {
 
     private static var captionTexts: [String] {
         [
-            L10n.timerChooseActivityPrompt.text,
+            L10n.timerIdlePrompt.text,
             L10n.timerReady.text,
             L10n.timerRunning.text,
             L10n.timerSaving.text,
@@ -93,7 +93,7 @@ struct NumericTimerReadout: View {
 
     private var caption: String {
         switch state {
-        case .idle: L10n.timerChooseActivityPrompt.text
+        case .idle: L10n.timerIdlePrompt.text
         case .ready: L10n.timerReady.text
         case .running: L10n.timerRunning.text
         case .saving: L10n.timerSaving.text
@@ -125,7 +125,7 @@ private struct TimerCaptionNaturalHeightKey: PreferenceKey {
 
 #Preview("Numeric Timer — Running") {
     NumericTimerReadout(state: .running(
-        Activity(id: "a", name: "Deep work"),
+        TrackState.Draft(text: "Deep work"),
         startedAt: Date().addingTimeInterval(-125)
     ), elapsed: 125)
     .background(Theme.backgroundPrimary)

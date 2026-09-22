@@ -99,21 +99,25 @@ Resolved design precedents for Lifio. Add a new entry here when a visual or inte
 
 - Deleting an activity that has past entries shows a destructive two-option confirm naming the affected entry count: delete the entire activity (+ all entries) vs. delete only the current entry. Both choices are destructive and enter the undo flow as a unit.
 - Reason: F10/U5 — the user must understand the scope before losing history; the prompt names the count so the choice is informed.
+- **Superseded by `remove-activities-layer`**: there are no activities, so there is no cascade and no scope choice. Deleting an entry from its entry form shows a single destructive confirm naming the entry text (F10/U5).
 
 ## D19 — Recency ordering, no manual reorder at MVP
 
 - Manage Activities and timer suggestions are ordered by `last_used_at` (most-recent first). No drag-to-reorder at MVP.
 - Reason: F8 — manual reorder adds complexity for little value now; recency is the cheapest useful default.
+- **Superseded by `remove-activities-layer`**: there is no Manage Activities screen. Recents are up-to-6 exact texts computed on-device from entries (`GROUP BY activity_text`, newest `started_at` wins); categories are name-ordered.
 
 ## D20 — Free-text start stays first-class
 
 - Typing a name and starting the timer still works in one step; if the name matches an existing activity (case-insensitive, trimmed) it is reused, otherwise a new activity is auto-created with no categories and linked to the entry. The user is never forced into the catalog to start a timer.
 - Reason: F4 — forcing categorization would add friction and fight the app's minimal-effort premise; auto-create keeps the free-text flow frictionless while still giving every entry an `activity_id`.
+- **Superseded by `remove-activities-layer`**: there is no activity to reuse or auto-create. Typing a name and starting still works in one step; an exact match against recent entries inherits that entry's ordered categories, otherwise the draft starts categoryless. The text IS the identity (exact, case-sensitive).
 
 ## D21 — Editors as sheets, shared create/edit modes
 
 - `ActivityEditor` and `CategoryEditor` are presented as sheets, each with create + edit modes, reused by the timer (quick-add, F7) and the Manage screens (F8). Keyboard placement follows D13.
 - Reason: one editor component per entity avoids duplicate surfaces; sheets keep the user in context (timer / manage list) without a full navigation push.
+- **Partially superseded by `remove-activities-layer`**: `ActivityEditor` is deleted with the activities layer. `CategoryEditor` remains a create/edit sheet; the entry form (`LogTimeView`) is a full-screen cover, not a sheet.
 
 ## D22 — Categories have catalog icons
 
@@ -129,6 +133,7 @@ Resolved design precedents for Lifio. Add a new entry here when a visual or inte
 
 - Activities are concrete tasks required for timing. Categories are optional zero-or-more analytics metadata managed separately from capture. Entries resolve an Activity's current Categories at query time, so editing an Activity's Categories reclassifies its existing history.
 - Reason: the current Activity/category API and entry model already use `activity_id` plus query-time tag resolution, and this keeps categoryless quick creation valid.
+- **Superseded by `remove-activities-layer`**: there are no activities. Entries own their trimmed text, ordered categories, and notes at write time; history never mutates retroactively. Categories remain optional zero-or-more per-entry metadata.
 
 ## D25 — Track, History, and Insights are the primary destinations
 
@@ -144,11 +149,13 @@ Resolved design precedents for Lifio. Add a new entry here when a visual or inte
 
 - Tapping the selected Activity affordance opens a searchable sheet: recent names before search, case-insensitive matches while typing, `Create "Name"` for valid unmatched input, and Manage Activities as a secondary destination. Category names and icons are not shown. Selecting or creating prepares the Activity and dismisses the sheet.
 - Reason: the main screen stays calm and numeric while the sheet handles a potentially large catalog with familiar search and keyboard behavior; Categories are optional analytics metadata and must not compete with the concrete task being selected.
+- **Superseded by `remove-activities-layer`**: the search sheet is deleted. Capture is a plain-text field plus up-to-6 Recents chips (exact texts with first-position category icons); tapping a chip fills the field and inherits that entry's ordered categories.
 
 ## D28 — Start is explicit and Stop is spatially stable
 
 - Selection enters a ready state; a separate Start action begins timing. The same central/lower control region changes from Start to Stop without moving. After Stop succeeds, a restrained saved confirmation appears and the same Activity remains prepared.
 - Reason: explicit Start is predictable across recents, search, and creation; stable geometry supports muscle memory; retaining selection makes repeated sessions quick while still requiring explicit confirmation.
+- Note (`remove-activities-layer`): "Activity" now means the prepared exact text. After Stop the same text stays prepared; running locks the name while the shared tag selector stays live (select-only).
 
 ## D29 — A compact timer is inset above non-Track tabs
 

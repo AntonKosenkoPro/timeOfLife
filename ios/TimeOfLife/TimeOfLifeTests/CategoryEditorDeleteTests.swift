@@ -28,7 +28,7 @@ struct CategoryEditorDeleteTests {
         let store = try makeStore()
         let vm = CategoryEditorViewModel(
             store: store,
-            category: TimeOfLife.Category(id: "gone", name: "Gone", icon: "tag"),
+            category: Category(id: "gone", name: "Gone", icon: "tag"),
             onSaved: { _ in },
             onDuplicate: { _ in }
         )

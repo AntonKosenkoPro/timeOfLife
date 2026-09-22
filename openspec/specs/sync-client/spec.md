@@ -4,6 +4,7 @@
 
 The optional background sync layer that, when the user signs in, keeps the local database and the backend relay eventually consistent by draining the outbox and pulling deltas. Activated on sign-in, deactivated on sign-out; the app works fully without it.
 ## Requirements
+
 ### Requirement: Sync is optional and gated on sign-in
 The system SHALL activate the sync client only when the user has a signed-in session. When no session is active, no sync network traffic occurs, no outbox is drained, and no delta pull runs.
 
@@ -31,7 +32,7 @@ On activation, the sync client SHALL pull the relay's current state (via `?modif
 - **THEN** the pull brings the relay's current records down and merges them into the local database (server-wins on conflicts); then the outbox drains and pushes any local-only records, which are idempotent on `id` against existing relay records
 
 ### Requirement: Delta pull via modified_since
-The sync client SHALL pull only records modified since the last successful pull, using the `?modified_since=<timestamp>` query parameter on `GET /activities` and `GET /entries`, and SHALL advance the per-resource sync cursor to the max `updated_at` received.
+The sync client SHALL pull only records modified since the last successful pull, using the `?modified_since=<timestamp>` query parameter on `GET /entries` (and `GET /categories`), and SHALL advance the per-resource sync cursor to the max `updated_at` received.
 
 #### Scenario: Incremental pull
 - **WHEN** the sync client runs after a previous successful pull recorded a cursor at time T
@@ -40,9 +41,8 @@ The sync client SHALL pull only records modified since the last successful pull,
 #### Scenario: No changes
 - **WHEN** the delta pull returns no records
 - **THEN** the cursor is unchanged and no local updates are applied
-
 ### Requirement: Last-write-wins conflict resolution
-On pull, the sync client SHALL apply a server record to the local database only if `server.updated_at > local.updated_at` for the same record id; otherwise the local version is kept. On push, a 409 `conflict` response SHALL cause the client to adopt the server's version (keep-latest) and clear the outbox row, per the existing R2 design. When a server record's normalized name matches a DIFFERENT local id, the newer `updated_at` owns the name: a newer server record SHALL be adopted via identity remap (local references move to the server id, the losing local identity is removed without emitting a delete); otherwise the local record is kept and the server record is skipped for this cycle. The pull SHALL NOT fail on such collisions.
+On pull, the sync client SHALL apply a server record to the local database only if `server.updated_at > local.updated_at` for the same record id; otherwise the local version is kept. On push, a 409 `conflict` response SHALL cause the client to adopt the server's version (keep-latest) and clear the outbox row. There SHALL be no cross-record name-identity remapping: equal or similar texts with different ids are independent records.
 
 #### Scenario: Newer server record overwrites local
 - **WHEN** a pulled record has `updated_at` greater than the local record's `updated_at`
@@ -57,43 +57,26 @@ On pull, the sync client SHALL apply a server record to the local database only 
 - **THEN** the client overwrites the local record with the server version, clears the outbox row, and surfaces an informational "Edited on another device" state (non-blocking, keep-latest)
 
 #### Scenario: Pull adopts newer server identity on name collision
-- **WHEN** a pulled category/activity has the same normalized name as a local row with a different id and a newer `updated_at`
-- **THEN** local references (joins, entries, pending outbox payloads) move to the server id, the losing local identity is removed with its create row, and the cycle continues
+- **WHEN** a pulled record's text matches a different local id (name collision under exact-text identity)
+- **THEN** no identity remap occurs: equal texts are independent records, the pull applies per-id LWW only, and the cycle continues
 
 #### Scenario: Pull keeps newer local identity on name collision
-- **WHEN** a pulled category/activity has the same normalized name as a local row with a different id and an older-or-equal `updated_at`
-- **THEN** the local record is kept, the server record is skipped (logged, secret-free), and the cycle continues; convergence follows when the name frees up or a later server version wins
-
-### Requirement: Cross-device name collision remapping
-When the client pushes a create and receives 409 `activity_exists` or `category_exists`, it SHALL re-map local references (entries, tags) to the winning record's id returned in `details`, clear the outbox row, and proceed without surfacing an error to the user, per the existing design. Conflict recovery SHALL never synthesize record content: when the winning-record fetch fails, the recovery SHALL rethrow — keeping the outbox row queued for retry — instead of merging a stub, and local records SHALL keep their real names until the real winner arrives. When merging a server activity, the client SHALL translate its category references to local ids (by id, else by normalized name from the pulled snapshot) so joins never reference a skipped server category; an unresolvable reference SHALL skip the activity (transient, retried next pull), never fail the cycle.
-
-#### Scenario: Activity name collision on push
-- **WHEN** the client pushes a local activity and receives 409 `activity_exists` with the existing activity's `{id, name}` in `details`
-- **THEN** the client re-maps any local entries referencing the local id to the server's id, clears the outbox row, and does not show an error
-
-#### Scenario: Winner fetch failure retries instead of stubbing
-- **WHEN** the winning-record fetch fails during `activity_exists`/`category_exists` recovery
-- **THEN** the client merges nothing, keeps the outbox row, and surfaces the cycle failure normally; the next cycle retries with local names intact
-
-#### Scenario: Activity merge translates skipped server categories
-- **WHEN** a pulled activity tags a server category that was skipped (local counterpart kept)
-- **THEN** the merge attaches the local counterpart's id; the join write succeeds and the cycle continues
-
+- **WHEN** a pulled record's text matches a different local id and either side is newer
+- **THEN** both records are kept as independent entries or categories; nothing merges, nothing is skipped for collision, and convergence needs no name-freedom step
 ### Requirement: Idempotent outbox drain
-The sync client SHALL drain the outbox by issuing one HTTP request per outbox row, in created_at order within a resource. Because POST is idempotent on `id` and PATCH carries `updated_at` (LWW), replaying an outbox row is safe; a replay after a crash or relapse produces the same result as the first attempt. A pulled entry whose activity is absent locally (skipped server branch) SHALL be skipped with a log instead of failing the cycle on the foreign-key constraint; the next pull retries.
+The sync client SHALL drain the outbox by issuing one HTTP request per outbox row, in created_at order within a resource. Because POST is idempotent on `id` and PATCH carries `updated_at` (LWW), replaying an outbox row is safe. Entries carry `activity_text`, ordered `category_ids`, and `notes`; unknown category ids on merge SHALL resolve by dropping the unknown id and keeping the remainder (logged, secret-free), never failing the cycle.
 
 #### Scenario: Replay after relaunch
 - **WHEN** the app was killed mid-drain and relaunched, leaving some outbox rows already pushed and some not
 - **THEN** re-pushing the already-pushed rows returns 200 (idempotent) or 409 (already newer) — both treated as success — and the outbox clears cleanly
 
+#### Scenario: Entry with unknown category is pruned
+- **WHEN** a pulled entry references a category id with no local row
+- **THEN** the unknown id is dropped, the entry merges with the remainder, and the cycle completes
+
 #### Scenario: Entry without provenance defaults to manual
 - **WHEN** a pulled entry omits `source` (relays predating entry provenance)
-- **THEN** the entry decodes with `source` = "manual" (mirroring the relay's own back-compat) instead of failing the pull on `keyNotFound`
-
-#### Scenario: Entry with missing activity is skipped
-- **WHEN** a pulled entry references an activity id with no local row
-- **THEN** the entry is skipped (logged), the cycle completes, and a later pull retries after the activity lands
-
+- **THEN** the entry decodes with `source` = "manual" instead of failing the pull
 ### Requirement: Sync triggers
 The sync client SHALL run on: (1) app enters foreground, (2) connectivity restores (NWPathMonitor `.satisfied`), (3) manual "Sync now" action. On macOS, a timer-based background sync (every N minutes while running) SHALL be added; on iOS, background task scheduling SHALL NOT be used (unreliable).
 
@@ -131,90 +114,53 @@ The client SHALL decode every relay timestamp as RFC 3339 (`format: date-time`) 
 - **WHEN** the relay returns categories or entries with RFC 3339 timestamps (with or without fractional seconds)
 - **THEN** the pull merges them and the cycle completes; no `typeMismatch` on `created_at`/`updated_at`
 
-### Requirement: Delete-wins on pull-merge
-
-On pull, the sync client SHALL NOT apply a server record the user deleted locally — a deletion sitting in the durable undo buffer (no outbox row yet) or a committed deletion with a pending outbox DELETE row. Such records SHALL be skipped with a secret-free log, and the cycle SHALL continue; the queued DELETE (once committed and drained) converges the relay. Undoing the deletion or successfully draining the DELETE lifts the exclusion, after which newer server versions merge under the normal last-write-wins rule.
-
-#### Scenario: First-sync with a pending activity delete
-
-- **WHEN** the outbox holds an activity DELETE and the relay still returns that activity (pull-first runs before the drain pushes the DELETE)
-- **THEN** the pull skips the record, the drain pushes the DELETE, the outbox clears, and the activity stays deleted locally with an idle cycle
-
-#### Scenario: Buffered activity deletion survives a pull
-
-- **WHEN** an activity deletion sits in the undo buffer (no outbox row) and a pull returns the relay's copy
-- **THEN** the pull skips the record, the local row stays gone, the buffer row stays restorable, and the cycle completes
-
-#### Scenario: Buffered category deletion survives the full snapshot
-
-- **WHEN** a category deletion sits in the undo buffer and the authoritative category snapshot still contains it
-- **THEN** the pull skips the record (snapshot reconciliation never re-creates it via merge) and the buffer row stays restorable
-
-#### Scenario: Buffered entry deletion survives a pull
-
-- **WHEN** an entry deletion sits in the undo buffer and a pull returns the relay's copy
-- **THEN** the pull skips the record and the buffer row stays restorable
-
-#### Scenario: Push-conflict adoption respects a superseding delete
-
-- **WHEN** an outbox update (or create) push receives 409 `conflict` but a DELETE for the same record is queued behind it in the same drain
-- **THEN** the client skips adopting the server version (the local deletion stands), clears the conflicting row, and the queued DELETE converges the relay
-
 ### Requirement: Tombstone fetch and apply
+Every sync cycle SHALL fetch the relay's deletion tombstones since the `deletions` cursor and apply them locally BEFORE draining the outbox. Applying a tombstone SHALL delete the local row (entries cascade to their joins; categories cascade to entry joins) with no outbox row, drop pending create/update outbox rows for the affected ids, and leave pending DELETE rows to converge via the existing 404-as-success. The cursor SHALL advance to the max `deleted_at` received, and stay unchanged when the list is empty. A tombstone for an unknown id is a no-op that still advances the cursor.
 
-Every sync cycle SHALL fetch the relay's deletion tombstones since the `deletions` cursor and apply them locally BEFORE draining the outbox. Applying a tombstone SHALL delete the local row (activities cascade to entries and joins) with no outbox row, drop pending create/update outbox rows for the affected ids, and leave pending DELETE rows to converge via the existing 404-as-success. The cursor SHALL advance to the max `deleted_at` received, and stay unchanged when the list is empty. A tombstone for an unknown id is a no-op that still advances the cursor.
-
-#### Scenario: Activity deleted on another device converges
-
-- **WHEN** the relay holds an activity tombstone and this device holds the live activity with committed entries
-- **THEN** after a sync the activity, its entries, and its joins are gone locally, no outbox row exists for them, the cycle is idle, and the cursor advanced past the tombstone
+#### Scenario: Entry or category deleted on another device converges
+- **WHEN** the relay holds an entry or category tombstone from a device that deleted it
+- **THEN** after a sync the entry is gone (or the category and its entry joins are gone with entries surviving untagged), no outbox row exists, and the cursor advanced past the tombstone
 
 #### Scenario: Entry deleted on another device converges
-
 - **WHEN** the relay holds an entry tombstone and this device holds the live entry
 - **THEN** after a sync the entry is gone locally with no outbox row and the cycle is idle
 
 #### Scenario: Category deleted on another device converges
-
-- **WHEN** the relay holds a category tombstone and this device holds the live category attached to an activity
-- **THEN** after a sync the category and its joins are gone, the activity survives untagged, and no outbox row exists
+- **WHEN** the relay holds a category tombstone and this device holds the live category attached to entries
+- **THEN** after a sync the category and its entry joins are gone, the entries survive untagged, and no outbox row exists
 
 #### Scenario: Tombstones apply before the drain
-
 - **WHEN** this device holds a stale pending update for a record the relay tombstoned
 - **THEN** the tombstone step drops the update row before the drain runs, so no 404 is ever pushed for it and the cycle stays idle
 
 #### Scenario: Stale tombstone never kills a recreation (R1)
-
 - **WHEN** the local row is clean (no pending create/update) and newer than the tombstone (`updated_at > deleted_at`)
 - **THEN** the row is kept and the tombstone is buried by the cursor advance
 
 #### Scenario: Empty deletions keep the cursor
-
 - **WHEN** the deletions fetch returns no tombstones
 - **THEN** the cursor is unchanged and no local state is touched
-
 ### Requirement: Push-404 resurrection
-
-When an outbox push fails because the relay lacks the record and no tombstone covers it, the sync client SHALL resurrect from the local record and retry exactly once instead of failing the cycle: entry create/update receiving `activity_not_found` or `not_found` SHALL be re-posted as a create (idempotent; `duplicate_import` clears the row via the existing resolver); a missing parent SHALL be re-posted first (409 `activity_exists` on the heal reuses the remap flow, then the entry retries with its rewritten payload); activity/category update receiving `not_found` SHALL be re-posted as a create (queued updates PATCH normally afterward; 409 reuses the existing conflict resolver). Rows with no local record left (remap leftovers) SHALL clear without further pushes. Any further failure SHALL rethrow the original error loudly; nothing is ever silently dropped.
-
-#### Scenario: Entry push resurrects a forgotten parent
-
-- **WHEN** the drain pushes an entry create and the relay answers `activity_not_found` while the full parent row exists locally
-- **THEN** the parent is re-posted, the entry push retried, both rows clear, and the cycle completes idle with entry and activity intact
+When an outbox push fails because the relay lacks the record and no tombstone covers it, the sync client SHALL resurrect from the local record and retry exactly once instead of failing the cycle: entry/category update receiving `not_found` SHALL be re-posted as a create (idempotent; `duplicate_import` clears the row via the existing resolver). Rows with no local record left SHALL clear without further pushes. Any further failure SHALL rethrow the original error loudly; nothing is ever silently dropped.
 
 #### Scenario: Stale update re-posts as create
-
-- **WHEN** the drain pushes an entry, activity, or category update and the relay answers `not_found` while the full local row exists
+- **WHEN** the drain pushes an entry or category update and the relay answers `not_found` while the full local row exists
 - **THEN** the row is re-posted as a create, the outbox clears, and the cycle completes idle with the local record intact
 
 #### Scenario: Remap-leftover update clears without pushing
-
-- **WHEN** a name-collision remap already moved an activity to its winner and the stale update row for the losing id answers `not_found`
-- **THEN** the row clears with no further push and the adopted winner is untouched
+- **WHEN** a stale update row references a record id with no local row left (no remap flow exists to orphan it)
+- **THEN** the row clears with no further push and no other record is touched
 
 #### Scenario: Failed heal surfaces loudly
-
-- **WHEN** the parent re-post fails with anything but a remappable collision
+- **WHEN** the re-post fails
 - **THEN** the cycle fails with the original push error and all rows stay queued for retry
+### Requirement: Delete-wins for entries and categories
+On pull, the sync client SHALL NOT apply a server entry or category the user deleted locally — a deletion sitting in the durable undo buffer or a committed deletion with a pending outbox DELETE row. Such records SHALL be skipped with a secret-free log; the queued DELETE converges the relay on drain.
 
+#### Scenario: Buffered entry deletion survives a pull
+- **WHEN** an entry deletion sits in the undo buffer and a pull returns the relay's copy
+- **THEN** the pull skips the record and the buffer row stays restorable
+
+#### Scenario: First-sync with a pending entry delete
+- **WHEN** the outbox holds an entry DELETE and the relay still returns that entry
+- **THEN** the pull skips the record, the drain pushes the DELETE, and the entry stays deleted locally

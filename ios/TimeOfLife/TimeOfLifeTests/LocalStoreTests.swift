@@ -18,27 +18,12 @@ struct LocalStoreTests {
         try LocalStore(url: temporaryStoreURL())
     }
 
-    private func makeActivity(
-        id: String = "act-1",
-        name: String = "Coding",
-        notes: String? = nil,
-        updatedAt: Date = Date(timeIntervalSinceReferenceDate: 2_000)
-    ) -> Activity {
-        Activity(
-            id: id,
-            name: name,
-            notes: notes,
-            createdAt: Date(timeIntervalSinceReferenceDate: 1_000),
-            updatedAt: updatedAt
-        )
-    }
-
     private func makeCategory(
         id: String = "cat-1",
         name: String = "Work",
         updatedAt: Date = Date(timeIntervalSinceReferenceDate: 2_000)
-    ) -> TimeOfLife.Category {
-        TimeOfLife.Category(
+    ) -> Category {
+        Category(
             id: id,
             name: name,
             icon: "briefcase",
@@ -49,291 +34,51 @@ struct LocalStoreTests {
 
     private func makeEntry(
         id: String = "entry-1",
-        activityID: String = "act-1",
+        activityText: String = "Coding",
+        startedAt: Date = Date(timeIntervalSinceReferenceDate: 2_500),
         source: String = "manual",
         sourceRef: String? = nil,
+        notes: String = "",
+        categoryIDs: [String] = [],
         updatedAt: Date = Date(timeIntervalSinceReferenceDate: 3_000)
     ) -> TimeEntry {
-        let startedAt = Date(timeIntervalSinceReferenceDate: 2_500)
-        return TimeEntry(
+        TimeEntry(
             id: id,
-            activityID: activityID,
-            activityName: "Coding",
+            activityText: activityText,
             startedAt: startedAt,
             endedAt: startedAt.addingTimeInterval(600),
             durationSeconds: 600,
             source: source,
             sourceRef: sourceRef,
+            categoryIDs: categoryIDs,
+            notes: notes,
             createdAt: Date(timeIntervalSinceReferenceDate: 2_000),
             updatedAt: updatedAt
         )
     }
 
-    // MARK: - Create-or-resolve (normalized identity)
+    // MARK: - Entry creation (owned fields + single outbox row)
 
-    @Test("createOrResolveActivity creates a new activity with an outbox row")
-    func createOrResolveCreates() async throws {
-        let store = try makeStore()
-        let outcome = try await store.createOrResolveActivity(named: "  Coding  ", now: Date(timeIntervalSinceReferenceDate: 5_000))
-
-        guard case let .created(activity) = outcome else {
-            Issue.record("expected created outcome, got \(outcome)")
-            return
-        }
-        #expect(activity.name == "Coding")
-        #expect(activity.notes == nil)
-        #expect(activity.categoryIDs.isEmpty)
-        #expect(activity.createdAt == Date(timeIntervalSinceReferenceDate: 5_000))
-
-        let rows = try await store.outboxRows()
-        #expect(rows.count == 1)
-        #expect(rows.first?.op == "create")
-        #expect(rows.first?.recordID == activity.id)
-    }
-
-    @Test("createOrResolveActivity reuses an existing case-insensitive match without a new outbox row")
-    func createOrResolveReusesExisting() async throws {
-        let store = try makeStore()
-        try await store.createActivity(makeActivity(name: "Coding"))
-        try? await Task.sleep(nanoseconds: 20_000_000)
-
-        let outcome = try await store.createOrResolveActivity(named: "  coding  ")
-        guard case let .existing(activity) = outcome else {
-            Issue.record("expected existing outcome, got \(outcome)")
-            return
-        }
-        #expect(activity.id == "act-1")
-        #expect(activity.name == "Coding")
-
-        let rows = try await store.outboxRows()
-        #expect(rows.count == 1)
-        #expect(rows.first?.op == "create")
-        #expect(rows.first?.recordID == "act-1")
-    }
-
-    @Test("createOrResolveActivity creates with notes and categories")
-    func createOrResolveWithMetadata() async throws {
-        let store = try makeStore()
-        try await store.createCategory(makeCategory())
-        let outcome = try await store.createOrResolveActivity(
-            named: "Gym",
-            notes: "Leg day",
-            categoryIDs: ["cat-1"]
-        )
-
-        guard case let .created(activity) = outcome else {
-            Issue.record("expected created outcome, got \(outcome)")
-            return
-        }
-        #expect(activity.notes == "Leg day")
-        #expect(activity.categoryIDs == ["cat-1"])
-        let stored = try await store.activity(id: activity.id)
-        #expect(stored?.categoryIDs == ["cat-1"])
-    }
-
-    @Test("createOrResolveActivity rejects empty and overlong names")
-    func createOrResolveValidates() async throws {
-        let store = try makeStore()
-        let empty = try await store.createOrResolveActivity(named: "   ")
-        #expect(empty == .invalid(.empty))
-
-        let long = try await store.createOrResolveActivity(named: String(repeating: "a", count: 61))
-        #expect(long == .invalid(.tooLong))
-
-        let rows = try await store.outboxRows()
-        #expect(rows.isEmpty)
-    }
-
-    @Test("the unique index on lower(name) rejects a direct duplicate insert")
-    func uniqueIndexEnforcesNormalizedUniqueness() async throws {
-        let store = try makeStore()
-        try await store.createActivity(makeActivity(name: "Coding"))
-        let duplicate = makeActivity(id: "act-2", name: "coding")
-
-        await #expect(throws: Error.self) {
-            try await store.createActivity(duplicate)
-        }
-        let activities = try await store.activities()
-        #expect(activities.count == 1)
-    }
-
-    @Test("a concurrent duplicate insert resolves to the existing activity")
-    func createOrResolveCollisionResolvesToExisting() async throws {
-        let store = try makeStore()
-        try await store.createActivity(makeActivity(name: "Coding"))
-
-        let outcome = try await store.createOrResolveActivity(named: "CODING")
-        guard case let .existing(activity) = outcome else {
-            Issue.record("expected existing outcome, got \(outcome)")
-            return
-        }
-        #expect(activity.id == "act-1")
-        let activities = try await store.activities()
-        #expect(activities.count == 1)
-    }
-
-    @Test("createOrResolveActivity works offline (no network dependency)")
-    func createOrResolveOffline() async throws {
-        let store = try makeStore()
-        let outcome = try await store.createOrResolveActivity(named: "Offline work")
-        guard case .created = outcome else {
-            Issue.record("expected created outcome, got \(outcome)")
-            return
-        }
-        let stored = try await store.activity(named: "offline work")
-        #expect(stored?.name == "Offline work")
-    }
-
-    // MARK: - Pending-deletion identity
-
-    @Test("createOrResolveActivity reports a buffered pending deletion as restorable")
-    func createOrResolveFindsPendingDeletion() async throws {
-        let store = try makeStore()
-        let snapshot = try makeActivitySnapshot()
-        let payload = try JSONEncoder().encode(snapshot)
-        try await store.undoBufferEnter(payload: payload, deletedAt: Date())
-
-        let outcome = try await store.createOrResolveActivity(named: "coding")
-        guard case let .restorableDeletion(activity) = outcome else {
-            Issue.record("expected restorableDeletion outcome, got \(outcome)")
-            return
-        }
-        #expect(activity.id == "act-1")
-        #expect(activity.name == "Coding")
-
-        let rows = try await store.outboxRows()
-        #expect(rows.isEmpty)
-    }
-
-    @Test("an old buffered deletion is still restorable (no wall-clock window)")
-    func createOrResolveFindsOldBufferedDeletion() async throws {
-        let store = try makeStore()
-        let snapshot = try makeActivitySnapshot()
-        let payload = try JSONEncoder().encode(snapshot)
-        try await store.undoBufferEnter(
-            payload: payload,
-            deletedAt: Date().addingTimeInterval(-3_600)
-        )
-
-        let outcome = try await store.createOrResolveActivity(named: "Coding")
-        guard case let .restorableDeletion(activity) = outcome else {
-            Issue.record("expected restorableDeletion outcome, got \(outcome)")
-            return
-        }
-        #expect(activity.id == "act-1")
-        let rows = try await store.outboxRows()
-        #expect(rows.isEmpty)
-    }
-
-    @Test("restorePendingDeletionActivity restores the snapshot without an outbox row")
-    func restorePendingDeletionRestores() async throws {
-        let store = try makeStore()
-        let snapshot = try makeActivitySnapshot()
-        let payload = try JSONEncoder().encode(snapshot)
-        try await store.undoBufferEnter(payload: payload, deletedAt: Date())
-
-        let restored = try await store.restorePendingDeletionActivity(named: "  CODING  ")
-        #expect(restored?.id == "act-1")
-        #expect(restored?.name == "Coding")
-
-        let stored = try await store.activity(id: "act-1")
-        #expect(stored?.name == "Coding")
-        let buffer = try await store.undoBufferMostRecent()
-        #expect(buffer == nil)
-        let rows = try await store.outboxRows()
-        #expect(rows.isEmpty)
-    }
-
-    @Test("restorePendingDeletionActivity returns nil for a name with no buffered match")
-    func restorePendingDeletionMisses() async throws {
-        let store = try makeStore()
-        let snapshot = try makeActivitySnapshot()
-        let payload = try JSONEncoder().encode(snapshot)
-        try await store.undoBufferEnter(
-            payload: payload,
-            deletedAt: Date().addingTimeInterval(-3_600)
-        )
-
-        let restored = try await store.restorePendingDeletionActivity(named: "Running")
-        #expect(restored == nil)
-        let buffer = try await store.undoBufferMostRecent()
-        #expect(buffer != nil)
-    }
-
-    /// A snapshot capturing a single activity (no entries).
-    private func makeActivitySnapshot() throws -> DeletionSnapshot {
-        let activity = Activity(
-            id: "act-1",
-            name: "Coding",
-            createdAt: Date(timeIntervalSinceReferenceDate: 1_000),
-            updatedAt: Date(timeIntervalSinceReferenceDate: 2_000)
-        )
-        return DeletionSnapshot(records: [
-            DeletionSnapshot.Record(
-                resource: "activity",
-                recordID: activity.id,
-                data: try JSONEncoder().encode(activity)
-            ),
-        ])
-    }
-
-    // MARK: - Outbox atomicity
-
-    @Test("createActivity writes the row and an outbox create row")
-    func createActivityEnqueuesOutbox() async throws {
-        let store = try makeStore()
-        let activity = makeActivity()
-        try await store.createActivity(activity)
-
-        let stored = try await store.activity(id: activity.id)
-        #expect(stored == activity)
-
-        let rows = try await store.outboxRows()
-        #expect(rows.count == 1)
-        let row = try #require(rows.first)
-        #expect(row.resource == "activity")
-        #expect(row.recordID == activity.id)
-        #expect(row.op == "create")
-        #expect(row.attempts == 0)
-        let payload = try #require(row.payload)
-        let decoded = try JSONDecoder().decode(Activity.self, from: Data(payload.utf8))
-        #expect(decoded == activity)
-    }
-
-    @Test("createCategory writes the row and an outbox create row")
-    func createCategoryEnqueuesOutbox() async throws {
-        let store = try makeStore()
-        let category = makeCategory()
-        try await store.createCategory(category)
-
-        let stored = try await store.category(id: category.id)
-        #expect(stored == category)
-
-        let rows = try await store.outboxRows()
-        #expect(rows.count == 1)
-        let row = try #require(rows.first)
-        #expect(row.resource == "category")
-        #expect(row.recordID == category.id)
-        #expect(row.op == "create")
-        let payload = try #require(row.payload)
-        let decoded = try JSONDecoder().decode(TimeOfLife.Category.self, from: Data(payload.utf8))
-        #expect(decoded == category)
-    }
-
-    @Test("createEntry writes the row and an outbox create row")
+    @Test("createEntry writes text, categories, notes, and one outbox row")
     func createEntryEnqueuesOutbox() async throws {
         let store = try makeStore()
-        try await store.createActivity(makeActivity())
-        let entry = makeEntry()
-        try await store.createEntry(entry)
+        try await store.createCategory(makeCategory())
+        let entry = makeEntry(notes: "note", categoryIDs: ["cat-1"])
+        let outcome = try await store.createEntry(entry)
 
-        let stored = try await store.entry(id: entry.id)
+        guard case let .created(stored) = outcome else {
+            Issue.record("expected created outcome, got \(outcome)")
+            return
+        }
         #expect(stored == entry)
 
+        let fetched = try await store.entry(id: entry.id)
+        #expect(fetched == entry)
+
         let rows = try await store.outboxRows()
+        // Seeded category create + entry create.
         #expect(rows.count == 2)
-        let row = try #require(rows.first { $0.resource == "entry" && $0.recordID == entry.id })
-        #expect(row.resource == "entry")
+        let row = try #require(rows.first { $0.resource == "entry" })
         #expect(row.recordID == entry.id)
         #expect(row.op == "create")
         let payload = try #require(row.payload)
@@ -341,286 +86,181 @@ struct LocalStoreTests {
         #expect(decoded == entry)
     }
 
-    @Test("deleteActivity removes record and cascades, enqueues a delete outbox row")
-    func deleteActivityEnqueuesDeleteOutbox() async throws {
+    @Test("createEntry trims the text before persisting")
+    func createEntryTrimsText() async throws {
         let store = try makeStore()
-        try await store.createActivity(makeActivity())
-        try? await Task.sleep(nanoseconds: 20_000_000)
-        try await store.createEntry(makeEntry())
-        try? await Task.sleep(nanoseconds: 20_000_000)
-        try await store.deleteActivity(id: "act-1")
-
-        let activity = try await store.activity(id: "act-1")
-        #expect(activity == nil)
-        let entries = try await store.entries()
-        #expect(entries.isEmpty)
-
-        let rows = try await store.outboxRows()
-        #expect(rows.count == 3)
-        let deleteRow = try #require(rows.last)
-        #expect(deleteRow.resource == "activity")
-        #expect(deleteRow.recordID == "act-1")
-        #expect(deleteRow.op == "delete")
-        #expect(deleteRow.payload == nil)
+        let outcome = try await store.createEntry(makeEntry(activityText: "  Coding  "))
+        guard case let .created(entry) = outcome else {
+            Issue.record("expected created outcome, got \(outcome)")
+            return
+        }
+        #expect(entry.activityText == "Coding")
+        #expect(try await store.entry(id: entry.id)?.activityText == "Coding")
     }
 
-    @Test("deleteCategory removes record, enqueues a delete outbox row")
-    func deleteCategoryEnqueuesDeleteOutbox() async throws {
+    @Test("createEntry is case-sensitive: Gym and GYM are distinct entries")
+    func createEntryIsCaseSensitive() async throws {
+        let store = try makeStore()
+        _ = try await store.createEntry(makeEntry(id: "entry-1", activityText: "Gym"))
+        _ = try await store.createEntry(makeEntry(id: "entry-2", activityText: "GYM"))
+        let entries = try await store.entries()
+        #expect(Set(entries.map(\.activityText)) == ["Gym", "GYM"])
+    }
+
+    @Test("createEntry rejects empty and overlong text without persisting")
+    func createEntryValidatesText() async throws {
+        let store = try makeStore()
+        let empty = try await store.createEntry(makeEntry(id: "entry-1", activityText: "   "))
+        #expect(empty == .invalid(.empty))
+        let long = try await store.createEntry(
+            makeEntry(id: "entry-2", activityText: String(repeating: "a", count: 61))
+        )
+        #expect(long == .invalid(.tooLong))
+        #expect(try await store.entries().isEmpty)
+        #expect(try await store.outboxRows().isEmpty)
+    }
+
+    @Test("createEntry is idempotent on id")
+    func createEntryIsIdempotent() async throws {
+        let store = try makeStore()
+        let entry = makeEntry()
+        _ = try await store.createEntry(entry)
+        let replay = try await store.createEntry(entry)
+        guard case .created = replay else {
+            Issue.record("expected created outcome on replay")
+            return
+        }
+        let rows = try await store.outboxRows()
+        #expect(rows.count == 1)
+        #expect(try await store.entries().count == 1)
+    }
+
+    @Test("createEntry rolls back everything when a category is unknown")
+    func createEntryInvalidAssociationRollsBack() async throws {
         let store = try makeStore()
         try await store.createCategory(makeCategory())
-        try? await Task.sleep(nanoseconds: 20_000_000)
-        try await store.deleteCategory(id: "cat-1")
-
-        let category = try await store.category(id: "cat-1")
-        #expect(category == nil)
-
-        let rows = try await store.outboxRows()
-        #expect(rows.count == 2)
-        let deleteRow = try #require(rows.last)
-        #expect(deleteRow.resource == "category")
-        #expect(deleteRow.recordID == "cat-1")
-        #expect(deleteRow.op == "delete")
-        #expect(deleteRow.payload == nil)
+        do {
+            _ = try await store.createEntry(makeEntry(categoryIDs: ["cat-1", "ghost"]))
+            Issue.record("expected invalidCategory throw")
+        } catch let error as AssociationError {
+            #expect(error == .invalidCategory("ghost"))
+        }
+        #expect(try await store.entry(id: "entry-1") == nil)
+        // The seeded category's own outbox row survives; only the entry's
+        // write must roll back.
+        #expect(!(try await store.outboxRows()).contains { $0.recordID == "entry-1" })
     }
 
-    @Test("deleteEntry removes record, enqueues a delete outbox row")
-    func deleteEntryEnqueuesDeleteOutbox() async throws {
+    @Test("createEntry stores an empty default notes value")
+    func createEntryDefaultsNotes() async throws {
         let store = try makeStore()
-        try await store.createActivity(makeActivity())
-        try? await Task.sleep(nanoseconds: 20_000_000)
-        try await store.createEntry(makeEntry())
-        try? await Task.sleep(nanoseconds: 20_000_000)
-        try await store.deleteEntry(id: "entry-1")
-
-        let entry = try await store.entry(id: "entry-1")
-        #expect(entry == nil)
-
-        let rows = try await store.outboxRows()
-        #expect(rows.count == 3)
-        let deleteRow = try #require(rows.last)
-        #expect(deleteRow.resource == "entry")
-        #expect(deleteRow.recordID == "entry-1")
-        #expect(deleteRow.op == "delete")
-        #expect(deleteRow.payload == nil)
+        let outcome = try await store.createEntry(makeEntry())
+        guard case let .created(entry) = outcome else {
+            Issue.record("expected created outcome")
+            return
+        }
+        #expect(entry.notes.isEmpty)
+        #expect(try await store.entry(id: entry.id)?.notes.isEmpty == true)
     }
 
-    // MARK: - LWW
+    // MARK: - Entry update (LWW)
 
-    @Test("stale updateActivity returns false and changes nothing")
-    func staleActivityUpdateIsRejected() async throws {
+    @Test("stale updateEntry returns false and changes nothing")
+    func staleEntryUpdateIsRejected() async throws {
         let store = try makeStore()
-        try await store.createActivity(makeActivity(updatedAt: Date(timeIntervalSinceReferenceDate: 4_000)))
+        _ = try await store.createEntry(makeEntry(updatedAt: Date(timeIntervalSinceReferenceDate: 4_000)))
 
-        let stale = makeActivity(name: "Stale", updatedAt: Date(timeIntervalSinceReferenceDate: 3_000))
-        let applied = try await store.updateActivity(stale)
+        let stale = makeEntry(activityText: "Stale", updatedAt: Date(timeIntervalSinceReferenceDate: 3_000))
+        let applied = try await store.updateEntry(stale)
         #expect(!applied)
 
-        let stored = try await store.activity(id: "act-1")
-        #expect(stored?.name == "Coding")
+        let stored = try await store.entry(id: "entry-1")
+        #expect(stored?.activityText == "Coding")
         let rows = try await store.outboxRows()
         #expect(rows.count == 1)
         #expect(rows.first?.op == "create")
     }
 
-    @Test("newer updateActivity returns true, updates, and enqueues an update outbox row")
-    func newerActivityUpdateApplies() async throws {
-        let store = try makeStore()
-        try await store.createActivity(makeActivity(updatedAt: Date(timeIntervalSinceReferenceDate: 4_000)))
-        try? await Task.sleep(nanoseconds: 20_000_000)
-
-        let newer = makeActivity(name: "Coding+", notes: "with notes", updatedAt: Date(timeIntervalSinceReferenceDate: 5_000))
-        let applied = try await store.updateActivity(newer)
-        #expect(applied)
-
-        let stored = try await store.activity(id: "act-1")
-        #expect(stored?.name == "Coding+")
-        #expect(stored?.notes == "with notes")
-
-        let rows = try await store.outboxRows()
-        #expect(rows.count == 2)
-        let updateRow = try #require(rows.last)
-        #expect(updateRow.resource == "activity")
-        #expect(updateRow.recordID == "act-1")
-        #expect(updateRow.op == "update")
-        let payload = try #require(updateRow.payload)
-        let decoded = try JSONDecoder().decode(Activity.self, from: Data(payload.utf8))
-        #expect(decoded.name == "Coding+")
-    }
-
-    @Test("stale updateCategory returns false and changes nothing")
-    func staleCategoryUpdateIsRejected() async throws {
-        let store = try makeStore()
-        try await store.createCategory(makeCategory(updatedAt: Date(timeIntervalSinceReferenceDate: 4_000)))
-
-        let stale = makeCategory(name: "Stale", updatedAt: Date(timeIntervalSinceReferenceDate: 3_000))
-        let applied = try await store.updateCategory(stale)
-        #expect(!applied)
-
-        let stored = try await store.category(id: "cat-1")
-        #expect(stored?.name == "Work")
-        let rows = try await store.outboxRows()
-        #expect(rows.count == 1)
-    }
-
-    @Test("newer updateCategory returns true, updates, and enqueues an update outbox row")
-    func newerCategoryUpdateApplies() async throws {
-        let store = try makeStore()
-        try await store.createCategory(makeCategory(updatedAt: Date(timeIntervalSinceReferenceDate: 4_000)))
-        try? await Task.sleep(nanoseconds: 20_000_000)
-
-        let newer = makeCategory(name: "Deep Work", updatedAt: Date(timeIntervalSinceReferenceDate: 5_000))
-        let applied = try await store.updateCategory(newer)
-        #expect(applied)
-
-        let stored = try await store.category(id: "cat-1")
-        #expect(stored?.name == "Deep Work")
-        #expect(stored?.icon == "briefcase")
-
-        let rows = try await store.outboxRows()
-        #expect(rows.count == 2)
-        let updateRow = try #require(rows.last)
-        #expect(updateRow.op == "update")
-        #expect(updateRow.resource == "category")
-    }
-
-    @Test("renaming a UUID-named row heals it and enqueues an update")
-    func renameHealsUuidNamedRow() async throws {
-        let store = try makeStore()
-        // Poisoned shape left by the old remap stub: the winner id carries a
-        // UUID name and no outbox row (the losing create row was cleared).
-        try await store.createCategory(TimeOfLife.Category(
-            id: "server-id", name: "0193a5c2-7b1e-7c8d-9e8f-605663513c5a", icon: "tag"
-        ))
-        for row in try await store.outboxRows() {
-            try await store.removeOutboxRow(id: row.id)
-        }
-
-        // The user-facing repair is rename (never delete — that would push a
-        // real delete of the winner). The rename bumps updated_at, so the
-        // LWW push adopts the real name on both sides.
-        let outcome = try await store.updateCategory(
-            id: "server-id",
-            draft: CategoryDraft(name: "Sport", icon: .figureRun)
-        )
-        guard case let .saved(updated) = outcome else {
-            Issue.record("expected saved, got \(outcome)")
-            return
-        }
-        #expect(updated.name == "Sport")
-
-        let rows = try await store.outboxRows()
-        #expect(rows.count == 1)
-        let updateRow = try #require(rows.first)
-        #expect(updateRow.resource == "category")
-        #expect(updateRow.op == "update")
-        #expect(updateRow.recordID == "server-id")
-        let payload = try #require(updateRow.payload)
-        let decoded = try JSONDecoder().decode(TimeOfLife.Category.self, from: Data(payload.utf8))
-        #expect(decoded.name == "Sport")
-    }
-
-    @Test("stale updateEntry returns false and changes nothing")
-    func staleEntryUpdateIsRejected() async throws {
-        let store = try makeStore()
-        try await store.createActivity(makeActivity())
-        try await store.createEntry(makeEntry(updatedAt: Date(timeIntervalSinceReferenceDate: 4_000)))
-
-        let stale = makeEntry(updatedAt: Date(timeIntervalSinceReferenceDate: 3_000))
-        let applied = try await store.updateEntry(stale)
-        #expect(!applied)
-
-        let stored = try await store.entry(id: "entry-1")
-        #expect(stored?.durationSeconds == 600)
-        let rows = try await store.outboxRows()
-        #expect(rows.count == 2)
-    }
-
-    @Test("newer updateEntry returns true, updates, and enqueues an update outbox row")
+    @Test("newer updateEntry updates text, notes, categories, and enqueues an update row")
     func newerEntryUpdateApplies() async throws {
         let store = try makeStore()
-        try await store.createActivity(makeActivity())
-        try await store.createEntry(makeEntry(updatedAt: Date(timeIntervalSinceReferenceDate: 4_000)))
+        try await store.createCategory(makeCategory())
+        try await store.createCategory(makeCategory(id: "cat-2", name: "Health"))
+        _ = try await store.createEntry(makeEntry(updatedAt: Date(timeIntervalSinceReferenceDate: 4_000)))
         try? await Task.sleep(nanoseconds: 20_000_000)
 
-        let newer = makeEntry(updatedAt: Date(timeIntervalSinceReferenceDate: 5_000))
+        let newer = TimeEntry(
+            id: "entry-1",
+            activityText: "Deep work",
+            startedAt: Date(timeIntervalSinceReferenceDate: 2_500),
+            endedAt: Date(timeIntervalSinceReferenceDate: 3_100),
+            durationSeconds: 600,
+            categoryIDs: ["cat-2"],
+            notes: "updated",
+            updatedAt: Date(timeIntervalSinceReferenceDate: 5_000)
+        )
         let applied = try await store.updateEntry(newer)
         #expect(applied)
 
         let stored = try await store.entry(id: "entry-1")
-        #expect(stored?.durationSeconds == 600)
+        #expect(stored?.activityText == "Deep work")
+        #expect(stored?.notes == "updated")
+        #expect(stored?.categoryIDs == ["cat-2"])
 
         let rows = try await store.outboxRows()
-        #expect(rows.count == 3)
+        // Two category creates + entry create + entry update.
+        #expect(rows.filter { $0.resource == "entry" }.count == 2)
         let updateRow = try #require(rows.last)
         #expect(updateRow.op == "update")
         #expect(updateRow.resource == "entry")
         #expect(updateRow.recordID == "entry-1")
     }
 
-    // MARK: - Idempotent create
-
-    @Test("createActivity with the same id twice is a no-op")
-    func createActivityIsIdempotent() async throws {
+    @Test("editing one entry never changes another entry (per-entry isolation)")
+    func entryEditIsIsolated() async throws {
         let store = try makeStore()
-        let activity = makeActivity()
-        try await store.createActivity(activity)
-        try await store.createActivity(activity)
+        try await store.createCategory(makeCategory())
+        _ = try await store.createEntry(makeEntry(id: "entry-1", activityText: "Gym", categoryIDs: ["cat-1"]))
+        _ = try await store.createEntry(makeEntry(id: "entry-2", activityText: "Gym", categoryIDs: ["cat-1"], updatedAt: Date(timeIntervalSinceReferenceDate: 3_500)))
 
-        let rows = try await store.outboxRows()
-        #expect(rows.count == 1)
-        let stored = try await store.activity(id: activity.id)
-        #expect(stored == activity)
+        var edited = try #require(try await store.entry(id: "entry-1"))
+        edited.activityText = "GYM"
+        edited.categoryIDs = []
+        edited.notes = "changed"
+        edited.updatedAt = Date(timeIntervalSinceReferenceDate: 9_000)
+        _ = try await store.updateEntry(edited)
+
+        let other = try await store.entry(id: "entry-2")
+        #expect(other?.activityText == "Gym")
+        #expect(other?.categoryIDs == ["cat-1"])
+        #expect(other?.notes.isEmpty == true)
     }
 
-    @Test("createCategory with the same id twice is a no-op")
-    func createCategoryIsIdempotent() async throws {
+    @Test("updateEntry on a missing entry returns false")
+    func updateMissingEntry() async throws {
         let store = try makeStore()
-        let category = makeCategory()
-        try await store.createCategory(category)
-        try await store.createCategory(category)
-
-        let rows = try await store.outboxRows()
-        #expect(rows.count == 1)
-        let stored = try await store.category(id: category.id)
-        #expect(stored == category)
+        let applied = try await store.updateEntry(makeEntry())
+        #expect(!applied)
     }
 
-    @Test("createEntry with the same id twice is a no-op")
-    func createEntryIsIdempotent() async throws {
-        let store = try makeStore()
-        try await store.createActivity(makeActivity())
-        let entry = makeEntry()
-        try await store.createEntry(entry)
-        try await store.createEntry(entry)
+    // MARK: - Entry deletion
 
+    @Test("deleteEntry removes the row and enqueues a delete outbox row")
+    func deleteEntryEnqueuesDeleteOutbox() async throws {
+        let store = try makeStore()
+        _ = try await store.createEntry(makeEntry())
+        try? await Task.sleep(nanoseconds: 20_000_000)
+        try await store.deleteEntry(id: "entry-1")
+
+        #expect(try await store.entry(id: "entry-1") == nil)
         let rows = try await store.outboxRows()
+        // Entry create + entry delete.
         #expect(rows.count == 2)
-        let stored = try await store.entry(id: entry.id)
-        #expect(stored == entry)
-    }
-
-    // MARK: - Timer state persistence
-
-    @Test("timer state survives a simulated relaunch at the same database URL")
-    func timerStateSurvivesRelaunch() async throws {
-        let url = temporaryStoreURL()
-        let startedAt = Date(timeIntervalSinceReferenceDate: 5_000)
-
-        let store1 = try LocalStore(url: url)
-        try await store1.startTimer(activityID: "act-1", activityName: "Coding", startedAt: startedAt)
-
-        let store2 = try LocalStore(url: url)
-        let state = try await store2.timerState()
-        #expect(state?.activityID == "act-1")
-        #expect(state?.activityName == "Coding")
-        #expect(state?.startedAt == startedAt)
-        #expect(state?.status == "running")
-
-        try await store2.stopTimer()
-
-        let store3 = try LocalStore(url: url)
-        let cleared = try await store3.timerState()
-        #expect(cleared == nil)
+        let deleteRow = try #require(rows.first { $0.op == "delete" })
+        #expect(deleteRow.resource == "entry")
+        #expect(deleteRow.recordID == "entry-1")
+        #expect(deleteRow.op == "delete")
+        #expect(deleteRow.payload == nil)
     }
 
     // MARK: - Provenance
@@ -628,9 +268,8 @@ struct LocalStoreTests {
     @Test("entry provenance round-trips through entry(id:)")
     func provenanceRoundTrips() async throws {
         let store = try makeStore()
-        try await store.createActivity(makeActivity())
         let entry = makeEntry(source: "screentime", sourceRef: "st-callback-42")
-        try await store.createEntry(entry)
+        _ = try await store.createEntry(entry)
 
         let fetched = try await store.entry(id: entry.id)
         #expect(fetched == entry)
@@ -641,151 +280,163 @@ struct LocalStoreTests {
     @Test("a second entry with the same (source, sourceRef) is rejected")
     func duplicateProvenanceIsRejected() async throws {
         let store = try makeStore()
-        try await store.createActivity(makeActivity())
-        try await store.createEntry(makeEntry(source: "screentime", sourceRef: "x"))
+        _ = try await store.createEntry(makeEntry(source: "screentime", sourceRef: "x"))
 
         let duplicate = makeEntry(id: "entry-2", source: "screentime", sourceRef: "x")
-        await #expect(throws: Error.self) {
-            try await store.createEntry(duplicate)
+        let outcome = try await store.createEntry(duplicate)
+        guard case .failure = outcome else {
+            Issue.record("expected a failure outcome, got \(outcome)")
+            return
         }
-
-        let entries = try await store.entries()
-        #expect(entries.count == 1)
+        #expect(try await store.entries().count == 1)
     }
 
     @Test("manual entries with nil sourceRef may duplicate")
     func manualEntriesWithoutSourceRefCanDuplicate() async throws {
         let store = try makeStore()
-        try await store.createActivity(makeActivity())
-        try await store.createEntry(makeEntry(id: "entry-1", source: "manual", sourceRef: nil))
-        try await store.createEntry(makeEntry(id: "entry-2", source: "manual", sourceRef: nil))
-
-        let entries = try await store.entries()
-        #expect(entries.count == 2)
+        _ = try await store.createEntry(makeEntry(id: "entry-1", source: "manual", sourceRef: nil))
+        _ = try await store.createEntry(makeEntry(id: "entry-2", source: "manual", sourceRef: nil))
+        #expect(try await store.entries().count == 2)
     }
 
-    // MARK: - Per-activity queries (activity-detail-sheet)
+    // MARK: - Recents (timer-capture-experience D5)
 
-    @Test("entries(activityID:) returns only that activity's entries, newest first")
-    func perActivityEntries() async throws {
+    @Test("recents groups by exact text, newest started_at wins per group")
+    func recentsGroupNewestWins() async throws {
         let store = try makeStore()
-        try await store.createActivity(makeActivity(id: "act-1", name: "Coding"))
-        try await store.createActivity(makeActivity(id: "act-2", name: "Reading"))
-        var older = makeEntry(id: "entry-1", activityID: "act-1")
-        older = TimeEntry(
-            id: older.id,
-            activityID: older.activityID,
-            activityName: older.activityName,
-            startedAt: Date(timeIntervalSinceReferenceDate: 2_500),
-            endedAt: older.endedAt,
-            durationSeconds: older.durationSeconds,
-            source: older.source,
-            sourceRef: older.sourceRef,
-            createdAt: older.createdAt,
-            updatedAt: older.updatedAt
+        try await store.createCategory(makeCategory())
+        _ = try await store.createEntry(makeEntry(id: "e1", activityText: "Gym", categoryIDs: ["cat-1"]))
+        _ = try await store.createEntry(makeEntry(id: "e2", activityText: "Gym", startedAt: Date(timeIntervalSinceReferenceDate: 2_400), updatedAt: Date(timeIntervalSinceReferenceDate: 3_100)))
+
+        let recents = try await store.recents()
+        #expect(recents.count == 1)
+        #expect(recents.first?.activityText == "Gym")
+        #expect(recents.first?.startedAt == Date(timeIntervalSinceReferenceDate: 2_500))
+        #expect(recents.first?.categoryIDs == ["cat-1"])
+    }
+
+    @Test("recents identity is case-sensitive (Gym and GYM are distinct chips)")
+    func recentsAreCaseSensitive() async throws {
+        let store = try makeStore()
+        _ = try await store.createEntry(makeEntry(id: "e1", activityText: "Gym"))
+        _ = try await store.createEntry(makeEntry(id: "e2", activityText: "GYM", updatedAt: Date(timeIntervalSinceReferenceDate: 3_100)))
+
+        let recents = try await store.recents()
+        #expect(recents.map(\.activityText) == ["GYM", "Gym"])
+    }
+
+    @Test("recents orders groups by their newest entry DESC and caps at limit")
+    func recentsOrderAndCap() async throws {
+        let store = try makeStore()
+        let base = Date(timeIntervalSinceReferenceDate: 1_000)
+        for index in 0..<8 {
+            _ = try await store.createEntry(makeEntry(
+                id: "e\(index)",
+                activityText: "Text\(index)",
+                startedAt: base.addingTimeInterval(Double(index))
+            ))
+        }
+
+        let recents = try await store.recents(limit: 6)
+        #expect(recents.count == 6)
+        #expect(recents.map(\.activityText) == (2...7).reversed().map { "Text\($0)" })
+        #expect(recents.first?.activityText == "Text7")
+        #expect(recents.last?.activityText == "Text2")
+    }
+
+    @Test("recents is empty with no committed entries")
+    func recentsEmpty() async throws {
+        let store = try makeStore()
+        #expect(try await store.recents().isEmpty)
+    }
+
+    // MARK: - Timer draft (remove-activities-layer D3/D4)
+
+    @Test("saveTimerDraft persists trimmed text and ordered categories")
+    func saveTimerDraftPersists() async throws {
+        let store = try makeStore()
+        try await store.saveTimerDraft(
+            activityText: "  Gym  ",
+            categoryIDs: ["b", "a", "b"],
+            startedAt: Date(timeIntervalSinceReferenceDate: 5_000)
         )
-        var newer = makeEntry(id: "entry-2", activityID: "act-1", source: "garmin", sourceRef: "g-1")
-        newer = TimeEntry(
-            id: newer.id,
-            activityID: newer.activityID,
-            activityName: newer.activityName,
-            startedAt: Date(timeIntervalSinceReferenceDate: 9_500),
-            endedAt: newer.endedAt,
-            durationSeconds: newer.durationSeconds,
-            source: newer.source,
-            sourceRef: newer.sourceRef,
-            createdAt: newer.createdAt,
-            updatedAt: newer.updatedAt
-        )
-        let other = makeEntry(id: "entry-3", activityID: "act-2")
-        try await store.createEntry(older)
-        try await store.createEntry(newer)
-        try await store.createEntry(other)
-
-        let entries = try await store.entries(activityID: "act-1")
-        #expect(entries.map(\.id) == ["entry-2", "entry-1"])
-        #expect(entries.allSatisfy { $0.activityName == "Coding" })
+        let draft = try await store.timerDraft()
+        #expect(draft?.activityText == "Gym")
+        #expect(draft?.categoryIDs == ["b", "a"])
+        #expect(draft?.startedAt == Date(timeIntervalSinceReferenceDate: 5_000))
+        #expect(draft?.status == "running")
     }
 
-    @Test("entries(activityID:) returns an empty array for an activity with no entries")
-    func perActivityEntriesEmpty() async throws {
+    @Test("timer draft survives a simulated relaunch at the same database URL")
+    func timerDraftSurvivesRelaunch() async throws {
+        let url = temporaryStoreURL()
+        let startedAt = Date(timeIntervalSinceReferenceDate: 5_000)
+
+        let store1 = try LocalStore(url: url)
+        try await store1.saveTimerDraft(activityText: "Coding", categoryIDs: ["cat-1"], startedAt: startedAt)
+
+        let store2 = try LocalStore(url: url)
+        let draft = try await store2.timerDraft()
+        #expect(draft?.activityText == "Coding")
+        #expect(draft?.categoryIDs == ["cat-1"])
+        #expect(draft?.startedAt == startedAt)
+        #expect(draft?.status == "running")
+
+        try await store2.clearTimerDraft()
+
+        let store3 = try LocalStore(url: url)
+        #expect(try await store3.timerDraft() == nil)
+    }
+
+    @Test("updateTimerDraftCategoryIDs rewrites only the snapshot")
+    func updateTimerDraftCategoryIDsIsSnapshotOnly() async throws {
         let store = try makeStore()
-        try await store.createActivity(makeActivity(id: "act-1"))
-
-        let entries = try await store.entries(activityID: "act-1")
-        #expect(entries.isEmpty)
+        try await store.saveTimerDraft(activityText: "Gym", categoryIDs: ["a"], startedAt: Date())
+        try await store.updateTimerDraftCategoryIDs(["b", "a"])
+        let draft = try await store.timerDraft()
+        #expect(draft?.categoryIDs == ["b", "a"])
+        #expect(draft?.activityText == "Gym")
     }
 
-    @Test("entries(activityID:) returns nothing after the activity is cascade-deleted")
-    func perActivityEntriesAfterCascadeDelete() async throws {
+    @Test("updateTimerDraftCategoryIDs is a no-op with no draft")
+    func updateDraftWithoutDraftIsNoOp() async throws {
         let store = try makeStore()
-        try await store.createActivity(makeActivity(id: "act-1"))
-        try await store.createEntry(makeEntry(id: "entry-1", activityID: "act-1"))
-        try await store.deleteActivity(id: "act-1")
-
-        let entries = try await store.entries(activityID: "act-1")
-        #expect(entries.isEmpty)
+        try await store.updateTimerDraftCategoryIDs(["a"])
+        #expect(try await store.timerDraft() == nil)
     }
 
-    @Test("totalDuration(activityID:) sums committed durations only, isolated per activity")
-    func totalDurationSumsCommittedOnly() async throws {
+    @Test("clearTimerDraft clears the singleton")
+    func clearTimerDraft() async throws {
         let store = try makeStore()
-        try await store.createActivity(makeActivity(id: "act-1", name: "Coding"))
-        try await store.createActivity(makeActivity(id: "act-2", name: "Reading"))
-        try await store.createEntry(makeEntry(id: "entry-1", activityID: "act-1"))
-
-        let running = TimeEntry(
-            id: "entry-2",
-            activityID: "act-1",
-            activityName: "Coding",
-            startedAt: Date(timeIntervalSinceReferenceDate: 2_500),
-            endedAt: nil,
-            durationSeconds: nil,
-            source: "manual",
-            sourceRef: nil,
-            createdAt: Date(timeIntervalSinceReferenceDate: 2_000),
-            updatedAt: Date(timeIntervalSinceReferenceDate: 3_000)
-        )
-        try await store.createEntry(running)
-        try await store.createEntry(makeEntry(id: "entry-3", activityID: "act-2"))
-
-        let total = try await store.totalDuration(activityID: "act-1")
-        #expect(total == 600)
-
-        let other = try await store.totalDuration(activityID: "act-2")
-        #expect(other == 600)
-
-        let none = try await store.totalDuration(activityID: "act-missing")
-        #expect(none == 0)
+        try await store.saveTimerDraft(activityText: "Gym", categoryIDs: [], startedAt: Date())
+        try await store.clearTimerDraft()
+        #expect(try await store.timerDraft() == nil)
     }
 
-    // MARK: - eraseAll
+    // MARK: - Erase
 
     @Test("eraseAll wipes every table")
     func eraseAllWipesEverything() async throws {
         let store = try makeStore()
-        try await store.createActivity(makeActivity())
         try await store.createCategory(makeCategory())
-        try await store.createEntry(makeEntry())
-        try await store.startTimer(activityID: "act-1", activityName: "Coding", startedAt: Date())
-        try await store.setLastSyncedAt(resource: "activity", date: Date())
+        _ = try await store.createEntry(makeEntry())
+        try await store.saveTimerDraft(activityText: "Coding", categoryIDs: [], startedAt: Date())
+        try await store.setLastSyncedAt(resource: "entry", date: Date())
         try await store.undoBufferEnter(payload: Data("snapshot".utf8), deletedAt: Date())
 
         try await store.eraseAll()
 
-        let activities = try await store.activities()
-        #expect(activities.isEmpty)
         let categories = try await store.categories()
         #expect(categories.isEmpty)
         let entries = try await store.entries()
         #expect(entries.isEmpty)
-        let state = try await store.timerState()
+        let state = try await store.timerDraft()
         #expect(state == nil)
         let outbox = try await store.outboxRows()
         #expect(outbox.isEmpty)
         let buffer = try await store.undoBufferMostRecent()
         #expect(buffer == nil)
-        let cursor = try await store.lastSyncedAt(resource: "activity")
+        let cursor = try await store.lastSyncedAt(resource: "entry")
         #expect(cursor == nil)
     }
 
@@ -794,128 +445,99 @@ struct LocalStoreTests {
     @Test("lastSyncedAt stores and advances per resource")
     func syncStateAdvancesCursor() async throws {
         let store = try makeStore()
-        let initial = try await store.lastSyncedAt(resource: "activity")
+        let initial = try await store.lastSyncedAt(resource: "entry")
         #expect(initial == nil)
 
         let first = Date(timeIntervalSinceReferenceDate: 10_000)
         let second = Date(timeIntervalSinceReferenceDate: 20_000)
-        try await store.setLastSyncedAt(resource: "activity", date: first)
-        let readBack = try await store.lastSyncedAt(resource: "activity")
+        try await store.setLastSyncedAt(resource: "entry", date: first)
+        let readBack = try await store.lastSyncedAt(resource: "entry")
         #expect(readBack == first)
 
-        try await store.setLastSyncedAt(resource: "activity", date: second)
-        let advanced = try await store.lastSyncedAt(resource: "activity")
+        try await store.setLastSyncedAt(resource: "entry", date: secondOf(first, second))
+        let advanced = try await store.lastSyncedAt(resource: "entry")
         #expect(advanced == second)
 
         let otherResource = try await store.lastSyncedAt(resource: "category")
         #expect(otherResource == nil)
     }
 
+    private func secondOf(_ first: Date, _ second: Date) -> Date { second }
+
     // MARK: - Outbox ordering
 
     @Test("outboxRows returns oldest first")
     func outboxRowsAreOldestFirst() async throws {
         let store = try makeStore()
-        try await store.createCategory(makeCategory(id: "cat-a", name: "Alpha"))
+        _ = try await store.createEntry(makeEntry(id: "e-a", activityText: "Alpha"))
         try? await Task.sleep(nanoseconds: 20_000_000)
-        try await store.createCategory(makeCategory(id: "cat-b", name: "Beta"))
+        _ = try await store.createEntry(makeEntry(id: "e-b", activityText: "Beta"))
         try? await Task.sleep(nanoseconds: 20_000_000)
-        try await store.createCategory(makeCategory(id: "cat-c", name: "Gamma"))
+        _ = try await store.createEntry(makeEntry(id: "e-c", activityText: "Gamma"))
 
         let rows = try await store.outboxRows()
-        #expect(rows.map(\.recordID) == ["cat-a", "cat-b", "cat-c"])
+        #expect(rows.map(\.recordID) == ["e-a", "e-b", "e-c"])
         #expect(rows[0].createdAt <= rows[1].createdAt)
         #expect(rows[1].createdAt <= rows[2].createdAt)
     }
 
     // MARK: - Deletion tombstones (cross-device-delete-propagation)
 
-    @Test("activity tombstone cascades entries and joins without an outbox row and drops pending creates")
-    func activityTombstoneCascades() async throws {
-        let store = try makeStore()
-        try await store.createCategory(makeCategory(id: "cat-1", name: "Work"))
-        let outcome = try await store.createOrResolveActivity(named: "Coding", categoryIDs: ["cat-1"])
-        guard case let .created(activity) = outcome else {
-            Issue.record("expected created outcome, got \(outcome)")
-            return
-        }
-        try await store.createEntry(makeEntry(id: "entry-1", activityID: activity.id))
-
-        // Pending create rows exist for the activity and its entry.
-        #expect(try await store.outboxRows().count == 3)
-
-        try await store.applyDeletionTombstone(
-            Deletion(resource: "activity", recordID: activity.id, deletedAt: Date(timeIntervalSinceReferenceDate: 9_000))
-        )
-
-        #expect(try await store.activity(id: activity.id) == nil)
-        #expect(try await store.entry(id: "entry-1") == nil)
-        #expect(try await store.category(id: "cat-1") != nil)
-        // Only the category's create row survives — the activity's and the
-        // entry's pending create rows were dropped.
-        let rows = try await store.outboxRows()
-        #expect(rows.count == 1)
-        #expect(rows.first?.resource == "category")
-    }
-
-    @Test("entry tombstone removes the row and drops its pending create/update rows")
+    @Test("entry tombstone removes the row (joins cascade) and drops its pending create/update rows")
     func entryTombstoneDropsPendingRows() async throws {
         let store = try makeStore()
-        try await store.createActivity(makeActivity())
-        try await store.createEntry(makeEntry())
+        try await store.createCategory(makeCategory())
+        _ = try await store.createEntry(makeEntry(categoryIDs: ["cat-1"]))
         try? await Task.sleep(nanoseconds: 20_000_000)
-        _ = try await store.updateEntry(makeEntry(updatedAt: Date(timeIntervalSinceReferenceDate: 5_000)))
+        var bumped = makeEntry(categoryIDs: ["cat-1"])
+        bumped.updatedAt = Date(timeIntervalSinceReferenceDate: 5_000)
+        _ = try await store.updateEntry(bumped)
 
         try await store.applyDeletionTombstone(
             Deletion(resource: "entry", recordID: "entry-1", deletedAt: Date(timeIntervalSinceReferenceDate: 9_000))
         )
 
         #expect(try await store.entry(id: "entry-1") == nil)
-        // The activity's create row survives; only the entry's rows were dropped.
+        // The category's create row survives; only the entry's rows were dropped.
         let rows = try await store.outboxRows()
         #expect(rows.count == 1)
-        #expect(rows.first?.resource == "activity")
+        #expect(rows.first?.resource == "category")
     }
 
-    @Test("category tombstone removes joins and the row while the activity survives untagged")
+    @Test("category tombstone removes joins and the row while entries survive untagged")
     func categoryTombstoneRemovesJoinsOnly() async throws {
         let store = try makeStore()
-        try await store.createCategory(makeCategory(id: "cat-1", name: "Work"))
-        let outcome = try await store.createOrResolveActivity(named: "Coding", categoryIDs: ["cat-1"])
-        guard case let .created(activity) = outcome else {
-            Issue.record("expected created outcome, got \(outcome)")
-            return
-        }
+        try await store.createCategory(makeCategory())
+        _ = try await store.createEntry(makeEntry(categoryIDs: ["cat-1"]))
 
         try await store.applyDeletionTombstone(
             Deletion(resource: "category", recordID: "cat-1", deletedAt: Date(timeIntervalSinceReferenceDate: 9_000))
         )
 
         #expect(try await store.category(id: "cat-1") == nil)
-        let stored = try await store.activity(id: activity.id)
+        let stored = try await store.entry(id: "entry-1")
+        #expect(stored != nil)
+        #expect(stored?.activityText == "Coding")
         #expect(stored?.categoryIDs.isEmpty == true)
-        // The activity's create row is untouched.
+        // The entry's create row is untouched.
         let rows = try await store.outboxRows()
         #expect(rows.count == 1)
-        #expect(rows.first?.resource == "activity")
-        #expect(rows.first?.recordID == activity.id)
+        #expect(rows.first?.resource == "entry")
+        #expect(rows.first?.recordID == "entry-1")
     }
 
     @Test("a pending DELETE outbox row survives tombstone application")
     func tombstoneKeepsPendingDeleteRow() async throws {
         let store = try makeStore()
-        try await store.createActivity(makeActivity())
+        _ = try await store.createEntry(makeEntry())
         try? await Task.sleep(nanoseconds: 20_000_000)
-        try await store.deleteActivity(id: "act-1")
-        // Before: one activity-create row (drained? no) — the delete row plus
-        // the original create row. The tombstone must keep the delete row.
+        try await store.deleteEntry(id: "entry-1")
         try await store.applyDeletionTombstone(
-            Deletion(resource: "activity", recordID: "act-1", deletedAt: Date(timeIntervalSinceReferenceDate: 9_000))
+            Deletion(resource: "entry", recordID: "entry-1", deletedAt: Date(timeIntervalSinceReferenceDate: 9_000))
         )
 
         let rows = try await store.outboxRows()
-        #expect(rows.contains { $0.resource == "activity" && $0.recordID == "act-1" && $0.op == "delete" })
-        // The pending create row was dropped; the delete row is the only survivor.
+        #expect(rows.contains { $0.resource == "entry" && $0.recordID == "entry-1" && $0.op == "delete" })
         #expect(rows.count == 1)
         #expect(rows.first?.op == "delete")
     }
@@ -923,52 +545,76 @@ struct LocalStoreTests {
     @Test("a clean local row newer than the tombstone is kept (R1)")
     func staleTombstoneKeepsCleanNewerRow() async throws {
         let store = try makeStore()
-        // A clean relay-merged row (no outbox rows) recreated after the
-        // tombstone's deleted_at.
-        let recreated = makeActivity(updatedAt: Date(timeIntervalSinceReferenceDate: 8_000))
-        try await store.mergeActivity(recreated)
+        let recreated = makeEntry(updatedAt: Date(timeIntervalSinceReferenceDate: 8_000))
+        try await store.mergeEntry(recreated)
 
         try await store.applyDeletionTombstone(
-            Deletion(resource: "activity", recordID: "act-1", deletedAt: Date(timeIntervalSinceReferenceDate: 5_000))
+            Deletion(resource: "entry", recordID: "entry-1", deletedAt: Date(timeIntervalSinceReferenceDate: 5_000))
         )
 
-        #expect(try await store.activity(id: "act-1") == recreated)
+        #expect(try await store.entry(id: "entry-1") == recreated)
         #expect(try await store.outboxRows().isEmpty)
     }
 
     @Test("a dirty row older than the tombstone is still deleted and its pending rows dropped")
     func tombstoneDeletesDirtyRow() async throws {
         let store = try makeStore()
-        try await store.createActivity(makeActivity(updatedAt: Date(timeIntervalSinceReferenceDate: 8_000)))
+        _ = try await store.createEntry(makeEntry(updatedAt: Date(timeIntervalSinceReferenceDate: 8_000)))
         try? await Task.sleep(nanoseconds: 20_000_000)
-        _ = try await store.updateActivity(makeActivity(name: "Coding+", updatedAt: Date(timeIntervalSinceReferenceDate: 9_000)))
-        try? await Task.sleep(nanoseconds: 20_000_000)
-        let entry = makeEntry(updatedAt: Date(timeIntervalSinceReferenceDate: 9_000))
-        try await store.createEntry(entry)
+        var bumped = makeEntry()
+        bumped.updatedAt = Date(timeIntervalSinceReferenceDate: 9_000)
+        _ = try await store.updateEntry(bumped)
 
         try await store.applyDeletionTombstone(
-            Deletion(resource: "activity", recordID: "act-1", deletedAt: Date(timeIntervalSinceReferenceDate: 7_000))
+            Deletion(resource: "entry", recordID: "entry-1", deletedAt: Date(timeIntervalSinceReferenceDate: 7_000))
         )
 
-        #expect(try await store.activity(id: "act-1") == nil)
-        #expect(try await store.entry(id: entry.id) == nil)
-        // Even though the row was newer than the tombstone, the pending
-        // update row made it dirty — delete-wins applies.
+        #expect(try await store.entry(id: "entry-1") == nil)
         #expect(try await store.outboxRows().isEmpty)
+    }
+
+    @Test("an activity tombstone is a no-op (the resource no longer exists)")
+    func activityTombstoneIsNoOp() async throws {
+        let store = try makeStore()
+        _ = try await store.createEntry(makeEntry())
+
+        try await store.applyDeletionTombstone(
+            Deletion(resource: "activity", recordID: "ghost", deletedAt: Date(timeIntervalSinceReferenceDate: 9_000))
+        )
+
+        #expect(try await store.entry(id: "entry-1") != nil)
+        let rows = try await store.outboxRows()
+        #expect(rows.count == 1)
     }
 
     @Test("a tombstone for an unknown id is a no-op")
     func unknownIDTombstoneIsNoOp() async throws {
         let store = try makeStore()
-        try await store.createActivity(makeActivity())
+        _ = try await store.createEntry(makeEntry())
 
         try await store.applyDeletionTombstone(
             Deletion(resource: "category", recordID: "unknown", deletedAt: Date(timeIntervalSinceReferenceDate: 9_000))
         )
 
-        #expect(try await store.activity(id: "act-1") != nil)
+        #expect(try await store.entry(id: "entry-1") != nil)
         let rows = try await store.outboxRows()
         #expect(rows.count == 1)
+    }
+
+    // MARK: - Merge (prune-unknown-category, D7)
+
+    @Test("mergeEntry prunes unknown category ids and keeps the remainder")
+    func mergeEntryPrunesUnknownCategories() async throws {
+        let store = try makeStore()
+        try await store.createCategory(makeCategory())
+        let serverEntry = makeEntry(categoryIDs: ["cat-1", "server-only"])
+        try await store.mergeEntry(serverEntry)
+
+        let stored = try await store.entry(id: "entry-1")
+        #expect(stored?.activityText == "Coding")
+        #expect(stored?.categoryIDs == ["cat-1"])
+        // mergeEntry enqueues nothing; only the seeded category create remains.
+        #expect(!(try await store.outboxRows()).contains { $0.resource == "entry" })
     }
 }
 
@@ -1026,7 +672,7 @@ struct LocalStoreSeedingTests {
         let result = try await store.seedStarterCategoriesIfNeeded(names: ruNames)
 
         guard case let .seeded(seeded) = result else {
-            Issue.record("expected seeded outcome")
+            Issue.record("expected seeded outcome, got \(result)")
             return
         }
         #expect(seeded.map(\.name) == ruNames)
@@ -1084,7 +730,7 @@ struct LocalStoreSeedingTests {
         let store = try makeStore()
         // Relay-merged rows present without the marker (erase-then-sync shape).
         try await store.createCategory(
-            TimeOfLife.Category(id: "server-sport", name: "Sport", icon: "figure.run")
+            Category(id: "server-sport", name: "Sport", icon: "figure.run")
         )
 
         let result = try await store.seedStarterCategoriesIfNeeded(names: enNames)
@@ -1179,7 +825,7 @@ struct LocalStoreCategoryMutationTests {
         #expect(row.op == "create")
         #expect(row.recordID == "cat-1")
         let payload = try #require(row.payload)
-        let decoded = try JSONDecoder().decode(TimeOfLife.Category.self, from: Data(payload.utf8))
+        let decoded = try JSONDecoder().decode(Category.self, from: Data(payload.utf8))
         #expect(decoded.name == "Sport")
         #expect(decoded.icon == "figure.run")
     }
@@ -1246,7 +892,7 @@ struct LocalStoreCategoryMutationTests {
         #expect(rows.count == 2)
         #expect(rows.last?.op == "update")
         let payload = try #require(rows.last?.payload)
-        let decoded = try JSONDecoder().decode(TimeOfLife.Category.self, from: Data(payload.utf8))
+        let decoded = try JSONDecoder().decode(Category.self, from: Data(payload.utf8))
         #expect(decoded.name == "Deep Work")
         #expect(decoded.icon == "laptopcomputer")
     }
@@ -1326,7 +972,7 @@ struct LocalStoreCategoryMutationTests {
     func uniqueIndexEnforcesCategoryUniqueness() async throws {
         let store = try makeStore()
         _ = try await store.createCategory(draft: CategoryDraft(name: "Work"), id: "cat-1")
-        let duplicate = TimeOfLife.Category(
+        let duplicate = Category(
             id: "cat-2", name: "work", icon: "tag",
             createdAt: Date(), updatedAt: Date()
         )
@@ -1345,394 +991,7 @@ struct LocalStoreCategoryMutationTests {
     }
 }
 
-@Suite("LocalStore Refinement")
-struct LocalStoreRefinementTests {
-
-    // MARK: - Helpers
-
-    private func temporaryStoreURL() -> URL {
-        URL(fileURLWithPath: NSTemporaryDirectory())
-            .appendingPathComponent(UUID().uuidString)
-            .appendingPathComponent("timeoflife.sqlite")
-    }
-
-    private func makeStore() throws -> LocalStore {
-        try LocalStore(url: temporaryStoreURL())
-    }
-
-    private func makeActivity(
-        id: String = "act-1",
-        name: String = "Coding",
-        notes: String? = nil,
-        categoryIDs: [String] = [],
-        updatedAt: Date = Date(timeIntervalSinceReferenceDate: 2_000)
-    ) -> Activity {
-        Activity(
-            id: id,
-            name: name,
-            notes: notes,
-            categoryIDs: categoryIDs,
-            createdAt: Date(timeIntervalSinceReferenceDate: 1_000),
-            updatedAt: updatedAt
-        )
-    }
-
-    private func makeCategory(
-        id: String = "cat-1",
-        name: String = "Work",
-        icon: String = "briefcase"
-    ) -> TimeOfLife.Category {
-        TimeOfLife.Category(
-            id: id,
-            name: name,
-            icon: icon,
-            createdAt: Date(timeIntervalSinceReferenceDate: 1_000),
-            updatedAt: Date(timeIntervalSinceReferenceDate: 2_000)
-        )
-    }
-
-    // MARK: - Successful updates
-
-    @Test("refineActivity updates name, notes, and Categories and enqueues an update outbox row")
-    func refineUpdatesFields() async throws {
-        let store = try makeStore()
-        try await store.createActivity(makeActivity())
-        try await store.createCategory(makeCategory(id: "cat-1", name: "Work"))
-        try await store.createCategory(makeCategory(id: "cat-2", name: "Health"))
-        try? await Task.sleep(nanoseconds: 20_000_000)
-
-        let now = Date(timeIntervalSinceReferenceDate: 5_000)
-        let outcome = try await store.refineActivity(
-            id: "act-1",
-            draft: ActivityDraft(name: "Deep Work", notes: "Focus session", categoryIDs: ["cat-2"]),
-            now: now
-        )
-
-        guard case let .updated(activity) = outcome else {
-            Issue.record("expected updated outcome, got \(outcome)")
-            return
-        }
-        #expect(activity.id == "act-1")
-        #expect(activity.name == "Deep Work")
-        #expect(activity.notes == "Focus session")
-        #expect(activity.categoryIDs == ["cat-2"])
-        #expect(activity.updatedAt == now)
-        #expect(activity.createdAt == Date(timeIntervalSinceReferenceDate: 1_000))
-
-        let stored = try await store.activity(id: "act-1")
-        #expect(stored?.name == "Deep Work")
-        #expect(stored?.notes == "Focus session")
-        #expect(stored?.categoryIDs == ["cat-2"])
-
-        let rows = try await store.outboxRows()
-        #expect(rows.count == 4)
-        let updateRow = try #require(rows.last)
-        #expect(updateRow.resource == "activity")
-        #expect(updateRow.recordID == "act-1")
-        #expect(updateRow.op == "update")
-        let payload = try #require(updateRow.payload)
-        let decoded = try JSONDecoder().decode(Activity.self, from: Data(payload.utf8))
-        #expect(decoded.name == "Deep Work")
-        #expect(decoded.notes == "Focus session")
-        #expect(decoded.categoryIDs == ["cat-2"])
-    }
-
-    @Test("refineActivity preserves the identifier and createdAt")
-    func refinePreservesIdentity() async throws {
-        let store = try makeStore()
-        try await store.createActivity(makeActivity())
-        try? await Task.sleep(nanoseconds: 20_000_000)
-
-        let outcome = try await store.refineActivity(
-            id: "act-1",
-            draft: ActivityDraft(name: "Renamed"),
-            now: Date(timeIntervalSinceReferenceDate: 6_000)
-        )
-
-        guard case let .updated(activity) = outcome else {
-            Issue.record("expected updated outcome")
-            return
-        }
-        #expect(activity.id == "act-1")
-        #expect(activity.createdAt == Date(timeIntervalSinceReferenceDate: 1_000))
-        #expect(activity.name == "Renamed")
-    }
-
-    @Test("refineActivity with the same name updates only metadata")
-    func refineSameName() async throws {
-        let store = try makeStore()
-        try await store.createActivity(makeActivity(name: "Coding"))
-        try? await Task.sleep(nanoseconds: 20_000_000)
-
-        let now = Date(timeIntervalSinceReferenceDate: 5_000)
-        let outcome = try await store.refineActivity(
-            id: "act-1",
-            draft: ActivityDraft(name: "Coding", notes: "Updated notes"),
-            now: now
-        )
-
-        guard case let .updated(activity) = outcome else {
-            Issue.record("expected updated outcome")
-            return
-        }
-        #expect(activity.name == "Coding")
-        #expect(activity.notes == "Updated notes")
-        #expect(activity.updatedAt == now)
-    }
-
-    @Test("refineActivity trims whitespace from name and notes")
-    func refineTrimsWhitespace() async throws {
-        let store = try makeStore()
-        try await store.createActivity(makeActivity())
-        try? await Task.sleep(nanoseconds: 20_000_000)
-
-        let outcome = try await store.refineActivity(
-            id: "act-1",
-            draft: ActivityDraft(name: "  Deep Work  ", notes: "  Notes  "),
-            now: Date(timeIntervalSinceReferenceDate: 5_000)
-        )
-
-        guard case let .updated(activity) = outcome else {
-            Issue.record("expected updated outcome")
-            return
-        }
-        #expect(activity.name == "Deep Work")
-        #expect(activity.notes == "Notes")
-    }
-
-    @Test("refineActivity stores nil for empty notes")
-    func refineEmptyNotesStoresNil() async throws {
-        let store = try makeStore()
-        try await store.createActivity(makeActivity(notes: "Old notes"))
-        try? await Task.sleep(nanoseconds: 20_000_000)
-
-        let outcome = try await store.refineActivity(
-            id: "act-1",
-            draft: ActivityDraft(name: "Coding", notes: "   "),
-            now: Date(timeIntervalSinceReferenceDate: 5_000)
-        )
-
-        guard case let .updated(activity) = outcome else {
-            Issue.record("expected updated outcome")
-            return
-        }
-        #expect(activity.notes == nil)
-        let stored = try await store.activity(id: "act-1")
-        #expect(stored?.notes == nil)
-    }
-
-    @Test("refineActivity replaces Category joins atomically")
-    func refineReplacesCategories() async throws {
-        let store = try makeStore()
-        try await store.createCategory(makeCategory(id: "cat-1", name: "Work"))
-        try await store.createCategory(makeCategory(id: "cat-2", name: "Health"))
-        try await store.createActivity(makeActivity(categoryIDs: ["cat-1"]))
-        try? await Task.sleep(nanoseconds: 20_000_000)
-
-        let outcome = try await store.refineActivity(
-            id: "act-1",
-            draft: ActivityDraft(name: "Coding", categoryIDs: ["cat-2"]),
-            now: Date(timeIntervalSinceReferenceDate: 5_000)
-        )
-
-        guard case .updated = outcome else {
-            Issue.record("expected updated outcome")
-            return
-        }
-        let stored = try await store.activity(id: "act-1")
-        #expect(stored?.categoryIDs == ["cat-2"])
-    }
-
-    @Test("refineActivity clears Categories when the draft has none")
-    func refineClearsCategories() async throws {
-        let store = try makeStore()
-        try await store.createCategory(makeCategory(id: "cat-1", name: "Work"))
-        try await store.createActivity(makeActivity(categoryIDs: ["cat-1"]))
-        try? await Task.sleep(nanoseconds: 20_000_000)
-
-        let outcome = try await store.refineActivity(
-            id: "act-1",
-            draft: ActivityDraft(name: "Coding", categoryIDs: []),
-            now: Date(timeIntervalSinceReferenceDate: 5_000)
-        )
-
-        guard case .updated = outcome else {
-            Issue.record("expected updated outcome")
-            return
-        }
-        let stored = try await store.activity(id: "act-1")
-        #expect(stored?.categoryIDs.isEmpty == true)
-    }
-
-    // MARK: - Collision
-
-    @Test("refineActivity rejects a normalized-name collision without partial writes")
-    func refineCollisionNoPartialWrite() async throws {
-        let store = try makeStore()
-        try await store.createActivity(makeActivity(id: "act-1", name: "Coding"))
-        try await store.createActivity(makeActivity(id: "act-2", name: "Reading"))
-        try? await Task.sleep(nanoseconds: 20_000_000)
-
-        let outcome = try await store.refineActivity(
-            id: "act-1",
-            draft: ActivityDraft(name: "Reading", notes: "Attempted"),
-            now: Date(timeIntervalSinceReferenceDate: 5_000)
-        )
-
-        guard case let .collision(winner) = outcome else {
-            Issue.record("expected collision outcome, got \(outcome)")
-            return
-        }
-        #expect(winner.id == "act-2")
-        #expect(winner.name == "Reading")
-
-        let stored = try await store.activity(id: "act-1")
-        #expect(stored?.name == "Coding")
-        #expect(stored?.notes == nil)
-
-        let rows = try await store.outboxRows()
-        let updateRows = rows.filter { $0.op == "update" }
-        #expect(updateRows.isEmpty)
-    }
-
-    @Test("refineActivity rejects a case-insensitive collision")
-    func refineCollisionCaseInsensitive() async throws {
-        let store = try makeStore()
-        try await store.createActivity(makeActivity(id: "act-1", name: "Coding"))
-        try await store.createActivity(makeActivity(id: "act-2", name: "Reading"))
-        try? await Task.sleep(nanoseconds: 20_000_000)
-
-        let outcome = try await store.refineActivity(
-            id: "act-1",
-            draft: ActivityDraft(name: "READING"),
-            now: Date(timeIntervalSinceReferenceDate: 5_000)
-        )
-
-        guard case let .collision(winner) = outcome else {
-            Issue.record("expected collision outcome")
-            return
-        }
-        #expect(winner.id == "act-2")
-    }
-
-    @Test("refineActivity allows renaming to the same normalized name")
-    func refineSameNormalizedNoCollision() async throws {
-        let store = try makeStore()
-        try await store.createActivity(makeActivity(name: "Coding"))
-        try? await Task.sleep(nanoseconds: 20_000_000)
-
-        let outcome = try await store.refineActivity(
-            id: "act-1",
-            draft: ActivityDraft(name: "CODING", notes: "Updated"),
-            now: Date(timeIntervalSinceReferenceDate: 5_000)
-        )
-
-        guard case let .updated(activity) = outcome else {
-            Issue.record("expected updated outcome, got \(outcome)")
-            return
-        }
-        #expect(activity.name == "CODING")
-        #expect(activity.notes == "Updated")
-    }
-
-    // MARK: - Missing Activity
-
-    @Test("refineActivity returns missing when the Activity does not exist")
-    func refineMissing() async throws {
-        let store = try makeStore()
-
-        let outcome = try await store.refineActivity(
-            id: "nonexistent",
-            draft: ActivityDraft(name: "Coding"),
-            now: Date(timeIntervalSinceReferenceDate: 5_000)
-        )
-
-        #expect(outcome == .missing)
-        let rows = try await store.outboxRows()
-        #expect(rows.isEmpty)
-    }
-
-    // MARK: - Invalid input
-
-    @Test("refineActivity rejects an empty name")
-    func refineInvalidEmpty() async throws {
-        let store = try makeStore()
-        try await store.createActivity(makeActivity())
-
-        let outcome = try await store.refineActivity(
-            id: "act-1",
-            draft: ActivityDraft(name: "   "),
-            now: Date(timeIntervalSinceReferenceDate: 5_000)
-        )
-
-        #expect(outcome == .invalid(.empty))
-        let stored = try await store.activity(id: "act-1")
-        #expect(stored?.name == "Coding")
-        let rows = try await store.outboxRows()
-        #expect(rows.count == 1)
-        #expect(rows.first?.op == "create")
-    }
-
-    @Test("refineActivity rejects an overlong name")
-    func refineInvalidTooLong() async throws {
-        let store = try makeStore()
-        try await store.createActivity(makeActivity())
-
-        let outcome = try await store.refineActivity(
-            id: "act-1",
-            draft: ActivityDraft(name: String(repeating: "a", count: 61)),
-            now: Date(timeIntervalSinceReferenceDate: 5_000)
-        )
-
-        #expect(outcome == .invalid(.tooLong))
-    }
-
-    // MARK: - Outbox payload
-
-    @Test("refineActivity outbox row contains the complete updated Activity")
-    func refineOutboxPayloadComplete() async throws {
-        let store = try makeStore()
-        try await store.createCategory(makeCategory(id: "cat-1", name: "Work"))
-        try await store.createActivity(makeActivity())
-        try? await Task.sleep(nanoseconds: 20_000_000)
-
-        let now = Date(timeIntervalSinceReferenceDate: 5_000)
-        _ = try await store.refineActivity(
-            id: "act-1",
-            draft: ActivityDraft(name: "Deep Work", notes: "Focus", categoryIDs: ["cat-1"]),
-            now: now
-        )
-
-        let rows = try await store.outboxRows()
-        let updateRow = try #require(rows.last)
-        let payload = try #require(updateRow.payload)
-        let decoded = try JSONDecoder().decode(Activity.self, from: Data(payload.utf8))
-        #expect(decoded.id == "act-1")
-        #expect(decoded.name == "Deep Work")
-        #expect(decoded.notes == "Focus")
-        #expect(decoded.categoryIDs == ["cat-1"])
-        #expect(decoded.updatedAt == now)
-    }
-
-    @Test("refineActivity does not create a new activity row")
-    func refineDoesNotCreateNewRow() async throws {
-        let store = try makeStore()
-        try await store.createActivity(makeActivity())
-        let countBefore = try await store.activities().count
-        try? await Task.sleep(nanoseconds: 20_000_000)
-
-        _ = try await store.refineActivity(
-            id: "act-1",
-            draft: ActivityDraft(name: "Renamed"),
-            now: Date(timeIntervalSinceReferenceDate: 5_000)
-        )
-
-        let countAfter = try await store.activities().count
-        #expect(countBefore == countAfter)
-    }
-}
-
-@Suite("LocalStore Category Associations (category-management D5)")
+@Suite("LocalStore Entry-Category Associations (category-management D5)")
 struct LocalStoreAssociationTests {
 
     private func temporaryStoreURL() -> URL {
@@ -1745,8 +1004,8 @@ struct LocalStoreAssociationTests {
         try LocalStore(url: temporaryStoreURL())
     }
 
-    private func makeCategory(id: String, name: String) -> TimeOfLife.Category {
-        TimeOfLife.Category(
+    private func makeCategory(id: String, name: String) -> Category {
+        Category(
             id: id, name: name, icon: "tag",
             createdAt: Date(timeIntervalSinceReferenceDate: 1_000),
             updatedAt: Date(timeIntervalSinceReferenceDate: 2_000)
@@ -1760,17 +1019,17 @@ struct LocalStoreAssociationTests {
         try await store.createCategory(makeCategory(id: "cat-2", name: "Health"))
         try await store.createCategory(makeCategory(id: "cat-3", name: "Travel"))
 
-        let outcome = try await store.createOrResolveActivity(
-            named: "Gym",
+        let outcome = try await store.createEntry(TimeEntry(
+            id: "e1", activityText: "Gym", startedAt: Date(),
             categoryIDs: ["cat-2", "cat-1", "cat-3"]
-        )
-        guard case let .created(activity) = outcome else {
+        ))
+        guard case let .created(entry) = outcome else {
             Issue.record("expected created")
             return
         }
-        #expect(activity.categoryIDs == ["cat-2", "cat-1", "cat-3"])
+        #expect(entry.categoryIDs == ["cat-2", "cat-1", "cat-3"])
 
-        let stored = try await store.activity(id: activity.id)
+        let stored = try await store.entry(id: "e1")
         #expect(stored?.categoryIDs == ["cat-2", "cat-1", "cat-3"])
     }
 
@@ -1780,16 +1039,16 @@ struct LocalStoreAssociationTests {
         try await store.createCategory(makeCategory(id: "cat-1", name: "Work"))
         try await store.createCategory(makeCategory(id: "cat-2", name: "Health"))
 
-        let outcome = try await store.createOrResolveActivity(
-            named: "Gym",
+        let outcome = try await store.createEntry(TimeEntry(
+            id: "e1", activityText: "Gym", startedAt: Date(),
             categoryIDs: ["cat-2", "cat-2", "cat-1", "cat-2"]
-        )
-        guard case let .created(activity) = outcome else {
+        ))
+        guard case let .created(entry) = outcome else {
             Issue.record("expected created")
             return
         }
-        #expect(activity.categoryIDs == ["cat-2", "cat-1"])
-        let stored = try await store.activity(id: activity.id)
+        #expect(entry.categoryIDs == ["cat-2", "cat-1"])
+        let stored = try await store.entry(id: "e1")
         #expect(stored?.categoryIDs == ["cat-2", "cat-1"])
     }
 
@@ -1799,119 +1058,53 @@ struct LocalStoreAssociationTests {
         try await store.createCategory(makeCategory(id: "cat-1", name: "Work"))
         try await store.createCategory(makeCategory(id: "cat-2", name: "Health"))
         try await store.createCategory(makeCategory(id: "cat-3", name: "Travel"))
-        let created = try await store.createOrResolveActivity(
-            named: "Gym", categoryIDs: ["cat-1", "cat-2", "cat-3"]
-        )
-        guard case let .created(activity) = created else {
-            Issue.record("expected created")
-            return
-        }
+        _ = try await store.createEntry(TimeEntry(
+            id: "e1", activityText: "Gym", startedAt: Date(),
+            categoryIDs: ["cat-1", "cat-2", "cat-3"]
+        ))
 
-        let outcome = try await store.refineActivity(
-            id: activity.id,
-            draft: ActivityDraft(name: "Gym", categoryIDs: ["cat-1", "cat-3"]),
-            now: Date(timeIntervalSinceReferenceDate: 5_000)
-        )
-        guard case .updated = outcome else {
-            Issue.record("expected updated")
-            return
-        }
-        let stored = try await store.activity(id: activity.id)
+        var updated = try #require(try await store.entry(id: "e1"))
+        updated.categoryIDs = ["cat-1", "cat-3"]
+        updated.updatedAt = Date().addingTimeInterval(60)
+        let applied = try await store.updateEntry(updated)
+        #expect(applied)
+        let stored = try await store.entry(id: "e1")
         #expect(stored?.categoryIDs == ["cat-1", "cat-3"])
     }
 
-    @Test("clearing all assignments leaves the activity valid")
-    func clearingAllKeepsActivity() async throws {
+    @Test("clearing all assignments leaves the entry valid")
+    func clearingAllKeepsEntry() async throws {
         let store = try makeStore()
         try await store.createCategory(makeCategory(id: "cat-1", name: "Work"))
-        let created = try await store.createOrResolveActivity(named: "Gym", categoryIDs: ["cat-1"])
-        guard case let .created(activity) = created else {
-            Issue.record("expected created")
-            return
-        }
+        _ = try await store.createEntry(TimeEntry(
+            id: "e1", activityText: "Gym", startedAt: Date(), categoryIDs: ["cat-1"]
+        ))
 
-        let outcome = try await store.refineActivity(
-            id: activity.id,
-            draft: ActivityDraft(name: "Gym", categoryIDs: []),
-            now: Date(timeIntervalSinceReferenceDate: 5_000)
-        )
-        guard case let .updated(updated) = outcome else {
-            Issue.record("expected updated, got \(outcome)")
-            return
-        }
-        #expect(updated.categoryIDs.isEmpty)
-        let stored = try await store.activity(id: activity.id)
+        var updated = try #require(try await store.entry(id: "e1"))
+        updated.categoryIDs = []
+        updated.updatedAt = Date().addingTimeInterval(60)
+        let applied = try await store.updateEntry(updated)
+        #expect(applied)
+        let stored = try await store.entry(id: "e1")
         #expect(stored?.categoryIDs.isEmpty == true)
         #expect(stored != nil)
     }
 
-    @Test("an invalid category id rolls back fields, joins, and outbox together")
-    func invalidAssociationRollsBackEverything() async throws {
-        let store = try makeStore()
-        try await store.createCategory(makeCategory(id: "cat-1", name: "Work"))
-        let created = try await store.createOrResolveActivity(named: "Gym", categoryIDs: ["cat-1"])
-        guard case let .created(activity) = created else {
-            Issue.record("expected created")
-            return
-        }
-        try? await Task.sleep(nanoseconds: 20_000_000)
-        let rowsBefore = try await store.outboxRows().count
-
-        let outcome = try await store.refineActivity(
-            id: activity.id,
-            draft: ActivityDraft(
-                name: "Renamed Gym",
-                notes: "attempted",
-                categoryIDs: ["cat-1", "nonexistent-category"]
-            ),
-            now: Date(timeIntervalSinceReferenceDate: 5_000)
-        )
-
-        guard case .invalidAssociation = outcome else {
-            Issue.record("expected invalidAssociation, got \(outcome)")
-            return
-        }
-        // The activity fields were rolled back.
-        let stored = try await store.activity(id: activity.id)
-        #expect(stored?.name == "Gym")
-        #expect(stored?.notes == nil)
-        // The joins were rolled back (the original association remains).
-        #expect(stored?.categoryIDs == ["cat-1"])
-        // No update outbox row was written.
-        let rows = try await store.outboxRows()
-        #expect(rows.count == rowsBefore)
-        #expect(rows.last?.op != "update")
-    }
-
-    @Test("the Activity outbox payload carries the complete ordered category set")
+    @Test("the entry outbox payload carries the complete ordered category set")
     func outboxPayloadCarriesOrderedCategories() async throws {
         let store = try makeStore()
         try await store.createCategory(makeCategory(id: "cat-2", name: "Health"))
         try await store.createCategory(makeCategory(id: "cat-1", name: "Work"))
-        let created = try await store.createOrResolveActivity(
-            named: "Gym", categoryIDs: ["cat-2", "cat-1"]
-        )
-        guard case let .created(activity) = created else {
-            Issue.record("expected created")
-            return
-        }
+        _ = try await store.createEntry(TimeEntry(
+            id: "e1", activityText: "Gym", startedAt: Date(),
+            categoryIDs: ["cat-2", "cat-1"]
+        ))
 
         let rows = try await store.outboxRows()
-        let createRow = try #require(rows.first { $0.resource == "activity" && $0.op == "create" })
+        let createRow = try #require(rows.first { $0.resource == "entry" && $0.op == "create" })
         let payload = try #require(createRow.payload)
-        let decoded = try JSONDecoder().decode(Activity.self, from: Data(payload.utf8))
+        let decoded = try JSONDecoder().decode(TimeEntry.self, from: Data(payload.utf8))
         #expect(decoded.categoryIDs == ["cat-2", "cat-1"])
-
-        _ = try await store.refineActivity(
-            id: activity.id,
-            draft: ActivityDraft(name: "Gym", categoryIDs: ["cat-1", "cat-2"]),
-            now: Date(timeIntervalSinceReferenceDate: 5_000)
-        )
-        let rowsAfter = try await store.outboxRows()
-        let updateRow = try #require(rowsAfter.last { $0.resource == "activity" && $0.op == "update" })
-        let updatePayload = try #require(updateRow.payload)
-        let decodedUpdate = try JSONDecoder().decode(Activity.self, from: Data(updatePayload.utf8))
-        #expect(decodedUpdate.categoryIDs == ["cat-1", "cat-2"])
     }
 }
 
@@ -1930,29 +1123,30 @@ struct UndoBufferStoreTests {
         try LocalStore(url: temporaryStoreURL())
     }
 
-    /// A snapshot capturing an activity and one of its entries.
+    /// A snapshot capturing a category and one of its entries.
     private func makeSnapshot() throws -> DeletionSnapshot {
-        let activity = Activity(
-            id: "act-1",
-            name: "Coding",
+        let category = Category(
+            id: "cat-1",
+            name: "Work",
+            icon: "briefcase",
             createdAt: Date(timeIntervalSinceReferenceDate: 1_000),
             updatedAt: Date(timeIntervalSinceReferenceDate: 2_000)
         )
         let entry = TimeEntry(
             id: "entry-1",
-            activityID: "act-1",
-            activityName: "Coding",
+            activityText: "Coding",
             startedAt: Date(timeIntervalSinceReferenceDate: 2_500),
             endedAt: Date(timeIntervalSinceReferenceDate: 3_100),
             durationSeconds: 600,
+            categoryIDs: ["cat-1"],
             createdAt: Date(timeIntervalSinceReferenceDate: 2_000),
             updatedAt: Date(timeIntervalSinceReferenceDate: 3_000)
         )
         return DeletionSnapshot(records: [
             DeletionSnapshot.Record(
-                resource: "activity",
-                recordID: activity.id,
-                data: try JSONEncoder().encode(activity)
+                resource: "category",
+                recordID: category.id,
+                data: try JSONEncoder().encode(category)
             ),
             DeletionSnapshot.Record(
                 resource: "entry",
@@ -1963,78 +1157,6 @@ struct UndoBufferStoreTests {
     }
 
     // MARK: - Tests
-
-    @Test("enter then undo restores records, removes the buffer row, and creates no outbox row")
-    func undoRestoresRecordsWithoutOutbox() async throws {
-        let store = try makeStore()
-        let snapshot = try makeSnapshot()
-        let payload = try JSONEncoder().encode(snapshot)
-        let undo = UndoBufferStore(store: store)
-
-        try await undo.enter(payload: payload, deletedAt: Date(timeIntervalSinceReferenceDate: 1_000))
-
-        let bufferBeforeUndo = try await undo.mostRecent()
-        #expect(bufferBeforeUndo != nil)
-        let outboxBeforeUndo = try await store.outboxRows()
-        #expect(outboxBeforeUndo.isEmpty)
-
-        let bufferEntry = try #require(bufferBeforeUndo)
-        try await undo.undo(id: bufferEntry.id)
-
-        let restoredActivity = try await store.activity(id: "act-1")
-        #expect(restoredActivity?.name == "Coding")
-        let restoredEntry = try await store.entry(id: "entry-1")
-        #expect(restoredEntry?.activityID == "act-1")
-        #expect(restoredEntry?.durationSeconds == 600)
-
-        let bufferAfterUndo = try await store.undoBufferMostRecent()
-        #expect(bufferAfterUndo == nil)
-        let outboxAfterUndo = try await store.outboxRows()
-        #expect(outboxAfterUndo.isEmpty)
-    }
-
-    @Test("commitAll commits buffered delete outbox rows (cold launch)")
-    func commitAllCommitsBufferedDeletes() async throws {
-        let store = try makeStore()
-        let snapshot = try makeSnapshot()
-        let payload = try JSONEncoder().encode(snapshot)
-        try await store.undoBufferEnter(
-            payload: payload,
-            deletedAt: Date().addingTimeInterval(-60)
-        )
-
-        let undo = UndoBufferStore(store: store)
-        try await undo.commitAll()
-
-        let buffer = try await store.undoBufferMostRecent()
-        #expect(buffer == nil)
-
-        let rows = try await store.outboxRows()
-        #expect(rows.count == 2)
-        #expect(rows.allSatisfy { $0.op == "delete" && $0.payload == nil })
-        #expect(rows.map(\.resource).sorted() == ["activity", "entry"])
-        #expect(rows.map(\.recordID).sorted() == ["act-1", "entry-1"])
-    }
-
-    @Test("commitAll commits even freshly buffered rows (no window)")
-    func commitAllCommitsFreshRowsToo() async throws {
-        let store = try makeStore()
-        let snapshot = try makeSnapshot()
-        let payload = try JSONEncoder().encode(snapshot)
-        try await store.undoBufferEnter(
-            payload: payload,
-            deletedAt: Date()
-        )
-
-        let undo = UndoBufferStore(store: store)
-        try await undo.commitAll()
-
-        let buffer = try await store.undoBufferMostRecent()
-        #expect(buffer == nil)
-        let outbox = try await store.outboxRows()
-        #expect(outbox.count == 2)
-        #expect(outbox.allSatisfy { $0.op == "delete" })
-    }
 
     @Test("mostRecent returns the newest buffer row")
     func mostRecentReturnsNewest() async throws {
@@ -2053,7 +1175,6 @@ struct UndoBufferStoreTests {
         let payloadString = entry.map { String(data: $0.payload, encoding: .utf8) }
         #expect(payloadString == "newer")
     }
-
 }
 
 @Suite("LocalStore Category Deletion & Undo (category-management D7)")
@@ -2069,17 +1190,13 @@ struct LocalStoreCategoryUndoTests {
         try LocalStore(url: temporaryStoreURL())
     }
 
-    @Test("undoable deletion captures the category and its ordered associations and writes no outbox row")
+    @Test("undoable deletion captures the category and its ordered entry associations and writes no outbox row")
     func deleteCapturesAssociationsWithoutOutbox() async throws {
         let store = try makeStore()
-        try await store.createCategory(TimeOfLife.Category(id: "cat-1", name: "Work", icon: "briefcase"))
-        let created = try await store.createOrResolveActivity(
-            named: "Gym", categoryIDs: ["cat-1"]
-        )
-        guard case let .created(activity) = created else {
-            Issue.record("expected created")
-            return
-        }
+        try await store.createCategory(Category(id: "cat-1", name: "Work", icon: "briefcase"))
+        _ = try await store.createEntry(TimeEntry(
+            id: "e1", activityText: "Gym", startedAt: Date(), categoryIDs: ["cat-1"]
+        ))
         try? await Task.sleep(nanoseconds: 20_000_000)
 
         let outcome = try await store.deleteCategoryUndoable(
@@ -2092,12 +1209,13 @@ struct LocalStoreCategoryUndoTests {
             return
         }
         #expect(snapshot.category.id == "cat-1")
-        #expect(snapshot.activityIDs == [activity.id])
+        #expect(snapshot.entryIDs == ["e1"])
 
         #expect(try await store.category(id: "cat-1") == nil)
-        // The activity itself survives.
-        let stored = try await store.activity(id: activity.id)
+        // The entry itself survives, untagged.
+        let stored = try await store.entry(id: "e1")
         #expect(stored != nil)
+        #expect(stored?.activityText == "Gym")
         #expect(stored?.categoryIDs.isEmpty == true)
         // No outbox row was created while the deletion is in the buffer.
         let rows = try await store.outboxRows()
@@ -2106,17 +1224,13 @@ struct LocalStoreCategoryUndoTests {
         #expect(try await store.undoBufferMostRecent() != nil)
     }
 
-    @Test("undo restores the same category identity and assignments without any sync")
+    @Test("undo restores the same category identity and entry associations without any sync")
     func undoRestoresIdentityAndAssociations() async throws {
         let store = try makeStore()
-        try await store.createCategory(TimeOfLife.Category(id: "cat-1", name: "Work", icon: "briefcase"))
-        let created = try await store.createOrResolveActivity(
-            named: "Gym", categoryIDs: ["cat-1"]
-        )
-        guard case let .created(activity) = created else {
-            Issue.record("expected created")
-            return
-        }
+        try await store.createCategory(Category(id: "cat-1", name: "Work", icon: "briefcase"))
+        _ = try await store.createEntry(TimeEntry(
+            id: "e1", activityText: "Gym", startedAt: Date(), categoryIDs: ["cat-1"]
+        ))
         try? await Task.sleep(nanoseconds: 20_000_000)
         _ = try await store.deleteCategoryUndoable(id: "cat-1", deletedAt: Date())
 
@@ -2129,8 +1243,8 @@ struct LocalStoreCategoryUndoTests {
         let stored = try await store.category(id: "cat-1")
         #expect(stored?.name == "Work")
         // The ordered association was restored.
-        let activityAfterUndo = try await store.activity(id: activity.id)
-        #expect(activityAfterUndo?.categoryIDs == ["cat-1"])
+        let entryAfterUndo = try await store.entry(id: "e1")
+        #expect(entryAfterUndo?.categoryIDs == ["cat-1"])
         // Buffer row is gone; no outbox delete was ever created.
         #expect(try await store.undoBufferMostRecent() == nil)
         let rows = try await store.outboxRows()
@@ -2140,7 +1254,7 @@ struct LocalStoreCategoryUndoTests {
     @Test("commitAll commits exactly one category delete outbox row")
     func commitAllCommitsOneCategoryDelete() async throws {
         let store = try makeStore()
-        try await store.createCategory(TimeOfLife.Category(id: "cat-1", name: "Work", icon: "briefcase"))
+        try await store.createCategory(Category(id: "cat-1", name: "Work", icon: "briefcase"))
         _ = try await store.deleteCategoryUndoable(
             id: "cat-1",
             deletedAt: Date().addingTimeInterval(-60)
@@ -2160,7 +1274,7 @@ struct LocalStoreCategoryUndoTests {
     @Test("no outbox row exists while the deletion is buffered")
     func noOutboxWhileBuffered() async throws {
         let store = try makeStore()
-        try await store.createCategory(TimeOfLife.Category(id: "cat-1", name: "Work", icon: "briefcase"))
+        try await store.createCategory(Category(id: "cat-1", name: "Work", icon: "briefcase"))
         _ = try await store.deleteCategoryUndoable(id: "cat-1", deletedAt: Date())
 
         let rows = try await store.outboxRows()
@@ -2171,8 +1285,8 @@ struct LocalStoreCategoryUndoTests {
     @Test("a newer deletion supersedes for undo; both stay buffered until restart")
     func supersessionKeepsBothBufferedUntilRestart() async throws {
         let store = try makeStore()
-        try await store.createCategory(TimeOfLife.Category(id: "cat-1", name: "Work", icon: "briefcase"))
-        try await store.createCategory(TimeOfLife.Category(id: "cat-2", name: "Health", icon: "heart"))
+        try await store.createCategory(Category(id: "cat-1", name: "Work", icon: "briefcase"))
+        try await store.createCategory(Category(id: "cat-2", name: "Health", icon: "heart"))
 
         // First deletion, older timestamp.
         _ = try await store.deleteCategoryUndoable(
@@ -2200,7 +1314,7 @@ struct LocalStoreCategoryUndoTests {
         let url = temporaryStoreURL()
         let deletedAt = Date()
         let store1 = try LocalStore(url: url)
-        try await store1.createCategory(TimeOfLife.Category(id: "cat-1", name: "Work", icon: "briefcase"))
+        try await store1.createCategory(Category(id: "cat-1", name: "Work", icon: "briefcase"))
         _ = try await store1.deleteCategoryUndoable(id: "cat-1", deletedAt: deletedAt)
 
         // Simulate a restart at the same URL: the launch reconciliation
@@ -2223,40 +1337,35 @@ struct LocalStoreCategoryUndoTests {
         #expect(try await store.undoBufferMostRecent() == nil)
     }
 
-    @Test("deletion leaves entries and timer state untouched")
+    @Test("deletion leaves entries, their text/notes/timings, and the timer draft untouched")
     func deletionLeavesEntriesAndTimerUntouched() async throws {
         let store = try makeStore()
-        try await store.createCategory(TimeOfLife.Category(id: "cat-1", name: "Work", icon: "briefcase"))
-        let created = try await store.createOrResolveActivity(named: "Gym", categoryIDs: ["cat-1"])
-        guard case let .created(activity) = created else {
-            Issue.record("expected created")
-            return
-        }
-        try await store.createEntry(TimeEntry(
-            id: "entry-1", activityID: activity.id, activityName: "Gym",
+        try await store.createCategory(Category(id: "cat-1", name: "Work", icon: "briefcase"))
+        _ = try await store.createEntry(TimeEntry(
+            id: "e1", activityText: "Gym",
             startedAt: Date(timeIntervalSinceReferenceDate: 1_000),
-            endedAt: Date(timeIntervalSinceReferenceDate: 1_600), durationSeconds: 600
+            endedAt: Date(timeIntervalSinceReferenceDate: 1_600), durationSeconds: 600,
+            categoryIDs: ["cat-1"], notes: "kept"
         ))
-        try await store.startTimer(activityID: activity.id, activityName: "Gym", startedAt: Date())
+        try await store.saveTimerDraft(activityText: "Gym", categoryIDs: ["cat-1"], startedAt: Date())
 
         _ = try await store.deleteCategoryUndoable(id: "cat-1")
 
-        #expect(try await store.entry(id: "entry-1") != nil)
-        #expect(try await store.timerState() != nil)
-        let stored = try await store.activity(id: activity.id)
-        #expect(stored != nil)
+        let entry = try await store.entry(id: "e1")
+        #expect(entry?.activityText == "Gym")
+        #expect(entry?.notes == "kept")
+        #expect(entry?.durationSeconds == 600)
+        #expect(try await store.timerDraft()?.activityText == "Gym")
     }
 
-    @Test("activity and entry decoders refuse category-owned rows, leaving the buffer intact (D10)")
+    @Test("entry decoder refuses a category-owned row, leaving the buffer intact (D10)")
     func foreignDecodersRefuseCategoryRow() async throws {
         let store = try makeStore()
-        try await store.createCategory(TimeOfLife.Category(id: "cat-1", name: "Work", icon: "briefcase"))
+        try await store.createCategory(Category(id: "cat-1", name: "Work", icon: "briefcase"))
         _ = try await store.deleteCategoryUndoable(id: "cat-1", deletedAt: Date())
 
         let buffer = try #require(try await store.undoBufferMostRecent())
-        #expect(try await store.activityDeletionSnapshot(bufferID: buffer.id) == nil)
         #expect(try await store.entryDeletionSnapshot(bufferID: buffer.id) == nil)
-        #expect(try await store.undoActivityDeletion(bufferID: buffer.id) == nil)
         #expect(try await store.undoEntryDeletion(bufferID: buffer.id) == nil)
         // The category row is untouched and still restorable by its owner.
         #expect(try await store.undoBufferMostRecent() != nil)
@@ -2264,7 +1373,7 @@ struct LocalStoreCategoryUndoTests {
     }
 }
 
-@Suite("LocalStore Entry Deletion & Undo (edit-entry-from-activity-detail)")
+@Suite("LocalStore Entry Deletion & Undo (entry-editor)")
 struct LocalStoreEntryUndoTests {
 
     private func temporaryStoreURL() -> URL {
@@ -2277,20 +1386,25 @@ struct LocalStoreEntryUndoTests {
         try LocalStore(url: temporaryStoreURL())
     }
 
-    private func makeEntry(id: String = "entry-1", source: String = "manual") -> TimeEntry {
+    private func makeEntry(
+        id: String = "entry-1",
+        source: String = "manual",
+        categoryIDs: [String] = [],
+        notes: String = ""
+    ) -> TimeEntry {
         TimeEntry(
-            id: id, activityID: "a1", activityName: "Running",
+            id: id, activityText: "Running",
             startedAt: Date(timeIntervalSinceReferenceDate: 1_000),
             endedAt: Date(timeIntervalSinceReferenceDate: 1_600), durationSeconds: 600,
-            source: source
+            source: source, categoryIDs: categoryIDs, notes: notes
         )
     }
 
     @Test("undoable entry deletion removes the entry and writes no outbox row")
     func deleteRemovesEntryWithoutOutbox() async throws {
         let store = try makeStore()
-        try await store.createActivity(Activity(id: "a1", name: "Running"))
-        try await store.createEntry(makeEntry())
+        try await store.createCategory(Category(id: "cat-1", name: "Work", icon: "briefcase"))
+        _ = try await store.createEntry(makeEntry(categoryIDs: ["cat-1"], notes: "n"))
 
         let outcome = try await store.deleteEntryUndoable(
             id: "entry-1",
@@ -2302,11 +1416,9 @@ struct LocalStoreEntryUndoTests {
             return
         }
         #expect(snapshot.id == "entry-1")
-        #expect(snapshot.activityID == "a1")
+        #expect(snapshot.activityText == "Running")
         #expect(snapshot.durationSeconds == 600)
         #expect(try await store.entry(id: "entry-1") == nil)
-        // The activity itself survives.
-        #expect(try await store.activity(id: "a1") != nil)
         // No outbox row was created while the deletion is in the buffer.
         let rows = try await store.outboxRows()
         #expect(rows.allSatisfy { $0.op != "delete" })
@@ -2315,22 +1427,24 @@ struct LocalStoreEntryUndoTests {
         #expect(try await store.entryDeletionSnapshot(bufferID: buffer.id)?.id == "entry-1")
     }
 
-    @Test("undo restores the same entry identity and values without any sync")
+    @Test("undo restores the same entry identity, categories, and values without any sync")
     func undoRestoresEntryWithoutSync() async throws {
         let store = try makeStore()
-        try await store.createActivity(Activity(id: "a1", name: "Running"))
-        try await store.createEntry(makeEntry(source: "garmin"))
+        try await store.createCategory(Category(id: "cat-1", name: "Work", icon: "briefcase"))
+        _ = try await store.createEntry(makeEntry(source: "garmin", categoryIDs: ["cat-1"], notes: "kept"))
         _ = try await store.deleteEntryUndoable(id: "entry-1", deletedAt: Date())
 
         let buffer = try #require(try await store.undoBufferMostRecent())
         let restored = try await store.undoEntryDeletion(bufferID: buffer.id)
 
         #expect(restored?.id == "entry-1")
-        #expect(restored?.activityID == "a1")
+        #expect(restored?.activityText == "Running")
         #expect(restored?.durationSeconds == 600)
         #expect(restored?.source == "garmin")
+        #expect(restored?.categoryIDs == ["cat-1"])
+        #expect(restored?.notes == "kept")
         let stored = try await store.entry(id: "entry-1")
-        #expect(stored?.activityName == "Running")
+        #expect(stored?.activityText == "Running")
         // Buffer row is gone; no outbox delete was ever created.
         #expect(try await store.undoBufferMostRecent() == nil)
         let rows = try await store.outboxRows()
@@ -2340,8 +1454,7 @@ struct LocalStoreEntryUndoTests {
     @Test("commitAll commits exactly one entry delete outbox row")
     func commitAllCommitsOneEntryDelete() async throws {
         let store = try makeStore()
-        try await store.createActivity(Activity(id: "a1", name: "Running"))
-        try await store.createEntry(makeEntry())
+        _ = try await store.createEntry(makeEntry())
         _ = try await store.deleteEntryUndoable(
             id: "entry-1",
             deletedAt: Date().addingTimeInterval(-60)
@@ -2369,9 +1482,8 @@ struct LocalStoreEntryUndoTests {
     @Test("a newer entry deletion supersedes an older one for undo")
     func supersessionKeepsNewestUndoable() async throws {
         let store = try makeStore()
-        try await store.createActivity(Activity(id: "a1", name: "Running"))
-        try await store.createEntry(makeEntry(id: "entry-1"))
-        try await store.createEntry(makeEntry(id: "entry-2"))
+        _ = try await store.createEntry(makeEntry(id: "entry-1"))
+        _ = try await store.createEntry(makeEntry(id: "entry-2"))
 
         _ = try await store.deleteEntryUndoable(
             id: "entry-1",
@@ -2392,205 +1504,17 @@ struct LocalStoreEntryUndoTests {
         #expect(try await store.entry(id: "entry-2") == nil)
     }
 
-    @Test("activity and category decoders refuse entry-owned rows, leaving the buffer intact (D10)")
+    @Test("category decoder refuses an entry-owned row, leaving the buffer intact (D10)")
     func foreignDecodersRefuseEntryRow() async throws {
         let store = try makeStore()
-        try await store.createActivity(Activity(id: "a1", name: "Running"))
-        try await store.createEntry(makeEntry())
+        _ = try await store.createEntry(makeEntry())
         _ = try await store.deleteEntryUndoable(id: "entry-1", deletedAt: Date())
 
         let buffer = try #require(try await store.undoBufferMostRecent())
-        #expect(try await store.activityDeletionSnapshot(bufferID: buffer.id) == nil)
         #expect(try await store.categoryDeletionSnapshot(bufferID: buffer.id) == nil)
-        #expect(try await store.undoActivityDeletion(bufferID: buffer.id) == nil)
         #expect(try await store.undoCategoryDeletion(bufferID: buffer.id) == nil)
         // The entry row is untouched and still restorable by its owner.
         #expect(try await store.undoBufferMostRecent() != nil)
         #expect(try await store.undoEntryDeletion(bufferID: buffer.id)?.id == "entry-1")
-    }
-}
-
-@Suite("LocalStore Activity Deletion & Undo (unify-catalog-deletion)")
-struct LocalStoreActivityUndoTests {
-
-    private func temporaryStoreURL() -> URL {
-        URL(fileURLWithPath: NSTemporaryDirectory())
-            .appendingPathComponent(UUID().uuidString)
-            .appendingPathComponent("timeoflife.sqlite")
-    }
-
-    private func makeStore() throws -> LocalStore {
-        try LocalStore(url: temporaryStoreURL())
-    }
-
-    private func makeEntry(id: String, activityID: String = "a1", activityName: String = "Running") -> TimeEntry {
-        TimeEntry(
-            id: id, activityID: activityID, activityName: activityName,
-            startedAt: Date(timeIntervalSinceReferenceDate: 1_000),
-            endedAt: Date(timeIntervalSinceReferenceDate: 1_600), durationSeconds: 600,
-            source: "manual"
-        )
-    }
-
-    private func makeActivityStore() async throws -> LocalStore {
-        let store = try makeStore()
-        try await store.createCategory(TimeOfLife.Category(id: "cat-1", name: "Work", icon: "briefcase"))
-        try await store.createActivity(Activity(id: "a1", name: "Running", categoryIDs: ["cat-1"]))
-        try await store.createEntry(makeEntry(id: "e1"))
-        try await store.createEntry(makeEntry(id: "e2"))
-        return store
-    }
-
-    @Test("undoable activity deletion removes the activity, joins, and entries, and writes no outbox row")
-    func deleteRemovesActivityJoinsAndEntriesWithoutOutbox() async throws {
-        let store = try await makeActivityStore()
-
-        let outcome = try await store.deleteActivityUndoable(
-            id: "a1",
-            deletedAt: Date(timeIntervalSinceReferenceDate: 3_000)
-        )
-
-        guard case let .deleted(snapshot) = outcome else {
-            Issue.record("expected deleted, got \(outcome)")
-            return
-        }
-        #expect(snapshot.activity.id == "a1")
-        #expect(snapshot.activity.name == "Running")
-        #expect(snapshot.activity.categoryIDs == ["cat-1"])
-        #expect(snapshot.entries.map(\.id).sorted() == ["e1", "e2"])
-        #expect(try await store.activity(id: "a1") == nil)
-        #expect(try await store.entry(id: "e1") == nil)
-        #expect(try await store.entry(id: "e2") == nil)
-        // The category itself survives.
-        #expect(try await store.category(id: "cat-1") != nil)
-        // No outbox row was created while the deletion is in the buffer.
-        let rows = try await store.outboxRows()
-        #expect(rows.allSatisfy { $0.op != "delete" })
-        // The buffer holds the snapshot, activity record first.
-        let buffer = try #require(try await store.undoBufferMostRecent())
-        let decoded = try #require(try await store.activityDeletionSnapshot(bufferID: buffer.id))
-        #expect(decoded.activity.id == "a1")
-        #expect(decoded.entries.map(\.id).sorted() == ["e1", "e2"])
-    }
-
-    @Test("undo restores the activity identity, assignments, and entries without any sync")
-    func undoRestoresActivityAndEntriesWithoutSync() async throws {
-        let store = try await makeActivityStore()
-        _ = try await store.deleteActivityUndoable(id: "a1", deletedAt: Date())
-
-        let buffer = try #require(try await store.undoBufferMostRecent())
-        let restored = try await store.undoActivityDeletion(bufferID: buffer.id)
-
-        let snapshot = try #require(restored)
-        #expect(snapshot.activity.id == "a1")
-        #expect(snapshot.entries.map(\.id).sorted() == ["e1", "e2"])
-        let stored = try #require(try await store.activity(id: "a1"))
-        #expect(stored.name == "Running")
-        #expect(stored.categoryIDs == ["cat-1"])
-        #expect(try await store.entry(id: "e1")?.durationSeconds == 600)
-        #expect(try await store.entry(id: "e2") != nil)
-        // Buffer row is gone; no outbox delete was ever created.
-        #expect(try await store.undoBufferMostRecent() == nil)
-        let rows = try await store.outboxRows()
-        #expect(rows.allSatisfy { $0.op != "delete" })
-    }
-
-    @Test("deleting the running activity is blocked and buffers nothing")
-    func deleteRunningActivityIsBlocked() async throws {
-        let store = try await makeActivityStore()
-        try await store.startTimer(activityID: "a1", activityName: "Running", startedAt: Date())
-
-        let outcome = try await store.deleteActivityUndoable(id: "a1")
-
-        #expect(outcome == .runBlocked)
-        #expect(try await store.activity(id: "a1") != nil)
-        #expect(try await store.entry(id: "e1") != nil)
-        #expect(try await store.entry(id: "e2") != nil)
-        #expect(try await store.undoBufferMostRecent() == nil)
-        let rows = try await store.outboxRows()
-        #expect(rows.allSatisfy { $0.op != "delete" })
-    }
-
-    @Test("deleting an unknown activity returns missing and buffers nothing")
-    func deleteMissingReturnsMissing() async throws {
-        let store = try makeStore()
-        let outcome = try await store.deleteActivityUndoable(id: "nonexistent")
-        #expect(outcome == .missing)
-        #expect(try await store.undoBufferMostRecent() == nil)
-    }
-
-    @Test("commitAll fans out one activity delete plus one per entry")
-    func commitAllFansOutActivityAndEntryDeletes() async throws {
-        let store = try await makeActivityStore()
-        _ = try await store.deleteActivityUndoable(
-            id: "a1",
-            deletedAt: Date().addingTimeInterval(-60)
-        )
-
-        let undo = UndoBufferStore(store: store)
-        try await undo.commitAll()
-
-        let rows = try await store.outboxRows()
-        let deletes = rows.filter { $0.op == "delete" }
-        #expect(deletes.count == 3)
-        #expect(deletes.first { $0.resource == "activity" }?.recordID == "a1")
-        #expect(deletes.filter { $0.resource == "entry" }.map(\.recordID).sorted() == ["e1", "e2"])
-        #expect(try await store.undoBufferMostRecent() == nil)
-    }
-
-    @Test("a newer activity deletion supersedes an older one for undo")
-    func supersessionKeepsNewestUndoable() async throws {
-        let store = try await makeActivityStore()
-        try await store.createActivity(Activity(id: "a2", name: "Reading"))
-
-        _ = try await store.deleteActivityUndoable(
-            id: "a1",
-            deletedAt: Date().addingTimeInterval(-40)
-        )
-        _ = try await store.deleteActivityUndoable(id: "a2", deletedAt: Date())
-
-        let undo = UndoBufferStore(store: store)
-        let mostRecent = try await undo.mostRecent()
-        let recent = try #require(mostRecent)
-        let decoded = try await store.activityDeletionSnapshot(bufferID: recent.id)
-        #expect(decoded?.activity.id == "a2")
-
-        // A restart commits every buffered deletion — nothing expires early.
-        try await undo.commitAll()
-        let rows = try await store.outboxRows()
-        let deletes = rows.filter { $0.op == "delete" }
-        #expect(deletes.count == 4)
-        #expect(deletes.map(\.recordID).sorted() == ["a1", "a2", "e1", "e2"])
-        #expect(try await store.activity(id: "a2") == nil)
-    }
-
-    @Test("foreign snapshots are not decoded as activity deletions")
-    func foreignSnapshotIsIgnored() async throws {
-        let store = try await makeActivityStore()
-        try await store.createCategory(TimeOfLife.Category(id: "cat-2", name: "Sport", icon: "figure.run"))
-        _ = try await store.deleteCategoryUndoable(id: "cat-2", deletedAt: Date())
-
-        let buffer = try #require(try await store.undoBufferMostRecent())
-        #expect(try await store.activityDeletionSnapshot(bufferID: buffer.id) == nil)
-        #expect(try await store.undoActivityDeletion(bufferID: buffer.id) == nil)
-        #expect(try await store.undoBufferMostRecent() != nil)
-    }
-
-    @Test("entry and category decoders refuse activity-owned rows, leaving the buffer intact (D10)")
-    func foreignDecodersRefuseActivityRow() async throws {
-        let store = try await makeActivityStore()
-        _ = try await store.deleteActivityUndoable(id: "a1", deletedAt: Date())
-
-        let buffer = try #require(try await store.undoBufferMostRecent())
-        #expect(try await store.entryDeletionSnapshot(bufferID: buffer.id) == nil)
-        #expect(try await store.categoryDeletionSnapshot(bufferID: buffer.id) == nil)
-        #expect(try await store.undoEntryDeletion(bufferID: buffer.id) == nil)
-        #expect(try await store.undoCategoryDeletion(bufferID: buffer.id) == nil)
-        // The activity row is untouched and still restorable by its owner.
-        #expect(try await store.undoBufferMostRecent() != nil)
-        #expect(try await store.activity(id: "a1") == nil)
-        let restored = try await store.undoActivityDeletion(bufferID: buffer.id)
-        #expect(restored?.activity.id == "a1")
-        #expect(restored?.entries.map(\.id).sorted() == ["e1", "e2"])
     }
 }

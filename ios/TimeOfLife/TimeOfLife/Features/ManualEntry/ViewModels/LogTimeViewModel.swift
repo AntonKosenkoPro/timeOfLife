@@ -13,37 +13,42 @@ enum EntryFormMode: Equatable, Sendable {
 }
 
 /// View model for the Log Time sheet (manual-entry spec) grown into the
-/// unified entry form (entry-editor spec): a validated
-/// activity + start/end draft that saves a committed manual entry in CREATE
+/// unified entry form (entry-editor spec): a validated name + categories +
+/// notes + start/end draft that saves a committed manual entry in CREATE
 /// mode, updates an existing `manual` entry in EDIT mode, or exposes an
 /// imported entry read-only in LOCKED mode.
 ///
 /// The draft is fully local: Start defaults to now floored to 5 minutes,
 /// End to Start + 1h. Moving Start at/past End auto-pushes End to preserve
 /// the last valid duration (Calendar behavior); moving End never moves
-/// Start. Add/Save is a validity gate (`isAddEnabled`): an activity must be
-/// chosen and End must be strictly after Start. Persistence delegates to
-/// `TimerService`'s store (`LocalStore.createEntry` + transactional outbox
-/// for CREATE, LWW `LocalStore.updateEntry` for EDIT);
-/// overlaps and future end-times are allowed, matching store semantics.
+/// Start. Add/Save is a validity gate (`isAddEnabled`): the trimmed name
+/// must be non-empty and End must be strictly after Start. There is no
+/// activity re-resolve — entries own their text (remove-activities-layer).
+/// Persistence delegates to `TimerService`'s store (`LocalStore.createEntry`
+/// + transactional outbox for CREATE, LWW `LocalStore.updateEntry` for
+/// EDIT); overlaps and future end-times are allowed, matching store
+/// semantics.
 @MainActor
-final class LogTimeViewModel: ObservableObject, ActivitySearchHosting {
+final class LogTimeViewModel: ObservableObject {
     /// Default duration for a fresh sheet and the fallback when the
     /// previous duration is unknown or invalid.
     static let defaultDuration: TimeInterval = 3_600
     /// Start-time flooring granularity, in minutes.
     static let startGranularityMinutes = 5
 
-    @Published private(set) var selectedActivity: Activity?
+    @Published var name: String
+    /// The ordered category selection (TagSelector parent owns order).
+    @Published private(set) var categoryIDs: [String]
+    /// The full category catalog for the TagSelector options, loaded once
+    /// on open.
+    @Published private(set) var availableCategories: [Category] = []
+    @Published var notes: String
     @Published private(set) var startsAt: Date
     @Published private(set) var endsAt: Date
     @Published var errorMessage: String?
     /// The entry being corrected in EDIT mode or shown in LOCKED mode
     /// (nil in CREATE mode).
     @Published private(set) var editingEntry: TimeEntry?
-    /// Picker presentation. Set by `activateSearch`, cleared by selection,
-    /// creation, restoration, or `cancelSearch`.
-    @Published var isPickerActive = false
 
     /// The last strictly-positive duration, preserved across edits so a
     /// Start pushed past End keeps a meaningful length.
@@ -68,41 +73,61 @@ final class LogTimeViewModel: ObservableObject, ActivitySearchHosting {
 
     init(
         service: TimerService,
-        initialActivity: Activity? = nil,
+        initialText: String = "",
+        initialCategoryIDs: [String] = [],
         editing entry: TimeEntry? = nil,
         now: Date = Date()
     ) {
         self.service = service
         self.editingEntry = entry
         if let entry {
-            // EDIT/LOCKED prefill: the entry's own activity (by id + name;
-            // save re-resolves the full record) and interval. The form never
-            // receives an in-progress entry (no entry point lists one); a
-            // nil end falls back to the default duration defensively.
-            self.selectedActivity = Activity(id: entry.activityID, name: entry.activityName)
+            // EDIT/LOCKED prefill straight from the entry's own fields —
+            // there is no activity to re-resolve. The form never receives an
+            // in-progress entry (no entry point lists one); a nil end falls
+            // back to the default duration defensively.
+            self.name = entry.activityText
+            self.categoryIDs = entry.categoryIDs
+            self.notes = entry.notes
             self.startsAt = entry.startedAt
             self.endsAt = entry.endedAt ?? entry.startedAt.addingTimeInterval(Self.defaultDuration)
             let duration = endsAt.timeIntervalSince(startsAt)
             self.lastValidDuration = duration > 0 ? duration : Self.defaultDuration
         } else {
             let start = Self.floored(now)
+            self.name = initialText
+            self.categoryIDs = initialCategoryIDs
+            self.notes = ""
             self.startsAt = start
             self.endsAt = start.addingTimeInterval(Self.defaultDuration)
-            self.selectedActivity = initialActivity
         }
     }
 
-    /// True when an activity is chosen and End is strictly after Start.
-    var isAddEnabled: Bool {
-        selectedActivity != nil && endsAt > startsAt
+    /// The trimmed name.
+    var trimmedName: String {
+        name.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    /// Chooses the activity (picker confirm or quick-create result) and
-    /// closes the picker.
-    func select(_ activity: Activity) {
-        selectedActivity = activity
-        isPickerActive = false
-        errorMessage = nil
+    /// True when the trimmed name is non-empty and End is strictly after
+    /// Start.
+    var isAddEnabled: Bool {
+        !trimmedName.isEmpty && endsAt > startsAt
+    }
+
+    /// Loads the category catalog for the TagSelector (idempotent). Called
+    /// on open by the view.
+    func loadCategoriesIfNeeded(store: LocalStore) async {
+        guard availableCategories.isEmpty else { return }
+        availableCategories = (try? await store.categories()) ?? []
+    }
+
+    /// Toggles a category on the ordered selection (TagSelector parent owns
+    /// order: toggling appends or removes, keeping the selection order).
+    func toggleCategory(_ categoryID: String) {
+        if let index = categoryIDs.firstIndex(of: categoryID) {
+            categoryIDs.remove(at: index)
+        } else {
+            categoryIDs.append(categoryID)
+        }
     }
 
     /// Moves Start, auto-pushing End to preserve the last valid duration
@@ -126,27 +151,23 @@ final class LogTimeViewModel: ObservableObject, ActivitySearchHosting {
     /// Saves the draft: a committed manual entry in CREATE mode, a
     /// last-write-wins update in EDIT mode. Returns false (with
     /// `errorMessage` set and the draft intact) when the form is invalid,
-    /// the activity no longer exists, persistence fails, or (EDIT) the
-    /// record changed underneath (stale write). LOCKED mode has no confirm
-    /// path and always returns false.
+    /// persistence fails, or (EDIT) the record changed underneath (stale
+    /// write). LOCKED mode has no confirm path and always returns false.
     func save() async -> Bool {
         guard mode != .locked else { return false }
-        guard let selected = selectedActivity, endsAt > startsAt else { return false }
+        guard !trimmedName.isEmpty, endsAt > startsAt else { return false }
         do {
-            guard let activity = try await service.store.activity(id: selected.id) else {
-                errorMessage = L10n.logTimeActivityMissing.text
-                return false
-            }
             if let editing = editingEntry, mode == .edit {
                 let updated = TimeEntry(
                     id: editing.id,
-                    activityID: activity.id,
-                    activityName: activity.name,
+                    activityText: trimmedName,
                     startedAt: startsAt,
                     endedAt: endsAt,
                     durationSeconds: max(0, Int(endsAt.timeIntervalSince(startsAt))),
                     source: editing.source,
                     sourceRef: editing.sourceRef,
+                    categoryIDs: categoryIDs,
+                    notes: notes,
                     createdAt: editing.createdAt,
                     updatedAt: Date()
                 )
@@ -160,12 +181,13 @@ final class LogTimeViewModel: ObservableObject, ActivitySearchHosting {
             }
             let entry = TimeEntry(
                 id: await service.store.newRecordID(),
-                activityID: activity.id,
-                activityName: activity.name,
+                activityText: trimmedName,
                 startedAt: startsAt,
                 endedAt: endsAt,
                 durationSeconds: max(0, Int(endsAt.timeIntervalSince(startsAt))),
-                source: "manual"
+                source: "manual",
+                categoryIDs: categoryIDs,
+                notes: notes
             )
             try await service.store.createEntry(entry)
             return true
@@ -199,127 +221,10 @@ final class LogTimeViewModel: ObservableObject, ActivitySearchHosting {
         }
     }
 
-    // MARK: - Activity picking (ActivitySearchHosting)
-
-    /// The recency-ordered catalog for the picker, loaded on open.
-    @Published private(set) var activities: [Activity] = []
-    /// The draft search state; never mutates the chosen activity until a
-    /// result is confirmed or quick-created.
-    @Published private(set) var search = ActivitySearchState()
-    @Published private(set) var pendingDeletion: Activity?
-    private(set) var pendingRestore: Activity?
-
-    var selectedActivityID: String? { selectedActivity?.id }
-
-    var searchResults: ActivitySearchResults {
-        ActivitySearchResults.derive(
-            query: search.query,
-            activities: activities,
-            pendingDeletion: pendingDeletion
-        )
-    }
-
-    var searchQueryBinding: Binding<String> {
-        Binding(
-            get: { self.search.query },
-            set: { self.setSearchQuery($0) }
-        )
-    }
-
-    func setSearchQuery(_ query: String) {
-        search.query = query
-        refreshPendingDeletion()
-    }
-
-    /// Opens the picker: pre-fills the chosen activity name (or empty),
-    /// refreshes the catalog, and presents.
-    func activateSearch() {
-        search = ActivitySearchState(query: selectedActivity?.name ?? "")
-        isPickerActive = true
-        refreshPendingDeletion()
-        Task {
-            if let loaded = try? await service.store.activities() {
-                activities = loaded
-            }
-        }
-    }
-
-    /// Ends picking without confirmation: the previously chosen activity
-    /// (or none) is unchanged.
-    func cancelSearch() {
-        isPickerActive = false
-        search = ActivitySearchState()
-    }
-
-    func dismissPendingRestore() {
-        pendingRestore = nil
-    }
-
-    /// Confirms an existing picker result: chooses it and closes.
-    func confirmSearchResult(_ activity: Activity) {
-        select(activity)
-    }
-
-    /// Quick-creates the unmatched valid query (categoryless) and chooses
-    /// it. On failure the picker stays open with the query preserved and a
-    /// localized non-field error. A matching restorable deletion surfaces
-    /// the explicit restore prompt instead of creating a duplicate.
-    func quickCreateFromSearch() async {
-        let trimmed = search.trimmedQuery
-        guard !trimmed.isEmpty else { return }
-        do {
-            let outcome = try await service.prepareActivity(named: trimmed)
-            switch outcome {
-            case let .created(activity), let .existing(activity):
-                activities = try await service.store.activities()
-                select(activity)
-            case let .restorableDeletion(activity):
-                pendingRestore = activity
-            case .invalid:
-                search.errorMessage = L10n.timerEmptyActivityError.text
-            case .failure:
-                search.errorMessage = L10n.text(in: .default, code: "error.unknown")
-            }
-        } catch {
-            search.errorMessage = L10n.text(in: .default, code: "error.unknown")
-        }
-    }
-
-    /// Explicitly restores the pending-deletion activity and chooses it.
-    /// No outbox row is created (the deletion was never committed).
-    func restorePendingDeletion() async {
-        guard let pending = pendingRestore else { return }
-        do {
-            if let restored = try await service.store.restorePendingDeletionActivity(named: pending.name) {
-                activities = try await service.store.activities()
-                pendingRestore = nil
-                select(restored)
-            } else {
-                // The buffer row is gone (restored elsewhere or the app
-                // restarted and it committed): fall back
-                // to ordinary creation.
-                pendingRestore = nil
-                await quickCreateFromSearch()
-            }
-        } catch {
-            search.errorMessage = L10n.text(in: .default, code: "error.unknown")
-        }
-    }
-
-    private func refreshPendingDeletion() {
-        let trimmed = search.trimmedQuery
-        guard !trimmed.isEmpty else {
-            pendingDeletion = nil
-            return
-        }
-        Task {
-            pendingDeletion = try? await service.store.pendingDeletionActivity(named: trimmed)
-        }
-    }
-
     // MARK: - Helpers
 
-    private func refreshValidDuration() {        let duration = endsAt.timeIntervalSince(startsAt)
+    private func refreshValidDuration() {
+        let duration = endsAt.timeIntervalSince(startsAt)
         if duration > 0 {
             lastValidDuration = duration
         }

@@ -142,14 +142,9 @@ func New(deps Dependencies) *Server {
 			r.With(h.AuthMiddleware).Get("/me", h.Me)
 		})
 
-		// Activity catalog, categories, and entries. All protected.
+		// Categories, entries, and deletion tombstones. All protected.
 		r.Group(func(r chi.Router) {
 			r.Use(h.AuthMiddleware)
-			r.Get("/activities", h.ListActivities)
-			r.Post("/activities", h.CreateActivity)
-			r.Get("/activities/{id}", h.GetActivity)
-			r.Patch("/activities/{id}", h.UpdateActivity)
-			r.Delete("/activities/{id}", h.DeleteActivity)
 			r.Get("/categories", h.ListCategories)
 			r.Post("/categories", h.CreateCategory)
 			r.Get("/categories/{id}", h.GetCategory)
@@ -157,6 +152,7 @@ func New(deps Dependencies) *Server {
 			r.Delete("/categories/{id}", h.DeleteCategory)
 			r.Get("/entries", h.ListEntries)
 			r.Post("/entries", h.CreateEntry)
+			r.Get("/entries/recents", h.ListRecents)
 			r.Get("/entries/{id}", h.GetEntry)
 			r.Patch("/entries/{id}", h.UpdateEntry)
 			r.Delete("/entries/{id}", h.DeleteEntry)

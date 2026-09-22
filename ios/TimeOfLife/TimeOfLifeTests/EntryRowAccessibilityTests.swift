@@ -8,7 +8,7 @@ struct EntryRowAccessibilityTests {
     @Test("row folds category names and timing into a single label")
     func rowFoldsContentIntoLabel() {
         let label = EntryRow.accessibilityLabel(
-            activityName: "Deep work",
+            entryText: "Deep work",
             categoryNames: "Health, Morning",
             timeframeText: "14:00 – 15:20",
             durationText: "1h 20m",
@@ -23,7 +23,7 @@ struct EntryRowAccessibilityTests {
     @Test("row without categories omits the category part")
     func noCategoriesLabel() {
         let label = EntryRow.accessibilityLabel(
-            activityName: "Reading",
+            entryText: "Reading",
             categoryNames: "",
             timeframeText: "09:00 – 09:33",
             durationText: "33m",
@@ -37,7 +37,7 @@ struct EntryRowAccessibilityTests {
     @Test("in-progress rows append the in-progress indicator to the label")
     func inProgressLabel() {
         let label = EntryRow.accessibilityLabel(
-            activityName: "Running",
+            entryText: "Running",
             categoryNames: "",
             timeframeText: "09:00 – In progress",
             durationText: L10n.historyInProgress.text,
@@ -49,7 +49,7 @@ struct EntryRowAccessibilityTests {
     @Test("rows with provenance fold the via label into the a11y label")
     func viaTextLabel() {
         let label = EntryRow.accessibilityLabel(
-            activityName: "Running",
+            entryText: "Running",
             categoryNames: "Health",
             timeframeText: "14:00 – 15:20",
             durationText: "1h 20m",
@@ -79,17 +79,5 @@ struct EntryRowAccessibilityTests {
         #expect(EntryProvenance.name(for: "garmin") == L10n.provenanceNameGarmin.text)
         #expect(!EntryProvenance.name(for: "screentime").contains("via"))
         #expect(!EntryProvenance.name(for: "screentime").contains("через"))
-    }
-
-    @Test("detail entry row folds range, provenance, and duration into one label")
-    func detailEntryRowLabel() {
-        let label = ActivityEntryRow.accessibilityLabel(
-            timeRangeText: "2:34 PM – 5:46 PM",
-            provenanceName: L10n.provenanceNameGarmin.text,
-            durationText: "3h 11m 46s"
-        )
-        #expect(label.contains("2:34 PM – 5:46 PM"))
-        #expect(label.contains("3h 11m 46s"))
-        #expect(label.contains(L10n.provenanceNameGarmin.text))
     }
 }

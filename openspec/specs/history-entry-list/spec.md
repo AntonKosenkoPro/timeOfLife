@@ -6,6 +6,7 @@ Lets users review their committed time entries as a read-only, day-grouped list 
 
 ## Requirements
 
+
 ### Requirement: History shows committed time entries
 The History destination SHALL display committed `TimeEntry` records as a chronological list, newest first, grouped by the day each entry started on. The list SHALL NOT show running (uncommitted) timer sessions.
 
@@ -22,20 +23,19 @@ The History destination SHALL display committed `TimeEntry` records as a chronol
 - **THEN** the compact timer remains visible but the running session does not appear as a History entry until the timer is stopped and saved
 
 ### Requirement: Each History row shows entry identity and timing
-Each History row SHALL display the activity name (headline), the entry's start–end timeframe and natural-language duration (right-aligned), the activity's comma-separated category names (left-aligned caption), and the first category's SF Symbol icon (leading, spanning both text lines, top-aligned with the activity name's cap-height top, not the text frame top). Rows with no categories SHALL render a `questionmark` fallback icon.
+Each History row SHALL display the entry's own text (headline), the entry's start–end timeframe and natural-language duration (right-aligned), the entry's own comma-separated category names (left-aligned caption), and the first category's SF Symbol icon (leading, spanning both text lines, top-aligned with the name's cap-height top, not the text frame top). Rows with no categories SHALL render a `questionmark` fallback icon.
 
 #### Scenario: Row with categories
-- **WHEN** an entry's activity has one or more categories
-- **THEN** the row shows the first category's icon (leading), the activity name (headline), all category names comma-separated (caption, left-aligned), the start–end timeframe (caption, right-aligned), and the duration (headline, right-aligned, top line)
+- **WHEN** an entry has one or more categories
+- **THEN** the row shows the first category's icon (leading), the entry text (headline), all category names comma-separated (caption, left-aligned), the start–end timeframe (caption, right-aligned), and the duration (headline, right-aligned, top line)
 
 #### Scenario: Row with no categories
-- **WHEN** an entry's activity has no categories
-- **THEN** the row shows a `questionmark` fallback icon (leading), the activity name (headline), no category names, the start–end timeframe (caption, right-aligned), and the duration (headline, right-aligned, top line)
+- **WHEN** an entry has no categories
+- **THEN** the row shows a `questionmark` fallback icon (leading), the entry text (headline), no category names, the start–end timeframe (caption, right-aligned), and the duration (headline, right-aligned, top line)
 
 #### Scenario: Entry with no end time
 - **WHEN** an entry has a start time but no end time (duration not yet computed)
 - **THEN** the row shows the start time and an in-progress indicator in place of the end time and duration
-
 ### Requirement: Day groups use relative-then-absolute labels; total shown when elevated
 Day group headers SHALL use relative labels ("Today", "Yesterday") for the two most recent days and the regional-standard absolute date for older days. A header SHALL show only the day label while in its in-list scroll position. When the header is elevated (pinned at the top of the list), it SHALL also display the total tracked time for that day, right-aligned, formatted in natural language with a localized "tracked" suffix (e.g. "2h 35m tracked"). The day label SHALL be left-aligned to the `EntryRow` icon column's leading edge, and the total SHALL be right-aligned to the `EntryRow` duration/timeframe trailing edge.
 
@@ -60,27 +60,11 @@ Day group headers SHALL use relative labels ("Today", "Yesterday") for the two m
 - **THEN** the total counts only entries with a known `durationSeconds`; in-progress entries contribute zero to the total
 
 ### Requirement: History offers no edit, delete, swipe, or long-press actions
-History rows SHALL NOT offer edit, delete, swipe, or long-press actions. Tapping an entry row navigates to the activity detail sheet (see "Tapping a History entry row opens the activity detail sheet").
+History rows SHALL NOT offer edit, delete, swipe, or long-press actions. Tapping an entry row opens the unified entry form directly (see "Tapping a History entry row opens the entry form").
 
 #### Scenario: No row actions
 - **WHEN** the user swipes or long-presses a History entry row
 - **THEN** no action is offered and nothing happens
-
-### Requirement: Tapping a History entry row opens the activity detail sheet
-The History list SHALL respond to a tap on an entry row by presenting the activity detail sheet for the entry's activity. The sheet is modal (a sheet, not a navigation push). History SHALL NOT offer swipe actions, long-press actions, or any edit/delete of entries. Tapping an entry row inside the detail sheet SHALL open the unified entry form (see entry-editor capability) as a full-screen cover.
-
-#### Scenario: Tap opens the sheet
-- **WHEN** the user taps a History entry row
-- **THEN** the activity detail sheet for that entry's activity is presented
-
-#### Scenario: No other row actions
-- **WHEN** the user swipes or long-presses a History entry row
-- **THEN** no action is offered and nothing happens
-
-#### Scenario: Tap inside the detail sheet
-- **WHEN** the user taps an entry row inside the activity detail sheet
-- **THEN** the unified entry form opens for that entry — editable for `manual` entries, read-only (delete-only) for imported entries
-
 ### Requirement: History preserves compact timer access with a persistent nav bar
 The History destination SHALL keep the compact cross-tab running timer visible and stoppable, matching the app-shell "Running timer remains globally accessible" requirement. The History destination SHALL keep the navigation bar (inline "History" title and Profile button) permanently visible while History is on screen, regardless of list scroll position. The Profile button is reachable at all times on History.
 
@@ -97,7 +81,7 @@ The History destination SHALL offer a `[+]` action in the navigation bar that op
 
 #### Scenario: Open the Log Time sheet
 - **WHEN** the user activates the `[+]` action in the History navigation bar
-- **THEN** the Log Time sheet opens with default times and no pre-filled activity
+- **THEN** the Log Time sheet opens with default times and empty name, categories, and notes
 
 #### Scenario: Action stays reachable
 - **WHEN** the user scrolls the History list down and back up
@@ -106,7 +90,6 @@ The History destination SHALL offer a `[+]` action in the navigation bar that op
 #### Scenario: Saved entry appears
 - **WHEN** the user saves a manual entry from the sheet opened via `[+]`
 - **THEN** the sheet dismisses and the entry appears in its day group in the list
-
 ### Requirement: History reflects entry edits and deletes
 Edits saved in the entry form SHALL appear in the History list with updated values in the correct day group when the user returns to it. Entries deleted via the entry form SHALL disappear from the History list (removing the day group when it becomes empty, recomputing the day total) via the existing invalidate/reload chain.
 
@@ -117,3 +100,13 @@ Edits saved in the entry form SHALL appear in the History list with updated valu
 #### Scenario: Deleted entry disappears
 - **WHEN** the user confirms deletion of an entry and returns to History
 - **THEN** the entry is gone and its day group is removed when empty
+### Requirement: Tapping a History entry row opens the entry form
+The History list SHALL respond to a tap on an entry row by opening the unified entry form (see entry-editor capability) as a full-screen cover for that entry — editable for `manual` entries, read-only (delete-only) for imported entries. History SHALL NOT offer swipe actions, long-press actions, or any other edit/delete of entries.
+
+#### Scenario: Tap opens the form
+- **WHEN** the user taps a History entry row
+- **THEN** the unified entry form opens for that entry — editable for `manual` entries, read-only (delete-only) for imported entries
+
+#### Scenario: No other row actions
+- **WHEN** the user swipes or long-presses a History entry row
+- **THEN** no action is offered and nothing happens
