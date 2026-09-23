@@ -4,13 +4,14 @@ Every PR passes two review stages: **stage 1 — AI review** (automated, advisor
 
 ## Stage 1 — AI review (automated)
 
-**Workflow:** `.github/workflows/ai-review.yml` — opencode agent (`anomalyco/opencode/github@latest`, model from `OPENCODE_REVIEW_MODEL` repo variable, default `ollama-cloud/deepseek-v4.1-flash` via Ollama Cloud) runs on every `pull_request` event (`opened/synchronize/reopened/ready_for_review`) and posts one summary comment.
+**Workflow:** `.github/workflows/ai-review.yml` — **OpenCodeReview** (`alibaba/open-code-review`, pinned `v1.12.9`), Alibaba's review-specialized agent: deterministic file selection/bundling + a review agent with tool use, posting inline comments with line precision plus one sticky summary comment. Same model as before — `deepseek-v4.1-flash` on Ollama Cloud (OpenAI-compatible endpoint, `OLLAMA_API_KEY` secret). Runs on `pull_request` events (`opened/synchronize/reopened`).
 
-- **Advisory by design:** the job never blocks merge — findings are severity-tagged comments only. The human decides what to fix and what to waive.
-- **What it checks (in order):** (1) OpenSpec compliance — diff vs the change's delta specs, tasks.md scope, edge-case tests, direct edits to baseline `openspec/specs/`; (2) repo non-negotiables from `AGENTS.md` (LocalStore chokepoint, Keychain tokens, Theme colors, L10n en+ru, OpenAPI sync, XcodeGen); (3) correctness bugs (Go concurrency, Swift concurrency, error handling); (4) test quality (tests that cannot fail, deleted/skipped tests); (5) security (plaintext secrets, user enumeration).
-- **What it skips:** style/formatting (golangci-lint + swiftlint already gate it), pre-existing issues, speculative redesigns.
-- **Severity:** `🔴 BLOCKING` (real bug / contract violation / spec gap) vs `🟡 NIT` (max 5, never blocking). On re-reviews it reports only new findings.
-- **Tuning:** edit the `prompt:` block in `ai-review.yml`; change the model via the `OPENCODE_REVIEW_MODEL` repository variable (Settings → Secrets and variables → Actions → Variables) — any opencode `provider/model` id, e.g. an Anthropic model. Auth uses the `OLLAMA_API_KEY` secret (Ollama Cloud, key from ollama.com → Settings → Keys); runs on your runner with `use_github_token: true` (no GitHub App), `share: false`.
+- **Why this engine:** its published benchmark (AACR-Bench, 200 real PRs) shows the same-model quality of a general-purpose agent at **~1/9 of the tokens** and faster wall-clock — precision-favored by design (lower recall, near-zero noise). That trade fits this process: stage 1 is a cheap pre-clean, stage 2 (human + OpenSpec reasoning) catches the gaps.
+- **Advisory by design:** the job never blocks merge — findings are review comments only. The human decides what to fix and what to waive.
+- **What it checks:** repo-specific rules from `.opencodereview/rule.json` (committed, per-path): LocalStore chokepoint, OpenAPI contract sync, Theme colors / L10n en+ru / XcodeGen, Keychain-only tokens, test validity, CI hygiene — plus OCR's built-in language rules for Go/Swift/YAML. Note: unlike the opencode-agent stage 1 it replaces, OCR reviews diffs per file with targeted rules, not the whole OpenSpec change — OpenSpec compliance stays a stage-2 responsibility (PR template + `openspec.yml` gate).
+- **What it skips:** style/formatting (golangci-lint + swiftlint already gate it); `openspec/changes/archive/**` and `.pbxproj` are excluded in `rule.json`.
+- **Behavior per push:** first run reviews `merge-base..head` in full and records a **checkpoint**; subsequent pushes review only `<checkpoint>..<head>` (fail-closed: any doubt → full review). The sticky summary comment is updated in place; low-severity findings are routed to the summary instead of inline (`route_severity_below: low`). Rapid pushes: the concurrency group cancels the in-flight run and restarts on the latest head.
+- **Tuning:** rules live in `.opencodereview/rule.json` (path-scoped `rule` strings + `exclude` globs); knobs are action inputs (`review_concurrency`, `effort` low/medium/high, `max_tokens_budget`, `route_categories`); model/endpoint are `llm_model` / `llm_url` (any OpenAI-compatible endpoint works).
 - **Anti-rubber-stamping rule:** a quiet AI review is *not* validation. Stage 2 runs regardless of how clean stage 1 looks.
 
 ## Stage 2 — Human review (you)
@@ -47,16 +48,17 @@ Draft PRs are the sequencing mechanism: AI sweeps the diff before you invest in 
 
 ## Metrics (lightweight, optional)
 
-- **AI-finding acceptance rate** — share of 🔴 findings actually fixed (grep PR threads); the core quality signal for tuning the prompt.
-- **Noise trend** — 🟡 nits per review; if it grows, tighten the prompt.
+- **AI-finding acceptance rate** — share of inline findings actually fixed (grep PR review threads); the core quality signal for tuning `.opencodereview/rule.json`.
+- **Noise trend** — inline comments per review; if it grows, tighten rules or set `effort: low`.
 - **Defect escape** — post-merge bugs the diff introduced; note them in the OpenSpec change when archived; quarterly skim of `openspec/changes/archive/` gives the rate with no tooling.
 
 ## Cost
 
-One agentic review per push on `deepseek-v4.1-flash` ≈ $0.02–0.08 for a typical 500-line diff ($0.15/$0.60 per MTok in/out). Tune cost with the `model:` input; the concurrency group cancels superseded runs on rapid pushes.
+OCR is the low-cost engine: deterministic file bundling means each review is a few single-shot LLM rounds per file group, not a long agent loop. On `deepseek-v4.1-flash` ($0.15/$0.60 per MTok in/out) a typical 500-line diff costs **cents to fractions of a cent** per run; checkpoint mode keeps follow-up pushes proportionally small. Hard caps available via `max_tokens_budget` (0 = unlimited today). The concurrency group cancels superseded runs on rapid pushes.
 
 ## References
 
+- OpenCodeReview: https://github.com/alibaba/open-code-review (config: https://open-codereview.ai/docs/configuration, rules: https://open-codereview.ai/docs/review-rules)
 - Google eng-practices (reviewer standard, small CLs): https://google.github.io/eng-practices/review/
 - SmartBear/Cisco review best practices (~400 LOC rule, checklists): https://smartbear.com/learn/code-review/best-practices-for-peer-code-review/
 - GitHub on reviewing AI-generated code: https://docs.github.com/en/copilot/tutorials/review-ai-generated-code

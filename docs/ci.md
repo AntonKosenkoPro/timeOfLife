@@ -6,7 +6,7 @@ GitHub Actions quality pipeline for Lifio. Path-filtered workflows provide the a
 - **`ios.yml`** — Swift: xcodegen, swiftlint `--strict`, warnings-as-errors build, unit tests
 - **`openspec.yml`** — spec-integrity gate: `openspec validate --all --strict` (CLI pinned 1.8.0) on every PR and push to `main`
 
-Plus the **advisory** stage-1 AI review (`ai-review.yml`, opencode) — see `docs/review-process.md`; it comments on PRs but never blocks.
+Plus the **advisory** stage-1 AI review (`ai-review.yml`, OpenCodeReview on Ollama Cloud's `deepseek-v4.1-flash`) — see `docs/review-process.md`; it posts review comments but never blocks.
 
 ## Stages (`backend.yml`)
 
@@ -52,4 +52,4 @@ Non-secret variables: `EMAIL_BACKEND`, `AWS_REGION`, `SES_FROM` (set as reposito
 - **PostgreSQL behavior needs verification** — run `make test:pg` locally after starting PostgreSQL; parity is not currently a CI job.
 - **Coverage gate fails** — total coverage dropped below the floor; add/keep tests. Raise the floor in `backend.yml` as coverage grows.
 - **Workflow not triggering** — workflow file paths must match the `on:` path filters (`backend/**`, `.github/workflows/backend.yml`).
-- **AI review missing** — check the `OLLAMA_API_KEY` secret exists (Ollama Cloud key from ollama.com → Settings → Keys) and the `ai-review` job didn't skip (`github.event.sender.type != 'Bot'`; bot-triggered PRs are skipped). Tune the prompt/model per `docs/review-process.md`.
+- **AI review missing** — check the `OLLAMA_API_KEY` secret exists (Ollama Cloud key from ollama.com → Settings → Keys) and the `ai-review` job didn't skip (`github.event.sender.type != 'Bot'`; bot-triggered PRs are skipped). Rules/tuning per `docs/review-process.md` and `.opencodereview/rule.json`.

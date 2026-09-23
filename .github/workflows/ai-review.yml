@@ -1,9 +1,10 @@
 name: ai-review
 # Stage 1 of the two-stage review process (docs/review-process.md).
-# Advisory only: findings are posted as PR comments, the job never blocks merge.
+# OpenCodeReview (alibaba/open-code-review): deterministic file bundling + review agent.
+# Advisory only: findings are posted as PR review comments, the job never blocks merge.
 on:
   pull_request:
-    types: [opened, synchronize, reopened, ready_for_review]
+    types: [opened, synchronize, reopened]
 
 concurrency:
   group: ai-review-${{ github.event.pull_request.number }}
@@ -17,56 +18,30 @@ jobs:
     permissions:
       contents: read
       pull-requests: write
-      issues: read
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v6
+      - name: Run OpenCodeReview
+        # The action performs its own full checkout (fetch-depth: 0).
+        uses: alibaba/open-code-review@v1.12.9
         with:
-          fetch-depth: 1
-          persist-credentials: false
-
-      - name: Run OpenCode review
-        uses: anomalyco/opencode/github@latest
-        env:
-          OLLAMA_API_KEY: ${{ secrets.OLLAMA_API_KEY }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          model: ${{ vars.OPENCODE_REVIEW_MODEL || 'ollama-cloud/deepseek-v4.1-flash' }}
-          share: false
-          use_github_token: true
-          prompt: |
-            You are stage 1 of this repo's two-stage review process. Read docs/review-process.md
-            and AGENTS.md first, then review this pull request as a fresh, independent reviewer.
-            The repo is spec-driven (openspec/): behavior changes must map to an OpenSpec change.
-
-            Review in this order:
-
-            1. Spec compliance (highest value). Identify the OpenSpec change(s) the diff belongs to
-               (openspec/changes/). Read its tasks.md, design.md and delta specs. Report:
-               - requirements from the delta specs that the diff does not implement
-               - edge cases the delta specs name that lack tests
-               - changes outside the change's declared scope (scope creep)
-               - if the PR edits baseline specs (openspec/specs/) directly, flag it — they are
-                 immutable; behavior changes go through a change.
-            2. Repo non-negotiables (AGENTS.md): raw GRDB writes outside LocalStore; tokens/secrets
-               outside Keychain/env; raw Color literals instead of Theme; new iOS strings missing
-               from en.lproj or ru.lproj or L10n; hand-edited .pbxproj instead of project.yml;
-               openapi.yaml not updated together with handler/client changes.
-            3. Correctness: logic bugs, Go concurrency (goroutines, races, context handling),
-               Swift concurrency (Sendable, actor isolation, @MainActor), error handling,
-               resource leaks.
-            4. Test quality: tests that cannot fail, tests deleted or skipped to make CI pass,
-               missing coverage for new behavior.
-            5. Security: plaintext secrets/tokens/OTP codes, user enumeration, injection, rate-limit bypass.
-
-            Do NOT report: style/formatting (golangci-lint and swiftlint already gate it),
-            pre-existing issues in lines this diff does not touch, speculative redesigns.
-
-            Severity: every finding gets a prefix — "🔴 BLOCKING" (real bug, contract violation,
-            spec gap) or "🟡 NIT" (minor, optional). Report at most 5 nits; nits must not block.
-            On re-reviews (synchronize), report only NEW findings; do not repeat dismissed ones.
-
-            Post ONE summary comment on the PR: a short verdict line ("Stage-1 review: clean" or
-            "Stage-1 review: N blocking, M nits"), then findings grouped 🔴 first, each with
-            file:line, what is wrong, and a concrete suggested fix. If everything is clean, say so
-            plainly. This review is advisory — the human reviewer (stage 2) makes all decisions.
+          # Ollama Cloud — OpenAI-compatible endpoint (models.dev: ollama-cloud base URL).
+          llm_url: https://ollama.com/v1
+          llm_auth_token: ${{ secrets.OLLAMA_API_KEY }}
+          llm_model: deepseek-v4.1-flash
+          # openai protocol (explicit; supersedes the required llm_use_anthropic boolean)
+          llm_protocol: openai
+          llm_use_anthropic: 'false'
+          # Disable reasoning for latency/cost; DeepSeek uses the Anthropic-style toggle.
+          llm_extra_body: '{"thinking": {"type": "disabled"}}'
+          llm_timeout: '600'
+          review_task_timeout: '15'
+          # Don't hammer Ollama Cloud rate limits.
+          review_concurrency: '4'
+          language: English
+          # Update one summary comment in place instead of posting a new one per run.
+          sticky_summary: 'true'
+          # Cross-push checkpoints: after the first run, later pushes review only
+          # <checkpoint>..<head>, not the whole PR (fail-closed: falls back to full).
+          checkpoint_range: 'true'
+          # Low-severity findings go to the sticky summary, not inline — less PR noise.
+          route_severity_below: 'low'
+          upload_artifacts: 'true'
