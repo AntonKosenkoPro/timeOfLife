@@ -175,16 +175,6 @@ struct ProfileView: View {
     }
 }
 
-/// Auth sheet for Enable Sync (app-shell spec): the existing auth flow with
-/// sheet chrome. Cancel and swipe-to-dismiss return unsigned with local data
-/// untouched; any sign-in path clears the presenter's flag and dismisses.
-private struct EnableSyncSheet: View {
-    var body: some View {
-        AuthFlowView()
-            .accessibilityIdentifier("EnableSyncSheet")
-    }
-}
-
 #if DEBUG
 #Preview("Profile") {
     let container = AppContainer.production()

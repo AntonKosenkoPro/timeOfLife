@@ -109,6 +109,13 @@
 // Day total suffix
 "history.tracked" = "отслеживано";
 
+// History pull-to-refresh (history-pull-to-sync)
+"history.pull.signedOut" = "Войдите, чтобы синхронизировать записи.";
+"history.pull.signIn" = "Войти";
+"history.pull.offline" = "Нет подключения. Подключитесь и попробуйте снова.";
+"history.syncError.title" = "Не удалось синхронизировать";
+"common.ok" = "ОК";
+
 // Insights breakdown (insights-breakdown)
 "insights.period.today" = "Сегодня";
 "insights.period.week" = "Эта неделя";

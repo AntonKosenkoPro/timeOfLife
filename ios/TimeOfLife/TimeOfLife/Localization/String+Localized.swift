@@ -83,6 +83,15 @@ enum L10n: String, CaseIterable {
     case historyInProgress = "history.inProgress"
     case historyTracked = "history.tracked"
 
+    // History pull-to-refresh (history-pull-to-sync change)
+    case historyPullSignedOut = "history.pull.signedOut"
+    case historyPullSignIn = "history.pull.signIn"
+    case historyPullOffline = "history.pull.offline"
+    case historySyncErrorTitle = "history.syncError.title"
+
+    // Common
+    case commonOk = "common.ok"
+
     // Insights breakdown (insights-breakdown)
     case insightsPeriodToday = "insights.period.today"
     case insightsPeriodWeek = "insights.period.week"
