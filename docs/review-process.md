@@ -4,13 +4,14 @@ Every PR passes two review stages: **stage 1 — AI review** (automated, advisor
 
 ## Stage 1 — AI review (automated)
 
-**Workflow:** `.github/workflows/ai-review.yml` — **OpenCodeReview** (`alibaba/open-code-review`, pinned `v1.12.9`), Alibaba's review-specialized agent: deterministic file selection/bundling + a review agent with tool use, posting inline comments with line precision plus one sticky summary comment. Same model as before — `deepseek-v4.1-flash` on Ollama Cloud (OpenAI-compatible endpoint, `OLLAMA_API_KEY` secret). Runs on `pull_request` events (`opened/synchronize/reopened`).
+**Workflow:** `.github/workflows/ai-review.yml` — **OpenCodeReview** (`alibaba/open-code-review`, pinned `v1.12.9`), Alibaba's review-specialized agent: deterministic file selection/bundling + a review agent with tool use, posting inline comments with line precision plus one sticky summary comment. Same model as before — `deepseek-v4.1-flash` on Ollama Cloud (OpenAI-compatible endpoint, `OLLAMA_API_KEY` secret).
 
+- **Manual trigger: comment `/review` on the PR.** Nothing runs on push — you decide when the AI looks. A comment that *contains* `/review` (e.g. "/review focus on SyncController") starts a run; bot comments are ignored; a running review is cancelled and restarted if you comment again.
 - **Why this engine:** its published benchmark (AACR-Bench, 200 real PRs) shows the same-model quality of a general-purpose agent at **~1/9 of the tokens** and faster wall-clock — precision-favored by design (lower recall, near-zero noise). That trade fits this process: stage 1 is a cheap pre-clean, stage 2 (human + OpenSpec reasoning) catches the gaps.
 - **Advisory by design:** the job never blocks merge — findings are review comments only. The human decides what to fix and what to waive.
 - **What it checks:** repo-specific rules from `.opencodereview/rule.json` (committed, per-path): LocalStore chokepoint, OpenAPI contract sync, Theme colors / L10n en+ru / XcodeGen, Keychain-only tokens, test validity, CI hygiene — plus OCR's built-in language rules for Go/Swift/YAML. Note: unlike the opencode-agent stage 1 it replaces, OCR reviews diffs per file with targeted rules, not the whole OpenSpec change — OpenSpec compliance stays a stage-2 responsibility (PR template + `openspec.yml` gate).
 - **What it skips:** style/formatting (golangci-lint + swiftlint already gate it); `openspec/changes/archive/**` and `.pbxproj` are excluded in `rule.json`.
-- **Behavior per push:** first run reviews `merge-base..head` in full and records a **checkpoint**; subsequent pushes review only `<checkpoint>..<head>` (fail-closed: any doubt → full review). The sticky summary comment is updated in place; low-severity findings are routed to the summary instead of inline (`route_severity_below: low`). Rapid pushes: the concurrency group cancels the in-flight run and restarts on the latest head.
+- **Behavior across runs:** each `/review` reviews the PR diff; the first run covers `merge-base..head` in full and records a **checkpoint**; a later `/review` (after more commits) covers only `<checkpoint>..<head>` (fail-closed: any doubt → full review). The sticky summary comment is updated in place; low-severity findings are routed to the summary instead of inline (`route_severity_below: low`). Rapid re-comments: the concurrency group cancels the in-flight run and restarts.
 - **Tuning:** rules live in `.opencodereview/rule.json` (path-scoped `rule` strings + `exclude` globs); knobs are action inputs (`review_concurrency`, `effort` low/medium/high, `max_tokens_budget`, `route_categories`); model/endpoint are `llm_model` / `llm_url` (any OpenAI-compatible endpoint works).
 - **Anti-rubber-stamping rule:** a quiet AI review is *not* validation. Stage 2 runs regardless of how clean stage 1 looks.
 
@@ -30,7 +31,8 @@ Runs after stage 1 findings are addressed or consciously waived. Use the checkli
 ```
 implement on branch
   → open PR as DRAFT
-  → stage 1: AI review runs automatically, fix 🔴 findings
+  → comment /review (stage 1): AI posts inline findings + sticky summary
+  → fix 🔴 findings, push, /review again if needed
   → mark ready
   → stage 2: self-review with the PR-template checklist,
     verify behavior by running the app where it matters
@@ -38,7 +40,7 @@ implement on branch
   → update OpenSpec tasks.md / advance the change as part of the merge commit's context
 ```
 
-Draft PRs are the sequencing mechanism: AI sweeps the diff before you invest in self-review.
+Draft PRs are the sequencing mechanism; `/review` is the switch — AI sweeps the diff when you ask, so pushes mid-development stay un-reviewed.
 
 ## Supporting checks
 

@@ -1,24 +1,41 @@
 name: ai-review
 # Stage 1 of the two-stage review process (docs/review-process.md).
 # OpenCodeReview (alibaba/open-code-review): deterministic file bundling + review agent.
-# Advisory only: findings are posted as PR review comments, the job never blocks merge.
+# Manual trigger: comment "/review" on a PR. Advisory only — never blocks merge.
 on:
-  pull_request:
-    types: [opened, synchronize, reopened]
+  issue_comment:
+    types: [created]
 
 concurrency:
-  group: ai-review-${{ github.event.pull_request.number }}
+  group: ai-review-${{ github.event.issue.number }}
   cancel-in-progress: true
 
 jobs:
   review:
-    if: github.event.sender.type != 'Bot'
+    if: >-
+      github.event.issue.pull_request != null &&
+      contains(github.event.comment.body, '/review') &&
+      github.event.sender.type != 'Bot'
     runs-on: ubuntu-latest
     timeout-minutes: 60
     permissions:
       contents: read
       pull-requests: write
     steps:
+      # issue_comment carries no PR refs — resolve head/base from the PR itself.
+      - name: Resolve PR refs
+        id: refs
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { data: pr } = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.issue.number
+            });
+            core.setOutput('base_ref', pr.base.ref);
+            core.setOutput('head_sha', pr.head.sha);
+
       - name: Run OpenCodeReview
         # The action performs its own full checkout (fetch-depth: 0).
         uses: alibaba/open-code-review@v1.12.9
@@ -39,9 +56,13 @@ jobs:
           language: English
           # Update one summary comment in place instead of posting a new one per run.
           sticky_summary: 'true'
-          # Cross-push checkpoints: after the first run, later pushes review only
-          # <checkpoint>..<head>, not the whole PR (fail-closed: falls back to full).
+          # Cross-push checkpoints: the first /review covers merge-base..head; a later
+          # /review covers only <checkpoint>..<head> (fail-closed: falls back to full).
           checkpoint_range: 'true'
           # Low-severity findings go to the sticky summary, not inline — less PR noise.
           route_severity_below: 'low'
           upload_artifacts: 'true'
+          # issue_comment carries no pull_request payload — pass the PR explicitly.
+          pr_number: ${{ github.event.issue.number }}
+          base_ref: ${{ steps.refs.outputs.base_ref }}
+          head_sha: ${{ steps.refs.outputs.head_sha }}
