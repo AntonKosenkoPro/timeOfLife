@@ -1068,6 +1068,98 @@ struct SyncControllerTests {
         #expect(fetches.count == 1)
     }
 
+    // MARK: - Join instead of fork (history-pull-to-sync)
+
+    @Test("concurrent syncNow calls join a single cycle")
+    func syncNowJoinsInFlightCycle() async throws {
+        let (store, mock, controller) = makeContext()
+        controller.activate()
+        await waitForCycle(controller)
+
+        // A slow push keeps the first cycle in flight while the second
+        // syncNow arrives (pull joining a Profile-started cycle, or two
+        // pulls racing).
+        try await store.createEntry(makeEntry(id: "e1", text: "Gym"))
+        mock.createEntryHandler = { _ in
+            try await Task.sleep(nanoseconds: 300_000_000)
+        }
+        mock.clearLog()
+
+        let first = Task { await controller.syncNow() }
+        await waitUntil { controller.status == .syncing }
+        await controller.syncNow()
+        await first.value
+        await waitForCycle(controller)
+
+        let pushes = mock.calls.filter { $0.method == "createEntry" }
+        #expect(pushes.count == 1)
+        #expect(isIdle(controller.status))
+        #expect(try await store.outboxRows().isEmpty)
+    }
+
+    @Test("syncNow joins a trigger-started cycle")
+    func syncNowJoinsTriggerCycle() async throws {
+        let (store, mock, controller) = makeContext()
+        controller.activate()
+        await waitForCycle(controller)
+
+        try await store.createEntry(makeEntry(id: "e1", text: "Gym"))
+        mock.createEntryHandler = { _ in
+            try await Task.sleep(nanoseconds: 300_000_000)
+        }
+        mock.clearLog()
+
+        controller.trigger()
+        await waitUntil { controller.status == .syncing }
+        await controller.syncNow()
+        await waitForCycle(controller)
+
+        let pushes = mock.calls.filter { $0.method == "createEntry" }
+        #expect(pushes.count == 1)
+        #expect(isIdle(controller.status))
+    }
+
+    @Test("trigger during a syncNow cycle does not fork")
+    func triggerDuringSyncNowDoesNotFork() async throws {
+        let (store, mock, controller) = makeContext()
+        controller.activate()
+        await waitForCycle(controller)
+
+        try await store.createEntry(makeEntry(id: "e1", text: "Gym"))
+        mock.createEntryHandler = { _ in
+            try await Task.sleep(nanoseconds: 300_000_000)
+        }
+        mock.clearLog()
+
+        let syncing = Task { await controller.syncNow() }
+        await waitUntil { controller.status == .syncing }
+        controller.trigger()
+        controller.trigger()
+        await syncing.value
+        await waitForCycle(controller)
+
+        let pushes = mock.calls.filter { $0.method == "createEntry" }
+        #expect(pushes.count == 1)
+        #expect(isIdle(controller.status))
+    }
+
+    @Test("sequential syncNow calls run separate cycles")
+    func sequentialSyncNowRunsSeparateCycles() async throws {
+        let (_, mock, controller) = makeContext()
+        controller.activate()
+        await waitForCycle(controller)
+
+        mock.clearLog()
+        await controller.syncNow()
+        await controller.syncNow()
+
+        // The boundary "race" (cycle already over at check time) is a fresh
+        // cheap cycle, not a join: one fetchEntries per call.
+        let fetches = mock.calls.filter { $0.method == "fetchEntries" }
+        #expect(fetches.count == 2)
+        #expect(isIdle(controller.status))
+    }
+
     // MARK: - Category-before-entry drain (fix-entry-category-sync)
 
     @Test("drain pushes categories before entries even when the entry was queued first")

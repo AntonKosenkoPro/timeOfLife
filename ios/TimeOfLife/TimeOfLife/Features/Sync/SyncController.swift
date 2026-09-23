@@ -78,11 +78,25 @@ final class SyncController: ObservableObject {
         status = .inactive
     }
 
-    /// Manual "Sync now" from Settings. Runs the same drain+pull path as the
-    /// automatic triggers.
+    /// Manual "Sync now" from Settings, and History pull-to-refresh
+    /// (sync-client spec): runs the same drain+pull path as the automatic
+    /// triggers. A call arriving while a cycle is already in flight joins it
+    /// (awaits the in-flight cycle's result) instead of starting a second
+    /// concurrent cycle; the fresh cycle registers itself so later callers
+    /// can join it too. The boundary race (cycle ending between the check
+    /// and the attach) degrades to a cheap fresh cycle — cursors just
+    /// advanced, so it is a no-op round-trip.
     func syncNow() async {
         guard status != .inactive else { return }
-        await runCycle(firstSync: false)
+        if let inFlight = cycleTask {
+            await inFlight.value
+            return
+        }
+        let task: Task<Void, Never> = Task { [weak self] in
+            await self?.runCycle(firstSync: false)
+        }
+        cycleTask = task
+        await task.value
     }
 
     /// Foreground / connectivity-restored trigger.

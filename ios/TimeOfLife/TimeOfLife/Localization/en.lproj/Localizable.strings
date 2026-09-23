@@ -109,6 +109,13 @@
 // Day total suffix
 "history.tracked" = "tracked";
 
+// History pull-to-refresh (history-pull-to-sync)
+"history.pull.signedOut" = "Sign in to sync your entries.";
+"history.pull.signIn" = "Sign in";
+"history.pull.offline" = "You're offline. Connect and try again.";
+"history.syncError.title" = "Sync failed";
+"common.ok" = "OK";
+
 // Insights breakdown (insights-breakdown)
 "insights.period.today" = "Today";
 "insights.period.week" = "This week";

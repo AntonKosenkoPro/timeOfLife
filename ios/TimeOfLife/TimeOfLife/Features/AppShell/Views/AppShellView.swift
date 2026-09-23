@@ -6,7 +6,15 @@ import SwiftUI
 /// control. A running timer stays visible and stoppable on History and
 /// Insights through the compact timer.
 struct AppShellView: View {
-    @ObservedObject var vm: AppShellViewModel
+    /// StateObject, not ObservedObject: `RootView` builds this view (and a
+    /// fresh `AppShellViewModel`) on every one of its own re-renders — e.g.
+    /// any `SessionStore` emission, including silent restores and sign-in
+    /// flips. An ObservedObject would inject the fresh VM each time and
+    /// reset `selectedTab` to `.track`, yanking the user off History or
+    /// Insights without request (app-shell "Return from profile" scenario).
+    /// StateObject keeps the first instance; later values are ignored.
+    /// (`trackVM` below already follows this pattern.)
+    @StateObject var vm: AppShellViewModel
     @EnvironmentObject var container: AppContainer
     @StateObject private var trackVM: TrackViewModel
     @State private var isShowingProfile = false
@@ -17,7 +25,7 @@ struct AppShellView: View {
     @State private var isHistoryLogTimeActive = false
 
     init(vm: AppShellViewModel, container: AppContainer) {
-        self.vm = vm
+        _vm = StateObject(wrappedValue: vm)
         _trackVM = StateObject(wrappedValue: TrackViewModel(
             service: container.timerService,
             connectivity: container.connectivity
@@ -36,6 +44,10 @@ struct AppShellView: View {
             navigationRoot {
                 HistoryView(
                     store: container.localStore,
+                    authService: container.authService,
+                    sessionStore: container.sessionStore,
+                    sync: container.syncController,
+                    connectivity: container.connectivity,
                     refreshSignal: vm.runningTimer?.activityText ?? "",
                     logTimeActive: $isHistoryLogTimeActive
                 )

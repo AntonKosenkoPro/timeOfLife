@@ -158,7 +158,9 @@ struct LocalizationTests {
         // (timer.idlePrompt/namePlaceholder, 5 entry.*) = 141;
         // remove-profile-placeholders removes 7 dead Profile keys
         // (profile.library/connections/integrations/export/app/appearance/
-        // dataAndPrivacy) and adds profile.onDevice + onDeviceFooter = 136
-        #expect(l10nCases.count == 136)
+        // dataAndPrivacy) and adds profile.onDevice + onDeviceFooter = 136;
+        // history-pull-to-sync adds 5 (history.pull.signedOut/signIn/offline,
+        // history.syncError.title, common.ok) = 141
+        #expect(l10nCases.count == 141)
     }
 }

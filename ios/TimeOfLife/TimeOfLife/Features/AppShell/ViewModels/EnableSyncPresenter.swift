@@ -1,5 +1,6 @@
 import Foundation
 import Combine
+import SwiftUI
 
 /// Presentation logic for the Profile "Enable Sync" row (app-shell spec):
 /// silent restore first, auth sheet only when still signed out; the sheet
@@ -41,5 +42,17 @@ final class EnableSyncPresenter: ObservableObject {
     /// Never touches session, store, or outbox state.
     func dismiss() {
         isSheetPresented = false
+    }
+}
+
+/// Auth sheet for Enable Sync (app-shell spec): the existing auth flow with
+/// sheet chrome. Shared by the Profile row and the History pull notice —
+/// exactly one auth entry flow. Cancel and swipe-to-dismiss return unsigned
+/// with local data untouched; any sign-in path clears the presenter's flag
+/// and dismisses.
+struct EnableSyncSheet: View {
+    var body: some View {
+        AuthFlowView()
+            .accessibilityIdentifier("EnableSyncSheet")
     }
 }
