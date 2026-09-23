@@ -60,7 +60,7 @@ jobs:
           # /review covers only <checkpoint>..<head> (fail-closed: falls back to full).
           checkpoint_range: 'true'
           # Low-severity findings go to the sticky summary, not inline — less PR noise.
-          route_severity_below: 'low'
+          route_severity_below: 'medium'
           upload_artifacts: 'true'
           # issue_comment carries no pull_request payload — pass the PR explicitly.
           pr_number: ${{ github.event.issue.number }}
