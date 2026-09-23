@@ -3,14 +3,15 @@ import GRDB
 
 /// The durable undo buffer (D3): deletions enter the `undo_buffer` table with
 /// a full serialized snapshot of the deleted records; a buffered deletion
-/// stays restorable until the app restarts — there is no wall-clock window.
-/// No outbox row is created while a deletion is in the buffer — the backend
-/// relay is never notified of a deletion that gets undone.
+/// stays restorable until its relay push succeeds — there is no wall-clock
+/// window. No outbox row is created while a deletion is in the buffer — the
+/// backend relay is never notified of a deletion that gets undone.
 ///
-/// Buffered rows commit to the outbox on cold launch (`commitAll()`), never
-/// while the process is alive (foreground/background cycles do not expire
-/// anything). The buffer survives suspension and backgrounding; a restart
-/// finalizes whatever is still buffered.
+/// Buffered rows push on the next sync cycle (push-then-commit) and commit
+/// to the outbox on cold launch (`commitAll()`) as the backstop, never
+/// while the process is alive otherwise (foreground/background cycles do
+/// not expire anything). The buffer survives suspension and backgrounding;
+/// a restart finalizes whatever is still buffered.
 actor UndoBufferStore {
     private let store: LocalStore
 

@@ -1216,6 +1216,59 @@ actor LocalStore {
 
     // MARK: - Undo buffer (durable, D3)
 
+    /// Set while a buffered deletion's relay push is in flight
+    /// (propagate-buffered-deletes D3): undo of that row is refused for the
+    /// ~100ms the push takes, closing the restore-vs-DELETE race where the
+    /// relay deletes a record the user just restored with no outbox row left
+    /// to repair the divergence. `LocalStore` is an actor, so plain stored
+    /// state is already serialized — no extra lock needed.
+    private var undoPushInFlight = false
+
+    /// Marks the start/end of a buffered-deletion push loop. While set,
+    /// `undoBufferRestore`, `undoEntryDeletion`, and `undoCategoryDeletion`
+    /// refuse with `UndoError.pushInFlight`.
+    func setUndoPushInFlight(_ inFlight: Bool) {
+        undoPushInFlight = inFlight
+    }
+
+    /// One snapshotted record awaiting push-then-commit.
+    struct BufferedDeletion: Equatable, Sendable {
+        /// The `undo_buffer` row holding the snapshot.
+        let bufferID: String
+        let resource: String
+        let recordID: String
+    }
+
+    /// Every snapshotted real record in the buffer, flattened across rows
+    /// (entry order preserved per row). The internal `category_associations`
+    /// pseudo-record is excluded — it never produces a push, same as
+    /// `undoBufferCommitAll`.
+    func bufferedDeletions() throws -> [BufferedDeletion] {
+        try dbQueue.read { db in
+            let rows = try UndoBufferRow.fetchAll(db, sql: """
+                SELECT * FROM undo_buffer ORDER BY deleted_at ASC, id ASC
+                """)
+            var result: [BufferedDeletion] = []
+            for row in rows {
+                let snapshot = try JSONDecoder().decode(DeletionSnapshot.self, from: Data(row.payload.utf8))
+                for record in snapshot.records
+                where record.resource != CategoryDeletionSnapshot.associationsResource {
+                    result.append(BufferedDeletion(bufferID: row.id, resource: record.resource, recordID: record.recordID))
+                }
+            }
+            return result
+        }
+    }
+
+    /// Drops one buffer row after all its records pushed successfully
+    /// (push-then-commit). A partial failure keeps the whole row buffered —
+    /// never half-committed.
+    func undoBufferRemove(id: String) throws {
+        try dbQueue.write { db in
+            try db.execute(sql: "DELETE FROM undo_buffer WHERE id = ?", arguments: [id])
+        }
+    }
+
     /// The most recent buffer row (the only one undoable via shake/toast, U7).
     func undoBufferMostRecent() throws -> UndoBufferRow? {
         try dbQueue.read { db in
@@ -1241,7 +1294,10 @@ actor LocalStore {
 
     /// Restores the records from a buffer row's payload and deletes the
     /// buffer row in one transaction. No outbox row is ever created.
+    /// Refuses with `UndoError.pushInFlight` while a buffered-deletion push
+    /// is in flight (propagate-buffered-deletes D3).
     func undoBufferRestore(id: String) throws {
+        guard !undoPushInFlight else { throw UndoError.pushInFlight }
         try dbQueue.write { db in
             guard let row = try UndoBufferRow.fetchOne(db, key: id) else { return }
             let snapshot = try JSONDecoder().decode(DeletionSnapshot.self, from: Data(row.payload.utf8))
@@ -1342,7 +1398,9 @@ actor LocalStore {
         case failure
     }
 
-    /// One local Category delete that is undoable until the app restarts.
+    /// One local Category delete that is undoable until its push succeeds
+    /// (buffered deletions push on the next sync; cold launch stays the
+    /// backstop).
     /// The snapshot carries the Category plus its ordered entry associations
     /// so undo can restore both exactly.
     struct CategoryDeletionSnapshot: Codable, Equatable, Sendable {
@@ -1444,9 +1502,12 @@ actor LocalStore {
     /// No outbox row is ever created, so the relay is never notified of the
     /// deletion. Returns the restored category, or nil when the buffer row
     /// no longer holds a category-OWNED snapshot (D10).
+    /// Refuses with `UndoError.pushInFlight` while a buffered-deletion push
+    /// is in flight (propagate-buffered-deletes D3).
     @discardableResult
     func undoCategoryDeletion(bufferID: String) throws -> Category? {
-        try dbQueue.write { db in
+        guard !undoPushInFlight else { throw UndoError.pushInFlight }
+        return try dbQueue.write { db in
             guard let row = try UndoBufferRow.fetchOne(db, key: bufferID) else {
                 return nil
             }
@@ -1489,7 +1550,9 @@ actor LocalStore {
         case failure
     }
 
-    /// One local Entry delete that is undoable until the app restarts.
+    /// One local Entry delete that is undoable until its push succeeds
+    /// (buffered deletions push on the next sync; cold launch stays the
+    /// backstop).
     /// The snapshot carries the full TimeEntry (with its ordered categories)
     /// so undo restores it exactly. Removes the entry in ONE transaction with
     /// the buffer insert. NO outbox row is created while the deletion is in
@@ -1550,9 +1613,12 @@ actor LocalStore {
     /// Returns the restored entry, or nil when the buffer row no longer holds
     /// an entry-OWNED snapshot (D10 — refusing here is what keeps an entry
     /// undo from shredding a category snapshot into an orphan entry).
+    /// Refuses with `UndoError.pushInFlight` while a buffered-deletion push
+    /// is in flight (propagate-buffered-deletes D3).
     @discardableResult
     func undoEntryDeletion(bufferID: String) throws -> TimeEntry? {
-        try dbQueue.write { db in
+        guard !undoPushInFlight else { throw UndoError.pushInFlight }
+        return try dbQueue.write { db in
             guard let row = try UndoBufferRow.fetchOne(db, key: bufferID) else {
                 return nil
             }
@@ -1725,8 +1791,16 @@ struct OutboxRow: Codable, Equatable, FetchableRecord, PersistableRecord {
 }
 
 /// GRDB record for the durable undo buffer (D3).
-struct UndoBufferRow: Codable, Equatable, FetchableRecord, PersistableRecord {
-    static let databaseTableName = "undo_buffer"
+/// Errors thrown when an undo is refused (never a persistence failure).
+enum UndoError: Error, Equatable {
+    /// A buffered-deletion relay push is in flight; the row may be committed
+    /// at any moment, so restoring it now could diverge from the relay
+    /// (propagate-buffered-deletes D3). Transient — retry after the sync
+    /// cycle finishes.
+    case pushInFlight
+}
+
+struct UndoBufferRow: Codable, Equatable, FetchableRecord, PersistableRecord {    static let databaseTableName = "undo_buffer"
 
     let id: String
     let payload: String

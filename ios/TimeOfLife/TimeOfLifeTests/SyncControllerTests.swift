@@ -506,7 +506,7 @@ struct SyncControllerTests {
         #expect(isIdle(controller.status))
     }
 
-    @Test("pull does not resurrect a buffered entry deletion")
+    @Test("pull does not resurrect a buffered entry deletion (the buffered push commits it)")
     func pullSkipsBufferedEntryDeletion() async throws {
         let (store, mock, controller) = makeContext()
         let old = Date(timeIntervalSince1970: 1_600_000_000)
@@ -521,13 +521,16 @@ struct SyncControllerTests {
         controller.activate()
         await waitForCycle(controller)
 
+        // The pull skipped the relay copy (no resurrection), then the
+        // buffered push committed the deletion: DELETE went out and the
+        // buffer cleared — undo ends at push success.
         #expect(try await store.entry(id: "e1") == nil)
-        // Still undoable: the buffer row survived the sync.
-        #expect(try await store.undoBufferMostRecent() != nil)
+        #expect(mock.calls.contains(Call("deleteEntry", "entry", "e1")))
+        #expect(try await store.undoBufferMostRecent() == nil)
         #expect(isIdle(controller.status))
     }
 
-    @Test("pull does not resurrect a buffered category deletion")
+    @Test("pull does not resurrect a buffered category deletion (the buffered push commits it)")
     func pullSkipsBufferedCategoryDeletion() async throws {
         let (store, mock, controller) = makeContext()
         let old = Date(timeIntervalSince1970: 1_600_000_000)
@@ -547,7 +550,8 @@ struct SyncControllerTests {
         await waitForCycle(controller)
 
         #expect(try await store.category(id: "c1") == nil)
-        #expect(try await store.undoBufferMostRecent() != nil)
+        #expect(mock.calls.contains(Call("deleteCategory", "category", "c1")))
+        #expect(try await store.undoBufferMostRecent() == nil)
         #expect(isIdle(controller.status))
     }
 
@@ -768,6 +772,134 @@ struct SyncControllerTests {
         #expect(isIdle(controller.status))
         #expect(try await store.outboxRows().isEmpty)
         #expect(try await store.lastSyncedAt(resource: "deletions") == deletedAt)
+    }
+
+    // MARK: - Buffered deletions push before the drain (push-then-commit)
+
+    @Test("buffered entry deletion pushes DELETE on the next cycle and clears the buffer")
+    func bufferedEntryDeletionPushes() async throws {
+        let (store, mock, controller) = makeContext()
+        let old = Date(timeIntervalSince1970: 1_600_000_000)
+        try await store.mergeEntry(makeEntry(id: "e1", text: "Gym", createdAt: old, updatedAt: old))
+        let outcome = try await store.deleteEntryUndoable(id: "e1")
+        guard case .deleted = outcome else {
+            Issue.record("expected the entry to be buffered for undo")
+            return
+        }
+
+        controller.activate()
+        await waitForCycle(controller)
+
+        #expect(isIdle(controller.status))
+        #expect(mock.calls.contains(Call("deleteEntry", "entry", "e1")))
+        #expect(try await store.entry(id: "e1") == nil)
+        #expect(try await store.bufferedDeletions().isEmpty)
+        #expect(try await store.outboxRows().isEmpty)
+    }
+
+    @Test("buffered category deletion pushes DELETE on the next cycle and clears the buffer")
+    func bufferedCategoryDeletionPushes() async throws {
+        let (store, mock, controller) = makeContext()
+        let old = Date(timeIntervalSince1970: 1_600_000_000)
+        try await store.mergeCategory(Category(
+            id: "cat-1", name: "Work", icon: "briefcase", createdAt: old, updatedAt: old
+        ))
+        _ = try await store.deleteCategoryUndoable(id: "cat-1")
+
+        controller.activate()
+        await waitForCycle(controller)
+
+        #expect(isIdle(controller.status))
+        #expect(mock.calls.contains(Call("deleteCategory", "category", "cat-1")))
+        #expect(try await store.category(id: "cat-1") == nil)
+        #expect(try await store.bufferedDeletions().isEmpty)
+        #expect(try await store.outboxRows().isEmpty)
+    }
+
+    @Test("404 on a buffered push is success: the buffer clears and the cycle stays idle")
+    func bufferedPush404ClearsBuffer() async throws {
+        let (store, mock, controller) = makeContext()
+        let old = Date(timeIntervalSince1970: 1_600_000_000)
+        try await store.mergeEntry(makeEntry(id: "e1", text: "Gym", createdAt: old, updatedAt: old))
+        _ = try await store.deleteEntryUndoable(id: "e1")
+        mock.deleteEntryHandler = { _ in
+            throw APIError.server(code: "not_found", message: "gone", details: [:])
+        }
+
+        controller.activate()
+        await waitForCycle(controller)
+
+        #expect(isIdle(controller.status))
+        #expect(try await store.bufferedDeletions().isEmpty)
+        #expect(try await store.outboxRows().isEmpty)
+    }
+
+    @Test("failed buffered push keeps the row buffered and undoable, and fails the cycle loudly")
+    func bufferedPushFailureKeepsRowUndoable() async throws {
+        let (store, mock, controller) = makeContext()
+        let old = Date(timeIntervalSince1970: 1_600_000_000)
+        try await store.mergeEntry(makeEntry(id: "e1", text: "Gym", createdAt: old, updatedAt: old))
+        _ = try await store.deleteEntryUndoable(id: "e1")
+        mock.deleteEntryHandler = { _ in
+            throw APIError.server(code: "internal", message: "boom", details: [:])
+        }
+
+        controller.activate()
+        await waitForCycle(controller)
+
+        // Loud failure, nothing committed — and the deletion is still
+        // restorable afterwards (the in-flight flag was cleared on error).
+        if case .error = controller.status {} else {
+            Issue.record("expected the cycle to fail loudly")
+        }
+        #expect(try await store.bufferedDeletions().count == 1)
+        let recent = try await store.undoBufferMostRecent()
+        let restored = try await store.undoEntryDeletion(bufferID: recent!.id)
+        #expect(restored?.id == "e1")
+        #expect(try await store.entry(id: "e1")?.activityText == "Gym")
+    }
+
+    @Test("undo refused while a buffered push is in flight, allowed again after")
+    func undoRefusedDuringBufferedPush() async throws {
+        let (store, _, _) = makeContext()
+        let old = Date(timeIntervalSince1970: 1_600_000_000)
+        try await store.mergeEntry(makeEntry(id: "e1", text: "Gym", createdAt: old, updatedAt: old))
+        _ = try await store.deleteEntryUndoable(id: "e1")
+        let recent = try await store.undoBufferMostRecent()
+
+        await store.setUndoPushInFlight(true)
+        await #expect(throws: UndoError.pushInFlight) {
+            try await store.undoEntryDeletion(bufferID: recent!.id)
+        }
+        await store.setUndoPushInFlight(false)
+        let restored = try await store.undoEntryDeletion(bufferID: recent!.id)
+        #expect(restored?.id == "e1")
+    }
+
+    @Test("buffered push runs before the drain: a stale queued update for the same id is dropped, never pushed")
+    func bufferedPushRunsBeforeDrain() async throws {
+        let (store, mock, controller) = makeContext()
+        let old = Date(timeIntervalSince1970: 1_600_000_000)
+        try await store.mergeEntry(makeEntry(id: "e1", text: "Gym", createdAt: old, updatedAt: old))
+        // A stale queued update…
+        _ = try await store.updateEntry(makeEntry(
+            id: "e1", text: "Gym v2", createdAt: old,
+            updatedAt: Date(timeIntervalSince1970: 1_620_000_000)
+        ))
+        // …then the user deletes the entry (buffered, no outbox row).
+        _ = try await store.deleteEntryUndoable(id: "e1")
+        mock.updateEntryHandler = { _ in
+            throw APIError.server(code: "not_found", message: "gone", details: [:])
+        }
+
+        controller.activate()
+        await waitForCycle(controller)
+
+        #expect(isIdle(controller.status))
+        #expect(mock.calls.contains(Call("deleteEntry", "entry", "e1")))
+        #expect(mock.calls.allSatisfy { $0.method != "updateEntry" })
+        #expect(try await store.outboxRows().isEmpty)
+        #expect(try await store.bufferedDeletions().isEmpty)
     }
 
     // MARK: - Push-404 resurrection (entries and categories only)

@@ -100,7 +100,10 @@ final class SyncController: ObservableObject {
     /// arrive before local pushes. Tombstones apply before the drain
     /// (steady) or right after the pull (first sync): a tombstone drops
     /// stale pending create/update rows pre-drain, so a 404 is never pushed
-    /// for a record the relay already deleted.
+    /// for a record the relay already deleted. Buffered (undoable) deletions
+    /// push right after tombstones and before the drain (push-then-commit):
+    /// the delete lands first, so the drain's stale-update drop then clears
+    /// any superseded queued update for the same id without pushing.
     private func runCycle(firstSync: Bool) async {
         defer { cycleTask = nil }
         guard connectivity.isConnected else {
@@ -115,6 +118,7 @@ final class SyncController: ObservableObject {
                 try await pull(modifiedSince: nil)
             }
             try await applyTombstones()
+            try await pushBufferedDeletions()
             try await drainOutbox()
             if !firstSync {
                 try await pull(modifiedSince: nil)
@@ -377,6 +381,47 @@ final class SyncController: ObservableObject {
     }
 
     // MARK: - Outbox drain (idempotent replay, D2)
+
+    /// Pushes buffered (undoable) deletions to the relay before the drain
+    /// (push-then-commit, propagate-buffered-deletes D1/D2): one `DELETE`
+    /// per snapshotted record; a buffer row is dropped only after ALL its
+    /// records pushed successfully, so a partial failure keeps the whole row
+    /// buffered and undoable for the next cycle — never half-committed. A
+    /// 404 is success (already gone); any other error fails the cycle loudly
+    /// with the row still buffered. While the loop runs, undo of buffered
+    /// rows is refused (D3 guard); the flag is always cleared, even on
+    /// error, so undo can never wedge shut.
+    private func pushBufferedDeletions() async throws {
+        let pending = try await store.bufferedDeletions()
+        guard !pending.isEmpty else { return }
+        await store.setUndoPushInFlight(true)
+        do {
+            for bufferID in Set(pending.map(\.bufferID)) {
+                for deletion in pending where deletion.bufferID == bufferID {
+                    do {
+                        switch deletion.resource {
+                        case "entry":
+                            try await remote.deleteEntry(id: deletion.recordID)
+                        case "category":
+                            try await remote.deleteCategory(id: deletion.recordID)
+                        default:
+                            Self.logger.error("sync ignores unknown buffered resource \(deletion.resource, privacy: .public)")
+                            throw SyncError.unknownOutboxOp(deletion.resource, "delete")
+                        }
+                    } catch let error as APIError where error.code == "not_found" {
+                        // Already gone on the relay — converged, nothing to do.
+                        Self.logger.info("sync buffered delete 404-as-success \(deletion.resource, privacy: .public) \(deletion.recordID, privacy: .public)")
+                    }
+                }
+                try await store.undoBufferRemove(id: bufferID)
+            }
+            Self.logger.info("sync pushed \(pending.count) buffered deletions")
+        } catch {
+            await store.setUndoPushInFlight(false)
+            throw error
+        }
+        await store.setUndoPushInFlight(false)
+    }
 
     /// Drains the outbox in dependency order, one HTTP request per row.
     /// `category` rows push before `entry` rows (`POST /entries` rejects

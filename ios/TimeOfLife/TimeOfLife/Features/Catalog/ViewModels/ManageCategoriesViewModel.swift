@@ -5,7 +5,7 @@ import Foundation
 /// conflict messaging, refresh after mutation, and category-deletion undo
 /// through the DEFAULT system Undo confirmation (shake → prompt → confirm
 /// restores the newest eligible deletion; buffered deletions stay restorable
-/// until the app restarts). Deletion itself lives in the category editor; the
+/// until their push succeeds). Deletion itself lives in the category editor; the
 /// list offers no delete affordance. All mutations go through `LocalStore`.
 @MainActor
 final class ManageCategoriesViewModel: ObservableObject {
@@ -92,7 +92,10 @@ final class ManageCategoriesViewModel: ObservableObject {
     /// the same category identity and assignments, removes the buffer row,
     /// and refreshes the list. Only category deletions are restored here —
     /// buffer rows owned by other surfaces are left for their owners.
-    /// Nothing is synced.
+    /// Nothing is synced. Refused while a buffered-deletion push is in
+    /// flight (the row may commit at any moment; retry after the sync
+    /// finishes) — surfaced as the persistence error, same as a failed
+    /// restore, since the user-visible outcome is identical (no undo).
     func performUndo() async {
         do {
             guard let recent = try await undoBuffer.mostRecent() else { return }

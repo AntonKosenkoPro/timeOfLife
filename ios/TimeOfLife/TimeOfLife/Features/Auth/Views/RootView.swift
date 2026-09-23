@@ -52,7 +52,7 @@ struct RootView: View {
             }
             .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
                 // Foregrounding never touches the undo buffer (buffered
-                // deletions stay restorable until the app restarts).
+                // deletions stay restorable until their push succeeds).
                 // Then run a sync cycle if signed in.
                 Task {
                     container.syncController.trigger()
