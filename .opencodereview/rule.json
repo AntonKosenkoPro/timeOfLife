@@ -1,0 +1,46 @@
+{
+  "rules": [
+    {
+      "path": "ios/TimeOfLife/TimeOfLife/Core/Storage/**",
+      "rule": "LocalStore.swift is the single mutation chokepoint for GRDB (App Group group.com.antonkosenko.timeoflifeapp). Flag any raw GRDB writes (Database.save/insert/update/delete, DatabaseQueue/Pool write APIs) outside LocalStore.swift. Watch transactional outbox, undo buffer, and sync cursor logic for races and missing transactions."
+    },
+    {
+      "path": "backend/**/*.go",
+      "rule": "backend/api/openapi.yaml is the authoritative API contract. If this diff changes any HTTP handler, request/response DTO, or route, check that openapi.yaml is updated to match in the same PR (and that the iOS client matches). Also check Go concurrency: goroutine leaks, missing context propagation, race conditions around pgx connections, and rate-limit logic (otp/request must always return 202 to keep user enumeration closed)."
+    },
+    {
+      "path": "backend/api/openapi.yaml",
+      "rule": "OpenAPI is the contract. Any change here must be mirrored in backend handlers and the iOS client in the same PR. No backward-compat branches for on-disk/API shapes pre-release; edit shapes in place."
+    },
+    {
+      "path": "ios/TimeOfLife/TimeOfLife/**/*.swift",
+      "rule": "SwiftUI views must use Theme semantic colors only — flag any raw Color literal (Color.red, Color(hex:) etc.) in view code. New user-facing strings must be added to BOTH en.lproj and ru.lproj and to the L10n enum if enumerated — flag strings that appear in only one. Never hand-edit .pbxproj; project.yml + xcodegen only."
+    },
+    {
+      "path": "ios/TimeOfLife/TimeOfLife/**/*.xcodeproj/**",
+      "rule": "This is XcodeGen-managed. Hand-edits to .pbxproj must be flagged as an error: changes go through project.yml + xcodegen generate."
+    },
+    {
+      "path": "ios/TimeOfLife/TimeOfLife/Features/Sync/**",
+      "rule": "Sync/Keychain rules: tokens live only in the Keychain, never persisted or logged in plaintext; OTP codes are stored as SHA-256 hashes. Flag any plaintext token/code persistence, logging of secrets, or session handling that bypasses SessionCache/Keychain."
+    },
+    {
+      "path": "ios/TimeOfLife/TimeOfLifeTests/**",
+      "rule": "Tests must be valid: flag tests that cannot fail, tests deleted or skipped to make CI pass, and tests that assert implementation details instead of behavior."
+    },
+    {
+      "path": "backend/**/*_test.go",
+      "rule": "Tests must be valid: flag tests that cannot fail, tests deleted or skipped to make CI pass, and tests that assert implementation details instead of behavior."
+    },
+    {
+      "path": ".github/workflows/**",
+      "rule": "CI changes: permissions must be least-privileged; secrets must come from GitHub secrets, never hardcoded; timeout-minutes must be set on every job."
+    }
+  ],
+  "exclude": [
+    "openspec/changes/archive/**",
+    "**/*.pbxproj",
+    "**/Pods/**",
+    "**/DerivedData/**"
+  ]
+}

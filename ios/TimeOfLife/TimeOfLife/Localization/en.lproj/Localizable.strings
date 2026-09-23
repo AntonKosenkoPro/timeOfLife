@@ -84,14 +84,9 @@
 "profile.syncing" = "Syncing…";
 "profile.lastSynced" = "Last synced: %@";
 "profile.syncError" = "Sync failed. Try again.";
-"profile.library" = "Library";
 "profile.categories" = "Categories";
-"profile.connections" = "Connections";
-"profile.integrations" = "Integrations";
-"profile.export" = "Export";
-"profile.app" = "App";
-"profile.appearance" = "Appearance";
-"profile.dataAndPrivacy" = "Data and Privacy";
+"profile.onDevice" = "On This Device";
+"profile.onDeviceFooter" = "Categories and time entries are stored on this device. Sync is optional.";
 "profile.eraseLocalData" = "Erase local data";
 "profile.eraseLocalDataConfirmTitle" = "Erase local data?";
 "profile.eraseLocalDataConfirmMessage" = "This permanently deletes all categories, entries, and pending sync data on this device.";
@@ -156,7 +151,7 @@
 "entry.save" = "Save";
 "entry.delete" = "Delete entry";
 "entry.deleteTitle" = "Delete this entry?";
-"entry.deleteMessage" = "This entry will be deleted. You can shake to undo until you restart the app.";
+"entry.deleteMessage" = "This entry will be deleted. You can shake to undo until it syncs.";
 "entry.deleteConfirm" = "Delete";
 "entry.staleError" = "This entry changed elsewhere. Dismiss and reopen it, then try again.";
 "entry.lockedNote" = "Imported via %@ — editing is disabled to avoid conflicts with the source.";
@@ -191,7 +186,7 @@
 "manage.categories.editHint" = "Double-tap to edit.";
 "manage.categories.loading" = "Loading categories…";
 "delete.category.title" = "Delete category?";
-"delete.category.message" = "%@ will be untagged from all entries. Your entries are kept. You can shake to undo until you restart the app.";
+"delete.category.message" = "%@ will be untagged from all entries. Your entries are kept. You can shake to undo until it syncs.";
 "delete.category.confirm" = "Delete";
 "error.categoryExists" = "A category with this name already exists.";
 "error.conflict" = "Edited on another device. Showing the latest version.";

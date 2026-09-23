@@ -37,7 +37,7 @@ docs/                    project-context.md (canonical context), ci.md
 openspec/                specs + changes (see above)
 Requirements/FURPS/      FURPS+ table (Common.md, Timetracking.md, Sign-up_and_Sign-in.md, Activity_Catalog_and_Categories.md)
 Design/                  text design system — see Design/README.md
-.github/workflows/       backend.yml + ios.yml (mandatory PR checks)
+.github/workflows/       backend.yml + ios.yml + openspec.yml (mandatory PR checks), ai-review.yml (advisory stage-1 review — docs/review-process.md)
 ```
 
 ## Build, test, run

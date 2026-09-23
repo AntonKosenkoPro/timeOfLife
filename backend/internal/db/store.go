@@ -206,9 +206,9 @@ type Store interface {
 	// on id (replay → created=false). ActivityText is the entry's own trimmed
 	// display text; CategoryIDs (nil/empty = untagged) are stored via the
 	// entry_categories join with order preserved — unknown or non-owned ids
-	// are pruned with the remainder kept (a merge never fails the sync
-	// cycle). duration_seconds is computed from ended_at - started_at when
-	// ended_at is present.
+	// are strictly rejected (ErrInvalidCategoryID → 422 validation_error with
+	// details.category_ids; atomic, nothing persisted). duration_seconds is
+	// computed from ended_at - started_at when ended_at is present.
 	CreateEntry(ctx context.Context, e Entry) (Entry, bool, error)
 
 	// UpdateEntry applies a partial LWW update on activity_text/notes/

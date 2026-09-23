@@ -9,6 +9,11 @@ import SwiftUI
 /// and a refresh-signal reload so entries saved from the compact timer appear
 /// without leaving the tab.
 struct InsightsView: View {
+    /// Observed directly (not via `container`): `AppContainer` publishes
+    /// nothing, so nested reads like `container.syncController.status` never
+    /// invalidate this view — the status change would be missed and the
+    /// breakdown would stay stale after a sync (HistoryView precedent).
+    @EnvironmentObject var sync: SyncController
     @StateObject private var vm: InsightsViewModel
     @State private var period: InsightsPeriod = .week
     @State private var lens: InsightsLens = .category
@@ -46,6 +51,19 @@ struct InsightsView: View {
         .onChange(of: refreshSignal) { _ in
             vm.invalidate()
             Task { await vm.loadIfNeeded() }
+        }
+        // Same staleness as HistoryView: a sync cycle merges relay state
+        // behind this view while the Profile sheet covers it, so reload on
+        // exit from `.syncing` (idle or error — a failed cycle may have
+        // applied partial merges before throwing).
+        .onChange(of: sync.status) { status in
+            switch status {
+            case .idle, .error:
+                vm.invalidate()
+                Task { await vm.loadIfNeeded() }
+            case .inactive, .syncing:
+                break
+            }
         }
     }
 
@@ -177,5 +195,6 @@ private struct BreakdownRow: View {
     }
     .navigationViewStyle(.stack)
     .environmentObject(container)
+    .environmentObject(container.syncController)
 }
 #endif

@@ -1279,7 +1279,7 @@ components:
           items:
             type: string
             format: uuid
-          description: Replace-all ordered tag set (unknown ids rejected with 422).
+          description: Replace-all ordered tag set (unknown/non-owned/malformed ids pruned on merge).
         started_at:
           type: string
           format: date-time

@@ -1,8 +1,8 @@
 import SwiftUI
 
 /// The Profile destination (app-shell spec, D6/D30): useful without an
-/// account. Account/sync controls live here alongside local category
-/// management, integrations, export, appearance, and data controls. No
+/// account. Account/sync controls live here alongside on-device category
+/// management and the destructive erase control. No
 /// activity management exists (no activity catalog — remove-activities-layer).
 struct ProfileView: View {
     @EnvironmentObject var container: AppContainer
@@ -28,9 +28,7 @@ struct ProfileView: View {
         NavigationView {
             List {
                 accountSection
-                librarySection
-                connectionsSection
-                appSection
+                onDeviceSection
             }
             .navigationTitle(L10n.profileTitle.text)
             .navigationBarTitleDisplayMode(.inline)
@@ -133,10 +131,13 @@ struct ProfileView: View {
         return formatter.localizedString(for: date, relativeTo: Date())
     }
 
-    // MARK: - Library
+    // MARK: - On This Device
 
-    private var librarySection: some View {
-        Section(L10n.profileLibrary.text) {
+    private var onDeviceSection: some View {
+        Section(
+            header: Text(L10n.profileOnDevice.text),
+            footer: Text(L10n.profileOnDeviceFooter.text)
+        ) {
             NavigationLink {
                 ManageCategoriesView(
                     store: container.localStore,
@@ -147,29 +148,14 @@ struct ProfileView: View {
                 ListRow(title: L10n.profileCategories.text, icon: "tag")
             }
             .accessibilityIdentifier("ProfileCategoriesRow")
-        }
-    }
-
-    // MARK: - Connections
-
-    private var connectionsSection: some View {
-        Section(L10n.profileConnections.text) {
-            ListRow(title: L10n.profileIntegrations.text, icon: "link")
-            ListRow(title: L10n.profileExport.text, icon: "square.and.arrow.up")
-        }
-    }
-
-    // MARK: - App
-
-    private var appSection: some View {
-        Section(L10n.profileApp.text) {
-            ListRow(title: L10n.profileAppearance.text, icon: "circle.lefthalf.filled")
-            ListRow(title: L10n.profileDataAndPrivacy.text, icon: "hand.raised")
-            Button {
+            Button(role: .destructive) {
                 isShowingEraseConfirm = true
             } label: {
-                ListRow(title: L10n.profileEraseLocalData.text, icon: "trash")
-                    .foregroundStyle(Theme.danger)
+                ListRow(
+                    title: L10n.profileEraseLocalData.text,
+                    icon: "trash",
+                    tint: Theme.danger
+                )
             }
             .accessibilityIdentifier("ProfileEraseLocalDataButton")
         }

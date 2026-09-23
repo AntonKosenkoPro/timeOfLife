@@ -311,6 +311,52 @@ struct HistoryViewModelTests {
         #expect(vm.dayGroups.isEmpty)
     }
 
+    // MARK: - Sync merge propagation (fix-history-sync-refresh)
+
+    @Test("synced pull appears and tombstone deletion disappears after invalidate + reload")
+    func syncMergeReflectedAfterReload() async throws {
+        let store = try makeStore()
+        let start = Date(timeIntervalSinceNow: -3600)
+        try await store.createEntry(entry(
+            id: "local",
+            startedAt: start,
+            durationSeconds: 60,
+            endedAt: start.addingTimeInterval(60)
+        ))
+
+        let vm = HistoryViewModel(store: store)
+        await vm.loadIfNeeded()
+        #expect(vm.dayGroups.flatMap(\.entries).map(\.id) == ["local"])
+
+        // A sync pull merges a cross-device entry behind the visible list.
+        let remoteStart = Date(timeIntervalSinceNow: -600)
+        try await store.mergeEntry(entry(
+            id: "remote",
+            startedAt: remoteStart,
+            text: "Remote",
+            durationSeconds: 30,
+            endedAt: remoteStart.addingTimeInterval(30)
+        ))
+        // The guarded snapshot hides it — the stale-list bug.
+        await vm.loadIfNeeded()
+        #expect(vm.dayGroups.flatMap(\.entries).map(\.id) == ["local"])
+
+        // The view's sync observer runs invalidate + loadIfNeeded on cycle end.
+        vm.invalidate()
+        await vm.loadIfNeeded()
+        #expect(vm.dayGroups.flatMap(\.entries).map(\.id) == ["remote", "local"])
+
+        // A tombstone for a cross-device delete converges on the next cycle.
+        try await store.applyDeletionTombstone(Deletion(
+            resource: "entry",
+            recordID: "remote",
+            deletedAt: Date()
+        ))
+        vm.invalidate()
+        await vm.loadIfNeeded()
+        #expect(vm.dayGroups.flatMap(\.entries).map(\.id) == ["local"])
+    }
+
     // MARK: - Helpers
 
     private static func date(_ iso: String, calendar: Calendar) -> Date {

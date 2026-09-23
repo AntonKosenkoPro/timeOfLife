@@ -64,19 +64,60 @@ On pull, the sync client SHALL apply a server record to the local database only 
 - **WHEN** a pulled record's text matches a different local id and either side is newer
 - **THEN** both records are kept as independent entries or categories; nothing merges, nothing is skipped for collision, and convergence needs no name-freedom step
 ### Requirement: Idempotent outbox drain
-The sync client SHALL drain the outbox by issuing one HTTP request per outbox row, in created_at order within a resource. Because POST is idempotent on `id` and PATCH carries `updated_at` (LWW), replaying an outbox row is safe. Entries carry `activity_text`, ordered `category_ids`, and `notes`; unknown category ids on merge SHALL resolve by dropping the unknown id and keeping the remainder (logged, secret-free), never failing the cycle.
+The sync client SHALL drain the outbox by issuing one HTTP request per outbox row, in created_at order within a resource. Because POST is idempotent on `id` and PATCH carries `updated_at` (LWW), replaying an outbox row is safe. Entries carry `activity_text`, ordered `category_ids`, and `notes`; a pulled entry referencing a category id absent from the relay snapshot SHALL resolve by dropping the unknown id and keeping the remainder (logged, secret-free), never failing the cycle. A pulled entry referencing a category id present in the relay snapshot but missing locally SHALL NOT be stripped: when a local category with the same name exists the join SHALL be remapped to that local id (local-only rewrite, never enqueued), otherwise the snapshot category row SHALL be merged locally and the id kept.
 
 #### Scenario: Replay after relaunch
 - **WHEN** the app was killed mid-drain and relaunched, leaving some outbox rows already pushed and some not
 - **THEN** re-pushing the already-pushed rows returns 200 (idempotent) or 409 (already newer) — both treated as success — and the outbox clears cleanly
 
 #### Scenario: Entry with unknown category is pruned
-- **WHEN** a pulled entry references a category id with no local row
+- **WHEN** a pulled entry references a category id absent from the relay snapshot and with no local row
 - **THEN** the unknown id is dropped, the entry merges with the remainder, and the cycle completes
+
+#### Scenario: Entry with relay-known but locally-missing category keeps its category
+- **WHEN** a pulled entry references a category id present in the relay snapshot but with no local row
+- **THEN** the entry keeps a category: the join is remapped to the same-name local category when one exists, otherwise the snapshot category row is merged locally — the entry never silently loses the category
 
 #### Scenario: Entry without provenance defaults to manual
 - **WHEN** a pulled entry omits `source` (relays predating entry provenance)
 - **THEN** the entry decodes with `source` = "manual" instead of failing the pull
+### Requirement: Dependency-ordered outbox drain
+The sync client SHALL drain `category` outbox rows before `entry` rows, preserving `created_at, id` order within each resource. Because `POST /entries` rejects unknown `category_ids` with 422, pushing categories first ensures referenced categories exist on the relay before entries that carry them. Additionally, before pushing each entry create/update, the drain SHALL ensure every referenced category id exists on the relay: ids missing from the relay snapshot but present locally (and not pending deletion) SHALL be created on the relay first via idempotent create (a `category_exists` 409 remaps local references to the winning id and the entry push uses it); only ids missing locally or pending deletion may reach the push uncreated.
+
+#### Scenario: Entry queued before its category still pushes category first
+- **WHEN** the outbox holds an entry create whose `created_at` precedes its category create
+- **THEN** the drain pushes the category create before the entry create and the cycle completes
+
+#### Scenario: Entry referencing a relay-unknown category pushes it first
+- **WHEN** the drain pushes an entry create/update whose category id exists locally but is absent from the relay
+- **THEN** the category is created on the relay first and the entry push carries the full category set — no 422, no prune, and the local entry keeps its categories
+
+#### Scenario: Entry referencing a locally-deleted category still prunes
+- **WHEN** the drain pushes an entry whose category id has a pending delete (or no local row at all)
+- **THEN** that id is not created on the relay and the existing validation_error prune-and-retry path applies
+
+### Requirement: Push validation_error recovery for unknown categories
+On an entry create/update push receiving `validation_error` with `category_ids` details, the sync client SHALL fetch the relay categories, drop unknown ids from the queued payload keeping the remainder (secret-free log), rewrite the outbox payload, retry the push exactly once, and clear the row on success. If no id is pruned or the retry fails, the cycle SHALL fail loudly with the push error and keep remaining rows queued. The following pull converges the local copy via LWW. This path is a last resort only: the dependency-ordered ensure step above SHALL make it unreachable whenever the missing categories exist locally.
+
+#### Scenario: Entry with unknown category is pruned on push
+- **WHEN** the drain pushes an entry create referencing a category id absent from the relay
+- **THEN** the payload is pruned to the known remainder, the push retries and succeeds, the outbox clears, and the cycle completes idle
+
+#### Scenario: Unprunable validation still fails
+- **WHEN** the entry push fails with `validation_error` but every id is already known (or the retry fails)
+- **THEN** the cycle fails with the push error and rows stay queued for retry
+
+### Requirement: Pull heals category-set forks
+When a pulled server entry is NOT newer than the local entry (tie or older, so LWW keeps local) but the local category set is a strict superset of the server set via existing clean local rows (none pending deletion), the sync client SHALL enqueue an entry update with a bumped `updated_at` (strictly newer even under second-precision truncation) carrying the full local set, so the complete categories reconverge on the relay on the next drain instead of diverging silently forever.
+
+#### Scenario: Re-assigned categories reconverge after a silent prune
+- **WHEN** a previous relay-side prune stored fewer categories than the local entry holds (equal timestamps, clean local rows)
+- **THEN** the next pull enqueues a healing update and the following drain pushes the full category set, which other devices then receive
+
+#### Scenario: Healing skips delete-wins ids
+- **WHEN** the extra local ids are pending deletion
+- **THEN** no healing update is enqueued for them and the queued delete still converges the relay
+
 ### Requirement: Sync triggers
 The sync client SHALL run on: (1) app enters foreground, (2) connectivity restores (NWPathMonitor `.satisfied`), (3) manual "Sync now" action. On macOS, a timer-based background sync (every N minutes while running) SHALL be added; on iOS, background task scheduling SHALL NOT be used (unreliable).
 
@@ -155,7 +196,7 @@ When an outbox push fails because the relay lacks the record and no tombstone co
 - **WHEN** the re-post fails
 - **THEN** the cycle fails with the original push error and all rows stay queued for retry
 ### Requirement: Delete-wins for entries and categories
-On pull, the sync client SHALL NOT apply a server entry or category the user deleted locally — a deletion sitting in the durable undo buffer or a committed deletion with a pending outbox DELETE row. Such records SHALL be skipped with a secret-free log; the queued DELETE converges the relay on drain.
+On pull, the sync client SHALL NOT apply a server entry or category the user deleted locally — a deletion sitting in the durable undo buffer or a committed deletion with a pending outbox DELETE row. Such records SHALL be skipped with a secret-free log; the queued DELETE converges the relay on drain. In addition, every sync cycle SHALL push buffered (undoable) deletions to the relay before draining the outbox (push-then-commit): one `DELETE` per snapshotted record; on success the buffer row is dropped and undo ends for that deletion. A 404 on a buffered push is success (already gone); any other push error fails the cycle loudly with the row still buffered and undoable.
 
 #### Scenario: Buffered entry deletion survives a pull
 - **WHEN** an entry deletion sits in the undo buffer and a pull returns the relay's copy
@@ -164,3 +205,15 @@ On pull, the sync client SHALL NOT apply a server entry or category the user del
 #### Scenario: First-sync with a pending entry delete
 - **WHEN** the outbox holds an entry DELETE and the relay still returns that entry
 - **THEN** the pull skips the record, the drain pushes the DELETE, and the entry stays deleted locally
+
+#### Scenario: Buffered deletion pushes on the next cycle
+- **WHEN** the user deletes an entry (or category) and a sync cycle runs while signed in and online
+- **THEN** the cycle pushes the `DELETE` for every snapshotted record before draining the outbox; on success the buffer row is dropped, the relay holds a tombstone, and other devices converge on their next sync — no app restart required
+
+#### Scenario: Failed buffered push stays undoable
+- **WHEN** a buffered `DELETE` push fails with a non-404 error (network, 5xx)
+- **THEN** the cycle fails loudly, the buffer row is kept, and the deletion can still be undone or retried on the next cycle
+
+#### Scenario: Undo ends at push success
+- **WHEN** a buffered deletion's pushes all succeeded and the buffer row was dropped
+- **THEN** a later undo finds nothing to restore (same as undo after a restart today)

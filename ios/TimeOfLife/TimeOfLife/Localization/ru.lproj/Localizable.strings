@@ -84,14 +84,9 @@
 "profile.syncing" = "Синхронизация…";
 "profile.lastSynced" = "Синхронизировано: %@";
 "profile.syncError" = "Не удалось синхронизировать. Попробуйте снова.";
-"profile.library" = "Библиотека";
 "profile.categories" = "Категории";
-"profile.connections" = "Подключения";
-"profile.integrations" = "Интеграции";
-"profile.export" = "Экспорт";
-"profile.app" = "Приложение";
-"profile.appearance" = "Оформление";
-"profile.dataAndPrivacy" = "Данные и конфиденциальность";
+"profile.onDevice" = "На этом устройстве";
+"profile.onDeviceFooter" = "Категории и записи хранятся на этом устройстве. Синхронизация необязательна.";
 "profile.eraseLocalData" = "Стереть локальные данные";
 "profile.eraseLocalDataConfirmTitle" = "Стереть локальные данные?";
 "profile.eraseLocalDataConfirmMessage" = "Это навсегда удалит все категории, записи и ожидающие синхронизацию данные на этом устройстве.";
@@ -156,7 +151,7 @@
 "entry.save" = "Сохранить";
 "entry.delete" = "Удалить запись";
 "entry.deleteTitle" = "Удалить эту запись?";
-"entry.deleteMessage" = "Запись будет удалена. Отменить можно встряской до перезапуска приложения.";
+"entry.deleteMessage" = "Запись будет удалена. Отменить можно встряской, пока она не синхронизировалась.";
 "entry.deleteConfirm" = "Удалить";
 "entry.staleError" = "Запись изменилась. Закройте и откройте её заново, затем повторите.";
 "entry.lockedNote" = "Импортировано через %@: редактирование отключено, чтобы избежать конфликтов с источником.";
@@ -191,7 +186,7 @@
 "manage.categories.editHint" = "Дважды коснитесь, чтобы изменить.";
 "manage.categories.loading" = "Загрузка категорий…";
 "delete.category.title" = "Удалить категорию?";
-"delete.category.message" = "%@ будет снята со всех записей. Записи сохранятся. Отменить можно встряской до перезапуска приложения.";
+"delete.category.message" = "%@ будет снята со всех записей. Записи сохранятся. Отменить можно встряской, пока она не синхронизировалась.";
 "delete.category.confirm" = "Удалить";
 "error.categoryExists" = "Категория с таким названием уже существует.";
 "error.conflict" = "Изменено на другом устройстве. Показана актуальная версия.";

@@ -155,7 +155,10 @@ struct LocalizationTests {
         // (timer.search.*, activityEditor.*, activity.delete.*,
         // activityDetail.*, profile.activities, logTime.activity.*,
         // choose/stale/deleted copy) and adds 7 plain-text entry keys
-        // (timer.idlePrompt/namePlaceholder, 5 entry.*) = 141
-        #expect(l10nCases.count == 141)
+        // (timer.idlePrompt/namePlaceholder, 5 entry.*) = 141;
+        // remove-profile-placeholders removes 7 dead Profile keys
+        // (profile.library/connections/integrations/export/app/appearance/
+        // dataAndPrivacy) and adds profile.onDevice + onDeviceFooter = 136
+        #expect(l10nCases.count == 136)
     }
 }

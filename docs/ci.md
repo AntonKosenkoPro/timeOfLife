@@ -1,9 +1,12 @@
 # CI Pipeline Guide
 
-GitHub Actions quality pipeline for Lifio. Two path-filtered workflows provide the applicable mandatory PR checks (Requirements S6):
+GitHub Actions quality pipeline for Lifio. Path-filtered workflows provide the applicable mandatory PR checks (Requirements S6):
 
 - **`backend.yml`** — Go: gofmt, go vet, golangci-lint, race tests, OpenAPI contract gate, coverage gate, deploy
 - **`ios.yml`** — Swift: xcodegen, swiftlint `--strict`, warnings-as-errors build, unit tests
+- **`openspec.yml`** — spec-integrity gate: `openspec validate --all --strict` (CLI pinned 1.8.0) on every PR and push to `main`
+
+Plus the **advisory, on-demand** stage-1 AI review (`ai-review.yml`, OpenCodeReview on Ollama Cloud's `deepseek-v4.1-flash`; trigger: comment `/review` on a PR) — see `docs/review-process.md`; it posts review comments but never blocks.
 
 ## Stages (`backend.yml`)
 
@@ -32,6 +35,7 @@ Required GitHub Actions secrets (configured in repo Settings → Secrets and var
 
 | Secret | Used by | Required |
 |---|---|---|
+| `OLLAMA_API_KEY` | ai-review (stage-1 review, Ollama Cloud) | ✅ |
 | `VM_HOST` | deploy | ✅ |
 | `VM_USER` | deploy | ✅ |
 | `VM_SSH_KEY` | deploy | ✅ |
@@ -48,3 +52,4 @@ Non-secret variables: `EMAIL_BACKEND`, `AWS_REGION`, `SES_FROM` (set as reposito
 - **PostgreSQL behavior needs verification** — run `make test:pg` locally after starting PostgreSQL; parity is not currently a CI job.
 - **Coverage gate fails** — total coverage dropped below the floor; add/keep tests. Raise the floor in `backend.yml` as coverage grows.
 - **Workflow not triggering** — workflow file paths must match the `on:` path filters (`backend/**`, `.github/workflows/backend.yml`).
+- **AI review missing after /review** — check the `OLLAMA_API_KEY` secret exists (Ollama Cloud key from ollama.com → Settings → Keys) and the job didn't skip (the comment must be on a PR, contain `/review`, and not come from a bot). Rules/tuning per `docs/review-process.md` and `.opencodereview/rule.json`.
