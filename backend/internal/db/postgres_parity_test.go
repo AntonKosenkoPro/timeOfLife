@@ -557,3 +557,37 @@ func TestPostgres_ListDeletions_UserScoping(t *testing.T) {
 		t.Errorf("user B: expected only their tombstone, got %+v", tombsB)
 	}
 }
+
+// TestPostgres_UpsertUserByAppleSubject exercises the SIWA upsert against real
+// PostgreSQL: the conflict target must match the partial unique index
+// (idx_users_apple_subject … WHERE apple_subject IS NOT NULL). Omitting the
+// predicate fails with SQLSTATE 42P10 at runtime — a bug SQLite's
+// INSERT OR IGNORE cannot reproduce.
+func TestPostgres_UpsertUserByAppleSubject(t *testing.T) {
+	store := newParityStore(t)
+	ctx := context.Background()
+
+	first, err := store.UpsertUserByAppleSubject(ctx, "apple-sub-parity", "relay@privaterelay.appleid.com")
+	if err != nil {
+		t.Fatalf("first upsert: %v", err)
+	}
+	if !first.EmailVerified {
+		t.Error("expected email_verified=true on create")
+	}
+
+	// Same subject, email withheld (Apple's behavior on re-auth): same user,
+	// original email retained, still verified.
+	second, err := store.UpsertUserByAppleSubject(ctx, "apple-sub-parity", "")
+	if err != nil {
+		t.Fatalf("second upsert (conflict path): %v", err)
+	}
+	if second.ID != first.ID {
+		t.Errorf("expected same user ID across sign-ins: %q vs %q", first.ID, second.ID)
+	}
+	if second.Email != first.Email {
+		t.Errorf("expected retained email %q, got %q", first.Email, second.Email)
+	}
+	if !second.EmailVerified {
+		t.Error("expected email_verified=true after conflict update")
+	}
+}

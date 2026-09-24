@@ -219,13 +219,15 @@ func (s *PostgresStore) GetUserByID(ctx context.Context, userID string) (User, e
 
 // UpsertUserByAppleSubject upserts a user keyed by Apple's stable `sub`.
 // The email is stored on first sign-in; on later sign-ins (ON CONFLICT) the
-// existing email is kept and the user is marked verified.
+// existing email is kept and the user is marked verified. The conflict target
+// must repeat the partial index predicate (idx_users_apple_subject is
+// `WHERE apple_subject IS NOT NULL`); omitting it fails with SQLSTATE 42P10.
 func (s *PostgresStore) UpsertUserByAppleSubject(ctx context.Context, appleSubject, email string) (User, error) {
 	var u User
 	err := s.pool.QueryRow(ctx, `
 		INSERT INTO users (id, email, email_verified, created_at, apple_subject)
 		VALUES (gen_random_uuid(), $1, true, NOW(), $2)
-		ON CONFLICT (apple_subject) DO UPDATE
+		ON CONFLICT (apple_subject) WHERE apple_subject IS NOT NULL DO UPDATE
 			SET email_verified = true
 		RETURNING id, email, email_verified, created_at
 	`, email, appleSubject).Scan(&u.ID, &u.Email, &u.EmailVerified, &u.CreatedAt)
