@@ -18,6 +18,7 @@ The repo is spec-driven (`openspec/config.yaml`, `schema: spec-driven`). See `op
 
 - **LocalStore is the single mutation chokepoint** (GRDB in App Group `group.com.antonkosenko.timeoflifeapp`) — no raw GRDB writes outside it.
 - **Incomplete UI surfaces — do not claim they are done**: UndoToast/shake-to-undo, the "Enable Sync" `AuthFlowView` sheet presentation (Profile currently does a silent `restoreSession()`), "via <Source>" labels, and the iOS 18 lock-screen ControlWidget (no target in `project.yml` yet). Full list: `docs/project-context.md` → "Incomplete / deferred", mirroring open tasks in `local-first-sync-architecture/tasks.md`.
+- **Bug fixes follow `docs/bugfix-process.md`** (reproduce → evidence/logs → OpenSpec proposal reviewed by human → red tests → fix → re-verify → corners → archive). Never diagnose from guesses; if it isn't reproduced or is only a hypothesis, stop and ask the human.
 - **OpenAPI is the authoritative API contract** (`backend/api/openapi.yaml`, S10). Endpoint changes update both sides + the spec.
 - **No backward compat for on-disk formats** (pre-release): edit `Codable` shapes in place, no legacy branches.
 - **No passwords, no plaintext secrets** (R1); tokens in Keychain only; user-enumeration closed (`otp/request` always 202).
