@@ -1192,6 +1192,261 @@ actor LocalStore {
 
     // MARK: - Sync state (per-resource cursors)
 
+    /// The `local_metadata` key holding the user id the sync cursors and
+    /// outbox convergence belong to. Cursors are per-device rows, so without
+    /// account scoping a sign-in to a *different* account (OTP vs SiWA are
+    /// separate identities by design) would reuse the old account's
+    /// `modified_since`/`deleted_since` and — worse — reconcile the local
+    /// catalog against the new account's (possibly empty) snapshot.
+    static let syncAccountIdKey = "sync_account_id"
+
+    /// The account id the current sync cursors belong to, or nil when no
+    /// account has synced yet on this dataset.
+    func syncAccountId() throws -> String? {
+        try dbQueue.read { db in
+            try Self.metadataValue(db: db, key: Self.syncAccountIdKey)
+        }
+    }
+
+    func setSyncAccountId(_ id: String?) throws {
+        try dbQueue.write { db in
+            if let id {
+                try db.execute(
+                    sql: "INSERT INTO local_metadata (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                    arguments: [Self.syncAccountIdKey, id]
+                )
+            } else {
+                try db.execute(sql: "DELETE FROM local_metadata WHERE key = ?", arguments: [Self.syncAccountIdKey])
+            }
+        }
+    }
+
+    /// Switches the sync scope to `newId`. When the account actually changed,
+    /// clears the per-resource cursors (next pull is a full pull against the
+    /// new account) and adopts every live local category/entry that has no
+    /// pending create or delete row under a freshly-minted record id: record
+    /// ids are relay-global, so pushing the old account's ids into the new
+    /// account would collide with another user's rows
+    /// (fix-cross-account-id-collision). Names, texts, icons, and notes are
+    /// preserved; entry→category references are rewritten to the fresh
+    /// category ids (live joins and kept payloads alike). Records that
+    /// already carry a create row (device-minted ids that were never pushed)
+    /// or a delete row keep both their rows and their ids untouched — the
+    /// drain's self-heal converges them. Stale update rows for adopted-away
+    /// old ids are dropped without pushing (the adoption create carries the
+    /// current state); pending delete rows are preserved so deletions still
+    /// propagate (a 404 there is success). Returns whether the account
+    /// changed. Runs exactly once per account transition; re-sign-in to the
+    /// same account id is a no-op.
+    @discardableResult
+    func switchSyncAccountIfNeeded(to newId: String?) throws -> Bool {
+        guard let newId else { return false }
+        let current = try syncAccountId()
+        guard current != newId else { return false }
+        try dbQueue.write { db in
+            try Self.adoptRecordsForAccountSwitch(db: db, idGenerator: recordIDGenerator)
+            try db.execute(sql: "DELETE FROM sync_state")
+            try db.execute(
+                sql: "INSERT INTO local_metadata (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                arguments: [Self.syncAccountIdKey, newId]
+            )
+        }
+        return true
+    }
+
+    /// Adopts live local rows into a new sync account under fresh record ids,
+    /// in one chokepoint transaction (see `switchSyncAccountIfNeeded`).
+    /// Categories go first so entries can follow the fresh ids in the same
+    /// pass; the running timer draft's category snapshot follows them too.
+    private static func adoptRecordsForAccountSwitch(db: Database, idGenerator: RecordIDGenerating) throws {
+        var categoryMap: [String: String] = [:]
+        for category in try Category.fetchAll(db, sql: "SELECT * FROM categories") {
+            guard try !Self.hasPendingCreateOrDelete(db, resource: "category", recordID: category.id) else { continue }
+            let freshID = idGenerator.newID()
+            let fresh = try Self.rekeyCategory(db, old: category, freshID: freshID)
+            try Self.enqueueOutbox(db: db, resource: "category", recordID: freshID, op: "create", payload: fresh)
+            try Self.dropPendingCreateOrUpdate(db, resource: "category", recordID: category.id)
+            categoryMap[category.id] = freshID
+        }
+        let entryIDs = try String.fetchAll(db, sql: "SELECT id FROM entries")
+        for entryID in entryIDs {
+            guard let snapshot = try Self.fetchEntryRow(db, id: entryID),
+                  try !Self.hasPendingCreateOrDelete(db, resource: "entry", recordID: snapshot.id)
+            else { continue }
+            let freshID = idGenerator.newID()
+            let remapped = Self.deduplicate(snapshot.categoryIDs.map { categoryMap[$0] ?? $0 })
+            let fresh = try Self.rekeyEntry(db, old: snapshot.entry, categoryIDs: remapped, freshID: freshID)
+            try Self.enqueueOutbox(db: db, resource: "entry", recordID: freshID, op: "create", payload: fresh)
+            try Self.dropPendingCreateOrUpdate(db, resource: "entry", recordID: snapshot.id)
+        }
+        if !categoryMap.isEmpty {
+            // Kept (create-row) entries whose references moved under fresh
+            // category ids: their live joins already follow via `rekeyCategory`,
+            // but their queued payloads still name the old ids.
+            let freshIDs = Array(categoryMap.values)
+            let placeholders = freshIDs.map { _ in "?" }.joined(separator: ",")
+            let touched = try String.fetchAll(db, sql: """
+                SELECT DISTINCT entry_id FROM entry_categories
+                WHERE category_id IN (\(placeholders))
+                """, arguments: StatementArguments(freshIDs))
+            try Self.refreshEntryPayloads(db, entryIDs: touched)
+            // The running draft's category snapshot must follow as well, or
+            // the next Stop would fail on the dangling reference.
+            if let row = try Row.fetchOne(db, sql: "SELECT category_ids FROM timer_state WHERE id = 'singleton'"),
+               let joined: String = row["category_ids"] {
+                let ids = Self.categoryIDs(from: joined)
+                let remapped = Self.deduplicate(ids.map { categoryMap[$0] ?? $0 })
+                if remapped != ids {
+                    try db.execute(
+                        sql: "UPDATE timer_state SET category_ids = ? WHERE id = 'singleton'",
+                        arguments: [remapped.joined(separator: ",")]
+                    )
+                }
+            }
+        }
+    }
+
+    /// Whether `(resource, record_id)` has a pending create or delete outbox
+    /// row. Creates carry device-minted ids that were never pushed (safe to
+    /// keep under their ids); deletes must still propagate to the relay.
+    private static func hasPendingCreateOrDelete(
+        _ db: Database,
+        resource: String,
+        recordID: String
+    ) throws -> Bool {
+        let count = try Int.fetchOne(db, sql: """
+            SELECT COUNT(*) FROM outbox
+            WHERE resource = ? AND record_id = ? AND op IN ('create', 'delete')
+            """, arguments: [resource, recordID]) ?? 0
+        return count > 0
+    }
+
+    /// Rekeys one category to a fresh id: deletes the old row (its joins
+    /// cascade), inserts the identical row under the fresh id, re-inserts
+    /// every affected entry's joins with the reference rewritten, and
+    /// refreshes the affected entries' pending payloads from the live join
+    /// state. Returns the fresh record.
+    private static func rekeyCategory(_ db: Database, old: Category, freshID: String) throws -> Category {
+        let affected = try String.fetchAll(db, sql: """
+            SELECT DISTINCT entry_id FROM entry_categories WHERE category_id = ?
+            """, arguments: [old.id])
+        var joins: [String: [String]] = [:]
+        for entryID in affected {
+            let ids = try String.fetchAll(db, sql: """
+                SELECT category_id FROM entry_categories
+                WHERE entry_id = ? ORDER BY position
+                """, arguments: [entryID])
+            joins[entryID] = Self.deduplicate(ids.map { $0 == old.id ? freshID : $0 })
+        }
+        try db.execute(sql: "DELETE FROM categories WHERE id = ?", arguments: [old.id])
+        let fresh = Category(
+            id: freshID, name: old.name, icon: old.icon,
+            createdAt: old.createdAt, updatedAt: old.updatedAt
+        )
+        try fresh.insert(db)
+        for (entryID, categoryIDs) in joins {
+            try Self.replaceEntryCategories(db: db, entryID: entryID, categoryIDs: categoryIDs)
+        }
+        try Self.refreshEntryPayloads(db, entryIDs: affected)
+        return fresh
+    }
+
+    /// Rekeys one entry to a fresh id, preserving every owned field and the
+    /// given ordered category set (which must reference existing categories).
+    /// Returns the fresh record.
+    private static func rekeyEntry(
+        _ db: Database,
+        old: TimeEntry,
+        categoryIDs: [String],
+        freshID: String
+    ) throws -> TimeEntry {
+        let fresh = TimeEntry(
+            id: freshID,
+            activityText: old.activityText,
+            startedAt: old.startedAt,
+            endedAt: old.endedAt,
+            durationSeconds: old.durationSeconds,
+            source: old.source,
+            sourceRef: old.sourceRef,
+            categoryIDs: categoryIDs,
+            notes: old.notes,
+            createdAt: old.createdAt,
+            updatedAt: old.updatedAt
+        )
+        // Delete first: the (source, source_ref) unique index would reject
+        // cloning a non-null provenance pair while the old row still exists.
+        try db.execute(sql: "DELETE FROM entries WHERE id = ?", arguments: [old.id])
+        try db.execute(
+            sql: """
+                INSERT INTO entries (id, activity_text, notes, started_at, ended_at, duration_seconds,
+                                     source, source_ref, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+            arguments: [
+                fresh.id, fresh.activityText, fresh.notes, fresh.startedAt,
+                fresh.endedAt, fresh.durationSeconds, fresh.source,
+                fresh.sourceRef, fresh.createdAt, fresh.updatedAt,
+            ]
+        )
+        try Self.replaceEntryCategories(db: db, entryID: freshID, categoryIDs: categoryIDs)
+        return fresh
+    }
+
+    /// Rewrites pending entry create/update payloads from the current live
+    /// join state, so a later drain pushes corrected references instead of
+    /// stale ones (used after a category rekey moves joins).
+    private static func refreshEntryPayloads(_ db: Database, entryIDs: [String]) throws {
+        for entryID in entryIDs {
+            guard let snapshot = try Self.fetchEntryRow(db, id: entryID) else { continue }
+            let payload = try String(data: JSONEncoder().encode(snapshot.entry), encoding: .utf8)
+            try db.execute(
+                sql: """
+                    UPDATE outbox SET payload = ?
+                    WHERE resource = 'entry' AND record_id = ? AND op IN ('create', 'update')
+                    """,
+                arguments: [payload, entryID]
+            )
+        }
+    }
+
+    /// Heals an unresolvable category id collision by rekeying the local row
+    /// onto a freshly-minted id (fix-cross-account-id-collision): every
+    /// pending create/update outbox row for the old id is dropped (the fresh
+    /// create below carries the current state — observably the stuck row
+    /// rewritten in place), local joins and pending entry payloads follow
+    /// the fresh id, and a create for the fresh id is enqueued for the
+    /// caller's retry push. Pending delete rows are preserved. Returns the
+    /// fresh record, or nil when no local row remains (the caller applies
+    /// delete-wins / loud-failure rules).
+    func healCategoryCollision(recordID: String) throws -> Category? {
+        try dbQueue.write { db in
+            guard let old = try Category.fetchOne(db, key: recordID) else { return nil }
+            let fresh = try Self.rekeyCategory(db, old: old, freshID: recordIDGenerator.newID())
+            try Self.dropPendingCreateOrUpdate(db, resource: "category", recordID: recordID)
+            try Self.enqueueOutbox(db: db, resource: "category", recordID: fresh.id, op: "create", payload: fresh)
+            return fresh
+        }
+    }
+
+    /// Heals an unresolvable entry id collision: same shape as
+    /// `healCategoryCollision` (rekey, drop superseded create/update rows,
+    /// enqueue a fresh create for the caller's retry push). The fresh clone
+    /// keeps text, notes, timing, provenance, and categories intact.
+    /// Returns the fresh record, or nil when no local row remains.
+    func healEntryCollision(recordID: String) throws -> TimeEntry? {
+        try dbQueue.write { db in
+            guard let snapshot = try Self.fetchEntryRow(db, id: recordID) else { return nil }
+            let fresh = try Self.rekeyEntry(
+                db, old: snapshot.entry,
+                categoryIDs: snapshot.categoryIDs,
+                freshID: recordIDGenerator.newID()
+            )
+            try Self.dropPendingCreateOrUpdate(db, resource: "entry", recordID: recordID)
+            try Self.enqueueOutbox(db: db, resource: "entry", recordID: fresh.id, op: "create", payload: fresh)
+            return fresh
+        }
+    }
+
     /// The last-synced cursor for a resource, or nil on first sync.
     func lastSyncedAt(resource: String) throws -> Date? {
         try dbQueue.read { db in

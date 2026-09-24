@@ -39,8 +39,8 @@ struct RootView: View {
             }
             .onChange(of: session.state) { newState in
                 switch newState {
-                case .signedIn:
-                    container.syncController.activate()
+                case .signedIn(let cached):
+                    container.syncController.activate(accountId: cached.id)
                 case .signedOut:
                     container.syncController.deactivate()
                 }

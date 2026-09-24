@@ -44,6 +44,15 @@ final class SyncController: ObservableObject {
     /// manual) share one cycle instead of racing.
     private var cycleTask: Task<Void, Never>?
 
+    /// Set when `activate(accountId:)` detects a sign-in to a different user
+    /// id than the sync cursors belong to (OTP vs SiWA are separate relay
+    /// identities). The next first-sync pull then skips the destructive
+    /// category-snapshot reconciliation: the new account's snapshot (often
+    /// empty) must not delete the preserved local catalog before the drain
+    /// pushes it. Tombstones still apply in that cycle, so genuine remote
+    /// deletes converge via the tombstone path.
+    private var skipReconcileOnce = false
+
     /// Cycle diagnostics (Console): secret-free strings only — the same codes
     /// and messages surfaced in UI. Never tokens, bodies, or emails.
     private static let logger = Logger(subsystem: "com.antonkosenko.timeoflifeapp", category: "sync")
@@ -62,11 +71,56 @@ final class SyncController: ObservableObject {
 
     /// Activates sync on sign-in: performs a first-sync (pull-then-push) and
     /// begins responding to triggers.
-    func activate() {
+    ///
+    /// - Parameter accountId: the signed-in user id. When it differs from the
+    ///   id the sync cursors belong to, cursors are reset (next pull is full),
+    ///   clean locals are re-enqueued for the drain, and the snapshot
+    ///   reconciliation is skipped once so an empty new-account relay cannot
+    ///   wipe the local catalog and strip every entry's categories. Nil keeps
+    ///   the legacy behavior (used by tests without a session).
+    func activate(accountId: String? = nil) {
+        // Relogin while a cycle is in flight (or idle-but-active): the
+        // `guard status` below would swallow the account switch and the next
+        // steady cycle would reconcile the preserved local catalog against
+        // the new account's snapshot. Handle the switch even when active by
+        // cancelling into a fresh first-sync that skips reconciliation once.
+        if status != .inactive, let pendingAccountId = accountId {
+            Task { [weak self] in
+                guard let self else { return }
+                do {
+                    let changed = try await self.store.switchSyncAccountIfNeeded(to: pendingAccountId)
+                    guard changed else { return }
+                    self.cycleTask?.cancel()
+                    self.cycleTask = nil
+                    self.status = .syncing
+                    self.skipReconcileOnce = true
+                    let task: Task<Void, Never> = Task { [weak self] in
+                        await self?.runCycle(firstSync: true)
+                    }
+                    self.cycleTask = task
+                    await task.value
+                } catch {
+                    Self.logger.error("sync account switch failed: \(error.localizedDescription, privacy: .public)")
+                }
+            }
+            return
+        }
         guard status == .inactive else { return }
         status = .syncing
+        let pendingAccountId = accountId
         cycleTask = Task { [weak self] in
-            await self?.runCycle(firstSync: true)
+            guard let self else { return }
+            if let pendingAccountId {
+                do {
+                    let changed = try await self.store.switchSyncAccountIfNeeded(to: pendingAccountId)
+                    if changed {
+                        self.skipReconcileOnce = true
+                    }
+                } catch {
+                    Self.logger.error("sync account switch failed: \(error.localizedDescription, privacy: .public)")
+                }
+            }
+            await self.runCycle(firstSync: true)
         }
     }
 
@@ -75,6 +129,7 @@ final class SyncController: ObservableObject {
     func deactivate() {
         cycleTask?.cancel()
         cycleTask = nil
+        skipReconcileOnce = false
         status = .inactive
     }
 
@@ -129,7 +184,9 @@ final class SyncController: ObservableObject {
         Self.logger.info("sync cycle start firstSync=\(firstSync)")
         do {
             if firstSync {
-                try await pull(modifiedSince: nil)
+                let skipReconcile = skipReconcileOnce
+                skipReconcileOnce = false
+                try await pull(modifiedSince: nil, skipReconcile: skipReconcile)
             }
             try await applyTombstones()
             try await pushBufferedDeletions()
@@ -154,11 +211,18 @@ final class SyncController: ObservableObject {
     /// Ordering: the full Category snapshot is fetched and merged FIRST so
     /// every referenced category exists locally before Entries are merged
     /// (join foreign keys stay enforced).
-    private func pull(modifiedSince: Date?) async throws {
+    private func pull(modifiedSince: Date?, skipReconcile: Bool = false) async throws {
         let categories = try await remote.fetchCategories()
-        try await reconcileCategories(categories)
-        for category in categories {
-            try await applyServer(category)
+        if skipReconcile {
+            Self.logger.info("sync skips snapshot reconciliation after account switch; drain pushes preserved locals first")
+            for category in categories {
+                try await applyServer(category)
+            }
+        } else {
+            try await reconcileCategories(categories)
+            for category in categories {
+                try await applyServer(category)
+            }
         }
 
         let categoryCursor: Date?
@@ -367,12 +431,14 @@ final class SyncController: ObservableObject {
         let deletions: [Deletion]
         do {
             deletions = try await remote.fetchDeletions(since: cursor)
-        } catch let error as APIError where error.code == "not_found" {
+        } catch let error as APIError where error.isNotFound {
             // Pre-tombstone relay (no /deletions route): skip statelessly and
             // run drain+pull anyway — a later relay upgrade just starts
             // working, and push-404 convergence below still heals per-record
-            // wedges against such relays. Any other fetch error still fails
-            // the cycle.
+            // wedges against such relays. The missing route answers with a
+            // bare chi/proxy 404 (no uniform envelope, hence `http_404`), so
+            // the guard keys off `isNotFound`, not the envelope code alone.
+            // Any other fetch error still fails the cycle.
             Self.logger.info("sync tombstones unsupported by relay; skipping")
             return
         }
@@ -422,8 +488,9 @@ final class SyncController: ObservableObject {
                             Self.logger.error("sync ignores unknown buffered resource \(deletion.resource, privacy: .public)")
                             throw SyncError.unknownOutboxOp(deletion.resource, "delete")
                         }
-                    } catch let error as APIError where error.code == "not_found" {
+                    } catch let error as APIError where error.isNotFound {
                         // Already gone on the relay — converged, nothing to do.
+                        // `isNotFound` covers the bare non-envelope 404 too.
                         Self.logger.info("sync buffered delete 404-as-success \(deletion.resource, privacy: .public) \(deletion.recordID, privacy: .public)")
                     }
                 }
@@ -500,11 +567,7 @@ final class SyncController: ObservableObject {
     /// Resolves one failed push. Returns true when the row is resolved and
     /// the drain may continue; false rethrows the original error loudly.
     private func resolvePushError(_ row: OutboxRow, error: APIError) async throws -> Bool {
-        switch error.code {
-        case "conflict", "category_exists", "duplicate_import":
-            try await resolveConflict(row, code: error.code ?? "", details: error.details)
-            return true
-        case "not_found":
+        if error.isNotFound {
             // 404 on DELETE → treat as success (already gone). A push
             // for a tombstone-less relay-missing record resurrects
             // from local data and retries once (see
@@ -515,6 +578,11 @@ final class SyncController: ObservableObject {
                 return true
             }
             return try await resurrectAndRetry(row)
+        }
+        switch error.code {
+        case "conflict", "category_exists", "duplicate_import":
+            try await resolveConflict(row, code: error.code ?? "", details: error.details)
+            return true
         case "validation_error":
             // 422 unknown `category_ids` on entry create/update →
             // prune to the relay-known remainder and retry once (see
@@ -565,11 +633,18 @@ final class SyncController: ObservableObject {
                     try await remote.createCategory(local)
                     knownIDs.insert(id)
                 } catch let error as APIError where error.code == "category_exists" {
-                    guard let winningID = error.details["id"] else { throw error }
-                    try await remapCategoryReferences(from: id, to: winningID)
-                    knownIDs.insert(winningID)
-                    if let fresh = try await store.outboxRow(id: row.id) {
-                        currentRow = fresh
+                    if let winningID = Self.usableWinnerID(error.details) {
+                        try await remapCategoryReferences(from: id, to: winningID)
+                        knownIDs.insert(winningID)
+                    } else {
+                        // Unresolvable cross-account id (missing/empty
+                        // winner): heal the referenced category onto a fresh
+                        // id and push it now, so the entry push below carries
+                        // the full set (no 422, no local loss).
+                        knownIDs.insert(try await healEnsuredCategory(id))
+                    }
+                    if let reread = try await store.outboxRow(id: row.id) {
+                        currentRow = reread
                     }
                     didRemap = true
                     break
@@ -578,6 +653,24 @@ final class SyncController: ObservableObject {
             if !didRemap { break }
         }
         return currentRow
+    }
+
+    /// Heals one ensure-referenced category with an unresolvable id onto a
+    /// fresh id and pushes it now. Returns the fresh id for the known-ids
+    /// cache. A heal failure fails loudly with a clear secret-free
+    /// diagnostic and the row still queued; the enqueued fresh create
+    /// converges on the next cycle.
+    private func healEnsuredCategory(_ id: String) async throws -> String {
+        guard let fresh = try await store.healCategoryCollision(recordID: id) else {
+            throw SyncError.unresolvableCollision("category", id)
+        }
+        do {
+            try await remote.createCategory(fresh)
+        } catch _ as APIError {
+            throw SyncError.unresolvableCollision("category", id)
+        }
+        try await store.removeOutboxRow(resource: "category", recordID: fresh.id)
+        return fresh.id
     }
 
     /// Recovers an entry create/update rejected with 422 `category_ids`:
@@ -718,23 +811,132 @@ final class SyncController: ObservableObject {
 
     /// Resolves a push conflict per the sync-client spec:
     /// - 409 `conflict` → adopt the server's version (keep-latest) + clear the row.
-    /// - 409 `category_exists` → remap local entry joins to the winning id
-    ///   + clear the row.
-    /// - 409 `duplicate_import` → the relay already has the record; clear the row.
+    /// - 409 `category_exists` with a usable winner id → remap local entry
+    ///   joins to the winning id + clear the row (proven path, untouched).
+    /// - 409 `category_exists` with a missing/empty winner id → unresolvable
+    ///   cross-account id collision: self-heal onto a fresh id and retry once
+    ///   (never a winner fetch with an empty id).
+    /// - 409 `duplicate_import` → disambiguate with a single GET: same import
+    ///   keys on the relay mean a true replay (clear silently); `not_found`
+    ///   (or same id with different keys) means a cross-user id collision
+    ///   (self-heal like the category path).
     private func resolveConflict(_ row: OutboxRow, code: String, details: [String: String]) async throws {
         switch code {
         case "conflict":
             try await adoptServerVersion(row)
         case "category_exists":
-            if let winningID = details["id"] {
-                try await remapCategoryReferences(from: row.recordID, to: winningID)
+            guard row.resource == "category" else { break }
+            guard let winningID = Self.usableWinnerID(details) else {
+                try await healCategoryCollisionAndRetry(row)
+                return
             }
+            try await remapCategoryReferences(from: row.recordID, to: winningID)
         case "duplicate_import":
-            break // relay already has the record; nothing to do
+            guard row.resource == "entry" else { break }
+            try await disambiguateDuplicateImport(row)
+            return
         default:
             break
         }
         try await store.removeOutboxRow(id: row.id)
+    }
+
+    /// A winner id is usable only when present and non-empty. A missing or
+    /// empty winner (the relay's unresolvable-collision form) must never
+    /// become a fetch: there is no route for an empty id, only a mystery
+    /// bare 404 every cycle.
+    private static func usableWinnerID(_ details: [String: String]) -> String? {
+        guard let id = details["id"], !id.isEmpty else { return nil }
+        return id
+    }
+
+    /// Self-heals an unresolvable category id collision: rewrites the stuck
+    /// row onto a freshly-minted id (local joins + pending payloads remapped,
+    /// companion rows for the old id superseded), retries the push once, and
+    /// clears the landed row. A failed retry fails loudly with a clear
+    /// secret-free collision diagnostic, keeping the row queued (now under
+    /// the fresh id, so the next cycle pushes it directly). Bounded by
+    /// construction: the retry never re-enters healing, so a repeat
+    /// collision is a loud failure, not a loop. No heal while the record is
+    /// locally deleted (delete-wins): the queued delete converges on its own.
+    private func healCategoryCollisionAndRetry(_ row: OutboxRow) async throws {
+        guard try await store.category(id: row.recordID) != nil else {
+            if try await store.isLocallyDeleted(resource: row.resource, recordID: row.recordID) {
+                try await store.removeOutboxRow(id: row.id)
+                return
+            }
+            throw SyncError.unresolvableCollision(row.resource, row.recordID)
+        }
+        guard let fresh = try await store.healCategoryCollision(recordID: row.recordID) else {
+            throw SyncError.unresolvableCollision(row.resource, row.recordID)
+        }
+        do {
+            try await remote.createCategory(fresh)
+        } catch let error as APIError where error.code == "category_exists" {
+            // The fresh id 409ed with a populated winner (the name landed
+            // concurrently): converge via the existing remap.
+            if let winningID = Self.usableWinnerID(error.details) {
+                try await remapCategoryReferences(from: fresh.id, to: winningID)
+                return
+            }
+            throw SyncError.unresolvableCollision(row.resource, row.recordID)
+        } catch _ as APIError {
+            throw SyncError.unresolvableCollision(row.resource, row.recordID)
+        }
+        try await store.removeOutboxRow(resource: "category", recordID: fresh.id)
+    }
+
+    /// Disambiguates an entry `duplicate_import` 409 with a single GET of
+    /// the pushed id (only on this rare path, never per row): the relay
+    /// holding the same import keys is a true same-account replay (clear
+    /// silently, existing behavior); `not_found` — or the same id with
+    /// different keys — proves a cross-user id collision and routes to the
+    /// same self-heal as the category path.
+    private func disambiguateDuplicateImport(_ row: OutboxRow) async throws {
+        guard let local = try await store.entry(id: row.recordID) else {
+            if try await store.isLocallyDeleted(resource: row.resource, recordID: row.recordID) {
+                try await store.removeOutboxRow(id: row.id)
+                return
+            }
+            throw SyncError.unresolvableCollision(row.resource, row.recordID)
+        }
+        let server: TimeEntry?
+        do {
+            server = try await remote.fetchEntry(id: row.recordID)
+        } catch let error as APIError where error.isNotFound {
+            server = nil
+        }
+        if let server, server.source == local.source, server.sourceRef == local.sourceRef {
+            try await store.removeOutboxRow(id: row.id)
+            return
+        }
+        try await healEntryCollisionAndRetry(row)
+    }
+
+    /// Self-heals an unresolvable entry id collision: same shape as
+    /// `healCategoryCollisionAndRetry` (rewrite in place to a fresh id,
+    /// retry the create once, adopt the landed row by clearing it; loud
+    /// secret-free diagnostic on retry failure; no heal while locally
+    /// deleted). A `duplicate_import` on the fresh-id retry cannot be a
+    /// true replay (fresh ids are relay-unknown), so it fails loudly
+    /// without a second GET — bounded by construction, no loop.
+    private func healEntryCollisionAndRetry(_ row: OutboxRow) async throws {
+        guard try await store.entry(id: row.recordID) != nil else {
+            if try await store.isLocallyDeleted(resource: row.resource, recordID: row.recordID) {
+                try await store.removeOutboxRow(id: row.id)
+                return
+            }
+            throw SyncError.unresolvableCollision(row.resource, row.recordID)
+        }
+        guard let fresh = try await store.healEntryCollision(recordID: row.recordID) else {
+            throw SyncError.unresolvableCollision(row.resource, row.recordID)
+        }
+        do {
+            try await remote.createEntry(fresh)
+        } catch _ as APIError {
+            throw SyncError.unresolvableCollision(row.resource, row.recordID)
+        }
+        try await store.removeOutboxRow(resource: "entry", recordID: fresh.id)
     }
 
     /// Adopts the server's current version of a record (keep-latest). Uses
@@ -798,4 +1000,21 @@ final class SyncController: ObservableObject {
 enum SyncError: Error, Equatable, Sendable {
     case unknownOutboxOp(String, String)
     case missingPayload(String, String)
+    /// An id collision the relay cannot attribute to a usable winner
+    /// (missing/empty winner id): the id is owned by another account.
+    /// Carries the resource and record id only — secret-free by construction.
+    case unresolvableCollision(String, String)
+}
+
+extension SyncError: LocalizedError {
+    var errorDescription: String? {
+        switch self {
+        case let .unknownOutboxOp(resource, op):
+            "sync(unknownOutboxOp): \(resource) \(op)"
+        case let .missingPayload(resource, op):
+            "sync(missingPayload): \(resource) \(op)"
+        case let .unresolvableCollision(resource, recordID):
+            "sync(id_collision): \(resource) \(recordID) is already in use by another account; kept queued"
+        }
+    }
 }

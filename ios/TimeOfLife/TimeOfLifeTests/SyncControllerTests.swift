@@ -998,6 +998,66 @@ struct SyncControllerTests {
         #expect(isIdle(controller.status))
     }
 
+    @Test("bare http_404 on deletions skips tombstones like a pre-tombstone relay")
+    func fetchDeletionsHttp404SkipsTombstones() async throws {
+        let (store, mock, controller) = makeContext()
+        try await store.createEntry(makeEntry(id: "e1", text: "Gym"))
+        // An unregistered /deletions route (or a proxy 404 page) carries no
+        // uniform envelope, so the client sees `http_404`, not `not_found`.
+        mock.fetchDeletionsHandler = { _ in
+            throw APIError.server(code: "http_404", message: "Not Found", details: [:])
+        }
+
+        controller.activate()
+        await waitForCycle(controller)
+
+        // Drain and pull ran normally around the skipped tombstone step.
+        #expect(mock.calls.contains(Call("createEntry", "entry", "e1")))
+        #expect(mock.calls.contains(Call("fetchEntries", "entry", nil)))
+        #expect(try await store.outboxRows().isEmpty)
+        #expect(try await store.lastSyncedAt(resource: "deletions") == nil)
+        #expect(isIdle(controller.status))
+    }
+
+    @Test("bare http_404 on delete is treated as success")
+    func http404OnDeleteIsSuccess() async throws {
+        let (store, mock, controller) = makeContext()
+        try await store.deleteEntry(id: "e1")
+
+        mock.deleteEntryHandler = { _ in
+            throw APIError.server(code: "http_404", message: "Not Found", details: [:])
+        }
+
+        controller.activate()
+        await waitForCycle(controller)
+
+        #expect(try await store.outboxRows().isEmpty)
+        #expect(mock.calls.contains(Call("deleteEntry", "entry", "e1")))
+        #expect(isIdle(controller.status))
+    }
+
+    @Test("stale entry update with a bare http_404 re-posts as create")
+    func entryUpdateHttp404RepostsAsCreate() async throws {
+        let (store, mock, controller) = makeContext()
+        let t0 = Date(timeIntervalSince1970: 1_600_000_000)
+        let t1 = Date(timeIntervalSince1970: 1_650_000_000)
+        try await store.mergeEntry(makeEntry(id: "e1", text: "Gym", createdAt: t0, updatedAt: t0))
+        _ = try await store.updateEntry(makeEntry(id: "e1", text: "Gym", createdAt: t0, updatedAt: t1))
+        mock.updateEntryHandler = { _ in
+            throw APIError.server(code: "http_404", message: "Not Found", details: [:])
+        }
+        var createdIDs: [String] = []
+        mock.createEntryHandler = { createdIDs.append($0.id) }
+
+        controller.activate()
+        await waitForCycle(controller)
+
+        #expect(createdIDs == ["e1"])
+        #expect(try await store.entry(id: "e1") != nil)
+        #expect(try await store.outboxRows().isEmpty)
+        #expect(isIdle(controller.status))
+    }
+
     @Test("failed cycle exposes its message through status")
     func failedCycleExposesMessage() async {
         let (store, mock, controller) = makeContext()
@@ -1431,6 +1491,247 @@ struct SyncControllerTests {
         let entry = try await store.entry(id: "e1")
         #expect(entry?.categoryIDs.isEmpty == true)
         #expect(entry?.updatedAt == stamp)
+        #expect(try await store.outboxRows().isEmpty)
+        #expect(isIdle(controller.status))
+    }
+
+    // MARK: - Account switch (SiWA relogin)
+
+    @Test("account switch preserves clean locals and pushes them to the new relay")
+    func accountSwitchPreservesCleanLocals() async throws {
+        let (store, mock, controller) = makeContext()
+        // Previously-synced dataset for user-A: clean rows, no outbox.
+        try await store.mergeCategory(Category(id: "cat-1", name: "Sport", icon: "tag"))
+        try await store.mergeEntry(makeEntry(id: "e1", text: "Gym", categoryIDs: ["cat-1"]))
+        try await store.setSyncAccountId("user-A")
+        let stale = Date(timeIntervalSince1970: 1_700_000_000)
+        try await store.setLastSyncedAt(resource: "entry", date: stale)
+        // The new account's relay is empty (SiWA mints a separate identity).
+        mock.categoriesResult = []
+        mock.entriesResult = []
+        mock.deletionsResult = []
+
+        controller.activate(accountId: "user-B")
+        await waitForCycle(controller)
+
+        // Adopted under fresh ids: record ids are relay-global, so the old
+        // account's ids are gone locally instead of being re-pushed.
+        #expect(try await store.category(id: "cat-1") == nil)
+        #expect(try await store.entry(id: "e1") == nil)
+        let cats = try await store.categories()
+        #expect(cats.count == 1)
+        let freshCat = try #require(cats.first)
+        #expect(freshCat.id != "cat-1")
+        #expect(freshCat.name == "Sport")
+        let entries = try await store.entries()
+        #expect(entries.count == 1)
+        let freshEntry = try #require(entries.first)
+        #expect(freshEntry.id != "e1")
+        #expect(freshEntry.activityText == "Gym")
+        #expect(freshEntry.categoryIDs == [freshCat.id])
+        // … and the drain pushed the fresh rows to the new relay.
+        let pushedCats = mock.calls.filter { $0.method == "createCategory" }.compactMap(\.id)
+        #expect(pushedCats.first == freshCat.id)
+        #expect(Set(pushedCats) == [freshCat.id])
+        let pushedEntries = mock.calls.filter { $0.method == "createEntry" }.compactMap(\.id)
+        #expect(Set(pushedEntries) == [freshEntry.id])
+        #expect(try await store.outboxRows().isEmpty)
+        #expect(try await store.syncAccountId() == "user-B")
+        // Cursors were reset, so the pull was a full pull (nil cursor).
+        #expect(mock.fetchedModifiedSince.count == 1)
+        #expect(mock.fetchedModifiedSince.first! == nil)
+        #expect(isIdle(controller.status))
+    }
+
+    @Test("same account keeps snapshot reconciliation")
+    func sameAccountKeepsReconciliation() async throws {
+        let (store, mock, controller) = makeContext()
+        try await store.mergeCategory(Category(id: "local-cat", name: "Old", icon: "tag"))
+        try await store.setSyncAccountId("user-A")
+        mock.categoriesResult = []
+
+        controller.activate(accountId: "user-A")
+        await waitForCycle(controller)
+
+        #expect(try await store.category(id: "local-cat") == nil)
+    }
+
+    // MARK: - Cross-account id collision (fix-cross-account-id-collision)
+
+    @Test("category_exists with an empty winner id never fetches and self-heals onto a fresh id")
+    func categoryExistsEmptyWinnerSelfHeals() async throws {
+        let (store, mock, controller) = makeContext()
+        try await store.createCategory(Category(id: "cat-1", name: "Sport", icon: "figure.run"))
+        try await store.createEntry(makeEntry(id: "e1", text: "Gym", categoryIDs: ["cat-1"]))
+        var pushedCategoryIDs: [String] = []
+        var pushedEntries: [TimeEntry] = []
+        mock.createCategoryHandler = { category in
+            pushedCategoryIDs.append(category.id)
+            if category.id == "cat-1" {
+                throw APIError.server(
+                    code: "category_exists", message: "exists",
+                    details: ["id": "", "name": "Sport"]
+                )
+            }
+            if !mock.categoriesResult.contains(where: { $0.id == category.id }) {
+                mock.categoriesResult.append(category)
+            }
+        }
+        mock.createEntryHandler = { pushedEntries.append($0) }
+
+        controller.activate()
+        await waitForCycle(controller)
+
+        // The empty winner never becomes a fetch: no GET with an empty id.
+        #expect(mock.calls.allSatisfy { $0.method != "fetchCategory" })
+        // The row healed onto a fresh id and landed; joins followed intact.
+        #expect(pushedCategoryIDs.first == "cat-1")
+        let freshID = try #require(pushedCategoryIDs.dropFirst().first)
+        #expect(freshID != "cat-1")
+        #expect(try await store.category(id: "cat-1") == nil)
+        #expect(try await store.category(id: freshID)?.name == "Sport")
+        #expect(try await store.entry(id: "e1")?.categoryIDs == [freshID])
+        #expect(pushedEntries.first?.categoryIDs == [freshID])
+        #expect(try await store.outboxRows().isEmpty)
+        #expect(isIdle(controller.status))
+    }
+
+    @Test("category_exists with an empty winner id and a failing retry keeps the row queued with a collision diagnostic")
+    func categoryExistsEmptyWinnerKeepsRowQueued() async throws {
+        let (store, mock, controller) = makeContext()
+        try await store.createCategory(Category(id: "cat-1", name: "Sport", icon: "figure.run"))
+        mock.createCategoryHandler = { _ in
+            throw APIError.server(
+                code: "category_exists", message: "exists",
+                details: ["id": "", "name": "Sport"]
+            )
+        }
+
+        controller.activate()
+        await waitForCycle(controller)
+
+        // No winner fetch was ever issued for the empty id (no mystery http_404).
+        #expect(mock.calls.allSatisfy { $0.method != "fetchCategory" })
+        let rows = try await store.outboxRows()
+        #expect(rows.contains { $0.resource == "category" && $0.op == "create" })
+        guard case .error(let message) = controller.status else {
+            Issue.record("expected error status, got \(controller.status)")
+            return
+        }
+        #expect(message.contains("id_collision"))
+        #expect(message.contains("category"))
+    }
+
+    @Test("category_exists with a missing winner id never fetches, keeps the row queued, and fails loudly")
+    func categoryExistsMissingWinnerKeepsRowQueued() async throws {
+        let (store, mock, controller) = makeContext()
+        try await store.createCategory(Category(id: "cat-1", name: "Sport", icon: "figure.run"))
+        mock.createCategoryHandler = { _ in
+            throw APIError.server(code: "category_exists", message: "exists", details: [:])
+        }
+
+        controller.activate()
+        await waitForCycle(controller)
+
+        #expect(mock.calls.allSatisfy { $0.method != "fetchCategory" })
+        let rows = try await store.outboxRows()
+        #expect(rows.contains { $0.resource == "category" && $0.op == "create" })
+        guard case .error(let message) = controller.status else {
+            Issue.record("expected error status, got \(controller.status)")
+            return
+        }
+        #expect(message.contains("id_collision"))
+    }
+
+    @Test("account switch drops superseded updates but still drains pending deletes")
+    func accountSwitchDropsStaleUpdatesButPreservesDeletes() async throws {
+        let (store, mock, controller) = makeContext()
+        let old = Date(timeIntervalSince1970: 1_600_000_000)
+        try await store.mergeCategory(
+            Category(id: "cat-1", name: "Sport", icon: "tag", createdAt: old, updatedAt: old)
+        )
+        _ = try await store.updateCategory(
+            Category(
+                id: "cat-1", name: "Sport", icon: "figure.run",
+                createdAt: old, updatedAt: Date(timeIntervalSince1970: 1_650_000_000)
+            )
+        )
+        try await store.mergeEntry(makeEntry(id: "e-gone", text: "Old"))
+        try await store.deleteEntry(id: "e-gone")
+        try await store.setSyncAccountId("user-A")
+        mock.categoriesResult = []
+        mock.entriesResult = []
+        mock.deletionsResult = []
+
+        controller.activate(accountId: "user-B")
+        await waitForCycle(controller)
+
+        #expect(isIdle(controller.status))
+        // The stale update for the adopted-away id never pushed …
+        #expect(mock.calls.allSatisfy { $0.method != "updateCategory" })
+        // … the pending delete still drained (404-as-success converges it) …
+        #expect(mock.calls.contains(Call("deleteEntry", "entry", "e-gone")))
+        #expect(try await store.outboxRows().isEmpty)
+        // … and the adopted category landed under a fresh id with latest state.
+        #expect(try await store.category(id: "cat-1") == nil)
+        let cats = try await store.categories()
+        #expect(cats.count == 1)
+        #expect(cats.first?.id != "cat-1")
+        #expect(cats.first?.icon == "figure.run")
+    }
+
+    @Test("duplicate_import with a not_found disambiguation GET self-heals the entry onto a fresh id")
+    func duplicateImportNotFoundSelfHeals() async throws {
+        let (store, mock, controller) = makeContext()
+        try await store.createEntry(
+            makeEntry(id: "e1", text: "Gym", categoryIDs: [], notes: "Leg day")
+        )
+        var pushed: [TimeEntry] = []
+        mock.createEntryHandler = { entry in
+            pushed.append(entry)
+            if entry.id == "e1" {
+                throw APIError.server(code: "duplicate_import", message: "duplicate", details: [:])
+            }
+        }
+        mock.fetchEntryHandler = { _ in
+            throw APIError.server(code: "not_found", message: "gone", details: [:])
+        }
+
+        controller.activate()
+        await waitForCycle(controller)
+
+        // Exactly one disambiguation GET for the pushed id — never per row.
+        #expect(mock.calls.filter { $0.method == "fetchEntry" }.count == 1)
+        #expect(pushed.count == 2)
+        #expect(pushed.first?.id == "e1")
+        let freshID = try #require(pushed.last?.id)
+        #expect(freshID != "e1")
+        let landed = try #require(try await store.entry(id: freshID))
+        #expect(landed.activityText == "Gym")
+        #expect(landed.notes == "Leg day")
+        #expect(try await store.entry(id: "e1") == nil)
+        #expect(try await store.outboxRows().isEmpty)
+        #expect(isIdle(controller.status))
+    }
+
+    @Test("duplicate_import with matching import keys still clears silently")
+    func duplicateImportMatchingKeysClearsSilently() async throws {
+        let (store, mock, controller) = makeContext()
+        try await store.createEntry(makeEntry(id: "e1", text: "Gym"))
+        var pushes = 0
+        mock.createEntryHandler = { _ in
+            pushes += 1
+            throw APIError.server(code: "duplicate_import", message: "duplicate", details: [:])
+        }
+        // The relay holds the same import keys (manual/nil) under this id.
+        mock.fetchEntryHandler = { _ in makeEntry(id: "e1", text: "Gym") }
+
+        controller.activate()
+        await waitForCycle(controller)
+
+        #expect(pushes == 1)
+        #expect(mock.calls.filter { $0.method == "fetchEntry" }.count == 1)
+        #expect(try await store.entry(id: "e1")?.activityText == "Gym")
         #expect(try await store.outboxRows().isEmpty)
         #expect(isIdle(controller.status))
     }
