@@ -97,7 +97,7 @@ ios/TimeOfLife/          SwiftUI app (iOS 15+), XcodeGen-managed (project.yml)
 .github/workflows/       CI: backend.yml + ios.yml (mandatory on every PR)
 .golangci.yml            Go linters (run from backend/)
 ios/TimeOfLife/.swiftlint.yml   Swift linters (run from ios/TimeOfLife/)
-docs/                    Durable repo documentation (this file, docs/ci.md)
+docs/                    Durable repo documentation (this file, docs/ci.md, docs/ios-test-loop.md)
 openspec/                Spec-driven change workflow (see openspec/README.md)
 ```
 
@@ -129,6 +129,8 @@ xcodebuild -scheme TimeOfLife \
 ```
 
 `project.yml` sets warnings-as-errors on the app and test targets. Do not pass those settings globally on the command line because GRDB intentionally compiles with `-suppress-warnings`.
+
+Agents running the iOS suite: follow `docs/ios-test-loop.md` (booted-sim-by-ID destination, `-only-testing` filters, one `xcodebuild` at a time, log-file polling instead of `| tail`).
 
 ## API contract (`/api/v1`)
 
