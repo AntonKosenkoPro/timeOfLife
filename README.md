@@ -60,7 +60,7 @@ open TimeOfLife.xcodeproj
 ```
 
 - `API_BASE_URL` is injected per build configuration: Debug → `http://127.0.0.1:8080` (local backend; ATS allows plain HTTP only to `127.0.0.1`), Release → `https://timeoflife-api.antonkosenko.pro`. On a physical device, use your LAN IP instead.
-- Code signing is disabled in `project.yml` so simulator/CI builds need no Apple Developer account. TestFlight/App Store distribution is deferred (see the comment in `project.yml`).
+- Code signing is split per configuration: **Debug stays unsigned** (simulator/CI need no Apple Developer account); **Release signs** with team `7923U48U87` (development identity; archives sign distribution automatically) and carries the Sign in with Apple entitlement (App ID `com.antonkosenko.timeoflifeapp` must have the SIWA capability enabled in the Apple Developer portal). The backend needs `APPLE_CLIENT_ID=com.antonkosenko.timeoflifeapp` set or `/auth/apple` returns 503.
 - Tests & lint:
 
 ```bash
@@ -74,6 +74,20 @@ Warnings are treated as errors on the app and test targets through `project.yml`
 
 Unit tests cover the auth flow (validators, API client incl. 401→refresh→retry, repositories, auth service + view models) and the local-first layer (GRDB `LocalStore`, `UndoBufferStore`, `SyncController`, provenance). Out of scope: SwiftUI snapshot and on-device keychain tests.
 
+### Sign in with Apple — manual smoke checklist
+
+Unit tests fake the Apple authorization (`AppleAuthorizationProviding`), and Apple's identity-token JWKS is only fetched for real with `APPLE_CLIENT_ID` configured — so the following must be verified manually on a **real device** (the entitlement has no effect in the simulator):
+
+Prerequisites: Release build installed on the device (`Product → Destination → your device`, Release scheme archive or Run with Release config), backend reachable with `APPLE_CLIENT_ID=com.antonkosenko.timeoflifeapp` (local or production), a sandbox/production Apple ID.
+
+1. [ ] **Sheet presents** — Profile → "Enable Sync" → tap *Sign in with Apple*; Apple's native authorization sheet appears (not an error).
+2. [ ] **Sign-in succeeds** — complete the sheet (try a *Hide My Email* address); the app lands signed-in in the shell; Profile shows the session and "Sync now".
+3. [ ] **Backend verified the token** — backend log shows the Apple sign-in line for the user (JWKS fetched, `aud` matched); the relay address `*@privaterelay.appleid.com` is stored as the email with `email_verified=true`.
+4. [ ] **Sync works** — start/stop a timer, run "Sync now"; the entry appears on the relay (check via a second sign-in on another device/simulator, or the backend DB).
+5. [ ] **Cancel is silent** — start the Apple flow, dismiss the sheet; no error banner appears.
+6. [ ] **Offline gates the button** — airplane mode on; the Apple button is disabled (dimmed); the email path still navigates.
+7. [ ] **Idempotent re-sign-in** — sign out, sign in with Apple again; same user (sync history reattaches, no duplicate account).
+
 ## CI (S6)
 
 `.github/workflows/backend.yml` (gofmt, go vet, golangci-lint, test + coverage) and `ios.yml` (xcodegen, swiftlint, warning-as-error build, test) are **mandatory PR checks**. See [`docs/ci.md`](docs/ci.md) for the full pipeline guide.
@@ -84,7 +98,7 @@ The backend deploys to a **GCP Compute Engine VM** (`timeoflife-backend`, us-eas
 
 ## Deferred / out of scope
 
-- **Sign in with Apple follow-ups** — account-deletion token revocation via Apple `/auth/revoke`, nonce replay defense, credential-state observation.
+- **Sign in with Apple follow-ups** — account-deletion token revocation via Apple `/auth/revoke`, nonce replay defense, credential-state observation, identity merging between email-OTP and Apple accounts (kept separate by design for now).
 - **iOS History list/edit UI** — the History day-grouped list and entry editing (tap a row → unified entry form) have shipped (deferred filtering lives in `docs/history-roadmap.md`); the Insights breakdown v1 (period switch + category/text lenses, mirror-only) is implemented.
 - **App-wide Undo UI, "Enable Sync" sheet, "via <Source>" labels, lock-screen Control** — local-first storage/sync foundations are done; these UI surfaces are open tasks in `openspec/changes/local-first-sync-architecture/tasks.md`. Category-scoped undo in Manage Categories is implemented separately.
 - **Kafka** — deferred (S1 names it; not needed yet). **Rate-limit store** — in-memory; Redis before multi-instance.

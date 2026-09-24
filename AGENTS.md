@@ -23,6 +23,7 @@ The repo is spec-driven (`openspec/config.yaml`, `schema: spec-driven`). See `op
 - **No passwords, no plaintext secrets** (R1); tokens in Keychain only; user-enumeration closed (`otp/request` always 202).
 - **iOS strings** go to both `en.lproj` and `ru.lproj` + `L10n` (U4).
 - **XcodeGen-managed** — edit `project.yml`, run `xcodegen generate`; never hand-edit the `.pbxproj`.
+- **Signing is per-config**: Debug unsigned (simulator/CI), Release signed with team `7923U48U87` (SIWA entitlement live; backend needs `APPLE_CLIENT_ID`). Manual smoke checklist: `README.md`.
 - **SwiftUI views use `Theme` semantic colors only**; no raw `Color` literals.
 
 ## Repo layout (short)
@@ -68,7 +69,7 @@ xcodebuild -scheme TimeOfLife -destination 'generic/platform=iOS Simulator' buil
 ## Flow recommendations
 
 - Plan every not obvious task (that will consume over 100k tokens per session)
-- Parallelism budget (Ollama Pro: 3 LLM slots; local work overlaps the queue): default fan-out **4 agents**, hard ceiling **6**; explore-only work stays at **3**
+- Parallelism budget (OpenCode Zen Muse Spark 1.3 Free: ~9–10 concurrent slots measured; local work overlaps the queue): default fan-out **6 agents**, hard ceiling **9**; explore-only work stays at **3**
 - Delegate FIRST via the Task tool — no sequential fallback: any task touching 2+ of backend (`backend/`) / iOS (`ios/TimeOfLife/`) / specs-docs (`openspec/`, `docs/`, `Requirements/`, `Design/`) MUST fan out with one Task call per area in a single message before doing the work yourself; merge results yourself
 - Backend verify (`gofmt`, `go vet`, `golangci-lint`, `go test`) and iOS verify (`swiftlint`, build, test) are disjoint — always run them on separate agents in parallel
 - Serialize single-writer resources: one `xcodebuild` at a time (DerivedData lock), one simulator per test run, never concurrent `xcodegen generate` with project edits, one writer for `openapi.yaml` / `tasks.md` / `project-context.md` / `project.yml` / `Localizable.strings`
