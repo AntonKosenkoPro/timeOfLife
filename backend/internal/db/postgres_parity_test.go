@@ -558,6 +558,56 @@ func TestPostgres_ListDeletions_UserScoping(t *testing.T) {
 	}
 }
 
+// Parity (fix-cross-account-id-collision): cross-user category id reuse
+// answers ErrCategoryExists with a zero-value winner (nil-details 409).
+func TestPostgres_CreateCategory_CrossUserIDCollision(t *testing.T) {
+	store := newParityStore(t)
+	ctx := context.Background()
+	uidA := parityUser(t, store, "pg-xcat-a@example.com")
+	uidB := parityUser(t, store, "pg-xcat-b@example.com")
+	id := uuidV7()
+
+	if _, _, err := store.CreateCategory(ctx, Category{
+		ID: id, UserID: uidA, Name: "Sport", Icon: "tag",
+	}); err != nil {
+		t.Fatalf("user A create: %v", err)
+	}
+	winner, _, err := store.CreateCategory(ctx, Category{
+		ID: id, UserID: uidB, Name: "Other", Icon: "briefcase",
+	})
+	if !errors.Is(err, ErrCategoryExists) {
+		t.Fatalf("expected ErrCategoryExists, got %v", err)
+	}
+	if winner.ID != "" || winner.Name != "" {
+		t.Errorf("cross-user winner lookup must miss (zero winner for nil details), got %+v", winner)
+	}
+}
+
+// Parity (fix-cross-account-id-collision): cross-user entry id push maps to
+// ErrDuplicateImport while GetEntry as the second user answers ErrNotFound.
+func TestPostgres_CreateEntry_CrossUserIDCollision(t *testing.T) {
+	store := newParityStore(t)
+	ctx := context.Background()
+	uidA := parityUser(t, store, "pg-xentry-a@example.com")
+	uidB := parityUser(t, store, "pg-xentry-b@example.com")
+	id := uuidV7()
+	base := time.Date(2026, 7, 27, 9, 0, 0, 0, time.UTC)
+
+	if _, _, err := store.CreateEntry(ctx, Entry{
+		ID: id, UserID: uidA, ActivityText: "Gym", StartedAt: base,
+	}); err != nil {
+		t.Fatalf("user A create: %v", err)
+	}
+	if _, _, err := store.CreateEntry(ctx, Entry{
+		ID: id, UserID: uidB, ActivityText: "Read", StartedAt: base.Add(time.Hour),
+	}); !errors.Is(err, ErrDuplicateImport) {
+		t.Fatalf("expected ErrDuplicateImport, got %v", err)
+	}
+	if _, err := store.GetEntry(ctx, uidB, id); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("expected ErrNotFound for the second user, got %v", err)
+	}
+}
+
 // TestPostgres_UpsertUserByAppleSubject exercises the SIWA upsert against real
 // PostgreSQL: the conflict target must match the partial unique index
 // (idx_users_apple_subject … WHERE apple_subject IS NOT NULL). Omitting the

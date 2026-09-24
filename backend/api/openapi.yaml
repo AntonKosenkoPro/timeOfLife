@@ -890,8 +890,16 @@ components:
         older than the server's); `details` carries the server's current version.
         `category_exists` — a case-insensitive name collision on a category
         create; `details` carries the existing record's id and name.
-        `duplicate_import` — an entry with the same (source, source_ref) already
-        exists (duplicate import prevention).
+        Unresolvable id collision: record ids are relay-global while the
+        winner lookup is user-scoped, so a create whose `id` is committed
+        under another account answers 409 `category_exists` with `details`
+        absent (null) — no usable winner exists. The client MUST NOT build a
+        winner route from such a response; the row is rewritten to a fresh id
+        and retried. `duplicate_import` — an entry with the same (source, source_ref) already
+        exists (duplicate import prevention). A cross-user entry id collision
+        surfaces as the same code; a `GET` of the pushed id answers `not_found`
+        then (the row belongs to the other user), which disambiguates it from
+        a true same-account replay.
       content:
         application/json:
           schema:
@@ -914,6 +922,12 @@ components:
                   details:
                     id: "019639f1-7a3b-7abc-9def-100000000002"
                     name: Sport
+            category_exists_unresolvable:
+              summary: Cross-account id collision (no usable winner, details absent)
+              value:
+                error:
+                  code: category_exists
+                  message: A category with this name already exists.
             duplicate_import:
               summary: Entry with the same source and source_ref already exists
               value:
