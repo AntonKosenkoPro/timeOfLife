@@ -35,7 +35,7 @@ ios/TimeOfLife/          SwiftUI app (iOS 15+), XcodeGen-managed
   TimeOfLife/Features/{Auth,AppShell,TimeTracking,Catalog,Sync,AppleSignIn}
   TimeOfLife/Core/Storage/   LocalStore.swift (GRDB), UndoBufferStore.swift, SessionCache.swift
   TimeOfLife/Core/           networking, keychain, reachability, theme, navigation, DI, components
-docs/                    project-context.md (canonical context), ci.md
+docs/                    project-context.md (canonical context), ci.md, ios-test-loop.md (fast xcodebuild loop)
 openspec/                specs + changes (see above)
 Requirements/FURPS/      FURPS+ table (Common.md, Timetracking.md, Sign-up_and_Sign-in.md, Activity_Catalog_and_Categories.md)
 Design/                  text design system — see Design/README.md
@@ -62,7 +62,7 @@ xcodebuild -scheme TimeOfLife -destination 'generic/platform=iOS Simulator' buil
 ## Required on every iteration (S5)
 
 1. Linters + build green; app/test target warnings are errors via `project.yml`; `gofmt -l .` empty.
-2. Both test suites green (`go test ./...`; `xcodebuild test -scheme TimeOfLife -destination '<available simulator>'`).
+2. Both test suites green (`go test ./...`; `xcodebuild test -scheme TimeOfLife -destination '<available simulator>'` — agent loop rules + timings: `docs/ios-test-loop.md`).
 3. Re-check the relevant `Requirements/FURPS/*.md` rows; fix conflicts.
 4. Update docs if architecture/contract/run steps or visual design changed: `docs/project-context.md`, `README.md`, `openspec/` artifacts + `openspec/config.yaml` guidance, relevant `Design/*.md`, `backend/api/openapi.yaml`. Keep `AGENTS.md` short — point to `docs/project-context.md`.
 5. Prefer existing utilities; remove dead code.
