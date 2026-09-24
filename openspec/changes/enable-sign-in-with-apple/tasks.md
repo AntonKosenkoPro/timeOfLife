@@ -39,5 +39,5 @@
 
 - [x] 6.1 Backend: `go build ./...`, `go test ./... -cover`, `golangci-lint run`, `gofmt -l .`, `go vet ./...` — green (no Go changes expected; run to prove it).
 - [x] 6.2 iOS: `xcodegen generate`, `swiftlint lint --strict`, simulator build + test (`xcodebuild test -scheme TimeOfLife -destination '<available simulator>'`) — green.
-- [ ] 6.3 CI: push a branch and confirm `ios.yml` (and `backend.yml` if touched) pass; PR mergeable with mandatory checks green.
-- [ ] 6.4 Mark this change ready for archive only after the production smoke (section 4) passes; update `docs/project-context.md` "Incomplete / deferred" (SIWA follow-ups: nonce, account deletion, credential-state remain deferred to their own changes).
+- [x] 6.3 CI: push a branch and confirm `ios.yml` (and `backend.yml` if touched) pass; PR mergeable with mandatory checks green. (PR #37: lint-build-test, lint-and-test, validate all pass.)
+- [x] 6.4 Mark this change ready for archive only after the production smoke (section 4) passes; update `docs/project-context.md` "Incomplete / deferred" (SIWA follow-ups: nonce, account deletion, credential-state remain deferred to their own changes). (Production smoke passed 2026-09-24; deferred list updated incl. error-code copy + TRUSTED_PROXIES note.)
