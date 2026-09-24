@@ -9,10 +9,12 @@ options:
 settings:
   base:
     SWIFT_VERSION: "5.0"
-    # Code signing is disabled so simulator/CI builds need no Apple Developer
-    # account. To ship via TestFlight/App Store later, set DEVELOPMENT_TEAM to
-    # your Apple Team ID, flip CODE_SIGNING_REQUIRED/CODE_SIGN_IDENTITY to
-    # "YES"/"Apple Distribution", and supply a provisioning profile.
+    # Code signing is split per configuration so simulator/CI builds need no
+    # Apple Developer account: Debug (base) stays unsigned. Release carries the
+    # team + distribution identity for TestFlight/App Store archives; the SIWA
+    # entitlement (TimeOfLife.entitlements) requires the App ID
+    # com.antonkosenko.timeoflifeapp to have Sign In with Apple enabled in the
+    # portal. To change teams later, update the Release DEVELOPMENT_TEAM below.
     DEVELOPMENT_TEAM: ""
     CODE_SIGN_STYLE: Automatic
     CODE_SIGNING_REQUIRED: NO
@@ -91,6 +93,13 @@ targets:
       configs:
         Debug:
           SWIFT_ACTIVE_COMPILATION_CONDITIONS: DEBUG
+        Release:
+          DEVELOPMENT_TEAM: 7923U48U87
+          CODE_SIGNING_REQUIRED: YES
+          # "Apple Development" (not "Apple Distribution"): with Automatic
+          # signing, device builds need the development identity; archives
+          # still pick the distribution identity automatically.
+          CODE_SIGN_IDENTITY: Apple Development
     dependencies:
       - package: GRDB
         product: GRDB
