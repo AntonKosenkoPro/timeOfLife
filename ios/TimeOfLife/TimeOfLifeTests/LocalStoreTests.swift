@@ -708,6 +708,93 @@ struct LocalStoreTests {
         #expect(try #require((try await store.categories()).first?.id) == adoptedID)
         #expect((try await store.outboxRows()).map(\.recordID) == [adoptedID])
     }
+
+    // MARK: - Adoption map (fix-round-trip-duplication)
+
+    @Test("adoption records old-to-new id mappings and resolves them transitively")
+    func adoptionMapRecordsAndResolves() async throws {
+        let store = try makeStore()
+        try await store.mergeCategory(makeCategory(id: "cat-A", name: "Sport"))
+        try await store.mergeEntry(makeEntry(id: "e-A", activityText: "Gym", categoryIDs: ["cat-A"]))
+        try await store.setSyncAccountId("user-A")
+
+        #expect(try await store.switchSyncAccountIfNeeded(to: "user-B"))
+        let freshCat = try #require(try await store.categories().first)
+        #expect(freshCat.id != "cat-A")
+        let freshEntry = try #require(try await store.entries().first)
+        #expect(freshEntry.id != "e-A")
+
+        // Map rows were written in the adoption transaction.
+        #expect(try await store.resolveAdoption(resource: "category", id: "cat-A") == freshCat.id)
+        #expect(try await store.resolveAdoption(resource: "entry", id: "e-A") == freshEntry.id)
+        // Unknown ids resolve to themselves.
+        #expect(try await store.resolveAdoption(resource: "entry", id: "unknown") == "unknown")
+
+        // A heal extends the chain; resolution follows it transitively.
+        let healedCat = try #require(try await store.healCategoryCollision(recordID: freshCat.id))
+        let healedEntry = try #require(try await store.healEntryCollision(recordID: freshEntry.id))
+        #expect(try await store.resolveAdoption(resource: "category", id: "cat-A") == healedCat.id)
+        #expect(try await store.resolveAdoption(resource: "category", id: freshCat.id) == healedCat.id)
+        #expect(try await store.resolveAdoption(resource: "entry", id: "e-A") == healedEntry.id)
+        #expect(try await store.resolveAdoption(resource: "entry", id: freshEntry.id) == healedEntry.id)
+    }
+
+    // MARK: - Duplicate convergence (fix-round-trip-duplication)
+
+    @Test("convergeDuplicateEntries folds byte-identical generations and keeps divergent copies")
+    func convergeDuplicateEntriesFoldsIdentical() async throws {
+        let store = try makeStore()
+        try await store.mergeCategory(makeCategory(id: "cat-1", name: "Work"))
+        let base = Date(timeIntervalSinceReferenceDate: 2_500)
+        // Three identical generations (as after two account round trips).
+        for id in ["e-1", "e-2", "e-3"] {
+            try await store.mergeEntry(
+                makeEntry(id: id, activityText: "Coding", startedAt: base, categoryIDs: ["cat-1"])
+            )
+        }
+        // A divergent copy (user-edited notes) must survive untouched.
+        try await store.mergeEntry(
+            makeEntry(id: "e-4", activityText: "Coding", startedAt: base, notes: "edited", categoryIDs: ["cat-1"])
+        )
+        // Identical content but a pending create: excluded from folding.
+        _ = try await store.createEntry(
+            makeEntry(id: "e-5", activityText: "Coding", startedAt: base, categoryIDs: ["cat-1"])
+        )
+        // Buffered deletion: stays buffered, never enqueued for the relay.
+        _ = try await store.createEntry(
+            makeEntry(id: "e-6", activityText: "Coding", startedAt: base, categoryIDs: ["cat-1"])
+        )
+        _ = try await store.deleteEntryUndoable(id: "e-6")
+        // Committed deletion: no second delete row is enqueued.
+        try await store.mergeEntry(
+            makeEntry(id: "e-7", activityText: "Coding", startedAt: base, categoryIDs: ["cat-1"])
+        )
+        try await store.deleteEntry(id: "e-7")
+
+        let report = try await store.convergeDuplicateEntriesIfNeeded(accountID: "user-A")
+        #expect(report.foldedGroups == 1)
+        #expect(report.foldedRows == 2)
+
+        // Deterministic survivor: intact refs, earliest createdAt, smallest id.
+        let live = try await store.entries()
+        #expect(Set(live.map(\.id)) == ["e-1", "e-4", "e-5"])
+        let rows = try await store.outboxRows()
+        let deletes = rows.filter { $0.op == "delete" }.map(\.recordID).sorted()
+        #expect(deletes == ["e-2", "e-3", "e-7"])
+        #expect(rows.contains { $0.resource == "entry" && $0.recordID == "e-5" && $0.op == "create" })
+        #expect(!rows.contains { $0.recordID == "e-4" })
+        // e-6 keeps its never-pushed create (the undoable delete clears
+        // nothing while buffered) but gains no delete row.
+        #expect(!rows.contains { $0.recordID == "e-6" && $0.op == "delete" })
+        // The buffered snapshot is untouched.
+        #expect(try await store.isBufferedForDeletion(resource: "entry", recordID: "e-6"))
+
+        // Second run is a no-op (once-flag).
+        let again = try await store.convergeDuplicateEntriesIfNeeded(accountID: "user-A")
+        #expect(again.foldedGroups == 0)
+        #expect(again.foldedRows == 0)
+        #expect(try await store.entries().count == 3)
+    }
 }
 
 @Suite("LocalStore Starter Seeding")

@@ -1736,6 +1736,139 @@ struct SyncControllerTests {
         #expect(isIdle(controller.status))
     }
 
+    // MARK: - Adoption-map pull merge (fix-round-trip-duplication)
+
+    @Test("pull of a mapped-but-unknown entry id merges onto the live row")
+    func pullMappedEntryMergesOntoLiveRow() async throws {
+        let (store, mock, controller) = makeContext()
+        try await store.mergeCategory(Category(id: "cat-A", name: "Sport", icon: "tag"))
+        try await store.mergeEntry(makeEntry(id: "e-A", text: "Gym", categoryIDs: ["cat-A"]))
+        try await store.setSyncAccountId("user-A")
+        #expect(try await store.switchSyncAccountIfNeeded(to: "user-B"))
+        let liveCat = try #require(try await store.categories().first)
+        #expect(liveCat.id != "cat-A")
+        let live = try #require(try await store.entries().first)
+        #expect(live.id != "e-A")
+        // Simulate the drain (adoption creates pushed): rows are clean, so no
+        // collapse may fire — the mapped pull must merge, not insert.
+        for row in try await store.outboxRows() {
+            try await store.removeOutboxRow(id: row.id)
+        }
+        // The relay still holds both generations (stale same-account state).
+        mock.categoriesResult = [
+            Category(
+                id: "cat-A", name: "Sport", icon: "tag",
+                createdAt: liveCat.createdAt, updatedAt: liveCat.updatedAt
+            ),
+            liveCat,
+        ]
+        let newer = Date(timeIntervalSinceNow: 3_600)
+        mock.entriesResult = [
+            makeEntry(id: "e-A", text: "Gym!", categoryIDs: ["cat-A"], updatedAt: newer),
+            live,
+        ]
+        mock.deletionsResult = []
+
+        controller.activate()
+        await waitForCycle(controller)
+
+        // Merged onto the live row: no new row, no outbox row, server wins.
+        #expect(try await store.entries().count == 1)
+        #expect(try await store.entry(id: "e-A") == nil)
+        #expect(try await store.entry(id: live.id)?.activityText == "Gym!")
+        #expect(try await store.categories().count == 1)
+        #expect(try await store.category(id: "cat-A") == nil)
+        #expect(try await store.outboxRows().isEmpty)
+        #expect(isIdle(controller.status))
+    }
+
+    @Test("pull of a mapped id whose live row is deleted stays skipped")
+    func pullMappedEntryToDeletedRowStaysSkipped() async throws {
+        let (store, mock, controller) = makeContext()
+        try await store.mergeCategory(Category(id: "cat-A", name: "Sport", icon: "tag"))
+        try await store.mergeEntry(makeEntry(id: "e-A", text: "Gym", categoryIDs: ["cat-A"]))
+        try await store.setSyncAccountId("user-A")
+        #expect(try await store.switchSyncAccountIfNeeded(to: "user-B"))
+        let liveCat = try #require(try await store.categories().first)
+        let live = try #require(try await store.entries().first)
+        // Simulate the drain, then delete the live row (pending delete).
+        for row in try await store.outboxRows() {
+            try await store.removeOutboxRow(id: row.id)
+        }
+        try await store.deleteEntry(id: live.id)
+        // The relay still lists the old generation plus the pushed live ids.
+        mock.categoriesResult = [Category(id: "cat-A", name: "Sport", icon: "tag"), liveCat]
+        mock.entriesResult = [makeEntry(id: "e-A", text: "Gym", categoryIDs: ["cat-A"])]
+        mock.deletionsResult = []
+
+        controller.activate()
+        await waitForCycle(controller)
+
+        // Delete-wins: the old generation is not resurrected; the pending
+        // delete drains and the cycle goes idle.
+        #expect(try await store.entries().isEmpty)
+        #expect(mock.calls.allSatisfy { $0.method != "createEntry" })
+        #expect(try await store.outboxRows().isEmpty)
+        #expect(isIdle(controller.status))
+    }
+
+    @Test("pull of an unmapped unknown id still inserts")
+    func pullUnmappedUnknownEntryStillInserts() async throws {
+        let (store, mock, controller) = makeContext()
+        try await store.mergeCategory(Category(id: "cat-A", name: "Sport", icon: "tag"))
+        try await store.mergeEntry(makeEntry(id: "e-A", text: "Gym", categoryIDs: ["cat-A"]))
+        // A genuinely new relay row (e.g. from another device) inserts as new.
+        mock.categoriesResult = [Category(id: "cat-A", name: "Sport", icon: "tag")]
+        mock.entriesResult = [
+            makeEntry(id: "e-A", text: "Gym", categoryIDs: ["cat-A"]),
+            makeEntry(id: "e-new", text: "Run", categoryIDs: ["cat-A"]),
+        ]
+        mock.deletionsResult = []
+
+        controller.activate()
+        await waitForCycle(controller)
+
+        #expect(try await store.entries().count == 2)
+        #expect(try await store.entry(id: "e-new")?.activityText == "Run")
+        #expect(try await store.outboxRows().isEmpty)
+        #expect(isIdle(controller.status))
+    }
+
+    @Test("same-account sign-in converges tripled entries and drains loser deletes")
+    func sameAccountSignInConvergesTripledEntries() async throws {
+        let (store, mock, controller) = makeContext()
+        try await store.mergeCategory(Category(id: "cat-A", name: "Sport", icon: "tag"))
+        let base = Date(timeIntervalSinceReferenceDate: 1_000)
+        let tripled = (1 ... 3).map { n in
+            makeEntry(
+                id: "e-\(n)", text: "Gym", categoryIDs: ["cat-A"],
+                startedAt: base, createdAt: base, updatedAt: base
+            )
+        }
+        for entry in tripled {
+            try await store.mergeEntry(entry)
+        }
+        try await store.setSyncAccountId("user-A")
+        // The relay holds the same three generations.
+        mock.categoriesResult = [Category(id: "cat-A", name: "Sport", icon: "tag")]
+        mock.entriesResult = tripled
+        mock.deletionsResult = []
+        var deleted: [String] = []
+        mock.deleteEntryHandler = { deleted.append($0) }
+
+        controller.activate(accountId: "user-A")
+        await waitForCycle(controller)
+
+        // Folded locally to the deterministic survivor; the same cycle's
+        // pull resolved the still-listed losers onto it (no resurrection);
+        // both loser deletes drained.
+        #expect(try await store.entries().count == 1)
+        #expect(try await store.entry(id: "e-1")?.activityText == "Gym")
+        #expect(Set(deleted) == ["e-2", "e-3"])
+        #expect(try await store.outboxRows().isEmpty)
+        #expect(isIdle(controller.status))
+    }
+
     // MARK: - Helpers
 
     private func makeEntry(

@@ -87,21 +87,7 @@ final class SyncController: ObservableObject {
         if status != .inactive, let pendingAccountId = accountId {
             Task { [weak self] in
                 guard let self else { return }
-                do {
-                    let changed = try await self.store.switchSyncAccountIfNeeded(to: pendingAccountId)
-                    guard changed else { return }
-                    self.cycleTask?.cancel()
-                    self.cycleTask = nil
-                    self.status = .syncing
-                    self.skipReconcileOnce = true
-                    let task: Task<Void, Never> = Task { [weak self] in
-                        await self?.runCycle(firstSync: true)
-                    }
-                    self.cycleTask = task
-                    await task.value
-                } catch {
-                    Self.logger.error("sync account switch failed: \(error.localizedDescription, privacy: .public)")
-                }
+                await self.firstSyncAfterSwitch(accountId: pendingAccountId)
             }
             return
         }
@@ -110,17 +96,67 @@ final class SyncController: ObservableObject {
         let pendingAccountId = accountId
         cycleTask = Task { [weak self] in
             guard let self else { return }
-            if let pendingAccountId {
-                do {
-                    let changed = try await self.store.switchSyncAccountIfNeeded(to: pendingAccountId)
-                    if changed {
-                        self.skipReconcileOnce = true
-                    }
-                } catch {
-                    Self.logger.error("sync account switch failed: \(error.localizedDescription, privacy: .public)")
+            await self.firstSync(accountId: pendingAccountId)
+        }
+    }
+
+    /// First-sync entry for an account switch that arrived while active:
+    /// converges duplicates, then switches scope (cancelling into a fresh
+    /// first-sync that skips reconciliation once) exactly like the previous
+    /// inline path. Same-account relogins are a no-op after converging.
+    private func firstSyncAfterSwitch(accountId: String) async {
+        await self.convergeDuplicatesIfNeeded(accountId: accountId)
+        let changed: Bool
+        do {
+            changed = try await self.store.switchSyncAccountIfNeeded(to: accountId)
+        } catch {
+            Self.logger.error("sync account switch failed: \(error.localizedDescription, privacy: .public)")
+            return
+        }
+        guard changed else { return }
+        self.cycleTask?.cancel()
+        self.cycleTask = nil
+        self.status = .syncing
+        self.skipReconcileOnce = true
+        let task: Task<Void, Never> = Task { [weak self] in
+            await self?.runCycle(firstSync: true)
+        }
+        self.cycleTask = task
+        await task.value
+    }
+
+    /// First-sync entry for a fresh activation: converges duplicates, then
+    /// switches scope (when the account changed), then runs the cycle.
+    private func firstSync(accountId: String?) async {
+        if let accountId {
+            await self.convergeDuplicatesIfNeeded(accountId: accountId)
+            do {
+                let changed = try await self.store.switchSyncAccountIfNeeded(to: accountId)
+                if changed {
+                    self.skipReconcileOnce = true
                 }
+            } catch {
+                Self.logger.error("sync account switch failed: \(error.localizedDescription, privacy: .public)")
             }
-            await self.runCycle(firstSync: true)
+        }
+        await self.runCycle(firstSync: true)
+    }
+
+    /// Runs the one-time duplicate-generations convergence before the first
+    /// post-update cycle (fix-round-trip-duplication). It must precede the
+    /// account-switch adoption: folding happens on the outgoing account's
+    /// rows while they are still clean, so the losers' relay deletes drain
+    /// normally and the survivors (not rekeyed losers) are what adoption
+    /// carries forward. Guarded by a per-account once-flag; failures log and
+    /// never fail the cycle.
+    private func convergeDuplicatesIfNeeded(accountId: String) async {
+        do {
+            let report = try await store.convergeDuplicateEntriesIfNeeded(accountID: accountId)
+            if report.foldedRows > 0 {
+                Self.logger.info("sync converged \(report.foldedRows, privacy: .public) duplicate entries in \(report.foldedGroups, privacy: .public) groups, keeping \(report.keptDivergentGroups, privacy: .public) divergent groups")
+            }
+        } catch {
+            Self.logger.error("sync convergence failed: \(error.localizedDescription, privacy: .public)")
         }
     }
 
@@ -254,7 +290,11 @@ final class SyncController: ObservableObject {
     /// Applies a server category only if `server.updated_at > local.updated_at`.
     /// Same-name/different-id rivals resolve by newer-owns-the-name
     /// (category records keep their `category_exists` remap — the only
-    /// name-identity remap left).
+    /// name-identity remap left). A server id unknown locally is first
+    /// resolved through the adoption map (fix-round-trip-duplication):
+    /// a superseded generation merges onto its live successor instead of
+    /// inserting a duplicate; an unpushed live successor collapses onto the
+    /// server id instead of pushing a new generation.
     private func applyServer(_ category: Category) async throws {
         // Delete-wins: the user deleted this record locally (buffered undoable
         // deletion or committed outbox delete) and the relay has not converged
@@ -266,10 +306,37 @@ final class SyncController: ObservableObject {
         }
         if let local = try await store.category(id: category.id) {
             guard category.updatedAt > local.updatedAt else { return }
+        } else {
+            // Locally unknown: resolve through the adoption map before any
+            // name heuristic (fix-round-trip-duplication).
+            let liveID = try await store.resolveAdoption(resource: "category", id: category.id)
+            if liveID != category.id, let live = try await store.category(id: liveID) {
+                if try await store.isLocallyDeleted(resource: "category", recordID: liveID) {
+                    Self.logger.info("sync pull skips generation \(category.id, privacy: .public) of locally deleted category \(liveID, privacy: .public)")
+                    return
+                }
+                if category.updatedAt > live.updatedAt {
+                    try await store.mergeCategory(
+                        Category(
+                            id: liveID, name: category.name, icon: category.icon,
+                            createdAt: live.createdAt, updatedAt: category.updatedAt
+                        )
+                    )
+                    return
+                }
+                if try await store.collapseCategoryIfRedundant(localID: liveID, server: category) {
+                    Self.logger.info("sync pull collapses unpushed category \(liveID, privacy: .public) onto relay generation \(category.id, privacy: .public)")
+                    return
+                }
+                Self.logger.info("sync pull keeps live category \(liveID, privacy: .public); skipping superseded generation \(category.id, privacy: .public)")
+                return
+            }
         }
         if let rival = try await store.category(named: category.name), rival.id != category.id {
             if category.updatedAt > rival.updatedAt {
                 try await store.remapCategoryReferences(from: rival.id, to: category.id, winner: category)
+            } else if try await store.collapseCategoryIfRedundant(localID: rival.id, server: category) {
+                Self.logger.info("sync pull collapses unpushed category \(rival.id, privacy: .public) onto relay generation \(category.id, privacy: .public)")
             } else {
                 Self.logger.info("sync pull keeps local category \(rival.id, privacy: .public); skipping server \(category.id, privacy: .public)")
             }
@@ -286,6 +353,13 @@ final class SyncController: ObservableObject {
     /// version is not newer but the local category set strictly supersets it
     /// via clean local rows, a healing update is enqueued instead (see
     /// `healCategoryForkIfNeeded`) and the local copy is kept.
+    ///
+    /// A server id unknown locally is a possible superseded generation
+    /// (fix-round-trip-duplication): it resolves through the adoption map,
+    /// falling back to a byte-identical live row (pre-fix rewrites were never
+    /// recorded, so old generations are only recognizable by content). The
+    /// generation then merges onto / collapses into / retires in favor of the
+    /// live row instead of inserting a duplicate — and is never inserted.
     private func applyServer(_ entry: TimeEntry, serverCategories: [String: Category]) async throws {
         // Delete-wins (see applyServer(_:)): never resurrect a locally
         // deleted entry.
@@ -301,10 +375,152 @@ final class SyncController: ObservableObject {
                 )
                 return
             }
+            var merged = entry
+            merged.categoryIDs = try await resolveEntryCategoryIDs(entry, serverCategories: serverCategories)
+            try await store.mergeEntry(merged)
+            return
         }
         var merged = entry
         merged.categoryIDs = try await resolveEntryCategoryIDs(entry, serverCategories: serverCategories)
+        let mappedID = try await store.resolveAdoption(resource: "entry", id: entry.id)
+        if try await self.generationCoveredByDelete(serverID: entry.id, mappedID: mappedID) {
+            return
+        }
+        guard let liveRow = try await self.liveGeneration(serverID: entry.id, mappedID: mappedID, merged: merged) else {
+            // Genuinely new (or a mapped generation whose successor is gone):
+            // insert exactly as before.
+            try await store.mergeEntry(merged)
+            return
+        }
+        try await self.applyServerGeneration(
+            server: entry, merged: merged, liveRow: liveRow, serverCategories: serverCategories
+        )
+    }
+
+    /// Delete-wins for a mapped successor that is itself gone locally: the
+    /// generation stays skipped, and a committed delete propagates along the
+    /// proven chain. Returns whether the server row was handled.
+    private func generationCoveredByDelete(serverID: String, mappedID: String) async throws -> Bool {
+        guard mappedID != serverID,
+            try await store.entry(id: mappedID) == nil,
+            try await store.isLocallyDeleted(resource: "entry", recordID: mappedID)
+        else { return false }
+        if try await store.hasPendingDelete(resource: "entry", recordID: mappedID),
+            try await store.isAdoptionRelated(resource: "entry", recordID: mappedID) {
+            try await store.enqueueDeleteRow(resource: "entry", recordID: serverID)
+        }
+        Self.logger.info("sync pull skips generation \(serverID, privacy: .public) of locally deleted entry \(mappedID, privacy: .public)")
+        return true
+    }
+
+    /// Finds the live row a locally-unknown server entry belongs to: the
+    /// mapped successor when the exact chain resolves to a held row,
+    /// otherwise the byte-identical twin (pre-fix generations were never
+    /// recorded). Nil means genuinely new.
+    private func liveGeneration(serverID: String, mappedID: String, merged: TimeEntry) async throws -> TimeEntry? {
+        if mappedID != serverID, let resolved = try await store.entry(id: mappedID) {
+            return resolved
+        }
+        return try await Self.identicalTwin(of: merged, in: store)
+    }
+
+    /// Merges a locally-unknown server generation onto its live row:
+    /// delete-wins (with death propagation along proven chains), newer-wins
+    /// adoption, unpushed-row collapse, superseded-relay-copy retirement, and
+    /// divergent-content preservation — never an insert.
+    private func applyServerGeneration(
+        server: TimeEntry,
+        merged: TimeEntry,
+        liveRow: TimeEntry,
+        serverCategories: [String: Category]
+    ) async throws {
+        if try await store.isLocallyDeleted(resource: "entry", recordID: liveRow.id) {
+            if try await store.hasPendingDelete(resource: "entry", recordID: liveRow.id),
+                try await store.isAdoptionRelated(resource: "entry", recordID: liveRow.id) {
+                // The logical entry was deleted here and the delete is
+                // committed, and the map proves this generation is the same
+                // lineage: propagate the death to it instead of resurrecting
+                // it. Without rewrite history the generation might be another
+                // device's independent row, so it is quietly skipped instead.
+                try await store.enqueueDeleteRow(resource: "entry", recordID: server.id)
+            }
+            Self.logger.info("sync pull skips generation \(server.id, privacy: .public) of locally deleted entry \(liveRow.id, privacy: .public)")
+            return
+        }
+        if merged.updatedAt > liveRow.updatedAt {
+            // Last-write-wins, same as the direct-hit path: the relay copy is
+            // newer, so its content lands on the live row. No outbox row —
+            // the relay already holds this version under the server id.
+            try await store.mergeEntry(
+                TimeEntry(
+                    id: liveRow.id,
+                    activityText: merged.activityText,
+                    startedAt: merged.startedAt,
+                    endedAt: merged.endedAt,
+                    durationSeconds: merged.durationSeconds,
+                    source: merged.source,
+                    sourceRef: merged.sourceRef,
+                    categoryIDs: merged.categoryIDs,
+                    notes: merged.notes,
+                    createdAt: liveRow.createdAt,
+                    updatedAt: merged.updatedAt
+                )
+            )
+            return
+        }
+        if try await store.collapseEntryIfRedundant(localID: liveRow.id, server: merged) {
+            Self.logger.info("sync pull collapses unpushed entry \(liveRow.id, privacy: .public) onto relay generation \(server.id, privacy: .public)")
+            return
+        }
+        guard Self.sameBusinessContent(merged, liveRow) else {
+            // Divergent generations are different logical content: keep the
+            // local row (healing category forks as usual), never auto-merge.
+            try await healCategoryForkIfNeeded(
+                server: server, local: liveRow, isTie: server.updatedAt == liveRow.updatedAt,
+                serverCategories: serverCategories
+            )
+            return
+        }
+        // Tie or older (newer already merged above) with identical content:
+        // retire the superseded relay copy — but only when the live row has
+        // rewrite history (exact chains or a rewrite-minted twin). Without
+        // it, the server row is an independent record that happens to match
+        // (no remap by content for entries): insert it as new, exactly as
+        // before.
+        if try await store.isAdoptionRelated(resource: "entry", recordID: liveRow.id) {
+            try await store.enqueueDeleteRow(resource: "entry", recordID: server.id)
+            Self.logger.info("sync pull retires superseded generation \(server.id, privacy: .public); keeping \(liveRow.id, privacy: .public)")
+            return
+        }
         try await store.mergeEntry(merged)
+    }
+
+    /// The byte-identical live row for a resolved server entry, if exactly
+    /// such rows exist (deterministic smallest id when several do — the same
+    /// tiebreak the one-time convergence ends with). Compares business fields
+    /// only: identity columns (id, created/updated timestamps) are excluded.
+    /// Nil means the server row is genuinely new locally.
+    private static func identicalTwin(of merged: TimeEntry, in store: LocalStore) async throws -> TimeEntry? {
+        let twins = try await store.entries().filter { candidate in
+            Self.sameBusinessContent(candidate, merged)
+        }.sorted { $0.id < $1.id }
+        if twins.count > 1 {
+            Self.logger.info("sync pull found \(twins.count, privacy: .public) identical local rows; converging onto \(twins[0].id, privacy: .public)")
+        }
+        return twins.first
+    }
+
+    /// Byte-identical business content: every field the one-time convergence
+    /// groups by (text, notes, timing, ordered categories, provenance).
+    private static func sameBusinessContent(_ lhs: TimeEntry, _ rhs: TimeEntry) -> Bool {
+        lhs.activityText == rhs.activityText
+            && lhs.notes == rhs.notes
+            && lhs.startedAt == rhs.startedAt
+            && lhs.endedAt == rhs.endedAt
+            && lhs.durationSeconds == rhs.durationSeconds
+            && lhs.source == rhs.source
+            && lhs.sourceRef == rhs.sourceRef
+            && lhs.categoryIDs == rhs.categoryIDs
     }
 
     /// Resolves an entry's category ids against the relay snapshot,
