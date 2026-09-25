@@ -52,8 +52,12 @@ func versionDetails(record any) any {
 }
 
 // idNameDetails returns {id, name} of the winning record for a *_exists 409.
+// A missing winner (unresolvable cross-account id collision — record ids are
+// relay-global while the winner re-query is user-scoped) yields nil details,
+// never empty-string ids/names, so no client ever builds an empty-id route.
+// Populated winners are returned byte-for-byte as before.
 func idNameDetails(record any) any {
-	if v, ok := record.(db.Category); ok {
+	if v, ok := record.(db.Category); ok && v.ID != "" {
 		return map[string]string{"id": v.ID, "name": v.Name}
 	}
 	return nil

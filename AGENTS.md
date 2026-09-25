@@ -18,6 +18,7 @@ The repo is spec-driven (`openspec/config.yaml`, `schema: spec-driven`). See `op
 
 - **LocalStore is the single mutation chokepoint** (GRDB in App Group `group.com.antonkosenko.timeoflifeapp`) — no raw GRDB writes outside it.
 - **Incomplete UI surfaces — do not claim they are done**: UndoToast/shake-to-undo, the "Enable Sync" `AuthFlowView` sheet presentation (Profile currently does a silent `restoreSession()`), "via <Source>" labels, and the iOS 18 lock-screen ControlWidget (no target in `project.yml` yet). Full list: `docs/project-context.md` → "Incomplete / deferred", mirroring open tasks in `local-first-sync-architecture/tasks.md`.
+- **Bug fixes follow `docs/bugfix-process.md`** (reproduce → evidence/logs → OpenSpec proposal reviewed by human → red tests → fix → re-verify → corners → archive). Never diagnose from guesses; if it isn't reproduced or is only a hypothesis, stop and ask the human.
 - **OpenAPI is the authoritative API contract** (`backend/api/openapi.yaml`, S10). Endpoint changes update both sides + the spec.
 - **No backward compat for on-disk formats** (pre-release): edit `Codable` shapes in place, no legacy branches.
 - **No passwords, no plaintext secrets** (R1); tokens in Keychain only; user-enumeration closed (`otp/request` always 202).
@@ -34,7 +35,7 @@ ios/TimeOfLife/          SwiftUI app (iOS 15+), XcodeGen-managed
   TimeOfLife/Features/{Auth,AppShell,TimeTracking,Catalog,Sync,AppleSignIn}
   TimeOfLife/Core/Storage/   LocalStore.swift (GRDB), UndoBufferStore.swift, SessionCache.swift
   TimeOfLife/Core/           networking, keychain, reachability, theme, navigation, DI, components
-docs/                    project-context.md (canonical context), ci.md
+docs/                    project-context.md (canonical context), ci.md, ios-test-loop.md (fast xcodebuild loop)
 openspec/                specs + changes (see above)
 Requirements/FURPS/      FURPS+ table (Common.md, Timetracking.md, Sign-up_and_Sign-in.md, Activity_Catalog_and_Categories.md)
 Design/                  text design system — see Design/README.md
@@ -61,7 +62,7 @@ xcodebuild -scheme TimeOfLife -destination 'generic/platform=iOS Simulator' buil
 ## Required on every iteration (S5)
 
 1. Linters + build green; app/test target warnings are errors via `project.yml`; `gofmt -l .` empty.
-2. Both test suites green (`go test ./...`; `xcodebuild test -scheme TimeOfLife -destination '<available simulator>'`).
+2. Both test suites green (`go test ./...`; `xcodebuild test -scheme TimeOfLife -destination '<available simulator>'` — agent loop rules + timings: `docs/ios-test-loop.md`).
 3. Re-check the relevant `Requirements/FURPS/*.md` rows; fix conflicts.
 4. Update docs if architecture/contract/run steps or visual design changed: `docs/project-context.md`, `README.md`, `openspec/` artifacts + `openspec/config.yaml` guidance, relevant `Design/*.md`, `backend/api/openapi.yaml`. Keep `AGENTS.md` short — point to `docs/project-context.md`.
 5. Prefer existing utilities; remove dead code.

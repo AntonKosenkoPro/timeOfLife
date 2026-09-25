@@ -55,6 +55,17 @@ extension APIError {
         return nil
     }
 
+    /// Whether this is a "record/route missing" 404 in either wire form: the
+    /// uniform envelope (`not_found`, from a registered backend route) or the
+    /// bare status fallback (`http_404`, when the response carries no
+    /// envelope — an unregistered route such as `GET /deletions` on a
+    /// pre-tombstone relay, or a proxy's own 404 page). Sync 404-handling
+    /// (tombstone skip, delete-as-success, update resurrection) must key off
+    /// this, not off the envelope code alone.
+    var isNotFound: Bool {
+        code == "not_found" || code == "http_404"
+    }
+
     /// The `details` map for server errors, otherwise empty.
     var details: [String: String] {
         if case let .server(_, _, details) = self { return details }

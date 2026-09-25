@@ -257,6 +257,19 @@ actor LocalStore {
             // rows) so a restart cannot trip on undecodable payloads.
             try Self.dropActivityUndoRows(db)
         }
+        migrator.registerMigration("v3") { db in
+            // Superseded-generation map (fix-round-trip-duplication): every
+            // adoption/heal/remap/collapse rewrite records OLD → NEW per
+            // resource, so later pulls recognize OLD as a superseded
+            // generation of the live row instead of inserting a duplicate.
+            // No foreign keys: both ends come and go as rows are rekeyed.
+            try db.create(table: "adoption_map") { t in
+                t.column("old_id", .text).notNull()
+                t.column("new_id", .text).notNull()
+                t.column("resource", .text).notNull()
+                t.primaryKey(["old_id", "resource"])
+            }
+        }
         return migrator
     }
 
@@ -571,6 +584,7 @@ actor LocalStore {
         try dbQueue.write { db in
             try db.execute(sql: "DELETE FROM entry_categories WHERE category_id = ?", arguments: [id])
             try db.execute(sql: "DELETE FROM categories WHERE id = ?", arguments: [id])
+            try Self.dropAdoptionOutgoing(db, resource: "category", recordID: id)
             try Self.enqueueOutbox(db: db, resource: "category", recordID: id, op: "delete", payload: nil)
         }
     }
@@ -592,69 +606,96 @@ actor LocalStore {
     /// valid collision recovery into a stub category. Entry joins and
     /// pending Entry payloads are rewritten in the same transaction, and
     /// the losing Category's create row is discarded without emitting DELETE.
-    func remapCategoryReferences( // swiftlint:disable:this function_body_length
+    func remapCategoryReferences(
         from oldID: String,
         to newID: String,
         winner: Category
     ) throws {
         try dbQueue.write { db in
-            let affectedIDs = try String.fetchAll(db, sql: """
-                SELECT entry_id FROM entry_categories
-                WHERE category_id = ? ORDER BY entry_id
-                """, arguments: [oldID])
-
-            let affectedEntries = try affectedIDs.compactMap {
-                try Self.fetchEntryRow(db, id: $0)
-            }
-
-            if oldID != newID {
-                try db.execute(sql: "DELETE FROM entry_categories WHERE category_id = ?", arguments: [oldID])
-                try db.execute(sql: "DELETE FROM categories WHERE id = ?", arguments: [oldID])
-            }
-
-            try db.execute(
-                sql: """
-                    INSERT INTO categories (id, name, icon, created_at, updated_at)
-                    VALUES (?, ?, ?, ?, ?)
-                    ON CONFLICT(id) DO UPDATE SET
-                        name = excluded.name,
-                        icon = excluded.icon,
-                        updated_at = excluded.updated_at
-                    """,
-                arguments: [winner.id, winner.name, winner.icon, winner.createdAt, winner.updatedAt]
-            )
-
-            for snapshot in affectedEntries {
-                let updatedCategoryIDs = Self.deduplicate(
-                    snapshot.categoryIDs.map { $0 == oldID ? newID : $0 }
-                )
-                try Self.replaceEntryCategories(
-                    db: db,
-                    entryID: snapshot.id,
-                    categoryIDs: updatedCategoryIDs
-                )
-                var updated = snapshot.entry
-                updated.categoryIDs = updatedCategoryIDs
-                let payload = try String(
-                    data: JSONEncoder().encode(updated),
-                    encoding: .utf8
-                )
-                try db.execute(
-                    sql: """
-                        UPDATE outbox
-                        SET payload = ?
-                        WHERE resource = 'entry' AND record_id = ?
-                          AND op IN ('create', 'update')
-                        """,
-                    arguments: [payload, snapshot.id]
-                )
-            }
-
-            try db.execute(
-                sql: "DELETE FROM outbox WHERE resource = 'category' AND record_id = ?",
-                arguments: [oldID]
-            )
+            try Self.remapCategory(db: db, from: oldID, to: newID, winner: winner)
         }
+    }
+
+    /// The remap itself inside an open transaction: the losing row is removed
+    /// before the winner is inserted (normalized-name index guard), entry
+    /// joins and pending entry payloads follow the winner, and the losing
+    /// create row is discarded without emitting DELETE. Records the
+    /// supersession in the adoption map — a later pull of the losing id
+    /// resolves to the winner instead of inserting a duplicate.
+    private static func remapCategory(
+        db: Database,
+        from oldID: String,
+        to newID: String,
+        winner: Category
+    ) throws {
+        let affectedIDs = try String.fetchAll(db, sql: """
+            SELECT entry_id FROM entry_categories
+            WHERE category_id = ? ORDER BY entry_id
+            """, arguments: [oldID])
+
+        let affectedEntries = try affectedIDs.compactMap {
+            try Self.fetchEntryRow(db, id: $0)
+        }
+
+        if oldID != newID {
+            try db.execute(sql: "DELETE FROM entry_categories WHERE category_id = ?", arguments: [oldID])
+            try db.execute(sql: "DELETE FROM categories WHERE id = ?", arguments: [oldID])
+        }
+
+        try db.execute(
+            sql: """
+                INSERT INTO categories (id, name, icon, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    name = excluded.name,
+                    icon = excluded.icon,
+                    updated_at = excluded.updated_at
+                """,
+            arguments: [winner.id, winner.name, winner.icon, winner.createdAt, winner.updatedAt]
+        )
+
+        for snapshot in affectedEntries {
+            try Self.rewriteEntryJoinsForRemap(db: db, entry: snapshot, oldID: oldID, newID: newID)
+        }
+
+        try Self.recordAdoption(db, resource: "category", oldID: oldID, newID: newID)
+        try db.execute(
+            sql: "DELETE FROM outbox WHERE resource = 'category' AND record_id = ?",
+            arguments: [oldID]
+        )
+    }
+
+    /// Rewrites one entry's joins and pending create/update payloads from the
+    /// losing category id to the winner inside an open remap transaction.
+    private static func rewriteEntryJoinsForRemap(
+        db: Database,
+        entry: EntryRowSnapshot,
+        oldID: String,
+        newID: String
+    ) throws {
+        let updatedCategoryIDs = Self.deduplicate(
+            entry.categoryIDs.map { $0 == oldID ? newID : $0 }
+        )
+        try Self.replaceEntryCategories(
+            db: db,
+            entryID: entry.id,
+            categoryIDs: updatedCategoryIDs
+        )
+        var updated = entry.entry
+        updated.categoryIDs = updatedCategoryIDs
+        let payload = try String(
+            data: JSONEncoder().encode(updated),
+            encoding: .utf8
+        )
+        try db.execute(
+            sql: """
+                UPDATE outbox
+                SET payload = ?
+                WHERE resource = 'entry' AND record_id = ?
+                  AND op IN ('create', 'update')
+                """,
+            arguments: [payload, entry.id]
+        )
     }
 
     /// Removes an outbox row by (resource, record_id) — used to clear a
@@ -854,6 +895,7 @@ actor LocalStore {
     func deleteEntry(id: String) throws {
         try dbQueue.write { db in
             try db.execute(sql: "DELETE FROM entries WHERE id = ?", arguments: [id])
+            try Self.dropAdoptionOutgoing(db, resource: "entry", recordID: id)
             try Self.enqueueOutbox(db: db, resource: "entry", recordID: id, op: "delete", payload: nil)
         }
     }
@@ -865,32 +907,40 @@ actor LocalStore {
     /// failing the merge on the join foreign key.
     func mergeEntry(_ entry: TimeEntry) throws {
         try dbQueue.write { db in
-            try db.execute(
-                sql: """
-                    INSERT INTO entries (id, activity_text, notes, started_at, ended_at, duration_seconds,
-                                         source, source_ref, created_at, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    ON CONFLICT(id) DO UPDATE SET
-                        activity_text = excluded.activity_text,
-                        notes = excluded.notes,
-                        started_at = excluded.started_at,
-                        ended_at = excluded.ended_at,
-                        duration_seconds = excluded.duration_seconds,
-                        source = excluded.source,
-                        source_ref = excluded.source_ref,
-                        updated_at = excluded.updated_at
-                    """,
-                arguments: [
-                    entry.id, entry.activityText, entry.notes, entry.startedAt,
-                    entry.endedAt, entry.durationSeconds, entry.source, entry.sourceRef,
-                    entry.createdAt, entry.updatedAt,
-                ]
-            )
-            let known = try entry.categoryIDs.filter { categoryID in
-                try Category.fetchOne(db, key: categoryID) != nil
-            }
-            try Self.replaceEntryCategories(db: db, entryID: entry.id, categoryIDs: known)
+            try Self.mergeEntryRow(db: db, entry: entry)
         }
+    }
+
+    /// The merge upsert inside an open transaction: the row plus its ordered
+    /// joins, without any outbox row (the relay already holds this version).
+    /// Join ids the local catalog lacks are pruned (remainder kept) instead
+    /// of failing on the join foreign key.
+    private static func mergeEntryRow(db: Database, entry: TimeEntry) throws {
+        try db.execute(
+            sql: """
+                INSERT INTO entries (id, activity_text, notes, started_at, ended_at, duration_seconds,
+                                     source, source_ref, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    activity_text = excluded.activity_text,
+                    notes = excluded.notes,
+                    started_at = excluded.started_at,
+                    ended_at = excluded.ended_at,
+                    duration_seconds = excluded.duration_seconds,
+                    source = excluded.source,
+                    source_ref = excluded.source_ref,
+                    updated_at = excluded.updated_at
+                """,
+            arguments: [
+                entry.id, entry.activityText, entry.notes, entry.startedAt,
+                entry.endedAt, entry.durationSeconds, entry.source, entry.sourceRef,
+                entry.createdAt, entry.updatedAt,
+            ]
+        )
+        let known = try entry.categoryIDs.filter { categoryID in
+            try Category.fetchOne(db, key: categoryID) != nil
+        }
+        try Self.replaceEntryCategories(db: db, entryID: entry.id, categoryIDs: known)
     }
 
     /// Fetches one entry row (for remap payload rewriting). Categories are
@@ -1061,6 +1111,18 @@ actor LocalStore {
         }
     }
 
+    /// Enqueues a hard-delete push for a record id with no local row change —
+    /// used to retire a superseded relay generation the pull recognized but
+    /// must not insert (fix-round-trip-duplication). A pending delete for the
+    /// same id is never duplicated: the drain converges either row via
+    /// 404-as-success.
+    func enqueueDeleteRow(resource: String, recordID: String) throws {
+        try dbQueue.write { db in
+            guard try !Self.hasPendingDelete(db, resource: resource, recordID: recordID) else { return }
+            try Self.enqueueOutbox(db: db, resource: resource, recordID: recordID, op: "delete", payload: nil)
+        }
+    }
+
     // MARK: - Local deletion tombstones (delete-wins on pull)
 
     /// Whether `(resource, recordID)` has a pending outbox DELETE: a
@@ -1069,12 +1131,37 @@ actor LocalStore {
     /// sees the record on the relay and must not merge it back.
     func hasPendingDelete(resource: String, recordID: String) throws -> Bool {
         try dbQueue.read { db in
-            let count = try Int.fetchOne(db, sql: """
-                SELECT COUNT(*) FROM outbox
-                WHERE resource = ? AND record_id = ? AND op = 'delete'
-                """, arguments: [resource, recordID]) ?? 0
-            return count > 0
+            try Self.hasPendingDelete(db, resource: resource, recordID: recordID)
         }
+    }
+
+    /// Whether `(resource, recordID)` has a pending outbox DELETE inside an
+    /// open transaction.
+    private static func hasPendingDelete(
+        _ db: Database,
+        resource: String,
+        recordID: String
+    ) throws -> Bool {
+        let count = try Int.fetchOne(db, sql: """
+            SELECT COUNT(*) FROM outbox
+            WHERE resource = ? AND record_id = ? AND op = 'delete'
+            """, arguments: [resource, recordID]) ?? 0
+        return count > 0
+    }
+
+    /// Whether `(resource, recordID)` has a pending outbox CREATE inside an
+    /// open transaction (an adoption/heal clone that has not reached the
+    /// relay yet — the only row a pull-side collapse may supersede).
+    private static func hasPendingCreate(
+        _ db: Database,
+        resource: String,
+        recordID: String
+    ) throws -> Bool {
+        let count = try Int.fetchOne(db, sql: """
+            SELECT COUNT(*) FROM outbox
+            WHERE resource = ? AND record_id = ? AND op = 'create'
+            """, arguments: [resource, recordID]) ?? 0
+        return count > 0
     }
 
     /// Whether `(resource, recordID)` sits in the durable undo buffer: a
@@ -1083,16 +1170,26 @@ actor LocalStore {
     /// the later commit would leave a permanent zombie behind.
     func isBufferedForDeletion(resource: String, recordID: String) throws -> Bool {
         try dbQueue.read { db in
-            let rows = try UndoBufferRow.fetchAll(db, sql: "SELECT * FROM undo_buffer")
-            for row in rows {
-                guard let data = row.payload.data(using: .utf8),
-                      let snapshot = try? JSONDecoder().decode(DeletionSnapshot.self, from: data),
-                      snapshot.records.contains(where: { $0.resource == resource && $0.recordID == recordID })
-                else { continue }
-                return true
-            }
-            return false
+            try Self.isBufferedForDeletion(db, resource: resource, recordID: recordID)
         }
+    }
+
+    /// Whether `(resource, recordID)` sits in the durable undo buffer inside
+    /// an open transaction (see the instance wrapper for the rule).
+    private static func isBufferedForDeletion(
+        _ db: Database,
+        resource: String,
+        recordID: String
+    ) throws -> Bool {
+        let rows = try UndoBufferRow.fetchAll(db, sql: "SELECT * FROM undo_buffer")
+        for row in rows {
+            guard let data = row.payload.data(using: .utf8),
+                  let snapshot = try? JSONDecoder().decode(DeletionSnapshot.self, from: data),
+                  snapshot.records.contains(where: { $0.resource == resource && $0.recordID == recordID })
+            else { continue }
+            return true
+        }
+        return false
     }
 
     /// Whether a pull-merge must skip this record: the user deleted it
@@ -1128,6 +1225,7 @@ actor LocalStore {
                     return // R1: the recreation already won.
                 }
                 try db.execute(sql: "DELETE FROM entries WHERE id = ?", arguments: [deletion.recordID])
+                try Self.dropAdoptionOutgoing(db, resource: "entry", recordID: deletion.recordID)
                 try Self.dropPendingCreateOrUpdate(db, resource: "entry", recordID: deletion.recordID)
             case "category":
                 if let local = try Category.fetchOne(db, key: deletion.recordID),
@@ -1137,6 +1235,7 @@ actor LocalStore {
                 }
                 try db.execute(sql: "DELETE FROM entry_categories WHERE category_id = ?", arguments: [deletion.recordID])
                 try db.execute(sql: "DELETE FROM categories WHERE id = ?", arguments: [deletion.recordID])
+                try Self.dropAdoptionOutgoing(db, resource: "category", recordID: deletion.recordID)
                 try Self.dropPendingCreateOrUpdate(db, resource: "category", recordID: deletion.recordID)
             default:
                 break
@@ -1191,6 +1290,566 @@ actor LocalStore {
     }
 
     // MARK: - Sync state (per-resource cursors)
+
+    /// The `local_metadata` key holding the user id the sync cursors and
+    /// outbox convergence belong to. Cursors are per-device rows, so without
+    /// account scoping a sign-in to a *different* account (OTP vs SiWA are
+    /// separate identities by design) would reuse the old account's
+    /// `modified_since`/`deleted_since` and — worse — reconcile the local
+    /// catalog against the new account's (possibly empty) snapshot.
+    static let syncAccountIdKey = "sync_account_id"
+
+    /// The account id the current sync cursors belong to, or nil when no
+    /// account has synced yet on this dataset.
+    func syncAccountId() throws -> String? {
+        try dbQueue.read { db in
+            try Self.metadataValue(db: db, key: Self.syncAccountIdKey)
+        }
+    }
+
+    func setSyncAccountId(_ id: String?) throws {
+        try dbQueue.write { db in
+            if let id {
+                try db.execute(
+                    sql: "INSERT INTO local_metadata (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                    arguments: [Self.syncAccountIdKey, id]
+                )
+            } else {
+                try db.execute(sql: "DELETE FROM local_metadata WHERE key = ?", arguments: [Self.syncAccountIdKey])
+            }
+        }
+    }
+
+    /// Switches the sync scope to `newId`. When the account actually changed,
+    /// clears the per-resource cursors (next pull is a full pull against the
+    /// new account) and adopts every live local category/entry that has no
+    /// pending create or delete row under a freshly-minted record id: record
+    /// ids are relay-global, so pushing the old account's ids into the new
+    /// account would collide with another user's rows
+    /// (fix-cross-account-id-collision). Names, texts, icons, and notes are
+    /// preserved; entry→category references are rewritten to the fresh
+    /// category ids (live joins and kept payloads alike). Records that
+    /// already carry a create row (device-minted ids that were never pushed)
+    /// or a delete row keep both their rows and their ids untouched — the
+    /// drain's self-heal converges them. Stale update rows for adopted-away
+    /// old ids are dropped without pushing (the adoption create carries the
+    /// current state); pending delete rows are preserved so deletions still
+    /// propagate (a 404 there is success). Returns whether the account
+    /// changed. Runs exactly once per account transition; re-sign-in to the
+    /// same account id is a no-op.
+    @discardableResult
+    func switchSyncAccountIfNeeded(to newId: String?) throws -> Bool {
+        guard let newId else { return false }
+        let current = try syncAccountId()
+        guard current != newId else { return false }
+        try dbQueue.write { db in
+            try Self.adoptRecordsForAccountSwitch(db: db, idGenerator: recordIDGenerator)
+            try db.execute(sql: "DELETE FROM sync_state")
+            try db.execute(
+                sql: "INSERT INTO local_metadata (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                arguments: [Self.syncAccountIdKey, newId]
+            )
+        }
+        return true
+    }
+
+    /// Adopts live local rows into a new sync account under fresh record ids,
+    /// in one chokepoint transaction (see `switchSyncAccountIfNeeded`).
+    /// Categories go first so entries can follow the fresh ids in the same
+    /// pass; the running timer draft's category snapshot follows them too.
+    private static func adoptRecordsForAccountSwitch(db: Database, idGenerator: RecordIDGenerating) throws {
+        var categoryMap: [String: String] = [:]
+        for category in try Category.fetchAll(db, sql: "SELECT * FROM categories") {
+            guard try !Self.hasPendingCreateOrDelete(db, resource: "category", recordID: category.id) else { continue }
+            let freshID = idGenerator.newID()
+            let fresh = try Self.rekeyCategory(db, old: category, freshID: freshID)
+            try Self.recordAdoption(db, resource: "category", oldID: category.id, newID: freshID)
+            try Self.enqueueOutbox(db: db, resource: "category", recordID: freshID, op: "create", payload: fresh)
+            try Self.dropPendingCreateOrUpdate(db, resource: "category", recordID: category.id)
+            categoryMap[category.id] = freshID
+        }
+        let entryIDs = try String.fetchAll(db, sql: "SELECT id FROM entries")
+        for entryID in entryIDs {
+            guard let snapshot = try Self.fetchEntryRow(db, id: entryID),
+                  try !Self.hasPendingCreateOrDelete(db, resource: "entry", recordID: snapshot.id)
+            else { continue }
+            let freshID = idGenerator.newID()
+            let remapped = Self.deduplicate(snapshot.categoryIDs.map { categoryMap[$0] ?? $0 })
+            let fresh = try Self.rekeyEntry(db, old: snapshot.entry, categoryIDs: remapped, freshID: freshID)
+            try Self.recordAdoption(db, resource: "entry", oldID: snapshot.id, newID: freshID)
+            try Self.enqueueOutbox(db: db, resource: "entry", recordID: freshID, op: "create", payload: fresh)
+            try Self.dropPendingCreateOrUpdate(db, resource: "entry", recordID: snapshot.id)
+        }
+        if !categoryMap.isEmpty {
+            // Kept (create-row) entries whose references moved under fresh
+            // category ids: their live joins already follow via `rekeyCategory`,
+            // but their queued payloads still name the old ids.
+            let freshIDs = Array(categoryMap.values)
+            let placeholders = freshIDs.map { _ in "?" }.joined(separator: ",")
+            let touched = try String.fetchAll(db, sql: """
+                SELECT DISTINCT entry_id FROM entry_categories
+                WHERE category_id IN (\(placeholders))
+                """, arguments: StatementArguments(freshIDs))
+            try Self.refreshEntryPayloads(db, entryIDs: touched)
+            // The running draft's category snapshot must follow as well, or
+            // the next Stop would fail on the dangling reference.
+            if let row = try Row.fetchOne(db, sql: "SELECT category_ids FROM timer_state WHERE id = 'singleton'"),
+               let joined: String = row["category_ids"] {
+                let ids = Self.categoryIDs(from: joined)
+                let remapped = Self.deduplicate(ids.map { categoryMap[$0] ?? $0 })
+                if remapped != ids {
+                    try db.execute(
+                        sql: "UPDATE timer_state SET category_ids = ? WHERE id = 'singleton'",
+                        arguments: [remapped.joined(separator: ",")]
+                    )
+                }
+            }
+        }
+    }
+
+    /// Whether `(resource, record_id)` has a pending create or delete outbox
+    /// row. Creates carry device-minted ids that were never pushed (safe to
+    /// keep under their ids); deletes must still propagate to the relay.
+    private static func hasPendingCreateOrDelete(
+        _ db: Database,
+        resource: String,
+        recordID: String
+    ) throws -> Bool {
+        let count = try Int.fetchOne(db, sql: """
+            SELECT COUNT(*) FROM outbox
+            WHERE resource = ? AND record_id = ? AND op IN ('create', 'delete')
+            """, arguments: [resource, recordID]) ?? 0
+        return count > 0
+    }
+
+    /// Rekeys one category to a fresh id: deletes the old row (its joins
+    /// cascade), inserts the identical row under the fresh id, re-inserts
+    /// every affected entry's joins with the reference rewritten, and
+    /// refreshes the affected entries' pending payloads from the live join
+    /// state. Returns the fresh record.
+    private static func rekeyCategory(_ db: Database, old: Category, freshID: String) throws -> Category {
+        let affected = try String.fetchAll(db, sql: """
+            SELECT DISTINCT entry_id FROM entry_categories WHERE category_id = ?
+            """, arguments: [old.id])
+        var joins: [String: [String]] = [:]
+        for entryID in affected {
+            let ids = try String.fetchAll(db, sql: """
+                SELECT category_id FROM entry_categories
+                WHERE entry_id = ? ORDER BY position
+                """, arguments: [entryID])
+            joins[entryID] = Self.deduplicate(ids.map { $0 == old.id ? freshID : $0 })
+        }
+        try db.execute(sql: "DELETE FROM categories WHERE id = ?", arguments: [old.id])
+        let fresh = Category(
+            id: freshID, name: old.name, icon: old.icon,
+            createdAt: old.createdAt, updatedAt: old.updatedAt
+        )
+        try fresh.insert(db)
+        for (entryID, categoryIDs) in joins {
+            try Self.replaceEntryCategories(db: db, entryID: entryID, categoryIDs: categoryIDs)
+        }
+        try Self.refreshEntryPayloads(db, entryIDs: affected)
+        return fresh
+    }
+
+    /// Rekeys one entry to a fresh id, preserving every owned field and the
+    /// given ordered category set (which must reference existing categories).
+    /// Returns the fresh record.
+    private static func rekeyEntry(
+        _ db: Database,
+        old: TimeEntry,
+        categoryIDs: [String],
+        freshID: String
+    ) throws -> TimeEntry {
+        let fresh = TimeEntry(
+            id: freshID,
+            activityText: old.activityText,
+            startedAt: old.startedAt,
+            endedAt: old.endedAt,
+            durationSeconds: old.durationSeconds,
+            source: old.source,
+            sourceRef: old.sourceRef,
+            categoryIDs: categoryIDs,
+            notes: old.notes,
+            createdAt: old.createdAt,
+            updatedAt: old.updatedAt
+        )
+        // Delete first: the (source, source_ref) unique index would reject
+        // cloning a non-null provenance pair while the old row still exists.
+        try db.execute(sql: "DELETE FROM entries WHERE id = ?", arguments: [old.id])
+        try db.execute(
+            sql: """
+                INSERT INTO entries (id, activity_text, notes, started_at, ended_at, duration_seconds,
+                                     source, source_ref, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+            arguments: [
+                fresh.id, fresh.activityText, fresh.notes, fresh.startedAt,
+                fresh.endedAt, fresh.durationSeconds, fresh.source,
+                fresh.sourceRef, fresh.createdAt, fresh.updatedAt,
+            ]
+        )
+        try Self.replaceEntryCategories(db: db, entryID: freshID, categoryIDs: categoryIDs)
+        return fresh
+    }
+
+    /// Rewrites pending entry create/update payloads from the current live
+    /// join state, so a later drain pushes corrected references instead of
+    /// stale ones (used after a category rekey moves joins).
+    private static func refreshEntryPayloads(_ db: Database, entryIDs: [String]) throws {
+        for entryID in entryIDs {
+            guard let snapshot = try Self.fetchEntryRow(db, id: entryID) else { continue }
+            let payload = try String(data: JSONEncoder().encode(snapshot.entry), encoding: .utf8)
+            try db.execute(
+                sql: """
+                    UPDATE outbox SET payload = ?
+                    WHERE resource = 'entry' AND record_id = ? AND op IN ('create', 'update')
+                    """,
+                arguments: [payload, entryID]
+            )
+        }
+    }
+
+    /// Heals an unresolvable category id collision by rekeying the local row
+    /// onto a freshly-minted id (fix-cross-account-id-collision): every
+    /// pending create/update outbox row for the old id is dropped (the fresh
+    /// create below carries the current state — observably the stuck row
+    /// rewritten in place), local joins and pending entry payloads follow
+    /// the fresh id, and a create for the fresh id is enqueued for the
+    /// caller's retry push. Pending delete rows are preserved. Returns the
+    /// fresh record, or nil when no local row remains (the caller applies
+    /// delete-wins / loud-failure rules).
+    func healCategoryCollision(recordID: String) throws -> Category? {
+        try dbQueue.write { db in
+            guard let old = try Category.fetchOne(db, key: recordID) else { return nil }
+            let fresh = try Self.rekeyCategory(db, old: old, freshID: recordIDGenerator.newID())
+            try Self.recordAdoption(db, resource: "category", oldID: recordID, newID: fresh.id)
+            try Self.dropPendingCreateOrUpdate(db, resource: "category", recordID: recordID)
+            try Self.enqueueOutbox(db: db, resource: "category", recordID: fresh.id, op: "create", payload: fresh)
+            return fresh
+        }
+    }
+
+    /// Heals an unresolvable entry id collision: same shape as
+    /// `healCategoryCollision` (rekey, drop superseded create/update rows,
+    /// enqueue a fresh create for the caller's retry push). The fresh clone
+    /// keeps text, notes, timing, provenance, and categories intact.
+    /// Returns the fresh record, or nil when no local row remains.
+    func healEntryCollision(recordID: String) throws -> TimeEntry? {
+        try dbQueue.write { db in
+            guard let snapshot = try Self.fetchEntryRow(db, id: recordID) else { return nil }
+            let fresh = try Self.rekeyEntry(
+                db, old: snapshot.entry,
+                categoryIDs: snapshot.categoryIDs,
+                freshID: recordIDGenerator.newID()
+            )
+            try Self.recordAdoption(db, resource: "entry", oldID: recordID, newID: fresh.id)
+            try Self.dropPendingCreateOrUpdate(db, resource: "entry", recordID: recordID)
+            try Self.enqueueOutbox(db: db, resource: "entry", recordID: fresh.id, op: "create", payload: fresh)
+            return fresh
+        }
+    }
+
+    // MARK: - Adoption map (fix-round-trip-duplication)
+
+    /// Records that record id OLD was superseded by NEW (same resource) in
+    /// the open transaction. Upsert: an id brought back to life by a collapse
+    /// replaces its own stale outgoing edge, which keeps the map a functional
+    /// graph (at most one outgoing edge per id) and can never form a lookup
+    /// cycle through rekeys. Self-edges are ignored.
+    private static func recordAdoption(
+        _ db: Database,
+        resource: String,
+        oldID: String,
+        newID: String
+    ) throws {
+        guard oldID != newID else { return }
+        try db.execute(sql: """
+            INSERT INTO adoption_map (old_id, new_id, resource) VALUES (?, ?, ?)
+            ON CONFLICT(old_id, resource) DO UPDATE SET new_id = excluded.new_id
+            """, arguments: [oldID, newID, resource])
+    }
+
+    /// Resolves a record id through the superseded-generation chains,
+    /// transitively: OLD → NEW → NEWER … until an id with no outgoing edge.
+    /// Returns the input unchanged when it was never rewritten. Cycle-safe by
+    /// construction (visited set): a cycle resolves to the first repeated
+    /// node instead of looping. Pure id-chain lookup — never content
+    /// similarity, so it cannot false-positive.
+    func resolveAdoption(resource: String, id: String) throws -> String {
+        try dbQueue.read { db in
+            try Self.resolveAdoptionIn(db: db, resource: resource, id: id)
+        }
+    }
+
+    /// The chain walk inside an open transaction (see `resolveAdoption`).
+    private static func resolveAdoptionIn(db: Database, resource: String, id: String) throws -> String {
+        var seen = Set<String>()
+        var current = id
+        while let next = try String.fetchOne(db, sql: """
+            SELECT new_id FROM adoption_map WHERE old_id = ? AND resource = ?
+            """, arguments: [current, resource]),
+            next != current, !seen.contains(next) {
+            seen.insert(current)
+            current = next
+        }
+        return current
+    }
+
+    /// Whether `id` was minted by a rewrite (adoption/heal/remap/collapse/
+    /// convergence): some edge points at it. Guard for pull-side collapse and
+    /// superseded-generation retirement — a user-created or relay-adopted row
+    /// with no rewrite history must never be folded into a same-content relay
+    /// row (independent records stay independent).
+    private static func hasIncomingAdoption(
+        _ db: Database,
+        resource: String,
+        recordID: String
+    ) throws -> Bool {
+        let count = try Int.fetchOne(db, sql: """
+            SELECT COUNT(*) FROM adoption_map WHERE new_id = ? AND resource = ?
+            """, arguments: [recordID, resource]) ?? 0
+        return count > 0
+    }
+
+    /// Whether `id` is known to the adoption map — either it starts a rewrite
+    /// chain or some edge points at it. Guard for pull-side superseded-
+    /// generation retirement: a row with no rewrite history (user-created,
+    /// relay-adopted, never rewritten) must never retire a same-content relay
+    /// row — independent records stay independent.
+    func isAdoptionRelated(resource: String, recordID: String) throws -> Bool {
+        try dbQueue.read { db in
+            guard (try Self.resolveAdoptionIn(db: db, resource: resource, id: recordID)) == recordID else {
+                return true
+            }
+            return try Self.hasIncomingAdoption(db, resource: resource, recordID: recordID)
+        }
+    }
+
+    /// Drops the stale outgoing edge of a row that is being deleted outside a
+    /// rewrite (user delete, undoable delete, relay tombstone). Incoming edges
+    /// are kept: pulls resolving through them still reach the deleted id and
+    /// stay skipped via delete-wins while the delete is pending. Rewrites
+    /// (adoption/heal/remap/collapse) must NOT call this — the old row's
+    /// deletion there is paired with a fresh outgoing edge recorded in the
+    /// same transaction.
+    private static func dropAdoptionOutgoing(
+        _ db: Database,
+        resource: String,
+        recordID: String
+    ) throws {
+        try db.execute(
+            sql: "DELETE FROM adoption_map WHERE old_id = ? AND resource = ?",
+            arguments: [recordID, resource]
+        )
+    }
+
+    /// Collapses an unpushed local entry onto the relay-held generation it was
+    /// adopted from (fix-round-trip-duplication): when the live row was minted
+    /// by a rewrite (adoption/heal), still carries its never-pushed create,
+    /// and its business content is byte-identical to the server version
+    /// (whose category ids the caller already resolved to local rows), the
+    /// relay already holds this exact content under the server id — so the
+    /// live row adopts the server id, its redundant create/update rows are
+    /// dropped, and nothing is enqueued. User-created rows, pushed rows, and
+    /// content-divergent rows never collapse (the incoming-edge guard keeps
+    /// independent records independent even when timestamps tie). One
+    /// transaction.
+    func collapseEntryIfRedundant(localID: String, server: TimeEntry) throws -> Bool {
+        try dbQueue.write { db in
+            guard let snapshot = try Self.fetchEntryRow(db, id: localID) else { return false }
+            guard try Self.hasIncomingAdoption(db, resource: "entry", recordID: localID),
+                  try !Self.hasPendingDelete(db, resource: "entry", recordID: localID),
+                  try !Self.isBufferedForDeletion(db, resource: "entry", recordID: localID),
+                  try Self.hasPendingCreate(db, resource: "entry", recordID: localID)
+            else { return false }
+            let live = snapshot.entry
+            guard live.activityText == server.activityText,
+                  live.notes == server.notes,
+                  live.startedAt == server.startedAt,
+                  live.endedAt == server.endedAt,
+                  live.durationSeconds == server.durationSeconds,
+                  live.source == server.source,
+                  live.sourceRef == server.sourceRef,
+                  snapshot.categoryIDs == server.categoryIDs
+            else { return false }
+            // Delete first: the (source, source_ref) unique index would reject
+            // cloning a non-null provenance pair while the live row exists.
+            try db.execute(sql: "DELETE FROM entries WHERE id = ?", arguments: [localID])
+            try Self.mergeEntryRow(db: db, entry: server)
+            try Self.recordAdoption(db, resource: "entry", oldID: localID, newID: server.id)
+            try Self.dropPendingCreateOrUpdate(db, resource: "entry", recordID: localID)
+            return true
+        }
+    }
+
+    /// Collapses an unpushed local category onto the relay-held generation it
+    /// was adopted from: same shape as `collapseEntryIfRedundant` (rewrite-
+    /// minted live row, pending create, identical name and icon), reusing the
+    /// remap core so entry joins and pending entry payloads follow the server
+    /// id. A newer local rival keeps its identity (the rival branch only
+    /// collapses rewrite-minted rows); user-created rows are never folded.
+    /// Returns false (no change) unless every condition holds. One transaction.
+    func collapseCategoryIfRedundant(localID: String, server: Category) throws -> Bool {
+        try dbQueue.write { db in
+            guard let live = try Category.fetchOne(db, key: localID) else { return false }
+            guard live.name == server.name, live.icon == server.icon,
+                  try Self.hasIncomingAdoption(db, resource: "category", recordID: localID),
+                  try !Self.hasPendingDelete(db, resource: "category", recordID: localID),
+                  try !Self.isBufferedForDeletion(db, resource: "category", recordID: localID),
+                  try Self.hasPendingCreate(db, resource: "category", recordID: localID)
+            else { return false }
+            try Self.remapCategory(db: db, from: localID, to: server.id, winner: server)
+            return true
+        }
+    }
+
+    /// One live entry with its ordered joins, for duplicate grouping.
+    private struct EntryCandidate {
+        let id: String
+        let entry: TimeEntry
+        let categoryIDs: [String]
+    }
+
+    /// The byte-identical business-payload key (identity columns excluded).
+    /// Two candidates share a key iff they are the same logical content.
+    private static func duplicateKey(of candidate: EntryCandidate) -> [String] {
+        [
+            candidate.entry.activityText,
+            candidate.entry.notes,
+            String(candidate.entry.startedAt.timeIntervalSinceReferenceDate),
+            candidate.entry.endedAt.map { String($0.timeIntervalSinceReferenceDate) } ?? "-",
+            candidate.entry.durationSeconds.map(String.init) ?? "-",
+            candidate.entry.source,
+            candidate.entry.sourceRef ?? "-",
+            candidate.categoryIDs.joined(separator: "\u{1F}"),
+        ]
+    }
+
+    /// The outcome of `convergeDuplicateEntriesIfNeeded(_:)`: how many
+    /// same-account groups folded (and rows removed), for secret-free cycle
+    /// diagnostics. Zero when there was nothing to fold or the run already
+    /// happened.
+    struct ConvergenceReport: Equatable, Sendable {
+        var foldedGroups: Int
+        var foldedRows: Int
+        /// Same text + startedAt but divergent payloads: kept whole, counted
+        /// for the log line so a human can tell folding from keeping.
+        var keptDivergentGroups: Int
+        static let zero = ConvergenceReport(foldedGroups: 0, foldedRows: 0, keptDivergentGroups: 0)
+    }
+
+    /// One-time convergence of duplicate entry generations
+    /// (fix-round-trip-duplication): folds same-account entry groups with
+    /// byte-identical business payloads down to one survivor — the generation
+    /// whose category references are intact (ties: earliest createdAt, then
+    /// smallest id) — deleting the losers locally and enqueueing hard deletes
+    /// for their relay copies (which propagate as tombstones through the
+    /// normal drain, so other devices converge). Groups whose payloads diverge
+    /// in any business field are kept whole, never auto-merged. Rows with any
+    /// outbox row, buffered rows, and locally-deleted rows are excluded.
+    /// Categories need no convergence (same-name remap already collapses
+    /// generations). Guarded by a per-account once-flag in local metadata, so
+    /// it runs exactly once per account — the sync layer calls it before the
+    /// first post-update cycle. One transaction.
+    func convergeDuplicateEntriesIfNeeded(accountID: String) throws -> ConvergenceReport {
+        try dbQueue.write { db in
+            let flagKey = "duplicates_converged_v1:" + accountID
+            guard try Self.metadataValue(db: db, key: flagKey) == nil else { return .zero }
+            defer {
+                try? db.execute(
+                    sql: "INSERT INTO local_metadata (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                    arguments: [flagKey, "1"]
+                )
+            }
+            let candidates = try Self.convergenceCandidates(db: db)
+            let liveCategoryIDs = Set(try String.fetchAll(db, sql: "SELECT id FROM categories"))
+            let plan = Self.convergencePlan(candidates: candidates, liveCategoryIDs: liveCategoryIDs)
+            var foldedRows = 0
+            for fold in plan.folds {
+                try Self.foldDuplicateGroup(db: db, survivor: fold.survivor, losers: fold.losers)
+                foldedRows += fold.losers.count
+            }
+            return ConvergenceReport(
+                foldedGroups: plan.folds.count,
+                foldedRows: foldedRows,
+                keptDivergentGroups: plan.divergentSets
+            )
+        }
+    }
+
+    /// One fold: the survivor stays, every loser is adopted onto it.
+    private struct DuplicateFold {
+        let survivor: EntryCandidate
+        let losers: [EntryCandidate]
+    }
+
+    /// The convergence grouping, pure (no database writes): byte-identical
+    /// groups with a survivor each (intact refs, earliest createdAt, smallest
+    /// id), plus the count of divergent same-text sets kept whole.
+    private static func convergencePlan(
+        candidates: [EntryCandidate],
+        liveCategoryIDs: Set<String>
+    ) -> (folds: [DuplicateFold], divergentSets: Int) {
+        var byKey: [[String]: [EntryCandidate]] = [:]
+        var keyOrder: [[String]] = []
+        for candidate in candidates {
+            let fingerprint = Self.duplicateKey(of: candidate)
+            if byKey[fingerprint] == nil { keyOrder.append(fingerprint) }
+            byKey[fingerprint, default: []].append(candidate)
+        }
+        var folds: [DuplicateFold] = []
+        for fingerprint in keyOrder {
+            guard let group = byKey[fingerprint], group.count > 1 else { continue }
+            let sorted = group.sorted {
+                let lhsIntact = Set($0.categoryIDs).isSubset(of: liveCategoryIDs)
+                let rhsIntact = Set($1.categoryIDs).isSubset(of: liveCategoryIDs)
+                if lhsIntact != rhsIntact { return lhsIntact }
+                if $0.entry.createdAt != $1.entry.createdAt { return $0.entry.createdAt < $1.entry.createdAt }
+                return $0.id < $1.id
+            }
+            folds.append(DuplicateFold(survivor: sorted[0], losers: Array(sorted.dropFirst())))
+        }
+        var seenPayloads: [String: Set<String>] = [:]
+        for candidate in candidates {
+            let setKey = candidate.entry.activityText + "\u{1F}" + String(candidate.entry.startedAt.timeIntervalSinceReferenceDate)
+            seenPayloads[setKey, default: []].insert(Self.duplicateKey(of: candidate).joined(separator: "\u{1F}"))
+        }
+        let divergentSets = seenPayloads.values.filter { $0.count > 1 }.count
+        return (folds, divergentSets)
+    }
+
+    /// Folds one group inside the convergence transaction (see
+    /// `convergeDuplicateEntriesIfNeeded` for the why of each step).
+    private static func foldDuplicateGroup(db: Database, survivor: EntryCandidate, losers: [EntryCandidate]) throws {
+        for loser in losers {
+            try Self.recordAdoption(db, resource: "entry", oldID: loser.id, newID: survivor.id)
+            try db.execute(
+                sql: "UPDATE adoption_map SET new_id = ? WHERE new_id = ? AND resource = 'entry'",
+                arguments: [survivor.id, loser.id]
+            )
+            try db.execute(sql: "DELETE FROM entries WHERE id = ?", arguments: [loser.id])
+            try Self.enqueueOutbox(db: db, resource: "entry", recordID: loser.id, op: "delete", payload: nil)
+        }
+    }
+
+    /// The foldable rows inside an open transaction: live entries with no
+    /// outbox row, no undo-buffer coverage, and no pending delete.
+    private static func convergenceCandidates(db: Database) throws -> [EntryCandidate] {
+        var candidates: [EntryCandidate] = []
+        for row in try Row.fetchAll(db, sql: "SELECT id FROM entries") {
+            let id: String = row["id"]
+            let outboxCount = try Int.fetchOne(db, sql: """
+                SELECT COUNT(*) FROM outbox WHERE resource = 'entry' AND record_id = ?
+                """, arguments: [id]) ?? 0
+            guard outboxCount == 0,
+                  try !Self.isBufferedForDeletion(db, resource: "entry", recordID: id),
+                  let snapshot = try Self.fetchEntryRow(db, id: id)
+            else { continue }
+            candidates.append(EntryCandidate(id: id, entry: snapshot.entry, categoryIDs: snapshot.categoryIDs))
+        }
+        return candidates
+    }
 
     /// The last-synced cursor for a resource, or nil on first sync.
     func lastSyncedAt(resource: String) throws -> Date? {
@@ -1464,6 +2123,7 @@ actor LocalStore {
                 )
                 try db.execute(sql: "DELETE FROM entry_categories WHERE category_id = ?", arguments: [id])
                 try db.execute(sql: "DELETE FROM categories WHERE id = ?", arguments: [id])
+                try Self.dropAdoptionOutgoing(db, resource: "category", recordID: id)
             } catch {
                 return .failure
             }
@@ -1583,6 +2243,7 @@ actor LocalStore {
                     arguments: [UUID().uuidString, payload, deletedAt]
                 )
                 try db.execute(sql: "DELETE FROM entries WHERE id = ?", arguments: [id])
+                try Self.dropAdoptionOutgoing(db, resource: "entry", recordID: id)
             } catch {
                 return .failure
             }

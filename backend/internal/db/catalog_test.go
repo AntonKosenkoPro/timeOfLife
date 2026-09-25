@@ -418,6 +418,62 @@ func TestStore_CrossUserIsolation(t *testing.T) {
 	}
 }
 
+// Cross-account id collision (fix-cross-account-id-collision): record ids are
+// a global PRIMARY KEY while the id pre-check and the winner re-query are
+// user-scoped. Reusing an id committed under another user answers
+// ErrCategoryExists with a zero-value winner (the lookup misses), which the
+// handler must surface as 409 with nil details — never {"id":"","name":""}.
+func TestStore_CreateCategory_CrossUserIDCollision(t *testing.T) {
+	store := setupTestStore(t)
+	ctx := context.Background()
+	u1 := newTestUser(t, store, "xcat-a@example.com")
+	u2 := newTestUser(t, store, "xcat-b@example.com")
+	id := uuidV7()
+
+	if _, _, err := store.CreateCategory(ctx, Category{
+		ID: id, UserID: u1, Name: "Sport", Icon: "tag",
+	}); err != nil {
+		t.Fatalf("user A create: %v", err)
+	}
+	// Distinct name: the failure is purely the global id collision.
+	winner, _, err := store.CreateCategory(ctx, Category{
+		ID: id, UserID: u2, Name: "Other", Icon: "briefcase",
+	})
+	if !errors.Is(err, ErrCategoryExists) {
+		t.Fatalf("expected ErrCategoryExists, got %v", err)
+	}
+	if winner.ID != "" || winner.Name != "" {
+		t.Errorf("cross-user winner lookup must miss (zero winner for nil details), got %+v", winner)
+	}
+}
+
+// Cross-user entry id collision (fix-cross-account-id-collision): the same
+// global-PK trip the client disambiguation relies on. The push maps to
+// ErrDuplicateImport (409) while GetEntry as the second user answers
+// ErrNotFound (404) — the row belongs to the other user.
+func TestStore_CreateEntry_CrossUserIDCollision(t *testing.T) {
+	store := setupTestStore(t)
+	ctx := context.Background()
+	u1 := newTestUser(t, store, "xentry-a@example.com")
+	u2 := newTestUser(t, store, "xentry-b@example.com")
+	id := uuidV7()
+	base := time.Date(2026, 7, 27, 9, 0, 0, 0, time.UTC)
+
+	if _, _, err := store.CreateEntry(ctx, Entry{
+		ID: id, UserID: u1, ActivityText: "Gym", StartedAt: base,
+	}); err != nil {
+		t.Fatalf("user A create: %v", err)
+	}
+	if _, _, err := store.CreateEntry(ctx, Entry{
+		ID: id, UserID: u2, ActivityText: "Read", StartedAt: base.Add(time.Hour),
+	}); !errors.Is(err, ErrDuplicateImport) {
+		t.Fatalf("expected ErrDuplicateImport, got %v", err)
+	}
+	if _, err := store.GetEntry(ctx, u2, id); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("expected ErrNotFound for the second user, got %v", err)
+	}
+}
+
 // ptr returns a pointer to s (helper for patch fields).
 func ptr(s string) *string { return &s }
 
