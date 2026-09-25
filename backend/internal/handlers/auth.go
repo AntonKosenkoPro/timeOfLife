@@ -449,6 +449,11 @@ func (h *Handler) AppleSignIn(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) RefreshToken(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
+	deviceID, ok := requireDeviceID(w, r)
+	if !ok {
+		return
+	}
+
 	var req refreshReq
 	if err := decodeJSON(r, &req); err != nil {
 		h.logger.Warn("invalid refresh body", "error", err)
@@ -476,6 +481,16 @@ func (h *Handler) RefreshToken(w http.ResponseWriter, r *http.Request) {
 		h.logger.Warn("refresh token expired", "userID", storedToken.UserID,
 			"deviceID", storedToken.DeviceID, "createdAt", storedToken.CreatedAt)
 		writeError(w, http.StatusUnauthorized, "refresh_expired", "Refresh token has expired. Please sign in again.", nil)
+		return
+	}
+
+	// The token belongs to a concrete device family: a presentation from a
+	// different device is rejected without revoking anything, so the real
+	// family's tokens stay intact.
+	if deviceID != storedToken.DeviceID {
+		h.logger.Warn("refresh token device mismatch", "userID", storedToken.UserID,
+			"deviceID", deviceID, "tokenDeviceID", storedToken.DeviceID)
+		writeError(w, http.StatusUnauthorized, "invalid_refresh", "Invalid refresh token", nil)
 		return
 	}
 

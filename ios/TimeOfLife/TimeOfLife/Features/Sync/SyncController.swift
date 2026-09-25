@@ -57,13 +57,27 @@ final class SyncController: ObservableObject {
     private var boundUserID: String?
 
     /// The account id the in-flight cycle was started for (nil when no cycle
-    /// runs). The stage boundaries and the drain loop re-check the session
-    /// against it, aborting the cycle on an account change.
+    /// runs). Recorded at cycle entry and cleared by the owning generation's
+    /// defer; the per-row drain guard compares against the cycle's own
+    /// captured `userID` (see `drainOutbox`), so this stays bookkeeping.
     private var activeCycleUserID: String?
 
     /// Single-flight guard: concurrent triggers (foreground + connectivity +
     /// manual) share one cycle instead of racing.
     private var cycleTask: Task<Void, Never>?
+
+    /// Monotonic ownership token for cycles. Every cycle start stamps the
+    /// current generation; `deactivate()` (and only it) invalidates by
+    /// incrementing. A finishing cycle may clear `cycleTask` /
+    /// `activeCycleUserID` only if its generation still owns them — a
+    /// cancelled predecessor finishing after `deactivate()` →
+    /// `activate(newUser)` must never wipe the NEW cycle's handle (defeats
+    /// single-flight) or its same-account guard.
+    private var cycleGeneration = 0
+
+    /// Whether a cycle currently holds the single-flight handle. Test
+    /// observability for the generation fix (deactivate → re-activate race).
+    var isCycleLive: Bool { cycleTask != nil }
 
     /// Cycle diagnostics (Console): secret-free strings only — the same codes
     /// and messages surfaced in UI. Never tokens, bodies, or emails.
@@ -96,14 +110,20 @@ final class SyncController: ObservableObject {
         guard status == .inactive else { return }
         boundUserID = userID
         status = .syncing
+        cycleGeneration += 1
+        let generation = cycleGeneration
         cycleTask = Task { [weak self] in
-            await self?.runCycle(firstSync: true)
+            await self?.runCycle(firstSync: true, generation: generation)
         }
     }
 
     /// Deactivates sync on sign-out. Local data and the outbox are preserved
-    /// (local-first-store spec); the outbox accumulates until the next sign-in.
+    /// (local-first-store spec); the outbox accumulates until the next
+    /// sign-in. Invalidates the generation so a cancelled in-flight cycle,
+    /// finishing after this call, can no longer clear the new cycle's
+    /// handle or guard state.
     func deactivate() {
+        cycleGeneration += 1
         cycleTask?.cancel()
         cycleTask = nil
         boundUserID = nil
@@ -124,8 +144,10 @@ final class SyncController: ObservableObject {
             await inFlight.value
             return
         }
+        cycleGeneration += 1
+        let generation = cycleGeneration
         let task: Task<Void, Never> = Task { [weak self] in
-            await self?.runCycle(firstSync: false)
+            await self?.runCycle(firstSync: false, generation: generation)
         }
         cycleTask = task
         await task.value
@@ -135,8 +157,10 @@ final class SyncController: ObservableObject {
     func trigger(userID: String) {
         guard isBound(to: userID), status != .inactive else { return }
         guard cycleTask == nil else { return }
+        cycleGeneration += 1
+        let generation = cycleGeneration
         cycleTask = Task { [weak self] in
-            await self?.runCycle(firstSync: false)
+            await self?.runCycle(firstSync: false, generation: generation)
         }
     }
 
@@ -172,10 +196,16 @@ final class SyncController: ObservableObject {
     /// change mid-cycle (sign-out or account swap) aborts the in-flight
     /// cycle before any further drain or pull applies to the swapped-out
     /// account's file (sync-client same-account guard).
-    private func runCycle(firstSync: Bool) async {
+    private func runCycle(firstSync: Bool, generation: Int) async {
         defer {
-            cycleTask = nil
-            activeCycleUserID = nil
+            // Only the still-owning generation may clear the single-flight
+            // handle and the cycle guard: a cancelled predecessor finishing
+            // after deactivate() → activate(newUser) must leave the NEW
+            // cycle's state alone.
+            if cycleGeneration == generation {
+                cycleTask = nil
+                activeCycleUserID = nil
+            }
         }
         guard let userID = boundUserID else {
             Self.logger.error("sync cycle skipped: no bound account")
@@ -203,7 +233,7 @@ final class SyncController: ObservableObject {
                 try await self.pushBufferedDeletions()
             }
             try await guardedStage(userID: userID) {
-                try await self.drainOutbox()
+                try await self.drainOutbox(userID: userID)
             }
             if !firstSync {
                 try await guardedStage(userID: userID) {
@@ -213,27 +243,37 @@ final class SyncController: ObservableObject {
             status = .idle(Date())
             Self.logger.info("sync cycle finished")
         } catch is CancellationError {
-            // Mid-cycle account change (or sign-out): the abort is the
-            // guard's job, not a failure — leave the outbox and cursors as
-            // they stand and surface no error state. Returning to .inactive
-            // (not .error) lets the shell's next activate(sessionID) rebind:
-            // activate only rebinds from inactive, so an idle abort would
-            // leave the controller stuck on the swapped-out account.
-            Self.logger.info("sync cycle aborted: account changed mid-cycle")
-            if boundUserID == userID {
-                status = .inactive
-            }
+            finishAbortedCycle(userID: userID, generation: generation)
         } catch {
-            Self.logger.error("sync cycle failed: \(error.localizedDescription, privacy: .public)")
+            finishFailedCycle(error, generation: generation)
+        }
+    }
+
+    /// Tail of a cycle aborted by the same-account guard (`.inactive`, not
+    /// `.error`, so the shell's next `activate(sessionID)` rebinds — see the
+    /// catch in `runCycle`). Only the still-owning generation may write the
+    /// status: a cancelled predecessor finishing after deactivate() →
+    /// activate(newUser) must not strand the NEW cycle's `.syncing`.
+    private func finishAbortedCycle(userID: String, generation: Int) {
+        Self.logger.info("sync cycle aborted: account changed mid-cycle")
+        if cycleGeneration == generation, boundUserID == userID {
+            status = .inactive
+        }
+    }
+
+    /// Tail of a cycle that failed for a real reason. Same generation
+    /// discipline: a cancelled predecessor's late failure must not strand
+    /// the NEW cycle's `.syncing` as `.error`.
+    private func finishFailedCycle(_ error: Error, generation: Int) {
+        Self.logger.error("sync cycle failed: \(error.localizedDescription, privacy: .public)")
+        if cycleGeneration == generation {
             status = .error(error.localizedDescription)
         }
     }
 
     /// Runs one cycle stage, aborting (with `CancellationError`) when the
     /// account changed mid-cycle: the still-bound id must match the session's
-    /// user id, otherwise nothing further is drained or applied. The drain
-    /// loop additionally re-checks per row (`activeCycleUserID`), so a swap
-    /// DURING a stage also stops before the next push.
+    /// user id, otherwise nothing further is drained or applied.
     private func guardedStage(
         userID: String,
         _ stage: () async throws -> Void
@@ -543,15 +583,22 @@ final class SyncController: ObservableObject {
     /// resource. POST is idempotent on `id` and PATCH carries `updated_at`
     /// (LWW), so a replay after a crash or relapse produces the same result
     /// as the first attempt.
-    private func drainOutbox() async throws {
+    ///
+    /// The per-row guard compares the session against the CYCLE's own
+    /// captured `userID`, not the shared `activeCycleUserID`: a cancelled
+    /// predecessor finishing after deactivate() → activate(newUser) reads
+    /// the successor's guard value, and comparing against it could let a
+    /// row drain under the NEW account's session.
+    private func drainOutbox(userID: String) async throws {
         let rows = try await store.outboxRows()
         // One relay category snapshot per drain, fetched lazily: only when
         // the drain actually holds an entry create/update row.
         var relayCategoryIDs: Set<String>?
         for queuedRow in Self.orderedForDrain(rows) {
             // Same-account guard per row: a session swap mid-drain stops the
-            // remaining pushes (sync-client same-account guard).
-            guard sessionUserIDProvider() == activeCycleUserID else {
+            // remaining pushes (sync-client same-account guard). Compared
+            // against this cycle's own captured user id — see the doc above.
+            guard sessionUserIDProvider() == userID else {
                 throw CancellationError()
             }
             // Conflict recovery can remove or rewrite a later row while this

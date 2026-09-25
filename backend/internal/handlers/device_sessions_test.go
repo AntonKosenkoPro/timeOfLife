@@ -265,6 +265,60 @@ func TestDeviceSessions_ApplePathStoresDeviceID(t *testing.T) {
 	}
 }
 
+func TestDeviceSessions_RefreshRequiresDeviceID(t *testing.T) {
+	store := newTestStore(t)
+	sender := &captureSender{}
+	h := newTestHandlerWithDependencies(t, store, nil, sender)
+
+	sess := signInDevice(t, h, sender, "refreshdev@example.com", "device-A")
+
+	w := refreshCall(h, sess.RefreshToken, "")
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 for missing X-Device-Id on refresh, got %d", w.Code)
+	}
+	var errResp errorResponse
+	if err := json.NewDecoder(w.Body).Decode(&errResp); err != nil {
+		t.Fatalf("decode error response: %v", err)
+	}
+	if errResp.Error.Code != "invalid_request" {
+		t.Errorf("expected invalid_request code, got %q", errResp.Error.Code)
+	}
+
+	// The family stays intact: the token still refreshes with the header.
+	if w := refreshCall(h, sess.RefreshToken, "device-A"); w.Code != http.StatusOK {
+		t.Errorf("expected refresh with correct header to succeed, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestDeviceSessions_RefreshWrongDeviceRejected(t *testing.T) {
+	store := newTestStore(t)
+	sender := &captureSender{}
+	h := newTestHandlerWithDependencies(t, store, nil, sender)
+
+	sess := signInDevice(t, h, sender, "wrongdev@example.com", "device-A")
+
+	// Wrong device id: 401, nothing revoked.
+	w := refreshCall(h, sess.RefreshToken, "device-B")
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("expected 401 for wrong X-Device-Id, got %d", w.Code)
+	}
+	var errResp errorResponse
+	if err := json.NewDecoder(w.Body).Decode(&errResp); err != nil {
+		t.Fatalf("decode error response: %v", err)
+	}
+	if errResp.Error.Code != "invalid_refresh" {
+		t.Errorf("expected invalid_refresh code, got %q", errResp.Error.Code)
+	}
+	if found, live := sessionState(t, store, sess.RefreshToken); !found || !live {
+		t.Errorf("expected original family intact after wrong-device attempt, found=%v live=%v", found, live)
+	}
+
+	// The real family still refreshes with the correct header.
+	if w := refreshCall(h, sess.RefreshToken, "device-A"); w.Code != http.StatusOK {
+		t.Errorf("expected refresh with correct header to succeed after wrong-device attempt, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
 func TestDeviceSessions_LogoutRequiresDeviceID(t *testing.T) {
 	store := newTestStore(t)
 	h := newTestHandler(t, store)

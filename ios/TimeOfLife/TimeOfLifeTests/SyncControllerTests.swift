@@ -1535,6 +1535,201 @@ struct SyncControllerTests {
         #expect(isIdle(controller.status))
     }
 
+    // MARK: - Cycle generation (deactivate → rapid re-activate race)
+
+    /// Awaitable one-shot gate for holding a cycle's push in flight while
+    /// the test re-activates the controller (same sendability shape as
+    /// `SessionUserIDHolder`).
+    private final class Gate: @unchecked Sendable {
+        private var continuation: CheckedContinuation<Void, Never>?
+        func wait() async {
+            await withCheckedContinuation { continuation = $0 }
+        }
+        func open() {
+            continuation?.resume()
+            continuation = nil
+        }
+    }
+
+    /// Mutable push-call counter (all access is main-actor serialized).
+    private final class PushCounter: @unchecked Sendable {
+        var value = 0
+    }
+
+    @Test("sign-out then rapid sign-in of the SAME account leaves the new cycle's handle live and draining")
+    func rapidReactivationSameAccountKeepsNewCycle() async throws {
+        let (store, mock, controller) = makeContext()
+        // Two queued rows: the predecessor holds at e1's push, the successor
+        // (started by the in-handler deactivate → activate) holds at its own
+        // e1 push. The predecessor is released FIRST, so its finishing defer
+        // lands while the successor cycle is provably still in flight.
+        try await store.createEntry(makeEntry(id: "e1", text: "First"))
+        try await store.createEntry(makeEntry(id: "e2", text: "Second"))
+        let gate1 = Gate()
+        let gate2 = Gate()
+        let counter = PushCounter()
+        mock.createEntryHandler = { _ in
+            counter.value += 1
+            if counter.value == 1 {
+                // Sign-out → rapid sign-in of the SAME account while the
+                // predecessor cycle is in flight at its push.
+                controller.deactivate()
+                controller.activate(userID: "u1")
+                await gate1.wait()
+            } else if counter.value == 2 {
+                await gate2.wait()
+            }
+        }
+
+        controller.activate(userID: "u1")
+        await waitUntil { mock.calls.contains { $0.method == "createEntry" && $0.id == "e1" } }
+        // The successor cycle started and holds at its own e1 push.
+        await waitUntil { mock.calls.filter { $0.method == "createEntry" }.count == 2 }
+        #expect(controller.isCycleLive)
+
+        // Release the cancelled predecessor: it finishes its tail. Its defer
+        // must NOT wipe the successor's cycleTask.
+        gate1.open()
+        await waitUntil { mock.calls.filter { $0.method == "createEntry" }.count == 3 }
+        #expect(controller.isCycleLive)
+
+        // Release the successor: it drains to idle and owns the cleanup.
+        gate2.open()
+        await waitUntil { !controller.isCycleLive }
+        #expect(isIdle(controller.status))
+        #expect(try await store.outboxRows().isEmpty)
+        // Single-flight intact: the controller is immediately usable again.
+        try await store.createEntry(makeEntry(id: "e3", text: "Third"))
+        await controller.syncNow(userID: "u1")
+        #expect(isIdle(controller.status))
+        #expect(try await store.outboxRows().isEmpty)
+    }
+
+    @Test("sign-out then rapid sign-in of a DIFFERENT account leaves the new cycle live and unstranded")
+    func rapidReactivationDifferentAccountKeepsNewCycle() async throws {
+        let (store, mock, _) = makeContext()
+        let session = SessionUserIDHolder("u1")
+        let controller = SyncController(
+            store: store, remote: mock, connectivity: MockConnectivity(connected: true)
+        ) { session.value }
+        try await store.createEntry(makeEntry(id: "e1", text: "A's entry"))
+        let gate1 = Gate()
+        let gate2 = Gate()
+        let counter = PushCounter()
+        mock.createEntryHandler = { _ in
+            counter.value += 1
+            if counter.value == 1 {
+                // The session flips to B; sign-out → rapid sign-in as B
+                // while A's cycle is in flight at its push.
+                session.value = "u2"
+                controller.deactivate()
+                controller.activate(userID: "u2")
+                await gate1.wait()
+            } else if counter.value == 2 {
+                await gate2.wait()
+            }
+        }
+
+        controller.activate(userID: "u1")
+        await waitUntil { mock.calls.contains { $0.method == "createEntry" && $0.id == "e1" } }
+        await waitUntil { mock.calls.filter { $0.method == "createEntry" }.count == 2 }
+        #expect(controller.isCycleLive)
+
+        gate1.open()
+        // The predecessor's tail ran (e2's per-row guard refused it under
+        // u2's session → abort) while the successor is provably still in
+        // flight.
+        try await Task.sleep(nanoseconds: 200_000_000)
+        // The cancelled predecessor's defer did not wipe the new (u2)
+        // cycle's handle while it was still in flight.
+        #expect(controller.isCycleLive)
+
+        gate2.open()
+        await waitUntil { !controller.isCycleLive }
+        #expect(isIdle(controller.status))
+        #expect(try await store.outboxRows().isEmpty)
+        // The guard semantics are unchanged: no push ran without a matching
+        // bound account (both pushes ran for their own bound session user).
+        #expect(mock.calls.contains { $0.method == "createEntry" && $0.id == "e1" })
+    }
+
+    // MARK: - Helpers
+
+    @Test("sign-out then rapid sign-in of the SAME account leaves one live cycle that drains")
+    func rapidReactivationSameAccountDrainsOnce() async throws {
+        let (store, mock, controller) = makeContext()
+        try await store.createEntry(makeEntry(id: "e1", text: "First"))
+        try await store.createEntry(makeEntry(id: "e2", text: "Second"))
+        let firstStarted = HeldCycleStart()
+        mock.createEntryHandler = { _ in
+            if !firstStarted.started {
+                firstStarted.started = true
+                // Sign-out → rapid sign-in of the SAME account while the
+                // predecessor cycle is in flight at its push. deactivate()
+                // already cancelled this task, so the sleep below aborts it
+                // with CancellationError right after the re-activation.
+                controller.deactivate()
+                controller.activate(userID: "u1")
+                try? await Task.sleep(nanoseconds: 200_000_000)
+            }
+        }
+
+        controller.activate(userID: "u1")
+        // The successor cycle owns the handle and drains the whole outbox to
+        // idle. The old bug: the cancelled predecessor's unconditional defer
+        // wiped the NEW cycle's cycleTask/activeCycleUserID, so the successor
+        // aborted at the per-row guard and stranded .inactive with rows
+        // queued.
+        await waitUntil {
+            !controller.isCycleLive
+        }
+        #expect(!controller.isCycleLive)
+        #expect(isIdle(controller.status))
+        #expect(try await store.outboxRows().isEmpty)
+        // Single-flight intact: the controller is immediately usable again.
+        try await store.createEntry(makeEntry(id: "e3", text: "Third"))
+        await controller.syncNow(userID: "u1")
+        #expect(isIdle(controller.status))
+        #expect(try await store.outboxRows().isEmpty)
+    }
+
+    @Test("sign-out then rapid sign-in of a DIFFERENT account leaves the new cycle live and unstranded")
+    func rapidReactivationDifferentAccountDrains() async throws {
+        let (store, mock, _) = makeContext()
+        try await store.createEntry(makeEntry(id: "e1", text: "A's entry"))
+        let session = SessionUserIDHolder("u1")
+        let controller = SyncController(
+            store: store, remote: mock, connectivity: MockConnectivity(connected: true)
+        ) { session.value }
+        let firstStarted = HeldCycleStart()
+        mock.createEntryHandler = { _ in
+            if !firstStarted.started {
+                firstStarted.started = true
+                // The session flips to B; sign-out → rapid sign-in as B
+                // while A's cycle is in flight at its push.
+                session.value = "u2"
+                controller.deactivate()
+                controller.activate(userID: "u2")
+                try? await Task.sleep(nanoseconds: 200_000_000)
+            }
+        }
+
+        controller.activate(userID: "u1")
+        await waitUntil {
+            !controller.isCycleLive
+        }
+
+        // The successor (u2) cycle owns the handle, drains, and lands idle —
+        // never stranded .inactive by the cancelled predecessor's defer.
+        #expect(!controller.isCycleLive)
+        #expect(isIdle(controller.status))
+        #expect(try await store.outboxRows().isEmpty)
+        // A's pushed row converged (it was pushed by whichever cycle owned
+        // the handle when the drain reached it); the guard semantics are
+        // unchanged — no push ever ran without a matching session user.
+        #expect(mock.calls.contains { $0.method == "createEntry" && $0.id == "e1" })
+    }
+
     // MARK: - Helpers
 
     /// Mutable session-user holder for the guard tests (the sync controller's

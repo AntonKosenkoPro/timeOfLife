@@ -75,7 +75,12 @@ final class AppContainer: ObservableObject {
     static func production() -> AppContainer {
         let baseURL = AppConfig.baseURL
         let keychain = KeychainStore()
-        let sessionCache = SessionCache()
+        // The cache must write the session id to the App Group defaults —
+        // the same store `ActiveAccountFileResolver` reads (lock-screen-
+        // controls delta 4.2), or resolve() sees `.locked` for real sessions.
+        let sessionCache = SessionCache(
+            defaults: UserDefaults(suiteName: LocalStore.appGroupID) ?? .standard
+        )
         let sessionStore = SessionStore()
         let navigation = AppNavigationStack()
         let connectivity = NetworkMonitor()
