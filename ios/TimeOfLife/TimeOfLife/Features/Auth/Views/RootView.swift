@@ -48,9 +48,22 @@ struct RootView: View {
                     // the shell) until the account's file is bound. The
                     // startup runs here — not in `onChange` — so it fires on
                     // every shell mount, including the restore-driven one.
-                    ProgressView()
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .task { beginSignIn(userID: current.id) }
+                    // A failed bind keeps the gate up with the error surfaced
+                    // instead of the shell — the store is unbound, so no
+                    // tracker read may mount.
+                    if container.localStoreOpenError != nil {
+                        Text(L10n.errorLocalPersistence.text)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                            .padding()
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            .accessibilityIdentifier("LocalStoreOpenError")
+                    } else {
+                        ProgressView()
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            .task { beginSignIn(userID: current.id) }
+                    }
                 }
             case .signedOut:
                 AuthFlowView()
@@ -102,9 +115,15 @@ struct RootView: View {
         lifecycleTask?.cancel()
         lifecycleTask = Task {
             if Task.isCancelled { return }
-            await container.openLocalStore(userID: userID)
+            let opened = await container.openLocalStore(userID: userID)
             if Task.isCancelled { return }
             guard case let .signedIn(current) = session.state, current.id == userID else { return }
+            // A failed bind leaves the store cleanly unbound: the gate stays
+            // up (the error is surfaced via `localStoreOpenError` above) and
+            // `boundUserID` is never set — commitAll/seed/sync must not run
+            // against the wrong file or an unbound store. The next sign-in
+            // (or relaunch restore) retries the bind.
+            guard opened else { return }
             boundUserID = userID
             try? await container.undoBuffer.commitAll()
             if Task.isCancelled { return }

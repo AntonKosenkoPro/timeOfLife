@@ -1540,6 +1540,53 @@ struct SyncControllerTests {
         #expect(try await store.outboxRows().isEmpty)
     }
 
+    @Test("sign-out waits for a held cycle before close: no .error, next sign-in syncs")
+    func signOutWaitsForHeldCycle() async throws {
+        // swiftlint:disable:next force_try
+        let store = try! LocalStore(url: temporaryStoreURL())
+        let mock = MockCatalogRepository()
+        let session = SessionUserIDHolder("u1")
+        let controller = SyncController(
+            store: store, remote: mock, connectivity: MockConnectivity(connected: true)
+        ) { session.value }
+        controller.activate(userID: "u1")
+        await waitForCycle(controller)
+
+        // A steady-state cycle (drain before pull) held at its first push.
+        try await store.createEntry(makeEntry(id: "e1", text: "First"))
+        try await store.createEntry(makeEntry(id: "e2", text: "Second"))
+        let gate = Gate()
+        let firstPush = HeldCycleStart()
+        mock.createEntryHandler = { _ in
+            if !firstPush.started {
+                firstPush.started = true
+                await gate.wait()
+            }
+        }
+        controller.trigger(userID: "u1")
+        await waitUntil { mock.calls.contains { $0.method == "createEntry" && $0.id == "e1" } }
+        // Sign-out mid-cycle: the session clears and sync deactivates while
+        // the push is held. The dead-wait bug surfaced here — deactivate()
+        // nils the handle, so a pre-close wait observed "not live" at once.
+        session.value = nil
+        controller.deactivate()
+        #expect(controller.isCycleLive)
+        gate.open()
+        await waitUntil { !controller.isCycleLive }
+        // The released cycle aborts at e2's per-row guard (never pushed under
+        // the cleared session) and stays .inactive — never .error — so the
+        // close is safe and the next sign-in rebinds.
+        #expect(controller.status == .inactive)
+        let rows = try await store.outboxRows()
+        #expect(!rows.contains { $0.recordID == "e1" })
+        #expect(rows.contains { $0.recordID == "e2" && $0.op == "create" })
+        session.value = "u1"
+        controller.activate(userID: "u1")
+        await waitUntil { !controller.isCycleLive }
+        #expect(isIdle(controller.status))
+        #expect(try await store.outboxRows().isEmpty)
+    }
+
     @Test("mid-stage swap aborts buffered deletes with no cross-account write")
     func midStageSwapAbortsBufferedDeletes() async throws {
         let (store, mock, _) = makeContext()

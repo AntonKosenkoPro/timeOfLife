@@ -46,6 +46,12 @@
 - [x] 8.2 Send `X-Device-Id` on verify/apple/refresh/logout (APIClient/APIEndpoint plumbing); missing-header path never triggers client-side. — `deviceIdProvider` on `APIClient`, wired from `DeviceIdentityStore` in `AppContainer.makeAuthClient`.
 - [x] 8.3 Tests: UUID stability across launches, header present on auth requests, reinstall-restore behavior documented. — `DeviceIdentityStoreTests`, `APIClientDeviceIdHeaderTests` (header on verify/apple/refresh/logout), no-provider omission test; xcodebuild left to the verifier.
 
+## Wave 5 (re-review findings — PR #47, both high, both confirmed real)
+
+- [x] W5.1 Unbound-on-failure (`LocalStore.openAccount`, `AppContainer.openLocalStore`, `RootView.beginSignIn`): any failed open releases dbQueue + boundURL + boundUserID + lastBoundURL and rethrows (all later ops throw `notBound`; `eraseAll` cannot retarget the previous file); `closeAccount` still retains `lastBoundURL` so erase-after-close works via explicit handling; `openLocalStore` returns success Bool (clears stale error on entry) and `beginSignIn` never sets its `boundUserID` / mounts the shell on failure (error surfaced in the gate via `localStoreOpenError`, existing `error.localPersistence` string).
+- [x] W5.2 Live shutdown wait (`SyncController` flag only — guard/generation semantics untouched): tail-owned `cycleRunning` (set at cycle start by generation-current cycles only; cleared only by the owning-generation tail, plus a stale tail with no live successor handle for plain-deactivate promptness); `isCycleLive` reads the flag so `waitForSyncShutdown` genuinely waits for the cancelled cycle to exit before `closeLocalStore` (polling, never awaiting the task handle).
+- [x] W5.3 Tests: `failedOpenLeavesStoreUnbound` + `failedCrossAccountOpenUnbinds` (notBound, boundUserID nil, eraseAll spares A's file, A resumable) replace the inverted `failedOpenKeepsPreviousBinding`; `signOutWaitsForHeldCycle` (live across deactivate, abort stays `.inactive` never `.error`, next sign-in drains); `failedBindReportsWithoutMounting` (container reports `false` + error, store unbound); rapid re-login ordering tests unchanged and preserved.
+
 ## Parallel execution plan (fan-out 6 default, ceiling 9)
 
 - Wave 1 (no deps between waves): Group 1 (backend agent) ‖ Group 2 (iOS-auth agent) ‖ Group 3 (iOS-store agent) ‖ Group 6.1 draft (contract agent, semantics-frozen assumption) — 4 agents.

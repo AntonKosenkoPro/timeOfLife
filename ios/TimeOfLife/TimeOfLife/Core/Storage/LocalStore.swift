@@ -129,22 +129,37 @@ actor LocalStore {
     /// dormant) and opens the new one. A file already bound to this account
     /// is left as-is.
     ///
-    /// Failure atomicity: the previous binding is released only AFTER the new
-    /// file opens successfully. A failed open (invalidUserID/accountMismatch/
-    /// migration error) therefore leaves the old account's queue, boundURL,
-    /// and boundUserID untouched — bound state never points at a file the
-    /// store no longer holds, so a later `eraseAll()` cannot delete the
-    /// previous account's file by mistake.
+    /// Failure atomicity (unbound-on-failure): ANY failure — invalidUserID,
+    /// accountMismatch, migration or disk error — releases the previous
+    /// binding FIRST (dbQueue, boundURL, boundUserID, and lastBoundURL all go
+    /// to nil) and rethrows. The store after a failed open is cleanly UNBOUND:
+    /// every subsequent operation throws `notBound` (an explicit signal, never
+    /// silent wrong-file access), and `eraseAll()` cannot retarget the previous
+    /// account's file. The previous account's file itself is untouched on disk
+    /// (dormant, resumable on its next open). Erase-after-close keeps working
+    /// because `closeAccount()` — the clean path — explicitly retains
+    /// `lastBoundURL`; a failed open is never a clean close, so it retains
+    /// nothing. No stale boundURL may ever point at a file the store doesn't
+    /// hold, in either direction.
     func openAccount(userID: String) throws {
-        let sanitized = try Self.sanitizedUserID(userID)
-        if boundUserID == sanitized, dbQueue != nil { return }
-        let url = Self.databaseURL(userID: sanitized)
-        let (queue, boundID) = try Self.openQueue(url: url, userID: sanitized)
-        self.dbQueue = queue
-        self.boundURL = url
-        self.boundUserID = boundID
-        self.lastBoundURL = url
-        undoPushInFlight = false
+        do {
+            let sanitized = try Self.sanitizedUserID(userID)
+            if boundUserID == sanitized, dbQueue != nil { return }
+            let url = Self.databaseURL(userID: sanitized)
+            let (queue, boundID) = try Self.openQueue(url: url, userID: sanitized)
+            self.dbQueue = queue
+            self.boundURL = url
+            self.boundUserID = boundID
+            self.lastBoundURL = url
+            undoPushInFlight = false
+        } catch {
+            dbQueue = nil
+            boundURL = nil
+            boundUserID = nil
+            lastBoundURL = nil
+            undoPushInFlight = false
+            throw error
+        }
     }
 
     /// Closes the active account file WITHOUT deleting it (account-bound-
@@ -1886,6 +1901,8 @@ actor LocalStore {
     /// unbound (the connection was released first), the target URL is kept
     /// for a retry, and the data stays on disk until the next sign-in
     /// reopens it. A missing file is success (nothing left to delete).
+    /// After a FAILED open there is nothing to erase (the failure cleared
+    /// `lastBoundURL` too): this returns without touching any dormant file.
     func eraseAll() throws {
         // Unbind first: the queued connection holds the file open, and
         // removing an open file would leave the descriptor dangling on

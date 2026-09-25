@@ -40,18 +40,18 @@ jobs:
         # The action performs its own full checkout (fetch-depth: 0).
         uses: alibaba/open-code-review@v1.12.9
         with:
-          # Ollama Cloud — OpenAI-compatible endpoint (models.dev: ollama-cloud base URL).
-          llm_url: https://ollama.com/v1
-          llm_auth_token: ${{ secrets.OLLAMA_API_KEY }}
-          llm_model: deepseek-v4.1-flash
-          # openai protocol (explicit; supersedes the required llm_use_anthropic boolean)
-          llm_protocol: openai
+          # OpenCode Zen — OpenAI Responses endpoint (models list: https://opencode.ai/docs/zen).
+          llm_url: https://opencode.ai/zen/v1/responses
+          llm_auth_token: ${{ secrets.OPENCODE_ZEN_API_KEY }}
+          llm_model: muse-spark-1.3-contributor-free
+          # openai-responses protocol for the /responses endpoint (explicit;
+          # supersedes the required llm_use_anthropic boolean)
+          llm_protocol: openai-responses
           llm_use_anthropic: 'false'
-          # Disable reasoning for latency/cost; DeepSeek uses the Anthropic-style toggle.
-          llm_extra_body: '{"thinking": {"type": "disabled"}}'
+          # No provider-specific extra body for Zen; omit the DeepSeek thinking toggle.
           llm_timeout: '600'
           review_task_timeout: '15'
-          # Don't hammer Ollama Cloud rate limits.
+          # Don't hammer Zen rate limits (free contributor tier).
           review_concurrency: '4'
           language: English
           # Update one summary comment in place instead of posting a new one per run.

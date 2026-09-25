@@ -106,4 +106,71 @@ struct AuthGateTests {
         #expect(store.state == .signedOut)
         #expect(await keychain.string(for: .refreshToken) == nil)
     }
+
+    // MARK: - Failed bind keeps the gate up (Wave 5 re-review finding 1)
+
+    @Test("a failed store bind reports failure without mounting (gate stays up)")
+    func failedBindReportsWithoutMounting() async throws {
+        let userID = "wave5-\(UUID().uuidString.lowercased())"
+        let prodURL = LocalStore.databaseURL(userID: userID)
+        // A corrupt file the open cannot migrate: a retryable (non-fatal)
+        // failure, so `openLocalStore` reports instead of crashing.
+        try Data("not-a-database".utf8).write(to: prodURL)
+        defer {
+            try? FileManager.default.removeItem(at: prodURL)
+            for ext in ["-wal", "-shm"] {
+                try? FileManager.default.removeItem(at: URL(fileURLWithPath: prodURL.path + ext))
+            }
+        }
+        let container = makeContainer()
+
+        let opened = await container.openLocalStore(userID: userID)
+
+        // The bind failed openly: no shell mount (`RootView` checks this
+        // flag before setting its boundUserID), error surfaced for the gate.
+        #expect(!opened)
+        #expect(container.localStoreOpenError != nil)
+        // The store is cleanly unbound: boundUserID nil, every op notBound.
+        #expect(await container.localStore.boundUserID == nil)
+        await #expect(throws: LocalStore.LocalStoreError.notBound) {
+            try await container.localStore.categories()
+        }
+    }
+
+    /// Minimal production-shaped container for the bind-lifecycle tests
+    /// (mirrors `AppContainer.uiTesting` wiring with unit-test doubles).
+    private func makeContainer() -> AppContainer {
+        let repository = FakeAuthRepository()
+        let keychain = InMemoryKeychainStore()
+        let cache = SessionCache(defaults: UserDefaults(suiteName: UUID().uuidString)!)
+        let sessionStore = SessionStore()
+        let authService = AuthService(
+            repository: repository,
+            keychain: keychain,
+            cache: cache,
+            sessionStore: sessionStore
+        )
+        let localStore = LocalStore()
+        let connectivity = MockConnectivity(connected: true)
+        return AppContainer(
+            baseURL: URL(string: "https://example.com")!,
+            apiClient: APIClient(baseURL: URL(string: "https://example.com")!, session: .shared),
+            keychain: keychain,
+            sessionCache: cache,
+            repository: repository,
+            sessionStore: sessionStore,
+            navigation: AppNavigationStack(),
+            connectivity: connectivity,
+            authService: authService,
+            appleService: AppleSignInService(),
+            timerService: TimerService(store: localStore),
+            localStore: localStore,
+            undoBuffer: UndoBufferStore(store: localStore),
+            syncController: SyncController(
+                store: localStore,
+                remote: MockCatalogRepository(),
+                connectivity: connectivity
+            ) { nil }
+        )
+    }
 }

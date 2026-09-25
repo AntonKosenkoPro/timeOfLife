@@ -1763,19 +1763,57 @@ struct LocalStoreAccountBoundTests {
         #expect(await store.boundURL == nil)
     }
 
-    @Test("a failed openAccount keeps the previous binding (failure atomicity)")
-    func failedOpenKeepsPreviousBinding() async throws {
+    @Test("a failed openAccount leaves the store unbound (never the wrong file)")
+    func failedOpenLeavesStoreUnbound() async throws {
         let base = temporaryBaseDirectory()
         let store = try makeBoundStore(userID: "u1", base: base)
         try await store.createCategory(Category(id: "cat-1", name: "Work", icon: "briefcase"))
         await #expect(throws: LocalStore.LocalStoreError.invalidUserID) {
             try await store.openAccount(userID: "../evil")
         }
-        // The old account's binding survives the failed switch: bound state
-        // never points at a file the store no longer holds, so a later
-        // eraseAll cannot delete the previous account's file by mistake.
-        #expect(await store.boundUserID == "u1")
-        #expect(await store.boundURL != nil)
-        #expect(try await store.category(id: "cat-1")?.name == "Work")
+        // The failed open releases the previous binding outright: bound
+        // state never points at a file the store no longer holds, and every
+        // subsequent operation throws notBound (explicit, never silent
+        // wrong-file access).
+        #expect(await store.boundUserID == nil)
+        #expect(await store.boundURL == nil)
+        await #expect(throws: LocalStore.LocalStoreError.notBound) {
+            try await store.categories()
+        }
+        // ... and eraseAll cannot retarget the previous account's file: with
+        // no live binding and no retained URL it is a no-op.
+        try await store.eraseAll()
+        #expect(FileManager.default.fileExists(atPath: fileURL(userID: "u1", base: base).path))
+    }
+
+    @Test("a failed cross-account openAccount unbinds and keeps A's file resumable")
+    func failedCrossAccountOpenUnbinds() async throws {
+        let base = temporaryBaseDirectory()
+        let store = try makeBoundStore(userID: "user-a", base: base)
+        try await store.createCategory(Category(id: "cat-a", name: "Work A", icon: "briefcase"))
+
+        // B's production file, pre-marked for someone else: opening it as B
+        // throws accountMismatch (the late-failure class, past sanitization).
+        let userB = "wave5-\(UUID().uuidString.lowercased())"
+        let prodURL = LocalStore.databaseURL(userID: userB)
+        _ = try LocalStore(url: prodURL, userID: "someone-else")
+        defer {
+            try? FileManager.default.removeItem(at: prodURL)
+            for ext in ["-wal", "-shm"] {
+                try? FileManager.default.removeItem(at: URL(fileURLWithPath: prodURL.path + ext))
+            }
+        }
+        await #expect(throws: LocalStore.LocalStoreError.accountMismatch) {
+            try await store.openAccount(userID: userB)
+        }
+        #expect(await store.boundUserID == nil)
+        await #expect(throws: LocalStore.LocalStoreError.notBound) {
+            try await store.categories()
+        }
+        // A's dormant file survives the failed switch and the erase attempt.
+        try await store.eraseAll()
+        #expect(FileManager.default.fileExists(atPath: fileURL(userID: "user-a", base: base).path))
+        let reopened = try makeBoundStore(userID: "user-a", base: base)
+        #expect(try await reopened.categories().map(\.id) == ["cat-a"])
     }
 }

@@ -152,9 +152,18 @@ final class AppContainer: ObservableObject {
     /// any other error (disk-full, corrupt file, migration failure) is
     /// retryable, so it is logged and surfaced via `localStoreOpenError`
     /// instead of crashing on sign-in.
-    func openLocalStore(userID: String) async {
+    ///
+    /// Returns whether the store is bound afterwards. The caller (`RootView`
+    /// `beginSignIn`) MUST check this: a failed open leaves the store cleanly
+    /// unbound, so mounting the shell on `false` would run every tracker read
+    /// against `notBound`. The error is cleared on entry so a retry never sees
+    /// a stale failure.
+    @discardableResult
+    func openLocalStore(userID: String) async -> Bool {
+        localStoreOpenError = nil
         do {
             try await localStore.openAccount(userID: userID)
+            return true
         } catch let error as LocalStore.LocalStoreError
             where error == .invalidUserID || error == .accountMismatch {
             // Binding failure (invalid id, cross-account file mismatch)
@@ -164,6 +173,7 @@ final class AppContainer: ObservableObject {
         } catch {
             localStoreOpenError = error
             Self.logger.error("LocalStore account binding failed (retryable): \(String(describing: error), privacy: .public)")
+            return false
         }
     }
 
