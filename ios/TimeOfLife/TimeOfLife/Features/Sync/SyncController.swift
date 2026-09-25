@@ -75,9 +75,25 @@ final class SyncController: ObservableObject {
     /// single-flight) or its same-account guard.
     private var cycleGeneration = 0
 
-    /// Whether a cycle currently holds the single-flight handle. Test
-    /// observability for the generation fix (deactivate → re-activate race).
-    var isCycleLive: Bool { cycleTask != nil }
+    /// Whether a cycle body is actually executing. Tail-owned: set at cycle
+    /// start (by a generation-current cycle only), cleared ONLY by the
+    /// finishing cycle's owning-generation tail — never by
+    /// deactivate/trigger/syncNow, which only cancel/nil the single-flight
+    /// handle. `isCycleLive` reads this, so the pre-close shutdown wait
+    /// genuinely waits for the cancelled cycle to suspend/exit instead of
+    /// observing the already-nilled handle. A stale tail clears it only when
+    /// no successor holds the handle (deactivate without re-activate);
+    /// while a successor runs, the stale predecessor's tail leaves it set.
+    /// Guard/generation semantics are otherwise untouched: `cycleTask`
+    /// remains the single-flight handle for trigger/syncNow.
+    private var cycleRunning = false
+
+    /// Whether a cycle body is actually executing (the tail-owned running
+    /// flag, not the single-flight handle — which `deactivate()` nils while
+    /// the cancelled cycle is still exiting). Test observability for the
+    /// generation fix (deactivate → re-activate race) and the pre-close
+    /// shutdown wait.
+    var isCycleLive: Bool { cycleRunning }
 
     /// Cycle diagnostics (Console): secret-free strings only — the same codes
     /// and messages surfaced in UI. Never tokens, bodies, or emails.
@@ -115,6 +131,9 @@ final class SyncController: ObservableObject {
         cycleTask = Task { [weak self] in
             await self?.runCycle(firstSync: true, generation: generation)
         }
+        // Stamped synchronously with the handle: a started-but-unhopped
+        // cycle must already read live (waiters poll isCycleLive).
+        cycleRunning = true
     }
 
     /// Deactivates sync on sign-out. Local data and the outbox are preserved
@@ -150,6 +169,7 @@ final class SyncController: ObservableObject {
             await self?.runCycle(firstSync: false, generation: generation)
         }
         cycleTask = task
+        cycleRunning = true
         await task.value
     }
 
@@ -162,6 +182,7 @@ final class SyncController: ObservableObject {
         cycleTask = Task { [weak self] in
             await self?.runCycle(firstSync: false, generation: generation)
         }
+        cycleRunning = true
     }
 
     /// The same-account guard at trigger/cycle entry: the controller must be
@@ -197,16 +218,12 @@ final class SyncController: ObservableObject {
     /// cycle before any further drain or pull applies to the swapped-out
     /// account's file (sync-client same-account guard).
     private func runCycle(firstSync: Bool, generation: Int) async {
-        defer {
-            // Only the still-owning generation may clear the single-flight
-            // handle and the cycle guard: a cancelled predecessor finishing
-            // after deactivate() → activate(newUser) must leave the NEW
-            // cycle's state alone.
-            if cycleGeneration == generation {
-                cycleTask = nil
-                activeCycleUserID = nil
-            }
-        }
+        // A task cancelled before its first hop (deactivate ran between its
+        // creation and its start) never started: it must neither mark the
+        // flag nor run its body against the successor's binding.
+        guard cycleGeneration == generation else { return }
+        cycleRunning = true
+        defer { finishCycleTail(generation: generation) }
         guard let userID = boundUserID else {
             Self.logger.error("sync cycle skipped: no bound account")
             status = .inactive
@@ -246,6 +263,23 @@ final class SyncController: ObservableObject {
             finishAbortedCycle(userID: userID, generation: generation)
         } catch {
             finishFailedCycle(error, userID: userID, generation: generation)
+        }
+    }
+
+    /// Tail of a finished cycle: releases the single-flight handle, the
+    /// cycle guard, and the running flag. Only the still-owning generation
+    /// may clear the handle/guard: a cancelled predecessor finishing after
+    /// deactivate() → activate(newUser) must leave the NEW cycle's state
+    /// alone. The running flag follows the same ownership, except a stale
+    /// tail with no live successor handle (plain deactivate) still clears it
+    /// so the shutdown wait ends promptly once the cancelled cycle exits.
+    private func finishCycleTail(generation: Int) {
+        if cycleGeneration == generation {
+            cycleTask = nil
+            activeCycleUserID = nil
+            cycleRunning = false
+        } else if cycleTask == nil {
+            cycleRunning = false
         }
     }
 
