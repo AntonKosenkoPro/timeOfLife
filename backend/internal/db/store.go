@@ -157,6 +157,10 @@ type Store interface {
 	// RevokeAllUserSessions revokes all refresh tokens for a user.
 	RevokeAllUserSessions(ctx context.Context, userID string) error
 
+	// RevokeUserDeviceSessions revokes the refresh family of one device:
+	// all non-revoked refresh tokens for user with the given device_id.
+	RevokeUserDeviceSessions(ctx context.Context, userID, deviceID string) error
+
 	// GetUserByID returns a user by their ID.
 	GetUserByID(ctx context.Context, userID string) (User, error)
 

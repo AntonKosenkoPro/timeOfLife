@@ -159,10 +159,29 @@ func writeAccepted(w http.ResponseWriter) {
 	writeJSON(w, http.StatusAccepted, map[string]string{"status": "accepted"})
 }
 
+// deviceIDFromRequest extracts the stable client device id sent as the
+// X-Device-Id header on session endpoints (verify, apple, refresh, logout).
+func deviceIDFromRequest(r *http.Request) string {
+	return strings.TrimSpace(r.Header.Get("X-Device-Id"))
+}
+
+// requireDeviceID validates the X-Device-Id header is present. Every refresh
+// token is issued against a concrete device family, so session endpoints
+// reject requests without one.
+func requireDeviceID(w http.ResponseWriter, r *http.Request) (string, bool) {
+	deviceID := deviceIDFromRequest(r)
+	if deviceID == "" {
+		writeError(w, http.StatusBadRequest, "invalid_request", "X-Device-Id header is required", nil)
+		return "", false
+	}
+	return deviceID, true
+}
+
 // issueTokens creates an access + refresh token pair for user, persists the
-// refresh token hash, and writes the authResponse envelope. On any failure it
-// writes an internal_error response. It returns nothing; callers return.
-func (h *Handler) issueTokens(ctx context.Context, w http.ResponseWriter, user db.User, emailVerified bool) {
+// refresh token hash bound to deviceID (per-device refresh family), and
+// writes the authResponse envelope. On any failure it writes an
+// internal_error response. It returns nothing; callers return.
+func (h *Handler) issueTokens(ctx context.Context, w http.ResponseWriter, user db.User, emailVerified bool, deviceID string) {
 	accessToken, err := h.tokenService.CreateAccessToken(user.ID, user.Email)
 	if err != nil {
 		h.logger.Error("failed to create access token", "error", err)
@@ -177,7 +196,7 @@ func (h *Handler) issueTokens(ctx context.Context, w http.ResponseWriter, user d
 		return
 	}
 
-	if err := h.store.SaveRefreshToken(ctx, user.ID, refreshHash, ""); err != nil {
+	if err := h.store.SaveRefreshToken(ctx, user.ID, refreshHash, deviceID); err != nil {
 		h.logger.Error("failed to save refresh token", "error", err)
 		writeError(w, http.StatusInternalServerError, "internal_error", "An internal error occurred", nil)
 		return
@@ -281,6 +300,11 @@ func (h *Handler) RequestOTP(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) VerifyOTP(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
+	deviceID, ok := requireDeviceID(w, r)
+	if !ok {
+		return
+	}
+
 	var req otpVerifyReq
 	if err := decodeJSON(r, &req); err != nil {
 		h.logger.Warn("invalid OTP verify body", "error", err)
@@ -355,7 +379,7 @@ func (h *Handler) VerifyOTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.issueTokens(ctx, w, user, true)
+	h.issueTokens(ctx, w, user, true, deviceID)
 }
 
 // AppleSignIn handles POST /api/v1/auth/apple.
@@ -368,6 +392,11 @@ func (h *Handler) AppleSignIn(w http.ResponseWriter, r *http.Request) {
 	if h.appleVerifier == nil {
 		writeError(w, http.StatusServiceUnavailable, "apple_not_configured",
 			"Sign in with Apple is not configured", nil)
+		return
+	}
+
+	deviceID, ok := requireDeviceID(w, r)
+	if !ok {
 		return
 	}
 
@@ -409,14 +438,21 @@ func (h *Handler) AppleSignIn(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Issue tokens (same path as VerifyOTP). Apple users are email-verified.
-	h.issueTokens(ctx, w, user, true)
+	h.issueTokens(ctx, w, user, true, deviceID)
 	h.logger.Info("apple user signed in", "userID", user.ID)
 }
 
 // RefreshToken handles POST /api/v1/auth/refresh.
-// It validates the refresh token, checks revocation, rotates the pair.
+// It validates the refresh token, checks revocation (per-device reuse
+// detection), enforces the refresh TTL against created_at, and rotates the
+// pair within the issuing device's family.
 func (h *Handler) RefreshToken(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
+
+	deviceID, ok := requireDeviceID(w, r)
+	if !ok {
+		return
+	}
 
 	var req refreshReq
 	if err := decodeJSON(r, &req); err != nil {
@@ -439,13 +475,35 @@ func (h *Handler) RefreshToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Check if revoked — if so, revoke ALL user sessions (token reuse detection).
+	// Check if revoked FIRST — before the TTL check — so a replayed revoked
+	// token always triggers per-device reuse revocation, even when its
+	// created_at is older than the refresh TTL (otherwise it would return
+	// refresh_expired and leave the live family tokens unrevoked).
 	if storedToken.Revoked {
-		h.logger.Warn("refresh token reuse detected", "userID", storedToken.UserID)
-		if err := h.store.RevokeAllUserSessions(ctx, storedToken.UserID); err != nil {
-			h.logger.Error("failed to revoke all user tokens after reuse", "error", err)
+		h.logger.Warn("refresh token reuse detected", "userID", storedToken.UserID, "deviceID", storedToken.DeviceID)
+		if err := h.store.RevokeUserDeviceSessions(ctx, storedToken.UserID, storedToken.DeviceID); err != nil {
+			h.logger.Error("failed to revoke device tokens after reuse", "error", err)
 		}
-		writeError(w, http.StatusUnauthorized, "token_reuse", "Token has been revoked. All sessions have been invalidated.", nil)
+		writeError(w, http.StatusUnauthorized, "token_reuse", "Token has been revoked. Sign in again.", nil)
+		return
+	}
+
+	// Enforce the refresh TTL against created_at: an expired family is
+	// rejected (lock-not-wipe — the client keeps local files and re-auths).
+	if time.Since(storedToken.CreatedAt) > h.tokenService.RefreshTokenTTL() {
+		h.logger.Warn("refresh token expired", "userID", storedToken.UserID,
+			"deviceID", storedToken.DeviceID, "createdAt", storedToken.CreatedAt)
+		writeError(w, http.StatusUnauthorized, "refresh_expired", "Refresh token has expired. Please sign in again.", nil)
+		return
+	}
+
+	// The token belongs to a concrete device family: a presentation from a
+	// different device is rejected without revoking anything, so the real
+	// family's tokens stay intact.
+	if deviceID != storedToken.DeviceID {
+		h.logger.Warn("refresh token device mismatch", "userID", storedToken.UserID,
+			"deviceID", deviceID, "tokenDeviceID", storedToken.DeviceID)
+		writeError(w, http.StatusUnauthorized, "invalid_refresh", "Invalid refresh token", nil)
 		return
 	}
 
@@ -464,12 +522,13 @@ func (h *Handler) RefreshToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Generate new token pair.
-	h.issueTokens(ctx, w, user, user.EmailVerified)
+	// Generate new token pair; rotation stays within the device's family.
+	h.issueTokens(ctx, w, user, user.EmailVerified, storedToken.DeviceID)
 }
 
 // Logout handles POST /api/v1/auth/logout.
-// It revokes all refresh tokens for the authenticated user.
+// It revokes only the calling device's refresh family, identified by the
+// request's X-Device-Id, leaving other devices' sessions intact.
 func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
@@ -479,14 +538,19 @@ func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Revoke all refresh tokens for the user.
-	if err := h.store.RevokeAllUserSessions(ctx, userID); err != nil {
-		h.logger.Error("failed to revoke all user tokens on logout", "error", err)
+	deviceID, ok := requireDeviceID(w, r)
+	if !ok {
+		return
+	}
+
+	// Revoke only this device's refresh tokens.
+	if err := h.store.RevokeUserDeviceSessions(ctx, userID, deviceID); err != nil {
+		h.logger.Error("failed to revoke device tokens on logout", "error", err)
 		writeError(w, http.StatusInternalServerError, "internal_error", "An internal error occurred", nil)
 		return
 	}
 
-	h.logger.Info("user logged out", "userID", userID)
+	h.logger.Info("user logged out", "userID", userID, "deviceID", deviceID)
 	w.WriteHeader(http.StatusNoContent)
 }
 

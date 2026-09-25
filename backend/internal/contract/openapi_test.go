@@ -18,6 +18,7 @@ import (
 // The spec must document exactly these and no others.
 var canonicalErrorCodes = []string{
 	"invalid_body",
+	"invalid_request",
 	"internal_error",
 	"rate_limited",
 	"invalid_otp",
@@ -27,6 +28,7 @@ var canonicalErrorCodes = []string{
 	"apple_not_configured",
 	"invalid_refresh",
 	"token_reuse",
+	"refresh_expired",
 	"unauthorized",
 	"not_found",
 	"conflict",

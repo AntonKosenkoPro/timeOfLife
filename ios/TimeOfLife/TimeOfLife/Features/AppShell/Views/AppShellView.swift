@@ -44,7 +44,6 @@ struct AppShellView: View {
             navigationRoot {
                 HistoryView(
                     store: container.localStore,
-                    authService: container.authService,
                     sessionStore: container.sessionStore,
                     sync: container.syncController,
                     connectivity: container.connectivity,
@@ -73,11 +72,9 @@ struct AppShellView: View {
             // A category created in Profile must be toggleable immediately.
             Task { await trackVM.load() }
         }, content: {
-            ProfileView(enableSync: EnableSyncPresenter(
-                authService: container.authService,
-                sessionStore: container.sessionStore
-            ))
-            .environmentObject(container)
+            ProfileView()
+                .environmentObject(container)
+                .environmentObject(container.sessionStore)
         })
         .task { await vm.load() }
         // TabView keeps mounted tabs alive, so Track's own `.task` runs only

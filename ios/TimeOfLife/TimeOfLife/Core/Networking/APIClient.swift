@@ -3,10 +3,12 @@ import Foundation
 /// Network client for the auth API.
 ///
 /// Builds `URLRequest`s from `APIEndpoint`s against `baseURL`, attaches a
-/// Bearer token from `accessTokenProvider` when `requiresAuth`, decodes
-/// either the success body or the uniform error envelope, maps offline via
-/// `URLError.notConnectedToInternet`, and on 401 transparently refreshes
-/// once via `refreshHandler` and retries the request.
+/// Bearer token from `accessTokenProvider` when `requiresAuth`, attaches the
+/// stable device identifier from `deviceIdProvider` as `X-Device-Id`
+/// (device-sessions spec), decodes either the success body or the uniform
+/// error envelope, maps offline via `URLError.notConnectedToInternet`, and
+/// on 401 transparently refreshes once via `refreshHandler` and retries the
+/// request.
 actor APIClient: APISending {
     let baseURL: URL
     let session: URLSession
@@ -20,12 +22,18 @@ actor APIClient: APISending {
     /// Performs a refresh using the stored refresh token. Returns the new
     /// access token on success, throws on failure. `nil` disables refresh.
     private let refreshHandler: (@Sendable () async throws -> String)?
+    /// Returns the stable device identifier sent as `X-Device-Id`. The auth
+    /// backend 400s any session-carrying request without it, so a `nil`
+    /// provider is only sensible in graphs that never hit the auth API
+    /// (e.g. the UI-testing stub).
+    private let deviceIdProvider: (@Sendable () async -> String)?
 
     init(
         baseURL: URL,
         session: URLSession,
         accessTokenProvider: @escaping @Sendable () async -> String? = { nil },
         refreshHandler: (@Sendable () async throws -> String)? = nil,
+        deviceIdProvider: (@Sendable () async -> String)? = nil,
         decoder: JSONDecoder = APIClient.defaultDecoder(),
         encoder: JSONEncoder = APIClient.defaultEncoder()
     ) {
@@ -33,6 +41,7 @@ actor APIClient: APISending {
         self.session = session
         self.accessTokenProvider = accessTokenProvider
         self.refreshHandler = refreshHandler
+        self.deviceIdProvider = deviceIdProvider
         self.decoder = decoder
         self.encoder = encoder
     }
@@ -152,6 +161,9 @@ actor APIClient: APISending {
         request.httpMethod = endpoint.method.rawValue
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
+        if let deviceId = await deviceIdProvider?(), !deviceId.isEmpty {
+            request.setValue(deviceId, forHTTPHeaderField: "X-Device-Id")
+        }
         if let body = endpoint.body {
             request.httpBody = body
         }

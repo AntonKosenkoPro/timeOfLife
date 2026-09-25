@@ -3,16 +3,22 @@ import Combine
 import os
 // swiftlint:disable file_length
 
-/// The optional background sync layer (sync-client spec): when the user is
-/// signed in, drains the transactional outbox to the backend relay and pulls
-/// deltas via `?modified_since=`, keeping the local database and the relay
-/// eventually consistent. Activated on sign-in, deactivated on sign-out; the
-/// app works fully without it.
+/// The session-gated background sync layer (sync-client spec): while the user
+/// holds a signed-in session, drains the transactional outbox to the backend
+/// relay and pulls deltas via `?modified_since=`, keeping the active account's
+/// local database and the relay eventually consistent. Activated on sign-in,
+/// deactivated on sign-out; a signed-out state sends no sync traffic at all.
 ///
 /// Distinct from request-response services (`AuthService`, `TimerService`) —
 /// it is a background reconciler, not a per-action call. Session-gated because
-/// sync is the paid feature; connectivity-gated because drain should wait for
-/// `.satisfied`.
+/// a valid session is mandatory for every sync operation; connectivity-gated
+/// because drain should wait for `.satisfied`.
+///
+/// Same-account guard (account-bound-local-data): every cycle records the
+/// `userId` the active per-user database file is bound to and verifies it
+/// against the authenticated session's `userId` at cycle entry and between
+/// cycle stages — one account's outbox is never drained or pushed under
+/// another account's token, and a mid-cycle account change aborts the cycle.
 ///
 /// Entries-only payloads (remove-activities-layer D7): entries carry
 /// `activity_text`, ordered `category_ids`, and `notes`; unknown category
@@ -39,10 +45,55 @@ final class SyncController: ObservableObject {
     private let store: LocalStore
     private let remote: CatalogSending
     private let connectivity: Connectivity
+    /// Reads the authenticated session's `userId` at guard time (the session
+    /// itself is not retained — no cycle). Production wires `SessionStore`;
+    /// tests inject a swappable closure to simulate an account swap mid-cycle.
+    private let sessionUserIDProvider: () -> String?
+    /// The account the sync client is bound to. Recorded at `activate()` from
+    /// the session that mounted the signed-in shell; every cycle start (and
+    /// every cycle stage boundary) verifies the still-current session user
+    /// against it, so a token swap mid-flight can never push A's outbox under
+    /// B's token (sync-client same-account guard).
+    private var boundUserID: String?
+
+    /// The account id the in-flight cycle was started for (nil when no cycle
+    /// runs). Recorded at cycle entry and cleared by the owning generation's
+    /// defer; the per-row drain guard compares against the cycle's own
+    /// captured `userID` (see `drainOutbox`), so this stays bookkeeping.
+    private var activeCycleUserID: String?
 
     /// Single-flight guard: concurrent triggers (foreground + connectivity +
     /// manual) share one cycle instead of racing.
     private var cycleTask: Task<Void, Never>?
+
+    /// Monotonic ownership token for cycles. Every cycle start stamps the
+    /// current generation; `deactivate()` (and only it) invalidates by
+    /// incrementing. A finishing cycle may clear `cycleTask` /
+    /// `activeCycleUserID` only if its generation still owns them — a
+    /// cancelled predecessor finishing after `deactivate()` →
+    /// `activate(newUser)` must never wipe the NEW cycle's handle (defeats
+    /// single-flight) or its same-account guard.
+    private var cycleGeneration = 0
+
+    /// Whether a cycle body is actually executing. Tail-owned: set at cycle
+    /// start (by a generation-current cycle only), cleared ONLY by the
+    /// finishing cycle's owning-generation tail — never by
+    /// deactivate/trigger/syncNow, which only cancel/nil the single-flight
+    /// handle. `isCycleLive` reads this, so the pre-close shutdown wait
+    /// genuinely waits for the cancelled cycle to suspend/exit instead of
+    /// observing the already-nilled handle. A stale tail clears it only when
+    /// no successor holds the handle (deactivate without re-activate);
+    /// while a successor runs, the stale predecessor's tail leaves it set.
+    /// Guard/generation semantics are otherwise untouched: `cycleTask`
+    /// remains the single-flight handle for trigger/syncNow.
+    private var cycleRunning = false
+
+    /// Whether a cycle body is actually executing (the tail-owned running
+    /// flag, not the single-flight handle — which `deactivate()` nils while
+    /// the cancelled cycle is still exiting). Test observability for the
+    /// generation fix (deactivate → re-activate race) and the pre-close
+    /// shutdown wait.
+    var isCycleLive: Bool { cycleRunning }
 
     /// Cycle diagnostics (Console): secret-free strings only — the same codes
     /// and messages surfaced in UI. Never tokens, bodies, or emails.
@@ -51,30 +102,50 @@ final class SyncController: ObservableObject {
     init(
         store: LocalStore,
         remote: CatalogSending,
-        connectivity: Connectivity
+        connectivity: Connectivity,
+        sessionUserIDProvider: @escaping () -> String? = { nil }
     ) {
         self.store = store
         self.remote = remote
         self.connectivity = connectivity
+        self.sessionUserIDProvider = sessionUserIDProvider
     }
 
     // MARK: - Lifecycle (driven by SessionStore.state)
 
-    /// Activates sync on sign-in: performs a first-sync (pull-then-push) and
-    /// begins responding to triggers.
-    func activate() {
-        guard status == .inactive else { return }
-        status = .syncing
-        cycleTask = Task { [weak self] in
-            await self?.runCycle(firstSync: true)
+    /// Activates sync on sign-in: records the bound account, performs a
+    /// first-sync (pull-then-push) and begins responding to triggers.
+    /// Called on every signed-in shell mount — a re-activation of the same
+    /// account is a no-op while a cycle for it is in flight or already ran;
+    /// an account change first cancels any in-flight cycle.
+    func activate(userID: String) {
+        if let boundUserID, boundUserID != userID {
+            Self.logger.error("sync account changed; deactivating before rebind")
+            deactivate()
         }
+        guard status == .inactive else { return }
+        boundUserID = userID
+        status = .syncing
+        cycleGeneration += 1
+        let generation = cycleGeneration
+        cycleTask = Task { [weak self] in
+            await self?.runCycle(firstSync: true, generation: generation)
+        }
+        // Stamped synchronously with the handle: a started-but-unhopped
+        // cycle must already read live (waiters poll isCycleLive).
+        cycleRunning = true
     }
 
     /// Deactivates sync on sign-out. Local data and the outbox are preserved
-    /// (local-first-store spec); the outbox accumulates until the next sign-in.
+    /// (local-first-store spec); the outbox accumulates until the next
+    /// sign-in. Invalidates the generation so a cancelled in-flight cycle,
+    /// finishing after this call, can no longer clear the new cycle's
+    /// handle or guard state.
     func deactivate() {
+        cycleGeneration += 1
         cycleTask?.cancel()
         cycleTask = nil
+        boundUserID = nil
         status = .inactive
     }
 
@@ -86,26 +157,49 @@ final class SyncController: ObservableObject {
     /// can join it too. The boundary race (cycle ending between the check
     /// and the attach) degrades to a cheap fresh cycle — cursors just
     /// advanced, so it is a no-op round-trip.
-    func syncNow() async {
-        guard status != .inactive else { return }
+    func syncNow(userID: String) async {
+        guard isBound(to: userID), status != .inactive else { return }
         if let inFlight = cycleTask {
             await inFlight.value
             return
         }
+        cycleGeneration += 1
+        let generation = cycleGeneration
         let task: Task<Void, Never> = Task { [weak self] in
-            await self?.runCycle(firstSync: false)
+            await self?.runCycle(firstSync: false, generation: generation)
         }
         cycleTask = task
+        cycleRunning = true
         await task.value
     }
 
     /// Foreground / connectivity-restored trigger.
-    func trigger() {
-        guard status != .inactive else { return }
+    func trigger(userID: String) {
+        guard isBound(to: userID), status != .inactive else { return }
         guard cycleTask == nil else { return }
+        cycleGeneration += 1
+        let generation = cycleGeneration
         cycleTask = Task { [weak self] in
-            await self?.runCycle(firstSync: false)
+            await self?.runCycle(firstSync: false, generation: generation)
         }
+        cycleRunning = true
+    }
+
+    /// The same-account guard at trigger/cycle entry: the controller must be
+    /// active and still bound to the session's account. A mismatch (or an
+    /// inactive controller) refuses the cycle with a secret-free log entry —
+    /// the outbox is left untouched (sync-client same-account guard).
+    private func isBound(to userID: String) -> Bool {
+        guard status != .inactive else { return false }
+        guard let boundUserID else {
+            Self.logger.error("sync trigger refused: no bound account")
+            return false
+        }
+        guard boundUserID == userID else {
+            Self.logger.error("sync trigger refused: account mismatch")
+            return false
+        }
+        return true
     }
 
     // MARK: - Cycle
@@ -118,8 +212,24 @@ final class SyncController: ObservableObject {
     /// push right after tombstones and before the drain (push-then-commit):
     /// the delete lands first, so the drain's stale-update drop then clears
     /// any superseded queued update for the same id without pushing.
-    private func runCycle(firstSync: Bool) async {
-        defer { cycleTask = nil }
+    ///
+    /// The same-account guard is re-checked between every stage: a session
+    /// change mid-cycle (sign-out or account swap) aborts the in-flight
+    /// cycle before any further drain or pull applies to the swapped-out
+    /// account's file (sync-client same-account guard).
+    private func runCycle(firstSync: Bool, generation: Int) async {
+        // A task cancelled before its first hop (deactivate ran between its
+        // creation and its start) never started: it must neither mark the
+        // flag nor run its body against the successor's binding.
+        guard cycleGeneration == generation else { return }
+        cycleRunning = true
+        defer { finishCycleTail(generation: generation) }
+        guard let userID = boundUserID else {
+            Self.logger.error("sync cycle skipped: no bound account")
+            status = .inactive
+            return
+        }
+        activeCycleUserID = userID
         guard connectivity.isConnected else {
             Self.logger.error("sync cycle skipped: offline")
             status = .error("offline")
@@ -129,20 +239,98 @@ final class SyncController: ObservableObject {
         Self.logger.info("sync cycle start firstSync=\(firstSync)")
         do {
             if firstSync {
-                try await pull(modifiedSince: nil)
+                try await guardedStage(userID: userID) {
+                    try await self.pull(modifiedSince: nil, userID: userID)
+                }
             }
-            try await applyTombstones()
-            try await pushBufferedDeletions()
-            try await drainOutbox()
+            try await guardedStage(userID: userID) {
+                try await self.applyTombstones(userID: userID)
+            }
+            try await guardedStage(userID: userID) {
+                try await self.pushBufferedDeletions(userID: userID)
+            }
+            try await guardedStage(userID: userID) {
+                try await self.drainOutbox(userID: userID)
+            }
             if !firstSync {
-                try await pull(modifiedSince: nil)
+                try await guardedStage(userID: userID) {
+                    try await self.pull(modifiedSince: nil, userID: userID)
+                }
             }
             status = .idle(Date())
             Self.logger.info("sync cycle finished")
+        } catch is CancellationError {
+            finishAbortedCycle(userID: userID, generation: generation)
         } catch {
-            Self.logger.error("sync cycle failed: \(error.localizedDescription, privacy: .public)")
+            finishFailedCycle(error, userID: userID, generation: generation)
+        }
+    }
+
+    /// Tail of a finished cycle: releases the single-flight handle, the
+    /// cycle guard, and the running flag. Only the still-owning generation
+    /// may clear the handle/guard: a cancelled predecessor finishing after
+    /// deactivate() → activate(newUser) must leave the NEW cycle's state
+    /// alone. The running flag follows the same ownership, except a stale
+    /// tail with no live successor handle (plain deactivate) still clears it
+    /// so the shutdown wait ends promptly once the cancelled cycle exits.
+    private func finishCycleTail(generation: Int) {
+        if cycleGeneration == generation {
+            cycleTask = nil
+            activeCycleUserID = nil
+            cycleRunning = false
+        } else if cycleTask == nil {
+            cycleRunning = false
+        }
+    }
+
+    /// Tail of a cycle aborted by the same-account guard (`.inactive`, not
+    /// `.error`, so the shell's next `activate(sessionID)` rebinds — see the
+    /// catch in `runCycle`). Only the still-owning generation may write the
+    /// status: a cancelled predecessor finishing after deactivate() →
+    /// activate(newUser) must not strand the NEW cycle's `.syncing`.
+    private func finishAbortedCycle(userID: String, generation: Int) {
+        Self.logger.info("sync cycle aborted: account changed mid-cycle")
+        if cycleGeneration == generation, boundUserID == userID {
+            status = .inactive
+        }
+    }
+
+    /// Tail of a cycle that failed for a real reason. Same generation
+    /// discipline, plus binding ownership: a deactivated (cancelled) cycle's
+    /// late failure must stay `.inactive`, never overwrite it with `.error`
+    /// (otherwise `activate` early-returns and sync strands dead until
+    /// relaunch). Only the still-bound owning generation surfaces `.error`.
+    private func finishFailedCycle(_ error: Error, userID: String, generation: Int) {
+        Self.logger.error("sync cycle failed: \(error.localizedDescription, privacy: .public)")
+        if cycleGeneration == generation, boundUserID == userID {
             status = .error(error.localizedDescription)
         }
+    }
+
+    /// Per-item same-account guard for in-stage loops (pull merge,
+    /// tombstones, buffered deletes): the session must still match the
+    /// cycle's own captured `userID` before the next record/push is applied.
+    /// A mid-stage swap costs at most the one in-flight call — the abort
+    /// surfaces as `CancellationError`, so `runCycle` routes it to
+    /// `finishAbortedCycle` with the same generation discipline (a stale
+    /// predecessor's abort never touches the successor's state).
+    private func requireSameAccount(_ userID: String) throws {
+        guard sessionUserIDProvider() == userID else {
+            throw CancellationError()
+        }
+    }
+
+    /// Runs one cycle stage, aborting (with `CancellationError`) when the
+    /// account changed mid-cycle: the still-bound id must match the session's
+    /// user id, otherwise nothing further is drained or applied.
+    private func guardedStage(
+        userID: String,
+        _ stage: () async throws -> Void
+    ) async throws {
+        guard sessionUserIDProvider() == userID else {
+            throw CancellationError()
+        }
+        try await stage()
     }
 
     // MARK: - Pull (LWW merge, D4/D5)
@@ -154,10 +342,14 @@ final class SyncController: ObservableObject {
     /// Ordering: the full Category snapshot is fetched and merged FIRST so
     /// every referenced category exists locally before Entries are merged
     /// (join foreign keys stay enforced).
-    private func pull(modifiedSince: Date?) async throws {
+    private func pull(modifiedSince: Date?, userID: String) async throws {
         let categories = try await remote.fetchCategories()
+        // Mid-stage swap: the fetch above ran under the old session — abort
+        // before reconciling or merging any of it into the (now foreign) file.
+        try requireSameAccount(userID)
         try await reconcileCategories(categories)
         for category in categories {
+            try requireSameAccount(userID)
             try await applyServer(category)
         }
 
@@ -167,6 +359,7 @@ final class SyncController: ObservableObject {
         } else {
             categoryCursor = try await store.lastSyncedAt(resource: "category")
         }
+        try requireSameAccount(userID)
         if let max = categories.map(\.updatedAt).max(), categoryCursor == nil || max > (categoryCursor ?? .distantPast) {
             try await store.setLastSyncedAt(resource: "category", date: max)
         }
@@ -178,10 +371,13 @@ final class SyncController: ObservableObject {
             entryCursor = try await store.lastSyncedAt(resource: "entry")
         }
         let entries = try await remote.fetchEntries(modifiedSince: entryCursor)
+        try requireSameAccount(userID)
         let serverCategoriesByID = Dictionary(uniqueKeysWithValues: categories.map { ($0.id, $0) })
         for entry in entries {
+            try requireSameAccount(userID)
             try await applyServer(entry, serverCategories: serverCategoriesByID)
         }
+        try requireSameAccount(userID)
         if let max = entries.map(\.updatedAt).max() {
             try await store.setLastSyncedAt(resource: "entry", date: max)
         }
@@ -362,7 +558,7 @@ final class SyncController: ObservableObject {
     /// tombstone for an unknown id is a no-op that still advances the
     /// cursor. Only entry and category tombstones exist (activity
     /// tombstones are gone); unknown resources are ignored defensively.
-    private func applyTombstones() async throws {
+    private func applyTombstones(userID: String) async throws {
         let cursor = try await store.lastSyncedAt(resource: "deletions")
         let deletions: [Deletion]
         do {
@@ -383,9 +579,14 @@ final class SyncController: ObservableObject {
             }
             return true
         }
+        // Mid-stage swap: the fetch above ran under the old session — abort
+        // before applying any tombstone into the (now foreign) file.
+        try requireSameAccount(userID)
         for deletion in known {
+            try requireSameAccount(userID)
             try await store.applyDeletionTombstone(deletion)
         }
+        try requireSameAccount(userID)
         if let max = deletions.map(\.deletedAt).max() {
             try await store.setLastSyncedAt(resource: "deletions", date: max)
         }
@@ -405,13 +606,19 @@ final class SyncController: ObservableObject {
     /// with the row still buffered. While the loop runs, undo of buffered
     /// rows is refused (D3 guard); the flag is always cleared, even on
     /// error, so undo can never wedge shut.
-    private func pushBufferedDeletions() async throws {
+    private func pushBufferedDeletions(userID: String) async throws {
         let pending = try await store.bufferedDeletions()
         guard !pending.isEmpty else { return }
         await store.setUndoPushInFlight(true)
         do {
             for bufferID in Set(pending.map(\.bufferID)) {
+                // Mid-stage swap aborts before the next buffer commits: no
+                // further DELETE goes out under the new session's token.
+                try requireSameAccount(userID)
                 for deletion in pending where deletion.bufferID == bufferID {
+                    // Per-item abort: a swap during the previous push costs at
+                    // most that one in-flight DELETE.
+                    try requireSameAccount(userID)
                     do {
                         switch deletion.resource {
                         case "entry":
@@ -427,6 +634,9 @@ final class SyncController: ObservableObject {
                         Self.logger.info("sync buffered delete 404-as-success \(deletion.resource, privacy: .public) \(deletion.recordID, privacy: .public)")
                     }
                 }
+                // Abort before committing the buffer row: a swap during the
+                // pushes leaves the row buffered for the owning account.
+                try requireSameAccount(userID)
                 try await store.undoBufferRemove(id: bufferID)
             }
             Self.logger.info("sync pushed \(pending.count) buffered deletions")
@@ -444,12 +654,24 @@ final class SyncController: ObservableObject {
     /// resource. POST is idempotent on `id` and PATCH carries `updated_at`
     /// (LWW), so a replay after a crash or relapse produces the same result
     /// as the first attempt.
-    private func drainOutbox() async throws {
+    ///
+    /// The per-row guard compares the session against the CYCLE's own
+    /// captured `userID`, not the shared `activeCycleUserID`: a cancelled
+    /// predecessor finishing after deactivate() → activate(newUser) reads
+    /// the successor's guard value, and comparing against it could let a
+    /// row drain under the NEW account's session.
+    private func drainOutbox(userID: String) async throws {
         let rows = try await store.outboxRows()
         // One relay category snapshot per drain, fetched lazily: only when
         // the drain actually holds an entry create/update row.
         var relayCategoryIDs: Set<String>?
         for queuedRow in Self.orderedForDrain(rows) {
+            // Same-account guard per row: a session swap mid-drain stops the
+            // remaining pushes (sync-client same-account guard). Compared
+            // against this cycle's own captured user id — see the doc above.
+            guard sessionUserIDProvider() == userID else {
+                throw CancellationError()
+            }
             // Conflict recovery can remove or rewrite a later row while this
             // drain is still iterating the initial snapshot. Always push the
             // current persisted payload rather than a stale in-memory copy.
@@ -481,6 +703,8 @@ final class SyncController: ObservableObject {
                     continue
                 }
                 throw error
+            } catch is CancellationError {
+                throw CancellationError()
             }
         }
     }

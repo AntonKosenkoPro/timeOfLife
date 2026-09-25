@@ -14,7 +14,7 @@ struct SyncControllerTests {
         let (store, mock, controller) = makeContext()
         try await store.createEntry(makeEntry(id: "e1", text: "Local"))
 
-        controller.activate()
+        controller.activate(userID: "u1")
         await waitForCycle(controller)
 
         let pullIndex = mock.calls.firstIndex { $0.method == "fetchCategories" }
@@ -34,13 +34,13 @@ struct SyncControllerTests {
         let cursor = Date(timeIntervalSince1970: 1_700_000_000)
         mock.entriesResult = [makeEntry(id: "e1", text: "Server", updatedAt: cursor)]
 
-        controller.activate()
+        controller.activate(userID: "u1")
         await waitForCycle(controller)
 
         #expect(try await store.lastSyncedAt(resource: "entry") == cursor)
 
         mock.clearLog()
-        await controller.syncNow()
+        await controller.syncNow(userID: "u1")
 
         #expect(mock.fetchedModifiedSince.first == cursor)
     }
@@ -63,7 +63,7 @@ struct SyncControllerTests {
         )
         mock.entriesResult = [server]
 
-        controller.activate()
+        controller.activate(userID: "u1")
         await waitForCycle(controller)
 
         let entry = try await store.entry(id: "e1")
@@ -86,7 +86,7 @@ struct SyncControllerTests {
         )
         mock.entriesResult = [server]
 
-        controller.activate()
+        controller.activate(userID: "u1")
         await waitForCycle(controller)
 
         let entry = try await store.entry(id: "e1")
@@ -99,7 +99,7 @@ struct SyncControllerTests {
         try await store.mergeEntry(makeEntry(id: "local-gym", text: "Gym"))
         mock.entriesResult = [makeEntry(id: "server-gym", text: "Gym")]
 
-        controller.activate()
+        controller.activate(userID: "u1")
         await waitForCycle(controller)
 
         #expect(isIdle(controller.status))
@@ -116,7 +116,7 @@ struct SyncControllerTests {
         try await store.createEntry(makeEntry(id: "e1", text: "A"))
         try await store.createEntry(makeEntry(id: "e2", text: "B"))
 
-        controller.activate()
+        controller.activate(userID: "u1")
         await waitForCycle(controller)
 
         let pushes = mock.calls.filter { $0.method == "createEntry" }
@@ -128,7 +128,7 @@ struct SyncControllerTests {
         try await store.createEntry(makeEntry(id: "e4", text: "D"))
         let rowsBefore = try await store.outboxRows()
 
-        await controller.syncNow()
+        await controller.syncNow(userID: "u1")
 
         let replayPushes = mock.calls.filter { $0.method == "createEntry" }
         #expect(replayPushes.map(\.id) == rowsBefore.map(\.recordID))
@@ -144,7 +144,7 @@ struct SyncControllerTests {
         try await store.mergeCategory(Category(id: "c2", name: "Health", icon: "tag"))
         try await store.createEntry(makeEntry(id: "e1", text: "Gym", categoryIDs: ["c1", "c2"], notes: "Leg day"))
 
-        controller.activate()
+        controller.activate(userID: "u1")
         await waitForCycle(controller)
 
         #expect(pushed?.activityText == "Gym")
@@ -166,7 +166,7 @@ struct SyncControllerTests {
             return server
         }
 
-        controller.activate()
+        controller.activate(userID: "u1")
         await waitForCycle(controller)
 
         #expect(try await store.outboxRows().isEmpty)
@@ -185,7 +185,7 @@ struct SyncControllerTests {
             makeEntry(id: "e1", text: "Gym", categoryIDs: ["c-keep", "c-unknown"])
         ]
 
-        controller.activate()
+        controller.activate(userID: "u1")
         await waitForCycle(controller)
 
         let entry = try await store.entry(id: "e1")
@@ -201,7 +201,7 @@ struct SyncControllerTests {
             makeEntry(id: "e1", text: "Gym", categoryIDs: ["c-ghost"])
         ]
 
-        controller.activate()
+        controller.activate(userID: "u1")
         await waitForCycle(controller)
 
         let entry = try await store.entry(id: "e1")
@@ -225,7 +225,7 @@ struct SyncControllerTests {
         }
         mock.fetchEntryHandler = { _ in server }
 
-        controller.activate()
+        controller.activate(userID: "u1")
         await waitForCycle(controller)
 
         let entry = try await store.entry(id: "e1")
@@ -240,7 +240,7 @@ struct SyncControllerTests {
         let (store, mock, controller) = makeContext()
         try await store.saveTimerDraft(activityText: "Work", categoryIDs: ["c1"], startedAt: Date())
 
-        controller.activate()
+        controller.activate(userID: "u1")
         await waitForCycle(controller)
 
         #expect(mock.calls.allSatisfy { $0.resource != "entry" || $0.method != "createEntry" })
@@ -264,7 +264,7 @@ struct SyncControllerTests {
         }
         let starterIDs = Set(starterCategories.map(\.id))
 
-        controller.activate()
+        controller.activate(userID: "u1")
         await waitForCycle(controller)
 
         let stored = try await store.categories()
@@ -281,7 +281,7 @@ struct SyncControllerTests {
         try await store.mergeCategory(Category(id: "local-cat", name: "Old", icon: "tag"))
         mock.categoriesResult = []
 
-        controller.activate()
+        controller.activate(userID: "u1")
         await waitForCycle(controller)
 
         #expect(try await store.category(id: "local-cat") == nil)
@@ -293,7 +293,7 @@ struct SyncControllerTests {
         try await store.createCategory(Category(id: "pending-cat", name: "Pending", icon: "tag"))
         mock.categoriesResult = []
 
-        controller.activate()
+        controller.activate(userID: "u1")
         await waitForCycle(controller)
 
         let stored = try await store.category(id: "pending-cat")
@@ -313,7 +313,7 @@ struct SyncControllerTests {
         // device); there is no pending outbox work for the category.
         mock.categoriesResult = []
 
-        controller.activate()
+        controller.activate(userID: "u1")
         await waitForCycle(controller)
 
         #expect(try await store.category(id: "cat-1") == nil)
@@ -330,12 +330,12 @@ struct SyncControllerTests {
         let category = Category(id: "cat-1", name: "Work", icon: "briefcase")
         mock.categoriesResult = [category]
 
-        controller.activate()
+        controller.activate(userID: "u1")
         await waitForCycle(controller)
         mock.clearLog()
 
         mock.categoriesResult = [category]
-        await controller.syncNow()
+        await controller.syncNow(userID: "u1")
         await waitForCycle(controller)
 
         #expect(try await store.categories().count == 1)
@@ -362,7 +362,7 @@ struct SyncControllerTests {
             )
         ]
 
-        controller.activate()
+        controller.activate(userID: "u1")
         await waitForCycle(controller)
 
         // Server identity adopted during pull — no push round-trip, no failure.
@@ -391,7 +391,7 @@ struct SyncControllerTests {
             )
         ]
 
-        controller.activate()
+        controller.activate(userID: "u1")
         await waitForCycle(controller)
 
         #expect(isIdle(controller.status))
@@ -417,7 +417,7 @@ struct SyncControllerTests {
             return winner
         }
 
-        controller.activate()
+        controller.activate(userID: "u1")
         await waitForCycle(controller)
 
         // The winning category is available locally.
@@ -448,7 +448,7 @@ struct SyncControllerTests {
         }
         mock.fetchCategoryHandler = { _ in throw APIError.offline }
 
-        controller.activate()
+        controller.activate(userID: "u1")
         await waitForCycle(controller)
 
         // No stub merged: the losing identity keeps its real name.
@@ -477,7 +477,7 @@ struct SyncControllerTests {
         // the DELETE.
         mock.entriesResult = [makeEntry(id: "e1", text: "Gym", createdAt: old, updatedAt: old)]
 
-        controller.activate()
+        controller.activate(userID: "u1")
         await waitForCycle(controller)
 
         #expect(try await store.entry(id: "e1") == nil)
@@ -498,7 +498,7 @@ struct SyncControllerTests {
             Category(id: "c1", name: "Sport", icon: "figure.run", createdAt: old, updatedAt: old)
         ]
 
-        controller.activate()
+        controller.activate(userID: "u1")
         await waitForCycle(controller)
 
         #expect(try await store.category(id: "c1") == nil)
@@ -518,7 +518,7 @@ struct SyncControllerTests {
         }
         mock.entriesResult = [makeEntry(id: "e1", text: "Gym", createdAt: old, updatedAt: old)]
 
-        controller.activate()
+        controller.activate(userID: "u1")
         await waitForCycle(controller)
 
         // The pull skipped the relay copy (no resurrection), then the
@@ -546,7 +546,7 @@ struct SyncControllerTests {
             Category(id: "c1", name: "Sport", icon: "figure.run", createdAt: old, updatedAt: old)
         ]
 
-        controller.activate()
+        controller.activate(userID: "u1")
         await waitForCycle(controller)
 
         #expect(try await store.category(id: "c1") == nil)
@@ -571,7 +571,7 @@ struct SyncControllerTests {
             makeEntry(id: "e1", text: "Server", createdAt: t0, updatedAt: t2)
         }
 
-        controller.activate()
+        controller.activate(userID: "u1")
         await waitForCycle(controller)
 
         #expect(try await store.entry(id: "e1") == nil)
@@ -595,7 +595,7 @@ struct SyncControllerTests {
         )
         mock.deletionsResult = [Deletion(resource: "entry", recordID: "e1", deletedAt: deletedAt)]
 
-        controller.activate()
+        controller.activate(userID: "u1")
         await waitForCycle(controller)
 
         #expect(isIdle(controller.status))
@@ -617,7 +617,7 @@ struct SyncControllerTests {
         try await store.createEntry(makeEntry(id: "e1", text: "Gym", categoryIDs: ["cat-1"]))
         mock.deletionsResult = [Deletion(resource: "category", recordID: "cat-1", deletedAt: deletedAt)]
 
-        controller.activate()
+        controller.activate(userID: "u1")
         await waitForCycle(controller)
 
         #expect(isIdle(controller.status))
@@ -633,7 +633,7 @@ struct SyncControllerTests {
         let deletedAt = Date(timeIntervalSince1970: 1_650_000_000)
         mock.deletionsResult = [Deletion(resource: "activity", recordID: "a1", deletedAt: deletedAt)]
 
-        controller.activate()
+        controller.activate(userID: "u1")
         await waitForCycle(controller)
 
         #expect(isIdle(controller.status))
@@ -652,7 +652,7 @@ struct SyncControllerTests {
         // is clean, and its updated_at is newer than the stale tombstone.
         mock.deletionsResult = [Deletion(resource: "entry", recordID: "e1", deletedAt: deletedAt)]
 
-        controller.activate()
+        controller.activate(userID: "u1")
         await waitForCycle(controller)
 
         #expect(isIdle(controller.status))
@@ -676,7 +676,7 @@ struct SyncControllerTests {
             throw APIError.server(code: "not_found", message: "gone", details: [:])
         }
 
-        controller.activate()
+        controller.activate(userID: "u1")
         await waitForCycle(controller)
 
         // The tombstone step removed the row and its pending update row
@@ -694,7 +694,7 @@ struct SyncControllerTests {
         let (store, mock, controller) = makeContext()
         mock.deletionsResult = []
 
-        controller.activate()
+        controller.activate(userID: "u1")
         await waitForCycle(controller)
 
         #expect(isIdle(controller.status))
@@ -708,7 +708,7 @@ struct SyncControllerTests {
         let deletedAt = Date(timeIntervalSince1970: 1_650_000_000)
         mock.deletionsResult = [Deletion(resource: "entry", recordID: "unknown", deletedAt: deletedAt)]
 
-        controller.activate()
+        controller.activate(userID: "u1")
         await waitForCycle(controller)
 
         #expect(isIdle(controller.status))
@@ -729,7 +729,7 @@ struct SyncControllerTests {
             Deletion(resource: "entry", recordID: "e2", deletedAt: later),
         ]
 
-        controller.activate()
+        controller.activate(userID: "u1")
         await waitForCycle(controller)
 
         #expect(isIdle(controller.status))
@@ -745,11 +745,11 @@ struct SyncControllerTests {
         try await store.mergeEntry(makeEntry(id: "e1", text: "Gym", createdAt: deletedAt, updatedAt: deletedAt))
         mock.deletionsResult = [Deletion(resource: "entry", recordID: "e1", deletedAt: deletedAt)]
 
-        controller.activate()
+        controller.activate(userID: "u1")
         await waitForCycle(controller)
 
         mock.clearLog()
-        await controller.syncNow()
+        await controller.syncNow(userID: "u1")
 
         #expect(mock.fetchedDeletionsSince.first == deletedAt)
         #expect(try await store.lastSyncedAt(resource: "deletions") == deletedAt)
@@ -764,7 +764,7 @@ struct SyncControllerTests {
         try await store.deleteEntry(id: "e1")
         mock.deletionsResult = [Deletion(resource: "entry", recordID: "e1", deletedAt: deletedAt)]
 
-        controller.activate()
+        controller.activate(userID: "u1")
         await waitForCycle(controller)
 
         // The locally queued DELETE drained normally; the tombstone found
@@ -787,7 +787,7 @@ struct SyncControllerTests {
             return
         }
 
-        controller.activate()
+        controller.activate(userID: "u1")
         await waitForCycle(controller)
 
         #expect(isIdle(controller.status))
@@ -806,7 +806,7 @@ struct SyncControllerTests {
         ))
         _ = try await store.deleteCategoryUndoable(id: "cat-1")
 
-        controller.activate()
+        controller.activate(userID: "u1")
         await waitForCycle(controller)
 
         #expect(isIdle(controller.status))
@@ -826,7 +826,7 @@ struct SyncControllerTests {
             throw APIError.server(code: "not_found", message: "gone", details: [:])
         }
 
-        controller.activate()
+        controller.activate(userID: "u1")
         await waitForCycle(controller)
 
         #expect(isIdle(controller.status))
@@ -844,7 +844,7 @@ struct SyncControllerTests {
             throw APIError.server(code: "internal", message: "boom", details: [:])
         }
 
-        controller.activate()
+        controller.activate(userID: "u1")
         await waitForCycle(controller)
 
         // Loud failure, nothing committed — and the deletion is still
@@ -892,7 +892,7 @@ struct SyncControllerTests {
             throw APIError.server(code: "not_found", message: "gone", details: [:])
         }
 
-        controller.activate()
+        controller.activate(userID: "u1")
         await waitForCycle(controller)
 
         #expect(isIdle(controller.status))
@@ -917,7 +917,7 @@ struct SyncControllerTests {
         var createdIDs: [String] = []
         mock.createEntryHandler = { createdIDs.append($0.id) }
 
-        controller.activate()
+        controller.activate(userID: "u1")
         await waitForCycle(controller)
 
         #expect(createdIDs == ["e1"])
@@ -943,7 +943,7 @@ struct SyncControllerTests {
         var createdIDs: [String] = []
         mock.createCategoryHandler = { createdIDs.append($0.id) }
 
-        controller.activate()
+        controller.activate(userID: "u1")
         await waitForCycle(controller)
 
         #expect(createdIDs == ["c1"])
@@ -970,7 +970,7 @@ struct SyncControllerTests {
             throw APIError.server(code: "not_found", message: "gone", details: [:])
         }
 
-        controller.activate()
+        controller.activate(userID: "u1")
         await waitForCycle(controller)
 
         #expect(updateCalls == 0)
@@ -987,7 +987,7 @@ struct SyncControllerTests {
             throw APIError.server(code: "not_found", message: "gone", details: [:])
         }
 
-        controller.activate()
+        controller.activate(userID: "u1")
         await waitForCycle(controller)
 
         // Drain and pull ran normally around the skipped tombstone step.
@@ -1006,7 +1006,7 @@ struct SyncControllerTests {
             throw APIError.server(code: "internal_error", message: "boom", details: [:])
         }
 
-        controller.activate()
+        controller.activate(userID: "u1")
         await waitForCycle(controller)
 
         #expect(controller.status == .error("server(internal_error): boom"))
@@ -1021,7 +1021,7 @@ struct SyncControllerTests {
             throw APIError.server(code: "not_found", message: "gone", details: [:])
         }
 
-        controller.activate()
+        controller.activate(userID: "u1")
         await waitForCycle(controller)
 
         #expect(try await store.outboxRows().isEmpty)
@@ -1032,7 +1032,7 @@ struct SyncControllerTests {
     @Test("offline activation errors without network calls")
     func offlineActivationErrorsWithoutNetworkCalls() async throws {
         let (_, mock, controller) = makeContext(connected: false)
-        controller.activate()
+        controller.activate(userID: "u1")
         await waitForCycle(controller)
 
         #expect(mock.calls.isEmpty)
@@ -1042,26 +1042,26 @@ struct SyncControllerTests {
     @Test("deactivate stops sync and syncNow is a no-op")
     func deactivateStopsSync() async throws {
         let (_, mock, controller) = makeContext()
-        controller.activate()
+        controller.activate(userID: "u1")
         await waitForCycle(controller)
 
         controller.deactivate()
         #expect(controller.status == .inactive)
 
         mock.clearLog()
-        await controller.syncNow()
+        await controller.syncNow(userID: "u1")
         #expect(mock.calls.isEmpty)
     }
 
     @Test("trigger is single-flight")
     func triggerIsSingleFlight() async throws {
         let (_, mock, controller) = makeContext()
-        controller.activate()
+        controller.activate(userID: "u1")
         await waitForCycle(controller)
 
         mock.clearLog()
-        controller.trigger()
-        controller.trigger()
+        controller.trigger(userID: "u1")
+        controller.trigger(userID: "u1")
         await waitUntil { mock.calls.count == 3 }
 
         let fetches = mock.calls.filter { $0.method == "fetchEntries" }
@@ -1073,7 +1073,7 @@ struct SyncControllerTests {
     @Test("concurrent syncNow calls join a single cycle")
     func syncNowJoinsInFlightCycle() async throws {
         let (store, mock, controller) = makeContext()
-        controller.activate()
+        controller.activate(userID: "u1")
         await waitForCycle(controller)
 
         // A slow push keeps the first cycle in flight while the second
@@ -1085,9 +1085,9 @@ struct SyncControllerTests {
         }
         mock.clearLog()
 
-        let first = Task { await controller.syncNow() }
+        let first = Task { await controller.syncNow(userID: "u1") }
         await waitUntil { controller.status == .syncing }
-        await controller.syncNow()
+        await controller.syncNow(userID: "u1")
         await first.value
         await waitForCycle(controller)
 
@@ -1100,7 +1100,7 @@ struct SyncControllerTests {
     @Test("syncNow joins a trigger-started cycle")
     func syncNowJoinsTriggerCycle() async throws {
         let (store, mock, controller) = makeContext()
-        controller.activate()
+        controller.activate(userID: "u1")
         await waitForCycle(controller)
 
         try await store.createEntry(makeEntry(id: "e1", text: "Gym"))
@@ -1109,9 +1109,9 @@ struct SyncControllerTests {
         }
         mock.clearLog()
 
-        controller.trigger()
+        controller.trigger(userID: "u1")
         await waitUntil { controller.status == .syncing }
-        await controller.syncNow()
+        await controller.syncNow(userID: "u1")
         await waitForCycle(controller)
 
         let pushes = mock.calls.filter { $0.method == "createEntry" }
@@ -1122,7 +1122,7 @@ struct SyncControllerTests {
     @Test("trigger during a syncNow cycle does not fork")
     func triggerDuringSyncNowDoesNotFork() async throws {
         let (store, mock, controller) = makeContext()
-        controller.activate()
+        controller.activate(userID: "u1")
         await waitForCycle(controller)
 
         try await store.createEntry(makeEntry(id: "e1", text: "Gym"))
@@ -1131,10 +1131,10 @@ struct SyncControllerTests {
         }
         mock.clearLog()
 
-        let syncing = Task { await controller.syncNow() }
+        let syncing = Task { await controller.syncNow(userID: "u1") }
         await waitUntil { controller.status == .syncing }
-        controller.trigger()
-        controller.trigger()
+        controller.trigger(userID: "u1")
+        controller.trigger(userID: "u1")
         await syncing.value
         await waitForCycle(controller)
 
@@ -1146,12 +1146,12 @@ struct SyncControllerTests {
     @Test("sequential syncNow calls run separate cycles")
     func sequentialSyncNowRunsSeparateCycles() async throws {
         let (_, mock, controller) = makeContext()
-        controller.activate()
+        controller.activate(userID: "u1")
         await waitForCycle(controller)
 
         mock.clearLog()
-        await controller.syncNow()
-        await controller.syncNow()
+        await controller.syncNow(userID: "u1")
+        await controller.syncNow(userID: "u1")
 
         // The boundary "race" (cycle already over at check time) is a fresh
         // cheap cycle, not a join: one fetchEntries per call.
@@ -1171,7 +1171,7 @@ struct SyncControllerTests {
         try await store.createEntry(makeEntry(id: "e1", text: "Gym"))
         try await store.createCategory(Category(id: "c1", name: "Sport", icon: "figure.run"))
 
-        controller.activate()
+        controller.activate(userID: "u1")
         await waitForCycle(controller)
 
         let categoryIndex = mock.calls.firstIndex { $0.method == "createCategory" }
@@ -1190,7 +1190,7 @@ struct SyncControllerTests {
         let (store, mock, controller) = makeContext()
         mock.categoriesResult = [Category(id: "c-keep", name: "Sport", icon: "figure.run")]
 
-        controller.activate()
+        controller.activate(userID: "u1")
         await waitForCycle(controller)
 
         // Clean local rows (no outbox): the relay knows c-keep but not c-new,
@@ -1218,7 +1218,7 @@ struct SyncControllerTests {
             }
         }
 
-        await controller.syncNow()
+        await controller.syncNow(userID: "u1")
 
         #expect(createdCategoryIDs == ["c-new"])
         #expect(pushed.count == 1)
@@ -1250,7 +1250,7 @@ struct SyncControllerTests {
             }
         }
 
-        controller.activate()
+        controller.activate(userID: "u1")
         await waitForCycle(controller)
 
         #expect(pushed.count == 2)
@@ -1273,7 +1273,7 @@ struct SyncControllerTests {
             )
         }
 
-        controller.activate()
+        controller.activate(userID: "u1")
         await waitForCycle(controller)
 
         guard case .error = controller.status else {
@@ -1312,7 +1312,7 @@ struct SyncControllerTests {
             )
         ]
 
-        controller.activate()
+        controller.activate(userID: "u1")
         await waitForCycle(controller)
 
         // server-sport remapped to the local rival, server-only adopted: the
@@ -1355,7 +1355,7 @@ struct SyncControllerTests {
         var updated: [TimeEntry] = []
         mock.updateEntryHandler = { updated.append($0) }
 
-        controller.activate()
+        controller.activate(userID: "u1")
         await waitForCycle(controller)
 
         #expect(updated.count == 1)
@@ -1393,7 +1393,7 @@ struct SyncControllerTests {
             makeEntry(id: "e1", text: "Gym", categoryIDs: ["c1", "c2"], createdAt: stamp, updatedAt: stamp)
         ]
 
-        controller.activate()
+        controller.activate(userID: "u1")
         await waitForCycle(controller)
 
         // Local-only adoption: joins restored, timestamp unchanged, no push.
@@ -1425,7 +1425,7 @@ struct SyncControllerTests {
             makeEntry(id: "e1", text: "Gym", categoryIDs: [], createdAt: older, updatedAt: older)
         ]
 
-        controller.activate()
+        controller.activate(userID: "u1")
         await waitForCycle(controller)
 
         let entry = try await store.entry(id: "e1")
@@ -1435,7 +1435,545 @@ struct SyncControllerTests {
         #expect(isIdle(controller.status))
     }
 
+    // MARK: - Same-account guard (account-bound-local-data 4.1)
+
+    @Test("activate A then switch the session to B: no cycle runs, outbox stays in A's file")
+    func accountMismatchRefusesCycle() async throws {
+        let (store, mock, controller) = makeContext()
+        // A's outbox holds a pending create row.
+        try await store.createEntry(makeEntry(id: "e1", text: "A's entry"))
+        controller.activate(userID: "u1")
+        await waitForCycle(controller)
+        // Steady state drained; queue a fresh row, then swap the session.
+        try await store.createEntry(makeEntry(id: "e2", text: "A's queued"))
+        mock.clearLog()
+
+        // Account B becomes the authenticated session; the controller is
+        // still bound to A. Every trigger is refused — A's rows are never
+        // pushed under B's token.
+        let swapped = SyncController(
+            store: store, remote: mock, connectivity: MockConnectivity(connected: true)
+        ) { "u2" }
+        swapped.activate(userID: "u1")
+        await waitForCycle(swapped)
+        await swapped.syncNow(userID: "u2")
+        swapped.trigger(userID: "u2")
+        try await Task.sleep(nanoseconds: 100_000_000)
+
+        #expect(mock.calls.isEmpty)
+        let rows = try await store.outboxRows()
+        #expect(rows.contains { $0.recordID == "e2" && $0.op == "create" })
+        guard case .inactive = swapped.status else {
+            Issue.record("expected inactive status, got \(swapped.status)")
+            return
+        }
+    }
+
+    @Test("a cycle in flight aborts mid-way when the account changes, without draining further rows")
+    func midCycleAccountChangeAborts() async throws {
+        let (store, mock, _) = makeContext()
+        // Two queued rows; the first push holds the cycle in flight while
+        // the session flips to another account.
+        try await store.createEntry(makeEntry(id: "e1", text: "First"))
+        try await store.createEntry(makeEntry(id: "e2", text: "Second"))
+        let session = SessionUserIDHolder("u1")
+        let held = HeldCycleStart()
+        mock.createEntryHandler = { _ in
+            if !held.started {
+                held.started = true
+                // Session changes to B while A's cycle is draining.
+                session.value = "u2"
+            }
+        }
+        let controller = SyncController(
+            store: store, remote: mock, connectivity: MockConnectivity(connected: true)
+        ) { session.value }
+
+        controller.activate(userID: "u1")
+        await waitForCycle(controller)
+
+        // The abort left the remaining row(s) in A's file: e2's create was
+        // never pushed under B's session.
+        let rows = try await store.outboxRows()
+        #expect(rows.contains { $0.recordID == "e2" && $0.op == "create" })
+        #expect(!mock.calls.contains { $0.method == "createEntry" && $0.id == "e2" })
+        // The abort surfaces no error and deactivates: the shell's next
+        // activate(sessionID) rebinds (activate only rebinds from inactive).
+        if case .inactive = controller.status {} else {
+            Issue.record("expected inactive after abort, got \(controller.status)")
+        }
+    }
+
+    @Test("cancel-then-fail stays inactive so the next activate rebinds and drains")
+    func cancelThenFailStaysInactive() async throws {
+        let (store, mock, controller) = makeContext()
+        try await store.createEntry(makeEntry(id: "e1", text: "Gym"))
+        let gate = Gate()
+        let firstPush = HeldCycleStart()
+        mock.createEntryHandler = { _ in
+            if !firstPush.started {
+                firstPush.started = true
+                await gate.wait()
+                throw APIError.server(code: "internal", message: "boom", details: [:])
+            }
+        }
+
+        controller.activate(userID: "u1")
+        await waitUntil { mock.calls.contains { $0.method == "createEntry" && $0.id == "e1" } }
+        // Cancel while the push is in flight (deactivate closes the binding);
+        // the late transport failure must not overwrite .inactive with .error.
+        controller.deactivate()
+        #expect(controller.status == .inactive)
+        gate.open()
+        try await Task.sleep(nanoseconds: 300_000_000)
+
+        #expect(controller.status == .inactive)
+        // The next activate rebinds (it early-returns unless .inactive) and
+        // drains the still-queued row.
+        mock.createEntryHandler = nil
+        mock.clearLog()
+        controller.activate(userID: "u1")
+        await waitForCycle(controller)
+
+        #expect(isIdle(controller.status))
+        #expect(mock.calls.contains { $0.method == "createEntry" && $0.id == "e1" })
+        #expect(try await store.outboxRows().isEmpty)
+    }
+
+    @Test("sign-out waits for a held cycle before close: no .error, next sign-in syncs")
+    func signOutWaitsForHeldCycle() async throws {
+        // swiftlint:disable:next force_try
+        let store = try! LocalStore(url: temporaryStoreURL())
+        let mock = MockCatalogRepository()
+        let session = SessionUserIDHolder("u1")
+        let controller = SyncController(
+            store: store, remote: mock, connectivity: MockConnectivity(connected: true)
+        ) { session.value }
+        controller.activate(userID: "u1")
+        await waitForCycle(controller)
+
+        // A steady-state cycle (drain before pull) held at its first push.
+        try await store.createEntry(makeEntry(id: "e1", text: "First"))
+        try await store.createEntry(makeEntry(id: "e2", text: "Second"))
+        let gate = Gate()
+        let firstPush = HeldCycleStart()
+        mock.createEntryHandler = { _ in
+            if !firstPush.started {
+                firstPush.started = true
+                await gate.wait()
+            }
+        }
+        controller.trigger(userID: "u1")
+        await waitUntil { mock.calls.contains { $0.method == "createEntry" && $0.id == "e1" } }
+        // Sign-out mid-cycle: the session clears and sync deactivates while
+        // the push is held. The dead-wait bug surfaced here — deactivate()
+        // nils the handle, so a pre-close wait observed "not live" at once.
+        session.value = nil
+        controller.deactivate()
+        #expect(controller.isCycleLive)
+        gate.open()
+        await waitUntil { !controller.isCycleLive }
+        // The released cycle aborts at e2's per-row guard (never pushed under
+        // the cleared session) and stays .inactive — never .error — so the
+        // close is safe and the next sign-in rebinds.
+        #expect(controller.status == .inactive)
+        let rows = try await store.outboxRows()
+        #expect(!rows.contains { $0.recordID == "e1" })
+        #expect(rows.contains { $0.recordID == "e2" && $0.op == "create" })
+        session.value = "u1"
+        controller.activate(userID: "u1")
+        await waitUntil { !controller.isCycleLive }
+        #expect(isIdle(controller.status))
+        #expect(try await store.outboxRows().isEmpty)
+    }
+
+    @Test("mid-stage swap aborts buffered deletes with no cross-account write")
+    func midStageSwapAbortsBufferedDeletes() async throws {
+        let (store, mock, _) = makeContext()
+        let old = Date(timeIntervalSince1970: 1_600_000_000)
+        try await store.mergeEntry(makeEntry(id: "e1", text: "A", createdAt: old, updatedAt: old))
+        try await store.mergeEntry(makeEntry(id: "e2", text: "B", createdAt: old, updatedAt: old))
+        _ = try await store.deleteEntryUndoable(id: "e1")
+        _ = try await store.deleteEntryUndoable(id: "e2")
+        let session = SessionUserIDHolder("u1")
+        let controller = SyncController(
+            store: store, remote: mock, connectivity: MockConnectivity(connected: true)
+        ) { session.value }
+        let swapped = HeldCycleStart()
+        mock.deleteEntryHandler = { _ in
+            if !swapped.started {
+                swapped.started = true
+                // Swap to B while A's buffered push is in flight: at most the
+                // one in-flight DELETE goes out.
+                session.value = "u2"
+            }
+        }
+
+        controller.activate(userID: "u1")
+        await waitForCycle(controller)
+
+        let deletes = mock.calls.filter { $0.method == "deleteEntry" }
+        #expect(deletes.count == 1)
+        // The uncommitted buffer rows stay for the owning account — nothing
+        // was committed under B's session.
+        #expect(!(try await store.bufferedDeletions()).isEmpty)
+        if case .inactive = controller.status {} else {
+            Issue.record("expected inactive after abort, got \(controller.status)")
+        }
+    }
+
+    @Test("mid-stage swap aborts tombstone application with no cross-account write")
+    func midStageSwapAbortsTombstones() async throws {
+        let (store, mock, _) = makeContext()
+        let old = Date(timeIntervalSince1970: 1_600_000_000)
+        try await store.mergeEntry(makeEntry(id: "e1", text: "Keep", createdAt: old, updatedAt: old))
+        try await store.mergeEntry(makeEntry(id: "e2", text: "Keep", createdAt: old, updatedAt: old))
+        let deletedAt = Date(timeIntervalSince1970: 1_650_000_000)
+        let session = SessionUserIDHolder("u1")
+        let controller = SyncController(
+            store: store, remote: mock, connectivity: MockConnectivity(connected: true)
+        ) { session.value }
+        mock.fetchDeletionsHandler = { _ in
+            // Swap to B during the tombstone fetch: the fetch ran under A's
+            // session, so none of it may apply into the now-foreign file.
+            session.value = "u2"
+            return [
+                Deletion(resource: "entry", recordID: "e1", deletedAt: deletedAt),
+                Deletion(resource: "entry", recordID: "e2", deletedAt: deletedAt),
+            ]
+        }
+
+        controller.activate(userID: "u1")
+        await waitForCycle(controller)
+
+        #expect(try await store.entry(id: "e1") != nil)
+        #expect(try await store.entry(id: "e2") != nil)
+        #expect(try await store.lastSyncedAt(resource: "deletions") == nil)
+        if case .inactive = controller.status {} else {
+            Issue.record("expected inactive after abort, got \(controller.status)")
+        }
+    }
+
+    @Test("mid-stage swap aborts pull merges with no cross-account write")
+    func midStageSwapAbortsPullMerges() async throws {
+        // swiftlint:disable:next force_try
+        let store = try! LocalStore(url: temporaryStoreURL())
+        let mock = MockCatalogRepository()
+        let session = SessionUserIDHolder("u1")
+        let remote = SwapOnEntriesFetchRemote(inner: mock, session: session)
+        let controller = SyncController(
+            store: store, remote: remote, connectivity: MockConnectivity(connected: true)
+        ) { session.value }
+        let stamp = Date(timeIntervalSince1970: 1_700_000_000)
+        mock.entriesResult = [
+            makeEntry(id: "srv-1", text: "Server 1", createdAt: stamp, updatedAt: stamp),
+            makeEntry(id: "srv-2", text: "Server 2", createdAt: stamp, updatedAt: stamp),
+        ]
+
+        controller.activate(userID: "u1")
+        await waitForCycle(controller)
+
+        // The entries fetch ran under A's session but the session swapped
+        // mid-pull: none of it merged into the now-foreign file, and the
+        // cursor never advanced.
+        #expect(try await store.entry(id: "srv-1") == nil)
+        #expect(try await store.entry(id: "srv-2") == nil)
+        #expect(try await store.lastSyncedAt(resource: "entry") == nil)
+        if case .inactive = controller.status {} else {
+            Issue.record("expected inactive after abort, got \(controller.status)")
+        }
+    }
+
+    @Test("re-login of the same account resumes the dormant drain (outbox + cursors ride the per-user file)")
+    func reloginResumesDormantDrain() async throws {
+        let base = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent(UUID().uuidString)
+        let url = base.appendingPathComponent(LocalStore.databaseFileName(userID: "u1"))
+
+        // Signed in as u1: queue a create, advance the entry cursor, sign out.
+        // swiftlint:disable:next force_try
+        let signedIn = try! LocalStore(url: url, userID: "u1")
+        try await signedIn.createEntry(makeEntry(id: "e1", text: "Offline draft"))
+        let cursor = Date(timeIntervalSince1970: 1_700_000_000)
+        try await signedIn.setLastSyncedAt(resource: "entry", date: cursor)
+        await signedIn.closeAccount()
+
+        // Re-login reopens the same file: the outbox drains and the cursor
+        // continues — no full re-pull (the fetch ran with the stored cursor).
+        // swiftlint:disable:next force_try
+        let reopened = try! LocalStore(url: url, userID: "u1")
+        let mock = MockCatalogRepository()
+        let controller = SyncController(
+            store: reopened, remote: mock, connectivity: MockConnectivity(connected: true)
+        ) { "u1" }
+        controller.activate(userID: "u1")
+        await waitForCycle(controller)
+
+        #expect(mock.calls.contains(Call("createEntry", "entry", "e1")))
+        #expect(try await reopened.outboxRows().isEmpty)
+        #expect(mock.fetchedModifiedSince.first == cursor)
+        #expect(isIdle(controller.status))
+    }
+
+    // MARK: - Cycle generation (deactivate → rapid re-activate race)
+
+    /// Awaitable one-shot gate for holding a cycle's push in flight while
+    /// the test re-activates the controller (same sendability shape as
+    /// `SessionUserIDHolder`).
+    private final class Gate: @unchecked Sendable {
+        private var continuation: CheckedContinuation<Void, Never>?
+        func wait() async {
+            await withCheckedContinuation { continuation = $0 }
+        }
+        func open() {
+            continuation?.resume()
+            continuation = nil
+        }
+    }
+
+    /// Mutable push-call counter (all access is main-actor serialized).
+    private final class PushCounter: @unchecked Sendable {
+        var value = 0
+    }
+
+    @Test("sign-out then rapid sign-in of the SAME account leaves the new cycle's handle live and draining")
+    func rapidReactivationSameAccountKeepsNewCycle() async throws {
+        let (store, mock, controller) = makeContext()
+        // Two queued rows: the predecessor holds at e1's push, the successor
+        // (started by the in-handler deactivate → activate) holds at its own
+        // e1 push. The predecessor is released FIRST, so its finishing defer
+        // lands while the successor cycle is provably still in flight.
+        try await store.createEntry(makeEntry(id: "e1", text: "First"))
+        try await store.createEntry(makeEntry(id: "e2", text: "Second"))
+        let gate1 = Gate()
+        let gate2 = Gate()
+        let counter = PushCounter()
+        mock.createEntryHandler = { _ in
+            counter.value += 1
+            if counter.value == 1 {
+                // Sign-out → rapid sign-in of the SAME account while the
+                // predecessor cycle is in flight at its push.
+                controller.deactivate()
+                controller.activate(userID: "u1")
+                await gate1.wait()
+            } else if counter.value == 2 {
+                await gate2.wait()
+            }
+        }
+
+        controller.activate(userID: "u1")
+        await waitUntil { mock.calls.contains { $0.method == "createEntry" && $0.id == "e1" } }
+        // The successor cycle started and holds at its own e1 push.
+        await waitUntil { mock.calls.filter { $0.method == "createEntry" }.count == 2 }
+        #expect(controller.isCycleLive)
+
+        // Release the cancelled predecessor: it finishes its tail. Its defer
+        // must NOT wipe the successor's cycleTask.
+        gate1.open()
+        await waitUntil { mock.calls.filter { $0.method == "createEntry" }.count == 3 }
+        #expect(controller.isCycleLive)
+
+        // Release the successor: it drains to idle and owns the cleanup.
+        gate2.open()
+        await waitUntil { !controller.isCycleLive }
+        #expect(isIdle(controller.status))
+        #expect(try await store.outboxRows().isEmpty)
+        // Single-flight intact: the controller is immediately usable again.
+        try await store.createEntry(makeEntry(id: "e3", text: "Third"))
+        await controller.syncNow(userID: "u1")
+        #expect(isIdle(controller.status))
+        #expect(try await store.outboxRows().isEmpty)
+    }
+
+    @Test("sign-out then rapid sign-in of a DIFFERENT account leaves the new cycle live and unstranded")
+    func rapidReactivationDifferentAccountKeepsNewCycle() async throws {
+        let (store, mock, _) = makeContext()
+        let session = SessionUserIDHolder("u1")
+        let controller = SyncController(
+            store: store, remote: mock, connectivity: MockConnectivity(connected: true)
+        ) { session.value }
+        try await store.createEntry(makeEntry(id: "e1", text: "A's entry"))
+        let gate1 = Gate()
+        let gate2 = Gate()
+        let counter = PushCounter()
+        mock.createEntryHandler = { _ in
+            counter.value += 1
+            if counter.value == 1 {
+                // The session flips to B; sign-out → rapid sign-in as B
+                // while A's cycle is in flight at its push.
+                session.value = "u2"
+                controller.deactivate()
+                controller.activate(userID: "u2")
+                await gate1.wait()
+            } else if counter.value == 2 {
+                await gate2.wait()
+            }
+        }
+
+        controller.activate(userID: "u1")
+        await waitUntil { mock.calls.contains { $0.method == "createEntry" && $0.id == "e1" } }
+        await waitUntil { mock.calls.filter { $0.method == "createEntry" }.count == 2 }
+        #expect(controller.isCycleLive)
+
+        gate1.open()
+        // The predecessor's tail ran (e2's per-row guard refused it under
+        // u2's session → abort) while the successor is provably still in
+        // flight.
+        try await Task.sleep(nanoseconds: 200_000_000)
+        // The cancelled predecessor's defer did not wipe the new (u2)
+        // cycle's handle while it was still in flight.
+        #expect(controller.isCycleLive)
+
+        gate2.open()
+        await waitUntil { !controller.isCycleLive }
+        #expect(isIdle(controller.status))
+        #expect(try await store.outboxRows().isEmpty)
+        // The guard semantics are unchanged: no push ran without a matching
+        // bound account (both pushes ran for their own bound session user).
+        #expect(mock.calls.contains { $0.method == "createEntry" && $0.id == "e1" })
+    }
+
     // MARK: - Helpers
+
+    @Test("sign-out then rapid sign-in of the SAME account leaves one live cycle that drains")
+    func rapidReactivationSameAccountDrainsOnce() async throws {
+        let (store, mock, controller) = makeContext()
+        try await store.createEntry(makeEntry(id: "e1", text: "First"))
+        try await store.createEntry(makeEntry(id: "e2", text: "Second"))
+        let firstStarted = HeldCycleStart()
+        mock.createEntryHandler = { _ in
+            if !firstStarted.started {
+                firstStarted.started = true
+                // Sign-out → rapid sign-in of the SAME account while the
+                // predecessor cycle is in flight at its push. deactivate()
+                // already cancelled this task, so the sleep below aborts it
+                // with CancellationError right after the re-activation.
+                controller.deactivate()
+                controller.activate(userID: "u1")
+                try? await Task.sleep(nanoseconds: 200_000_000)
+            }
+        }
+
+        controller.activate(userID: "u1")
+        // The successor cycle owns the handle and drains the whole outbox to
+        // idle. The old bug: the cancelled predecessor's unconditional defer
+        // wiped the NEW cycle's cycleTask/activeCycleUserID, so the successor
+        // aborted at the per-row guard and stranded .inactive with rows
+        // queued.
+        await waitUntil {
+            !controller.isCycleLive
+        }
+        #expect(!controller.isCycleLive)
+        #expect(isIdle(controller.status))
+        #expect(try await store.outboxRows().isEmpty)
+        // Single-flight intact: the controller is immediately usable again.
+        try await store.createEntry(makeEntry(id: "e3", text: "Third"))
+        await controller.syncNow(userID: "u1")
+        #expect(isIdle(controller.status))
+        #expect(try await store.outboxRows().isEmpty)
+    }
+
+    @Test("sign-out then rapid sign-in of a DIFFERENT account leaves the new cycle live and unstranded")
+    func rapidReactivationDifferentAccountDrains() async throws {
+        let (store, mock, _) = makeContext()
+        try await store.createEntry(makeEntry(id: "e1", text: "A's entry"))
+        let session = SessionUserIDHolder("u1")
+        let controller = SyncController(
+            store: store, remote: mock, connectivity: MockConnectivity(connected: true)
+        ) { session.value }
+        let firstStarted = HeldCycleStart()
+        mock.createEntryHandler = { _ in
+            if !firstStarted.started {
+                firstStarted.started = true
+                // The session flips to B; sign-out → rapid sign-in as B
+                // while A's cycle is in flight at its push.
+                session.value = "u2"
+                controller.deactivate()
+                controller.activate(userID: "u2")
+                try? await Task.sleep(nanoseconds: 200_000_000)
+            }
+        }
+
+        controller.activate(userID: "u1")
+        await waitUntil {
+            !controller.isCycleLive
+        }
+
+        // The successor (u2) cycle owns the handle, drains, and lands idle —
+        // never stranded .inactive by the cancelled predecessor's defer.
+        #expect(!controller.isCycleLive)
+        #expect(isIdle(controller.status))
+        #expect(try await store.outboxRows().isEmpty)
+        // A's pushed row converged (it was pushed by whichever cycle owned
+        // the handle when the drain reached it); the guard semantics are
+        // unchanged — no push ever ran without a matching session user.
+        #expect(mock.calls.contains { $0.method == "createEntry" && $0.id == "e1" })
+    }
+
+    // MARK: - Helpers
+
+    /// Mutable session-user holder for the guard tests (the sync controller's
+    /// `sessionUserIDProvider` reads it live to simulate an account swap).
+    /// `@unchecked Sendable`: the only concurrent access is the cycle task's
+    /// guard read versus the test's write, both serialized on the main actor.
+    private final class SessionUserIDHolder: @unchecked Sendable {
+        var value: String?
+        init(_ value: String?) { self.value = value }
+    }
+
+    /// One-shot flag holder for handler closures (same sendability shape as
+    /// `SessionUserIDHolder`).
+    private final class HeldCycleStart: @unchecked Sendable {
+        var started = false
+    }
+
+    /// Forwarding `CatalogSending` that flips the session to another account
+    /// when the pull's entries fetch returns — simulating an account swap
+    /// during pull's in-flight fetch. All other calls delegate to the inner
+    /// mock untouched.
+    private final class SwapOnEntriesFetchRemote: CatalogSending, @unchecked Sendable {
+        let inner: MockCatalogRepository
+        let session: SessionUserIDHolder
+        init(inner: MockCatalogRepository, session: SessionUserIDHolder) {
+            self.inner = inner
+            self.session = session
+        }
+        func fetchCategories() async throws -> [Category] {
+            try await inner.fetchCategories()
+        }
+        func fetchEntries(modifiedSince: Date?) async throws -> [TimeEntry] {
+            let result = try await inner.fetchEntries(modifiedSince: modifiedSince)
+            session.value = "u2"
+            return result
+        }
+        func fetchDeletions(since: Date?) async throws -> [Deletion] {
+            try await inner.fetchDeletions(since: since)
+        }
+        func fetchCategory(id: String) async throws -> Category {
+            try await inner.fetchCategory(id: id)
+        }
+        func fetchEntry(id: String) async throws -> TimeEntry {
+            try await inner.fetchEntry(id: id)
+        }
+        func createCategory(_ category: Category) async throws {
+            try await inner.createCategory(category)
+        }
+        func updateCategory(_ category: Category) async throws {
+            try await inner.updateCategory(category)
+        }
+        func deleteCategory(id: String) async throws {
+            try await inner.deleteCategory(id: id)
+        }
+        func createEntry(_ entry: TimeEntry) async throws {
+            try await inner.createEntry(entry)
+        }
+        func updateEntry(_ entry: TimeEntry) async throws {
+            try await inner.updateEntry(entry)
+        }
+        func deleteEntry(id: String) async throws {
+            try await inner.deleteEntry(id: id)
+        }
+    }
 
     private func makeEntry(
         id: String,
@@ -1468,15 +2006,17 @@ struct SyncControllerTests {
         let mock = MockCatalogRepository()
         let connectivity = MockConnectivity(connected: connected)
         let controller = SyncController(
-            store: store, remote: mock, connectivity: connectivity
-        )
+            store: store,
+            remote: mock,
+            connectivity: connectivity
+        ) { "u1" }
         return (store, mock, controller)
     }
 
     private func temporaryStoreURL() -> URL {
         URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent(UUID().uuidString)
-            .appendingPathComponent("timeoflife.sqlite")
+            .appendingPathComponent(LocalStore.databaseFileName(userID: "u1"))
     }
 
     private func waitForCycle(_ controller: SyncController) async {

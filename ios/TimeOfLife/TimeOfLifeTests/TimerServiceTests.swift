@@ -65,6 +65,6 @@ struct TimerServiceTests {
     private func temporaryStoreURL() -> URL {
         URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent(UUID().uuidString)
-            .appendingPathComponent("timeoflife.sqlite")
+            .appendingPathComponent(LocalStore.databaseFileName(userID: "u1"))
     }
 }

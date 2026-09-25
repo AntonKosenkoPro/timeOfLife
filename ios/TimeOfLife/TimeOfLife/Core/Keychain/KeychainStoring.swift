@@ -13,4 +13,7 @@ protocol KeychainStoring: AnyObject, Sendable {
 enum KeychainKey: String, Sendable {
     case accessToken = "com.timeoflife.access_token"
     case refreshToken = "com.timeoflife.refresh_token"
+    /// Stable per-device identifier sent as `X-Device-Id` (device-sessions
+    /// spec). Not a secret, but it must survive reinstalls like one.
+    case deviceId = "com.timeoflife.device_id"
 }

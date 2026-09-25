@@ -176,6 +176,42 @@ struct AuthServiceTests {
         #expect(store.state == .signedOut)
     }
 
+    // MARK: - Gate transitions (account-bound-local-data 2.4)
+
+    /// The gate decides on `SessionStore.state` alone; every launch path
+    /// (no session → gate, restored session → shell, revocation → gate)
+    /// must land in the right state. Data-file assertions live in task 3.x.
+    @Test("revoked session locks to the gate: signed out, tokens cleared, cache cleared")
+    func revokedSessionLocksToGate() async throws {
+        let cached = CachedSession(id: "u1", email: "a@b.com", emailVerified: true)
+        let (service, repo, keychain, cache, store) = makeService(
+            initialTokens: [.accessToken: "at", .refreshToken: "rt"],
+            cached: cached
+        )
+        repo.meError = APIError.unauthorized
+        repo.refreshError = APIError.server(code: "invalid_refresh", message: "expired")
+        await service.restoreSession()
+
+        #expect(store.state == .signedOut)
+        #expect(await keychain.string(for: .accessToken) == nil)
+        #expect(await keychain.string(for: .refreshToken) == nil)
+        #expect(cache.load() == nil)
+    }
+
+    @Test("transient offline restore keeps the signed-in shell mounted")
+    func offlineRestoreKeepsGateDown() async throws {
+        let cached = CachedSession(id: "u1", email: "a@b.com", emailVerified: true)
+        let (service, repo, _, _, store) = makeService(
+            initialTokens: [.accessToken: "at", .refreshToken: "rt"],
+            cached: cached
+        )
+        repo.meError = APIError.offline
+        await service.restoreSession()
+
+        // Offline is not an auth fact: the shell stays (D6 lock-not-wipe).
+        #expect(store.state == .signedIn(cached))
+    }
+
     @Test("restoreSession keeps cached session on offline /me failure")
     func restoreOfflineKeepsCached() async throws {
         let cached = CachedSession(id: "u1", email: "a@b.com", emailVerified: true)

@@ -1,29 +1,33 @@
+import OSLog
 import SwiftUI
 
-/// The Profile destination (app-shell spec, D6/D30): useful without an
-/// account. Account/sync controls live here alongside on-device category
-/// management and the destructive erase control. No
-/// activity management exists (no activity catalog — remove-activities-layer).
+/// The Profile destination (app-shell spec): account + sync status, on-device
+/// category management, and the destructive erase control. Signed-in only —
+/// the launch gate guarantees a session, so there is no "Enable Sync" row and
+/// no auth sheet. No activity management exists (no activity catalog —
+/// remove-activities-layer).
 struct ProfileView: View {
     @EnvironmentObject var container: AppContainer
+    /// The signed-in session (Profile renders only behind the launch gate):
+    /// supplies the `userId` the sync same-account guard checks against.
+    @EnvironmentObject var session: SessionStore
     /// Observed directly (not via `container`): `AppContainer` publishes
     /// nothing, so nested reads like `container.syncController.status` never
     /// invalidate this view — the status row froze on "Syncing…" and the
     /// Sync now button never re-enabled. Separate environment objects (as in
     /// `TimeOfLifeApp`) subscribe to the real publishers.
     @EnvironmentObject var sync: SyncController
-    @EnvironmentObject var session: SessionStore
     @Environment(\.dismiss)
     private var dismiss
     @State private var isShowingEraseConfirm = false
-    /// Owns the Enable Sync tap branching (restore-then-sheet) and the
-    /// sheet flag (app-shell spec). Constructed at the presentation site
-    /// because `container` is not available in `init`.
-    @StateObject private var enableSync: EnableSyncPresenter
+    /// The last erase failure message, surfaced in an alert. Set only when
+    /// `eraseLocalData()` throws — the file then survives on disk, so the
+    /// flow stays signed in for a retry instead of logging out and
+    /// reporting success.
+    @State private var eraseErrorMessage: String?
 
-    init(enableSync: EnableSyncPresenter) {
-        _enableSync = StateObject(wrappedValue: enableSync)
-    }
+    private static let logger = Logger(subsystem: "com.antonkosenko.timeoflifeapp", category: "profile")
+
     var body: some View {
         NavigationView {
             List {
@@ -45,16 +49,16 @@ struct ProfileView: View {
             } message: {
                 Text(L10n.profileEraseLocalDataConfirmMessage.text)
             }
-            // Enable Sync sheet (app-shell spec): the auth flow, presented
-            // only when the silent restore left the session signed out.
-            // The custom binding routes system dismissal through the
-            // presenter; sign-in flips clear the flag from the presenter.
-            .sheet(isPresented: Binding(
-                get: { enableSync.isSheetPresented },
-                set: { if !$0 { enableSync.dismiss() } }
-            )) {
-                EnableSyncSheet()
-                    .environmentObject(container)
+            .alert(
+                L10n.profileEraseLocalData.text,
+                isPresented: Binding(
+                    get: { eraseErrorMessage != nil },
+                    set: { if !$0 { eraseErrorMessage = nil } }
+                )
+            ) {
+                Button(L10n.commonOk.text, role: .cancel) { eraseErrorMessage = nil }
+            } message: {
+                Text(eraseErrorMessage ?? "")
             }
         }
         .navigationViewStyle(.stack)
@@ -65,37 +69,22 @@ struct ProfileView: View {
 
     private var accountSection: some View {
         Section(L10n.profileAccount.text) {
-            switch session.state {
-            case .signedOut:
-                Button {
-                    Task { await enableSync.enableSync() }
-                } label: {
-                    ListRow(
-                        title: L10n.profileEnableSync.text,
-                        icon: "icloud",
-                        subtitle: L10n.profileEnableSyncSubtitle.text
-                    )
-                }
-                .disabled(enableSync.isRestoring)
-                .accessibilityIdentifier("ProfileEnableSyncButton")
-            case .signedIn:
-                syncStatusRow
-                Button {
-                    Task { await sync.syncNow() }
-                } label: {
-                    ListRow(title: syncNowTitle, icon: "arrow.triangle.2.circlepath")
-                }
-                .disabled(sync.status == .syncing)
-                // `.disabled` alone does not restyle a custom label — without
-                // this the button looks tappable while syncing (WelcomeView
-                // precedent for the 0.6 value).
-                .opacity(sync.status == .syncing ? 0.6 : 1)
-                .accessibilityIdentifier("ProfileSyncNowButton")
-                Button(L10n.timerSignOut.text, role: .destructive) {
-                    Task { await container.authService.logout() }
-                }
-                .accessibilityIdentifier("ProfileSignOutButton")
+            syncStatusRow
+            Button {
+                Task { await sync.syncNow(userID: sessionUserID) }
+            } label: {
+                ListRow(title: L10n.profileSyncNow.text, icon: "arrow.triangle.2.circlepath")
             }
+            .disabled(sync.status == .syncing)
+            // `.disabled` alone does not restyle a custom label — without
+            // this the button looks tappable while syncing (WelcomeView
+            // precedent for the 0.6 value).
+            .opacity(sync.status == .syncing ? 0.6 : 1)
+            .accessibilityIdentifier("ProfileSyncNowButton")
+            Button(L10n.timerSignOut.text, role: .destructive) {
+                Task { await container.authService.logout() }
+            }
+            .accessibilityIdentifier("ProfileSignOutButton")
         }
     }
 
@@ -117,12 +106,6 @@ struct ProfileView: View {
                 subtitle: message.isEmpty ? nil : message
             )
         }
-    }
-
-    /// The Sync Now action title never doubles as a status indicator — the
-    /// status row above owns "Syncing…" alone (sync-client spec).
-    private var syncNowTitle: String {
-        L10n.profileSyncNow.text
     }
 
     private static func relativeTime(_ date: Date) -> String {
@@ -161,29 +144,43 @@ struct ProfileView: View {
         }
     }
 
+    /// The authenticated session's `userId` (empty when signed out — Profile
+    /// is unreachable then; the guard refuses an empty-id trigger anyway).
+    private var sessionUserID: String {
+        if case let .signedIn(current) = session.state { return current.id }
+        return ""
+    }
+
     private func eraseLocalData() async {
+        // Deletes ONLY the active account's database file (account-bound-
+        // store spec: explicit per-account erase, never a logout side
+        // effect). A failed removal throws: log it, surface it, and stay
+        // signed in so the user can retry — logging out anyway would strand
+        // the surviving file as a dormant account with a success claim.
+        // On success the store ends unbound; logout then clears the session
+        // artifacts (Keychain tokens, cached session) and the gate
+        // re-renders full-screen.
         do {
-            try await container.localStore.eraseAll()
-            await container.authService.logout()
-            // Stale auth routes (e.g. OTP for the erased account) would otherwise
-            // re-present in the next Enable Sync sheet; shell tabs keep their own
-            // NavigationViews, so this only clears the auth sheet's path.
-            container.navigation.path = []
+            try await container.eraseLocalData()
         } catch {
-            // Erase failure: keep the session; the user can retry.
+            Self.logger.error("Erase local data failed: \(String(describing: error), privacy: .public)")
+            eraseErrorMessage = error.localizedDescription
+            return
         }
+        await container.authService.logout()
+        // Clear any stale auth routes (e.g. OTP for the erased account) so
+        // the gate starts over from its first step (local-first-store
+        // "Erase resets auth flow").
+        container.navigation.path = []
     }
 }
 
 #if DEBUG
 #Preview("Profile") {
     let container = AppContainer.production()
-    ProfileView(enableSync: EnableSyncPresenter(
-        authService: container.authService,
-        sessionStore: container.sessionStore
-    ))
-    .environmentObject(container)
-    .environmentObject(container.sessionStore)
-    .environmentObject(container.syncController)
+    ProfileView()
+        .environmentObject(container)
+        .environmentObject(container.sessionStore)
+        .environmentObject(container.syncController)
 }
 #endif

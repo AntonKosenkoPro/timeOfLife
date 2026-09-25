@@ -9,7 +9,7 @@ struct CategoryEditorViewModelTests {
     private func makeStore() throws -> LocalStore {
         try LocalStore(url: URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent(UUID().uuidString)
-            .appendingPathComponent("timeoflife.sqlite"))
+            .appendingPathComponent(LocalStore.databaseFileName(userID: "u1")))
     }
 
     @Test("create mode starts empty with the default tag icon")
@@ -199,7 +199,7 @@ struct ManageCategoriesViewModelTests {
     private func makeStore() throws -> LocalStore {
         try LocalStore(url: URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent(UUID().uuidString)
-            .appendingPathComponent("timeoflife.sqlite"))
+            .appendingPathComponent(LocalStore.databaseFileName(userID: "u1")))
     }
 
     @Test("load presents the alphabetized local catalog")

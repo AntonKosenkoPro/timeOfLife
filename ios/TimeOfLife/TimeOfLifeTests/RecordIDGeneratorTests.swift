@@ -89,7 +89,7 @@ struct RecordIDInjectionTests {
         let store = try LocalStore(
             url: URL(fileURLWithPath: NSTemporaryDirectory())
                 .appendingPathComponent(UUID().uuidString)
-                .appendingPathComponent("timeoflife.sqlite"),
+                .appendingPathComponent(LocalStore.databaseFileName(userID: "u1")),
             recordIDGenerator: generator
         )
         let entry = TimeEntry(
@@ -110,7 +110,7 @@ struct RecordIDInjectionTests {
         let store = try LocalStore(
             url: URL(fileURLWithPath: NSTemporaryDirectory())
                 .appendingPathComponent(UUID().uuidString)
-                .appendingPathComponent("timeoflife.sqlite"),
+                .appendingPathComponent(LocalStore.databaseFileName(userID: "u1")),
             recordIDGenerator: generator
         )
         let first = await store.newRecordID()

@@ -8,14 +8,28 @@ struct LocalStoreTests {
 
     // MARK: - Helpers
 
-    private func temporaryStoreURL() -> URL {
-        URL(fileURLWithPath: NSTemporaryDirectory())
-            .appendingPathComponent(UUID().uuidString)
-            .appendingPathComponent("timeoflife.sqlite")
+    private func temporaryStoreURL(userID: String, base: URL? = nil) -> URL {
+        (base ?? URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent(UUID().uuidString))
+            .appendingPathComponent(LocalStore.databaseFileName(userID: userID))
     }
 
-    private func makeStore() throws -> LocalStore {
-        try LocalStore(url: temporaryStoreURL())
+    /// A throwaway base directory so per-account-file tests can assert on
+    /// real file presence/absence without touching other tests' files.
+    private func temporaryBaseDirectory() -> URL {
+        URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent(UUID().uuidString)
+    }
+
+    private func makeStore(userID: String? = "u1", base: URL? = nil) throws -> LocalStore {
+        try LocalStore(
+            url: temporaryStoreURL(userID: userID ?? "u1", base: base),
+            userID: userID
+        )
+    }
+
+    private func temporaryStoreURL() -> URL {
+        temporaryStoreURL(userID: "u1")
     }
 
     private func makeCategory(
@@ -415,9 +429,10 @@ struct LocalStoreTests {
 
     // MARK: - Erase
 
-    @Test("eraseAll wipes every table")
+    @Test("eraseAll deletes the account file and unbinds the store")
     func eraseAllWipesEverything() async throws {
-        let store = try makeStore()
+        let base = temporaryBaseDirectory()
+        let store = try makeStore(userID: "u1", base: base)
         try await store.createCategory(makeCategory())
         _ = try await store.createEntry(makeEntry())
         try await store.saveTimerDraft(activityText: "Coding", categoryIDs: [], startedAt: Date())
@@ -426,18 +441,15 @@ struct LocalStoreTests {
 
         try await store.eraseAll()
 
-        let categories = try await store.categories()
-        #expect(categories.isEmpty)
-        let entries = try await store.entries()
-        #expect(entries.isEmpty)
-        let state = try await store.timerDraft()
-        #expect(state == nil)
-        let outbox = try await store.outboxRows()
-        #expect(outbox.isEmpty)
-        let buffer = try await store.undoBufferMostRecent()
-        #expect(buffer == nil)
-        let cursor = try await store.lastSyncedAt(resource: "entry")
-        #expect(cursor == nil)
+        // The file is gone and the store is unbound: every operation is
+        // refused until the next sign-in (account-bound-store spec).
+        #expect(!FileManager.default.fileExists(atPath: temporaryStoreURL(userID: "u1", base: base).path))
+        await #expect(throws: LocalStore.LocalStoreError.notBound) {
+            try await store.categories()
+        }
+        await #expect(throws: LocalStore.LocalStoreError.notBound) {
+            try await store.outboxRows()
+        }
     }
 
     // MARK: - Sync state
@@ -633,13 +645,27 @@ struct LocalStoreSeedingTests {
     ]
 
     private func temporaryStoreURL() -> URL {
-        URL(fileURLWithPath: NSTemporaryDirectory())
-            .appendingPathComponent(UUID().uuidString)
-            .appendingPathComponent("timeoflife.sqlite")
+        temporaryStoreURL(userID: "u1")
     }
 
-    private func makeStore() throws -> LocalStore {
-        try LocalStore(url: temporaryStoreURL())
+    /// A throwaway base directory so per-account-file tests can assert on
+    /// real file presence/absence without touching other tests' files.
+    private func temporaryBaseDirectory() -> URL {
+        URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent(UUID().uuidString)
+    }
+
+    private func temporaryStoreURL(userID: String, base: URL? = nil) -> URL {
+        (base ?? URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent(UUID().uuidString))
+            .appendingPathComponent(LocalStore.databaseFileName(userID: userID))
+    }
+
+    private func makeStore(
+        userID: String? = "u1",
+        base: URL? = nil
+    ) throws -> LocalStore {
+        try LocalStore(url: temporaryStoreURL(userID: userID ?? "u1", base: base), userID: userID)
     }
 
     @Test("seeding creates exactly seven localized categories with their icons and outbox rows")
@@ -710,13 +736,20 @@ struct LocalStoreSeedingTests {
 
     @Test("eraseAll clears the seed marker so a new dataset seeds again")
     func reseedsAfterErase() async throws {
-        let store = try makeStore()
+        let base = temporaryBaseDirectory()
+        let userID = "u1"
+        var store = try makeStore(userID: userID, base: base)
         _ = try await store.seedStarterCategoriesIfNeeded(names: enNames)
         try await store.eraseAll()
 
-        #expect(try await store.categories().isEmpty)
-        #expect(!(try await store.categoryStartersSeeded()))
+        // The file is deleted, not row-wiped, and the store is unbound:
+        // re-signing in creates a fresh file that seeds again
+        // (account-bound-store spec).
+        await #expect(throws: LocalStore.LocalStoreError.notBound) {
+            try await store.categories()
+        }
 
+        store = try makeStore(userID: userID, base: base)
         let result = try await store.seedStarterCategoriesIfNeeded(names: ruNames)
         guard case let .seeded(seeded) = result else {
             Issue.record("expected reseed after erase")
@@ -789,7 +822,7 @@ struct LocalStoreCategoryMutationTests {
     private func temporaryStoreURL() -> URL {
         URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent(UUID().uuidString)
-            .appendingPathComponent("timeoflife.sqlite")
+            .appendingPathComponent(LocalStore.databaseFileName(userID: "u1"))
     }
 
     private func makeStore() throws -> LocalStore {
@@ -997,7 +1030,7 @@ struct LocalStoreAssociationTests {
     private func temporaryStoreURL() -> URL {
         URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent(UUID().uuidString)
-            .appendingPathComponent("timeoflife.sqlite")
+            .appendingPathComponent(LocalStore.databaseFileName(userID: "u1"))
     }
 
     private func makeStore() throws -> LocalStore {
@@ -1116,7 +1149,7 @@ struct UndoBufferStoreTests {
     private func temporaryStoreURL() -> URL {
         URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent(UUID().uuidString)
-            .appendingPathComponent("timeoflife.sqlite")
+            .appendingPathComponent(LocalStore.databaseFileName(userID: "u1"))
     }
 
     private func makeStore() throws -> LocalStore {
@@ -1183,7 +1216,7 @@ struct LocalStoreCategoryUndoTests {
     private func temporaryStoreURL() -> URL {
         URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent(UUID().uuidString)
-            .appendingPathComponent("timeoflife.sqlite")
+            .appendingPathComponent(LocalStore.databaseFileName(userID: "u1"))
     }
 
     private func makeStore() throws -> LocalStore {
@@ -1379,7 +1412,7 @@ struct LocalStoreEntryUndoTests {
     private func temporaryStoreURL() -> URL {
         URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent(UUID().uuidString)
-            .appendingPathComponent("timeoflife.sqlite")
+            .appendingPathComponent(LocalStore.databaseFileName(userID: "u1"))
     }
 
     private func makeStore() throws -> LocalStore {
@@ -1516,5 +1549,271 @@ struct LocalStoreEntryUndoTests {
         // The entry row is untouched and still restorable by its owner.
         #expect(try await store.undoBufferMostRecent() != nil)
         #expect(try await store.undoEntryDeletion(bufferID: buffer.id)?.id == "entry-1")
+    }
+}
+
+// MARK: - Account-bound store (account-bound-local-data, account-bound-store spec)
+
+@Suite("LocalStore Account-Bound Files")
+struct LocalStoreAccountBoundTests {
+
+    private let enNames = [
+        "Work", "Hobby", "Sport", "Education", "Relax", "Sleep", "Entertainment",
+    ]
+
+    private func temporaryBaseDirectory() -> URL {
+        URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent(UUID().uuidString)
+    }
+
+    private func fileURL(userID: String, base: URL) -> URL {
+        base.appendingPathComponent(LocalStore.databaseFileName(userID: userID))
+    }
+
+    private func makeBoundStore(
+        userID: String,
+        base: URL
+    ) throws -> LocalStore {
+        try LocalStore(url: fileURL(userID: userID, base: base), userID: userID)
+    }
+
+    @Test("databaseFileName derives the per-user file name")
+    func databaseFileNameIsPerUser() {
+        #expect(LocalStore.databaseFileName(userID: "abc-123") == "lifio_abc-123.db")
+    }
+
+    @Test("first login adopts-or-creates the file and seeds it once per account")
+    func firstLoginCreatesFileAndSeeds() async throws {
+        let base = temporaryBaseDirectory()
+        let store = try makeBoundStore(userID: "user-a", base: base)
+        #expect(FileManager.default.fileExists(atPath: fileURL(userID: "user-a", base: base).path))
+
+        let result = try await store.seedStarterCategoriesIfNeeded(names: enNames)
+        guard case .seeded = result else {
+            Issue.record("expected a fresh account file to seed")
+            return
+        }
+        // Re-login reopens the same file: seeding does not run again.
+        let reopened = try makeBoundStore(userID: "user-a", base: base)
+        let replay = try await reopened.seedStarterCategoriesIfNeeded(names: enNames)
+        #expect(replay == .alreadySeeded)
+        #expect(try await reopened.categories().count == 7)
+    }
+
+    @Test("per-user isolation: two accounts never share rows or files")
+    func perUserIsolation() async throws {
+        let base = temporaryBaseDirectory()
+        let storeA = try makeBoundStore(userID: "user-a", base: base)
+        try await storeA.createCategory(Category(id: "a-cat", name: "Work A", icon: "briefcase"))
+        try await storeA.saveTimerDraft(
+            activityText: "Draft A", categoryIDs: [], startedAt: Date(timeIntervalSinceReferenceDate: 1_000)
+        )
+
+        let storeB = try makeBoundStore(userID: "user-b", base: base)
+        try await storeB.createCategory(Category(id: "b-cat", name: "Work B", icon: "book"))
+        #expect(try await storeB.categories().map(\.id) == ["b-cat"])
+        #expect(try await storeB.timerDraft() == nil)
+        // A never sees B's rows either.
+        #expect(try await storeA.categories().map(\.id) == ["a-cat"])
+
+        // Distinct files on disk.
+        #expect(FileManager.default.fileExists(atPath: fileURL(userID: "user-a", base: base).path))
+        #expect(FileManager.default.fileExists(atPath: fileURL(userID: "user-b", base: base).path))
+    }
+
+    @Test("resume after re-login: outbox, cursors, and timer draft survive logout")
+    func resumeAfterRelogin() async throws {
+        let base = temporaryBaseDirectory()
+        let startedAt = Date(timeIntervalSinceReferenceDate: 5_000)
+        let cursor = Date(timeIntervalSinceReferenceDate: 6_000)
+
+        let signedIn = try makeBoundStore(userID: "user-a", base: base)
+        try await signedIn.createCategory(Category(id: "cat-1", name: "Work", icon: "briefcase"))
+        try await signedIn.saveTimerDraft(
+            activityText: "Coding", categoryIDs: ["cat-1"], startedAt: startedAt
+        )
+        try await signedIn.setLastSyncedAt(resource: "entry", date: cursor)
+
+        // Logout closes the store; the file (dirty outbox + draft) stays.
+        await signedIn.closeAccount()
+        #expect(FileManager.default.fileExists(atPath: fileURL(userID: "user-a", base: base).path))
+
+        // Re-login as the SAME account reopens and resumes — no re-pull
+        // (the cursor continues from where it stopped).
+        let reopened = try makeBoundStore(userID: "user-a", base: base)
+        #expect(try await reopened.timerDraft()?.activityText == "Coding")
+        #expect(try await reopened.timerDraft()?.startedAt == startedAt)
+        #expect(try await reopened.lastSyncedAt(resource: "entry") == cursor)
+        #expect(try await reopened.categories().map(\.id) == ["cat-1"])
+    }
+
+    @Test("logout keeps all files; dormant dirty outbox stays put")
+    func logoutKeepsFilesAndDirtyOutbox() async throws {
+        let base = temporaryBaseDirectory()
+        let storeA = try makeBoundStore(userID: "user-a", base: base)
+        try await storeA.createCategory(Category(id: "cat-a", name: "Work A", icon: "briefcase"))
+        await storeA.closeAccount()
+
+        let storeB = try makeBoundStore(userID: "user-b", base: base)
+        try await storeB.createCategory(Category(id: "cat-b", name: "Work B", icon: "book"))
+        await storeB.closeAccount()
+
+        // Logging out of B (closing its store) deletes nothing: both dormant
+        // files remain on disk with their data.
+        #expect(FileManager.default.fileExists(atPath: fileURL(userID: "user-a", base: base).path))
+        #expect(FileManager.default.fileExists(atPath: fileURL(userID: "user-b", base: base).path))
+        let dormantA = try makeBoundStore(userID: "user-a", base: base)
+        #expect(try await dormantA.categories().map(\.id) == ["cat-a"])
+    }
+
+    @Test("erase deletes only the active file; other dormant files remain")
+    func eraseDeletesOnlyActiveFile() async throws {
+        let base = temporaryBaseDirectory()
+        let storeA = try makeBoundStore(userID: "user-a", base: base)
+        try await storeA.createCategory(Category(id: "cat-a", name: "Work A", icon: "briefcase"))
+
+        let storeB = try makeBoundStore(userID: "user-b", base: base)
+        try await storeB.createCategory(Category(id: "cat-b", name: "Work B", icon: "book"))
+        await storeB.closeAccount()
+
+        // Erase while signed in as A: only A's file goes.
+        try await storeA.eraseAll()
+        #expect(!FileManager.default.fileExists(atPath: fileURL(userID: "user-a", base: base).path))
+        #expect(FileManager.default.fileExists(atPath: fileURL(userID: "user-b", base: base).path))
+
+        // A's store ends unbound — every operation is refused until re-login.
+        await #expect(throws: LocalStore.LocalStoreError.notBound) {
+            try await storeA.categories()
+        }
+        // B's dormant data is intact.
+        let dormantB = try makeBoundStore(userID: "user-b", base: base)
+        #expect(try await dormantB.categories().map(\.id) == ["cat-b"])
+
+        // Re-login after erase creates a fresh file that seeds again.
+        let freshA = try makeBoundStore(userID: "user-a", base: base)
+        guard case .seeded = try await freshA.seedStarterCategoriesIfNeeded(names: enNames) else {
+            Issue.record("expected the re-created file to seed again")
+            return
+        }
+    }
+
+    @Test("an unbound store refuses every operation (signed-out reads nothing)")
+    func unboundStoreRefusesOperations() async throws {
+        let store = LocalStore()
+        await #expect(throws: LocalStore.LocalStoreError.notBound) {
+            try await store.categories()
+        }
+        await #expect(throws: LocalStore.LocalStoreError.notBound) {
+            try await store.outboxRows()
+        }
+    }
+
+    @Test("openAccount on a file bound to another account fails with accountMismatch")
+    func crossAccountFileOpenFails() async throws {
+        let base = temporaryBaseDirectory()
+        let url = fileURL(userID: "user-a", base: base)
+        _ = try LocalStore(url: url, userID: "user-a")
+
+        #expect(throws: LocalStore.LocalStoreError.accountMismatch) {
+            try LocalStore(url: url, userID: "user-b")
+        }
+    }
+
+    @Test("the per-file account marker records the bound user id")
+    func perFileAccountMarker() async throws {
+        let base = temporaryBaseDirectory()
+        let store = try makeBoundStore(userID: "user-a", base: base)
+
+        // The marker lives inside the per-user file (chosen marker location).
+        let reopened = try LocalStore(
+            url: fileURL(userID: "user-a", base: base),
+            userID: "user-a"
+        )
+        #expect(await reopened.boundUserID == "user-a")
+        #expect(await store.boundUserID == "user-a")
+        #expect(await reopened.boundURL == fileURL(userID: "user-a", base: base))
+
+        // A marker-less file (legacy/anonymous shape) is adopted on open.
+        let adoptable = try LocalStore(url: fileURL(userID: "user-c", base: base))
+        try await adoptable.openAccount(userID: "user-c")
+        #expect(await adoptable.boundUserID == "user-c")
+    }
+
+    @Test("closeAccount then eraseAll still removes the file")
+    func eraseAfterCloseRemovesFile() async throws {
+        let base = temporaryBaseDirectory()
+        let store = try makeBoundStore(userID: "user-a", base: base)
+        try await store.createCategory(Category(id: "cat-a", name: "Work A", icon: "briefcase"))
+        await store.closeAccount()
+
+        try await store.eraseAll()
+        #expect(!FileManager.default.fileExists(atPath: fileURL(userID: "user-a", base: base).path))
+    }
+
+    @Test("invalid user ids are rejected before any file is created")
+    func invalidUserIDRejected() async throws {
+        let store = LocalStore()
+        await #expect(throws: LocalStore.LocalStoreError.invalidUserID) {
+            try await store.openAccount(userID: "../evil")
+        }
+        await #expect(throws: LocalStore.LocalStoreError.invalidUserID) {
+            try await store.openAccount(userID: "")
+        }
+        #expect(await store.boundUserID == nil)
+        #expect(await store.boundURL == nil)
+    }
+
+    @Test("a failed openAccount leaves the store unbound (never the wrong file)")
+    func failedOpenLeavesStoreUnbound() async throws {
+        let base = temporaryBaseDirectory()
+        let store = try makeBoundStore(userID: "u1", base: base)
+        try await store.createCategory(Category(id: "cat-1", name: "Work", icon: "briefcase"))
+        await #expect(throws: LocalStore.LocalStoreError.invalidUserID) {
+            try await store.openAccount(userID: "../evil")
+        }
+        // The failed open releases the previous binding outright: bound
+        // state never points at a file the store no longer holds, and every
+        // subsequent operation throws notBound (explicit, never silent
+        // wrong-file access).
+        #expect(await store.boundUserID == nil)
+        #expect(await store.boundURL == nil)
+        await #expect(throws: LocalStore.LocalStoreError.notBound) {
+            try await store.categories()
+        }
+        // ... and eraseAll cannot retarget the previous account's file: with
+        // no live binding and no retained URL it is a no-op.
+        try await store.eraseAll()
+        #expect(FileManager.default.fileExists(atPath: fileURL(userID: "u1", base: base).path))
+    }
+
+    @Test("a failed cross-account openAccount unbinds and keeps A's file resumable")
+    func failedCrossAccountOpenUnbinds() async throws {
+        let base = temporaryBaseDirectory()
+        let store = try makeBoundStore(userID: "user-a", base: base)
+        try await store.createCategory(Category(id: "cat-a", name: "Work A", icon: "briefcase"))
+
+        // B's production file, pre-marked for someone else: opening it as B
+        // throws accountMismatch (the late-failure class, past sanitization).
+        let userB = "wave5-\(UUID().uuidString.lowercased())"
+        let prodURL = LocalStore.databaseURL(userID: userB)
+        _ = try LocalStore(url: prodURL, userID: "someone-else")
+        defer {
+            try? FileManager.default.removeItem(at: prodURL)
+            for ext in ["-wal", "-shm"] {
+                try? FileManager.default.removeItem(at: URL(fileURLWithPath: prodURL.path + ext))
+            }
+        }
+        await #expect(throws: LocalStore.LocalStoreError.accountMismatch) {
+            try await store.openAccount(userID: userB)
+        }
+        #expect(await store.boundUserID == nil)
+        await #expect(throws: LocalStore.LocalStoreError.notBound) {
+            try await store.categories()
+        }
+        // A's dormant file survives the failed switch and the erase attempt.
+        try await store.eraseAll()
+        #expect(FileManager.default.fileExists(atPath: fileURL(userID: "user-a", base: base).path))
+        let reopened = try makeBoundStore(userID: "user-a", base: base)
+        #expect(try await reopened.categories().map(\.id) == ["cat-a"])
     }
 }

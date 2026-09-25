@@ -4,7 +4,7 @@ Every PR passes two review stages: **stage 1 — AI review** (automated, advisor
 
 ## Stage 1 — AI review (automated)
 
-**Workflow:** `.github/workflows/ai-review.yml` — **OpenCodeReview** (`alibaba/open-code-review`, pinned `v1.12.9`), Alibaba's review-specialized agent: deterministic file selection/bundling + a review agent with tool use, posting inline comments with line precision plus one sticky summary comment. Same model as before — `deepseek-v4.1-flash` on Ollama Cloud (OpenAI-compatible endpoint, `OLLAMA_API_KEY` secret).
+**Workflow:** `.github/workflows/ai-review.yml` — **OpenCodeReview** (`alibaba/open-code-review`, pinned `v1.12.9`), Alibaba's review-specialized agent: deterministic file selection/bundling + a review agent with tool use, posting inline comments with line precision plus one sticky summary comment. Model — `muse-spark-1.3-contributor-free` on OpenCode Zen (OpenAI Responses endpoint `https://opencode.ai/zen/v1/responses`, `OPENCODE_ZEN_API_KEY` secret, `llm_protocol: openai-responses`).
 
 - **Manual trigger: comment `/review` on the PR.** Nothing runs on push — you decide when the AI looks. A comment that *contains* `/review` (e.g. "/review focus on SyncController") starts a run; bot comments are ignored; a running review is cancelled and restarted if you comment again.
 - **Why this engine:** its published benchmark (AACR-Bench, 200 real PRs) shows the same-model quality of a general-purpose agent at **~1/9 of the tokens** and faster wall-clock — precision-favored by design (lower recall, near-zero noise). That trade fits this process: stage 1 is a cheap pre-clean, stage 2 (human + OpenSpec reasoning) catches the gaps.
@@ -56,7 +56,7 @@ Draft PRs are the sequencing mechanism; `/review` is the switch — AI sweeps th
 
 ## Cost
 
-OCR is the low-cost engine: deterministic file bundling means each review is a few single-shot LLM rounds per file group, not a long agent loop. On `deepseek-v4.1-flash` ($0.15/$0.60 per MTok in/out) a typical 500-line diff costs **cents to fractions of a cent** per run; checkpoint mode keeps follow-up pushes proportionally small. Hard caps available via `max_tokens_budget` (0 = unlimited today). The concurrency group cancels superseded runs on rapid pushes.
+OCR is the low-cost engine: deterministic file bundling means each review is a few single-shot LLM rounds per file group, not a long agent loop. On `muse-spark-1.3-contributor-free` (free contributor tier on Zen — prompts/completions usable for training future Meta models) a typical diff costs **nothing** per run; checkpoint mode keeps follow-up pushes proportionally small. Hard caps available via `max_tokens_budget` (0 = unlimited today). The concurrency group cancels superseded runs on rapid pushes.
 
 ## References
 

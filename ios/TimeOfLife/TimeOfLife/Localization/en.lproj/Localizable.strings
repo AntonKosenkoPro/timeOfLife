@@ -7,6 +7,9 @@
 "welcome.tagline" = "Personal time tracker.";
 "welcome.continueWithEmail" = "Continue with Email";
 
+// Auth gate (account-bound-local-data: required-voice launch gate)
+"authGate.title" = "Log in to start tracking";
+
 // Email entry (passwordless: sign-in + sign-up collapse into email → OTP)
 "emailEntry.title" = "Continue with Email";
 "emailEntry.email" = "Email";
@@ -77,10 +80,7 @@
 "profile.title" = "Profile";
 "profile.done" = "Done";
 "profile.account" = "Account";
-"profile.enableSync" = "Enable Sync";
-"profile.enableSyncSubtitle" = "Optional account for your other devices";
 "profile.syncNow" = "Sync now";
-"sync.cancel" = "Cancel";
 "profile.syncing" = "Syncing…";
 "profile.lastSynced" = "Last synced: %@";
 "profile.syncError" = "Sync failed. Try again.";
@@ -110,8 +110,6 @@
 "history.tracked" = "tracked";
 
 // History pull-to-refresh (history-pull-to-sync)
-"history.pull.signedOut" = "Sign in to sync your entries.";
-"history.pull.signIn" = "Sign in";
 "history.pull.offline" = "You're offline. Connect and try again.";
 "history.syncError.title" = "Sync failed";
 "common.ok" = "OK";

@@ -11,6 +11,9 @@ enum L10n: String, CaseIterable {
     case welcomeTagline = "welcome.tagline"
     case welcomeContinueWithEmail = "welcome.continueWithEmail"
 
+    // Auth gate (account-bound-local-data: required-voice launch gate)
+    case authGateTitle = "authGate.title"
+
     // Email entry (passwordless)
     case emailEntryTitle = "emailEntry.title"
     case emailEntryEmail = "emailEntry.email"
@@ -55,10 +58,7 @@ enum L10n: String, CaseIterable {
     case profileTitle = "profile.title"
     case profileDone = "profile.done"
     case profileAccount = "profile.account"
-    case profileEnableSync = "profile.enableSync"
-    case profileEnableSyncSubtitle = "profile.enableSyncSubtitle"
     case profileSyncNow = "profile.syncNow"
-    case syncCancel = "sync.cancel"
     case profileSyncing = "profile.syncing"
     case profileLastSynced = "profile.lastSynced"
     case profileSyncError = "profile.syncError"
@@ -84,8 +84,6 @@ enum L10n: String, CaseIterable {
     case historyTracked = "history.tracked"
 
     // History pull-to-refresh (history-pull-to-sync change)
-    case historyPullSignedOut = "history.pull.signedOut"
-    case historyPullSignIn = "history.pull.signIn"
     case historyPullOffline = "history.pull.offline"
     case historySyncErrorTitle = "history.syncError.title"
 

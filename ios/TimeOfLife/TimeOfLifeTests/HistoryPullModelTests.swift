@@ -6,59 +6,10 @@ import Foundation
 @Suite("HistoryPullModel")
 struct HistoryPullModelTests {
 
-    @Test("signed-out pull shows the sign-in notice and starts no network traffic")
-    func signedOutPullShowsNoticeWithoutTraffic() async throws {
-        let (mock, model, _) = makeContext(signedIn: false, connected: true)
-
-        await model.refresh()
-
-        #expect(model.notice == .signedOut)
-        #expect(mock.calls.isEmpty)
-        #expect(model.syncErrorMessage == nil)
-    }
-
-    @Test("signed-out notice auto-dismisses after its lifetime")
-    func signedOutNoticeAutoDismisses() async {
-        let (_, model, _) = makeContext(signedIn: false, connected: true, noticeLifetime: 0.2)
-
-        await model.refresh()
-        #expect(model.notice == .signedOut)
-
-        try? await Task.sleep(nanoseconds: 350_000_000)
-        #expect(model.notice == nil)
-    }
-
-    @Test("re-pull resets the notice timer")
-    func rePullResetsNoticeTimer() async {
-        let (_, model, _) = makeContext(signedIn: false, connected: true, noticeLifetime: 0.2)
-
-        await model.refresh()
-        try? await Task.sleep(nanoseconds: 150_000_000)
-        await model.refresh()
-        // 0.15s after the second pull (0.3s after the first): the first
-        // timer would have fired, the reset one has not.
-        try? await Task.sleep(nanoseconds: 150_000_000)
-        #expect(model.notice == .signedOut)
-
-        try? await Task.sleep(nanoseconds: 300_000_000)
-        #expect(model.notice == nil)
-    }
-
-    @Test("cancelNotice dismisses immediately")
-    func cancelNoticeDismissesImmediately() async {
-        let (_, model, _) = makeContext(signedIn: false, connected: true)
-
-        await model.refresh()
-        #expect(model.notice == .signedOut)
-
-        model.cancelNotice()
-        #expect(model.notice == nil)
-    }
-
     @Test("offline pull shows the offline notice and burns no cycle")
     func offlinePullShowsNoticeWithoutCycle() async throws {
-        let (mock, model, controller) = makeContext(signedIn: true, connected: false)
-        controller.activate()
+        let (mock, model, controller) = makeContext(connected: false)
+        controller.activate(userID: "u1")
         await waitForCycle(controller)
         mock.clearLog()
 
@@ -69,10 +20,48 @@ struct HistoryPullModelTests {
         #expect(model.syncErrorMessage == nil)
     }
 
+    @Test("offline notice auto-dismisses after its lifetime")
+    func offlineNoticeAutoDismisses() async {
+        let (_, model, _) = makeContext(connected: false, noticeLifetime: 0.2)
+
+        await model.refresh()
+        #expect(model.notice == .offline)
+
+        try? await Task.sleep(nanoseconds: 350_000_000)
+        #expect(model.notice == nil)
+    }
+
+    @Test("re-pull resets the notice timer")
+    func rePullResetsNoticeTimer() async {
+        let (_, model, _) = makeContext(connected: false, noticeLifetime: 0.2)
+
+        await model.refresh()
+        try? await Task.sleep(nanoseconds: 150_000_000)
+        await model.refresh()
+        // 0.15s after the second pull (0.3s after the first): the first
+        // timer would have fired, the reset one has not.
+        try? await Task.sleep(nanoseconds: 150_000_000)
+        #expect(model.notice == .offline)
+
+        try? await Task.sleep(nanoseconds: 300_000_000)
+        #expect(model.notice == nil)
+    }
+
+    @Test("cancelNotice dismisses immediately")
+    func cancelNoticeDismissesImmediately() async {
+        let (_, model, _) = makeContext(connected: false)
+
+        await model.refresh()
+        #expect(model.notice == .offline)
+
+        model.cancelNotice()
+        #expect(model.notice == nil)
+    }
+
     @Test("online pull runs a cycle with no notice and no error")
     func onlinePullRunsCycle() async throws {
-        let (mock, model, controller) = makeContext(signedIn: true, connected: true)
-        controller.activate()
+        let (mock, model, controller) = makeContext(connected: true)
+        controller.activate(userID: "u1")
         await waitForCycle(controller)
         mock.clearLog()
 
@@ -88,8 +77,8 @@ struct HistoryPullModelTests {
 
     @Test("concurrent pulls join a single cycle")
     func concurrentPullsJoinSingleCycle() async throws {
-        let (mock, model, controller, store) = makeFullContext(signedIn: true, connected: true)
-        controller.activate()
+        let (mock, model, controller, store) = makeFullContext(connected: true)
+        controller.activate(userID: "u1")
         await waitForCycle(controller)
 
         try await store.createEntry(TimeEntry(
@@ -119,8 +108,8 @@ struct HistoryPullModelTests {
 
     @Test("failed pull surfaces the cycle error as dialog content")
     func failedPullSetsErrorMessage() async throws {
-        let (mock, model, controller, store) = makeFullContext(signedIn: true, connected: true)
-        controller.activate()
+        let (mock, model, controller, store) = makeFullContext(connected: true)
+        controller.activate(userID: "u1")
         await waitForCycle(controller)
 
         try await store.createCategory(Category(id: "c1", name: "Sport", icon: "figure.run"))
@@ -136,8 +125,8 @@ struct HistoryPullModelTests {
 
     @Test("background cycle failure with no pull in flight sets no dialog content")
     func backgroundFailureSetsNoDialog() async throws {
-        let (mock, model, controller, store) = makeFullContext(signedIn: true, connected: true)
-        controller.activate()
+        let (mock, model, controller, store) = makeFullContext(connected: true)
+        controller.activate(userID: "u1")
         await waitForCycle(controller)
 
         try await store.createCategory(Category(id: "c1", name: "Sport", icon: "figure.run"))
@@ -146,7 +135,7 @@ struct HistoryPullModelTests {
         }
 
         // A background trigger (foreground/connectivity), not a pull.
-        await controller.syncNow()
+        await controller.syncNow(userID: "u1")
 
         guard case .error = controller.status else {
             Issue.record("expected error status, got \(controller.status)")
@@ -157,8 +146,8 @@ struct HistoryPullModelTests {
 
     @Test("mid-cycle failure routes to the dialog, not the offline notice")
     func midCycleFailureRoutesToDialog() async throws {
-        let (mock, model, controller, _) = makeFullContext(signedIn: true, connected: true)
-        controller.activate()
+        let (mock, model, controller, _) = makeFullContext(connected: true)
+        controller.activate(userID: "u1")
         await waitForCycle(controller)
 
         // Online at pull time, failing mid-cycle.
@@ -170,23 +159,46 @@ struct HistoryPullModelTests {
         #expect(model.syncErrorMessage != nil)
     }
 
+    @Test("nil session returns silently — no notice, no cycle, no dialog")
+    func nilSessionReturnsSilently() async throws {
+        let (mock, model, controller, _) = makeFullContext(connected: true, sessionUserID: nil)
+        controller.activate(userID: "u1")
+        await waitForCycle(controller)
+        mock.clearLog()
+
+        await model.refresh()
+
+        #expect(model.notice == nil)
+        #expect(model.syncErrorMessage == nil)
+        #expect(mock.calls.isEmpty)
+    }
+
+    @Test("nil session while offline still shows no notice")
+    func nilSessionOfflineShowsNoNotice() async {
+        let (_, model, _, _) = makeFullContext(connected: false, sessionUserID: nil)
+
+        await model.refresh()
+
+        #expect(model.notice == nil)
+        #expect(model.syncErrorMessage == nil)
+    }
+
     // MARK: - Helpers
 
     private func makeContext(
-        signedIn: Bool,
         connected: Bool,
         noticeLifetime: TimeInterval = 5
     ) -> (mock: MockCatalogRepository, model: HistoryPullModel, controller: SyncController) {
         let (mock, model, controller, _) = makeFullContext(
-            signedIn: signedIn, connected: connected, noticeLifetime: noticeLifetime
+            connected: connected, noticeLifetime: noticeLifetime
         )
         return (mock, model, controller)
     }
 
     private func makeFullContext(
-        signedIn: Bool,
         connected: Bool,
-        noticeLifetime: TimeInterval = 5
+        noticeLifetime: TimeInterval = 5,
+        sessionUserID: String? = "u1"
     ) -> (
         mock: MockCatalogRepository,
         model: HistoryPullModel,
@@ -197,14 +209,12 @@ struct HistoryPullModelTests {
         let store = try! LocalStore(url: temporaryStoreURL())
         let mock = MockCatalogRepository()
         let connectivity = MockConnectivity(connected: connected)
-        let controller = SyncController(store: store, remote: mock, connectivity: connectivity)
-        let session = SessionStore()
-        if signedIn {
-            session.setSignedIn(CachedSession(id: "u1", email: "a@b.com", emailVerified: true))
-        }
+        let controller = SyncController(store: store, remote: mock, connectivity: connectivity) { "u1" }
         let model = HistoryPullModel(
-            sync: controller, session: session,
-            connectivity: connectivity, noticeLifetime: noticeLifetime
+            sync: controller,
+            connectivity: connectivity,
+            sessionUserIDProvider: { sessionUserID },
+            noticeLifetime: noticeLifetime
         )
         return (mock, model, controller, store)
     }
@@ -212,7 +222,7 @@ struct HistoryPullModelTests {
     private func temporaryStoreURL() -> URL {
         URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent(UUID().uuidString)
-            .appendingPathComponent("timeoflife.sqlite")
+            .appendingPathComponent(LocalStore.databaseFileName(userID: "u1"))
     }
 
     private func waitForCycle(_ controller: SyncController) async {

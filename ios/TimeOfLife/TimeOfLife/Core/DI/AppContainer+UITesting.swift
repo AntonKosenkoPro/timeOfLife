@@ -19,8 +19,14 @@ extension AppContainer {
         let sessionStore = SessionStore()
         let navigation = AppNavigationStack()
         let connectivity = MockConnectivity(connected: true)
+        // The UI-testing graph pins a per-user test file (account-bound-store
+        // spec shape): `lifio_<userId>.db` under a throwaway temp directory,
+        // opened already bound so every screen reads one account's data.
         // swiftlint:disable:next force_try
-        let localStore = try! LocalStore(url: temporaryStoreURL())
+        let localStore = try! LocalStore(
+            url: temporaryStoreURL(userID: "ui-test"),
+            userID: "ui-test"
+        )
         let timerService = TimerService(store: localStore)
         let repository = UITestingAuthRepository()
         let authService = AuthService(
@@ -31,7 +37,8 @@ extension AppContainer {
         )
         // An `APIClient` is required by the container but is never called in
         // this graph (the stub repository answers everything), so wire it
-        // with no token/refresh hooks against the configured base URL.
+        // with no token/refresh/device-id hooks against the configured base
+        // URL — the UI-testing stub never hits the real auth API.
         let apiClient = APIClient(baseURL: AppConfig.baseURL, session: .shared)
         let appleService = AppleSignInService()
         let catalog = RemoteCatalogRepository(client: apiClient)
@@ -40,7 +47,10 @@ extension AppContainer {
             store: localStore,
             remote: catalog,
             connectivity: connectivity
-        )
+        ) { [weak sessionStore] in
+            guard case let .signedIn(session) = sessionStore?.state else { return nil }
+            return session.id
+        }
 
         let container = AppContainer(
             baseURL: AppConfig.baseURL,
@@ -64,10 +74,10 @@ extension AppContainer {
         return container
     }
 
-    private static func temporaryStoreURL() -> URL {
+    private static func temporaryStoreURL(userID: String) -> URL {
         URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent(UUID().uuidString)
-            .appendingPathComponent("timeoflife.sqlite")
+            .appendingPathComponent(LocalStore.databaseFileName(userID: userID))
     }
 
     /// Places the app on a specific screen for inspection.
