@@ -1,6 +1,7 @@
 import SwiftUI
 
-/// Welcome screen — the root of the signed-out flow.
+/// Welcome screen — the root of the mandatory launch gate (app-shell spec,
+/// account-bound-local-data).
 ///
 /// Introduces the app ("Lifio — personal time tracker") and leads with
 /// Sign in with Apple as the primary, default auth method. Email/OTP is a
@@ -8,14 +9,13 @@ import SwiftUI
 /// The email button is always tappable (it only navigates); it is disabled only
 /// while an Apple sign-in attempt is in flight to prevent concurrent auth flows.
 /// No text entry on this screen, so there is no keyboard handling.
+///
+/// Presented full-screen at the root — never a sheet — so there is no
+/// dismiss/Cancel path: the gate cannot be left without signing in.
 struct WelcomeView: View {
     @ObservedObject var vm: WelcomeViewModel
     @EnvironmentObject var navigation: AppNavigationStack
     @EnvironmentObject var container: AppContainer
-    // No-op outside a sheet; the flow's only presentation today is the
-    // Enable Sync sheet, whose Cancel closes it (app-shell spec).
-    @Environment(\.dismiss)
-    private var dismiss
 
     private var isOffline: Bool { !container.connectivity.isConnected }
     private var appleButtonDisabled: Bool { isOffline || vm.isLoading }
@@ -94,18 +94,15 @@ struct WelcomeView: View {
             .background(Theme.backgroundPrimary)
         }
         .onAppear { vm.reset() }
-        // Sheet chrome for the flow's Enable Sync presentation: the flow sets
-        // no titles of its own, so the root names it (this also renders the
-        // bar — and the Cancel item — on iOS 16+, where a titleless
-        // NavigationStack shows no bar at all). Pushed screens keep the title
-        // with their Back button; swipe-to-dismiss works throughout.
-        .navigationTitle(L10n.profileEnableSync.text)
+        // Full-screen gate chrome (app-shell spec): the title states the
+        // requirement in the required voice. The flow sets no Cancel item —
+        // there is no dismiss path out of the gate without signing in.
+        // The title also renders the bar on iOS 16+, where a titleless
+        // NavigationStack shows no bar at all. Pushed screens keep the title
+        // with their Back button; swipe-to-dismiss of pushed screens still
+        // works throughout.
+        .navigationTitle(L10n.authGateTitle.text)
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .cancellationAction) {
-                Button(L10n.syncCancel.text) { dismiss() }
-            }
-        }
     }
 
     @State private var bottomBarHeight: CGFloat = 0

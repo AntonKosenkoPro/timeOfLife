@@ -160,7 +160,14 @@ struct LocalizationTests {
         // (profile.library/connections/integrations/export/app/appearance/
         // dataAndPrivacy) and adds profile.onDevice + onDeviceFooter = 136;
         // history-pull-to-sync adds 5 (history.pull.signedOut/signIn/offline,
-        // history.syncError.title, common.ok) = 141
-        #expect(l10nCases.count == 141)
+        // history.syncError.title, common.ok) = 141;
+        // account-bound-local-data removes 5 retired-UI cases
+        // (profile.enableSync, profile.enableSyncSubtitle, sync.cancel,
+        // history.pull.signedOut, history.pull.signIn) and adds
+        // authGate.title = 137; Wave 2 removed the 5 orphaned
+        // string-file rows from both lproj files (all L10n cases
+        // resolve; ad-hoc file keys — error.*, validation.*,
+        // catalogIcon.* — stay keyed outside the enum)
+        #expect(l10nCases.count == 137)
     }
 }

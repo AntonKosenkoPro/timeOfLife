@@ -11,9 +11,12 @@ info:
        and sends it via email (console in dev/test, AWS SES in production).
     2. **Verify OTP** — `POST /api/v1/auth/otp/verify` with the email and 6-digit code. On success,
        returns a JWT access token (15 min TTL) and an opaque refresh token.
-    3. **Refresh** — `POST /api/v1/auth/refresh` with the refresh token. Issues a new token pair
-       and revokes the old one. Reuse of a revoked token revokes ALL user sessions.
-    4. **Logout** — `POST /api/v1/auth/logout` with a Bearer access token. Revokes all sessions.
+    3. **Refresh** — `POST /api/v1/auth/refresh` with the refresh token and `X-Device-Id`.
+       Issues a new token pair within the sending device's refresh family and revokes the
+       old token. Reuse of a revoked token revokes only that device's family — other
+       devices' sessions keep working.
+    4. **Logout** — `POST /api/v1/auth/logout` with a Bearer access token and `X-Device-Id`.
+       Revokes only the calling device's refresh family; other devices' sessions remain valid.
     5. **Me** — `GET /api/v1/auth/me` with a Bearer access token. Returns the user profile.
 
     ## Auth flow (Sign in with Apple)
@@ -22,6 +25,25 @@ info:
       stable `sub` claim, then issues the same access + refresh token pair as the OTP flow.
        The route is always registered; without `APPLE_CLIENT_ID` it returns 503
        `apple_not_configured`.
+
+    ## Device identity & per-device sessions
+    - **Device id** — every session-carrying auth request (`/auth/otp/verify`,
+      `/auth/apple`, `/auth/refresh`, `/auth/logout`) sends a stable client-generated
+      UUID via the `X-Device-Id` header. The device id persists in the Keychain across
+      app reinstalls and is minted fresh only when the device fingerprint changes
+      (restore-on-new-phone).
+    - **Per-device refresh families** — every issued refresh token is recorded against a
+      concrete `device_id` (never an empty one); rotation stays within the issuing
+      device's family. There is deliberately NO device quota: sign-in succeeds from any
+      number of devices — no 409 `device_limit` response exists. Device limit counting
+      is explicitly deferred to issue #46 (do not file its absence as a bug).
+    - **Revocation semantics** — reuse detection and logout are scoped per-device:
+      a replayed or logged-out device's refresh family is revoked while other devices'
+      sessions stay valid. A device whose family is revoked or TTL-exhausted must
+      re-authenticate from the auth gate; the client never wipes local data on
+      session loss (lock-not-wipe is a client behavior, no server-side delete).
+    - **Refresh TTL** — a device family's refresh tokens expire 7 days after issue;
+      refresh attempts after that are rejected as unauthorized.
 
     ## Security
     - No passwords. OTP codes and refresh tokens are stored only as SHA-256 hashes.
@@ -132,8 +154,11 @@ paths:
       description: |
         Verifies the 6-digit OTP code for the given email. On success, marks the
         user as email-verified and returns a JWT access token + opaque refresh token.
+        The refresh token is recorded against the `X-Device-Id` device's refresh family.
       tags:
         - Auth
+      parameters:
+        - $ref: "#/components/parameters/DeviceIdHeader"
       requestBody:
         required: true
         content:
@@ -207,12 +232,15 @@ paths:
         issuer, audience (the app's Bundle ID), and expiry. Upserts a user keyed by Apple's
         stable `sub` claim (Apple may withhold the email after the first authorization) and
         returns the same access + refresh token pair as the OTP flow. Apple users are
-        considered email-verified.
+        considered email-verified. The refresh token is recorded against the
+        `X-Device-Id` device's refresh family.
 
         This endpoint is always registered. When the server is not configured
         with `APPLE_CLIENT_ID`, it returns HTTP 503 (`apple_not_configured`).
       tags:
         - Auth
+      parameters:
+        - $ref: "#/components/parameters/DeviceIdHeader"
       requestBody:
         required: true
         content:
@@ -277,10 +305,15 @@ paths:
       summary: Refresh access token
       description: |
         Exchanges a refresh token for a new access + refresh token pair.
-        The old refresh token is revoked. If a revoked token is presented,
-        all user sessions are invalidated (token reuse detection).
+        The old refresh token is revoked and the new one stays within the
+        `X-Device-Id` device's refresh family. Rotation never affects other
+        devices' sessions. There is deliberately NO device limit: no 409
+        `device_limit` response exists (device quota counting is deferred to
+        issue #46 — do not file its absence as a bug).
       tags:
         - Auth
+      parameters:
+        - $ref: "#/components/parameters/DeviceIdHeader"
       requestBody:
         required: true
         content:
@@ -307,24 +340,29 @@ paths:
                   code: invalid_body
                   message: Refresh token is required
         "401":
-          description: Invalid or revoked refresh token
+          description: |
+            Invalid, revoked (reuse), or TTL-expired refresh token. Reuse detection is
+            scoped per-device: only the offending device's refresh family is revoked —
+            other devices' sessions keep working. After a revoked or TTL-expired family,
+            the device must re-authenticate (the client locks to the auth gate with all
+            local data intact; nothing is wiped).
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
               examples:
                 invalid_refresh:
-                  summary: Token not found
+                  summary: Token not found or family TTL expired
                   value:
                     error:
                       code: invalid_refresh
                       message: Invalid refresh token
                 token_reuse:
-                  summary: Token reuse detected
+                  summary: Token reuse detected (offending device's family revoked)
                   value:
                     error:
                       code: token_reuse
-                      message: Token has been revoked. All sessions have been invalidated.
+                      message: Token has been revoked. The device's sessions have been invalidated.
         "500":
           $ref: "#/components/responses/InternalError"
 
@@ -333,15 +371,18 @@ paths:
       operationId: logout
       summary: Logout
       description: |
-        Revokes all refresh tokens for the authenticated user.
-        Requires a valid Bearer access token.
+        Revokes only the refresh family identified by the request's `X-Device-Id`;
+        other devices' sessions remain valid. Requires a valid Bearer access token.
+        After logout the client keeps all local data intact (logout never wipes).
       tags:
         - Auth
       security:
         - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/DeviceIdHeader"
       responses:
         "204":
-          description: Logout successful — all sessions revoked
+          description: Logout successful — the calling device's refresh family revoked
         "401":
           description: Missing or invalid access token
           content:
@@ -815,6 +856,21 @@ paths:
           $ref: "#/components/responses/InternalError"
 
 components:
+  parameters:
+    DeviceIdHeader:
+      name: X-Device-Id
+      in: header
+      required: true
+      description: |
+        Stable client-generated device identifier (UUID). Persisted in the iOS Keychain
+        across app reinstalls; minted fresh only when the device fingerprint changes
+        (restore-on-new-phone). Scopes refresh-token families, reuse detection, and
+        logout to a single device: revocation never touches other devices' sessions.
+      schema:
+        type: string
+        format: uuid
+        example: 550e8400-e29b-41d4-a716-446655440000
+
   securitySchemes:
     BearerAuth:
       type: http
@@ -960,13 +1016,13 @@ components:
 
     RefreshRequest:
       type: object
-      description: Request body for refreshing tokens.
+      description: Request body for refreshing tokens. The device scope comes from the `X-Device-Id` header on the request, not from this body.
       required:
         - refresh_token
       properties:
         refresh_token:
           type: string
-          description: Opaque refresh token (64 hex characters)
+          description: Opaque refresh token (64 hex characters) from the requesting device's family
           example: a1b2c3d4e5f6...
 
     AppleSignInRequest:
@@ -998,7 +1054,7 @@ components:
           example: eyJhbGciOiJIUzI1NiIs...
         refresh_token:
           type: string
-          description: Opaque refresh token (64 hex chars, 7 day TTL)
+          description: Opaque refresh token (64 hex chars, 7-day TTL), recorded against the requesting device's `X-Device-Id` refresh family
           example: a1b2c3d4e5f6...
         user:
           $ref: "#/components/schemas/User"

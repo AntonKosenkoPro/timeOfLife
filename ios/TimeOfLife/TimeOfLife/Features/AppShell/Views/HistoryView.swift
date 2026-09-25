@@ -16,7 +16,9 @@ import SwiftUI
 /// Tapping an entry row opens the unified entry form directly as a
 /// full-screen cover (remove-activities-layer D6; entry-editor spec):
 /// editable for `manual` entries, read-only for imported ones. There is no
-/// activity detail sheet.
+/// activity detail sheet. Signed-out History does not exist — the launch
+/// gate precedes every tab — so there is no signed-out pull notice and no
+/// auth sheet here (account-bound-local-data).
 struct HistoryView: View {
     @EnvironmentObject var container: AppContainer
     /// Observed directly (not via `container`): `AppContainer` publishes
@@ -24,13 +26,7 @@ struct HistoryView: View {
     /// invalidate this view — the status change would be missed and the list
     /// would stay stale after a sync (ProfileView precedent).
     @EnvironmentObject var sync: SyncController
-    /// Observed for the pull-notice early-dismiss on sign-in flip (the pull
-    /// model shares this instance; see `init`).
-    @ObservedObject var session: SessionStore
     @StateObject private var vm: HistoryViewModel
-    /// Owns the banner sign-in link (restore-then-sheet, shared with
-    /// ProfileView's row — exactly one auth entry flow).
-    @StateObject private var enableSync: EnableSyncPresenter
     /// Owns the pull-to-refresh verdict flow (history-pull-to-sync spec).
     @StateObject private var pull: HistoryPullModel
     @State private var elevatedGroupID: String?
@@ -57,13 +53,13 @@ struct HistoryView: View {
         logTimeActive: Binding<Bool> = .constant(false)
     ) {
         _vm = StateObject(wrappedValue: HistoryViewModel(store: store))
-        _enableSync = StateObject(wrappedValue: EnableSyncPresenter(
-            authService: authService, sessionStore: sessionStore
-        ))
         _pull = StateObject(wrappedValue: HistoryPullModel(
-            sync: sync, session: sessionStore, connectivity: connectivity
-        ))
-        self.session = sessionStore
+            sync: sync,
+            connectivity: connectivity
+        ) { [weak sessionStore] in
+            guard case let .signedIn(session) = sessionStore?.state else { return nil }
+            return session.id
+        })
         self.refreshSignal = refreshSignal
         _isLogTimeActive = logTimeActive
     }
@@ -77,9 +73,7 @@ struct HistoryView: View {
         // above the list, below the navigation bar (the shell owns the bar).
         VStack(spacing: 0) {
             if pull.notice != nil {
-                PullNoticeBanner(notice: pull.notice) {
-                    Task { await enableSync.enableSync() }
-                }
+                PullNoticeBanner()
             }
             // ZStack, not Group (same stability rule as above, one level
             // down): the conditional content must not own the modifiers.
@@ -136,13 +130,6 @@ struct HistoryView: View {
                 Task { await vm.loadIfNeeded() }
             }
         }
-        // A successful sign-in dismisses the signed-out pull notice early:
-        // first-sync takes over from here.
-        .onChange(of: session.state) { state in
-            if case .signedIn = state {
-                pull.cancelNotice()
-            }
-        }
         // A pull-awaited cycle failure surfaces once, with a single OK
         // (history-pull-to-sync spec). Background cycles fail through the
         // same status property but never set the model's message, so they
@@ -157,17 +144,6 @@ struct HistoryView: View {
             Button(L10n.commonOk.text, role: .cancel) {}
         } message: {
             Text(pull.syncErrorMessage ?? "")
-        }
-        // Enable Sync sheet (app-shell spec, shared with ProfileView): the
-        // auth flow, presented only when the silent restore left the session
-        // signed out. The custom binding routes system dismissal through
-        // the presenter; sign-in flips clear the flag from the presenter.
-        .sheet(isPresented: Binding(
-            get: { enableSync.isSheetPresented },
-            set: { if !$0 { enableSync.dismiss() } }
-        )) {
-            EnableSyncSheet()
-                .environmentObject(container)
         }
         // The unified entry form presents as a full-screen cover (D6):
         // EDIT for manual entries, LOCKED for imported ones. Dismissal
@@ -286,41 +262,20 @@ struct HistoryView: View {
 
 // MARK: - Pull notice (history-pull-to-sync)
 
-/// Inline verdict below the navigation bar for signed-out/offline pulls
-/// (one at a time; newest pull wins). The signed-out notice carries the
-/// sign-in link; the offline notice has no action. `Theme` colors only.
+/// Inline verdict below the navigation bar for offline pulls (one at a
+/// time; newest pull wins). The signed-out notice is gone with the launch
+/// gate — the only reachable signed-out surface is the auth gate itself.
+/// `Theme` colors only.
 private struct PullNoticeBanner: View {
-    let notice: HistoryPullModel.Notice?
-    let onSignIn: () -> Void
-
     var body: some View {
-        HStack(spacing: Theme.spacingSmall) {
-            Text(message)
-                .font(.footnote)
-                .foregroundStyle(Theme.textPrimary)
-            if notice == .signedOut {
-                Button(action: onSignIn) {
-                    Text(L10n.historyPullSignIn.text)
-                        .font(.footnote)
-                        .fontWeight(.semibold)
-                }
-                .foregroundStyle(Theme.accentPrimary)
-                .accessibilityIdentifier("HistoryPullSignInLink")
-            }
-        }
-        .padding(.vertical, Theme.spacingSmall)
-        .padding(.horizontal, Theme.spacingMedium)
-        .frame(maxWidth: .infinity)
-        .background(Theme.backgroundSecondary)
-        .accessibilityIdentifier(
-            notice == .signedOut ? "HistorySignedOutNotice" : "HistoryOfflineNotice"
-        )
-    }
-
-    private var message: String {
-        notice == .signedOut
-            ? L10n.historyPullSignedOut.text
-            : L10n.historyPullOffline.text
+        Text(L10n.historyPullOffline.text)
+            .font(.footnote)
+            .foregroundStyle(Theme.textPrimary)
+            .padding(.vertical, Theme.spacingSmall)
+            .padding(.horizontal, Theme.spacingMedium)
+            .frame(maxWidth: .infinity)
+            .background(Theme.backgroundSecondary)
+            .accessibilityIdentifier("HistoryOfflineNotice")
     }
 }
 

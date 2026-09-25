@@ -370,7 +370,7 @@ extension TrackViewModel {
             .appendingPathComponent("preview.sqlite")
         let store: LocalStore
         do {
-            store = try LocalStore(url: url)
+            store = try LocalStore(url: url, userID: "preview-user")
         } catch {
             fatalError("Unable to create preview store: \(error)")
         }

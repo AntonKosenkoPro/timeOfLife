@@ -12,16 +12,35 @@ struct APIClientTests {
     private func makeClient(
         baseURL: URL? = nil,
         accessTokenProvider: @escaping @Sendable () async -> String? = { nil },
-        refreshHandler: (@Sendable () async throws -> String)? = nil
+        refreshHandler: (@Sendable () async throws -> String)? = nil,
+        deviceIdProvider: (@Sendable () async -> String)? = nil
     ) -> (APIClient, URLSession) {
         let session = URLProtocolStub.makeSession()
         let client = APIClient(
             baseURL: baseURL ?? self.baseURL,
             session: session,
             accessTokenProvider: accessTokenProvider,
-            refreshHandler: refreshHandler
+            refreshHandler: refreshHandler,
+            deviceIdProvider: deviceIdProvider
         )
         return (client, session)
+    }
+
+    @Test("X-Device-Id header is not set when no provider is wired")
+    func noDeviceIdWithoutProvider() async throws {
+        defer { URLProtocolStub.clear() }
+        var header: String?
+        URLProtocolStub.responseHandler = { request in
+            header = request.value(forHTTPHeaderField: "X-Device-Id")
+            return (Data(), TestFactories.okResponse(request.url!, status: 204))
+        }
+
+        let (client, _) = makeClient(deviceIdProvider: nil)
+        try await client.sendVoid(
+            APIEndpoint.value(method: .post, path: "/api/v1/auth/otp/verify")
+        )
+
+        #expect(header == nil)
     }
 
     /// Convenience: stubs a URL with a JSON-encoded encodable value.

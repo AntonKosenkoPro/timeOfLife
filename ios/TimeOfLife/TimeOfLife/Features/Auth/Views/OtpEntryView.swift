@@ -89,7 +89,8 @@ struct OtpEntryView: View {
             // full code before the network call. A shorter/changed code cancels
             // any pending auto-submit. The field stays first responder (we do
             // not dismiss the keyboard); on success `AuthService` flips
-            // `SessionStore` flips to signed-in; the app shell (Track) remains the root.
+            // `SessionStore` to signed-in; the launch gate swaps to the app
+            // shell.
             autoSubmitTask?.cancel()
             guard newValue.count == 6 else { return }
             autoSubmitTask = Task {

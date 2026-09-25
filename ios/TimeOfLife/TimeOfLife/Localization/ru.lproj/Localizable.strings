@@ -7,6 +7,9 @@
 "welcome.tagline" = "Личный трекер времени.";
 "welcome.continueWithEmail" = "Войти по почте";
 
+// Auth gate (account-bound-local-data: required-voice launch gate)
+"authGate.title" = "Войдите, чтобы начать учёт времени";
+
 // Email entry (passwordless: sign-in + sign-up collapse into email → OTP)
 "emailEntry.title" = "Войти по почте";
 "emailEntry.email" = "Эл. почта";
@@ -77,10 +80,7 @@
 "profile.title" = "Профиль";
 "profile.done" = "Готово";
 "profile.account" = "Аккаунт";
-"profile.enableSync" = "Включить синхронизацию";
-"profile.enableSyncSubtitle" = "Необязательный аккаунт для других устройств";
 "profile.syncNow" = "Синхронизировать";
-"sync.cancel" = "Отмена";
 "profile.syncing" = "Синхронизация…";
 "profile.lastSynced" = "Синхронизировано: %@";
 "profile.syncError" = "Не удалось синхронизировать. Попробуйте снова.";
@@ -110,8 +110,6 @@
 "history.tracked" = "отслеживано";
 
 // History pull-to-refresh (history-pull-to-sync)
-"history.pull.signedOut" = "Войдите, чтобы синхронизировать записи.";
-"history.pull.signIn" = "Войти";
 "history.pull.offline" = "Нет подключения. Подключитесь и попробуйте снова.";
 "history.syncError.title" = "Не удалось синхронизировать";
 "common.ok" = "ОК";

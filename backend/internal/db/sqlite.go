@@ -209,6 +209,18 @@ func (s *SQLiteStore) RevokeAllUserSessions(ctx context.Context, userID string) 
 	return nil
 }
 
+// RevokeUserDeviceSessions revokes the refresh family of one device.
+func (s *SQLiteStore) RevokeUserDeviceSessions(ctx context.Context, userID, deviceID string) error {
+	_, err := s.db.ExecContext(ctx, `
+		UPDATE refresh_tokens SET revoked = true
+		WHERE user_id = ? AND device_id = ? AND revoked = false
+	`, userID, deviceID)
+	if err != nil {
+		return fmt.Errorf("revoke user device sessions: %w", err)
+	}
+	return nil
+}
+
 // GetUserByID returns a user by their ID.
 func (s *SQLiteStore) GetUserByID(ctx context.Context, userID string) (User, error) {
 	var u User

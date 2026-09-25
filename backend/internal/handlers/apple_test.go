@@ -28,6 +28,7 @@ func doAppleSignIn(t *testing.T, h *Handler, identityToken string) *httptest.Res
 	body, _ := json.Marshal(map[string]string{"identity_token": identityToken})
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/apple", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Device-Id", "test-device")
 	w := httptest.NewRecorder()
 	h.AppleSignIn(w, req)
 	return w

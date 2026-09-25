@@ -107,9 +107,15 @@ func requestOTP(t *testing.T, h *Handler, email string) *httptest.ResponseRecord
 
 func verifyOTP(t *testing.T, h *Handler, email, code string) *httptest.ResponseRecorder {
 	t.Helper()
+	return verifyOTPWithDevice(t, h, email, code, "test-device")
+}
+
+func verifyOTPWithDevice(t *testing.T, h *Handler, email, code, deviceID string) *httptest.ResponseRecorder {
+	t.Helper()
 	body, _ := json.Marshal(map[string]string{"email": email, "code": code})
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/otp/verify", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Device-Id", deviceID)
 	w := httptest.NewRecorder()
 	h.VerifyOTP(w, req)
 	return w
@@ -200,6 +206,7 @@ func TestRefreshToken_Returns401ForInvalidToken(t *testing.T) {
 	body, _ := json.Marshal(map[string]string{"refresh_token": "invalid-token"})
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/refresh", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Device-Id", "test-device")
 	w := httptest.NewRecorder()
 	h.RefreshToken(w, req)
 

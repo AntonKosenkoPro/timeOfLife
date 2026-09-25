@@ -2,20 +2,19 @@ import Foundation
 
 /// Pull-to-refresh verdict logic for the History list (history-pull-to-sync
 /// spec). Owns the refresh decision so it is unit-testable — `HistoryView`
-/// only binds the notice, the error dialog, and the Enable Sync sheet.
+/// only binds the notice and the error dialog.
 ///
 /// The pull is sync-only: it never reloads local data directly. The existing
 /// `sync.status` cycle-exit observer in `HistoryView` stays the sole reload
-/// path. Verdict order: signed-out → signed-out notice (no network traffic);
-/// offline → offline notice (no cycle burned); otherwise await a fresh or
-/// joined cycle and surface its error, if any, as dialog content. A
-/// connectivity loss mid-cycle is a cycle failure, so it routes to the
-/// dialog — never back to the offline notice.
+/// path. Signed-out pulls do not exist (the launch gate precedes every tab —
+/// account-bound-local-data); offline → offline notice (no cycle burned);
+/// otherwise await a fresh or joined cycle and surface its error, if any, as
+/// dialog content. A connectivity loss mid-cycle is a cycle failure, so it
+/// routes to the dialog — never back to the offline notice.
 @MainActor
 final class HistoryPullModel: ObservableObject {
     /// Inline notice shown below the navigation bar (one at a time).
     enum Notice: Equatable {
-        case signedOut
         case offline
     }
 
@@ -26,20 +25,23 @@ final class HistoryPullModel: ObservableObject {
     @Published private(set) var syncErrorMessage: String?
 
     private let sync: SyncController
-    private let session: SessionStore
     private let connectivity: Connectivity
+    /// Reads the authenticated session's `userId` (nil signed-out) for the
+    /// sync same-account guard: the pull drains only under the account the
+    /// active file is bound to.
+    private let sessionUserIDProvider: () -> String?
     private let noticeLifetime: TimeInterval
     private var dismissTask: Task<Void, Never>?
 
     init(
         sync: SyncController,
-        session: SessionStore,
         connectivity: Connectivity,
+        sessionUserIDProvider: @escaping () -> String?,
         noticeLifetime: TimeInterval = 5
     ) {
         self.sync = sync
-        self.session = session
         self.connectivity = connectivity
+        self.sessionUserIDProvider = sessionUserIDProvider
         self.noticeLifetime = noticeLifetime
     }
 
@@ -47,21 +49,21 @@ final class HistoryPullModel: ObservableObject {
     /// as this awaits (fresh or joined cycle); pre-check verdicts return
     /// immediately with no spinner wait and no network traffic.
     func refresh() async {
-        guard case .signedIn = session.state else {
-            showNotice(.signedOut)
-            return
-        }
         guard connectivity.isConnected else {
             showNotice(.offline)
             return
         }
-        await sync.syncNow()
+        guard let userID = sessionUserIDProvider() else {
+            showNotice(.offline)
+            return
+        }
+        await sync.syncNow(userID: userID)
         if case let .error(message) = sync.status {
             syncErrorMessage = message
         }
     }
 
-    /// Dismisses the notice immediately (navigation away, sign-in flip).
+    /// Dismisses the notice immediately (navigation away).
     func cancelNotice() {
         dismissTask?.cancel()
         dismissTask = nil
