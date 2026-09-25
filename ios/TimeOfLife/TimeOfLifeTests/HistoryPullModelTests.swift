@@ -159,6 +159,30 @@ struct HistoryPullModelTests {
         #expect(model.syncErrorMessage != nil)
     }
 
+    @Test("nil session returns silently — no notice, no cycle, no dialog")
+    func nilSessionReturnsSilently() async throws {
+        let (mock, model, controller, _) = makeFullContext(connected: true, sessionUserID: nil)
+        controller.activate(userID: "u1")
+        await waitForCycle(controller)
+        mock.clearLog()
+
+        await model.refresh()
+
+        #expect(model.notice == nil)
+        #expect(model.syncErrorMessage == nil)
+        #expect(mock.calls.isEmpty)
+    }
+
+    @Test("nil session while offline still shows no notice")
+    func nilSessionOfflineShowsNoNotice() async {
+        let (_, model, _, _) = makeFullContext(connected: false, sessionUserID: nil)
+
+        await model.refresh()
+
+        #expect(model.notice == nil)
+        #expect(model.syncErrorMessage == nil)
+    }
+
     // MARK: - Helpers
 
     private func makeContext(
@@ -173,7 +197,8 @@ struct HistoryPullModelTests {
 
     private func makeFullContext(
         connected: Bool,
-        noticeLifetime: TimeInterval = 5
+        noticeLifetime: TimeInterval = 5,
+        sessionUserID: String? = "u1"
     ) -> (
         mock: MockCatalogRepository,
         model: HistoryPullModel,
@@ -188,7 +213,7 @@ struct HistoryPullModelTests {
         let model = HistoryPullModel(
             sync: controller,
             connectivity: connectivity,
-            sessionUserIDProvider: { "u1" },
+            sessionUserIDProvider: { sessionUserID },
             noticeLifetime: noticeLifetime
         )
         return (mock, model, controller, store)

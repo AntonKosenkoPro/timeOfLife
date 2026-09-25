@@ -174,6 +174,55 @@ func TestDeviceSessions_ReuseKillsOnlyItsFamily(t *testing.T) {
 	}
 }
 
+// TestDeviceSessions_RevokedReplayBeyondTTLKillsFamily covers the
+// revoked-before-TTL ordering: a replayed revoked token whose created_at is
+// older than the refresh TTL must still report token_reuse (not
+// refresh_expired) and revoke the live family tokens.
+func TestDeviceSessions_RevokedReplayBeyondTTLKillsFamily(t *testing.T) {
+	store := newTestStore(t)
+	sender := &captureSender{}
+	h := newTestHandlerWithDependencies(t, store, nil, sender)
+
+	sess := signInDevice(t, h, sender, "stale-reuse@example.com", "device-A")
+
+	// Rotate once: the original token is now revoked, the new one is live.
+	w := refreshCall(h, sess.RefreshToken, "device-A")
+	if w.Code != http.StatusOK {
+		t.Fatalf("first refresh: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var rotated authResponse
+	if err := json.NewDecoder(w.Body).Decode(&rotated); err != nil {
+		t.Fatalf("decode refresh response: %v", err)
+	}
+
+	// Age the revoked original beyond the 7-day refresh TTL.
+	oldHash := auth.HashToken(sess.RefreshToken)
+	if _, err := store.DB().Exec(`UPDATE refresh_tokens SET created_at = datetime('now', '-8 days') WHERE token_hash = ?`, oldHash); err != nil {
+		t.Fatalf("backdate created_at: %v", err)
+	}
+
+	// Replay the stale revoked token: must be token_reuse, not refresh_expired.
+	w = refreshCall(h, sess.RefreshToken, "device-A")
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("replayed refresh: expected 401, got %d: %s", w.Code, w.Body.String())
+	}
+	var errResp errorResponse
+	if err := json.NewDecoder(w.Body).Decode(&errResp); err != nil {
+		t.Fatalf("decode error response: %v", err)
+	}
+	if errResp.Error.Code != "token_reuse" {
+		t.Errorf("expected token_reuse code, got %q", errResp.Error.Code)
+	}
+
+	// The live family token was revoked by the reuse detection.
+	if found, live := sessionState(t, store, rotated.RefreshToken); !found || live {
+		t.Errorf("expected rotated token revoked after reuse, found=%v live=%v", found, live)
+	}
+	if w := refreshCall(h, rotated.RefreshToken, "device-A"); w.Code != http.StatusUnauthorized {
+		t.Errorf("expected rotated token rejected after family revocation, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
 func TestDeviceSessions_LogoutRevokesOnlyCaller(t *testing.T) {
 	store := newTestStore(t)
 	sender := &captureSender{}

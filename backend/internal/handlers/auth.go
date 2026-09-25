@@ -475,6 +475,19 @@ func (h *Handler) RefreshToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Check if revoked FIRST — before the TTL check — so a replayed revoked
+	// token always triggers per-device reuse revocation, even when its
+	// created_at is older than the refresh TTL (otherwise it would return
+	// refresh_expired and leave the live family tokens unrevoked).
+	if storedToken.Revoked {
+		h.logger.Warn("refresh token reuse detected", "userID", storedToken.UserID, "deviceID", storedToken.DeviceID)
+		if err := h.store.RevokeUserDeviceSessions(ctx, storedToken.UserID, storedToken.DeviceID); err != nil {
+			h.logger.Error("failed to revoke device tokens after reuse", "error", err)
+		}
+		writeError(w, http.StatusUnauthorized, "token_reuse", "Token has been revoked. Sign in again.", nil)
+		return
+	}
+
 	// Enforce the refresh TTL against created_at: an expired family is
 	// rejected (lock-not-wipe — the client keeps local files and re-auths).
 	if time.Since(storedToken.CreatedAt) > h.tokenService.RefreshTokenTTL() {
@@ -491,17 +504,6 @@ func (h *Handler) RefreshToken(w http.ResponseWriter, r *http.Request) {
 		h.logger.Warn("refresh token device mismatch", "userID", storedToken.UserID,
 			"deviceID", deviceID, "tokenDeviceID", storedToken.DeviceID)
 		writeError(w, http.StatusUnauthorized, "invalid_refresh", "Invalid refresh token", nil)
-		return
-	}
-
-	// Check if revoked — if so, revoke only this device's refresh family
-	// (per-device reuse detection; other devices keep working).
-	if storedToken.Revoked {
-		h.logger.Warn("refresh token reuse detected", "userID", storedToken.UserID, "deviceID", storedToken.DeviceID)
-		if err := h.store.RevokeUserDeviceSessions(ctx, storedToken.UserID, storedToken.DeviceID); err != nil {
-			h.logger.Error("failed to revoke device tokens after reuse", "error", err)
-		}
-		writeError(w, http.StatusUnauthorized, "token_reuse", "Token has been revoked. Sign in again.", nil)
 		return
 	}
 

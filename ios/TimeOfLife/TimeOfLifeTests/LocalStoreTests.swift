@@ -439,7 +439,7 @@ struct LocalStoreTests {
         try await store.setLastSyncedAt(resource: "entry", date: Date())
         try await store.undoBufferEnter(payload: Data("snapshot".utf8), deletedAt: Date())
 
-        await store.eraseAll()
+        try await store.eraseAll()
 
         // The file is gone and the store is unbound: every operation is
         // refused until the next sign-in (account-bound-store spec).
@@ -740,7 +740,7 @@ struct LocalStoreSeedingTests {
         let userID = "u1"
         var store = try makeStore(userID: userID, base: base)
         _ = try await store.seedStarterCategoriesIfNeeded(names: enNames)
-        await store.eraseAll()
+        try await store.eraseAll()
 
         // The file is deleted, not row-wiped, and the store is unbound:
         // re-signing in creates a fresh file that seeds again
@@ -1677,7 +1677,7 @@ struct LocalStoreAccountBoundTests {
         await storeB.closeAccount()
 
         // Erase while signed in as A: only A's file goes.
-        await storeA.eraseAll()
+        try await storeA.eraseAll()
         #expect(!FileManager.default.fileExists(atPath: fileURL(userID: "user-a", base: base).path))
         #expect(FileManager.default.fileExists(atPath: fileURL(userID: "user-b", base: base).path))
 
@@ -1746,7 +1746,7 @@ struct LocalStoreAccountBoundTests {
         try await store.createCategory(Category(id: "cat-a", name: "Work A", icon: "briefcase"))
         await store.closeAccount()
 
-        await store.eraseAll()
+        try await store.eraseAll()
         #expect(!FileManager.default.fileExists(atPath: fileURL(userID: "user-a", base: base).path))
     }
 
@@ -1761,5 +1761,21 @@ struct LocalStoreAccountBoundTests {
         }
         #expect(await store.boundUserID == nil)
         #expect(await store.boundURL == nil)
+    }
+
+    @Test("a failed openAccount keeps the previous binding (failure atomicity)")
+    func failedOpenKeepsPreviousBinding() async throws {
+        let base = temporaryBaseDirectory()
+        let store = try makeBoundStore(userID: "u1", base: base)
+        try await store.createCategory(Category(id: "cat-1", name: "Work", icon: "briefcase"))
+        await #expect(throws: LocalStore.LocalStoreError.invalidUserID) {
+            try await store.openAccount(userID: "../evil")
+        }
+        // The old account's binding survives the failed switch: bound state
+        // never points at a file the store no longer holds, so a later
+        // eraseAll cannot delete the previous account's file by mistake.
+        #expect(await store.boundUserID == "u1")
+        #expect(await store.boundURL != nil)
+        #expect(try await store.category(id: "cat-1")?.name == "Work")
     }
 }

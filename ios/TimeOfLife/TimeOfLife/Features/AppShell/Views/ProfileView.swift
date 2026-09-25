@@ -1,3 +1,4 @@
+import OSLog
 import SwiftUI
 
 /// The Profile destination (app-shell spec): account + sync status, on-device
@@ -19,6 +20,13 @@ struct ProfileView: View {
     @Environment(\.dismiss)
     private var dismiss
     @State private var isShowingEraseConfirm = false
+    /// The last erase failure message, surfaced in an alert. Set only when
+    /// `eraseLocalData()` throws — the file then survives on disk, so the
+    /// flow stays signed in for a retry instead of logging out and
+    /// reporting success.
+    @State private var eraseErrorMessage: String?
+
+    private static let logger = Logger(subsystem: "com.antonkosenko.timeoflifeapp", category: "profile")
 
     var body: some View {
         NavigationView {
@@ -40,6 +48,17 @@ struct ProfileView: View {
                 Button(L10n.profileEraseCancel.text, role: .cancel) {}
             } message: {
                 Text(L10n.profileEraseLocalDataConfirmMessage.text)
+            }
+            .alert(
+                L10n.profileEraseLocalData.text,
+                isPresented: Binding(
+                    get: { eraseErrorMessage != nil },
+                    set: { if !$0 { eraseErrorMessage = nil } }
+                )
+            ) {
+                Button(L10n.commonOk.text, role: .cancel) { eraseErrorMessage = nil }
+            } message: {
+                Text(eraseErrorMessage ?? "")
             }
         }
         .navigationViewStyle(.stack)
@@ -135,10 +154,19 @@ struct ProfileView: View {
     private func eraseLocalData() async {
         // Deletes ONLY the active account's database file (account-bound-
         // store spec: explicit per-account erase, never a logout side
-        // effect). The store ends unbound; logout then clears the session
+        // effect). A failed removal throws: log it, surface it, and stay
+        // signed in so the user can retry — logging out anyway would strand
+        // the surviving file as a dormant account with a success claim.
+        // On success the store ends unbound; logout then clears the session
         // artifacts (Keychain tokens, cached session) and the gate
         // re-renders full-screen.
-        await container.eraseLocalData()
+        do {
+            try await container.eraseLocalData()
+        } catch {
+            Self.logger.error("Erase local data failed: \(String(describing: error), privacy: .public)")
+            eraseErrorMessage = error.localizedDescription
+            return
+        }
         await container.authService.logout()
         // Clear any stale auth routes (e.g. OTP for the erased account) so
         // the gate starts over from its first step (local-first-store

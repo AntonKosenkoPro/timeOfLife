@@ -45,7 +45,6 @@ struct HistoryView: View {
 
     init(
         store: LocalStore,
-        authService: AuthService,
         sessionStore: SessionStore,
         sync: SyncController,
         connectivity: Connectivity,
@@ -302,7 +301,6 @@ private struct HeaderFramePreferenceKey: PreferenceKey {
     NavigationView {
         HistoryView(
             store: container.localStore,
-            authService: container.authService,
             sessionStore: container.sessionStore,
             sync: container.syncController,
             connectivity: container.connectivity
@@ -318,7 +316,6 @@ private struct HeaderFramePreferenceKey: PreferenceKey {
     NavigationView {
         HistoryView(
             store: container.localStore,
-            authService: container.authService,
             sessionStore: container.sessionStore,
             sync: container.syncController,
             connectivity: container.connectivity

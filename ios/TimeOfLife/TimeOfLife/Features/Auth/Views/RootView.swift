@@ -10,35 +10,57 @@ import Combine
 /// The local-first lifecycle wiring moves behind the gate: everything that
 /// touches the active account's store (cold-launch undo-buffer commit,
 /// starter seeding, sync activation + the first-sync cycle) runs only once a
-/// session exists — see `runSignedInStartup`. The gate itself never reads or
+/// session exists — see `beginSignIn`. The gate itself never reads or
 /// writes tracker data (local-first-store spec).
 struct RootView: View {
     @EnvironmentObject var session: SessionStore
     @EnvironmentObject var container: AppContainer
+    /// The account whose file has finished binding and is safe for tracker
+    /// reads. Nil while the bind is in flight (fresh sign-in, restore,
+    /// re-login) or after sign-out. The shell mounts only once this matches
+    /// the signed-in session id (bind-then-reveal): no tracker read (Track /
+    /// shell `.load()`) precedes `openLocalStore`, so a fresh sign-in never
+    /// flashes `error.unknown` from `LocalStoreError.notBound`.
+    @State private var boundUserID: String?
+    /// Serializes the account-bound store lifecycle across rapid
+    /// transitions: every sign-in/sign-out cancels its predecessor, so a
+    /// late sign-out close can never unbind a newer sign-in's file
+    /// (open-after-close).
+    @State private var lifecycleTask: Task<Void, Never>?
 
     var body: some View {
         Group {
             switch session.state {
-            case .signedIn(let session):
-                AppShellView(
-                    vm: AppShellViewModel(service: container.timerService),
-                    container: container
-                )
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .safeAreaInset(edge: .top) {
-                        OfflineBanner()
-                            .environmentObject(container.connectivity)
-                            .animation(.easeInOut(duration: 0.2), value: container.connectivity.isConnected)
-                    }
-                    .task { await runSignedInStartup(userID: session.id) }
+            case .signedIn(let current):
+                if boundUserID == current.id {
+                    AppShellView(
+                        vm: AppShellViewModel(service: container.timerService),
+                        container: container
+                    )
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .safeAreaInset(edge: .top) {
+                            OfflineBanner()
+                                .environmentObject(container.connectivity)
+                                .animation(.easeInOut(duration: 0.2), value: container.connectivity.isConnected)
+                        }
+                } else {
+                    // Bind-then-reveal: the gate stays up (a spinner, never
+                    // the shell) until the account's file is bound. The
+                    // startup runs here — not in `onChange` — so it fires on
+                    // every shell mount, including the restore-driven one.
+                    ProgressView()
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .task { beginSignIn(userID: current.id) }
+                }
             case .signedOut:
                 AuthFlowView()
             }
         }
             .background(Theme.backgroundPrimary.ignoresSafeArea())
             .task {
-                // Restores a cached session (signed-in → the shell mounts and
-                // runs the startup above) or leaves the gate up.
+                // Restores a cached session (signed-in → the binding
+                // placeholder above mounts and runs the startup) or leaves
+                // the gate up.
                 await container.authService.restoreSession()
             }
             .onChange(of: session.state) { newState in
@@ -46,11 +68,7 @@ struct RootView: View {
                 case .signedIn:
                     break
                 case .signedOut:
-                    // Sync stops before the file closes: an in-flight cycle
-                    // aborts at its next stage guard, then the account's file
-                    // goes dormant (logout keeps all files).
-                    container.syncController.deactivate()
-                    Task { await container.closeLocalStore() }
+                    beginSignOut()
                 }
             }
             .onChange(of: container.connectivity.isConnected) { connected in
@@ -76,11 +94,63 @@ struct RootView: View {
     /// runs; seeding is idempotent (per-file marker) and activation records
     /// the bound account and performs the pull-first first-sync (sync-client
     /// spec).
-    private func runSignedInStartup(userID: String) async {
-        await container.openLocalStore(userID: userID)
-        try? await container.undoBuffer.commitAll()
-        container.syncController.activate(userID: userID)
-        await seedStarterCategoriesIfNeeded()
+    ///
+    /// The caller cancels superseded lifecycles, so every suspension point
+    /// re-checks cancellation and the live session: a sign-out that lands
+    /// mid-bind must neither reveal the shell nor activate sync for it.
+    private func beginSignIn(userID: String) {
+        lifecycleTask?.cancel()
+        lifecycleTask = Task {
+            if Task.isCancelled { return }
+            await container.openLocalStore(userID: userID)
+            if Task.isCancelled { return }
+            guard case let .signedIn(current) = session.state, current.id == userID else { return }
+            boundUserID = userID
+            try? await container.undoBuffer.commitAll()
+            if Task.isCancelled { return }
+            guard case let .signedIn(current) = session.state, current.id == userID else { return }
+            container.syncController.activate(userID: userID)
+            await seedStarterCategoriesIfNeeded()
+        }
+    }
+
+    /// Tears down the signed-in lifecycle on every transition to `.signedOut`
+    /// (plain logout and server-driven revocation alike): stops sync, clears
+    /// stale auth routes so the gate never reopens on a pre-filled OTP
+    /// screen, hides the shell, then closes the account's file (logout keeps
+    /// all files) — but only after the in-flight cycle actually ended and
+    /// only while still signed out, so a fast re-login's file stays bound
+    /// (open-after-close).
+    private func beginSignOut() {
+        // Sync stops before the file closes: an in-flight cycle aborts at
+        // its next stage guard, then the account's file goes dormant.
+        container.syncController.deactivate()
+        container.navigation.path = []
+        boundUserID = nil
+        lifecycleTask?.cancel()
+        lifecycleTask = Task {
+            await waitForSyncShutdown()
+            guard !Task.isCancelled else { return }
+            // Rapid re-login flips the state before the close runs: skip it.
+            // The guard and the close share one MainActor turn, so no flip
+            // can slip between them — the close always precedes a later open.
+            guard case .signedOut = session.state else { return }
+            await container.closeLocalStore()
+        }
+    }
+
+    /// Waits until SyncController's in-flight cycle actually ends
+    /// (`deactivate()` only requests cancellation) so `closeLocalStore`
+    /// never pulls the file out from under a running cycle — which would
+    /// surface `notBound` as `.error` instead of `.inactive` and strand the
+    /// next sign-in's `activate` (it only runs from `.inactive`). Bounded:
+    /// the cycle is already cancelled, so it resolves on its next
+    /// suspension point.
+    private func waitForSyncShutdown() async {
+        let deadline = Date().addingTimeInterval(2)
+        while !Task.isCancelled, container.syncController.isCycleLive, Date() < deadline {
+            try? await Task.sleep(nanoseconds: 50_000_000)
+        }
     }
 
     /// The authenticated session's `userId` (empty when signed out — callers

@@ -1,4 +1,5 @@
 import Foundation
+import OSLog
 import SwiftUI
 
 /// Composition root. Builds the real production graph and exposes the
@@ -29,10 +30,18 @@ final class AppContainer: ObservableObject {
     let localStore: LocalStore
     let undoBuffer: UndoBufferStore
     let syncController: SyncController
+    /// The last retryable `openLocalStore` failure (disk-full, corrupt file,
+    /// migration error). Integrity failures (`invalidUserID`/`accountMismatch`)
+    /// still `fatalError`; everything else is logged and surfaced here for
+    /// the UI instead of crashing on sign-in. `openLocalStore` stays
+    /// non-throwing because `RootView` awaits it inline during startup.
+    @Published var localStoreOpenError: Error?
     /// Strong reference to the holder that wires the API client's refresh hook
     /// back to `authService`. If this were not retained, the holder would
     /// deallocate after `production()` returns and token refresh would fail.
     private let clientHolder: APIClientHolder?
+
+    private static let logger = Logger(subsystem: "com.antonkosenko.timeoflifeapp", category: "store")
 
     init(
         baseURL: URL,
@@ -138,14 +147,23 @@ final class AppContainer: ObservableObject {
     /// path in `RootView` — restore-on-launch and both sign-in flows — and
     /// awaited before any store operation (undo commitAll, seeding, first
     /// sync cycle) touches the file.
+    ///
+    /// Only integrity failures (`invalidUserID`/`accountMismatch`) fail fast:
+    /// any other error (disk-full, corrupt file, migration failure) is
+    /// retryable, so it is logged and surfaced via `localStoreOpenError`
+    /// instead of crashing on sign-in.
     func openLocalStore(userID: String) async {
         do {
             try await localStore.openAccount(userID: userID)
-        } catch {
+        } catch let error as LocalStore.LocalStoreError
+            where error == .invalidUserID || error == .accountMismatch {
             // Binding failure (invalid id, cross-account file mismatch)
             // is an integrity failure — fail fast rather than silently
             // operating on the wrong file.
             fatalError("LocalStore account binding failed: \(error)")
+        } catch {
+            localStoreOpenError = error
+            Self.logger.error("LocalStore account binding failed (retryable): \(String(describing: error), privacy: .public)")
         }
     }
 
@@ -158,9 +176,11 @@ final class AppContainer: ObservableObject {
 
     /// Deletes ONLY the active account's database file (explicit per-account
     /// Erase in Profile; never a side effect of logout/switch/revoke). The
-    /// store ends unbound; the caller clears the session artifacts.
-    func eraseLocalData() async {
-        await localStore.eraseAll()
+    /// store ends unbound; the caller clears the session artifacts. Throwing:
+    /// a failed file removal propagates so the UI can report it instead of
+    /// claiming success.
+    func eraseLocalData() async throws {
+        try await localStore.eraseAll()
     }
 
     /// Builds the API client and the back-reference holder used to break the

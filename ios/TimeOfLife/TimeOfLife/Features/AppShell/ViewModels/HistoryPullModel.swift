@@ -49,11 +49,11 @@ final class HistoryPullModel: ObservableObject {
     /// as this awaits (fresh or joined cycle); pre-check verdicts return
     /// immediately with no spinner wait and no network traffic.
     func refresh() async {
+        // No session → silent no-op. Signed-out History is unreachable
+        // behind the auth gate, so there is no recovery affordance to offer
+        // here — and the offline notice's copy would be wrong for it.
+        guard let userID = sessionUserIDProvider() else { return }
         guard connectivity.isConnected else {
-            showNotice(.offline)
-            return
-        }
-        guard let userID = sessionUserIDProvider() else {
             showNotice(.offline)
             return
         }

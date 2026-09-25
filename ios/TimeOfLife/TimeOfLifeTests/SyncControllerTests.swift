@@ -1504,6 +1504,139 @@ struct SyncControllerTests {
         }
     }
 
+    @Test("cancel-then-fail stays inactive so the next activate rebinds and drains")
+    func cancelThenFailStaysInactive() async throws {
+        let (store, mock, controller) = makeContext()
+        try await store.createEntry(makeEntry(id: "e1", text: "Gym"))
+        let gate = Gate()
+        let firstPush = HeldCycleStart()
+        mock.createEntryHandler = { _ in
+            if !firstPush.started {
+                firstPush.started = true
+                await gate.wait()
+                throw APIError.server(code: "internal", message: "boom", details: [:])
+            }
+        }
+
+        controller.activate(userID: "u1")
+        await waitUntil { mock.calls.contains { $0.method == "createEntry" && $0.id == "e1" } }
+        // Cancel while the push is in flight (deactivate closes the binding);
+        // the late transport failure must not overwrite .inactive with .error.
+        controller.deactivate()
+        #expect(controller.status == .inactive)
+        gate.open()
+        try await Task.sleep(nanoseconds: 300_000_000)
+
+        #expect(controller.status == .inactive)
+        // The next activate rebinds (it early-returns unless .inactive) and
+        // drains the still-queued row.
+        mock.createEntryHandler = nil
+        mock.clearLog()
+        controller.activate(userID: "u1")
+        await waitForCycle(controller)
+
+        #expect(isIdle(controller.status))
+        #expect(mock.calls.contains { $0.method == "createEntry" && $0.id == "e1" })
+        #expect(try await store.outboxRows().isEmpty)
+    }
+
+    @Test("mid-stage swap aborts buffered deletes with no cross-account write")
+    func midStageSwapAbortsBufferedDeletes() async throws {
+        let (store, mock, _) = makeContext()
+        let old = Date(timeIntervalSince1970: 1_600_000_000)
+        try await store.mergeEntry(makeEntry(id: "e1", text: "A", createdAt: old, updatedAt: old))
+        try await store.mergeEntry(makeEntry(id: "e2", text: "B", createdAt: old, updatedAt: old))
+        _ = try await store.deleteEntryUndoable(id: "e1")
+        _ = try await store.deleteEntryUndoable(id: "e2")
+        let session = SessionUserIDHolder("u1")
+        let controller = SyncController(
+            store: store, remote: mock, connectivity: MockConnectivity(connected: true)
+        ) { session.value }
+        let swapped = HeldCycleStart()
+        mock.deleteEntryHandler = { _ in
+            if !swapped.started {
+                swapped.started = true
+                // Swap to B while A's buffered push is in flight: at most the
+                // one in-flight DELETE goes out.
+                session.value = "u2"
+            }
+        }
+
+        controller.activate(userID: "u1")
+        await waitForCycle(controller)
+
+        let deletes = mock.calls.filter { $0.method == "deleteEntry" }
+        #expect(deletes.count == 1)
+        // The uncommitted buffer rows stay for the owning account — nothing
+        // was committed under B's session.
+        #expect(!(try await store.bufferedDeletions()).isEmpty)
+        if case .inactive = controller.status {} else {
+            Issue.record("expected inactive after abort, got \(controller.status)")
+        }
+    }
+
+    @Test("mid-stage swap aborts tombstone application with no cross-account write")
+    func midStageSwapAbortsTombstones() async throws {
+        let (store, mock, _) = makeContext()
+        let old = Date(timeIntervalSince1970: 1_600_000_000)
+        try await store.mergeEntry(makeEntry(id: "e1", text: "Keep", createdAt: old, updatedAt: old))
+        try await store.mergeEntry(makeEntry(id: "e2", text: "Keep", createdAt: old, updatedAt: old))
+        let deletedAt = Date(timeIntervalSince1970: 1_650_000_000)
+        let session = SessionUserIDHolder("u1")
+        let controller = SyncController(
+            store: store, remote: mock, connectivity: MockConnectivity(connected: true)
+        ) { session.value }
+        mock.fetchDeletionsHandler = { _ in
+            // Swap to B during the tombstone fetch: the fetch ran under A's
+            // session, so none of it may apply into the now-foreign file.
+            session.value = "u2"
+            return [
+                Deletion(resource: "entry", recordID: "e1", deletedAt: deletedAt),
+                Deletion(resource: "entry", recordID: "e2", deletedAt: deletedAt),
+            ]
+        }
+
+        controller.activate(userID: "u1")
+        await waitForCycle(controller)
+
+        #expect(try await store.entry(id: "e1") != nil)
+        #expect(try await store.entry(id: "e2") != nil)
+        #expect(try await store.lastSyncedAt(resource: "deletions") == nil)
+        if case .inactive = controller.status {} else {
+            Issue.record("expected inactive after abort, got \(controller.status)")
+        }
+    }
+
+    @Test("mid-stage swap aborts pull merges with no cross-account write")
+    func midStageSwapAbortsPullMerges() async throws {
+        // swiftlint:disable:next force_try
+        let store = try! LocalStore(url: temporaryStoreURL())
+        let mock = MockCatalogRepository()
+        let session = SessionUserIDHolder("u1")
+        let remote = SwapOnEntriesFetchRemote(inner: mock, session: session)
+        let controller = SyncController(
+            store: store, remote: remote, connectivity: MockConnectivity(connected: true)
+        ) { session.value }
+        let stamp = Date(timeIntervalSince1970: 1_700_000_000)
+        mock.entriesResult = [
+            makeEntry(id: "srv-1", text: "Server 1", createdAt: stamp, updatedAt: stamp),
+            makeEntry(id: "srv-2", text: "Server 2", createdAt: stamp, updatedAt: stamp),
+        ]
+
+        controller.activate(userID: "u1")
+        await waitForCycle(controller)
+
+        // The entries fetch ran under A's session but the session swapped
+        // mid-pull: none of it merged into the now-foreign file, and the
+        // cursor never advanced.
+        #expect(try await store.entry(id: "srv-1") == nil)
+        #expect(try await store.entry(id: "srv-2") == nil)
+        #expect(try await store.lastSyncedAt(resource: "entry") == nil)
+        if case .inactive = controller.status {} else {
+            Issue.record("expected inactive after abort, got \(controller.status)")
+        }
+    }
+
     @Test("re-login of the same account resumes the dormant drain (outbox + cursors ride the per-user file)")
     func reloginResumesDormantDrain() async throws {
         let base = URL(fileURLWithPath: NSTemporaryDirectory())
@@ -1745,6 +1878,54 @@ struct SyncControllerTests {
     /// `SessionUserIDHolder`).
     private final class HeldCycleStart: @unchecked Sendable {
         var started = false
+    }
+
+    /// Forwarding `CatalogSending` that flips the session to another account
+    /// when the pull's entries fetch returns — simulating an account swap
+    /// during pull's in-flight fetch. All other calls delegate to the inner
+    /// mock untouched.
+    private final class SwapOnEntriesFetchRemote: CatalogSending, @unchecked Sendable {
+        let inner: MockCatalogRepository
+        let session: SessionUserIDHolder
+        init(inner: MockCatalogRepository, session: SessionUserIDHolder) {
+            self.inner = inner
+            self.session = session
+        }
+        func fetchCategories() async throws -> [Category] {
+            try await inner.fetchCategories()
+        }
+        func fetchEntries(modifiedSince: Date?) async throws -> [TimeEntry] {
+            let result = try await inner.fetchEntries(modifiedSince: modifiedSince)
+            session.value = "u2"
+            return result
+        }
+        func fetchDeletions(since: Date?) async throws -> [Deletion] {
+            try await inner.fetchDeletions(since: since)
+        }
+        func fetchCategory(id: String) async throws -> Category {
+            try await inner.fetchCategory(id: id)
+        }
+        func fetchEntry(id: String) async throws -> TimeEntry {
+            try await inner.fetchEntry(id: id)
+        }
+        func createCategory(_ category: Category) async throws {
+            try await inner.createCategory(category)
+        }
+        func updateCategory(_ category: Category) async throws {
+            try await inner.updateCategory(category)
+        }
+        func deleteCategory(id: String) async throws {
+            try await inner.deleteCategory(id: id)
+        }
+        func createEntry(_ entry: TimeEntry) async throws {
+            try await inner.createEntry(entry)
+        }
+        func updateEntry(_ entry: TimeEntry) async throws {
+            try await inner.updateEntry(entry)
+        }
+        func deleteEntry(id: String) async throws {
+            try await inner.deleteEntry(id: id)
+        }
     }
 
     private func makeEntry(

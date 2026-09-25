@@ -44,7 +44,6 @@ struct AppShellView: View {
             navigationRoot {
                 HistoryView(
                     store: container.localStore,
-                    authService: container.authService,
                     sessionStore: container.sessionStore,
                     sync: container.syncController,
                     connectivity: container.connectivity,

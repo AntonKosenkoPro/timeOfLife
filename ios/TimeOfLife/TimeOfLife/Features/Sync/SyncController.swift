@@ -223,21 +223,21 @@ final class SyncController: ObservableObject {
         do {
             if firstSync {
                 try await guardedStage(userID: userID) {
-                    try await self.pull(modifiedSince: nil)
+                    try await self.pull(modifiedSince: nil, userID: userID)
                 }
             }
             try await guardedStage(userID: userID) {
-                try await self.applyTombstones()
+                try await self.applyTombstones(userID: userID)
             }
             try await guardedStage(userID: userID) {
-                try await self.pushBufferedDeletions()
+                try await self.pushBufferedDeletions(userID: userID)
             }
             try await guardedStage(userID: userID) {
                 try await self.drainOutbox(userID: userID)
             }
             if !firstSync {
                 try await guardedStage(userID: userID) {
-                    try await self.pull(modifiedSince: nil)
+                    try await self.pull(modifiedSince: nil, userID: userID)
                 }
             }
             status = .idle(Date())
@@ -245,7 +245,7 @@ final class SyncController: ObservableObject {
         } catch is CancellationError {
             finishAbortedCycle(userID: userID, generation: generation)
         } catch {
-            finishFailedCycle(error, generation: generation)
+            finishFailedCycle(error, userID: userID, generation: generation)
         }
     }
 
@@ -262,12 +262,27 @@ final class SyncController: ObservableObject {
     }
 
     /// Tail of a cycle that failed for a real reason. Same generation
-    /// discipline: a cancelled predecessor's late failure must not strand
-    /// the NEW cycle's `.syncing` as `.error`.
-    private func finishFailedCycle(_ error: Error, generation: Int) {
+    /// discipline, plus binding ownership: a deactivated (cancelled) cycle's
+    /// late failure must stay `.inactive`, never overwrite it with `.error`
+    /// (otherwise `activate` early-returns and sync strands dead until
+    /// relaunch). Only the still-bound owning generation surfaces `.error`.
+    private func finishFailedCycle(_ error: Error, userID: String, generation: Int) {
         Self.logger.error("sync cycle failed: \(error.localizedDescription, privacy: .public)")
-        if cycleGeneration == generation {
+        if cycleGeneration == generation, boundUserID == userID {
             status = .error(error.localizedDescription)
+        }
+    }
+
+    /// Per-item same-account guard for in-stage loops (pull merge,
+    /// tombstones, buffered deletes): the session must still match the
+    /// cycle's own captured `userID` before the next record/push is applied.
+    /// A mid-stage swap costs at most the one in-flight call — the abort
+    /// surfaces as `CancellationError`, so `runCycle` routes it to
+    /// `finishAbortedCycle` with the same generation discipline (a stale
+    /// predecessor's abort never touches the successor's state).
+    private func requireSameAccount(_ userID: String) throws {
+        guard sessionUserIDProvider() == userID else {
+            throw CancellationError()
         }
     }
 
@@ -293,10 +308,14 @@ final class SyncController: ObservableObject {
     /// Ordering: the full Category snapshot is fetched and merged FIRST so
     /// every referenced category exists locally before Entries are merged
     /// (join foreign keys stay enforced).
-    private func pull(modifiedSince: Date?) async throws {
+    private func pull(modifiedSince: Date?, userID: String) async throws {
         let categories = try await remote.fetchCategories()
+        // Mid-stage swap: the fetch above ran under the old session — abort
+        // before reconciling or merging any of it into the (now foreign) file.
+        try requireSameAccount(userID)
         try await reconcileCategories(categories)
         for category in categories {
+            try requireSameAccount(userID)
             try await applyServer(category)
         }
 
@@ -306,6 +325,7 @@ final class SyncController: ObservableObject {
         } else {
             categoryCursor = try await store.lastSyncedAt(resource: "category")
         }
+        try requireSameAccount(userID)
         if let max = categories.map(\.updatedAt).max(), categoryCursor == nil || max > (categoryCursor ?? .distantPast) {
             try await store.setLastSyncedAt(resource: "category", date: max)
         }
@@ -317,10 +337,13 @@ final class SyncController: ObservableObject {
             entryCursor = try await store.lastSyncedAt(resource: "entry")
         }
         let entries = try await remote.fetchEntries(modifiedSince: entryCursor)
+        try requireSameAccount(userID)
         let serverCategoriesByID = Dictionary(uniqueKeysWithValues: categories.map { ($0.id, $0) })
         for entry in entries {
+            try requireSameAccount(userID)
             try await applyServer(entry, serverCategories: serverCategoriesByID)
         }
+        try requireSameAccount(userID)
         if let max = entries.map(\.updatedAt).max() {
             try await store.setLastSyncedAt(resource: "entry", date: max)
         }
@@ -501,7 +524,7 @@ final class SyncController: ObservableObject {
     /// tombstone for an unknown id is a no-op that still advances the
     /// cursor. Only entry and category tombstones exist (activity
     /// tombstones are gone); unknown resources are ignored defensively.
-    private func applyTombstones() async throws {
+    private func applyTombstones(userID: String) async throws {
         let cursor = try await store.lastSyncedAt(resource: "deletions")
         let deletions: [Deletion]
         do {
@@ -522,9 +545,14 @@ final class SyncController: ObservableObject {
             }
             return true
         }
+        // Mid-stage swap: the fetch above ran under the old session — abort
+        // before applying any tombstone into the (now foreign) file.
+        try requireSameAccount(userID)
         for deletion in known {
+            try requireSameAccount(userID)
             try await store.applyDeletionTombstone(deletion)
         }
+        try requireSameAccount(userID)
         if let max = deletions.map(\.deletedAt).max() {
             try await store.setLastSyncedAt(resource: "deletions", date: max)
         }
@@ -544,13 +572,19 @@ final class SyncController: ObservableObject {
     /// with the row still buffered. While the loop runs, undo of buffered
     /// rows is refused (D3 guard); the flag is always cleared, even on
     /// error, so undo can never wedge shut.
-    private func pushBufferedDeletions() async throws {
+    private func pushBufferedDeletions(userID: String) async throws {
         let pending = try await store.bufferedDeletions()
         guard !pending.isEmpty else { return }
         await store.setUndoPushInFlight(true)
         do {
             for bufferID in Set(pending.map(\.bufferID)) {
+                // Mid-stage swap aborts before the next buffer commits: no
+                // further DELETE goes out under the new session's token.
+                try requireSameAccount(userID)
                 for deletion in pending where deletion.bufferID == bufferID {
+                    // Per-item abort: a swap during the previous push costs at
+                    // most that one in-flight DELETE.
+                    try requireSameAccount(userID)
                     do {
                         switch deletion.resource {
                         case "entry":
@@ -566,6 +600,9 @@ final class SyncController: ObservableObject {
                         Self.logger.info("sync buffered delete 404-as-success \(deletion.resource, privacy: .public) \(deletion.recordID, privacy: .public)")
                     }
                 }
+                // Abort before committing the buffer row: a swap during the
+                // pushes leaves the row buffered for the owning account.
+                try requireSameAccount(userID)
                 try await store.undoBufferRemove(id: bufferID)
             }
             Self.logger.info("sync pushed \(pending.count) buffered deletions")

@@ -128,10 +128,16 @@ actor LocalStore {
     /// no re-pull; switching accounts closes the previous file (kept on disk,
     /// dormant) and opens the new one. A file already bound to this account
     /// is left as-is.
+    ///
+    /// Failure atomicity: the previous binding is released only AFTER the new
+    /// file opens successfully. A failed open (invalidUserID/accountMismatch/
+    /// migration error) therefore leaves the old account's queue, boundURL,
+    /// and boundUserID untouched — bound state never points at a file the
+    /// store no longer holds, so a later `eraseAll()` cannot delete the
+    /// previous account's file by mistake.
     func openAccount(userID: String) throws {
         let sanitized = try Self.sanitizedUserID(userID)
         if boundUserID == sanitized, dbQueue != nil { return }
-        dbQueue = nil
         let url = Self.databaseURL(userID: sanitized)
         let (queue, boundID) = try Self.openQueue(url: url, userID: sanitized)
         self.dbQueue = queue
@@ -180,23 +186,53 @@ actor LocalStore {
         return sanitized
     }
 
-    /// Opens (creating if needed) a database file, migrates it to the latest
-    /// schema, and — when `userID` is given — verifies (then writes) its
-    /// per-file account marker. Returns the open queue and the effective
-    /// bound user id (nil when `userID` is nil).
+    /// Opens (creating if needed) a database file, verifies — when `userID`
+    /// is given — its per-file account marker, migrates it to the latest
+    /// schema, then re-verifies and writes the marker. Returns the open queue
+    /// and the effective bound user id (nil when `userID` is nil).
+    ///
+    /// The marker check runs BEFORE migrations whenever the file already
+    /// carries a schema (a `local_metadata` table exists): the v2 migration
+    /// is not additive-only (it renames, backfills, and drops tables), so a
+    /// cross-account open must throw `accountMismatch` without mutating the
+    /// dormant file. Files without a schema (brand-new) or without the table
+    /// (legacy) migrate first; the marker is then checked (mismatch still
+    /// throws) and written on adoption.
     private static func openQueue(
         url: URL,
         userID: String?
     ) throws -> (DatabaseQueue, String?) {
         let queue = try makeDatabaseQueue(at: url)
-        try migrator().migrate(queue)
-        guard let userID else { return (queue, nil) }
+        guard let userID else {
+            try migrator().migrate(queue)
+            return (queue, nil)
+        }
         let sanitized = try sanitizedUserID(userID)
+        if try schemaHasMarkerTable(in: queue),
+           let existing = try boundUserMarker(in: queue),
+           existing != sanitized {
+            throw LocalStoreError.accountMismatch
+        }
+        try migrator().migrate(queue)
         if let existing = try boundUserMarker(in: queue), existing != sanitized {
             throw LocalStoreError.accountMismatch
         }
         try writeBoundUserMarker(sanitized, in: queue)
         return (queue, sanitized)
+    }
+
+    /// Whether the database file already carries a schema holding the
+    /// per-file account marker (a `local_metadata` table). Read-only:
+    /// opening the queue never mutates the file, so this gate lets
+    /// `openQueue` reject a cross-account file before migrations run.
+    private static func schemaHasMarkerTable(in queue: DatabaseQueue) throws -> Bool {
+        try queue.read { db in
+            let count = try Int.fetchOne(db, sql: """
+                SELECT COUNT(*) FROM sqlite_master
+                WHERE type = 'table' AND name = 'local_metadata'
+                """) ?? 0
+            return count > 0
+        }
     }
 
     /// Creates the database queue for one file. `DatabaseQueue` is
@@ -593,7 +629,7 @@ actor LocalStore {
     /// One category by case-insensitive normalized name, or nil.
     func category(named name: String) throws -> Category? {
         let trimmed = CategoryName.normalized(name)
-        return try queue.write { db in
+        return try queue.read { db in
             try Category.fetchOne(db, sql: """
                 SELECT * FROM categories WHERE lower(name) = lower(?)
                 """, arguments: [trimmed])
@@ -904,7 +940,7 @@ actor LocalStore {
 
     /// One entry by id, or nil.
     func entry(id: String) throws -> TimeEntry? {
-        try queue.write { db in
+        try queue.read { db in
             guard let row = try Row.fetchOne(db, sql: """
                 SELECT * FROM entries WHERE id = ?
                 """, arguments: [id]) else { return nil }
@@ -1148,7 +1184,7 @@ actor LocalStore {
     /// `categoryIDs` is the live ordered snapshot; `activityText` is locked
     /// from Start until Stop.
     func timerDraft() throws -> RunningTimerDraft? {
-        try queue.write { db in
+        try queue.read { db in
             guard let row = try Row.fetchOne(db, sql: """
                 SELECT * FROM timer_state WHERE id = 'singleton'
                 """) else { return nil }
@@ -1228,7 +1264,7 @@ actor LocalStore {
     /// operation because conflict recovery may rewrite a later payload in the
     /// same in-memory drain pass.
     func outboxRow(id: String) throws -> OutboxRow? {
-        try queue.write { db in
+        try queue.read { db in
             try OutboxRow.fetchOne(db, key: id)
         }
     }
@@ -1261,7 +1297,7 @@ actor LocalStore {
     /// still holds the record, so an unguarded pull would resurrect it and
     /// the later commit would leave a permanent zombie behind.
     func isBufferedForDeletion(resource: String, recordID: String) throws -> Bool {
-        try queue.write { db in
+        try queue.read { db in
             let rows = try UndoBufferRow.fetchAll(db, sql: "SELECT * FROM undo_buffer")
             for row in rows {
                 guard let data = row.payload.data(using: .utf8),
@@ -1373,7 +1409,7 @@ actor LocalStore {
 
     /// The last-synced cursor for a resource, or nil on first sync.
     func lastSyncedAt(resource: String) throws -> Date? {
-        try queue.write { db in
+        try queue.read { db in
             try Date.fetchOne(db, sql: """
                 SELECT last_synced_at FROM sync_state WHERE resource = ?
                 """, arguments: [resource])
@@ -1423,7 +1459,7 @@ actor LocalStore {
     /// pseudo-record is excluded — it never produces a push, same as
     /// `undoBufferCommitAll`.
     func bufferedDeletions() throws -> [BufferedDeletion] {
-        try queue.write { db in
+        try queue.read { db in
             let rows = try UndoBufferRow.fetchAll(db, sql: """
                 SELECT * FROM undo_buffer ORDER BY deleted_at ASC, id ASC
                 """)
@@ -1450,7 +1486,7 @@ actor LocalStore {
 
     /// The most recent buffer row (the only one undoable via shake/toast, U7).
     func undoBufferMostRecent() throws -> UndoBufferRow? {
-        try queue.write { db in
+        try queue.read { db in
             try UndoBufferRow.fetchOne(db, sql: """
                 SELECT * FROM undo_buffer ORDER BY deleted_at DESC, id DESC LIMIT 1
                 """)
@@ -1655,7 +1691,7 @@ actor LocalStore {
     /// does not carry a category-OWNED deletion (D10 — entry rows
     /// are left for their owners).
     func categoryDeletionSnapshot(bufferID: String) throws -> CategoryDeletionSnapshot? {
-        try queue.write { db in
+        try queue.read { db in
             guard let row = try UndoBufferRow.fetchOne(db, key: bufferID) else {
                 return nil
             }
@@ -1773,7 +1809,7 @@ actor LocalStore {
     /// when the row does not exist or does not carry an entry-OWNED deletion
     /// (D10 — category rows are left for their owners).
     func entryDeletionSnapshot(bufferID: String) throws -> TimeEntry? {
-        try queue.write { db in
+        try queue.read { db in
             guard let row = try UndoBufferRow.fetchOne(db, key: bufferID) else {
                 return nil
             }
@@ -1844,7 +1880,13 @@ actor LocalStore {
     /// never deletes any file. Session artifacts (Keychain tokens, cached
     /// session) are cleared by the caller, not here. The next sign-in as
     /// this account creates a fresh file that is seeded again.
-    func eraseAll() {
+    ///
+    /// Throwing: a failed `removeItem` (disk error, permissions) propagates
+    /// to the caller instead of reporting success — the store is already
+    /// unbound (the connection was released first), the target URL is kept
+    /// for a retry, and the data stays on disk until the next sign-in
+    /// reopens it. A missing file is success (nothing left to delete).
+    func eraseAll() throws {
         // Unbind first: the queued connection holds the file open, and
         // removing an open file would leave the descriptor dangling on
         // a path that no longer matches the store's state.
@@ -1852,10 +1894,22 @@ actor LocalStore {
         dbQueue = nil
         boundURL = nil
         boundUserID = nil
-        lastBoundURL = nil
         undoPushInFlight = false
-        if let url {
-            try? FileManager.default.removeItem(at: url)
+        guard let url else {
+            lastBoundURL = nil
+            return
+        }
+        do {
+            try FileManager.default.removeItem(at: url)
+            lastBoundURL = nil
+        } catch let error as NSError
+            where error.domain == NSCocoaErrorDomain && error.code == NSFileNoSuchFileError {
+            // Already gone: the erase goal is met.
+            lastBoundURL = nil
+        } catch {
+            // Keep the URL so the caller can retry the same file.
+            lastBoundURL = url
+            throw error
         }
     }
 
