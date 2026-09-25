@@ -52,13 +52,26 @@ struct RootView: View {
                     // instead of the shell — the store is unbound, so no
                     // tracker read may mount.
                     if container.localStoreOpenError != nil {
-                        Text(L10n.errorLocalPersistence.text)
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                            .multilineTextAlignment(.center)
-                            .padding()
-                            .frame(maxWidth: .infinity, maxHeight: .infinity)
-                            .accessibilityIdentifier("LocalStoreOpenError")
+                        // Bind failure dead-ends here without an escape hatch:
+                        // beginSignIn (the only site that clears the error via
+                        // openLocalStore) runs solely in the spinner branch,
+                        // and the shell with Profile's sign-out is unreachable
+                        // while this gate is up. So offer sign-out right here
+                        // (same L10n key + logout shape as ProfileView) — the
+                        // next sign-in retries the bind.
+                        VStack(spacing: 12) {
+                            Text(L10n.errorLocalPersistence.text)
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                                .multilineTextAlignment(.center)
+                                .accessibilityIdentifier("LocalStoreOpenError")
+                            Button(L10n.timerSignOut.text, role: .destructive) {
+                                Task { await container.authService.logout() }
+                            }
+                            .accessibilityIdentifier("GateSignOutButton")
+                        }
+                        .padding()
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
                     } else {
                         ProgressView()
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -146,6 +159,10 @@ struct RootView: View {
         container.syncController.deactivate()
         container.navigation.path = []
         boundUserID = nil
+        // A stale bind error must never leak into a later sign-in: the error
+        // branch's sign-out is the only escape from a failed bind, and the
+        // next beginSignIn clears on entry anyway — belt and braces.
+        container.localStoreOpenError = nil
         lifecycleTask?.cancel()
         lifecycleTask = Task {
             await waitForSyncShutdown()
