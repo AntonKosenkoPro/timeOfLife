@@ -50,6 +50,10 @@
 "error.offline" = "Вы не в сети.";
 "error.unknown" = "Что-то пошло не так. Попробуйте снова.";
 "error.unauthorized" = "Сессия истекла. Войдите снова.";
+"error.invalid_request" = "Нет данных устройства. Обновите приложение и попробуйте снова.";
+"error.refresh_expired" = "Сессия истекла. Войдите снова.";
+"error.apple_not_configured" = "Вход через Apple временно недоступен. Попробуйте позже.";
+"error.invalid_apple_token" = "Не удалось войти через Apple. Попробуйте снова.";
 
 // Apple sign in
 "appleSignIn.title" = "Вход через Apple";
