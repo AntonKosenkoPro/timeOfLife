@@ -168,8 +168,10 @@ struct LocalizationTests {
         // string-file rows from both lproj files (all L10n cases
         // resolve; ad-hoc file keys — error.*, validation.*,
         // catalogIcon.* — stay keyed outside the enum);
-        // fix-offline-banner-duplication removes offlineBanner
-        // (offline.banner) = 136;
-        #expect(l10nCases.count == 136)
+        // feat-entry-duration-subtitle adds entry.duration +
+        // entry.invalidInterval; feat-name-field-affordances adds
+        // name.clear + name.suggestions; fix-offline-banner-duplication
+        // removes offlineBanner (offline.banner) = 140.
+        #expect(l10nCases.count == 140)
     }
 }

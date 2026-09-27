@@ -117,7 +117,7 @@ Resolved design precedents for Lifio. Add a new entry here when a visual or inte
 
 - `ActivityEditor` and `CategoryEditor` are presented as sheets, each with create + edit modes, reused by the timer (quick-add, F7) and the Manage screens (F8). Keyboard placement follows D13.
 - Reason: one editor component per entity avoids duplicate surfaces; sheets keep the user in context (timer / manage list) without a full navigation push.
-- **Partially superseded by `remove-activities-layer`**: `ActivityEditor` is deleted with the activities layer. `CategoryEditor` remains a create/edit sheet; the entry form (`LogTimeView`) is a full-screen cover, not a sheet.
+- **Partially superseded by `remove-activities-layer`**: `ActivityEditor` is deleted with the activities layer. `CategoryEditor` remains a create/edit sheet; the entry form (`LogTimeView`) is a sheet for CREATE and a navigation push for EDIT/LOCKED (pushed by `fix-entry-form-gestures` so the edge-back gesture works — a full-screen cover has no back stack).
 
 ## D22 — Categories have catalog icons
 

@@ -1,14 +1,27 @@
+// Follow-up (#57): Split this view (card sections/pickers → subviews) to get
+// under the 400-line file_length limit and drop this suppression. (A scoped
+// `:next` disable cannot cover file_length — the violation is reported at
+// EOF — so the suppression stays file-wide with this tracking reference.)
+// swiftlint:disable file_length
 import SwiftUI
 
 /// The unified entry form (entry-editor spec + manual-entry CREATE mode),
-/// styled on the iOS Calendar add-event form and trimmed to four rows: Name,
-/// Categories (shared ordered `TagSelector`), Notes, Starts and Ends (date +
-/// time pills with inline single-open pickers). Cancel/Add (CREATE) or
-/// Cancel/Save (EDIT) live in the navigation bar; the confirm action is a
-/// validity gate — disabled until the trimmed name is non-empty and End is
-/// strictly after Start. LOCKED mode shows the values read-only with Cancel
-/// only; EDIT and LOCKED offer a bottom destructive Delete. A save failure
-/// surfaces as a non-field error with the draft intact and the form open.
+/// styled on the iOS Calendar add-event form and trimmed to five cards in
+/// fixed order: Name, Start, End, Categories, Notes (Start/End are separate
+/// cards, each with date + time pills and an inline single-open picker).
+/// Cancel/Add (CREATE) or Cancel/Save (EDIT) live in the navigation bar; the
+/// confirm action is a validity gate — disabled until the trimmed name is
+/// non-empty and End is strictly after Start. LOCKED mode shows the values
+/// read-only with Cancel only; EDIT and LOCKED offer a bottom destructive
+/// Delete. A save failure surfaces as a non-field error with the draft
+/// intact and the form open.
+///
+/// Gesture rule (fix-entry-form-gestures): no system gesture is ever
+/// disabled here — the wheel pickers keep non-picker grab area around them
+/// so pull-down-to-scroll always reaches the outer ScrollView, and the
+/// pushed (EDIT/LOCKED) presentation provides the edge-back gesture.
+/// Tap-away keyboard dismissal lives in the shared `FormCard` container as
+/// a simultaneous tap, so child buttons (chips, pills) keep their taps.
 struct LogTimeView: View {
     @StateObject private var vm: LogTimeViewModel
     @EnvironmentObject var container: AppContainer
@@ -19,8 +32,20 @@ struct LogTimeView: View {
     @State private var expandedPicker: InlinePicker?
     /// Drives the delete confirmation alert (EDIT + LOCKED modes).
     @State private var isShowingDeleteConfirm = false
+    /// Which text field holds focus, if any (tap-away/scroll-away resign it).
+    @FocusState private var focusedField: FormField?
+    /// True when pushed onto the presenter's NavigationStack (EDIT/LOCKED
+    /// via History) instead of presented as a sheet (CREATE): the outer
+    /// stack owns the navigation chrome AND the back stack (edge-back
+    /// gesture), so the internal NavigationStack is skipped — never nested.
+    private let embeddedInNavigationStack: Bool
     /// Called after a successful save so the presenter can refresh.
     let onSaved: (() -> Void)?
+
+    /// The form's text fields (focus-tracked for tap-away dismissal).
+    private enum FormField {
+        case name, notes
+    }
 
     private enum InlinePicker {
         case startDate, startTime, endDate, endTime
@@ -31,6 +56,7 @@ struct LogTimeView: View {
         initialText: String = "",
         initialCategoryIDs: [String] = [],
         editing entry: TimeEntry? = nil,
+        embeddedInNavigationStack: Bool = false,
         onSaved: (() -> Void)? = nil
     ) {
         _vm = StateObject(wrappedValue: LogTimeViewModel(
@@ -39,42 +65,68 @@ struct LogTimeView: View {
             initialCategoryIDs: initialCategoryIDs,
             editing: entry
         ))
+        self.embeddedInNavigationStack = embeddedInNavigationStack
         self.onSaved = onSaved
     }
 
     var body: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(spacing: Theme.spacingMedium) {
-                    nameCard
-                        .disabled(vm.isLocked)
-                        .opacity(vm.isLocked ? 0.6 : 1)
-                    categoriesCard
-                        .disabled(vm.isLocked)
-                        .opacity(vm.isLocked ? 0.6 : 1)
-                    notesCard
-                        .disabled(vm.isLocked)
-                        .opacity(vm.isLocked ? 0.6 : 1)
-                    startsEndsCard
-                        .disabled(vm.isLocked)
-                        .opacity(vm.isLocked ? 0.6 : 1)
-                    if vm.isLocked {
-                        lockedNote
-                    }
-                    if vm.errorMessage != nil {
-                        errorSection
-                    }
-                    if vm.mode != .create {
-                        deleteSection
-                    }
-                }
-                .padding(.horizontal, Theme.spacingMedium)
-                .padding(.vertical, Theme.spacingMedium)
+        if embeddedInNavigationStack {
+            chrome(formContent)
+        } else {
+            NavigationStack {
+                chrome(formContent)
             }
-            .background(Theme.backgroundPrimary.ignoresSafeArea())
-            .navigationTitle(formTitle)
+        }
+    }
+
+    /// The scrollable card stack (shared by the sheet and pushed forms so
+    /// CREATE and EDIT can never visually diverge).
+    private var formContent: some View {
+        ScrollView {
+            VStack(spacing: Theme.spacingMedium) {
+                nameCard
+                    .disabled(vm.isLocked)
+                    .opacity(vm.isLocked ? 0.6 : 1)
+                startCard
+                    .disabled(vm.isLocked)
+                    .opacity(vm.isLocked ? 0.6 : 1)
+                endCard
+                    .disabled(vm.isLocked)
+                    .opacity(vm.isLocked ? 0.6 : 1)
+                categoriesCard
+                    .disabled(vm.isLocked)
+                    .opacity(vm.isLocked ? 0.6 : 1)
+                notesCard
+                    .disabled(vm.isLocked)
+                    .opacity(vm.isLocked ? 0.6 : 1)
+                if vm.isLocked {
+                    lockedNote
+                }
+                if vm.errorMessage != nil {
+                    errorSection
+                }
+                if vm.mode != .create {
+                    deleteSection
+                }
+            }
+            .padding(.horizontal, Theme.spacingMedium)
+            .padding(.vertical, Theme.spacingMedium)
+        }
+        .background(Theme.backgroundPrimary.ignoresSafeArea())
+        // Scroll-away dismisses the keyboard (native interactive behavior).
+        .scrollDismissesKeyboard(.interactively)
+    }
+
+    /// The navigation chrome shared by both presentations: title +
+    /// duration subtitle, bar actions, delete confirmation, and data loads.
+    @ViewBuilder
+    private func chrome<Content: View>(_ content: Content) -> some View {
+        content
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                ToolbarItem(placement: .principal) {
+                    titleSubtitle
+                }
                 ToolbarItem(placement: .cancellationAction) {
                     Button(L10n.logTimeCancel.text) { dismiss() }
                 }
@@ -101,8 +153,38 @@ struct LogTimeView: View {
             }
             .task {
                 await vm.loadCategoriesIfNeeded(store: container.localStore)
+                await vm.loadNameRecentsIfNeeded(store: container.localStore)
+            }
+    }
+
+    /// Live duration subtitle in the nav bar (feat-entry-duration-subtitle):
+    /// the mode title plus a footnote line — the natural-language interval
+    /// duration while End is after Start, or the invalid-interval
+    /// explanation in red (the confirm is disabled) otherwise. Display-only
+    /// over the already-published `startsAt`/`endsAt`.
+    private var titleSubtitle: some View {
+        VStack(spacing: 0) {
+            Text(formTitle)
+                .font(.headline)
+                .lineLimit(1)
+            if let seconds = vm.durationSubtitleSeconds {
+                Text(String(
+                    format: L10n.entryDuration.text,
+                    locale: .current,
+                    HistoryViewModel.naturalDuration(seconds)
+                ))
+                .font(.footnote)
+                .foregroundStyle(Theme.textSecondary)
+                .lineLimit(1)
+            } else {
+                Text(L10n.entryInvalidInterval.text)
+                    .font(.footnote)
+                    .foregroundStyle(Theme.danger)
+                    .lineLimit(1)
             }
         }
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("EntryDurationSubtitle")
     }
 
     /// Mode-specific navigation title (localized).
@@ -122,7 +204,7 @@ struct LogTimeView: View {
     }
 
     /// Deletes the entry into the durable undo buffer; dismisses on success
-    /// (the presenter reloads via the cover/sheet dismissal). On failure the
+    /// (the presenter reloads via the push/sheet dismissal). On failure the
     /// form stays open with the error banner.
     private func deleteEntry() async {
         if await vm.deleteConfirmed() {
@@ -133,57 +215,97 @@ struct LogTimeView: View {
     // MARK: - Name row
 
     private var nameCard: some View {
-        VStack(alignment: .leading, spacing: Theme.spacingExtraSmall) {
-            Text(L10n.entryNameLabel.text)
-                .font(.caption)
-                .foregroundStyle(Theme.textSecondary)
-            TextField(L10n.entryNamePlaceholder.text, text: $vm.name)
-                .submitLabel(.done)
-                .font(.body)
-                .frame(minHeight: Theme.minTapArea)
+        FormCard(accessibilityID: "EntryNameRow", resignFocus: focusedField = nil) {
+            VStack(alignment: .leading, spacing: Theme.spacingExtraSmall) {
+                Text(L10n.entryNameLabel.text)
+                    .font(.caption)
+                    .foregroundStyle(Theme.textSecondary)
+                HStack(spacing: 0) {
+                    TextField(L10n.entryNamePlaceholder.text, text: $vm.name)
+                        .submitLabel(.done)
+                        .focused($focusedField, equals: .name)
+                        .font(.body)
+                        .frame(maxWidth: .infinity, minHeight: Theme.minTapArea)
+                    if !vm.isLocked, !vm.name.isEmpty {
+                        ClearTextButton(action: { vm.clearName() }, accessibilityId: "EntryNameClearButton")
+                    }
+                }
+                if !vm.isLocked {
+                    nameSuggestions
+                }
+            }
         }
-        .padding(Theme.spacingMedium)
-        .background(Theme.backgroundSecondary)
-        .clipShape(RoundedRectangle(cornerRadius: Theme.cornerRadius))
-        .accessibilityIdentifier("EntryNameRow")
+    }
+
+    /// Autocomplete suggestions from recent entry texts
+    /// (feat-name-field-affordances): inline list inside the name card;
+    /// picking one fills the draft and inherits that entry's ordered
+    /// categories. Pure function of draft + loaded recents — no open/close
+    /// state, no history mutation.
+    @ViewBuilder private var nameSuggestions: some View {
+        let suggestions = vm.nameSuggestions()
+        if !suggestions.isEmpty {
+            VStack(alignment: .leading, spacing: 0) {
+                ForEach(Array(suggestions.enumerated()), id: \.element.id) { index, suggestion in
+                    Button {
+                        vm.applySuggestion(
+                            text: suggestion.activityText,
+                            categoryIDs: suggestion.categoryIDs
+                        )
+                    } label: {
+                        Text(suggestion.activityText)
+                            .font(.body)
+                            .lineLimit(1)
+                            .foregroundStyle(Theme.textPrimary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .frame(minHeight: Theme.minTapArea)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("EntryNameSuggestion\(index)")
+                    if index < suggestions.count - 1 {
+                        Divider()
+                    }
+                }
+            }
+            .accessibilityIdentifier("EntryNameSuggestions")
+            .accessibilityLabel(L10n.nameSuggestions.text)
+        }
     }
 
     // MARK: - Categories row
 
     private var categoriesCard: some View {
-        VStack(alignment: .leading, spacing: Theme.spacingExtraSmall) {
-            Text(L10n.entryCategoriesLabel.text)
-                .font(.caption)
-                .foregroundStyle(Theme.textSecondary)
-            TagSelector(
-                options: vm.availableCategories,
-                selected: Set(vm.categoryIDs),
-                onToggle: { vm.toggleCategory($0) },
-                accessibilityId: "EntryCategories"
-            )
+        FormCard(accessibilityID: "EntryCategoriesRow", resignFocus: focusedField = nil) {
+            VStack(alignment: .leading, spacing: Theme.spacingExtraSmall) {
+                Text(L10n.entryCategoriesLabel.text)
+                    .font(.caption)
+                    .foregroundStyle(Theme.textSecondary)
+                TagSelector(
+                    options: vm.availableCategories,
+                    selected: Set(vm.categoryIDs),
+                    onToggle: { vm.toggleCategory($0) },
+                    accessibilityId: "EntryCategories"
+                )
+            }
         }
-        .padding(Theme.spacingMedium)
-        .background(Theme.backgroundSecondary)
-        .clipShape(RoundedRectangle(cornerRadius: Theme.cornerRadius))
-        .accessibilityIdentifier("EntryCategoriesRow")
     }
 
     // MARK: - Notes row
 
     private var notesCard: some View {
-        VStack(alignment: .leading, spacing: Theme.spacingExtraSmall) {
-            Text(L10n.entryNotesLabel.text)
-                .font(.caption)
-                .foregroundStyle(Theme.textSecondary)
-            TextField(L10n.entryNotesPlaceholder.text, text: $vm.notes)
-                .submitLabel(.done)
-                .font(.body)
-                .frame(minHeight: Theme.minTapArea)
+        FormCard(accessibilityID: "EntryNotesRow", resignFocus: focusedField = nil) {
+            VStack(alignment: .leading, spacing: Theme.spacingExtraSmall) {
+                Text(L10n.entryNotesLabel.text)
+                    .font(.caption)
+                    .foregroundStyle(Theme.textSecondary)
+                TextField(L10n.entryNotesPlaceholder.text, text: $vm.notes)
+                    .submitLabel(.done)
+                    .focused($focusedField, equals: .notes)
+                    .font(.body)
+                    .frame(minHeight: Theme.minTapArea)
+            }
         }
-        .padding(Theme.spacingMedium)
-        .background(Theme.backgroundSecondary)
-        .clipShape(RoundedRectangle(cornerRadius: Theme.cornerRadius))
-        .accessibilityIdentifier("EntryNotesRow")
     }
 
     // MARK: - Locked provenance note
@@ -226,31 +348,40 @@ struct LogTimeView: View {
         .accessibilityIdentifier("EntryDeleteButton")
     }
 
-    // MARK: - Starts / Ends rows
+    // MARK: - Start / End cards
 
-    private var startsEndsCard: some View {
-        VStack(alignment: .leading, spacing: Theme.spacingSmall) {
-            timeRow(
-                title: L10n.logTimeStarts.text,
-                date: vm.startsAt,
-                datePicker: .startDate,
-                timePicker: .startTime,
-                dateId: "LogTimeStartDatePill",
-                timeId: "LogTimeStartTimePill"
-            )
-            Divider()
-            timeRow(
-                title: L10n.logTimeEnds.text,
-                date: vm.endsAt,
-                datePicker: .endDate,
-                timePicker: .endTime,
-                dateId: "LogTimeEndDatePill",
-                timeId: "LogTimeEndTimePill"
-            )
+    /// Separate cards (not one combined card): each picker's vertical-drag
+    /// capture area stays small with non-picker grab surfaces adjacent, so a
+    /// scroll drag starting outside the wheels always reaches the outer
+    /// ScrollView. No gesture is disabled to achieve this.
+    private var startCard: some View {
+        FormCard(resignFocus: focusedField = nil) {
+            VStack(alignment: .leading, spacing: Theme.spacingSmall) {
+                timeRow(
+                    title: L10n.logTimeStarts.text,
+                    date: vm.startsAt,
+                    datePicker: .startDate,
+                    timePicker: .startTime,
+                    dateId: "LogTimeStartDatePill",
+                    timeId: "LogTimeStartTimePill"
+                )
+            }
         }
-        .padding(Theme.spacingMedium)
-        .background(Theme.backgroundSecondary)
-        .clipShape(RoundedRectangle(cornerRadius: Theme.cornerRadius))
+    }
+
+    private var endCard: some View {
+        FormCard(resignFocus: focusedField = nil) {
+            VStack(alignment: .leading, spacing: Theme.spacingSmall) {
+                timeRow(
+                    title: L10n.logTimeEnds.text,
+                    date: vm.endsAt,
+                    datePicker: .endDate,
+                    timePicker: .endTime,
+                    dateId: "LogTimeEndDatePill",
+                    timeId: "LogTimeEndTimePill"
+                )
+            }
+        }
     }
 
     private func timeRow(

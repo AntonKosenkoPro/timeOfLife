@@ -51,7 +51,7 @@ struct Category: Identifiable, Codable, Equatable, Sendable, FetchableRecord, Pe
 ///
 /// Not a GRDB record: `category_ids` is a join-derived value, not a column.
 /// `LocalStore` maps rows manually.
-struct TimeEntry: Identifiable, Codable, Equatable, Sendable {
+struct TimeEntry: Identifiable, Codable, Equatable, Hashable, Sendable {
     let id: String
     var activityText: String
     var categoryIDs: [String]

@@ -1,3 +1,4 @@
+// swiftlint:disable file_length
 import SwiftUI
 
 /// The stable Track timer layout, built on the adaptive dual-flow stack
@@ -182,19 +183,28 @@ struct TrackContent: View {
     }
 
     private var nameField: some View {
-        TextField(
-            L10n.timerNamePlaceholder.text,
-            text: $vm.nameDraft,
-            onEditingChanged: { editing in
-                vm.nameFieldFocused = editing
-                guard !editing else { return }
-                vm.syncReadyFromDraft()
-            },
-            onCommit: { vm.syncReadyFromDraft() }
-        )
-        .focused($nameFieldFocused)
-        .submitLabel(.done)
-        .font(.body)
+        let suggestions = vm.nameSuggestions()
+        return HStack(spacing: 0) {
+            TextField(
+                L10n.timerNamePlaceholder.text,
+                text: $vm.nameDraft,
+                onEditingChanged: { editing in
+                    vm.nameFieldFocused = editing
+                    guard !editing else { return }
+                    vm.syncReadyFromDraft()
+                },
+                onCommit: { vm.syncReadyFromDraft() }
+            )
+            .focused($nameFieldFocused)
+            .submitLabel(.done)
+            .font(.body)
+            .frame(maxWidth: .infinity, minHeight: Theme.minTapArea)
+            .accessibilityIdentifier("TimerNameField")
+            .accessibilityLabel(L10n.timerNamePlaceholder.text)
+            if !vm.nameDraft.isEmpty {
+                ClearTextButton(action: { vm.clearNameDraft() }, accessibilityId: "TimerNameClearButton")
+            }
+        }
         .padding(.horizontal, Theme.spacingMedium)
         .frame(maxWidth: .infinity, minHeight: Theme.minTapArea)
         .background(Theme.backgroundSecondary)
@@ -203,9 +213,60 @@ struct TrackContent: View {
             RoundedRectangle(cornerRadius: Theme.cornerRadius)
                 .stroke(Theme.hairline, lineWidth: 0.7)
         }
+        // Suggestions float below the field without taking layout space, so
+        // the Start/Stop action never moves while typing (D10 stationary
+        // action). Pure function of draft + recents — no open/close state.
+        .overlay(alignment: .topLeading) {
+            if !suggestions.isEmpty {
+                GeometryReader { proxy in
+                    VStack(spacing: 0) {
+                        Color.clear
+                            .frame(height: proxy.size.height + Theme.spacingExtraSmall)
+                        nameSuggestionsCard(suggestions)
+                    }
+                    .frame(width: proxy.size.width, alignment: .topLeading)
+                }
+            }
+        }
+        .zIndex(1)
         .disabled(vm.state.isRunning)
-        .accessibilityIdentifier("TimerNameField")
-        .accessibilityLabel(L10n.timerNamePlaceholder.text)
+        .accessibilityElement(children: .contain)
+    }
+
+    /// Autocomplete suggestions from the exact-text Recents
+    /// (feat-name-field-affordances): text-only rows; picking one follows
+    /// the Recents tap contract (fills text + ordered categories, starts
+    /// nothing).
+    private func nameSuggestionsCard(_ suggestions: [TrackViewModel.RecentEntry]) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            ForEach(Array(suggestions.enumerated()), id: \.element.id) { index, suggestion in
+                Button {
+                    vm.select(suggestion)
+                } label: {
+                    Text(suggestion.text)
+                        .font(.body)
+                        .lineLimit(1)
+                        .foregroundStyle(Theme.textPrimary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .frame(minHeight: Theme.minTapArea)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("TimerNameSuggestion\(index)")
+                if index < suggestions.count - 1 {
+                    Divider()
+                }
+            }
+        }
+        .padding(.horizontal, Theme.spacingMedium)
+        .background(Theme.backgroundSecondary)
+        .clipShape(RoundedRectangle(cornerRadius: Theme.cornerRadius))
+        .overlay {
+            RoundedRectangle(cornerRadius: Theme.cornerRadius)
+                .stroke(Theme.hairline, lineWidth: 0.7)
+        }
+        .accessibilityIdentifier("TimerNameSuggestions")
+        .accessibilityLabel(L10n.nameSuggestions.text)
     }
 
     private var lockedNameLabel: some View {

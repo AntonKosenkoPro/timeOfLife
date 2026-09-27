@@ -42,6 +42,12 @@ final class LogTimeViewModel: ObservableObject {
     /// The full category catalog for the TagSelector options, loaded once
     /// on open.
     @Published private(set) var availableCategories: [Category] = []
+    /// Recent committed entry texts for name autocomplete suggestions
+    /// (feat-name-field-affordances), loaded once on open. Newest-first,
+    /// capped at 6 — the same source as the Track Recents chips. Settable
+    /// (not `private(set)`) so tests can seed recents directly instead of
+    /// driving them through async store paths.
+    @Published var nameRecents: [RecentEntry] = []
     @Published var notes: String
     @Published private(set) var startsAt: Date
     @Published private(set) var endsAt: Date
@@ -113,11 +119,56 @@ final class LogTimeViewModel: ObservableObject {
         !trimmedName.isEmpty && endsAt > startsAt
     }
 
+    /// Rounded Start→End seconds for the nav-bar duration subtitle
+    /// (feat-entry-duration-subtitle): nil when End is at or before Start.
+    /// Pure display helper — the validity gate and save paths are unchanged.
+    var durationSubtitleSeconds: Int? {
+        guard endsAt > startsAt else { return nil }
+        return max(0, Int(endsAt.timeIntervalSince(startsAt).rounded()))
+    }
+
+    /// Autocomplete suggestions for the name field
+    /// (feat-name-field-affordances): loaded recents whose text starts with
+    /// the trimmed input (case-insensitive prefix), excluding the
+    /// case-sensitive exact match so `Gym` ≠ `GYM` identity is preserved.
+    /// Pure over loaded data — never touches the store or history.
+    func nameSuggestions() -> [RecentEntry] {
+        let prefix = trimmedName
+        guard !prefix.isEmpty else { return [] }
+        let lowered = prefix.lowercased()
+        return nameRecents.filter {
+            $0.activityText != prefix && $0.activityText.lowercased().hasPrefix(lowered)
+        }
+    }
+
     /// Loads the category catalog for the TagSelector (idempotent). Called
     /// on open by the view.
     func loadCategoriesIfNeeded(store: LocalStore) async {
         guard availableCategories.isEmpty else { return }
         availableCategories = (try? await store.categories()) ?? []
+    }
+
+    /// Loads recent entry texts for name autocomplete suggestions
+    /// (idempotent). A failure leaves suggestions empty — it never blocks
+    /// the form. Called on open by the view alongside the catalog load.
+    func loadNameRecentsIfNeeded(store: LocalStore) async {
+        guard nameRecents.isEmpty else { return }
+        nameRecents = (try? await store.recents(limit: 6)) ?? []
+    }
+
+    /// Fills the draft from an autocomplete suggestion (the Recents tap
+    /// contract): exact text plus that entry's full ordered categories.
+    /// Draft-only — no committed entry is touched and validation/save
+    /// behavior is unchanged.
+    func applySuggestion(text: String, categoryIDs: [String]) {
+        name = text
+        self.categoryIDs = categoryIDs
+    }
+
+    /// Clears the draft name (clear button): text only — categories, notes,
+    /// and the interval stay untouched; the validity gate re-evaluates.
+    func clearName() {
+        name = ""
     }
 
     /// Toggles a category on the ordered selection (TagSelector parent owns

@@ -13,12 +13,15 @@ import SwiftUI
 /// scroll tracking. The list is read-only (no swipe actions), so `List`'s
 /// editing machinery is not needed.
 ///
-/// Tapping an entry row opens the unified entry form directly as a
-/// full-screen cover (remove-activities-layer D6; entry-editor spec):
-/// editable for `manual` entries, read-only for imported ones. There is no
-/// activity detail sheet. Signed-out History does not exist — the launch
-/// gate precedes every tab — so there is no signed-out pull notice and no
-/// auth sheet here (account-bound-local-data).
+/// Tapping an entry row pushes the unified entry form onto this tab's
+/// NavigationStack (remove-activities-layer D6 as amended by
+/// fix-entry-form-gestures; entry-editor spec): editable for `manual`
+/// entries, read-only for imported ones. The push (not a full-screen cover)
+/// is what provides the leading-edge back gesture — a modal cover has no
+/// back stack to pop. There is no activity detail sheet. Signed-out History
+/// does not exist — the launch gate precedes every tab — so there is no
+/// signed-out pull notice and no auth sheet here
+/// (account-bound-local-data).
 struct HistoryView: View {
     @EnvironmentObject var container: AppContainer
     /// Observed directly (not via `container`): `AppContainer` publishes
@@ -144,20 +147,28 @@ struct HistoryView: View {
         } message: {
             Text(pull.syncErrorMessage ?? "")
         }
-        // The unified entry form presents as a full-screen cover (D6):
-        // EDIT for manual entries, LOCKED for imported ones. Dismissal
-        // reloads the day groups (edits and deletes both land here).
-        .fullScreenCover(
-            item: $editingEntry,
-            onDismiss: {
+        // The unified entry form pushes onto this tab's NavigationStack
+        // (fix-entry-form-gestures): EDIT for manual entries, LOCKED for
+        // imported ones. The push provides the system back button and the
+        // leading-edge pop gesture (a full-screen cover has no back stack,
+        // which is why #50's gesture never recognized). Leaving the pushed
+        // form reloads the day groups (edits and deletes both land here) —
+        // the same invalidate/loadIfNeeded path the CREATE sheet uses.
+        .navigationDestination(item: $editingEntry) { entry in
+            LogTimeView(
+                service: container.timerService,
+                editing: entry,
+                embeddedInNavigationStack: true
+            ) {
                 vm.invalidate()
                 Task { await vm.loadIfNeeded() }
-            },
-            content: { entry in
-                LogTimeView(service: container.timerService, editing: entry)
-                    .environmentObject(container)
             }
-        )
+            .environmentObject(container)
+            .onDisappear {
+                vm.invalidate()
+                Task { await vm.loadIfNeeded() }
+            }
+        }
     }
 
     /// Pull-to-refresh lives on the populated list branch only: the empty
@@ -182,8 +193,8 @@ struct HistoryView: View {
                                 viaText: vm.viaText(for: entry)
                             )
                             .padding(.horizontal, Theme.spacingMedium)
-                            // Tap → unified entry form cover (history
-                            // D6). No swipe/long-press actions.
+                            // Tap → pushed unified entry form (history D6 as
+                            // amended). No swipe/long-press actions.
                             .contentShape(Rectangle())
                             .onTapGesture { editingEntry = entry }
                             .accessibilityAddTraits(.isButton)
