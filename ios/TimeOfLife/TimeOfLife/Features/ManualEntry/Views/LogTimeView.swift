@@ -1,3 +1,7 @@
+// Follow-up (#57): Split this view (card sections/pickers → subviews) to get
+// under the 400-line file_length limit and drop this suppression. (A scoped
+// `:next` disable cannot cover file_length — the violation is reported at
+// EOF — so the suppression stays file-wide with this tracking reference.)
 // swiftlint:disable file_length
 import SwiftUI
 
@@ -16,6 +20,8 @@ import SwiftUI
 /// disabled here — the wheel pickers keep non-picker grab area around them
 /// so pull-down-to-scroll always reaches the outer ScrollView, and the
 /// pushed (EDIT/LOCKED) presentation provides the edge-back gesture.
+/// Tap-away keyboard dismissal lives in the shared `FormCard` container as
+/// a simultaneous tap, so child buttons (chips, pills) keep their taps.
 struct LogTimeView: View {
     @StateObject private var vm: LogTimeViewModel
     @EnvironmentObject var container: AppContainer
@@ -176,62 +182,53 @@ struct LogTimeView: View {
     // MARK: - Name row
 
     private var nameCard: some View {
-        VStack(alignment: .leading, spacing: Theme.spacingExtraSmall) {
-            Text(L10n.entryNameLabel.text)
-                .font(.caption)
-                .foregroundStyle(Theme.textSecondary)
-            TextField(L10n.entryNamePlaceholder.text, text: $vm.name)
-                .submitLabel(.done)
-                .focused($focusedField, equals: .name)
-                .font(.body)
-                .frame(minHeight: Theme.minTapArea)
+        FormCard(accessibilityID: "EntryNameRow", resignFocus: focusedField = nil) {
+            VStack(alignment: .leading, spacing: Theme.spacingExtraSmall) {
+                Text(L10n.entryNameLabel.text)
+                    .font(.caption)
+                    .foregroundStyle(Theme.textSecondary)
+                TextField(L10n.entryNamePlaceholder.text, text: $vm.name)
+                    .submitLabel(.done)
+                    .focused($focusedField, equals: .name)
+                    .font(.body)
+                    .frame(minHeight: Theme.minTapArea)
+            }
         }
-        .padding(Theme.spacingMedium)
-        .background(Theme.backgroundSecondary)
-        .clipShape(RoundedRectangle(cornerRadius: Theme.cornerRadius))
-        .accessibilityIdentifier("EntryNameRow")
     }
 
     // MARK: - Categories row
 
     private var categoriesCard: some View {
-        VStack(alignment: .leading, spacing: Theme.spacingExtraSmall) {
-            Text(L10n.entryCategoriesLabel.text)
-                .font(.caption)
-                .foregroundStyle(Theme.textSecondary)
-            TagSelector(
-                options: vm.availableCategories,
-                selected: Set(vm.categoryIDs),
-                onToggle: { vm.toggleCategory($0) },
-                accessibilityId: "EntryCategories"
-            )
+        FormCard(accessibilityID: "EntryCategoriesRow", resignFocus: focusedField = nil) {
+            VStack(alignment: .leading, spacing: Theme.spacingExtraSmall) {
+                Text(L10n.entryCategoriesLabel.text)
+                    .font(.caption)
+                    .foregroundStyle(Theme.textSecondary)
+                TagSelector(
+                    options: vm.availableCategories,
+                    selected: Set(vm.categoryIDs),
+                    onToggle: { vm.toggleCategory($0) },
+                    accessibilityId: "EntryCategories"
+                )
+            }
         }
-        .padding(Theme.spacingMedium)
-        .background(Theme.backgroundSecondary)
-        .clipShape(RoundedRectangle(cornerRadius: Theme.cornerRadius))
-        .accessibilityIdentifier("EntryCategoriesRow")
-        // Tap-away keyboard dismissal: this card holds no text field, so any
-        // tap here (pills, tags, labels, padding) safely resigns focus.
-        .onTapGesture { focusedField = nil }
     }
 
     // MARK: - Notes row
 
     private var notesCard: some View {
-        VStack(alignment: .leading, spacing: Theme.spacingExtraSmall) {
-            Text(L10n.entryNotesLabel.text)
-                .font(.caption)
-                .foregroundStyle(Theme.textSecondary)
-            TextField(L10n.entryNotesPlaceholder.text, text: $vm.notes)
-                .submitLabel(.done)
-                .focused($focusedField, equals: .notes)
-                .font(.body)
-                .frame(minHeight: Theme.minTapArea)
+        FormCard(accessibilityID: "EntryNotesRow", resignFocus: focusedField = nil) {
+            VStack(alignment: .leading, spacing: Theme.spacingExtraSmall) {
+                Text(L10n.entryNotesLabel.text)
+                    .font(.caption)
+                    .foregroundStyle(Theme.textSecondary)
+                TextField(L10n.entryNotesPlaceholder.text, text: $vm.notes)
+                    .submitLabel(.done)
+                    .focused($focusedField, equals: .notes)
+                    .font(.body)
+                    .frame(minHeight: Theme.minTapArea)
+            }
         }
-        .padding(Theme.spacingMedium)
-        .background(Theme.backgroundSecondary)
-        .clipShape(RoundedRectangle(cornerRadius: Theme.cornerRadius))
-        .accessibilityIdentifier("EntryNotesRow")
     }
 
     // MARK: - Locked provenance note
@@ -281,39 +278,33 @@ struct LogTimeView: View {
     /// scroll drag starting outside the wheels always reaches the outer
     /// ScrollView. No gesture is disabled to achieve this.
     private var startCard: some View {
-        VStack(alignment: .leading, spacing: Theme.spacingSmall) {
-            timeRow(
-                title: L10n.logTimeStarts.text,
-                date: vm.startsAt,
-                datePicker: .startDate,
-                timePicker: .startTime,
-                dateId: "LogTimeStartDatePill",
-                timeId: "LogTimeStartTimePill"
-            )
+        FormCard(resignFocus: focusedField = nil) {
+            VStack(alignment: .leading, spacing: Theme.spacingSmall) {
+                timeRow(
+                    title: L10n.logTimeStarts.text,
+                    date: vm.startsAt,
+                    datePicker: .startDate,
+                    timePicker: .startTime,
+                    dateId: "LogTimeStartDatePill",
+                    timeId: "LogTimeStartTimePill"
+                )
+            }
         }
-        .padding(Theme.spacingMedium)
-        .background(Theme.backgroundSecondary)
-        .clipShape(RoundedRectangle(cornerRadius: Theme.cornerRadius))
-        // Tap-away keyboard dismissal (no text field in this card).
-        .onTapGesture { focusedField = nil }
     }
 
     private var endCard: some View {
-        VStack(alignment: .leading, spacing: Theme.spacingSmall) {
-            timeRow(
-                title: L10n.logTimeEnds.text,
-                date: vm.endsAt,
-                datePicker: .endDate,
-                timePicker: .endTime,
-                dateId: "LogTimeEndDatePill",
-                timeId: "LogTimeEndTimePill"
-            )
+        FormCard(resignFocus: focusedField = nil) {
+            VStack(alignment: .leading, spacing: Theme.spacingSmall) {
+                timeRow(
+                    title: L10n.logTimeEnds.text,
+                    date: vm.endsAt,
+                    datePicker: .endDate,
+                    timePicker: .endTime,
+                    dateId: "LogTimeEndDatePill",
+                    timeId: "LogTimeEndTimePill"
+                )
+            }
         }
-        .padding(Theme.spacingMedium)
-        .background(Theme.backgroundSecondary)
-        .clipShape(RoundedRectangle(cornerRadius: Theme.cornerRadius))
-        // Tap-away keyboard dismissal (no text field in this card).
-        .onTapGesture { focusedField = nil }
     }
 
     private func timeRow(
