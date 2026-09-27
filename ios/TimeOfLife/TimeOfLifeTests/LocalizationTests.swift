@@ -167,7 +167,10 @@ struct LocalizationTests {
         // authGate.title = 137; Wave 2 removed the 5 orphaned
         // string-file rows from both lproj files (all L10n cases
         // resolve; ad-hoc file keys — error.*, validation.*,
-        // catalogIcon.* — stay keyed outside the enum)
-        #expect(l10nCases.count == 137)
+        // catalogIcon.* — stay keyed outside the enum);
+        // feat-entry-duration-subtitle adds entry.duration +
+        // entry.invalidInterval = 139; feat-name-field-affordances adds
+        // name.clear + name.suggestions = 141.
+        #expect(l10nCases.count == 141)
     }
 }

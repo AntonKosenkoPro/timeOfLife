@@ -166,12 +166,18 @@
 "entry.lockedNote" = "Импортировано через %@: редактирование отключено, чтобы избежать конфликтов с источником.";
 "entry.nameLabel" = "Название";
 "entry.namePlaceholder" = "напр. Спортзал";
+"entry.duration" = "Длительность: %@";
+"entry.invalidInterval" = "Окончание должно быть позже начала";
 "entry.categoriesLabel" = "Категории";
 "entry.notesLabel" = "Заметки";
 "entry.notesPlaceholder" = "Необязательные заметки";
 
 // History manual entry (add-manual-entry)
 "history.logTime" = "Записать время";
+
+// Name-field affordances (clear + autocomplete suggestions)
+"name.clear" = "Очистить название";
+"name.suggestions" = "Варианты";
 
 // Starter categories (category-management spec, seed requirement)
 "category.seed.work" = "Работа";
