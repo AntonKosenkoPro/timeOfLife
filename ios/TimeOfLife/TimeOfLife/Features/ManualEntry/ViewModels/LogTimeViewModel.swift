@@ -123,8 +123,8 @@ final class LogTimeViewModel: ObservableObject {
     /// (feat-entry-duration-subtitle): nil when End is at or before Start.
     /// Pure display helper — the validity gate and save paths are unchanged.
     var durationSubtitleSeconds: Int? {
-        let seconds = Int(endsAt.timeIntervalSince(startsAt).rounded())
-        return seconds > 0 ? seconds : nil
+        guard endsAt > startsAt else { return nil }
+        return max(0, Int(endsAt.timeIntervalSince(startsAt).rounded()))
     }
 
     /// Autocomplete suggestions for the name field

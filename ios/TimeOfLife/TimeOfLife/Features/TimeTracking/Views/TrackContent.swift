@@ -183,7 +183,8 @@ struct TrackContent: View {
     }
 
     private var nameField: some View {
-        HStack(spacing: 0) {
+        let suggestions = vm.nameSuggestions()
+        return HStack(spacing: 0) {
             TextField(
                 L10n.timerNamePlaceholder.text,
                 text: $vm.nameDraft,
@@ -198,6 +199,8 @@ struct TrackContent: View {
             .submitLabel(.done)
             .font(.body)
             .frame(maxWidth: .infinity, minHeight: Theme.minTapArea)
+            .accessibilityIdentifier("TimerNameField")
+            .accessibilityLabel(L10n.timerNamePlaceholder.text)
             if !vm.nameDraft.isEmpty {
                 ClearTextButton(action: { vm.clearNameDraft() }, accessibilityId: "TimerNameClearButton")
             }
@@ -214,12 +217,12 @@ struct TrackContent: View {
         // the Start/Stop action never moves while typing (D10 stationary
         // action). Pure function of draft + recents — no open/close state.
         .overlay(alignment: .topLeading) {
-            if !vm.nameSuggestions().isEmpty {
+            if !suggestions.isEmpty {
                 GeometryReader { proxy in
                     VStack(spacing: 0) {
                         Color.clear
                             .frame(height: proxy.size.height + Theme.spacingExtraSmall)
-                        nameSuggestionsCard
+                        nameSuggestionsCard(suggestions)
                     }
                     .frame(width: proxy.size.width, alignment: .topLeading)
                 }
@@ -227,17 +230,15 @@ struct TrackContent: View {
         }
         .zIndex(1)
         .disabled(vm.state.isRunning)
-        .accessibilityIdentifier("TimerNameField")
-        .accessibilityLabel(L10n.timerNamePlaceholder.text)
+        .accessibilityElement(children: .contain)
     }
 
     /// Autocomplete suggestions from the exact-text Recents
     /// (feat-name-field-affordances): text-only rows; picking one follows
     /// the Recents tap contract (fills text + ordered categories, starts
     /// nothing).
-    private var nameSuggestionsCard: some View {
-        let suggestions = vm.nameSuggestions()
-        return VStack(alignment: .leading, spacing: 0) {
+    private func nameSuggestionsCard(_ suggestions: [TrackViewModel.RecentEntry]) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
             ForEach(Array(suggestions.enumerated()), id: \.element.id) { index, suggestion in
                 Button {
                     vm.select(suggestion)

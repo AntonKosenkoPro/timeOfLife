@@ -27,3 +27,9 @@
 - [x] 5.1 `swiftlint lint --strict` clean (0 violations); warning-as-error `xcodebuild build-for-testing` green; full iOS suite green — 503 tests passed, 0 failed (serialized per `docs/ios-test-loop.md`, booted-sim-by-ID destination). Backend untouched (no `go` run needed).
 - [x] 5.2 Re-checked `Requirements/FURPS/Timetracking.md` (F13 comment gains the subtitle sentence) + `Common.md` (no conflicts).
 - [x] 5.3 Stacked PR (PR #56 opened, unmerged) targeting `fix/50-51-entry-form-gestures` (retargeted to `main` after #54 merges): title "Entry duration subtitle plus name-field affordances (#36, #42, #43)", body "Fixes #36, fixes #42, fixes #43" + what changed + verification evidence + untested checklist items. DO NOT merge.
+
+## 6. AI-review findings fix (PR #56, OpenCodeReview LOW)
+
+- [x] 6.1 `LogTimeViewModel.durationSubtitleSeconds`: guard `endsAt > startsAt` before rounding, then `max(0, Int(...rounded()))` — sub-second intervals (reachable via EDIT prefill) no longer show the red invalid text while Save stays enabled; nil ⟺ `isAddEnabled` gate disagreement closed.
+- [x] 6.2 Added `durationSubtitleSubSecond` agreement test (`isAddEnabled` true ⟹ subtitle non-nil on a 0.4 s interval).
+- [x] 6.3 `openspec validate feat-entry-duration-subtitle --strict` passes.

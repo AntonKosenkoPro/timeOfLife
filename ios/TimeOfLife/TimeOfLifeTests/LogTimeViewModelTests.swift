@@ -361,6 +361,15 @@ struct LogTimeViewModelTests {
         #expect(vm.durationSubtitleSeconds == nil)
     }
 
+    @Test("durationSubtitleSeconds agrees with isAddEnabled on sub-second intervals")
+    func durationSubtitleSubSecond() {
+        let vm = makeViewModel()
+        vm.name = "Reading"
+        vm.setEndsAt(vm.startsAt.addingTimeInterval(0.4))
+        #expect(vm.isAddEnabled)
+        #expect(vm.durationSubtitleSeconds != nil)
+    }
+
     // MARK: - Name suggestions (feat-name-field-affordances)
 
     @Test("nameSuggestions matches recents by case-insensitive prefix")
