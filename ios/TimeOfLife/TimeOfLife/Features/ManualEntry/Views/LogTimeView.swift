@@ -1,14 +1,21 @@
+// swiftlint:disable file_length
 import SwiftUI
 
 /// The unified entry form (entry-editor spec + manual-entry CREATE mode),
-/// styled on the iOS Calendar add-event form and trimmed to four rows: Name,
-/// Categories (shared ordered `TagSelector`), Notes, Starts and Ends (date +
-/// time pills with inline single-open pickers). Cancel/Add (CREATE) or
-/// Cancel/Save (EDIT) live in the navigation bar; the confirm action is a
-/// validity gate — disabled until the trimmed name is non-empty and End is
-/// strictly after Start. LOCKED mode shows the values read-only with Cancel
-/// only; EDIT and LOCKED offer a bottom destructive Delete. A save failure
-/// surfaces as a non-field error with the draft intact and the form open.
+/// styled on the iOS Calendar add-event form and trimmed to five cards in
+/// fixed order: Name, Start, End, Categories, Notes (Start/End are separate
+/// cards, each with date + time pills and an inline single-open picker).
+/// Cancel/Add (CREATE) or Cancel/Save (EDIT) live in the navigation bar; the
+/// confirm action is a validity gate — disabled until the trimmed name is
+/// non-empty and End is strictly after Start. LOCKED mode shows the values
+/// read-only with Cancel only; EDIT and LOCKED offer a bottom destructive
+/// Delete. A save failure surfaces as a non-field error with the draft
+/// intact and the form open.
+///
+/// Gesture rule (fix-entry-form-gestures): no system gesture is ever
+/// disabled here — the wheel pickers keep non-picker grab area around them
+/// so pull-down-to-scroll always reaches the outer ScrollView, and the
+/// pushed (EDIT/LOCKED) presentation provides the edge-back gesture.
 struct LogTimeView: View {
     @StateObject private var vm: LogTimeViewModel
     @EnvironmentObject var container: AppContainer
@@ -19,8 +26,20 @@ struct LogTimeView: View {
     @State private var expandedPicker: InlinePicker?
     /// Drives the delete confirmation alert (EDIT + LOCKED modes).
     @State private var isShowingDeleteConfirm = false
+    /// Which text field holds focus, if any (tap-away/scroll-away resign it).
+    @FocusState private var focusedField: FormField?
+    /// True when pushed onto the presenter's NavigationStack (EDIT/LOCKED
+    /// via History) instead of presented as a sheet (CREATE): the outer
+    /// stack owns the navigation chrome AND the back stack (edge-back
+    /// gesture), so the internal NavigationStack is skipped — never nested.
+    private let embeddedInNavigationStack: Bool
     /// Called after a successful save so the presenter can refresh.
     let onSaved: (() -> Void)?
+
+    /// The form's text fields (focus-tracked for tap-away dismissal).
+    private enum FormField {
+        case name, notes
+    }
 
     private enum InlinePicker {
         case startDate, startTime, endDate, endTime
@@ -31,6 +50,7 @@ struct LogTimeView: View {
         initialText: String = "",
         initialCategoryIDs: [String] = [],
         editing entry: TimeEntry? = nil,
+        embeddedInNavigationStack: Bool = false,
         onSaved: (() -> Void)? = nil
     ) {
         _vm = StateObject(wrappedValue: LogTimeViewModel(
@@ -39,39 +59,63 @@ struct LogTimeView: View {
             initialCategoryIDs: initialCategoryIDs,
             editing: entry
         ))
+        self.embeddedInNavigationStack = embeddedInNavigationStack
         self.onSaved = onSaved
     }
 
     var body: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(spacing: Theme.spacingMedium) {
-                    nameCard
-                        .disabled(vm.isLocked)
-                        .opacity(vm.isLocked ? 0.6 : 1)
-                    categoriesCard
-                        .disabled(vm.isLocked)
-                        .opacity(vm.isLocked ? 0.6 : 1)
-                    notesCard
-                        .disabled(vm.isLocked)
-                        .opacity(vm.isLocked ? 0.6 : 1)
-                    startsEndsCard
-                        .disabled(vm.isLocked)
-                        .opacity(vm.isLocked ? 0.6 : 1)
-                    if vm.isLocked {
-                        lockedNote
-                    }
-                    if vm.errorMessage != nil {
-                        errorSection
-                    }
-                    if vm.mode != .create {
-                        deleteSection
-                    }
-                }
-                .padding(.horizontal, Theme.spacingMedium)
-                .padding(.vertical, Theme.spacingMedium)
+        if embeddedInNavigationStack {
+            chrome(formContent)
+        } else {
+            NavigationStack {
+                chrome(formContent)
             }
-            .background(Theme.backgroundPrimary.ignoresSafeArea())
+        }
+    }
+
+    /// The scrollable card stack (shared by the sheet and pushed forms so
+    /// CREATE and EDIT can never visually diverge).
+    private var formContent: some View {
+        ScrollView {
+            VStack(spacing: Theme.spacingMedium) {
+                nameCard
+                    .disabled(vm.isLocked)
+                    .opacity(vm.isLocked ? 0.6 : 1)
+                startCard
+                    .disabled(vm.isLocked)
+                    .opacity(vm.isLocked ? 0.6 : 1)
+                endCard
+                    .disabled(vm.isLocked)
+                    .opacity(vm.isLocked ? 0.6 : 1)
+                categoriesCard
+                    .disabled(vm.isLocked)
+                    .opacity(vm.isLocked ? 0.6 : 1)
+                notesCard
+                    .disabled(vm.isLocked)
+                    .opacity(vm.isLocked ? 0.6 : 1)
+                if vm.isLocked {
+                    lockedNote
+                }
+                if vm.errorMessage != nil {
+                    errorSection
+                }
+                if vm.mode != .create {
+                    deleteSection
+                }
+            }
+            .padding(.horizontal, Theme.spacingMedium)
+            .padding(.vertical, Theme.spacingMedium)
+        }
+        .background(Theme.backgroundPrimary.ignoresSafeArea())
+        // Scroll-away dismisses the keyboard (native interactive behavior).
+        .scrollDismissesKeyboard(.interactively)
+    }
+
+    /// The navigation chrome shared by both presentations: title, bar
+    /// actions, delete confirmation, and category loading.
+    @ViewBuilder
+    private func chrome<Content: View>(_ content: Content) -> some View {
+        content
             .navigationTitle(formTitle)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -102,7 +146,6 @@ struct LogTimeView: View {
             .task {
                 await vm.loadCategoriesIfNeeded(store: container.localStore)
             }
-        }
     }
 
     /// Mode-specific navigation title (localized).
@@ -122,7 +165,7 @@ struct LogTimeView: View {
     }
 
     /// Deletes the entry into the durable undo buffer; dismisses on success
-    /// (the presenter reloads via the cover/sheet dismissal). On failure the
+    /// (the presenter reloads via the push/sheet dismissal). On failure the
     /// form stays open with the error banner.
     private func deleteEntry() async {
         if await vm.deleteConfirmed() {
@@ -139,6 +182,7 @@ struct LogTimeView: View {
                 .foregroundStyle(Theme.textSecondary)
             TextField(L10n.entryNamePlaceholder.text, text: $vm.name)
                 .submitLabel(.done)
+                .focused($focusedField, equals: .name)
                 .font(.body)
                 .frame(minHeight: Theme.minTapArea)
         }
@@ -166,6 +210,9 @@ struct LogTimeView: View {
         .background(Theme.backgroundSecondary)
         .clipShape(RoundedRectangle(cornerRadius: Theme.cornerRadius))
         .accessibilityIdentifier("EntryCategoriesRow")
+        // Tap-away keyboard dismissal: this card holds no text field, so any
+        // tap here (pills, tags, labels, padding) safely resigns focus.
+        .onTapGesture { focusedField = nil }
     }
 
     // MARK: - Notes row
@@ -177,6 +224,7 @@ struct LogTimeView: View {
                 .foregroundStyle(Theme.textSecondary)
             TextField(L10n.entryNotesPlaceholder.text, text: $vm.notes)
                 .submitLabel(.done)
+                .focused($focusedField, equals: .notes)
                 .font(.body)
                 .frame(minHeight: Theme.minTapArea)
         }
@@ -226,9 +274,13 @@ struct LogTimeView: View {
         .accessibilityIdentifier("EntryDeleteButton")
     }
 
-    // MARK: - Starts / Ends rows
+    // MARK: - Start / End cards
 
-    private var startsEndsCard: some View {
+    /// Separate cards (not one combined card): each picker's vertical-drag
+    /// capture area stays small with non-picker grab surfaces adjacent, so a
+    /// scroll drag starting outside the wheels always reaches the outer
+    /// ScrollView. No gesture is disabled to achieve this.
+    private var startCard: some View {
         VStack(alignment: .leading, spacing: Theme.spacingSmall) {
             timeRow(
                 title: L10n.logTimeStarts.text,
@@ -238,7 +290,16 @@ struct LogTimeView: View {
                 dateId: "LogTimeStartDatePill",
                 timeId: "LogTimeStartTimePill"
             )
-            Divider()
+        }
+        .padding(Theme.spacingMedium)
+        .background(Theme.backgroundSecondary)
+        .clipShape(RoundedRectangle(cornerRadius: Theme.cornerRadius))
+        // Tap-away keyboard dismissal (no text field in this card).
+        .onTapGesture { focusedField = nil }
+    }
+
+    private var endCard: some View {
+        VStack(alignment: .leading, spacing: Theme.spacingSmall) {
             timeRow(
                 title: L10n.logTimeEnds.text,
                 date: vm.endsAt,
@@ -251,6 +312,8 @@ struct LogTimeView: View {
         .padding(Theme.spacingMedium)
         .background(Theme.backgroundSecondary)
         .clipShape(RoundedRectangle(cornerRadius: Theme.cornerRadius))
+        // Tap-away keyboard dismissal (no text field in this card).
+        .onTapGesture { focusedField = nil }
     }
 
     private func timeRow(

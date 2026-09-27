@@ -25,7 +25,7 @@ The History destination answers "what did I spend time on and when?" — a chron
 ### Behaviors
 
 - On appear, load entries (`LocalStore.entries()`) and categories (`LocalStore.categories()`); rebuild day groups. Read-only — no mutation paths on this screen.
-- Tapping a row opens the unified entry form as a full-screen cover (EDIT for `manual`, LOCKED read-only for imported with delete only); there is no intermediate detail surface.
+- Tapping a row pushes the unified entry form onto the History navigation stack (EDIT for `manual`, LOCKED read-only for imported with delete only) — the push provides the system back button and edge-back gesture; there is no intermediate detail surface.
 - Elevated-header tracking is view state owned by `HistoryView`; `HistoryViewModel` owns data only (design risk note).
 
 ### States
