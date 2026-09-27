@@ -1,25 +1,45 @@
 {
   "$schema": "https://opencode.ai/config.json",
+  "model": "ollama-cloud/glm-5.3-flash",
+  "small_model": "opencode/muse-spark-1.3-contributor-free",
+  "compaction": {
+    "auto": true,
+    "reserved": 12000
+  },
+  "provider": {
+    "ollama-cloud": {
+      "models": {
+        "glm-5.3-flash": {
+          "limit": {
+            "context": 1000000,
+            "input": 262144,
+            "output": 131072
+          }
+        }
+      }
+    }
+  },
   "instructions": [
-    "AGENTS.md"
+    "AGENTS.md",
+    "docs/english-feedback.md"
   ],
   "agent": {
     "explore": {
       "description": "Fast read-only codebase explorer. Use PROACTIVELY instead of reading/searching files yourself: any question spanning 2+ areas (backend vs iOS vs specs/docs) or needing file/pattern searches MUST be fanned out as 2-3 parallel explore Task calls in ONE message, one per disjoint area. Explore-only work stays at 3 agents max.",
-      "model": "ollama-cloud/glm-5.3-flash",
+      "model": "opencode-go/muse-spark-1.3-contributor",
       "reasoningEffort": "high"
     },
     "build": {
-      "model": "ollama-cloud/deepseek-v4-flash",
-      "reasoningEffort": "max"
+      "model": "opencode-go/muse-spark-1.3-contributor",
+      "reasoningEffort": "xhigh"
     },
     "general": {
-      "description": "General-purpose worker for independent units of work. Use PROACTIVELY instead of working sequentially: any task touching 2+ of backend/ vs ios/TimeOfLife/ vs specs-docs MUST be split into parallel Task calls (one per area, single message) before doing anything yourself. Backend verify and iOS verify always run on separate agents in parallel. Default fan-out 4 agents, hard ceiling 6.",
-      "model": "ollama-cloud/glm-5.3-flash",
+      "description": "General-purpose worker for independent units of work. Use PROACTIVELY instead of working sequentially: any task touching 2+ of backend/ vs ios/TimeOfLife/ vs specs-docs MUST be split into parallel Task calls (one per area, single message) before doing anything yourself. Backend verify and iOS verify always run on separate agents in parallel. Default fan-out 6 agents, hard ceiling 9.",
+      "model": "opencode-go/muse-spark-1.3-contributor",
       "reasoningEffort": "high"
     },
     "plan": {
-      "model": "opencode-go/kimi-k3",
+      "model": "opencode-go/muse-spark-1.3-contributor",
       "reasoningEffort": "max",
       "permission": {
         "argent*": "deny"
@@ -36,7 +56,27 @@
       "enabled": true
     }
   },
-  "subagent_depth": 2,
+  "permission": {
+    "external_directory": {
+      "/tmp/*": "allow"
+    },
+    "read": {
+      "/tmp/*": "allow"
+    },
+    "edit": {
+      "/tmp/*": "allow"
+    },
+    "glob": {
+      "/tmp/*": "allow"
+    },
+    "grep": {
+      "/tmp/*": "allow"
+    },
+    "list": {
+      "/tmp/*": "allow"
+    }
+  },
+  "subagent_depth": 3,
   "tools": {
     "argent*": true
   }

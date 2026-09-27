@@ -72,6 +72,7 @@ xcodebuild -scheme TimeOfLife -destination 'generic/platform=iOS Simulator' buil
 - Plan every not obvious task (that will consume over 100k tokens per session)
 - Parallelism budget (OpenCode Zen Muse Spark 1.3 Free: ~9–10 concurrent slots measured; local work overlaps the queue): default fan-out **6 agents**, hard ceiling **9**; explore-only work stays at **3**
 - Delegate FIRST via the Task tool — no sequential fallback: any task touching 2+ of backend (`backend/`) / iOS (`ios/TimeOfLife/`) / specs-docs (`openspec/`, `docs/`, `Requirements/`, `Design/`) MUST fan out with one Task call per area in a single message before doing the work yourself; merge results yourself
+- Subagent depth is **3** (`subagent_depth` in `opencode.json`): subagents may spawn nested subagents when needed — use nesting for fan-out inside an area (e.g., area worker splits per-file/per-item), but prefer flat fan-out, stay within the parallelism budget, and never nest to re-delegate a single unit of work
 - Backend verify (`gofmt`, `go vet`, `golangci-lint`, `go test`) and iOS verify (`swiftlint`, build, test) are disjoint — always run them on separate agents in parallel
 - Serialize single-writer resources: one `xcodebuild` at a time (DerivedData lock), one simulator per test run, never concurrent `xcodegen generate` with project edits, one writer for `openapi.yaml` / `tasks.md` / `project-context.md` / `project.yml` / `Localizable.strings`
 - Ask the user to start a new session if the current context overwhelms 200k tokens
