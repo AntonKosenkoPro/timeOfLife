@@ -11,9 +11,8 @@ import SwiftUI
 /// prepared text's chip keeps its icon and switches to a filled accent
 /// presentation (accent background, on-accent text, accent border) — the
 /// same non-color-only selected treatment as `TagSelector` (fill + contrast,
-/// no checkmark, so chips stay compact). Rows are packed from measured chip
-/// widths because the `Layout` protocol is iOS 16+ and the app supports
-/// iOS 15 (same algorithm as `TagSelector`, category-management D9).
+/// no checkmark, so chips stay compact). Chips wrap via the shared
+/// `FlowLayout` with equal `Theme.spacingSmall` gaps.
 struct RecentActivitiesChips: View {
     let recents: [TrackViewModel.RecentEntry]
     let categories: [String: Category]
@@ -22,7 +21,6 @@ struct RecentActivitiesChips: View {
 
     @Environment(\.dynamicTypeSize)
     private var dynamicTypeSize
-    @State private var containerWidth: CGFloat = 0
 
     /// The capped, most-recently-used-first slice (the store already sorts
     /// by the text's newest `started_at`).
@@ -38,41 +36,25 @@ struct RecentActivitiesChips: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Theme.spacingSmall) {
-            ForEach(rows.indices, id: \.self) { rowIndex in
-                HStack(spacing: Theme.spacingSmall) {
-                    ForEach(rows[rowIndex]) { recent in
-                        chip(recent)
-                    }
-                }
+        FlowLayout(spacing: Theme.spacingSmall) {
+            ForEach(capped) { recent in
+                chip(recent)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            GeometryReader { geometry in
-                Color.clear.preference(key: RecentsWidthKey.self, value: geometry.size.width)
-            }
-        )
-        .onPreferenceChange(RecentsWidthKey.self) { containerWidth = $0 }
     }
 
     // MARK: - Sizing
 
-    /// The subheadline metrics object used for both the icon glyph and the
-    /// measured name width.
+    /// The subheadline metrics object used for the icon glyph size.
     private var metrics: UIFontMetrics { UIFontMetrics(forTextStyle: .subheadline) }
 
     /// A trait collection matching the SwiftUI environment's effective
-    /// Dynamic Type size, so measurement and rendering always scale
-    /// together (also under a `.dynamicTypeSize` environment override,
+    /// Dynamic Type size, so the icon glyph scales with rendering
+    /// (also under a `.dynamicTypeSize` environment override,
     /// which `UIFont.preferredFont` alone would not reflect).
     private var sizeTrait: UITraitCollection {
         UITraitCollection(preferredContentSizeCategory: dynamicTypeSize.uiContentSizeCategory)
-    }
-
-    /// The name font at the effective size, used to measure chip widths.
-    private var nameFont: UIFont {
-        metrics.scaledFont(for: UIFont.systemFont(ofSize: 17), compatibleWith: sizeTrait)
     }
 
     /// Icon glyph size at the effective size.
@@ -86,69 +68,20 @@ struct RecentActivitiesChips: View {
         ceil(symbolFontSize * 1.5)
     }
 
-    /// Natural chip width: optional icon slot + name + uniform horizontal
-    /// padding.
-    private func chipWidth(for recent: TrackViewModel.RecentEntry) -> CGFloat {
-        let name = recent.text.size(withAttributes: [.font: nameFont]).width
-        let iconWidth = recent.firstCategoryID != nil
-            ? symbolSlotSize + Theme.spacingExtraSmall
-            : 0
-        return iconWidth + name + Theme.spacingMedium * 2
-    }
-
-    /// Greedy packing: fill each row with as many content-sized chips as fit,
-    /// keeping equal `Theme.spacingSmall` gaps. Until the container width is
-    /// measured, every chip sits on its own row (single pass, no flicker).
-    private var rows: [[TrackViewModel.RecentEntry]] {
-        guard containerWidth > 0 else { return capped.map { [$0] } }
-        var result: [[TrackViewModel.RecentEntry]] = []
-        var current: [TrackViewModel.RecentEntry] = []
-        var currentWidth: CGFloat = 0
-        for recent in capped {
-            let width = min(chipWidth(for: recent), containerWidth)
-            let projected = currentWidth + (current.isEmpty ? 0 : Theme.spacingSmall) + width
-            if current.isEmpty || projected <= containerWidth {
-                current.append(recent)
-                currentWidth = projected
-            } else {
-                result.append(current)
-                current = [recent]
-                currentWidth = width
-            }
-        }
-        if !current.isEmpty { result.append(current) }
-        return result
-    }
-
     // MARK: - Chip
 
     @ViewBuilder
     private func chip(_ recent: TrackViewModel.RecentEntry) -> some View {
         let isSelected = selectedText == recent.text
-        let label = chipLabel(recent: recent, isSelected: isSelected)
-        // A chip wider than the container gets a fixed container-width frame
-        // so its name truncates instead of overflowing.
-        if containerWidth > 0, chipWidth(for: recent) > containerWidth {
-            Button {
-                onSelect(recent)
-            } label: {
-                label.frame(width: containerWidth)
-            }
-            .accessibilityLabel(String(format: L10n.timerSelectActivity.text, recent.text))
-            .accessibilityValue(isSelected ? L10n.undoSelected.text : "")
-            .accessibilityAddTraits(isSelected ? .isSelected : [])
-            .accessibilityIdentifier("TimerSuggestion(\(recent.text))")
-        } else {
-            Button {
-                onSelect(recent)
-            } label: {
-                label
-            }
-            .accessibilityLabel(String(format: L10n.timerSelectActivity.text, recent.text))
-            .accessibilityValue(isSelected ? L10n.undoSelected.text : "")
-            .accessibilityAddTraits(isSelected ? .isSelected : [])
-            .accessibilityIdentifier("TimerSuggestion(\(recent.text))")
+        Button {
+            onSelect(recent)
+        } label: {
+            chipLabel(recent: recent, isSelected: isSelected)
         }
+        .accessibilityLabel(String(format: L10n.timerSelectActivity.text, recent.text))
+        .accessibilityValue(isSelected ? L10n.undoSelected.text : "")
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+        .accessibilityIdentifier("TimerSuggestion(\(recent.text))")
     }
 
     private func chipLabel(recent: TrackViewModel.RecentEntry, isSelected: Bool) -> some View {
@@ -177,13 +110,6 @@ struct RecentActivitiesChips: View {
                 lineWidth: 0.7
             )
         }
-    }
-}
-
-private struct RecentsWidthKey: PreferenceKey {
-    static let defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = max(value, nextValue())
     }
 }
 

@@ -153,7 +153,8 @@ struct TrackContent: View {
     /// in every state — the name field and the button above never move on
     /// state switch, and the tags sit where Recents was instead of pushing
     /// the button down. Hit testing and accessibility follow the visible
-    /// branch (opacity hiding preserves layout on iOS 15).
+    /// branch (opacity hiding preserves layout while keeping the hidden
+    /// branch out of hit testing and accessibility).
     @ViewBuilder private var belowActionSlot: some View {
         ZStack(alignment: .top) {
             recentActivities

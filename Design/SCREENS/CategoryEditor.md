@@ -12,7 +12,7 @@ Implements F2/U1/U2 of `Requirements/FURPS/Activity_Catalog_and_Categories.md`. 
 
 ### Layout
 
-`.sheet` with `medium` and `large` detents on iOS 16+ (the iOS 15 fallback uses the system sheet height). `ScrollView` → `VStack(spacing: Theme.spacingLarge)` with horizontal padding `Theme.screenHorizontalPadding` and `Theme.maxContentWidth`:
+`.sheet` with `medium` and `large` detents. `ScrollView` → `VStack(spacing: Theme.spacingLarge)` with horizontal padding `Theme.screenHorizontalPadding` and `Theme.maxContentWidth`:
 
 1. Native collapsing navigation title via `EditorSheetScaffold`. Create: `L10n.categoryEditorCreateTitle`; edit: `L10n.categoryEditorEditTitle`. At the top edge the system renders its large-title form with Cancel in the top bar; scrolling collapses it into an inline material bar beside Cancel, and returning to the top expands it again.
 2. `TextFieldWithError` for name:

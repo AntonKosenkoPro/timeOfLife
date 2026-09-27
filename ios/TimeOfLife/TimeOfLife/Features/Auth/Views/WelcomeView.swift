@@ -97,7 +97,7 @@ struct WelcomeView: View {
         // Full-screen gate chrome (app-shell spec): the title states the
         // requirement in the required voice. The flow sets no Cancel item —
         // there is no dismiss path out of the gate without signing in.
-        // The title also renders the bar on iOS 16+, where a titleless
+        // The title also renders the bar, since a titleless
         // NavigationStack shows no bar at all. Pushed screens keep the title
         // with their Back button; swipe-to-dismiss of pushed screens still
         // works throughout.

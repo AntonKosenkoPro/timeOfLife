@@ -13,7 +13,7 @@ struct OtpEntryView: View {
     @State private var autoSubmitTask: Task<Void, Never>?
 
     var body: some View {
-        // `ScrollView` gives us keyboard avoidance on iOS 15. The form stacks
+        // `ScrollView` gives us keyboard avoidance. The form stacks
         // from the top; content scrolls when it does not fit, especially while
         // the keyboard is open on short screens (iPhone SE 1st gen).
         ScrollView {
@@ -79,7 +79,7 @@ struct OtpEntryView: View {
             // only after a manual resend.
             vm.armInitialResendCooldown()
         }
-        .onChange(of: vm.code) { newValue in
+        .onChange(of: vm.code) { _, newValue in
             // Clear stale validation state per keystroke.
             if vm.fieldErrors.otp != nil {
                 vm.fieldErrors.otp = nil
@@ -118,7 +118,7 @@ struct OtpEntryView: View {
     private var resendColor: Color {
         let disabled = vm.isLoading || vm.resendCountdown > 0 || !container.connectivity.isConnected
         return disabled
-            ? Theme.color(Theme.accentPrimary, alpha: 0.5)
+            ? Theme.accentPrimary.opacity(0.5)
             : Theme.accentPrimary
     }
 }

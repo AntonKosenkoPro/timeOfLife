@@ -29,7 +29,7 @@ struct ProfileView: View {
     private static let logger = Logger(subsystem: "com.antonkosenko.timeoflifeapp", category: "profile")
 
     var body: some View {
-        NavigationView {
+        NavigationStack {
             List {
                 accountSection
                 onDeviceSection
@@ -61,7 +61,6 @@ struct ProfileView: View {
                 Text(eraseErrorMessage ?? "")
             }
         }
-        .navigationViewStyle(.stack)
         .accessibilityIdentifier("Profile")
     }
 

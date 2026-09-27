@@ -11,9 +11,8 @@ import SwiftUI
 /// (uniform `Theme.spacingChip` padding on all sides), unselected chips show
 /// only the category icon, selected chips swap the icon for a `checkmark`
 /// (both 30% larger than `.caption`, scaling with Dynamic Type), no outline
-/// circles, and a 44 pt minimum tap target. Rows are packed from measured
-/// chip widths because the `Layout` protocol is iOS 16+ and the app supports
-/// iOS 15.
+/// circles, and a 44 pt minimum tap target. Chips wrap via the shared
+/// `FlowLayout` with equal `Theme.spacingSmall` gaps.
 struct TagSelector: View {
     let options: [Category]
     /// The selected ids as a set (for chip rendering state).
@@ -23,25 +22,13 @@ struct TagSelector: View {
     let onToggle: (String) -> Void
     let accessibilityId: String
 
-    @State private var containerWidth: CGFloat = 0
-
     var body: some View {
-        VStack(alignment: .leading, spacing: Theme.spacingSmall) {
-            ForEach(rows.indices, id: \.self) { rowIndex in
-                HStack(spacing: Theme.spacingSmall) {
-                    ForEach(rows[rowIndex]) { category in
-                        chip(category)
-                    }
-                }
+        FlowLayout(spacing: Theme.spacingSmall) {
+            ForEach(options) { category in
+                chip(category)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            GeometryReader { geometry in
-                Color.clear.preference(key: TagSelectorWidthKey.self, value: geometry.size.width)
-            }
-        )
-        .onPreferenceChange(TagSelectorWidthKey.self) { containerWidth = $0 }
     }
 
     // MARK: - Sizing
@@ -60,65 +47,19 @@ struct TagSelector: View {
         ceil(symbolFontSize * 1.5)
     }
 
-    /// Natural chip width: symbol slot + inner gap + name + uniform padding.
-    private func chipWidth(for category: Category) -> CGFloat {
-        let nameFont = UIFont.preferredFont(forTextStyle: .caption1)
-        let name = category.name.size(withAttributes: [.font: nameFont]).width
-        return symbolSlotSize + Theme.spacingExtraSmall + name + Theme.spacingChip * 2
-    }
-
-    /// Greedy packing: fill each row with as many content-sized chips as fit,
-    /// keeping equal `Theme.spacingSmall` gaps. Until the container width is
-    /// measured, every chip sits on its own row (single pass, no flicker).
-    private var rows: [[Category]] {
-        guard containerWidth > 0 else { return options.map { [$0] } }
-        var result: [[Category]] = []
-        var current: [Category] = []
-        var currentWidth: CGFloat = 0
-        for category in options {
-            let width = min(chipWidth(for: category), containerWidth)
-            let projected = currentWidth + (current.isEmpty ? 0 : Theme.spacingSmall) + width
-            if current.isEmpty || projected <= containerWidth {
-                current.append(category)
-                currentWidth = projected
-            } else {
-                result.append(current)
-                current = [category]
-                currentWidth = width
-            }
-        }
-        if !current.isEmpty { result.append(current) }
-        return result
-    }
-
     // MARK: - Chip
 
     @ViewBuilder
     private func chip(_ category: Category) -> some View {
         let isSelected = selected.contains(category.id)
-        let label = chipLabel(category: category, isSelected: isSelected)
-        // A chip wider than the container gets a fixed container-width frame
-        // so its name truncates instead of overflowing. All other chips stay
-        // content-sized (no flexible frame that would stretch them).
-        if containerWidth > 0, chipWidth(for: category) > containerWidth {
-            Button {
-                onToggle(category.id)
-            } label: {
-                label.frame(width: containerWidth)
-            }
-            .accessibilityLabel("\(L10n.manageCategoriesRowA11y.text), \(category.name)")
-            .accessibilityValue(isSelected ? L10n.undoSelected.text : L10n.undoNotSelected.text)
-            .accessibilityIdentifier("\(accessibilityId)Chip(\(category.id))")
-        } else {
-            Button {
-                onToggle(category.id)
-            } label: {
-                label
-            }
-            .accessibilityLabel("\(L10n.manageCategoriesRowA11y.text), \(category.name)")
-            .accessibilityValue(isSelected ? L10n.undoSelected.text : L10n.undoNotSelected.text)
-            .accessibilityIdentifier("\(accessibilityId)Chip(\(category.id))")
+        Button {
+            onToggle(category.id)
+        } label: {
+            chipLabel(category: category, isSelected: isSelected)
         }
+        .accessibilityLabel("\(L10n.manageCategoriesRowA11y.text), \(category.name)")
+        .accessibilityValue(isSelected ? L10n.undoSelected.text : L10n.undoNotSelected.text)
+        .accessibilityIdentifier("\(accessibilityId)Chip(\(category.id))")
     }
 
     private func chipLabel(category: Category, isSelected: Bool) -> some View {
@@ -142,12 +83,5 @@ struct TagSelector: View {
                 Capsule().stroke(Theme.hairline, lineWidth: 1)
             }
         }
-    }
-}
-
-private struct TagSelectorWidthKey: PreferenceKey {
-    static let defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = max(value, nextValue())
     }
 }

@@ -49,19 +49,14 @@ enum AppConfig {
     }
 
     private static func logWarning(_ message: String) {
-        if #available(iOS 14.0, *) {
-            Logger.appConfig.warning("\(message)")
-        }
+        Logger.appConfig.warning("\(message)")
     }
 
     private static func logInfo(_ message: String) {
-        if #available(iOS 14.0, *) {
-            Logger.appConfig.info("\(message)")
-        }
+        Logger.appConfig.info("\(message)")
     }
 }
 
-@available(iOS 14.0, *)
 private extension Logger {
     static let appConfig = Logger(subsystem: "com.antonkosenko.timeoflifeapp", category: "AppConfig")
 }

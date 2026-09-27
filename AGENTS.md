@@ -4,7 +4,7 @@ Agent entrypoint for this repo. **Read [`docs/project-context.md`](docs/project-
 
 ## What this is
 
-**Lifio** — a personal time-tracking iOS app (SwiftUI, iOS 15+, local-first **account-bound**: mandatory sign-in, per-account data files, per-device sessions) with a Go backend acting as **identity + sync relay**. Current scope: auth MVP (passwordless email-OTP + Sign in with Apple) and the Track experience (three-tab shell, numeric timer, plain-text capture + Recents, running tag selector, Profile, compact cross-tab timer). There is no activity entity — entries own their text, ordered categories, and notes.
+**Lifio** — a personal time-tracking iOS app (SwiftUI, iOS 18+, local-first **account-bound**: mandatory sign-in, per-account data files, per-device sessions) with a Go backend acting as **identity + sync relay**. Current scope: auth MVP (passwordless email-OTP + Sign in with Apple) and the Track experience (three-tab shell, numeric timer, plain-text capture + Recents, running tag selector, Profile, compact cross-tab timer). There is no activity entity — entries own their text, ordered categories, and notes.
 
 ## OpenSpec routing (read this before touching behavior)
 
@@ -31,7 +31,7 @@ The repo is spec-driven (`openspec/config.yaml`, `schema: spec-driven`). See `op
 
 ```
 backend/                 Go (chi + pgx/Postgres; sqlite for tests) — relay: auth + categories/entries
-ios/TimeOfLife/          SwiftUI app (iOS 15+), XcodeGen-managed
+ios/TimeOfLife/          SwiftUI app (iOS 18+), XcodeGen-managed
   TimeOfLife/Features/{Auth,AppShell,TimeTracking,Catalog,Sync,AppleSignIn}
   TimeOfLife/Core/Storage/   LocalStore.swift (GRDB), UndoBufferStore.swift, SessionCache.swift
   TimeOfLife/Core/           networking, keychain, reachability, theme, navigation, DI, components
