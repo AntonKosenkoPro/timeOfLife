@@ -54,7 +54,7 @@ struct CategoryEditorView: View {
                     isNameFocused = false
                 }
                 .focused($isNameFocused)
-                .onChange(of: vm.name) { _ in
+                .onChange(of: vm.name) {
                     vm.nameDidChange()
                 }
 
@@ -116,7 +116,7 @@ struct CategoryEditorView: View {
         }
         // Dismiss only after a successful save. Duplicate and stale
         // outcomes keep the editor open with actionable context.
-        .onChange(of: vm.isSavedOrDuplicate) { saved in
+        .onChange(of: vm.isSavedOrDuplicate) { _, saved in
             if saved {
                 dismiss()
             }

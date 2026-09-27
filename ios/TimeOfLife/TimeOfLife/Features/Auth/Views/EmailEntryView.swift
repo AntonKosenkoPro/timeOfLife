@@ -14,7 +14,7 @@ struct EmailEntryView: View {
 
     var body: some View {
         // `ScrollView` + `.safeAreaInset(edge: .bottom)` gives us keyboard
-        // avoidance on iOS 15. The form stacks from the top with a fixed reserve
+        // avoidance. The form stacks from the top with a fixed reserve
         // for the pinned bottom action bar so the field never crowds the buttons
         // on short screens (iPhone SE 1st gen), especially while the keyboard
         // is open. Content scrolls when it does not fit.
@@ -77,9 +77,9 @@ struct EmailEntryView: View {
             // Pinned action bar. Content in `safeAreaInset` animates with the
             // system keyboard transition instead of reflowing with the main
             // stack, and stays visible above the keyboard so the user can tap
-            // Continue without dismissing the keyboard first. On iOS 15 the
-            // enclosing `ScrollView` now makes this inset lift above the
-            // keyboard (it was covered on iPhone SE 1st gen).
+            // Continue without dismissing the keyboard first. The enclosing
+            // `ScrollView` makes this inset lift above the keyboard (it was
+            // covered on iPhone SE 1st gen).
             VStack(spacing: Theme.spacingSmall) {
                 PrimaryButton(
                     title: L10n.emailEntrySubmit.text,
@@ -97,7 +97,7 @@ struct EmailEntryView: View {
             .background(Theme.backgroundPrimary)
         }
         .onAppear { isEmailFocused = true }
-        .onChange(of: vm.email) { _ in
+        .onChange(of: vm.email) {
             if vm.fieldErrors.email != nil {
                 vm.fieldErrors.email = nil
             }
@@ -105,7 +105,7 @@ struct EmailEntryView: View {
                 vm.errorMessage = nil
             }
         }
-        .onChange(of: vm.isEmailSent) { sent in
+        .onChange(of: vm.isEmailSent) { _, sent in
             if sent {
                 navigation.push(.otpEntry(email: vm.email))
                 vm.isEmailSent = false

@@ -114,7 +114,7 @@ struct ManageCategoriesView: View {
             await vm.registerSystemUndo(with: undoManager)
         }
         .background(ShakeFirstResponderHost(undoManager: undoManager))
-        .onChange(of: sync.status) { status in
+        .onChange(of: sync.status) { _, status in
             if case .idle = status {
                 Task { await vm.load() }
             }
@@ -125,13 +125,12 @@ struct ManageCategoriesView: View {
 #if DEBUG
 #Preview("Manage Categories") {
     let container = AppContainer.production()
-    NavigationView {
+    NavigationStack {
         ManageCategoriesView(
             store: container.localStore,
             undoBuffer: container.undoBuffer
         )
         .environmentObject(container)
     }
-    .navigationViewStyle(.stack)
 }
 #endif

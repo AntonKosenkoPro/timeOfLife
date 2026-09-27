@@ -36,7 +36,7 @@ struct EditorSheetScaffold<Content: View, BottomBar: View>: View {
 
     var body: some View {
         Group {
-            if #available(iOS 16.0, *), usesMediumDetent {
+            if usesMediumDetent {
                 sheetContent
                     .presentationDetents([.medium, .large])
             } else {
@@ -46,7 +46,7 @@ struct EditorSheetScaffold<Content: View, BottomBar: View>: View {
     }
 
     private var sheetContent: some View {
-        NavigationView {
+        NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: Theme.spacingLarge) {
                     content
@@ -72,7 +72,6 @@ struct EditorSheetScaffold<Content: View, BottomBar: View>: View {
                 bottomBar
             }
         }
-        .navigationViewStyle(.stack)
         .interactiveDismissDisabled(isLoading)
     }
 }

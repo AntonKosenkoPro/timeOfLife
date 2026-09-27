@@ -48,7 +48,7 @@ struct InsightsView: View {
         .task { await vm.loadIfNeeded() }
         .onAppear { Task { await vm.loadIfNeeded() } }
         .onDisappear { vm.invalidate() }
-        .onChange(of: refreshSignal) { _ in
+        .onChange(of: refreshSignal) {
             vm.invalidate()
             Task { await vm.loadIfNeeded() }
         }
@@ -56,7 +56,7 @@ struct InsightsView: View {
         // behind this view while the Profile sheet covers it, so reload on
         // exit from `.syncing` (idle or error — a failed cycle may have
         // applied partial merges before throwing).
-        .onChange(of: sync.status) { status in
+        .onChange(of: sync.status) { _, status in
             switch status {
             case .idle, .error:
                 vm.invalidate()
@@ -190,10 +190,9 @@ private struct BreakdownRow: View {
 #if DEBUG
 #Preview("Insights") {
     let container = AppContainer.production()
-    NavigationView {
+    NavigationStack {
         InsightsView(store: container.localStore)
     }
-    .navigationViewStyle(.stack)
     .environmentObject(container)
     .environmentObject(container.syncController)
 }

@@ -43,7 +43,7 @@ struct LogTimeView: View {
     }
 
     var body: some View {
-        NavigationView {
+        NavigationStack {
             ScrollView {
                 VStack(spacing: Theme.spacingMedium) {
                     nameCard
@@ -103,7 +103,6 @@ struct LogTimeView: View {
                 await vm.loadCategoriesIfNeeded(store: container.localStore)
             }
         }
-        .navigationViewStyle(.stack)
     }
 
     /// Mode-specific navigation title (localized).
@@ -322,7 +321,7 @@ struct LogTimeView: View {
                 .padding(.horizontal, Theme.spacingSmall + 4)
                 .padding(.vertical, Theme.spacingSmall - 2)
                 .foregroundStyle(active ? Theme.accentPrimary : Theme.textPrimary)
-                .background(active ? Theme.color(Theme.accentPrimary, alpha: 0.15) : Theme.backgroundPrimary)
+                .background(active ? Theme.accentPrimary.opacity(0.15) : Theme.backgroundPrimary)
                 .clipShape(Capsule())
         }
         .accessibilityIdentifier(id)
@@ -370,8 +369,8 @@ struct LogTimeView: View {
     /// Fixed wheel-picker height (standard `UIPickerView` height): the
     /// GeometryReader container needs an explicit height.
     private static let wheelPickerHeight: CGFloat = 216
-    /// Fixed calendar-picker height: large enough for six-week months on
-    /// iOS 15 without clipping.
+    /// Fixed calendar-picker height: large enough for six-week months
+    /// without clipping.
     private static let graphicalPickerHeight: CGFloat = 360
 
     private static let dateFormatter: DateFormatter = {

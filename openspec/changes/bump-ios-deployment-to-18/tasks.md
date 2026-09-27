@@ -11,10 +11,10 @@
 - [x] 2.3 Collapse `ShellToolbar` to a single scope, make `presentationDetents([.medium, .large])` unconditional, delete `Theme.color(_, alpha:)` (verify the old "`Color.opacity` is iOS 16+" comment; 4 call sites to native opacity), and remove dead `#available(iOS 14)` guards in `AppConfig`.
 - [x] 2.4 Re-check `app-shell` / `timer-capture-experience` scenarios for implied old-toolbar behavior; add a delta spec only if a REQUIREMENT (not implementation) changed.
 
-## 3. ControlWidget target
+## 3. ControlWidget removal (deferred again as excessive)
 
-- [x] 3.1 Add the widget target in `project.yml` (+ entitlements, App Group) with the `ControlWidget` toggle + `alwaysAllowed` AppIntent against the active per-account file; intent writes state + outbox row in one transaction and never syncs directly (LocalStore chokepoint invariant).
-- [x] 3.2 Cover the Control with tests where possible (intent transaction/outbox) and run the README real-device smoke (auth → track → History → lock-screen Control start/stop, incl. first-use-no-history and locked-device paths per the delta spec).
+- [x] 3.1 Remove the `LifioControlWidget` target from `project.yml` (target block, app dependency, ControlWidget sources exclusion), delete `TimeOfLife/ControlWidget/`, `TimerControlLogic.swift`, `TimerControlLogicTests.swift`, revert the `AnyEncodable` extraction and the `ActiveAccountFileResolver.ready` signature, revert the `control.*` L10n/strings, run `xcodegen generate`.
+- [x] 3.2 Update change artifacts (proposal/design/tasks/delta spec), FURPS rows, and docs back to deferred-Control wording; re-verify (lint, build, full tests, validate).
 
 ## 4. Verification + docs
 

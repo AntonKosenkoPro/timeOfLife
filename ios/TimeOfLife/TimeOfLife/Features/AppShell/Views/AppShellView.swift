@@ -20,8 +20,8 @@ struct AppShellView: View {
     @State private var isShowingProfile = false
     /// Presents the Log Time sheet from History (manual-entry spec). Owned
     /// here so the [+] lives in the same toolbar scope as the Profile
-    /// button — one scope renders on every supported iOS version; the
-    /// sheet itself stays in `HistoryView`, which owns the refresh.
+    /// button; the sheet itself stays in `HistoryView`, which owns the
+    /// refresh.
     @State private var isHistoryLogTimeActive = false
 
     init(vm: AppShellViewModel, container: AppContainer) {
@@ -88,7 +88,7 @@ struct AppShellView: View {
 
     @ViewBuilder
     private func navigationRoot<Content: View>(@ViewBuilder content: () -> Content) -> some View {
-        NavigationView {
+        NavigationStack {
             content()
                 .navigationTitle(navigationTitle)
                 .navigationBarTitleDisplayMode(.inline)
@@ -98,7 +98,6 @@ struct AppShellView: View {
                     onProfile: { isShowingProfile = true }
                 ))
         }
-        .navigationViewStyle(.stack)
     }
 
     private var navigationTitle: String {
@@ -130,18 +129,14 @@ struct AppShellView: View {
 
 /// The shell's navigation-bar scope (app-shell spec + manual-entry spec):
 /// the Profile button on every tab, plus the Log Time [+] on History only.
-/// One scope (never nested child scopes) so the bar renders identically on
-/// every supported iOS version. The `if/else` lives at the View level —
-/// `if` directly inside `.toolbar {}` needs iOS 16 — with the [+] branch
-/// duplicating the Profile item.
 private struct ShellToolbar: ViewModifier {
     let showsLogTime: Bool
     let onLogTime: () -> Void
     let onProfile: () -> Void
 
     func body(content: Content) -> some View {
-        if showsLogTime {
-            content.toolbar {
+        content.toolbar {
+            if showsLogTime {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button(action: onLogTime) {
                         Image(systemName: "plus")
@@ -149,25 +144,14 @@ private struct ShellToolbar: ViewModifier {
                     .accessibilityLabel(L10n.historyLogTime.text)
                     .accessibilityIdentifier("HistoryLogTimeButton")
                 }
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button(action: onProfile) {
-                        Image(systemName: "person.crop.circle")
-                            .font(.system(size: 19, weight: .regular))
-                    }
-                    .accessibilityLabel(L10n.profileTitle.text)
-                    .accessibilityIdentifier("ProfileButton")
-                }
             }
-        } else {
-            content.toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button(action: onProfile) {
-                        Image(systemName: "person.crop.circle")
-                            .font(.system(size: 19, weight: .regular))
-                    }
-                    .accessibilityLabel(L10n.profileTitle.text)
-                    .accessibilityIdentifier("ProfileButton")
+            ToolbarItem(placement: .navigationBarTrailing) {
+                Button(action: onProfile) {
+                    Image(systemName: "person.crop.circle")
+                        .font(.system(size: 19, weight: .regular))
                 }
+                .accessibilityLabel(L10n.profileTitle.text)
+                .accessibilityIdentifier("ProfileButton")
             }
         }
     }

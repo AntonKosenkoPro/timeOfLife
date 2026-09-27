@@ -10,7 +10,7 @@ but the CLI stays the source of truth.
 | Layer | Location | Meaning |
 |---|---|---|
 | **Baseline specs** | `openspec/specs/<capability>/spec.md` | The current merged contract. Today: `app-icon`, `app-shell`, `timer-capture-experience`, `category-management`, `editor-sheet-ux`, `local-first-store`, `sync-client`, `entry-provenance`, `lock-screen-controls`, and `manual-entry`. **Never edit directly** — behavior changes go through a change. |
-| **Active change (deltas)** | `openspec/changes/<change>/` | A proposal in flight. Its `specs/<capability>/spec.md` files are delta specs (ADDED/MODIFIED requirements) not yet in the baseline. One active change right now: `fix-history-sync-refresh` — check `openspec list`. |
+| **Active change (deltas)** | `openspec/changes/<change>/` | A proposal in flight. Its `specs/<capability>/spec.md` files are delta specs (ADDED/MODIFIED requirements) not yet in the baseline. Active right now: `bump-ios-deployment-to-18` — check `openspec list`. |
 | **Archives** | `openspec/changes/archive/<change>/` | Completed changes; their deltas were already folded into the baselines by `openspec archive`. Read them only for history. Today: `redesign-track-experience`, `keep-timer-position-on-stop`, `unify-activity-preparation-flow`, `refine-selected-activity-from-track`, `add-category-management`, `collapsing-editor-sheet-headers`, `integrate-app-icon`, `refine-track-recents`, `local-first-sync-architecture`, `add-manual-entry`, `history-entry-list`, `disable-start-while-saved`, `fix-stale-draft-first-start`, `fix-running-tags-title-spacing`, `fix-entry-category-sync`, `destructive-erase-row`, `fix-category-sync-loss`, and `propagate-buffered-deletes`. |
 
 **Which contract is in force?** The baselines plus the delta specs of the active change
@@ -52,8 +52,9 @@ archived `changes/`. The CLI generates or updates workflow adapters on demand.
 - **Baselines never edited directly**; every behavior change adds a delta to a change.
 - **Incomplete UI surfaces must not be claimed done**: app-wide activity/history UndoToast/shake-to-undo, the "Enable
   Sync" `AuthFlowView` sheet (Profile currently does a silent `restoreSession()`), "via
-  <Source>" labels, and the iOS 18 lock-screen ControlWidget remain deferred after
-  `local-first-sync-architecture` was archived. Category-scoped undo in Manage Categories is
+  <Source>" labels, and the iOS 18 lock-screen ControlWidget (no target in `project.yml` —
+  deferred again as excessive under `bump-ios-deployment-to-18`) remain deferred.
+  Category-scoped undo in Manage Categories is
   implemented (archived `add-category-management`) and does not close the app-wide undo work.
 - **OpenAPI is the authoritative API contract** (`backend/api/openapi.yaml`, S10): endpoint
   changes update both sides + the spec.

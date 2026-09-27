@@ -7,7 +7,7 @@ context: |
   it is the canonical context for this repo (architecture, OpenSpec routing, API contract,
   incomplete surfaces, standards, build/test/run).
 
-  What this is: Lifio — a personal time-tracking iOS app (SwiftUI, iOS 15+, local-first)
+  What this is: Lifio — a personal time-tracking iOS app (SwiftUI, iOS 18+, local-first)
   with a Go backend that is an OPTIONAL sync relay. Auth MVP (passwordless email-OTP +
   Sign in with Apple) and the Track experience (three-tab shell, numeric timer, plain-text
   capture + Recents, running tag selector, Profile, compact cross-tab timer). There is no
@@ -35,18 +35,22 @@ context: |
 rules:
   proposal:
     - Identify affected baseline capabilities and authoritative documentation; include explicit non-goals.
+    - When the change depends on external library/framework/SDK/API/CLI/cloud behavior, resolve + fetch current docs via `npx ctx7@latest library` → `docs` (one concept per query, max 3) and cite library ID + query; state the version pin used.
   design:
     - Preserve the invariants in `docs/project-context.md` and cite decisions that constrain implementation.
+    - Cite the ctx7 library IDs + queries that constrain the design; do not rely on training-data API shapes.
   specs:
     - Write change-scoped deltas only; never edit baseline specs directly while proposing a change.
   tasks:
     - Include relevant tests, linters, requirements checks, and documentation updates.
+    - When an external dependency is involved, include the ctx7 fetch as the first task; implementation tasks depend on it.
 
 operations:
   apply:
     guidance:
       - Read `docs/project-context.md` first (canonical context; `AGENTS.md` is the short entrypoint).
       - Check the selected change's `tasks.md` before implementing and mark tasks `[x]` as you complete them; reconcile with the relevant `Requirements/FURPS/*.md` rows.
+      - External docs first: if the work touches an external dependency, run the ctx7 `library` → `docs` fetch before coding and cite it; on quota error ask for `npx ctx7@latest login` / `CONTEXT7_API_KEY`, never silently fall back.
       - Deferred local-first UI surfaces (UndoToast/shake-to-undo, "Enable Sync" AuthFlowView sheet, "via <Source>" labels, lock-screen ControlWidget) must not be claimed done; update `docs/project-context.md` → "Incomplete / deferred" and any owning change artifacts accordingly.
       - If the OpenAPI contract changes, update `backend/api/openapi.yaml` and both client/server sides (S10); run the backend contract gate (`go test ./...` includes `internal/contract`).
       - Run linters + warning-as-error build + both test suites per `docs/project-context.md` → "Per-iteration revising process (S5)".

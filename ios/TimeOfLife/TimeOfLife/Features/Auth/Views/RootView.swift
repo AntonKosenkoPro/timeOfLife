@@ -89,7 +89,7 @@ struct RootView: View {
                 // the gate up.
                 await container.authService.restoreSession()
             }
-            .onChange(of: session.state) { newState in
+            .onChange(of: session.state) { _, newState in
                 switch newState {
                 case .signedIn:
                     break
@@ -97,7 +97,7 @@ struct RootView: View {
                     beginSignOut()
                 }
             }
-            .onChange(of: container.connectivity.isConnected) { connected in
+            .onChange(of: container.connectivity.isConnected) { _, connected in
                 if connected, case .signedIn = session.state {
                     container.syncController.trigger(userID: sessionUserID())
                 }

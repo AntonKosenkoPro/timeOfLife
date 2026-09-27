@@ -74,7 +74,7 @@ struct OtpCodeField: View {
                 isFocused = true
             }
         }
-        .onChange(of: code) { newValue in
+        .onChange(of: code) { _, newValue in
             // Sanitize to digits only and cap at `length`. Only write back when
             // the value actually changed to avoid a feedback loop.
             let digits = String(newValue.filter(\.isNumber).prefix(length))
@@ -82,7 +82,7 @@ struct OtpCodeField: View {
                 code = digits
             }
         }
-        .onChange(of: error) { newError in
+        .onChange(of: error) { _, newError in
             // Re-focus the hidden field when a verification error appears so the
             // user can re-type immediately after the code is cleared.
             if newError != nil, !UIAccessibility.isVoiceOverRunning {

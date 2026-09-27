@@ -35,8 +35,8 @@ struct HistoryView: View {
     /// spec, history D6).
     @State private var editingEntry: TimeEntry?
     /// Presents the Log Time sheet (manual-entry spec). Owned by the shell
-    /// so the [+] shares the nav-bar toolbar scope (iOS 15 renders a single
-    /// scope reliably); the sheet and its refresh stay here.
+    /// so the [+] shares the nav-bar toolbar scope; the sheet and its
+    /// refresh stay here.
     @Binding var isLogTimeActive: Bool
     /// Changes whenever the shell's running timer starts or stops (nil on
     /// stop). Lets History reload an entry saved from the compact timer
@@ -105,7 +105,7 @@ struct HistoryView: View {
             vm.invalidate()
             pull.cancelNotice()
         }
-        .onChange(of: refreshSignal) { _ in
+        .onChange(of: refreshSignal) {
             vm.invalidate()
             Task { await vm.loadIfNeeded() }
         }
@@ -114,7 +114,7 @@ struct HistoryView: View {
         // guarded reload above never runs. Observe the cycle directly and
         // reload on exit from `.syncing` (idle or error — a failed cycle may
         // have applied partial merges before throwing).
-        .onChange(of: sync.status) { status in
+        .onChange(of: sync.status) { _, status in
             switch status {
             case .idle, .error:
                 vm.invalidate()
@@ -298,7 +298,7 @@ private struct HeaderFramePreferenceKey: PreferenceKey {
 #if DEBUG
 #Preview("History with entries") {
     let container = AppContainer.production()
-    NavigationView {
+    NavigationStack {
         HistoryView(
             store: container.localStore,
             sessionStore: container.sessionStore,
@@ -306,14 +306,13 @@ private struct HeaderFramePreferenceKey: PreferenceKey {
             connectivity: container.connectivity
         )
     }
-    .navigationViewStyle(.stack)
     .environmentObject(container)
     .environmentObject(container.syncController)
 }
 
 #Preview("History empty") {
     let container = AppContainer.production()
-    NavigationView {
+    NavigationStack {
         HistoryView(
             store: container.localStore,
             sessionStore: container.sessionStore,
@@ -321,7 +320,6 @@ private struct HeaderFramePreferenceKey: PreferenceKey {
             connectivity: container.connectivity
         )
     }
-    .navigationViewStyle(.stack)
     .environmentObject(container)
     .environmentObject(container.syncController)
 }

@@ -46,10 +46,4 @@ enum Theme {
     static func timerFont() -> Font {
         .system(size: 64, weight: .semibold, design: .rounded)
     }
-
-    /// Returns a copy of the color with the given alpha component.
-    /// `Color.opacity(_:)` is iOS 16+; this helper keeps iOS 15 support.
-    static func color(_ color: Color, alpha: Double) -> Color {
-        Color(uiColor: UIColor(color).withAlphaComponent(alpha))
-    }
 }

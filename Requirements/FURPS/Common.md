@@ -18,7 +18,7 @@
 | S9    | There should be Figma-compatible Design Tokens to store all suitable design variable                                                                                    |         |
 | S10   | There should be OpenAPI documentation for every backend API                                                                                                             | ✅ `backend/api/openapi.yaml` (OpenAPI 3.0) |
 | +1    | Should work without website                                                                                                                                             |         |
-| +2    | Should work on iOS 15+ and support correctly all supported devices (correct layout, feature support)                                                                    |         |
+| +2    | Should work on iOS 18+ and support correctly all supported devices (correct layout, feature support)                                                                    |         |
 | +3    | Backend should use Golang                                                                                                                                               |         |
 | +4    | Mobile app should use Swift                                                                                                                                             |         |
 

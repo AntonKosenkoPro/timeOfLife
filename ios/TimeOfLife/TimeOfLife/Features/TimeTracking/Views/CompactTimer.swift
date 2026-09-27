@@ -18,7 +18,7 @@ struct CompactTimer: View {
                             .font(.system(size: 14, weight: .medium))
                             .foregroundStyle(Theme.accentPrimary)
                             .frame(width: 38, height: 38)
-                            .background(Theme.color(Theme.accentPrimary, alpha: 0.13))
+                            .background(Theme.accentPrimary.opacity(0.13))
                             .clipShape(Circle())
 
                         VStack(alignment: .leading, spacing: 2) {
