@@ -40,20 +40,18 @@ jobs:
         # The action performs its own full checkout (fetch-depth: 0).
         uses: alibaba/open-code-review@v1.12.9
         with:
-          # OpenCode Zen — OpenAI-compatible chat endpoint (models list: https://opencode.ai/docs/zen).
-          llm_url: https://opencode.ai/zen/v1/chat/completions
-          llm_auth_token: ${{ secrets.OPENCODE_ZEN_API_KEY }}
+          # Ollama Cloud — OpenAI-compatible endpoint (models.dev: ollama-cloud base URL).
+          llm_url: https://ollama.com/v1
+          llm_auth_token: ${{ secrets.OLLAMA_API_KEY }}
           llm_model: glm-5.3-flash
-          # openai protocol for the /chat/completions endpoint (explicit;
-          # supersedes the required llm_use_anthropic boolean)
+          # openai protocol (explicit; supersedes the required llm_use_anthropic boolean)
           llm_protocol: openai
           llm_use_anthropic: 'false'
-          # No provider-specific extra body for Zen; omit the DeepSeek thinking toggle.
+          # Disable reasoning for latency/cost.
+          llm_extra_body: '{"thinking": {"type": "disabled"}}'
           llm_timeout: '600'
           review_task_timeout: '15'
-          # Paid model ($0.15/$0.50 per 1M) — needs Zen credits on the
-          # account behind OPENCODE_ZEN_API_KEY. Keep concurrency modest
-          # to bound spend per run.
+          # Don't hammer Ollama Cloud rate limits.
           review_concurrency: '4'
           language: English
           # Update one summary comment in place instead of posting a new one per run.
