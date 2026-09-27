@@ -31,4 +31,4 @@
 
 - [x] 5.1 `swiftlint lint --strict` clean (0 violations); warning-as-error `xcodebuild build-for-testing` green; full iOS suite green — 503 tests passed, 0 failed (serialized per `docs/ios-test-loop.md`, booted-sim-by-ID destination). Backend untouched (no `go` run needed).
 - [x] 5.2 Re-checked `Requirements/FURPS/Timetracking.md` (F13 comment gains the affordances sentence) + `Common.md` (no conflicts).
-- [ ] 5.3 Stacked PR targeting `fix/50-51-entry-form-gestures` (retargeted to `main` after #54 merges): title "Entry duration subtitle plus name-field affordances (#36, #42, #43)", body "Fixes #36, fixes #42, fixes #43" + what changed + verification evidence + untested checklist items. DO NOT merge.
+- [x] 5.3 Stacked PR (PR #56 opened, unmerged) targeting `fix/50-51-entry-form-gestures` (retargeted to `main` after #54 merges): title "Entry duration subtitle plus name-field affordances (#36, #42, #43)", body "Fixes #36, fixes #42, fixes #43" + what changed + verification evidence + untested checklist items. DO NOT merge.
