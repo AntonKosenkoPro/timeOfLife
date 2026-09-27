@@ -53,6 +53,22 @@ enum CatalogIcon: String, Codable, CaseIterable, Sendable {
     case heart
     case leaf
     case sparkles
+    case pawprint
+    case dog
+    case cat
+    case fish
+    case bird
+    case washer
+    case dryer
+    case dishwasher
+    case refrigerator
+    case sofa
+    case shower
+    case lampTable = "lamp.table"
+    case person2 = "person.2"
+    case figureAndChildHoldinghands = "figure.and.child.holdinghands"
+    case stethoscope
+    case pill
     case tag
 
     /// The default icon for a newly created category.

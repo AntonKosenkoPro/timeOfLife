@@ -22,7 +22,12 @@ struct CatalogIconTests {
         "bed.double", "moon.stars", "moon.zzz",
         "film", "music.note", "guitar", "camera", "tv", "musicalnotes",
         "paintbrush", "house", "car.fill", "airplane", "cart", "phone",
-        "hammer", "heart", "leaf", "sparkles", "tag",
+        "hammer", "heart", "leaf", "sparkles",
+        "pawprint", "dog", "cat", "fish", "bird",
+        "washer", "dryer", "dishwasher", "refrigerator",
+        "sofa", "shower", "lamp.table",
+        "person.2", "figure.and.child.holdinghands",
+        "stethoscope", "pill", "tag",
     ]
 
     @Test("CatalogIcon mirrors the authoritative OpenAPI icon set exactly")
