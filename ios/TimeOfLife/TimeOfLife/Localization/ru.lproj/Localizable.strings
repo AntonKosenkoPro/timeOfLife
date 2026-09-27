@@ -22,9 +22,6 @@
 "otp.resend" = "Отправить код снова";
 "otp.resendCountdown" = "Отправить код через %d с";
 
-// Offline
-"offline.banner" = "Вы не в сети. Некоторые действия недоступны.";
-
 // Sign out confirmation
 "signOut.cancel" = "Отмена";
 

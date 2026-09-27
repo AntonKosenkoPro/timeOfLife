@@ -26,9 +26,6 @@ enum L10n: String, CaseIterable {
     case otpResend = "otp.resend"
     case otpResendCountdown = "otp.resendCountdown"
 
-    // Offline
-    case offlineBanner = "offline.banner"
-
     // Apple
     case appleSignInTitle = "appleSignIn.title"
     case appleSignInError = "appleSignIn.error"
