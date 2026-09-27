@@ -96,7 +96,7 @@ struct LocalizationTests {
         }
     }
 
-    @Test("offline error maps to offline banner text")
+    @Test("offline error maps to offline error text")
     func offlineMapping() {
         let msg = ErrorLocalization.message(for: .offline)
         #expect(!msg.isEmpty)
@@ -167,7 +167,9 @@ struct LocalizationTests {
         // authGate.title = 137; Wave 2 removed the 5 orphaned
         // string-file rows from both lproj files (all L10n cases
         // resolve; ad-hoc file keys — error.*, validation.*,
-        // catalogIcon.* — stay keyed outside the enum)
-        #expect(l10nCases.count == 137)
+        // catalogIcon.* — stay keyed outside the enum);
+        // fix-offline-banner-duplication removes offlineBanner
+        // (offline.banner) = 136;
+        #expect(l10nCases.count == 136)
     }
 }

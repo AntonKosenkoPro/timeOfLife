@@ -38,11 +38,6 @@ struct RootView: View {
                         container: container
                     )
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .safeAreaInset(edge: .top) {
-                            OfflineBanner()
-                                .environmentObject(container.connectivity)
-                                .animation(.easeInOut(duration: 0.2), value: container.connectivity.isConnected)
-                        }
                 } else {
                     // Bind-then-reveal: the gate stays up (a spinner, never
                     // the shell) until the account's file is bound. The
@@ -202,25 +197,5 @@ struct RootView: View {
     /// and the operation is a no-op after the first launch.
     private func seedStarterCategoriesIfNeeded() async {
         _ = try? await container.localStore.seedStarterCategoriesIfNeeded(names: String.starterCategoryNames)
-    }
-}
-
-/// Top banner shown when offline (offline signed-in keeps working; the gate
-/// needs no banner — the auth flow is fully offline-capable).
-struct OfflineBanner: View {
-    @EnvironmentObject var connectivity: Connectivity
-
-    var body: some View {
-        if !connectivity.isConnected {
-            Text(L10n.offlineBanner.text)
-                .font(.footnote)
-                .foregroundStyle(.white)
-                .padding(.vertical, 6)
-                .padding(.horizontal, 12)
-                .frame(maxWidth: .infinity)
-                .background(Theme.danger)
-                .transition(.move(edge: .top).combined(with: .opacity))
-                .accessibilityIdentifier("OfflineBanner")
-        }
     }
 }
