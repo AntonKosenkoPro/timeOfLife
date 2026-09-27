@@ -47,6 +47,11 @@ var validIcons = map[string]bool{
 	"paintbrush": true, "house": true,
 	"car.fill": true, "airplane": true, "cart": true, "phone": true,
 	"hammer": true, "heart": true, "leaf": true, "sparkles": true,
+	"pawprint": true, "dog": true, "cat": true, "fish": true, "bird": true,
+	"washer": true, "dryer": true, "dishwasher": true, "refrigerator": true,
+	"sofa": true, "shower": true, "lamp.table": true,
+	"person.2": true, "figure.and.child.holdinghands": true,
+	"stethoscope": true, "pill": true,
 	"tag": true,
 }
 

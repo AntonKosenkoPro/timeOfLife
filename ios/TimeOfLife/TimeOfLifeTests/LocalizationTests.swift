@@ -96,7 +96,7 @@ struct LocalizationTests {
         }
     }
 
-    @Test("offline error maps to offline banner text")
+    @Test("offline error maps to offline error text")
     func offlineMapping() {
         let msg = ErrorLocalization.message(for: .offline)
         #expect(!msg.isEmpty)
@@ -169,8 +169,9 @@ struct LocalizationTests {
         // resolve; ad-hoc file keys — error.*, validation.*,
         // catalogIcon.* — stay keyed outside the enum);
         // feat-entry-duration-subtitle adds entry.duration +
-        // entry.invalidInterval = 139; feat-name-field-affordances adds
-        // name.clear + name.suggestions = 141.
-        #expect(l10nCases.count == 141)
+        // entry.invalidInterval; feat-name-field-affordances adds
+        // name.clear + name.suggestions; fix-offline-banner-duplication
+        // removes offlineBanner (offline.banner) = 140.
+        #expect(l10nCases.count == 140)
     }
 }

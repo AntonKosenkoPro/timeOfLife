@@ -22,9 +22,6 @@
 "otp.resend" = "Отправить код снова";
 "otp.resendCountdown" = "Отправить код через %d с";
 
-// Offline
-"offline.banner" = "Вы не в сети. Некоторые действия недоступны.";
-
 // Sign out confirmation
 "signOut.cancel" = "Отмена";
 
@@ -267,4 +264,20 @@
 "catalogIcon.heart" = "Сердце";
 "catalogIcon.leaf" = "Лист";
 "catalogIcon.sparkles" = "Искры";
+"catalogIcon.pawprint" = "След лапы";
+"catalogIcon.dog" = "Собака";
+"catalogIcon.cat" = "Кошка";
+"catalogIcon.fish" = "Рыба";
+"catalogIcon.bird" = "Птица";
+"catalogIcon.washer" = "Стиральная машина";
+"catalogIcon.dryer" = "Сушильная машина";
+"catalogIcon.dishwasher" = "Посудомоечная машина";
+"catalogIcon.refrigerator" = "Холодильник";
+"catalogIcon.sofa" = "Диван";
+"catalogIcon.shower" = "Душ";
+"catalogIcon.lamp.table" = "Настольная лампа";
+"catalogIcon.person.2" = "Люди";
+"catalogIcon.figure.and.child.holdinghands" = "Семья";
+"catalogIcon.stethoscope" = "Стетоскоп";
+"catalogIcon.pill" = "Таблетка";
 "catalogIcon.tag" = "Тег";

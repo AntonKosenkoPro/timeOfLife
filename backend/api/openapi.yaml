@@ -1247,6 +1247,22 @@ components:
         - heart
         - leaf
         - sparkles
+        - pawprint
+        - dog
+        - cat
+        - fish
+        - bird
+        - washer
+        - dryer
+        - dishwasher
+        - refrigerator
+        - sofa
+        - shower
+        - lamp.table
+        - person.2
+        - figure.and.child.holdinghands
+        - stethoscope
+        - pill
         - tag
 
     # ---------- Catalog request schemas ----------
