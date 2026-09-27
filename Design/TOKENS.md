@@ -128,6 +128,22 @@ Allowed set for category icons (F2); default is `tag`. This is the documented mi
 | `heart` | Wellness |
 | `leaf` | Nature / outdoors |
 | `sparkles` | Misc / other |
+| `pawprint` | Pets / animals |
+| `dog` | Pets / dog |
+| `cat` | Pets / cat |
+| `fish` | Pets / fish |
+| `bird` | Pets / bird |
+| `washer` | Home / laundry |
+| `dryer` | Home / laundry |
+| `dishwasher` | Home / kitchen |
+| `refrigerator` | Home / kitchen |
+| `sofa` | Home / living room |
+| `shower` | Home / bathroom |
+| `lamp.table` | Home / lighting |
+| `person.2` | Family / people |
+| `figure.and.child.holdinghands` | Family / parenting |
+| `stethoscope` | Body / health |
+| `pill` | Body / medication |
 | `tag` | Category marker |
 
 ### Management icons
