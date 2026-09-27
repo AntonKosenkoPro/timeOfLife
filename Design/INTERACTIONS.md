@@ -97,7 +97,7 @@ When a screen’s main purpose is to collect input from a single field (email, O
 ### Auth transitions
 
 - Auth screens (Welcome → Email → OTP) are pushed on the shared `AppNavigationStack`.
-- Use the system `NavigationStack` push slide. Do not add custom `.transition()` modifiers that could break the iOS 15 `NavigationView(.stack)` polyfill.
+- Use the system `NavigationStack` push slide. Do not add custom `.transition()` modifiers.
 - iOS 18 native zoom navigation transitions are noted as future-only and require a separate decision.
 
 ## Haptics
@@ -114,8 +114,7 @@ Keep haptics subtle. Do not vibrate on every keystroke.
 ## Navigation
 
 - Use `AppNavigationStack` for programmatic push/pop.
-- iOS 16+ uses `NavigationStack` + `navigationDestination(for:)`.
-- iOS 15 uses `NavigationView(.stack)` with a hidden `NavigationLink` bound to `path.last`.
+- Navigation renders in a `NavigationStack` + `navigationDestination(for:)`.
 - Do not use `NavigationLink` directly for programmatic navigation.
 
 ## App shell (Track / History / Insights / Profile)

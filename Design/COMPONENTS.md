@@ -422,7 +422,7 @@ struct TagSelector: View {
 
 ### Visual
 
-- Wrapping flow of content-sized chips (each chip as wide as its icon/checkmark, name, and uniform padding), left-aligned, equal `Theme.spacingSmall` gaps between chips and rows, compatible with iOS 15 (rows packed from measured chip widths).
+- Wrapping flow of content-sized chips (each chip as wide as its icon/checkmark, name, and uniform padding), left-aligned, equal `Theme.spacingSmall` gaps between chips and rows, laid out by the shared `FlowLayout` (`Layout` protocol).
 - Unselected chip: only the category icon (30% larger than `.caption`, scaling with Dynamic Type) + name (`.caption`); `Theme.backgroundSecondary` fill + 1 pt `Theme.hairline` border; no outline circle.
 - Selected chip: the icon is swapped for a `checkmark` of the same enlarged size (`.semibold`); `Theme.accentPrimary` fill, `Theme.textOnAccent` icon/checkmark and text; no outline circle.
 - Each chip: `Theme.spacingChip` (10 pt) uniform padding on all sides, `minHeight Theme.minTapArea` (44 pt — Apple HIG / WCAG 2.2 SC 2.5.5 AAA), `Capsule` shape; long names truncate with `lineLimit(1)`.
@@ -484,10 +484,8 @@ struct RecentActivitiesChips: View {
 ### Visual
 
 - Wrapping flow of content-sized chips, left-aligned, equal `Theme.spacingSmall`
-  gaps between chips and rows. Rows are packed from measured chip widths (the
-  `Layout` protocol is iOS 16+ and the app supports iOS 15 — same greedy
-  packing algorithm as `TagSelector`, container width via `GeometryReader` +
-  preference key).
+  gaps between chips and rows, laid out by the shared `FlowLayout`
+  (same greedy packing as `TagSelector`).
 - Cap of six, most-recently-used first (`activities.prefix(6)`; the store
   already sorts by `last_used_at`).
 - Each chip: fixed icon slot with the first assigned Category's

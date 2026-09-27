@@ -28,7 +28,7 @@ Seeded once per local dataset by the `category_starters_seeded` marker. Deleting
 
 ### Layout
 
-Use the existing Profile-owned `NavigationView` stack (iOS 15-compatible).
+Use the existing Profile-owned `NavigationStack`.
 
 - Inline navigation title: `L10n.manageCategoriesTitle`.
 - Toolbar trailing: `Image(systemName: "plus")` button, `accessibilityIdentifier("ManageCategoriesAddButton")` → presents `CategoryEditor` in create mode (sheet, D21).

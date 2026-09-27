@@ -49,7 +49,7 @@ docker-compose up -d postgres
 go run ./cmd/server         # serves http://127.0.0.1:8080 (watch stdout for OTP codes)
 ```
 
-### iOS (`/ios/TimeOfLife`) — SwiftUI, iOS 15+
+### iOS (`/ios/TimeOfLife`) — SwiftUI, iOS 18+
 
 XcodeGen-managed: edit `project.yml`, run `xcodegen generate` — never hand-edit the `.pbxproj`.
 
