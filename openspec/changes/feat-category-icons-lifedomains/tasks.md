@@ -21,6 +21,6 @@
 
 ## 4. Verification
 
-- [ ] 4.1 Backend: `gofmt -l .` empty, `go vet ./...`, `go test ./...` green (incl. `TestSpec_CategoryIconEnumMatchesGo`).
-- [ ] 4.2 iOS: `swiftlint lint --strict` clean, warning-as-error Simulator build green, full test suite green on a booted simulator (incl. `CatalogIconTests`, `LocalizationTests`).
-- [ ] 4.3 Push branch `feat/38-category-icons-lifedomains` and open a PR targeting `main` ("Fixes #38", final symbol table + verification evidence). DO NOT merge.
+- [x] 4.1 Backend: `gofmt -l .` empty, `go vet ./...`, `go test ./...` green (incl. `TestSpec_CategoryIconEnumMatchesGo`).
+- [x] 4.2 iOS: `swiftlint lint --strict` clean, warning-as-error Simulator build green, full test suite green on a booted simulator (incl. `CatalogIconTests`, `LocalizationTests`).
+- [x] 4.3 Push branch `feat/38-category-icons-lifedomains` and open a PR targeting `main` (PR #53: "Fixes #38", final symbol table + verification evidence). DO NOT merge.
