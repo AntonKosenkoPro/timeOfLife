@@ -166,12 +166,18 @@
 "entry.lockedNote" = "Imported via %@ — editing is disabled to avoid conflicts with the source.";
 "entry.nameLabel" = "Name";
 "entry.namePlaceholder" = "e.g. Gym";
+"entry.duration" = "Duration: %@";
+"entry.invalidInterval" = "End must be after Start";
 "entry.categoriesLabel" = "Categories";
 "entry.notesLabel" = "Notes";
 "entry.notesPlaceholder" = "Optional notes";
 
 // History manual entry (add-manual-entry)
 "history.logTime" = "Log time";
+
+// Name-field affordances (clear + autocomplete suggestions)
+"name.clear" = "Clear name";
+"name.suggestions" = "Suggestions";
 
 // Starter categories (category-management spec, seed requirement)
 "category.seed.work" = "Work";

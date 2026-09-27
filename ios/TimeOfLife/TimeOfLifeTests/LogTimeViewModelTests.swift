@@ -1,3 +1,4 @@
+// swiftlint:disable file_length
 import Testing
 import Foundation
 @testable import TimeOfLife
@@ -340,6 +341,98 @@ struct LogTimeViewModelTests {
 
         #expect(await vm.deleteConfirmed() == false)
         #expect(try await store.undoBufferMostRecent() == nil)
+    }
+
+    // MARK: - Duration subtitle helper (feat-entry-duration-subtitle)
+
+    @Test("durationSubtitleSeconds returns the interval seconds when valid")
+    func durationSubtitleValid() {
+        let vm = makeViewModel()
+        // Fresh sheet: Start floored, End = Start + 1h.
+        #expect(vm.durationSubtitleSeconds == 3_600)
+    }
+
+    @Test("durationSubtitleSeconds is nil when End is at or before Start")
+    func durationSubtitleInvalid() {
+        let vm = makeViewModel()
+        vm.setEndsAt(vm.startsAt)
+        #expect(vm.durationSubtitleSeconds == nil)
+        vm.setEndsAt(vm.startsAt.addingTimeInterval(-60))
+        #expect(vm.durationSubtitleSeconds == nil)
+    }
+
+    // MARK: - Name suggestions (feat-name-field-affordances)
+
+    @Test("nameSuggestions matches recents by case-insensitive prefix")
+    func nameSuggestionsPrefix() {
+        let vm = makeViewModel()
+        vm.nameRecents = [
+            RecentEntry(activityText: "Gym", categoryIDs: ["c1"], startedAt: Date()),
+            RecentEntry(activityText: "Gymnastics", categoryIDs: [], startedAt: Date()),
+            RecentEntry(activityText: "Reading", categoryIDs: [], startedAt: Date()),
+        ]
+        vm.name = "gy"
+        #expect(vm.nameSuggestions().map(\.activityText) == ["Gym", "Gymnastics"])
+    }
+
+    @Test("nameSuggestions excludes the exact match but keeps case variants")
+    func nameSuggestionsExactExcluded() {
+        let vm = makeViewModel()
+        vm.nameRecents = [
+            RecentEntry(activityText: "Gym", categoryIDs: ["c1"], startedAt: Date()),
+            RecentEntry(activityText: "GYM", categoryIDs: ["c2"], startedAt: Date()),
+        ]
+        vm.name = "Gym"
+        #expect(vm.nameSuggestions().map(\.activityText) == ["GYM"])
+    }
+
+    @Test("nameSuggestions is empty for empty input")
+    func nameSuggestionsEmpty() {
+        let vm = makeViewModel()
+        vm.nameRecents = [RecentEntry(activityText: "Gym", categoryIDs: [], startedAt: Date())]
+        vm.name = "   "
+        #expect(vm.nameSuggestions().isEmpty)
+    }
+
+    @Test("applySuggestion fills text plus ordered categories without touching the rest")
+    func applySuggestionFills() {
+        let vm = makeViewModel()
+        vm.notes = "keep me"
+        vm.applySuggestion(text: "Gym", categoryIDs: ["c1", "c2"])
+        #expect(vm.name == "Gym")
+        #expect(vm.categoryIDs == ["c1", "c2"])
+        #expect(vm.notes == "keep me")
+        #expect(vm.isAddEnabled)
+    }
+
+    @Test("clearName empties the text only")
+    func clearNameEmptiesTextOnly() {
+        let vm = makeViewModel()
+        vm.name = "Gym"
+        vm.toggleCategory("c1")
+        vm.clearName()
+        #expect(vm.name.isEmpty)
+        #expect(vm.categoryIDs == ["c1"])
+        #expect(!vm.isAddEnabled)
+    }
+
+    @Test("loadNameRecentsIfNeeded loads the store recents once")
+    func loadNameRecentsLoads() async throws {
+        let store = try await makeStore()
+        let start = Date(timeIntervalSinceReferenceDate: 20_000)
+        try await store.createEntry(TimeEntry(
+            id: "e9", activityText: "Gym",
+            startedAt: start, endedAt: start.addingTimeInterval(600),
+            durationSeconds: 600, source: "manual",
+            categoryIDs: [], notes: "",
+            createdAt: start, updatedAt: start
+        ))
+        let vm = makeViewModel(store: store)
+        await vm.loadNameRecentsIfNeeded(store: store)
+        #expect(vm.nameRecents.map(\.activityText) == ["Gym"])
+        // Idempotent: a second load keeps the first result.
+        await vm.loadNameRecentsIfNeeded(store: store)
+        #expect(vm.nameRecents.count == 1)
     }
 
     // MARK: - Helpers

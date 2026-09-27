@@ -136,12 +136,18 @@ enum L10n: String, CaseIterable {
     case entryLockedNote = "entry.lockedNote"
     case entryNameLabel = "entry.nameLabel"
     case entryNamePlaceholder = "entry.namePlaceholder"
+    case entryDuration = "entry.duration"
+    case entryInvalidInterval = "entry.invalidInterval"
     case entryCategoriesLabel = "entry.categoriesLabel"
     case entryNotesLabel = "entry.notesLabel"
     case entryNotesPlaceholder = "entry.notesPlaceholder"
 
     // History manual entry (add-manual-entry)
     case historyLogTime = "history.logTime"
+
+    // Name-field affordances (feat-name-field-affordances: clear + autocomplete)
+    case nameClear = "name.clear"
+    case nameSuggestions = "name.suggestions"
 
     // Starter categories (category-management spec, seed requirement)
     case categorySeedWork = "category.seed.work"

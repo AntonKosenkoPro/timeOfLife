@@ -117,14 +117,16 @@ struct LogTimeView: View {
         .scrollDismissesKeyboard(.interactively)
     }
 
-    /// The navigation chrome shared by both presentations: title, bar
-    /// actions, delete confirmation, and category loading.
+    /// The navigation chrome shared by both presentations: title +
+    /// duration subtitle, bar actions, delete confirmation, and data loads.
     @ViewBuilder
     private func chrome<Content: View>(_ content: Content) -> some View {
         content
-            .navigationTitle(formTitle)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                ToolbarItem(placement: .principal) {
+                    titleSubtitle
+                }
                 ToolbarItem(placement: .cancellationAction) {
                     Button(L10n.logTimeCancel.text) { dismiss() }
                 }
@@ -151,7 +153,38 @@ struct LogTimeView: View {
             }
             .task {
                 await vm.loadCategoriesIfNeeded(store: container.localStore)
+                await vm.loadNameRecentsIfNeeded(store: container.localStore)
             }
+    }
+
+    /// Live duration subtitle in the nav bar (feat-entry-duration-subtitle):
+    /// the mode title plus a footnote line — the natural-language interval
+    /// duration while End is after Start, or the invalid-interval
+    /// explanation in red (the confirm is disabled) otherwise. Display-only
+    /// over the already-published `startsAt`/`endsAt`.
+    private var titleSubtitle: some View {
+        VStack(spacing: 0) {
+            Text(formTitle)
+                .font(.headline)
+                .lineLimit(1)
+            if let seconds = vm.durationSubtitleSeconds {
+                Text(String(
+                    format: L10n.entryDuration.text,
+                    locale: .current,
+                    HistoryViewModel.naturalDuration(seconds)
+                ))
+                .font(.footnote)
+                .foregroundStyle(Theme.textSecondary)
+                .lineLimit(1)
+            } else {
+                Text(L10n.entryInvalidInterval.text)
+                    .font(.footnote)
+                    .foregroundStyle(Theme.danger)
+                    .lineLimit(1)
+            }
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("EntryDurationSubtitle")
     }
 
     /// Mode-specific navigation title (localized).
@@ -187,12 +220,56 @@ struct LogTimeView: View {
                 Text(L10n.entryNameLabel.text)
                     .font(.caption)
                     .foregroundStyle(Theme.textSecondary)
-                TextField(L10n.entryNamePlaceholder.text, text: $vm.name)
-                    .submitLabel(.done)
-                    .focused($focusedField, equals: .name)
-                    .font(.body)
-                    .frame(minHeight: Theme.minTapArea)
+                HStack(spacing: 0) {
+                    TextField(L10n.entryNamePlaceholder.text, text: $vm.name)
+                        .submitLabel(.done)
+                        .focused($focusedField, equals: .name)
+                        .font(.body)
+                        .frame(maxWidth: .infinity, minHeight: Theme.minTapArea)
+                    if !vm.isLocked, !vm.name.isEmpty {
+                        ClearTextButton(action: { vm.clearName() }, accessibilityId: "EntryNameClearButton")
+                    }
+                }
+                if !vm.isLocked {
+                    nameSuggestions
+                }
             }
+        }
+    }
+
+    /// Autocomplete suggestions from recent entry texts
+    /// (feat-name-field-affordances): inline list inside the name card;
+    /// picking one fills the draft and inherits that entry's ordered
+    /// categories. Pure function of draft + loaded recents — no open/close
+    /// state, no history mutation.
+    @ViewBuilder private var nameSuggestions: some View {
+        let suggestions = vm.nameSuggestions()
+        if !suggestions.isEmpty {
+            VStack(alignment: .leading, spacing: 0) {
+                ForEach(Array(suggestions.enumerated()), id: \.element.id) { index, suggestion in
+                    Button {
+                        vm.applySuggestion(
+                            text: suggestion.activityText,
+                            categoryIDs: suggestion.categoryIDs
+                        )
+                    } label: {
+                        Text(suggestion.activityText)
+                            .font(.body)
+                            .lineLimit(1)
+                            .foregroundStyle(Theme.textPrimary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .frame(minHeight: Theme.minTapArea)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("EntryNameSuggestion\(index)")
+                    if index < suggestions.count - 1 {
+                        Divider()
+                    }
+                }
+            }
+            .accessibilityIdentifier("EntryNameSuggestions")
+            .accessibilityLabel(L10n.nameSuggestions.text)
         }
     }
 

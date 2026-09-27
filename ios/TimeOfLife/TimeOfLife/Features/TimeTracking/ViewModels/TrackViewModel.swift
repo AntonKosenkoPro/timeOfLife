@@ -1,3 +1,4 @@
+// swiftlint:disable file_length
 import Combine
 import Foundation
 import SwiftUI
@@ -175,6 +176,31 @@ final class TrackViewModel: ObservableObject {
         state = .ready(TrackState.Draft(text: recent.text, categoryIDs: recent.categoryIDs))
         elapsed = 0
         Haptics.selection()
+    }
+
+    /// Autocomplete suggestions for the name field
+    /// (feat-name-field-affordances): recents whose text starts with the
+    /// trimmed draft (case-insensitive prefix), excluding the
+    /// case-sensitive exact match so `Gym` ≠ `GYM` identity is preserved.
+    /// Newest-first order preserved. Pure over loaded recents.
+    func nameSuggestions() -> [RecentEntry] {
+        let prefix = trimmedName
+        guard !prefix.isEmpty else { return [] }
+        let lowered = prefix.lowercased()
+        return recents.filter {
+            $0.text != prefix && $0.text.lowercased().hasPrefix(lowered)
+        }
+    }
+
+    /// Clears the name-field draft (clear button): empties the text and
+    /// re-syncs to idle, cancelling a deferred start. Never called while
+    /// running (the name is locked then).
+    func clearNameDraft() {
+        guard !state.isRunning else { return }
+        pendingStart?.cancel()
+        pendingStart = nil
+        nameDraft = ""
+        syncReadyFromDraft()
     }
 
     /// Starts the prepared name (timer-capture-experience spec); typing or
