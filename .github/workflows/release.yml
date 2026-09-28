@@ -1,0 +1,200 @@
+name: release
+
+# Manual release bump: workflow_dispatch with the desired marketing version.
+# Edits ios/TimeOfLife/project.yml (the single version writer — design.md D1)
+# and mirrors the two values into the tracked Info.plist statics (xcodegen
+# rewrites that file from project.yml on every generate, so the mirror keeps
+# the committed file from reading stale between the bump and the next
+# generate; generation remains authoritative), then commits
+# chore(release): bump to X.Y.Z (N) and pushes annotated tag vX.Y.Z.
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Marketing version to release (X.Y.Z semver, e.g. 1.0.0)"
+        required: true
+        type: string
+
+# First workflow in this repo with write access (ios.yml is contents: read):
+# the bump commit + annotated tag must be pushed back to main.
+permissions:
+  contents: write
+
+# Two runs must never interleave (both read build N, both write N+1).
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  bump-and-tag:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # full history so the tag has ancestry and pushes cleanly
+
+      - name: Guard — must run on main
+        run: |
+          if [ "${{ github.ref }}" != "refs/heads/main" ]; then
+            echo "::error::Release workflow must run on the main branch (got '${{ github.ref }}')."
+            exit 1
+          fi
+
+      - name: Guard — version must be X.Y.Z semver
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Invalid version '$VERSION'. Expected numeric X.Y.Z semver (e.g. 1.0.0; not '1.0', 'v1.0.0', or '1.0.0-beta'). Nothing changed."
+            exit 1
+          fi
+
+      - name: Guard — working tree must be clean
+        run: |
+          if [ -n "$(git status --porcelain)" ]; then
+            echo "::error::Working tree is dirty. Commit or stash changes first; nothing changed."
+            git status --porcelain
+            exit 1
+          fi
+
+      - name: Guard — version must be strictly greater than current
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          python3 - <<'EOF'
+          import os
+          import re
+          import sys
+
+          requested = os.environ["VERSION"]
+          with open("ios/TimeOfLife/project.yml", encoding="utf-8") as f:
+              text = f.read()
+          m = re.search(r'CFBundleShortVersionString:\s*"([^"]+)"', text)
+          if not m:
+              print("::error::Could not find CFBundleShortVersionString in ios/TimeOfLife/project.yml.")
+              sys.exit(1)
+          current = m.group(1)
+
+
+          def normalize(v):
+              parts = v.split(".")
+              if len(parts) == 2:  # legacy two-component "1.0" == "1.0.0" for compare
+                  parts.append("0")
+              return tuple(int(p) for p in parts)
+
+
+          if tuple(int(p) for p in requested.split(".")) <= normalize(current):
+              print(
+                  f"::error::Requested version {requested} is not strictly greater "
+                  f"than current {current}. Nothing changed."
+              )
+              sys.exit(1)
+          print(f"Version check passed: current={current} requested={requested}")
+          EOF
+
+      - name: Bump project.yml (marketing + build, assert equality)
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          python3 - <<'EOF'
+          import os
+          import re
+          import sys
+
+          path = "ios/TimeOfLife/project.yml"
+          requested = os.environ["VERSION"]
+          with open(path, encoding="utf-8") as f:
+              text = f.read()
+
+          m = re.search(r'CFBundleVersion:\s*"(\d+)"', text)
+          if not m:
+              print("::error::Could not find numeric CFBundleVersion in project.yml.")
+              sys.exit(1)
+          new_build = str(int(m.group(1)) + 1)
+
+          # Overwrite wholesale: also normalizes legacy two-component "1.0".
+          text, n1 = re.subn(
+              r'CFBundleShortVersionString:\s*"[^"]+"',
+              f'CFBundleShortVersionString: "{requested}"',
+              text,
+              count=1,
+          )
+          text, n2 = re.subn(
+              r'CFBundleVersion:\s*"[^"]+"',
+              f'CFBundleVersion: "{new_build}"',
+              text,
+              count=1,
+          )
+          text, n3 = re.subn(
+              r'CURRENT_PROJECT_VERSION:\s*"[^"]+"',
+              f'CURRENT_PROJECT_VERSION: "{new_build}"',
+              text,
+              count=1,
+          )
+          if not (n1 == 1 and n2 == 1 and n3 == 1):
+              print(f"::error::Expected to edit 3 version fields, edited ({n1}, {n2}, {n3}).")
+              sys.exit(1)
+
+          # Equality assertion before anything is written.
+          short = re.search(r'CFBundleShortVersionString:\s*"([^"]+)"', text).group(1)
+          bundle = re.search(r'CFBundleVersion:\s*"([^"]+)"', text).group(1)
+          current_proj = re.search(r'CURRENT_PROJECT_VERSION:\s*"([^"]+)"', text).group(1)
+          assert short == requested, f"marketing mismatch: {short} != {requested}"
+          assert bundle == current_proj, f"build drift: CFBundleVersion={bundle} != CURRENT_PROJECT_VERSION={current_proj}"
+
+          with open(path, "w", encoding="utf-8") as f:
+              f.write(text)
+          print(f"Bumped to {short} ({bundle}); CFBundleVersion == CURRENT_PROJECT_VERSION holds.")
+
+          # Mirror into the tracked Info.plist statics so the committed file
+          # never reads stale between this bump and the next xcodegen
+          # generate (which rewrites it from project.yml anyway).
+          plist = "ios/TimeOfLife/TimeOfLife/Configuration/Info.plist"
+          with open(plist, encoding="utf-8") as f:
+              ptext = f.read()
+          ptext, p1 = re.subn(
+              r"(<key>CFBundleShortVersionString</key>\s*<string>)[^<]+(</string>)",
+              rf"\g<1>{requested}\g<2>",
+              ptext,
+              count=1,
+          )
+          ptext, p2 = re.subn(
+              r"(<key>CFBundleVersion</key>\s*<string>)[^<]+(</string>)",
+              rf"\g<1>{new_build}\g<2>",
+              ptext,
+              count=1,
+          )
+          if not (p1 == 1 and p2 == 1):
+              print(f"::error::Expected to mirror 2 Info.plist keys, mirrored ({p1}, {p2}).")
+              sys.exit(1)
+          with open(plist, "w", encoding="utf-8") as f:
+              f.write(ptext)
+          print(f"Mirrored {requested} ({new_build}) into Info.plist.")
+          EOF
+
+      - name: Commit, tag, and push
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          BUILD=$(python3 -c 'import re; print(re.search(r"CFBundleVersion:\s*\"([^\"]+)\"", open("ios/TimeOfLife/project.yml").read()).group(1))')
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add ios/TimeOfLife/project.yml ios/TimeOfLife/TimeOfLife/Configuration/Info.plist
+          git commit -m "chore(release): bump to $VERSION ($BUILD)"
+          git tag -a "v$VERSION" -m "Release $VERSION ($BUILD)"
+          git push origin HEAD:main
+          git push origin "v$VERSION"
+
+      - name: Summary
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          {
+            echo "## Release v$VERSION"
+            echo ""
+            echo "Bumped \`ios/TimeOfLife/project.yml\` to \`$VERSION\` (Info.plist mirrored), committed, tagged \`v$VERSION\`, and pushed."
+            echo ""
+            echo "Note: the bump commit touches \`ios/**\` on \`main\`, so it will trigger \`ios.yml\` — this is intended verification, not a loop to avoid."
+          } >> "$GITHUB_STEP_SUMMARY"

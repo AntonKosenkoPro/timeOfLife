@@ -93,6 +93,9 @@
 "profile.eraseLocalDataConfirmMessage" = "This permanently deletes all categories, entries, and pending sync data on this device.";
 "profile.eraseConfirm" = "Erase";
 "profile.eraseCancel" = "Cancel";
+// Build-configuration suffix for the Profile version row (universal
+// technical term — identical in ru).
+"profile.versionDebugSuffix" = "Debug";
 
 // Destination empty states
 "history.emptyTitle" = "Nothing here yet";
