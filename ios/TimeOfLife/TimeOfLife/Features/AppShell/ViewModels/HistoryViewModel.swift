@@ -108,9 +108,12 @@ final class HistoryViewModel: ObservableObject {
         return "\(start) – \(Self.timeText(for: endedAt))"
     }
 
-    /// The entry's natural-language duration; an in-progress entry shows the
-    /// localized in-progress indicator instead (D5).
-    func durationText(for entry: TimeEntry) -> String {
+    /// The entry's natural-language duration in the given locale; an
+    /// in-progress entry shows the localized in-progress indicator
+    /// instead (D5).
+    /// - Note: the in-progress indicator intentionally follows the app
+    ///   language (`L10n`), not `locale`.
+    func durationText(for entry: TimeEntry, locale: Locale = .current) -> String {
         if isInProgress(entry) {
             return L10n.historyInProgress.text
         }
@@ -118,7 +121,7 @@ final class HistoryViewModel: ObservableObject {
             start: entry.startedAt,
             end: entry.endedAt
         )
-        return Self.naturalDuration(seconds)
+        return Self.naturalDuration(seconds, locale: locale)
     }
 
     /// The entry's own ordered categories, position-preserved, unknown ids
@@ -131,7 +134,15 @@ final class HistoryViewModel: ObservableObject {
 
     /// Groups entries by the calendar day of `startedAt` (D2): newest day
     /// first, entries within a day newest first, per-day totals (D8).
-    nonisolated static func makeDayGroups(entries: [TimeEntry], now: Date, calendar: Calendar = .current) -> [DayGroup] {
+    /// - Note: `locale` governs durations only (row durations via
+    ///   `durationText`, day totals). Group headings intentionally follow
+    ///   the app language and calendar (`dayLabel`), never `locale`.
+    nonisolated static func makeDayGroups(
+        entries: [TimeEntry],
+        now: Date,
+        calendar: Calendar = .current,
+        locale: Locale = .current
+    ) -> [DayGroup] {
         let sorted = entries.sorted { $0.startedAt > $1.startedAt }
         var buckets: [String: [TimeEntry]] = [:]
         var order: [String] = []
@@ -149,7 +160,10 @@ final class HistoryViewModel: ObservableObject {
                 id: key,
                 label: dayLabel(for: day, now: now, calendar: calendar),
                 entries: dayEntries,
-                total: naturalDuration(dayEntries.reduce(0) { $0 + ($1.durationSeconds ?? 0) })
+                total: naturalDuration(
+                    dayEntries.reduce(0) { $0 + ($1.durationSeconds ?? 0) },
+                    locale: locale
+                )
             )
         }
     }
@@ -172,8 +186,11 @@ final class HistoryViewModel: ObservableObject {
         }
     }
 
-    /// Natural-language duration: `33s`, `1m 20s`, `1h 12m`, `1d 12h` (D5).
-    nonisolated static func naturalDuration(_ seconds: Int) -> String {
+    /// Natural-language duration in the given locale (`33s`, `1m 20s`,
+    /// `1h 12m`, `1d 12h` in English; locale-correct abbreviations and
+    /// plurals elsewhere, e.g. `1 ч 12 мин` in Russian) (D5). The grammar —
+    /// which tiers appear — is fixed here; Foundation owns the unit words.
+    nonisolated static func naturalDuration(_ seconds: Int, locale: Locale = .current) -> String {
         let total = max(0, seconds)
         let days = total / 86_400
         let hours = (total % 86_400) / 3_600
@@ -181,15 +198,66 @@ final class HistoryViewModel: ObservableObject {
         let secs = total % 60
 
         if days > 0 {
-            return hours > 0 ? "\(days)d \(hours)h" : "\(days)d"
+            return hours > 0
+                ? "\(day(days, locale)) \(hour(hours, locale))"
+                : day(days, locale)
         }
         if hours > 0 {
-            return minutes > 0 ? "\(hours)h \(minutes)m" : "\(hours)h"
+            return minutes > 0
+                ? "\(hour(hours, locale)) \(minute(minutes, locale))"
+                : hour(hours, locale)
         }
         if minutes > 0 {
-            return secs > 0 ? "\(minutes)m \(secs)s" : "\(minutes)m"
+            return secs > 0
+                ? "\(minute(minutes, locale)) \(second(secs, locale))"
+                : minute(minutes, locale)
         }
-        return "\(secs)s"
+        return second(secs, locale)
+    }
+
+    /// Locale-aware single-unit words backing `naturalDuration` (one tiny
+    /// `DateComponentsFormatter` each: a whole-string formatter cannot
+    /// reproduce the two-tier grammar). The calendar is fixed to Gregorian —
+    /// unit words do not depend on the calendar system — with the caller's
+    /// locale applied to it.
+    nonisolated private static func day(_ value: Int, _ locale: Locale) -> String {
+        unit(value, .day, locale)
+    }
+
+    nonisolated private static func hour(_ value: Int, _ locale: Locale) -> String {
+        unit(value, .hour, locale)
+    }
+
+    nonisolated private static func minute(_ value: Int, _ locale: Locale) -> String {
+        unit(value, .minute, locale)
+    }
+
+    nonisolated private static func second(_ value: Int, _ locale: Locale) -> String {
+        unit(value, .second, locale)
+    }
+
+    nonisolated private static func unit(_ value: Int, _ component: Calendar.Component, _ locale: Locale) -> String {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.locale = locale
+        let formatter = DateComponentsFormatter()
+        formatter.unitsStyle = .abbreviated
+        formatter.calendar = calendar
+        var components = DateComponents()
+        switch component {
+        case .day:
+            components.day = value
+            formatter.allowedUnits = [.day]
+        case .hour:
+            components.hour = value
+            formatter.allowedUnits = [.hour]
+        case .minute:
+            components.minute = value
+            formatter.allowedUnits = [.minute]
+        default:
+            components.second = value
+            formatter.allowedUnits = [.second]
+        }
+        return formatter.string(from: components) ?? "\(value)"
     }
 
     /// Short-time caption ("14:00").

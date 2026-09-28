@@ -8,7 +8,7 @@ This capability answers "where does my time actually go?" — a read-only, perio
 
 
 ### Requirement: Period-scoped breakdown with hero total
-The Insights destination SHALL present a hero total of committed tracked time for the selected period plus a proportional breakdown of that time, scoped by a period switch (`Today | This week | All time`, default `This week`). Only committed entries (`endedAt != nil`, NULL durations contributing zero) SHALL contribute; the running timer is excluded from all numbers. Entries are bucketed by the calendar day of `startedAt` (device calendar, same day-boundary rule as History); `Today` covers the calendar day containing now (start-of-day to start-of-next-day, so future-dated manual entries count by `startedAt` with no special-casing), `This week` covers the locale week interval containing now, `All time` covers everything.
+The Insights destination SHALL present a hero total of committed tracked time for the selected period plus a proportional breakdown of that time, scoped by a period switch (`Today | This week | All time`, default `This week`). Only committed entries (`endedAt != nil`, NULL durations contributing zero) SHALL contribute; the running timer is excluded from all numbers. The hero total and all row durations SHALL render in the device locale's natural language with locale-correct unit abbreviations and plurals (e.g. English `1h 20m`; Russian uses Russian abbreviations). Entries are bucketed by the calendar day of `startedAt` (device calendar, same day-boundary rule as History); `Today` covers the calendar day containing now (start-of-day to start-of-next-day, so future-dated manual entries count by `startedAt` with no special-casing), `This week` covers the locale week interval containing now, `All time` covers everything.
 
 #### Scenario: Default view
 - **WHEN** the user opens Insights with tracked time in the current week
@@ -21,6 +21,10 @@ The Insights destination SHALL present a hero total of committed tracked time fo
 #### Scenario: Running timer excluded
 - **WHEN** a timer is running and the user opens Insights
 - **THEN** the hero and rows reflect committed entries only, and the compact timer remains visible above the tab bar per the app-shell contract
+
+#### Scenario: Hero follows the device locale
+- **WHEN** the device locale is Russian
+- **THEN** the hero total and row durations render with Russian unit abbreviations (not English `h`/`m`/`s`)
 
 ### Requirement: Category and activity lenses with full-credit attribution
 The breakdown SHALL offer a lens toggle (`By category | By activity`, default `By category`). The activity lens SHALL group committed entries by trimmed exact text (`Gym` and `GYM` are distinct rows) and attribute each entry's full duration to its text row (rows sum to the hero). The category lens SHALL attribute each committed entry's full duration to **every** category stored on that entry; category rows MAY therefore sum above the hero, which is correct behavior, not an error. Entries with no categories SHALL aggregate into a localized "Without category" row that sorts by its own total like any other row. No edit on one entry SHALL reclassify any other entry.
@@ -41,7 +45,7 @@ The breakdown SHALL offer a lens toggle (`By category | By activity`, default `B
 - **WHEN** the user changes one entry's categories and reopens Insights (retags are per-entry; no other entry reclassifies)
 - **THEN** only that entry contributes to the updated category set; same-text entries are unchanged
 ### Requirement: Mirror-only presentation
-Insights SHALL observe without judging: rows SHALL show icon, name, duration, and a proportional bar scaled to the **max row** (relative presence, never scaled to the hero and never implying summation). The screen SHALL show no percentages, targets, streaks, goals, deltas, comparisons, or red/green judgments. Rows SHALL NOT be tappable — no drill-in, filtering, or export. The category lens SHALL carry a one-line footnote naming the full-credit rule ("An activity with several categories counts fully toward each", localized).
+Insights SHALL observe without judging: rows SHALL show icon, name, duration, and a proportional bar scaled to the **max row** (relative presence, never scaled to the hero and never implying summation). Row durations SHALL use the same locale-aware natural language as the hero. The screen SHALL show no percentages, targets, streaks, goals, deltas, comparisons, or red/green judgments. Rows SHALL NOT be tappable — no drill-in, filtering, or export. The category lens SHALL carry a one-line footnote naming the full-credit rule ("An activity with several categories counts fully toward each", localized).
 
 #### Scenario: No summation cues on category lens
 - **WHEN** the user views the category lens with multi-category activities

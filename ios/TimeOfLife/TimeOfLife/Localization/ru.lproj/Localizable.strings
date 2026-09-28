@@ -61,18 +61,18 @@
 "timer.stop" = "Стоп";
 "timer.stopHint" = "Останавливает таймер и сохраняет запись";
 "timer.signOut" = "Выйти";
-"timer.idlePrompt" = "Введите название, чтобы начать";
-"timer.namePlaceholder" = "Над чем вы работали?";
-"timer.saved" = "Сохранено";
+"timer.idlePrompt" = "Введите название активности, чтобы начать";
+"timer.namePlaceholder" = "Чем вы сейчас заняты?";
+"timer.saved" = "Запись сохранена";
 "timer.saving" = "Сохранение…";
-"timer.running" = "Идёт";
+"timer.running" = "Идёт запись";
 "timer.ready" = "Готово";
 "timer.chooserRecent" = "Недавние";
-"timer.recentsEmptyHint" = "Здесь появятся названия, которые вы отслеживаете.";
+"timer.recentsEmptyHint" = "Здесь появятся последние сохранённые активности.";
 "timer.selectActivity" = "Выбрать %@";
-"timer.compactStop" = "Остановить и сохранить таймер";
+"timer.compactStop" = "Остановить таймер и сохранить запись";
 "timer.compactReturnHint" = "Вернуться в Трек";
-"timer.compactRunning" = "%@, таймер идёт";
+"timer.compactRunning" = "%@, идёт запись";
 
 // App shell
 "tab.track" = "Трек";
@@ -98,7 +98,7 @@
 "history.emptyTitle" = "Пока пусто";
 "history.emptySubtitle" = "Завершённые сессии появятся здесь в виде хронологии.";
 "insights.emptyTitle" = "Пока пусто";
-"insights.emptySubtitle" = "Закономерности появятся после небольшого объёма учёта времени.";
+"insights.emptySubtitle" = "Аналитика появится после добавления первых записей.";
 
 // History day-group labels
 "history.day.today" = "Сегодня";
@@ -108,10 +108,10 @@
 "history.inProgress" = "В процессе";
 
 // Day total suffix
-"history.tracked" = "отслеживано";
+"history.tracked" = "учтено";
 
 // History pull-to-refresh (history-pull-to-sync)
-"history.pull.offline" = "Нет подключения. Подключитесь и попробуйте снова.";
+"history.pull.offline" = "Нет подключения к сети. Подключитесь и попробуйте снова.";
 "history.syncError.title" = "Не удалось синхронизировать";
 "common.ok" = "ОК";
 
