@@ -7,11 +7,11 @@
 
 - [x] 2.1 Rework `HistoryViewModel.naturalDuration` to `naturalDuration(_:locale:)` (`locale: Locale = .current`), per-call `DateComponentsFormatter` per design.md; no call-site changes.
 - [x] 2.2 Update `NaturalDurationTests` to assert with explicit `en` locale (existing expectations unchanged) plus `ru` expectations from 1.1; update `HistoryViewModelTests` duration assertions to pass explicit `en` locale.
-- [ ] 2.3 Run `swiftlint lint --strict`, the affected suites (`NaturalDurationTests`, `HistoryViewModelTests`, `LocalizationTests`, `InsightsViewModelTests`, `LogTimeViewModelTests`), then the full iOS suite green per `docs/ios-test-loop.md`.
+- [x] 2.3 Run `swiftlint lint --strict`, the affected suites (`NaturalDurationTests`, `HistoryViewModelTests`, `LocalizationTests`, `InsightsViewModelTests`, `LogTimeViewModelTests`), then the full iOS suite green per `docs/ios-test-loop.md`. (Done: lint clean; affected suites green locally; PR #62 CI `lint-build-test` + `validate` green after the count fix. The one-off local `LocalStoreTests/updateCategory` failure never reproduced on CI — treated as a local flake.)
 
 ## 3. Manual verification
 
-- [ ] 3.1 Run the app in RU simulator: History rows, elevated day totals, Insights hero/rows, Log Time subtitle all show Russian units; EN simulator output unchanged (spot-check `1h 20m`, `2h 35m tracked`).
+- [x] 3.1 Run the app in RU simulator: History rows, elevated day totals, Insights hero/rows, Log Time subtitle all show Russian units; EN simulator output unchanged (spot-check `1h 20m`, `2h 35m tracked`). (Done: owner verified RU rendering on device/simulator.)
 - [x] 3.2 Confirm no new `Localizable.strings` keys were needed and `LocalizationTests` parity still holds (228/228).
 
 ## 4. AI-review follow-ups (PR #62)

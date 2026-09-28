@@ -23,7 +23,7 @@ The History destination SHALL display committed `TimeEntry` records as a chronol
 - **THEN** the compact timer remains visible but the running session does not appear as a History entry until the timer is stopped and saved
 
 ### Requirement: Each History row shows entry identity and timing
-Each History row SHALL display the entry's own text (headline), the entry's start–end timeframe and natural-language duration (right-aligned), the entry's own comma-separated category names (left-aligned caption), and the first category's SF Symbol icon (leading, spanning both text lines, top-aligned with the name's cap-height top, not the text frame top). Rows with no categories SHALL render a `questionmark` fallback icon.
+Each History row SHALL display the entry's own text (headline), the entry's start–end timeframe and natural-language duration (right-aligned), the entry's own comma-separated category names (left-aligned caption), and the first category's SF Symbol icon (leading, spanning both text lines, top-aligned with the name's cap-height top, not the text frame top). The duration SHALL render in the device locale's natural language with locale-correct unit abbreviations and plurals (e.g. English `1h 20m`; Russian uses Russian abbreviations). Rows with no categories SHALL render a `questionmark` fallback icon.
 
 #### Scenario: Row with categories
 - **WHEN** an entry has one or more categories
@@ -36,8 +36,12 @@ Each History row SHALL display the entry's own text (headline), the entry's star
 #### Scenario: Entry with no end time
 - **WHEN** an entry has a start time but no end time (duration not yet computed)
 - **THEN** the row shows the start time and an in-progress indicator in place of the end time and duration
+
+#### Scenario: Duration follows the device locale
+- **WHEN** the device locale is Russian and an entry lasted 1 hour 20 minutes
+- **THEN** the row duration renders with Russian unit abbreviations (not `1h 20m`)
 ### Requirement: Day groups use relative-then-absolute labels; total shown when elevated
-Day group headers SHALL use relative labels ("Today", "Yesterday") for the two most recent days and the regional-standard absolute date for older days. A header SHALL show only the day label while in its in-list scroll position. When the header is elevated (pinned at the top of the list), it SHALL also display the total tracked time for that day, right-aligned, formatted in natural language with a localized "tracked" suffix (e.g. "2h 35m tracked"). The day label SHALL be left-aligned to the `EntryRow` icon column's leading edge, and the total SHALL be right-aligned to the `EntryRow` duration/timeframe trailing edge.
+Day group headers SHALL use relative labels ("Today", "Yesterday") for the two most recent days and the regional-standard absolute date for older days. A header SHALL show only the day label while in its in-list scroll position. When the header is elevated (pinned at the top of the list), it SHALL also display the total tracked time for that day, right-aligned, formatted in the device locale's natural language with a localized "tracked" suffix (e.g. English "2h 35m tracked"). The day label SHALL be left-aligned to the `EntryRow` icon column's leading edge, and the total SHALL be right-aligned to the `EntryRow` duration/timeframe trailing edge.
 
 #### Scenario: Today's entries
 - **WHEN** entries exist for the current calendar day
@@ -58,6 +62,10 @@ Day group headers SHALL use relative labels ("Today", "Yesterday") for the two m
 #### Scenario: Day with in-progress entries
 - **WHEN** a day group contains an entry with no end time
 - **THEN** the total counts only entries with a known `durationSeconds`; in-progress entries contribute zero to the total
+
+#### Scenario: Elevated total follows the device locale
+- **WHEN** the device locale is Russian and a header is elevated
+- **THEN** the day total renders with Russian unit abbreviations followed by the localized "tracked" suffix
 
 ### Requirement: History offers no edit, delete, swipe, or long-press actions
 History rows SHALL NOT offer edit, delete, swipe, or long-press actions. Tapping an entry row opens the unified entry form directly (see "Tapping a History entry row opens the entry form").
