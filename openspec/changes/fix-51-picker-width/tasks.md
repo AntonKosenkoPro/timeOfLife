@@ -23,4 +23,4 @@
 
 - [x] 5.1 `swiftlint lint --strict` clean; warning-as-error `xcodebuild` build green; full iOS suite green (serialized per `docs/ios-test-loop.md`). Backend untouched (no `go` run; `openapi.yaml` unmodified).
 - [x] 5.2 Re-check `Requirements/FURPS/Timetracking.md` rows for the entry form; fix conflicts if any.
-- [ ] 5.3 Push + `gh pr create` targeting `main` (title references #51, body carries "Fixes #51" + repro steps + before/after screenshots + root cause with evidence + verification + corners). DO NOT merge. Post no `/review` comment.
+- [x] 5.3 Push + `gh pr create` targeting `main` (title references #51, body carries "Fixes #51" + repro steps + before/after screenshots + root cause with evidence + verification + corners). DO NOT merge. Post no `/review` comment.
