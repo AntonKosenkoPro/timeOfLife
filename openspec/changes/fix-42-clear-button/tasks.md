@@ -31,4 +31,4 @@
 
 ## 6. PR (one PR targeting main)
 
-- [ ] 6.1 Push branch `fix/42-clear-button-conditions`; open PR targeting `main`, title per-issue with "Fixes #42", body with repro + red-test evidence + verification + corners. DO NOT merge. Post no `/review` comment.
+- [x] 6.1 Push branch `fix/42-clear-button-conditions`; open PR targeting `main`, title per-issue with "Fixes #42", body with repro + red-test evidence + verification + corners. DO NOT merge. Post no `/review` comment.
