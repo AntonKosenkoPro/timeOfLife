@@ -121,9 +121,26 @@ struct HistoryViewModelTests {
                 entry(id: "b", startedAt: Self.date("2026-09-03 14:00", calendar: calendar), durationSeconds: 1200)
             ],
             now: now,
-            calendar: calendar
+            calendar: calendar,
+            locale: Locale(identifier: "en")
         )
         #expect(groups[0].total == "1h 40m")
+    }
+
+    @Test("day total renders Russian units under the ru locale")
+    func dayTotalRussianUnits() {
+        let calendar = Calendar(identifier: .gregorian)
+        let now = Self.date("2026-09-03 15:00", calendar: calendar)
+        let groups = HistoryViewModel.makeDayGroups(
+            entries: [
+                entry(id: "a", startedAt: Self.date("2026-09-03 09:00", calendar: calendar), durationSeconds: 4800),
+                entry(id: "b", startedAt: Self.date("2026-09-03 14:00", calendar: calendar), durationSeconds: 1200)
+            ],
+            now: now,
+            calendar: calendar,
+            locale: Locale(identifier: "ru")
+        )
+        #expect(groups[0].total == "1 ч 40 мин")
     }
 
     @Test("in-progress entries contribute zero to the day total")
@@ -136,14 +153,15 @@ struct HistoryViewModelTests {
                 entry(id: "running", startedAt: Self.date("2026-09-03 14:00", calendar: calendar))
             ],
             now: now,
-            calendar: calendar
+            calendar: calendar,
+            locale: Locale(identifier: "en")
         )
         #expect(groups[0].total == "1h 20m")
     }
 
     @Test("empty day total is 0s")
     func emptyDayTotal() {
-        let total = HistoryViewModel.naturalDuration(0)
+        let total = HistoryViewModel.naturalDuration(0, locale: Locale(identifier: "en"))
         #expect(total == "0s")
     }
 
@@ -273,7 +291,7 @@ struct HistoryViewModelTests {
 
         let vm = HistoryViewModel(store: store)
         await vm.loadIfNeeded()
-        #expect(vm.durationText(for: vm.dayGroups[0].entries[0]) == "1m")
+        #expect(vm.durationText(for: vm.dayGroups[0].entries[0], locale: Locale(identifier: "en")) == "1m")
 
         // Edit behind the entry form cover (the updateEntry path).
         var updated = try #require(try await store.entry(id: "e1"))
@@ -285,7 +303,7 @@ struct HistoryViewModelTests {
         vm.invalidate()
         await vm.loadIfNeeded()
         #expect(vm.dayGroups.flatMap(\.entries).map(\.id) == ["e1"])
-        #expect(vm.durationText(for: vm.dayGroups[0].entries[0]) == "1h 1m")
+        #expect(vm.durationText(for: vm.dayGroups[0].entries[0], locale: Locale(identifier: "en")) == "1h 1m")
     }
 
     @Test("deleted entry disappears and empties its day group after reload")
