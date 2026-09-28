@@ -61,14 +61,14 @@
 "timer.stop" = "Stop";
 "timer.stopHint" = "Stops the timer and saves the entry";
 "timer.signOut" = "Sign Out";
-"timer.idlePrompt" = "Enter a name to start";
+"timer.idlePrompt" = "Enter an activity name to start";
 "timer.namePlaceholder" = "What did you work on?";
 "timer.saved" = "Saved";
 "timer.saving" = "Saving…";
 "timer.running" = "Running";
 "timer.ready" = "Ready";
 "timer.chooserRecent" = "Recent";
-"timer.recentsEmptyHint" = "Names you track will appear here.";
+"timer.recentsEmptyHint" = "Activities you track will appear here.";
 "timer.selectActivity" = "Select %@";
 "timer.compactStop" = "Stop and save timer";
 "timer.compactReturnHint" = "Returns to Track";
