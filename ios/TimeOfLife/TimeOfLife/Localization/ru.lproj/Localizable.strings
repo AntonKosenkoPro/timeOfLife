@@ -146,7 +146,6 @@
 
 // Log Time sheet (manual-entry spec)
 "logTime.title" = "Записать время";
-"logTime.add" = "Добавить";
 "logTime.cancel" = "Отмена";
 "logTime.starts" = "Начало";
 "logTime.ends" = "Конец";
@@ -154,7 +153,9 @@
 // Unified entry form (entry-editor spec: EDIT + LOCKED modes)
 "entry.editTitle" = "Редактировать запись";
 "entry.lockedTitle" = "Импортированная запись";
-"entry.save" = "Сохранить";
+"entry.dismissLabel" = "Закрыть";
+"entry.confirmAddLabel" = "Добавить запись";
+"entry.confirmSaveLabel" = "Сохранить запись";
 "entry.delete" = "Удалить запись";
 "entry.deleteTitle" = "Удалить эту запись?";
 "entry.deleteMessage" = "Запись будет удалена. Отменить можно встряской, пока она не синхронизировалась.";

@@ -171,7 +171,11 @@ struct LocalizationTests {
         // feat-entry-duration-subtitle adds entry.duration +
         // entry.invalidInterval; feat-name-field-affordances adds
         // name.clear + name.suggestions; fix-offline-banner-duplication
-        // removes offlineBanner (offline.banner) = 140.
-        #expect(l10nCases.count == 140)
+        // removes offlineBanner (offline.banner) = 140;
+        // fix-50-nav-buttons adds 3 icon-button VoiceOver labels
+        // (entry.dismissLabel + entry.confirmAddLabel +
+        // entry.confirmSaveLabel) and retires 2 text-button keys
+        // (logTime.add + entry.save) = 141.
+        #expect(l10nCases.count == 141)
     }
 }

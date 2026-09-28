@@ -146,7 +146,6 @@
 
 // Log Time sheet (manual-entry spec)
 "logTime.title" = "Log Time";
-"logTime.add" = "Add";
 "logTime.cancel" = "Cancel";
 "logTime.starts" = "Starts";
 "logTime.ends" = "Ends";
@@ -154,7 +153,9 @@
 // Unified entry form (entry-editor spec: EDIT + LOCKED modes)
 "entry.editTitle" = "Edit entry";
 "entry.lockedTitle" = "Imported entry";
-"entry.save" = "Save";
+"entry.dismissLabel" = "Close";
+"entry.confirmAddLabel" = "Add entry";
+"entry.confirmSaveLabel" = "Save entry";
 "entry.delete" = "Delete entry";
 "entry.deleteTitle" = "Delete this entry?";
 "entry.deleteMessage" = "This entry will be deleted. You can shake to undo until it syncs.";

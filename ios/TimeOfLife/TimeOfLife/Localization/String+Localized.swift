@@ -116,7 +116,6 @@ enum L10n: String, CaseIterable {
 
     // Log Time sheet (manual-entry spec)
     case logTimeTitle = "logTime.title"
-    case logTimeAdd = "logTime.add"
     case logTimeCancel = "logTime.cancel"
     case logTimeStarts = "logTime.starts"
     case logTimeEnds = "logTime.ends"
@@ -124,7 +123,11 @@ enum L10n: String, CaseIterable {
     // Unified entry form (entry-editor spec: CREATE + EDIT + LOCKED modes)
     case entryEditTitle = "entry.editTitle"
     case entryLockedTitle = "entry.lockedTitle"
-    case entrySave = "entry.save"
+    // Calendar-grammar icon buttons (fix-50-nav-buttons): VoiceOver labels
+    // for the X dismiss (CREATE sheet) and the checkmark confirms.
+    case entryDismissLabel = "entry.dismissLabel"
+    case entryConfirmAddLabel = "entry.confirmAddLabel"
+    case entryConfirmSaveLabel = "entry.confirmSaveLabel"
     case entryDelete = "entry.delete"
     case entryDeleteTitle = "entry.deleteTitle"
     case entryDeleteMessage = "entry.deleteMessage"
