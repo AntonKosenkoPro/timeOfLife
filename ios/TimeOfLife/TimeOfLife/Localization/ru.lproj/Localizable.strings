@@ -176,6 +176,7 @@
 // Name-field affordances (clear + autocomplete suggestions)
 "name.clear" = "Очистить название";
 "name.suggestions" = "Варианты";
+"notes.clear" = "Очистить заметки";
 
 // Starter categories (category-management spec, seed requirement)
 "category.seed.work" = "Работа";

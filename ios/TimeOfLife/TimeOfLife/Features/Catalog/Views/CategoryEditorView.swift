@@ -49,10 +49,16 @@ struct CategoryEditorView: View {
                     textContentType: nil,
                     submitLabel: .done,
                     autocapitalization: .sentences,
-                    accessibilityId: "CategoryEditorNameField"
-                ) {
-                    isNameFocused = false
-                }
+                    accessibilityId: "CategoryEditorNameField",
+                    onSubmit: { isNameFocused = false },
+                    showClear: ClearButtonVisibility.shouldShow(
+                        isFocused: isNameFocused,
+                        text: vm.name
+                    ),
+                    onClear: { vm.name = "" },
+                    clearAccessibilityId: "CategoryNameClearButton",
+                    clearAccessibilityLabel: L10n.nameClear.text
+                )
                 .focused($isNameFocused)
                 .onChange(of: vm.name) {
                     vm.nameDidChange()

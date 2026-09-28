@@ -171,6 +171,12 @@ final class LogTimeViewModel: ObservableObject {
         name = ""
     }
 
+    /// Clears the draft notes (clear button): notes only — name,
+    /// categories, and the interval stay untouched.
+    func clearNotes() {
+        notes = ""
+    }
+
     /// Toggles a category on the ordered selection (TagSelector parent owns
     /// order: toggling appends or removes, keeping the selection order).
     func toggleCategory(_ categoryID: String) {
