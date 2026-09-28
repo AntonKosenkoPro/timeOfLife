@@ -35,11 +35,15 @@ A release SHALL be triggered manually with the desired marketing version as its 
 - **THEN** the build number is incremented without changing the marketing version, keeping the upload acceptable to App Store Connect
 
 ### Requirement: Release tag convention
-Every release bump commit on `main` SHALL carry exactly one annotated tag named `v<marketing-version>` (e.g. `v1.0.0`) pointing at the bump commit. Tags SHALL be created only on `main` and SHALL never be moved once pushed.
+Every marketing-version bump commit on `main` SHALL carry exactly one annotated tag named `v<marketing-version>` (e.g. `v1.0.0`) pointing at the bump commit. Tags SHALL be created only on `main` and SHALL never be moved once pushed. Rebuild commits (same marketing version, incremented build — the re-upload case above) SHALL NOT create or move a tag: the existing `v<marketing-version>` tag keeps identifying the marketing release while the build number identifies the exact commit.
 
 #### Scenario: Tag lands with the bump
 - **WHEN** a release bump commit lands on `main` for version `1.0.0`
 - **THEN** the annotated tag `v1.0.0` points at that commit and is pushed
+
+#### Scenario: Rebuild reuses the existing tag
+- **WHEN** a rebuild commit lands for the same marketing version with a higher build number
+- **THEN** no tag is created or moved, and the existing `v1.0.0` tag still points at the original bump commit
 
 #### Scenario: Tag matches the app label
 - **WHEN** a tester reads the Profile version row `1.0.0 (4)` from a TestFlight build

@@ -6,7 +6,7 @@ TestFlight distribution is the next step (signed Release archives uploaded to Ap
 
 - Profile displays a version row at the bottom (separate trailing row, right-aligned): `1.0.0 (3)` on Release builds, `1.0.0 (3) • Debug` on Debug builds.
 - `project.yml` becomes the single version source of truth (`CFBundleShortVersionString` + `CFBundleVersion` / `CURRENT_PROJECT_VERSION`); the `Info.plist` statics remain only as fallback.
-- A manually-triggered GitHub Actions workflow (`workflow_dispatch` with a `version` input, e.g. `1.0.0`) validates the input (semver `X.Y.Z`, strictly greater than current, main branch, clean tree), bumps the marketing version, auto-increments the build number by +1, commits, and pushes an annotated `vX.Y.Z` tag.
+- A manually-triggered GitHub Actions workflow (`workflow_dispatch` with a `version` input, e.g. `1.0.0`, plus an optional `build_only` flag for TestFlight re-uploads) validates the input (canonical semver `X.Y.Z`, strictly greater than current — or equal in rebuild mode — main branch, clean tree), bumps the marketing version (skipped in rebuild mode), auto-increments the build number by +1, commits, and pushes an annotated `vX.Y.Z` tag (a genuinely missing tag is recovered by pushing just the tag).
 - First bump also normalizes the two-component `1.0` to three-component semver.
 
 Non-goals (explicit):
@@ -28,5 +28,5 @@ Non-goals (explicit):
 ## Impact
 
 - iOS: `ProfileView` (+ version row, `L10n` key, `en`+`ru` strings), `project.yml` version fields (the bump script also mirrors the values into the `Info.plist` statics so the tracked file never reads stale); `Theme` secondary color + caption styling only, no new dependencies.
-- CI: new `.github/workflows/release.yml` with `contents: write` permission; existing `ios.yml`adopted unchanged (bump commits to `main` touching `ios/**` trigger it — intended verification).
+- CI: new `.github/workflows/release.yml` with `contents: write` permission; existing `ios.yml` unchanged — pushes made with `GITHUB_TOKEN` do not trigger it, so the bump commit is not CI-verified (verify with a local build/archive before uploading).
 - Repo history: bump commits + annotated tags on `main` only; no existing tags to migrate (none exist).
