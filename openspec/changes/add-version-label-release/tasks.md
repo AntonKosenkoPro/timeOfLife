@@ -16,6 +16,7 @@
 - [x] 3.2 Implement `project.yml` bump (marketing + `CFBundleVersion` + `CURRENT_PROJECT_VERSION`, `+1` build, equality assert) with `1.0` → semver normalization
 - [x] 3.3 Commit (`chore(release): bump to X.Y.Z (N)`) + annotated `vX.Y.Z` tag + push (`contents: write`)
 - [x] 3.5 AI-review follow-ups: `build_only` rebuild mode + missing-tag recovery, injection-hardened ref, canonical semver, dup-key detection, `timeout-minutes`, truthful CI note (spec tag requirement clarified for rebuilds)
+- [x] 3.6 Second-review follow-ups: `--atomic` pushes, recover BUILD from bump snapshot, automated `verify` via `ios.yml workflow_call`, origin-side tag checks, fixed-string bump lookup + snapshot verify, rebuild canonical-string + tag-presumption guards, SHA-compare landed check
 - [ ] 3.4 Dry-run with an invalid version (guards refuse, nothing changes), then a real run; confirm refs landed (workflow's `ls-remote` check) and verify with a local build/archive before uploading (GITHUB_TOKEN pushes do not trigger `ios.yml`)
 
 ## 4. Verification and docs

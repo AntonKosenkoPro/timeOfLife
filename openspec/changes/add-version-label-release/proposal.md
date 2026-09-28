@@ -28,5 +28,5 @@ Non-goals (explicit):
 ## Impact
 
 - iOS: `ProfileView` (+ version row, `L10n` key, `en`+`ru` strings), `project.yml` version fields (the bump script also mirrors the values into the `Info.plist` statics so the tracked file never reads stale); `Theme` secondary color + caption styling only, no new dependencies.
-- CI: new `.github/workflows/release.yml` with `contents: write` permission; existing `ios.yml` unchanged — pushes made with `GITHUB_TOKEN` do not trigger it, so the bump commit is not CI-verified (verify with a local build/archive before uploading).
+- CI: new `.github/workflows/release.yml` with `contents: write` permission; `ios.yml` exposes `workflow_call` so the release run chains it as a `verify` job on the pushed head (`GITHUB_TOKEN` pushes trigger nothing on their own).
 - Repo history: bump commits + annotated tags on `main` only; no existing tags to migrate (none exist).

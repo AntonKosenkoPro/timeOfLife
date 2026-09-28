@@ -54,6 +54,10 @@ jobs:
           fi
 
       - name: Guard — version must be canonical X.Y.Z semver
+        # NOTE: version-shape rules live in two places — keep in sync with
+        # normalize() in "Guard — resolve mode" below. This regex is the
+        # entry gate (requested input only); normalize additionally accepts
+        # legacy two-component values for the stored `current`.
         env:
           VERSION: ${{ inputs.version }}
         run: |
@@ -103,6 +107,10 @@ jobs:
                   print(f"[output] {name}={value}")
 
 
+          # NOTE: second copy of the version-shape rules — keep in sync with
+          # the "Guard — version must be canonical X.Y.Z semver" shell regex
+          # above. This copy additionally accepts legacy two-component values
+          # for the stored `current` only.
           def normalize(v):
               parts = v.split(".")
               if len(parts) == 2:  # legacy two-component "1.0" == "1.0.0" for compare
@@ -118,6 +126,16 @@ jobs:
               return tuple(int(p) for p in parts)
 
 
+          def tag_exists(tag):
+              # Authoritative check against origin (not the local clone, which
+              # is only a checkout-time snapshot) — matches the ls-remote
+              # style of "Verify refs landed".
+              return subprocess.run(
+                  ["git", "ls-remote", "--exit-code", "origin", f"refs/tags/{tag}"],
+                  capture_output=True,
+              ).returncode == 0
+
+
           requested_t = normalize(requested)
           current_t = normalize(current)
 
@@ -126,6 +144,23 @@ jobs:
                   print(
                       f"::error::Rebuild mode requires VERSION to equal the current "
                       f"marketing version ({current}), got {requested}. Nothing changed."
+                  )
+                  sys.exit(1)
+              if requested != current:
+                  # Tuple equality accepts a legacy two-component stored value
+                  # ("1.0" == "1.0.0"), but the bump would rewrite the stored
+                  # string — a rebuild must never touch the marketing version.
+                  print(
+                      f"::error::Rebuild requires the stored marketing string "
+                      f"('{current}') to be canonical; normalize it with a "
+                      f"release bump first. Nothing changed."
+                  )
+                  sys.exit(1)
+              if not tag_exists(f"v{requested}"):
+                  print(
+                      f"::error::Rebuild presumes existing tag v{requested}; none on "
+                      f"origin. Re-run with build_only=false to recover it first. "
+                      f"Nothing changed."
                   )
                   sys.exit(1)
               emit("mode", "rebuild")
@@ -145,14 +180,12 @@ jobs:
               # only if the tag is genuinely absent; otherwise this is a
               # duplicate release request.
               tag = f"v{requested}"
-              if subprocess.run(
-                  ["git", "rev-parse", "-q", "--verify", f"refs/tags/{tag}"],
-                  capture_output=True,
-              ).returncode == 0:
+              if tag_exists(tag):
                   print(f"::error::Tag {tag} already exists. Nothing changed.")
                   sys.exit(1)
               bump = subprocess.run(
-                  ["git", "log", "--format=%H", "-1", "--grep", f"chore(release): bump to {requested} ("],
+                  ["git", "log", "--format=%H", "-1", "--fixed-strings",
+                   "--grep", f"chore(release): bump to {requested} ("],
                   capture_output=True,
                   text=True,
               ).stdout.strip()
@@ -160,6 +193,17 @@ jobs:
                   print(
                       f"::error::Version {requested} already current and no bump commit "
                       f"found to re-tag. Recover manually. Nothing changed."
+                  )
+                  sys.exit(1)
+              snap = subprocess.run(
+                  ["git", "show", f"{bump}:ios/TimeOfLife/project.yml"],
+                  capture_output=True,
+                  text=True,
+              ).stdout
+              if f'CFBundleShortVersionString: "{requested}"' not in snap:
+                  print(
+                      f"::error::Commit {bump} does not contain version {requested} "
+                      f"in project.yml. Recover manually. Nothing changed."
                   )
                   sys.exit(1)
               emit("mode", "recover")
@@ -245,11 +289,11 @@ jobs:
           git add ios/TimeOfLife/project.yml ios/TimeOfLife/TimeOfLife/Configuration/Info.plist
           if [ "$MODE" = "rebuild" ]; then
             git commit -m "chore(release): rebuild $VERSION ($BUILD)"
-            git push origin HEAD:main
+            git push --atomic origin HEAD:main
           else
             git commit -m "chore(release): bump to $VERSION ($BUILD)"
             git tag -a "v$VERSION" -m "Release $VERSION ($BUILD)"
-            git push origin HEAD:main "v$VERSION"
+            git push --atomic origin HEAD:main "v$VERSION"
           fi
 
       - name: Recover missing tag
@@ -259,11 +303,13 @@ jobs:
           BUMP_COMMIT: ${{ steps.mode.outputs.bump_commit }}
         run: |
           set -euo pipefail
-          BUILD=$(python3 -c 'import re; print(re.search(r"CFBundleVersion:\s*\"([^\"]+)\"", open("ios/TimeOfLife/project.yml").read()).group(1))')
+          # Provenance must describe the tagged commit, not the live tree: a
+          # rebuild-mode bump may have moved the build number forward since.
+          BUILD=$(git show "$BUMP_COMMIT:ios/TimeOfLife/project.yml" | python3 -c 'import re,sys; print(re.search(r"CFBundleVersion:\s*\"([^\"]+)\"", sys.stdin.read()).group(1))')
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git tag -a "v$VERSION" -m "Release $VERSION ($BUILD)" "$BUMP_COMMIT"
-          git push origin "v$VERSION"
+          git push --atomic origin "v$VERSION"
 
       - name: Verify refs landed
         env:
@@ -271,11 +317,28 @@ jobs:
           MODE: ${{ steps.mode.outputs.mode }}
         run: |
           set -euo pipefail
-          git ls-remote origin "refs/heads/main" | grep -q . || { echo "::error::main ref missing on origin."; exit 1; }
+          # Content check, not just existence: origin/main must be the exact
+          # commit just pushed (catches a concurrent force-push landing first).
+          LOCAL=$(git rev-parse HEAD)
+          REMOTE=$(git ls-remote origin refs/heads/main | cut -f1)
+          if [ "$REMOTE" != "$LOCAL" ]; then
+            echo "::error::origin/main ($REMOTE) is not the pushed commit ($LOCAL)."
+            exit 1
+          fi
           if [ "$MODE" != "rebuild" ]; then
             git ls-remote origin "refs/tags/v$VERSION" | grep -q . || { echo "::error::Tag v$VERSION missing on origin."; exit 1; }
           fi
           echo "Refs verified on origin."
+
+  # Automated verification of the pushed head: GITHUB_TOKEN pushes trigger no
+  # workflows, so without this the bump would reach App Store Connect on the
+  # strength of a manual local build. ios.yml exposes workflow_call for this.
+  verify:
+    needs: bump-and-tag
+    if: needs.bump-and-tag.result == 'success'
+    uses: ./.github/workflows/ios.yml
+    permissions:
+      contents: read
 
       - name: Summary
         env:
@@ -293,5 +356,5 @@ jobs:
               echo "Bumped \`ios/TimeOfLife/project.yml\` to \`$VERSION\` (Info.plist mirrored), committed, tagged \`v$VERSION\`, and pushed."
             fi
             echo ""
-            echo "Note: pushes made with GITHUB_TOKEN do not trigger other workflows, so \`ios.yml\` will NOT run on the bump commit — verify the release with a local build/archive before uploading to App Store Connect."
+            echo "Verification: the \`verify\` job runs \`ios.yml\` on the pushed head automatically (GITHUB_TOKEN pushes trigger no workflows on their own). Do not upload to App Store Connect until it is green."
           } >> "$GITHUB_STEP_SUMMARY"

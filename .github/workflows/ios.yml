@@ -2,6 +2,9 @@ name: ios
 
 # Requirements S6: linters + tests run on every pull request as a mandatory check.
 on:
+  # Also callable as release verification: GITHUB_TOKEN pushes trigger no
+  # workflows, so the release workflow invokes this explicitly on the bump.
+  workflow_call:
   pull_request:
     paths:
       - "ios/**"
