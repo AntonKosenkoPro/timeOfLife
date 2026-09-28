@@ -201,7 +201,11 @@ struct TrackContent: View {
             .frame(maxWidth: .infinity, minHeight: Theme.minTapArea)
             .accessibilityIdentifier("TimerNameField")
             .accessibilityLabel(L10n.timerNamePlaceholder.text)
-            if !vm.nameDraft.isEmpty {
+            if ClearButtonVisibility.shouldShow(
+                isFocused: nameFieldFocused,
+                text: vm.nameDraft,
+                isLocked: vm.state.isRunning
+            ) {
                 ClearTextButton(action: { vm.clearNameDraft() }, accessibilityId: "TimerNameClearButton")
             }
         }

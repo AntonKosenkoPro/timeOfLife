@@ -425,6 +425,18 @@ struct LogTimeViewModelTests {
         #expect(!vm.isAddEnabled)
     }
 
+    @Test("clearNotes empties the notes only")
+    func clearNotesEmptiesNotesOnly() {
+        let vm = makeViewModel()
+        vm.name = "Gym"
+        vm.notes = "sore legs"
+        vm.toggleCategory("c1")
+        vm.clearNotes()
+        #expect(vm.notes.isEmpty)
+        #expect(vm.name == "Gym")
+        #expect(vm.categoryIDs == ["c1"])
+    }
+
     @Test("loadNameRecentsIfNeeded loads the store recents once")
     func loadNameRecentsLoads() async throws {
         let store = try await makeStore()

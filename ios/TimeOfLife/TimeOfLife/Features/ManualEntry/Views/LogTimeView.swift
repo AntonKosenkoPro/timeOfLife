@@ -226,7 +226,11 @@ struct LogTimeView: View {
                         .focused($focusedField, equals: .name)
                         .font(.body)
                         .frame(maxWidth: .infinity, minHeight: Theme.minTapArea)
-                    if !vm.isLocked, !vm.name.isEmpty {
+                    if ClearButtonVisibility.shouldShow(
+                        isFocused: focusedField == .name,
+                        text: vm.name,
+                        isLocked: vm.isLocked
+                    ) {
                         ClearTextButton(action: { vm.clearName() }, accessibilityId: "EntryNameClearButton")
                     }
                 }
@@ -299,11 +303,24 @@ struct LogTimeView: View {
                 Text(L10n.entryNotesLabel.text)
                     .font(.caption)
                     .foregroundStyle(Theme.textSecondary)
-                TextField(L10n.entryNotesPlaceholder.text, text: $vm.notes)
-                    .submitLabel(.done)
-                    .focused($focusedField, equals: .notes)
-                    .font(.body)
-                    .frame(minHeight: Theme.minTapArea)
+                HStack(spacing: 0) {
+                    TextField(L10n.entryNotesPlaceholder.text, text: $vm.notes)
+                        .submitLabel(.done)
+                        .focused($focusedField, equals: .notes)
+                        .font(.body)
+                        .frame(maxWidth: .infinity, minHeight: Theme.minTapArea)
+                    if ClearButtonVisibility.shouldShow(
+                        isFocused: focusedField == .notes,
+                        text: vm.notes,
+                        isLocked: vm.isLocked
+                    ) {
+                        ClearTextButton(
+                            action: { vm.clearNotes() },
+                            accessibilityId: "EntryNotesClearButton",
+                            accessibilityLabel: L10n.notesClear.text
+                        )
+                    }
+                }
             }
         }
     }
