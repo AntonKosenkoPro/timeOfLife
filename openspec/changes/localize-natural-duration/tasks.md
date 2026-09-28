@@ -13,3 +13,9 @@
 
 - [ ] 3.1 Run the app in RU simulator: History rows, elevated day totals, Insights hero/rows, Log Time subtitle all show Russian units; EN simulator output unchanged (spot-check `1h 20m`, `2h 35m tracked`).
 - [x] 3.2 Confirm no new `Localizable.strings` keys were needed and `LocalizationTests` parity still holds (228/228).
+
+## 4. AI-review follow-ups (PR #62)
+
+- [x] 4.1 Document the locale contract: in-progress indicator follows the app language (`durationText` Note); group headings follow the app language/calendar (`makeDayGroups` Note).
+- [x] 4.2 Inline high-severity `.abbreviated`-vs-`short` claim verified as false positive (EN suite green locally and on CI) — no change.
+- [x] 4.3 Per-call formatter construction kept over `NSCache` memoization (thread-safety in `nonisolated` context outweighs negligible per-row cost) — recorded in design.md.

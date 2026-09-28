@@ -111,6 +111,8 @@ final class HistoryViewModel: ObservableObject {
     /// The entry's natural-language duration in the given locale; an
     /// in-progress entry shows the localized in-progress indicator
     /// instead (D5).
+    /// - Note: the in-progress indicator intentionally follows the app
+    ///   language (`L10n`), not `locale`.
     func durationText(for entry: TimeEntry, locale: Locale = .current) -> String {
         if isInProgress(entry) {
             return L10n.historyInProgress.text
@@ -132,6 +134,9 @@ final class HistoryViewModel: ObservableObject {
 
     /// Groups entries by the calendar day of `startedAt` (D2): newest day
     /// first, entries within a day newest first, per-day totals (D8).
+    /// - Note: `locale` governs durations only (row durations via
+    ///   `durationText`, day totals). Group headings intentionally follow
+    ///   the app language and calendar (`dayLabel`), never `locale`.
     nonisolated static func makeDayGroups(
         entries: [TimeEntry],
         now: Date,
