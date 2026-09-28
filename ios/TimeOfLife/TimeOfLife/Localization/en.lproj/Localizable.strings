@@ -175,6 +175,7 @@
 // Name-field affordances (clear + autocomplete suggestions)
 "name.clear" = "Clear name";
 "name.suggestions" = "Suggestions";
+"notes.clear" = "Clear notes";
 
 // Starter categories (category-management spec, seed requirement)
 "category.seed.work" = "Work";

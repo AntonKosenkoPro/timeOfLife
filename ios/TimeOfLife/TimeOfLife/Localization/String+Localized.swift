@@ -145,6 +145,8 @@ enum L10n: String, CaseIterable {
     // Name-field affordances (feat-name-field-affordances: clear + autocomplete)
     case nameClear = "name.clear"
     case nameSuggestions = "name.suggestions"
+    // Notes-field clear (fix-42-clear-button)
+    case notesClear = "notes.clear"
 
     // Starter categories (category-management spec, seed requirement)
     case categorySeedWork = "category.seed.work"
