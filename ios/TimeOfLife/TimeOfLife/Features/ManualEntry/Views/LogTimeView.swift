@@ -9,10 +9,11 @@ import SwiftUI
 /// styled on the iOS Calendar add-event form and trimmed to five cards in
 /// fixed order: Name, Start, End, Categories, Notes (Start/End are separate
 /// cards, each with date + time pills and an inline single-open picker).
-/// Cancel/Add (CREATE) or Cancel/Save (EDIT) live in the navigation bar; the
+/// X/checkmark (CREATE sheet) or Back/checkmark (pushed EDIT, fix-50-nav-buttons
+/// Calendar grammar) live in the navigation bar; the
 /// confirm action is a validity gate — disabled until the trimmed name is
 /// non-empty and End is strictly after Start. LOCKED mode shows the values
-/// read-only with Cancel only; EDIT and LOCKED offer a bottom destructive
+/// read-only with Back only (no dismiss text button, no confirm); EDIT and LOCKED
 /// Delete. A save failure surfaces as a non-field error with the draft
 /// intact and the form open.
 ///
@@ -127,15 +128,34 @@ struct LogTimeView: View {
                 ToolbarItem(placement: .principal) {
                     titleSubtitle
                 }
-                ToolbarItem(placement: .cancellationAction) {
-                    Button(L10n.logTimeCancel.text) { dismiss() }
+                // Calendar grammar (fix-50-nav-buttons): the pushed form
+                // (EDIT/LOCKED) dismisses via the system Back button, so no
+                // leading dismiss item is shown there; the CREATE sheet (no
+                // back stack) dismisses via an X button with the same action.
+                if !embeddedInNavigationStack {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button {
+                            dismiss()
+                        } label: {
+                            Image(systemName: "xmark")
+                        }
+                        .accessibilityLabel(L10n.entryDismissLabel.text)
+                        .accessibilityIdentifier("LogTimeDismissButton")
+                    }
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     if !vm.isLocked {
-                        Button(vm.mode == .edit ? L10n.entrySave.text : L10n.logTimeAdd.text) {
+                        Button {
                             Task { await save() }
+                        } label: {
+                            Image(systemName: "checkmark")
                         }
                         .disabled(!vm.isAddEnabled)
+                        .accessibilityLabel(
+                            vm.mode == .edit
+                                ? L10n.entryConfirmSaveLabel.text
+                                : L10n.entryConfirmAddLabel.text
+                        )
                         .accessibilityIdentifier(vm.mode == .edit ? "EntryEditSaveButton" : "LogTimeAddButton")
                     }
                 }
