@@ -5,22 +5,22 @@ import Foundation
 @Suite("AppVersion")
 struct AppVersionTests {
 
-    @Test("Release formats marketing and build with no suffix")
+    @Test("Release formats marketing and build with v prefix and no suffix")
     func releaseFormat() {
-        let text = AppVersion.formatted(marketing: "1.0.0", build: "3", isDebug: false, debugSuffix: "Debug")
-        #expect(text == "1.0.0 (3)")
+        let text = AppVersion.formatted(marketing: "0.1.0", build: "1", isDebug: false, debugSuffix: "Debug")
+        #expect(text == "v0.1.0 (1)")
     }
 
     @Test("Debug appends the localized suffix after a bullet")
     func debugFormat() {
-        let text = AppVersion.formatted(marketing: "1.0.0", build: "3", isDebug: true, debugSuffix: "Debug")
-        #expect(text == "1.0.0 (3) • Debug")
+        let text = AppVersion.formatted(marketing: "0.1.0", build: "1", isDebug: true, debugSuffix: "Debug")
+        #expect(text == "v0.1.0 (1) • Debug")
     }
 
     @Test("missing bundle keys fall back to placeholders")
     func missingKeys() {
         let text = AppVersion.formatted(marketing: nil, build: nil, isDebug: false, debugSuffix: "Debug")
-        #expect(text == "? (?)")
+        #expect(text == "v? (?)")
     }
 
     @Test("runtime text matches the running configuration")

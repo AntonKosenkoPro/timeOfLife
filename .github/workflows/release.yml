@@ -330,16 +330,6 @@ jobs:
           fi
           echo "Refs verified on origin."
 
-  # Automated verification of the pushed head: GITHUB_TOKEN pushes trigger no
-  # workflows, so without this the bump would reach App Store Connect on the
-  # strength of a manual local build. ios.yml exposes workflow_call for this.
-  verify:
-    needs: bump-and-tag
-    if: needs.bump-and-tag.result == 'success'
-    uses: ./.github/workflows/ios.yml
-    permissions:
-      contents: read
-
       - name: Summary
         env:
           VERSION: ${{ inputs.version }}
@@ -358,3 +348,13 @@ jobs:
             echo ""
             echo "Verification: the \`verify\` job runs \`ios.yml\` on the pushed head automatically (GITHUB_TOKEN pushes trigger no workflows on their own). Do not upload to App Store Connect until it is green."
           } >> "$GITHUB_STEP_SUMMARY"
+
+  # Automated verification of the pushed head: GITHUB_TOKEN pushes trigger no
+  # workflows, so without this the bump would reach App Store Connect on the
+  # strength of a manual local build. ios.yml exposes workflow_call for this.
+  verify:
+    needs: bump-and-tag
+    if: needs.bump-and-tag.result == 'success'
+    uses: ./.github/workflows/ios.yml
+    permissions:
+      contents: read
