@@ -43,16 +43,20 @@ jobs:
           # Ollama Cloud — OpenAI-compatible endpoint (models.dev: ollama-cloud base URL).
           llm_url: https://ollama.com/v1
           llm_auth_token: ${{ secrets.OLLAMA_API_KEY }}
+          # glm-5.3-flash, thinking at max (benchmarked: deepest useful
+          # reasoning on Ollama Cloud; reasoning_effort is ignored there).
           llm_model: glm-5.3-flash
           # openai protocol (explicit; supersedes the required llm_use_anthropic boolean)
           llm_protocol: openai
           llm_use_anthropic: 'false'
-          # Disable reasoning for latency/cost.
-          llm_extra_body: '{"thinking": {"type": "disabled"}}'
+          llm_extra_body: '{"think": "max"}'
           llm_timeout: '600'
           review_task_timeout: '15'
           # Don't hammer Ollama Cloud rate limits.
           review_concurrency: '4'
+          # Review effort low (1 round/subtask, benchmarked fastest without
+          # recall loss on this model) — the single biggest cost lever.
+          effort: 'low'
           # Bound paid-provider spend: generous runaway guard (fail-open —
           # over-budget files report failed(budget) but partial results still
           # publish). Tune after measuring typical per-run usage.
@@ -63,8 +67,8 @@ jobs:
           # Cross-push checkpoints: the first /review covers merge-base..head; a later
           # /review covers only <checkpoint>..<head> (fail-closed: falls back to full).
           checkpoint_range: 'true'
-          # Low-severity findings go to the sticky summary, not inline — less PR noise.
-          route_severity_below: 'medium'
+          # All findings post inline (no severity routing to the summary).
+          route_severity_below: ''
           upload_artifacts: 'true'
           # issue_comment carries no pull_request payload — pass the PR explicitly.
           pr_number: ${{ github.event.issue.number }}
