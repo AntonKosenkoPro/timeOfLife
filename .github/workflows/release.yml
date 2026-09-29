@@ -1,0 +1,360 @@
+name: release
+
+# Manual release bump: workflow_dispatch with the desired marketing version.
+# Normal mode (build_only=false): validates strictly-greater semver on main,
+# edits ios/TimeOfLife/project.yml (the single version writer — design.md D1)
+# and mirrors the two values into the tracked Info.plist statics (xcodegen
+# rewrites that file from project.yml on every generate, so the mirror keeps
+# the committed file from reading stale between the bump and the next
+# generate; generation remains authoritative), then commits
+# chore(release): bump to X.Y.Z (N) and pushes annotated tag vX.Y.Z.
+# Rebuild mode (build_only=true, spec "Re-upload without a new marketing
+# version"): VERSION must equal the current marketing version; only the build
+# number increments (no new tag — vX.Y.Z already exists and never moves).
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Marketing version (canonical X.Y.Z, e.g. 1.0.0; in rebuild mode must equal current)"
+        required: true
+        type: string
+      build_only:
+        description: "Rebuild only: keep the marketing version, increment just the build number (TestFlight re-upload)"
+        required: false
+        default: false
+        type: boolean
+
+# First workflow in this repo with write access (ios.yml is contents: read):
+# the bump commit + annotated tag must be pushed back to main.
+permissions:
+  contents: write
+
+# Two runs must never interleave (both read build N, both write N+1).
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  bump-and-tag:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # full history + tags, so recovery can find the bump commit
+
+      - name: Guard — must run on main
+        env:
+          GIT_REF: ${{ github.ref }} # via env, never interpolated: ref names can carry shell metacharacters
+        run: |
+          if [ "$GIT_REF" != "refs/heads/main" ]; then
+            echo "::error::Release workflow must run on the main branch (got '$GIT_REF')."
+            exit 1
+          fi
+
+      - name: Guard — version must be canonical X.Y.Z semver
+        # NOTE: version-shape rules live in two places — keep in sync with
+        # normalize() in "Guard — resolve mode" below. This regex is the
+        # entry gate (requested input only); normalize additionally accepts
+        # legacy two-component values for the stored `current`.
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          if ! [[ "$VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo "::error::Invalid version '$VERSION'. Expected canonical X.Y.Z digits, no leading zeros (e.g. 1.0.0; not '1.0', 'v1.0.0', '01.2.3', or '1.0.0-beta'). Nothing changed."
+            exit 1
+          fi
+
+      - name: Guard — working tree must be clean
+        run: |
+          if [ -n "$(git status --porcelain)" ]; then
+            echo "::error::Working tree is dirty. Commit or stash changes first; nothing changed."
+            git status --porcelain
+            exit 1
+          fi
+
+      - name: Guard — resolve mode (release, rebuild, or recover)
+        id: mode
+        env:
+          VERSION: ${{ inputs.version }}
+          BUILD_ONLY: ${{ inputs.build_only }}
+        run: |
+          python3 - <<'EOF'
+          import os
+          import re
+          import subprocess
+          import sys
+
+          requested = os.environ["VERSION"]
+          build_only = os.environ.get("BUILD_ONLY") == "true"
+          out_path = os.environ.get("GITHUB_OUTPUT")
+
+          with open("ios/TimeOfLife/project.yml", encoding="utf-8") as f:
+              text = f.read()
+          m = re.search(r'CFBundleShortVersionString:\s*"([^"]+)"', text)
+          if not m:
+              print("::error::Could not find CFBundleShortVersionString in ios/TimeOfLife/project.yml.")
+              sys.exit(1)
+          current = m.group(1)
+
+
+          def emit(name, value):
+              if out_path:
+                  with open(out_path, "a", encoding="utf-8") as f:
+                      f.write(f"{name}={value}\n")
+              else:  # local simulation without GitHub outputs
+                  print(f"[output] {name}={value}")
+
+
+          # NOTE: second copy of the version-shape rules — keep in sync with
+          # the "Guard — version must be canonical X.Y.Z semver" shell regex
+          # above. This copy additionally accepts legacy two-component values
+          # for the stored `current` only.
+          def normalize(v):
+              parts = v.split(".")
+              if len(parts) == 2:  # legacy two-component "1.0" == "1.0.0" for compare
+                  parts.append("0")
+              if len(parts) != 3 or not all(
+                  p.isdigit() and (len(p) == 1 or not p.startswith("0")) for p in parts
+              ):
+                  print(
+                      f"::error::Version '{v}' is not canonical numeric X[.Y[.Z]] "
+                      f"(digits only, no leading zeros). Nothing changed."
+                  )
+                  sys.exit(1)
+              return tuple(int(p) for p in parts)
+
+
+          def tag_exists(tag):
+              # Authoritative check against origin (not the local clone, which
+              # is only a checkout-time snapshot) — matches the ls-remote
+              # style of "Verify refs landed".
+              return subprocess.run(
+                  ["git", "ls-remote", "--exit-code", "origin", f"refs/tags/{tag}"],
+                  capture_output=True,
+              ).returncode == 0
+
+
+          requested_t = normalize(requested)
+          current_t = normalize(current)
+
+          if build_only:
+              if requested_t != current_t:
+                  print(
+                      f"::error::Rebuild mode requires VERSION to equal the current "
+                      f"marketing version ({current}), got {requested}. Nothing changed."
+                  )
+                  sys.exit(1)
+              if requested != current:
+                  # Tuple equality accepts a legacy two-component stored value
+                  # ("1.0" == "1.0.0"), but the bump would rewrite the stored
+                  # string — a rebuild must never touch the marketing version.
+                  print(
+                      f"::error::Rebuild requires the stored marketing string "
+                      f"('{current}') to be canonical; normalize it with a "
+                      f"release bump first. Nothing changed."
+                  )
+                  sys.exit(1)
+              if not tag_exists(f"v{requested}"):
+                  print(
+                      f"::error::Rebuild presumes existing tag v{requested}; none on "
+                      f"origin. Re-run with build_only=false to recover it first. "
+                      f"Nothing changed."
+                  )
+                  sys.exit(1)
+              emit("mode", "rebuild")
+              print(f"Rebuild check passed: keeping {current}, build will increment.")
+          elif requested_t > current_t:
+              emit("mode", "release")
+              print(f"Version check passed: current={current} requested={requested}")
+          elif requested_t < current_t:
+              print(
+                  f"::error::Requested version {requested} is not strictly greater "
+                  f"than current {current}. Nothing changed."
+              )
+              sys.exit(1)
+          else:
+              # Requested == current: the bump already landed but its tag may be
+              # missing (partial push). Recover by pushing just the tag — but
+              # only if the tag is genuinely absent; otherwise this is a
+              # duplicate release request.
+              tag = f"v{requested}"
+              if tag_exists(tag):
+                  print(f"::error::Tag {tag} already exists. Nothing changed.")
+                  sys.exit(1)
+              bump = subprocess.run(
+                  ["git", "log", "--format=%H", "-1", "--fixed-strings",
+                   "--grep", f"chore(release): bump to {requested} ("],
+                  capture_output=True,
+                  text=True,
+              ).stdout.strip()
+              if not bump:
+                  print(
+                      f"::error::Version {requested} already current and no bump commit "
+                      f"found to re-tag. Recover manually. Nothing changed."
+                  )
+                  sys.exit(1)
+              snap = subprocess.run(
+                  ["git", "show", f"{bump}:ios/TimeOfLife/project.yml"],
+                  capture_output=True,
+                  text=True,
+              ).stdout
+              if f'CFBundleShortVersionString: "{requested}"' not in snap:
+                  print(
+                      f"::error::Commit {bump} does not contain version {requested} "
+                      f"in project.yml. Recover manually. Nothing changed."
+                  )
+                  sys.exit(1)
+              emit("mode", "recover")
+              emit("bump_commit", bump)
+              print(f"Recovering missing tag {tag} on bump commit {bump}.")
+          EOF
+
+      - name: Bump (marketing + build, assert equality, mirror plist)
+        if: steps.mode.outputs.mode == 'release' || steps.mode.outputs.mode == 'rebuild'
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          python3 - <<'EOF'
+          import os
+          import re
+          import sys
+
+          path = "ios/TimeOfLife/project.yml"
+          requested = os.environ["VERSION"]
+          with open(path, encoding="utf-8") as f:
+              text = f.read()
+
+          m = re.search(r'CFBundleVersion:\s*"(\d+)"', text)
+          if not m:
+              print("::error::Could not find numeric CFBundleVersion in project.yml.")
+              sys.exit(1)
+          new_build = str(int(m.group(1)) + 1)
+
+          # Exactly one match per key is required first: with a capped
+          # substitution a duplicated key would otherwise go stale silently.
+          # Overwriting wholesale also normalizes legacy two-component "1.0".
+          # (In rebuild mode requested == current, so the marketing edit is a no-op.)
+          for pattern, repl in (
+              (r'CFBundleShortVersionString:\s*"[^"]+"', f'CFBundleShortVersionString: "{requested}"'),
+              (r'CFBundleVersion:\s*"[^"]+"', f'CFBundleVersion: "{new_build}"'),
+              (r'CURRENT_PROJECT_VERSION:\s*"[^"]+"', f'CURRENT_PROJECT_VERSION: "{new_build}"'),
+          ):
+              if len(re.findall(pattern, text)) != 1:
+                  print(f"::error::Expected exactly one match for {pattern}; refusing to bump.")
+                  sys.exit(1)
+              text = re.sub(pattern, repl, text)
+
+          # Equality assertion before anything is written.
+          short = re.search(r'CFBundleShortVersionString:\s*"([^"]+)"', text).group(1)
+          bundle = re.search(r'CFBundleVersion:\s*"([^"]+)"', text).group(1)
+          current_proj = re.search(r'CURRENT_PROJECT_VERSION:\s*"([^"]+)"', text).group(1)
+          assert short == requested, f"marketing mismatch: {short} != {requested}"
+          assert bundle == current_proj, f"build drift: CFBundleVersion={bundle} != CURRENT_PROJECT_VERSION={current_proj}"
+
+          with open(path, "w", encoding="utf-8") as f:
+              f.write(text)
+          print(f"Bumped to {short} ({bundle}); CFBundleVersion == CURRENT_PROJECT_VERSION holds.")
+
+          # Mirror into the tracked Info.plist statics so the committed file
+          # never reads stale between this bump and the next xcodegen
+          # generate (which rewrites it from project.yml anyway).
+          plist = "ios/TimeOfLife/TimeOfLife/Configuration/Info.plist"
+          with open(plist, encoding="utf-8") as f:
+              ptext = f.read()
+          for pattern, repl in (
+              (r"(<key>CFBundleShortVersionString</key>\s*<string>)[^<]+(</string>)", rf"\g<1>{requested}\g<2>"),
+              (r"(<key>CFBundleVersion</key>\s*<string>)[^<]+(</string>)", rf"\g<1>{new_build}\g<2>"),
+          ):
+              if len(re.findall(pattern, ptext)) != 1:
+                  print(f"::error::Expected exactly one Info.plist match for {pattern}; refusing to mirror.")
+                  sys.exit(1)
+              ptext = re.sub(pattern, repl, ptext)
+          with open(plist, "w", encoding="utf-8") as f:
+              f.write(ptext)
+          print(f"Mirrored {requested} ({new_build}) into Info.plist.")
+          EOF
+
+      - name: Commit and push (single push — no partial tag state)
+        if: steps.mode.outputs.mode == 'release' || steps.mode.outputs.mode == 'rebuild'
+        env:
+          VERSION: ${{ inputs.version }}
+          MODE: ${{ steps.mode.outputs.mode }}
+        run: |
+          set -euo pipefail
+          BUILD=$(python3 -c 'import re; print(re.search(r"CFBundleVersion:\s*\"([^\"]+)\"", open("ios/TimeOfLife/project.yml").read()).group(1))')
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add ios/TimeOfLife/project.yml ios/TimeOfLife/TimeOfLife/Configuration/Info.plist
+          if [ "$MODE" = "rebuild" ]; then
+            git commit -m "chore(release): rebuild $VERSION ($BUILD)"
+            git push --atomic origin HEAD:main
+          else
+            git commit -m "chore(release): bump to $VERSION ($BUILD)"
+            git tag -a "v$VERSION" -m "Release $VERSION ($BUILD)"
+            git push --atomic origin HEAD:main "v$VERSION"
+          fi
+
+      - name: Recover missing tag
+        if: steps.mode.outputs.mode == 'recover'
+        env:
+          VERSION: ${{ inputs.version }}
+          BUMP_COMMIT: ${{ steps.mode.outputs.bump_commit }}
+        run: |
+          set -euo pipefail
+          # Provenance must describe the tagged commit, not the live tree: a
+          # rebuild-mode bump may have moved the build number forward since.
+          BUILD=$(git show "$BUMP_COMMIT:ios/TimeOfLife/project.yml" | python3 -c 'import re,sys; print(re.search(r"CFBundleVersion:\s*\"([^\"]+)\"", sys.stdin.read()).group(1))')
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "v$VERSION" -m "Release $VERSION ($BUILD)" "$BUMP_COMMIT"
+          git push --atomic origin "v$VERSION"
+
+      - name: Verify refs landed
+        env:
+          VERSION: ${{ inputs.version }}
+          MODE: ${{ steps.mode.outputs.mode }}
+        run: |
+          set -euo pipefail
+          # Content check, not just existence: origin/main must be the exact
+          # commit just pushed (catches a concurrent force-push landing first).
+          LOCAL=$(git rev-parse HEAD)
+          REMOTE=$(git ls-remote origin refs/heads/main | cut -f1)
+          if [ "$REMOTE" != "$LOCAL" ]; then
+            echo "::error::origin/main ($REMOTE) is not the pushed commit ($LOCAL)."
+            exit 1
+          fi
+          if [ "$MODE" != "rebuild" ]; then
+            git ls-remote origin "refs/tags/v$VERSION" | grep -q . || { echo "::error::Tag v$VERSION missing on origin."; exit 1; }
+          fi
+          echo "Refs verified on origin."
+
+  # Automated verification of the pushed head: GITHUB_TOKEN pushes trigger no
+  # workflows, so without this the bump would reach App Store Connect on the
+  # strength of a manual local build. ios.yml exposes workflow_call for this.
+  verify:
+    needs: bump-and-tag
+    if: needs.bump-and-tag.result == 'success'
+    uses: ./.github/workflows/ios.yml
+    permissions:
+      contents: read
+
+      - name: Summary
+        env:
+          VERSION: ${{ inputs.version }}
+          MODE: ${{ steps.mode.outputs.mode }}
+        run: |
+          {
+            echo "## Release v$VERSION ($MODE)"
+            echo ""
+            if [ "$MODE" = "rebuild" ]; then
+              echo "Rebuilt \`$VERSION\`: build number incremented, marketing version unchanged, no new tag (existing \`v$VERSION\` still points at the original bump commit; the new build's commit is recorded here)."
+            elif [ "$MODE" = "recover" ]; then
+              echo "Pushed the missing \`v$VERSION\` tag onto its bump commit. No version numbers changed."
+            else
+              echo "Bumped \`ios/TimeOfLife/project.yml\` to \`$VERSION\` (Info.plist mirrored), committed, tagged \`v$VERSION\`, and pushed."
+            fi
+            echo ""
+            echo "Verification: the \`verify\` job runs \`ios.yml\` on the pushed head automatically (GITHUB_TOKEN pushes trigger no workflows on their own). Do not upload to App Store Connect until it is green."
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -93,6 +93,9 @@
 "profile.eraseLocalDataConfirmMessage" = "Это навсегда удалит все категории, записи и ожидающие синхронизацию данные на этом устройстве.";
 "profile.eraseConfirm" = "Стереть";
 "profile.eraseCancel" = "Отмена";
+// Build-configuration suffix for the Profile version row (universal
+// technical term — identical in en).
+"profile.versionDebugSuffix" = "Debug";
 
 // Destination empty states
 "history.emptyTitle" = "Пока пусто";

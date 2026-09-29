@@ -177,6 +177,7 @@ struct LocalizationTests {
         // entry.confirmSaveLabel) and retires 2 text-button keys
         // (logTime.add + entry.save) = 141;
         // fix-42-clear-button adds notes.clear = 142.
-        #expect(l10nCases.count == 142)
+        // add-version-label-release adds profile.versionDebugSuffix = 143.
+        #expect(l10nCases.count == 143)
     }
 }
