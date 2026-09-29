@@ -66,13 +66,24 @@ Insights SHALL keep the existing true-zero empty state ("Nothing here yet" / "Pa
 - **WHEN** the user selects `Today` with no committed entries started today while the week has entries
 - **THEN** a "Nothing tracked today yet" sentence is shown (localized), with no bars and no hero total of zero competing with it
 
-### Requirement: Insights is accessible and unsigned
-The period switch, lens toggle, hero total, and breakdown rows SHALL be reachable without authentication and SHALL expose stable accessibility labels and identifiers, remaining operable with VoiceOver and Dynamic Type. Row accessibility labels SHALL name the category or activity and its duration.
+### Requirement: Insights is signed-in-only and accessible
+The period switch, lens toggle, hero total, and breakdown rows SHALL be reachable by the signed-in account behind the launch auth gate and SHALL expose stable accessibility labels and identifiers, remaining operable with VoiceOver and Dynamic Type. Row accessibility labels SHALL name the category or activity and its duration.
 
 #### Scenario: VoiceOver reads a row
 - **WHEN** VoiceOver focuses a breakdown row
 - **THEN** it announces the category or activity name and its localized duration
 
-#### Scenario: Unsigned access
-- **WHEN** a user without an account opens Insights
-- **THEN** the full breakdown is available with no sign-in prompt
+#### Scenario: Signed-out user meets the auth gate
+- **WHEN** a user without an account reaches Insights
+- **THEN** the launch auth gate precedes it: the breakdown is available only after sign-in
+
+### Requirement: Insights reflects synced changes without re-entry
+The Insights destination SHALL recompute its breakdown when a sync cycle completes while Insights is visible, including a manual Sync now triggered from the Profile sheet opened over Insights. Pulled entries, category changes, and tombstone deletions SHALL appear in the hero total and rows without requiring the user to leave and re-enter the tab.
+
+#### Scenario: Sync now from Profile over Insights
+- **WHEN** the user opens Profile from the Insights tab, taps Sync now, the cycle pulls cross-device changes, and dismisses Profile
+- **THEN** the hero total and breakdown rows reflect the pulled state without any tab switch
+
+#### Scenario: Automatic sync while Insights is visible
+- **WHEN** a foreground or connectivity-restored sync cycle merges relay changes while Insights is on screen
+- **THEN** the breakdown reloads to reflect the merged state once the cycle completes

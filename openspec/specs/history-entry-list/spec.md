@@ -134,23 +134,8 @@ The populated History list SHALL offer a native pull-to-refresh gesture that run
 - **WHEN** History shows the empty state (no committed entries)
 - **THEN** no pull-to-refresh gesture is offered
 
-### Requirement: Signed-out pull shows a sign-in banner with link
-A pull while signed out SHALL NOT start any sync network traffic. It SHALL present an inline notice below the navigation bar stating sign-in is required with a tappable sign-in link that opens the Enable Sync auth sheet (the existing auth flow, not a new entry point). The banner SHALL auto-dismiss after 5 seconds, reset its timer on re-pull, dismiss on navigation away, and dismiss early on successful sign-in (first-sync takes over).
-
-#### Scenario: Signed-out pull
-- **WHEN** the user pulls while signed out
-- **THEN** no network traffic occurs and the signed-out banner with sign-in link appears
-
-#### Scenario: Banner auto-dismiss
-- **WHEN** the signed-out banner has been visible for 5 seconds without interaction
-- **THEN** it dismisses on its own
-
-#### Scenario: Sign-in link
-- **WHEN** the user taps the sign-in link in the banner
-- **THEN** the Enable Sync auth sheet opens; a successful sign-in dismisses the banner and starts first-sync
-
 ### Requirement: Offline pull shows an offline banner
-A pull while signed in but offline SHALL NOT start a sync cycle. It SHALL present an inline notice in the same slot as the signed-out banner stating the device is offline (no action link), with the same 5-second auto-dismiss, re-pull reset, and dismiss-on-leave behavior. A connectivity loss mid-cycle (online at pull, offline during drain) SHALL surface as a cycle error dialog, not the offline banner.
+A pull while signed in but offline SHALL NOT start a sync cycle. It SHALL present an inline notice below the navigation bar stating the device is offline (no action link), with 5-second auto-dismiss, re-pull reset, and dismiss-on-leave behavior. A connectivity loss mid-cycle (online at pull, offline during drain) SHALL surface as a cycle error dialog, not the offline banner.
 
 #### Scenario: Offline pull
 - **WHEN** the user pulls while signed in with no connectivity
@@ -170,3 +155,18 @@ A sync cycle awaited by a pull that ends in error SHALL present a modal dialog w
 #### Scenario: Background failure shows no dialog
 - **WHEN** a foreground/connectivity cycle fails while History is visible with no pull in flight
 - **THEN** no dialog appears over History
+
+### Requirement: History reflects synced changes without re-entry
+The History destination SHALL reload its day groups when a sync cycle completes while History is visible, including a manual Sync now triggered from the Profile sheet opened over History. Pulled entries, category changes, and tombstone deletions SHALL appear without requiring the user to leave and re-enter the tab.
+
+#### Scenario: Sync now from Profile over History
+- **WHEN** the user opens Profile from the History tab, taps Sync now, the cycle pulls cross-device changes, and dismisses Profile
+- **THEN** the History list shows the pulled entries and deletions in their day groups without any tab switch
+
+#### Scenario: Automatic sync while History is visible
+- **WHEN** a foreground or connectivity-restored sync cycle merges relay changes while History is on screen
+- **THEN** the History list reloads to reflect the merged state once the cycle completes
+
+#### Scenario: Failed sync keeps current list
+- **WHEN** a sync cycle fails with an offline or transport error having applied no merges
+- **THEN** the History list keeps its current content and reports no spurious empty state

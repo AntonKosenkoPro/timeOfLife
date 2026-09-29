@@ -6,15 +6,15 @@ The on-device source of truth for the user's time-tracking data — a SQLite dat
 ## Requirements
 
 ### Requirement: Device is the source of truth
-The system SHALL treat the local SQLite database in the App Group shared container as the authoritative source of the user's categories, entries, entry-category assignments, and running timer draft. All app features (timer, history, insights) SHALL operate against this local database and SHALL function fully with no network connectivity and no signed-in account.
+The system SHALL treat the active signed-in account's local SQLite database in the App Group shared container as the authoritative source of the user's categories, entries, entry-category assignments, and running timer draft. All app features (timer, history, insights) SHALL operate against this active account's database while the user is signed in, and SHALL function fully with no network connectivity. No app feature SHALL operate against any local database while the user is signed out: the auth gate is the only reachable surface, and it SHALL neither read nor write tracker data.
 
 #### Scenario: App launches with no account
-- **WHEN** the app is installed and launched for the first time, with no signed-in session and no network connectivity
-- **THEN** the user can start and stop a timer, create categories, and view history, with all data persisted to the local database
+- **WHEN** the app is installed and launched for the first time, with no signed-in session
+- **THEN** the auth gate precedes all data access: no anonymous timer, categories, or history is available, the app presents only the auth flow, and no tracker feature operates until sign-in completes
 
 #### Scenario: Sync is unavailable
-- **WHEN** the user is not signed in, or is signed in but offline
-- **THEN** all app features continue to work against the local database; no feature is gated on the presence of a backend connection
+- **WHEN** the user is signed in but offline, or is not signed in
+- **THEN** a signed-in user retains full local function (timer, categories, history) against the active account's database with no network connectivity, while a signed-out user has no tracker function and remains at the auth gate
 ### Requirement: App Group shared container
 The system SHALL store the local database in an App Group shared container (`group.com.antonkosenko.timeoflifeapp`) so that the main app, widget extensions, Screen Time extension, and lock-screen Control intents can read and write the same data cross-process.
 
@@ -94,15 +94,15 @@ The system SHALL hold deletions in a durable `undo_buffer` table (not in-memory)
 - **THEN** the undo is refused with the existing persistence error; the push completes and drops the row, or fails and leaves the row undoable for the next cycle
 
 ### Requirement: Sign-out preserves local data
-The system SHALL NOT wipe the local database or the outbox when the user signs out of sync. The user's local data persists; an explicit "Erase local data" action is available in Profile for shared-device or privacy cases. Confirming "Erase local data" SHALL additionally reset the auth navigation so the auth flow starts over from its first step. The Profile "Erase local data" row SHALL present as destructive: its icon and title render in the danger token and its control carries destructive button semantics, so its appearance warns before the confirmation alert.
+The system SHALL NOT wipe any per-account local database, outbox, or undo buffer when the user signs out. All per-account files — including the dormant file of the signed-out account and its pending dirty outbox — SHALL be kept on disk; re-signing in as the same account SHALL reopen its file and resume (drain the outbox, continue sync cursors, and resume a dormant running timer draft). The user's local data persists across sign-out. An explicit per-account "Erase local data" action is available in Profile for shared-device or privacy cases and SHALL delete only the active account's local file (with its associated keychain and cache entries); it MUST NOT touch other accounts' dormant files. Confirming "Erase local data" SHALL additionally reset the auth navigation so the auth gate starts over from its first step. The Profile "Erase local data" row SHALL present as destructive: its icon and title render in the danger token and its control carries destructive button semantics, so its appearance warns before the confirmation alert.
 
 #### Scenario: Sign out keeps data
-- **WHEN** the user signs out of sync
-- **THEN** the local database, including the outbox, is preserved; the user can continue using the app locally and can re-sign-in to resume sync
+- **WHEN** the user signs out
+- **THEN** the signed-out account's local database file is kept with its outbox intact, no other account's data is affected, and re-signing in as that account resumes from the dormant file
 
 #### Scenario: Explicit erase
 - **WHEN** the user taps "Erase local data" in Profile and confirms
-- **THEN** the local database is wiped (including the outbox and undo buffer); the action is destructive and irreversible
+- **THEN** only the active account's local database file is wiped (with its outbox, undo buffer, and associated keychain and cache entries); other accounts' dormant files are not touched, and the action is destructive and irreversible
 
 #### Scenario: Erase row warns as destructive
 - **WHEN** the user views the Profile "On This Device" section
@@ -110,7 +110,7 @@ The system SHALL NOT wipe the local database or the outbox when the user signs o
 
 #### Scenario: Erase resets auth flow
 - **WHEN** the erase is confirmed
-- **THEN** the auth navigation resets so "Enable Sync" starts at email entry with no previous address
+- **THEN** the auth navigation resets so the launch gate starts at email entry with no previous address
 
 ### Requirement: Local deletion tombstone reads
 
@@ -152,3 +152,29 @@ The `timer_state` singleton SHALL hold `(activity_text, ordered category_ids, st
 #### Scenario: Crash restores draft tags
 - **WHEN** the app restarts with a persisted running draft
 - **THEN** the timer resumes with the locked text and the tags as last left
+
+### Requirement: Anonymous data is discarded on first login
+Because this change ships pre-release, the system SHALL NOT migrate existing anonymous or prior-dev-install local data into any per-account database file. On the first sign-in under the account-bound model, the system SHALL discard the anonymous local database content and start the signed-in account with its own fresh per-account file. No compatibility branch or legacy-format read path SHALL be kept for anonymous data.
+
+#### Scenario: First login starts fresh
+- **WHEN** a user signs in for the first time on a device that holds anonymous pre-release data from a prior install or prior build
+- **THEN** the anonymous data is not carried into the account's database; the signed-in account starts with an empty per-account file
+
+#### Scenario: No migration path is retained
+- **WHEN** the account-bound model is active
+- **THEN** the system performs no anonymous-to-account migration, and no legacy anonymous database branch remains in the store
+
+### Requirement: Starter seeding is per-account-file
+The system SHALL seed starter categories into a per-account database file the first time that account's file is opened, and SHALL NOT re-seed it afterward. Each account's file is seeded independently: opening one account's file does not seed, modify, or reset any other account's file.
+
+#### Scenario: New account file is seeded
+- **WHEN** an account signs in and its per-account file is opened for the first time
+- **THEN** the starter categories are seeded into that account's file and are immediately visible to the signed-in user
+
+#### Scenario: Existing account file is not re-seeded
+- **WHEN** the same account re-opens its existing per-account file after sign-out and sign-in
+- **THEN** the starter seeding does not run again and the file's existing data is preserved as-is
+
+#### Scenario: Seeding is scoped to the opened account
+- **WHEN** an account's file is opened and seeded
+- **THEN** no other account's dormant file is created, modified, or seeded as a side effect
