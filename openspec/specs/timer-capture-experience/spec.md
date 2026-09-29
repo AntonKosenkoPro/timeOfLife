@@ -283,3 +283,33 @@ The app SHALL treat categories as optional, zero-or-more metadata owned by each 
 #### Scenario: Retag affects one entry only
 - **WHEN** the user changes an entry's categories
 - **THEN** no other entry with the same text changes
+
+### Requirement: Track name clear shows only when focused and non-empty, Apple-standard look
+The Track name field's trailing clear (`×`) button SHALL be visible only when the field is focused AND holds non-empty text (idle/ready/saved states; never while running — the name is locked then). One tap SHALL clear the draft and return Track to idle. The button SHALL use the Apple-standard trailing look: a small (16 pt) dim `xmark.circle.fill` in `Theme.textSecondary` at reduced opacity tucked at the field's trailing edge, with the 44 pt accessible tap target preserved.
+
+#### Scenario: Clear hidden when unfocused, even with text
+- **WHEN** the Track name field holds text but is not focused
+- **THEN** no clear button is shown
+
+#### Scenario: Clear hidden when empty, even when focused
+- **WHEN** the Track name field is focused but empty
+- **THEN** no clear button is shown
+
+#### Scenario: Clear visible when focused with text
+- **WHEN** the Track name field is focused and holds text while idle, ready, or saved
+- **THEN** a small dim trailing `×` is visible, and one tap empties the field and returns Track to idle
+
+#### Scenario: No clear button while running
+- **WHEN** a timer is running
+- **THEN** the name is locked and no clear button is shown
+
+### Requirement: Track name field has autocomplete suggestions over recents
+(Clear-button behavior for this field — focused-AND-non-empty visibility, Apple-standard look — is owned by the "Track name clear shows only when focused and non-empty" requirement.) The Track name field SHALL offer autocomplete suggestions over recent texts. Suggestions SHALL be drawn from the exact-text Recents (cap 6, newest-first, `Gym` ≠ `GYM`): when the trimmed draft is a non-empty prefix, Track SHALL suggest the recents whose text starts with it (case-insensitive prefix), excluding the case-sensitive exact match. Suggestions SHALL render without moving the main action (overlay, not layout). Picking a suggestion SHALL follow the Recents tap contract: fill the exact text plus that recent's full ordered categories without starting timing and without creating anything.
+
+#### Scenario: Typing shows prefix suggestions without moving Start
+- **WHEN** the user types a non-empty prefix matching one or more recents
+- **THEN** those recents are suggested newest-first (exact match excluded) and the Start/Stop action does not move
+
+#### Scenario: Picking a suggestion prepares without starting
+- **WHEN** the user picks a suggestion
+- **THEN** the field fills with that exact text plus its ordered categories, the ready timer appears, and no timer starts and no entry is created

@@ -16,7 +16,7 @@
 
 ## 4. Implementation (step 7; region-confined, parallel-agent-safe)
 
-- [ ] 4.1 `ClearTextButton.swift`: pure `ClearButtonVisibility` helper + restyle (17 pt, `.secondary`, 44 pt target kept) + per-field `accessibilityLabel` param (default `name.clear`). Do NOT touch toolbar/nav (#50) or picker (#51) regions.
+- [x] 4.1 `ClearTextButton.swift`: pure `ClearButtonVisibility` helper + restyle + per-field `accessibilityLabel` param (default `name.clear`). As-built (commit `2fa5608`, on `main`): 16 pt `Theme.textSecondary` at 55% opacity (spec'd 17 pt `.secondary` — 1 pt refinement, verified in 5.1/5.2 as-is); 44 pt target kept via `Theme.minTapArea`. Do NOT touch toolbar/nav (#50) or picker (#51) regions.
 - [x] 4.2 `TrackContent.nameField`: visibility via helper with `nameFieldFocused`.
 - [x] 4.3 `LogTimeView.nameCard` (focus condition) + `notesCard` (HStack + `EntryNotesClearButton` + focused-notes condition); `LogTimeViewModel.clearNotes()`.
 - [x] 4.4 `TextFieldWithError` opt-in clear props (default off); `CategoryEditorView` opts in with `isNameFocused`.
@@ -31,4 +31,4 @@
 
 ## 6. PR (one PR targeting main)
 
-- [x] 6.1 Push branch `fix/42-clear-button-conditions`; open PR targeting `main`, title per-issue with "Fixes #42", body with repro + red-test evidence + verification + corners. DO NOT merge. Post no `/review` comment.
+- [x] 6.1 Push branch `fix/42-clear-button-conditions`; open PR targeting `main`, title per-issue with "Fixes #42", body with repro + red-test evidence + verification + corners. DO NOT merge. Post no `/review` comment. (Closed out 2026-09-29: landed on `main` as commit `2fa5608`; the local branch is stale and safe to delete.)

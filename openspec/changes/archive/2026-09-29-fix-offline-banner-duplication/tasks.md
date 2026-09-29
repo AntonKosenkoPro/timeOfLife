@@ -15,10 +15,10 @@
 
 ## 4. Manual on-device checklist
 
-- [ ] 4.1 Go offline on Track — no red banner, no other global offline hint.
-- [ ] 4.2 Go offline on History, pull to refresh — inline offline notice appears (`HistoryOfflineNotice`), auto-dismisses.
-- [ ] 4.3 Go offline, open Profile — sync-status error row visible; tap "Sync now" online recovers to idle.
-- [ ] 4.4 Light/dark + EN/RU spot-check that no layout gap remains where the banner sat (top inset collapses).
+- [x] 4.1 Go offline on Track — no red banner, no other global offline hint. (Device pass 2026-09-29: pass.)
+- [x] 4.2 Go offline on History, pull to refresh — inline offline notice appears (`HistoryOfflineNotice`), auto-dismisses. (Device pass 2026-09-29: pass.)
+- [x] 4.3 Go offline, open Profile — sync-status error row visible; tap "Sync now" online recovers to idle. (Device pass 2026-09-29: pass.)
+- [x] 4.4 Light/dark + EN/RU spot-check that no layout gap remains where the banner sat (top inset collapses). (Device pass 2026-09-29: pass.)
 
 ## 5. Verification + docs (S5)
 
