@@ -33,7 +33,7 @@ struct ProfileView: View {
             List {
                 accountSection
                 onDeviceSection
-                versionSection
+                versionFooter
             }
             .navigationTitle(L10n.profileTitle.text)
             .navigationBarTitleDisplayMode(.inline)
@@ -144,23 +144,20 @@ struct ProfileView: View {
         }
     }
 
-    // MARK: - Version
-
-    /// Trailing diagnostic version row (add-version-label-release): the built
-    /// bundle's marketing version + build (`1.0.0 (3)`, plus `• Debug` on
-    /// Debug builds) in its own trailing section — `onDeviceSection` already
-    /// owns a footer, so reusing it would collide with
-    /// `profileOnDeviceFooter` styling. Plain `Text` in a `Section`, never a
-    /// `Button`/`NavigationLink`, so the row is non-tappable and VoiceOver
-    /// exposes it as a static label. `.caption` scales with Dynamic Type;
-    /// `Theme.textSecondary` resolves for light/dark.
-    private var versionSection: some View {
+    /// Trailing diagnostic version footer (add-version-label-release): plain
+    /// footer text with no row/card, so it stays dim and never reads as
+    /// tappable. Plain `Text`, so VoiceOver exposes it as a static label.
+    /// `.caption` scales with Dynamic Type; `Theme.textSecondary` resolves
+    /// for light/dark.
+    private var versionFooter: some View {
         Section {
+            EmptyView()
+        } footer: {
             Text(AppVersion.text)
                 .font(.caption)
                 .foregroundStyle(Theme.textSecondary)
                 .frame(maxWidth: .infinity, alignment: .trailing)
-                .accessibilityIdentifier("ProfileVersionRow")
+                .accessibilityIdentifier("ProfileVersionLabel")
         }
     }
 

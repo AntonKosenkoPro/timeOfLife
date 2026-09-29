@@ -1,18 +1,19 @@
 import Foundation
 
 /// The built bundle's marketing version + build number for the Profile
-/// version row (add-version-label-release): `1.0.0 (3)` on Release builds,
-/// `1.0.0 (3) • Debug` on Debug builds. Version truth lives in
-/// `project.yml` (`info.properties` + `CURRENT_PROJECT_VERSION`) — XcodeGen
-/// merges it into `Info.plist` at generation time, so this helper only reads
-/// the built bundle (same pattern as `AppConfig` reading `API_BASE_URL`).
+/// version label (add-version-label-release): `v0.1.0 (1)` on Release builds,
+/// `v0.1.0 (1) • Debug` on Debug builds. The `v` prefix marks the digits as
+/// build metadata. Version truth lives in `project.yml` (`info.properties`
+/// + `CURRENT_PROJECT_VERSION`) — XcodeGen merges it into `Info.plist` at
+/// generation time, so this helper only reads the built bundle (same pattern
+/// as `AppConfig` reading `API_BASE_URL`).
 enum AppVersion {
     /// Pure formatting core with explicit inputs, so tests can cover both
     /// configurations without depending on the running build's bundle keys.
     /// Missing bundle keys fall back to `"?"` (defensive only — a built app
     /// bundle always carries both keys).
     static func formatted(marketing: String?, build: String?, isDebug: Bool, debugSuffix: String) -> String {
-        let base = "\(marketing ?? "?") (\(build ?? "?"))"
+        let base = "v\(marketing ?? "?") (\(build ?? "?"))"
         guard isDebug else { return base }
         return "\(base) • \(debugSuffix)"
     }
