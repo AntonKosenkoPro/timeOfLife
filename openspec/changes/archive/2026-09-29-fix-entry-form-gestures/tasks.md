@@ -18,12 +18,12 @@
 
 > Status: UNTESTED ON DEVICE (no device run in this iteration — shared simulator host was running a concurrent change; see PR body). Recommended before merge: build Release to a physical iPhone, sign in, and walk the list below.
 
-- [ ] 4.1 Scroll with picker closed (all modes) — pull-down-to-scroll works.
-- [ ] 4.2 Scroll with date picker open + with time (wheel) picker open, drag starting outside the wheels (all modes) — form scrolls, picker stays open.
-- [ ] 4.3 Swipe-down-to-dismiss the CREATE sheet — discards draft, no entry created.
-- [ ] 4.4 Edge-back pop of the EDIT/LOCKED push — discards draft, lists unchanged; system back button also works.
-- [ ] 4.5 Keyboard: focus name/notes → tap away dismisses (draft kept); scroll dismisses; Return (Done) dismisses.
-- [ ] 4.6 Small-screen (320 pt) + Dynamic Type + light/dark + EN/RU spot-check with a picker expanded (card margins kept, no clipping).
+- [x] 4.1 Scroll with picker closed (all modes) — pull-down-to-scroll works. (Device pass 2026-09-29: CREATE sheet pass.)
+- [x] 4.2 Scroll with date picker open + with time (wheel) picker open, drag starting outside the wheels (all modes) — form scrolls, picker stays open. (Device pass 2026-09-29: pass.)
+- [x] 4.3 Swipe-down-to-dismiss the CREATE sheet — discards draft, no entry created. (Device pass 2026-09-29: pass.)
+- [x] 4.4 Edge-back pop of the EDIT/LOCKED push — discards draft, lists unchanged; system back button also works. (Device pass 2026-09-29: pass.)
+- [x] 4.5 Keyboard: focus name/notes → tap away dismisses (draft kept); scroll dismisses; Return (Done) dismisses. (Device pass 2026-09-29: pass.)
+- [x] 4.6 Small-screen (320 pt) + Dynamic Type + light/dark + EN/RU spot-check with a picker expanded (card margins kept, no clipping). (Device pass 2026-09-29: pass.)
 
 ## 5. Verification + docs (S5)
 

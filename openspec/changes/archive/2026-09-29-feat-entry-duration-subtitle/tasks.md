@@ -17,10 +17,10 @@
 
 ## 4. Manual on-device checklist (CREATE + EDIT + LOCKED)
 
-- [ ] 4.1 Valid interval shows `Duration: <natural>` updating live while Start/End pickers change.
-- [ ] 4.2 End ≤ Start shows the invalid text in red; confirm stays disabled.
-- [ ] 4.3 320 pt + Dynamic Type + light/dark + EN/RU: subtitle truncates, bar actions reachable.
-- [ ] 4.4 EDIT pushed form: subtitle beside the back button; LOCKED form: read-only subtitle.
+- [x] 4.1 Valid interval shows `Duration: <natural>` updating live while Start/End pickers change. (Device pass 2026-09-29: pass.)
+- [x] 4.2 End ≤ Start shows the invalid text in red; confirm stays disabled. (Device pass 2026-09-29: pass.)
+- [x] 4.3 320 pt + Dynamic Type + light/dark + EN/RU: subtitle truncates, bar actions reachable. (Device pass 2026-09-29: pass.)
+- [x] 4.4 EDIT pushed form: subtitle beside the back button; LOCKED form: read-only subtitle. (Device pass 2026-09-29: pass.)
 
 ## 5. Verification + docs (S5)
 

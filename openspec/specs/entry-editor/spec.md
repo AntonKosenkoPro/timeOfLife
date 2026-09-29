@@ -70,3 +70,85 @@ Entries with a non-`manual` source SHALL open in LOCKED mode: the Activity row, 
 #### Scenario: Imported entry can still be deleted
 - **WHEN** the user deletes an imported entry and confirms
 - **THEN** the entry enters the undo buffer exactly like a manual entry (restorable by shake within 30 s)
+
+### Requirement: Entry-form name clear shows only when focused and non-empty
+The entry-form Name row's trailing clear (`×`) button SHALL be visible only when the field is focused AND holds non-empty text and the form is editable (hidden in LOCKED mode, when unfocused, or when empty); one tap SHALL clear the draft name (categories, notes, and interval untouched; the validity gate re-evaluates). The button uses the Apple-standard trailing look (small dim `xmark.circle.fill`, 44 pt tap target).
+
+#### Scenario: Name clear hidden when unfocused
+- **WHEN** the entry-form name field holds text but is not focused
+- **THEN** no clear button is shown
+
+#### Scenario: Name clear clears the draft name
+- **WHEN** the entry-form name field is focused, holds text, and the form is editable
+- **THEN** a trailing `×` is visible, and one tap empties the field while categories, notes, and Start/End stay unchanged
+
+### Requirement: Entry-form Notes row has a clear button
+The entry-form Notes row SHALL offer a trailing clear (`×`) button with the same visibility rule (focused AND non-empty, editable only) and the same Apple-standard look. One tap SHALL clear the draft notes (name, categories, and interval untouched; the validity gate re-evaluates). The button carries the `EntryNotesClearButton` identifier and a "Clear notes" accessibility label.
+
+#### Scenario: Notes clear clears the draft notes
+- **WHEN** the Notes field is focused, holds text, and the form is editable
+- **THEN** a trailing `×` is visible, and one tap empties the notes while name, categories, and Start/End stay unchanged
+
+#### Scenario: Notes clear hidden when nothing to clear
+- **WHEN** the Notes field is empty, unfocused, or the form is LOCKED (read-only)
+- **THEN** no clear button is shown
+
+### Requirement: Unified entry form field order
+The unified entry form SHALL lay out its input cards in exactly this order in every mode (CREATE, EDIT, LOCKED): Activity name → Start time → End time → Categories → Notes. Start and Ends SHALL be separate cards (one `timeRow` each with its own date + time pills and inline single-open picker), not one combined Starts/Ends card. The validity gate, picker behavior (single-open, device locale/calendar), mode chrome (titles/actions/LOCKED dimming + provenance note), and bottom destructive Delete are unchanged.
+
+#### Scenario: Card order in CREATE mode
+- **WHEN** the Log Time sheet opens for a new entry
+- **THEN** the cards read top-to-bottom: Name, Start, End, Categories, Notes
+
+#### Scenario: Card order in EDIT mode
+- **WHEN** the form opens for an existing `manual` entry
+- **THEN** the cards read top-to-bottom: Name, Start, End, Categories, Notes with the same pills/pickers as creation
+
+#### Scenario: Card order in LOCKED mode
+- **WHEN** the form opens for an imported entry
+- **THEN** the cards read top-to-bottom: Name, Start, End, Categories, Notes, disabled-dimmed with the provenance note and no Save action
+
+### Requirement: All native gestures work in the entry form
+The entry form SHALL NOT disable, block, or work around any system gesture to accommodate layout. Pull-down-to-scroll SHALL scroll the form with any picker open or closed; swipe-down-to-dismiss SHALL dismiss the sheet/cover presentation; the edge-back gesture SHALL pop the form wherever a back stack exists; tapping outside a focused text field SHALL dismiss the keyboard. If a presentation kills a system gesture, the presentation SHALL change (navigation push or interactive dismiss) rather than patching the gesture.
+
+#### Scenario: Scroll with picker open
+- **WHEN** a date or time picker is expanded and the user drags vertically starting outside the picker wheels
+- **THEN** the form scrolls; the wheel picker never traps the scroll gesture
+
+#### Scenario: Dismiss and back gestures
+- **WHEN** the form is presented and the user swipes down (sheet/cover) or swipes back from the leading edge (pushed onto a navigation stack)
+- **THEN** the form dismisses/pops with the draft discarded and no entry created or changed
+
+#### Scenario: Keyboard dismissal
+- **WHEN** the name or notes field is focused and the user taps outside the field or scrolls
+- **THEN** the keyboard dismisses and the draft is preserved
+
+### Requirement: Entry form shows a live duration subtitle in the navigation bar
+The entry form SHALL show a live duration subtitle in the form's navigation bar in every mode (CREATE, EDIT, LOCKED): a `ToolbarItem(.principal)` VStack with the mode title (`Log Time` / `Edit entry` / `Imported entry`, localized) plus a footnote duration line. The duration line SHALL update live from the already-`@Published` `startsAt`/`endsAt`, formatted with the History natural-language duration (`33s`, `1m 20s`, `1h 12m`, `1d 12h`) prefixed by the localized `Duration` label. When the interval is invalid (End equal to or before Start, confirm disabled), the subtitle SHALL show a localized explanatory text (e.g. `End must be after Start`) in `Theme.danger` instead of a duration — it explains *why* the confirm action is disabled. The subtitle SHALL use `Theme` semantic colors only, with all user-facing strings localized (EN + RU); the footnote line SHALL be a single line (inline-mode truncation).
+
+#### Scenario: Valid interval shows a live duration
+- **WHEN** the form holds an end strictly after the start
+- **THEN** the nav bar shows the mode title plus a footnote `Duration: <natural-language duration>` line that updates as Start/End change
+
+#### Scenario: Invalid interval explains why the confirm is disabled
+- **WHEN** the form holds an end equal to or before the start
+- **THEN** the nav bar footnote shows the localized invalid-interval text in `Theme.danger` instead of a duration
+
+#### Scenario: Locked mode keeps the read-only subtitle
+- **WHEN** the form opens for an imported entry
+- **THEN** the subtitle shows that entry's fixed interval duration (or the invalid text), never editable
+
+### Requirement: Entry-form name row has autocomplete suggestions
+(Clear-button behavior for this row — focused-AND-non-empty visibility, editable only — is owned by the "Entry-form name clear shows only when focused and non-empty" requirement.) The entry-form Name row SHALL offer autocomplete suggestions. Suggestions SHALL be drawn from recent committed entry texts (exact-text history, case-sensitive identity: `Gym` ≠ `GYM`): when the trimmed input is non-empty, the row SHALL list the loaded recents (cap 6, newest-first) whose text starts with the input (case-insensitive prefix), excluding the case-sensitive exact match. Picking a suggestion SHALL fill the field with that exact text and inherit that entry's full ordered categories (the Recents tap contract); suggestions SHALL never mutate committed history.
+
+#### Scenario: Typing shows prefix suggestions
+- **WHEN** the user types a non-empty prefix matching one or more recent texts
+- **THEN** those recents are suggested newest-first, excluding the exact text already in the field
+
+#### Scenario: Picking a suggestion fills text plus categories
+- **WHEN** the user picks a suggestion
+- **THEN** the field fills with that exact text and the ordered categories become that entry's categories; no committed entry changes
+
+#### Scenario: Exact-text identity is case-sensitive
+- **WHEN** recents hold both `Gym` and `GYM` and the user types `g`
+- **THEN** both are suggested; typing the exact `Gym` excludes only `Gym`, not `GYM`

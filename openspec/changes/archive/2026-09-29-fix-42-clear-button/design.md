@@ -42,6 +42,8 @@ The component serves the category editor (needs the button) and email-OTP (must 
 
 Reference glyph ≈ 16–18 pt dim gray circle. Implementation: `.font(.system(size: 17))` + `.foregroundStyle(.secondary)` (adapts light/dark like the reference) on the image; the Button keeps `minWidth/minHeight 44` + `contentShape(Rectangle())` so the accessible tap target does not shrink — only the visible glyph gets smaller and dimmer. No raw `Color` literals (Theme/system semantics only).
 
+As-built (commit `2fa5608`): 16 pt `Theme.textSecondary.opacity(0.55)` — within the reference tolerance, verified by the §5 screenshots as-is.
+
 ### 5. Audit outcome (all `TextField` call sites)
 
 | Field | Clear button | Why |

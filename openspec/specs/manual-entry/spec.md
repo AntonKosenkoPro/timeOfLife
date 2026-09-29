@@ -69,12 +69,12 @@ Activating Add SHALL persist a committed entry via `LocalStore.createEntry` with
 #### Scenario: Overlap is allowed
 - **WHEN** the chosen interval overlaps an existing entry or a running timer session
 - **THEN** Add stays enabled and saving succeeds
-### Requirement: Log Time sheet captures name, categories, notes, start, and end
-The app SHALL provide the Log Time sheet as the CREATE mode of the unified entry form (see entry-editor capability): containing Name (plain-text field), Categories (ordered TagSelector), Notes (plain-text field, empty by default), Starts (date pill + time pill), and Ends (date pill + time pill). CREATE mode SHALL keep the "Log time" title (localized) with Cancel and Add actions in the navigation bar, presented as a sheet from the existing entry points with unchanged defaults, gates, pickers, and save behavior. EDIT and LOCKED modes are defined by the entry-editor capability; no title, location, all-day, repeat, or alert fields SHALL be present in any mode.
+### Requirement: Log Time sheet captures name, start, end, categories, and notes
+The app SHALL provide the Log Time sheet as the CREATE mode of the unified entry form (see entry-editor capability): cards in exactly this order — Name (plain-text field), Start (date pill + time pill with inline single-open picker), End (date pill + time pill with inline single-open picker), Categories (ordered TagSelector), Notes (plain-text field, empty by default). CREATE mode SHALL keep the "Log time" title (localized) with Cancel and Add actions in the navigation bar, presented as a sheet from the existing entry points with unchanged defaults, gates, pickers, and save behavior. EDIT and LOCKED modes are defined by the entry-editor capability; no title, location, all-day, repeat, or alert fields SHALL be present in any mode. The all-native-gestures-must-work rule (entry-editor capability) SHALL apply to CREATE mode as well as EDIT/LOCKED.
 
 #### Scenario: Sheet contents
 - **WHEN** the Log Time sheet is open
-- **THEN** it shows a Name row, a Categories row, a Notes row, a Starts row with date and time pills, an Ends row with date and time pills, and Cancel/Add actions — and nothing else
+- **THEN** it shows a Name card, a Start card with date and time pills, an End card with date and time pills, a Categories card, and a Notes card — in that order — plus Cancel/Add actions, and nothing else
 
 #### Scenario: Cancel discards the draft
 - **WHEN** the user activates Cancel

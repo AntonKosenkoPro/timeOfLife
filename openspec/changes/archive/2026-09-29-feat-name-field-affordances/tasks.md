@@ -21,11 +21,11 @@
 
 ## 4. Manual on-device checklist (autocomplete UX is device-sensitive)
 
-- [ ] 4.1 Track: type a prefix → suggestions appear without moving Start; pick → exact text + categories fill, ready timer, nothing starts; clear → field empties, idle returns.
-- [ ] 4.2 Entry form (CREATE + EDIT): same clear/pick behavior inline; pick inherits categories; clear keeps categories/notes/interval.
-- [ ] 4.3 `Gym` vs `GYM`: both suggest on shared prefix; exact typing excludes only the exact one.
-- [ ] 4.4 No suggestions when field empty or exactly matching; LOCKED form shows no clear and no suggestions.
-- [ ] 4.5 320 pt + Dynamic Type + light/dark + EN/RU spot-check; VoiceOver reads clear button + suggestion rows.
+- [x] 4.1 Track: type a prefix → suggestions appear without moving Start; pick → exact text + categories fill, ready timer, nothing starts; clear → field empties, idle returns. (Device pass 2026-09-29: pass except suggestions overflow the Start button in some cases — issue #69, ships as known issue for internal TestFlight.)
+- [x] 4.2 Entry form (CREATE + EDIT): same clear/pick behavior inline; pick inherits categories; clear keeps categories/notes/interval. (Device pass 2026-09-29: pass.)
+- [x] 4.3 `Gym` vs `GYM`: both suggest on shared prefix; exact typing excludes only the exact one. (Device pass 2026-09-29: pass.)
+- [x] 4.4 No suggestions when field empty or exactly matching; LOCKED form shows no clear and no suggestions. (Device pass 2026-09-29: pass.)
+- [x] 4.5 320 pt + Dynamic Type + light/dark + EN/RU spot-check; VoiceOver reads clear button + suggestion rows. (Device pass 2026-09-29: pass.)
 
 ## 5. Verification + docs (S5)
 

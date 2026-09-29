@@ -46,15 +46,15 @@ The Control SHALL display its toggle state (running vs idle) and, when running, 
 - **WHEN** no timer is running and the Control renders
 - **THEN** it displays the start state, referencing the most-recently-used exact text by name
 ### Requirement: Availability guard for iOS 18+
-The Control SHALL be available only on iOS 18+ and SHALL be absent (no Control offered) on iOS 15–17. The app's deployment target SHALL remain iOS 15. The Control code SHALL be wrapped in `if #available(iOS 18, *)` guards so the app builds and runs on iOS 15+.
+The app's deployment target SHALL be iOS 18. No `if #available(iOS 18, *)` guards SHALL exist around Control code. The Control target itself remains deferred (no widget target in `project.yml`); the start/stop, authentication, failure, state-reading, and outbox requirements stay in force as the contract for its future implementation.
 
 #### Scenario: iOS 18+ device
 - **WHEN** the user runs the app on iOS 18 or later
-- **THEN** the Lifio Control is available to add to the lock screen / Control Center
+- **THEN** the app runs natively with no availability-guard branching; the lock-screen Control is not yet offered (deferred)
 
 #### Scenario: iOS 15–17 device
-- **WHEN** the user runs the app on iOS 15, 16, or 17
-- **THEN** no Control is offered; the app's other features work normally
+- **WHEN** a device runs iOS 15, 16, or 17
+- **THEN** the app cannot be installed (deployment floor is iOS 18); no Control-absent runtime branch exists
 
 ### Requirement: Outbox integration
 The Control's App Intent SHALL write the started/stopped entry to the local database and enqueue the corresponding outbox row in the same transaction (per the local-first-store transactional outbox requirement). The sync client drains the outbox on the next foreground; the intent does NOT attempt to sync directly.
