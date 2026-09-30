@@ -18,4 +18,4 @@
 
 ## 4. Stage-1 review follow-up (PR #85)
 
-- [ ] 4.1 Migrate `EmailEntryView` to field-level `focused:`; make the binding required (drop the fallback sink); update the DEBUG preview; re-verify email autofocus on simulator.
+- [x] 4.1 Migrate `EmailEntryView` to field-level `focused:`; make the binding required (drop the fallback sink); update the DEBUG preview; re-verify email autofocus on simulator.
