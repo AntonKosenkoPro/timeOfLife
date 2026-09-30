@@ -6,6 +6,10 @@ options:
   createIntermediateGroups: true
   generateEmptyDirectories: true
   groupSortPosition: top
+  # Runs after every regeneration (local, CI, Xcode Cloud). Required while
+  # XcodeGen stringifies nested target attributes instead of emitting PBX
+  # dicts (yonaskolb/XcodeGen#1637) — see scripts/normalize-system-capabilities.py.
+  postGenCommand: python3 scripts/normalize-system-capabilities.py
 settings:
   base:
     SWIFT_VERSION: "5.0"
@@ -103,6 +107,21 @@ targets:
           # signing, device builds need the development identity; archives
           # still pick the distribution identity automatically.
           CODE_SIGN_IDENTITY: Apple Development
+    # Capabilities MUST be declared here: Xcode writes them to
+    # TargetAttributes.SystemCapabilities in the (gitignored) .pbxproj,
+    # so anything added only via the Xcode UI is wiped by the next
+    # `xcodegen generate` (this previously broke Sign in with Apple
+    # on every regen). The ATS Exception row needs nothing — it is
+    # derived from NSAppTransportSecurity in Info.plist.
+    # NOTE: XcodeGen <= 2.46.0 emits this block as a quoted string
+    # (yonaskolb/XcodeGen#1637); options.postGenCommand normalizes it
+    # back to a native PBX dict on every generate.
+    attributes:
+      SystemCapabilities:
+        com.apple.ApplicationGroups.iOS:
+          enabled: 1
+        com.apple.SignInWithApple:
+          enabled: 1
     dependencies:
       - package: GRDB
         product: GRDB
