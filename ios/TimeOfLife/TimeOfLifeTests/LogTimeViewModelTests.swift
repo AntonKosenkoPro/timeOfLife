@@ -433,17 +433,6 @@ struct LogTimeViewModelTests {
         #expect(vm.name == "Gym")
     }
 
-    @Test("clearName empties the text only")
-    func clearNameEmptiesTextOnly() {
-        let vm = makeViewModel()
-        vm.name = "Gym"
-        vm.toggleCategory("c1")
-        vm.clearName()
-        #expect(vm.name.isEmpty)
-        #expect(vm.categoryIDs == ["c1"])
-        #expect(!vm.isAddEnabled)
-    }
-
     @Test("clearNotes empties the notes only")
     func clearNotesEmptiesNotesOnly() {
         let vm = makeViewModel()

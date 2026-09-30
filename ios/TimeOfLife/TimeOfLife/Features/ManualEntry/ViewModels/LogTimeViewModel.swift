@@ -166,12 +166,6 @@ final class LogTimeViewModel: ObservableObject {
         }
     }
 
-    /// Clears the draft name (clear button): text only — categories, notes,
-    /// and the interval stay untouched; the validity gate re-evaluates.
-    func clearName() {
-        name = ""
-    }
-
     /// Clears the draft notes (clear button): notes only — name,
     /// categories, and the interval stay untouched.
     func clearNotes() {

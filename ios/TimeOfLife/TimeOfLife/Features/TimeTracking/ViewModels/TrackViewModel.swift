@@ -193,17 +193,6 @@ final class TrackViewModel: ObservableObject {
         Haptics.selection()
     }
 
-    /// Clears the name-field draft (clear button): empties the text and
-    /// re-syncs to idle, cancelling a deferred start. Never called while
-    /// running (the name is locked then).
-    func clearNameDraft() {
-        guard !state.isRunning else { return }
-        pendingStart?.cancel()
-        pendingStart = nil
-        nameDraft = ""
-        syncReadyFromDraft()
-    }
-
     /// Starts the prepared name (timer-capture-experience spec); typing or
     /// chip selection alone never starts timing. Start is gated on the
     /// trimmed text being non-empty. A committed `.ready` draft starts
@@ -338,6 +327,7 @@ final class TrackViewModel: ObservableObject {
             Haptics.success()
             scheduleSavedReset()
             recents = (try? await storeRecents()) ?? recents
+            allNames = (try? await storeAllNames()) ?? allNames
         } catch {
             // Recoverable: preserve running state so elapsed time is not lost.
             state = .error(draft, startedAt: startedAt)

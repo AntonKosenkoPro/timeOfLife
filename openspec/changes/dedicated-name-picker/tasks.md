@@ -38,4 +38,9 @@
 ## 8. Revert: empty-Done applies (kept: resign-before-pop jump fix)
 
 - [x] 8.1 Empty Done is a no-op again (code + `completeTypedName` test); spec + design + proposal + FURPS reverted with the rationale recorded
-- [x] 8.2 Re-verify: lint clean, full suite green (525 tests / 51 suites), `openspec validate --all --strict` 19/19
+## 9. AI review follow-up (PR #83)
+
+- [x] 9.1 High: `stop()` refreshes `allNames` in lockstep with `recents` + lockstep test
+- [x] 9.2 Low: retire dead `LogTimeViewModel.clearName()` + `TrackViewModel.clearNameDraft()` and their tests (no production callers; empty-Done stays a no-op by explicit decision)
+- [x] 9.3 Medium: extend `allActivityNames` test with dedupe (newest-wins shape) + case-sensitivity paths
+- [x] 9.4 Re-verify: lint clean, build + tests green, `openspec validate --all --strict`

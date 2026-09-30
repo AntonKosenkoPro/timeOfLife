@@ -371,25 +371,14 @@ struct TrackViewModelTests {
         #expect(vm.allNames.first?.text == "Text7")
     }
 
-    @Test("clearNameDraft empties the draft and returns to idle")
-    func clearNameDraftResets() {
+    @Test("stop refreshes recents and picker names in lockstep")
+    func stopRefreshesBothLists() async {
         let vm = makeViewModel()
-        vm.nameDraft = "Reading"
-        vm.state = .ready(TrackState.Draft(text: "Reading"))
-        vm.clearNameDraft()
-        #expect(vm.nameDraft.isEmpty)
-        #expect(vm.state == .idle)
-        #expect(!vm.canStart)
-    }
-
-    @Test("clearNameDraft is a no-op while running")
-    func clearNameDraftLockedWhileRunning() {
-        let vm = makeViewModel()
-        vm.nameDraft = "Reading"
-        vm.state = .running(TrackState.Draft(text: "Reading"), startedAt: Date())
-        vm.clearNameDraft()
-        #expect(vm.nameDraft == "Reading")
-        #expect(vm.state.isRunning)
+        vm.nameDraft = "Gym"
+        vm.state = .running(TrackState.Draft(text: "Gym"), startedAt: Date())
+        await vm.stop()
+        #expect(vm.recents.map(\.text) == ["Gym"])
+        #expect(vm.allNames.map(\.text) == ["Gym"])
     }
 
     // MARK: - Helpers

@@ -379,6 +379,30 @@ struct LocalStoreTests {
         let names = try await store.allActivityNames()
         #expect(names.count == 8)
         #expect(names.map(\.activityText) == (0...7).reversed().map { "Text\($0)" })
+
+        // Dedupe: repeated exact texts collapse to one row carrying the
+        // newest occurrence's startedAt and categoryIDs; case variants stay
+        // distinct (mirroring the recents contract).
+        _ = try await store.createCategory(makeCategory())
+        _ = try await store.createEntry(makeEntry(
+            id: "old-gym", activityText: "Gym",
+            startedAt: base.addingTimeInterval(-100),
+            categoryIDs: ["cat-1"]
+        ))
+        _ = try await store.createEntry(makeEntry(
+            id: "new-gym", activityText: "Gym",
+            startedAt: base.addingTimeInterval(1_100)
+        ))
+        _ = try await store.createEntry(makeEntry(
+            id: "case-gym", activityText: "GYM",
+            startedAt: base.addingTimeInterval(1_200)
+        ))
+        let deduped = try await store.allActivityNames()
+        #expect(deduped.map(\.activityText).prefix(3) == ["GYM", "Gym", "Text7"])
+        #expect(deduped.count == 10)
+        let gym = try #require(deduped.first { $0.activityText == "Gym" })
+        #expect(gym.startedAt == base.addingTimeInterval(1_100))
+        #expect(gym.categoryIDs.isEmpty)
     }
 
     // MARK: - Timer draft (remove-activities-layer D3/D4)
