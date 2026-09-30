@@ -1,10 +1,10 @@
 import SwiftUI
 
 /// The shared Category Editor sheet (Design/SCREENS/CategoryEditor.md,
-/// category-management D4): name field, catalog icon grid, field validation,
-/// Cancel, and a keyboard-safe pinned Save bar. Create mode starts with an
-/// empty name and the default `tag` icon; edit mode prefills from the
-/// passed-in category.
+/// category-management D4): full-height sheet with Log Time toolbar chrome
+/// (X dismiss, checkmark save), compact name field, catalog icon grid, and
+/// field validation. Create mode starts with an empty name and the default
+/// `tag` icon; edit mode prefills from the passed-in category.
 struct CategoryEditorView: View {
     @StateObject private var vm: CategoryEditorViewModel
     @Environment(\.dismiss)
@@ -32,81 +32,104 @@ struct CategoryEditorView: View {
     }
 
     var body: some View {
-        EditorSheetScaffold(
-            title: vm.isCreateMode ? L10n.categoryEditorCreateTitle.text : L10n.categoryEditorEditTitle.text,
-            cancelTitle: L10n.categoryEditorCancel.text,
-            isLoading: vm.isLoading,
-            cancelAccessibilityId: "CategoryEditorCancelButton",
-            usesMediumDetent: true,
-            onCancel: { dismiss() },
-            content: {
-                TextFieldWithError(
-                    title: L10n.categoryEditorNameLabel.text,
-                    placeholder: L10n.categoryEditorNamePlaceholder.text,
-                    text: $vm.name,
-                    error: vm.fieldErrors.name,
-                    keyboardType: .default,
-                    textContentType: nil,
-                    submitLabel: .done,
-                    autocapitalization: .sentences,
-                    accessibilityId: "CategoryEditorNameField",
-                    onSubmit: { isNameFocused = false },
-                    showClear: ClearButtonVisibility.shouldShow(
-                        isFocused: isNameFocused,
-                        text: vm.name
-                    ),
-                    onClear: { vm.name = "" },
-                    clearAccessibilityId: "CategoryNameClearButton",
-                    clearAccessibilityLabel: L10n.nameClear.text
-                )
-                .focused($isNameFocused)
-                .onChange(of: vm.name) {
-                    vm.nameDidChange()
-                }
-
-                VStack(alignment: .leading, spacing: Theme.spacingSmall) {
-                    Text(L10n.categoryEditorIconLabel.text)
-                        .font(.title2.bold())
-                        .foregroundStyle(Theme.textPrimary)
-                        .accessibilityAddTraits(.isHeader)
-
-                    IconPickerGrid(
-                        options: iconOptions,
-                        selection: Binding(
-                            get: { vm.icon.rawValue },
-                            set: { vm.icon = CatalogIcon(validated: $0) }
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: Theme.spacingLarge) {
+                    TextFieldWithError(
+                        title: L10n.categoryEditorNameLabel.text,
+                        placeholder: L10n.categoryEditorNamePlaceholder.text,
+                        text: $vm.name,
+                        error: vm.fieldErrors.name,
+                        keyboardType: .default,
+                        textContentType: nil,
+                        submitLabel: .done,
+                        autocapitalization: .sentences,
+                        accessibilityId: "CategoryEditorNameField",
+                        onSubmit: { isNameFocused = false },
+                        focused: $isNameFocused,
+                        showClear: ClearButtonVisibility.shouldShow(
+                            isFocused: isNameFocused,
+                            text: vm.name
                         ),
-                        accessibilityId: "CategoryEditorIcon"
+                        onClear: { vm.name = "" },
+                        clearAccessibilityId: "CategoryNameClearButton",
+                        clearAccessibilityLabel: L10n.nameClear.text
                     )
-                }
+                    .onChange(of: vm.name) {
+                        vm.nameDidChange()
+                    }
 
-                if let errorMessage = vm.errorMessage {
-                    ErrorBanner(
-                        message: errorMessage,
-                        accessibilityId: "CategoryEditorErrorBanner"
-                    )
-                }
+                    VStack(alignment: .leading, spacing: Theme.spacingSmall) {
+                        Text(L10n.categoryEditorIconLabel.text)
+                            .font(.title2.bold())
+                            .foregroundStyle(Theme.textPrimary)
+                            .accessibilityAddTraits(.isHeader)
 
-                if !vm.isCreateMode {
-                    deleteSection
-                }
-            },
-            bottomBar: {
-                PrimaryButton(
-                    title: L10n.categoryEditorSave.text,
-                    icon: nil,
-                    isLoading: vm.isLoading,
-                    isDisabled: !vm.canSave,
-                    accessibilityId: "CategoryEditorSaveButton"
-                ) {
-                    vm.save()
+                        IconPickerGrid(
+                            options: iconOptions,
+                            selection: Binding(
+                                get: { vm.icon.rawValue },
+                                set: { vm.icon = CatalogIcon(validated: $0) }
+                            ),
+                            accessibilityId: "CategoryEditorIcon"
+                        )
+                    }
+
+                    if let errorMessage = vm.errorMessage {
+                        ErrorBanner(
+                            message: errorMessage,
+                            accessibilityId: "CategoryEditorErrorBanner"
+                        )
+                    }
+
+                    if !vm.isCreateMode {
+                        deleteSection
+                    }
                 }
                 .padding(.horizontal, Theme.screenHorizontalPadding)
-                .padding(.vertical, Theme.spacingSmall)
-                .background(Theme.backgroundPrimary)
+                .padding(.vertical, Theme.spacingMedium)
+                .frame(maxWidth: Theme.maxContentWidth)
+                .frame(maxWidth: .infinity)
             }
-        )
-        .onAppear {
+            .background(Theme.backgroundPrimary)
+            .navigationTitle(vm.isCreateMode ? L10n.categoryEditorCreateTitle.text : L10n.categoryEditorEditTitle.text)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                // Calendar grammar (Log Time parity): X dismisses, checkmark
+                // saves. The checkmark mirrors the old Save bar's gate.
+                ToolbarItem(placement: .cancellationAction) {
+                    Button {
+                        dismiss()
+                    } label: {
+                        Image(systemName: "xmark")
+                    }
+                    .disabled(vm.isLoading)
+                    .accessibilityLabel(L10n.categoryEditorDismissLabel.text)
+                    .accessibilityIdentifier("CategoryEditorCancelButton")
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button {
+                        vm.save()
+                    } label: {
+                        Image(systemName: "checkmark")
+                    }
+                    .disabled(!vm.canSave)
+                    .accessibilityLabel(L10n.categoryEditorConfirmSaveLabel.text)
+                    .accessibilityIdentifier("CategoryEditorSaveButton")
+                }
+            }
+            // Scroll-away dismisses the keyboard (native interactive behavior).
+            .scrollDismissesKeyboard(.interactively)
+        }
+        .interactiveDismissDisabled(vm.isLoading)
+        .task {
+            // Autofocus waits out the sheet presentation (issue #82,
+            // NamePicker precedent): focusing instantly fires the keyboard
+            // mid-animation, and the keyboard-driven auto-scroll computes
+            // against moving layout, landing the field partly out of
+            // viewport. Cancelled automatically on dismiss.
+            try? await Task.sleep(nanoseconds: Self.focusDelayNanoseconds)
+            guard !Task.isCancelled else { return }
             isNameFocused = true
         }
         .alert(
@@ -130,6 +153,9 @@ struct CategoryEditorView: View {
     }
 
     // MARK: - Delete
+
+    /// Sheet-presentation settle before autofocus (see `.task` above).
+    private static let focusDelayNanoseconds: UInt64 = 400_000_000
 
     /// Bottom-of-page destructive Delete (edit mode only). Mirrors the entry
     /// form's delete section.

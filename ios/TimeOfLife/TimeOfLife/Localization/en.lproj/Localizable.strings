@@ -219,6 +219,8 @@
 "categoryEditor.iconUnavailable" = "This icon is unavailable on this iOS version and is shown as a tag.";
 "categoryEditor.save" = "Save";
 "categoryEditor.cancel" = "Cancel";
+"categoryEditor.dismissLabel" = "Close";
+"categoryEditor.confirmSaveLabel" = "Save category";
 "categoryEditor.delete" = "Delete category";
 "category.nameRequired" = "Enter a category name.";
 "category.nameTooLong" = "Name must be at most 60 characters.";

@@ -191,6 +191,10 @@ enum L10n: String, CaseIterable {
     case categoryEditorIconUnavailable = "categoryEditor.iconUnavailable"
     case categoryEditorSave = "categoryEditor.save"
     case categoryEditorCancel = "categoryEditor.cancel"
+    // Calendar-grammar icon buttons (unify-category-editor-chrome):
+    // VoiceOver labels for the X dismiss and the checkmark save.
+    case categoryEditorDismissLabel = "categoryEditor.dismissLabel"
+    case categoryEditorConfirmSaveLabel = "categoryEditor.confirmSaveLabel"
     case categoryEditorDelete = "categoryEditor.delete"
     case categoryNameRequired = "category.nameRequired"
     case categoryNameTooLong = "category.nameTooLong"

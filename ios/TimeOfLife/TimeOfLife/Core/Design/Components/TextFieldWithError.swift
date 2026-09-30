@@ -15,7 +15,11 @@ struct TextFieldWithError: View {
     let autocapitalization: UITextAutocapitalizationType
     let accessibilityId: String
     let onSubmit: () -> Void
-    /// Opt-in trailing clear (`×`, issue #42): defaults to off so existing
+    /// Focus binding applied to the inner `TextField` (issue #82): Apple's
+    /// `focused(_:)` moves focus to *the modified view*, so the binding
+    /// belongs on the field itself — never on a wrapper container.
+    let focused: FocusState<Bool>.Binding
+    /// Opt-in trailing clear (×, issue #42): defaults to off so existing
     /// callers (email-OTP) are unaffected; the category editor opts in.
     /// The caller owns visibility (focused AND non-empty) via
     /// `ClearButtonVisibility` and passes the result as `showClear`.
@@ -37,7 +41,11 @@ struct TextFieldWithError: View {
                     .autocapitalization(autocapitalization)
                     .autocorrectionDisabled()
                     .submitLabel(submitLabel)
-                    .frame(maxWidth: .infinity)
+                    // Stable row height (issue #82): the 44 pt clear button
+                    // fits inside an already-44 pt field, so its appearance
+                    // never grows the row or shifts content below.
+                    .frame(maxWidth: .infinity, minHeight: Theme.minTapArea)
+                    .focused(focused)
                     .accessibilityIdentifier(accessibilityId)
                     .onSubmit(onSubmit)
                 if showClear, let onClear {
@@ -48,7 +56,10 @@ struct TextFieldWithError: View {
                     )
                 }
             }
-                .padding()
+                // Compact card (issue #82): horizontal-only padding keeps the
+                // row at the 44 pt minimum — matching the NamePicker field —
+                // instead of ballooning to ~76 pt with full padding.
+                .padding(.horizontal, Theme.spacingMedium)
                 .background(Theme.backgroundSecondary)
                 .cornerRadius(Theme.cornerRadius)
                 .overlay(
@@ -69,6 +80,7 @@ struct TextFieldWithError: View {
 #if DEBUG
 private struct TextFieldWithErrorPreview: View {
     @State private var text: String = ""
+    @FocusState private var isFocused: Bool
 
     var body: some View {
         TextFieldWithError(
@@ -80,8 +92,10 @@ private struct TextFieldWithErrorPreview: View {
             textContentType: .emailAddress,
             submitLabel: .continue,
             autocapitalization: .none,
-            accessibilityId: "PreviewTextField"
-        ) {}
+            accessibilityId: "PreviewTextField",
+            onSubmit: {},
+            focused: $isFocused
+        )
         .padding()
     }
 }

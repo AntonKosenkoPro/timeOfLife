@@ -180,6 +180,9 @@ struct LocalizationTests {
         // add-version-label-release adds profile.versionDebugSuffix = 143.
         // dedicated-name-picker removes name.suggestions and adds
         // name.pickerTitle + name.pickerNoMatchHint = 144.
-        #expect(l10nCases.count == 144)
+        // unify-category-editor-chrome adds 2 icon-button VoiceOver labels
+        // (categoryEditor.dismissLabel + categoryEditor.confirmSaveLabel)
+        // = 146.
+        #expect(l10nCases.count == 146)
     }
 }
