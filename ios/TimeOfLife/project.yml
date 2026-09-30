@@ -74,6 +74,7 @@ targets:
               NSExceptionAllowsInsecureHTTPLoads: true
               NSIncludesSubdomains: false
         UIUserInterfaceStyle: Automatic
+        UIRequiresFullScreen: true
         ITSAppUsesNonExemptEncryption: false
         API_BASE_URL: "$(API_BASE_URL)"
     settings:
