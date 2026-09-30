@@ -19,7 +19,7 @@
 - [x] 3.6 Second-review follow-ups: `--atomic` pushes, recover BUILD from bump snapshot, automated `verify` via `ios.yml workflow_call`, origin-side tag checks, fixed-string bump lookup + snapshot verify, rebuild canonical-string + tag-presumption guards, SHA-compare landed check
 - [x] 3.7 Fix `verify`-job placement breaking workflow YAML (Summary orphaned); all future workflow edits must pass a full YAML parse, not just `bash -n`
 - [x] 2.5 Owner feedback: footer label at Profile bottom (right-aligned, no card) after row + navbar spikes rejected, `v`-prefixed format, live versions set to `0.1.0 (1)`
-- [ ] 3.4 Dry-run with an invalid version (guards refuse, nothing changes), then a real run; confirm refs landed (workflow's `ls-remote` check) and verify with a local build/archive before uploading (GITHUB_TOKEN pushes do not trigger `ios.yml`)
+- [x] 3.4 Dry-run with an invalid version (guards refuse, nothing changes), then a real run; confirm refs landed (workflow's `ls-remote` check) and verify with a local build/archive before uploading (GITHUB_TOKEN pushes do not trigger `ios.yml`). (Closed 2026-09-30: real run proven by the `0.1.1 (2)` cut — workflow guards + `ls-remote` verify passed, tag `v0.1.1` landed, local archive + TestFlight upload succeeded and the Xcode Cloud tag pipeline went green end-to-end.)
 
 ## 4. Verification and docs
 
