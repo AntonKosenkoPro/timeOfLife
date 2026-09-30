@@ -53,6 +53,7 @@ targets:
       - path: TimeOfLife/Localization/ru.lproj
     resources:
       - TimeOfLife/Resources/Assets.xcassets
+      - TimeOfLife/PrivacyInfo.xcprivacy
     info:
       path: TimeOfLife/Configuration/Info.plist
       properties:
@@ -73,6 +74,7 @@ targets:
               NSExceptionAllowsInsecureHTTPLoads: true
               NSIncludesSubdomains: false
         UIUserInterfaceStyle: Automatic
+        ITSAppUsesNonExemptEncryption: false
         API_BASE_URL: "$(API_BASE_URL)"
     settings:
       base:
