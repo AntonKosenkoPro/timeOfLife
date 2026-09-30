@@ -219,6 +219,8 @@
 "categoryEditor.iconUnavailable" = "Этот значок недоступен в этой версии iOS и отображается как тег.";
 "categoryEditor.save" = "Сохранить";
 "categoryEditor.cancel" = "Отмена";
+"categoryEditor.dismissLabel" = "Закрыть";
+"categoryEditor.confirmSaveLabel" = "Сохранить категорию";
 "categoryEditor.delete" = "Удалить категорию";
 "category.nameRequired" = "Введите название категории.";
 "category.nameTooLong" = "Название должно быть не длиннее 60 символов.";

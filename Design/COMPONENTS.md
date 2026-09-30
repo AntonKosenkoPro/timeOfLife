@@ -105,6 +105,8 @@ struct TextFieldWithError: View {
     let autocapitalization: UITextAutocapitalizationType
     let accessibilityId: String
     let onSubmit: () -> Void
+    var focused: FocusState<Bool>.Binding? // nil = caller binds `.focused` itself
+    var showClear: Bool // + onClear / clearAccessibilityId / clearAccessibilityLabel
 }
 ```
 
@@ -119,10 +121,12 @@ struct TextFieldWithError: View {
 ### Requirements
 
 - Label appears above the field using `Theme.textSecondary` and `.caption`.
-- Field uses `Theme.backgroundSecondary`, `.cornerRadius(Theme.cornerRadius)`, padding `Theme.spacingMedium`.
+- Field uses `Theme.backgroundSecondary`, `.cornerRadius(Theme.cornerRadius)`, horizontal padding `Theme.spacingMedium` (compact ~44 pt card, NamePicker parity).
 - Border is a 1 pt `RoundedRectangle` stroke: `Theme.hairline` normally, `Theme.danger` when `error != nil`.
 - Error label uses `.caption` and `Theme.danger`, with `accessibilityIdentifier("<accessibilityId>Error")`.
 - Clear error when `text` changes.
+- The text input carries `minHeight Theme.minTapArea` (44 pt), so the opt-in trailing clear button never changes row height.
+- Focus binds to the inner field via the `focused` parameter; callers must not attach `.focused` to the component itself.
 
 ### Usage
 

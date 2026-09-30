@@ -12,16 +12,16 @@ Implements F2/U1/U2 of `Requirements/FURPS/Activity_Catalog_and_Categories.md`. 
 
 ### Layout
 
-`.sheet` with `medium` and `large` detents. `ScrollView` → `VStack(spacing: Theme.spacingLarge)` with horizontal padding `Theme.screenHorizontalPadding` and `Theme.maxContentWidth`:
+Full-height `.sheet` (no detents — closed or fully open). `ScrollView` → `VStack(spacing: Theme.spacingLarge)` with horizontal padding `Theme.screenHorizontalPadding`, vertical padding `Theme.spacingMedium`, and `Theme.maxContentWidth`:
 
-1. Native collapsing navigation title via `EditorSheetScaffold`. Create: `L10n.categoryEditorCreateTitle`; edit: `L10n.categoryEditorEditTitle`. At the top edge the system renders its large-title form with Cancel in the top bar; scrolling collapses it into an inline material bar beside Cancel, and returning to the top expands it again.
+1. Inline navigation title via the view's own `NavigationStack` (Log Time parity — no collapsing large title). Create: `L10n.categoryEditorCreateTitle`; edit: `L10n.categoryEditorEditTitle`. Toolbar: `xmark` at `.cancellationAction` (dismiss, `CategoryEditorCancelButton`, VoiceOver `L10n.categoryEditorDismissLabel`) and `checkmark` at `.confirmationAction` (save, `CategoryEditorSaveButton`, VoiceOver `L10n.categoryEditorConfirmSaveLabel`, disabled while the draft is invalid or saving).
 2. `TextFieldWithError` for name:
    - `accessibilityId`: `CategoryEditorNameField`
    - title / placeholder: `L10n.categoryEditorNameLabel` / `L10n.categoryEditorNamePlaceholder`
    - `submitLabel`: `.done`
    - `autocapitalization`: `.sentences`
    - error: `vm.fieldErrors.name`
-   - Focused on appear.
+   - Focused on appear, after the sheet presentation settles (a short settle delay keeps keyboard-driven auto-scroll on final layout).
 3. `SectionHeader(L10n.categoryEditorIconLabel)` + `IconPickerGrid(options: CatalogIcon.renderableSymbols, selection: $vm.icon, accessibilityId: "CategoryEditorIcon")`. A valid synchronized icon unavailable on the current OS remains selected by raw value and is displayed with the `tag` fallback until the user changes it.
 4. `ErrorBanner` if `vm.errorMessage != nil`:
    - `accessibilityId`: `CategoryEditorErrorBanner`
@@ -29,17 +29,11 @@ Implements F2/U1/U2 of `Requirements/FURPS/Activity_Catalog_and_Categories.md`. 
 
 Background: `Theme.backgroundPrimary`.
 
-Pinned bottom action bar via `.safeAreaInset(edge: .bottom)` (D13):
-
-- `PrimaryButton`:
-  - title: `L10n.categoryEditorSave`
-  - `accessibilityId`: `CategoryEditorSaveButton`
-  - disabled while name is whitespace-only (trimmed) or `vm.isLoading`
-- Cancel via swipe-down and the scaffold's native cancellation toolbar item with `accessibilityIdentifier("CategoryEditorCancelButton")`; both dismiss paths are disabled while saving.
+The save action lives in the toolbar (`checkmark`, gated on a valid draft and idle state) — there is no pinned bottom bar. Cancel via the toolbar `xmark` and swipe-down; both dismiss paths are disabled while saving.
 
 ### Keyboard handling
 
-Follows `Design/INTERACTIONS.md` → **Editor sheets and keyboard placement** (D13 / D21). The name field sits in the upper scrollable area, focused on appear. The Save `PrimaryButton` is pinned to `.safeAreaInset(edge: .bottom)` so it follows the keyboard and stays tappable. A measured bottom reserve prevents the field from being hidden behind the action bar on short screens. Dismiss the sheet on save success or cancel; do not leave the keyboard up after save.
+Follows `Design/INTERACTIONS.md` → **Editor sheets and keyboard placement** (D13 / D21). The name field sits in the upper scrollable area, focused on appear (after the presentation settles). The `checkmark` save action lives in the always-visible toolbar so it stays tappable with the keyboard open. Dismiss the sheet on save success or cancel; do not leave the keyboard up after save.
 
 ### Behaviors
 
@@ -98,7 +92,7 @@ struct Category: Identifiable, Codable, Sendable {
 
 - [x] All strings use `L10n.*` keys (EN + RU).
 - [x] Accessibility identifiers: `CategoryEditorNameField`, `CategoryEditorIcon`, `CategoryEditorSaveButton`, `CategoryEditorCancelButton`, `CategoryEditorErrorBanner`, `CategoryEditorDeleteButton` (edit mode).
-- [x] Keyboard placement follows D13 (name upper, Save pinned bottom, measured reserve).
+- [x] Keyboard placement follows D13 (name upper, toolbar checkmark save, full-height sheet).
 - [x] Validation uses unified category-name messages (U2).
 - [x] Duplicate names preserve the draft and keep the editor open.
 - [x] Edit mode pre-fills name + icon from the passed-in `Category`.

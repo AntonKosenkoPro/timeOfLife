@@ -239,11 +239,11 @@ Timer Recents are up-to-6 exact texts computed on-device from committed entries 
 
 ## Editor sheets and keyboard placement
 
-D13 / D21. Applies to `ActivityEditor` and `CategoryEditor`.
+D13 / D21. Applies to `LogTimeView` (CREATE sheet) and `CategoryEditor`.
 
-- Editors are presented as sheets (`.sheet`, medium detents) and shared across create + edit modes (D21).
-- Inside the sheet, follow the existing **Keyboard and primary input placement** rule above:
-  - The name field is in the upper scrollable area, focused on appear.
-  - The Save `PrimaryButton` is pinned to `.safeAreaInset(edge: .bottom)` so it follows the keyboard and stays tappable.
-  - A measured bottom reserve prevents the field from being hidden on short screens.
+- Editors are presented as full-height sheets (plain `.sheet`, no detents — closed or fully open) and shared across create + edit modes (D21).
+- Inside the sheet, follow the existing **Keyboard and primary input placement** rule above, with Log Time toolbar chrome:
+  - The name field is in the upper scrollable area, focused on appear (after the presentation settles).
+  - The primary action is the toolbar `checkmark` (gated on a valid draft and idle state); cancellation is the toolbar `xmark`. Both dismiss paths are disabled while saving.
+  - Scroll-away dismisses the keyboard (`.scrollDismissesKeyboard(.interactively)`).
 - Dismiss the sheet on save success or cancel; do not leave the keyboard up after save.
