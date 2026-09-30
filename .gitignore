@@ -23,8 +23,16 @@ build/
 *.xcodeproj/project.xcworkspace/xcuserdata/
 *.xcworkspace/xcuserdata/
 
-### Generated Xcode project (single source of truth is project.yml)
-ios/TimeOfLife/TimeOfLife.xcodeproj/
+### Generated Xcode project (single source of truth is project.yml).
+### Only the shared schemes are tracked: Xcode Cloud scans the repo for
+### them at workflow-creation time, before ci_post_clone.sh can generate
+### anything. Re-commit them whenever project.yml targets/schemes change.
+ios/TimeOfLife/TimeOfLife.xcodeproj/*
+!ios/TimeOfLife/TimeOfLife.xcodeproj/xcshareddata
+ios/TimeOfLife/TimeOfLife.xcodeproj/xcshareddata/*
+!ios/TimeOfLife/TimeOfLife.xcodeproj/xcshareddata/xcschemes
+ios/TimeOfLife/TimeOfLife.xcodeproj/xcshareddata/xcschemes/*
+!ios/TimeOfLife/TimeOfLife.xcodeproj/xcshareddata/xcschemes/*.xcscheme
 
 ### Swift Package Manager (legacy)
 .build/
