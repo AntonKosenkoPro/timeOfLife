@@ -43,10 +43,10 @@ struct EmailEntryView: View {
                     submitLabel: .continue,
                     autocapitalization: .none,
                     accessibilityId: "EmailField",
-                    onSubmit: submit
+                    onSubmit: submit,
+                    focused: $isEmailFocused
                 )
                 .disabled(vm.isLoading)
-                .focused($isEmailFocused)
 
                 if let errorMessage = vm.errorMessage {
                     ErrorBanner(

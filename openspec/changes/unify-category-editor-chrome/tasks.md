@@ -15,3 +15,7 @@
 - [x] 3.2 Existing suites green (category editor, localization, ManageCategories view-model suites).
 - [x] 3.3 Simulator E2E (signed-in, as in the prior change): open create + edit — sheet full-height, no resize/jump on keyboard appear/dismiss; X discards, ✓ disabled when empty/saving and saves when valid; content stays top-anchored with the field fully visible throughout.
 - [x] 3.4 Re-check `Requirements/FURPS` rows and `Design/SCREENS/CategoryEditor.md` + `Design/INTERACTIONS.md` (D13/D21); update chrome/detent wording to the new contract.
+
+## 4. Stage-1 review follow-up (PR #85)
+
+- [ ] 4.1 Migrate `EmailEntryView` to field-level `focused:`; make the binding required (drop the fallback sink); update the DEBUG preview; re-verify email autofocus on simulator.

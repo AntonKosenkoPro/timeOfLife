@@ -105,7 +105,7 @@ struct TextFieldWithError: View {
     let autocapitalization: UITextAutocapitalizationType
     let accessibilityId: String
     let onSubmit: () -> Void
-    var focused: FocusState<Bool>.Binding? // nil = caller binds `.focused` itself
+    let focused: FocusState<Bool>.Binding // bound to the inner field
     var showClear: Bool // + onClear / clearAccessibilityId / clearAccessibilityLabel
 }
 ```
