@@ -304,12 +304,16 @@ The Track name field's trailing clear (`×`) button SHALL be visible only when t
 - **THEN** the name is locked and no clear button is shown
 
 ### Requirement: Track name field has autocomplete suggestions over recents
-(Clear-button behavior for this field — focused-AND-non-empty visibility, Apple-standard look — is owned by the "Track name clear shows only when focused and non-empty" requirement.) The Track name field SHALL offer autocomplete suggestions over recent texts. Suggestions SHALL be drawn from the exact-text Recents (cap 6, newest-first, `Gym` ≠ `GYM`): when the trimmed draft is a non-empty prefix, Track SHALL suggest the recents whose text starts with it (case-insensitive prefix), excluding the case-sensitive exact match. Suggestions SHALL render without moving the main action (overlay, not layout). Picking a suggestion SHALL follow the Recents tap contract: fill the exact text plus that recent's full ordered categories without starting timing and without creating anything.
+(Clear-button behavior for this field — focused-AND-non-empty visibility, Apple-standard look — is owned by the "Track name clear shows only when focused and non-empty" requirement.) The Track name field SHALL open the shared dedicated name-picker page (`name-picker` capability) instead of rendering a floating overlay. Tapping the idle/ready/saved name row SHALL push the picker prefilled with the current draft. Picking a suggestion or completing with Done SHALL follow the picker completion contract: fill the exact text plus that recent's full ordered categories without starting timing and without creating anything. The Start/Stop action SHALL never be covered by suggestions by construction (typing and starting live on different screens), and the main-action frame requirements are unchanged.
+
+#### Scenario: Tapping the name row opens the picker
+- **WHEN** the user taps the Track name row while idle, ready, or saved
+- **THEN** the shared picker pushes prefilled with the current draft text and the Start/Stop action stays uncovered behind it
 
 #### Scenario: Typing shows prefix suggestions without moving Start
-- **WHEN** the user types a non-empty prefix matching one or more recents
-- **THEN** those recents are suggested newest-first (exact match excluded) and the Start/Stop action does not move
+- **WHEN** the user types a non-empty prefix matching one or more committed names on the picker page
+- **THEN** those names are suggested newest-first (exact match included) and the Track Start/Stop action does not move and is never covered
 
 #### Scenario: Picking a suggestion prepares without starting
-- **WHEN** the user picks a suggestion
-- **THEN** the field fills with that exact text plus its ordered categories, the ready timer appears, and no timer starts and no entry is created
+- **WHEN** the user picks a suggestion or completes with Done on the picker page
+- **THEN** the field fills with that exact text plus its ordered categories, the picker pops back to Track showing the ready timer, and no timer starts and no entry is created

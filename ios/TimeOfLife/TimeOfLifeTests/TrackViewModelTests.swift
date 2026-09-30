@@ -353,57 +353,32 @@ struct TrackViewModelTests {
 
     // MARK: - Name affordances (feat-name-field-affordances)
 
-    @Test("nameSuggestions matches recents by case-insensitive prefix, newest-first")
-    func nameSuggestionsPrefix() {
+    @Test("load fills both the capped recents and the uncapped picker names")
+    func loadFillsRecentsAndAllNames() async throws {
         let vm = makeViewModel()
-        vm.recents = [
-            TrackViewModel.RecentEntry(text: "Gym", categoryIDs: ["c1"], firstCategoryID: "c1"),
-            TrackViewModel.RecentEntry(text: "Gymnastics", categoryIDs: [], firstCategoryID: nil),
-            TrackViewModel.RecentEntry(text: "Reading", categoryIDs: [], firstCategoryID: nil),
-        ]
-        vm.nameDraft = "gy"
-        #expect(vm.nameSuggestions().map(\.text) == ["Gym", "Gymnastics"])
+        let store = vm.service.store
+        let base = Date(timeIntervalSinceReferenceDate: 1_000)
+        for index in 0..<8 {
+            try await store.createEntry(makeEntry(
+                id: "e\(index)",
+                text: "Text\(index)",
+                startedAt: base.addingTimeInterval(Double(index))
+            ))
+        }
+        await vm.load()
+        #expect(vm.recents.count == 6)
+        #expect(vm.allNames.count == 8)
+        #expect(vm.allNames.first?.text == "Text7")
     }
 
-    @Test("nameSuggestions excludes the exact match but keeps case variants")
-    func nameSuggestionsExactExcluded() {
+    @Test("stop refreshes recents and picker names in lockstep")
+    func stopRefreshesBothLists() async {
         let vm = makeViewModel()
-        vm.recents = [
-            TrackViewModel.RecentEntry(text: "Gym", categoryIDs: ["c1"], firstCategoryID: "c1"),
-            TrackViewModel.RecentEntry(text: "GYM", categoryIDs: ["c2"], firstCategoryID: "c2"),
-        ]
         vm.nameDraft = "Gym"
-        #expect(vm.nameSuggestions().map(\.text) == ["GYM"])
-    }
-
-    @Test("nameSuggestions is empty for empty input or no recents")
-    func nameSuggestionsEmpty() {
-        let vm = makeViewModel()
-        #expect(vm.nameSuggestions().isEmpty)
-        vm.recents = [TrackViewModel.RecentEntry(text: "Gym", categoryIDs: [], firstCategoryID: nil)]
-        vm.nameDraft = "   "
-        #expect(vm.nameSuggestions().isEmpty)
-    }
-
-    @Test("clearNameDraft empties the draft and returns to idle")
-    func clearNameDraftResets() {
-        let vm = makeViewModel()
-        vm.nameDraft = "Reading"
-        vm.state = .ready(TrackState.Draft(text: "Reading"))
-        vm.clearNameDraft()
-        #expect(vm.nameDraft.isEmpty)
-        #expect(vm.state == .idle)
-        #expect(!vm.canStart)
-    }
-
-    @Test("clearNameDraft is a no-op while running")
-    func clearNameDraftLockedWhileRunning() {
-        let vm = makeViewModel()
-        vm.nameDraft = "Reading"
-        vm.state = .running(TrackState.Draft(text: "Reading"), startedAt: Date())
-        vm.clearNameDraft()
-        #expect(vm.nameDraft == "Reading")
-        #expect(vm.state.isRunning)
+        vm.state = .running(TrackState.Draft(text: "Gym"), startedAt: Date())
+        await vm.stop()
+        #expect(vm.recents.map(\.text) == ["Gym"])
+        #expect(vm.allNames.map(\.text) == ["Gym"])
     }
 
     // MARK: - Helpers

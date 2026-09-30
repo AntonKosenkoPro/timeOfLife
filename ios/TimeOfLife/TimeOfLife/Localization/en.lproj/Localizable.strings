@@ -176,9 +176,10 @@
 // History manual entry (add-manual-entry)
 "history.logTime" = "Log time";
 
-// Name-field affordances (clear + autocomplete suggestions)
+// Name picker (dedicated-name-picker: shared push page)
 "name.clear" = "Clear name";
-"name.suggestions" = "Suggestions";
+"name.pickerTitle" = "Choose name";
+"name.pickerNoMatchHint" = "No matches — Done will use “%@” as a new name.";
 "notes.clear" = "Clear notes";
 
 // Starter categories (category-management spec, seed requirement)

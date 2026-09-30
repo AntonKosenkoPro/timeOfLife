@@ -146,9 +146,10 @@ enum L10n: String, CaseIterable {
     // History manual entry (add-manual-entry)
     case historyLogTime = "history.logTime"
 
-    // Name-field affordances (feat-name-field-affordances: clear + autocomplete)
+    // Name picker (dedicated-name-picker: shared push page)
     case nameClear = "name.clear"
-    case nameSuggestions = "name.suggestions"
+    case namePickerTitle = "name.pickerTitle"
+    case namePickerNoMatchHint = "name.pickerNoMatchHint"
     // Notes-field clear (fix-42-clear-button)
     case notesClear = "notes.clear"
 

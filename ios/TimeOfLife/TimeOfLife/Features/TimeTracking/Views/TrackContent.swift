@@ -17,7 +17,6 @@ import SwiftUI
 /// field and the button never move on state switch.
 struct TrackContent: View {
     @ObservedObject var vm: TrackViewModel
-    @FocusState private var nameFieldFocused: Bool
     @Environment(\.dynamicTypeSize)
     private var dynamicTypeSize
     @State private var actionSlotWidth: CGFloat = 0
@@ -141,10 +140,8 @@ struct TrackContent: View {
         .padding(.horizontal, Theme.screenHorizontalPadding)
         .frame(maxWidth: Theme.maxContentWidth)
         .frame(maxWidth: .infinity)
-        // State swaps must be instant: Start resigns the field, so the swap
-        // lands inside the keyboard-dismissal animation transaction — without
-        // this the button tint/label crossfades and slides ("bubbles") with
-        // the keyboard instead of appearing in place.
+        // State swaps must be instant: without this the button tint/label
+        // crossfades instead of appearing in place.
         .transaction { $0.animation = nil }
     }
 
@@ -171,44 +168,66 @@ struct TrackContent: View {
 
     // MARK: - Name capture (plain text, remove-activities-layer 4.1/4.2)
 
-    /// Idle/ready/saved: the plain-text name field. Running/saving/error:
-    /// the locked name label (name is non-editable after Start).
+    /// Idle/ready/saved: the name push row opening the shared picker.
+    /// Running/saving/error: the locked name label (name is non-editable
+    /// after Start).
     @ViewBuilder private var nameControl: some View {
         switch vm.state {
         case .idle, .ready, .saved:
-            nameField
+            nameRow
         case .running, .saving, .error:
             lockedNameLabel
         }
     }
 
-    private var nameField: some View {
-        let suggestions = vm.nameSuggestions()
-        return HStack(spacing: 0) {
-            TextField(
-                L10n.timerNamePlaceholder.text,
-                text: $vm.nameDraft,
-                onEditingChanged: { editing in
-                    vm.nameFieldFocused = editing
-                    guard !editing else { return }
-                    vm.syncReadyFromDraft()
+    /// Name push row (dedicated-name-picker): tapping pushes the shared
+    /// picker prefilled with the draft; picking or Done completes through
+    /// the Recents-tap contract, Back cancels restoring the draft. There is
+    /// no inline field and no floating layer, so the Start action below can
+    /// never be covered (issue #69).
+    private var nameRow: some View {
+        NavigationLink {
+            NamePicker(
+                initialText: vm.nameDraft,
+                recents: vm.allNames.map {
+                    NamePickerSuggestion(
+                        text: $0.text,
+                        categoryIDs: $0.categoryIDs,
+                        firstCategoryID: $0.firstCategoryID
+                    )
                 },
-                onCommit: { vm.syncReadyFromDraft() }
+                categories: vm.categories,
+                placeholder: L10n.timerNamePlaceholder.text,
+                emptyHint: L10n.timerRecentsEmptyHint.text,
+                onCompleteSuggestion: {
+                    vm.select(TrackViewModel.RecentEntry(
+                        text: $0.text,
+                        categoryIDs: $0.categoryIDs,
+                        firstCategoryID: $0.firstCategoryID
+                    ))
+                },
+                onCompleteText: {
+                    vm.nameDraft = $0
+                    vm.syncReadyFromDraft()
+                }
             )
-            .focused($nameFieldFocused)
-            .submitLabel(.done)
-            .font(.body)
-            .frame(maxWidth: .infinity, minHeight: Theme.minTapArea)
-            .accessibilityIdentifier("TimerNameField")
-            .accessibilityLabel(L10n.timerNamePlaceholder.text)
-            if ClearButtonVisibility.shouldShow(
-                isFocused: nameFieldFocused,
-                text: vm.nameDraft,
-                isLocked: vm.state.isRunning
-            ) {
-                ClearTextButton(action: { vm.clearNameDraft() }, accessibilityId: "TimerNameClearButton")
+        } label: {
+            HStack(spacing: Theme.spacingSmall) {
+                Text(vm.nameDraft.isEmpty ? L10n.timerNamePlaceholder.text : vm.nameDraft)
+                    .font(.body)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .foregroundStyle(vm.nameDraft.isEmpty ? Theme.textSecondary : Theme.textPrimary)
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(Theme.textSecondary)
+                    .accessibilityHidden(true)
             }
+            .frame(maxWidth: .infinity, minHeight: Theme.minTapArea)
+            .contentShape(Rectangle())
         }
+        .buttonStyle(.plain)
         .padding(.horizontal, Theme.spacingMedium)
         .frame(maxWidth: .infinity, minHeight: Theme.minTapArea)
         .background(Theme.backgroundSecondary)
@@ -217,60 +236,9 @@ struct TrackContent: View {
             RoundedRectangle(cornerRadius: Theme.cornerRadius)
                 .stroke(Theme.hairline, lineWidth: 0.7)
         }
-        // Suggestions float below the field without taking layout space, so
-        // the Start/Stop action never moves while typing (D10 stationary
-        // action). Pure function of draft + recents — no open/close state.
-        .overlay(alignment: .topLeading) {
-            if !suggestions.isEmpty {
-                GeometryReader { proxy in
-                    VStack(spacing: 0) {
-                        Color.clear
-                            .frame(height: proxy.size.height + Theme.spacingExtraSmall)
-                        nameSuggestionsCard(suggestions)
-                    }
-                    .frame(width: proxy.size.width, alignment: .topLeading)
-                }
-            }
-        }
-        .zIndex(1)
-        .disabled(vm.state.isRunning)
-        .accessibilityElement(children: .contain)
-    }
-
-    /// Autocomplete suggestions from the exact-text Recents
-    /// (feat-name-field-affordances): text-only rows; picking one follows
-    /// the Recents tap contract (fills text + ordered categories, starts
-    /// nothing).
-    private func nameSuggestionsCard(_ suggestions: [TrackViewModel.RecentEntry]) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            ForEach(Array(suggestions.enumerated()), id: \.element.id) { index, suggestion in
-                Button {
-                    vm.select(suggestion)
-                } label: {
-                    Text(suggestion.text)
-                        .font(.body)
-                        .lineLimit(1)
-                        .foregroundStyle(Theme.textPrimary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .frame(minHeight: Theme.minTapArea)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityIdentifier("TimerNameSuggestion\(index)")
-                if index < suggestions.count - 1 {
-                    Divider()
-                }
-            }
-        }
-        .padding(.horizontal, Theme.spacingMedium)
-        .background(Theme.backgroundSecondary)
-        .clipShape(RoundedRectangle(cornerRadius: Theme.cornerRadius))
-        .overlay {
-            RoundedRectangle(cornerRadius: Theme.cornerRadius)
-                .stroke(Theme.hairline, lineWidth: 0.7)
-        }
-        .accessibilityIdentifier("TimerNameSuggestions")
-        .accessibilityLabel(L10n.nameSuggestions.text)
+        .accessibilityIdentifier("TimerNameRow")
+        .accessibilityLabel(L10n.timerNamePlaceholder.text)
+        .accessibilityValue(vm.nameDraft)
     }
 
     private var lockedNameLabel: some View {
@@ -347,11 +315,10 @@ struct TrackContent: View {
         ) {
             switch vm.state {
             case .idle, .ready, .saved:
-                // Push focus into the VM before resigning: a focused Start
-                // tap resigns first and the swap waits out the keyboard
-                // slide (see `TrackViewModel.start()`).
-                vm.nameFieldFocused = nameFieldFocused
-                nameFieldFocused = false
+                // Naming happens on the picker page (its keyboard dismisses
+                // on pop), so Start never competes with a keyboard slide and
+                // fires directly. The VM's deferred-start path stays for
+                // focused callers covered by unit tests.
                 vm.start()
             case .running, .saving:
                 Task { await vm.stop() }
