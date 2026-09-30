@@ -29,10 +29,17 @@ build/
 ### anything. Re-commit them whenever project.yml targets/schemes change.
 ios/TimeOfLife/TimeOfLife.xcodeproj/*
 !ios/TimeOfLife/TimeOfLife.xcodeproj/xcshareddata
+!ios/TimeOfLife/TimeOfLife.xcodeproj/project.xcworkspace
 ios/TimeOfLife/TimeOfLife.xcodeproj/xcshareddata/*
 !ios/TimeOfLife/TimeOfLife.xcodeproj/xcshareddata/xcschemes
 ios/TimeOfLife/TimeOfLife.xcodeproj/xcshareddata/xcschemes/*
 !ios/TimeOfLife/TimeOfLife.xcodeproj/xcshareddata/xcschemes/*.xcscheme
+ios/TimeOfLife/TimeOfLife.xcodeproj/project.xcworkspace/*
+!ios/TimeOfLife/TimeOfLife.xcodeproj/project.xcworkspace/xcshareddata
+ios/TimeOfLife/TimeOfLife.xcodeproj/project.xcworkspace/xcshareddata/*
+!ios/TimeOfLife/TimeOfLife.xcodeproj/project.xcworkspace/xcshareddata/swiftpm
+ios/TimeOfLife/TimeOfLife.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/*
+!ios/TimeOfLife/TimeOfLife.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved
 
 ### Swift Package Manager (legacy)
 .build/
