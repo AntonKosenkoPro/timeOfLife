@@ -58,8 +58,8 @@ targets:
       path: TimeOfLife/Configuration/Info.plist
       properties:
         CFBundleDisplayName: Lifio
-        CFBundleShortVersionString: "0.1.1"
-        CFBundleVersion: "2"
+        CFBundleShortVersionString: "0.1.2"
+        CFBundleVersion: "3"
         LSRequiresIPhoneOS: true
         UIApplicationSupportsIndirectInputEvents: true
         UILaunchScreen:
@@ -86,7 +86,7 @@ targets:
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentPrimary
         ENABLE_PREVIEWS: YES
         SWIFT_EMIT_LOC_STRINGS: NO
-        CURRENT_PROJECT_VERSION: "2"
+        CURRENT_PROJECT_VERSION: "3"
         GENERATE_INFOPLIST_FILE: NO
         # Warnings-as-errors live here (target-scoped), not on the CLI: a
         # global SWIFT_TREAT_WARNINGS_AS_ERRORS=YES conflicts with the
