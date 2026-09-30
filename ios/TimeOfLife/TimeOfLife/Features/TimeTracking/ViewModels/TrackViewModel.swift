@@ -22,6 +22,10 @@ final class TrackViewModel: ObservableObject {
     /// The 6 exact-text recents (newest first, first-category icon data).
     /// Settable for the same test-seeding reason as `state`.
     @Published var recents: [RecentEntry] = []
+    /// Every committed exact-text name, newest first, uncapped — the source
+    /// for the shared name picker (dedicated-name-picker). The chips stay
+    /// capped at 6 (`recents`); the picker suggests everything ever used.
+    @Published var allNames: [RecentEntry] = []
     /// The id→Category map used to resolve recents chip icons (design D5).
     @Published private(set) var categories: [String: Category] = [:]
 
@@ -80,6 +84,7 @@ final class TrackViewModel: ObservableObject {
             // here is safe.
             _ = try? await service.store.seedStarterCategoriesIfNeeded(names: String.starterCategoryNames)
             recents = try await storeRecents()
+            allNames = try await storeAllNames()
             categories = Dictionary(uniqueKeysWithValues: try await service.store.categories().map { ($0.id, $0) })
             let persisted = try await service.runningTimerDraft()
             if let persisted, !persisted.activityText.isEmpty {
@@ -100,6 +105,16 @@ final class TrackViewModel: ObservableObject {
 
     private func storeRecents() async throws -> [RecentEntry] {
         try await service.store.recents(limit: 6).map { recent in
+            RecentEntry(
+                text: recent.activityText,
+                categoryIDs: recent.categoryIDs,
+                firstCategoryID: recent.categoryIDs.first
+            )
+        }
+    }
+
+    private func storeAllNames() async throws -> [RecentEntry] {
+        try await service.store.allActivityNames().map { recent in
             RecentEntry(
                 text: recent.activityText,
                 categoryIDs: recent.categoryIDs,
@@ -176,20 +191,6 @@ final class TrackViewModel: ObservableObject {
         state = .ready(TrackState.Draft(text: recent.text, categoryIDs: recent.categoryIDs))
         elapsed = 0
         Haptics.selection()
-    }
-
-    /// Autocomplete suggestions for the name field
-    /// (feat-name-field-affordances): recents whose text starts with the
-    /// trimmed draft (case-insensitive prefix), excluding the
-    /// case-sensitive exact match so `Gym` ≠ `GYM` identity is preserved.
-    /// Newest-first order preserved. Pure over loaded recents.
-    func nameSuggestions() -> [RecentEntry] {
-        let prefix = trimmedName
-        guard !prefix.isEmpty else { return [] }
-        let lowered = prefix.lowercased()
-        return recents.filter {
-            $0.text != prefix && $0.text.lowercased().hasPrefix(lowered)
-        }
     }
 
     /// Clears the name-field draft (clear button): empties the text and

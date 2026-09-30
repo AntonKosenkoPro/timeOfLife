@@ -1193,6 +1193,39 @@ actor LocalStore {
         }
     }
 
+    /// Every committed exact `activity_text` for the name picker
+    /// (dedicated-name-picker): same shape and newest-first ordering as
+    /// `recents(limit:)` but uncapped — suggestions cover all names ever
+    /// used, not just the chip cap.
+    func allActivityNames() throws -> [RecentEntry] {
+        try queue.read { db in
+            let rows = try Row.fetchAll(db, sql: """
+                SELECT e.activity_text, e.started_at, e.id
+                FROM entries e
+                WHERE e.id = (
+                    SELECT e2.id FROM entries e2
+                    WHERE e2.activity_text = e.activity_text
+                    ORDER BY e2.started_at DESC, e2.id DESC
+                    LIMIT 1
+                )
+                ORDER BY e.started_at DESC, e.id DESC
+                """)
+            return try rows.map { row in
+                let text: String = row["activity_text"]
+                let categoryIDs = try String.fetchAll(db, sql: """
+                    SELECT category_id FROM entry_categories
+                    WHERE entry_id = ? ORDER BY position
+                    """, arguments: [row["id"]])
+                let startedAt: Date = row["started_at"]
+                return RecentEntry(
+                    activityText: text,
+                    categoryIDs: categoryIDs,
+                    startedAt: startedAt
+                )
+            }
+        }
+    }
+
     // MARK: - Timer draft (running timer persistence, D3/D4)
 
     /// The persisted running-timer draft, or nil when no timer is running.

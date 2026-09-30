@@ -372,35 +372,27 @@ struct LogTimeViewModelTests {
 
     // MARK: - Name suggestions (feat-name-field-affordances)
 
-    @Test("nameSuggestions matches recents by case-insensitive prefix")
-    func nameSuggestionsPrefix() {
-        let vm = makeViewModel()
-        vm.nameRecents = [
-            RecentEntry(activityText: "Gym", categoryIDs: ["c1"], startedAt: Date()),
-            RecentEntry(activityText: "Gymnastics", categoryIDs: [], startedAt: Date()),
-            RecentEntry(activityText: "Reading", categoryIDs: [], startedAt: Date()),
-        ]
-        vm.name = "gy"
-        #expect(vm.nameSuggestions().map(\.activityText) == ["Gym", "Gymnastics"])
-    }
-
-    @Test("nameSuggestions excludes the exact match but keeps case variants")
-    func nameSuggestionsExactExcluded() {
-        let vm = makeViewModel()
-        vm.nameRecents = [
-            RecentEntry(activityText: "Gym", categoryIDs: ["c1"], startedAt: Date()),
-            RecentEntry(activityText: "GYM", categoryIDs: ["c2"], startedAt: Date()),
-        ]
-        vm.name = "Gym"
-        #expect(vm.nameSuggestions().map(\.activityText) == ["GYM"])
-    }
-
-    @Test("nameSuggestions is empty for empty input")
-    func nameSuggestionsEmpty() {
-        let vm = makeViewModel()
-        vm.nameRecents = [RecentEntry(activityText: "Gym", categoryIDs: [], startedAt: Date())]
-        vm.name = "   "
-        #expect(vm.nameSuggestions().isEmpty)
+    @Test("loadNameRecentsIfNeeded loads all names uncapped, newest-first")
+    func loadNameRecentsLoadsAll() async throws {
+        let store = try await makeStore()
+        let base = Date(timeIntervalSinceReferenceDate: 20_000)
+        for index in 0..<8 {
+            let start = base.addingTimeInterval(Double(index))
+            try await store.createEntry(TimeEntry(
+                id: "e\(index)", activityText: "Text\(index)",
+                startedAt: start, endedAt: start.addingTimeInterval(600),
+                durationSeconds: 600, source: "manual",
+                categoryIDs: [], notes: "",
+                createdAt: start, updatedAt: start
+            ))
+        }
+        let vm = makeViewModel(store: store)
+        await vm.loadNameRecentsIfNeeded(store: store)
+        #expect(vm.nameRecents.count == 8)
+        #expect(vm.nameRecents.first?.activityText == "Text7")
+        // Idempotent: a second load keeps the first result.
+        await vm.loadNameRecentsIfNeeded(store: store)
+        #expect(vm.nameRecents.count == 8)
     }
 
     @Test("applySuggestion fills text plus ordered categories without touching the rest")
@@ -412,6 +404,33 @@ struct LogTimeViewModelTests {
         #expect(vm.categoryIDs == ["c1", "c2"])
         #expect(vm.notes == "keep me")
         #expect(vm.isAddEnabled)
+    }
+
+    @Test("completeTypedName inherits categories on exact match")
+    func completeTypedNameExactMatch() {
+        let vm = makeViewModel()
+        vm.nameRecents = [RecentEntry(activityText: "Gym", categoryIDs: ["c1"], startedAt: Date())]
+        vm.completeTypedName("Gym")
+        #expect(vm.name == "Gym")
+        #expect(vm.categoryIDs == ["c1"])
+    }
+
+    @Test("completeTypedName keeps categories for a new name")
+    func completeTypedNameNewName() {
+        let vm = makeViewModel()
+        vm.nameRecents = [RecentEntry(activityText: "Gym", categoryIDs: ["c1"], startedAt: Date())]
+        vm.toggleCategory("c2")
+        vm.completeTypedName("Run")
+        #expect(vm.name == "Run")
+        #expect(vm.categoryIDs == ["c2"])
+    }
+
+    @Test("completeTypedName is a no-op for empty input")
+    func completeTypedNameEmpty() {
+        let vm = makeViewModel()
+        vm.name = "Gym"
+        vm.completeTypedName("   ")
+        #expect(vm.name == "Gym")
     }
 
     @Test("clearName empties the text only")

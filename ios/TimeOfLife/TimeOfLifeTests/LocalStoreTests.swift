@@ -364,6 +364,23 @@ struct LocalStoreTests {
         #expect(try await store.recents().isEmpty)
     }
 
+    @Test("allActivityNames returns every name newest-first, uncapped")
+    func allActivityNamesUncapped() async throws {
+        let store = try makeStore()
+        let base = Date(timeIntervalSinceReferenceDate: 1_000)
+        for index in 0..<8 {
+            _ = try await store.createEntry(makeEntry(
+                id: "e\(index)",
+                activityText: "Text\(index)",
+                startedAt: base.addingTimeInterval(Double(index))
+            ))
+        }
+
+        let names = try await store.allActivityNames()
+        #expect(names.count == 8)
+        #expect(names.map(\.activityText) == (0...7).reversed().map { "Text\($0)" })
+    }
+
     // MARK: - Timer draft (remove-activities-layer D3/D4)
 
     @Test("saveTimerDraft persists trimmed text and ordered categories")

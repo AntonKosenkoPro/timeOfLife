@@ -33,7 +33,7 @@ struct LogTimeView: View {
     @State private var expandedPicker: InlinePicker?
     /// Drives the delete confirmation alert (EDIT + LOCKED modes).
     @State private var isShowingDeleteConfirm = false
-    /// Which text field holds focus, if any (tap-away/scroll-away resign it).
+    /// The text field holding focus, if any (tap-away/scroll-away resigns it).
     @FocusState private var focusedField: FormField?
     /// True when pushed onto the presenter's NavigationStack (EDIT/LOCKED
     /// via History) instead of presented as a sheet (CREATE): the outer
@@ -43,9 +43,9 @@ struct LogTimeView: View {
     /// Called after a successful save so the presenter can refresh.
     let onSaved: (() -> Void)?
 
-    /// The form's text fields (focus-tracked for tap-away dismissal).
+    /// The form's text field (focus-tracked for tap-away dismissal).
     private enum FormField {
-        case name, notes
+        case notes
     }
 
     private enum InlinePicker {
@@ -240,60 +240,53 @@ struct LogTimeView: View {
                 Text(L10n.entryNameLabel.text)
                     .font(.caption)
                     .foregroundStyle(Theme.textSecondary)
-                HStack(spacing: 0) {
-                    TextField(L10n.entryNamePlaceholder.text, text: $vm.name)
-                        .submitLabel(.done)
-                        .focused($focusedField, equals: .name)
+                if vm.isLocked {
+                    Text(vm.name)
                         .font(.body)
-                        .frame(maxWidth: .infinity, minHeight: Theme.minTapArea)
-                    if ClearButtonVisibility.shouldShow(
-                        isFocused: focusedField == .name,
-                        text: vm.name,
-                        isLocked: vm.isLocked
-                    ) {
-                        ClearTextButton(action: { vm.clearName() }, accessibilityId: "EntryNameClearButton")
-                    }
-                }
-                if !vm.isLocked {
-                    nameSuggestions
-                }
-            }
-        }
-    }
-
-    /// Autocomplete suggestions from recent entry texts
-    /// (feat-name-field-affordances): inline list inside the name card;
-    /// picking one fills the draft and inherits that entry's ordered
-    /// categories. Pure function of draft + loaded recents — no open/close
-    /// state, no history mutation.
-    @ViewBuilder private var nameSuggestions: some View {
-        let suggestions = vm.nameSuggestions()
-        if !suggestions.isEmpty {
-            VStack(alignment: .leading, spacing: 0) {
-                ForEach(Array(suggestions.enumerated()), id: \.element.id) { index, suggestion in
-                    Button {
-                        vm.applySuggestion(
-                            text: suggestion.activityText,
-                            categoryIDs: suggestion.categoryIDs
+                        .foregroundStyle(Theme.textPrimary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .frame(minHeight: Theme.minTapArea)
+                } else {
+                    NavigationLink {
+                        NamePicker(
+                            initialText: vm.name,
+                            recents: vm.nameRecents.map {
+                                NamePickerSuggestion(
+                                    text: $0.activityText,
+                                    categoryIDs: $0.categoryIDs,
+                                    firstCategoryID: $0.categoryIDs.first
+                                )
+                            },
+                            categories: Dictionary(uniqueKeysWithValues: vm.availableCategories.map { ($0.id, $0) }),
+                            placeholder: L10n.entryNamePlaceholder.text,
+                            emptyHint: L10n.timerRecentsEmptyHint.text,
+                            onCompleteSuggestion: {
+                                vm.applySuggestion(text: $0.text, categoryIDs: $0.categoryIDs)
+                            },
+                            onCompleteText: { vm.completeTypedName($0) }
                         )
                     } label: {
-                        Text(suggestion.activityText)
-                            .font(.body)
-                            .lineLimit(1)
-                            .foregroundStyle(Theme.textPrimary)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .frame(minHeight: Theme.minTapArea)
-                            .contentShape(Rectangle())
+                        HStack(spacing: Theme.spacingSmall) {
+                            Text(vm.name.isEmpty ? L10n.entryNamePlaceholder.text : vm.name)
+                                .font(.body)
+                                .lineLimit(1)
+                                .truncationMode(.tail)
+                                .foregroundStyle(vm.name.isEmpty ? Theme.textSecondary : Theme.textPrimary)
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .font(.footnote.weight(.semibold))
+                                .foregroundStyle(Theme.textSecondary)
+                                .accessibilityHidden(true)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .frame(minHeight: Theme.minTapArea)
+                        .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
-                    .accessibilityIdentifier("EntryNameSuggestion\(index)")
-                    if index < suggestions.count - 1 {
-                        Divider()
-                    }
+                    .accessibilityLabel(L10n.entryNameLabel.text)
+                    .accessibilityValue(vm.name)
                 }
             }
-            .accessibilityIdentifier("EntryNameSuggestions")
-            .accessibilityLabel(L10n.nameSuggestions.text)
         }
     }
 
