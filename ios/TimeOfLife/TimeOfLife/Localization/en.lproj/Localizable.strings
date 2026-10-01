@@ -83,7 +83,7 @@
 "profile.signOut" = "Sign Out";
 "profile.syncNow" = "Sync now";
 "profile.syncing" = "Syncing…";
-"profile.lastSynced" = "Last synced: %@";
+"profile.syncedSuccessfully" = "Synced successfully";
 "profile.lastSynced.ago" = "%@ ago";
 "profile.lastSynced.justNow" = "Less than a minute ago";
 "profile.syncError" = "Sync failed. Try again.";

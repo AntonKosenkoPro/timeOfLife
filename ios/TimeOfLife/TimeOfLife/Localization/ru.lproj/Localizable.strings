@@ -83,7 +83,7 @@
 "profile.signOut" = "Выйти";
 "profile.syncNow" = "Синхронизировать";
 "profile.syncing" = "Синхронизация…";
-"profile.lastSynced" = "Синхронизировано: %@";
+"profile.syncedSuccessfully" = "Синхронизировано успешно";
 "profile.lastSynced.ago" = "%@ назад";
 "profile.lastSynced.justNow" = "Меньше минуты назад";
 "profile.syncError" = "Не удалось синхронизировать. Попробуйте снова.";

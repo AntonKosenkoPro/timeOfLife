@@ -56,20 +56,20 @@ enum SyncRelativeTime {
         }
     }
 
-    /// Full "Last synced: …" title. Glue strings are parameters (view passes
-    /// L10n, tests pass literals) so composition is pinnable in any locale.
-    static func title(
+    /// Age subtitle for the idle row ("1 minute ago", "Меньше минуты назад").
+    /// Glue strings are parameters (view passes L10n, tests pass literals) so
+    /// composition is pinnable in any locale.
+    static func subtitle(
         since date: Date,
         now: Date,
-        outer: String,
         ago: String,
         justNow: String,
         locale: Locale = .current
     ) -> String {
         let bucket = bucket(elapsed: now.timeIntervalSince(date))
         guard case .justNow = bucket else {
-            return String(format: outer, String(format: ago, quantity(for: bucket, locale: locale)))
+            return String(format: ago, quantity(for: bucket, locale: locale))
         }
-        return String(format: outer, justNow)
+        return justNow
     }
 }

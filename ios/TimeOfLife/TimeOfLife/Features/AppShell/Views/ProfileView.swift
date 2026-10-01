@@ -112,14 +112,14 @@ struct ProfileView: View {
             // the "Last synced" label would freeze until the next event.
             TimelineView(.periodic(from: Date(), by: 60)) { context in
                 ListRow(
-                    title: SyncRelativeTime.title(
+                    title: L10n.profileSyncedSuccessfully.text,
+                    icon: "checkmark.icloud",
+                    subtitle: SyncRelativeTime.subtitle(
                         since: date,
                         now: context.date,
-                        outer: L10n.profileLastSynced.text,
                         ago: L10n.profileLastSyncedAgo.text,
                         justNow: L10n.profileLastSyncedJustNow.text
-                    ),
-                    icon: "checkmark.icloud"
+                    )
                 )
             }
         case let .error(message):

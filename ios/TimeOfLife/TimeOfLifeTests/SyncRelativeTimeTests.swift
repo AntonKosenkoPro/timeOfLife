@@ -59,49 +59,49 @@ struct SyncRelativeTimeTests {
 
     // MARK: - Composition
 
-    @Test("english title composes wrapper, quantity, and ago-word")
-    func englishTitle() {
+    @Test("english subtitle composes quantity and ago-word")
+    func englishSubtitle() {
         let now = Date()
-        #expect(SyncRelativeTime.title(
+        #expect(SyncRelativeTime.subtitle(
             since: now.addingTimeInterval(-30), now: now,
-            outer: "Last synced: %@", ago: "%@ ago", justNow: "Less than a minute ago", locale: en
-        ) == "Last synced: Less than a minute ago")
-        #expect(SyncRelativeTime.title(
+            ago: "%@ ago", justNow: "Less than a minute ago", locale: en
+        ) == "Less than a minute ago")
+        #expect(SyncRelativeTime.subtitle(
             since: now.addingTimeInterval(-90), now: now,
-            outer: "Last synced: %@", ago: "%@ ago", justNow: "Less than a minute ago", locale: en
-        ) == "Last synced: 1 minute ago")
-        #expect(SyncRelativeTime.title(
+            ago: "%@ ago", justNow: "Less than a minute ago", locale: en
+        ) == "1 minute ago")
+        #expect(SyncRelativeTime.subtitle(
             since: now.addingTimeInterval(-400 * 86400), now: now,
-            outer: "Last synced: %@", ago: "%@ ago", justNow: "Less than a minute ago", locale: en
-        ) == "Last synced: 400 days ago")
+            ago: "%@ ago", justNow: "Less than a minute ago", locale: en
+        ) == "400 days ago")
     }
 
     @Test("future timestamp clamps to just-now in both locales")
     func futureClamp() {
         let now = Date()
         let future = now.addingTimeInterval(3600)
-        #expect(SyncRelativeTime.title(
+        #expect(SyncRelativeTime.subtitle(
             since: future, now: now,
-            outer: "Last synced: %@", ago: "%@ ago", justNow: "Less than a minute ago", locale: en
-        ) == "Last synced: Less than a minute ago")
-        #expect(SyncRelativeTime.title(
+            ago: "%@ ago", justNow: "Less than a minute ago", locale: en
+        ) == "Less than a minute ago")
+        #expect(SyncRelativeTime.subtitle(
             since: future, now: now,
-            outer: "Синхронизировано: %@", ago: "%@ назад", justNow: "Меньше минуты назад", locale: ru
-        ) == "Синхронизировано: Меньше минуты назад")
+            ago: "%@ назад", justNow: "Меньше минуты назад", locale: ru
+        ) == "Меньше минуты назад")
     }
 
-    @Test("russian title composes quantity with correct plurals")
-    func russianTitle() {
+    @Test("russian subtitle composes quantity with correct plurals")
+    func russianSubtitle() {
         let now = Date()
-        #expect(SyncRelativeTime.title(
+        #expect(SyncRelativeTime.subtitle(
             since: now.addingTimeInterval(-300), now: now,
-            outer: "Синхронизировано: %@", ago: "%@ назад", justNow: "Меньше минуты назад", locale: ru
-        ) == "Синхронизировано: 5 минут назад")
+            ago: "%@ назад", justNow: "Меньше минуты назад", locale: ru
+        ) == "5 минут назад")
     }
 
     // MARK: - Glue keys
 
-    @Test("glue keys resolve with exact copy in both locales")
+    @Test("glue and title keys resolve with exact copy in both locales")
     func glueKeysResolve() throws {
         let main = Bundle.main
         let enPath = try #require(main.path(forResource: "en", ofType: "lproj"))
@@ -112,5 +112,7 @@ struct SyncRelativeTimeTests {
         #expect(NSLocalizedString("profile.lastSynced.ago", bundle: ruBundle, comment: "") == "%@ назад")
         #expect(NSLocalizedString("profile.lastSynced.justNow", bundle: enBundle, comment: "") == "Less than a minute ago")
         #expect(NSLocalizedString("profile.lastSynced.justNow", bundle: ruBundle, comment: "") == "Меньше минуты назад")
+        #expect(NSLocalizedString("profile.syncedSuccessfully", bundle: enBundle, comment: "") == "Synced successfully")
+        #expect(NSLocalizedString("profile.syncedSuccessfully", bundle: ruBundle, comment: "") == "Синхронизировано успешно")
     }
 }
