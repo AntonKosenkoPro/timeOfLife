@@ -84,6 +84,8 @@
 "profile.syncNow" = "Синхронизировать";
 "profile.syncing" = "Синхронизация…";
 "profile.lastSynced" = "Синхронизировано: %@";
+"profile.lastSynced.ago" = "%@ назад";
+"profile.lastSynced.justNow" = "Меньше минуты назад";
 "profile.syncError" = "Не удалось синхронизировать. Попробуйте снова.";
 "profile.categories" = "Категории";
 "profile.onDevice" = "На этом устройстве";

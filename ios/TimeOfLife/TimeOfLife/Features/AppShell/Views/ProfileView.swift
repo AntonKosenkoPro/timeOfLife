@@ -107,10 +107,21 @@ struct ProfileView: View {
         case .syncing:
             ListRow(title: L10n.profileSyncing.text, icon: "arrow.triangle.2.circlepath")
         case let .idle(date):
-            ListRow(
-                title: String(format: L10n.profileLastSynced.text, Self.relativeTime(date)),
-                icon: "checkmark.icloud"
-            )
+            // Minute-cadence refresh scoped to this row (fix-sync-status-row):
+            // `sync.status` publishes once per cycle, so without the timeline
+            // the "Last synced" label would freeze until the next event.
+            TimelineView(.periodic(from: Date(), by: 60)) { context in
+                ListRow(
+                    title: SyncRelativeTime.title(
+                        since: date,
+                        now: context.date,
+                        outer: L10n.profileLastSynced.text,
+                        ago: L10n.profileLastSyncedAgo.text,
+                        justNow: L10n.profileLastSyncedJustNow.text
+                    ),
+                    icon: "checkmark.icloud"
+                )
+            }
         case let .error(message):
             ListRow(
                 title: L10n.profileSyncError.text,
@@ -118,12 +129,6 @@ struct ProfileView: View {
                 subtitle: message.isEmpty ? nil : message
             )
         }
-    }
-
-    private static func relativeTime(_ date: Date) -> String {
-        let formatter = RelativeDateTimeFormatter()
-        formatter.unitsStyle = .short
-        return formatter.localizedString(for: date, relativeTo: Date())
     }
 
     // MARK: - On This Device

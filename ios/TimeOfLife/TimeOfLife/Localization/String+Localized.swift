@@ -58,6 +58,8 @@ enum L10n: String, CaseIterable {
     case profileSyncNow = "profile.syncNow"
     case profileSyncing = "profile.syncing"
     case profileLastSynced = "profile.lastSynced"
+    case profileLastSyncedAgo = "profile.lastSynced.ago"
+    case profileLastSyncedJustNow = "profile.lastSynced.justNow"
     case profileSyncError = "profile.syncError"
     case profileCategories = "profile.categories"
     case profileOnDevice = "profile.onDevice"

@@ -183,6 +183,8 @@ struct LocalizationTests {
         // unify-category-editor-chrome adds 2 icon-button VoiceOver labels
         // (categoryEditor.dismissLabel + categoryEditor.confirmSaveLabel)
         // = 146.
-        #expect(l10nCases.count == 146)
+        // fix-sync-status-row adds 2 sync-age glue keys
+        // (profile.lastSynced.ago + profile.lastSynced.justNow) = 148.
+        #expect(l10nCases.count == 148)
     }
 }
