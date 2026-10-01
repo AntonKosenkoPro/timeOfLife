@@ -10,6 +10,7 @@ import UIKit
 /// unchanged copy in both locales, the icon constant and its SF Symbol
 /// resolution, and the stable accessibility id. The tint itself stays
 /// manual-smoke + review (`Theme.danger` is a named asset `Color`).
+@MainActor
 @Suite("Profile Sign Out Row")
 struct ProfileSignOutRowTests {
 
