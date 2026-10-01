@@ -80,17 +80,6 @@ struct ProfileView: View {
     private var accountSection: some View {
         Section(L10n.profileAccount.text) {
             syncStatusRow
-            Button {
-                Task { await sync.syncNow(userID: sessionUserID) }
-            } label: {
-                ListRow(title: L10n.profileSyncNow.text, icon: "arrow.triangle.2.circlepath")
-            }
-            .disabled(sync.status == .syncing)
-            // `.disabled` alone does not restyle a custom label — without
-            // this the button looks tappable while syncing (WelcomeView
-            // precedent for the 0.6 value).
-            .opacity(sync.status == .syncing ? 0.6 : 1)
-            .accessibilityIdentifier("ProfileSyncNowButton")
             Button(role: .destructive) {
                 Task { await container.authService.logout() }
             } label: {
@@ -130,15 +119,35 @@ struct ProfileView: View {
                     title: L10n.profileSyncedSuccessfully.text,
                     icon: "checkmark.icloud",
                     subtitle: Self.ageSubtitle(since: date, now: context.date)
-                )
+                ) {
+                    syncButton
+                }
             }
         case let .error(message):
             ListRow(
                 title: L10n.profileSyncError.text,
                 icon: "exclamationmark.icloud",
                 subtitle: message.isEmpty ? rememberedAgeSubtitle(now: Date()) : message
-            )
+            ) {
+                syncButton
+            }
         }
+    }
+
+    /// Trailing sync action on the status row (fix-sync-status-row): same
+    /// call and automation id as the retired separate row, absent while
+    /// syncing. VoiceOver label reuses `profile.syncNow` — no new strings.
+    private var syncButton: some View {
+        Button {
+            Task { await sync.syncNow(userID: sessionUserID) }
+        } label: {
+            Image(systemName: "arrow.triangle.2.circlepath")
+                .font(.body)
+                .foregroundStyle(Theme.accentPrimary)
+                .frame(minWidth: Theme.minTapArea, minHeight: Theme.minTapArea)
+        }
+        .accessibilityIdentifier("ProfileSyncNowButton")
+        .accessibilityLabel(L10n.profileSyncNow.text)
     }
 
     /// Age subtitle from a known date ("1 minute ago", "Меньше минуты назад").
