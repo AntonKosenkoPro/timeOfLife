@@ -60,7 +60,7 @@ struct RootView: View {
                                 .foregroundStyle(.secondary)
                                 .multilineTextAlignment(.center)
                                 .accessibilityIdentifier("LocalStoreOpenError")
-                            Button(L10n.timerSignOut.text, role: .destructive) {
+                            Button(L10n.profileSignOut.text, role: .destructive) {
                                 Task { await container.authService.logout() }
                             }
                             .accessibilityIdentifier("GateSignOutButton")

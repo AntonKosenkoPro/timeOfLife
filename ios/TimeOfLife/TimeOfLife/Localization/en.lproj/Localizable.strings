@@ -60,7 +60,6 @@
 "timer.start" = "Start";
 "timer.stop" = "Stop";
 "timer.stopHint" = "Stops the timer and saves the entry";
-"timer.signOut" = "Sign Out";
 "timer.idlePrompt" = "Enter an activity name to start";
 "timer.namePlaceholder" = "What did you work on?";
 "timer.saved" = "Saved";
@@ -81,6 +80,7 @@
 "profile.title" = "Profile";
 "profile.done" = "Done";
 "profile.account" = "Account";
+"profile.signOut" = "Sign Out";
 "profile.syncNow" = "Sync now";
 "profile.syncing" = "Syncing…";
 "profile.lastSynced" = "Last synced: %@";

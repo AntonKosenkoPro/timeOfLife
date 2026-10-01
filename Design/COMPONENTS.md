@@ -327,6 +327,7 @@ struct ListRow<Trailing: View>: View {
     let icon: String?
     let title: String
     let subtitle: String?
+    let tint: Color? // default nil → accent; pass Theme.danger so icon + title warn together
     @ViewBuilder let trailing: () -> Trailing
 }
 ```
@@ -334,8 +335,8 @@ struct ListRow<Trailing: View>: View {
 ### Visual
 
 - `HStack(spacing: Theme.spacingMedium)` with `alignment: .firstTextBaseline`.
-- Optional leading icon: `Theme.accentPrimary`, `.body`.
-- Title: `.body`, `Theme.textPrimary`.
+- Optional leading icon: `tint ?? Theme.accentPrimary`, `.body`.
+- Title: `.body`, `tint ?? Theme.textPrimary`.
 - Subtitle: `.caption`, `Theme.textSecondary`.
 - Trailing view aligned to the right.
 - Full width, padding vertical `Theme.spacingSmall`.
