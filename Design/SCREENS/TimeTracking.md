@@ -1,7 +1,7 @@
 # Track Screen
 
 This is the first non-auth screen described for the app. The local-first Track
-experience lets the user type an exact activity text, start a timer, see exact
+experience lets the user type an exact entry text, start a timer, see exact
 elapsed time, stop, and save the entry. Categories are optional per-entry
 metadata attached at capture; they are not a catalog and there is no activity
 entity. History never mutates retroactively.
@@ -212,7 +212,7 @@ start, so a stale draft can never start.
 - A running timer remains visible above the tab bar on History and Insights;
   its Stop action saves in place.
 - Profile owns sign-out and account/sync controls rather than the Track toolbar.
-- Dynamic Type keeps the readout, Activity name, and Start/Stop action readable;
+- Dynamic Type keeps the readout, entry text, and Start/Stop action readable;
   the adaptive spacers and central separator collapse before any content is
   clipped or unreachable.
 - Reduce Motion uses fades or immediate state changes rather than custom motion.
@@ -262,7 +262,7 @@ per-record state).
 - [ ] Start follows explicit selection and persists running state.
 - [ ] Stop saves locally and preserves recoverable state on failure.
 - [ ] Compact timer is available above History and Insights navigation.
-- [x] VoiceOver, Dynamic Type, Reduce Motion, light/dark, and iOS 15 are tested.
+- [x] VoiceOver, Dynamic Type, Reduce Motion, light/dark, and iOS 18 are tested.
 - [ ] SwiftLint and warning-as-error builds pass.
 
 ## Localization keys
@@ -272,7 +272,7 @@ Add English and Russian values, then add corresponding `L10n` cases:
 ```text
 "timer.title" = "Track";
 "timer.idlePrompt" = "What are you doing?";
-"timer.namePlaceholder" = "Activity name";
+"timer.namePlaceholder" = "What did you work on?";
 "timer.start" = "Start";
 "timer.stop" = "Stop";
 "timer.stopHint" = "Stops the timer and saves the entry";

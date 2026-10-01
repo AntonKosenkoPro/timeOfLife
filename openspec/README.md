@@ -9,8 +9,8 @@ but the CLI stays the source of truth.
 
 | Layer | Location | Meaning |
 |---|---|---|
-| **Baseline specs** | `openspec/specs/<capability>/spec.md` | The current merged contract. Today: `app-icon`, `app-shell`, `account-bound-store`, `device-sessions`, `release-versioning`, `timer-capture-experience`, `category-management`, `editor-sheet-ux`, `local-first-store`, `sync-client`, `entry-provenance`, `lock-screen-controls`, and `manual-entry`. **Never edit directly** — behavior changes go through a change. |
-| **Active change (deltas)** | `openspec/changes/<change>/` | A proposal in flight. Its `specs/<capability>/spec.md` files are delta specs (ADDED/MODIFIED requirements) not yet in the baseline. Several changes are active — check `openspec list`. |
+| **Baseline specs** | `openspec/specs/<capability>/spec.md` | The current merged contract. Today (19 baselines): `account-bound-store`, `app-icon`, `app-identity`, `app-shell`, `apple-signin`, `category-management`, `device-sessions`, `editor-sheet-ux`, `entry-editor`, `entry-provenance`, `history-entry-list`, `insights-breakdown`, `local-first-store`, `lock-screen-controls`, `manual-entry`, `name-picker`, `release-versioning`, `sync-client`, and `timer-capture-experience`. **Never edit directly** — behavior changes go through a change. |
+| **Active change (deltas)** | `openspec/changes/<change>/` | A proposal in flight. Its `specs/<capability>/spec.md` files are delta specs (ADDED/MODIFIED requirements) not yet in the baseline. The active change is `reduce-codebase-complexity` — check `openspec list`. |
 | **Archives** | `openspec/changes/archive/<change>/` | Completed changes; their deltas were already folded into the baselines by `openspec archive`. Read them only for history. Today: `redesign-track-experience`, `keep-timer-position-on-stop`, `unify-activity-preparation-flow`, `refine-selected-activity-from-track`, `add-category-management`, `collapsing-editor-sheet-headers`, `integrate-app-icon`, `refine-track-recents`, `local-first-sync-architecture`, `add-manual-entry`, `history-entry-list`, `disable-start-while-saved`, `fix-stale-draft-first-start`, `fix-running-tags-title-spacing`, `fix-entry-category-sync`, `destructive-erase-row`, `fix-category-sync-loss`, `propagate-buffered-deletes`, `localize-natural-duration`, `fix-42-clear-button`, `fix-offline-banner-duplication`, `fix-entry-form-gestures`, `feat-entry-duration-subtitle`, `feat-name-field-affordances`, `fix-50-nav-buttons`, `fix-51-picker-width`, `feat-category-icons-lifedomains`, `fix-history-sync-refresh`, `account-bound-local-data`, `add-version-label-release`, `fix-category-name-field-layout`, `unify-category-editor-chrome`, `fix-profile-signout-row`, and `fix-sync-status-row`. |
 
 **Which contract is in force?** The baselines plus the delta specs of the active change
@@ -50,12 +50,11 @@ archived `changes/`. The CLI generates or updates workflow adapters on demand.
 ## Repo conventions that affect changes
 
 - **Baselines never edited directly**; every behavior change adds a delta to a change.
-- **Incomplete UI surfaces must not be claimed done**: app-wide activity/history UndoToast/shake-to-undo, the "Enable
-  Sync" `AuthFlowView` sheet (Profile currently does a silent `restoreSession()`), "via
-  <Source>" labels, and the iOS 18 lock-screen ControlWidget (no target in `project.yml` —
+- **Incomplete UI surfaces must not be claimed done**: app-wide UndoToast/shake-to-undo,
+  "via <Source>" labels, and the iOS 18 lock-screen ControlWidget (no target in `project.yml` —
   deferred again as excessive under `bump-ios-deployment-to-18`) remain deferred.
-  Category-scoped undo in Manage Categories is
-  implemented (archived `add-category-management`) and does not close the app-wide undo work.
+  Entry and category deletions undo through the DEFAULT system Undo confirmation
+  (archived `unify-catalog-deletion`) and do not close the app-wide undo work.
 - **OpenAPI is the authoritative API contract** (`backend/api/openapi.yaml`, S10): endpoint
   changes update both sides + the spec.
 - Per-iteration revising process (linters, tests, docs): `docs/project-context.md` → S5.

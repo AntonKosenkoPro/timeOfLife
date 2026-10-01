@@ -1,8 +1,8 @@
 # Manage Categories Screen
 
-Implements F2/F6/U8/R1/R3 of `Requirements/FURPS/Activity_Catalog_and_Categories.md`. Full CRUD surface for category tags, reached from Profile for signed-in and signed-out users.
+Implements F2/F6/U8/R1/R3 of `Requirements/FURPS/Activity_Catalog_and_Categories.md`. Full CRUD surface for category tags, reached from Profile by the signed-in user (sign-in is the mandatory launch gate; there is no signed-out use).
 
-A separate Manage Categories screen (per the user's decision) so category CRUD does not crowd the Manage Activities list. The screen lists all categories, lets the user create/edit them, and seeds 7 localized defaults on first run (F6). Deletion lives in the category editor and is undoable until the app restarts via the system Undo confirmation (R3); conflicts with the server resolve by last-write-wins (R2).
+A separate Manage Categories screen (per the user's decision) for category tag CRUD. The screen lists all categories, lets the user create/edit them, and seeds 7 localized defaults on first run (F6). Deletion lives in the category editor and is undoable until the app restarts via the system Undo confirmation (R3); conflicts with the server resolve by last-write-wins (R2).
 
 **Default categories (F6):**
 
@@ -57,11 +57,11 @@ Single destructive confirm in the category editor (edit mode) — a category has
 
 1. The editor's bottom Delete button (`CategoryEditorDeleteButton`) presents an alert:
    - Title: `L10n.deleteCategoryTitle`.
-   - Message: `String(format: L10n.deleteCategoryMessage.text, category.name)` — explicitly states the category will be removed from all activities (join cascade), that **entries are unaffected** (D18, F2), and that shaking undoes until the app restarts.
+   - Message: `String(format: L10n.deleteCategoryMessage.text, category.name)` — explicitly states the category will be removed from all entries (join cascade), that **entries are unaffected** (D18, F2), and that shaking undoes until the app restarts.
    - Confirm button: `L10n.deleteCategoryConfirm`, `role: .destructive`.
    - Cancel button: `L10n.categoryEditorCancel`, `role: .cancel`.
-2. On confirm, the category enters the client-side undo buffer (R3/D17): the local store removes the category and strips its tag from all activities via join cascade; entries are untouched. The editor dismisses and the list reloads.
-3. Undo is the DEFAULT system Undo confirmation only (U7, no toast): shaking on Manage Categories surfaces the system prompt, and confirming restores the newest eligible category deletion with its activity assignments; nothing is synced.
+2. On confirm, the category enters the client-side undo buffer (R3/D17): the local store removes the category and strips its tag from all entries via join cascade; entries are untouched. The editor dismisses and the list reloads.
+3. Undo is the DEFAULT system Undo confirmation only (U7, no toast): shaking on Manage Categories surfaces the system prompt, and confirming restores the newest eligible category deletion with its entry assignments; nothing is synced.
 4. On app restart, commit locally (hard delete) and enqueue `DELETE /categories/{id}` for sync; the server hard-deletes (no trash, per the API contract).
 
 Reference: D17 and `Design/INTERACTIONS.md` → Undo flow + Delete-scope confirmation.
@@ -113,11 +113,11 @@ Add to `en.lproj/Localizable.strings` and `ru.lproj/Localizable.strings`, then t
 // Manage categories
 "manage.categories.title" = "Categories";
 "manage.categories.emptyTitle" = "No categories yet";
-"manage.categories.emptySubtitle" = "Add one to tag your activities.";
+"manage.categories.emptySubtitle" = "Add one to tag your entries.";
 
 // Category delete confirmation (in the category editor)
 "delete.category.title" = "Delete category?";
-"delete.category.message" = "%@ will be removed from all activities. Your entries are kept. You can shake to undo until you restart the app.";
+"delete.category.message" = "%@ will be removed from all entries. Your entries are kept. You can shake to undo until you restart the app.";
 "delete.category.confirm" = "Delete";
 "categoryEditor.delete" = "Delete category";
 
@@ -141,11 +141,11 @@ Russian:
 // Manage categories
 "manage.categories.title" = "Категории";
 "manage.categories.emptyTitle" = "Пока нет категорий";
-"manage.categories.emptySubtitle" = "Добавьте категорию, чтобы размечать активности.";
+"manage.categories.emptySubtitle" = "Добавьте категорию, чтобы помечать записи.";
 
 // Category delete confirmation (in the category editor)
 "delete.category.title" = "Удалить категорию?";
-"delete.category.message" = "%@ будет удалена со всех активностей. Записи сохранятся. Отменить можно встряской в течение 30 секунд.";
+"delete.category.message" = "%@ будет удалена из всех записей. Записи сохранятся. Отменить можно встряской до перезапуска приложения.";
 "delete.category.confirm" = "Удалить";
 "categoryEditor.delete" = "Удалить категорию";
 

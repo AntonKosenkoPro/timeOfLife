@@ -83,8 +83,8 @@ func TestOTPService_DefaultExpiry(t *testing.T) {
 
 	s := NewOTPService(0, 0)
 
-	if s.Expiry() != DefaultOTPExpiry {
-		t.Errorf("expected default expiry %v, got %v", DefaultOTPExpiry, s.Expiry())
+	if s.Expiry != DefaultOTPExpiry {
+		t.Errorf("expected default expiry %v, got %v", DefaultOTPExpiry, s.Expiry)
 	}
 }
 
@@ -93,8 +93,8 @@ func TestOTPService_DefaultMaxAttempts(t *testing.T) {
 
 	s := NewOTPService(0, 0)
 
-	if s.MaxAttempts() != DefaultOTPMaxAttempts {
-		t.Errorf("expected default max attempts %d, got %d", DefaultOTPMaxAttempts, s.MaxAttempts())
+	if s.MaxAttempts != DefaultOTPMaxAttempts {
+		t.Errorf("expected default max attempts %d, got %d", DefaultOTPMaxAttempts, s.MaxAttempts)
 	}
 }
 
@@ -103,11 +103,11 @@ func TestOTPService_CustomExpiryAndMaxAttempts(t *testing.T) {
 
 	s := NewOTPService(5*time.Minute, 3)
 
-	if s.Expiry() != 5*time.Minute {
-		t.Errorf("expected expiry 5m, got %v", s.Expiry())
+	if s.Expiry != 5*time.Minute {
+		t.Errorf("expected expiry 5m, got %v", s.Expiry)
 	}
-	if s.MaxAttempts() != 3 {
-		t.Errorf("expected max attempts 3, got %d", s.MaxAttempts())
+	if s.MaxAttempts != 3 {
+		t.Errorf("expected max attempts 3, got %d", s.MaxAttempts)
 	}
 }
 

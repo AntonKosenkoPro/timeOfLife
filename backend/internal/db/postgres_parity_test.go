@@ -31,12 +31,12 @@ func newParityStore(t *testing.T) *PostgresStore {
 	}
 	t.Cleanup(func() { _ = store.Close() })
 
-	if err := migrations.RunPostgres(ctx, store.Pool()); err != nil {
+	if err := migrations.RunPostgres(ctx, store.DB()); err != nil {
 		t.Fatalf("RunPostgres: %v", err)
 	}
 
-	// Truncate for isolation (migrations are idempotent IF NOT EXISTS).
-	if _, err := store.Pool().Exec(ctx, `
+	// Truncate for isolation (migrations run once per DB via schema_migrations).
+	if _, err := store.DB().Exec(ctx, `
 		TRUNCATE entry_categories, entries, categories,
 		         refresh_tokens, otp_codes, users RESTART IDENTITY CASCADE
 	`); err != nil {

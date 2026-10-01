@@ -21,6 +21,8 @@
 "otp.sentTo" = "Введите 6-значный код, отправленный на %@";
 "otp.resend" = "Отправить код снова";
 "otp.resendCountdown" = "Отправить код через %d с";
+"otp.codeLabel" = "Одноразовый код, %d цифр";
+"otp.codeHint" = "Дважды нажмите, чтобы изменить";
 
 // Sign out confirmation
 "signOut.cancel" = "Отмена";

@@ -210,9 +210,8 @@ actor LocalStore {
     /// carries a schema (a `local_metadata` table exists): the v2 migration
     /// is not additive-only (it renames, backfills, and drops tables), so a
     /// cross-account open must throw `accountMismatch` without mutating the
-    /// dormant file. Files without a schema (brand-new) or without the table
-    /// (legacy) migrate first; the marker is then checked (mismatch still
-    /// throws) and written on adoption.
+    /// dormant file. Brand-new files migrate first; the marker is then
+    /// checked (mismatch still throws) and written on adoption.
     private static func openQueue(
         url: URL,
         userID: String?

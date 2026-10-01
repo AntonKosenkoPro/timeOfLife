@@ -1,7 +1,11 @@
 #if DEBUG
 import SwiftUI
+@testable import TimeOfLife
 
-/// DEBUG-only layout spike harness for the refine-track-recents layout work
+/// Retired layout spike harness for the refine-track-recents layout work
+/// (design D1/D7/D8/D10). Kept for reference OUTSIDE the app target (this
+/// file lives in the test bundle): the production `TrackView` no longer
+/// gates on it.
 /// (design D1/D7/D8/D10). Renders the exact production `TrackContent`
 /// dual-flow stack inside the real tab shell with a configurable spacer cap
 /// and injected state, so the spike exercises the production invariants:
@@ -102,14 +106,14 @@ struct TrackLayoutSpike: View {
         ]
     }
 
-    private static var spikeRecents: [TrackViewModel.RecentEntry] {
+    private static var spikeRecents: [ExactName] {
         [
-            TrackViewModel.RecentEntry(text: "Deep work", categoryIDs: ["spike-c-work"], firstCategoryID: "spike-c-work"),
-            TrackViewModel.RecentEntry(text: "Reading", categoryIDs: ["spike-c-study"], firstCategoryID: "spike-c-study"),
-            TrackViewModel.RecentEntry(text: "Gym session", categoryIDs: ["spike-c-sport"], firstCategoryID: "spike-c-sport"),
-            TrackViewModel.RecentEntry(text: "Emails", categoryIDs: ["spike-c-mail"], firstCategoryID: "spike-c-mail"),
-            TrackViewModel.RecentEntry(text: "Walk the dog", categoryIDs: ["spike-c-home"], firstCategoryID: "spike-c-home"),
-            TrackViewModel.RecentEntry(text: "Meditation", categoryIDs: ["spike-c-health"], firstCategoryID: "spike-c-health")
+            ExactName(text: "Deep work", categoryIDs: ["spike-c-work"], firstCategoryID: "spike-c-work"),
+            ExactName(text: "Reading", categoryIDs: ["spike-c-study"], firstCategoryID: "spike-c-study"),
+            ExactName(text: "Gym session", categoryIDs: ["spike-c-sport"], firstCategoryID: "spike-c-sport"),
+            ExactName(text: "Emails", categoryIDs: ["spike-c-mail"], firstCategoryID: "spike-c-mail"),
+            ExactName(text: "Walk the dog", categoryIDs: ["spike-c-home"], firstCategoryID: "spike-c-home"),
+            ExactName(text: "Meditation", categoryIDs: ["spike-c-health"], firstCategoryID: "spike-c-health")
         ]
     }
 }

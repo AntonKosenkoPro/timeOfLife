@@ -79,14 +79,12 @@ final class SyncController: ObservableObject {
     /// start (by a generation-current cycle only), cleared ONLY by the
     /// finishing cycle's owning-generation tail — never by
     /// deactivate/trigger/syncNow, which only cancel/nil the single-flight
-    /// handle. `isCycleLive` reads this, so the pre-close shutdown wait
-    /// genuinely waits for the cancelled cycle to suspend/exit instead of
-    /// observing the already-nilled handle. A stale tail clears it only when
-    /// no successor holds the handle (deactivate without re-activate);
-    /// while a successor runs, the stale predecessor's tail leaves it set.
+    /// handle. Published so the pre-close shutdown (`waitForCycleEnd`)
+    /// observes settled state via the cycle tail instead of busy-polling:
+    /// every tail transition wakes settled waiters.
     /// Guard/generation semantics are otherwise untouched: `cycleTask`
     /// remains the single-flight handle for trigger/syncNow.
-    private var cycleRunning = false
+    @Published private(set) var cycleRunning = false
 
     /// Whether a cycle body is actually executing (the tail-owned running
     /// flag, not the single-flight handle — which `deactivate()` nils while
@@ -147,6 +145,73 @@ final class SyncController: ObservableObject {
         cycleTask = nil
         boundUserID = nil
         status = .inactive
+    }
+
+    /// Waiters for the pre-close shutdown (`waitForCycleEnd`), keyed by
+    /// registration id. MainActor-confined: only `suspendUntilCycleEnd`,
+    /// `cancelCycleWaiter`, the `waitForCycleEnd` defer, and the cycle tail
+    /// touch it — no lock needed, and a timed-out or cancelled waiter is
+    /// removed so its continuation resumes at most once.
+    private var cycleEndWaiters: [UUID: CheckedContinuation<Void, Never>] = [:]
+
+    /// Waits until the in-flight cycle actually ends (`deactivate()` only
+    /// requests cancellation) so the pre-close path never pulls the file out
+    /// from under a running cycle. Publisher-style: the waiter suspends on
+    /// the tail-owned `cycleRunning` state (every tail transition resumes
+    /// settled waiters) with a bounded timeout — the cycle is already
+    /// cancelled, so it resolves on its next suspension point. Returns
+    /// immediately when no cycle is live. Cancellation (rapid re-login)
+    /// unregisters the waiter instead of leaking it.
+    func waitForCycleEnd(timeout: TimeInterval = 2) async {
+        guard isCycleLive else { return }
+        let id = UUID()
+        defer { cycleEndWaiters.removeValue(forKey: id) }
+        await withTaskGroup(of: Void.self) { group in
+            group.addTask { [weak self] in
+                await withTaskCancellationHandler {
+                    await self?.suspendUntilCycleEnd(id: id)
+                } onCancel: {
+                    Task { [weak self] in await self?.cancelCycleWaiter(id: id) }
+                }
+            }
+            group.addTask {
+                try? await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
+            }
+            _ = await group.next()
+            group.cancelAll()
+        }
+    }
+
+    /// Suspends until the cycle tail settles (or the waiter is cancelled or
+    /// the entry already settled between the `isCycleLive` check and now).
+    private func suspendUntilCycleEnd(id: UUID) async {
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            if !isCycleLive {
+                continuation.resume()
+            } else {
+                cycleEndWaiters[id] = continuation
+            }
+        }
+    }
+
+    /// Unregisters a cancelled waiter and wakes it so the cancelled task
+    /// exits instead of suspending forever.
+    private func cancelCycleWaiter(id: UUID) {
+        if let waiter = cycleEndWaiters.removeValue(forKey: id) {
+            waiter.resume()
+        }
+    }
+
+    /// Wakes settled waiters. Called by every cycle tail, but resumes only
+    /// when nothing is live: a stale predecessor tail landing while a
+    /// successor runs must not release a waiter early.
+    private func resumeCycleWaiters() {
+        guard !cycleRunning else { return }
+        let waiters = cycleEndWaiters
+        cycleEndWaiters.removeAll()
+        for waiter in waiters.values {
+            waiter.resume()
+        }
     }
 
     /// Manual "Sync now" from Settings, and History pull-to-refresh
@@ -281,6 +346,7 @@ final class SyncController: ObservableObject {
         } else if cycleTask == nil {
             cycleRunning = false
         }
+        resumeCycleWaiters()
     }
 
     /// Tail of a cycle aborted by the same-account guard (`.inactive`, not

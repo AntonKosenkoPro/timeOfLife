@@ -47,7 +47,7 @@ final class LogTimeViewModel: ObservableObject {
     /// the picker suggests all names ever used, not just the chip cap.
     /// Settable (not `private(set)`) so tests can seed names directly
     /// instead of driving them through async store paths.
-    @Published var nameRecents: [RecentEntry] = []
+    @Published var nameRecents: [ExactName] = []
     @Published var notes: String
     @Published private(set) var startsAt: Date
     @Published private(set) var endsAt: Date
@@ -139,7 +139,7 @@ final class LogTimeViewModel: ObservableObject {
     /// Called on open by the view alongside the catalog load.
     func loadNameRecentsIfNeeded(store: LocalStore) async {
         guard nameRecents.isEmpty else { return }
-        nameRecents = (try? await store.allActivityNames()) ?? []
+        nameRecents = (try? await store.allActivityNames().map(ExactName.init(storeRecent:))) ?? []
     }
 
     /// Fills the draft from an autocomplete suggestion (the Recents tap
@@ -159,8 +159,8 @@ final class LogTimeViewModel: ObservableObject {
     func completeTypedName(_ text: String) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
-        if let match = nameRecents.first(where: { $0.activityText == trimmed }) {
-            applySuggestion(text: match.activityText, categoryIDs: match.categoryIDs)
+        if let match = nameRecents.first(where: { $0.text == trimmed }) {
+            applySuggestion(text: match.text, categoryIDs: match.categoryIDs)
         } else {
             name = trimmed
         }

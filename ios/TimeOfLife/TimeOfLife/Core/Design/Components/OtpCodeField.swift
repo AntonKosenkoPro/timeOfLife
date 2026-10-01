@@ -27,7 +27,7 @@ struct OtpCodeField: View {
                     .autocorrectionDisabled()
                     .textInputAutocapitalization(.never)
                     .focused($isFocused)
-                    .opacity(0)
+                    .opacity(Theme.opacityHiddenField)
                     .accessibilityHidden(true)
                     .disabled(isLoading)
 
@@ -65,9 +65,9 @@ struct OtpCodeField: View {
             }
         }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("One-time code, \(length) digits")
+        .accessibilityLabel(String(format: L10n.otpCodeLabel.text, locale: .current, length))
         .accessibilityValue(code)
-        .accessibilityHint("Double tap to edit")
+        .accessibilityHint(L10n.otpCodeHint.text)
         .accessibilityIdentifier(accessibilityId)
         .onAppear {
             if !UIAccessibility.isVoiceOverRunning {
@@ -140,7 +140,7 @@ private struct OtpCodeFieldPreview: View {
 }
 
 #Preview("OTP Code Field — Error") {
-    OtpCodeFieldPreview(code: "12", error: "Invalid code")
+    OtpCodeFieldPreview(code: "12", error: L10n.text(in: .default, code: "invalid_otp"))
 }
 
 #Preview("OTP Code Field — Loading") {

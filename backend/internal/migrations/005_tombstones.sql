@@ -1,7 +1,6 @@
--- 006: Deletion tombstones (cross-device delete propagation). Every hard
--- DELETE of an activity, category, or entry upserts one row; recreating an id
--- clears it. No GC yet (rows are tiny; deleted_at enables future GC).
--- Idempotent (re-applied on every start): IF NOT EXISTS throughout.
+-- 005: Deletion tombstones (cross-device delete propagation). Every hard
+-- DELETE of a category or entry upserts one row; recreating an id clears
+-- it. No GC yet (rows are tiny; deleted_at enables future GC).
 CREATE TABLE IF NOT EXISTS tombstones (
     user_id UUID NOT NULL REFERENCES users(id),
     resource TEXT NOT NULL,

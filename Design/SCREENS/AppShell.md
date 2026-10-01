@@ -6,14 +6,13 @@ Implements the `app-shell` capability (OpenSpec change `redesign-track-experienc
 
 ```
 TabView (Track | History | Insights)
-  ├─ Track      — capture: activity chooser + numeric timer (SCREENS/TimeTracking.md)
+  ├─ Track      — capture: plain-text name field + Recents chips + numeric timer (SCREENS/TimeTracking.md)
   ├─ History    — retrospective review (empty state in this change)
   └─ Insights   — analysis: period breakdown with hero total (insights-breakdown)
-Profile (sheet, top-trailing person control on every tab)
-  ├─ Account    — Enable Sync (signed out) / account + sync management (signed in)
-  ├─ Library    — Manage Activities, Manage Categories
-  ├─ Connections— Integrations, Export
-  └─ App        — Appearance, Data and Privacy (incl. Erase local data)
+Profile (sheet, top-trailing person control on every tab; signed-in only — unreachable until the launch gate signs the user in)
+  ├─ Account    — account + sync management (sync status, "Sync now", Sign Out)
+  ├─ Library    — Manage Categories
+  └─ App        — Erase local data (active account file only)
 ```
 
 - Track is the initially selected destination and the only place that starts or stops a timer.
@@ -39,16 +38,15 @@ Profile (sheet, top-trailing person control on every tab)
 ### Behaviors
 
 - Switching destinations never changes timer state and never discards the previous destination's state (tab state is preserved by `TabView`).
-- The app launches into Track without requiring authentication; History and Insights are reachable unsigned.
-- Insights shows a mirror-only breakdown of committed time: a `Today | This week | All time` period switch (default `This week`), a hero period total, a `By category | By activity` lens toggle (default `By category`), and proportional rows with max-scaled bars. Category rows attribute the full duration to every attached category (rows may sum above the hero) with a one-line footnote naming the rule; rows are not tappable; empty periods show a one-line sentence, and the true-zero state keeps the honest placeholder.
-- Profile opens for all users. Signed out, local configuration remains available and account sync is presented as an optional "Enable Sync" action.
-- Dismissing Profile restores the previously selected destination and its state.
+- The app launches into the auth flow when signed out (the auth flow is the root until sign-in completes) and into Track when signed in; there is no unsigned use and no "Enable Sync" action.
+- Insights shows a mirror-only breakdown of committed time: a `Today | This week | All time` period switch (default `This week`), a hero period total, a `By category | By text` lens toggle (default `By category`), and proportional rows with max-scaled bars. Category rows attribute the full duration to every attached category (rows may sum above the hero) with a one-line footnote naming the rule; rows are not tappable; empty periods show a one-line sentence, and the true-zero state keeps the honest placeholder.
+- Profile is signed-in-only and shows the active account and sync state. Dismissing Profile restores the previously selected destination and its state.
 - The compact timer's main area returns to Track; its Stop button saves in place and keeps the current destination selected.
 
 ### Accessibility
 
 - Tab items expose stable identifiers (`TabTrack`, `TabHistory`, `TabInsights`) and localized labels.
-- The compact timer is a single accessible element announcing activity name, elapsed duration, running state, and available actions (see `COMPONENTS.md`).
+- The compact timer is a single accessible element announcing entry text, elapsed duration, running state, and available actions (see `COMPONENTS.md`).
 - Navigation labels and compact timer content remain readable at accessibility Dynamic Type sizes without hiding Start/Stop actions.
 
 ### Implementation checklist
@@ -58,5 +56,5 @@ Profile (sheet, top-trailing person control on every tab)
 - [ ] Tab items and Profile button have stable identifiers.
 - [ ] Compact timer appears only on History/Insights and only while running.
 - [ ] Profile is a sheet, not a tab.
-- [ ] VoiceOver, Dynamic Type, Reduce Motion, light/dark, and iOS 15 are tested.
+- [ ] VoiceOver, Dynamic Type, Reduce Motion, light/dark, and iOS 18 are tested.
 - [ ] SwiftLint and warning-as-error builds pass.

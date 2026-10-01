@@ -21,31 +21,44 @@ import (
 
 // Dependencies holds all dependencies for the server.
 type Dependencies struct {
-	Store         db.Store
-	TokenService  *auth.TokenService
-	OTPService    *auth.OTPService
-	EmailSender   email.Sender
-	RateLimiter   *handlers.RateLimiterGroup
-	AppleVerifier apple.Verifier
-	HandlerCfg    handlers.HandlerConfig
+	Store          db.Store
+	TokenService   *auth.TokenService
+	OTPService     *auth.OTPService
+	EmailSender    email.Sender
+	RateLimiter    *handlers.RateLimiterGroup
+	AppleVerifier  apple.Verifier
+	HandlerCfg     handlers.HandlerConfig
+	RequestTimeout time.Duration
 }
+
+// defaultAccessTokenTTL and defaultRefreshTokenTTL mirror the config defaults
+// so a literally-constructed Config (tests) behaves like a loaded one.
+const (
+	defaultAccessTokenTTL  = 15 * time.Minute
+	defaultRefreshTokenTTL = 7 * 24 * time.Hour
+	defaultRequestTimeout  = 30 * time.Second
+)
 
 // NewDefaultDependencies creates a default set of dependencies from config and store.
 func NewDefaultDependencies(cfg *config.Config, store db.Store) Dependencies {
 	logger := slog.Default()
 
-	tokenService := auth.NewTokenService(
-		cfg.JWTSecret,
-		15*time.Minute, // access token TTL
-		7*24*time.Hour, // refresh token TTL
-	)
+	accessTTL := cfg.AccessTokenTTL
+	if accessTTL <= 0 {
+		accessTTL = defaultAccessTokenTTL
+	}
+	refreshTTL := cfg.RefreshTokenTTL
+	if refreshTTL <= 0 {
+		refreshTTL = defaultRefreshTokenTTL
+	}
+	tokenService := auth.NewTokenService(cfg.JWTSecret, accessTTL, refreshTTL)
 
 	otpService := auth.NewOTPService(
 		cfg.OTPExpiry,
 		cfg.OTPMaxAttempts,
 	)
 
-	emailSender := email.NewSender(email.SenderConfig{
+	emailSender, err := email.NewSender(email.SenderConfig{
 		Backend:              cfg.EmailBackend,
 		AWSAccessKeyID:       cfg.AWSAccessKeyID,
 		AWSSecretAccessKey:   cfg.AWSSecretAccessKey,
@@ -55,6 +68,13 @@ func NewDefaultDependencies(cfg *config.Config, store db.Store) Dependencies {
 		OTPEmailHTMLTemplate: cfg.OTPEmailHTMLTemplate,
 		Logger:               logger,
 	})
+	if err != nil {
+		// Explicit fallback: the service stays up on console delivery, but
+		// the misconfiguration is surfaced here instead of inside the
+		// factory. Fail fast (return error) is the follow-up once
+		// EMAIL_BACKEND=ses misconfigurations are proven loud enough.
+		logger.Error("email sender misconfigured, using console fallback", "error", err)
+	}
 
 	rateLimiter := &handlers.RateLimiterGroup{
 		OTPRequest: ratelimit.OTPRequestLimit,
@@ -63,7 +83,11 @@ func NewDefaultDependencies(cfg *config.Config, store db.Store) Dependencies {
 
 	trustedProxies, err := handlers.ParseTrustedProxies(cfg.TrustedProxies)
 	if err != nil {
-		logger.Error("invalid TRUSTED_PROXIES, ignoring forwarded headers", "error", err)
+		// Explicit continue with the safe default (trust nobody): forwarded
+		// headers are ignored, so a typo here fails closed for rate
+		// limiting rather than open. The raw value is not secret.
+		logger.Error("invalid TRUSTED_PROXIES, ignoring forwarded headers",
+			"error", err, "value", cfg.TrustedProxies)
 	}
 
 	handlerCfg := handlers.HandlerConfig{
@@ -84,13 +108,14 @@ func NewDefaultDependencies(cfg *config.Config, store db.Store) Dependencies {
 	}
 
 	return Dependencies{
-		Store:         store,
-		TokenService:  tokenService,
-		OTPService:    otpService,
-		EmailSender:   emailSender,
-		RateLimiter:   rateLimiter,
-		AppleVerifier: appleVerifier,
-		HandlerCfg:    handlerCfg,
+		Store:          store,
+		TokenService:   tokenService,
+		OTPService:     otpService,
+		EmailSender:    emailSender,
+		RateLimiter:    rateLimiter,
+		AppleVerifier:  appleVerifier,
+		HandlerCfg:     handlerCfg,
+		RequestTimeout: cfg.RequestTimeout,
 	}
 }
 
@@ -122,7 +147,7 @@ func New(deps Dependencies) *Server {
 	r.Use(chimw.Recoverer)
 	r.Use(chimw.RequestID)
 	r.Use(requestLogger)
-	r.Use(chimw.Timeout(30 * time.Second))
+	r.Use(chimw.Timeout(deps.requestTimeout()))
 	r.Use(corsMiddleware)
 
 	// Health check
@@ -170,6 +195,15 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.router.ServeHTTP(w, r)
 }
 
+// requestTimeout resolves the chi request timeout, defaulting for a
+// literally-constructed Dependencies (tests) the same way config.Load does.
+func (d Dependencies) requestTimeout() time.Duration {
+	if d.RequestTimeout <= 0 {
+		return defaultRequestTimeout
+	}
+	return d.RequestTimeout
+}
+
 // --- Middleware ---
 
 // requestLogger logs each request using slog.
@@ -194,17 +228,24 @@ func requestLogger(next http.Handler) http.Handler {
 }
 
 // corsMiddleware allows development origins.
+//
+// NOTE (residual risk, follow-up candidate): any presented Origin is
+// reflected with Allow-Credentials, so any website can make credentialed
+// calls. The proper fix is an allowlist from config. The one combo changed
+// here is the missing-Origin case: "*" is no longer paired with
+// Allow-Credentials (browsers reject that combo outright).
 func corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		origin := r.Header.Get("Origin")
 		if origin == "" {
-			origin = "*"
+			w.Header().Set("Access-Control-Allow-Origin", "*")
+		} else {
+			w.Header().Set("Access-Control-Allow-Origin", origin)
+			w.Header().Set("Access-Control-Allow-Credentials", "true")
+			w.Header().Add("Vary", "Origin")
 		}
-
-		w.Header().Set("Access-Control-Allow-Origin", origin)
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
-		w.Header().Set("Access-Control-Allow-Credentials", "true")
 
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)

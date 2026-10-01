@@ -21,12 +21,13 @@ extension AppContainer {
         let connectivity = MockConnectivity(connected: true)
         // The UI-testing graph pins a per-user test file (account-bound-store
         // spec shape): `lifio_<userId>.db` under a throwaway temp directory,
-        // opened already bound so every screen reads one account's data.
-        // swiftlint:disable:next force_try
-        let localStore = try! LocalStore(
+        // opened already bound so every screen reads one account's data. A
+        // file failure must never crash the loop: fall back to an unbound
+        // store (screens render empty) instead of `try!`.
+        let localStore = (try? LocalStore(
             url: temporaryStoreURL(userID: "ui-test"),
             userID: "ui-test"
-        )
+        )) ?? LocalStore()
         let timerService = TimerService(store: localStore)
         let repository = UITestingAuthRepository()
         let authService = AuthService(

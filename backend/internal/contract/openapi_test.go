@@ -7,6 +7,7 @@ package contract
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"gopkg.in/yaml.v3"
@@ -45,6 +46,7 @@ var bearerProtectedPaths = []string{
 	"/api/v1/categories",
 	"/api/v1/categories/{id}",
 	"/api/v1/entries",
+	"/api/v1/entries/recents",
 	"/api/v1/entries/{id}",
 }
 
@@ -405,5 +407,83 @@ func TestSpec_CategoryIconEnumMatchesGo(t *testing.T) {
 	}
 	if len(goIcons) != len(specIcons) {
 		t.Errorf("icon set sizes differ: Go %d vs OpenAPI %d", len(goIcons), len(specIcons))
+	}
+}
+
+// Recents (D5): GET /entries/recents mirrors the newest-per-exact-text query
+// for fresh devices. The handler caps limit at 20 (default 6) with 422 on
+// out-of-range values — the spec must document the path, the limit contract,
+// and the 422 alongside 200/401.
+func TestSpec_RecentsEndpointDocumented(t *testing.T) {
+	s := loadSpec(t)
+	get, ok := s.Paths["/api/v1/entries/recents"]["get"]
+	if !ok {
+		t.Fatal("expected GET /api/v1/entries/recents to be documented")
+	}
+	if !requiresAuth(get) {
+		t.Error("GET /api/v1/entries/recents must require BearerAuth")
+	}
+	for _, want := range []string{"200", "401", "422"} {
+		if _, ok := get.Responses[want]; !ok {
+			t.Errorf("GET /api/v1/entries/recents must document %s", want)
+		}
+	}
+	found := false
+	for _, p := range get.Parameters {
+		if p.Name == "limit" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("GET /api/v1/entries/recents must document the limit query parameter")
+	}
+}
+
+// Categories have no delta pull: the handler ignores ?modified_since= on
+// GET /categories (200, full list — pinned in handlers
+// TestCategories_ModifiedSinceIgnored), so the spec must NOT document the
+// parameter there. If the filter is ever implemented, handler + spec + this
+// pin change together (backend follow-up, not this contract).
+func TestSpec_NoModifiedSinceOnListCategories(t *testing.T) {
+	s := loadSpec(t)
+	get, ok := s.Paths["/api/v1/categories"]["get"]
+	if !ok {
+		t.Fatal("expected GET /api/v1/categories")
+	}
+	for _, p := range get.Parameters {
+		if p.Name == "modified_since" {
+			t.Error("GET /api/v1/categories must not document modified_since (handler ignores it)")
+		}
+	}
+}
+
+// Create-vs-merge asymmetry (D7): POST /entries rejects unknown category
+// ids loudly (422 validation_error), while PATCH prunes them and succeeds.
+// The spec must document the 422 on create and the prune rule on
+// EntryUpdate.category_ids.
+func TestSpec_Create422VsMergePrune(t *testing.T) {
+	s := loadSpec(t)
+	post, ok := s.Paths["/api/v1/entries"]["post"]
+	if !ok {
+		t.Fatal("expected POST /api/v1/entries")
+	}
+	if _, ok := post.Responses["422"]; !ok {
+		t.Error("POST /api/v1/entries must document 422 (unknown category ids rejected)")
+	}
+	update, ok := s.Components.Schemas["EntryUpdate"]
+	if !ok {
+		t.Fatal("expected EntryUpdate schema")
+	}
+	rawIDs, ok := update.Properties["category_ids"]
+	if !ok {
+		t.Fatal("EntryUpdate schema must document category_ids")
+	}
+	prop, ok := rawIDs.(map[string]any)
+	if !ok {
+		t.Fatalf("EntryUpdate.category_ids has unexpected shape %T", rawIDs)
+	}
+	desc, _ := prop["description"].(string)
+	if !strings.Contains(strings.ToLower(desc), "prun") {
+		t.Errorf("EntryUpdate.category_ids must document pruning, got %q", desc)
 	}
 }

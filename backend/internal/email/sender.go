@@ -87,12 +87,19 @@ func setOTPTemplates(textOverride, htmlOverride string) error {
 }
 
 // NewOTPMessage renders the OTP templates into a Message ready to send.
+// Template execution against otpTemplateData cannot fail for the parsed
+// templates above (Code is a plain string), but an error is logged rather
+// than swallowed so a future template change surfaces loudly.
 func NewOTPMessage(to, code string) Message {
 	data := otpTemplateData{Code: code}
 
 	var textBuf, htmlBuf bytes.Buffer
-	_ = otpTextTmpl.Execute(&textBuf, data)
-	_ = otpHTMLTmpl.Execute(&htmlBuf, data)
+	if err := otpTextTmpl.Execute(&textBuf, data); err != nil {
+		slog.Error("render OTP text template", "error", err)
+	}
+	if err := otpHTMLTmpl.Execute(&htmlBuf, data); err != nil {
+		slog.Error("render OTP HTML template", "error", err)
+	}
 
 	return Message{
 		To:      to,
@@ -219,17 +226,18 @@ type SenderConfig struct {
 }
 
 // NewSender creates the appropriate Sender based on Backend. Supported values:
-// "console" (default) and "ses". On construction failure it falls back to
-// ConsoleSender so the service stays available.
-func NewSender(cfg SenderConfig) Sender {
+// "console" (default) and "ses". Misconfiguration (malformed template
+// overrides, incomplete SES credentials) is returned as an error ALONGSIDE a
+// console fallback, so the caller must acknowledge it explicitly instead of
+// silently running without real email delivery.
+func NewSender(cfg SenderConfig) (Sender, error) {
 	logger := cfg.Logger
 	if logger == nil {
 		logger = slog.Default()
 	}
 
 	if err := setOTPTemplates(cfg.OTPEmailTextTemplate, cfg.OTPEmailHTMLTemplate); err != nil {
-		logger.Error("failed to configure OTP templates, falling back to console", "error", err)
-		return NewConsoleSender(logger)
+		return NewConsoleSender(logger), fmt.Errorf("new sender: %w", err)
 	}
 
 	switch strings.ToLower(cfg.Backend) {
@@ -242,11 +250,10 @@ func NewSender(cfg SenderConfig) Sender {
 			Logger:          logger,
 		})
 		if err != nil {
-			logger.Error("failed to create SES sender, falling back to console", "error", err)
-			return NewConsoleSender(logger)
+			return NewConsoleSender(logger), fmt.Errorf("new sender: %w", err)
 		}
-		return s
+		return s, nil
 	default:
-		return NewConsoleSender(logger)
+		return NewConsoleSender(logger), nil
 	}
 }

@@ -45,7 +45,7 @@ struct ClearTextButton: View {
         Button(action: action) {
             Image(systemName: "xmark.circle.fill")
                 .font(.system(size: 16))
-                .foregroundStyle(Theme.textSecondary.opacity(0.55))
+                .foregroundStyle(Theme.textSecondary.opacity(Theme.opacityClearGlyph))
                 .frame(
                     minWidth: Theme.minTapArea,
                     minHeight: Theme.minTapArea,

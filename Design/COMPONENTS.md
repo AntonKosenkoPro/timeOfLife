@@ -29,7 +29,7 @@ struct EditorSheetScaffold<Content: View, BottomBar: View>: View {
 
 ### Use
 
-- Use for Activity, Category, and future editor sheets that combine scrollable fields with a pinned primary action.
+- Use for entry, Category, and future editor sheets that combine scrollable fields with a pinned primary action.
 - Supply existing localized title/Cancel strings and a stable Cancel accessibility identifier.
 - Keep `@FocusState`, dismiss-on-save observation, validation, and field sections in the calling editor.
 - Do not recreate the header with a custom title inside scroll content, scroll-offset tracking, top overlays, or `UINavigationBarAppearance` overrides.
@@ -447,7 +447,7 @@ struct TagSelector: View {
 - Chips are content-sized; gaps between chips are uniform (`Theme.spacingSmall`); toggling swaps the icon for the checkmark without re-packing rows.
 - Each chip's tap target is at least 44×44 pt (`Theme.minTapArea`).
 - Each chip `accessibilityIdentifier("\(accessibilityId)Chip(\(id))")`.
-- Tags are optional; an activity with no tags is valid (F3). The selector never forces a selection.
+- Tags are optional; an entry with no tags is valid (F3). The selector never forces a selection.
 - Empty-state action follows U8 — guides toward Category creation without blocking the editor.
 
 ### Usage
@@ -471,18 +471,20 @@ TagSelector(
 ## `RecentActivitiesChips`
 
 The Track Recents chip flow (D2/D3/D4): a wrapping flow of at most six
-most-recently-used Activities with 44 pt tap targets; chips wrap onto
-additional rows and never require horizontal scrolling. A single tap prepares
-the Activity without starting timing.
+most-recently-used exact entry texts with 44 pt tap targets; chips wrap onto
+additional rows and never require horizontal scrolling. A single tap fills the
+name field with that exact text plus its newest entry's ordered categories
+without starting timing. There is no activity entity — chips represent entry
+texts, never activities. (The type name is kept for code continuity.)
 
 ### Signature
 
 ```swift
 struct RecentActivitiesChips: View {
-    let activities: [Activity]
+    let recents: [ExactName]
     let categories: [String: Category]
-    let selectedID: String?
-    let onSelect: (Activity) -> Void
+    let selectedText: String?
+    let onSelect: (ExactName) -> Void
 }
 ```
 
@@ -491,58 +493,58 @@ struct RecentActivitiesChips: View {
 - Wrapping flow of content-sized chips, left-aligned, equal `Theme.spacingSmall`
   gaps between chips and rows, laid out by the shared `FlowLayout`
   (same greedy packing as `TagSelector`).
-- Cap of six, most-recently-used first (`activities.prefix(6)`; the store
-  already sorts by `last_used_at`).
+- Cap of six, most-recently-used first (`recents.prefix(6)`; the store
+  already sorts by each text's newest `started_at`).
 - Each chip: fixed icon slot with the first assigned Category's
-  `CatalogIcon(validated:).displaySymbol` + name (`.subheadline.weight(.medium)`,
+  `CatalogIcon(validated:).displaySymbol` + exact text (`.subheadline.weight(.medium)`,
   one line, tail-truncated), `Theme.spacingMedium` horizontal / 12 pt vertical
   padding, `minHeight Theme.minTapArea` (44 pt), `Capsule` shape.
-- Categoryless Activities render name-only chips with no icon and no
+- Categoryless texts render name-only chips with no icon and no
   placeholder glyph.
 - Unselected chip: `Theme.backgroundSecondary` fill + `Theme.hairline` border;
-  icon and name in `Theme.textPrimary`.
-- Selected chip (the prepared Activity, `selectedID == activity.id`): filled
+  icon and text in `Theme.textPrimary`.
+- Selected chip (the prepared text, `selectedText == recent.text`): filled
   accent presentation — `Theme.accentPrimary` background, `Theme.textOnAccent`
   text and icon, accent border; the Category icon is kept; no checkmark.
-- When `activities` is empty the component renders no chips; the parent screen
+- When `recents` is empty the component renders no chips; the parent screen
   shows the dedicated empty copy (`timer.recentsEmptyHint`).
 
 ### States
 
 | State | Visual |
 |---|---|
-| Unselected | `Theme.backgroundSecondary` fill + `Theme.hairline` border; icon + name |
+| Unselected | `Theme.backgroundSecondary` fill + `Theme.hairline` border; icon + text |
 | Selected | `Theme.accentPrimary` fill, `Theme.textOnAccent` text/icon, accent border; icon kept |
 | Empty | No chips; parent shows `timer.recentsEmptyHint` |
 
 ### Requirements
 
-- Tapping a chip calls `onSelect` — the parent prepares the Activity without
+- Tapping a chip calls `onSelect` — the parent fills the field and inherits the ordered categories without
   starting timing.
 - Chips are content-sized with uniform `Theme.spacingSmall` gaps; a chip wider
   than the container renders at container width with a truncated name.
 - Each chip's tap target is at least 44×44 pt (`Theme.minTapArea`) in every
   presentation (icon, no-icon, selected).
 - Recents are hidden while a timer is running.
-- Category names are never shown on chips; search results and the
-  selected-Activity row remain category-free (D16 revision).
+- Category names are never shown on chips; the prepared-text chip and the
+  running tag selector remain category-name-free (D16 revision).
 
 ### Accessibility
 
-- Each chip is a button element with `.accessibilityLabel("Select \(activity.name)")`
+- Each chip is a button element with `.accessibilityLabel("Select \(recent.text)")`
   (`L10n.timerSelectActivity`).
-- The prepared Activity's chip additionally gets `.accessibilityAddTraits(.isSelected)`
+- The prepared text's chip additionally gets `.accessibilityAddTraits(.isSelected)`
   and `.accessibilityValue("Selected")`; unselected chips carry no value.
 - The icon is `.accessibilityHidden(true)` decoration.
-- `accessibilityIdentifier("TimerSuggestion(\(activity.id))")`.
+- `accessibilityIdentifier("TimerSuggestion(\(recent.text))")`.
 
 ### Usage
 
 ```swift
 RecentActivitiesChips(
-    activities: vm.activities,
+    recents: vm.recents,
     categories: vm.categoryMap,
-    selectedID: state.activity?.id
+    selectedText: state.text
 ) { vm.prefill(from: $0) }
 ```
 
@@ -594,7 +596,7 @@ struct AdaptiveVerticalLayout<TopContent: View, BottomContent: View>: View {
 
 - The three flexible regions never exceed the cap and never go negative; they
   collapse to zero before content clips, overlaps, or becomes unreachable.
-- The main action sits above Recents so Choose Activity / Start / Stop stays
+- The main action sits above Recents so the name prompt / Start / Stop stays
   reachable without scrolling on short screens.
 
 ---
@@ -609,7 +611,6 @@ The centered numeric timer on Track (D2/D23). Its only purpose is displaying the
 struct NumericTimerReadout: View {
     let state: TrackState // idle / ready / running / saving / saved / error
     let elapsed: TimeInterval
-    let activityName: String?
 }
 ```
 
@@ -628,7 +629,7 @@ struct NumericTimerReadout: View {
 
 | State | Visual |
 |---|---|
-| Idle | `00:00` + choose-an-Activity prompt |
+| Idle | `00:00` + name prompt |
 | Ready | `00:00` + `READY` caption |
 | Running | Live exact elapsed value + `RUNNING` caption |
 | Saving | Readout stable; primary action shows progress |
@@ -638,7 +639,7 @@ struct NumericTimerReadout: View {
 ### Accessibility
 
 - Single accessible element: `.accessibilityElement(children: .combine)`.
-- `.accessibilityLabel` announces the selected Activity, timer state, and elapsed duration; `.accessibilityValue` carries the exact formatted duration.
+- `.accessibilityLabel` announces the entry text, timer state, and elapsed duration; `.accessibilityValue` carries the exact formatted duration.
 - `.accessibilityAddTraits(.updatesFrequently)` while running so VoiceOver announces the live value.
 
 ---
@@ -651,7 +652,7 @@ The persistent running-timer surface shown above the tab bar on History and Insi
 
 ```swift
 struct CompactTimer: View {
-    let activityName: String
+    let entryText: String
     let startedAt: Date
     let openTrack: () -> Void
     let stop: () -> Void
@@ -661,7 +662,7 @@ struct CompactTimer: View {
 ### Visual
 
 - Inset above the tab bar via `.safeAreaInset(edge: .bottom)` on History/Insights roots.
-- `HStack`: a non-destructive main area (activity name + live elapsed duration, `.monospacedDigit()`) that returns to Track, and a separate 44 pt circular Stop button (`stop.fill`, `Theme.danger` or accent tint).
+- `HStack`: a non-destructive main area (entry text + live elapsed duration, `.monospacedDigit()`) that returns to Track, and a separate 44 pt circular Stop button (`stop.fill`, `Theme.danger` or accent tint).
 - Surface: `Theme.backgroundSecondary` fill, `Theme.cornerRadius` continuous corners, `Theme.hairline` 1 pt stroke.
 - `accessibilityIdentifier("CompactTimer")`; Stop button `accessibilityIdentifier("CompactTimerStopButton")`.
 
@@ -669,19 +670,21 @@ struct CompactTimer: View {
 
 | State | Visual |
 |---|---|
-| Running | Activity name + live elapsed duration + Stop |
+| Running | Entry text + live elapsed duration + Stop |
 | Stopped | Removed from the shell (entry saved in place) |
 
 ### Accessibility
 
-- Main area: `.accessibilityLabel("\(activityName), timer running")`, `.accessibilityHint("Returns to Track")`.
+- Main area: `.accessibilityLabel("<entry text>, timer running")`, `.accessibilityHint("Returns to Track")`.
 - Stop button: `.accessibilityLabel("Stop and save timer")`.
-- VoiceOver announces activity name, elapsed duration, running state, and available actions.
+- VoiceOver announces entry text, elapsed duration, running state, and available actions.
 - The Stop target is a distinct 44 pt target separated from the navigation area (D5 risk mitigation).
 
 ---
 
 ## `ActivitySearchSheet` and `ActivitySearchContent`
+
+> **Retired** by `remove-activities-layer`: Track has no search sheet, no quick-create, and no catalog — capture is the plain-text field plus Recents chips. The spec below is history.
 
 `ActivitySearchSheet` is the full-height native-search presentation opened by
 the `TimerActivitySearchButton` affordance on Track. It owns the native search
@@ -761,6 +764,8 @@ Track no longer renders full-width suggestion rows.
 
 ## `ActivityRow`
 
+> **Retired** by `remove-activities-layer`: there is no Manage Activities screen and no activity editor (F8). The spec below is history.
+
 Manage-list row for an activity (F8). Tap opens `ActivityEditor`; swipe-to-delete is handled by the parent `List`.
 
 ### Signature
@@ -819,7 +824,7 @@ List {
 
 ## `EntryRow`
 
-Read-only History row for a committed time entry (history-entry-list spec, Variant H layout). Purely presentational — grouping, category resolution, and duration formatting are owned by `HistoryViewModel`. (The activity detail sheet uses the entry-only `ActivityEntryRow` instead.)
+Read-only History row for a committed time entry (history-entry-list spec, Variant H layout). Purely presentational — grouping, category resolution, and duration formatting are owned by `HistoryViewModel`.
 
 ### Signature
 
@@ -840,14 +845,14 @@ struct EntryRow: View {
 Variant H (spike-confirmed, design.md D4):
 
 ```
-  [icon]  Activity Name                    1h 20m
+  [icon]  Entry text                       1h 20m
           Health, Morning, via Garmin  14:00 – 15:20
 ```
 
 - `HStack(alignment: .top, spacing: Theme.spacingMedium)`:
-  - Leading icon: first category's SF Symbol, `.title3`, `Theme.textSecondary`, 28 pt column, vertically spanning both text lines. Its optical top is top-aligned with the activity name's **cap-height top** (top of capital letters), not the text frame top — achieved with a negative top padding tuned for `.title3` icon + `.headline` name (`EntryRow.iconTopAdjustment`). If the font stack changes, the offset needs re-tuning.
+  - Leading icon: first category's SF Symbol, `.title3`, `Theme.textSecondary`, 28 pt column, vertically spanning both text lines. Its optical top is top-aligned with the entry text's **cap-height top** (top of capital letters), not the text frame top — achieved with a negative top padding tuned for `.title3` icon + `.headline` name (`EntryRow.iconTopAdjustment`). If the font stack changes, the offset needs re-tuning.
   - `VStack(alignment: .leading, spacing: 2)`:
-    - Line 1: activity name `.headline`, `Theme.textPrimary` (left, flexible) + duration `.headline`, `Theme.textPrimary`, `.monospacedDigit()` (right).
+    - Line 1: entry text `.headline`, `Theme.textPrimary` (left, flexible) + duration `.headline`, `Theme.textPrimary`, `.monospacedDigit()` (right).
     - Line 2: category names + provenance label `.caption`, `Theme.textSecondary` (left, flexible) + timeframe `.caption`, `Theme.textSecondary`, `.monospacedDigit()` (right). The "via <Source>" label (entry-provenance spec) is appended to the category caption after a comma; `manual` entries show nothing.
 - Min height `Theme.minTapArea`; dividers between rows lead after the icon column.
 
@@ -864,7 +869,7 @@ Variant H (spike-confirmed, design.md D4):
 
 - `accessibilityIdentifier("EntryRow(\(entry.id))")`.
 - Read-only: no tap action in this component (history-entry-list spec).
-- The caller (`HistoryViewModel`) resolves the icon and category names from the activity's current category set at read time (D6).
+- The caller (`HistoryViewModel`) resolves the icon and category names from the entry's own ordered category set (entries own their categories at write time; nothing is resolved at query time).
 
 ### Usage
 
@@ -1000,9 +1005,9 @@ SectionHeader(title: dayGroup.label, contentLeadingInset: EntryRow.iconColumnWid
 
 ## `UndoToast`
 
-> **Removed** by `unify-catalog-deletion`: deletions undo through the DEFAULT system Undo confirmation only (see `INTERACTIONS.md` → Undo flow). The component, its `L10n.undo.*` keys (except the chip-selection `undo.selected` / `undo.notSelected`), and all call sites are deleted. The spec below is history.
+> **Removed** by `unify-catalog-deletion`: deletions undo through the DEFAULT system Undo confirmation only (see `INTERACTIONS.md` → Undo flow). The component, its `L10n.undo.*` keys (except the chip-selection `undo.selected` / `undo.notSelected`), and all call sites are deleted. The spec below is history: deletions enter the durable undo buffer and stay restorable until the app restarts (no wall-clock window) — there is no toast and no 30-second window.
 
-Transient 30-second undo affordance shown after a delete (R3/U6). Purely presentational — the auto-dismiss timer and the 30 s undo window are owned by the parent ViewModel.
+Retired 30-second undo affordance formerly shown after a delete (R3/U6). Purely presentational — the auto-dismiss timer and the restart-persistent undo buffer are owned by the parent ViewModel.
 
 ### Signature
 
@@ -1030,7 +1035,7 @@ struct UndoToast: View {
 
 ### Requirements
 
-- The toast is purely presentational (D17): it does not own the 30 s undo window or the auto-dismiss timer — the parent ViewModel starts both when it shows the toast and calls `onDismiss` when either fires.
+- The toast is purely presentational (D17): it does not own the restart-persistent undo buffer or the auto-dismiss timer — the parent ViewModel starts both when it shows the toast and calls `onDismiss` when either fires.
 - Undo button is accent-tinted, `accessibilityIdentifier("UndoToastButton")`.
 - Both choices (undo, dismiss) are destructive-safe: undo restores from the client-side undo buffer before the deletion is committed (R3).
 
@@ -1050,11 +1055,13 @@ if let undo = vm.undoToast {
 
 - `accessibilityIdentifier("UndoToastButton")` on the Undo button.
 - The toast container is `.accessibilityElement(children: .contain)` so VoiceOver focuses the message then the actions.
-- `.accessibilityAddTraits(.updatesFrequently)` is NOT set — the toast is static for its 30 s lifetime.
+- `.accessibilityAddTraits(.updatesFrequently)` is NOT set — the toast is static for its on-screen lifetime.
 
 ---
 
 ## `ScopeConfirmation`
+
+> **Retired** by `remove-activities-layer` + `unify-catalog-deletion`: there is no activity delete and no entries-scope choice — entry deletion is a single destructive confirm naming the entry text (F10/U5), and category deletion is a single tag-only confirm. The spec below is history.
 
 Destructive two-option confirmation for deleting an activity that has past entries (F10/U5). The user must choose between deleting the entire activity (and all its entries) or only the current entry.
 
@@ -1114,6 +1121,8 @@ ScopeConfirmation(
 
 ## `ActivityDetailView`
 
+> **Retired** by `remove-activities-layer`: there is no activity detail sheet — History row taps push the unified entry form directly. The spec below is history.
+
 Activity detail sheet presented from a History entry tap (activity-detail-sheet spec). Toolbar holds the activity name and the "Edit Activity" action stacking the existing `ActivityEditorView`. The body header shows each activity field exactly once (icon, categories with icons, notes) below a divider-separated Entries section whose header carries the all-time total; the activity's complete day-grouped committed-entry list renders on inert entry-only rows. Presented at medium detent, draggable to large. If the activity is cascade-deleted while the sheet is open, the sheet dismisses itself.
 
 ### Signature
@@ -1170,6 +1179,8 @@ struct ActivityDetailView: View {
 ---
 
 ## `ActivityEntryRow`
+
+> **Retired** by `remove-activities-layer`: there is no activity detail sheet. The spec below is history.
 
 Entry-only row for the activity detail sheet (activity-detail-sheet spec): time range, provenance (shared `arrow.triangle.2.circlepath` sync icon + bare source name), duration. No activity identity. Purely presentational — the caller (`ActivityDetailViewModel`) computes all strings.
 

@@ -18,7 +18,7 @@ func setupTestStore(t *testing.T) *SQLiteStore {
 	}
 
 	ctx := context.Background()
-	if err := migrations.RunSQLite(ctx, store.db); err != nil {
+	if err := migrations.RunSQLite(ctx, store.DB()); err != nil {
 		_ = store.Close()
 		t.Fatalf("RunSQLite failed: %v", err)
 	}
@@ -109,7 +109,7 @@ func TestSQLiteStore_SaveOTPAndGetValidOTP(t *testing.T) {
 	codeHash := "abc123hash"
 	expiresAt := time.Now().Add(10 * time.Minute)
 
-	if err := store.SaveOTP(ctx, user.ID, codeHash, expiresAt); err != nil {
+	if err := store.SaveOTP(ctx, user.ID, codeHash, expiresAt, 5); err != nil {
 		t.Fatalf("SaveOTP failed: %v", err)
 	}
 
@@ -143,7 +143,7 @@ func TestSQLiteStore_GetValidOTP_ReturnsErrorForExpiredOTP(t *testing.T) {
 
 	// Save an OTP that expired in the past
 	expiresAt := time.Now().Add(-1 * time.Minute)
-	if err := store.SaveOTP(ctx, user.ID, "expiredhash", expiresAt); err != nil {
+	if err := store.SaveOTP(ctx, user.ID, "expiredhash", expiresAt, 5); err != nil {
 		t.Fatalf("SaveOTP failed: %v", err)
 	}
 
@@ -164,7 +164,7 @@ func TestSQLiteStore_IncrementOTPAttempts_IncrementsCounter(t *testing.T) {
 	}
 
 	expiresAt := time.Now().Add(10 * time.Minute)
-	if err := store.SaveOTP(ctx, user.ID, "hash", expiresAt); err != nil {
+	if err := store.SaveOTP(ctx, user.ID, "hash", expiresAt, 5); err != nil {
 		t.Fatalf("SaveOTP failed: %v", err)
 	}
 
@@ -197,7 +197,7 @@ func TestSQLiteStore_MarkOTPExhausted_MarksOTPAsExhausted(t *testing.T) {
 	}
 
 	expiresAt := time.Now().Add(10 * time.Minute)
-	if err := store.SaveOTP(ctx, user.ID, "hash", expiresAt); err != nil {
+	if err := store.SaveOTP(ctx, user.ID, "hash", expiresAt, 5); err != nil {
 		t.Fatalf("SaveOTP failed: %v", err)
 	}
 
@@ -454,14 +454,14 @@ func TestSQLiteStore_GetValidOTP_ReturnsLatestOTP(t *testing.T) {
 	expiresAt := time.Now().Add(10 * time.Minute)
 
 	// Save first OTP
-	if err := store.SaveOTP(ctx, user.ID, "first-hash", expiresAt); err != nil {
+	if err := store.SaveOTP(ctx, user.ID, "first-hash", expiresAt, 5); err != nil {
 		t.Fatalf("SaveOTP first failed: %v", err)
 	}
 
 	time.Sleep(10 * time.Millisecond)
 
 	// Save second OTP (should be returned as latest)
-	if err := store.SaveOTP(ctx, user.ID, "second-hash", expiresAt); err != nil {
+	if err := store.SaveOTP(ctx, user.ID, "second-hash", expiresAt, 5); err != nil {
 		t.Fatalf("SaveOTP second failed: %v", err)
 	}
 

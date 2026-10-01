@@ -64,8 +64,8 @@ Deleting a category removes the tag from all entries (cascade on the join) but d
 - **Last-write-wins on `updated_at`** (R2): every mutable request (`PATCH`) carries the client's `updated_at`. The server applies the write only if `client.updated_at > server.updated_at` (optimistic `UPDATE … WHERE updated_at < $client_updated_at`). On a stale write the server returns **409 `conflict`** with its current version so the client can reconcile. No field-level merge at MVP.
 - **Hard deletes + tombstones** (R3): no server-side trash. The client holds buffered deletions (restorable until the app restarts); the `DELETE` is only sent to the server after a restart commits the buffer (or is never sent if undone). Each hard delete upserts a `(user_id, resource, record_id, deleted_at)` tombstone in the same transaction (cascade-deleted join rows get none — one row per user intent); recreating an id clears its tombstone. `GET /deletions?deleted_since=` lists tombstones oldest-first for cross-device convergence; no GC yet (rows are tiny, personal scale; `deleted_at` enables a future policy).
 - **Cross-device name collision** (two devices create "Sport" offline with different ids): the `UNIQUE (user_id, lower(name))` constraint rejects the second `POST` with **409 `category_exists`** (carrying the winning category in `details`). The client re-maps its local entry references to the surviving id. Noted as the one LWW edge case the client must handle.
-- **Delta pull-sync**: `GET /categories` and `GET /entries` accept an optional `modified_since` (RFC 3339) that filters to records with `updated_at` **strictly greater** than the timestamp; absent/empty = full pull. The client advances a per-resource cursor to the max `updated_at` received, so integrations (hundreds/thousands of entries) don't force full re-pulls.
-- **Prune-unknown-category**: entry payloads may reference category ids unknown to the receiver (deleted elsewhere). The receiver keeps the remainder and drops the unknown ids — never rejects the entry.
+- **Delta pull-sync**: `GET /entries` accepts an optional `modified_since` (RFC 3339) that filters to records with `updated_at` **strictly greater** than the timestamp; absent/empty = full pull. `GET /categories` is a full pull ordered by name (the handler ignores `modified_since`; adding it is a backend follow-up). The client advances the entries cursor to the max `updated_at` received, so integrations (hundreds/thousands of entries) don't force full re-pulls.
+- **Prune-unknown-category**: entry payloads merged from elsewhere may reference category ids unknown to the receiver (deleted elsewhere). The receiver keeps the remainder and drops the unknown ids — never rejects the entry. On **create** (`POST /entries`) unknown ids are instead rejected with **422** (`ErrInvalidCategoryID`); the client's prune-and-retry heal (drop unknown ids, rewrite the outbox payload, retry once) is the last resort for dangling/delete-wins ids.
 - **Entry provenance**: entries carry `source` (default `manual`) and nullable `source_ref`. The `UNIQUE (user_id, source, source_ref)` constraint rejects a duplicate import with **409 `duplicate_import`** — a source re-sending the same record (Screen Time firing twice, Garmin re-sync) cannot create a duplicate. Deleting an imported entry is a hard delete; a later re-import of the same `(source, source_ref)` does not resurrect it.
 
 ---
@@ -88,9 +88,9 @@ All `401 unauthorized` on missing/invalid token (existing `AuthMiddleware`). All
 | Method | Path | Body | Success | Errors |
 |---|---|---|---|---|
 | GET | `/entries` | — | 200 `{items:[…], next_cursor?}` ordered by `started_at DESC`; filters `?from=&to=&category_id=&limit=&cursor=&modified_since=` (delta pull) | (401) |
-| GET | `/entries/recents` | — | 200 `[{activity_text, started_at, category_ids}]` — newest entry per exact text, `started_at DESC`, capped at 6 | (401) |
+| GET | `/entries/recents` | — | 200 `[{entry…}]` — newest entry per exact text, `started_at DESC`, capped at 6 (default; `?limit=` 1–20) | (401) |
 | GET | `/entries/{id}` | — | 200 `{entry…}` with owned `activity_text`, ordered `categories[]`, and `notes` | 404, (401) |
-| POST | `/entries` | `{id, activity_text, category_ids?, notes?, started_at, ended_at?, source?, source_ref?}` | 201 `{entry…}`; unknown category ids are pruned (remainder kept); `source` defaults to `manual`; duplicate `(source, source_ref)` → 409 `duplicate_import` | 400, 422, 409 `conflict`/`duplicate_import`, (401) |
+| POST | `/entries` | `{id, activity_text, category_ids?, notes?, started_at, ended_at?, source?, source_ref?}` | 201 `{entry…}`; unknown category ids are rejected with 422 (the client heals with prune-and-retry); `source` defaults to `manual`; duplicate `(source, source_ref)` → 409 `duplicate_import` | 400, 422, 409 `conflict`/`duplicate_import`, (401) |
 | PATCH | `/entries/{id}` | `{activity_text?, category_ids?, notes?, started_at?, ended_at?, updated_at}` | 200 `{entry…}` (full `category_ids` = replace-all tags) | 400, 404, 409 `conflict`, 422, (401) |
 | DELETE | `/entries/{id}` | — | 204 (hard delete + entry tombstone) | 404, (401) |
 
@@ -142,7 +142,7 @@ Reuses the auth validator pattern (one field → one error; multiple rules for o
 - `icon` (category): must be a non-empty SF Symbol string from the allowed set.
 - `started_at`: required, valid RFC 3339, ≤ now + small clock-skew tolerance.
 - `ended_at`: if present, must be > `started_at`.
-- `category_ids`: each must exist and belong to the user (unknown ids on entry write are pruned, not rejected — see above).
+- `category_ids`: each must exist and belong to the user on create (unknown ids → 422 `ErrInvalidCategoryID`); updates and merges prune unknown ids keeping the remainder (see above).
 - `id` (on POST): valid UUID v7 format.
 
 No count caps at MVP (Resolved decisions).

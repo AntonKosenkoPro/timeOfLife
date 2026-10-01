@@ -2,7 +2,6 @@ package handlers
 
 import (
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
 
@@ -40,10 +39,8 @@ func (h *Handler) ListEntries(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if v := q.Get("limit"); v != "" {
-		n, err := strconv.Atoi(v)
-		if err != nil || n < 1 || n > 200 {
-			errs.add("limit", "limit must be between 1 and 200")
-		} else {
+		n, ok := parseLimitParam(v, 200, errs)
+		if ok {
 			f.Limit = n
 		}
 	}
@@ -86,9 +83,10 @@ func (h *Handler) ListRecents(w http.ResponseWriter, r *http.Request) {
 	}
 	limit := 6
 	if v := r.URL.Query().Get("limit"); v != "" {
-		n, err := strconv.Atoi(v)
-		if err != nil || n < 1 || n > 20 {
-			writeValidation(w, validationErrs{"limit": "limit must be between 1 and 20"})
+		errs := validationErrs{}
+		n, ok := parseLimitParam(v, 20, errs)
+		if !ok {
+			writeValidation(w, errs)
 			return
 		}
 		limit = n
@@ -122,9 +120,7 @@ func (h *Handler) CreateEntry(w http.ResponseWriter, r *http.Request) {
 	// An empty ended_at string means "no value" (running timer), not a present
 	// zero-time timestamp. Normalize it to omitted so it is not stored as
 	// year-0001 with a hugely negative duration_seconds.
-	if req.EndedAt != nil && *req.EndedAt == "" {
-		req.EndedAt = nil
-	}
+	req.EndedAt = emptyToNil(req.EndedAt)
 
 	text := strings.TrimSpace(req.ActivityText)
 	errs := validationErrs{}
@@ -188,7 +184,7 @@ func (h *Handler) CreateEntry(w http.ResponseWriter, r *http.Request) {
 	}
 	created, isNew, err := h.store.CreateEntry(r.Context(), e)
 	if err != nil {
-		h.writeCatalogStoreErr(w, created, err, "create entry")
+		h.writeCatalogStoreErr(w, err, "create entry", versionDetails(created.UpdatedAt), nil)
 		return
 	}
 	status := http.StatusCreated
@@ -207,7 +203,7 @@ func (h *Handler) GetEntry(w http.ResponseWriter, r *http.Request) {
 	}
 	e, err := h.store.GetEntry(r.Context(), userID, chi.URLParam(r, "id"))
 	if err != nil {
-		h.writeCatalogStoreErr(w, e, err, "get entry")
+		h.writeCatalogStoreErr(w, err, "get entry", versionDetails(e.UpdatedAt), nil)
 		return
 	}
 	writeJSON(w, http.StatusOK, e)
@@ -238,6 +234,7 @@ func (h *Handler) UpdateEntry(w http.ResponseWriter, r *http.Request) {
 	}
 	// Malformed category ids can never match a category (any format), so they
 	// prune on merge (D7) — no loud format check here either.
+	req.StartedAt = emptyToNil(req.StartedAt)
 	if req.StartedAt != nil {
 		validateTimestamp("started_at", *req.StartedAt, false, errs)
 	}
@@ -274,7 +271,7 @@ func (h *Handler) UpdateEntry(w http.ResponseWriter, r *http.Request) {
 	patch.UpdatedAt = updatedAt
 	updated, err := h.store.UpdateEntry(r.Context(), userID, chi.URLParam(r, "id"), patch)
 	if err != nil {
-		h.writeCatalogStoreErr(w, updated, err, "update entry")
+		h.writeCatalogStoreErr(w, err, "update entry", versionDetails(updated.UpdatedAt), nil)
 		return
 	}
 	writeJSON(w, http.StatusOK, updated)
@@ -287,7 +284,7 @@ func (h *Handler) DeleteEntry(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.store.DeleteEntry(r.Context(), userID, chi.URLParam(r, "id")); err != nil {
-		h.writeCatalogStoreErr(w, nil, err, "delete entry")
+		h.writeCatalogStoreErr(w, err, "delete entry", nil, nil)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

@@ -133,8 +133,8 @@ type Store interface {
 	// SetUserVerified marks a user's email as verified.
 	SetUserVerified(ctx context.Context, userID string) error
 
-	// SaveOTP stores a new OTP code for a user.
-	SaveOTP(ctx context.Context, userID string, codeHash string, expiresAt time.Time) error
+	// SaveOTP stores a new OTP code for a user with the given attempt budget.
+	SaveOTP(ctx context.Context, userID string, codeHash string, expiresAt time.Time, maxAttempts int) error
 
 	// GetValidOTP returns the latest non-expired, non-exhausted OTP for a user.
 	GetValidOTP(ctx context.Context, userID string) (OTP, error)

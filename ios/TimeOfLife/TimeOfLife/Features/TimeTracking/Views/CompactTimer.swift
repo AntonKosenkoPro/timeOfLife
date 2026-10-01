@@ -18,7 +18,7 @@ struct CompactTimer: View {
                             .font(.system(size: 14, weight: .medium))
                             .foregroundStyle(Theme.accentPrimary)
                             .frame(width: 38, height: 38)
-                            .background(Theme.accentPrimary.opacity(0.13))
+                            .background(Theme.accentPrimary.opacity(Theme.opacityAccentFaint))
                             .clipShape(Circle())
 
                         VStack(alignment: .leading, spacing: 2) {
@@ -40,7 +40,7 @@ struct CompactTimer: View {
                 Button(action: stop) {
                     Image(systemName: "stop.fill")
                         .font(.system(size: 12, weight: .bold))
-                        .foregroundStyle(.white)
+                        .foregroundStyle(Theme.textOnAccent)
                         .frame(width: Theme.minTapArea, height: Theme.minTapArea)
                         .background(Theme.danger)
                         .clipShape(Circle())
@@ -72,7 +72,7 @@ struct CompactTimer: View {
 #if DEBUG
 #Preview("Compact Timer") {
     CompactTimer(
-        entryText: "Deep work",
+        entryText: L10n.categorySeedWork.text,
         startedAt: Date().addingTimeInterval(-125),
         openTrack: {},
         stop: {}

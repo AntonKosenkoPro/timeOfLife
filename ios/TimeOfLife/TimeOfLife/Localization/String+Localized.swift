@@ -25,6 +25,9 @@ enum L10n: String, CaseIterable {
     case otpSentTo = "otp.sentTo"
     case otpResend = "otp.resend"
     case otpResendCountdown = "otp.resendCountdown"
+    // OTP field VoiceOver copy (was hardcoded in `OtpCodeField`).
+    case otpCodeLabel = "otp.codeLabel"
+    case otpCodeHint = "otp.codeHint"
 
     // Apple
     case appleSignInTitle = "appleSignIn.title"
@@ -89,6 +92,16 @@ enum L10n: String, CaseIterable {
 
     // Common
     case commonOk = "common.ok"
+    case commonAnd = "common.and"
+
+    // Validation (AuthValidator unified messages, Requirements U4)
+    case validationEmailEmpty = "validation.emailEmpty"
+    case validationEmailPrefix = "validation.email.prefix"
+    case validationEmailRuleInvalid = "validation.email.rule.invalid"
+    case validationEmailRuleTooLong = "validation.email.rule.tooLong"
+    case validationOtpEmpty = "validation.otpEmpty"
+    case validationOtpPrefix = "validation.otp.prefix"
+    case validationOtpRuleInvalid = "validation.otp.rule.invalid"
 
     // Insights breakdown (insights-breakdown)
     case insightsPeriodToday = "insights.period.today"

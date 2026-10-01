@@ -31,7 +31,6 @@ final class HistoryViewModel: ObservableObject {
 
     init(
         store: LocalStore,
-        undoBuffer: UndoBufferStore? = nil,
         now: @escaping () -> Date = Date.init
     ) {
         self.store = store
@@ -190,74 +189,10 @@ final class HistoryViewModel: ObservableObject {
     /// `1h 12m`, `1d 12h` in English; locale-correct abbreviations and
     /// plurals elsewhere, e.g. `1 ч 12 мин` in Russian) (D5). The grammar —
     /// which tiers appear — is fixed here; Foundation owns the unit words.
+    /// Implementation lives in `DurationFormatting`; this forwards so
+    /// existing call sites keep compiling unchanged.
     nonisolated static func naturalDuration(_ seconds: Int, locale: Locale = .current) -> String {
-        let total = max(0, seconds)
-        let days = total / 86_400
-        let hours = (total % 86_400) / 3_600
-        let minutes = (total % 3_600) / 60
-        let secs = total % 60
-
-        if days > 0 {
-            return hours > 0
-                ? "\(day(days, locale)) \(hour(hours, locale))"
-                : day(days, locale)
-        }
-        if hours > 0 {
-            return minutes > 0
-                ? "\(hour(hours, locale)) \(minute(minutes, locale))"
-                : hour(hours, locale)
-        }
-        if minutes > 0 {
-            return secs > 0
-                ? "\(minute(minutes, locale)) \(second(secs, locale))"
-                : minute(minutes, locale)
-        }
-        return second(secs, locale)
-    }
-
-    /// Locale-aware single-unit words backing `naturalDuration` (one tiny
-    /// `DateComponentsFormatter` each: a whole-string formatter cannot
-    /// reproduce the two-tier grammar). The calendar is fixed to Gregorian —
-    /// unit words do not depend on the calendar system — with the caller's
-    /// locale applied to it.
-    nonisolated private static func day(_ value: Int, _ locale: Locale) -> String {
-        unit(value, .day, locale)
-    }
-
-    nonisolated private static func hour(_ value: Int, _ locale: Locale) -> String {
-        unit(value, .hour, locale)
-    }
-
-    nonisolated private static func minute(_ value: Int, _ locale: Locale) -> String {
-        unit(value, .minute, locale)
-    }
-
-    nonisolated private static func second(_ value: Int, _ locale: Locale) -> String {
-        unit(value, .second, locale)
-    }
-
-    nonisolated private static func unit(_ value: Int, _ component: Calendar.Component, _ locale: Locale) -> String {
-        var calendar = Calendar(identifier: .gregorian)
-        calendar.locale = locale
-        let formatter = DateComponentsFormatter()
-        formatter.unitsStyle = .abbreviated
-        formatter.calendar = calendar
-        var components = DateComponents()
-        switch component {
-        case .day:
-            components.day = value
-            formatter.allowedUnits = [.day]
-        case .hour:
-            components.hour = value
-            formatter.allowedUnits = [.hour]
-        case .minute:
-            components.minute = value
-            formatter.allowedUnits = [.minute]
-        default:
-            components.second = value
-            formatter.allowedUnits = [.second]
-        }
-        return formatter.string(from: components) ?? "\(value)"
+        DurationFormatting.natural(seconds, locale: locale)
     }
 
     /// Short-time caption ("14:00").

@@ -84,15 +84,13 @@ When a screen’s main purpose is to collect input from a single field (email, O
 
 - Sign Out is a destructive, low-frequency account action owned by Profile.
 - The Track toolbar does not expose account actions as a peer to capture.
-- Tapping Sign Out must show a confirmation alert before clearing the local session, because local timer data may be lost.
-- Sign Out must work offline by clearing the local session.
+- Tapping Sign Out signs the user out with no confirmation (local account files are kept; only the session is cleared). Sign Out must work offline by clearing the local session.
 
 ### Profile destination
 
-- The person control opens Profile for all users — signed out and signed in.
-- Signed out, the account section offers **Enable Sync**; local entry/category management, integrations, export, appearance, and data controls remain accessible independently.
-- Signed in, the account section shows sync status ("Last synced"/"Syncing…"/error) and a manual "Sync now" action, plus sign-out.
-- "Erase local data" is a destructive, confirmed action that wipes the local database (state + outbox + undo buffer + sync cursors).
+- The person control opens Profile for the signed-in user — sign-in is the mandatory launch gate (`RootView` renders the auth flow full-screen when signed out), so Profile is unreachable unsigned.
+- The account section shows sync status ("Last synced"/"Syncing…"/error) and a manual "Sync now" action, plus sign-out. There is no "Enable Sync" row or auth-flow sheet anywhere: the optional-sync presentation was removed with the mandatory gate.
+- "Erase local data" is a destructive, confirmed action that deletes only the active account file (state + outbox + undo buffer + sync cursors); dormant account files are kept.
 
 ### Auth transitions
 
@@ -124,9 +122,9 @@ D1 (OpenSpec change `redesign-track-experience`). The root is a three-tab shell,
 - **Track, History, Insights are the primary destinations.** Track is initially selected and is the only destination that starts or stops a timer.
 - **Profile is a sheet, not a tab.** A consistent top-trailing person control on every tab opens it. Profile owns account/sync, category management, integrations, export, appearance, and destructive data controls.
 - **Switching destinations never changes timer state** and never discards the previous destination's state.
-- **The app launches into Track without authentication**; History and Insights are reachable unsigned. Auth is an optional "Enable Sync" action inside Profile.
+- **The app launches into the auth flow when signed out and into Track when signed in**; sign-in is mandatory before any Track/History/Insights use. There is no anonymous use and no optional "Enable Sync" action — the launch gate owns authentication.
 - **A running timer stays globally accessible.** While running, History and Insights show the compact timer immediately above the tab bar (`.safeAreaInset(edge: .bottom)`). Its main area returns to Track; its Stop button saves in place and keeps the current destination selected. Track does not duplicate it.
-- **Sign Out is owned by Profile**, not the Track toolbar. Tapping Sign Out shows a confirmation alert before clearing the local session, because local timer data may be lost. Sign Out must work offline by clearing the local session.
+- **Sign Out is owned by Profile**, not the Track toolbar. Tapping Sign Out signs the user out with no confirmation (account files are kept). Sign Out must work offline by clearing the local session.
 - The hierarchy maps to a future macOS sidebar without changing meaning (Track/History/Insights primary; profile-owned features secondary).
 
 ## Accessibility identifiers
@@ -142,7 +140,7 @@ R3 / U6 / U7; decisions D17 + `unify-catalog-deletion`. Applies to entry and cat
 - A deletion is **not** committed to the local store or pushed to sync immediately. It enters the client-side **durable undo buffer** and stays restorable until the app restarts; a cold launch commits whatever is still buffered.
 - No `UndoToast` is shown. Undo is the DEFAULT system Undo confirmation only: shaking on the presenting surface shows the system prompt, and confirming restores exactly the most recent buffered deletion (registrations are cleared-then-single).
 - The buffer is **superseded** by the next undoable action — only the most recent buffered deletion is restorable, including across surfaces (an entry delete followed by a category delete leaves only the category undoable, and vice versa; each surface filters snapshots by resource; older rows stay buffered until undone or the app restarts).
-- On restart, commit locally (hard delete) and enqueue the `DELETE` for sync; the server hard-deletes (no trash, per `Activity_Catalog_API.md` Sync & ids).
+- On restart, commit locally (hard delete) and enqueue the `DELETE` for sync; the server hard-deletes (no trash, per `Entry_Catalog_API.md` Sync & ids).
 - **Undo failure:** undo is a local transaction (no API call); on a local failure the surface keeps its last good snapshot and the buffer row is preserved for retry until the app restarts.
 
 ### Durable undo buffer (local-first)
@@ -188,7 +186,7 @@ R2. Reuses the Offline sync path; do not duplicate the Offline section above.
 - Every mutable request carries the client `updated_at`. The server applies the write only if `client.updated_at > server.updated_at`; otherwise it returns **409 `conflict`** with the server's current version in `details`.
 - On 409 `conflict`, the client shows an inline `ErrorBanner` ("Edited on another device") and adopts the server's version as the source of truth (keep-latest). No field-level merge at MVP.
 - If the user dismisses the conflict `ErrorBanner` without choosing, default to keep-latest (adopt server version) — the banner is informational, not blocking.
-- On 409 `category_exists` (case-insensitive name collision on create), the client re-maps local references to the surviving id (see `Activity_Catalog_API.md` Sync & ids) and proceeds without an error.
+- On 409 `category_exists` (case-insensitive name collision on create), the client re-maps local references to the surviving id (see `Entry_Catalog_API.md` Sync & ids) and proceeds without an error.
 - Idempotent `POST` (same id replayed) returns the existing record — the offline queue is safe to replay; do not surface this as an error.
 
 ### Confirmation-dialog cleanup
@@ -210,7 +208,7 @@ All manage-screen delete flows should follow this pattern consistently.
 
 ## Sync client (local-first)
 
-D6 (OpenSpec change `local-first-sync-architecture`). Sync is an **optional transport feature**, not a prerequisite: the app works fully offline and unsigned; the `SyncController` activates only on sign-in and deactivates on sign-out.
+D6 (OpenSpec change `local-first-sync-architecture`). Sync is a **session-gated transport feature**: the tracker works fully offline once signed in; the `SyncController` activates only on sign-in and deactivates on sign-out.
 
 - **Triggers:** (1) app enters foreground, (2) connectivity restored (`.satisfied`), (3) manual "Sync now" in Profile. No background task scheduling on iOS (unreliable); macOS may add a timer-based background sync later.
 - **First-sync is pull-first:** on activation, pull the relay's full state, merge server-wins on `updated_at` conflicts, then drain the local outbox. Subsequent pulls are deltas via `?modified_since=` (per-resource cursor advanced to the max `updated_at` received).

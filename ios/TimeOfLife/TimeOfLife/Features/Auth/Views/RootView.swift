@@ -57,7 +57,7 @@ struct RootView: View {
                         VStack(spacing: 12) {
                             Text(L10n.errorLocalPersistence.text)
                                 .font(.footnote)
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(Theme.textSecondary)
                                 .multilineTextAlignment(.center)
                                 .accessibilityIdentifier("LocalStoreOpenError")
                             Button(L10n.profileSignOut.text, role: .destructive) {
@@ -176,12 +176,10 @@ struct RootView: View {
     /// surface `notBound` as `.error` instead of `.inactive` and strand the
     /// next sign-in's `activate` (it only runs from `.inactive`). Bounded:
     /// the cycle is already cancelled, so it resolves on its next
-    /// suspension point.
+    /// suspension point. Delegates to the controller's state publisher
+    /// (no busy-poll).
     private func waitForSyncShutdown() async {
-        let deadline = Date().addingTimeInterval(2)
-        while !Task.isCancelled, container.syncController.isCycleLive, Date() < deadline {
-            try? await Task.sleep(nanoseconds: 50_000_000)
-        }
+        await container.syncController.waitForCycleEnd(timeout: 2)
     }
 
     /// The authenticated session's `userId` (empty when signed out — callers

@@ -158,7 +158,7 @@ func TestTokenService_RefreshTokenTTL(t *testing.T) {
 	ttl := 7 * 24 * time.Hour
 	s := NewTokenService("test-secret-that-is-at-least-32-bytes-long!!", 15*time.Minute, ttl)
 
-	got := s.RefreshTokenTTL()
+	got := s.RefreshTokenTTL
 	if got != ttl {
 		t.Errorf("expected TTL %v, got %v", ttl, got)
 	}

@@ -87,19 +87,19 @@ struct LogTimeView: View {
             VStack(spacing: Theme.spacingMedium) {
                 nameCard
                     .disabled(vm.isLocked)
-                    .opacity(vm.isLocked ? 0.6 : 1)
+                    .opacity(vm.isLocked ? Theme.opacityLockedForm : 1)
                 startCard
                     .disabled(vm.isLocked)
-                    .opacity(vm.isLocked ? 0.6 : 1)
+                    .opacity(vm.isLocked ? Theme.opacityLockedForm : 1)
                 endCard
                     .disabled(vm.isLocked)
-                    .opacity(vm.isLocked ? 0.6 : 1)
+                    .opacity(vm.isLocked ? Theme.opacityLockedForm : 1)
                 categoriesCard
                     .disabled(vm.isLocked)
-                    .opacity(vm.isLocked ? 0.6 : 1)
+                    .opacity(vm.isLocked ? Theme.opacityLockedForm : 1)
                 notesCard
                     .disabled(vm.isLocked)
-                    .opacity(vm.isLocked ? 0.6 : 1)
+                    .opacity(vm.isLocked ? Theme.opacityLockedForm : 1)
                 if vm.isLocked {
                     lockedNote
                 }
@@ -132,32 +132,20 @@ struct LogTimeView: View {
                 // (EDIT/LOCKED) dismisses via the system Back button, so no
                 // leading dismiss item is shown there; the CREATE sheet (no
                 // back stack) dismisses via an X button with the same action.
-                if !embeddedInNavigationStack {
-                    ToolbarItem(placement: .cancellationAction) {
-                        Button {
-                            dismiss()
-                        } label: {
-                            Image(systemName: "xmark")
-                        }
-                        .accessibilityLabel(L10n.entryDismissLabel.text)
-                        .accessibilityIdentifier("LogTimeDismissButton")
-                    }
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    if !vm.isLocked {
-                        Button {
-                            Task { await save() }
-                        } label: {
-                            Image(systemName: "checkmark")
-                        }
-                        .disabled(!vm.isAddEnabled)
-                        .accessibilityLabel(
-                            vm.mode == .edit
-                                ? L10n.entryConfirmSaveLabel.text
-                                : L10n.entryConfirmAddLabel.text
-                        )
-                        .accessibilityIdentifier(vm.mode == .edit ? "EntryEditSaveButton" : "LogTimeAddButton")
-                    }
+                EditorToolbar(
+                    showsDismiss: !embeddedInNavigationStack,
+                    dismissAccessibilityLabel: L10n.entryDismissLabel.text,
+                    dismissAccessibilityId: "LogTimeDismissButton",
+                    isDismissDisabled: false,
+                    onDismiss: dismiss(),
+                    showsConfirm: !vm.isLocked,
+                    confirmAccessibilityLabel: vm.mode == .edit
+                        ? L10n.entryConfirmSaveLabel.text
+                        : L10n.entryConfirmAddLabel.text,
+                    confirmAccessibilityId: vm.mode == .edit ? "EntryEditSaveButton" : "LogTimeAddButton",
+                    isConfirmDisabled: !vm.isAddEnabled
+                ) {
+                    Task { await save() }
                 }
             }
             .alert(
@@ -250,13 +238,7 @@ struct LogTimeView: View {
                     NavigationLink {
                         NamePicker(
                             initialText: vm.name,
-                            recents: vm.nameRecents.map {
-                                NamePickerSuggestion(
-                                    text: $0.activityText,
-                                    categoryIDs: $0.categoryIDs,
-                                    firstCategoryID: $0.categoryIDs.first
-                                )
-                            },
+                            recents: vm.nameRecents,
                             categories: Dictionary(uniqueKeysWithValues: vm.availableCategories.map { ($0.id, $0) }),
                             placeholder: L10n.entryNamePlaceholder.text,
                             emptyHint: L10n.timerRecentsEmptyHint.text,
@@ -364,18 +346,12 @@ struct LogTimeView: View {
 
     /// Bottom-of-page destructive Delete (EDIT + LOCKED modes only).
     private var deleteSection: some View {
-        Button(role: .destructive) {
+        DestructiveBottomButton(
+            title: L10n.entryDelete.text,
+            accessibilityId: "EntryDeleteButton"
+        ) {
             isShowingDeleteConfirm = true
-        } label: {
-            Text(L10n.entryDelete.text)
-                .font(.headline)
-                .foregroundStyle(Theme.danger)
-                .frame(maxWidth: .infinity, minHeight: Theme.minTapArea)
-                .contentShape(Rectangle())
         }
-        .background(Theme.backgroundSecondary)
-        .clipShape(RoundedRectangle(cornerRadius: Theme.cornerRadius))
-        .accessibilityIdentifier("EntryDeleteButton")
     }
 
     // MARK: - Start / End cards
@@ -488,7 +464,7 @@ struct LogTimeView: View {
                 .padding(.horizontal, Theme.spacingSmall + 4)
                 .padding(.vertical, Theme.spacingSmall - 2)
                 .foregroundStyle(active ? Theme.accentPrimary : Theme.textPrimary)
-                .background(active ? Theme.accentPrimary.opacity(0.15) : Theme.backgroundPrimary)
+                .background(active ? Theme.accentPrimary.opacity(Theme.opacityAccentSoft) : Theme.backgroundPrimary)
                 .clipShape(Capsule())
         }
         .accessibilityIdentifier(id)

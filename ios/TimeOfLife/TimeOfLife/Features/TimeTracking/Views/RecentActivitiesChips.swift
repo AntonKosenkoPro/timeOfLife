@@ -14,24 +14,24 @@ import SwiftUI
 /// no checkmark, so chips stay compact). Chips wrap via the shared
 /// `FlowLayout` with equal `Theme.spacingSmall` gaps.
 struct RecentActivitiesChips: View {
-    let recents: [TrackViewModel.RecentEntry]
+    let recents: [ExactName]
     let categories: [String: Category]
     let selectedText: String?
-    let onSelect: (TrackViewModel.RecentEntry) -> Void
+    let onSelect: (ExactName) -> Void
 
     @Environment(\.dynamicTypeSize)
     private var dynamicTypeSize
 
     /// The capped, most-recently-used-first slice (the store already sorts
     /// by the text's newest `started_at`).
-    private var capped: [TrackViewModel.RecentEntry] { Self.recents(from: recents) }
+    private var capped: [ExactName] { Self.recents(from: recents) }
 
     /// The capped, most-recently-used-first slice of the given recents.
     /// Pure (no view state), so `nonisolated` like `EntryRow.accessibilityLabel`.
     nonisolated static func recents(
-        from recents: [TrackViewModel.RecentEntry],
+        from recents: [ExactName],
         limit: Int = 6
-    ) -> [TrackViewModel.RecentEntry] {
+    ) -> [ExactName] {
         Array(recents.prefix(limit))
     }
 
@@ -46,9 +46,6 @@ struct RecentActivitiesChips: View {
 
     // MARK: - Sizing
 
-    /// The subheadline metrics object used for the icon glyph size.
-    private var metrics: UIFontMetrics { UIFontMetrics(forTextStyle: .subheadline) }
-
     /// A trait collection matching the SwiftUI environment's effective
     /// Dynamic Type size, so the icon glyph scales with rendering
     /// (also under a `.dynamicTypeSize` environment override,
@@ -59,19 +56,27 @@ struct RecentActivitiesChips: View {
 
     /// Icon glyph size at the effective size.
     private var symbolFontSize: CGFloat {
-        metrics.scaledFont(for: UIFont.systemFont(ofSize: 14), compatibleWith: sizeTrait).pointSize
+        let metrics = UIFontMetrics(forTextStyle: .subheadline)
+        return metrics.scaledFont(
+            for: UIFont.systemFont(ofSize: 14),
+            compatibleWith: sizeTrait
+        ).pointSize
     }
 
     /// Fixed icon slot so wide SF Symbols stay fully visible and the
     /// measured chip width is exact.
     private var symbolSlotSize: CGFloat {
-        ceil(symbolFontSize * 1.5)
+        DynamicTypeMetrics.symbolSlotSize(
+            basePointSize: 14,
+            textStyle: .subheadline,
+            dynamicTypeSize: dynamicTypeSize
+        )
     }
 
     // MARK: - Chip
 
     @ViewBuilder
-    private func chip(_ recent: TrackViewModel.RecentEntry) -> some View {
+    private func chip(_ recent: ExactName) -> some View {
         let isSelected = selectedText == recent.text
         Button {
             onSelect(recent)
@@ -84,7 +89,7 @@ struct RecentActivitiesChips: View {
         .accessibilityIdentifier("TimerSuggestion(\(recent.text))")
     }
 
-    private func chipLabel(recent: TrackViewModel.RecentEntry, isSelected: Bool) -> some View {
+    private func chipLabel(recent: ExactName, isSelected: Bool) -> some View {
         HStack(spacing: Theme.spacingExtraSmall) {
             if let categoryID = recent.firstCategoryID,
                let category = categories[categoryID] {
@@ -143,11 +148,11 @@ extension DynamicTypeSize {
         Category(id: "c3", name: "Sport", icon: "figure.run")
     ]
     let recents = [
-        TrackViewModel.RecentEntry(text: "Deep work", categoryIDs: ["c1"], firstCategoryID: "c1"),
-        TrackViewModel.RecentEntry(text: "Reading", categoryIDs: ["c2"], firstCategoryID: "c2"),
-        TrackViewModel.RecentEntry(text: "Gym session", categoryIDs: ["c3"], firstCategoryID: "c3"),
-        TrackViewModel.RecentEntry(text: "Planning", categoryIDs: [], firstCategoryID: nil),
-        TrackViewModel.RecentEntry(text: "A very long entry name that truncates", categoryIDs: ["c1"], firstCategoryID: "c1")
+        ExactName(text: "Deep work", categoryIDs: ["c1"], firstCategoryID: "c1"),
+        ExactName(text: "Reading", categoryIDs: ["c2"], firstCategoryID: "c2"),
+        ExactName(text: "Gym session", categoryIDs: ["c3"], firstCategoryID: "c3"),
+        ExactName(text: "Planning", categoryIDs: [], firstCategoryID: nil),
+        ExactName(text: "A very long entry name that truncates", categoryIDs: ["c1"], firstCategoryID: "c1")
     ]
     return RecentActivitiesChips(
         recents: recents,

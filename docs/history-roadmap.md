@@ -1,4 +1,6 @@
-# History Screen — Roadmap
+# History Screen — Roadmap (archived)
+
+> **Archived.** The deferred History follow-ups below (filtering, History-row swipe delete, app-wide UndoToast) are tracked in a single home: `docs/project-context.md` → "Incomplete / deferred". This file is preserved as archaeology — its "Activity" references are stale (the activities layer is gone), and its per-item SHIPPED notes describe the change that delivered them, not open work.
 
 > Note (`remove-activities-layer`): the activities layer is gone — no activity
 > definitions, no Manage Activities, no activity detail sheet, no activity
@@ -107,13 +109,18 @@ where it was opened from (History row or ActivityDetail entries list).
   existing `TagSelector` chip pattern is a candidate for Activity/Source
   multi-select.
 
-### 6. "via <Source>" provenance labels (U1) — SHIPPED
+### 6. "via <Source>" provenance labels (U1) — SHIPPED on rows, no detail surface
 
 - **Delivered by the `activity-detail-sheet` change**: non-`manual` entries
   show a localized "via <Source>" label appended to entry-row captions in
-  both the History list and the activity detail sheet (`EntryProvenance`).
-  The spec ambiguity was resolved toward rows everywhere; no entry-detail
-  surface exists.
+  the History list and on the unified entry form (`EntryProvenance`, FURPS U1).
+  There is deliberately no entry-detail surface, so the entry-detail half of
+  the old wording was dropped from the spec rather than deferred.
+- **Resolved contradiction**: this item being SHIPPED does not conflict with
+  `docs/project-context.md` → "Incomplete / deferred" listing "via <Source>"
+  labels — that line tracks only the dropped entry-detail-surface wording
+  (there is nothing left to build for rows). Do not file row labels as
+  missing.
 
 ### 7. Running / in-progress session in History
 

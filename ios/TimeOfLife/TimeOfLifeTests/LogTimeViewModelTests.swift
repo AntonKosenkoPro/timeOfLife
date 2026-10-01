@@ -389,7 +389,7 @@ struct LogTimeViewModelTests {
         let vm = makeViewModel(store: store)
         await vm.loadNameRecentsIfNeeded(store: store)
         #expect(vm.nameRecents.count == 8)
-        #expect(vm.nameRecents.first?.activityText == "Text7")
+        #expect(vm.nameRecents.first?.text == "Text7")
         // Idempotent: a second load keeps the first result.
         await vm.loadNameRecentsIfNeeded(store: store)
         #expect(vm.nameRecents.count == 8)
@@ -409,7 +409,7 @@ struct LogTimeViewModelTests {
     @Test("completeTypedName inherits categories on exact match")
     func completeTypedNameExactMatch() {
         let vm = makeViewModel()
-        vm.nameRecents = [RecentEntry(activityText: "Gym", categoryIDs: ["c1"], startedAt: Date())]
+        vm.nameRecents = [ExactName(text: "Gym", categoryIDs: ["c1"], firstCategoryID: "c1")]
         vm.completeTypedName("Gym")
         #expect(vm.name == "Gym")
         #expect(vm.categoryIDs == ["c1"])
@@ -418,7 +418,7 @@ struct LogTimeViewModelTests {
     @Test("completeTypedName keeps categories for a new name")
     func completeTypedNameNewName() {
         let vm = makeViewModel()
-        vm.nameRecents = [RecentEntry(activityText: "Gym", categoryIDs: ["c1"], startedAt: Date())]
+        vm.nameRecents = [ExactName(text: "Gym", categoryIDs: ["c1"], firstCategoryID: "c1")]
         vm.toggleCategory("c2")
         vm.completeTypedName("Run")
         #expect(vm.name == "Run")
@@ -458,7 +458,7 @@ struct LogTimeViewModelTests {
         ))
         let vm = makeViewModel(store: store)
         await vm.loadNameRecentsIfNeeded(store: store)
-        #expect(vm.nameRecents.map(\.activityText) == ["Gym"])
+        #expect(vm.nameRecents.map(\.text) == ["Gym"])
         // Idempotent: a second load keeps the first result.
         await vm.loadNameRecentsIfNeeded(store: store)
         #expect(vm.nameRecents.count == 1)

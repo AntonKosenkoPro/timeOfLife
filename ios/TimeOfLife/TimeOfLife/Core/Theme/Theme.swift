@@ -29,16 +29,24 @@ enum Theme {
 
     static let cornerRadius: CGFloat = 10
     static let cornerRadiusSmall: CGFloat = 8
-    static let cornerRadiusLarge: CGFloat = 16
     static let minTapArea: CGFloat = 44
     static let screenHorizontalPadding: CGFloat = 24
     static let maxContentWidth: CGFloat = 420
 
-    // MARK: - Shadows
+    // MARK: - Opacity
 
-    /// Small shadow for floating cards (Design/TOKENS.md `shadowSmall`:
-    /// radius 4, y 2, opacity 0.08).
-    static let shadowSmall = Color(uiColor: UIColor.black.withAlphaComponent(0.08))
+    /// Dimmed fill for inactive (loading/disabled) primary buttons.
+    static let opacityDisabledFill: Double = 0.5
+    /// Soft accent wash for active pills.
+    static let opacityAccentSoft: Double = 0.15
+    /// Faint accent wash for the compact-timer icon disc.
+    static let opacityAccentFaint: Double = 0.13
+    /// Dimmed trailing clear glyph.
+    static let opacityClearGlyph: Double = 0.55
+    /// Locked (read-only) form cards.
+    static let opacityLockedForm: Double = 0.6
+    /// Fully transparent hidden capture field.
+    static let opacityHiddenField: Double = 0
 
     // MARK: - Helpers
 

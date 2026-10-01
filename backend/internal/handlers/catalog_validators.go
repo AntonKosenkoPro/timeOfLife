@@ -2,8 +2,10 @@ package handlers
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -100,15 +102,13 @@ func writeValidation(w http.ResponseWriter, errs validationErrs) {
 	writeError(w, http.StatusUnprocessableEntity, codeValidation, "Validation failed", errs)
 }
 
-// parseRFC3339 parses an RFC 3339 timestamp.
+// parseRFC3339 parses an RFC 3339 timestamp. RFC3339Nano already accepts
+// whole-second inputs (the fractional section is optional in Go layouts),
+// so no fallback layout is needed.
 func parseRFC3339(s string) (time.Time, bool) {
 	t, err := time.Parse(time.RFC3339Nano, s)
 	if err != nil {
-		// Fall back to the non-nano layout for whole-second inputs.
-		t, err = time.Parse(time.RFC3339, s)
-		if err != nil {
-			return time.Time{}, false
-		}
+		return time.Time{}, false
 	}
 	return t, true
 }
@@ -250,4 +250,25 @@ func validateTimestamp(field, s string, required bool, errs validationErrs) {
 	if _, ok := parseRFC3339(s); !ok {
 		errs.add(field, field+" must be a valid RFC 3339 timestamp")
 	}
+}
+
+// emptyToNil normalizes an empty optional timestamp to omitted (nil), so ""
+// means "no value" rather than a present zero time. Used for ended_at on
+// create (a running timer) and for optional update fields.
+func emptyToNil(s *string) *string {
+	if s != nil && *s == "" {
+		return nil
+	}
+	return s
+}
+
+// parseLimitParam validates a ?limit= query value against [1, maxLimit]. It
+// returns the parsed limit, or ok=false when the handler must answer 422.
+func parseLimitParam(v string, maxLimit int, errs validationErrs) (limit int, ok bool) {
+	n, err := strconv.Atoi(v)
+	if err != nil || n < 1 || n > maxLimit {
+		errs.add("limit", fmt.Sprintf("limit must be between 1 and %d", maxLimit))
+		return 0, false
+	}
+	return n, true
 }

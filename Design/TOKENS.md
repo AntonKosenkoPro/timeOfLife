@@ -70,7 +70,7 @@ Use SF Symbols. Prefer filled variants for active/primary actions.
 | Stop | `stop.fill` | Stop and save entry |
 | History | `clock.arrow.circlepath` | History tab |
 | Settings | `gearshape.fill` | Settings / configuration |
-| Plus | `plus.circle.fill` | Add activity |
+| Plus | `plus.circle.fill` | Add category |
 | Check | `checkmark.circle.fill` | Success state |
 | Exclamation | `exclamationmark.triangle.fill` | Error state |
 | Arrow back | `chevron.left` | Back navigation |
@@ -148,7 +148,7 @@ Allowed set for category icons (F2); default is `tag`. This is the documented mi
 
 ### Management icons
 
-New for the catalog feature (Manage Activities, quick-add sheet, category management).
+For the catalog feature (category management, entry form, running tag selector).
 
 | SF Symbol | Usage |
 |---|---|

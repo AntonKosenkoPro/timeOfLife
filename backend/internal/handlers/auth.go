@@ -2,13 +2,16 @@
 package handlers
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
+	"net/mail"
 	"regexp"
 	"strings"
 	"time"
@@ -116,8 +119,16 @@ type errorResponse struct {
 
 var emailRegex = regexp.MustCompile(`^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$`)
 
+// validateEmail reports whether email is an acceptable account identifier.
+// net/mail parses the address structure (RFC 5322); the additional length
+// and dot-TLD rules preserve the previous accept set (ASCII mailbox, dotted
+// domain with a 2+ letter TLD, max 254 chars).
 func validateEmail(email string) bool {
 	if email == "" || len(email) > 254 {
+		return false
+	}
+	addr, err := mail.ParseAddress(email)
+	if err != nil || addr.Address != email {
 		return false
 	}
 	return emailRegex.MatchString(email)
@@ -213,12 +224,19 @@ func (h *Handler) issueTokens(ctx context.Context, w http.ResponseWriter, user d
 	})
 }
 
+// maxBodyBytes caps request bodies (64 KB). Oversized bodies are rejected
+// with 400 invalid_body by the handler, matching the previous behavior.
+const maxBodyBytes = 1 << 16
+
 func decodeJSON(r *http.Request, v any) error {
-	// A nil ResponseWriter is safe here: MaxBytesReader only calls WriteHeader
-	// when its writer is non-nil, so the 413-on-overflow path is skipped. The
-	// handler responds with its own 400 invalid_body on a too-large body.
-	r.Body = http.MaxBytesReader(nil, r.Body, 1<<16) // 64 KB
-	dec := json.NewDecoder(r.Body)
+	body, err := io.ReadAll(io.LimitReader(r.Body, maxBodyBytes+1))
+	if err != nil {
+		return fmt.Errorf("read request body: %w", err)
+	}
+	if len(body) > maxBodyBytes {
+		return errors.New("request body too large")
+	}
+	dec := json.NewDecoder(bytes.NewReader(body))
 	if err := dec.Decode(v); err != nil {
 		var syntaxErr *json.SyntaxError
 		if errors.As(err, &syntaxErr) {
@@ -279,8 +297,8 @@ func (h *Handler) RequestOTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	expiresAt := time.Now().Add(h.otpService.Expiry())
-	if err := h.store.SaveOTP(ctx, user.ID, hash, expiresAt); err != nil {
+	expiresAt := time.Now().Add(h.otpService.Expiry)
+	if err := h.store.SaveOTP(ctx, user.ID, hash, expiresAt, h.otpService.MaxAttempts); err != nil {
 		h.logger.Error("failed to save OTP", "error", err)
 		writeAccepted(w)
 		return
@@ -490,7 +508,7 @@ func (h *Handler) RefreshToken(w http.ResponseWriter, r *http.Request) {
 
 	// Enforce the refresh TTL against created_at: an expired family is
 	// rejected (lock-not-wipe — the client keeps local files and re-auths).
-	if time.Since(storedToken.CreatedAt) > h.tokenService.RefreshTokenTTL() {
+	if time.Since(storedToken.CreatedAt) > h.tokenService.RefreshTokenTTL {
 		h.logger.Warn("refresh token expired", "userID", storedToken.UserID,
 			"deviceID", storedToken.DeviceID, "createdAt", storedToken.CreatedAt)
 		writeError(w, http.StatusUnauthorized, "refresh_expired", "Refresh token has expired. Please sign in again.", nil)

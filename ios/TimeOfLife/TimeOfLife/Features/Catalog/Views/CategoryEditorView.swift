@@ -97,25 +97,18 @@ struct CategoryEditorView: View {
             .toolbar {
                 // Calendar grammar (Log Time parity): X dismisses, checkmark
                 // saves. The checkmark mirrors the old Save bar's gate.
-                ToolbarItem(placement: .cancellationAction) {
-                    Button {
-                        dismiss()
-                    } label: {
-                        Image(systemName: "xmark")
-                    }
-                    .disabled(vm.isLoading)
-                    .accessibilityLabel(L10n.categoryEditorDismissLabel.text)
-                    .accessibilityIdentifier("CategoryEditorCancelButton")
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button {
-                        vm.save()
-                    } label: {
-                        Image(systemName: "checkmark")
-                    }
-                    .disabled(!vm.canSave)
-                    .accessibilityLabel(L10n.categoryEditorConfirmSaveLabel.text)
-                    .accessibilityIdentifier("CategoryEditorSaveButton")
+                EditorToolbar(
+                    showsDismiss: true,
+                    dismissAccessibilityLabel: L10n.categoryEditorDismissLabel.text,
+                    dismissAccessibilityId: "CategoryEditorCancelButton",
+                    isDismissDisabled: vm.isLoading,
+                    onDismiss: dismiss(),
+                    showsConfirm: true,
+                    confirmAccessibilityLabel: L10n.categoryEditorConfirmSaveLabel.text,
+                    confirmAccessibilityId: "CategoryEditorSaveButton",
+                    isConfirmDisabled: !vm.canSave
+                ) {
+                    vm.save()
                 }
             }
             // Scroll-away dismisses the keyboard (native interactive behavior).
@@ -128,8 +121,7 @@ struct CategoryEditorView: View {
             // mid-animation, and the keyboard-driven auto-scroll computes
             // against moving layout, landing the field partly out of
             // viewport. Cancelled automatically on dismiss.
-            try? await Task.sleep(nanoseconds: Self.focusDelayNanoseconds)
-            guard !Task.isCancelled else { return }
+            guard await FocusDelay.settle() else { return }
             isNameFocused = true
         }
         .alert(
@@ -154,24 +146,15 @@ struct CategoryEditorView: View {
 
     // MARK: - Delete
 
-    /// Sheet-presentation settle before autofocus (see `.task` above).
-    private static let focusDelayNanoseconds: UInt64 = 400_000_000
-
     /// Bottom-of-page destructive Delete (edit mode only). Mirrors the entry
     /// form's delete section.
     private var deleteSection: some View {
-        Button(role: .destructive) {
+        DestructiveBottomButton(
+            title: L10n.categoryEditorDelete.text,
+            accessibilityId: "CategoryEditorDeleteButton"
+        ) {
             isShowingDeleteConfirm = true
-        } label: {
-            Text(L10n.categoryEditorDelete.text)
-                .font(.headline)
-                .foregroundStyle(Theme.danger)
-                .frame(maxWidth: .infinity, minHeight: Theme.minTapArea)
-                .contentShape(Rectangle())
         }
-        .background(Theme.backgroundSecondary)
-        .clipShape(RoundedRectangle(cornerRadius: Theme.cornerRadius))
-        .accessibilityIdentifier("CategoryEditorDeleteButton")
     }
 
     /// Deletes the category into the durable undo buffer; notifies the
@@ -213,7 +196,7 @@ struct CategoryEditorView: View {
     CategoryEditorView(
         store: container.localStore,
         category: TimeOfLife.Category(
-            id: "preview", name: "Спорт", icon: "figure.run",
+            id: "preview", name: L10n.categorySeedSport.text, icon: "figure.run",
             createdAt: Date(), updatedAt: Date()
         ),
         onSaved: { _ in },

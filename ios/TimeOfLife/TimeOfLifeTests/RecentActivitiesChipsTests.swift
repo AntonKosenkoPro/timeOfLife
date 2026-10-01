@@ -5,8 +5,8 @@ import Foundation
 @Suite("RecentActivitiesChips.recents")
 struct RecentActivitiesChipsTests {
 
-    private func recent(_ id: String) -> TrackViewModel.RecentEntry {
-        TrackViewModel.RecentEntry(text: id, categoryIDs: [], firstCategoryID: nil)
+    private func recent(_ id: String) -> ExactName {
+        ExactName(text: id, categoryIDs: [], firstCategoryID: nil)
     }
 
     @Test("caps at six recents, preserving the input order")

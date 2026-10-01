@@ -63,7 +63,9 @@ info:
     trimmed, case-sensitive identity — `Gym` ≠ `GYM`), their ordered category
     tags, and their notes; there is no activities resource and history never
     mutates retroactively. Recents are computed client-side from the synced
-    entries — there is no suggestions endpoint.
+    entries for offline use; the relay additionally mirrors the same query at
+    `GET /api/v1/entries/recents` (newest entry per exact text, default cap 6)
+    so a fresh device can render Recents before its first full entry pull.
 
   version: "2.0.0"
   contact:
@@ -481,7 +483,11 @@ paths:
     get:
       operationId: listCategories
       summary: List categories
-      description: Returns the authenticated user's categories, ordered by name.
+      description: |
+        Returns the authenticated user's categories, ordered by name.
+        This is a full pull: the handler ignores `modified_since` (delta pulls
+        are entries-only). Adding `modified_since` support here is a backend
+        follow-up, not part of this contract.
       tags:
         - Categories
       security:
@@ -754,6 +760,48 @@ paths:
         "500":
           $ref: "#/components/responses/InternalError"
 
+  /api/v1/entries/recents:
+    get:
+      operationId: listRecents
+      summary: List recent entry texts
+      description: |
+        Returns up to `limit` entries (default 6, max 20) — the newest entry
+        per exact `activity_text` (`GROUP BY activity_text`, newest
+        `started_at` wins per group, `id DESC` tiebreak), newest-first. Each
+        item is a full entry with its own ordered category tags, so a fresh
+        device can render Recents (exact text + first-position category icon)
+        before its first full entry pull. Identity is byte-exact trimmed text,
+        case-sensitive (`Gym` ≠ `GYM`).
+      tags:
+        - Entries
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 20
+            default: 6
+          description: Max exact-text groups to return.
+      responses:
+        "200":
+          description: The recents entries, newest group first.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Entry"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
   /api/v1/entries/{id}:
     get:
       operationId: getEntry
@@ -830,7 +878,9 @@ paths:
     delete:
       operationId: deleteEntry
       summary: Delete an entry
-      description: Hard-deletes a single entry (F10 "delete only the current entry"). The 30 s undo window is client-side.
+      description: |
+        Hard-deletes a single entry (F10 "delete only the current entry"). Undo is client-side:
+        the deletion sits in the durable undo buffer, restorable until the app restarts (no wall-clock window).
       tags:
         - Entries
       security:
@@ -1394,7 +1444,7 @@ components:
           items:
             type: string
             format: uuid
-          description: Replace-all ordered tag set (unknown/non-owned/malformed ids pruned on merge).
+          description: Replace-all ordered tag set (unknown/non-owned ids pruned, remainder kept).
         started_at:
           type: string
           format: date-time
