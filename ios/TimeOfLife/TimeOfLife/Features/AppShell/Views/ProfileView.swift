@@ -25,6 +25,10 @@ struct ProfileView: View {
     /// flow stays signed in for a retry instead of logging out and
     /// reporting success.
     @State private var eraseErrorMessage: String?
+    /// Last successful-sync date (fix-sync-status-row): feeds the age
+    /// subtitle under "Syncing…" so the status row keeps its two-line height
+    /// across states instead of jumping. Nil before the first sync.
+    @State private var lastIdleDate: Date?
 
     private static let logger = Logger(subsystem: "com.antonkosenko.timeoflifeapp", category: "profile")
 
@@ -76,17 +80,6 @@ struct ProfileView: View {
     private var accountSection: some View {
         Section(L10n.profileAccount.text) {
             syncStatusRow
-            Button {
-                Task { await sync.syncNow(userID: sessionUserID) }
-            } label: {
-                ListRow(title: L10n.profileSyncNow.text, icon: "arrow.triangle.2.circlepath")
-            }
-            .disabled(sync.status == .syncing)
-            // `.disabled` alone does not restyle a custom label — without
-            // this the button looks tappable while syncing (WelcomeView
-            // precedent for the 0.6 value).
-            .opacity(sync.status == .syncing ? 0.6 : 1)
-            .accessibilityIdentifier("ProfileSyncNowButton")
             Button(role: .destructive) {
                 Task { await container.authService.logout() }
             } label: {
@@ -98,32 +91,88 @@ struct ProfileView: View {
             }
             .accessibilityIdentifier(Self.signOutAccessibilityId)
         }
-    }
-
-    @ViewBuilder private var syncStatusRow: some View {
-        switch sync.status {
-        case .inactive:
-            EmptyView()
-        case .syncing:
-            ListRow(title: L10n.profileSyncing.text, icon: "arrow.triangle.2.circlepath")
-        case let .idle(date):
-            ListRow(
-                title: String(format: L10n.profileLastSynced.text, Self.relativeTime(date)),
-                icon: "checkmark.icloud"
-            )
-        case let .error(message):
-            ListRow(
-                title: L10n.profileSyncError.text,
-                icon: "exclamationmark.icloud",
-                subtitle: message.isEmpty ? nil : message
-            )
+        // Remember the last idle date so the syncing/error branches can keep
+        // the row's two-line height with real content (no layout jump).
+        .onChange(of: sync.status, initial: true) { _, status in
+            if case let .idle(date) = status {
+                lastIdleDate = date
+            }
         }
     }
 
-    private static func relativeTime(_ date: Date) -> String {
-        let formatter = RelativeDateTimeFormatter()
-        formatter.unitsStyle = .short
-        return formatter.localizedString(for: date, relativeTo: Date())
+    // Single TimelineView above the switch (fix-sync-status-row): the row must
+    // keep one stable view structure across idle/syncing/error — swapping view
+    // types or adding/removing the trailing button re-lays-out the section
+    // and the screen jumps on every tap of Sync now.
+    @ViewBuilder private var syncStatusRow: some View {
+        TimelineView(.periodic(from: Date(), by: 60)) { context in
+            switch sync.status {
+            case .inactive:
+                EmptyView()
+            case .syncing:
+                ListRow(
+                    title: L10n.profileSyncing.text,
+                    icon: "arrow.triangle.2.circlepath",
+                    subtitle: rememberedAgeSubtitle(now: context.date)
+                ) {
+                    syncButton(disabled: true)
+                }
+            case let .idle(date):
+                ListRow(
+                    title: L10n.profileSyncedSuccessfully.text,
+                    icon: "checkmark.icloud",
+                    subtitle: Self.ageSubtitle(since: date, now: context.date)
+                ) {
+                    syncButton(disabled: false)
+                }
+            case let .error(message):
+                ListRow(
+                    title: L10n.profileSyncError.text,
+                    icon: "exclamationmark.icloud",
+                    subtitle: message.isEmpty ? rememberedAgeSubtitle(now: context.date) : message
+                ) {
+                    syncButton(disabled: false)
+                }
+            }
+        }
+    }
+
+    /// Trailing sync action on the status row (fix-sync-status-row): same
+    /// call and automation id as the retired separate row. Present (disabled)
+    /// while syncing so the row structure never changes between states.
+    /// VoiceOver label reuses `profile.syncNow` — no new strings.
+    private func syncButton(disabled: Bool) -> some View {
+        Button {
+            Task { await sync.syncNow(userID: sessionUserID) }
+        } label: {
+            Image(systemName: "arrow.triangle.2.circlepath")
+                .font(.body)
+                .foregroundStyle(Theme.accentPrimary)
+                .frame(minWidth: Theme.minTapArea, minHeight: Theme.minTapArea)
+                .accessibilityHidden(true)
+        }
+        .buttonStyle(.plain)
+        .disabled(disabled)
+        // `.disabled` alone does not restyle a custom label — without this
+        // the button looks tappable while syncing (WelcomeView precedent).
+        .opacity(disabled ? 0.6 : 1)
+        .accessibilityIdentifier("ProfileSyncNowButton")
+        .accessibilityLabel(L10n.profileSyncNow.text)
+    }
+
+    /// Age subtitle from a known date ("1 minute ago", "Меньше минуты назад").
+    private static func ageSubtitle(since date: Date, now: Date) -> String {
+        SyncRelativeTime.subtitle(
+            since: date,
+            now: now,
+            ago: L10n.profileLastSyncedAgo.text,
+            justNow: L10n.profileLastSyncedJustNow.text
+        )
+    }
+
+    /// Age of the last successful sync, if any (nil before the first sync).
+    private func rememberedAgeSubtitle(now: Date) -> String? {
+        lastIdleDate.map { Self.ageSubtitle(since: $0, now: now) }
     }
 
     // MARK: - On This Device
