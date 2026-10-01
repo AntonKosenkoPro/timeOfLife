@@ -196,7 +196,7 @@ Every sync cycle SHALL be bound to the account it serves: the sync client SHALL 
 - **THEN** the in-flight cycle aborts without draining further rows or applying further pulled records to the swapped-out account's file
 
 ### Requirement: Relay wire-format date decoding
-The client SHALL decode every relay timestamp as RFC 3339 (`format: date-time`) through dedicated wire shapes, never through the local models' timestamp decoding. Categories and entries use wire decoding like activities do. A decoding failure SHALL surface as a normal cycle error, never a stuck "Syncing…".
+The client SHALL decode every relay timestamp as RFC 3339 (`format: date-time`) through dedicated wire shapes, never through the local models' timestamp decoding. Categories and entries each have their own wire decoding for `created_at`/`updated_at`. A decoding failure SHALL surface as a normal cycle error, never a stuck "Syncing…".
 
 #### Scenario: Non-empty pull decodes
 - **WHEN** the relay returns categories or entries with RFC 3339 timestamps (with or without fractional seconds)

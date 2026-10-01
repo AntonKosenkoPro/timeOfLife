@@ -30,7 +30,7 @@ The system SHALL provide an iOS 18+ `ControlWidget` (a toggle Control) that the 
 - **WHEN** an account file is dormant and a different account's file is active, and the Control renders or is tapped
 - **THEN** the Control reads and writes only the active account's file and never surfaces data from the dormant account's file
 ### Requirement: No authentication required
-The Control's App Intent SHALL use `IntentAuthenticationPolicy.alwaysAllowed`, so the intent executes when the device is locked without prompting for Face ID, Touch ID, or passcode. The intent SHALL perform no account authentication of its own: device unlock is the authorization for operating on the active account's file.
+The Control's App Intent SHALL use `IntentAuthenticationPolicy.alwaysAllowed`, so the intent executes when the device is locked without prompting for Face ID, Touch ID, or passcode. The intent SHALL perform no account authentication of its own: device unlock is the authorization for operating on the active account's file. The intent operates only when an account file is active (the device has been unlocked at least once since boot and a signed-in account is bound); with no active account file the intent SHALL fail gracefully without prompting, writing nothing.
 
 #### Scenario: Tapped while device is locked
 - **WHEN** the device is locked (but has been unlocked at least once since boot) and the user taps the Control
@@ -39,6 +39,10 @@ The Control's App Intent SHALL use `IntentAuthenticationPolicy.alwaysAllowed`, s
 #### Scenario: No auth prompt for account state
 - **WHEN** the user taps the Control regardless of the signed-in account's identity
 - **THEN** the intent never prompts for, verifies, or refreshes the user's account session; it acts only on whichever account file is active
+
+#### Scenario: No active account file fails gracefully
+- **WHEN** the user taps the Control with no active account file (signed out / never unlocked since boot)
+- **THEN** the intent performs no write, shows no auth prompt, and returns the existing graceful-failure result
 
 ### Requirement: Graceful failure when database inaccessible
 When the active account's file in the shared container is inaccessible — because the device was just rebooted and has never been unlocked since boot (`.completeUntilFirstUserAuthentication` keys evicted), or no active account file exists — the intent SHALL catch the error or absence and return a "please unlock" or locked state to the Control, rather than crashing, creating a new anonymous file, or leaving data inconsistent.
