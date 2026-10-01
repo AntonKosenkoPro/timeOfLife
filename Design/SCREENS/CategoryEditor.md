@@ -1,6 +1,6 @@
 # Category Editor Screen
 
-Implements F2/U1/U2 of `Requirements/FURPS/Activity_Catalog_and_Categories.md`. Shared sheet for creating and editing a category; reached from Manage Categories and the Activity Editor's add-category link. Per decision D21.
+Implements F2/U1/U2 of `Requirements/FURPS/Activity_Catalog_and_Categories.md`. Shared sheet for creating and editing a category; reached from Manage Categories. Per decision D21.
 
 ---
 
@@ -42,7 +42,7 @@ Follows `Design/INTERACTIONS.md` → **Editor sheets and keyboard placement** (D
 - Edit mode pre-fills `vm.name` and `vm.icon` from the passed-in `Category`.
 - On 422 show field errors beneath the name field.
 - On a normalized duplicate, keep the editor open with the draft intact, show `L10n.errorCategoryExists`, and allow correction. Relay collision recovery remaps local references to the surviving id in `SyncController`.
-- Save success: dismiss the sheet. If opened from the Activity Editor's add-category link, the new category appears pre-selected in the `TagSelector`.
+- Save success: dismiss the sheet. The new category is available in the `TagSelector` options immediately.
 - Clear field error when `vm.name` changes.
 - Disable Save while `vm.isLoading` or name is empty/whitespace-only.
 
@@ -53,7 +53,7 @@ Categories list offers no delete affordance): a bottom destructive Delete
 button (`CategoryEditorDeleteButton`, `Theme.danger`, entry-form grammar)
 opens the tag-only destructive confirmation alert (`L10n.deleteCategoryTitle`
 / message naming the category, entries kept, until-restart shake hint). Confirming
-enters the durable undo buffer (category + ordered activity assignments, no
+enters the durable undo buffer (category + ordered entry assignments, no
 outbox row), notifies the presenter via `onDeleted`, and dismisses; the list
 reloads. Until the app restarts, the system Undo confirmation on Manage Categories
 restores identity + assignments; a restart commits the hard delete on
@@ -96,7 +96,7 @@ struct Category: Identifiable, Codable, Sendable {
 - [x] Validation uses unified category-name messages (U2).
 - [x] Duplicate names preserve the draft and keep the editor open.
 - [x] Edit mode pre-fills name + icon from the passed-in `Category`.
-- [x] iOS 16+ medium/large detents are availability guarded.
+- [x] iOS 18 floor — no availability guards (plain `.sheet`, no detents).
 - [ ] Screen previews exist for light/dark and EN/RU.
 - [x] SwiftLint passes with zero findings.
 

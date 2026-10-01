@@ -11,19 +11,20 @@ import (
 	"github.com/antonkosenko/time-of-life/backend/internal/db"
 )
 
-// writeCatalogStoreErr maps a db store error (returned alongside its record)
-// to the catalog error contract. record carries the server's current version
-// (for conflict) or the winning record (for *_exists), used to populate details.
-func (h *Handler) writeCatalogStoreErr(w http.ResponseWriter, record any, err error, action string) {
+// writeCatalogStoreErr maps a db store error to the catalog error contract.
+// conflictDetails carries the server's current version (for a 409 conflict)
+// and existsDetails the winning record (for a *_exists 409); both are
+// computed by the caller with versionDetails/identityDetails below.
+func (h *Handler) writeCatalogStoreErr(w http.ResponseWriter, err error, action string, conflictDetails, existsDetails any) {
 	switch {
 	case errors.Is(err, db.ErrNotFound):
 		writeError(w, http.StatusNotFound, codeNotFound, "Not found", nil)
 	case errors.Is(err, db.ErrConflict):
 		writeError(w, http.StatusConflict, codeConflict,
-			"Outdated version; a newer record exists on the server.", versionDetails(record))
+			"Outdated version; a newer record exists on the server.", conflictDetails)
 	case errors.Is(err, db.ErrCategoryExists):
 		writeError(w, http.StatusConflict, codeCategoryExists,
-			"A category with this name already exists.", idNameDetails(record))
+			"A category with this name already exists.", existsDetails)
 	case errors.Is(err, db.ErrDuplicateImport):
 		writeError(w, http.StatusConflict, codeDuplicateImport,
 			"An entry with this source and source_ref already exists.", nil)
@@ -38,25 +39,13 @@ func (h *Handler) writeCatalogStoreErr(w http.ResponseWriter, record any, err er
 }
 
 // versionDetails returns {updated_at: <server's current version>} for a 409 conflict.
-func versionDetails(record any) any {
-	var t time.Time
-	switch v := record.(type) {
-	case db.Category:
-		t = v.UpdatedAt
-	case db.Entry:
-		t = v.UpdatedAt
-	default:
-		return nil
-	}
-	return map[string]string{"updated_at": t.UTC().Format(time.RFC3339Nano)}
+func versionDetails(updatedAt time.Time) map[string]string {
+	return map[string]string{"updated_at": updatedAt.UTC().Format(time.RFC3339Nano)}
 }
 
-// idNameDetails returns {id, name} of the winning record for a *_exists 409.
-func idNameDetails(record any) any {
-	if v, ok := record.(db.Category); ok {
-		return map[string]string{"id": v.ID, "name": v.Name}
-	}
-	return nil
+// identityDetails returns {id, name} of the winning record for a *_exists 409.
+func identityDetails(id, name string) map[string]string {
+	return map[string]string{"id": id, "name": name}
 }
 
 // ---------- Categories ----------
@@ -105,7 +94,7 @@ func (h *Handler) CreateCategory(w http.ResponseWriter, r *http.Request) {
 	c := db.Category{ID: req.ID, UserID: userID, Name: name, Icon: icon}
 	created, isNew, err := h.store.CreateCategory(r.Context(), c)
 	if err != nil {
-		h.writeCatalogStoreErr(w, created, err, "create category")
+		h.writeCatalogStoreErr(w, err, "create category", versionDetails(created.UpdatedAt), identityDetails(created.ID, created.Name))
 		return
 	}
 	status := http.StatusCreated
@@ -124,7 +113,7 @@ func (h *Handler) GetCategory(w http.ResponseWriter, r *http.Request) {
 	}
 	c, err := h.store.GetCategory(r.Context(), userID, chi.URLParam(r, "id"))
 	if err != nil {
-		h.writeCatalogStoreErr(w, c, err, "get category")
+		h.writeCatalogStoreErr(w, err, "get category", versionDetails(c.UpdatedAt), nil)
 		return
 	}
 	writeJSON(w, http.StatusOK, c)
@@ -163,7 +152,7 @@ func (h *Handler) UpdateCategory(w http.ResponseWriter, r *http.Request) {
 	patch := db.CategoryPatch{Name: req.Name, Icon: req.Icon, UpdatedAt: updatedAt}
 	updated, err := h.store.UpdateCategory(r.Context(), userID, chi.URLParam(r, "id"), patch)
 	if err != nil {
-		h.writeCatalogStoreErr(w, updated, err, "update category")
+		h.writeCatalogStoreErr(w, err, "update category", versionDetails(updated.UpdatedAt), identityDetails(updated.ID, updated.Name))
 		return
 	}
 	writeJSON(w, http.StatusOK, updated)
@@ -176,7 +165,7 @@ func (h *Handler) DeleteCategory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.store.DeleteCategory(r.Context(), userID, chi.URLParam(r, "id")); err != nil {
-		h.writeCatalogStoreErr(w, nil, err, "delete category")
+		h.writeCatalogStoreErr(w, err, "delete category", nil, nil)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

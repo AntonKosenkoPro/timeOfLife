@@ -118,7 +118,7 @@ struct OtpEntryView: View {
     private var resendColor: Color {
         let disabled = vm.isLoading || vm.resendCountdown > 0 || !container.connectivity.isConnected
         return disabled
-            ? Theme.accentPrimary.opacity(0.5)
+            ? Theme.accentPrimary.opacity(Theme.opacityDisabledFill)
             : Theme.accentPrimary
     }
 }

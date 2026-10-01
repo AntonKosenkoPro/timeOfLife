@@ -16,23 +16,84 @@ import (
 //go:embed *.sql
 var migrationFiles embed.FS
 
-// RunPostgres applies all embedded SQL migrations against a Postgres pool.
-func RunPostgres(ctx context.Context, pool *pgxpool.Pool) error {
+// listMigrationFiles returns the embedded *.sql file names in apply order.
+// File names are zero-padded sequence numbers (001_..., 002_...), so lexical
+// order is apply order.
+func listMigrationFiles() ([]string, error) {
 	files, err := fs.Glob(migrationFiles, "*.sql")
 	if err != nil {
-		return fmt.Errorf("list migration files: %w", err)
+		return nil, fmt.Errorf("list migration files: %w", err)
 	}
 	sort.Strings(files)
+	return files, nil
+}
+
+// migrationAdvisoryLockKey serializes migration application across
+// concurrently booting replicas: rolling deploys call RunPostgres on every
+// boot, and concurrent CREATE TABLE IF NOT EXISTS fails with catalog
+// unique-violation errors. Single-instance deploys never contend.
+const migrationAdvisoryLockKey = 7481021
+
+// RunPostgres applies all embedded SQL migrations against a Postgres pool.
+// Applied files are recorded in the schema_migrations table and skipped on
+// later boots, so each file runs exactly once.
+func RunPostgres(ctx context.Context, pool *pgxpool.Pool) error {
+	if _, err := pool.Exec(ctx, `CREATE TABLE IF NOT EXISTS schema_migrations (
+		filename TEXT PRIMARY KEY,
+		applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+	)`); err != nil {
+		return fmt.Errorf("ensure schema_migrations: %w", err)
+	}
+
+	files, err := listMigrationFiles()
+	if err != nil {
+		return err
+	}
+
+	// Hold one connection for the whole run: the advisory lock below is
+	// session-scoped, so lock and work must share it.
+	conn, err := pool.Acquire(ctx)
+	if err != nil {
+		return fmt.Errorf("acquire migration connection: %w", err)
+	}
+	defer conn.Release()
+
+	if _, err := conn.Exec(ctx, `SELECT pg_advisory_lock($1)`, migrationAdvisoryLockKey); err != nil {
+		return fmt.Errorf("acquire migration lock: %w", err)
+	}
+	defer func() {
+		_, _ = conn.Exec(context.Background(), `SELECT pg_advisory_unlock($1)`, migrationAdvisoryLockKey)
+	}()
 
 	for _, file := range files {
+		var applied bool
+		if err := conn.QueryRow(ctx, `SELECT true FROM schema_migrations WHERE filename = $1`, file).Scan(&applied); err == nil && applied {
+			continue
+		}
+
 		content, err := migrationFiles.ReadFile(file)
 		if err != nil {
 			return fmt.Errorf("read migration %s: %w", file, err)
 		}
 
-		_, err = pool.Exec(ctx, string(content))
+		// Apply the file and its tracking row atomically: Postgres DDL is
+		// transactional, so a mid-file failure rolls back instead of leaving
+		// partial schema with no tracking row (which the next boot would
+		// silently re-run in full).
+		tx, err := conn.Begin(ctx)
 		if err != nil {
+			return fmt.Errorf("begin migration %s: %w", file, err)
+		}
+		if _, err := tx.Exec(ctx, string(content)); err != nil {
+			_ = tx.Rollback(ctx)
 			return fmt.Errorf("apply migration %s: %w", file, err)
+		}
+		if _, err := tx.Exec(ctx, `INSERT INTO schema_migrations (filename) VALUES ($1) ON CONFLICT DO NOTHING`, file); err != nil {
+			_ = tx.Rollback(ctx)
+			return fmt.Errorf("record migration %s: %w", file, err)
+		}
+		if err := tx.Commit(ctx); err != nil {
+			return fmt.Errorf("commit migration %s: %w", file, err)
 		}
 	}
 
@@ -40,67 +101,102 @@ func RunPostgres(ctx context.Context, pool *pgxpool.Pool) error {
 }
 
 // RunSQLite applies all embedded SQL migrations against a SQLite database.
+// Applied files are recorded in the schema_migrations table and skipped on
+// later calls, so each file runs exactly once.
 func RunSQLite(ctx context.Context, db *sql.DB) error {
-	files, err := fs.Glob(migrationFiles, "*.sql")
-	if err != nil {
-		return fmt.Errorf("list migration files: %w", err)
+	if _, err := db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS schema_migrations (
+		filename TEXT PRIMARY KEY,
+		applied_at TEXT NOT NULL DEFAULT (datetime('now'))
+	)`); err != nil {
+		return fmt.Errorf("ensure schema_migrations: %w", err)
 	}
-	sort.Strings(files)
+
+	files, err := listMigrationFiles()
+	if err != nil {
+		return err
+	}
 
 	for _, file := range files {
+		var applied bool
+		if err := db.QueryRowContext(ctx, `SELECT true FROM schema_migrations WHERE filename = ?`, file).Scan(&applied); err == nil && applied {
+			continue
+		}
+
 		content, err := migrationFiles.ReadFile(file)
 		if err != nil {
 			return fmt.Errorf("read migration %s: %w", file, err)
 		}
 
 		// Adapt Postgres SQL to SQLite
-		sql := adaptToSQLite(string(content))
+		adapted := adaptToSQLite(string(content))
 
-		_, err = db.ExecContext(ctx, sql)
-		if err != nil {
+		if _, err := db.ExecContext(ctx, adapted); err != nil {
 			return fmt.Errorf("apply migration %s: %w", file, err)
+		}
+		if _, err := db.ExecContext(ctx, `INSERT OR IGNORE INTO schema_migrations (filename) VALUES (?)`, file); err != nil {
+			return fmt.Errorf("record migration %s: %w", file, err)
 		}
 	}
 
 	return nil
 }
 
-// adaptToSQLite converts Postgres-specific SQL syntax to SQLite-compatible syntax.
+// sqliteReplacements maps Postgres dialect fragments to their SQLite
+// equivalents. Each entry is applied in order with strings.ReplaceAll.
+var sqliteReplacements = [][2]string{
+	{"TIMESTAMPTZ", "TEXT"},
+	{"UUID", "TEXT"},
+	{"NOW()", "(datetime('now'))"},
+	{"DEFAULT false", "DEFAULT 0"},
+	{"DEFAULT true", "DEFAULT 1"},
+	{"CONCURRENTLY", ""},
+}
+
+// dropIndexExistsGuard is the DROP INDEX guard SQLite supports and the
+// blanket IF EXISTS strip below must not eat.
+const dropIndexExistsGuard = "DROP INDEX IF EXISTS"
+
+// stripDOBlocks removes Postgres DO $$ ... END $$; blocks. The legacy
+// upgrade migration guards pre-squash-only statements in DO blocks probing
+// information_schema; test databases are always fresh, so the upgrade path
+// is dead code there and PL/pgSQL would not parse. Must run before the
+// blanket guard strips below, which would corrupt the block contents.
+func stripDOBlocks(sql string) string {
+	var b strings.Builder
+	rest := sql
+	for {
+		start := strings.Index(rest, "DO $$")
+		if start < 0 {
+			b.WriteString(rest)
+			break
+		}
+		b.WriteString(rest[:start])
+		end := strings.Index(rest[start:], "END $$;")
+		if end < 0 {
+			break // unterminated — drop the remainder, never emit PL/pgSQL
+		}
+		rest = rest[start+end+len("END $$;"):]
+	}
+	return b.String()
+}
+
+// adaptToSQLite converts Postgres-specific SQL syntax to SQLite-compatible
+// syntax. SQLite supports IF NOT EXISTS on CREATE but not on ADD COLUMN or
+// CREATE INDEX, and it supports neither IF EXISTS on DROP COLUMN; the fresh
+// in-memory test DB applies each file once, so the guards are stripped.
+// DROP INDEX keeps its guard (an index may legitimately be absent there).
 func adaptToSQLite(sql string) string {
-	// 007 re-adds entries.activity_id so its backfill stays a no-op when
-	// Postgres migrations re-apply on every server start (the column was
-	// dropped in a previous pass). The fresh in-memory SQLite test DB created
-	// by 003 already has the column — NOT NULL — so re-adding it would fail;
-	// SQLite stores are never re-migrated, so strip the re-add entirely.
-	// Must run BEFORE the UUID→TEXT replacement, which would rewrite the
-	// statement past recognition.
-	sql = strings.ReplaceAll(sql,
-		"ALTER TABLE entries ADD COLUMN IF NOT EXISTS activity_id UUID;\n", "")
-	// Replace TIMESTAMPTZ with TEXT (SQLite has no native datetime type)
-	sql = strings.ReplaceAll(sql, "TIMESTAMPTZ", "TEXT")
-	// Replace UUID with TEXT
-	sql = strings.ReplaceAll(sql, "UUID", "TEXT")
-	// Replace NOW() with (datetime('now')) — parens required for SQLite DEFAULT
-	sql = strings.ReplaceAll(sql, "NOW()", "(datetime('now'))")
-	// Replace DEFAULT false with DEFAULT 0
-	sql = strings.ReplaceAll(sql, "DEFAULT false", "DEFAULT 0")
-	// Replace DEFAULT true with DEFAULT 1
-	sql = strings.ReplaceAll(sql, "DEFAULT true", "DEFAULT 1")
-	// Remove IF NOT EXISTS for indexes (SQLite doesn't support it), except on
-	// DROP statements, which must stay guarded (SQLite supports IF NOT
-	// EXISTS/IF EXISTS on DROP, and 007's DROP INDEX IF EXISTS runs against
-	// DBs where the index may not exist — 003 stopped creating it).
-	//
-	// Note the DROP guard must be restored BEFORE the blanket strips below
-	// would eat it: swap it out, strip, swap back.
-	sql = strings.ReplaceAll(sql, "DROP INDEX IF EXISTS", "DROP INDEX %%KEEP_EXISTS%%")
-	// Remove IF NOT EXISTS for indexes (SQLite doesn't support it)
+	sql = stripDOBlocks(sql)
+	const guardPlaceholder = "DROP INDEX %%KEEP_EXISTS%%"
+	sql = strings.ReplaceAll(sql, dropIndexExistsGuard, guardPlaceholder)
+	for _, r := range sqliteReplacements {
+		sql = strings.ReplaceAll(sql, r[0], r[1])
+	}
+	// Remove IF NOT EXISTS for ADD COLUMN / CREATE INDEX (SQLite doesn't
+	// support it there; each file applies once).
 	sql = strings.ReplaceAll(sql, "IF NOT EXISTS", "")
-	// Remove IF EXISTS for DROP COLUMN (SQLite doesn't support it; the column
-	// always exists on the fresh in-memory DB used by tests)
+	// Remove IF EXISTS for DROP COLUMN (SQLite doesn't support it).
 	sql = strings.ReplaceAll(sql, "IF EXISTS", "")
-	sql = strings.ReplaceAll(sql, "%%KEEP_EXISTS%%", "IF EXISTS")
-	// Remove CONCURRENTLY if present
-	sql = strings.ReplaceAll(sql, "CONCURRENTLY", "")
+	sql = strings.ReplaceAll(sql, guardPlaceholder, dropIndexExistsGuard)
 	return sql
 }

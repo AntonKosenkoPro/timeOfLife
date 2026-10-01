@@ -21,6 +21,8 @@
 "otp.sentTo" = "Enter the 6-digit code sent to %@";
 "otp.resend" = "Resend code";
 "otp.resendCountdown" = "Resend code in %ds";
+"otp.codeLabel" = "One-time code, %d digits";
+"otp.codeHint" = "Double tap to edit";
 
 // Sign out confirmation
 "signOut.cancel" = "Cancel";

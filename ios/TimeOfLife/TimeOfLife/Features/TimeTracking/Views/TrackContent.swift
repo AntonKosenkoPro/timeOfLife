@@ -189,76 +189,53 @@ struct TrackContent: View {
         NavigationLink {
             NamePicker(
                 initialText: vm.nameDraft,
-                recents: vm.allNames.map {
-                    NamePickerSuggestion(
-                        text: $0.text,
-                        categoryIDs: $0.categoryIDs,
-                        firstCategoryID: $0.firstCategoryID
-                    )
-                },
+                recents: vm.allNames,
                 categories: vm.categories,
                 placeholder: L10n.timerNamePlaceholder.text,
                 emptyHint: L10n.timerRecentsEmptyHint.text,
-                onCompleteSuggestion: {
-                    vm.select(TrackViewModel.RecentEntry(
-                        text: $0.text,
-                        categoryIDs: $0.categoryIDs,
-                        firstCategoryID: $0.firstCategoryID
-                    ))
-                },
+                onCompleteSuggestion: { vm.select($0) },
                 onCompleteText: {
                     vm.nameDraft = $0
                     vm.syncReadyFromDraft()
                 }
             )
         } label: {
-            HStack(spacing: Theme.spacingSmall) {
-                Text(vm.nameDraft.isEmpty ? L10n.timerNamePlaceholder.text : vm.nameDraft)
-                    .font(.body)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                    .foregroundStyle(vm.nameDraft.isEmpty ? Theme.textSecondary : Theme.textPrimary)
-                Spacer()
-                Image(systemName: "chevron.right")
-                    .font(.footnote.weight(.semibold))
-                    .foregroundStyle(Theme.textSecondary)
-                    .accessibilityHidden(true)
+            FieldCard {
+                HStack(spacing: Theme.spacingSmall) {
+                    Text(vm.nameDraft.isEmpty ? L10n.timerNamePlaceholder.text : vm.nameDraft)
+                        .font(.body)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .foregroundStyle(vm.nameDraft.isEmpty ? Theme.textSecondary : Theme.textPrimary)
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(Theme.textSecondary)
+                        .accessibilityHidden(true)
+                }
+                .frame(maxWidth: .infinity, minHeight: Theme.minTapArea)
+                .contentShape(Rectangle())
             }
-            .frame(maxWidth: .infinity, minHeight: Theme.minTapArea)
-            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .padding(.horizontal, Theme.spacingMedium)
-        .frame(maxWidth: .infinity, minHeight: Theme.minTapArea)
-        .background(Theme.backgroundSecondary)
-        .clipShape(RoundedRectangle(cornerRadius: Theme.cornerRadius))
-        .overlay {
-            RoundedRectangle(cornerRadius: Theme.cornerRadius)
-                .stroke(Theme.hairline, lineWidth: 0.7)
-        }
         .accessibilityIdentifier("TimerNameRow")
         .accessibilityLabel(L10n.timerNamePlaceholder.text)
         .accessibilityValue(vm.nameDraft)
     }
 
     private var lockedNameLabel: some View {
-        HStack(spacing: Theme.spacingSmall) {
-            Image(systemName: "timer")
-                .foregroundStyle(Theme.textSecondary)
-                .accessibilityHidden(true)
-            Text(vm.state.draft?.text ?? "")
-                .lineLimit(1)
-                .foregroundStyle(Theme.textPrimary)
-            Spacer()
-        }
-        .font(.body)
-        .padding(.horizontal, Theme.spacingMedium)
-        .frame(maxWidth: .infinity, minHeight: Theme.minTapArea)
-        .background(Theme.backgroundSecondary)
-        .clipShape(RoundedRectangle(cornerRadius: Theme.cornerRadius))
-        .overlay {
-            RoundedRectangle(cornerRadius: Theme.cornerRadius)
-                .stroke(Theme.hairline, lineWidth: 0.7)
+        FieldCard {
+            HStack(spacing: Theme.spacingSmall) {
+                Image(systemName: "timer")
+                    .foregroundStyle(Theme.textSecondary)
+                    .accessibilityHidden(true)
+                Text(vm.state.draft?.text ?? "")
+                    .lineLimit(1)
+                    .foregroundStyle(Theme.textPrimary)
+                Spacer()
+            }
+            .font(.body)
+            .frame(maxWidth: .infinity, minHeight: Theme.minTapArea)
         }
         .accessibilityIdentifier("TimerNameLabel")
         .accessibilityLabel(vm.state.draft?.text ?? "")
@@ -317,8 +294,7 @@ struct TrackContent: View {
             case .idle, .ready, .saved:
                 // Naming happens on the picker page (its keyboard dismisses
                 // on pop), so Start never competes with a keyboard slide and
-                // fires directly. The VM's deferred-start path stays for
-                // focused callers covered by unit tests.
+                // fires directly.
                 vm.start()
             case .running, .saving:
                 Task { await vm.stop() }

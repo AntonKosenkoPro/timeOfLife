@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 )
@@ -15,18 +16,31 @@ type rowScanner interface {
 	Scan(dest ...any) error
 }
 
-// parseTime parses a SQLite TEXT timestamp into time.Time (zero on failure).
+// parseTime parses a SQLite TEXT timestamp into time.Time. Unparseable
+// input yields the zero time (the previous behavior, preserved for
+// backward-compatible reads); the failure is logged so corrupt rows
+// surface instead of silently becoming year-0001.
 func parseTime(s string) time.Time {
-	t, _ := time.Parse("2006-01-02 15:04:05", s)
+	t, err := time.Parse("2006-01-02 15:04:05", s)
+	if err != nil {
+		slog.Warn("unparseable sqlite timestamp, using zero time", "value", s)
+		return time.Time{}
+	}
 	return t
 }
 
 // nullTimePtr converts a nullable SQLite TEXT timestamp into a *time.Time.
+// Unparseable input yields a pointer to the zero time (the previous
+// behavior, preserved for backward-compatible reads); the failure is
+// logged so corrupt rows surface instead of passing silently.
 func nullTimePtr(ns sql.NullString) *time.Time {
 	if !ns.Valid || ns.String == "" {
 		return nil
 	}
-	t, _ := time.Parse("2006-01-02 15:04:05", ns.String)
+	t, err := time.Parse("2006-01-02 15:04:05", ns.String)
+	if err != nil {
+		slog.Warn("unparseable sqlite timestamp, using zero time", "value", ns.String)
+	}
 	return &t
 }
 

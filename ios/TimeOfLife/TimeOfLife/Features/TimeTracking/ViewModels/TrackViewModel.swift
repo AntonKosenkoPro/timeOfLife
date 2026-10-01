@@ -1,4 +1,3 @@
-// swiftlint:disable file_length
 import Combine
 import Foundation
 import SwiftUI
@@ -21,11 +20,11 @@ final class TrackViewModel: ObservableObject {
     @Published var nameDraft = ""
     /// The 6 exact-text recents (newest first, first-category icon data).
     /// Settable for the same test-seeding reason as `state`.
-    @Published var recents: [RecentEntry] = []
+    @Published var recents: [ExactName] = []
     /// Every committed exact-text name, newest first, uncapped — the source
     /// for the shared name picker (dedicated-name-picker). The chips stay
     /// capped at 6 (`recents`); the picker suggests everything ever used.
-    @Published var allNames: [RecentEntry] = []
+    @Published var allNames: [ExactName] = []
     /// The id→Category map used to resolve recents chip icons (design D5).
     @Published private(set) var categories: [String: Category] = [:]
 
@@ -34,13 +33,6 @@ final class TrackViewModel: ObservableObject {
     private let nowProvider: () -> Date
     private var ticker: AnyCancellable?
     private var savedResetTask: Task<Void, Never>?
-    /// Name-field focus from the view: a focused Start tap resigns first and
-    /// the swap waits out the keyboard slide, so Stop appears in place.
-    var nameFieldFocused = false
-    /// A Start deferred until the keyboard finishes dismissing (see above).
-    /// Cancelled by any draft change before it fires, so a stale draft can
-    /// never start.
-    private var pendingStart: Task<Void, Never>?
 
     init(
         service: TimerService,
@@ -54,19 +46,6 @@ final class TrackViewModel: ObservableObject {
 
     // MARK: - Recents model
 
-    /// One recents chip: the exact text, its newest entry's first-position
-    /// category (icon source), and the full ordered categories a tap
-    /// inherits (design D5).
-    struct RecentEntry: Identifiable, Equatable {
-        let text: String
-        let categoryIDs: [String]
-        /// The first-position category id, or nil when the newest entry has
-        /// no categories (the chip renders without an icon).
-        let firstCategoryID: String?
-
-        var id: String { text }
-    }
-
     // MARK: - Lifecycle
 
     /// Loads the recents and categories and restores a persisted running
@@ -77,12 +56,10 @@ final class TrackViewModel: ObservableObject {
     /// appear.
     func load() async {
         do {
-            // Seed first: on a fresh install the seeding task in RootView
-            // can still be in flight when this first load runs, which used
-            // to leave the running tag selector empty until the next tab
-            // switch. Seeding is idempotent (marker-guarded), so racing it
-            // here is safe.
-            _ = try? await service.store.seedStarterCategoriesIfNeeded(names: String.starterCategoryNames)
+            // Seeding lives behind the sign-in gate (`RootView`) only: this
+            // load races it on first appear, and seeding is idempotent, but
+            // the gate is the single owner — a second racing call site only
+            // doubles file traffic on every cold start.
             recents = try await storeRecents()
             allNames = try await storeAllNames()
             categories = Dictionary(uniqueKeysWithValues: try await service.store.categories().map { ($0.id, $0) })
@@ -103,24 +80,12 @@ final class TrackViewModel: ObservableObject {
         }
     }
 
-    private func storeRecents() async throws -> [RecentEntry] {
-        try await service.store.recents(limit: 6).map { recent in
-            RecentEntry(
-                text: recent.activityText,
-                categoryIDs: recent.categoryIDs,
-                firstCategoryID: recent.categoryIDs.first
-            )
-        }
+    private func storeRecents() async throws -> [ExactName] {
+        try await service.store.recents(limit: 6).map(ExactName.init(storeRecent:))
     }
 
-    private func storeAllNames() async throws -> [RecentEntry] {
-        try await service.store.allActivityNames().map { recent in
-            RecentEntry(
-                text: recent.activityText,
-                categoryIDs: recent.categoryIDs,
-                firstCategoryID: recent.categoryIDs.first
-            )
-        }
+    private func storeAllNames() async throws -> [ExactName] {
+        try await service.store.allActivityNames().map(ExactName.init(storeRecent:))
     }
 
     /// Leaves a `.running` state whose persisted draft is gone (stopped from
@@ -160,8 +125,6 @@ final class TrackViewModel: ObservableObject {
         guard !trimmed.isEmpty else {
             if state != .idle {
                 state = .idle
-                pendingStart?.cancel()
-                pendingStart = nil
             }
             elapsed = 0
             return
@@ -170,12 +133,6 @@ final class TrackViewModel: ObservableObject {
         let draft = TrackState.Draft(text: trimmed, categoryIDs: inherited)
         if state != .ready(draft) {
             state = .ready(draft)
-            // The draft changed under a deferred Start (e.g. the resign
-            // after a tap recomputed it): a changed draft cancels the
-            // pending start so a stale draft can never start. An unchanged
-            // recompute keeps a pending start valid.
-            pendingStart?.cancel()
-            pendingStart = nil
             elapsed = 0
         }
     }
@@ -183,10 +140,8 @@ final class TrackViewModel: ObservableObject {
     /// Selects a recents chip: fills the exact text plus that recent's full
     /// ordered categories without starting timing and without creating
     /// anything.
-    func select(_ recent: RecentEntry) {
+    func select(_ recent: ExactName) {
         guard !state.isRunning else { return }
-        pendingStart?.cancel()
-        pendingStart = nil
         nameDraft = recent.text
         state = .ready(TrackState.Draft(text: recent.text, categoryIDs: recent.categoryIDs))
         elapsed = 0
@@ -200,21 +155,15 @@ final class TrackViewModel: ObservableObject {
     /// match (or empty) in `syncReadyFromDraft`, and chip selection filled
     /// it in `select` — so Start never re-derives categories behind the
     /// user's back. Only from `.idle` (a Start tap that raced the field's
-    /// focus-resign) is the field synced first; an invalid `.ready` draft
+    /// commit) is the field synced first; an invalid `.ready` draft
     /// (empty text) is left untouched and Start does nothing.
     ///
-    /// When the field is focused, the tap also resigns it: the keyboard
-    /// slide and the running swap must not coincide, so the swap waits for
-    /// the keyboard to actually finish dismissing (see
-    /// `waitForKeyboardDismissal`) while the haptic fires immediately and
-    /// `startedAt` stays the tap time. When nothing is focused (chip flow),
-    /// Start is immediate.
+    /// Start is immediate: naming happens on the picker page (its keyboard
+    /// dismisses on pop), so Start never competes with a keyboard slide.
     func start() {
         // Tap-time sync (see `syncReadyFromDraft`): a carried-over `.ready`
         // (e.g. after a stop) may hold a stale draft for the field's current
-        // text. Syncing first means the deferred swap below captures the
-        // fresh draft, so the tap's own focus-resign finds nothing to cancel.
-        // Matching text needs no sync — this preserves programmatically
+        // text. Matching text needs no sync — this preserves programmatically
         // prepared categories and the empty-text state. `.saved` is excluded:
         // the disabled Start button is the only caller and cannot fire there.
         switch state {
@@ -226,52 +175,11 @@ final class TrackViewModel: ObservableObject {
             break
         }
         guard case let .ready(draft) = state, canStart else { return }
-        if nameFieldFocused {
-            nameFieldFocused = false
-            Haptics.selection()
-            let startedAt = Date()
-            pendingStart?.cancel()
-            pendingStart = Task { [weak self] in
-                await Self.waitForKeyboardDismissal()
-                guard !Task.isCancelled else { return }
-                guard let self, case .ready = self.state else { return }
-                self.beginRunning(draft: draft, startedAt: startedAt)
-            }
-        } else {
-            Haptics.selection()
-            beginRunning(draft: draft, startedAt: Date())
-        }
+        Haptics.selection()
+        beginRunning(draft: draft, startedAt: Date())
     }
 
-    /// Waits for the keyboard-dismissal slide to finish so the running swap
-    /// lands on a settled layout. Fires on the real `didHide` notification —
-    /// a fixed delay guesses wrong on devices whose slide outlasts it — with
-    /// a bounded fallback for hardware keyboards, where no dismissal fires.
-    private static func waitForKeyboardDismissal() async {
-        await withTaskGroup(of: String.self) { group in
-            group.addTask {
-                let dismissed = NotificationCenter.default.notifications(
-                    named: UIResponder.keyboardDidHideNotification
-                )
-                for await _ in dismissed.prefix(1) { break }
-                return "didHide"
-            }
-            group.addTask {
-                try? await Task.sleep(nanoseconds: Self.keyboardDismissFallback)
-                return "fallback"
-            }
-            _ = await group.next()
-            group.cancelAll()
-        }
-    }
-
-    /// Upper bound for the dismissal wait (hardware keyboards never notify).
-    private static let keyboardDismissFallback: UInt64 = 600_000_000
-
-    private func beginRunning(draft: TrackState.Draft, startedAt: Date) {
-        pendingStart?.cancel()
-        pendingStart = nil
-        state = .running(draft, startedAt: startedAt)
+    private func beginRunning(draft: TrackState.Draft, startedAt: Date) {        state = .running(draft, startedAt: startedAt)
         elapsed = 0
         errorMessage = nil
         startTicker(from: startedAt)
@@ -348,11 +256,9 @@ final class TrackViewModel: ObservableObject {
 
     private func startTicker(from startedAt: Date) {
         ticker?.cancel()
-        ticker = Timer.publish(every: 1, on: .main, in: .common)
-            .autoconnect()
-            .sink { [weak self] _ in
-                self?.elapsed = max(0, Date().timeIntervalSince(startedAt))
-            }
+        ticker = Ticker.everySecond { [weak self] in
+            self?.elapsed = max(0, Date().timeIntervalSince(startedAt))
+        }
     }
 
     private func stopTicker() {
@@ -378,23 +284,23 @@ final class TrackViewModel: ObservableObject {
 extension TrackViewModel {
     static func preview(
         state: TrackState = .idle,
-        recents: [RecentEntry] = [],
+        recents: [ExactName] = [],
         categories: [String: Category] = [:],
         nameDraft: String = ""
     ) -> TrackViewModel {
         let url = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent(UUID().uuidString)
             .appendingPathComponent("preview.sqlite")
-        let store: LocalStore
-        do {
-            store = try LocalStore(url: url, userID: "preview-user")
-        } catch {
-            fatalError("Unable to create preview store: \(error)")
-        }
+        // A preview must never crash: a store failure falls back to an
+        // unbound store with the failure surfaced in the error banner slot.
+        let bound = try? LocalStore(url: url, userID: "preview-user")
         let vm = TrackViewModel(
-            service: TimerService(store: store),
+            service: TimerService(store: bound ?? LocalStore()),
             connectivity: MockConnectivity(connected: true)
         )
+        if bound == nil {
+            vm.errorMessage = L10n.text(in: .default, code: "error.unknown")
+        }
         vm.state = state
         vm.recents = recents
         vm.categories = categories

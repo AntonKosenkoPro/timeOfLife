@@ -99,12 +99,12 @@ func (s *SQLiteStore) SetUserVerified(ctx context.Context, userID string) error 
 	return nil
 }
 
-// SaveOTP stores a new OTP code for a user.
-func (s *SQLiteStore) SaveOTP(ctx context.Context, userID string, codeHash string, expiresAt time.Time) error {
+// SaveOTP stores a new OTP code for a user with the given attempt budget.
+func (s *SQLiteStore) SaveOTP(ctx context.Context, userID string, codeHash string, expiresAt time.Time, maxAttempts int) error {
 	_, err := s.db.ExecContext(ctx, `
 		INSERT INTO otp_codes (id, user_id, code_hash, expires_at, attempts, max_attempts, created_at)
 		VALUES (?, ?, ?, ?, 0, ?, datetime('now'))
-	`, uuidV7(), userID, codeHash, expiresAt.UTC().Format("2006-01-02 15:04:05"), 5)
+	`, uuidV7(), userID, codeHash, expiresAt.UTC().Format("2006-01-02 15:04:05"), maxAttempts)
 	if err != nil {
 		return fmt.Errorf("save otp: %w", err)
 	}

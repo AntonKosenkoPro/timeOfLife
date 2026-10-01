@@ -158,17 +158,17 @@ struct TrackViewModelTests {
         #expect(vm.categories["c1"]?.name == "Work")
     }
 
-    @Test("load seeds the starter categories on a fresh store")
+    @Test("load on a fresh store leaves recents empty without seeding")
     func loadEmptyRecents() async throws {
         let vm = makeViewModel()
 
         await vm.load()
 
         #expect(vm.recents.isEmpty)
-        // First load seeds the seven starter categories (no collision on a
-        // fresh dataset), so the running tag selector is never empty.
-        #expect(vm.categories.count == 7)
-        #expect(vm.categories.values.map(\.name).contains("Work"))
+        // Seeding lives behind the sign-in gate (`RootView`) only — this
+        // load never seeds, so a fresh dataset reports no categories until
+        // the gate seeds them.
+        #expect(vm.categories.isEmpty)
     }
 
     @Test("exact text identity: Gym and GYM are separate recents")
@@ -188,7 +188,7 @@ struct TrackViewModelTests {
     @Test("selecting a recents chip prepares it without starting")
     func selectChipPrepares() async throws {
         let vm = makeViewModel()
-        vm.recents = [TrackViewModel.RecentEntry(text: "Reading", categoryIDs: ["c1"], firstCategoryID: "c1")]
+        vm.recents = [ExactName(text: "Reading", categoryIDs: ["c1"], firstCategoryID: "c1")]
 
         vm.select(vm.recents[0])
 
@@ -250,23 +250,16 @@ struct TrackViewModelTests {
         #expect(draft.categoryIDs == ["c1"])
     }
 
-    @Test("focused start waits out the keyboard slide, keeping tap-time start")
-    func focusedStartDefers() async {
+    @Test("start is immediate: ready transitions to running on the tap")
+    func startIsImmediate() async {
         let vm = makeViewModel()
         vm.nameDraft = "Gym"
         vm.state = .ready(TrackState.Draft(text: "Gym"))
-        vm.nameFieldFocused = true
 
         let tapTime = Date()
         vm.start()
-        // Still ready immediately — the swap waits for the slide.
-        #expect(vm.state == .ready(TrackState.Draft(text: "Gym")))
-
-        // No keyboard dismissal fires in tests, so the bounded fallback
-        // (600 ms) triggers the swap.
-        try? await Task.sleep(nanoseconds: 900_000_000)
         guard case let .running(draft, startedAt) = vm.state else {
-            Issue.record("expected running state after the delay")
+            Issue.record("expected running state immediately")
             return
         }
         #expect(draft.text == "Gym")
@@ -274,38 +267,33 @@ struct TrackViewModelTests {
         #expect(startedAt.timeIntervalSince(tapTime) < 1)
     }
 
-    @Test("a draft edit cancels a deferred start")
-    func draftEditCancelsDeferredStart() async {
+    @Test("a draft edit before start prepares the fresh text")
+    func draftEditBeforeStartPreparesFreshText() async {
         let vm = makeViewModel()
         vm.nameDraft = "Gym"
         vm.state = .ready(TrackState.Draft(text: "Gym"))
-        vm.nameFieldFocused = true
-        vm.start()
 
         vm.nameDraft = "Gym2"
         vm.syncReadyFromDraft()
+        vm.start()
 
-        try? await Task.sleep(nanoseconds: 500_000_000)
-        #expect(!vm.state.isRunning)
-        #expect(vm.state == .ready(TrackState.Draft(text: "Gym2", categoryIDs: [])))
+        guard case let .running(draft, _) = vm.state else {
+            Issue.record("expected running state")
+            return
+        }
+        #expect(draft.text == "Gym2")
     }
 
-    @Test("focused start after a post-stop edit starts on the first tap")
+    @Test("start after a post-stop edit starts on the first tap with fresh text")
     func staleDraftFirstTapStarts() async {
         let vm = makeViewModel()
         // Post-stop state: the committed draft is stale for the edited field.
         vm.nameDraft = "Gym"
         vm.state = .ready(TrackState.Draft(text: "Gym"))
         vm.nameDraft = "Gym2"
-        vm.nameFieldFocused = true
 
         vm.start()
         // Tap-time sync brings the preparation up to date at once.
-        #expect(vm.state == .ready(TrackState.Draft(text: "Gym2", categoryIDs: [])))
-
-        // No keyboard dismissal fires in tests, so the bounded fallback
-        // (600 ms) triggers the swap — with the edited text, first tap.
-        try? await Task.sleep(nanoseconds: 900_000_000)
         guard case let .running(draft, _) = vm.state else {
             Issue.record("expected running state after the first tap")
             return
@@ -401,14 +389,8 @@ struct TrackViewModelTests {
         )
     }
 
-    private func storeRecents(_ store: LocalStore) async throws -> [TrackViewModel.RecentEntry] {
-        try await store.recents(limit: 6).map { recent in
-            TrackViewModel.RecentEntry(
-                text: recent.activityText,
-                categoryIDs: recent.categoryIDs,
-                firstCategoryID: recent.categoryIDs.first
-            )
-        }
+    private func storeRecents(_ store: LocalStore) async throws -> [ExactName] {
+        try await store.recents(limit: 6).map(ExactName.init(storeRecent:))
     }
 
     private func makeViewModel() -> TrackViewModel {

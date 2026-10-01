@@ -26,18 +26,8 @@ struct TrackView: View {
             .task { await vm.load() }
     }
 
-    /// DEBUG-only spike gate: launching with `TRACK_SPIKE=1` replaces the
-    /// Track content with the refine-track-recents layout harness (D7).
-    @ViewBuilder private var content: some View {
-        #if DEBUG
-        if ProcessInfo.processInfo.environment["TRACK_SPIKE"] == "1" {
-            TrackLayoutSpike()
-        } else {
-            TrackContent(vm: vm)
-        }
-        #else
+    private var content: some View {
         TrackContent(vm: vm)
-        #endif
     }
 }
 
@@ -54,7 +44,7 @@ struct TrackView: View {
     TrackContent(vm: .preview(
         state: .ready(TrackState.Draft(text: "Deep work", categoryIDs: ["preview-c-work"])),
         recents: [
-            TrackViewModel.RecentEntry(text: "Deep work", categoryIDs: ["preview-c-work"], firstCategoryID: "preview-c-work")
+            ExactName(text: "Deep work", categoryIDs: ["preview-c-work"], firstCategoryID: "preview-c-work")
         ],
         categories: Dictionary(uniqueKeysWithValues: categories.map { ($0.id, $0) })
     ))

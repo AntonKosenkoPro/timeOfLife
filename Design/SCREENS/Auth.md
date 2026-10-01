@@ -8,11 +8,12 @@ The signed-out flow is now a linear `NavigationStack`:
 WelcomeView  --(Continue with Email)-->  EmailEntryView  --(email sent)-->  OtpEntryView
 ```
 
-`Sign in with Apple` is the primary action on `WelcomeView` and handles sign-up/sign-in in one step. The email/OTP path is a deliberate secondary option. When any auth path succeeds, `SessionStore` flips to `.signedIn` and `SyncController` activates; the app shell (Track) is the root regardless of session state — auth is an optional "Enable Sync" action in Profile, not a launch gate.
+`Sign in with Apple` is the primary action on `WelcomeView` and handles sign-up/sign-in in one step. The email/OTP path is a deliberate secondary option. When any auth path succeeds, `SessionStore` flips to `.signedIn` and `SyncController` activates; the app shell (Track) replaces this flow. Auth is the mandatory launch gate: `RootView` renders this flow full-screen whenever there is no signed-in session — never as an "Enable Sync" sheet inside Profile.
 
 Protected API requests refresh an expired access token once. If the refresh token is
-invalid or reused, the client clears the local session and `RootView` returns to
-this signed-out flow; temporary offline or transport failures keep the cached
+invalid or reused, the client locks to this auth gate with all local account files
+intact (lock-not-wipe — logout/revocation never deletes data) and `RootView` returns to
+this flow; temporary offline or transport failures keep the cached
 session for a later retry.
 
 ---
@@ -161,7 +162,7 @@ Follows `Design/INTERACTIONS.md` → **Keyboard and primary input placement**. T
 - Focus the hidden OTP field on appear and re-focus it after a verification error.
 - Auto-submit: when `vm.code` reaches 6 digits, debounce 250 ms then call `vm.submit()`. The debounce lets the user see the full code before the network call.
 - On a verification error, clear `vm.code` and refocus so the user can re-enter the code.
-- On success, `AuthService` updates `SessionStore`; `SyncController` activates. The app shell (Track) remains the root — auth is optional.
+- On success, `AuthService` updates `SessionStore`; `SyncController` activates. The app shell (Track) replaces the auth flow — sign-in is the mandatory launch gate.
 - Resend is enabled after a 30-second cooldown; on resend show a feedback message via `L10n.otpResent`.
 - Clear field error when `vm.code` changes.
 - Offline: show banner, disable submit, set `errorMessage` to `String.localized("error.offline")` if submit is attempted.

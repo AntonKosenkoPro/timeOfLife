@@ -101,7 +101,7 @@ struct PrimaryButton: View {
     private var background: Color {
         let fill = tint ?? Theme.accentPrimary
         if isLoading || isDisabled {
-            return fill.opacity(0.5)
+            return fill.opacity(Theme.opacityDisabledFill)
         }
         return fill
     }

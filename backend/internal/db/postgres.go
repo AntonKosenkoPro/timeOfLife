@@ -94,12 +94,12 @@ func (s *PostgresStore) SetUserVerified(ctx context.Context, userID string) erro
 	return nil
 }
 
-// SaveOTP stores a new OTP code for a user.
-func (s *PostgresStore) SaveOTP(ctx context.Context, userID string, codeHash string, expiresAt time.Time) error {
+// SaveOTP stores a new OTP code for a user with the given attempt budget.
+func (s *PostgresStore) SaveOTP(ctx context.Context, userID string, codeHash string, expiresAt time.Time, maxAttempts int) error {
 	_, err := s.pool.Exec(ctx, `
 		INSERT INTO otp_codes (id, user_id, code_hash, expires_at, attempts, max_attempts, created_at)
 		VALUES (gen_random_uuid(), $1, $2, $3, 0, $4, NOW())
-	`, userID, codeHash, expiresAt, 5)
+	`, userID, codeHash, expiresAt, maxAttempts)
 	if err != nil {
 		return fmt.Errorf("save otp: %w", err)
 	}
@@ -249,7 +249,7 @@ func (s *PostgresStore) UpsertUserByAppleSubject(ctx context.Context, appleSubje
 	return u, nil
 }
 
-// Pool returns the underlying pgxpool.Pool for use by migrations.
-func (s *PostgresStore) Pool() *pgxpool.Pool {
+// DB returns the underlying pool for use by migrations.
+func (s *PostgresStore) DB() *pgxpool.Pool {
 	return s.pool
 }

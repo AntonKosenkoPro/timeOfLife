@@ -132,59 +132,174 @@ struct LocalizationTests {
 
     // MARK: - L10n enum allCases matches strings files
 
-    @Test("L10n enum allCases count matches expected keys")
-    func allCasesCount() {
-        // 123 keys after refine-track-recents; history-entry-list adds
-        // historyDayToday, historyDayYesterday, historyInProgress,
-        // historyTracked = 127; activity-detail-sheet adds 7 provenance
-        // "via" labels + activityDetailEditActivity = 135; the sheet
-        // redesign adds 7 bare source names + categories/entries/total = 145;
-        // save-dismiss/empty-categories revision adds noCategories = 146;
-        // add-manual-entry adds activityDetailLogTime + 8 logTime.* +
-        // historyLogTime = 156; edit-entry-from-activity-detail adds 9
-        // entry.* (edit/locked titles, save, delete + confirm, stale
-        // error, locked note) = 165; unify-catalog-deletion adds 6
-        // (activityEditor.delete, 4 activity.delete.*, categoryEditor.delete)
-        // and removes 5 (4 undo toast keys + delete.category.cancel) = 166;
-        // insights-v1-breakdown adds 9 (3 insights.period.*,
-        // 2 insights.lens.*, insights.noCategory, insights.footnote,
-        // insights.empty.today, insights.empty.week) = 175;
-        // present-enable-sync-sheet adds sync.cancel = 176;
-        // drain-404-convergence adds timer.activityDeleted = 177;
-        // remove-activities-layer removes 43 dead activity-catalog keys
-        // (timer.search.*, activityEditor.*, activity.delete.*,
-        // activityDetail.*, profile.activities, logTime.activity.*,
-        // choose/stale/deleted copy) and adds 7 plain-text entry keys
-        // (timer.idlePrompt/namePlaceholder, 5 entry.*) = 141;
-        // remove-profile-placeholders removes 7 dead Profile keys
-        // (profile.library/connections/integrations/export/app/appearance/
-        // dataAndPrivacy) and adds profile.onDevice + onDeviceFooter = 136;
-        // history-pull-to-sync adds 5 (history.pull.signedOut/signIn/offline,
-        // history.syncError.title, common.ok) = 141;
-        // account-bound-local-data removes 5 retired-UI cases
-        // (profile.enableSync, profile.enableSyncSubtitle, sync.cancel,
-        // history.pull.signedOut, history.pull.signIn) and adds
-        // authGate.title = 137; Wave 2 removed the 5 orphaned
-        // string-file rows from both lproj files (all L10n cases
-        // resolve; ad-hoc file keys — error.*, validation.*,
-        // catalogIcon.* — stay keyed outside the enum);
-        // feat-entry-duration-subtitle adds entry.duration +
-        // entry.invalidInterval; feat-name-field-affordances adds
-        // name.clear + name.suggestions; fix-offline-banner-duplication
-        // removes offlineBanner (offline.banner) = 140;
-        // fix-50-nav-buttons adds 3 icon-button VoiceOver labels
-        // (entry.dismissLabel + entry.confirmAddLabel +
-        // entry.confirmSaveLabel) and retires 2 text-button keys
-        // (logTime.add + entry.save) = 141;
-        // fix-42-clear-button adds notes.clear = 142.
-        // add-version-label-release adds profile.versionDebugSuffix = 143.
-        // dedicated-name-picker removes name.suggestions and adds
-        // name.pickerTitle + name.pickerNoMatchHint = 144.
-        // unify-category-editor-chrome adds 2 icon-button VoiceOver labels
-        // (categoryEditor.dismissLabel + categoryEditor.confirmSaveLabel)
-        // = 146.
-        // fix-sync-status-row adds 2 sync-age glue keys
-        // (profile.lastSynced.ago + profile.lastSynced.justNow) = 148.
-        #expect(l10nCases.count == 148)
+    /// Sorted-keys snapshot of the `L10n` contract: adding, removing, or
+    /// renaming a key fails here with an exact diff (the former
+    /// `allCasesCount == 148` only caught count drift and went stale on
+    /// every copy change). Update the snapshot deliberately when copy
+    /// changes land; the en+ru resolution tests above pin the values.
+    @Test("L10n sorted-keys snapshot matches the recorded contract")
+    func sortedKeysSnapshot() {
+        #expect(l10nCases.map(\.rawValue).sorted() == Self.expectedKeys)
     }
+
+    private static let expectedKeys: [String] = [
+        "app.name",
+        "appleSignIn.error",
+        "appleSignIn.title",
+        "authGate.title",
+        "category.nameRequired",
+        "category.nameTooLong",
+        "category.seed.education",
+        "category.seed.entertainment",
+        "category.seed.hobby",
+        "category.seed.relax",
+        "category.seed.sleep",
+        "category.seed.sport",
+        "category.seed.work",
+        "categoryEditor.cancel",
+        "categoryEditor.confirmSaveLabel",
+        "categoryEditor.createTitle",
+        "categoryEditor.delete",
+        "categoryEditor.dismissLabel",
+        "categoryEditor.editTitle",
+        "categoryEditor.iconLabel",
+        "categoryEditor.iconUnavailable",
+        "categoryEditor.nameLabel",
+        "categoryEditor.namePlaceholder",
+        "categoryEditor.save",
+        "common.and",
+        "common.ok",
+        "delete.category.confirm",
+        "delete.category.message",
+        "delete.category.title",
+        "emailEntry.email",
+        "emailEntry.submit",
+        "emailEntry.subtitle",
+        "emailEntry.title",
+        "entry.categoriesLabel",
+        "entry.confirmAddLabel",
+        "entry.confirmSaveLabel",
+        "entry.delete",
+        "entry.deleteConfirm",
+        "entry.deleteMessage",
+        "entry.deleteTitle",
+        "entry.dismissLabel",
+        "entry.duration",
+        "entry.editTitle",
+        "entry.invalidInterval",
+        "entry.lockedNote",
+        "entry.lockedTitle",
+        "entry.nameLabel",
+        "entry.namePlaceholder",
+        "entry.notesLabel",
+        "entry.notesPlaceholder",
+        "entry.staleError",
+        "error.categoryExists",
+        "error.conflict",
+        "error.localPersistence",
+        "history.day.today",
+        "history.day.yesterday",
+        "history.emptySubtitle",
+        "history.emptyTitle",
+        "history.inProgress",
+        "history.logTime",
+        "history.pull.offline",
+        "history.syncError.title",
+        "history.tracked",
+        "insights.empty.today",
+        "insights.empty.week",
+        "insights.emptySubtitle",
+        "insights.emptyTitle",
+        "insights.footnote",
+        "insights.lens.activity",
+        "insights.lens.category",
+        "insights.noCategory",
+        "insights.period.all",
+        "insights.period.today",
+        "insights.period.week",
+        "logTime.cancel",
+        "logTime.ends",
+        "logTime.starts",
+        "logTime.title",
+        "manage.categories.add",
+        "manage.categories.editHint",
+        "manage.categories.emptySubtitle",
+        "manage.categories.emptyTitle",
+        "manage.categories.loading",
+        "manage.categories.rowA11y",
+        "manage.categories.title",
+        "name.clear",
+        "name.pickerNoMatchHint",
+        "name.pickerTitle",
+        "notes.clear",
+        "otp.codeHint",
+        "otp.codeLabel",
+        "otp.resend",
+        "otp.resendCountdown",
+        "otp.sentTo",
+        "otp.title",
+        "profile.account",
+        "profile.categories",
+        "profile.done",
+        "profile.eraseCancel",
+        "profile.eraseConfirm",
+        "profile.eraseLocalData",
+        "profile.eraseLocalDataConfirmMessage",
+        "profile.eraseLocalDataConfirmTitle",
+        "profile.lastSynced.ago",
+        "profile.lastSynced.justNow",
+        "profile.onDevice",
+        "profile.onDeviceFooter",
+        "profile.signOut",
+        "profile.syncError",
+        "profile.syncNow",
+        "profile.syncedSuccessfully",
+        "profile.syncing",
+        "profile.title",
+        "profile.versionDebugSuffix",
+        "provenance.name.calendar",
+        "provenance.name.control",
+        "provenance.name.garmin",
+        "provenance.name.healthkit",
+        "provenance.name.screentime",
+        "provenance.name.siri",
+        "provenance.name.widget",
+        "provenance.via.calendar",
+        "provenance.via.control",
+        "provenance.via.garmin",
+        "provenance.via.healthkit",
+        "provenance.via.screentime",
+        "provenance.via.siri",
+        "provenance.via.widget",
+        "signOut.cancel",
+        "tab.history",
+        "tab.insights",
+        "tab.track",
+        "timer.chooserRecent",
+        "timer.compactReturnHint",
+        "timer.compactRunning",
+        "timer.compactStop",
+        "timer.idlePrompt",
+        "timer.namePlaceholder",
+        "timer.ready",
+        "timer.recentsEmptyHint",
+        "timer.running",
+        "timer.saved",
+        "timer.saving",
+        "timer.selectActivity",
+        "timer.start",
+        "timer.stop",
+        "timer.stopHint",
+        "undo.notSelected",
+        "undo.selected",
+        "validation.email.prefix",
+        "validation.email.rule.invalid",
+        "validation.email.rule.tooLong",
+        "validation.emailEmpty",
+        "validation.otp.prefix",
+        "validation.otp.rule.invalid",
+        "validation.otpEmpty",
+        "welcome.continueWithEmail",
+        "welcome.tagline",
+    ]
 }

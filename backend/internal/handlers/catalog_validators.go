@@ -2,8 +2,10 @@ package handlers
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -100,15 +102,13 @@ func writeValidation(w http.ResponseWriter, errs validationErrs) {
 	writeError(w, http.StatusUnprocessableEntity, codeValidation, "Validation failed", errs)
 }
 
-// parseRFC3339 parses an RFC 3339 timestamp.
+// parseRFC3339 parses an RFC 3339 timestamp. RFC3339Nano already accepts
+// whole-second inputs (the fractional section is optional in Go layouts),
+// so no fallback layout is needed.
 func parseRFC3339(s string) (time.Time, bool) {
 	t, err := time.Parse(time.RFC3339Nano, s)
 	if err != nil {
-		// Fall back to the non-nano layout for whole-second inputs.
-		t, err = time.Parse(time.RFC3339, s)
-		if err != nil {
-			return time.Time{}, false
-		}
+		return time.Time{}, false
 	}
 	return t, true
 }
@@ -117,11 +117,14 @@ func parseRFC3339(s string) (time.Time, bool) {
 // Set=true with Valid=false sets NULL, Set=true with Valid=true sets Value.
 // Bad=true marks a present-but-unparseable value so the validator can emit a
 // 422 (UnmarshalJSON deliberately never errors, so a bad timestamp does not
-// surface as a 400 invalid_body). It maps directly onto db.NullableTime.
+// surface as a 400 invalid_body). Empty=true marks a present-but-empty string,
+// which handlers normalize to unset (matching emptyToNil for *string fields,
+// so "" means "omitted" everywhere). It maps directly onto db.NullableTime.
 type optTime struct {
 	Set   bool
 	Valid bool
 	Bad   bool
+	Empty bool
 	Value time.Time
 }
 
@@ -136,6 +139,10 @@ func (o *optTime) UnmarshalJSON(b []byte) error {
 	}
 	var s string
 	if err := json.Unmarshal(b, &s); err == nil {
+		if s == "" {
+			o.Empty = true
+			return nil
+		}
 		if t, ok := parseRFC3339(s); ok {
 			o.Valid = true
 			o.Value = t
@@ -250,4 +257,25 @@ func validateTimestamp(field, s string, required bool, errs validationErrs) {
 	if _, ok := parseRFC3339(s); !ok {
 		errs.add(field, field+" must be a valid RFC 3339 timestamp")
 	}
+}
+
+// emptyToNil normalizes an empty optional timestamp to omitted (nil), so ""
+// means "no value" rather than a present zero time. Used for ended_at on
+// create (a running timer) and for optional update fields.
+func emptyToNil(s *string) *string {
+	if s != nil && *s == "" {
+		return nil
+	}
+	return s
+}
+
+// parseLimitParam validates a ?limit= query value against [1, maxLimit]. It
+// returns the parsed limit, or ok=false when the handler must answer 422.
+func parseLimitParam(v string, maxLimit int, errs validationErrs) (limit int, ok bool) {
+	n, err := strconv.Atoi(v)
+	if err != nil || n < 1 || n > maxLimit {
+		errs.add("limit", fmt.Sprintf("limit must be between 1 and %d", maxLimit))
+		return 0, false
+	}
+	return n, true
 }

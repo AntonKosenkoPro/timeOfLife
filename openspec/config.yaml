@@ -7,25 +7,26 @@ context: |
   it is the canonical context for this repo (architecture, OpenSpec routing, API contract,
   incomplete surfaces, standards, build/test/run).
 
-  What this is: Lifio — a personal time-tracking iOS app (SwiftUI, iOS 18+, local-first)
-  with a Go backend that is an OPTIONAL sync relay. Auth MVP (passwordless email-OTP +
+  What this is: Lifio — a personal time-tracking iOS app (SwiftUI, iOS 18+, local-first
+  and account-bound: mandatory sign-in, per-account data files, per-device sessions)
+  with a Go backend acting as identity + sync relay. Auth MVP (passwordless email-OTP +
   Sign in with Apple) and the Track experience (three-tab shell, numeric timer, plain-text
   capture + Recents, running tag selector, Profile, compact cross-tab timer). There is no
   activity entity — entries own their text, ordered categories, and notes.
 
   OpenSpec routing: baseline specs (`openspec/specs/<capability>/spec.md`) are the merged
-  contract and are NEVER edited directly. Behavior changes go through a change: delta specs
+  contract and are NEVER edited directly (19 baselines incl. `account-bound-store`,
+  `device-sessions`, and `apple-signin`). Behavior changes go through a change: delta specs
   under `openspec/changes/<change>/specs/`. The local-first architecture now lives in the
   `local-first-store`, `sync-client`, `entry-provenance`, and `lock-screen-controls` baselines.
-  Archives (`openspec/changes/archive/`) are history already folded into the baselines. Use
-  `openspec list` to identify active changes, then check the selected change's `tasks.md` before
-  implementing and mark tasks as you complete them.
+  Archives (`openspec/changes/archive/`) are history already folded into the baselines. The
+  active change is `reduce-codebase-complexity` (wording-only docs-contract sync) — check
+  its `tasks.md` before implementing and mark tasks as you complete them.
 
   Non-negotiables: LocalStore is the single mutation chokepoint (GRDB, App Group
   `group.com.antonkosenko.timeoflifeapp`) — no raw GRDB writes outside it. Several local-first UI
   surfaces are INCOMPLETE (see docs/project-context.md → "Incomplete / deferred"): UndoToast /
-  shake-to-undo, the "Enable Sync" AuthFlowView sheet (Profile currently does a silent
-  `restoreSession()`), "via <Source>" labels, and the iOS 18 lock-screen ControlWidget (no
+  shake-to-undo, "via <Source>" labels, and the iOS 18 lock-screen ControlWidget (no
   target in `project.yml`). OpenAPI (`backend/api/openapi.yaml`) is the authoritative API
   contract (S10). No backward compat for on-disk formats (pre-release). No passwords, no
   plaintext secrets (R1). iOS strings go to both `en.lproj` and `ru.lproj` + `L10n` (U4).
@@ -51,7 +52,7 @@ operations:
       - Read `docs/project-context.md` first (canonical context; `AGENTS.md` is the short entrypoint).
       - Check the selected change's `tasks.md` before implementing and mark tasks `[x]` as you complete them; reconcile with the relevant `Requirements/FURPS/*.md` rows.
       - External docs first: if the work touches an external dependency, run the ctx7 `library` → `docs` fetch before coding and cite it; on quota error ask for `npx ctx7@latest login` / `CONTEXT7_API_KEY`, never silently fall back.
-      - Deferred local-first UI surfaces (UndoToast/shake-to-undo, "Enable Sync" AuthFlowView sheet, "via <Source>" labels, lock-screen ControlWidget) must not be claimed done; update `docs/project-context.md` → "Incomplete / deferred" and any owning change artifacts accordingly.
+      - Deferred local-first UI surfaces (UndoToast/shake-to-undo, "via <Source>" labels, lock-screen ControlWidget) must not be claimed done; update `docs/project-context.md` → "Incomplete / deferred" and any owning change artifacts accordingly.
       - If the OpenAPI contract changes, update `backend/api/openapi.yaml` and both client/server sides (S10); run the backend contract gate (`go test ./...` includes `internal/contract`).
       - Run linters + warning-as-error build + both test suites per `docs/project-context.md` → "Per-iteration revising process (S5)".
   archive:

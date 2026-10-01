@@ -1,20 +1,5 @@
 import SwiftUI
 
-/// One name suggestion: an exact committed text plus the newest entry's
-/// category data for inheritance and the row icon (name-picker spec).
-/// Callers map their recents into this shape (`TrackViewModel.RecentEntry`
-/// via `.text`, `LogTimeViewModel.RecentEntry` via `.activityText`) so the
-/// picker stays view-model-agnostic.
-struct NamePickerSuggestion: Identifiable, Equatable {
-    let text: String
-    let categoryIDs: [String]
-    /// The first-position category id, or nil when the newest entry has no
-    /// categories (the row renders without an icon, like the Recents chips).
-    let firstCategoryID: String?
-
-    var id: String { text }
-}
-
 /// Pure suggestion filter for the name picker (name-picker spec):
 /// case-insensitive prefix over all committed exact-text names,
 /// newest-first. The exact match is included — typing a full existing name
@@ -25,8 +10,8 @@ struct NamePickerSuggestion: Identifiable, Equatable {
 enum NamePickerFilter {
     static func suggestions(
         for draft: String,
-        in recents: [NamePickerSuggestion]
-    ) -> [NamePickerSuggestion] {
+        in recents: [ExactName]
+    ) -> [ExactName] {
         let trimmed = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return recents }
         let lowered = trimmed.lowercased()
@@ -46,7 +31,7 @@ enum NamePickerFilter {
 /// inheritance resolved by the caller). Done with empty text is a no-op.
 struct NamePicker: View {
     /// Caller recents, newest-first, already capped (the picker reads only).
-    let recents: [NamePickerSuggestion]
+    let recents: [ExactName]
     /// The id→Category map for row icons.
     let categories: [String: Category]
     /// Field placeholder (each caller passes its own copy).
@@ -54,7 +39,7 @@ struct NamePicker: View {
     /// Hint shown when there are no recents and nothing is typed.
     let emptyHint: String
     /// Row-tap completion (exact text + ordered categories).
-    let onCompleteSuggestion: (NamePickerSuggestion) -> Void
+    let onCompleteSuggestion: (ExactName) -> Void
     /// Done-with-text completion (typed text).
     let onCompleteText: (String) -> Void
 
@@ -69,11 +54,11 @@ struct NamePicker: View {
 
     init(
         initialText: String,
-        recents: [NamePickerSuggestion],
+        recents: [ExactName],
         categories: [String: Category],
         placeholder: String,
         emptyHint: String,
-        onCompleteSuggestion: @escaping (NamePickerSuggestion) -> Void,
+        onCompleteSuggestion: @escaping (ExactName) -> Void,
         onCompleteText: @escaping (String) -> Void
     ) {
         self.recents = recents
@@ -104,47 +89,37 @@ struct NamePicker: View {
             // fires the keyboard mid-push, and the keyboard-driven relayout
             // makes the covered Track screen visibly jump before the picker
             // lands. Cancelled automatically on pop.
-            try? await Task.sleep(nanoseconds: Self.focusDelayNanoseconds)
-            guard !Task.isCancelled else { return }
+            guard await FocusDelay.settle() else { return }
             fieldFocused = true
         }
     }
 
-    /// Push-transition settle before autofocus (see above).
-    private static let focusDelayNanoseconds: UInt64 = 400_000_000
-
     // MARK: - Entry field (pinned)
 
     private var fieldCard: some View {
-        HStack(spacing: 0) {
-            TextField(
-                placeholder,
-                text: $draft,
-                onCommit: completeWithTypedText
-            )
-            .focused($fieldFocused)
-            .submitLabel(.done)
-            .font(.body)
-            .frame(maxWidth: .infinity, minHeight: Theme.minTapArea)
-            .accessibilityIdentifier("NamePickerField")
-            .accessibilityLabel(placeholder)
-            if ClearButtonVisibility.shouldShow(
-                isFocused: fieldFocused,
-                text: draft
-            ) {
-                ClearTextButton(
-                    action: { draft = "" },
-                    accessibilityId: "NamePickerClearButton"
+        FieldCard {
+            HStack(spacing: 0) {
+                TextField(
+                    placeholder,
+                    text: $draft,
+                    onCommit: completeWithTypedText
                 )
+                .focused($fieldFocused)
+                .submitLabel(.done)
+                .font(.body)
+                .frame(maxWidth: .infinity, minHeight: Theme.minTapArea)
+                .accessibilityIdentifier("NamePickerField")
+                .accessibilityLabel(placeholder)
+                if ClearButtonVisibility.shouldShow(
+                    isFocused: fieldFocused,
+                    text: draft
+                ) {
+                    ClearTextButton(
+                        action: { draft = "" },
+                        accessibilityId: "NamePickerClearButton"
+                    )
+                }
             }
-        }
-        .padding(.horizontal, Theme.spacingMedium)
-        .frame(maxWidth: .infinity, minHeight: Theme.minTapArea)
-        .background(Theme.backgroundSecondary)
-        .clipShape(RoundedRectangle(cornerRadius: Theme.cornerRadius))
-        .overlay {
-            RoundedRectangle(cornerRadius: Theme.cornerRadius)
-                .stroke(Theme.hairline, lineWidth: 0.7)
         }
         .padding(.vertical, Theme.spacingMedium)
         .accessibilityElement(children: .contain)
@@ -204,7 +179,7 @@ struct NamePicker: View {
         .accessibilityLabel(L10n.namePickerTitle.text)
     }
 
-    private func suggestionLabel(_ suggestion: NamePickerSuggestion) -> some View {
+    private func suggestionLabel(_ suggestion: ExactName) -> some View {
         HStack(spacing: Theme.spacingExtraSmall) {
             suggestionIcon(suggestion)
             Text(suggestion.text)
@@ -224,7 +199,7 @@ struct NamePicker: View {
     /// Recents chips (which omit the icon to save space), the list keeps
     /// the slot so every row's text aligns. The slot scales with Dynamic
     /// Type, mirroring `RecentActivitiesChips`.
-    private func suggestionIcon(_ suggestion: NamePickerSuggestion) -> some View {
+    private func suggestionIcon(_ suggestion: ExactName) -> some View {
         let symbol: String
         if let categoryID = suggestion.firstCategoryID,
            let category = categories[categoryID] {
@@ -241,15 +216,11 @@ struct NamePicker: View {
 
     /// Fixed icon slot so the text column aligns across rows.
     private var symbolSlotSize: CGFloat {
-        let metrics = UIFontMetrics(forTextStyle: .body)
-        let trait = UITraitCollection(
-            preferredContentSizeCategory: dynamicTypeSize.uiContentSizeCategory
+        DynamicTypeMetrics.symbolSlotSize(
+            basePointSize: 17,
+            textStyle: .body,
+            dynamicTypeSize: dynamicTypeSize
         )
-        let pointSize = metrics.scaledFont(
-            for: UIFont.systemFont(ofSize: 17),
-            compatibleWith: trait
-        ).pointSize
-        return ceil(pointSize * 1.5)
     }
 
     /// Keyboard Done: applies the typed text. Empty input is a no-op —
@@ -262,7 +233,7 @@ struct NamePicker: View {
     }
 
     /// Row tap: applies the exact text plus its ordered categories.
-    private func complete(with suggestion: NamePickerSuggestion) {
+    private func complete(with suggestion: ExactName) {
         resignAndPop { onCompleteSuggestion(suggestion) }
     }
 
@@ -283,12 +254,12 @@ struct NamePicker: View {
         NamePicker(
             initialText: "Gy",
             recents: [
-                NamePickerSuggestion(text: "Gym", categoryIDs: ["c1"], firstCategoryID: "c1"),
-                NamePickerSuggestion(text: "Gymnastics", categoryIDs: [], firstCategoryID: nil)
+                ExactName(text: "Gym", categoryIDs: ["c1"], firstCategoryID: "c1"),
+                ExactName(text: "Gymnastics", categoryIDs: [], firstCategoryID: nil)
             ],
             categories: ["c1": Category(id: "c1", name: "Sport", icon: "figure.run")],
-            placeholder: "What did you work on?",
-            emptyHint: "Activities you track will appear here.",
+            placeholder: L10n.timerNamePlaceholder.text,
+            emptyHint: L10n.timerRecentsEmptyHint.text,
             onCompleteSuggestion: { _ in },
             onCompleteText: { _ in }
         )
@@ -301,8 +272,8 @@ struct NamePicker: View {
             initialText: "",
             recents: [],
             categories: [:],
-            placeholder: "What did you work on?",
-            emptyHint: "Activities you track will appear here.",
+            placeholder: L10n.timerNamePlaceholder.text,
+            emptyHint: L10n.timerRecentsEmptyHint.text,
             onCompleteSuggestion: { _ in },
             onCompleteText: { _ in }
         )
@@ -314,11 +285,11 @@ struct NamePicker: View {
         NamePicker(
             initialText: "Zzz",
             recents: [
-                NamePickerSuggestion(text: "Gym", categoryIDs: [], firstCategoryID: nil)
+                ExactName(text: "Gym", categoryIDs: [], firstCategoryID: nil)
             ],
             categories: [:],
-            placeholder: "What did you work on?",
-            emptyHint: "Activities you track will appear here.",
+            placeholder: L10n.timerNamePlaceholder.text,
+            emptyHint: L10n.timerRecentsEmptyHint.text,
             onCompleteSuggestion: { _ in },
             onCompleteText: { _ in }
         )

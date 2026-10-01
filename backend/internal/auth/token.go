@@ -15,7 +15,7 @@ import (
 type TokenService struct {
 	jwtSecret       []byte
 	accessTokenTTL  time.Duration
-	refreshTokenTTL time.Duration
+	RefreshTokenTTL time.Duration
 }
 
 // NewTokenService creates a new TokenService.
@@ -23,7 +23,7 @@ func NewTokenService(jwtSecret string, accessTokenTTL, refreshTokenTTL time.Dura
 	return &TokenService{
 		jwtSecret:       []byte(jwtSecret),
 		accessTokenTTL:  accessTokenTTL,
-		refreshTokenTTL: refreshTokenTTL,
+		RefreshTokenTTL: refreshTokenTTL,
 	}
 }
 
@@ -91,9 +91,4 @@ func (s *TokenService) GenerateRefreshToken() (rawToken, hash string, err error)
 func HashToken(token string) string {
 	h := sha256.Sum256([]byte(token))
 	return hex.EncodeToString(h[:])
-}
-
-// RefreshTokenTTL returns the configured refresh token TTL.
-func (s *TokenService) RefreshTokenTTL() time.Duration {
-	return s.refreshTokenTTL
 }

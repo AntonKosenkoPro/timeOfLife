@@ -10,7 +10,6 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
-	"time"
 
 	"github.com/antonkosenko/time-of-life/backend/internal/config"
 	"github.com/antonkosenko/time-of-life/backend/internal/db"
@@ -59,7 +58,7 @@ func run() int {
 	slog.Info("connected to database")
 
 	// Run migrations
-	if err := migrations.RunPostgres(ctx, store.Pool()); err != nil {
+	if err := migrations.RunPostgres(ctx, store.DB()); err != nil {
 		slog.Error("failed to run migrations", "error", err)
 		return 1
 	}
@@ -74,9 +73,9 @@ func run() int {
 	httpServer := &http.Server{
 		Addr:         fmt.Sprintf(":%d", cfg.Port),
 		Handler:      srv,
-		ReadTimeout:  15 * time.Second,
-		WriteTimeout: 30 * time.Second,
-		IdleTimeout:  60 * time.Second,
+		ReadTimeout:  cfg.ReadTimeout,
+		WriteTimeout: cfg.WriteTimeout,
+		IdleTimeout:  cfg.IdleTimeout,
 	}
 
 	// Start server in a goroutine
@@ -96,7 +95,7 @@ func run() int {
 	slog.Info("shutting down server", "signal", sig.String())
 
 	// Graceful shutdown with timeout
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
 	defer cancel()
 
 	if err := httpServer.Shutdown(shutdownCtx); err != nil {

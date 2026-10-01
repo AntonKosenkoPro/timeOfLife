@@ -43,6 +43,7 @@ targets:
           - "Configuration/Config.Debug.xcconfig"
           - "Configuration/Config.Release.xcconfig"
           - "Configuration/Info.plist"
+          - "Configuration/Info-Debug.plist"
           - "Configuration/TimeOfLife.entitlements"
       - path: TimeOfLife/Configuration/Config.Debug.xcconfig
         type: file
@@ -72,11 +73,10 @@ targets:
           - UIInterfaceOrientationPortrait
         UIRequiredDeviceCapabilities:
           - arm64
-        NSAppTransportSecurity:
-          NSExceptionDomains:
-            127.0.0.1:
-              NSExceptionAllowsInsecureHTTPLoads: true
-              NSIncludesSubdomains: false
+        # No NSAppTransportSecurity here: the 127.0.0.1 insecure-HTTP
+        # exception lives in Info-Debug.plist only (Debug needs the local
+        # backend over plain HTTP; Release talks HTTPS and ships without
+        # the exception). See settings.configs.Debug.INFOPLIST_FILE below.
         UIUserInterfaceStyle: Automatic
         UIRequiresFullScreen: true
         ITSAppUsesNonExemptEncryption: false
@@ -100,6 +100,10 @@ targets:
       configs:
         Debug:
           SWIFT_ACTIVE_COMPILATION_CONDITIONS: DEBUG
+          # Debug talks to the local backend over plain HTTP, so it uses
+          # the Debug plist carrying the scoped 127.0.0.1 ATS exception.
+          # Release uses the base plist (no exception — HTTPS only).
+          INFOPLIST_FILE: TimeOfLife/Configuration/Info-Debug.plist
         Release:
           DEVELOPMENT_TEAM: 7923U48U87
           CODE_SIGNING_REQUIRED: YES
@@ -111,8 +115,7 @@ targets:
     # TargetAttributes.SystemCapabilities in the (gitignored) .pbxproj,
     # so anything added only via the Xcode UI is wiped by the next
     # `xcodegen generate` (this previously broke Sign in with Apple
-    # on every regen). The ATS Exception row needs nothing — it is
-    # derived from NSAppTransportSecurity in Info.plist.
+    # on every regen).
     # NOTE: XcodeGen <= 2.46.0 emits this block as a quoted string
     # (yonaskolb/XcodeGen#1637); options.postGenCommand normalizes it
     # back to a native PBX dict on every generate.

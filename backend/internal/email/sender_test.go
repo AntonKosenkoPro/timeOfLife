@@ -248,28 +248,37 @@ func TestSESSender_Send_PropagatesClientError(t *testing.T) {
 // ---------- NewSender factory ----------
 
 func TestNewSender_ReturnsConsoleSenderForConsoleBackend(t *testing.T) {
-	s := NewSender(SenderConfig{Backend: "console", Logger: quietLogger()})
+	s, err := NewSender(SenderConfig{Backend: "console", Logger: quietLogger()})
+	if err != nil {
+		t.Fatalf("expected nil error, got %v", err)
+	}
 	if _, ok := s.(*ConsoleSender); !ok {
 		t.Fatalf("expected *ConsoleSender, got %T", s)
 	}
 }
 
 func TestNewSender_ReturnsConsoleSenderForEmptyBackend(t *testing.T) {
-	s := NewSender(SenderConfig{Logger: quietLogger()})
+	s, err := NewSender(SenderConfig{Logger: quietLogger()})
+	if err != nil {
+		t.Fatalf("expected nil error, got %v", err)
+	}
 	if _, ok := s.(*ConsoleSender); !ok {
 		t.Fatalf("expected *ConsoleSender, got %T", s)
 	}
 }
 
 func TestNewSender_ReturnsConsoleSenderForUnknownBackend(t *testing.T) {
-	s := NewSender(SenderConfig{Backend: "unknown", Logger: quietLogger()})
+	s, err := NewSender(SenderConfig{Backend: "unknown", Logger: quietLogger()})
+	if err != nil {
+		t.Fatalf("expected nil error, got %v", err)
+	}
 	if _, ok := s.(*ConsoleSender); !ok {
 		t.Fatalf("expected *ConsoleSender, got %T", s)
 	}
 }
 
 func TestNewSender_ReturnsSESSenderWhenConfigured(t *testing.T) {
-	s := NewSender(SenderConfig{
+	s, err := NewSender(SenderConfig{
 		Backend:            "ses",
 		AWSAccessKeyID:     "AKIAEXAMPLE",
 		AWSSecretAccessKey: "secretexamplesecretexample",
@@ -277,27 +286,36 @@ func TestNewSender_ReturnsSESSenderWhenConfigured(t *testing.T) {
 		SESFrom:            "noreply@example.com",
 		Logger:             quietLogger(),
 	})
+	if err != nil {
+		t.Fatalf("expected nil error, got %v", err)
+	}
 	if _, ok := s.(*SESSender); !ok {
 		t.Fatalf("expected *SESSender, got %T", s)
 	}
 }
 
 func TestNewSender_SESBackendFallsBackToConsoleOnError(t *testing.T) {
-	s := NewSender(SenderConfig{
+	s, err := NewSender(SenderConfig{
 		Backend: "ses", // missing AWS_* and SES_FROM
 		Logger:  quietLogger(),
 	})
+	if err == nil {
+		t.Fatal("expected explicit misconfiguration error, got nil")
+	}
 	if _, ok := s.(*ConsoleSender); !ok {
 		t.Fatalf("expected fallback *ConsoleSender, got %T", s)
 	}
 }
 
 func TestNewSender_BadTemplateFallsBackToConsole(t *testing.T) {
-	s := NewSender(SenderConfig{
+	s, err := NewSender(SenderConfig{
 		Backend:              "console",
 		OTPEmailTextTemplate: "{{.Invalid", // malformed template
 		Logger:               quietLogger(),
 	})
+	if err == nil {
+		t.Fatal("expected explicit template error, got nil")
+	}
 	if _, ok := s.(*ConsoleSender); !ok {
 		t.Fatalf("expected fallback *ConsoleSender, got %T", s)
 	}

@@ -38,11 +38,22 @@ func (c Claims) IsEmailVerified() bool { return bool(c.EmailVerified) }
 // documented "Boolean" is delivered as a string on the wire).
 type flexibleBool bool
 
-// UnmarshalJSON accepts a JSON bool or a quoted/unquoted "true"/"false".
+// UnmarshalJSON accepts a JSON bool, a quoted/unquoted "true"/"false"
+// (and "1"/"0"), or null (absent field → false). Any other shape is an
+// error rather than a silent false, so unexpected Apple payloads fail
+// verification loudly instead of downgrading email trust.
 func (b *flexibleBool) UnmarshalJSON(data []byte) error {
 	s := strings.TrimSpace(strings.Trim(string(data), `"`))
-	*b = flexibleBool(s == "true" || s == "1")
-	return nil
+	switch s {
+	case "true", "1":
+		*b = true
+		return nil
+	case "false", "0", "null":
+		*b = false
+		return nil
+	default:
+		return fmt.Errorf("flexibleBool: unexpected value %q", string(data))
+	}
 }
 
 // ErrInvalidToken is returned when an identity token fails verification.

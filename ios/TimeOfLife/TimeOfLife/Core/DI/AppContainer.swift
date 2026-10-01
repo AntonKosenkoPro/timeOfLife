@@ -30,11 +30,13 @@ final class AppContainer: ObservableObject {
     let localStore: LocalStore
     let undoBuffer: UndoBufferStore
     let syncController: SyncController
-    /// The last retryable `openLocalStore` failure (disk-full, corrupt file,
-    /// migration error). Integrity failures (`invalidUserID`/`accountMismatch`)
-    /// still `fatalError`; everything else is logged and surfaced here for
-    /// the UI instead of crashing on sign-in. `openLocalStore` stays
-    /// non-throwing because `RootView` awaits it inline during startup.
+    /// The last `openLocalStore` failure (disk-full, corrupt file, migration
+    /// error — and, as of the complexity-reduction pass, integrity failures
+    /// too: an `invalidUserID`/`accountMismatch` bind leaves the store
+    /// cleanly unbound and surfaces here instead of crashing on sign-in; the
+    /// gate stays up with the error and the next sign-in retries the bind).
+    /// `openLocalStore` stays non-throwing because `RootView` awaits it
+    /// inline during startup.
     @Published var localStoreOpenError: Error?
     /// Strong reference to the holder that wires the API client's refresh hook
     /// back to `authService`. If this were not retained, the holder would
@@ -148,10 +150,9 @@ final class AppContainer: ObservableObject {
     /// awaited before any store operation (undo commitAll, seeding, first
     /// sync cycle) touches the file.
     ///
-    /// Only integrity failures (`invalidUserID`/`accountMismatch`) fail fast:
-    /// any other error (disk-full, corrupt file, migration failure) is
-    /// retryable, so it is logged and surfaced via `localStoreOpenError`
-    /// instead of crashing on sign-in.
+    /// Every failure (integrity or retryable) is logged and surfaced via
+    /// `localStoreOpenError` instead of crashing on sign-in: the store stays
+    /// cleanly unbound and the gate stays up with the error.
     ///
     /// Returns whether the store is bound afterwards. The caller (`RootView`
     /// `beginSignIn`) MUST check this: a failed open leaves the store cleanly
@@ -164,15 +165,9 @@ final class AppContainer: ObservableObject {
         do {
             try await localStore.openAccount(userID: userID)
             return true
-        } catch let error as LocalStore.LocalStoreError
-            where error == .invalidUserID || error == .accountMismatch {
-            // Binding failure (invalid id, cross-account file mismatch)
-            // is an integrity failure — fail fast rather than silently
-            // operating on the wrong file.
-            fatalError("LocalStore account binding failed: \(error)")
         } catch {
             localStoreOpenError = error
-            Self.logger.error("LocalStore account binding failed (retryable): \(String(describing: error), privacy: .public)")
+            Self.logger.error("LocalStore account binding failed: \(String(describing: error), privacy: .public)")
             return false
         }
     }

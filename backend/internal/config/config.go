@@ -20,6 +20,15 @@ type Config struct {
 	OTPMaxAttempts       int
 	OTPEmailTemplate     string
 	OTPEmailHTMLTemplate string
+	// Token TTLs (unset = compiled defaults; explicit values must be positive).
+	AccessTokenTTL  time.Duration
+	RefreshTokenTTL time.Duration
+	// HTTP timeouts (unset = compiled defaults; explicit values must be positive).
+	ReadTimeout     time.Duration
+	WriteTimeout    time.Duration
+	IdleTimeout     time.Duration
+	RequestTimeout  time.Duration
+	ShutdownTimeout time.Duration
 	// AWS SES (real mail sender). Required when EMAIL_BACKEND=ses.
 	AWSAccessKeyID     string
 	AWSSecretAccessKey string
@@ -59,7 +68,7 @@ func Load() (*Config, error) {
 		return nil, requiredFieldError("JWT_SECRET")
 	}
 	if len(cfg.JWTSecret) < 32 {
-		return nil, &configError{field: "JWT_SECRET", msg: "JWT_SECRET must be at least 32 bytes long"}
+		return nil, &configError{msg: "JWT_SECRET must be at least 32 bytes long"}
 	}
 
 	// Required: EMAIL_BACKEND
@@ -113,6 +122,32 @@ func Load() (*Config, error) {
 	cfg.OTPEmailTemplate = os.Getenv("OTP_EMAIL_TEMPLATE")
 	cfg.OTPEmailHTMLTemplate = os.Getenv("OTP_EMAIL_HTML_TEMPLATE")
 
+	// Optional: token TTLs (defaults 15m access / 168h refresh).
+	var err error
+	if cfg.AccessTokenTTL, err = durationOrDefault("ACCESS_TOKEN_TTL", 15*time.Minute); err != nil {
+		return nil, err
+	}
+	if cfg.RefreshTokenTTL, err = durationOrDefault("REFRESH_TOKEN_TTL", 7*24*time.Hour); err != nil {
+		return nil, err
+	}
+
+	// Optional: HTTP timeouts (defaults match the previous hardcoded values).
+	if cfg.ReadTimeout, err = durationOrDefault("HTTP_READ_TIMEOUT", 15*time.Second); err != nil {
+		return nil, err
+	}
+	if cfg.WriteTimeout, err = durationOrDefault("HTTP_WRITE_TIMEOUT", 30*time.Second); err != nil {
+		return nil, err
+	}
+	if cfg.IdleTimeout, err = durationOrDefault("HTTP_IDLE_TIMEOUT", 60*time.Second); err != nil {
+		return nil, err
+	}
+	if cfg.RequestTimeout, err = durationOrDefault("HTTP_REQUEST_TIMEOUT", 30*time.Second); err != nil {
+		return nil, err
+	}
+	if cfg.ShutdownTimeout, err = durationOrDefault("SHUTDOWN_TIMEOUT", 30*time.Second); err != nil {
+		return nil, err
+	}
+
 	// Optional: AWS SES. Required when EMAIL_BACKEND=ses.
 	cfg.AWSAccessKeyID = os.Getenv("AWS_ACCESS_KEY_ID")
 	cfg.AWSSecretAccessKey = os.Getenv("AWS_SECRET_ACCESS_KEY")
@@ -154,16 +189,35 @@ func Load() (*Config, error) {
 }
 
 func requiredFieldError(name string) error {
-	return &configError{field: name, msg: "required environment variable is not set: " + name}
+	return &configError{msg: "required environment variable is not set: " + name}
 }
 
 func invalidFieldError(name, expected string) error {
-	return &configError{field: name, msg: "invalid " + name + ": expected " + expected}
+	return &configError{msg: "invalid " + name + ": expected " + expected}
+}
+
+// durationOrDefault reads an optional duration env var, falling back to
+// def when unset. A present-but-unparseable or non-positive value is a
+// config error: zero disables net/http timeouts (rather than defaulting)
+// and negatives/zero break TTLs and shutdown deadlines, so fail fast here
+// instead of letting them reach http.Server or context.WithTimeout.
+func durationOrDefault(name string, def time.Duration) (time.Duration, error) {
+	raw := os.Getenv(name)
+	if raw == "" {
+		return def, nil
+	}
+	d, err := time.ParseDuration(raw)
+	if err != nil {
+		return 0, invalidFieldError(name, "valid duration (e.g. 15m)")
+	}
+	if d <= 0 {
+		return 0, invalidFieldError(name, "positive duration (e.g. 15m)")
+	}
+	return d, nil
 }
 
 type configError struct {
-	field string
-	msg   string
+	msg string
 }
 
 func (e *configError) Error() string { return e.msg }

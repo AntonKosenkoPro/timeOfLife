@@ -21,8 +21,8 @@ const (
 
 // OTPService handles one-time password generation and verification.
 type OTPService struct {
-	expiry      time.Duration
-	maxAttempts int
+	Expiry      time.Duration
+	MaxAttempts int
 }
 
 // NewOTPService creates a new OTPService with the given expiry and max attempts.
@@ -36,8 +36,8 @@ func NewOTPService(expiry time.Duration, maxAttempts int) *OTPService {
 		maxAttempts = DefaultOTPMaxAttempts
 	}
 	return &OTPService{
-		expiry:      expiry,
-		maxAttempts: maxAttempts,
+		Expiry:      expiry,
+		MaxAttempts: maxAttempts,
 	}
 }
 
@@ -59,16 +59,6 @@ func (s *OTPService) GenerateOTP() (code, hash string, err error) {
 func (s *OTPService) VerifyCode(plainCode, hash string) bool {
 	computed := otpHash(plainCode)
 	return subtle.ConstantTimeCompare([]byte(computed), []byte(hash)) == 1
-}
-
-// Expiry returns the configured OTP expiry duration.
-func (s *OTPService) Expiry() time.Duration {
-	return s.expiry
-}
-
-// MaxAttempts returns the configured maximum number of OTP verification attempts.
-func (s *OTPService) MaxAttempts() int {
-	return s.maxAttempts
 }
 
 func otpHash(code string) string {

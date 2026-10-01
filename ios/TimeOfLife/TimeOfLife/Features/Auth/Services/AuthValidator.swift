@@ -73,17 +73,17 @@ enum AuthValidator {
     static func unifiedEmailMessage(_ errors: [ValidationError]) -> String? {
         guard !errors.isEmpty else { return nil }
         if errors.contains(.emailEmpty) {
-            return NSLocalizedString("validation.emailEmpty", comment: "")
+            return L10n.validationEmailEmpty.text
         }
         var fragments: [String] = []
         if errors.contains(.emailInvalid) {
-            fragments.append(NSLocalizedString("validation.email.rule.invalid", comment: ""))
+            fragments.append(L10n.validationEmailRuleInvalid.text)
         }
         if errors.contains(.emailTooLong) {
-            fragments.append(NSLocalizedString("validation.email.rule.tooLong", comment: ""))
+            fragments.append(L10n.validationEmailRuleTooLong.text)
         }
         guard !fragments.isEmpty else { return nil }
-        return NSLocalizedString("validation.email.prefix", comment: "") + " "
+        return L10n.validationEmailPrefix.text + " "
             + joinFragments(fragments) + "."
     }
 
@@ -91,18 +91,18 @@ enum AuthValidator {
     static func unifiedOtpMessage(_ errors: [ValidationError]) -> String? {
         guard !errors.isEmpty else { return nil }
         if errors.contains(.otpEmpty) {
-            return NSLocalizedString("validation.otpEmpty", comment: "")
+            return L10n.validationOtpEmpty.text
         }
         // .otpInvalid only.
-        return NSLocalizedString("validation.otp.prefix", comment: "") + " "
-            + NSLocalizedString("validation.otp.rule.invalid", comment: "") + "."
+        return L10n.validationOtpPrefix.text + " "
+            + L10n.validationOtpRuleInvalid.text + "."
     }
 
     /// Joins fragments with a localized "and" before the last item:
     /// `["A"]` → "A"; `["A","B"]` → "A and B"; `["A","B","C"]` → "A, B and C".
     static func joinFragments(_ fragments: [String]) -> String {
         guard fragments.count > 1 else { return fragments.first ?? "" }
-        let and = NSLocalizedString("common.and", comment: "")
+        let and = L10n.commonAnd.text
         let head = fragments.dropLast().joined(separator: ", ")
         return "\(head) \(and) \(fragments.last!)"
     }

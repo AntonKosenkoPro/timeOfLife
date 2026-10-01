@@ -55,8 +55,8 @@ struct ListRow<Trailing: View>: View {
 
 #if DEBUG
 #Preview("List Row") {
-    ListRow(title: "Deep work", icon: "clock", subtitle: "2h 14m") {
-        Text("Today")
+    ListRow(title: L10n.categorySeedWork.text, icon: "clock", subtitle: HistoryViewModel.naturalDuration(8_040)) {
+        Text(L10n.historyDayToday.text)
             .font(.caption)
             .foregroundStyle(Theme.textSecondary)
     }

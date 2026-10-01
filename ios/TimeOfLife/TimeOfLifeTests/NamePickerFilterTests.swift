@@ -5,11 +5,11 @@ import Foundation
 @Suite("NamePickerFilter")
 struct NamePickerFilterTests {
 
-    private var recents: [NamePickerSuggestion] {
+    private var recents: [ExactName] {
         [
-            NamePickerSuggestion(text: "Gymnastics", categoryIDs: [], firstCategoryID: nil),
-            NamePickerSuggestion(text: "Gym", categoryIDs: ["c1"], firstCategoryID: "c1"),
-            NamePickerSuggestion(text: "GYM", categoryIDs: ["c2"], firstCategoryID: "c2")
+            ExactName(text: "Gymnastics", categoryIDs: [], firstCategoryID: nil),
+            ExactName(text: "Gym", categoryIDs: ["c1"], firstCategoryID: "c1"),
+            ExactName(text: "GYM", categoryIDs: ["c2"], firstCategoryID: "c2")
         ]
     }
 
@@ -43,7 +43,7 @@ struct NamePickerFilterTests {
 
     @Test("typing a lone existing name narrows to its row, not the new-name hint")
     func loneExactMatchListsItself() {
-        let solo = [NamePickerSuggestion(text: "Gym", categoryIDs: ["c1"], firstCategoryID: "c1")]
+        let solo = [ExactName(text: "Gym", categoryIDs: ["c1"], firstCategoryID: "c1")]
         #expect(NamePickerFilter.suggestions(for: "Gym", in: solo).map(\.text) == ["Gym"])
     }
 
