@@ -60,7 +60,6 @@
 "timer.start" = "Старт";
 "timer.stop" = "Стоп";
 "timer.stopHint" = "Останавливает таймер и сохраняет запись";
-"timer.signOut" = "Выйти";
 "timer.idlePrompt" = "Введите название активности, чтобы начать";
 "timer.namePlaceholder" = "Чем вы сейчас заняты?";
 "timer.saved" = "Запись сохранена";
@@ -81,6 +80,7 @@
 "profile.title" = "Профиль";
 "profile.done" = "Готово";
 "profile.account" = "Аккаунт";
+"profile.signOut" = "Выйти";
 "profile.syncNow" = "Синхронизировать";
 "profile.syncing" = "Синхронизация…";
 "profile.lastSynced" = "Синхронизировано: %@";

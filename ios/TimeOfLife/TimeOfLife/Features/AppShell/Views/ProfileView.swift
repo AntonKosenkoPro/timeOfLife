@@ -28,6 +28,12 @@ struct ProfileView: View {
 
     private static let logger = Logger(subsystem: "com.antonkosenko.timeoflifeapp", category: "profile")
 
+    /// Sign-out row contract (fix-profile-signout-row): shared `ListRow`
+    /// geometry with a leading icon + danger tint, mirroring Erase local data.
+    /// Pinned by `ProfileSignOutRowTests`; keep the icon + id in sync there.
+    static let signOutIcon = "rectangle.portrait.and.arrow.right"
+    static let signOutAccessibilityId = "ProfileSignOutButton"
+
     var body: some View {
         NavigationStack {
             List {
@@ -81,10 +87,16 @@ struct ProfileView: View {
             // precedent for the 0.6 value).
             .opacity(sync.status == .syncing ? 0.6 : 1)
             .accessibilityIdentifier("ProfileSyncNowButton")
-            Button(L10n.timerSignOut.text, role: .destructive) {
+            Button(role: .destructive) {
                 Task { await container.authService.logout() }
+            } label: {
+                ListRow(
+                    title: L10n.profileSignOut.text,
+                    icon: Self.signOutIcon,
+                    tint: Theme.danger
+                )
             }
-            .accessibilityIdentifier("ProfileSignOutButton")
+            .accessibilityIdentifier(Self.signOutAccessibilityId)
         }
     }
 
