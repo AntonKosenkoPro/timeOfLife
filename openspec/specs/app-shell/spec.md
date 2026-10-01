@@ -29,7 +29,7 @@ The app SHALL provide Track, History, and Insights as its primary destinations, 
 - **THEN** the auth flow covers the full screen with no shell visible behind it, and there is no way to dismiss it into the app without signing in
 
 ### Requirement: Profile owns secondary destinations
-The app SHALL expose account, sync, category management, and destructive data controls from a profile destination rather than as a primary tab. The profile destination SHALL be signed-in-only: it SHALL NOT present an Enable Sync row or auth-flow sheet, and the auth flow SHALL NOT be presented from Profile as a sheet. Because the launch auth gate guarantees a signed-in user, the account and sync state shown in Profile SHALL reflect the active signed-in account at all times. The profile destination SHALL NOT expose integrations, export, appearance, or data-and-privacy placeholder rows, and activity management SHALL NOT appear in Profile (no activity catalog exists).
+The app SHALL expose account, sync, category management, and destructive data controls from a profile destination rather than as a primary tab. The profile destination SHALL be signed-in-only: it SHALL NOT present an Enable Sync row or auth-flow sheet, and the auth flow SHALL NOT be presented from Profile as a sheet. Because the launch auth gate guarantees a signed-in user, the account and sync state shown in Profile SHALL reflect the active signed-in account at all times. The profile destination SHALL NOT expose integrations, export, appearance, or data-and-privacy placeholder rows, and activity management SHALL NOT appear in Profile (no activity catalog exists). Destructive rows in Profile (Sign Out, Erase local data) SHALL share one list-row visual contract: the shared list row geometry with a leading icon and the danger tint.
 
 #### Scenario: Open profile while signed out
 - **WHEN** a user without an account attempts to reach the profile destination
@@ -58,6 +58,10 @@ The app SHALL expose account, sync, category management, and destructive data co
 #### Scenario: No placeholder rows
 - **WHEN** the user opens Profile
 - **THEN** no Integrations, Export, Appearance, or Data & Privacy rows are shown, and every visible row is tappable or a live status
+
+#### Scenario: Sign out row parity
+- **WHEN** the user opens Profile
+- **THEN** Sign Out renders with the same list-row geometry, leading icon, and danger tint as Erase local data, keeps the `ProfileSignOutButton` accessibility identifier, and tapping it signs the user out with no confirmation
 ### Requirement: Running timer remains globally accessible
 The app SHALL keep an active timer visible and directly stoppable while History or Insights is selected. The compact timer SHALL float above the tab bar with a visible gap — never overlapping or touching it.
 
