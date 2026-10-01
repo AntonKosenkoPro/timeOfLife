@@ -1,19 +1,19 @@
 ## MODIFIED Requirements
 
 ### Requirement: Manual sync and status visibility
-The system SHALL expose a sync action and a sync status ("Synced successfully" with a relative-age subtitle, "Syncing…", or an error state) in Profile, visible only when signed in. The action lives as a trailing icon button on the status row itself (no separate "Sync now" row) and calls the same drain+pull path as the automatic triggers. While a sync is in progress, the trailing button is absent and the status row SHALL be the single "Syncing…" surface — never two. A failed cycle SHALL surface its captured error message alongside the generic error state (secret-free: codes and server messages only). Status views SHALL subscribe to the sync status directly rather than through a non-publishing intermediary, so the display follows the cycle on its own. The idle status SHALL render a "Synced successfully" title with an age subtitle. The subtitle SHALL be minute-bucketed with no seconds precision: under a minute, whole minutes 1–59, whole hours 1–23, whole days 24 hours and up with no upper cap (never weeks, months, or years); a timestamp in the future SHALL render as under a minute. The row SHALL re-render its subtitle on its own as time passes while Profile is visible, with no user action. The subtitle SHALL be correctly localized in English + Russian with correct plural forms: quantity words MAY be rendered by the system quantity formatter (which owns pluralization in every locale), and all connective words SHALL come from localizable strings — no system relative-time formatter with automatic unit choice and tense.
+The system SHALL expose a sync action and a sync status ("Synced successfully" with a relative-age subtitle, "Syncing…", or an error state) in Profile, visible only when signed in. The action lives as a trailing icon button on the status row itself (no separate "Sync now" row) and calls the same drain+pull path as the automatic triggers. While a sync is in progress, the trailing button stays in place disabled and the status row SHALL be the single "Syncing…" surface — never two. A failed cycle SHALL surface its captured error message alongside the generic error state (secret-free: codes and server messages only). Status views SHALL subscribe to the sync status directly rather than through a non-publishing intermediary, so the display follows the cycle on its own. The idle status SHALL render a "Synced successfully" title with an age subtitle. The subtitle SHALL be minute-bucketed with no seconds precision: under a minute, whole minutes 1–59, whole hours 1–23, whole days 24 hours and up with no upper cap (never weeks, months, or years); a timestamp in the future SHALL render as under a minute. The row SHALL re-render its subtitle on its own as time passes while Profile is visible, with no user action. The subtitle SHALL be correctly localized in English + Russian with correct plural forms: quantity words MAY be rendered by the system quantity formatter (which owns pluralization in every locale), and all connective words SHALL come from localizable strings — no system relative-time formatter with automatic unit choice and tense.
 
 #### Scenario: Status display
 - **WHEN** the user views Profile while signed in
-- **THEN** the sync status row is visible with a trailing sync button carrying the same action; while a sync is in progress, the button is absent and exactly one "Syncing…" indicator is shown
+- **THEN** the sync status row is visible with a trailing sync button carrying the same action; while a sync is in progress, the button stays in place disabled and exactly one "Syncing…" indicator is shown
 
 #### Scenario: Status follows the cycle without manual refresh
 - **WHEN** a sync cycle completes (or fails) while Profile is visible
 - **THEN** the status row and button state update on their own — no navigation or re-render trigger needed
 
 #### Scenario: Status row keeps its height across states
-- **WHEN** the user taps "Sync now" with a previous successful sync on record
-- **THEN** the row stays two lines through syncing (previous age as the subtitle) into the new idle age — the section below never jumps
+- **WHEN** the user taps the trailing sync button with a previous successful sync on record
+- **THEN** the row keeps one stable structure (same view types, button always present, previous age as the subtitle while syncing) into the new idle age — the section below never jumps
 
 #### Scenario: Error state
 - **WHEN** a sync cycle fails (network error, 5xx)

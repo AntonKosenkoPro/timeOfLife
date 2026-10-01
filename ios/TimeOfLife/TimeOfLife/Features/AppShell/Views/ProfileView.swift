@@ -100,44 +100,48 @@ struct ProfileView: View {
         }
     }
 
+    // Single TimelineView above the switch (fix-sync-status-row): the row must
+    // keep one stable view structure across idle/syncing/error — swapping view
+    // types or adding/removing the trailing button re-lays-out the section
+    // and the screen jumps on every tap of Sync now.
     @ViewBuilder private var syncStatusRow: some View {
-        switch sync.status {
-        case .inactive:
-            EmptyView()
-        case .syncing:
-            ListRow(
-                title: L10n.profileSyncing.text,
-                icon: "arrow.triangle.2.circlepath",
-                subtitle: rememberedAgeSubtitle(now: Date())
-            )
-        case let .idle(date):
-            // Minute-cadence refresh scoped to this row (fix-sync-status-row):
-            // `sync.status` publishes once per cycle, so without the timeline
-            // the subtitle would freeze until the next event.
-            TimelineView(.periodic(from: Date(), by: 60)) { context in
+        TimelineView(.periodic(from: Date(), by: 60)) { context in
+            switch sync.status {
+            case .inactive:
+                EmptyView()
+            case .syncing:
+                ListRow(
+                    title: L10n.profileSyncing.text,
+                    icon: "arrow.triangle.2.circlepath",
+                    subtitle: rememberedAgeSubtitle(now: context.date)
+                ) {
+                    syncButton(disabled: true)
+                }
+            case let .idle(date):
                 ListRow(
                     title: L10n.profileSyncedSuccessfully.text,
                     icon: "checkmark.icloud",
                     subtitle: Self.ageSubtitle(since: date, now: context.date)
                 ) {
-                    syncButton
+                    syncButton(disabled: false)
                 }
-            }
-        case let .error(message):
-            ListRow(
-                title: L10n.profileSyncError.text,
-                icon: "exclamationmark.icloud",
-                subtitle: message.isEmpty ? rememberedAgeSubtitle(now: Date()) : message
-            ) {
-                syncButton
+            case let .error(message):
+                ListRow(
+                    title: L10n.profileSyncError.text,
+                    icon: "exclamationmark.icloud",
+                    subtitle: message.isEmpty ? rememberedAgeSubtitle(now: context.date) : message
+                ) {
+                    syncButton(disabled: false)
+                }
             }
         }
     }
 
     /// Trailing sync action on the status row (fix-sync-status-row): same
-    /// call and automation id as the retired separate row, absent while
-    /// syncing. VoiceOver label reuses `profile.syncNow` — no new strings.
-    private var syncButton: some View {
+    /// call and automation id as the retired separate row. Present (disabled)
+    /// while syncing so the row structure never changes between states.
+    /// VoiceOver label reuses `profile.syncNow` — no new strings.
+    private func syncButton(disabled: Bool) -> some View {
         Button {
             Task { await sync.syncNow(userID: sessionUserID) }
         } label: {
@@ -146,6 +150,10 @@ struct ProfileView: View {
                 .foregroundStyle(Theme.accentPrimary)
                 .frame(minWidth: Theme.minTapArea, minHeight: Theme.minTapArea)
         }
+        .disabled(disabled)
+        // `.disabled` alone does not restyle a custom label — without this
+        // the button looks tappable while syncing (WelcomeView precedent).
+        .opacity(disabled ? 0.6 : 1)
         .accessibilityIdentifier("ProfileSyncNowButton")
         .accessibilityLabel(L10n.profileSyncNow.text)
     }
