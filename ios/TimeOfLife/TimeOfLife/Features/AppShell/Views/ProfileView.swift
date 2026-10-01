@@ -25,6 +25,10 @@ struct ProfileView: View {
     /// flow stays signed in for a retry instead of logging out and
     /// reporting success.
     @State private var eraseErrorMessage: String?
+    /// Last successful-sync date (fix-sync-status-row): feeds the age
+    /// subtitle under "Syncing…" so the status row keeps its two-line height
+    /// across states instead of jumping. Nil before the first sync.
+    @State private var lastIdleDate: Date?
 
     private static let logger = Logger(subsystem: "com.antonkosenko.timeoflifeapp", category: "profile")
 
@@ -98,6 +102,13 @@ struct ProfileView: View {
             }
             .accessibilityIdentifier(Self.signOutAccessibilityId)
         }
+        // Remember the last idle date so the syncing/error branches can keep
+        // the row's two-line height with real content (no layout jump).
+        .onChange(of: sync.status, initial: true) { _, status in
+            if case let .idle(date) = status {
+                lastIdleDate = date
+            }
+        }
     }
 
     @ViewBuilder private var syncStatusRow: some View {
@@ -105,30 +116,44 @@ struct ProfileView: View {
         case .inactive:
             EmptyView()
         case .syncing:
-            ListRow(title: L10n.profileSyncing.text, icon: "arrow.triangle.2.circlepath")
+            ListRow(
+                title: L10n.profileSyncing.text,
+                icon: "arrow.triangle.2.circlepath",
+                subtitle: rememberedAgeSubtitle(now: Date())
+            )
         case let .idle(date):
             // Minute-cadence refresh scoped to this row (fix-sync-status-row):
             // `sync.status` publishes once per cycle, so without the timeline
-            // the "Last synced" label would freeze until the next event.
+            // the subtitle would freeze until the next event.
             TimelineView(.periodic(from: Date(), by: 60)) { context in
                 ListRow(
                     title: L10n.profileSyncedSuccessfully.text,
                     icon: "checkmark.icloud",
-                    subtitle: SyncRelativeTime.subtitle(
-                        since: date,
-                        now: context.date,
-                        ago: L10n.profileLastSyncedAgo.text,
-                        justNow: L10n.profileLastSyncedJustNow.text
-                    )
+                    subtitle: Self.ageSubtitle(since: date, now: context.date)
                 )
             }
         case let .error(message):
             ListRow(
                 title: L10n.profileSyncError.text,
                 icon: "exclamationmark.icloud",
-                subtitle: message.isEmpty ? nil : message
+                subtitle: message.isEmpty ? rememberedAgeSubtitle(now: Date()) : message
             )
         }
+    }
+
+    /// Age subtitle from a known date ("1 minute ago", "Меньше минуты назад").
+    private static func ageSubtitle(since date: Date, now: Date) -> String {
+        SyncRelativeTime.subtitle(
+            since: date,
+            now: now,
+            ago: L10n.profileLastSyncedAgo.text,
+            justNow: L10n.profileLastSyncedJustNow.text
+        )
+    }
+
+    /// Age of the last successful sync, if any (nil before the first sync).
+    private func rememberedAgeSubtitle(now: Date) -> String? {
+        lastIdleDate.map { Self.ageSubtitle(since: $0, now: now) }
     }
 
     // MARK: - On This Device

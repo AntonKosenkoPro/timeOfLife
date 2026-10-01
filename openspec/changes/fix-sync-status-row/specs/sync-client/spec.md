@@ -11,6 +11,10 @@ The system SHALL expose a "Sync now" action and a sync status ("Synced successfu
 - **WHEN** a sync cycle completes (or fails) while Profile is visible
 - **THEN** the status row and button state update on their own — no navigation or re-render trigger needed
 
+#### Scenario: Status row keeps its height across states
+- **WHEN** the user taps "Sync now" with a previous successful sync on record
+- **THEN** the row stays two lines through syncing (previous age as the subtitle) into the new idle age — the section below never jumps
+
 #### Scenario: Error state
 - **WHEN** a sync cycle fails (network error, 5xx)
 - **THEN** the status shows an error with its captured message and the "Sync now" button remains enabled to allow retry

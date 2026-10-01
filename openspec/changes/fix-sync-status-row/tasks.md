@@ -7,6 +7,7 @@
 
 ## 2. Verify
 
+- [x] 1.5 Keep status-row height stable: remember last idle date in view `@State`, show its age as subtitle under "Syncing…" (fallback under empty-message error)
 - [x] 2.1 Run `swiftlint lint --strict`, `xcodebuild -scheme TimeOfLife -destination '<available simulator>'` build + full `test` green (one xcodebuild at a time; `LocalizationTests` count unchanged at 148: -1 wrapper, +1 title)
 - [ ] 2.2 Manual smoke: keep Profile open across a minute boundary (label advances), ru locale buckets read correctly, device-clock-ahead shows under-a-minute, syncing/error rows unchanged
 - [x] 2.3 Run `openspec validate --all --strict` green; re-check FURPS Timetracking F5 row for conflicts
