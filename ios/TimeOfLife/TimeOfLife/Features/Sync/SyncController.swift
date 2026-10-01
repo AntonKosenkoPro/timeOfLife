@@ -168,10 +168,17 @@ final class SyncController: ObservableObject {
         defer { cycleEndWaiters.removeValue(forKey: id) }
         await withTaskGroup(of: Void.self) { group in
             group.addTask { [weak self] in
+                // Strongify once: nested closures below must capture this
+                // local (a let), never the outer weak capture itself —
+                // re-capturing weak self inside onCancel is a captured-var
+                // reference and fails in Swift 6 language mode.
+                guard let controller = self else { return }
                 await withTaskCancellationHandler {
-                    await self?.suspendUntilCycleEnd(id: id)
+                    await controller.suspendUntilCycleEnd(id: id)
                 } onCancel: {
-                    Task { [weak self] in await self?.cancelCycleWaiter(id: id) }
+                    Task { [controller, id] in
+                        await controller.cancelCycleWaiter(id: id)
+                    }
                 }
             }
             group.addTask {
