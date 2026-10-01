@@ -6,6 +6,24 @@ import (
 	"time"
 )
 
+// TestUpdateEntry_EmptyStringsAreOmitted pins the PATCH empty-string parity:
+// started_at:"" and ended_at:"" both mean "field omitted" (matching the
+// create path), not a 422 and not a zero-time write.
+func TestUpdateEntry_EmptyStringsAreOmitted(t *testing.T) {
+	h, _, _, tok := newCatalogHandler(t)
+	entryID := newEntry(t, h, tok)
+	// Bump past SQLite's second-precision updated_at (follow-up #92).
+	fresh := time.Now().Add(2 * time.Second).UTC().Format(time.RFC3339Nano)
+	w := serve(h, jsonReq(t, "PATCH", "/api/v1/entries/"+entryID, tok, map[string]any{
+		"started_at": "",
+		"ended_at":   "",
+		"updated_at": fresh,
+	}))
+	if w.Code != http.StatusOK {
+		t.Fatalf("empty strings: expected 200 (omitted), got %d (%s)", w.Code, w.Body.String())
+	}
+}
+
 // TestListEntries_CursorFollowThrough pins pagination: page 1 returns the
 // newest items plus a cursor, page 2 resumes strictly below it, and the last
 // page carries no cursor.
@@ -128,7 +146,7 @@ func TestEntries_Tombstone404(t *testing.T) {
 // TestCategory_StaleUpdate409 pins the 409 conflict mapping: a stale
 // updated_at is rejected with conflict and the server version in details.
 //
-// NOTE (follow-up candidate, real bug — NOT fixed here): the same stale
+// NOTE (follow-up #92, real bug — NOT fixed here): the same stale
 // write on *entries* deadlocks the SQLite store instead of returning
 // ErrConflict. UpdateEntry holds its tx (single-connection pool) while
 // re-reading the row via the pool (sqlite_catalog.go:666), so the read
@@ -179,9 +197,11 @@ func TestEntries_Create422VsMergePrune(t *testing.T) {
 	}
 
 	entryID := newEntry(t, h, tok)
-	// Bump past SQLite's second-precision updated_at: an updated_at within
-	// the same second truncates equal and takes the stale path (which
-	// deadlocks — see the NOTE on TestCategory_StaleUpdate409).
+	// Bump past SQLite's second-precision updated_at (follow-up #92): an
+	// updated_at within the same second truncates equal and takes the stale
+	// path (which deadlocks on entries — see the NOTE on
+	// TestCategory_StaleUpdate409), so the bump keeps this merge-path test
+	// off the store bug it is not testing.
 	fresh := time.Now().Add(2 * time.Second).UTC().Format(time.RFC3339Nano)
 	wu := serve(h, jsonReq(t, "PATCH", "/api/v1/entries/"+entryID, tok, map[string]any{
 		"category_ids": []string{v7()}, // unknown → pruned, merge succeeds
@@ -199,9 +219,10 @@ func TestEntries_Create422VsMergePrune(t *testing.T) {
 
 // TestCategories_ModifiedSinceIgnored pins the ACTUAL behavior: the handler
 // ignores ?modified_since= on GET /categories (200, full list) even though
-// GET /entries honors it. The spec likewise does not document the parameter
-// here (see contract pins). Follow-up candidate: implement the filter or
-// remove it from clients.
+// GET /entries honors it, the spec likewise does not document the parameter
+// here (see contract pins), and the iOS client never sends it for categories
+// (fetchCategories is a plain full pull). Follow-up #94: implement the filter
+// or keep full-pull by decision.
 func TestCategories_ModifiedSinceIgnored(t *testing.T) {
 	h, _, _, tok := newCatalogHandler(t)
 	createCategoryHelper(t, h, tok, "Gym", "dumbbell")

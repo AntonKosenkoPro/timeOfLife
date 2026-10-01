@@ -120,9 +120,12 @@ type errorResponse struct {
 var emailRegex = regexp.MustCompile(`^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$`)
 
 // validateEmail reports whether email is an acceptable account identifier.
-// net/mail parses the address structure (RFC 5322); the additional length
-// and dot-TLD rules preserve the previous accept set (ASCII mailbox, dotted
-// domain with a 2+ letter TLD, max 254 chars).
+// net/mail parses the address structure (RFC 5322); the legacy regex then
+// applies on top (ASCII mailbox, dotted domain with a 2+ letter TLD, max 254
+// chars). NOTE: the pair is an intersection — strictly narrower than the old
+// regex alone for inputs like ".a@example.com" or "a..b@example.com", which
+// now return 400. Pre-existing accounts with such addresses would be locked
+// out; confirmation tracked in #95.
 func validateEmail(email string) bool {
 	if email == "" || len(email) > 254 {
 		return false

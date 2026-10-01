@@ -71,7 +71,14 @@ type rawOperation struct {
 }
 
 type rawParameter struct {
-	Name string `yaml:"name"`
+	Name   string         `yaml:"name"`
+	Schema rawParamSchema `yaml:"schema"`
+}
+
+type rawParamSchema struct {
+	Minimum *int `yaml:"minimum"`
+	Maximum *int `yaml:"maximum"`
+	Default int  `yaml:"default"`
 }
 
 type rawResponse struct {
@@ -429,9 +436,15 @@ func TestSpec_RecentsEndpointDocumented(t *testing.T) {
 		}
 	}
 	found := false
-	for _, p := range get.Parameters {
-		if p.Name == "limit" {
+	for i := range get.Parameters {
+		if get.Parameters[i].Name == "limit" {
 			found = true
+			limitParam := &get.Parameters[i]
+			if limitParam.Schema.Minimum == nil || *limitParam.Schema.Minimum != 1 ||
+				limitParam.Schema.Maximum == nil || *limitParam.Schema.Maximum != 20 ||
+				limitParam.Schema.Default != 6 {
+				t.Errorf("recents limit must pin minimum 1 / maximum 20 / default 6, got %+v", limitParam.Schema)
+			}
 		}
 	}
 	if !found {
@@ -483,7 +496,8 @@ func TestSpec_Create422VsMergePrune(t *testing.T) {
 		t.Fatalf("EntryUpdate.category_ids has unexpected shape %T", rawIDs)
 	}
 	desc, _ := prop["description"].(string)
-	if !strings.Contains(strings.ToLower(desc), "prun") {
-		t.Errorf("EntryUpdate.category_ids must document pruning, got %q", desc)
+	lowered := strings.ToLower(desc)
+	if !strings.Contains(lowered, "pruned") || !strings.Contains(lowered, "unknown") {
+		t.Errorf("EntryUpdate.category_ids must document pruning of unknown ids, got %q", desc)
 	}
 }

@@ -20,10 +20,10 @@ type Config struct {
 	OTPMaxAttempts       int
 	OTPEmailTemplate     string
 	OTPEmailHTMLTemplate string
-	// Token TTLs (zero = compiled defaults below).
+	// Token TTLs (unset = compiled defaults; explicit values must be positive).
 	AccessTokenTTL  time.Duration
 	RefreshTokenTTL time.Duration
-	// HTTP timeouts (zero = compiled defaults below).
+	// HTTP timeouts (unset = compiled defaults; explicit values must be positive).
 	ReadTimeout     time.Duration
 	WriteTimeout    time.Duration
 	IdleTimeout     time.Duration
@@ -197,7 +197,10 @@ func invalidFieldError(name, expected string) error {
 }
 
 // durationOrDefault reads an optional duration env var, falling back to
-// def when unset. A present-but-unparseable value is a config error.
+// def when unset. A present-but-unparseable or non-positive value is a
+// config error: zero disables net/http timeouts (rather than defaulting)
+// and negatives/zero break TTLs and shutdown deadlines, so fail fast here
+// instead of letting them reach http.Server or context.WithTimeout.
 func durationOrDefault(name string, def time.Duration) (time.Duration, error) {
 	raw := os.Getenv(name)
 	if raw == "" {
@@ -206,6 +209,9 @@ func durationOrDefault(name string, def time.Duration) (time.Duration, error) {
 	d, err := time.ParseDuration(raw)
 	if err != nil {
 		return 0, invalidFieldError(name, "valid duration (e.g. 15m)")
+	}
+	if d <= 0 {
+		return 0, invalidFieldError(name, "positive duration (e.g. 15m)")
 	}
 	return d, nil
 }

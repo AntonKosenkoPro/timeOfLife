@@ -117,11 +117,14 @@ func parseRFC3339(s string) (time.Time, bool) {
 // Set=true with Valid=false sets NULL, Set=true with Valid=true sets Value.
 // Bad=true marks a present-but-unparseable value so the validator can emit a
 // 422 (UnmarshalJSON deliberately never errors, so a bad timestamp does not
-// surface as a 400 invalid_body). It maps directly onto db.NullableTime.
+// surface as a 400 invalid_body). Empty=true marks a present-but-empty string,
+// which handlers normalize to unset (matching emptyToNil for *string fields,
+// so "" means "omitted" everywhere). It maps directly onto db.NullableTime.
 type optTime struct {
 	Set   bool
 	Valid bool
 	Bad   bool
+	Empty bool
 	Value time.Time
 }
 
@@ -136,6 +139,10 @@ func (o *optTime) UnmarshalJSON(b []byte) error {
 	}
 	var s string
 	if err := json.Unmarshal(b, &s); err == nil {
+		if s == "" {
+			o.Empty = true
+			return nil
+		}
 		if t, ok := parseRFC3339(s); ok {
 			o.Valid = true
 			o.Value = t

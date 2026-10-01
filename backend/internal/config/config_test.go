@@ -111,24 +111,28 @@ func TestConfig_Load_Branches(t *testing.T) {
 	})
 
 	t.Run("invalid values", func(t *testing.T) {
-		cases := map[string]string{
-			"PORT":                 "notaport",
-			"OTP_EXPIRY":           "notaduration",
-			"OTP_MAX_ATTEMPTS":     "0",
-			"EMAIL_BACKEND":        "smtp",
-			"ACCESS_TOKEN_TTL":     "soon",
-			"REFRESH_TOKEN_TTL":    "-5",
-			"HTTP_READ_TIMEOUT":    "huge",
-			"HTTP_WRITE_TIMEOUT":   "x",
-			"HTTP_IDLE_TIMEOUT":    "x",
-			"HTTP_REQUEST_TIMEOUT": "x",
-			"SHUTDOWN_TIMEOUT":     "x",
+		cases := []struct{ key, bad string }{
+			{"PORT", "notaport"},
+			{"OTP_EXPIRY", "notaduration"},
+			{"OTP_MAX_ATTEMPTS", "0"},
+			{"EMAIL_BACKEND", "smtp"},
+			{"ACCESS_TOKEN_TTL", "soon"},
+			{"ACCESS_TOKEN_TTL", "0s"},
+			{"REFRESH_TOKEN_TTL", "-5"},
+			{"REFRESH_TOKEN_TTL", "-1m"},
+			{"HTTP_READ_TIMEOUT", "huge"},
+			{"HTTP_READ_TIMEOUT", "0"},
+			{"HTTP_WRITE_TIMEOUT", "x"},
+			{"HTTP_IDLE_TIMEOUT", "x"},
+			{"HTTP_REQUEST_TIMEOUT", "x"},
+			{"SHUTDOWN_TIMEOUT", "x"},
+			{"SHUTDOWN_TIMEOUT", "-1m"},
 		}
-		for key, bad := range cases {
+		for _, c := range cases {
 			setRequired(t)
-			t.Setenv(key, bad)
+			t.Setenv(c.key, c.bad)
 			if _, err := Load(); err == nil {
-				t.Errorf("expected error for %s=%q, got nil", key, bad)
+				t.Errorf("expected error for %s=%q, got nil", c.key, c.bad)
 			}
 		}
 	})

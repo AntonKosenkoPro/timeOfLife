@@ -238,6 +238,11 @@ func (h *Handler) UpdateEntry(w http.ResponseWriter, r *http.Request) {
 	if req.StartedAt != nil {
 		validateTimestamp("started_at", *req.StartedAt, false, errs)
 	}
+	// Empty-string means omitted, matching started_at above and the create
+	// path — without this, ended_at:"" 422s while started_at:"" is ignored.
+	if req.EndedAt.Empty {
+		req.EndedAt = optTime{}
+	}
 	if req.EndedAt.Set && req.EndedAt.Bad {
 		errs.add("ended_at", "ended_at must be a valid RFC 3339 timestamp")
 	}

@@ -768,10 +768,11 @@ paths:
         Returns up to `limit` entries (default 6, max 20) — the newest entry
         per exact `activity_text` (`GROUP BY activity_text`, newest
         `started_at` wins per group, `id DESC` tiebreak), newest-first. Each
-        item is a full entry with its own ordered category tags, so a fresh
-        device can render Recents (exact text + first-position category icon)
-        before its first full entry pull. Identity is byte-exact trimmed text,
-        case-sensitive (`Gym` ≠ `GYM`).
+        item is a full entry with its own ordered category tags so a client
+        can render Recents before its first full entry pull (the iOS app
+        computes Recents locally from the synced entries today; relay
+        adoption on the client ships in a follow-up). Identity is byte-exact
+        trimmed text, case-sensitive (`Gym` ≠ `GYM`).
       tags:
         - Entries
       security:
@@ -1448,11 +1449,12 @@ components:
         started_at:
           type: string
           format: date-time
+          description: Replacement start time; an empty string means omitted (field left unchanged).
         ended_at:
           type: string
           format: date-time
           nullable: true
-          description: Setting this stops a running timer; `duration_seconds` is recomputed.
+          description: Setting this stops a running timer; `duration_seconds` is recomputed. An empty string means omitted (field left unchanged).
         updated_at:
           type: string
           format: date-time
