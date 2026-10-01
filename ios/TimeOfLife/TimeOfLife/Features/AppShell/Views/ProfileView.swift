@@ -149,7 +149,9 @@ struct ProfileView: View {
                 .font(.body)
                 .foregroundStyle(Theme.accentPrimary)
                 .frame(minWidth: Theme.minTapArea, minHeight: Theme.minTapArea)
+                .accessibilityHidden(true)
         }
+        .buttonStyle(.plain)
         .disabled(disabled)
         // `.disabled` alone does not restyle a custom label — without this
         // the button looks tappable while syncing (WelcomeView precedent).
