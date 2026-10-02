@@ -714,3 +714,61 @@ func TestStore_CreateCategory_ConcurrentNameCollision(t *testing.T) {
 		t.Errorf("expected exactly 1 created category, got %d", createdCount)
 	}
 }
+
+// Issue #92: same-second stale UpdateEntry must return ErrConflict promptly,
+// never hang on the single-conn SQLite pool. The timeout guard turns a
+// regression (deadlock) into a test failure instead of blocking the suite.
+func TestStore_UpdateEntry_SameSecondConflictsWithoutHang(t *testing.T) {
+	store := setupTestStore(t)
+	uid := newTestUser(t, store, "stale-entry@example.com")
+	base := time.Date(2026, 7, 27, 9, 0, 0, 0, time.UTC)
+	e := mustCreateEntry(t, store, uid, "Gym", nil, base)
+
+	type result struct {
+		err error
+	}
+	done := make(chan result, 1)
+	go func() {
+		_, err := store.UpdateEntry(context.Background(), uid, e.ID, EntryPatch{
+			ActivityText: ptr("Gym updated"),
+			UpdatedAt:    e.UpdatedAt,
+		})
+		done <- result{err: err}
+	}()
+	select {
+	case r := <-done:
+		if !errors.Is(r.err, ErrConflict) {
+			t.Fatalf("expected ErrConflict on identical updated_at, got %v", r.err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("UpdateEntry with identical updated_at hung (issue #92)")
+	}
+}
+
+// Issue #92 twin: same-second stale UpdateCategory must return ErrConflict
+// promptly, never hang.
+func TestStore_UpdateCategory_SameSecondConflictsWithoutHang(t *testing.T) {
+	store := setupTestStore(t)
+	uid := newTestUser(t, store, "stale-cat@example.com")
+	c := mustCreateCategory(t, store, uid, "Sport")
+
+	type result struct {
+		err error
+	}
+	done := make(chan result, 1)
+	go func() {
+		_, err := store.UpdateCategory(context.Background(), uid, c.ID, CategoryPatch{
+			Name:      ptr("Sport updated"),
+			UpdatedAt: c.UpdatedAt,
+		})
+		done <- result{err: err}
+	}()
+	select {
+	case r := <-done:
+		if !errors.Is(r.err, ErrConflict) {
+			t.Fatalf("expected ErrConflict on identical updated_at, got %v", r.err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("UpdateCategory with identical updated_at hung (issue #92)")
+	}
+}

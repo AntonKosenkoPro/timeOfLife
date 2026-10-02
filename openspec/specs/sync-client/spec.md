@@ -42,7 +42,7 @@ The sync client SHALL pull only records modified since the last successful pull,
 - **THEN** the cursor is unchanged and no local updates are applied
 
 ### Requirement: Last-write-wins conflict resolution
-On pull, the sync client SHALL apply a server record to the local database only if `server.updated_at > local.updated_at` for the same record id; otherwise the local version is kept. On push, a 409 `conflict` response SHALL cause the client to adopt the server's version (keep-latest) and clear the outbox row. There SHALL be no cross-record name-identity remapping: equal or similar texts with different ids are independent records.
+On pull, the sync client SHALL apply a server record to the local database only if `server.updated_at > local.updated_at` for the same record id; otherwise the local version is kept. On push, a 409 `conflict` response SHALL cause the client to adopt the server's version (keep-latest) and clear the outbox row. There SHALL be no cross-record name-identity remapping: equal or similar texts with different ids are independent records. The relay SHALL compare `updated_at` at millisecond precision for entry and category updates, so two writes within the same second are ordered correctly and only a truly stale `updated_at` conflicts. A stale entry or category update SHALL return 409 `conflict` with the current server version promptly and SHALL never hang or block indefinitely.
 
 #### Scenario: Newer server record overwrites local
 - **WHEN** a pulled record has `updated_at` greater than the local record's `updated_at`
@@ -63,6 +63,14 @@ On pull, the sync client SHALL apply a server record to the local database only 
 #### Scenario: Pull keeps newer local identity on name collision
 - **WHEN** a pulled record's text matches a different local id and either side is newer
 - **THEN** both records are kept as independent entries or categories; nothing merges, nothing is skipped for collision, and convergence needs no name-freedom step
+
+#### Scenario: Same-second stale entry update conflicts instead of hanging
+- **WHEN** a client PATCHes an entry with an `updated_at` equal to the relay's current `updated_at` (same second, same millisecond)
+- **THEN** the relay returns 409 `conflict` with the current server version promptly and the request completes (never hangs)
+
+#### Scenario: Same-second stale category update conflicts instead of hanging
+- **WHEN** a client PATCHes a category with an `updated_at` equal to the relay's current `updated_at` (same second, same millisecond)
+- **THEN** the relay returns 409 `conflict` with the current server version promptly and the request completes (never hangs)
 
 ### Requirement: Idempotent outbox drain
 The sync client SHALL drain the outbox by issuing one HTTP request per outbox row, in created_at order within a resource. Because POST is idempotent on `id` and PATCH carries `updated_at` (LWW), replaying an outbox row is safe. Entries carry `activity_text`, ordered `category_ids`, and `notes`; a pulled entry referencing a category id absent from the relay snapshot SHALL resolve by dropping the unknown id and keeping the remainder (logged, secret-free), never failing the cycle. A pulled entry referencing a category id present in the relay snapshot but missing locally SHALL NOT be stripped: when a local category with the same name exists the join SHALL be remapped to that local id (local-only rewrite, never enqueued), otherwise the snapshot category row SHALL be merged locally and the id kept.
