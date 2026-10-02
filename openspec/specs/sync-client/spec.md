@@ -31,15 +31,19 @@ On activation, the sync client SHALL pull the relay's current state (via `?modif
 - **THEN** the pull brings the relay's current records down and merges them into the local database (server-wins on conflicts); then the outbox drains and pushes any local-only records, which are idempotent on `id` against existing relay records
 
 ### Requirement: Delta pull via modified_since
-The sync client SHALL pull only records modified since the last successful pull, using the `?modified_since=<timestamp>` query parameter on `GET /entries` (and `GET /categories`), and SHALL advance the per-resource sync cursor to the max `updated_at` received.
+The sync client SHALL pull only records modified since the last successful pull, using the `?modified_since=<timestamp>` query parameter on `GET /entries`, and SHALL advance the entries sync cursor to the max `updated_at` received. `GET /categories` is full-pull by design (catalog small: seeded plus a handful of user rows, so a snapshot merge with newer-owns-the-name is cheap; entries are unbounded and need the cursor): the client SHALL fetch the full category list on every pull and SHALL NOT send a categories cursor.
 
 #### Scenario: Incremental pull
 - **WHEN** the sync client runs after a previous successful pull recorded a cursor at time T
-- **THEN** it requests `?modified_since=T` and receives only records with `updated_at > T`; it applies them locally with LWW merge and advances the cursor
+- **THEN** it requests `GET /entries?modified_since=T` and receives only records with `updated_at > T`; it applies them locally with LWW merge and advances the cursor
 
 #### Scenario: No changes
 - **WHEN** the delta pull returns no records
 - **THEN** the cursor is unchanged and no local updates are applied
+
+#### Scenario: Categories always full-pull
+- **WHEN** the sync client runs a pull (first sync or delta cycle)
+- **THEN** it fetches `GET /categories` with no `modified_since` parameter and merges the full snapshot (newer-owns-the-name), regardless of the entries cursor
 
 ### Requirement: Last-write-wins conflict resolution
 On pull, the sync client SHALL apply a server record to the local database only if `server.updated_at > local.updated_at` for the same record id; otherwise the local version is kept. On push, a 409 `conflict` response SHALL cause the client to adopt the server's version (keep-latest) and clear the outbox row. There SHALL be no cross-record name-identity remapping: equal or similar texts with different ids are independent records. The relay SHALL compare `updated_at` at millisecond precision for entry and category updates, so two writes within the same second are ordered correctly and only a truly stale `updated_at` conflicts. A stale entry or category update SHALL return 409 `conflict` with the current server version promptly and SHALL never hang or block indefinitely.
