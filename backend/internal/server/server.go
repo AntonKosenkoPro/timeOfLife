@@ -5,6 +5,7 @@ import (
 	"context"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -29,6 +30,9 @@ type Dependencies struct {
 	AppleVerifier  apple.Verifier
 	HandlerCfg     handlers.HandlerConfig
 	RequestTimeout time.Duration
+	// CORSAllowedOrigins is the exact-match allowlist of origins echoed
+	// for credentialed browser calls. Empty (default) = deny all.
+	CORSAllowedOrigins []string
 }
 
 // defaultAccessTokenTTL and defaultRefreshTokenTTL mirror the config defaults
@@ -108,14 +112,15 @@ func NewDefaultDependencies(cfg *config.Config, store db.Store) Dependencies {
 	}
 
 	return Dependencies{
-		Store:          store,
-		TokenService:   tokenService,
-		OTPService:     otpService,
-		EmailSender:    emailSender,
-		RateLimiter:    rateLimiter,
-		AppleVerifier:  appleVerifier,
-		HandlerCfg:     handlerCfg,
-		RequestTimeout: cfg.RequestTimeout,
+		Store:              store,
+		TokenService:       tokenService,
+		OTPService:         otpService,
+		EmailSender:        emailSender,
+		RateLimiter:        rateLimiter,
+		AppleVerifier:      appleVerifier,
+		HandlerCfg:         handlerCfg,
+		RequestTimeout:     cfg.RequestTimeout,
+		CORSAllowedOrigins: config.ParseCORSAllowedOrigins(cfg.CORSAllowedOrigins),
 	}
 }
 
@@ -148,7 +153,7 @@ func New(deps Dependencies) *Server {
 	r.Use(chimw.RequestID)
 	r.Use(requestLogger)
 	r.Use(chimw.Timeout(deps.requestTimeout()))
-	r.Use(corsMiddleware)
+	r.Use(corsMiddlewareWithAllowlist(deps.CORSAllowedOrigins))
 
 	// Health check
 	r.Get("/health", s.handleHealth)
@@ -227,33 +232,44 @@ func requestLogger(next http.Handler) http.Handler {
 	})
 }
 
-// corsMiddleware allows development origins.
+// corsMiddlewareWithAllowlist enforces the CORS origin allowlist (issue #93).
 //
-// NOTE (residual risk, follow-up candidate): any presented Origin is
-// reflected with Allow-Credentials, so any website can make credentialed
-// calls. The proper fix is an allowlist from config. The one combo changed
-// here is the missing-Origin case: "*" is no longer paired with
-// Allow-Credentials (browsers reject that combo outright).
-func corsMiddleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		origin := r.Header.Get("Origin")
-		if origin == "" {
-			w.Header().Set("Access-Control-Allow-Origin", "*")
-		} else {
-			w.Header().Set("Access-Control-Allow-Origin", origin)
-			w.Header().Set("Access-Control-Allow-Credentials", "true")
-			w.Header().Add("Vary", "Origin")
+// A presented Origin is echoed with Allow-Credentials only on exact match
+// against the allowlist (empty default = deny all). Non-allowlisted and
+// missing origins receive no origin/credentials headers — never
+// Allow-Credentials with a wildcard or a reflected origin. The
+// methods/headers advertisement and the OPTIONS 204 preflight status are
+// preserved in all cases (absent headers enforce); Vary: Origin is set on
+// echoes so caches don't poison one origin's echo for another.
+func corsMiddlewareWithAllowlist(allowedOrigins []string) func(http.Handler) http.Handler {
+	allowed := make(map[string]struct{}, len(allowedOrigins))
+	for _, o := range allowedOrigins {
+		o = strings.TrimSpace(o)
+		if o == "" {
+			continue
 		}
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+		allowed[o] = struct{}{}
+	}
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if origin := r.Header.Get("Origin"); origin != "" {
+				if _, ok := allowed[origin]; ok {
+					w.Header().Set("Access-Control-Allow-Origin", origin)
+					w.Header().Set("Access-Control-Allow-Credentials", "true")
+					w.Header().Add("Vary", "Origin")
+				}
+			}
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS")
+			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
 
-		if r.Method == http.MethodOptions {
-			w.WriteHeader(http.StatusNoContent)
-			return
-		}
+			if r.Method == http.MethodOptions {
+				w.WriteHeader(http.StatusNoContent)
+				return
+			}
 
-		next.ServeHTTP(w, r)
-	})
+			next.ServeHTTP(w, r)
+		})
+	}
 }
 
 // --- Health ---

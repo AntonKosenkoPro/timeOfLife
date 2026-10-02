@@ -153,4 +153,39 @@ func TestConfig_Load_Branches(t *testing.T) {
 			t.Error("expected error for ses backend without credentials, got nil")
 		}
 	})
+
+	t.Run("cors allowlist", func(t *testing.T) {
+		setRequired(t)
+		// Empty default = deny (nil).
+		cfg, err := Load()
+		if err != nil {
+			t.Fatalf("Load: %v", err)
+		}
+		if cfg.CORSAllowedOrigins != "" {
+			t.Errorf("expected empty default CORS allowlist, got %q", cfg.CORSAllowedOrigins)
+		}
+		if got := ParseCORSAllowedOrigins(cfg.CORSAllowedOrigins); len(got) != 0 {
+			t.Errorf("expected nil parse of empty allowlist, got %+v", got)
+		}
+		// CSV with whitespace and empty entries.
+		setRequired(t)
+		t.Setenv("CORS_ALLOWED_ORIGINS", " https://app.example.com,, http://localhost:3000 , ")
+		cfg, err = Load()
+		if err != nil {
+			t.Fatalf("Load: %v", err)
+		}
+		got := ParseCORSAllowedOrigins(cfg.CORSAllowedOrigins)
+		if len(got) != 2 || got[0] != "https://app.example.com" || got[1] != "http://localhost:3000" {
+			t.Errorf("expected trimmed 2-origin allowlist, got %+v", got)
+		}
+	})
+}
+
+func TestParseCORSAllowedOrigins(t *testing.T) {
+	if got := ParseCORSAllowedOrigins(""); len(got) != 0 {
+		t.Errorf("expected empty for empty input, got %+v", got)
+	}
+	if got := ParseCORSAllowedOrigins(" , ,"); len(got) != 0 {
+		t.Errorf("expected empty for blank entries, got %+v", got)
+	}
 }
