@@ -1336,7 +1336,6 @@ struct LocalStoreCategoryUndoTests {
         _ = try await store.createEntry(TimeEntry(
             id: "e1", activityText: "Gym", startedAt: Date(), categoryIDs: ["cat-1", "cat-2"]
         ))
-        try? await Task.sleep(nanoseconds: 20_000_000)
         _ = try await store.deleteCategoryUndoable(id: "cat-1", deletedAt: Date())
 
         // The deletion stripped only the deleted category's joins.

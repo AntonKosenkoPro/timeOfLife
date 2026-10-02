@@ -125,6 +125,12 @@ final class HistoryViewModel: ObservableObject {
         }
     }
 
+    /// Clears the undo error, e.g. when the user dismisses the undo-error
+    /// dialog. The view cannot nil it directly (`private(set)`).
+    func clearUndoError() {
+        undoError = nil
+    }
+
     // MARK: - Row presentation (EntryRow inputs)
 
     /// First category's validated SF Symbol, or the `questionmark` fallback

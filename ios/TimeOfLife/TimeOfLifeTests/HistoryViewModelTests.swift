@@ -450,6 +450,9 @@ struct HistoryViewModelTests {
         #expect(vm.undoError == L10n.errorLocalPersistence.text)
         #expect(try await store.entry(id: "e1") == nil)
         #expect(try await store.undoBufferMostRecent() != nil)
+        // The dialog dismiss path clears the error.
+        vm.clearUndoError()
+        #expect(vm.undoError == nil)
     }
 
     // MARK: - Helpers

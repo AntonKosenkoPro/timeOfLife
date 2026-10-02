@@ -151,6 +151,22 @@ struct HistoryView: View {
         } message: {
             Text(pull.syncErrorMessage ?? "")
         }
+        // A refused/failed entry undo surfaces once, with a single OK
+        // (history-entry-list spec: "refused with the existing persistence
+        // error"). A system dialog through the existing alert pattern — no
+        // banner, no toast (fix-87 deliberate choice, mirroring how
+        // ProfileView surfaces its erase error).
+        .alert(
+            vm.undoError ?? "",
+            isPresented: Binding(
+                get: { vm.undoError != nil },
+                set: { if !$0 { vm.clearUndoError() } }
+            )
+        ) {
+            Button(L10n.commonOk.text, role: .cancel) { vm.clearUndoError() }
+        } message: {
+            Text(vm.undoError ?? "")
+        }
         // The unified entry form pushes onto this tab's NavigationStack
         // (fix-entry-form-gestures): EDIT for manual entries, LOCKED for
         // imported ones. The push provides the system back button and the
