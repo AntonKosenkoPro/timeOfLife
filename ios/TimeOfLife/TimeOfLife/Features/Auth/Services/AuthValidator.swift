@@ -58,11 +58,21 @@ enum AuthValidator {
         email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
     }
 
-    /// Lightweight email shape check (deliberately permissive — the server is
-    /// authoritative). Accepts `local@domain.tld` with reasonable characters.
+    /// Email shape check mirroring the server's canonical rule (fix #95;
+    /// the server remains authoritative). Accepts `local@domain.tld` with
+    /// reasonable characters, plus the server's dot-atom restriction on the
+    /// local part: no leading, trailing, or consecutive dots.
     static func isValidEmail(_ email: String) -> Bool {
         let pattern = #"^[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}$"#
-        return email.range(of: pattern, options: .regularExpression) != nil
+        guard email.range(of: pattern, options: .regularExpression) != nil else {
+            return false
+        }
+        guard let at = email.lastIndex(of: "@") else { return false }
+        let local = email[..<at]
+        if local.hasPrefix(".") || local.hasSuffix(".") || local.contains("..") {
+            return false
+        }
+        return true
     }
 
     // MARK: - Unified messages (Requirements U4)

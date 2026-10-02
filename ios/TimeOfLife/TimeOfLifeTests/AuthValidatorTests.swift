@@ -43,6 +43,22 @@ struct AuthValidatorTests {
         #expect(AuthValidator.validateEmail("a@b.c").contains(.emailInvalid))
     }
 
+    @Test("dot-edge local parts are rejected (mirrors server #95 vectors)")
+    func dotEdgeLocalParts() {
+        // Kept in sync with TestRequestOTP_RejectsDotEdgeLocalParts (backend);
+        // the server is authoritative, this is instant inline feedback only.
+        for email in [".a@example.com", "a..b@example.com", "a.@example.com"] {
+            #expect(AuthValidator.validateEmail(email).contains(.emailInvalid), "expected \(email) to be invalid")
+        }
+    }
+
+    @Test("representative valid senders are accepted (mirrors server #95 vectors)")
+    func representativeValidSenders() {
+        for email in ["user@example.com", "user+tag@example.com", "first.last@example.com"] {
+            #expect(AuthValidator.validateEmail(email).isEmpty, "expected \(email) to be valid")
+        }
+    }
+
     @Test("normalize trims whitespace and lowercases")
     func normalize() {
         #expect(AuthValidator.normalize(email: "  Foo@Bar.COM ") == "foo@bar.com")
