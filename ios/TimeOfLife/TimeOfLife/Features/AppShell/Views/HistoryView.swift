@@ -164,8 +164,6 @@ struct HistoryView: View {
             )
         ) {
             Button(L10n.commonOk.text, role: .cancel) { vm.clearUndoError() }
-        } message: {
-            Text(vm.undoError ?? "")
         }
         // The unified entry form pushes onto this tab's NavigationStack
         // (fix-entry-form-gestures): EDIT for manual entries, LOCKED for
