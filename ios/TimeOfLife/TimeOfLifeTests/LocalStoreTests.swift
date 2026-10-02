@@ -1328,6 +1328,29 @@ struct LocalStoreCategoryUndoTests {
         #expect(rows.allSatisfy { $0.op != "delete" })
     }
 
+    @Test("undo restores ordered entry_categories joins with original positions (fix-87 proof)")
+    func undoRestoresOrderedJoins() async throws {
+        let store = try makeStore()
+        try await store.createCategory(Category(id: "cat-1", name: "Work", icon: "briefcase"))
+        try await store.createCategory(Category(id: "cat-2", name: "Health", icon: "heart"))
+        _ = try await store.createEntry(TimeEntry(
+            id: "e1", activityText: "Gym", startedAt: Date(), categoryIDs: ["cat-1", "cat-2"]
+        ))
+        _ = try await store.deleteCategoryUndoable(id: "cat-1", deletedAt: Date())
+
+        // The deletion stripped only the deleted category's joins.
+        #expect(try await store.entry(id: "e1")?.categoryIDs == ["cat-2"])
+
+        let buffer = try #require(try await store.undoBufferMostRecent())
+        let restored = try await store.undoCategoryDeletion(bufferID: buffer.id)
+
+        #expect(restored?.id == "cat-1")
+        // Both the category and its ordered joins are back in position.
+        #expect(try await store.category(id: "cat-1")?.name == "Work")
+        #expect(try await store.entry(id: "e1")?.categoryIDs == ["cat-1", "cat-2"])
+        #expect(try await store.undoBufferMostRecent() == nil)
+    }
+
     @Test("commitAll commits exactly one category delete outbox row")
     func commitAllCommitsOneCategoryDelete() async throws {
         let store = try makeStore()

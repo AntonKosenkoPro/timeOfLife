@@ -296,7 +296,7 @@ struct ComplexitySliceTests {
             startedAt: Date().addingTimeInterval(-3_600),
             duration: 60
         ))
-        let vm = HistoryViewModel(store: store)
+        let vm = HistoryViewModel(store: store, undoBuffer: UndoBufferStore(store: store))
 
         await withTaskGroup(of: Void.self) { group in
             for _ in 0..<5 {
