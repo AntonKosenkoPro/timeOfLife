@@ -4,7 +4,6 @@
 
 Defines a local-first category catalog that users can manage from Profile and apply as optional, reusable tags to one or more Activities.
 ## Requirements
-
 ### Requirement: A starter category set is created once
 The system SHALL create exactly one starter set for a new local dataset containing Work (`briefcase`), Hobby (`paintbrush`), Sport (`figure.run`), Education (`book`), Relax (`cup.and.saucer`), Sleep (`bed.double`), and Entertainment (`tv`). Starter names SHALL use the app's active supported language when the records are first created. Starter categories SHALL thereafter behave as ordinary user records and SHALL NOT be recreated merely because the user edits or deletes them.
 
@@ -140,6 +139,7 @@ Starter creation, category CRUD, deletion finalization, and entry-category assig
 #### Scenario: Remote category deletion arrives
 - **WHEN** a finalized category deletion from another device is received through synchronization
 - **THEN** the category and its local entry associations are removed while entries remain intact
+
 ### Requirement: Category management is localized and accessible
 All category-management copy SHALL be available in English and Russian, all interactive controls SHALL expose stable accessibility identifiers and meaningful labels, and category icons SHALL include the category name as accessible context rather than relying on the symbol alone. Interactive category controls SHALL expose a tap target of at least 44×44 points, and category chip selection SHALL be indicated by a visible check affordance rather than color alone.
 
@@ -161,16 +161,16 @@ All category-management copy SHALL be available in English and Russian, all inte
 
 ### Requirement: Category deletion is undoable until the app restarts
 
-A confirmed category deletion SHALL remain restorable until the app restarts — there is no wall-clock undo window. The category editor (edit mode) SHALL offer the destructive Delete action at the bottom of the form; confirming the destructive confirmation (which names the category and explains that Activity tags will be removed while entries remain available) SHALL enter the durable undo buffer, dismiss the editor, and refresh the list. Until a restart, the Manage Categories surface SHALL offer restore through the DEFAULT system Undo confirmation only: shaking the device surfaces the system Undo prompt, and confirming restores exactly one deletion — the most recent buffered one. No UndoToast SHALL be shown. No deletion SHALL be sent to the relay while it is buffered. Undo SHALL restore the same category identity, values, and Activity assignments.
+A confirmed category deletion SHALL remain restorable until the earlier of a successful relay push of its `DELETE` (push-then-commit) or the next app restart — there is no wall-clock undo window. The category editor (edit mode) SHALL offer the destructive Delete action at the bottom of the form; confirming the destructive confirmation (which names the category and explains that Activity tags will be removed while entries remain available, with timeless undo copy — "You can shake to undo." and no lifetime bound) SHALL enter the durable undo buffer, dismiss the editor, and refresh the list. The entry-delete confirmation SHALL carry the same timeless undo copy. Until the buffer row commits, the Manage Categories surface SHALL offer restore through the DEFAULT system Undo confirmation only: shaking the device surfaces the system Undo prompt, and confirming restores exactly one deletion — the most recent buffered one. No UndoToast SHALL be shown. No deletion SHALL be sent to the relay while it is buffered. Undo SHALL restore the same category identity, values, and Activity assignments.
 
 #### Scenario: Undo from the visible affordance
 
-- **WHEN** the user activates Undo from the system Undo confirmation before restarting the app
+- **WHEN** the user activates Undo from the system Undo confirmation before the buffered deletion commits (no restart and no successful push of its `DELETE`)
 - **THEN** the category and all prior Activity assignments are restored and no deletion is synchronized
 
 #### Scenario: Undo through the system gesture
 
-- **WHEN** the user invokes the system Undo gesture on Manage Categories (before restarting the app) and confirms
+- **WHEN** the user invokes the system Undo gesture on Manage Categories (before the buffered deletion commits) and confirms
 - **THEN** the most recent eligible category deletion is restored
 
 #### Scenario: Restart commits buffered deletions
@@ -178,10 +178,20 @@ A confirmed category deletion SHALL remain restorable until the app restarts —
 - **WHEN** the app restarts with a buffered category deletion
 - **THEN** the deletion becomes final locally on cold launch and is queued for relay synchronization
 
+#### Scenario: Successful push commits the buffered deletion
+
+- **WHEN** a sync cycle successfully pushes the buffered deletion's `DELETE` for every snapshotted record
+- **THEN** the buffer row is dropped and a later undo finds nothing to restore
+
 #### Scenario: Backgrounding does not expire the buffer
 
-- **WHEN** the app leaves the foreground with a buffered deletion and returns (without restarting)
-- **THEN** the deletion is still restorable; nothing is finalized without an app restart
+- **WHEN** the app leaves the foreground with a buffered deletion and returns (without restarting and without a successful push of its `DELETE`)
+- **THEN** the deletion is still restorable; nothing is finalized on any time boundary
+
+#### Scenario: Delete confirmations carry timeless undo copy
+
+- **WHEN** the user opens the entry-delete or category-delete confirmation in English or Russian
+- **THEN** the undo sentence states only that shake-to-undo is available ("You can shake to undo." / "Отменить можно встряской.") with no sync, restart, or time bound
 
 #### Scenario: Cancel category deletion
 
@@ -198,6 +208,7 @@ Deleting a category SHALL remove that category's joins from every entry but SHAL
 #### Scenario: Cancel category deletion
 - **WHEN** the user cancels the destructive confirmation
 - **THEN** the category and all of its entry assignments remain unchanged
+
 ### Requirement: Entries support optional multiple category assignments
 The unified entry form and the running timer's `TagSelector` SHALL display the available category catalog and allow zero, one, or multiple categories per entry with order preserved. Saving SHALL persist that entry's ordered category set. Category assignment SHALL remain optional. There is no activity entity and no Activity editor — category chips live on entry forms and the running timer only. Recents chips SHALL display only the icon of the first category of each exact text's newest entry and SHALL NOT display category names.
 
@@ -285,3 +296,4 @@ The category editor (create and edit modes) SHALL offer cancellation as a toolba
 #### Scenario: VoiceOver identifies the toolbar actions
 - **WHEN** VoiceOver focuses the X or ✓ button in English or Russian
 - **THEN** it announces the cancel/save meaning and the available action
+
