@@ -22,6 +22,11 @@ import (
 
 func newTestServer(t *testing.T) *Server {
 	t.Helper()
+	return newTestServerWithAllowlist(t, nil)
+}
+
+func newTestServerWithAllowlist(t *testing.T, allowed []string) *Server {
+	t.Helper()
 
 	store, err := db.NewSQLiteStore(":memory:")
 	if err != nil {
@@ -50,12 +55,13 @@ func newTestServer(t *testing.T) *Server {
 	handlerCfg := handlers.HandlerConfig{}
 
 	deps := Dependencies{
-		Store:        store,
-		TokenService: tokenService,
-		OTPService:   otpService,
-		EmailSender:  emailSender,
-		RateLimiter:  rateLimiter,
-		HandlerCfg:   handlerCfg,
+		Store:              store,
+		TokenService:       tokenService,
+		OTPService:         otpService,
+		EmailSender:        emailSender,
+		RateLimiter:        rateLimiter,
+		HandlerCfg:         handlerCfg,
+		CORSAllowedOrigins: allowed,
 	}
 
 	return New(deps)
@@ -131,7 +137,7 @@ func TestAppleRouteReturnsConfiguredErrorWhenDisabled(t *testing.T) {
 }
 
 func TestCORSHeaders(t *testing.T) {
-	s := newTestServer(t)
+	s := newTestServerWithAllowlist(t, []string{"http://localhost:3000"})
 
 	req := httptest.NewRequest(http.MethodOptions, "/health", nil)
 	req.Header.Set("Origin", "http://localhost:3000")
@@ -142,9 +148,78 @@ func TestCORSHeaders(t *testing.T) {
 		t.Errorf("expected 204 for OPTIONS, got %d", w.Code)
 	}
 
-	origin := w.Header().Get("Access-Control-Allow-Origin")
-	if origin == "" {
-		t.Error("expected CORS origin header")
+	if origin := w.Header().Get("Access-Control-Allow-Origin"); origin != "http://localhost:3000" {
+		t.Errorf("expected allowlisted origin echo, got %q", origin)
+	}
+	if creds := w.Header().Get("Access-Control-Allow-Credentials"); creds != "true" {
+		t.Errorf("expected Allow-Credentials true for allowlisted origin, got %q", creds)
+	}
+	if vary := w.Header().Get("Vary"); !strings.Contains(vary, "Origin") {
+		t.Errorf("expected Vary: Origin on allowlisted echo, got %q", vary)
+	}
+	if methods := w.Header().Get("Access-Control-Allow-Methods"); strings.Contains(methods, "PUT") {
+		t.Errorf("expected no PUT in allowed methods, got %q", methods)
+	} else if methods != "GET, POST, PATCH, DELETE, OPTIONS" {
+		t.Errorf("expected methods GET, POST, PATCH, DELETE, OPTIONS, got %q", methods)
+	}
+	if headers := w.Header().Get("Access-Control-Allow-Headers"); headers != "Content-Type, Authorization" {
+		t.Errorf("expected headers Content-Type, Authorization, got %q", headers)
+	}
+}
+
+func TestCORSNonAllowlistedOriginDenied(t *testing.T) {
+	s := newTestServerWithAllowlist(t, []string{"https://app.example.com"})
+
+	req := httptest.NewRequest(http.MethodOptions, "/health", nil)
+	req.Header.Set("Origin", "https://evil.example.com")
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, req)
+
+	if w.Code != http.StatusNoContent {
+		t.Errorf("expected 204 for OPTIONS, got %d", w.Code)
+	}
+	if origin := w.Header().Get("Access-Control-Allow-Origin"); origin != "" {
+		t.Errorf("expected no origin echo for non-allowlisted origin, got %q", origin)
+	}
+	if creds := w.Header().Get("Access-Control-Allow-Credentials"); creds != "" {
+		t.Errorf("expected no credentials for non-allowlisted origin, got %q", creds)
+	}
+}
+
+func TestCORSMissingOriginNoCredentials(t *testing.T) {
+	s := newTestServerWithAllowlist(t, []string{"https://app.example.com"})
+
+	req := httptest.NewRequest(http.MethodOptions, "/health", nil)
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, req)
+
+	if w.Code != http.StatusNoContent {
+		t.Errorf("expected 204 for OPTIONS, got %d", w.Code)
+	}
+	if creds := w.Header().Get("Access-Control-Allow-Credentials"); creds != "" {
+		t.Errorf("expected no credentials for missing origin, got %q", creds)
+	}
+	if origin := w.Header().Get("Access-Control-Allow-Origin"); origin != "" {
+		t.Errorf("expected no origin header for missing origin, got %q", origin)
+	}
+}
+
+func TestCORSEmptyAllowlistDeniesAll(t *testing.T) {
+	s := newTestServer(t) // nil allowlist = deny all
+
+	req := httptest.NewRequest(http.MethodGet, "/health", nil)
+	req.Header.Set("Origin", "http://localhost:3000")
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d", w.Code)
+	}
+	if origin := w.Header().Get("Access-Control-Allow-Origin"); origin != "" {
+		t.Errorf("expected no origin echo under empty allowlist, got %q", origin)
+	}
+	if creds := w.Header().Get("Access-Control-Allow-Credentials"); creds != "" {
+		t.Errorf("expected no credentials under empty allowlist, got %q", creds)
 	}
 }
 

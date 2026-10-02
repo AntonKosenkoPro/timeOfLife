@@ -46,6 +46,11 @@ type Config struct {
 	// headers are ignored and the direct TCP peer is used. This prevents
 	// rate-limit bypass via spoofed headers. (FURPS R1/S5)
 	TrustedProxies string
+	// CORSAllowedOrigins is a comma-separated allowlist of exact origins
+	// (scheme://host[:port]) echoed for credentialed browser calls.
+	// Empty (default) = deny all: no Origin is reflected and no
+	// Access-Control-Allow-Credentials is ever sent.
+	CORSAllowedOrigins string
 }
 
 // Load reads configuration from environment variables.
@@ -185,7 +190,34 @@ func Load() (*Config, error) {
 	// forwarded IP headers for rate limiting. Empty = trust nobody.
 	cfg.TrustedProxies = os.Getenv("TRUSTED_PROXIES")
 
+	// Optional: CORS_ALLOWED_ORIGINS — comma-separated exact origins
+	// (scheme://host[:port]) allowed for credentialed browser calls. Empty
+	// (default) = deny all: no Origin is echoed and no credentials are
+	// advertised. Localhost dev origins work only via explicit listing.
+	cfg.CORSAllowedOrigins = os.Getenv("CORS_ALLOWED_ORIGINS")
+
 	return cfg, nil
+}
+
+// ParseCORSAllowedOrigins parses a comma-separated allowlist of exact
+// origins (e.g. "https://app.example.com,http://localhost:3000") into a
+// list of origins. Entries are trimmed; empty entries are ignored. An empty
+// input yields an empty slice (deny all). Matching is exact on the full
+// origin string — no wildcards or subdomain expansion.
+func ParseCORSAllowedOrigins(raw string) []string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+	var out []string
+	for _, part := range strings.Split(raw, ",") {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		out = append(out, part)
+	}
+	return out
 }
 
 func requiredFieldError(name string) error {
