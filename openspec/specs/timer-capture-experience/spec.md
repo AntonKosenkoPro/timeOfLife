@@ -120,7 +120,7 @@ Track SHALL present the state-specific main action in one main-action region who
 - **WHEN** a recoverable non-field error wraps beyond the reserved height and the top adaptive spacing and central separator can absorb the growth
 - **THEN** the main-action frame does not change; only when both are exhausted does the content scroll
 ### Requirement: Recents present a capped wrapping chip flow
-Track SHALL present its most-recently-used exact entry texts as a wrapping chip flow below the name field, ordered by each text's newest committed `started_at` first, and SHALL cap the flow at six chips. Identity SHALL be trimmed exact text (case-sensitive: `Gym` and `GYM` are distinct). Chips SHALL wrap onto additional rows as needed and SHALL NOT require horizontal scrolling. A single tap on a chip SHALL fill the name plus that recent's full ordered categories without starting timing. Recents SHALL yield the below-button slot to the running TagSelector while a timer is running (inactive branch opacity-hidden with the slot keeping the taller branch's height). Returning to Track SHALL reload recents and categories — seeding the starter set first on a fresh install — so History edits and new categories are reflected immediately.
+Track SHALL present its most-recently-used exact entry texts as a wrapping chip flow below the name field, ordered by each text's newest committed `started_at` first, and SHALL cap the flow at six chips. Identity SHALL be trimmed exact text (case-sensitive: `Gym` and `GYM` are distinct). There is no activity entity — chips represent entry texts, never activities. Chips SHALL wrap onto additional rows as needed and SHALL NOT require horizontal scrolling. A single tap on a chip SHALL fill the name plus that recent's full ordered categories without starting timing. Recents SHALL yield the below-button slot to the running TagSelector while a timer is running (inactive branch opacity-hidden with the slot keeping the taller branch's height). Returning to Track SHALL reload recents and categories — seeding the starter set first on a fresh install — so History edits and new categories are reflected immediately.
 
 #### Scenario: More Activities than the cap
 - **WHEN** the user has more than six distinct exact texts
@@ -145,6 +145,7 @@ Track SHALL present its most-recently-used exact entry texts as a wrapping chip 
 #### Scenario: Return refreshes Recents
 - **WHEN** the user returns to Track from another tab or sheet
 - **THEN** Recents and the category map reload (seeding first when needed), so entries edited in History are inherited and chip icons stay current
+
 ### Requirement: Recents highlight the prepared text
 When an exact text is prepared, its Recents chip SHALL indicate the selected state with a filled accent presentation — accent background, on-accent text, and accent border, keeping the Category icon — a visible affordance that does not rely on color alone, and assistive technologies SHALL be told that the chip is selected. No chip SHALL appear selected while Track is idle.
 

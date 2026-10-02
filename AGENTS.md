@@ -11,13 +11,13 @@ Agent entrypoint for this repo. **Read [`docs/project-context.md`](docs/project-
 The repo is spec-driven (`openspec/config.yaml`, `schema: spec-driven`). See `openspec/README.md` for the workflow; the essentials:
 
 - **Baseline specs** (`openspec/specs/<capability>/spec.md`): current contract (19 baselines incl. `app-shell`, `timer-capture-experience`, `apple-signin`). Never edit directly — behavior changes go through a change.
-- **Active deltas**: `openspec/changes/reduce-codebase-complexity/` — wording-only docs-contract sync (no behavior change). Check its `tasks.md` and `openspec status --change reduce-codebase-complexity` before implementing; mark tasks as you complete them.
+- **Active deltas**: none — `reduce-codebase-complexity` (wording-only docs-contract sync, no behavior change) is archived at `openspec/changes/archive/2026-10-02-reduce-codebase-complexity/` and folded into the baselines. Check `openspec list` before starting new behavior work.
 - **Archives** (`openspec/changes/archive/`): history (e.g. `redesign-track-experience`); their deltas are already folded into the baselines.
 
 ## Non-negotiables
 
 - **LocalStore is the single mutation chokepoint** (GRDB in App Group `group.com.antonkosenko.timeoflifeapp`) — no raw GRDB writes outside it.
-- **Incomplete UI surfaces — do not claim they are done**: UndoToast/shake-to-undo, "via <Source>" labels, and the iOS 18 lock-screen ControlWidget (no target in `project.yml` yet). Device quota + picker (#46) is a pre-release blocker. Full list: `docs/project-context.md` → "Incomplete / deferred", mirroring open tasks in `reduce-codebase-complexity/tasks.md`.
+- **Incomplete UI surfaces — do not claim they are done**: UndoToast/shake-to-undo, "via <Source>" labels, and the iOS 18 lock-screen ControlWidget (no target in `project.yml` yet). Device quota + picker (#46) is a pre-release blocker. Full list: `docs/project-context.md` → "Incomplete / deferred".
 - **OpenAPI is the authoritative API contract** (`backend/api/openapi.yaml`, S10). Endpoint changes update both sides + the spec.
 - **External docs first (ctx7)**: before implementing anything that depends on external library/framework/SDK/API/CLI/cloud-service behavior, fetch current docs via `npx ctx7@latest library` → `docs` and cite library ID + query in proposal/design; never rely on training data alone. Procedure: `docs/project-context.md` → "External docs first (ctx7)".
 - **No backward compat for on-disk formats** (pre-release): edit `Codable` shapes in place, no legacy branches.

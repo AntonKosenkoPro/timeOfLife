@@ -19,9 +19,8 @@ context: |
   `device-sessions`, and `apple-signin`). Behavior changes go through a change: delta specs
   under `openspec/changes/<change>/specs/`. The local-first architecture now lives in the
   `local-first-store`, `sync-client`, `entry-provenance`, and `lock-screen-controls` baselines.
-  Archives (`openspec/changes/archive/`) are history already folded into the baselines. The
-  active change is `reduce-codebase-complexity` (wording-only docs-contract sync) — check
-  its `tasks.md` before implementing and mark tasks as you complete them.
+  Archives (`openspec/changes/archive/`) are history already folded into the baselines. No
+  active change right now (`reduce-codebase-complexity` archived 2026-10-02).
 
   Non-negotiables: LocalStore is the single mutation chokepoint (GRDB, App Group
   `group.com.antonkosenko.timeoflifeapp`) — no raw GRDB writes outside it. Several local-first UI
