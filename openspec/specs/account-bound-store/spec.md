@@ -39,11 +39,11 @@ The system SHALL preserve all account database files on logout. Only Keychain se
 - **THEN** all files stay on disk, the dirty outbox remains in the now-dormant file, and only Keychain and cached session state are cleared
 
 ### Requirement: Running timer survives logout and account switch
-The system SHALL keep a running timer's state in its account's file across logout or account switch, and SHALL resume it (elapsed time, activity) when that account becomes active again.
+The system SHALL keep a running timer's draft state (elapsed time, entry text, ordered categories) in its account's file across logout or account switch, and SHALL resume it when that account becomes active again. There is no activity entity — the resumed state is the timer draft, never an activity.
 
 #### Scenario: Timer resumes after returning to its account
 - **WHEN** a timer is running in account A, the user logs out and signs in as B, then later signs back in as A
-- **THEN** account A's file still holds the running timer state, and on return the timer UI resumes with the elapsed time and activity intact; account B never sees A's timer
+- **THEN** account A's file still holds the running timer draft, and on return the timer UI resumes with the elapsed time, text, and categories intact; account B never sees A's timer
 
 ### Requirement: Explicit per-account erase
 The system SHALL delete only the active account's database file and its session artifacts (Keychain/cache entries) when the user performs an explicit per-account erase action. Erase SHALL never occur as a side effect of logout, re-login, or account switch.
