@@ -124,8 +124,11 @@ func TestListDeletions_DeletedSinceFilter(t *testing.T) {
 		t.Fatalf("delete 1: expected 204, got %d", del1.Code)
 	}
 
-	// Pin the cursor to the current second (SQLite second precision), then
-	// wait so the second delete's tombstone is strictly newer.
+	// The cursor travels over HTTP as RFC3339 (second precision), so pin a
+	// whole second strictly between the two deletes: wait past the first
+	// delete's second, capture the cursor, then wait again so the second
+	// delete's tombstone is strictly newer.
+	time.Sleep(1100 * time.Millisecond)
 	cursor := time.Now().UTC().Truncate(time.Second)
 	time.Sleep(1100 * time.Millisecond)
 

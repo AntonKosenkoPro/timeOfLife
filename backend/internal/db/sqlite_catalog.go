@@ -16,12 +16,28 @@ type rowScanner interface {
 	Scan(dest ...any) error
 }
 
+// SQLite timestamp shapes: writes use millisecond precision; reads accept
+// both the legacy second-precision and the new millisecond strings so
+// pre-existing rows still parse. Both are fixed-width UTC prefixes, so
+// lexicographic `updated_at < ?` ordering stays chronological.
+const (
+	sqliteTimeMillis = "2006-01-02 15:04:05.999"
+	sqliteTimeSecond = "2006-01-02 15:04:05"
+)
+
+func parseSQLiteTime(s string) (time.Time, error) {
+	if t, err := time.Parse(sqliteTimeMillis, s); err == nil {
+		return t, nil
+	}
+	return time.Parse(sqliteTimeSecond, s)
+}
+
 // parseTime parses a SQLite TEXT timestamp into time.Time. Unparseable
 // input yields the zero time (the previous behavior, preserved for
 // backward-compatible reads); the failure is logged so corrupt rows
 // surface instead of silently becoming year-0001.
 func parseTime(s string) time.Time {
-	t, err := time.Parse("2006-01-02 15:04:05", s)
+	t, err := parseSQLiteTime(s)
 	if err != nil {
 		slog.Warn("unparseable sqlite timestamp, using zero time", "value", s)
 		return time.Time{}
@@ -37,7 +53,7 @@ func nullTimePtr(ns sql.NullString) *time.Time {
 	if !ns.Valid || ns.String == "" {
 		return nil
 	}
-	t, err := time.Parse("2006-01-02 15:04:05", ns.String)
+	t, err := parseSQLiteTime(ns.String)
 	if err != nil {
 		slog.Warn("unparseable sqlite timestamp, using zero time", "value", ns.String)
 	}
@@ -55,7 +71,7 @@ func nullIntPtr(n sql.NullInt64) *int {
 
 // fmtTime formats a time.Time for SQLite storage.
 func fmtTime(t time.Time) string {
-	return t.UTC().Format("2006-01-02 15:04:05")
+	return t.UTC().Format(sqliteTimeMillis)
 }
 
 // fmtTimeArg formats a nullable time for a SQLite placeholder (nil → NULL).
@@ -63,7 +79,7 @@ func fmtTimeArg(t *time.Time) any {
 	if t == nil {
 		return nil
 	}
-	return t.UTC().Format("2006-01-02 15:04:05")
+	return t.UTC().Format(sqliteTimeMillis)
 }
 
 // nullIntArg turns a nil *int into a NULL placeholder.
@@ -294,7 +310,15 @@ func (s *SQLiteStore) UpdateCategory(ctx context.Context, userID, id string, c C
 	sets = append(sets, "updated_at = ?")
 	args = append(args, fmtTime(c.UpdatedAt))
 	args = append(args, id, userID, fmtTime(c.UpdatedAt))
-	res, err := s.db.ExecContext(ctx, `
+	// Run the LWW UPDATE inside a tx (mirroring UpdateEntry) so the
+	// stale-path rollback-before-read ordering holds on the single-conn
+	// SQLite pool: no s.db reads run while the tx is open.
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return Category{}, fmt.Errorf("update category begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	res, err := tx.ExecContext(ctx, `
 		UPDATE categories SET `+strings.Join(sets, ", ")+`
 		WHERE id = ? AND user_id = ? AND updated_at < ?
 	`, args...)
@@ -309,6 +333,11 @@ func (s *SQLiteStore) UpdateCategory(ctx context.Context, userID, id string, c C
 		return Category{}, fmt.Errorf("update category rows: %w", err)
 	}
 	if affected == 0 {
+		// Stale or deleted: roll back first to release the single pool
+		// connection before re-reading via the pool (twin of UpdateEntry).
+		if err := tx.Rollback(); err != nil && !errors.Is(err, sql.ErrTxDone) {
+			return Category{}, fmt.Errorf("update category rollback: %w", err)
+		}
 		if _, err := s.getCategoryRow(ctx, userID, id); errors.Is(err, ErrNotFound) {
 			return Category{}, fmt.Errorf("update category: %w", ErrNotFound)
 		} else if err != nil {
@@ -319,6 +348,9 @@ func (s *SQLiteStore) UpdateCategory(ctx context.Context, userID, id string, c C
 			return Category{}, err
 		}
 		return current, fmt.Errorf("update category: %w", ErrConflict)
+	}
+	if err := tx.Commit(); err != nil {
+		return Category{}, fmt.Errorf("update category commit: %w", err)
 	}
 	return s.getCategoryRow(ctx, userID, id)
 }
@@ -661,17 +693,19 @@ func (s *SQLiteStore) UpdateEntry(ctx context.Context, userID, id string, p Entr
 		return Entry{}, fmt.Errorf("update entry rows: %w", err)
 	}
 	if affected == 0 {
+		// Stale or deleted: roll back first so the single pool connection
+		// is released before re-reading via the pool. Reading through
+		// s.db while the tx is still open deadlocks (MaxOpenConns=1).
+		// The deferred tx.Rollback() becomes a no-op safety net.
+		if err := tx.Rollback(); err != nil && !errors.Is(err, sql.ErrTxDone) {
+			return Entry{}, fmt.Errorf("update entry rollback: %w", err)
+		}
 		// Not found, or the row was deleted between the fetch above and this
 		// UPDATE — distinguish so a concurrent delete returns ErrNotFound.
 		if _, err := s.getEntryRow(ctx, userID, id); errors.Is(err, ErrNotFound) {
 			return Entry{}, fmt.Errorf("update entry: %w", ErrNotFound)
 		} else if err != nil {
 			return Entry{}, err
-		}
-		// Stale write: roll back first so the single pool connection is
-		// released before re-reading the current version.
-		if err := tx.Rollback(); err != nil {
-			return Entry{}, fmt.Errorf("update entry rollback: %w", err)
 		}
 		fresh, err := s.GetEntry(ctx, userID, id)
 		if err != nil {
