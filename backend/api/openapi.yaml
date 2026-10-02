@@ -488,7 +488,7 @@ paths:
         This is a full pull by design (catalog small): the handler ignores
         `modified_since` (delta pulls are entries-only). The catalog is small
         (seeded plus a handful of user rows), so a snapshot merge with
-        newer-owns-name is cheap; entries are unbounded and need the cursor.
+        newer-owns-the-name is cheap; entries are unbounded and need the cursor.
       tags:
         - Categories
       security:
