@@ -175,6 +175,14 @@ On every iteration (feature/fix PR) the author MUST:
 4. Update `AGENTS.md`, `README.md`, `docs/project-context.md`, the relevant `Design/*.md` files, and [`backend/api/openapi.yaml`](../backend/api/openapi.yaml) if architecture/contract/run steps or visual design changed. The OpenAPI spec is the authoritative API contract — keep it in sync with the handlers. Advance or archive the active OpenSpec change as appropriate.
 5. Prefer reusing existing utilities/patterns over new code; remove dead code.
 
+### Reproduce before fixing, verify after (bugfix rule)
+
+No bugfix implementation without a recorded reproduction on the current tree:
+1. **Reproduce first** — re-run the issue's repro steps (or write your own) and record the evidence (screen recording, log excerpt, or failing test). Precedent: the repros in issues #101/#67 outlived their merged fixes — merged code is not proof.
+2. **Implement only after the repro confirms the bug.** If it cannot be reproduced, stop and report instead of guessing.
+3. **Verify after** — re-run the identical repro on the fixed tree and record the evidence with the change/PR. Where automatable, encode the repro as a regression test (fails before, passes after).
+4. Merges with "Fixes #" auto-close issues — reopen the issue if the bug survives the fix.
+
 ## CI (Requirements S6)
 
 `.github/workflows/backend.yml` (Go: gofmt, go vet, golangci-lint, test + coverage) and `.github/workflows/ios.yml` (xcodegen, swiftlint, warning-as-error xcodebuild build, test) run on pull requests that touch their subsystem and on similarly path-filtered pushes to `main`. Both are **mandatory** PR checks when triggered — a PR is not mergeable until the applicable checks are green. `.github/workflows/openspec.yml` additionally enforces `openspec validate --all --strict` on every PR. An **advisory** AI review (`ai-review.yml`) comments on every PR but never blocks — the two-stage review process (AI stage 1 → human stage 2) is defined in [`docs/review-process.md`](review-process.md). See `docs/ci.md` for the full pipeline guide.
