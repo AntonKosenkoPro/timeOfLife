@@ -71,6 +71,14 @@ struct ManageCategoriesView: View {
                 } label: {
                     Image(systemName: "plus")
                 }
+                // Calm the presenting button (issue #101): the press-highlight
+                // restore otherwise inherits the sheet-presentation
+                // transaction and fades back slowly across the sheet rise,
+                // reading as a weird plus animation. Disabling animations
+                // for the button subtree keeps press feedback instant while
+                // the sheet, editor, and `vm.addCategory()` semantics stay
+                // untouched (the `pill` highlight precedent in LogTimeView).
+                .transaction { $0.disablesAnimations = true }
                 .accessibilityLabel(L10n.manageCategoriesAdd.text)
                 .accessibilityIdentifier("ManageCategoriesAddButton")
             }
