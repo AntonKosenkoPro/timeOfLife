@@ -35,6 +35,13 @@ struct LogTimeView: View {
     @State private var isShowingDeleteConfirm = false
     /// The text field holding focus, if any (tap-away/scroll-away resigns it).
     @FocusState private var focusedField: FormField?
+    /// One-shot resign suppress for the notes `×` (issue #67): the notes
+    /// clear lives inside a resigning `FormCard`, so the `×` arms this
+    /// on touch-down (before every touch-up handler runs) — the card's
+    /// tap gesture then skips exactly one resign and the keyboard stays
+    /// open. No other card passes a binding, and the `×` action itself
+    /// only clears.
+    @State private var suppressNotesResign = false
     /// True when pushed onto the presenter's NavigationStack (EDIT/LOCKED
     /// via History) instead of presented as a sheet (CREATE): the outer
     /// stack owns the navigation chrome AND the back stack (edge-back
@@ -293,7 +300,11 @@ struct LogTimeView: View {
     // MARK: - Notes row
 
     private var notesCard: some View {
-        FormCard(accessibilityID: "EntryNotesRow", resignFocus: focusedField = nil) {
+        FormCard(
+            accessibilityID: "EntryNotesRow",
+            resignFocus: focusedField = nil,
+            suppressNextResign: $suppressNotesResign
+        ) {
             VStack(alignment: .leading, spacing: Theme.spacingExtraSmall) {
                 Text(L10n.entryNotesLabel.text)
                     .font(.caption)
@@ -313,6 +324,16 @@ struct LogTimeView: View {
                             action: { vm.clearNotes() },
                             accessibilityId: "EntryNotesClearButton",
                             accessibilityLabel: L10n.notesClear.text
+                        )
+                        // Arms the card's one-shot resign suppress on
+                        // touch-down (issue #67): the card gesture can fire
+                        // before this button's action, so arming in the
+                        // action is too late — this zero-distance drag
+                        // always precedes every touch-up handler.
+                        .simultaneousGesture(
+                            DragGesture(minimumDistance: 0).onChanged { _ in
+                                suppressNotesResign = true
+                            }
                         )
                     }
                 }
