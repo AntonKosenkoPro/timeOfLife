@@ -1297,12 +1297,12 @@ actor LocalStore {
 
     // MARK: - Outbox
 
-    /// All pending outbox rows, oldest first (created_at order within a
-    /// resource, per the sync-client spec).
+    /// All pending outbox rows, oldest first (insertion order within a
+    /// resource: created_at with a rowid tiebreak, per the sync-client spec).
     func outboxRows() throws -> [OutboxRow] {
         try queue.read { db in
             try OutboxRow.fetchAll(db, sql: """
-                SELECT * FROM outbox ORDER BY created_at, id
+                SELECT * FROM outbox ORDER BY created_at, rowid
             """)
         }
     }

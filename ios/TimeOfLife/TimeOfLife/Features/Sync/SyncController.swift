@@ -723,8 +723,8 @@ final class SyncController: ObservableObject {
     /// Drains the outbox in dependency order, one HTTP request per row.
     /// `category` rows push before `entry` rows (`POST /entries` rejects
     /// unknown `category_ids` with 422, so referenced categories must exist
-    /// on the relay first); `created_at, id` order is preserved within each
-    /// resource. POST is idempotent on `id` and PATCH carries `updated_at`
+    /// on the relay first); insertion order (`created_at, rowid`) is preserved
+    /// within each resource. POST is idempotent on `id` and PATCH carries `updated_at`
     /// (LWW), so a replay after a crash or relapse produces the same result
     /// as the first attempt.
     ///
@@ -783,15 +783,19 @@ final class SyncController: ObservableObject {
     }
 
     /// Dependency order for the drain snapshot: `category` rows before
-    /// `entry` rows, `created_at, id` within each resource.
+    /// `entry` rows, insertion order (`created_at, rowid` from `outboxRows`)
+    /// within each resource. The snapshot index is the tiebreak — never the
+    /// random outbox id — so same-tick rows drain deterministically.
     private static func orderedForDrain(_ rows: [OutboxRow]) -> [OutboxRow] {
-        rows.sorted { lhs, rhs in
-            let leftRank = drainRank(lhs.resource)
-            let rightRank = drainRank(rhs.resource)
+        rows.enumerated().sorted { lhs, rhs in
+            let leftRank = drainRank(lhs.element.resource)
+            let rightRank = drainRank(rhs.element.resource)
             if leftRank != rightRank { return leftRank < rightRank }
-            if lhs.createdAt != rhs.createdAt { return lhs.createdAt < rhs.createdAt }
-            return lhs.id < rhs.id
-        }
+            if lhs.element.createdAt != rhs.element.createdAt {
+                return lhs.element.createdAt < rhs.element.createdAt
+            }
+            return lhs.offset < rhs.offset
+        }.map(\.element)
     }
 
     /// Resolves one failed push. Returns true when the row is resolved and

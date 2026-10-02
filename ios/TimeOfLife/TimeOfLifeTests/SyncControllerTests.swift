@@ -1493,9 +1493,11 @@ struct SyncControllerTests {
         await waitForCycle(controller)
 
         // The abort left the remaining row(s) in A's file: e2's create was
-        // never pushed under B's session.
+        // never pushed under B's session. Same-tick rows drain in insertion
+        // order (created_at, rowid), so e1 was deterministically first.
         let rows = try await store.outboxRows()
         #expect(rows.contains { $0.recordID == "e2" && $0.op == "create" })
+        #expect(mock.calls.contains { $0.method == "createEntry" && $0.id == "e1" })
         #expect(!mock.calls.contains { $0.method == "createEntry" && $0.id == "e2" })
         // The abort surfaces no error and deactivates: the shell's next
         // activate(sessionID) rebinds (activate only rebinds from inactive).
