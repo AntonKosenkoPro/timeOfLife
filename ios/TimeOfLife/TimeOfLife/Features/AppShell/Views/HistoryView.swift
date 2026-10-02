@@ -29,6 +29,8 @@ struct HistoryView: View {
     /// invalidate this view — the status change would be missed and the list
     /// would stay stale after a sync (ProfileView precedent).
     @EnvironmentObject var sync: SyncController
+    @Environment(\.undoManager)
+    private var undoManager
     @StateObject private var vm: HistoryViewModel
     /// Owns the pull-to-refresh verdict flow (history-pull-to-sync spec).
     @StateObject private var pull: HistoryPullModel
@@ -48,13 +50,14 @@ struct HistoryView: View {
 
     init(
         store: LocalStore,
+        undoBuffer: UndoBufferStore,
         sessionStore: SessionStore,
         sync: SyncController,
         connectivity: Connectivity,
         refreshSignal: String = "",
         logTimeActive: Binding<Bool> = .constant(false)
     ) {
-        _vm = StateObject(wrappedValue: HistoryViewModel(store: store))
+        _vm = StateObject(wrappedValue: HistoryViewModel(store: store, undoBuffer: undoBuffer))
         _pull = StateObject(wrappedValue: HistoryPullModel(
             sync: sync,
             connectivity: connectivity
@@ -95,11 +98,15 @@ struct HistoryView: View {
             }
         }
         .background(Theme.backgroundPrimary.ignoresSafeArea())
+        // System shake-to-undo for entry deletions (history-entry-list,
+        // fix-87): the passive host returns this surface's undo manager so
+        // shakes reach the registration `registerSystemUndo` owns.
+        .background(ShakeFirstResponderHost(undoManager: undoManager))
         // `.task` alone misses re-entry after saving an entry on Track; a
         // plain `onAppear` reload would re-fire on every inner re-render.
         // The load is guarded by `needsReload` inside the VM.
-        .task { await vm.loadIfNeeded() }
-        .onAppear { Task { await vm.loadIfNeeded() } }
+        .task { await reloadAndRegister() }
+        .onAppear { Task { await reloadAndRegister() } }
         // Entries can be saved on Track (or from the compact timer) while
         // History is off-screen; mark stale on leave so the next appear
         // reloads. Without this the `needsReload` guard serves the first
@@ -109,8 +116,7 @@ struct HistoryView: View {
             pull.cancelNotice()
         }
         .onChange(of: refreshSignal) {
-            vm.invalidate()
-            Task { await vm.loadIfNeeded() }
+            Task { await invalidateReloadAndRegister() }
         }
         // A sync cycle merges relay state into LocalStore behind this view:
         // the Profile sheet covers History without firing onDisappear, so the
@@ -120,16 +126,14 @@ struct HistoryView: View {
         .onChange(of: sync.status) { _, status in
             switch status {
             case .idle, .error:
-                vm.invalidate()
-                Task { await vm.loadIfNeeded() }
+                Task { await invalidateReloadAndRegister() }
             case .inactive, .syncing:
                 break
             }
         }
         .sheet(isPresented: $isLogTimeActive) {
             LogTimeView(service: container.timerService) {
-                vm.invalidate()
-                Task { await vm.loadIfNeeded() }
+                Task { await invalidateReloadAndRegister() }
             }
         }
         // A pull-awaited cycle failure surfaces once, with a single OK
@@ -160,15 +164,26 @@ struct HistoryView: View {
                 editing: entry,
                 embeddedInNavigationStack: true
             ) {
-                vm.invalidate()
-                Task { await vm.loadIfNeeded() }
+                Task { await invalidateReloadAndRegister() }
             }
             .environmentObject(container)
             .onDisappear {
-                vm.invalidate()
-                Task { await vm.loadIfNeeded() }
+                Task { await invalidateReloadAndRegister() }
             }
         }
+    }
+
+    /// Reload-then-register ordering: the registration reads the newest
+    /// buffer row, which only exists after the delete transaction commits —
+    /// registering before reload races it.
+    private func reloadAndRegister() async {
+        await vm.loadIfNeeded()
+        await vm.registerSystemUndo(with: undoManager)
+    }
+
+    private func invalidateReloadAndRegister() async {
+        vm.invalidate()
+        await reloadAndRegister()
     }
 
     /// Pull-to-refresh lives on the populated list branch only: the empty
@@ -312,6 +327,7 @@ private struct HeaderFramePreferenceKey: PreferenceKey {
     NavigationStack {
         HistoryView(
             store: container.localStore,
+            undoBuffer: container.undoBuffer,
             sessionStore: container.sessionStore,
             sync: container.syncController,
             connectivity: container.connectivity
@@ -326,6 +342,7 @@ private struct HeaderFramePreferenceKey: PreferenceKey {
     NavigationStack {
         HistoryView(
             store: container.localStore,
+            undoBuffer: container.undoBuffer,
             sessionStore: container.sessionStore,
             sync: container.syncController,
             connectivity: container.connectivity

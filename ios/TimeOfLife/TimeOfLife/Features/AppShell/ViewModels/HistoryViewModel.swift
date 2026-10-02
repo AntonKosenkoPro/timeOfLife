@@ -23,17 +23,25 @@ struct DayGroup: Identifiable, Equatable {
 final class HistoryViewModel: ObservableObject {
     @Published private(set) var dayGroups: [DayGroup] = []
     @Published private(set) var isLoading = false
+    @Published private(set) var undoError: String?
 
     private let store: LocalStore
+    private let undoBuffer: UndoBufferStore
     private let nowProvider: () -> Date
     private var needsReload = true
     private var categoriesByID: [String: Category] = [:]
+    /// The UndoManager the current registration belongs to, held weakly so
+    /// the re-registration after an undo targets the same manager without
+    /// capturing a non-Sendable value in the undo handler closure.
+    private weak var registeredUndoManager: UndoManager?
 
     init(
         store: LocalStore,
+        undoBuffer: UndoBufferStore,
         now: @escaping () -> Date = Date.init
     ) {
         self.store = store
+        self.undoBuffer = undoBuffer
         self.nowProvider = now
     }
 
@@ -66,6 +74,55 @@ final class HistoryViewModel: ObservableObject {
     /// Marks the data stale so the next History appear reloads it.
     func invalidate() {
         needsReload = true
+    }
+
+    // MARK: - Entry shake-to-undo (history-entry-list, fix-87)
+
+    /// Registers the newest restorable entry deletion with the system Undo
+    /// manager, so shaking surfaces the DEFAULT Undo confirmation and
+    /// confirming restores exactly one entry — the most recent buffered
+    /// one. Previous registrations are cleared first, so one shake+confirm
+    /// can never restore two deletions. Offers nothing when the buffer holds
+    /// no entry deletion — including when the newest row belongs to another
+    /// surface (U7 supersession). Mirrors
+    /// `ManageCategoriesViewModel.registerSystemUndo`.
+    func registerSystemUndo(with undoManager: UndoManager?) async {
+        guard let undoManager else { return }
+        registeredUndoManager = undoManager
+        undoManager.removeAllActions(withTarget: self)
+        guard let recent = try? await undoBuffer.mostRecent(),
+              (try? await store.entryDeletionSnapshot(bufferID: recent.id)) != nil else { return }
+        undoManager.registerUndo(withTarget: self) { target in
+            Task { @MainActor in
+                await target.performUndo()
+                await target.registerSystemUndo(with: target.registeredUndoManager)
+            }
+        }
+        // Names the undoable action so the DEFAULT system confirmation
+        // states what Confirm will restore. Reuses the existing localized
+        // Delete string — no new strings (U4).
+        undoManager.setActionName(L10n.entryDeleteConfirm.text)
+    }
+
+    /// Undoes the most recent entry deletion: restores the entry with its
+    /// ordered categories, removes the buffer row, and rebuilds the day
+    /// groups. Only entry deletions are restored here — buffer rows owned
+    /// by other surfaces are left for their owners. Nothing is synced.
+    /// Refused while a buffered-deletion push is in flight (the row may
+    /// commit at any moment; retry after the sync finishes) — surfaced as
+    /// the persistence error, same as a failed restore, since the
+    /// user-visible outcome is identical (no undo).
+    func performUndo() async {
+        do {
+            guard let recent = try await undoBuffer.mostRecent() else { return }
+            guard try await store.entryDeletionSnapshot(bufferID: recent.id) != nil else { return }
+            if try await store.undoEntryDeletion(bufferID: recent.id) != nil {
+                undoError = nil
+                await load()
+            }
+        } catch {
+            undoError = L10n.errorLocalPersistence.text
+        }
     }
 
     // MARK: - Row presentation (EntryRow inputs)

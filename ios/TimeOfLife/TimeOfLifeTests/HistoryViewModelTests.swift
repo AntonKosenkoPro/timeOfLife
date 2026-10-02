@@ -1,3 +1,4 @@
+// swiftlint:disable file_length
 import Testing
 import Foundation
 @testable import TimeOfLife
@@ -188,7 +189,7 @@ struct HistoryViewModelTests {
             endedAt: Date(timeIntervalSinceNow: -6000)
         ))
 
-        let vm = HistoryViewModel(store: store)
+        let vm = HistoryViewModel(store: store, undoBuffer: UndoBufferStore(store: store))
         await vm.load()
 
         #expect(vm.dayGroups.count == 1)
@@ -216,7 +217,7 @@ struct HistoryViewModelTests {
             endedAt: Date(timeIntervalSinceNow: -3540)
         ))
 
-        let vm = HistoryViewModel(store: store)
+        let vm = HistoryViewModel(store: store, undoBuffer: UndoBufferStore(store: store))
         await vm.loadIfNeeded()
         #expect(vm.categoryNames(for: vm.dayGroups[0].entries[0]) == "Health")
 
@@ -234,7 +235,7 @@ struct HistoryViewModelTests {
         let store = try makeStore()
         try await store.createEntry(entry(id: "e1", startedAt: Date(timeIntervalSinceNow: -60)))
 
-        let vm = HistoryViewModel(store: store)
+        let vm = HistoryViewModel(store: store, undoBuffer: UndoBufferStore(store: store))
         await vm.load()
 
         let running = vm.dayGroups[0].entries[0]
@@ -255,7 +256,7 @@ struct HistoryViewModelTests {
             endedAt: Date(timeIntervalSinceNow: -3540)
         ))
 
-        let vm = HistoryViewModel(store: store)
+        let vm = HistoryViewModel(store: store, undoBuffer: UndoBufferStore(store: store))
         await vm.loadIfNeeded()
         #expect(vm.dayGroups.flatMap(\.entries).map(\.id) == ["e1"])
 
@@ -289,7 +290,7 @@ struct HistoryViewModelTests {
             endedAt: start.addingTimeInterval(60)
         ))
 
-        let vm = HistoryViewModel(store: store)
+        let vm = HistoryViewModel(store: store, undoBuffer: UndoBufferStore(store: store))
         await vm.loadIfNeeded()
         #expect(vm.durationText(for: vm.dayGroups[0].entries[0], locale: Locale(identifier: "en")) == "1m")
 
@@ -317,7 +318,7 @@ struct HistoryViewModelTests {
             endedAt: start.addingTimeInterval(60)
         ))
 
-        let vm = HistoryViewModel(store: store)
+        let vm = HistoryViewModel(store: store, undoBuffer: UndoBufferStore(store: store))
         await vm.loadIfNeeded()
         #expect(vm.dayGroups.count == 1)
 
@@ -342,7 +343,7 @@ struct HistoryViewModelTests {
             endedAt: start.addingTimeInterval(60)
         ))
 
-        let vm = HistoryViewModel(store: store)
+        let vm = HistoryViewModel(store: store, undoBuffer: UndoBufferStore(store: store))
         await vm.loadIfNeeded()
         #expect(vm.dayGroups.flatMap(\.entries).map(\.id) == ["local"])
 
@@ -373,6 +374,82 @@ struct HistoryViewModelTests {
         vm.invalidate()
         await vm.loadIfNeeded()
         #expect(vm.dayGroups.flatMap(\.entries).map(\.id) == ["local"])
+    }
+
+    // MARK: - Entry shake-to-undo (fix-87)
+
+    @Test("registerSystemUndo registers the newest entry deletion and performUndo restores it")
+    func entryUndoRegistersAndRestores() async throws {
+        let store = try makeStore()
+        try await store.createCategory(Category(id: "c1", name: "Health", icon: "figure.run"))
+        try await store.createCategory(Category(id: "c2", name: "Work", icon: "briefcase"))
+        try await store.createEntry(entry(
+            id: "e1",
+            startedAt: Date(timeIntervalSinceNow: -3600),
+            text: "Running",
+            categoryIDs: ["c2", "c1"],
+            durationSeconds: 600,
+            endedAt: Date(timeIntervalSinceNow: -3000)
+        ))
+        _ = try await store.deleteEntryUndoable(id: "e1", deletedAt: Date())
+
+        let vm = HistoryViewModel(store: store, undoBuffer: UndoBufferStore(store: store))
+        await vm.loadIfNeeded()
+        #expect(vm.dayGroups.isEmpty)
+
+        let undoManager = UndoManager()
+        await vm.registerSystemUndo(with: undoManager)
+        #expect(undoManager.canUndo)
+        #expect(undoManager.undoActionName == L10n.entryDeleteConfirm.text)
+
+        await vm.performUndo()
+
+        #expect(try await store.entry(id: "e1")?.activityText == "Running")
+        #expect(vm.dayGroups.flatMap(\.entries).map(\.id) == ["e1"])
+        let restored = try #require(vm.dayGroups.flatMap(\.entries).first { $0.id == "e1" })
+        #expect(vm.categoryNames(for: restored) == "Work, Health")
+        #expect(vm.undoError == nil)
+        let rows = try await store.outboxRows()
+        #expect(rows.allSatisfy { $0.op != "delete" })
+    }
+
+    @Test("a category-newest buffer offers nothing to the entry path")
+    func categoryNewestOffersNothing() async throws {
+        let store = try makeStore()
+        try await store.createCategory(Category(id: "c1", name: "Work", icon: "briefcase"))
+        _ = try await store.deleteCategoryUndoable(id: "c1", deletedAt: Date())
+
+        let vm = HistoryViewModel(store: store, undoBuffer: UndoBufferStore(store: store))
+        let undoManager = UndoManager()
+        await vm.registerSystemUndo(with: undoManager)
+        await vm.performUndo()
+
+        #expect(!undoManager.canUndo)
+        // The foreign buffer row is untouched and still restorable by its owner.
+        #expect(try await store.undoBufferMostRecent() != nil)
+        #expect(try await store.category(id: "c1") == nil)
+        #expect(vm.undoError == nil)
+    }
+
+    @Test("performUndo is refused with the persistence error while the push is in flight")
+    func inFlightPushRefusesUndo() async throws {
+        let store = try makeStore()
+        try await store.createEntry(entry(
+            id: "e1",
+            startedAt: Date(timeIntervalSinceNow: -3600),
+            durationSeconds: 60,
+            endedAt: Date(timeIntervalSinceNow: -3540)
+        ))
+        _ = try await store.deleteEntryUndoable(id: "e1", deletedAt: Date())
+
+        let vm = HistoryViewModel(store: store, undoBuffer: UndoBufferStore(store: store))
+        await store.setUndoPushInFlight(true)
+        await vm.performUndo()
+        await store.setUndoPushInFlight(false)
+
+        #expect(vm.undoError == L10n.errorLocalPersistence.text)
+        #expect(try await store.entry(id: "e1") == nil)
+        #expect(try await store.undoBufferMostRecent() != nil)
     }
 
     // MARK: - Helpers
