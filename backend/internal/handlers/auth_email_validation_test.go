@@ -46,11 +46,15 @@ func TestRequestOTP_AcceptsRepresentativeValidSenders(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			store := newTestStore(t)
-			h := newTestHandler(t, store)
+			sender := &captureSender{}
+			h := newTestHandlerWithDependencies(t, store, nil, sender)
 
 			w := requestOTP(t, h, tc.email)
 			if w.Code != http.StatusAccepted {
 				t.Errorf("expected 202 for %q, got %d: %s", tc.email, w.Code, w.Body.String())
+			}
+			if len(sender.messages) != 1 {
+				t.Errorf("expected one OTP email for %q, got %d", tc.email, len(sender.messages))
 			}
 		})
 	}
