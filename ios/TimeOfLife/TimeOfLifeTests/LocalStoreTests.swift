@@ -964,6 +964,9 @@ struct LocalStoreCategoryMutationTests {
 
         let rows = try await store.outboxRows()
         #expect(rows.count == 2)
+        // Same-tick rows drain in insertion order (created_at, rowid):
+        // the create came first, the update last.
+        #expect(rows.first?.op == "create")
         #expect(rows.last?.op == "update")
         let payload = try #require(rows.last?.payload)
         let decoded = try JSONDecoder().decode(Category.self, from: Data(payload.utf8))
