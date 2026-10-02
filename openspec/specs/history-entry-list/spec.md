@@ -3,10 +3,7 @@
 ## Purpose
 
 Lets users review their committed time entries as a read-only, day-grouped list in the History tab, showing activity identity, categories, timeframe, and duration.
-
 ## Requirements
-
-
 ### Requirement: History shows committed time entries
 The History destination SHALL display committed `TimeEntry` records as a chronological list, newest first, grouped by the day each entry started on. The list SHALL NOT show running (uncommitted) timer sessions.
 
@@ -74,6 +71,7 @@ History rows SHALL NOT offer edit, delete, swipe, or long-press actions. Tapping
 #### Scenario: No row actions
 - **WHEN** the user swipes or long-presses a History entry row
 - **THEN** no action is offered and nothing happens
+
 ### Requirement: History preserves compact timer access with a persistent nav bar
 The History destination SHALL keep the compact cross-tab running timer visible and stoppable, matching the app-shell "Running timer remains globally accessible" requirement. The History destination SHALL keep the navigation bar (inline "History" title and Profile button) permanently visible while History is on screen, regardless of list scroll position. The Profile button is reachable at all times on History.
 
@@ -99,6 +97,7 @@ The History destination SHALL offer a `[+]` action in the navigation bar that op
 #### Scenario: Saved entry appears
 - **WHEN** the user saves a manual entry from the sheet opened via `[+]`
 - **THEN** the sheet dismisses and the entry appears in its day group in the list
+
 ### Requirement: History reflects entry edits and deletes
 Edits saved in the entry form SHALL appear in the History list with updated values in the correct day group when the user returns to it. Entries deleted via the entry form SHALL disappear from the History list (removing the day group when it becomes empty, recomputing the day total) via the existing invalidate/reload chain.
 
@@ -109,6 +108,7 @@ Edits saved in the entry form SHALL appear in the History list with updated valu
 #### Scenario: Deleted entry disappears
 - **WHEN** the user confirms deletion of an entry and returns to History
 - **THEN** the entry is gone and its day group is removed when empty
+
 ### Requirement: Tapping a History entry row opens the entry form
 The History list SHALL respond to a tap on an entry row by opening the unified entry form (see entry-editor capability) as a full-screen cover for that entry — editable for `manual` entries, read-only (delete-only) for imported entries. History SHALL NOT offer swipe actions, long-press actions, or any other edit/delete of entries.
 
@@ -171,3 +171,33 @@ The History destination SHALL reload its day groups when a sync cycle completes 
 #### Scenario: Failed sync keeps current list
 - **WHEN** a sync cycle fails with an offline or transport error having applied no merges
 - **THEN** the History list keeps its current content and reports no spurious empty state
+
+### Requirement: History offers entry shake-to-undo through the system Undo confirmation
+
+The History destination SHALL offer restore of a confirmed entry deletion through the DEFAULT system Undo confirmation only: shaking the device surfaces the system Undo prompt, and confirming restores exactly one entry — the most recent entry-owned buffered deletion. The registration SHALL be cleared-then-single (one shake+confirm restores at most one deletion) and SHALL cover entry-owned snapshots only: when the newest buffer row belongs to another surface (e.g. a category deletion), History SHALL offer nothing. While the row's `DELETE` push is in flight, undo SHALL be refused with the existing persistence error. No UndoToast SHALL be shown. Confirming an entry delete in the entry form SHALL still dismiss the form; the entry disappears from History via the existing invalidate/reload chain until restored.
+
+#### Scenario: Shake on History after entry delete restores the entry
+
+- **WHEN** the user confirms an entry deletion, returns to History, shakes the device, and confirms the system Undo prompt
+- **THEN** the entry is restored with its text, values, and ordered categories back into its day group, and nothing is synced
+
+#### Scenario: Category-newest buffer offers nothing on History
+
+- **WHEN** the newest buffered deletion is category-owned and the user shakes on History
+- **THEN** no Undo action is offered and nothing is restored
+
+#### Scenario: Entry-newest buffer offers nothing on Manage Categories
+
+- **WHEN** the newest buffered deletion is entry-owned and the user shakes on Manage Categories
+- **THEN** no category Undo action is offered and nothing is restored
+
+#### Scenario: In-flight push refuses History undo
+
+- **WHEN** the user shakes on History and confirms while the buffered entry deletion's `DELETE` push is in flight
+- **THEN** the undo is refused with the existing persistence error and the list is unchanged
+
+#### Scenario: No toast on History undo path
+
+- **WHEN** the user confirms an entry deletion
+- **THEN** no UndoToast is shown on the entry form or on History; restore is offered only through the system Undo confirmation
+
