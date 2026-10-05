@@ -19,6 +19,7 @@ Stage 1 (AI review) runs automatically on this PR. Stage 2 is your self-review b
 - [ ] Both test suites green (`go test ./...`, `xcodebuild test`)
 - [ ] Relevant `Requirements/FURPS/*.md` rows re-checked
 - [ ] Docs updated if architecture/contract/design changed (`docs/project-context.md`, `Design/*.md`, `backend/api/openapi.yaml`)
+- [ ] Bugfix: reproduced on the current tree before fixing and re-verified after (evidence linked); regression test added where automatable
 
 ## Repo non-negotiables
 

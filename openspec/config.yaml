@@ -43,6 +43,7 @@ rules:
     - Write change-scoped deltas only; never edit baseline specs directly while proposing a change.
   tasks:
     - Include relevant tests, linters, requirements checks, and documentation updates.
+    - For bugfix changes, the first task reproduces the bug on the current tree (recorded steps + evidence); implementation tasks come after the repro, and a final task re-runs the identical repro to verify the fix.
     - When an external dependency is involved, include the ctx7 fetch as the first task; implementation tasks depend on it.
 
 operations:
@@ -50,6 +51,7 @@ operations:
     guidance:
       - Read `docs/project-context.md` first (canonical context; `AGENTS.md` is the short entrypoint).
       - Check the selected change's `tasks.md` before implementing and mark tasks `[x]` as you complete them; reconcile with the relevant `Requirements/FURPS/*.md` rows.
+      - Bugfix rule: reproduce the bug first (recorded evidence), implement only after confirming the repro, and re-verify with the identical repro afterwards; if it cannot be reproduced, stop and report instead of guessing (see `docs/project-context.md` → "Per-iteration revising process").
       - External docs first: if the work touches an external dependency, run the ctx7 `library` → `docs` fetch before coding and cite it; on quota error ask for `npx ctx7@latest login` / `CONTEXT7_API_KEY`, never silently fall back.
       - Deferred local-first UI surfaces (UndoToast/shake-to-undo, "via <Source>" labels, lock-screen ControlWidget) must not be claimed done; update `docs/project-context.md` → "Incomplete / deferred" and any owning change artifacts accordingly.
       - If the OpenAPI contract changes, update `backend/api/openapi.yaml` and both client/server sides (S10); run the backend contract gate (`go test ./...` includes `internal/contract`).

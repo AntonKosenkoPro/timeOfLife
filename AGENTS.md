@@ -66,6 +66,7 @@ xcodebuild -scheme TimeOfLife -destination 'generic/platform=iOS Simulator' buil
 3. Re-check the relevant `Requirements/FURPS/*.md` rows; fix conflicts.
 4. Update docs if architecture/contract/run steps or visual design changed: `docs/project-context.md`, `README.md`, `openspec/` artifacts + `openspec/config.yaml` guidance, relevant `Design/*.md`, `backend/api/openapi.yaml`. Keep `AGENTS.md` short — point to `docs/project-context.md`.
 5. Prefer existing utilities; remove dead code.
+6. Reproduce bugs before fixing and re-verify after: no implementation without a recorded repro on the current tree — rule: `docs/project-context.md` → "Per-iteration revising process".
 
 ## Flow recommendations
 
