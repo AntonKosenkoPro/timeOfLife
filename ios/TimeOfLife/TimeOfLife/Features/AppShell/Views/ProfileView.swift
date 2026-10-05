@@ -5,7 +5,9 @@ import SwiftUI
 /// category management, and the destructive erase control. Signed-in only —
 /// the launch gate guarantees a session, so there is no "Enable Sync" row and
 /// no auth sheet. No activity management exists (no activity catalog —
-/// remove-activities-layer).
+/// remove-activities-layer). Profile is a pushed page (back navigation, no
+/// Done): it renders inside the presenting tab's NavigationStack, and
+/// Manage Categories pushes from here the same way.
 struct ProfileView: View {
     @EnvironmentObject var container: AppContainer
     /// The signed-in session (Profile renders only behind the launch gate):
@@ -17,8 +19,6 @@ struct ProfileView: View {
     /// Sync now button never re-enabled. Separate environment objects (as in
     /// `TimeOfLifeApp`) subscribe to the real publishers.
     @EnvironmentObject var sync: SyncController
-    @Environment(\.dismiss)
-    private var dismiss
     @State private var isShowingEraseConfirm = false
     /// The last erase failure message, surfaced in an alert. Set only when
     /// `eraseLocalData()` throws — the file then survives on disk, so the
@@ -39,38 +39,31 @@ struct ProfileView: View {
     static let signOutAccessibilityId = "ProfileSignOutButton"
 
     var body: some View {
-        NavigationStack {
-            List {
-                accountSection
-                onDeviceSection
-                versionFooter
+        List {
+            accountSection
+            onDeviceSection
+            versionFooter
+        }
+        .navigationTitle(L10n.profileTitle.text)
+        .navigationBarTitleDisplayMode(.inline)
+        .alert(L10n.profileEraseLocalDataConfirmTitle.text, isPresented: $isShowingEraseConfirm) {
+            Button(L10n.profileEraseConfirm.text, role: .destructive) {
+                Task { await eraseLocalData() }
             }
-            .navigationTitle(L10n.profileTitle.text)
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button(L10n.profileDone.text) { dismiss() }
-                }
-            }
-            .alert(L10n.profileEraseLocalDataConfirmTitle.text, isPresented: $isShowingEraseConfirm) {
-                Button(L10n.profileEraseConfirm.text, role: .destructive) {
-                    Task { await eraseLocalData() }
-                }
-                Button(L10n.profileEraseCancel.text, role: .cancel) {}
-            } message: {
-                Text(L10n.profileEraseLocalDataConfirmMessage.text)
-            }
-            .alert(
-                L10n.profileEraseLocalData.text,
-                isPresented: Binding(
-                    get: { eraseErrorMessage != nil },
-                    set: { if !$0 { eraseErrorMessage = nil } }
-                )
-            ) {
-                Button(L10n.commonOk.text, role: .cancel) { eraseErrorMessage = nil }
-            } message: {
-                Text(eraseErrorMessage ?? "")
-            }
+            Button(L10n.profileEraseCancel.text, role: .cancel) {}
+        } message: {
+            Text(L10n.profileEraseLocalDataConfirmMessage.text)
+        }
+        .alert(
+            L10n.profileEraseLocalData.text,
+            isPresented: Binding(
+                get: { eraseErrorMessage != nil },
+                set: { if !$0 { eraseErrorMessage = nil } }
+            )
+        ) {
+            Button(L10n.commonOk.text, role: .cancel) { eraseErrorMessage = nil }
+        } message: {
+            Text(eraseErrorMessage ?? "")
         }
         .accessibilityIdentifier("Profile")
     }
@@ -256,9 +249,11 @@ struct ProfileView: View {
 #if DEBUG
 #Preview("Profile") {
     let container = AppContainer.production()
-    ProfileView()
-        .environmentObject(container)
-        .environmentObject(container.sessionStore)
-        .environmentObject(container.syncController)
+    NavigationStack {
+        ProfileView()
+            .environmentObject(container)
+            .environmentObject(container.sessionStore)
+            .environmentObject(container.syncController)
+    }
 }
 #endif

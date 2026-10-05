@@ -69,14 +69,15 @@ struct AppShellView: View {
             .accessibilityIdentifier("TabInsights")
         }
         .tint(Theme.accentPrimary)
-        .sheet(isPresented: $isShowingProfile, onDismiss: {
-            // A category created in Profile must be toggleable immediately.
-            Task { await trackVM.load() }
-        }, content: {
-            ProfileView()
-                .environmentObject(container)
-                .environmentObject(container.sessionStore)
-        })
+        // Profile is a pushed page (one per tab stack), not a sheet: exiting
+        // it back to a tab flips the flag false, which reloads Track data
+        // (the sheet's onDismiss contract, once on exit — pushes to
+        // Categories don't touch the flag, so no spurious reloads).
+        .onChange(of: isShowingProfile) { old, new in
+            if old, !new {
+                Task { await trackVM.load() }
+            }
+        }
         .task { await vm.load() }
         // TabView keeps mounted tabs alive, so Track's own `.task` runs only
         // on first appear: refresh recents + categories on every return, so
@@ -98,6 +99,11 @@ struct AppShellView: View {
                     onLogTime: { isHistoryLogTimeActive = true },
                     onProfile: { isShowingProfile = true }
                 ))
+                .navigationDestination(isPresented: $isShowingProfile) {
+                    ProfileView()
+                        .environmentObject(container)
+                        .environmentObject(container.sessionStore)
+                }
         }
     }
 
