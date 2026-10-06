@@ -81,6 +81,11 @@ targets:
         UIRequiresFullScreen: true
         ITSAppUsesNonExemptEncryption: false
         API_BASE_URL: "$(API_BASE_URL)"
+        # Build-stamped commit SHA (profile-version-sha): the trailing Run
+        # Script Phase below overwrites this "?" default in the *built* plist
+        # on every build, so a build that skips the script still reads a
+        # defined key.
+        GIT_COMMIT_SHA: "?"
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.antonkosenko.timeoflifeapp
@@ -128,6 +133,22 @@ targets:
     dependencies:
       - package: GRDB
         product: GRDB
+    # Trailing stamp (profile-version-sha): writes the built commit's 7-char
+    # SHA into the *built* Info.plist as GIT_COMMIT_SHA for the Profile
+    # version footer. Trailing on purpose — the built plist only exists after
+    # Xcode's Process-Info.plist step — and build-phase scripts still run
+    # before CodeSign, so the stamped plist is what gets signed. No
+    # dirty-tree marker by decision: a dirty tree reports its base commit.
+    postBuildScripts:
+      - name: Stamp GIT_COMMIT_SHA
+        # No outputs by design: the stamp must refresh on every build (a new
+        # commit between builds changes the footer). This silences Xcode's
+        # "will be run during every build" warning by declaring the intent.
+        basedOnDependencyAnalysis: false
+        script: |
+          SHA="$(git rev-parse --short=7 HEAD 2>/dev/null || echo "?")"
+          /usr/libexec/PlistBuddy -c "Set :GIT_COMMIT_SHA $SHA" "${TARGET_BUILD_DIR}/${INFOPLIST_PATH}" 2>/dev/null \
+            || /usr/libexec/PlistBuddy -c "Add :GIT_COMMIT_SHA string $SHA" "${TARGET_BUILD_DIR}/${INFOPLIST_PATH}"
   TimeOfLifeTests:
     type: bundle.unit-test
     platform: iOS
