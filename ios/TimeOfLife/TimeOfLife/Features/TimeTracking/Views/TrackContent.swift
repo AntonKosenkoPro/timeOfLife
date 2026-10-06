@@ -249,7 +249,7 @@ struct TrackContent: View {
                 .frame(maxWidth: .infinity, minHeight: Theme.minTapArea)
             }
             NavigationLink {
-                NotesEditorPage(initialText: vm.state.draft?.notes ?? "") { notes in
+                NotesEditorPage(initialText: vm.state.draft?.notes ?? "", entryName: vm.state.draft?.text ?? "") { notes in
                     Task { await vm.updateDraftNotes(notes) }
                 }
             } label: {

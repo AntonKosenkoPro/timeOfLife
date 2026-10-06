@@ -164,6 +164,10 @@ enum L10n: String, CaseIterable {
     case nameClear = "name.clear"
     case namePickerTitle = "name.pickerTitle"
     case namePickerNoMatchHint = "name.pickerNoMatchHint"
+    // Notes editor live counter (extend-notes-limit: `<name> • <n>/2000`,
+    // name omitted when empty)
+    case notesEditorSubtitle = "notes.editorSubtitle"
+    case notesEditorCounter = "notes.editorCounter"
 
     // Starter categories (category-management spec, seed requirement)
     case categorySeedWork = "category.seed.work"

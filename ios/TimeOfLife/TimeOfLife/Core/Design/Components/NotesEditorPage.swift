@@ -12,21 +12,41 @@ import SwiftUI
 /// system Back button is hidden, so dismissal is X/✓ plus swipe-back
 /// (which pops and discards, like X).
 ///
+/// The nav-bar subtitle pairs the entry name with a live notes counter
+/// (`<name> • <count>/2000`, name omitted when empty), counting trimmed
+/// scalars against the relay bound. Past the bound the counter renders red
+/// while ✓ stays enabled; an over-limit save attempt shakes the editor
+/// without saving or popping (shake suppressed under Reduce Motion).
+///
 /// Placeholder reuses `L10n.entryNotesPlaceholder` (`TextEditor` has no
 /// native placeholder); `Theme` semantic colors only.
 struct NotesEditorPage: View {
+    /// Entry name shown in the counter subtitle (static open-time snapshot —
+    /// neither caller retexts underneath the page).
+    let entryName: String
     /// Write-back on ✓ (form draft or running draft, caller-owned).
     let onSave: (String) -> Void
     /// Local draft: the caller sees exactly one update, on save.
     @State private var draft: String
+    /// Failed over-limit save attempts; keys the shake animation.
+    @State private var shakeAttempts = 0
     @FocusState private var fieldFocused: Bool
     @Environment(\.dismiss)
     private var dismiss
+    @Environment(\.accessibilityReduceMotion)
+    private var reduceMotion
 
-    init(initialText: String, onSave: @escaping (String) -> Void) {
+    init(initialText: String, entryName: String, onSave: @escaping (String) -> Void) {
         _draft = State(initialValue: initialText)
+        self.entryName = entryName
         self.onSave = onSave
     }
+
+    /// Trimmed scalar count of the draft (mirrors the relay rule).
+    private var count: Int { NotesCounter.trimmedCount(draft) }
+
+    /// Whether the draft exceeds the relay bound.
+    private var isOverLimit: Bool { NotesCounter.isOverLimit(draft) }
 
     var body: some View {
         TextEditor(text: $draft)
@@ -47,7 +67,19 @@ struct NotesEditorPage: View {
                 }
             }
             .padding(.horizontal, Theme.spacingMedium)
-            .navigationTitle(L10n.entryNotesLabel.text)
+            // Over-limit shake: a horizontal-offset keyframe track keyed on
+            // the failed-attempt counter (keyframeAnimator, iOS 17+ API).
+            .keyframeAnimator(initialValue: CGFloat.zero, trigger: shakeAttempts) { content, value in
+                content.offset(x: value)
+            } keyframes: { _ in
+                KeyframeTrack {
+                    CubicKeyframe(10, duration: 0.06)
+                    CubicKeyframe(-8, duration: 0.06)
+                    CubicKeyframe(5, duration: 0.06)
+                    CubicKeyframe(-3, duration: 0.06)
+                    CubicKeyframe(0, duration: 0.06)
+                }
+            }
             .navigationBarTitleDisplayMode(.inline)
             // No system Back: X is the sole cancel path, so the bar reads
             // X · title · ✓. Swipe-back still pops (and discards, like X).
@@ -55,6 +87,21 @@ struct NotesEditorPage: View {
             .background(Theme.backgroundPrimary.ignoresSafeArea())
             .scrollDismissesKeyboard(.interactively)
             .toolbar {
+                // Principal subtitle (LogTime `titleSubtitle` precedent):
+                // the page title plus the live counter footnote.
+                ToolbarItem(placement: .principal) {
+                    VStack(spacing: 0) {
+                        Text(L10n.entryNotesLabel.text)
+                            .font(.headline)
+                            .lineLimit(1)
+                        Text(counterText)
+                            .font(.footnote)
+                            .foregroundStyle(isOverLimit ? Theme.danger : Theme.textSecondary)
+                            .lineLimit(1)
+                    }
+                    .accessibilityElement(children: .combine)
+                    .accessibilityIdentifier("NotesEditorCounter")
+                }
                 EditorToolbar(
                     showsDismiss: true,
                     dismissAccessibilityLabel: L10n.entryDismissLabel.text,
@@ -66,8 +113,7 @@ struct NotesEditorPage: View {
                     confirmAccessibilityId: "NotesEditorSaveButton",
                     isConfirmDisabled: false
                 ) {
-                    onSave(draft)
-                    dismiss()
+                    confirm()
                 }
             }
             .accessibilityIdentifier("NotesEditorPage")
@@ -79,5 +125,27 @@ struct NotesEditorPage: View {
                 guard await FocusDelay.settle() else { return }
                 fieldFocused = true
             }
+    }
+
+    /// `<name> • <count>/2000`, name omitted when empty.
+    private var counterText: String {
+        if entryName.isEmpty {
+            String(format: L10n.notesEditorCounter.text, locale: .current, count)
+        } else {
+            String(format: L10n.notesEditorSubtitle.text, locale: .current, entryName, count)
+        }
+    }
+
+    /// ✓ always commits within the bound; an over-limit attempt shakes and
+    /// stays (no save, no pop).
+    private func confirm() {
+        if isOverLimit {
+            if !reduceMotion {
+                shakeAttempts += 1
+            }
+            return
+        }
+        onSave(draft)
+        dismiss()
     }
 }
