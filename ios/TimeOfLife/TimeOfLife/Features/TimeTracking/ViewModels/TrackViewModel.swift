@@ -234,6 +234,9 @@ final class TrackViewModel: ObservableObject {
     /// only the running draft notes snapshot — never an entry, history
     /// row, or recents. History learns the notes at Stop. Available in
     /// both recording states (running + error), preserving whichever holds.
+    /// A persistence failure surfaces the recoverable error (the
+    /// beginRunning grammar) with the in-memory notes intact — never a
+    /// silent success, or a kill/compact-stop could lose the edit.
     func updateDraftNotes(_ notes: String) async {
         switch state {
         case let .running(draft, startedAt):
@@ -247,7 +250,13 @@ final class TrackViewModel: ObservableObject {
         case .idle, .ready, .saving, .saved:
             return
         }
-        try? await service.updateTimerDraftNotes(notes)
+        do {
+            try await service.updateTimerDraftNotes(notes)
+        } catch {
+            // Local persistence failure: keep the notes in memory so the
+            // user can retry (recoverable error), like beginRunning.
+            errorMessage = L10n.text(in: .default, code: "error.unknown")
+        }
     }
 
     /// Stops the running timer and saves the completed entry locally with

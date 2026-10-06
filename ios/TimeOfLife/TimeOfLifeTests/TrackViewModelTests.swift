@@ -1,6 +1,7 @@
 // swiftlint:disable file_length
 import Testing
 import Foundation
+import GRDB
 @testable import TimeOfLife
 
 @MainActor
@@ -192,6 +193,40 @@ struct TrackViewModelTests {
         }
         #expect(draft.notes == "retry with notes")
         #expect(try await vm.service.runningTimerDraft()?.notes == "retry with notes")
+    }
+
+    @Test("notes save failure surfaces an error preserving the draft")
+    func notesSaveFailureSurfacesError() async throws {
+        // A failed persist must never report silent success: with the
+        // table gone the UPDATE throws, the banner raises, and the
+        // in-memory notes survive for a retry (beginRunning grammar).
+        let url = temporaryStoreURL()
+        // swiftlint:disable:next force_try
+        let store = try! LocalStore(url: url)
+        let service = TimerService(store: store)
+        let vm = TrackViewModel(service: service, connectivity: MockConnectivity(connected: true))
+        let startedAt = Date()
+        try await store.saveTimerDraft(activityText: "Work", categoryIDs: [], startedAt: startedAt)
+        vm.state = .running(TrackState.Draft(text: "Work"), startedAt: startedAt)
+        try dropTimerStateTable(at: url)
+
+        await vm.updateDraftNotes("unsaved thought")
+
+        #expect(vm.errorMessage != nil)
+        guard case let .running(draft, _) = vm.state else {
+            Issue.record("expected running state")
+            return
+        }
+        #expect(draft.notes == "unsaved thought")
+    }
+
+    /// Drops the draft table to force persistence failures. Fixture-only:
+    /// app mutation paths stay behind LocalStore.
+    private func dropTimerStateTable(at url: URL) throws {
+        let queue = try DatabaseQueue(path: url.path)
+        try queue.write { db in
+            try db.execute(sql: "DROP TABLE timer_state")
+        }
     }
 
     @Test("load restores persisted draft notes into the running state")
