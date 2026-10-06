@@ -445,6 +445,41 @@ struct LogTimeViewModelTests {
         #expect(vm.categoryIDs == ["c1"])
     }
 
+    @Test("save preserves multiline notes with newlines")
+    func savePreservesMultilineNotes() async throws {
+        let vm = makeViewModel()
+        vm.name = "Gym"
+        vm.notes = "warmup\n5x5 squats\nstretch"
+
+        let saved = await vm.save()
+
+        #expect(saved)
+        let entries = try await vm.service.store.entries()
+        #expect(entries.count == 1)
+        #expect(entries[0].notes == "warmup\n5x5 squats\nstretch")
+    }
+
+    @Test("clearNotes empties multiline notes only")
+    func clearNotesEmptiesMultilineNotesOnly() {
+        let vm = makeViewModel()
+        vm.name = "Gym"
+        vm.notes = "sore\nlegs"
+        vm.toggleCategory("c1")
+        vm.clearNotes()
+        #expect(vm.notes.isEmpty)
+        #expect(vm.name == "Gym")
+        #expect(vm.categoryIDs == ["c1"])
+    }
+
+    @Test("EDIT prefills multiline notes verbatim")
+    func editPrefillsMultilineNotes() {
+        let entry = storedEntry(notes: "line one\nline two")
+        let vm = makeViewModel(editing: entry)
+
+        #expect(vm.mode == .edit)
+        #expect(vm.notes == "line one\nline two")
+    }
+
     @Test("loadNameRecentsIfNeeded loads the store recents once")
     func loadNameRecentsLoads() async throws {
         let store = try await makeStore()

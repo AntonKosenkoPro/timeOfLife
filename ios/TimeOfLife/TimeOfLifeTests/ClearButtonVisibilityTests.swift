@@ -42,6 +42,14 @@ struct ClearButtonVisibilityTests {
         #expect(ClearButtonVisibility.shouldShow(isFocused: true, text: "  ") == true)
     }
 
+    @Test("multiline text counts as non-empty")
+    func multilineCountsAsText() {
+        // The notes editor holds newlines: any non-empty string shows the
+        // button, including text that is only newlines.
+        #expect(ClearButtonVisibility.shouldShow(isFocused: true, text: "warmup\n5x5") == true)
+        #expect(ClearButtonVisibility.shouldShow(isFocused: true, text: "\n") == true)
+    }
+
     @Test("notes.clear resolves in en and ru")
     func notesClearLocalizes() throws {
         let main = Bundle.main
