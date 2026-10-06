@@ -75,6 +75,76 @@ struct AppShellViewModelTests {
         #expect(vm.selectedTab == .history)
     }
 
+    // MARK: - Per-tab navigation paths (per-tab-navigation-paths)
+
+    @Test("paths start empty on every tab")
+    func pathsStartEmpty() {
+        let vm = makeViewModel()
+        #expect(vm.trackPath.isEmpty)
+        #expect(vm.historyPath.isEmpty)
+        #expect(vm.insightsPath.isEmpty)
+    }
+
+    @Test("openProfile pushes only on the selected tab")
+    func openProfilePushesSelectedTabOnly() {
+        let vm = makeViewModel()
+        vm.selectedTab = .track
+        vm.openProfile()
+        #expect(vm.trackPath == [.profile])
+        #expect(vm.historyPath.isEmpty)
+        #expect(vm.insightsPath.isEmpty)
+    }
+
+    @Test("profile paths stay independent across tabs")
+    func profilePathsAreIndependent() {
+        let vm = makeViewModel()
+        vm.selectedTab = .track
+        vm.openProfile()
+        vm.selectedTab = .history
+        // History shows its own root — Profile was never pre-pushed here.
+        #expect(vm.historyPath.isEmpty)
+        vm.openProfile()
+        #expect(vm.trackPath == [.profile])
+        #expect(vm.historyPath == [.profile])
+        #expect(vm.insightsPath.isEmpty)
+    }
+
+    @Test("openProfile never changes the selected tab")
+    func openProfileKeepsSelectedTab() {
+        let vm = makeViewModel()
+        vm.selectedTab = .insights
+        vm.openProfile()
+        #expect(vm.selectedTab == .insights)
+        #expect(vm.insightsPath == [.profile])
+    }
+
+    @Test("openProfile is idempotent on the same tab")
+    func openProfileDoesNotDuplicate() {
+        let vm = makeViewModel()
+        vm.selectedTab = .track
+        vm.openProfile()
+        vm.openProfile()
+        #expect(vm.trackPath == [.profile])
+    }
+
+    @Test("entry pushes stay on the history path only")
+    func entryPushStaysOnHistory() {
+        let vm = makeViewModel()
+        let entry = TimeEntry(id: "e1", activityText: "Gym", startedAt: Date())
+        vm.historyPath.append(.entry(entry))
+        #expect(vm.historyPath == [.entry(entry)])
+        #expect(vm.trackPath.isEmpty)
+        #expect(vm.insightsPath.isEmpty)
+    }
+
+    @Test("profileWasPopped fires only on the profile exit transition")
+    func profileWasPoppedTransition() {
+        #expect(AppShellViewModel.profileWasPopped(old: [.profile], new: []) == true)
+        #expect(AppShellViewModel.profileWasPopped(old: [], new: []) == false)
+        #expect(AppShellViewModel.profileWasPopped(old: [], new: [.profile]) == false)
+        #expect(AppShellViewModel.profileWasPopped(old: [.profile], new: [.profile]) == false)
+    }
+
     // MARK: - Helpers
 
     private func makeViewModel() -> AppShellViewModel {

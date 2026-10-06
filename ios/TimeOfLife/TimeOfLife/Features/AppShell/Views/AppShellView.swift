@@ -17,7 +17,6 @@ struct AppShellView: View {
     @StateObject var vm: AppShellViewModel
     @EnvironmentObject var container: AppContainer
     @StateObject private var trackVM: TrackViewModel
-    @State private var isShowingProfile = false
     /// Presents the Log Time sheet from History (manual-entry spec). Owned
     /// here so the [+] lives in the same toolbar scope as the Profile
     /// button; the sheet itself stays in `HistoryView`, which owns the
@@ -34,50 +33,22 @@ struct AppShellView: View {
 
     var body: some View {
         TabView(selection: $vm.selectedTab) {
-            navigationRoot {
-                TrackView(vm: trackVM)
-            }
-            .tabItem { Label(L10n.tabTrack.text, systemImage: "timer") }
-            .tag(AppShellViewModel.Tab.track)
-            .accessibilityIdentifier("TabTrack")
+            trackStack
+                .tabItem { Label(L10n.tabTrack.text, systemImage: "timer") }
+                .tag(AppShellViewModel.Tab.track)
+                .accessibilityIdentifier("TabTrack")
 
-            navigationRoot {
-                HistoryView(
-                    store: container.localStore,
-                    undoBuffer: container.undoBuffer,
-                    sessionStore: container.sessionStore,
-                    sync: container.syncController,
-                    connectivity: container.connectivity,
-                    refreshSignal: vm.runningTimer?.activityText ?? "",
-                    logTimeActive: $isHistoryLogTimeActive
-                )
-                    .safeAreaInset(edge: .bottom) { compactTimerIfNeeded }
-            }
-            .tabItem { Label(L10n.tabHistory.text, systemImage: "clock.arrow.circlepath") }
-            .tag(AppShellViewModel.Tab.history)
-            .accessibilityIdentifier("TabHistory")
+            historyStack
+                .tabItem { Label(L10n.tabHistory.text, systemImage: "clock.arrow.circlepath") }
+                .tag(AppShellViewModel.Tab.history)
+                .accessibilityIdentifier("TabHistory")
 
-            navigationRoot {
-                InsightsView(
-                    store: container.localStore,
-                    refreshSignal: vm.runningTimer?.activityText ?? ""
-                )
-                .safeAreaInset(edge: .bottom) { compactTimerIfNeeded }
-            }
-            .tabItem { Label(L10n.tabInsights.text, systemImage: "chart.line.uptrend.xyaxis") }
-            .tag(AppShellViewModel.Tab.insights)
-            .accessibilityIdentifier("TabInsights")
+            insightsStack
+                .tabItem { Label(L10n.tabInsights.text, systemImage: "chart.line.uptrend.xyaxis") }
+                .tag(AppShellViewModel.Tab.insights)
+                .accessibilityIdentifier("TabInsights")
         }
         .tint(Theme.accentPrimary)
-        // Profile is a pushed page (one per tab stack), not a sheet: exiting
-        // it back to a tab flips the flag false, which reloads Track data
-        // (the sheet's onDismiss contract, once on exit — pushes to
-        // Categories don't touch the flag, so no spurious reloads).
-        .onChange(of: isShowingProfile) { old, new in
-            if old, !new {
-                Task { await trackVM.load() }
-            }
-        }
         .task { await vm.load() }
         // TabView keeps mounted tabs alive, so Track's own `.task` runs only
         // on first appear: refresh recents + categories on every return, so
@@ -88,30 +59,103 @@ struct AppShellView: View {
         }
     }
 
-    @ViewBuilder
-    private func navigationRoot<Content: View>(@ViewBuilder content: () -> Content) -> some View {
-        NavigationStack {
-            content()
-                .navigationTitle(navigationTitle)
+    /// Track tab: its own push state. Profile is a path value here, so
+    /// opening it on Track never pre-pushes it on History or Insights.
+    /// The path observer lives on the stack (not the shell body): one
+    /// `onChange` per expression keeps the type-checker fast on every
+    /// toolchain — a single body-wide chain timed out CI's build.
+    private var trackStack: some View {
+        NavigationStack(path: $vm.trackPath) {
+            TrackView(vm: trackVM)
+                .navigationTitle(L10n.tabTrack.text)
                 .navigationBarTitleDisplayMode(.inline)
                 .modifier(ShellToolbar(
-                    showsLogTime: vm.selectedTab == .history,
-                    onLogTime: { isHistoryLogTimeActive = true },
-                    onProfile: { isShowingProfile = true }
+                    showsLogTime: false,
+                    onLogTime: {},
+                    onProfile: { vm.openProfile() }
                 ))
-                .navigationDestination(isPresented: $isShowingProfile) {
-                    ProfileView()
-                        .environmentObject(container)
-                        .environmentObject(container.sessionStore)
+                .navigationDestination(for: ShellRoute.self) { route in
+                    if route == .profile {
+                        profileDestination
+                    }
                 }
+        }
+        // Per-tab Profile-exit reload: popping Profile here reloads Track
+        // data once (the sheet's old onDismiss contract). Pushes to
+        // Categories never touch a path value, so no spurious reloads.
+        .onChange(of: vm.trackPath) { old, new in
+            profilePoppedReload(old: old, new: new)
         }
     }
 
-    private var navigationTitle: String {
-        switch vm.selectedTab {
-        case .track: L10n.tabTrack.text
-        case .history: L10n.tabHistory.text
-        case .insights: L10n.tabInsights.text
+    /// History tab: its own push state. Destinations live in `HistoryView`
+    /// (it owns the entry-form reload), so this stack declares none — one
+    /// `navigationDestination(for: ShellRoute.self)` per stack, never two.
+    private var historyStack: some View {
+        NavigationStack(path: $vm.historyPath) {
+            HistoryView(
+                store: container.localStore,
+                undoBuffer: container.undoBuffer,
+                sessionStore: container.sessionStore,
+                sync: container.syncController,
+                connectivity: container.connectivity,
+                refreshSignal: vm.runningTimer?.activityText ?? "",
+                logTimeActive: $isHistoryLogTimeActive
+            )
+            .environmentObject(vm)
+            .safeAreaInset(edge: .bottom) { compactTimerIfNeeded }
+            .navigationTitle(L10n.tabHistory.text)
+            .navigationBarTitleDisplayMode(.inline)
+            .modifier(ShellToolbar(
+                showsLogTime: true,
+                onLogTime: { isHistoryLogTimeActive = true },
+                onProfile: { vm.openProfile() }
+            ))
+        }
+        .onChange(of: vm.historyPath) { old, new in
+            profilePoppedReload(old: old, new: new)
+        }
+    }
+
+    /// Insights tab: its own push state, mirroring the Track tab.
+    private var insightsStack: some View {
+        NavigationStack(path: $vm.insightsPath) {
+            InsightsView(
+                store: container.localStore,
+                refreshSignal: vm.runningTimer?.activityText ?? ""
+            )
+            .safeAreaInset(edge: .bottom) { compactTimerIfNeeded }
+            .navigationTitle(L10n.tabInsights.text)
+            .navigationBarTitleDisplayMode(.inline)
+            .modifier(ShellToolbar(
+                showsLogTime: false,
+                onLogTime: {},
+                onProfile: { vm.openProfile() }
+            ))
+            .navigationDestination(for: ShellRoute.self) { route in
+                if route == .profile {
+                    profileDestination
+                }
+            }
+        }
+        .onChange(of: vm.insightsPath) { old, new in
+            profilePoppedReload(old: old, new: new)
+        }
+    }
+
+    /// The Profile page (app-shell spec: pushed page, system Back, no Done).
+    /// Built once here for the Track/Insights stacks; the History stack
+    /// builds its own inside `HistoryView`, next to the entry destination.
+    /// The tab bar hides on Profile itself (see `ProfileView`).
+    private var profileDestination: some View {
+        ProfileView()
+            .environmentObject(container)
+            .environmentObject(container.sessionStore)
+    }
+
+    private func profilePoppedReload(old: [ShellRoute], new: [ShellRoute]) {
+        if AppShellViewModel.profileWasPopped(old: old, new: new) {
+            Task { await trackVM.load() }
         }
     }
 

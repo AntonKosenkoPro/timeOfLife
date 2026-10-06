@@ -29,16 +29,17 @@ struct HistoryView: View {
     /// invalidate this view — the status change would be missed and the list
     /// would stay stale after a sync (ProfileView precedent).
     @EnvironmentObject var sync: SyncController
+    /// The shell's paths (per-tab-navigation-paths): entry taps append
+    /// `.entry` to the History path only — never to another tab — and the
+    /// destinations below (Profile + entry form) render from that path, so
+    /// one `navigationDestination(for:)` serves this whole stack.
+    @EnvironmentObject var shell: AppShellViewModel
     @Environment(\.undoManager)
     private var undoManager
     @StateObject private var vm: HistoryViewModel
     /// Owns the pull-to-refresh verdict flow (history-pull-to-sync spec).
     @StateObject private var pull: HistoryPullModel
     @State private var elevatedGroupID: String?
-    /// The entry opened in the unified entry form (nil = none). EDIT mode
-    /// for `manual` entries, LOCKED mode for imported ones (entry-editor
-    /// spec, history D6).
-    @State private var editingEntry: TimeEntry?
     /// Presents the Log Time sheet (manual-entry spec). Owned by the shell
     /// so the [+] shares the nav-bar toolbar scope; the sheet and its
     /// refresh stay here.
@@ -165,24 +166,34 @@ struct HistoryView: View {
         ) {
             Button(L10n.commonOk.text, role: .cancel) { vm.clearUndoError() }
         }
-        // The unified entry form pushes onto this tab's NavigationStack
-        // (fix-entry-form-gestures): EDIT for manual entries, LOCKED for
+        // The unified entry form pushes onto this tab's path
+        // (per-tab-navigation-paths): EDIT for manual entries, LOCKED for
         // imported ones. The push provides the system back button and the
         // leading-edge pop gesture (a full-screen cover has no back stack,
-        // which is why #50's gesture never recognized). Leaving the pushed
-        // form reloads the day groups (edits and deletes both land here) —
-        // the same invalidate/loadIfNeeded path the CREATE sheet uses.
-        .navigationDestination(item: $editingEntry) { entry in
-            LogTimeView(
-                service: container.timerService,
-                editing: entry,
-                embeddedInNavigationStack: true
-            ) {
-                Task { await invalidateReloadAndRegister() }
-            }
-            .environmentObject(container)
-            .onDisappear {
-                Task { await invalidateReloadAndRegister() }
+        // which is why #50's gesture never recognized). Profile pushes on
+        // this same path from the shell toolbar — one value destination
+        // serves both, so opening Profile here never touches Track or
+        // Insights. Leaving the pushed form reloads the day groups (edits
+        // and deletes both land here) — the same invalidate/loadIfNeeded
+        // path the CREATE sheet uses.
+        .navigationDestination(for: ShellRoute.self) { route in
+            switch route {
+            case .profile:
+                ProfileView()
+                    .environmentObject(container)
+                    .environmentObject(container.sessionStore)
+            case .entry(let entry):
+                LogTimeView(
+                    service: container.timerService,
+                    editing: entry,
+                    embeddedInNavigationStack: true
+                ) {
+                    Task { await invalidateReloadAndRegister() }
+                }
+                .environmentObject(container)
+                .onDisappear {
+                    Task { await invalidateReloadAndRegister() }
+                }
             }
         }
     }
@@ -222,10 +233,10 @@ struct HistoryView: View {
                                 viaText: vm.viaText(for: entry)
                             )
                             .padding(.horizontal, Theme.spacingMedium)
-                            // Tap → pushed unified entry form (history D6 as
-                            // amended). No swipe/long-press actions.
+                            // Tap → pushed unified entry form on this tab's path
+                            // (history D6 as amended). No swipe/long-press actions.
                             .contentShape(Rectangle())
-                            .onTapGesture { editingEntry = entry }
+                            .onTapGesture { shell.historyPath.append(.entry(entry)) }
                             .accessibilityAddTraits(.isButton)
                         }
                     } header: {
@@ -349,6 +360,7 @@ private struct HeaderFramePreferenceKey: PreferenceKey {
     }
     .environmentObject(container)
     .environmentObject(container.syncController)
+    .environmentObject(AppShellViewModel(service: container.timerService))
 }
 
 #Preview("History empty") {
@@ -364,5 +376,6 @@ private struct HeaderFramePreferenceKey: PreferenceKey {
     }
     .environmentObject(container)
     .environmentObject(container.syncController)
+    .environmentObject(AppShellViewModel(service: container.timerService))
 }
 #endif
