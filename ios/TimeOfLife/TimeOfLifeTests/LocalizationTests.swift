@@ -240,7 +240,6 @@ struct LocalizationTests {
         "otp.title",
         "profile.account",
         "profile.categories",
-        "profile.done",
         "profile.eraseCancel",
         "profile.eraseConfirm",
         "profile.eraseLocalData",

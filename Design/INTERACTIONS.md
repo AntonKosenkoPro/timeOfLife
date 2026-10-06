@@ -120,7 +120,7 @@ Keep haptics subtle. Do not vibrate on every keystroke.
 D1 (OpenSpec change `redesign-track-experience`). The root is a three-tab shell, not a timer-only root:
 
 - **Track, History, Insights are the primary destinations.** Track is initially selected and is the only destination that starts or stops a timer.
-- **Profile is a sheet, not a tab.** A consistent top-trailing person control on every tab opens it. Profile owns account/sync, category management, integrations, export, appearance, and destructive data controls.
+- **Profile is a pushed page, not a tab.** A consistent top-trailing person control on every tab pushes it (back navigation, no Done). Profile owns account/sync, category management, integrations, export, appearance, and destructive data controls.
 - **Switching destinations never changes timer state** and never discards the previous destination's state.
 - **The app launches into the auth flow when signed out and into Track when signed in**; sign-in is mandatory before any Track/History/Insights use. There is no anonymous use and no optional "Enable Sync" action — the launch gate owns authentication.
 - **A running timer stays globally accessible.** While running, History and Insights show the compact timer immediately above the tab bar (`.safeAreaInset(edge: .bottom)`). Its main area returns to Track; its Stop button saves in place and keeps the current destination selected. Track does not duplicate it.

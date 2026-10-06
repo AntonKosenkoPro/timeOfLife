@@ -9,7 +9,7 @@ TabView (Track | History | Insights)
   ├─ Track      — capture: plain-text name field + Recents chips + numeric timer (SCREENS/TimeTracking.md)
   ├─ History    — retrospective review (empty state in this change)
   └─ Insights   — analysis: period breakdown with hero total (insights-breakdown)
-Profile (sheet, top-trailing person control on every tab; signed-in only — unreachable until the launch gate signs the user in)
+Profile (pushed page, top-trailing person control on every tab; signed-in only — unreachable until the launch gate signs the user in)
   ├─ Account    — account + sync management (sync status, "Sync now", Sign Out)
   ├─ Library    — Manage Categories
   └─ App        — Erase local data (active account file only)
@@ -31,7 +31,7 @@ Profile (sheet, top-trailing person control on every tab; signed-in only — unr
    - Track — `Label(L10n.tabTrack, systemImage: "timer")`, `accessibilityIdentifier("TabTrack")`.
    - History — `Label(L10n.tabHistory, systemImage: "clock.arrow.circlepath")`, `accessibilityIdentifier("TabHistory")`.
    - Insights — `Label(L10n.tabInsights, systemImage: "chart.line.uptrend.xyaxis")`, `accessibilityIdentifier("TabInsights")`.
-2. Each tab root carries the top-trailing person control (`ProfileButton`) opening the Profile sheet.
+2. Each tab root carries the top-trailing person control (`ProfileButton`) pushing the Profile page.
 3. While a timer is running, History and Insights render the compact timer immediately above the tab bar via `.safeAreaInset(edge: .bottom)` (see `CompactTimer` in `COMPONENTS.md`). Track does not duplicate it — the full numeric timer is already visible.
 4. `OfflineBanner` is rendered at the top by the root shell (unchanged).
 
@@ -55,6 +55,6 @@ Profile (sheet, top-trailing person control on every tab; signed-in only — unr
 - [ ] All strings use `L10n.*` keys in English and Russian.
 - [ ] Tab items and Profile button have stable identifiers.
 - [ ] Compact timer appears only on History/Insights and only while running.
-- [ ] Profile is a sheet, not a tab.
+- [ ] Profile is a pushed page, not a tab.
 - [ ] VoiceOver, Dynamic Type, Reduce Motion, light/dark, and iOS 18 are tested.
 - [ ] SwiftLint and warning-as-error builds pass.

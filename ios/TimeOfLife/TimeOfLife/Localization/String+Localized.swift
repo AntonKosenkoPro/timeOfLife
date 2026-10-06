@@ -55,7 +55,6 @@ enum L10n: String, CaseIterable {
     case tabHistory = "tab.history"
     case tabInsights = "tab.insights"
     case profileTitle = "profile.title"
-    case profileDone = "profile.done"
     case profileAccount = "profile.account"
     case profileSignOut = "profile.signOut"
     case profileSyncNow = "profile.syncNow"

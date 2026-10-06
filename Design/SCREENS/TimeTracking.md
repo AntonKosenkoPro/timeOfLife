@@ -200,7 +200,7 @@ start, so a stale draft can never start.
   categories at start time.
 - Start persists the running timer immediately, begins periodic readout refresh,
   emits selection feedback, and keeps the screen awake.
-- Returning to Track (tab switch back, Profile sheet dismiss) reloads
+- Returning to Track (tab switch back, navigating back from Profile) reloads
   recents and categories — including seeding the starter set first on a
   fresh install — so History edits and new categories are inherited and
   chip icons stay current.
