@@ -16,10 +16,18 @@ final class TimerService: ObservableObject {
     }
 
     /// Starts (or rewrites) the persisted running draft for the given
-    /// trimmed text and ordered category snapshot (D3/D4) so it survives a
-    /// crash and is readable by widgets and lock-screen Controls.
-    func startTimerDraft(text: String, categoryIDs: [String], startedAt: Date = Date()) async throws {
-        try await store.saveTimerDraft(activityText: text, categoryIDs: categoryIDs, startedAt: startedAt)
+    /// trimmed text, ordered category snapshot, and notes snapshot (D3/D4)
+    /// so it survives a crash and is readable by widgets and lock-screen
+    /// Controls.
+    func startTimerDraft(text: String, categoryIDs: [String], notes: String = "", startedAt: Date = Date()) async throws {
+        try await store.saveTimerDraft(activityText: text, categoryIDs: categoryIDs, startedAt: startedAt, notes: notes)
+    }
+
+    /// Rewrites only the persisted running draft's live notes snapshot (a
+    /// mid-run notes save). The locked text, categories, and `started_at`
+    /// are untouched.
+    func updateTimerDraftNotes(_ notes: String) async throws {
+        try await store.updateTimerDraftNotes(notes)
     }
 
     /// The persisted running-timer draft, or nil when no timer is running.
@@ -30,11 +38,11 @@ final class TimerService: ObservableObject {
     }
 
     /// Stops the running timer: saves the completed entry (with
-    /// `source='manual'`, empty notes) in one transaction with its single
-    /// outbox row and clears the persisted running draft. Category ids that
-    /// vanished mid-run (deleted elsewhere while timing) are pruned with the
-    /// remainder kept — a stop never fails on a dead tag.
-    func stopTimerDraft(text: String, categoryIDs: [String], startedAt: Date, endedAt: Date = Date()) async throws {
+    /// `source='manual'` and the draft's final notes) in one transaction
+    /// with its single outbox row and clears the persisted running draft.
+    /// Category ids that vanished mid-run (deleted elsewhere while timing)
+    /// are pruned with the remainder kept — a stop never fails on a dead tag.
+    func stopTimerDraft(text: String, categoryIDs: [String], startedAt: Date, endedAt: Date = Date(), notes: String = "") async throws {
         let existing = Set(try await store.categories().map(\.id))
         let pruned = categoryIDs.filter { existing.contains($0) }
         let entry = TimeEntry(
@@ -45,7 +53,7 @@ final class TimerService: ObservableObject {
             durationSeconds: Int(endedAt.timeIntervalSince(startedAt)),
             source: "manual",
             categoryIDs: pruned,
-            notes: ""
+            notes: notes
         )
         try await store.createEntry(entry)
         try await store.clearTimerDraft()

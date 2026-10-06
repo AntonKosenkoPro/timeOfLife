@@ -23,8 +23,8 @@ import SwiftUI
 /// pushed (EDIT/LOCKED) presentation provides the edge-back gesture.
 /// Tap-away keyboard dismissal lives in the shared `FormCard` container
 /// as a plain tap (tap-away only): child buttons consume their taps, so
-/// chips/pills resign explicitly in their actions and the Notes `×`
-/// clears only, keeping the keyboard open.
+/// chips/pills resign explicitly in their actions. Notes editing lives on
+/// the pushed `NotesEditorPage` (X/✓ chrome, no keyboard Done key).
 struct LogTimeView: View {
     @StateObject private var vm: LogTimeViewModel
     @EnvironmentObject var container: AppContainer
@@ -37,8 +37,6 @@ struct LogTimeView: View {
     @State private var isShowingDeleteConfirm = false
     /// The text field holding focus, if any (tap-away/scroll-away resigns it).
     @FocusState private var focusedField: FormField?
-    @Environment(\.dynamicTypeSize)
-    private var dynamicTypeSize
     /// True when pushed onto the presenter's NavigationStack (EDIT/LOCKED
     /// via History) instead of presented as a sheet (CREATE): the outer
     /// stack owns the navigation chrome AND the back stack (edge-back
@@ -233,9 +231,16 @@ struct LogTimeView: View {
     private var nameCard: some View {
         FormCard(accessibilityID: "EntryNameRow", resignFocus: focusedField = nil) {
             VStack(alignment: .leading, spacing: Theme.spacingExtraSmall) {
-                Text(L10n.entryNameLabel.text)
-                    .font(.caption)
-                    .foregroundStyle(Theme.textSecondary)
+                HStack(spacing: Theme.spacingSmall) {
+                    Text(L10n.entryNameLabel.text)
+                        .font(.caption)
+                        .foregroundStyle(Theme.textSecondary)
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(Theme.textSecondary)
+                        .accessibilityHidden(true)
+                }
                 if vm.isLocked {
                     Text(vm.name)
                         .font(.body)
@@ -262,11 +267,6 @@ struct LogTimeView: View {
                                 .lineLimit(1)
                                 .truncationMode(.tail)
                                 .foregroundStyle(vm.name.isEmpty ? Theme.textSecondary : Theme.textPrimary)
-                            Spacer()
-                            Image(systemName: "chevron.right")
-                                .font(.footnote.weight(.semibold))
-                                .foregroundStyle(Theme.textSecondary)
-                                .accessibilityHidden(true)
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .frame(minHeight: Theme.minTapArea)
@@ -292,6 +292,7 @@ struct LogTimeView: View {
                 Text(L10n.entryCategoriesLabel.text)
                     .font(.caption)
                     .foregroundStyle(Theme.textSecondary)
+                Spacer()
                 TagSelector(
                     options: vm.availableCategories,
                     selected: Set(vm.categoryIDs),
@@ -307,55 +308,53 @@ struct LogTimeView: View {
         }
     }
 
-    // MARK: - Notes row
+    // MARK: - Notes row (presenter + pushed editor, separate-notes-editor)
 
+    /// Read-only Notes presenter (approved spike variant B): a caption row
+    /// with a corner-balanced trailing chevron plus full-width 1–5 line
+    /// text with truncation, placeholder when empty. Tapping pushes the
+    /// shared `NotesEditorPage` (copy-on-open: X discards, ✓ writes
+    /// `vm.notes` only and the validity gate re-evaluates). LOCKED mode
+    /// renders the same presenter read-only with no navigation.
     private var notesCard: some View {
         FormCard(accessibilityID: "EntryNotesRow", resignFocus: focusedField = nil) {
-            VStack(alignment: .leading, spacing: Theme.spacingExtraSmall) {
-                Text(L10n.entryNotesLabel.text)
-                    .font(.caption)
-                    .foregroundStyle(Theme.textSecondary)
-                HStack(alignment: .top, spacing: 0) {
-                    TextEditor(text: $vm.notes)
-                        .focused($focusedField, equals: .notes)
+            if vm.isLocked {
+                VStack(alignment: .leading, spacing: Theme.spacingExtraSmall) {
+                    Text(L10n.entryNotesLabel.text)
+                        .font(.caption)
+                        .foregroundStyle(Theme.textSecondary)
+                    Text(vm.notes.isEmpty ? L10n.entryNotesPlaceholder.text : vm.notes)
                         .font(.body)
-                        .foregroundStyle(Theme.textPrimary)
-                        .scrollContentBackground(.hidden)
-                        .background(Theme.transparent)
-                        .frame(maxWidth: .infinity)
-                        .frame(height: DynamicTypeMetrics.editorHeight(
-                            lines: Self.notesVisibleLines,
-                            textStyle: .body,
-                            dynamicTypeSize: dynamicTypeSize
-                        ))
-                        .overlay(alignment: .topLeading) {
-                            if vm.notes.isEmpty {
-                                Text(L10n.entryNotesPlaceholder.text)
-                                    .font(.body)
-                                    .foregroundStyle(Theme.textSecondary)
-                                    .padding(.top, DynamicTypeMetrics.editorTextOriginInsets.top)
-                                    .padding(.leading, DynamicTypeMetrics.editorTextOriginInsets.leading)
-                                    .allowsHitTesting(false)
-                                    .accessibilityHidden(true)
-                            }
+                        .lineLimit(1...5)
+                        .foregroundStyle(vm.notes.isEmpty ? Theme.textSecondary : Theme.textPrimary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            } else {
+                NavigationLink {
+                    NotesEditorPage(initialText: vm.notes) { vm.notes = $0 }
+                } label: {
+                    VStack(alignment: .leading, spacing: Theme.spacingExtraSmall) {
+                        HStack(spacing: Theme.spacingSmall) {
+                            Text(L10n.entryNotesLabel.text)
+                                .font(.caption)
+                                .foregroundStyle(Theme.textSecondary)
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .font(.footnote.weight(.semibold))
+                                .foregroundStyle(Theme.textSecondary)
+                                .accessibilityHidden(true)
                         }
-                        .accessibilityIdentifier("EntryNotesField")
-                        .accessibilityLabel(L10n.entryNotesLabel.text)
-                    if ClearButtonVisibility.shouldShow(
-                        isFocused: focusedField == .notes,
-                        text: vm.notes,
-                        isLocked: vm.isLocked
-                    ) {
-                        // Clear only (issue #67): the plain card tap-away
-                        // stays silent on this tap (consumed by the button),
-                        // so the keyboard never dismisses — no flicker.
-                        ClearTextButton(
-                            action: { vm.clearNotes() },
-                            accessibilityId: "EntryNotesClearButton",
-                            accessibilityLabel: L10n.notesClear.text
-                        )
+                        Text(vm.notes.isEmpty ? L10n.entryNotesPlaceholder.text : vm.notes)
+                            .font(.body)
+                            .lineLimit(1...5)
+                            .foregroundStyle(vm.notes.isEmpty ? Theme.textSecondary : Theme.textPrimary)
+                            .frame(maxWidth: .infinity, minHeight: Theme.minTapArea, alignment: .leading)
+                            .contentShape(Rectangle())
                     }
                 }
+                .buttonStyle(.plain)
+                .accessibilityLabel(L10n.entryNotesLabel.text)
+                .accessibilityValue(vm.notes.isEmpty ? L10n.entryNotesPlaceholder.text : vm.notes)
             }
         }
     }
@@ -442,6 +441,7 @@ struct LogTimeView: View {
             Text(title)
                 .font(.caption)
                 .foregroundStyle(Theme.textSecondary)
+            Spacer()
             HStack(spacing: Theme.spacingSmall) {
                 pill(Self.dateText(for: date), active: expandedPicker == datePicker, id: dateId) {
                     toggle(datePicker)
@@ -552,9 +552,6 @@ struct LogTimeView: View {
 
     // MARK: - Formatting
 
-    /// Visible notes-editor reserve (multiline notes): Return inserts
-    /// newlines, so the box holds this many lines before inner-scrolling.
-    private static let notesVisibleLines = 3
     /// Fixed wheel-picker height (standard `UIPickerView` height): the
     /// GeometryReader container needs an explicit height.
     private static let wheelPickerHeight: CGFloat = 216

@@ -106,6 +106,26 @@ struct TrackViewModelTests {
         #expect(state == nil)
     }
 
+    @Test("stop saves the entry with the final draft notes")
+    func stopSavesNotes() async throws {
+        let vm = makeViewModel()
+        vm.nameDraft = "Reading"
+        vm.state = .ready(TrackState.Draft(text: "Reading"))
+        vm.start()
+        try? await Task.sleep(nanoseconds: 10_000_000)
+        guard case .running = vm.state else {
+            Issue.record("expected running state")
+            return
+        }
+        await vm.updateDraftNotes("steady pace\nsecond wind")
+
+        await vm.stop()
+
+        let entries = try await vm.service.store.entries()
+        #expect(entries.count == 1)
+        #expect(entries.first?.notes == "steady pace\nsecond wind")
+    }
+
     @Test("toggling tags mid-run rewrites only the running draft snapshot")
     func toggleRewritesDraftOnly() async throws {
         let vm = makeViewModel()
@@ -128,6 +148,88 @@ struct TrackViewModelTests {
         #expect(persisted?.categoryIDs == ["c2"])
         // No entry exists mid-run; nothing entered History.
         #expect(try await vm.service.store.outboxRows().allSatisfy { $0.resource != "entry" })
+    }
+
+    @Test("saving notes mid-run rewrites only the draft snapshot")
+    func notesRewritesDraftOnly() async throws {
+        let vm = makeViewModel()
+        vm.nameDraft = "Work"
+        vm.state = .ready(TrackState.Draft(text: "Work", categoryIDs: ["c1"]))
+        vm.start()
+        try? await Task.sleep(nanoseconds: 10_000_000)
+
+        await vm.updateDraftNotes("remember HR belt")
+
+        guard case let .running(draft, _) = vm.state else {
+            Issue.record("expected running state")
+            return
+        }
+        #expect(draft.notes == "remember HR belt")
+        #expect(draft.text == "Work")
+        #expect(draft.categoryIDs == ["c1"])
+        #expect(try await vm.service.store.entries().isEmpty)
+        let persisted = try await vm.service.runningTimerDraft()
+        #expect(persisted?.notes == "remember HR belt")
+        #expect(persisted?.activityText == "Work")
+        // No entry exists mid-run; nothing entered History.
+        #expect(try await vm.service.store.outboxRows().allSatisfy { $0.resource != "entry" })
+    }
+
+    @Test("saving notes in the error state preserves the error case")
+    func notesInErrorPreservesCase() async throws {
+        let vm = makeViewModel()
+        let startedAt = Date()
+        try await vm.service.store.saveTimerDraft(activityText: "Work", categoryIDs: [], startedAt: startedAt)
+        vm.state = .error(TrackState.Draft(text: "Work"), startedAt: startedAt)
+
+        await vm.updateDraftNotes("retry with notes")
+
+        guard case let .error(draft, _) = vm.state else {
+            Issue.record("expected error state")
+            return
+        }
+        #expect(draft.notes == "retry with notes")
+        #expect(try await vm.service.runningTimerDraft()?.notes == "retry with notes")
+    }
+
+    @Test("load restores persisted draft notes into the running state")
+    func loadRestoresDraftNotes() async throws {
+        let vm = makeViewModel()
+        let startedAt = Date().addingTimeInterval(-60)
+        try await vm.service.store.saveTimerDraft(
+            activityText: "Work",
+            categoryIDs: [],
+            startedAt: startedAt,
+            notes: "resumed thought"
+        )
+
+        await vm.load()
+
+        guard case let .running(draft, _) = vm.state else {
+            Issue.record("expected running state")
+            return
+        }
+        #expect(draft.notes == "resumed thought")
+    }
+
+    @Test("load with no persisted draft reconciles a running state back to ready")
+    func loadReconcilesExternallyStoppedTimer() async {
+        // The external-stop path (compact-timer stop on another
+        // destination): a `.running` state with no persisted draft must
+        // leave running instead of counting forever. (On pre-notes
+        // installs the same loss misfired when Start failed to persist —
+        // the store heal, not this path, is the fix for that.)
+        let vm = makeViewModel()
+        vm.state = .running(TrackState.Draft(text: "Work"), startedAt: Date().addingTimeInterval(-30))
+
+        await vm.load()
+
+        guard case let .ready(draft) = vm.state else {
+            Issue.record("expected ready state")
+            return
+        }
+        #expect(draft.text == "Work")
+        #expect(vm.elapsed == 0)
     }
 
     @Test("elapsed formatting matches TimeFormatter")

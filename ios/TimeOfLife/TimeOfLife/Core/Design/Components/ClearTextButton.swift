@@ -25,7 +25,7 @@ struct ClearTextButton: View {
     let action: () -> Void
     /// Accessibility identifier supplied by the caller
     /// (`TimerNameClearButton` / `EntryNameClearButton` /
-    /// `EntryNotesClearButton` / `CategoryNameClearButton`).
+    /// `CategoryNameClearButton`).
     let accessibilityId: String
     /// VoiceOver label; defaults to the name-field label — notes and
     /// category callers pass their own.

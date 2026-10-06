@@ -460,6 +460,40 @@ struct LocalStoreTests {
         #expect(try await store.timerDraft() == nil)
     }
 
+    @Test("saveTimerDraft persists the notes snapshot")
+    func saveTimerDraftPersistsNotes() async throws {
+        let store = try makeStore()
+        try await store.saveTimerDraft(
+            activityText: "Gym",
+            categoryIDs: ["a"],
+            startedAt: Date(timeIntervalSinceReferenceDate: 5_000),
+            notes: "sore legs\nstretch"
+        )
+        let draft = try await store.timerDraft()
+        #expect(draft?.notes == "sore legs\nstretch")
+        #expect(draft?.activityText == "Gym")
+    }
+
+    @Test("updateTimerDraftNotes rewrites only the snapshot")
+    func updateTimerDraftNotesIsSnapshotOnly() async throws {
+        let store = try makeStore()
+        let startedAt = Date(timeIntervalSinceReferenceDate: 5_000)
+        try await store.saveTimerDraft(activityText: "Gym", categoryIDs: ["a"], startedAt: startedAt, notes: "old")
+        try await store.updateTimerDraftNotes("new\nnotes")
+        let draft = try await store.timerDraft()
+        #expect(draft?.notes == "new\nnotes")
+        #expect(draft?.activityText == "Gym")
+        #expect(draft?.categoryIDs == ["a"])
+        #expect(draft?.startedAt == startedAt)
+    }
+
+    @Test("updateTimerDraftNotes is a no-op with no draft")
+    func updateNotesWithoutDraftIsNoOp() async throws {
+        let store = try makeStore()
+        try await store.updateTimerDraftNotes("x")
+        #expect(try await store.timerDraft() == nil)
+    }
+
     @Test("clearTimerDraft clears the singleton")
     func clearTimerDraft() async throws {
         let store = try makeStore()

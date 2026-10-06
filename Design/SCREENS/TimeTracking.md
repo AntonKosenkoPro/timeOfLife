@@ -146,7 +146,10 @@ the single capture entry point:
   Stopping is the only commit boundary — it creates the entry and dismisses
   nothing (the same text stays prepared).
 - The running name is locked: it cannot be edited until Stop. Category
-  toggles while running rewrite the draft snapshot only.
+  toggles while running rewrite the draft snapshot only. A standalone notes
+  button sits outside the locked-name row (its tint signals whether the
+  draft holds notes); mid-run notes saves rewrite the draft notes snapshot
+  only, and Stop commits the entry with the final notes.
 
 ### Text and Category relationship
 

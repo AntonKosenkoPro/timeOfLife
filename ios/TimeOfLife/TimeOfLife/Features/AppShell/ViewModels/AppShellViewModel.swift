@@ -78,8 +78,8 @@ final class AppShellViewModel: ObservableObject {
     }
 
     /// Stops the running timer from the compact surface, saving the entry
-    /// with the draft's final categories in place (app-shell spec: keeps the
-    /// current destination selected).
+    /// with the draft's final categories and final notes in place
+    /// (app-shell spec: keeps the current destination selected).
     func stopFromCompact() async {
         guard let running = runningTimer,
               !running.activityText.isEmpty,
@@ -89,7 +89,8 @@ final class AppShellViewModel: ObservableObject {
                 text: running.activityText,
                 categoryIDs: running.categoryIDs,
                 startedAt: startedAt,
-                endedAt: Date()
+                endedAt: Date(),
+                notes: running.notes
             )
             runningTimer = nil
         } catch {
