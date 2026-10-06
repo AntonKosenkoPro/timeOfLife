@@ -11,10 +11,10 @@ import SwiftUI
 /// (issue #67: the Notes `×` deliberately does NOT resign — it clears only,
 /// so no flicker and no race is possible).
 ///
-/// Field cards (name/notes) use this too: tapping the `TextField` itself
-/// keeps working — the field's focus claim is applied after the tap
-/// gesture's resign, so the field still wins focus, while taps anywhere else
-/// on the card (label, padding) dismiss the keyboard.
+/// The notes editor uses this too: tapping the `TextEditor` itself
+/// keeps working — the editor's focus claim is applied after the tap
+/// gesture's resign, so the editor still wins focus, while taps anywhere
+/// else on the card (label, padding) dismiss the keyboard.
 struct FormCard<Content: View>: View {
     private let accessibilityID: String?
     private let resignFocus: () -> Void
