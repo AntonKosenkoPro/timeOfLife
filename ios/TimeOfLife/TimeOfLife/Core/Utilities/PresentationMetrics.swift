@@ -24,6 +24,12 @@ enum FocusDelay {
 /// track rendering under `.dynamicTypeSize` overrides too. The former
 /// per-screen `symbolSlotSize` duplicates, one idiom.
 enum DynamicTypeMetrics {
+    /// UITextView's default text origin: container top inset (8) plus
+    /// line-fragment padding (5). `editorHeight` budgets the vertical
+    /// half and placeholder overlays align to the full origin — one
+    /// source so the two can never silently drift.
+    static let editorTextOriginInsets = (top: CGFloat(8), leading: CGFloat(5))
+
     /// UITextView's default vertical text-container insets (8 top + 8
     /// bottom): a fixed-height `TextEditor` must add these on top of the
     /// text height or the last reserved line clips.

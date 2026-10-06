@@ -329,9 +329,10 @@ struct LogTimeView: View {
                                 Text(L10n.entryNotesPlaceholder.text)
                                     .font(.body)
                                     .foregroundStyle(Theme.textSecondary)
-                                    .padding(.top, Self.notesPlaceholderTopInset)
-                                    .padding(.leading, Self.notesPlaceholderLeadingInset)
+                                    .padding(.top, DynamicTypeMetrics.editorTextOriginInsets.top)
+                                    .padding(.leading, DynamicTypeMetrics.editorTextOriginInsets.leading)
                                     .allowsHitTesting(false)
+                                    .accessibilityHidden(true)
                             }
                         }
                         .accessibilityIdentifier("EntryNotesField")
@@ -550,11 +551,6 @@ struct LogTimeView: View {
     /// Visible notes-editor reserve (multiline notes): Return inserts
     /// newlines, so the box holds this many lines before inner-scrolling.
     private static let notesVisibleLines = 3
-    /// Placeholder alignment inside the editor: mirrors UITextView's
-    /// default text origin (8pt top inset, 5pt line-fragment padding) so
-    /// the hint sits exactly where typed text starts.
-    private static let notesPlaceholderTopInset: CGFloat = 8
-    private static let notesPlaceholderLeadingInset: CGFloat = 5
     /// Fixed wheel-picker height (standard `UIPickerView` height): the
     /// GeometryReader container needs an explicit height.
     private static let wheelPickerHeight: CGFloat = 216
