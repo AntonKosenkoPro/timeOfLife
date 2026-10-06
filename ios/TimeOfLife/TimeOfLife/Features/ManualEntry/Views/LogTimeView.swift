@@ -35,13 +35,6 @@ struct LogTimeView: View {
     @State private var isShowingDeleteConfirm = false
     /// The text field holding focus, if any (tap-away/scroll-away resigns it).
     @FocusState private var focusedField: FormField?
-    /// One-shot resign suppress for the notes `×` (issue #67): the notes
-    /// clear lives inside a resigning `FormCard`, so the `×` arms this
-    /// on touch-down (before every touch-up handler runs) — the card's
-    /// tap gesture then skips exactly one resign and the keyboard stays
-    /// open. No other card passes a binding, and the `×` action itself
-    /// only clears.
-    @State private var suppressNotesResign = false
     /// True when pushed onto the presenter's NavigationStack (EDIT/LOCKED
     /// via History) instead of presented as a sheet (CREATE): the outer
     /// stack owns the navigation chrome AND the back stack (edge-back
@@ -271,6 +264,10 @@ struct LogTimeView: View {
                         .frame(minHeight: Theme.minTapArea)
                         .contentShape(Rectangle())
                     }
+                    // No resign here (issue #67): the pushed NamePicker
+                    // autofocuses its own field, so focus transfers directly
+                    // and the keyboard never drops — resigning first would
+                    // replay the dismiss/reappear flicker this change kills.
                     .buttonStyle(.plain)
                     .accessibilityLabel(L10n.entryNameLabel.text)
                     .accessibilityValue(vm.name)
@@ -290,7 +287,12 @@ struct LogTimeView: View {
                 TagSelector(
                     options: vm.availableCategories,
                     selected: Set(vm.categoryIDs),
-                    onToggle: { vm.toggleCategory($0) },
+                    onToggle: {
+                        vm.toggleCategory($0)
+                        // The plain card tap-away stays silent on chip taps
+                        // (consumed), so toggles resign explicitly here.
+                        focusedField = nil
+                    },
                     accessibilityId: "EntryCategories"
                 )
             }
@@ -300,11 +302,7 @@ struct LogTimeView: View {
     // MARK: - Notes row
 
     private var notesCard: some View {
-        FormCard(
-            accessibilityID: "EntryNotesRow",
-            resignFocus: focusedField = nil,
-            suppressNextResign: $suppressNotesResign
-        ) {
+        FormCard(accessibilityID: "EntryNotesRow", resignFocus: focusedField = nil) {
             VStack(alignment: .leading, spacing: Theme.spacingExtraSmall) {
                 Text(L10n.entryNotesLabel.text)
                     .font(.caption)
@@ -320,20 +318,13 @@ struct LogTimeView: View {
                         text: vm.notes,
                         isLocked: vm.isLocked
                     ) {
+                        // Clear only (issue #67): the plain card tap-away
+                        // stays silent on this tap (consumed by the button),
+                        // so the keyboard never dismisses — no flicker.
                         ClearTextButton(
                             action: { vm.clearNotes() },
                             accessibilityId: "EntryNotesClearButton",
                             accessibilityLabel: L10n.notesClear.text
-                        )
-                        // Arms the card's one-shot resign suppress on
-                        // touch-down (issue #67): the card gesture can fire
-                        // before this button's action, so arming in the
-                        // action is too late — this zero-distance drag
-                        // always precedes every touch-up handler.
-                        .simultaneousGesture(
-                            DragGesture(minimumDistance: 0).onChanged { _ in
-                                suppressNotesResign = true
-                            }
                         )
                     }
                 }
@@ -496,6 +487,9 @@ struct LogTimeView: View {
 
     private func toggle(_ picker: InlinePicker) {
         expandedPicker = (expandedPicker == picker) ? nil : picker
+        // The plain card tap-away stays silent on pill taps (consumed), so
+        // expanding/collapsing a picker resigns explicitly here.
+        focusedField = nil
     }
 
     private func dateBinding(for picker: InlinePicker) -> Binding<Date> {
