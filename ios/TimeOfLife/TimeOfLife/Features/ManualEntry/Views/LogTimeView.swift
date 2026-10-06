@@ -21,8 +21,10 @@ import SwiftUI
 /// disabled here — the wheel pickers keep non-picker grab area around them
 /// so pull-down-to-scroll always reaches the outer ScrollView, and the
 /// pushed (EDIT/LOCKED) presentation provides the edge-back gesture.
-/// Tap-away keyboard dismissal lives in the shared `FormCard` container as
-/// a simultaneous tap, so child buttons (chips, pills) keep their taps.
+/// Tap-away keyboard dismissal lives in the shared `FormCard` container
+/// as a plain tap (tap-away only): child buttons consume their taps, so
+/// chips/pills resign explicitly in their actions and the Notes `×`
+/// clears only, keeping the keyboard open.
 struct LogTimeView: View {
     @StateObject private var vm: LogTimeViewModel
     @EnvironmentObject var container: AppContainer
@@ -35,6 +37,8 @@ struct LogTimeView: View {
     @State private var isShowingDeleteConfirm = false
     /// The text field holding focus, if any (tap-away/scroll-away resigns it).
     @FocusState private var focusedField: FormField?
+    @Environment(\.dynamicTypeSize)
+    private var dynamicTypeSize
     /// True when pushed onto the presenter's NavigationStack (EDIT/LOCKED
     /// via History) instead of presented as a sheet (CREATE): the outer
     /// stack owns the navigation chrome AND the back stack (edge-back
@@ -307,12 +311,31 @@ struct LogTimeView: View {
                 Text(L10n.entryNotesLabel.text)
                     .font(.caption)
                     .foregroundStyle(Theme.textSecondary)
-                HStack(spacing: 0) {
-                    TextField(L10n.entryNotesPlaceholder.text, text: $vm.notes)
-                        .submitLabel(.done)
+                HStack(alignment: .top, spacing: 0) {
+                    TextEditor(text: $vm.notes)
                         .focused($focusedField, equals: .notes)
                         .font(.body)
-                        .frame(maxWidth: .infinity, minHeight: Theme.minTapArea)
+                        .foregroundStyle(Theme.textPrimary)
+                        .scrollContentBackground(.hidden)
+                        .background(Theme.transparent)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: DynamicTypeMetrics.editorHeight(
+                            lines: Self.notesVisibleLines,
+                            textStyle: .body,
+                            dynamicTypeSize: dynamicTypeSize
+                        ))
+                        .overlay(alignment: .topLeading) {
+                            if vm.notes.isEmpty {
+                                Text(L10n.entryNotesPlaceholder.text)
+                                    .font(.body)
+                                    .foregroundStyle(Theme.textSecondary)
+                                    .padding(.top, Self.notesPlaceholderTopInset)
+                                    .padding(.leading, Self.notesPlaceholderLeadingInset)
+                                    .allowsHitTesting(false)
+                            }
+                        }
+                        .accessibilityIdentifier("EntryNotesField")
+                        .accessibilityLabel(L10n.entryNotesLabel.text)
                     if ClearButtonVisibility.shouldShow(
                         isFocused: focusedField == .notes,
                         text: vm.notes,
@@ -524,6 +547,14 @@ struct LogTimeView: View {
 
     // MARK: - Formatting
 
+    /// Visible notes-editor reserve (multiline notes): Return inserts
+    /// newlines, so the box holds this many lines before inner-scrolling.
+    private static let notesVisibleLines = 3
+    /// Placeholder alignment inside the editor: mirrors UITextView's
+    /// default text origin (8pt top inset, 5pt line-fragment padding) so
+    /// the hint sits exactly where typed text starts.
+    private static let notesPlaceholderTopInset: CGFloat = 8
+    private static let notesPlaceholderLeadingInset: CGFloat = 5
     /// Fixed wheel-picker height (standard `UIPickerView` height): the
     /// GeometryReader container needs an explicit height.
     private static let wheelPickerHeight: CGFloat = 216
