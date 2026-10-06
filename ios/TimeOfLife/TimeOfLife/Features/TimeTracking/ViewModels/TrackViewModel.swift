@@ -102,7 +102,12 @@ final class TrackViewModel: ObservableObject {
         stopTicker()
         UIApplication.shared.isIdleTimerDisabled = false
         elapsed = 0
-        state = draft.text.isEmpty ? .idle : .ready(draft)
+        // Same grammar as scheduleSavedReset: a restart must not inherit
+        // the previous run's notes (e.g. mid-run notes preserved in memory
+        // while the persisted draft was stopped elsewhere).
+        state = draft.text.isEmpty
+            ? .idle
+            : .ready(TrackState.Draft(text: draft.text, categoryIDs: draft.categoryIDs))
     }
 
     // MARK: - Capture (plain text)

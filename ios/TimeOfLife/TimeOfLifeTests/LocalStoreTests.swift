@@ -1,6 +1,7 @@
 // swiftlint:disable file_length
 import Testing
 import Foundation
+import GRDB
 @testable import TimeOfLife
 
 @Suite("LocalStore")
@@ -26,6 +27,15 @@ struct LocalStoreTests {
             url: temporaryStoreURL(userID: userID ?? "u1", base: base),
             userID: userID
         )
+    }
+
+    /// Drops the notes column to simulate a pre-notes install.
+    /// Fixture-only: app mutation paths stay behind LocalStore.
+    private func regressTimerStateToPreNotesShape(at url: URL) throws {
+        let queue = try DatabaseQueue(path: url.path)
+        try queue.write { db in
+            try db.execute(sql: "ALTER TABLE timer_state DROP COLUMN notes")
+        }
     }
 
     private func temporaryStoreURL() -> URL {
@@ -492,6 +502,29 @@ struct LocalStoreTests {
         let store = try makeStore()
         try await store.updateTimerDraftNotes("x")
         #expect(try await store.timerDraft() == nil)
+    }
+
+    @Test("open forward-heals a pre-notes timer_state table")
+    func openHealsPreNotesTimerState() async throws {
+        // Simulate an install migrated before the notes column shipped:
+        // regress the table to the old shape inside the store's own file
+        // (raw GRDB here is a legacy-schema fixture only — app mutation
+        // paths stay behind the LocalStore chokepoint), reopen, and verify
+        // the heal converges it to the new shape. Without the heal every
+        // timer write throws "no such column" and Start never persists.
+        let url = temporaryStoreURL()
+        _ = try LocalStore(url: url, userID: "u1")
+        try regressTimerStateToPreNotesShape(at: url)
+        let store = try LocalStore(url: url, userID: "u1")
+        try await store.saveTimerDraft(
+            activityText: "Gym",
+            categoryIDs: [],
+            startedAt: Date(timeIntervalSinceReferenceDate: 5_000),
+            notes: "healed"
+        )
+        let draft = try await store.timerDraft()
+        #expect(draft?.notes == "healed")
+        #expect(draft?.activityText == "Gym")
     }
 
     @Test("clearTimerDraft clears the singleton")

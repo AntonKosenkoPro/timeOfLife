@@ -236,10 +236,14 @@ struct LogTimeView: View {
                         .font(.caption)
                         .foregroundStyle(Theme.textSecondary)
                     Spacer()
-                    Image(systemName: "chevron.right")
-                        .font(.footnote.weight(.semibold))
-                        .foregroundStyle(Theme.textSecondary)
-                        .accessibilityHidden(true)
+                    // No chevron in LOCKED mode: the row offers no
+                    // navigation there, so the affordance would mislead.
+                    if !vm.isLocked {
+                        Image(systemName: "chevron.right")
+                            .font(.footnote.weight(.semibold))
+                            .foregroundStyle(Theme.textSecondary)
+                            .accessibilityHidden(true)
+                    }
                 }
                 if vm.isLocked {
                     Text(vm.name)

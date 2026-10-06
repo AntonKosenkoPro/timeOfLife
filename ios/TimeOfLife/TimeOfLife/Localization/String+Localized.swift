@@ -164,8 +164,6 @@ enum L10n: String, CaseIterable {
     case nameClear = "name.clear"
     case namePickerTitle = "name.pickerTitle"
     case namePickerNoMatchHint = "name.pickerNoMatchHint"
-    // Notes-field clear (fix-42-clear-button)
-    case notesClear = "notes.clear"
 
     // Starter categories (category-management spec, seed requirement)
     case categorySeedWork = "category.seed.work"

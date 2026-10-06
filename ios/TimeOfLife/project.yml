@@ -157,6 +157,11 @@ targets:
       - TimeOfLifeTests
     dependencies:
       - target: TimeOfLife
+      # Legacy-schema fixtures only (e.g. regressing timer_state to its
+      # pre-notes shape): no app mutation path may use this — LocalStore
+      # stays the single chokepoint (see .opencodereview/rule.json).
+      - package: GRDB
+        product: GRDB
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.antonkosenko.timeoflifeapp.tests

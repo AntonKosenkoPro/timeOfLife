@@ -39,7 +39,7 @@ struct TrackViewModelTests {
         vm.state = .ready(TrackState.Draft(text: "Coding", categoryIDs: ["c1"]))
         vm.start()
 
-        try? await Task.sleep(nanoseconds: 50_000_000)
+        await waitForPersistedDraft(vm)
         guard case let .running(draft, _) = vm.state else {
             Issue.record("expected running state")
             return
@@ -77,7 +77,7 @@ struct TrackViewModelTests {
         vm.nameDraft = "Reading"
         vm.state = .ready(TrackState.Draft(text: "Reading"))
         vm.start()
-        try? await Task.sleep(nanoseconds: 10_000_000)
+        await waitForPersistedDraft(vm)
         guard case .running = vm.state else {
             Issue.record("expected running state")
             return
@@ -112,7 +112,7 @@ struct TrackViewModelTests {
         vm.nameDraft = "Reading"
         vm.state = .ready(TrackState.Draft(text: "Reading"))
         vm.start()
-        try? await Task.sleep(nanoseconds: 10_000_000)
+        await waitForPersistedDraft(vm)
         guard case .running = vm.state else {
             Issue.record("expected running state")
             return
@@ -129,13 +129,15 @@ struct TrackViewModelTests {
     @Test("toggling tags mid-run rewrites only the running draft snapshot")
     func toggleRewritesDraftOnly() async throws {
         let vm = makeViewModel()
-        vm.nameDraft = "Work"
-        vm.state = .ready(TrackState.Draft(text: "Work", categoryIDs: ["c1"]))
-        vm.start()
-        try? await Task.sleep(nanoseconds: 10_000_000)
+        // Seeded explicitly (awaited): the toggle persist is fire-and-forget,
+        // so racing it against start()'s own un-awaited write would flake.
+        let startedAt = Date()
+        try await vm.service.store.saveTimerDraft(activityText: "Work", categoryIDs: ["c1"], startedAt: startedAt)
+        vm.state = .running(TrackState.Draft(text: "Work", categoryIDs: ["c1"]), startedAt: startedAt)
 
         vm.toggleDraftCategory("c1") // deselect
         vm.toggleDraftCategory("c2") // select
+        await waitForPersistedDraft(vm) { $0?.categoryIDs == ["c2"] }
 
         guard case let .running(draft, _) = vm.state else {
             Issue.record("expected running state")
@@ -156,7 +158,7 @@ struct TrackViewModelTests {
         vm.nameDraft = "Work"
         vm.state = .ready(TrackState.Draft(text: "Work", categoryIDs: ["c1"]))
         vm.start()
-        try? await Task.sleep(nanoseconds: 10_000_000)
+        await waitForPersistedDraft(vm)
 
         await vm.updateDraftNotes("remember HR belt")
 
@@ -216,11 +218,13 @@ struct TrackViewModelTests {
     func loadReconcilesExternallyStoppedTimer() async {
         // The external-stop path (compact-timer stop on another
         // destination): a `.running` state with no persisted draft must
-        // leave running instead of counting forever. (On pre-notes
-        // installs the same loss misfired when Start failed to persist —
-        // the store heal, not this path, is the fix for that.)
+        // leave running instead of counting forever — and must not carry
+        // the previous run's notes into the next Start.
         let vm = makeViewModel()
-        vm.state = .running(TrackState.Draft(text: "Work"), startedAt: Date().addingTimeInterval(-30))
+        vm.state = .running(
+            TrackState.Draft(text: "Work", categoryIDs: ["c1"], notes: "stale"),
+            startedAt: Date().addingTimeInterval(-30)
+        )
 
         await vm.load()
 
@@ -229,6 +233,8 @@ struct TrackViewModelTests {
             return
         }
         #expect(draft.text == "Work")
+        #expect(draft.categoryIDs == ["c1"])
+        #expect(draft.notes.isEmpty)
         #expect(vm.elapsed == 0)
     }
 
@@ -501,6 +507,24 @@ struct TrackViewModelTests {
         let store = try! LocalStore(url: temporaryStoreURL())
         let service = TimerService(store: store)
         return TrackViewModel(service: service, connectivity: connectivity)
+    }
+
+    /// Waits for a persisted-draft condition (bounded): `start()` persists
+    /// via an un-awaited Task, so fixed delays flake under CI load. Callers
+    /// asserting persisted state must wait on the signal, not the clock.
+    private func waitForPersistedDraft(
+        _ vm: TrackViewModel,
+        matching condition: (RunningTimerDraft?) -> Bool = { $0 != nil }
+    ) async {
+        for _ in 0..<100 {
+            do {
+                if condition(try await vm.service.runningTimerDraft()) { return }
+            } catch {
+                // Store read failed; retry within the bound.
+                continue
+            }
+            try? await Task.sleep(nanoseconds: 1_000_000)
+        }
     }
 
     private func temporaryStoreURL() -> URL {

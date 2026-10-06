@@ -49,16 +49,4 @@ struct ClearButtonVisibilityTests {
         #expect(ClearButtonVisibility.shouldShow(isFocused: true, text: "warmup\n5x5") == true)
         #expect(ClearButtonVisibility.shouldShow(isFocused: true, text: "\n") == true)
     }
-
-    @Test("notes.clear resolves in en and ru")
-    func notesClearLocalizes() throws {
-        let main = Bundle.main
-        for locale in ["en", "ru"] {
-            let path = try #require(main.path(forResource: locale, ofType: "lproj"))
-            let bundle = try #require(Bundle(path: path))
-            let value = NSLocalizedString("notes.clear", bundle: bundle, comment: "")
-            #expect(value != "notes.clear", "notes.clear missing in \(locale)")
-            #expect(!value.isEmpty, "notes.clear empty in \(locale)")
-        }
-    }
 }

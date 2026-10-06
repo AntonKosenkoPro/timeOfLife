@@ -228,12 +228,12 @@ struct TrackContent: View {
     /// Running/error: the locked name card plus the standalone notes
     /// button outside it (separate-notes-editor, spike-approved): the
     /// card keeps the screen's leading alignment while the 44 pt button
-    /// sits near the right edge, its tint signalling draft-notes presence.
-    /// Tapping pushes the shared `NotesEditorPage` prefilled from the
-    /// running draft (✓ rewrites the draft snapshot, X discards). The
-    /// row-local negative trailing inset reaches into the screen padding
-    /// zone, so every other row — including the main action — keeps its
-    /// exact frame across states (D10).
+    /// rides beside it at the screen's trailing padding, its tint
+    /// signalling draft-notes presence. Tapping pushes the shared
+    /// `NotesEditorPage` prefilled from the running draft (✓ rewrites
+    /// the draft snapshot, X discards). The row keeps standard insets,
+    /// so every other row — including the main action — keeps its exact
+    /// frame across states (D10).
     private var runningNameRow: some View {
         HStack(spacing: Theme.spacingSmall) {
             FieldCard {
