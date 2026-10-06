@@ -128,6 +128,10 @@ struct LogTimeView: View {
     private func chrome<Content: View>(_ content: Content) -> some View {
         content
             .navigationBarTitleDisplayMode(.inline)
+            // Pushed EDIT/LOCKED forms hide the tab bar
+            // (per-tab-navigation-paths); the CREATE sheet has no tab bar,
+            // so this is a no-op there.
+            .toolbar(.hidden, for: .tabBar)
             .toolbar {
                 ToolbarItem(placement: .principal) {
                     titleSubtitle

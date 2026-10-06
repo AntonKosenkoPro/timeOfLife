@@ -63,6 +63,9 @@ struct ManageCategoriesView: View {
         }
         .navigationTitle(L10n.manageCategoriesTitle.text)
         .navigationBarTitleDisplayMode(.inline)
+        // Second-depth push from Profile (per-tab-navigation-paths): keeps
+        // the tab bar hidden, like every destination past a tab root.
+        .toolbar(.hidden, for: .tabBar)
         .background(Theme.backgroundPrimary.ignoresSafeArea())
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
