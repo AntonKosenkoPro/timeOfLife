@@ -21,10 +21,12 @@ import SwiftUI
 /// disabled here — the wheel pickers keep non-picker grab area around them
 /// so pull-down-to-scroll always reaches the outer ScrollView, and the
 /// pushed (EDIT/LOCKED) presentation provides the edge-back gesture.
-/// Tap-away keyboard dismissal lives in the shared `FormCard` container
-/// as a plain tap (tap-away only): child buttons consume their taps, so
-/// chips/pills resign explicitly in their actions. Notes editing lives on
-/// the pushed `NotesEditorPage` (X/✓ chrome, no keyboard Done key).
+/// Tap-away keyboard dismissal stays wired through the shared `FormCard`
+/// container as a plain tap, but no inline text field remains on this form
+/// (name is a push row; notes editing lives on the pushed `NotesEditorPage`
+/// with X/✓ chrome and no keyboard Done key), so every resign is currently
+/// a no-op kept for the next inline field: child buttons still consume
+/// their taps, and chips/pills still resign explicitly in their actions.
 struct LogTimeView: View {
     @StateObject private var vm: LogTimeViewModel
     @EnvironmentObject var container: AppContainer
