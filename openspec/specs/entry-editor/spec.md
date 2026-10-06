@@ -129,6 +129,21 @@ The entry-form Notes row SHALL be a multiline editor: Return inserts a newline a
 - **WHEN** the form opens for an imported entry with multiline notes
 - **THEN** the full notes render read-only across lines, disabled and dimmed, with no clear button
 
+### Requirement: Notes clear never dismisses the keyboard
+Tapping the Notes-row clear (`×`) SHALL clear the field and keep the keyboard open with no dismiss/reappear transition. Taps on the card's labels, padding, and background SHALL still resign focus, and taps on the name row, category chips, and start/end pills SHALL still resign focus.
+
+#### Scenario: Clear notes with keyboard open
+- **WHEN** the Notes field is focused with non-empty text and the user taps `×`
+- **THEN** the field empties, the keyboard stays open and focused, and no dismiss animation plays
+
+#### Scenario: Tap-away still dismisses
+- **WHEN** the user taps a card label, padding, or background
+- **THEN** the keyboard dismisses as before
+
+#### Scenario: Control taps still dismiss
+- **WHEN** the user taps the name row, a category chip, or a start/end pill
+- **THEN** the tapped control acts and the keyboard dismisses as before
+
 ### Requirement: Unified entry form field order
 The unified entry form SHALL lay out its input cards in exactly this order in every mode (CREATE, EDIT, LOCKED): Activity name → Start time → End time → Categories → Notes. Start and Ends SHALL be separate cards (one `timeRow` each with its own date + time pills and inline single-open picker), not one combined Starts/Ends card. The validity gate, picker behavior (single-open, device locale/calendar), mode chrome (titles/actions/LOCKED dimming + provenance note), and bottom destructive Delete are unchanged.
 
