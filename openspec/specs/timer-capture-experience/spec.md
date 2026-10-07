@@ -4,8 +4,6 @@
 
 Defines a focused, local-first timer capture journey in which a centered numeric timer communicates exact actionable timer state and every start follows an explicit Activity selection.
 ## Requirements
-
-
 ### Requirement: Numeric timer is an instrumental readout
 The Track numeric timer SHALL represent only timer readiness and exact elapsed timing; it SHALL NOT display fabricated progress, daily totals, goals, rings, sweeps, or history while idle.
 
@@ -20,6 +18,7 @@ The Track numeric timer SHALL represent only timer readiness and exact elapsed t
 #### Scenario: Timer running
 - **WHEN** the user starts the prepared name
 - **THEN** the numeric timer displays the exact live elapsed duration, including completed hours, without a secondary progress visualization
+
 ### Requirement: Starting always requires explicit confirmation
 Selecting a recent or typing a name SHALL prepare it without starting a timer; the timer SHALL begin only after the user activates Start. Unconfirmed typed input SHALL NOT start a timer or create an entry. A focused Start tap SHALL resign the field immediately (selection haptic fires and `started_at` is captured at tap time) and delay the running swap until the keyboard finishes dismissing (real `didHide`, bounded fallback for hardware keyboards); the swap SHALL then render instantly with no animation of its own. A Start tap SHALL start timing on the first tap using the field's current text, even when the committed preparation went stale (for example edited after a stop): the tap SHALL bring the preparation up to date before the swap is scheduled, so the resign that follows finds nothing to cancel. Any other field edit or chip tap before the swap fires SHALL cancel the deferred start.
 
@@ -54,6 +53,7 @@ Selecting a recent or typing a name SHALL prepare it without starting a timer; t
 #### Scenario: Running swap renders instantly
 - **WHEN** the running swap fires
 - **THEN** Stop appears in place with no fade, slide, or spring of its own; the keyboard's own slide moves the whole layout together
+
 ### Requirement: Track uses an adaptive two-ended vertical layout
 Track SHALL arrange its content in this top-to-bottom order: navigation title, top adaptive spacing, completion mark region, timer numbers, timer status, reserved non-field-error region, central separator, Activity search/refine row when applicable, the state-specific main action, Recents when applicable, bottom adaptive spacing, and the tab bar. The top and bottom adaptive spacing regions SHALL use one shared maximum height selected through approved layout spikes, SHALL resolve to equal heights from the remaining space, SHALL shrink toward zero when vertical space is constrained, and SHALL yield before content clips, overlaps, or becomes unreachable. Free space beyond twice the shared maximum SHALL go to the central separator between the error region and the search/refine flow. Placing the main action above Recents SHALL keep the Choose Activity, Start, and Stop controls reachable without scrolling. The local-first Track screen SHALL NOT display an offline hint.
 
@@ -119,6 +119,7 @@ Track SHALL present the state-specific main action in one main-action region who
 #### Scenario: Wrapped error keeps the main action stationary
 - **WHEN** a recoverable non-field error wraps beyond the reserved height and the top adaptive spacing and central separator can absorb the growth
 - **THEN** the main-action frame does not change; only when both are exhausted does the content scroll
+
 ### Requirement: Recents present a capped wrapping chip flow
 Track SHALL present its most-recently-used exact entry texts as a wrapping chip flow below the name field, ordered by each text's newest committed `started_at` first, and SHALL cap the flow at six chips. Identity SHALL be trimmed exact text (case-sensitive: `Gym` and `GYM` are distinct). There is no activity entity — chips represent entry texts, never activities. Chips SHALL wrap onto additional rows as needed and SHALL NOT require horizontal scrolling. A single tap on a chip SHALL fill the name plus that recent's full ordered categories without starting timing. Recents SHALL yield the below-button slot to the running TagSelector while a timer is running (inactive branch opacity-hidden with the slot keeping the taller branch's height). Returning to Track SHALL reload recents and categories — seeding the starter set first on a fresh install — so History edits and new categories are reflected immediately.
 
@@ -179,6 +180,7 @@ When no committed entries exist, Recents SHALL present dedicated localized copy 
 #### Scenario: First Activity created
 - **WHEN** the user saves the first entry and returns to Track
 - **THEN** the empty hint is replaced by Recents chips containing that exact text
+
 ### Requirement: Stop saves with stable feedback
 Stopping a running timer SHALL save the completed entry locally, communicate success without a blocking loader, and retain the entered text in the ready state for an optional later restart. While the saved confirmation is showing, the Start button SHALL render disabled (dimmed, non-interactive) since starting is not possible until the state settles back to ready; it SHALL re-enable with the return to ready. Editing the name while the saved confirmation is showing SHALL return to ready for the new text at once, ending the confirmation early. When the persisted running draft is gone but Track still holds a `.running` state (the timer was stopped from the compact timer on another destination), Track SHALL reconcile on next load: stop the elapsed ticker, re-enable the idle timer, reset elapsed to zero, and return to `.ready` for the same text — or `.idle` when nothing was entered — instead of counting elapsed time forever.
 
@@ -205,6 +207,7 @@ Stopping a running timer SHALL save the completed entry locally, communicate suc
 #### Scenario: Edit during the saved confirmation returns to ready
 - **WHEN** the user edits the name while the saved confirmation is showing
 - **THEN** the screen returns to ready for the new text at once, ending the confirmation early instead of waiting out the window
+
 ### Requirement: Timer states remain visually and physically stable
 The idle, ready, running, saving, saved, and error states SHALL preserve the numeric timer's position and primary control geometry, support light and dark appearance, respect Reduce Motion, and expose accessible state. Transient saved-state feedback displayed above the numeric timer SHALL NOT change the timer's vertical position.
 
@@ -238,8 +241,9 @@ Track SHALL capture the entry name as plain trimmed text with no catalog, no sea
 #### Scenario: Exact text identity
 - **WHEN** the trimmed text differs from an existing recent only by letter case (e.g. `Gym` vs `GYM`)
 - **THEN** the two are treated as different names with separate recents and separate inherited categories
+
 ### Requirement: Running timer hosts the category TagSelector
-While a timer is running, Track SHALL show the shared ordered `TagSelector` (select-only from existing categories, zero allowed, order preserved) below the readout. The name SHALL be locked after Start; tags SHALL stay live until Stop. Toggles SHALL rewrite only the running draft (persisted `timer_state` snapshot) and SHALL never touch history. Stop SHALL save the entry with the final ordered categories.
+While a timer is running, Track SHALL show the shared ordered `TagSelector` (select-only from existing categories, zero allowed, order preserved) below the readout. The name SHALL be locked after Start; tags SHALL stay live until Stop. Toggles SHALL rewrite only the running draft (persisted `timer_state` snapshot) and SHALL never touch history. Notes edits SHALL rewrite only the running draft notes snapshot the same way. Stop SHALL save the entry with the final ordered categories, the final draft notes, and derived duration, plus a single outbox row.
 
 #### Scenario: Toggle tags mid-run
 - **WHEN** the user toggles a category while the timer runs
@@ -255,7 +259,8 @@ While a timer is running, Track SHALL show the shared ordered `TagSelector` (sel
 
 #### Scenario: Stop saves final tags
 - **WHEN** the user activates Stop
-- **THEN** the entry is created with the trimmed locked text, the final ordered categories, empty notes, and derived duration, plus a single outbox row
+- **THEN** the entry is created with the trimmed locked text, the final ordered categories, the final draft notes, and derived duration, plus a single outbox row
+
 ### Requirement: Recents chips show the first inherited Category icon
 A Recents chip SHALL display the icon of the first category of that exact text's newest committed entry (first by stored position). A text whose newest entry has no categories SHALL render its chip without an icon. Recents chips SHALL NOT display category names.
 
@@ -274,6 +279,7 @@ A Recents chip SHALL display the icon of the first category of that exact text's
 #### Scenario: Icon cannot render on this OS
 - **WHEN** the first category's icon is unavailable on the running iOS version
 - **THEN** the chip falls back to the tag glyph used elsewhere for unavailable category icons
+
 ### Requirement: Categories are per-entry and never retroactive
 The app SHALL treat categories as optional, zero-or-more metadata owned by each entry at creation. Editing categories on one entry (or on the running draft) SHALL NOT change any other entry. There SHALL be no query-time category resolution through any other record.
 
@@ -318,3 +324,27 @@ The Track name field's trailing clear (`×`) button SHALL be visible only when t
 #### Scenario: Picking a suggestion prepares without starting
 - **WHEN** the user picks a suggestion or completes with Done on the picker page
 - **THEN** the field fills with that exact text plus its ordered categories, the picker pops back to Track showing the ready timer, and no timer starts and no entry is created
+
+### Requirement: Running Track offers a recording-only notes button
+While a timer is running, the locked name row SHALL be paired with a trailing notes button that opens the shared Notes editor page bound to the running draft. The button SHALL be visible only while recording (running/error states with a persisted draft) and SHALL sit OUTSIDE the locked-name row as a standalone 44 pt `note.text` control at the screen's trailing padding beside the locked-name `FieldCard` — without changing the row height or moving the main action. The button's tint SHALL signal draft-notes presence (accent when non-empty, secondary when empty); no notes preview SHALL appear on Track. Saving on the editor page SHALL rewrite only the running draft notes snapshot (persisted `timer_state`); cancelling SHALL leave the draft untouched. Notes edits SHALL never touch history until Stop.
+
+#### Scenario: Notes button visible only while recording
+- **WHEN** a timer is running
+- **THEN** the locked name row shows the trailing notes button at full tap target
+
+#### Scenario: Notes button hidden when not recording
+- **WHEN** Track is idle, ready, or saved (no running draft)
+- **THEN** no notes button is shown
+
+#### Scenario: Opening notes mid-run
+- **WHEN** the user taps the notes button while running
+- **THEN** the Notes editor page pushes prefilled with the current draft notes
+
+#### Scenario: Saving running notes updates the draft only
+- **WHEN** the user saves on the editor page while running
+- **THEN** the running draft notes update, the persisted snapshot updates, and no entry or history row changes
+
+#### Scenario: Cancelling running notes keeps the draft
+- **WHEN** the user cancels on the editor page while running
+- **THEN** the page pops and the running draft notes are unchanged
+
