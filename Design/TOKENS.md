@@ -15,7 +15,7 @@ All colors are stored as color sets in `Assets.xcassets` with light/dark variant
 | `textPrimary` | `#111111` | `#F5F5F7` | `Theme.textPrimary` | Headings, primary body text |
 | `textSecondary` | `#3C3C43` | `#9A9AA0` | `Theme.textSecondary` | Subtitles, placeholders, captions |
 | `accentPrimary` | `#FF840A` | `#FF840A` | `Theme.accentPrimary` | Primary buttons, active states |
-| `danger` | `#FF3B30` | `#FF453A` | `Theme.danger` | Errors, offline banner, destructive actions |
+| `danger` | `#FF3B30` | `#FF453A` | `Theme.danger` | Errors, destructive actions |
 | `success` | `#34C759` | `#30D158` | `Theme.success` | Success states |
 | `hairline` | `#E5E5EA` | `#38383C` | `Theme.hairline` | Borders, dividers |
 | `textOnAccent` | `#FFFFFF` | `#FFFFFF` | `Theme.textOnAccent` | Text and progress indicators on filled accent controls |
