@@ -4,7 +4,6 @@
 
 Lets users correct and remove logged time with one shared surface: the entry form used for manual creation also edits a committed entry's activity and interval, or deletes it with confirmation and shake-to-undo — while imported entries stay read-only except for delete.
 ## Requirements
-
 ### Requirement: Unified entry form with CREATE, EDIT, and LOCKED modes
 The app SHALL provide a single entry form with three modes sharing one layout — input cards in Name → Start → End → Categories → Notes order (Start and End as separate cards with date + time pills and inline single-open pickers; device locale and calendar) — and one validity gate (the confirm action is enabled only when the trimmed name is non-empty AND the end is strictly after the start; otherwise disabled with no error text). CREATE mode SHALL behave per the manual-entry capability (Log Time copy, X/✓ chrome, sheet presentation). EDIT mode SHALL be titled "Edit entry" (localized) with Back + checkmark actions in the navigation bar when pushed. LOCKED mode SHALL show the entry read-only with Back only and no confirm action. The form SHALL use Theme semantic colors only, with all user-facing strings localized (EN + RU). With any inline picker expanded, the form SHALL keep its card margins on 320 pt screens: no card goes edge-to-edge and no content clips at the screen edges. The Start and End cards SHALL stretch to the same full card width as the Name, Categories, and Notes cards in every mode, whether their inline picker is collapsed or expanded: a collapsed card SHALL NOT hug its date/time pills.
 
@@ -27,6 +26,7 @@ The app SHALL provide a single entry form with three modes sharing one layout �
 #### Scenario: Expanded picker stays inside the cards on small screens
 - **WHEN** the user expands a date or time picker on a 320 pt screen in any mode
 - **THEN** the cards keep their horizontal margins, the picker renders within the card width, and no text or control touches or clips at the screen edges
+
 ### Requirement: EDIT mode saves through last-write-wins update
 EDIT mode SHALL prefill the Name, Categories, Notes, and Starts/Ends pills from the entry. Activating Save on a valid form SHALL persist the changes through the local store's last-write-wins entry update (bumping `updated_at`, enqueuing the sync outbox row in the same transaction), dismiss the form, and refresh the underlying lists so the entry appears with its new values in the correct day group. Overlapping entries and future end-times SHALL be allowed, matching creation. Retexting or retagging SHALL affect only this entry. When the record changed underneath (stale write), the app SHALL show a localized error with the draft intact and the form open.
 
@@ -45,6 +45,7 @@ EDIT mode SHALL prefill the Name, Categories, Notes, and Starts/Ends pills from 
 #### Scenario: Overlap is allowed in edit mode
 - **WHEN** the edited interval overlaps another entry
 - **THEN** Save stays enabled and saving succeeds
+
 ### Requirement: Entry delete needs confirmation and enters the undo buffer
 EDIT and LOCKED modes SHALL offer a destructive Delete action at the bottom of the form (below the input cards, red destructive styling). Activating it SHALL present a destructive confirmation alert titled "Delete this entry?" with an entry-focused message naming the entry's text (never an activity — no activity entity exists); confirming SHALL remove the entry from all lists immediately, enter the durable undo buffer (full snapshot, no outbox row yet — the relay is never notified of an undone deletion), dismiss the form, and refresh the underlying lists. No UndoToast SHALL be shown in this change. The deletion SHALL stay restorable through the DEFAULT system Undo confirmation until the app restarts (no wall-clock window): shaking the device surfaces the system Undo prompt, and confirming restores exactly one entry — the most recent buffered deletion (the registration is cleared-then-single, so one shake+confirm can never restore two). Cold launch SHALL commit the deletion (outbox delete row) with no restore path afterwards. Only the most recent buffer row SHALL be restorable (supersession, including across surfaces — an entry delete followed by a category delete leaves only the category undoable on this surface). Dismissing the confirm alert SHALL leave the entry and the draft unchanged.
 
@@ -87,47 +88,51 @@ The entry-form Name row's trailing clear (`×`) button SHALL be visible only whe
 - **THEN** a trailing `×` is visible, and one tap empties the field while categories, notes, and Start/End stay unchanged
 
 ### Requirement: Entry-form Notes row has a clear button
-The entry-form Notes row SHALL be a multiline editor: Return inserts a newline and never dismisses the keyboard (there is no keyboard Done key — dismissal is tap-away on card label/padding plus scroll-away). The editor SHALL reserve a fixed 3-line visible height at the current Dynamic Type (identical height when empty, short, or when the clear button mounts) and SHALL scroll internally past 3 lines with a stable card height. When the draft notes are empty the row SHALL show the localized notes placeholder, hidden as soon as any text is present. The row SHALL offer a top-trailing clear (`×`) button with the same visibility rule (focused AND non-empty, editable only) and the same Apple-standard look. One tap SHALL clear the draft notes only (name, categories, and interval untouched; the validity gate re-evaluates) and SHALL keep the Notes field focused with the keyboard open. The button carries the `EntryNotesClearButton` identifier and a "Clear notes" accessibility label. Taps elsewhere in the card SHALL still resign focus exactly as today; the notes `×` tap SHALL never resign focus. In LOCKED mode the notes SHALL render multiline read-only (disabled and dimmed) with no clear button and no editing. The 280-rune notes cap is unchanged.
+The entry-form Notes row SHALL present a read-only multiline presenter instead of an inline editor: a `Text` label with a 1–5 line window that shows the localized notes placeholder when the draft notes are empty and truncates past 5 lines. The presenter SHALL carry the caption row with a trailing chevron in balanced corner margins (the caption row's top inset equals the card's trailing inset; approved spike variant B). Tapping the presenter SHALL push a dedicated Notes editor page carrying X (cancel/discard) and ✓ (save/commit) in the navigation bar with no system Back button (X is the sole cancel path; swipe-back still pops and discards). The editor SHALL be a multiline `TextEditor` where Return inserts a newline and never dismisses the keyboard (there is no keyboard Done key); dismissal and commit happen only through X/✓ (plus the system push-pop). X SHALL discard keystrokes and restore the pre-open draft; ✓ SHALL write the edited text back to the form draft (name, categories, and interval untouched; the validity gate re-evaluates) and pop. The 280-rune notes cap is unchanged. In LOCKED mode the presenter SHALL render multiline read-only (disabled and dimmed) with no editing and no navigation. All strings localized (EN + RU), `Theme` semantic colors only.
 
 #### Scenario: Return inserts a newline
-- **WHEN** the Notes editor is focused and the user presses Return
-- **THEN** a newline is inserted, the keyboard stays open, and the draft is preserved
+- **WHEN** the Notes editor page field is focused and the user presses Return
+- **THEN** a newline is inserted, the keyboard stays open, and the page draft is preserved
 
 #### Scenario: Three-line reserve is stable
 - **WHEN** the form opens with empty or short notes at any Dynamic Type size
-- **THEN** the Notes row occupies its 3-line height, and typing or the clear button appearing causes no vertical jump
+- **THEN** the presenter occupies its 1–5 line window with no vertical jump when the draft changes or the editor page opens
 
 #### Scenario: Overflow scrolls inside the editor
-- **WHEN** the draft notes exceed 3 lines
-- **THEN** the editor scrolls internally while the card height stays fixed
+- **WHEN** the draft notes exceed the presenter window
+- **THEN** the presenter truncates past line 5 while the editor page holds and scrolls the full text
 
 #### Scenario: Placeholder shows only when empty
 - **WHEN** the draft notes are empty
-- **THEN** the localized notes placeholder is visible, and it hides as soon as any text is present
+- **THEN** the presenter shows the localized notes placeholder, and tapping it opens the editor page; the placeholder hides as soon as any text is present
 
 #### Scenario: Notes clear clears the draft notes
-- **WHEN** the Notes field is focused, holds text, and the form is editable
-- **THEN** a top-trailing `×` is visible, and one tap empties the notes while name, categories, and Start/End stay unchanged
+- **WHEN** the editor page holds text and the user activates X
+- **THEN** the page pops with the form draft notes unchanged (keystrokes discarded) while name, categories, and Start/End stay unchanged
 
 #### Scenario: Notes clear keeps the keyboard open
-- **WHEN** the user taps the Notes `×` while the Notes field is focused
-- **THEN** the notes empty, the field stays focused, and the keyboard remains open for immediate typing
+- **WHEN** the user is editing on the Notes editor page
+- **THEN** typing, newline insertion, and navigation keep the keyboard open until X/✓ or the system pop
 
 #### Scenario: Notes clear hidden when nothing to clear
-- **WHEN** the Notes field is empty, unfocused, or the form is LOCKED (read-only)
-- **THEN** no clear button is shown
+- **WHEN** the form is LOCKED (read-only)
+- **THEN** no editing affordance is shown and the presenter offers no editor page
 
 #### Scenario: Tap-away resigns but the clear button never does
-- **WHEN** the user taps card label/padding rather than the notes `×`
-- **THEN** focus resigns exactly as before, while the notes `×` tap itself never resigns focus
+- **WHEN** the user taps the Notes presenter in CREATE or EDIT mode
+- **THEN** the dedicated editor page pushes prefilled with the current draft notes
 
 #### Scenario: Chip taps still resign after the fix
-- **WHEN** the user taps a category chip (or elsewhere in the card) rather than the notes `×`
-- **THEN** focus resigns exactly as before — the notes `×` tap itself never resigns focus
+- **WHEN** the user taps a category chip (or elsewhere on the form) rather than the Notes presenter
+- **THEN** focus resigns exactly as before and the notes draft is untouched
 
 #### Scenario: Locked notes render multiline read-only
 - **WHEN** the form opens for an imported entry with multiline notes
-- **THEN** the full notes render read-only across lines, disabled and dimmed, with no clear button
+- **THEN** the full notes render through the presenter read-only across lines, disabled and dimmed, with no editor page and no editing
+
+#### Scenario: Save commits notes only
+- **WHEN** the user edits notes on the editor page and activates ✓
+- **THEN** the page pops, the form draft notes update to the edited text, and name, categories, and Start/End stay unchanged
 
 ### Requirement: Notes clear never dismisses the keyboard
 Tapping the Notes-row clear (`×`) SHALL clear the field and keep the keyboard open with no dismiss/reappear transition. Taps on the card's labels, padding, and background SHALL still resign focus, and taps on the name row, category chips, and start/end pills SHALL still resign focus.
@@ -207,3 +212,19 @@ The entry form SHALL show a live duration subtitle in the form's navigation bar 
 #### Scenario: Exact-text identity is case-sensitive
 - **WHEN** committed names hold both `Gym` and `GYM` and the user types `g`
 - **THEN** both are suggested; typing the exact `Gym` suggests `Gym` itself (plus longer prefix matches)
+
+### Requirement: Entry-form push rows share caption-row chevron grammar
+The editable Name and Notes rows SHALL present as push rows with the navigation chevron on the caption row (caption plus trailing chevron with balanced corner margins) and the full-width value below — single-line truncated for Name, 1–5 line truncated for Notes. LOCKED mode SHALL show no chevron and no navigation on either row.
+
+#### Scenario: Name row chevron sits on the caption row
+- **WHEN** the form opens in CREATE or EDIT mode
+- **THEN** the Name row shows its chevron trailing the caption, and the value fills the full row width below
+
+#### Scenario: Notes presenter matches the Name row
+- **WHEN** the form opens in CREATE or EDIT mode
+- **THEN** the Notes presenter shows the same caption-row chevron grammar as the Name row
+
+#### Scenario: Locked rows show no chevron
+- **WHEN** the form opens for an imported entry
+- **THEN** neither the Name nor the Notes row offers navigation or a chevron
+

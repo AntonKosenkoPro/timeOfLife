@@ -69,7 +69,7 @@ func ValidIcons() (map[string]bool, error) {
 
 const (
 	maxNameLen  = 60
-	maxNotesLen = 280
+	maxNotesLen = 2000
 )
 
 // validEntrySources is the allowed provenance set for entries (entry-provenance
@@ -231,7 +231,7 @@ func entryTags(ids []string) []db.CategoryTag {
 
 func validateNotes(n string, errs validationErrs) {
 	if utf8.RuneCountInString(strings.TrimSpace(n)) > maxNotesLen {
-		errs.add("notes", "Notes must be 280 characters or fewer")
+		errs.add("notes", fmt.Sprintf("Notes must be %d characters or fewer", maxNotesLen))
 	}
 }
 

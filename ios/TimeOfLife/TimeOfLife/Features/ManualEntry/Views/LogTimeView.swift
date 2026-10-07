@@ -337,7 +337,7 @@ struct LogTimeView: View {
                 }
             } else {
                 NavigationLink {
-                    NotesEditorPage(initialText: vm.notes) { vm.notes = $0 }
+                    NotesEditorPage(initialText: vm.notes, entryName: vm.name) { vm.notes = $0 }
                 } label: {
                     VStack(alignment: .leading, spacing: Theme.spacingExtraSmall) {
                         HStack(spacing: Theme.spacingSmall) {

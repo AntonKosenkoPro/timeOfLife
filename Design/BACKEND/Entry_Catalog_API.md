@@ -40,7 +40,7 @@ Deleting a category removes the tag from all entries (cascade on the join) but d
 | `id` | UUID PK | client-generated v7 |
 | `user_id` | UUID NOT NULL → users(id) | |
 | `activity_text` | TEXT NOT NULL | exact trimmed identity (byte-exact, case-sensitive); ≤ 60 chars |
-| `notes` | TEXT NOT NULL DEFAULT '' | ≤ 280 chars |
+| `notes` | TEXT NOT NULL DEFAULT '' | ≤ 2000 chars |
 | `started_at` | TIMESTAMPTZ NOT NULL | |
 | `ended_at` | TIMESTAMPTZ | set at Stop; entries are Stop-only (no running rows) |
 | `duration_seconds` | INT | `ended_at - started_at`; stored for query/filter convenience |
@@ -138,7 +138,7 @@ Reuses the auth validator pattern (one field → one error; multiple rules for o
 
 - `activity_text` (entry): non-empty after trim, ≤ 60 chars.
 - `name` (category): non-empty after trim, ≤ 60 chars.
-- `notes`: ≤ 280 chars.
+- `notes`: ≤ 2000 chars.
 - `icon` (category): must be a non-empty SF Symbol string from the allowed set.
 - `started_at`: required, valid RFC 3339, ≤ now + small clock-skew tolerance.
 - `ended_at`: if present, must be > `started_at`.
