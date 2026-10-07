@@ -26,13 +26,13 @@ struct StopTimerIntent: AppIntent {
 
     func perform() async throws -> some IntentResult {
         guard case .ready(let url) = ActiveAccountFileResolver().resolve() else {
-            Self.logger.info("Stop ignored: no active account file")
+            Self.logger.info("StopTimerIntent ignored: no active account file")
             return .result()
         }
         guard let store = try? LocalStore(url: url),
               let draft = try? await store.timerDraft(),
               !draft.activityText.isEmpty else {
-            Self.logger.info("Stop ignored: store or draft unavailable")
+            Self.logger.info("StopTimerIntent ignored: store or draft unavailable")
             return .result()
         }
         let startedAt = draft.startedAt ?? Date()
@@ -54,12 +54,12 @@ struct StopTimerIntent: AppIntent {
               (try? await store.clearTimerDraft()) != nil else {
             // Recoverable: the draft is untouched, so the user can retry
             // from the app (mirrors the in-app `.error` grammar).
-            Self.logger.error("Stop failed: entry save or draft clear threw")
+            Self.logger.error("StopTimerIntent failed: entry save or draft clear threw")
             return .result()
         }
         await LiveActivityService { true }
             .runEnded(startedAt: startedAt, durationSeconds: durationSeconds)
-        Self.logger.info("Stop saved entry with duration")
+        Self.logger.info("StopTimerIntent saved entry with duration")
         return .result()
     }
 

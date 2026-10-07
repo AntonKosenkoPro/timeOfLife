@@ -69,11 +69,11 @@ final class LiveActivityService: LiveActivityControlling {
     func runStarted(text: String, iconSymbol: String, startedAt: Date) async {
         let liveCount = Activity<TimerActivityAttributes>.activities.count
         guard ActivityAuthorizationInfo().areActivitiesEnabled else {
-            Self.logger.info("request skipped: activities disabled")
+            Self.logger.info("LiveActivityService: request skipped: activities disabled")
             return
         }
         guard isForeground() else {
-            Self.logger.info("request skipped: not foreground")
+            Self.logger.info("LiveActivityService: request skipped: not foreground")
             return
         }
         let live = Activity<TimerActivityAttributes>.activities
@@ -89,16 +89,16 @@ final class LiveActivityService: LiveActivityControlling {
                 content: .init(state: state, staleDate: nil),
                 pushType: nil
             )
-            Self.logger.info("request ok liveBefore=\(liveCount) id=\(activity.id)")
+            Self.logger.info("LiveActivityService: request ok liveBefore=\(liveCount) id=\(activity.id)")
         } catch {
             // Never fail the timer: starting succeeds with no activity.
-            Self.logger.error("request threw \(String(describing: error)) liveBefore=\(liveCount)")
+            Self.logger.error("LiveActivityService: request threw \(String(describing: error)) liveBefore=\(liveCount)")
         }
     }
 
     func runEnded(startedAt: Date, durationSeconds: Int) async {
         let live = Activity<TimerActivityAttributes>.activities
-        Self.logger.info("end: liveCount=\(live.count)")
+        Self.logger.info("LiveActivityService: end liveCount=\(live.count)")
         let final = TimerActivityAttributes.ContentState(
             startedAt: startedAt,
             savedDurationSeconds: durationSeconds
