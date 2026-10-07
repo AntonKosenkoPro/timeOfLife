@@ -89,8 +89,12 @@ final class AppContainer: ObservableObject {
         // The cache must write the session id to the App Group defaults —
         // the same store `ActiveAccountFileResolver` reads (lock-screen-
         // controls delta 4.2), or resolve() sees `.locked` for real sessions.
+        // The id is additionally mirrored to the group-container sidecar
+        // file, which is what extension processes actually read (suite
+        // UserDefaults detach from cfprefsd in extensions).
         let sessionCache = SessionCache(
-            defaults: UserDefaults(suiteName: LocalStore.appGroupID) ?? .standard
+            defaults: UserDefaults(suiteName: LocalStore.appGroupID) ?? .standard,
+            sessionFileURL: ActiveAccountFileResolver.sessionFileURL()
         )
         let sessionStore = SessionStore()
         let navigation = AppNavigationStack()

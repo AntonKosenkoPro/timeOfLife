@@ -79,6 +79,13 @@ struct TimeOfLifeApp: App {
             .environmentObject(container)
             .environmentObject(session)
             .environmentObject(navigation)
+            // Live Activity taps (`lifio://track`): select the Track tab.
+            // Unknown links are ignored (DeepLink.parse returns nil).
+            .onOpenURL { url in
+                if DeepLink.parse(url) == .track {
+                    navigation.requestTrack()
+                }
+            }
             // Sync status is read directly by Profile (status row, Sync now
             // state) and Manage Categories (reload on idle): it needs its own
             // object in the environment — nested reads through `container`

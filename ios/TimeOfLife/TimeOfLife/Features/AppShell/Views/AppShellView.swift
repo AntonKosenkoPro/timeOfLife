@@ -16,6 +16,7 @@ struct AppShellView: View {
     /// (`trackVM` below already follows this pattern.)
     @StateObject var vm: AppShellViewModel
     @EnvironmentObject var container: AppContainer
+    @EnvironmentObject var navigation: AppNavigationStack
     @StateObject private var trackVM: TrackViewModel
     /// Presents the Log Time sheet from History (manual-entry spec). Owned
     /// here so the [+] lives in the same toolbar scope as the Profile
@@ -56,6 +57,12 @@ struct AppShellView: View {
         // `dropFirst` skips the initial value (already covered by `.task`).
         .onReceive(vm.$selectedTab.dropFirst().filter { $0 == .track }) { _ in
             Task { await trackVM.load() }
+        }
+        // Live Activity tap: a bumped counter selects Track without
+        // disturbing per-tab push state. `dropFirst` skips the initial
+        // value (no request has arrived yet).
+        .onReceive(navigation.$trackRequestID.dropFirst()) { _ in
+            vm.selectedTab = .track
         }
     }
 
@@ -212,5 +219,6 @@ private struct ShellToolbar: ViewModifier {
     let container = AppContainer.production()
     AppShellView(vm: AppShellViewModel(service: container.timerService), container: container)
         .environmentObject(container)
+        .environmentObject(AppNavigationStack())
 }
 #endif

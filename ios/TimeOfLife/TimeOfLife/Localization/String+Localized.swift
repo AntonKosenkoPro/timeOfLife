@@ -50,6 +50,11 @@ enum L10n: String, CaseIterable {
     case timerCompactReturnHint = "timer.compactReturnHint"
     case timerCompactRunning = "timer.compactRunning"
 
+    // Live Activity end-card (renders in the widget extension from the
+    // shared strings; the case exists so LocalizationTests pins the key
+    // in both bundles).
+    case activitySavedWithDuration = "activity.savedWithDuration"
+
     // App shell
     case tabTrack = "tab.track"
     case tabHistory = "tab.history"

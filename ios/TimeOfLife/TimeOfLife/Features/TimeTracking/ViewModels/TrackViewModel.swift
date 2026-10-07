@@ -76,6 +76,15 @@ final class TrackViewModel: ObservableObject {
                 )
                 nameDraft = persisted.activityText
                 startTicker(from: startedAt)
+                // Revived runs never pass through beginRunning, so no
+                // Live Activity would exist for them (cold start, upgrade
+                // install, relaunch) — re-mirror here. Singleton-guarded:
+                // an already-live activity is a no-op.
+                await service.refreshLiveActivity(
+                    text: persisted.activityText,
+                    categoryIDs: persisted.categoryIDs,
+                    startedAt: startedAt
+                )
             } else if case let .running(draft, _) = state {
                 await reconcileExternalStop(draft: draft)
             }

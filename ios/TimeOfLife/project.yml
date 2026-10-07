@@ -56,6 +56,14 @@ targets:
         buildPhase: none
       - path: TimeOfLife/Localization/en.lproj
       - path: TimeOfLife/Localization/ru.lproj
+      # Shared ActivityKit attributes (live-activities change): the same
+      # file compiles into the widget extension (its sources glob picks it
+      # up) and here into the app (which requests/ends the activity).
+      # Pure Foundation + ActivityKit — no app-module imports allowed.
+      - path: LifioLiveActivities/Shared/TimerActivityAttributes.swift
+      # Shared clock (phantom skeleton + live style): unit-tested here,
+      # rendered in the extension. Foundation-only.
+      - path: LifioLiveActivities/Shared/TimerClock.swift
     resources:
       - TimeOfLife/Resources/Assets.xcassets
       - TimeOfLife/PrivacyInfo.xcprivacy
@@ -80,6 +88,15 @@ targets:
         UIUserInterfaceStyle: Automatic
         UIRequiresFullScreen: true
         ITSAppUsesNonExemptEncryption: false
+        # Live Activities (live-activities change): the app must opt in to
+        # allow ActivityKit requests, and the Island/banner tap deep-links
+        # to Track. NOTE: this plist is REGENERATED from these properties on
+        # every `xcodegen generate` — hand-edits here are wiped. Keep the
+        # unmanaged Info-Debug.plist (Debug config) in sync by hand.
+        NSSupportsLiveActivities: true
+        CFBundleURLTypes:
+          - CFBundleURLName: com.antonkosenko.timeoflifeapp.track
+            CFBundleURLSchemes: [lifio]
         API_BASE_URL: "$(API_BASE_URL)"
         # Build-stamped commit SHA (profile-version-sha): the trailing Run
         # Script Phase below overwrites this "?" default in the *built* plist
@@ -131,6 +148,10 @@ targets:
         com.apple.SignInWithApple:
           enabled: 1
     dependencies:
+      # Embeds the Live Activities widget extension (live-activities
+      # change): XcodeGen creates the Embed App Extensions phase from an
+      # app-extension target dependency.
+      - target: LifioLiveActivities
       - package: GRDB
         product: GRDB
     # Trailing stamp (profile-version-sha): writes the built commit's 7-char
@@ -149,6 +170,100 @@ targets:
           SHA="$(git rev-parse --short=7 HEAD 2>/dev/null || echo "?")"
           /usr/libexec/PlistBuddy -c "Set :GIT_COMMIT_SHA $SHA" "${TARGET_BUILD_DIR}/${INFOPLIST_PATH}" 2>/dev/null \
             || /usr/libexec/PlistBuddy -c "Add :GIT_COMMIT_SHA string $SHA" "${TARGET_BUILD_DIR}/${INFOPLIST_PATH}"
+  LifioLiveActivities:
+    type: app-extension
+    platform: iOS
+    deploymentTarget: "18.0"
+    sources:
+      - path: LifioLiveActivities
+        excludes:
+          - "Info.plist"
+          - "LifioLiveActivities.entitlements"
+      # Shared app sources compiled into the extension (live-activities
+      # change). Each is dependency-light by design (Foundation/GRDB/UIKit
+      # only) — do NOT add feature files here without checking their
+      # transitive imports, or the extension target bloats.
+      - path: TimeOfLife/Core/Storage/LocalStore.swift
+      - path: TimeOfLife/Core/Utilities/RecordIDGenerator.swift
+      # AnyEncodable only (LocalStore outbox payloads live in Utilities,
+      # not in the networking layer).
+      - path: TimeOfLife/Core/Utilities/AnyEncodable.swift
+      - path: TimeOfLife/Features/Catalog/Models/CatalogModels.swift
+      - path: TimeOfLife/Features/Catalog/Models/CatalogIcon.swift
+      - path: TimeOfLife/Features/Catalog/Models/ActivityName.swift
+      - path: TimeOfLife/Features/Catalog/Models/CategoryDraft.swift
+      - path: TimeOfLife/Features/Catalog/Models/CategoryName.swift
+      - path: TimeOfLife/Features/Catalog/Models/ExactName.swift
+      - path: TimeOfLife/Features/Sync/ActiveAccountFileResolver.swift
+      - path: TimeOfLife/Features/TimeTracking/Services/LiveActivityService.swift
+      # The shared user-facing strings (single source with the app): the
+      # extension reads them from its own bundle at runtime. Declared as
+      # explicit resource files HERE (not a separate `resources:` block):
+      # these paths are already owned by the app target's sources, and
+      # XcodeGen silently drops such duplicates from a second target's
+      # `resources:` — and a second `sources:` key would REPLACE this
+      # list (YAML duplicate keys), emptying the compile phase and
+      # shipping an appex with no executable. Both failure modes produced
+      # real breakage; keep all entries in this one list.
+      - path: TimeOfLife/Localization/en.lproj/Localizable.strings
+        type: file
+        buildPhase: resources
+      - path: TimeOfLife/Localization/ru.lproj/Localizable.strings
+        type: file
+        buildPhase: resources
+      - path: LifioLiveActivities/Info.plist
+        type: file
+        buildPhase: none
+      - path: LifioLiveActivities/LifioLiveActivities.entitlements
+        type: file
+        buildPhase: none
+    info:
+      path: LifioLiveActivities/Info.plist
+      properties:
+        # NOTE: this plist is REGENERATED from these properties on every
+        # `xcodegen generate` — hand-edits to the file are wiped. The
+        # WidgetKit extension point is what makes the appex installable
+        # (without it sim installs fail with "extensionDictionary must
+        # be set in placeholder attributes").
+        CFBundleDisplayName: Lifio
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.antonkosenko.timeoflifeapp.liveactivities
+        INFOPLIST_FILE: LifioLiveActivities/Info.plist
+        CODE_SIGN_ENTITLEMENTS: LifioLiveActivities/LifioLiveActivities.entitlements
+        GENERATE_INFOPLIST_FILE: NO
+        # Target-scoped warnings-as-errors, same rationale as the app
+        # target (never global: GRDB compiles with -suppress-warnings).
+        SWIFT_TREAT_WARNINGS_AS_ERRORS: YES
+        GCC_TREAT_WARNINGS_AS_ERRORS: YES
+      configs:
+        # Signing parity with the app target: Debug unsigned
+        # (simulator/CI), Release signed with the distribution team.
+        # NOTE: no version keys here on purpose. The extension must ship
+        # the same CFBundleShortVersionString/CFBundleVersion as the
+        # containing app (build warning now, App Store rejection later),
+        # but the app versions differ per config (Debug 0.1.3/4,
+        # Release 0.1.4/5) while `info.properties` is config-independent —
+        # and INFOPLIST_KEY_ overrides are not honored for this target on
+        # the current toolchain (verified: settings present, plist
+        # unchanged). Align versions in the release flow before the first
+        # TestFlight upload instead.
+        Release:
+          DEVELOPMENT_TEAM: 7923U48U87
+          CODE_SIGNING_REQUIRED: YES
+          CODE_SIGN_IDENTITY: Apple Development
+    # Same regen rule as the app target (see above): capabilities declared
+    # here, options.postGenCommand normalizes them back to a native PBX
+    # dict on every generate.
+    attributes:
+      SystemCapabilities:
+        com.apple.ApplicationGroups.iOS:
+          enabled: 1
+    dependencies:
+      - package: GRDB
+        product: GRDB
   TimeOfLifeTests:
     type: bundle.unit-test
     platform: iOS
@@ -175,6 +290,7 @@ schemes:
     build:
       targets:
         TimeOfLife: all
+        LifioLiveActivities: all
         TimeOfLifeTests: [test]
     run:
       config: Debug

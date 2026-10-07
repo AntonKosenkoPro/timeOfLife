@@ -68,33 +68,33 @@ def main() -> int:
 
     matches = list(MALFORMED_RE.finditer(text))
     if matches:
-        if len(matches) != 1:
-            print(
-                f"error: expected 1 malformed SystemCapabilities line, "
-                f"found {len(matches)} — inspect manually",
-                file=sys.stderr,
+        # One malformed line per target that declares SystemCapabilities
+        # (app + each extension): normalize every one, walking in reverse
+        # so earlier offsets stay valid.
+        normalized: list[str] = []
+        for m in reversed(matches):
+            caps = [
+                (e.group("cap"), int(e.group("val")))
+                for e in ENTRY_RE.finditer(m.group("body"))
+            ]
+            if not caps:
+                print(
+                    "error: malformed SystemCapabilities line has unrecognized "
+                    "content — inspect manually",
+                    file=sys.stderr,
+                )
+                return 1
+            text = (
+                text[: m.start()]
+                + emit_native(m.group("indent"), caps)
+                + text[m.end() :]
             )
-            return 1
-        m = matches[0]
-        caps = [
-            (e.group("cap"), int(e.group("val")))
-            for e in ENTRY_RE.finditer(m.group("body"))
-        ]
-        if not caps:
-            print(
-                "error: malformed SystemCapabilities line has unrecognized "
-                "content — inspect manually",
-                file=sys.stderr,
+            normalized.append(
+                ", ".join(f"com.apple.{c}" for c, _ in sorted(caps))
             )
-            return 1
-        text = (
-            text[: m.start()]
-            + emit_native(m.group("indent"), caps)
-            + text[m.end() :]
-        )
         PBXPROJ.write_text(text)
-        names = ", ".join(f"com.apple.{c}" for c, _ in sorted(caps))
-        print(f"normalized SystemCapabilities to native PBX dict ({names})")
+        for names in reversed(normalized):
+            print(f"normalized SystemCapabilities to native PBX dict ({names})")
         return 0
 
     if NATIVE_RE.search(text):

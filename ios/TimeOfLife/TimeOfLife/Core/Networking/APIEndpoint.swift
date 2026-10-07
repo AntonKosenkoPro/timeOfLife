@@ -33,12 +33,3 @@ struct APIEndpoint: Equatable, Sendable {
 
 /// Empty JSON body marker.
 struct EmptyBody: Encodable, Equatable, Sendable {}
-
-/// Type-erased encodable wrapper so endpoints can encode any `Encodable`.
-struct AnyEncodable: Encodable {
-    private let encode: (Encoder) throws -> Void
-    init(_ wrapped: Encodable) {
-        self.encode = wrapped.encode
-    }
-    func encode(to encoder: Encoder) throws { try encode(encoder) }
-}

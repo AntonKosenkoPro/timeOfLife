@@ -7,6 +7,10 @@ import SwiftUI
 @MainActor
 final class AppNavigationStack: ObservableObject {
     @Published var path: [AppRoute] = []
+    /// Monotonic counter bumped on every `lifio://track` deep link (Live
+    /// Activity tap). `AppShellView` observes it and selects the Track tab.
+    /// A counter (not a Bool) so rapid taps never coalesce.
+    @Published var trackRequestID = 0
 
     init(path: [AppRoute] = []) {
         self.path = path
@@ -14,6 +18,10 @@ final class AppNavigationStack: ObservableObject {
 
     func push(_ route: AppRoute) {
         path.append(route)
+    }
+
+    func requestTrack() {
+        trackRequestID += 1
     }
 }
 

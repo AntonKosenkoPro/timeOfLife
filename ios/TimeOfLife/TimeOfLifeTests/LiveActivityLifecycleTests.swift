@@ -1,0 +1,135 @@
+import Testing
+import Foundation
+@testable import TimeOfLife
+
+/// TimerService ↔ Live Activity wiring (live-activities spec: "Live
+/// Activity follows the running timer"). The fake stands in for
+/// ActivityKit; the real service's singleton guard (same-text reuse) is
+/// not unit-testable and is covered by the device smoke in task 4.3.
+@MainActor
+@Suite("LiveActivityLifecycle")
+struct LiveActivityLifecycleTests {
+
+    @Test("start mirrors the run with exact text and first icon")
+    func startMirrorsRun() async throws {
+        let fake = FakeLiveActivities()
+        let service = makeService(liveActivities: fake)
+        try await service.store.createCategory(Category(id: "c1", name: "Work", icon: CatalogIcon.briefcase.rawValue))
+        let startedAt = Date(timeIntervalSince1970: 1_600_000_000)
+
+        try await service.startTimerDraft(text: "Gym", categoryIDs: ["c1"], startedAt: startedAt)
+
+        #expect(fake.started.count == 1)
+        #expect(fake.started.first?.text == "Gym")
+        #expect(fake.started.first?.iconSymbol == CatalogIcon.briefcase.rawValue)
+        #expect(fake.started.first?.startedAt == startedAt)
+        #expect(fake.ended.isEmpty)
+    }
+
+    @Test("start without known categories falls back to the timer icon")
+    func startFallsBackToTimerIcon() async throws {
+        let fake = FakeLiveActivities()
+        let service = makeService(liveActivities: fake)
+        let startedAt = Date(timeIntervalSince1970: 1_600_000_000)
+
+        try await service.startTimerDraft(text: "Walk", categoryIDs: [], startedAt: startedAt)
+        try await service.startTimerDraft(text: "Run", categoryIDs: ["gone"], startedAt: startedAt)
+
+        #expect(fake.started.map(\.iconSymbol) == ["timer", "timer"])
+    }
+
+    @Test("stop ends the activity with the saved duration")
+    func stopEndsActivity() async throws {
+        let fake = FakeLiveActivities()
+        let service = makeService(liveActivities: fake)
+        let startedAt = Date(timeIntervalSince1970: 1_600_000_000)
+        try await service.startTimerDraft(text: "Gym", categoryIDs: [], startedAt: startedAt)
+
+        try await service.stopTimerDraft(
+            text: "Gym",
+            categoryIDs: [],
+            startedAt: startedAt,
+            endedAt: startedAt.addingTimeInterval(600)
+        )
+
+        #expect(fake.ended.count == 1)
+        #expect(fake.ended.first?.startedAt == startedAt)
+        #expect(fake.ended.first?.durationSeconds == 600)
+    }
+
+    @Test("stop without a start still fires end once (idempotent)")
+    func stopWithoutStartEndsOnce() async throws {
+        let fake = FakeLiveActivities()
+        let service = makeService(liveActivities: fake)
+        let startedAt = Date(timeIntervalSince1970: 1_600_000_000)
+
+        try await service.stopTimerDraft(
+            text: "Gym",
+            categoryIDs: [],
+            startedAt: startedAt,
+            endedAt: startedAt.addingTimeInterval(60)
+        )
+
+        #expect(fake.ended.count == 1)
+    }
+
+    @Test("load with a persisted draft re-mirrors the run (restore path)")
+    func loadRestoresActivity() async throws {
+        let fake = FakeLiveActivities()
+        let store = try LocalStore(url: temporaryStoreURL())
+        try await store.createCategory(Category(id: "c1", name: "Work", icon: CatalogIcon.briefcase.rawValue))
+        let startedAt = Date(timeIntervalSince1970: 1_600_000_000)
+        try await store.saveTimerDraft(activityText: "Gym", categoryIDs: ["c1"], startedAt: startedAt)
+        let vm = TrackViewModel(
+            service: TimerService(store: store, liveActivities: fake),
+            connectivity: MockConnectivity(connected: true)
+        )
+
+        await vm.load()
+
+        #expect(fake.started.count == 1)
+        #expect(fake.started.first?.text == "Gym")
+        #expect(fake.started.first?.iconSymbol == CatalogIcon.briefcase.rawValue)
+        #expect(fake.started.first?.startedAt == startedAt)
+    }
+
+    // MARK: - Helpers
+
+    private func makeService(liveActivities: LiveActivityControlling) -> TimerService {
+        // swiftlint:disable:next force_try
+        let store = try! LocalStore(url: temporaryStoreURL())
+        return TimerService(store: store, liveActivities: liveActivities)
+    }
+
+    private func temporaryStoreURL() -> URL {
+        URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent(UUID().uuidString)
+            .appendingPathComponent("liveactivity.sqlite")
+    }
+}
+
+/// Capturing fake for `LiveActivityControlling`.
+@MainActor
+final class FakeLiveActivities: LiveActivityControlling {
+    struct Started: Equatable {
+        var text: String
+        var iconSymbol: String
+        var startedAt: Date
+    }
+
+    struct Ended: Equatable {
+        var startedAt: Date
+        var durationSeconds: Int
+    }
+
+    var started: [Started] = []
+    var ended: [Ended] = []
+
+    func runStarted(text: String, iconSymbol: String, startedAt: Date) async {
+        started.append(Started(text: text, iconSymbol: iconSymbol, startedAt: startedAt))
+    }
+
+    func runEnded(startedAt: Date, durationSeconds: Int) async {
+        ended.append(Ended(startedAt: startedAt, durationSeconds: durationSeconds))
+    }
+}
