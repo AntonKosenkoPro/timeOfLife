@@ -1,7 +1,7 @@
 ## MODIFIED Requirements
 
 ### Requirement: Entry-form Notes row has a clear button
-The entry-form Notes row SHALL present a read-only multiline presenter instead of an inline editor: a `Text` label with a 1–5 line window that shows the localized notes placeholder when the draft notes are empty and truncates past 5 lines. The presenter SHALL carry the caption row with a trailing chevron in balanced corner margins (the caption row's top inset equals the card's trailing inset; approved spike variant B). Tapping the presenter SHALL push a dedicated Notes editor page carrying X (cancel/discard) and ✓ (save/commit) in the navigation bar with no system Back button (X is the sole cancel path; swipe-back still pops and discards). The editor page SHALL show a live localized subtitle pairing the entry name with the notes counter (`<name> • <count>/2000`, name omitted when empty), counting trimmed runes against the 2000 bound. Past the bound the counter SHALL render red; the confirm action SHALL stay enabled and an over-limit save attempt SHALL shake the page without saving or popping. The 2000-rune notes cap is enforced by the relay; the 60-char name bound is unchanged. In LOCKED mode the presenter SHALL render multiline read-only (disabled and dimmed) with no editing and no navigation. All strings localized (EN + RU), `Theme` semantic colors only.
+The entry-form Notes row SHALL present a read-only multiline presenter instead of an inline editor: a `Text` label with a 1–5 line window that shows the localized notes placeholder when the draft notes are empty and truncates past 5 lines. The presenter SHALL carry the caption row with a trailing chevron in balanced corner margins (the caption row's top inset equals the card's trailing inset; approved spike variant B). Tapping the presenter SHALL push a dedicated Notes editor page carrying X (cancel/discard) and ✓ (save/commit) in the navigation bar with no system Back button (X is the sole cancel path; swipe-back still pops and discards). The editor page SHALL show a live localized subtitle pairing the entry name with the notes counter (`<name> • <count>/2000`, name omitted when empty), counting every rune against the 2000 bound. Past the bound the counter SHALL render red; the confirm action SHALL stay enabled and an over-limit save attempt SHALL shake the counter subtitle and play the error haptic without saving or popping. The 2000-rune notes cap is enforced by the relay; the 60-char name bound is unchanged. In LOCKED mode the presenter SHALL render multiline read-only (disabled and dimmed) with no editing and no navigation. All strings localized (EN + RU), `Theme` semantic colors only.
 
 #### Scenario: Return inserts a newline
 - **WHEN** the Notes editor page field is focused and the user presses Return
@@ -52,9 +52,9 @@ The entry-form Notes row SHALL present a read-only multiline presenter instead o
 - **THEN** the subtitle pairs the name with the live counter (`<name> • <count>/2000`) updating as the user types
 
 #### Scenario: Over-limit counter renders red
-- **WHEN** the draft notes exceed 2000 trimmed runes on the editor page
+- **WHEN** the draft notes exceed 2000 runes on the editor page
 - **THEN** the counter renders red while the page otherwise behaves identically
 
-#### Scenario: Over-limit save shakes without saving
+#### Scenario: Over-limit save shakes the subtitle without saving
 - **WHEN** the user activates ✓ with notes past the bound
-- **THEN** the page shakes, stays open with the draft intact, and nothing is written back
+- **THEN** the counter subtitle shakes, the error haptic plays, the page stays open with the draft intact, and nothing is written back

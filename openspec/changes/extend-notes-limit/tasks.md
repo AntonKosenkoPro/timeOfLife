@@ -22,3 +22,9 @@
 - [x] 4.2 Record the sim battery (counter live count, red + shake on over-limit ✓ at default and large Dynamic Type, X-discards/✓-commits unchanged within bound, both call sites show the right name) plus VoiceOver order (editor → subtitle → X/✓); boundary backend tests are the red/green pair (2000 passes, 2001 422s).
 - [x] 4.3 Re-check `Requirements/FURPS/Activity_Catalog_and_Categories.md` U1 + Limits row (2000) and `Design/BACKEND/Entry_Catalog_API.md` (×2); run `openspec validate --all` green.
 - [x] 4.4 Ship order: backend deploy first (widens acceptance; stuck rows self-heal on next drain), app release after; mixed versions are safe. Confirm no migration either side.
+
+## 5. Battery follow-ups (user testing)
+
+- [x] 5.1 Move the shake from the editor text to the counter subtitle (the counter is the error signal) and play `Haptics.error()` on every over-limit ✓ (reuses the existing `Haptics` helper; fires even under Reduce Motion).
+- [x] 5.2 Count every rune client-side (no trim): each keystroke moves the counter by exactly one; the client stays strictly tighter than the relay so no sync wedge. Update `NotesCounterTests`, the entry-editor delta, design decision 2, and the proposal.
+- [x] 5.3 Re-run the sim battery on the subtitle shake (frame-diff the recording) plus `swiftlint`, build, full suite, and `openspec validate --all`.

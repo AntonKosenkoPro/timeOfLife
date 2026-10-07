@@ -13,10 +13,11 @@ import SwiftUI
 /// (which pops and discards, like X).
 ///
 /// The nav-bar subtitle pairs the entry name with a live notes counter
-/// (`<name> • <count>/2000`, name omitted when empty), counting trimmed
-/// scalars against the relay bound. Past the bound the counter renders red
-/// while ✓ stays enabled; an over-limit save attempt shakes the editor
-/// without saving or popping (shake suppressed under Reduce Motion).
+/// (`<name> • <count>/2000`, name omitted when empty), counting every rune
+/// against the relay bound. Past the bound the counter renders red while ✓
+/// stays enabled; an over-limit save attempt shakes the subtitle, plays the
+/// error haptic, and saves nothing without popping (shake suppressed under
+/// Reduce Motion; the haptic still fires).
 ///
 /// Placeholder reuses `L10n.entryNotesPlaceholder` (`TextEditor` has no
 /// native placeholder); `Theme` semantic colors only.
@@ -42,8 +43,8 @@ struct NotesEditorPage: View {
         self.onSave = onSave
     }
 
-    /// Trimmed scalar count of the draft (mirrors the relay rule).
-    private var count: Int { NotesCounter.trimmedCount(draft) }
+    /// Scalar count of the draft (every keystroke counts).
+    private var count: Int { NotesCounter.count(draft) }
 
     /// Whether the draft exceeds the relay bound.
     private var isOverLimit: Bool { NotesCounter.isOverLimit(draft) }
@@ -67,19 +68,6 @@ struct NotesEditorPage: View {
                 }
             }
             .padding(.horizontal, Theme.spacingMedium)
-            // Over-limit shake: a horizontal-offset keyframe track keyed on
-            // the failed-attempt counter (keyframeAnimator, iOS 17+ API).
-            .keyframeAnimator(initialValue: CGFloat.zero, trigger: shakeAttempts) { content, value in
-                content.offset(x: value)
-            } keyframes: { _ in
-                KeyframeTrack {
-                    CubicKeyframe(10, duration: 0.06)
-                    CubicKeyframe(-8, duration: 0.06)
-                    CubicKeyframe(5, duration: 0.06)
-                    CubicKeyframe(-3, duration: 0.06)
-                    CubicKeyframe(0, duration: 0.06)
-                }
-            }
             .navigationBarTitleDisplayMode(.inline)
             // No system Back: X is the sole cancel path, so the bar reads
             // X · title · ✓. Swipe-back still pops (and discards, like X).
@@ -88,7 +76,11 @@ struct NotesEditorPage: View {
             .scrollDismissesKeyboard(.interactively)
             .toolbar {
                 // Principal subtitle (LogTime `titleSubtitle` precedent):
-                // the page title plus the live counter footnote.
+                // the page title plus the live counter footnote. The stack
+                // carries the over-limit shake: a horizontal-offset keyframe
+                // track keyed on the failed-attempt counter (keyframeAnimator,
+                // iOS 17+ API), so the counter line itself shakes, not the
+                // editor text.
                 ToolbarItem(placement: .principal) {
                     VStack(spacing: 0) {
                         Text(L10n.entryNotesLabel.text)
@@ -98,6 +90,17 @@ struct NotesEditorPage: View {
                             .font(.footnote)
                             .foregroundStyle(isOverLimit ? Theme.danger : Theme.textSecondary)
                             .lineLimit(1)
+                    }
+                    .keyframeAnimator(initialValue: CGFloat.zero, trigger: shakeAttempts) { content, value in
+                        content.offset(x: value)
+                    } keyframes: { _ in
+                        KeyframeTrack {
+                            CubicKeyframe(12, duration: 0.06)
+                            CubicKeyframe(-9, duration: 0.06)
+                            CubicKeyframe(6, duration: 0.06)
+                            CubicKeyframe(-3, duration: 0.06)
+                            CubicKeyframe(0, duration: 0.06)
+                        }
                     }
                     .accessibilityElement(children: .combine)
                     .accessibilityIdentifier("NotesEditorCounter")
@@ -136,10 +139,13 @@ struct NotesEditorPage: View {
         }
     }
 
-    /// ✓ always commits within the bound; an over-limit attempt shakes and
-    /// stays (no save, no pop).
+    /// ✓ always commits within the bound; an over-limit attempt shakes the
+    /// subtitle, plays the error haptic, and stays (no save, no pop). The
+    /// haptic fires even under Reduce Motion — it is the non-motion channel
+    /// when the shake is suppressed.
     private func confirm() {
         if isOverLimit {
+            Haptics.error()
             if !reduceMotion {
                 shakeAttempts += 1
             }

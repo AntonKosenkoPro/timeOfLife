@@ -6,7 +6,7 @@ The 280-rune notes bound now blocks real usage: the multiline editor and the ded
 
 - Relay notes bound 280 → **2000 trimmed runes** (`maxNotesLen`; counting rule unchanged). The 422 message keeps its wording pattern with the bumped number ("Notes must be 2000 characters or fewer").
 - OpenAPI `notes.maxLength` 280 → 2000 in all three schemas (EntryCreate, EntryUpdate, Entry read).
-- iOS `NotesEditorPage` gains a live subtitle: `<entry name> • <count>/2000` (name omitted when empty), counting trimmed `unicodeScalars` to mirror server runes. The counter turns red past the bound; ✓ stays enabled and an over-limit save attempt shakes the page (no save, no pop).
+- iOS `NotesEditorPage` gains a live subtitle: `<entry name> • <count>/2000` (name omitted when empty), counting every rune so each keystroke moves the counter by one. The counter turns red past the bound; ✓ stays enabled and an over-limit save attempt shakes the subtitle and plays the error haptic (no save, no pop).
 - Both editor call sites (entry form, running Track) pass the entry name into the page.
 - Rows already stuck over 280 self-heal: they drain on the next cycle after the raise, no user action needed.
 
@@ -22,13 +22,13 @@ Non-goals (explicit):
 - None.
 
 ### Modified Capabilities
-- `entry-editor`: Notes editor page gains the localized counter subtitle, red over-limit state, and shake-on-over-limit-save (✓ never gates).
+- `entry-editor`: Notes editor page gains the localized counter subtitle, red over-limit state, and shake-the-subtitle + error-haptic on over-limit save (✓ never gates).
 - `local-first-store`: entry `notes` bound max 280 → 2000 runes.
 
 ## Impact
 
 - Backend: `internal/handlers/catalog_validators.go` (const + message), `backend/api/openapi.yaml` (×3), `internal/handlers/entries_test.go` (gate + boundary tests). `go test ./...` incl. the `internal/contract` gate stays green.
-- iOS: `Core/Design/Components/NotesEditorPage.swift` (subtitle, counter, shake, `entryName` param), `LogTimeView` + `TrackContent` call sites, new `L10n` keys in both locales (+ `allCases` coverage). Pure `NotesCounter` helper (trim + scalars + over-limit) for unit tests. `Theme` colors only.
+- iOS: `Core/Design/Components/NotesEditorPage.swift` (subtitle, counter, subtitle shake + haptic, `entryName` param), `LogTimeView` + `TrackContent` call sites, new `L10n` keys in both locales (+ `allCases` coverage). Pure `NotesCounter` helper (untrimmed scalars + over-limit) for unit tests. `Theme` colors only. Reuses the existing `Haptics` helper.
 - Authoritative docs: `openspec/specs/entry-editor/spec.md`, `openspec/specs/local-first-store/spec.md`; FURPS `Activity_Catalog_and_Categories.md` U1 + Limits row; `Design/BACKEND/Entry_Catalog_API.md` (×2).
 - Stacking: `separate-notes-editor` is implemented but unarchived — archive it FIRST so its presenter baseline folds in; this change's entry-editor delta is written as a superset (presenter + counter) so it validates now and archives cleanly after, in that order.
 - External behavior (ctx7): SwiftUI library `/websites/developer_apple_swiftui`, query `keyframeAnimator shake animation validation` (trigger-keyed `keyframeAnimator` + `KeyframeTrack`, iOS 17+ API); version pin iOS 18+ (repo floor, no availability guards).
