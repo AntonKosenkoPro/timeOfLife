@@ -219,6 +219,7 @@ actor LocalStore {
         let queue = try makeDatabaseQueue(at: url)
         guard let userID else {
             try migrator().migrate(queue)
+            try healTimerStateNotesColumn(in: queue)
             return (queue, nil)
         }
         let sanitized = try sanitizedUserID(userID)
@@ -228,6 +229,7 @@ actor LocalStore {
             throw LocalStoreError.accountMismatch
         }
         try migrator().migrate(queue)
+        try healTimerStateNotesColumn(in: queue)
         if let existing = try boundUserMarker(in: queue), existing != sanitized {
             throw LocalStoreError.accountMismatch
         }
@@ -246,6 +248,28 @@ actor LocalStore {
                 WHERE type = 'table' AND name = 'local_metadata'
                 """) ?? 0
             return count > 0
+        }
+    }
+
+    /// Forward-heals pre-notes `timer_state` tables (separate-notes-editor):
+    /// installs migrated before the `notes` column shipped carry the old
+    /// shape, and the edited-in-place v2 creation never re-runs for them —
+    /// without this, every timer write throws ("no such column"), Start
+    /// fails to persist, and a later pop reconciles the in-memory run away
+    /// (error banner plus lost tracking). `ALTER TABLE ... ADD COLUMN`
+    /// converges the table to the new shape while preserving any in-flight
+    /// draft; no legacy read path exists anywhere — after the heal only
+    /// the new shape is ever read or written. Fresh installs already carry
+    /// the column, so the check is a no-op there. A missing table (never
+    /// the case post-migrate) fails loudly at the ALTER instead of
+    /// running silently against the wrong shape.
+    private static func healTimerStateNotesColumn(in queue: DatabaseQueue) throws {
+        let columnNames = try queue.read { db in
+            try String.fetchAll(db, sql: "SELECT name FROM pragma_table_info('timer_state')")
+        }
+        guard !columnNames.contains("notes") else { return }
+        try queue.write { db in
+            try db.execute(sql: "ALTER TABLE timer_state ADD COLUMN notes TEXT")
         }
     }
 
@@ -471,6 +495,7 @@ actor LocalStore {
                 t.column("id", .text).primaryKey()
                 t.column("activity_text", .text)
                 t.column("category_ids", .text)
+                t.column("notes", .text)
                 t.column("started_at", .datetime)
                 t.column("status", .text).notNull()
             }
@@ -1228,8 +1253,8 @@ actor LocalStore {
     // MARK: - Timer draft (running timer persistence, D3/D4)
 
     /// The persisted running-timer draft, or nil when no timer is running.
-    /// `categoryIDs` is the live ordered snapshot; `activityText` is locked
-    /// from Start until Stop.
+    /// `categoryIDs` is the live ordered snapshot, `notes` the live notes
+    /// snapshot; `activityText` is locked from Start until Stop.
     func timerDraft() throws -> RunningTimerDraft? {
         try queue.read { db in
             guard let row = try Row.fetchOne(db, sql: """
@@ -1237,11 +1262,13 @@ actor LocalStore {
                 """) else { return nil }
             let text: String? = row["activity_text"]
             let joined: String? = row["category_ids"]
+            let notes: String? = row["notes"]
             let startedAt: Date? = row["started_at"]
             let status: String = row["status"]
             return RunningTimerDraft(
                 activityText: text ?? "",
                 categoryIDs: Self.categoryIDs(from: joined),
+                notes: notes ?? "",
                 startedAt: startedAt,
                 status: status
             )
@@ -1249,40 +1276,54 @@ actor LocalStore {
     }
 
     /// Persists the running draft (Start): locked text plus the initial
-    /// ordered category snapshot. The singleton row is upserted; any prior
-    /// draft is replaced.
+    /// ordered category snapshot and the (empty-at-start) notes snapshot.
+    /// The singleton row is upserted; any prior draft is replaced.
     func saveTimerDraft(
         activityText: String,
         categoryIDs: [String],
-        startedAt: Date
+        startedAt: Date,
+        notes: String = ""
     ) throws {
         let trimmed = ActivityName.normalized(activityText)
         let joined = Self.deduplicate(categoryIDs).joined(separator: ",")
         try queue.write { db in
             try db.execute(
                 sql: """
-                    INSERT INTO timer_state (id, activity_text, category_ids, started_at, status)
-                    VALUES ('singleton', ?, ?, ?, 'running')
+                    INSERT INTO timer_state (id, activity_text, category_ids, notes, started_at, status)
+                    VALUES ('singleton', ?, ?, ?, ?, 'running')
                     ON CONFLICT(id) DO UPDATE SET
                         activity_text = excluded.activity_text,
                         category_ids = excluded.category_ids,
+                        notes = excluded.notes,
                         started_at = excluded.started_at,
                         status = 'running'
                     """,
-                arguments: [trimmed, joined, startedAt]
+                arguments: [trimmed, joined, notes, startedAt]
             )
         }
     }
 
     /// Rewrites only the running draft's live category snapshot (a mid-run
-    /// toggle, D4). The locked text and `started_at` are untouched. A no-op
-    /// when no draft exists.
+    /// toggle, D4). The locked text, notes, and `started_at` are untouched.
+    /// A no-op when no draft exists.
     func updateTimerDraftCategoryIDs(_ categoryIDs: [String]) throws {
         let joined = Self.deduplicate(categoryIDs).joined(separator: ",")
         try queue.write { db in
             try db.execute(
                 sql: "UPDATE timer_state SET category_ids = ? WHERE id = 'singleton'",
                 arguments: [joined]
+            )
+        }
+    }
+
+    /// Rewrites only the running draft's live notes snapshot (a mid-run
+    /// notes save). The locked text, categories, and `started_at` are
+    /// untouched. A no-op when no draft exists.
+    func updateTimerDraftNotes(_ notes: String) throws {
+        try queue.write { db in
+            try db.execute(
+                sql: "UPDATE timer_state SET notes = ? WHERE id = 'singleton'",
+                arguments: [notes]
             )
         }
     }
@@ -2050,14 +2091,16 @@ actor LocalStore {
 // MARK: - GRDB records
 
 /// The persisted running-timer draft (remove-activities-layer D3/D4): the
-/// locked trimmed text plus the live ordered category-id snapshot. Backed by
-/// the `timer_state` singleton row; readable by widgets and lock-screen
-/// Controls.
+/// locked trimmed text plus the live ordered category-id and notes
+/// snapshots. Backed by the `timer_state` singleton row; readable by
+/// widgets and lock-screen Controls (which ignore the notes column).
 struct RunningTimerDraft: Codable, Equatable, Sendable {
     /// The locked trimmed entry text.
     var activityText: String
     /// The live ordered category-id snapshot (rewritable while running).
     var categoryIDs: [String]
+    /// The live notes snapshot (rewritable while running).
+    var notes: String
     var startedAt: Date?
     var status: String
 }

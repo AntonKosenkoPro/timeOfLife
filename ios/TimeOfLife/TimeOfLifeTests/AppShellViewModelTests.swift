@@ -48,7 +48,12 @@ struct AppShellViewModelTests {
         try await store.createCategory(Category(id: "c1", name: "Work", icon: CatalogIcon.briefcase.rawValue))
         try await store.createCategory(Category(id: "c2", name: "Health", icon: CatalogIcon.briefcase.rawValue))
         let startedAt = Date().addingTimeInterval(-120)
-        try await store.saveTimerDraft(activityText: "Reading", categoryIDs: ["c1", "c2"], startedAt: startedAt)
+        try await store.saveTimerDraft(
+            activityText: "Reading",
+            categoryIDs: ["c1", "c2"],
+            startedAt: startedAt,
+            notes: "compact thought"
+        )
 
         await vm.load()
         #expect(vm.runningTimer != nil)
@@ -60,6 +65,7 @@ struct AppShellViewModelTests {
         #expect(entries.count == 1)
         #expect(entries.first?.activityText == "Reading")
         #expect(entries.first?.categoryIDs == ["c1", "c2"])
+        #expect(entries.first?.notes == "compact thought")
         #expect(entries.first?.durationSeconds == 120)
     }
 

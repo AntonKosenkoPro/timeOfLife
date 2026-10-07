@@ -25,15 +25,10 @@ enum FocusDelay {
 /// per-screen `symbolSlotSize` duplicates, one idiom.
 enum DynamicTypeMetrics {
     /// UITextView's default text origin: container top inset (8) plus
-    /// line-fragment padding (5). `editorHeight` budgets the vertical
-    /// half and placeholder overlays align to the full origin — one
-    /// source so the two can never silently drift.
+    /// line-fragment padding (5). Placeholder overlays on a `TextEditor`
+    /// align to this origin — one source so editor text and its
+    /// placeholder can never silently drift.
     static let editorTextOriginInsets = (top: CGFloat(8), leading: CGFloat(5))
-
-    /// UITextView's default vertical text-container insets (8 top + 8
-    /// bottom): a fixed-height `TextEditor` must add these on top of the
-    /// text height or the last reserved line clips.
-    private static let textEditorVerticalInsets: CGFloat = 16
 
     /// Fixed icon slot for a glyph of `basePointSize` at `textStyle`,
     /// widened by `multiplier` (the 1.5× slot both lists use).
@@ -52,25 +47,5 @@ enum DynamicTypeMetrics {
             compatibleWith: trait
         ).pointSize
         return ceil(pointSize * multiplier)
-    }
-
-    /// Fixed `TextEditor` height reserving `lines` of `textStyle` text:
-    /// scaled line height × lines plus the editor's vertical insets,
-    /// ceiled — so a line reserve tracks Dynamic Type (pass the view's
-    /// `dynamicTypeSize` so overrides recompute it) instead of freezing a
-    /// point value. Content past the reserve scrolls inside the editor.
-    static func editorHeight(
-        lines: Int,
-        textStyle: UIFont.TextStyle,
-        dynamicTypeSize: DynamicTypeSize
-    ) -> CGFloat {
-        let trait = UITraitCollection(
-            preferredContentSizeCategory: dynamicTypeSize.uiContentSizeCategory
-        )
-        let lineHeight = UIFont.preferredFont(
-            forTextStyle: textStyle,
-            compatibleWith: trait
-        ).lineHeight
-        return ceil(lineHeight * CGFloat(max(lines, 1)) + textEditorVerticalInsets)
     }
 }

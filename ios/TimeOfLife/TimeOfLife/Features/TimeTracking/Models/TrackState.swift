@@ -5,19 +5,22 @@ import Foundation
 /// type has no UIKit or persistence dependencies.
 ///
 /// Identity is the trimmed exact text (case-sensitive: `Gym` ≠ `GYM`);
-/// there is no Activity object anywhere. The draft's ordered categories are
-/// inherited from the exact recents match at preparation time and stay live
-/// while running.
+/// there is no Activity object anywhere. The draft's ordered categories
+/// are inherited from the exact recents match at preparation time and stay
+/// live while running; the draft's notes start empty at Start and stay
+/// live (mid-run editor saves) until Stop.
 enum TrackState: Equatable {
     /// A prepared (or running) capture: the locked trimmed text plus the
-    /// ordered category draft.
+    /// ordered category draft and the live notes draft.
     struct Draft: Equatable {
         let text: String
         var categoryIDs: [String]
+        var notes: String
 
-        init(text: String, categoryIDs: [String] = []) {
+        init(text: String, categoryIDs: [String] = [], notes: String = "") {
             self.text = text
             self.categoryIDs = categoryIDs
+            self.notes = notes
         }
     }
 
