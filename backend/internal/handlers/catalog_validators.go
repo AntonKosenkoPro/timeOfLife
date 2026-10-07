@@ -231,7 +231,7 @@ func entryTags(ids []string) []db.CategoryTag {
 
 func validateNotes(n string, errs validationErrs) {
 	if utf8.RuneCountInString(strings.TrimSpace(n)) > maxNotesLen {
-		errs.add("notes", "Notes must be 2000 characters or fewer")
+		errs.add("notes", fmt.Sprintf("Notes must be %d characters or fewer", maxNotesLen))
 	}
 }
 
