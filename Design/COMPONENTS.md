@@ -233,21 +233,9 @@ OtpCodeField(
 
 ---
 
-## `OfflineBanner`
+## `OfflineBanner` (removed)
 
-Top banner shown when the device is offline.
-
-### Signature
-
-Already implemented: `RootView.OfflineBanner` in `ios/TimeOfLife/TimeOfLife/Features/Auth/Views/RootView.swift:33`.
-
-### Visual
-
-- Full width, top of screen via `ZStack(alignment: .top)`.
-- Text: `L10n.offlineBanner`, `.footnote`, white.
-- Background: `Theme.danger`.
-- Padding vertical `6`, horizontal `12`.
-- Transition: `.move(edge: .top).combined(with: .opacity)`.
+> **Removed** by `fix-offline-banner-duplication`: there is no global offline banner. Offline surfaces via the History pull-to-refresh inline notice and the Profile sync status; auth submit actions disable offline with `error.offline`. No component, no `L10n.offlineBanner` key, no call sites.
 
 ---
 
@@ -334,7 +322,7 @@ struct ListRow<Trailing: View>: View {
 
 ### Visual
 
-- `HStack(spacing: Theme.spacingMedium)` with `alignment: .firstTextBaseline`.
+- `HStack(spacing: Theme.spacingMedium)` with default (center) alignment.
 - Optional leading icon: `tint ?? Theme.accentPrimary`, `.body`.
 - Title: `.body`, `tint ?? Theme.textPrimary`.
 - Subtitle: `.caption`, `Theme.textSecondary`.
@@ -412,7 +400,7 @@ IconPickerGrid(
 
 ## `TagSelector`
 
-Multi-select category chips for an activity (F3). A wrapping flow of content-sized tappable chips; toggling a chip adds/removes the category id from the parent-owned ordered selection.
+Multi-select category chips for an entry (F3). A wrapping flow of content-sized tappable chips; toggling a chip adds/removes the category id from the parent-owned ordered selection.
 
 ### Signature
 
@@ -455,8 +443,9 @@ struct TagSelector: View {
 ```swift
 TagSelector(
     options: vm.allCategories,
-    selected: $vm.selectedCategoryIds,
-    accessibilityId: "ActivityEditorTags"
+    selected: vm.selectedCategoryIds,
+    onToggle: { vm.toggleCategory($0) },
+    accessibilityId: "RunningTags"
 )
 ```
 
@@ -682,146 +671,26 @@ struct CompactTimer: View {
 
 ---
 
-## `ActivitySearchSheet` and `ActivitySearchContent`
+## `ActivitySearchSheet` and `ActivitySearchContent` (removed)
 
-> **Retired** by `remove-activities-layer`: Track has no search sheet, no quick-create, and no catalog — capture is the plain-text field plus Recents chips. The spec below is history.
-
-`ActivitySearchSheet` is the full-height native-search presentation opened by
-the `TimerActivitySearchButton` affordance on Track. It owns the native search
-field and sheet dismissal. `ActivitySearchContent` is its results surface.
-The operating system owns field placement, focus, keyboard, and Cancel;
-Category names and icons are never shown here.
-
-### Signature
-
-```swift
-struct ActivitySearchSheet: View {
-    @ObservedObject var vm: TrackViewModel
-}
-```
-
-### Visual
-
-- Full-height sheet with an always-visible native search field and a native
-  `List` content surface. It does not replace the Track body.
-- Empty query: the complete catalog in recency order (`last_used_at`), with
-  the prepared Activity marked by a checkmark.
-- While typing: case-insensitive containment matches in recency order.
-- Exact normalized match: identified first; no create action for that name.
-- Valid unmatched input: one full-width quick-create button
-  (`ActivitySearchCreateButton`) with a localized accessibility label.
-- Non-expired pending-deletion identity: a restore row
-  (`ActivitySearchRestoreButton`) replaces creation for that name.
-- Empty catalog: `EmptyState` explaining the empty state and prompting the
-  user to enter a name in the native search field.
-- Invalid input: existing results stay available; localized validation
-  guidance (`ActivitySearchValidationError`) is shown.
-- Non-field errors: `ErrorBanner` (`ActivitySearchErrorBanner`).
-- Native Cancel and sheet swipe-down dismiss the sheet without changing the
-  committed ready/idle state. A confirmed result or creation prepares an
-  Activity and then dismisses the sheet.
-
-### States
-
-| State | Visual |
-|---|---|
-| Browse (empty query) | Recency-ordered catalog, prepared Activity marked |
-| Searching | Case-insensitive matches only |
-| Unmatched valid input | Create row: full-width quick-create button |
-| Pending-deletion identity | Restore row instead of creation |
-| Empty catalog | `EmptyState` + prompt to type a name |
-| Invalid input | Results + localized validation guidance |
-
-### Accessibility
-
-- Each result row: `.accessibilityLabel("Select \(activity.name)")`, with
-  `.accessibilityValue("Ready")` when it is the prepared Activity.
-- Create row: `.accessibilityLabel("Create \(name)")`.
-- Restore row: `.accessibilityLabel("Restore \(name)")`.
-- The content never requires a Category and never shows Category metadata.
+> **Removed** by `remove-activities-layer`: Track has no search sheet — capture is the `TimerNameRow` push row plus the shared `NamePicker` page (see `SCREENS/NamePicker.md`) and Recents chips. No implementation, no call sites.
 
 ---
+## `TimerActivityRefineButton` (removed)
 
-## `TimerActivityRefineButton` (retired)
-
-The Refine affordance on the Track selected-Activity row was removed in
-refine-track-recents (D34/D9): Track has no editing affordance, and the
-component is superseded by `RecentActivitiesChips` for Track's
-preparation surface. The Activity editor sheet and its view-model
-presentation machinery remain wired but unreachable from Track; editing
-placement is deferred to a later change. Keep this section until a
-replacement placement is designed.
-
-## `SuggestionRow` (retired)
-
-The single-row recency suggestion row on Track was replaced by
-`RecentActivitiesChips` in refine-track-recents (D2): a wrapping chip flow
-capped at six, with first-Category icons, a filled accent selected
-presentation, and dedicated empty copy. Keep this section only as history;
-Track no longer renders full-width suggestion rows.
+> **Removed** in refine-track-recents: Track has no editing affordance. No implementation.
 
 ---
+## `SuggestionRow` (removed)
 
-## `ActivityRow`
-
-> **Retired** by `remove-activities-layer`: there is no Manage Activities screen and no activity editor (F8). The spec below is history.
-
-Manage-list row for an activity (F8). Tap opens `ActivityEditor`; swipe-to-delete is handled by the parent `List`.
-
-### Signature
-
-```swift
-struct ActivityRow: View {
-    let activity: Activity
-    let categories: [Category]
-    let action: () -> Void
-}
-```
-
-### Visual
-
-- `HStack(spacing: Theme.spacingMedium)`:
-  - Leading: the first category's icon in `Theme.textSecondary`, `.body`, when categories are present.
-  - Middle `VStack(alignment: .leading, spacing: 2)`:
-    - Name in `.headline`, `Theme.textPrimary`.
-    - Comma-separated category names in `.caption`, hidden when `categories.isEmpty` (F3).
-    - Last-used subtitle in `.footnote`, `Theme.textSecondary`.
-  - Trailing `Image(systemName: "chevron.right")` in `Theme.textSecondary`.
-- Min height `Theme.minTapArea`; full width.
-
-### States
-
-| State | Visual |
-|---|---|
-| Default | Row with first-category icon, name + category names + subtitle, trailing chevron |
-| No categories | Category icon and names collapse; name sits directly above the subtitle |
-| No last-used | Subtitle hidden |
-
-### Requirements
-
-- `accessibilityIdentifier("ActivityRow(\(activity.id))")`.
-- List ordering is recency-based (most-recently-used first, F8). No manual reorder at MVP.
-- Swipe-to-delete is owned by the parent `List`, not by this row.
-- Tapping calls `action` — the parent navigates to `ActivityEditor`.
-
-### Usage
-
-```swift
-List {
-    ForEach(vm.activities) { a in
-        ActivityRow(activity: a, categories: vm.categories(for: a)) { vm.edit(a) }
-            .swipeActions { Button(role: .destructive) { vm.delete(a) } label: { Label(L10n.delete, systemImage: "trash") } }
-    }
-}
-```
-
-### Accessibility
-
-- `accessibilityIdentifier("ActivityRow(\(activity.id))")`.
-- The whole row is a single button element; category names and subtitle are `.accessibilityHidden(true)` and folded into the row label.
+> **Removed** in refine-track-recents: replaced by `RecentActivitiesChips`. No implementation.
 
 ---
+## `ActivityRow` (removed)
 
+> **Removed** by `remove-activities-layer`: no Manage Activities screen, no activity editor. No implementation, no call sites.
+
+---
 ## `EntryRow`
 
 Read-only History row for a committed time entry (history-entry-list spec, Variant H layout). Purely presentational — grouping, category resolution, and duration formatting are owned by `HistoryViewModel`.
@@ -951,17 +820,17 @@ Simple section title used in editor screens to label input sections, and in Hist
 ```swift
 struct SectionHeader<Trailing: View>: View {
     let title: String
-    @ViewBuilder let trailing: () -> Trailing
     /// Leading inset that visually aligns the title with a row's text column
     /// (e.g. flush with `EntryRow`'s content past its icon column). When nil,
     /// the title sits at the container's default leading inset.
     let contentLeadingInset: CGFloat?
+    @ViewBuilder let trailing: () -> Trailing
 }
 ```
 
 ### Visual
 
-- `Text(title).font(.title2.bold()).foregroundStyle(Theme.textPrimary)` — or `.headline` when used as a History day-group header over `List` section rows (the editor usage keeps `.title2.bold()`).
+- `Text(title).font(.title2.bold()).foregroundStyle(Theme.textPrimary)` in both editor and History day-group usage.
 - Optional trailing view (right-aligned), e.g. the History day total.
 - Padded with `Theme.spacingMedium` leading / `Theme.spacingSmall` vertical (editors), or the History day-group paddings (see `SCREENS/History.md`).
 - History day-group usage (D8/D10): day label left-aligned to the `EntryRow` icon column's leading edge via `contentLeadingInset`; when the header is elevated (pinned at the top of the list), the trailing view shows the day's total tracked time, right-aligned to the `EntryRow` duration/timeframe trailing edge. In-list (not elevated), the header shows only the day label.
@@ -1003,208 +872,88 @@ SectionHeader(title: dayGroup.label, contentLeadingInset: EntryRow.iconColumnWid
 
 ---
 
-## `UndoToast`
+## `FlowLayout`
 
-> **Removed** by `unify-catalog-deletion`: deletions undo through the DEFAULT system Undo confirmation only (see `INTERACTIONS.md` → Undo flow). The component, its `L10n.undo.*` keys (except the chip-selection `undo.selected` / `undo.notSelected`), and all call sites are deleted. The spec below is history: deletions enter the durable undo buffer and stay restorable until the app restarts (no wall-clock window) — there is no toast and no 30-second window.
-
-Retired 30-second undo affordance formerly shown after a delete (R3/U6). Purely presentational — the auto-dismiss timer and the restart-persistent undo buffer are owned by the parent ViewModel.
+Greedy wrapping flow (`Layout` protocol) shared by `TagSelector` and `RecentActivitiesChips`. Packs content-sized chips left-aligned with uniform `Theme.spacingSmall` gaps between chips and rows; a chip wider than the container renders at container width.
 
 ### Signature
 
 ```swift
-struct UndoToast: View {
-    let message: String
-    let onUndo: () -> Void
-    let onDismiss: () -> Void
+struct FlowLayout: Layout {
+    var spacing: CGFloat
 }
 ```
-
-### Visual
-
-- Floating bottom banner via `.safeAreaInset(edge: .bottom)` or overlay.
-- `Theme.backgroundSecondary` fill with `Theme.shadowSmall`, `Theme.cornerRadiusLarge`.
-- `HStack`: message (`.subheadline`, `Theme.textPrimary`) + icon-only Undo button (`L10n.undoButton`, `Theme.accentPrimary` tint) + dismiss `xmark`.
-- `accessibilityIdentifier("UndoToastButton")` on the Undo button.
-
-### States
-
-| State | Visual |
-|---|---|
-| Visible | Banner in view at the bottom safe area |
-| Dismissing | Slide-down + fade transition (`.move(edge: .bottom).combined(with: .opacity)`) |
 
 ### Requirements
 
-- The toast is purely presentational (D17): it does not own the restart-persistent undo buffer or the auto-dismiss timer — the parent ViewModel starts both when it shows the toast and calls `onDismiss` when either fires.
-- Undo button is accent-tinted, `accessibilityIdentifier("UndoToastButton")`.
-- Both choices (undo, dismiss) are destructive-safe: undo restores from the client-side undo buffer before the deletion is committed (R3).
-
-### Usage
-
-```swift
-if let undo = vm.undoToast {
-    UndoToast(
-        message: String(format: L10n.undoDeleteMessage.text, undo.itemName),
-        onUndo: { vm.performUndo() },
-        onDismiss: { vm.dismissUndo() }
-    )
-}
-```
-
-### Accessibility
-
-- `accessibilityIdentifier("UndoToastButton")` on the Undo button.
-- The toast container is `.accessibilityElement(children: .contain)` so VoiceOver focuses the message then the actions.
-- `.accessibilityAddTraits(.updatesFrequently)` is NOT set — the toast is static for its on-screen lifetime.
+- Toggling a chip swaps its content without re-packing rows.
+- Min tap area per chip is the caller's responsibility (`Theme.minTapArea`).
 
 ---
 
-## `ScopeConfirmation`
+## `ClearTextButton`
 
-> **Retired** by `remove-activities-layer` + `unify-catalog-deletion`: there is no activity delete and no entries-scope choice — entry deletion is a single destructive confirm naming the entry text (F10/U5), and category deletion is a single tag-only confirm. The spec below is history.
-
-Destructive two-option confirmation for deleting an activity that has past entries (F10/U5). The user must choose between deleting the entire activity (and all its entries) or only the current entry.
+Opt-in trailing clear (`xmark`) button for text fields. Keeps a 44 pt row height stable whether visible or not.
 
 ### Signature
 
 ```swift
-struct ScopeConfirmation: View {
-    @Binding var isPresented: Bool
-    let entryCount: Int
-    let onDeleteAll: () -> Void
-    let onDeleteEntryOnly: () -> Void
-    let onCancel: () -> Void
+struct ClearTextButton: View {
+    let action: () -> Void
+    let accessibilityId: String
 }
 ```
 
-### Visual
-
-- System `.confirmationDialog` with:
-  - Title: `L10n.deleteActivityTitle`.
-  - Message: `String(format: L10n.deleteActivityMessage, entryCount)` — names the number of affected entries (U5).
-  - Two destructive buttons (D18):
-    - `L10n.deleteActivityEntire` with `%d` entries — `role: .destructive`, calls `onDeleteAll`.
-    - `L10n.deleteActivityEntryOnly` — `role: .destructive`, calls `onDeleteEntryOnly`.
-  - A cancel button calling `onCancel`.
-
-### States
-
-| State | Visual |
-|---|---|
-| Presented | System `.confirmationDialog` sheet |
-| Dismissed | Binding flipped to `false` by any action |
-
-### Requirements
-
-- Both destructive choices trigger the undo flow (R3/U6) — the parent shows `UndoToast` after either runs.
-- `entryCount` must be > 0; the parent only presents this dialog when the activity has entries (D18).
-- For category delete, a simpler single-destructive `.confirmationDialog` is used directly in the parent screen — no separate component is needed, because a category has no entries-scope choice.
-
-### Usage
-
-```swift
-ScopeConfirmation(
-    isPresented: $vm.showDeleteScope,
-    entryCount: vm.entryCount(for: activity),
-    onDeleteAll: { vm.deleteActivityAndEntries(activity) },
-    onDeleteEntryOnly: { vm.deleteEntryOnly(activity) },
-    onCancel: { vm.cancelDelete() }
-)
-```
-
-### Accessibility
-
-- Relies on the system `.confirmationDialog` accessibility — no custom identifiers needed.
-- The dialog title and message are read together; destructive buttons are announced as "Delete" with the destructive trait.
+- Callers: timer name, entry name/notes, category name (`TimerNameClearButton` / `EntryNameClearButton` / `EntryNotesClearButton` / `CategoryNameClearButton`).
 
 ---
 
-## `ActivityDetailView`
+## `FieldCard` / `FormCard`
 
-> **Retired** by `remove-activities-layer`: there is no activity detail sheet — History row taps push the unified entry form directly. The spec below is history.
-
-Activity detail sheet presented from a History entry tap (activity-detail-sheet spec). Toolbar holds the activity name and the "Edit Activity" action stacking the existing `ActivityEditorView`. The body header shows each activity field exactly once (icon, categories with icons, notes) below a divider-separated Entries section whose header carries the all-time total; the activity's complete day-grouped committed-entry list renders on inert entry-only rows. Presented at medium detent, draggable to large. If the activity is cascade-deleted while the sheet is open, the sheet dismisses itself.
-
-### Signature
-
-```swift
-struct ActivityDetailView: View {
-    init(store: LocalStore, activityID: String)
-}
-```
-
-### Visual
-
-```
-┌─ sheet (medium → large) ─────────────────────────────┐
-│  ── toolbar title = activity name · [Edit Activity] ─ │
-│  🏃  Categories: 🏷 Health, 🌅 Morning                │
-│      Activity description                            │
-│  ──────────────────────────────────────────────────  │
-│  Entries                              Total: 12h 40m │
-│    Today                                             │
-│    14:00 – 15:20          [sync] Garmin     1h 20m 5s│
-│    Yesterday, 23:34 – Today, 0:34            59m 50s │
-└──────────────────────────────────────────────────────┘
-```
-
-- Header: leading icon (first category's symbol, `EntryRow.iconColumnWidth` column, `.title2`); "Categories:" caption with each category's icon + name, or the localized "none" value when the activity has no categories (the line is always shown); optional activity notes `.subheadline` below when present. No name — the toolbar owns it.
-- A `Divider` separates the header from the Entries section. The Entries header is a `SectionHeader` ("Entries" + "Total: <three-component duration>" caption, monospaced digits).
-- Entries: `ScrollView` + `LazyVStack(pinnedViews: [.sectionHeaders])`, `Section`-grouped by day with plain `SectionHeader` day labels. No scroll-driven elevation — headers always show only the day label.
-- Reuses `HistoryViewModel.makeDayGroups` / `dayLabel` / `timeText` / `detailedDuration` pure helpers.
-
-### Requirements
-
-- Rows are inert: `ActivityEntryRow` receives no tap action; the whole sheet is read-only.
-- "Edit Activity" (`ActivityDetailEditButton`) presents `ActivityEditorView` stacked over the sheet; Save dismisses the editor (the presenter clears its sheet item in `onSaved`) and Cancel dismisses via the editor's own Cancel; on editor dismiss the sheet reloads identity, categories, and total.
-- Running sessions never appear (only committed entries; `totalDuration` sums `duration_seconds` only).
-- The running timer's compact cross-tab control remains visible beneath the sheet on History (sheet overlays the tab content only).
-
-### Usage
-
-```swift
-// In HistoryView, on entry-row tap:
-.sheet(item: $detailTarget) { target in
-    ActivityDetailView(store: container.localStore, activityID: target.activityID)
-        .environmentObject(container)
-}
-```
-
-### Accessibility
-
-- Edit button: `accessibilityIdentifier("ActivityDetailEditButton")`.
-- Entry rows (`ActivityEntryRow(id)`) are single elements folding range, provenance name, and duration.
-- Day headers keep `SectionHeader`'s `.isHeader` trait.
+Shared card container for name rows and entry-form sections. `Theme.backgroundSecondary` fill, `Theme.cornerRadius` continuous corners, `Theme.spacingMedium` horizontal padding, `minHeight Theme.minTapArea`. Tap-away keyboard dismissal lives in `FormCard` as a plain tap (child buttons consume their taps).
 
 ---
 
-## `ActivityEntryRow`
+## `EditorChrome`
 
-> **Retired** by `remove-activities-layer`: there is no activity detail sheet. The spec below is history.
+Shared navigation-bar chrome for editor sheets: toolbar `xmark` cancel + `checkmark` confirm (CREATE sheet) or Back + `checkmark` (pushed EDIT). Both dismiss paths lock while saving; confirm is validity-gated by the caller.
 
-Entry-only row for the activity detail sheet (activity-detail-sheet spec): time range, provenance (shared `arrow.triangle.2.circlepath` sync icon + bare source name), duration. No activity identity. Purely presentational — the caller (`ActivityDetailViewModel`) computes all strings.
+---
 
-### Signature
+## `ShakeFirstResponderHost`
 
-```swift
-struct ActivityEntryRow: View {
-    static let provenanceIcon = "arrow.triangle.2.circlepath"
-    let timeRangeText: String
-    let provenanceName: String   // "" for manual entries
-    let durationText: String
-}
-```
+Passive transparent `UIViewRepresentable` holding first responder so the iOS system shake-to-undo prompt reaches the surface's `@Environment(\.undoManager)`. Handles no motion itself; one host per deletable surface (Track, History, Manage Categories, entry form). No custom accelerometer logic.
 
-### Visual
+---
 
-```
-  2:34 PM – 5:46 PM        [sync] Garmin       3h 11m 46s
-```
+## `MainActionSlot`
 
-- `HStack(alignment: .firstTextBaseline)`: range `.subheadline` `Theme.textPrimary` (left, flexible) + optional provenance `.caption` `Theme.textSecondary` + duration `.subheadline` `Theme.textPrimary` `.monospacedDigit()` (right).
-- Min height `Theme.minTapArea`.
+Fixed-height slot for Track's state-specific main action (name prompt / Start / Stop). The frame equals the tallest state title at the active Dynamic Type size; the swap itself never animates.
 
-### Accessibility
+---
 
-- `accessibilityIdentifier("ActivityEntryRow(\(entry.id))")` set by the parent.
-- Single element: range, provenance name, and duration folded into one label.
+## `NamePicker` (page)
+
+Shared dedicated name-picking page — full spec lives in `SCREENS/NamePicker.md`. Component contract: `init(initialText:recents:categories:placeholder:emptyHint:onCompleteSuggestion:onCompleteText:)`; local draft only, two caller-owned completions, Back cancels.
+
+---
+
+## `UndoToast` (removed)
+
+> **Removed** by `unify-catalog-deletion`: deletions undo through the DEFAULT system Undo confirmation only (see `INTERACTIONS.md` → Undo flow). No component, no `L10n.undo.*` toast keys, no call sites. The undo buffer stays restorable until the app restarts — there is no toast and no 30-second window.
+
+---
+## `ScopeConfirmation` (removed)
+
+> **Removed** by `remove-activities-layer` + `unify-catalog-deletion`: entry deletion is a single destructive confirm naming the entry text; category deletion is a single tag-only confirm. No component, no call sites.
+
+---
+## `ActivityDetailView` (removed)
+
+> **Removed** by `remove-activities-layer`: History row taps push the unified entry form directly (see `SCREENS/EntryForm.md`). No implementation, no call sites.
+
+---
+## `ActivityEntryRow` (removed)
+
+> **Removed** by `remove-activities-layer`: no activity detail sheet. No implementation, no call sites.
+
