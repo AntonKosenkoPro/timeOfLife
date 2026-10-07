@@ -64,6 +64,9 @@ targets:
       # Shared clock (phantom skeleton + live style): unit-tested here,
       # rendered in the extension. Foundation-only.
       - path: LifioLiveActivities/Shared/TimerClock.swift
+      # Shared Darwin signal (posted by the Stop intent, observed by the
+      # app): Foundation-only, no app-module imports.
+      - path: LifioLiveActivities/Shared/LiveActivitySignal.swift
     resources:
       - TimeOfLife/Resources/Assets.xcassets
       - TimeOfLife/PrivacyInfo.xcprivacy
@@ -195,7 +198,10 @@ targets:
       - path: TimeOfLife/Features/Catalog/Models/CategoryName.swift
       - path: TimeOfLife/Features/Catalog/Models/ExactName.swift
       - path: TimeOfLife/Features/Sync/ActiveAccountFileResolver.swift
-      - path: TimeOfLife/Features/TimeTracking/Services/LiveActivityService.swift
+      # NOTE: LiveActivityService.swift is deliberately NOT here: the
+      # intent never touches ActivityKit (module-distinct attributes type
+      # makes the extension's `activities` always empty) — it posts the
+      # Darwin signal and the app reaps (D8).
       # The shared user-facing strings (single source with the app): the
       # extension reads them from its own bundle at runtime. Declared as
       # explicit resource files HERE (not a separate `resources:` block):

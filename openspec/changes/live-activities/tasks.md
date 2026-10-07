@@ -19,6 +19,7 @@
 - [x] 3.4 Localize all new strings
 - [x] 3.5 Device-feedback polish: ship strings in the appex (explicit resource files), expanded bottom uses the circular red Stop + plain Track link, Stop hidden outside full-color rendering (D7)
 - [x] 3.6 Stop-intent session channel: suite UserDefaults detach from cfprefsd in extensions (device log) — SessionCache mirrors the user id to a group-container sidecar file, resolver reads file-first with defaults fallback, restore re-saves for upgraders
+- [x] 3.7 Island stop completion: intent posts a Darwin signal instead of ending (module-distinct attributes type blinds the extension); app reaps orphans with the true duration, reloads tracker surfaces, silent immediate dismiss on catch-up paths
 
 ## 4. Quality gates
 

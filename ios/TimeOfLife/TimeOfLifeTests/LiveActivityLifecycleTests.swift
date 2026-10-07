@@ -93,6 +93,29 @@ struct LiveActivityLifecycleTests {
         #expect(fake.started.first?.startedAt == startedAt)
     }
 
+    @Test("orphan reaping skips when a draft is present (run genuinely active)")
+    func orphanReapSkipsActiveDraft() async throws {
+        let fake = FakeLiveActivities()
+        let service = makeService(liveActivities: fake)
+        try await service.startTimerDraft(text: "Gym", categoryIDs: [], startedAt: Date())
+
+        await service.endOrphanedActivities(knownDurationSeconds: 60)
+
+        #expect(fake.orphanEnds.isEmpty)
+        #expect(try await service.runningTimerDraft() != nil)
+    }
+
+    @Test("orphan reaping delegates with the signaled duration when no draft exists")
+    func orphanReapDelegatesWithoutDraft() async throws {
+        let fake = FakeLiveActivities()
+        let service = makeService(liveActivities: fake)
+
+        await service.endOrphanedActivities(knownDurationSeconds: 60)
+        await service.endOrphanedActivities()
+
+        #expect(fake.orphanEnds == [60, nil])
+    }
+
     // MARK: - Helpers
 
     private func makeService(liveActivities: LiveActivityControlling) -> TimerService {
@@ -124,6 +147,7 @@ final class FakeLiveActivities: LiveActivityControlling {
 
     var started: [Started] = []
     var ended: [Ended] = []
+    var orphanEnds: [Int?] = []
 
     func runStarted(text: String, iconSymbol: String, startedAt: Date) async {
         started.append(Started(text: text, iconSymbol: iconSymbol, startedAt: startedAt))
@@ -131,5 +155,9 @@ final class FakeLiveActivities: LiveActivityControlling {
 
     func runEnded(startedAt: Date, durationSeconds: Int) async {
         ended.append(Ended(startedAt: startedAt, durationSeconds: durationSeconds))
+    }
+
+    func endOrphanedActivities(knownDurationSeconds: Int?) async {
+        orphanEnds.append(knownDurationSeconds)
     }
 }

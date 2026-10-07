@@ -24,6 +24,12 @@ struct TrackView: View {
             // First appear: pull recents + categories and restore a persisted
             // running draft. Returns to this tab refresh via AppShellView.
             .task { await vm.load() }
+            // Island Stop while this screen is up: the draft is gone under
+            // a live `.running` state — reload reconciles back to ready
+            // instead of ticking stale (live-activities D8).
+            .onReceive(NotificationCenter.default.publisher(for: .timerStoppedExternally)) { _ in
+                Task { await vm.load() }
+            }
     }
 
     private var content: some View {

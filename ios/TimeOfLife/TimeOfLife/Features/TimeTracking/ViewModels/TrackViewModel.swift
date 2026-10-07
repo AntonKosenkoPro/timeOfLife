@@ -117,6 +117,10 @@ final class TrackViewModel: ObservableObject {
         state = draft.text.isEmpty
             ? .idle
             : .ready(TrackState.Draft(text: draft.text, categoryIDs: draft.categoryIDs))
+        // The draft is gone so no run is active, but an Island may still be
+        // live (terminated app missed the Darwin signal): reap silently —
+        // no invented Saved card (live-activities D8).
+        await service.endOrphanedActivities()
     }
 
     // MARK: - Capture (plain text)

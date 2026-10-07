@@ -22,6 +22,9 @@ protocol LiveActivityControlling: Sendable {
     /// Ends every live timer activity with the Saved card. No-op when
     /// none is live (idempotent — covers app/intent double stops).
     func runEnded(startedAt: Date, durationSeconds: Int) async
+    /// Ends activities whose draft is gone (app-side reaping — the only
+    /// process whose attributes type matches its own requests).
+    func endOrphanedActivities(knownDurationSeconds: Int?) async
 }
 
 /// No-op implementation for previews and tests that must not touch
@@ -30,6 +33,7 @@ protocol LiveActivityControlling: Sendable {
 final class NoopLiveActivityController: LiveActivityControlling {
     func runStarted(text: String, iconSymbol: String, startedAt: Date) async {}
     func runEnded(startedAt: Date, durationSeconds: Int) async {}
+    func endOrphanedActivities(knownDurationSeconds: Int?) async {}
 }
 
 /// The real ActivityKit implementation (D1/D2/D6).
@@ -108,6 +112,39 @@ final class LiveActivityService: LiveActivityControlling {
                 .init(state: final, staleDate: nil),
                 dismissalPolicy: .after(.now + Self.dismissalDelaySeconds)
             )
+        }
+    }
+
+    /// Ends activities whose draft is gone — stopped from the Island (the
+    /// intent posts `LiveActivitySignal` instead of ending: the extension
+    /// compiles its own attributes type, so its `activities` is always
+    /// empty). Runs in the app process, where this module's type matches
+    /// its own requests.
+    ///
+    /// - With a known duration (Darwin signal): Saved card with the true
+    ///   value, timed dismissal (D6).
+    /// - Without one (foreground/load catch-up): dismiss immediately with
+    ///   the last content — no invented duration on the card.
+    func endOrphanedActivities(knownDurationSeconds: Int?) async {
+        // Only `.active` ones: an `.ended` activity showing its Saved card
+        // keeps its own dismissal (e.g. compact-stop card cut short by a
+        // Track return would otherwise vanish early).
+        for activity in Activity<TimerActivityAttributes>.activities where activity.activityState == .active {
+            if let duration = knownDurationSeconds {
+                let start = Date().addingTimeInterval(-Double(max(0, duration)))
+                await activity.end(
+                    .init(
+                        state: TimerActivityAttributes.ContentState(
+                            startedAt: start,
+                            savedDurationSeconds: duration
+                        ),
+                        staleDate: nil
+                    ),
+                    dismissalPolicy: .after(.now + Self.dismissalDelaySeconds)
+                )
+            } else {
+                await activity.end(nil, dismissalPolicy: .immediate)
+            }
         }
     }
 }

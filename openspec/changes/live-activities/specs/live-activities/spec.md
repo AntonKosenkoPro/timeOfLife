@@ -55,7 +55,7 @@ Tapping any face SHALL deep-link to Track (`lifio://track`). The expanded card a
 
 #### Scenario: Stop from the Island saves
 - **WHEN** the user activates Stop in the expanded card or banner while running
-- **THEN** the entry is saved with the draft's final categories, the running draft is cleared, and Track reconciles via its existing external-stop path
+- **THEN** the entry is saved with the draft's final categories, the running draft is cleared, and Track reconciles via its existing external-stop path. The Island itself is ended by the app on contact (Darwin signal, foreground, or load) — the intent only saves and signals, never ends.
 
 #### Scenario: Stop fails gracefully
 - **WHEN** Stop is activated with no active account file or an inaccessible database (e.g. cold boot before first unlock)
@@ -66,11 +66,15 @@ Tapping any face SHALL deep-link to Track (`lifio://track`). The expanded card a
 - **THEN** faces show the same layout without the Stop control (it is not interactive there and its saturated red otherwise dominates the dimmed face); the control returns in full color
 
 ### Requirement: Saved card then dismissal
-Ending the activity SHALL show a final `✓ Saved <duration>` banner and then remove it via a timed dismissal (`.after`, seconds tuned during testing); the Island SHALL collapse at once. The system default linger (hours) SHALL NOT be used.
+Ending the activity SHALL show a final `✓ Saved <duration>` banner and then remove it via a timed dismissal (`.after`, seconds tuned during testing) whenever the true duration is known; the Island SHALL collapse at once. The system default linger (hours) SHALL NOT be used.
 
 #### Scenario: Stop shows Saved then removes
-- **WHEN** the timer stops from any surface
+- **WHEN** the timer stops from any surface while the app is live (in-app Stop, or Island Stop reaped with the signaled duration)
 - **THEN** the banner shows the Saved card with the final duration and is removed after the tuned delay
+
+#### Scenario: Stop with a terminated app dismisses silently
+- **WHEN** an orphaned Island is reaped without a known duration (terminated app, missed signal)
+- **THEN** it is dismissed immediately with its last content and no card — no duration is ever invented
 
 #### Scenario: No hour-long linger
 - **WHEN** the activity has ended

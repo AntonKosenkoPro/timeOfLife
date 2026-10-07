@@ -10,6 +10,15 @@ import OSLog
 /// app process may be suspended while the intent runs in the extension
 /// process. If `TimerService.stopTimerDraft` changes, update this in step.
 ///
+/// The intent does NOT end the activity itself: the shared attributes file
+/// compiles into two modules (`TimeOfLife` + `LifioLiveActivities`), which
+/// ActivityKit treats as two distinct types — the extension's
+/// `Activity<Attributes>.activities` is always empty (observed on-device:
+/// "Activities changed: []" with a live island), so ending there is a
+/// guaranteed no-op. Instead it posts `LiveActivitySignal`, and the app
+/// reaps the orphaned activity on contact (Darwin handler, foreground,
+/// load-reconcile) where its own type matches.
+///
 /// `alwaysAllowed`: device unlock is the authorization (lock-screen-controls
 /// pattern) — no account auth of its own. With no active account file, an
 /// unreadable store, or no running draft, it returns success having written
@@ -57,8 +66,10 @@ struct StopTimerIntent: AppIntent {
             Self.logger.error("StopTimerIntent failed: entry save or draft clear threw")
             return .result()
         }
-        await LiveActivityService { true }
-            .runEnded(startedAt: startedAt, durationSeconds: durationSeconds)
+        // Signal, don't end: the app reaps the orphaned activity (see
+        // type docs above). The duration rides along so the Saved card
+        // shows the true value.
+        LiveActivitySignal.post(durationSeconds: durationSeconds)
         Self.logger.info("StopTimerIntent saved entry with duration")
         return .result()
     }
