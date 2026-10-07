@@ -1,6 +1,6 @@
 ## 1. Predecessors
 
-- [ ] 1.1 Archive `separate-notes-editor` FIRST (its presenter baseline folds in; this change's entry-editor delta already carries the merged text, so archive order is the only constraint) — implementation tasks depend on this.
+- [x] 1.1 Archive `separate-notes-editor` FIRST (its presenter baseline folds in; this change's entry-editor delta already carries the merged text, so archive order is the only constraint) — implementation tasks depend on this.
 - [x] 1.2 Run ctx7 `library` → `docs` for the shake animation (library `/websites/developer_apple_swiftui`, query `keyframeAnimator shake animation validation`; pin iOS 18+) and confirm trigger-keyed `keyframeAnimator` + `KeyframeTrack` before coding — done during proposal, output recorded there.
 
 ## 2. Relay bound (Go)
@@ -18,7 +18,7 @@
 
 ## 4. Verification + docs
 
-- [ ] 4.1 Run `swiftlint lint --strict` clean and the warning-as-error `xcodebuild` build + full test suite green (per `docs/ios-test-loop.md`: one `xcodebuild` at a time, booted-sim-by-ID).
-- [ ] 4.2 Record the sim battery (counter live count, red + shake on over-limit ✓ at default and large Dynamic Type, X-discards/✓-commits unchanged within bound, both call sites show the right name) plus VoiceOver order (editor → subtitle → X/✓); boundary backend tests are the red/green pair (2000 passes, 2001 422s).
+- [x] 4.1 Run `swiftlint lint --strict` clean and the warning-as-error `xcodebuild` build + full test suite green (per `docs/ios-test-loop.md`: one `xcodebuild` at a time, booted-sim-by-ID).
+- [x] 4.2 Record the sim battery (counter live count, red + shake on over-limit ✓ at default and large Dynamic Type, X-discards/✓-commits unchanged within bound, both call sites show the right name) plus VoiceOver order (editor → subtitle → X/✓); boundary backend tests are the red/green pair (2000 passes, 2001 422s).
 - [x] 4.3 Re-check `Requirements/FURPS/Activity_Catalog_and_Categories.md` U1 + Limits row (2000) and `Design/BACKEND/Entry_Catalog_API.md` (×2); run `openspec validate --all` green.
 - [x] 4.4 Ship order: backend deploy first (widens acceptance; stuck rows self-heal on next drain), app release after; mixed versions are safe. Confirm no migration either side.
