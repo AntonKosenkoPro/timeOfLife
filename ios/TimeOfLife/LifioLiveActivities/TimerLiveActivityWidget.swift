@@ -96,29 +96,33 @@ struct TimerLiveActivityWidget: Widget {
     // not rendering — the system dims the live timer itself, like Apple's.
     private func runningBanner(text: String, iconSymbol: String, startedAt: Date) -> some View {
         HStack(spacing: 12) {
-            Image(systemName: iconSymbol)
-                .font(.title2)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(text)
-                    .font(.headline)
-                    .lineLimit(1)
-                Text(timerInterval: startedAt...Date.distantFuture, countsDown: false)
-                    // Headline-bold: the banner timer must survive AoD
-                    // dimming (device finding) — caption was too small.
-                    .font(.headline.bold().monospacedDigit())
-                    .lineLimit(1)
+            // Deep-link zone scoped to the label: the root must NOT carry
+            // widgetURL — a root URL also engages on Stop taps and demands
+            // unlock on a locked phone (device finding), fighting the
+            // alwaysAllowed intent. Body taps still go to Track.
+            HStack(spacing: 12) {
+                Image(systemName: iconSymbol)
+                    .font(.title2)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(text)
+                        .font(.headline)
+                        .lineLimit(1)
+                    Text(timerInterval: startedAt...Date.distantFuture, countsDown: false)
+                        // Headline-bold: the banner timer must survive AoD
+                        // dimming (device finding) — caption was too small.
+                        .font(.headline.bold().monospacedDigit())
+                        .lineLimit(1)
+                }
             }
+            .widgetURL(trackURL)
             Spacer()
             LiveActivityStopButton()
         }
-        // Banner breathing room: the HStack otherwise sits flush against
-        // the banner's top/bottom edges (device finding).
         // Banner breathing room: the HStack otherwise sits flush against
         // the banner's top/bottom edges (device finding, verified 8pt).
         .padding(.vertical, 8)
         .accessibilityElement(children: .combine)
         .accessibilityLabel(LiveActivityStrings.runningAccessibilityLabel(text: text))
-        .widgetURL(trackURL)
     }
 
     private func savedBanner(duration: String) -> some View {
