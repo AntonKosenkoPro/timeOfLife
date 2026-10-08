@@ -112,6 +112,7 @@ struct TimerLiveActivityWidget: Widget {
             Spacer()
             LiveActivityStopButton()
         }
+        .aodTint()
         .aodAccentable()
         .accessibilityElement(children: .combine)
         .accessibilityLabel(LiveActivityStrings.runningAccessibilityLabel(text: text))
@@ -125,6 +126,7 @@ struct TimerLiveActivityWidget: Widget {
             Text(LiveActivityStrings.savedCardTitle(duration: duration))
                 .font(.headline)
         }
+        .aodTint()
         .aodAccentable()
         .widgetURL(trackURL)
     }
@@ -227,9 +229,25 @@ struct AodAccentable: ViewModifier {
     }
 }
 
+/// Saturated AoD tint (Apple Timer's own orange face): explicit color as
+/// the second survival mechanism alongside grouping — whichever the AoD
+/// renderer honors, content stays visible. No-op in full color.
+struct AodTint: ViewModifier {
+    @Environment(\.isLuminanceReduced)
+    private var isLuminanceReduced
+
+    func body(content: Content) -> some View {
+        content.foregroundStyle(isLuminanceReduced ? .orange : .primary)
+    }
+}
+
 extension View {
     func aodAccentable() -> some View {
         modifier(AodAccentable())
+    }
+
+    func aodTint() -> some View {
+        modifier(AodTint())
     }
 }
 
