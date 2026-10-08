@@ -70,17 +70,17 @@ struct TimerLiveActivityWidget: Widget {
                     .widgetURL(trackURL)
                 }
             } compactLeading: {
-                Image(systemName: context.attributes.iconSymbol)
-                    .widgetURL(trackURL)
-            } compactTrailing: {
                 islandElapsed(context: context)
                     // Explicit width: the timer view has no intrinsic size —
                     // it fills any proposal (stretching the pill
                     // edge-to-edge) and collapses to zero under fixedSize
                     // (device finding + Mobileraker #273). 52pt fits
-                    // H:MM:SS in the ~52–62pt trailing slot; monospaced
+                    // H:MM:SS in the ~52–62pt slot; monospaced
                     // digits keep shorter values stable.
                     .frame(width: 52)
+                    .widgetURL(trackURL)
+            } compactTrailing: {
+                Image(systemName: context.attributes.iconSymbol)
                     .widgetURL(trackURL)
             } minimal: {
                 Image(systemName: context.attributes.iconSymbol)
