@@ -104,7 +104,7 @@ struct TimerLiveActivityWidget: Widget {
             Spacer()
             LiveActivityStopButton()
         }
-        .aodTint()
+        .aodAccentable()
         .accessibilityElement(children: .combine)
         .accessibilityLabel(LiveActivityStrings.runningAccessibilityLabel(text: text))
         .widgetURL(trackURL)
@@ -117,7 +117,7 @@ struct TimerLiveActivityWidget: Widget {
             Text(LiveActivityStrings.savedCardTitle(duration: duration))
                 .font(.headline)
         }
-        .aodTint()
+        .aodAccentable()
         .widgetURL(trackURL)
     }
 
@@ -206,21 +206,22 @@ struct BannerElapsed: View {
         .font(.caption.monospacedDigit())
     }
 }
-/// Always-On tint: saturated color survives dimming (Apple Timer's own
-/// orange face) while white is crushed to invisible — device finding
-/// (blank-black banner). Applied to banner content; no-op in full color.
-struct AodTint: ViewModifier {
+/// Always-On visibility: joins the accent group when dimmed so content
+/// survives accented rendering (device finding: unmarked content renders
+/// in bright lock but vanishes entirely on AoD, while Apple's marked
+/// content persists). No-op in full color.
+struct AodAccentable: ViewModifier {
     @Environment(\.isLuminanceReduced)
     private var isLuminanceReduced
 
     func body(content: Content) -> some View {
-        content.foregroundStyle(isLuminanceReduced ? .orange : .primary)
+        content.widgetAccentable(isLuminanceReduced)
     }
 }
 
 extension View {
-    func aodTint() -> some View {
-        modifier(AodTint())
+    func aodAccentable() -> some View {
+        modifier(AodAccentable())
     }
 }
 
