@@ -91,17 +91,24 @@ struct TimerLiveActivityWidget: Widget {
 
     // MARK: - Lock Screen banner
 
-    // AoD content-flow probe v2 (WIP): maximum-signal banner — giant
-    // static text only, no image, no button, no stack complexity. If AoD
-    // shows different blocks, our content flows but gets redacted; if
-    // identical blocks, the system isn't rendering our hierarchy at all.
+    // Banner: icon + name + live ticking timer + Stop. No luminance
+    // branch, no accent wrappers: the AoD blank was a device setting
+    // (Face ID & Passcode → Allow Access When Locked → Live Activities),
+    // not rendering — the system dims the live timer itself, like Apple's.
     private func runningBanner(text: String, iconSymbol: String, startedAt: Date) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("TEST 123")
-                .font(.largeTitle.bold())
-            Text(text)
-                .font(.headline)
-                .lineLimit(1)
+        HStack(spacing: 12) {
+            Image(systemName: iconSymbol)
+                .font(.title2)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(text)
+                    .font(.headline)
+                    .lineLimit(1)
+                Text(timerInterval: startedAt...Date.distantFuture, countsDown: false)
+                    .font(.caption.monospacedDigit())
+                    .lineLimit(1)
+            }
+            Spacer()
+            LiveActivityStopButton()
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel(LiveActivityStrings.runningAccessibilityLabel(text: text))
@@ -183,19 +190,6 @@ struct TimerLiveActivityWidget: Widget {
     }
 }
 
-/// Banner elapsed readout — AoD probe (WIP): fully static coarse masked
-/// reading (`0:--`), no ticking view, no luminance gating, no accent.
-/// Isolates whether the live `Text(timerInterval:)` or the accent wrappers
-/// blank the dimmed face. Restore the gated variant once AoD reads.
-struct BannerElapsed: View {
-    let startedAt: Date
-
-    var body: some View {
-        Text(TimerClock.maskedCoarse(Int(Date().timeIntervalSince(startedAt))))
-            .font(.headline)
-            .lineLimit(1)
-    }
-}
 /// Always-On visibility: joins the accent group when dimmed so content
 /// survives accented rendering (device finding: unmarked content renders
 /// in bright lock but vanishes entirely on AoD, while Apple's marked

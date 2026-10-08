@@ -25,7 +25,7 @@
 
 - [x] 4.1 `swiftlint lint --strict` clean, warning-as-error `xcodebuild` build green
 - [x] 4.2 iOS suite green incl. new tests (lifecycle singleton, Stop-intent idempotence, no-anonymous-file, dismissal); re-check FURPS Track rows
-- [ ] 4.3 Manual smoke on device: start → Island + banner appear; long-press → expanded; tap → Track; Stop from Island → Saved card → dismiss; competing music activity → minimal; lock screen banner
+- [ ] 4.3 Manual smoke on device: start → Island + banner appear; long-press → expanded; tap → Track; Stop from Island → Saved card → dismiss; competing music activity → minimal; lock screen banner. Precondition: Settings → Face ID & Passcode → Allow Access When Locked → Live Activities ON (else AoD shows placeholders — device-verified, see D7)
 
 ## 5. Tuning and docs
 
