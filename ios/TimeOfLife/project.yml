@@ -247,6 +247,10 @@ targets:
       configs:
         # Signing parity with the app target: Debug unsigned
         # (simulator/CI), Release signed with the distribution team.
+        # DEBUG flag mirrors the app target (enables `#if DEBUG` testing
+        # aids in the extension, e.g. the banner build marker).
+        Debug:
+          SWIFT_ACTIVE_COMPILATION_CONDITIONS: DEBUG
         # NOTE: no version keys here on purpose. The extension must ship
         # the same CFBundleShortVersionString/CFBundleVersion as the
         # containing app (build warning now, App Store rejection later),

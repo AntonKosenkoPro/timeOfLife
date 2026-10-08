@@ -99,6 +99,14 @@ struct TimerLiveActivityWidget: Widget {
                 Text(text)
                     .font(.headline)
                     .lineLimit(1)
+                // Build fingerprint for on-device testing (which appex is
+                // actually rendering): the extension's own stamped SHA.
+                // Shown unconditionally during WIP — device runs Release,
+                // so a DEBUG gate would hide it. Remove before archive
+                // (tasks 5.3).
+                Text(Bundle.main.object(forInfoDictionaryKey: "GIT_COMMIT_SHA") as? String ?? "?")
+                    .font(.caption2.monospacedDigit())
+                    .lineLimit(1)
                 BannerElapsed(startedAt: startedAt)
             }
             Spacer()
