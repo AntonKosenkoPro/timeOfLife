@@ -15,20 +15,14 @@ enum AppVersion {
     /// configurations without depending on the running build's bundle keys.
     /// Missing bundle keys fall back to `"?"` (defensive only — a built app
     /// bundle always carries the marketing key, and the stamp script leaves
-    /// `"?"` in `GIT_COMMIT_SHA` when git is unavailable). The extension
-    /// SHA is appended whenever the appex is present, so a stale extension
-    /// (app updated, appex not) reads directly off the Profile row.
+    /// `"?"` in `GIT_COMMIT_SHA` when git is unavailable).
     static func formatted(
         marketing: String?,
         build: String?,
-        extensionBuild: String?,
         isDebug: Bool,
         debugSuffix: String
     ) -> String {
-        var base = "v\(marketing ?? "?") (\(build ?? "?"))"
-        if let extensionBuild {
-            base += " • ext (\(extensionBuild))"
-        }
+        let base = "v\(marketing ?? "?") (\(build ?? "?"))"
         guard isDebug else { return base }
         return "\(base) • \(debugSuffix)"
     }
@@ -48,24 +42,8 @@ enum AppVersion {
         return formatted(
             marketing: marketing,
             build: sha,
-            extensionBuild: extensionSHA,
             isDebug: isDebug,
             debugSuffix: L10n.profileVersionDebugSuffix.text
         )
-    }
-
-    /// The widget extension's stamped commit SHA, or nil when the appex
-    /// (or its stamp) is absent — e.g. app builds predating the extension.
-    static var extensionSHA: String? {
-        guard let plugins = Bundle.main.builtInPlugInsURL else { return nil }
-        let url = plugins
-            .appendingPathComponent("LifioLiveActivities.appex")
-            .appendingPathComponent("Info.plist")
-        guard let data = try? Data(contentsOf: url),
-              let plist = try? PropertyListSerialization.propertyList(from: data, format: nil),
-              let dict = plist as? [String: Any],
-              let sha = dict["GIT_COMMIT_SHA"] as? String
-        else { return nil }
-        return sha
     }
 }

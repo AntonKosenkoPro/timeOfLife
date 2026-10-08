@@ -37,7 +37,6 @@ struct TimerLiveActivityWidget: Widget {
                     expandedTimer(context: context)
                         .padding(.horizontal, 10)
                         .padding(.vertical, 8)
-                        .overlay(Capsule().stroke(.blue, lineWidth: 1))
                         .padding(.horizontal, 4)
                         .padding(.vertical, 4)
                         .widgetURL(trackURL)
@@ -128,8 +127,6 @@ struct TimerLiveActivityWidget: Widget {
             Text(LiveActivityStrings.savedCardTitle(duration: duration))
                 .font(.headline)
         }
-        .aodTint()
-        .aodAccentable()
         .widgetURL(trackURL)
     }
 
@@ -153,12 +150,6 @@ struct TimerLiveActivityWidget: Widget {
         .accessibilityLabel(LiveActivityStrings.runningAccessibilityLabel(text: context.attributes.entryText))
     }
     
-    /// Expanded leading timer with a dimmed hour placeholder: while the
-    /// run is under an hour, a dimmed "0:" precedes the live MM:SS, holding
-    /// the bordered capsule at full H:MM:SS width from the start — no
-    /// oversized empty border, no layout shift at the hour mark. The
-    /// placeholder resolves at render time; at/past the hour the live (or
-    /// saved) text carries the hour digit itself.
     /// Expanded leading timer with a dynamically hugging border: the
     /// capsule wraps the visible digits only and grows with them
     /// (`0:01` narrow → `1:23:45` wide). The live timer view has no
@@ -196,94 +187,44 @@ struct TimerLiveActivityWidget: Widget {
     }
 }
 
-/// Always-On visibility: joins the accent group when dimmed so content
-/// survives accented rendering (device finding: unmarked content renders
-/// in bright lock but vanishes entirely on AoD, while Apple's marked
-/// content persists). No-op in full color.
-struct AodAccentable: ViewModifier {
-    @Environment(\.isLuminanceReduced)
-    private var isLuminanceReduced
-
-    func body(content: Content) -> some View {
-        content.widgetAccentable(isLuminanceReduced)
-    }
-}
-
-/// Saturated AoD tint (Apple Timer's own orange face): explicit color as
-/// the second survival mechanism alongside grouping — whichever the AoD
-/// renderer honors, content stays visible. No-op in full color.
-struct AodTint: ViewModifier {
-    @Environment(\.isLuminanceReduced)
-    private var isLuminanceReduced
-
-    func body(content: Content) -> some View {
-        content.foregroundStyle(isLuminanceReduced ? .orange : .primary)
-    }
-}
-
-extension View {
-    func aodAccentable() -> some View {
-        modifier(AodAccentable())
-    }
-
-    func aodTint() -> some View {
-        modifier(AodTint())
-    }
-}
-
 /// Circular Stop control shared by the banner and the expanded card (the
 /// `CompactTimer` language: white glyph on a danger-red circle).
 ///
-/// Hidden outside full-color rendering: in dimmed/accent modes (Always-on
-/// display, StandBy) the button is not interactive, and a lone red dot is
-/// all that survives the dimming — the AoD finding.
+/// Always rendered, including dimmed faces: the button lives in the same
+/// HStack row as the timer, so it cannot change the banner height, and
+/// the postmortem showed the AoD blank was a device setting (Face ID &
+/// Passcode → Allow Access When Locked → Live Activities), not rendering —
+/// hiding the control would only remove a working lock-screen action.
 struct LiveActivityStopButton: View {
-    @Environment(\.widgetRenderingMode)
-    private var renderingMode
-    @Environment(\.isLuminanceReduced)
-    private var isLuminanceReduced
-
     var body: some View {
-        // Hidden outside interactive contexts: non-fullColor (StandBy
-        // accent) or dimmed (Always-On) — the button is not interactive
-        // there, and its saturated red is all that survives the dimming.
-        if renderingMode == .fullColor, !isLuminanceReduced {
-            Button(intent: StopTimerIntent()) {
-                Image(systemName: "stop.fill")
-                    .font(.system(size: 12, weight: .bold))
-                    .foregroundStyle(.white)
-                    .frame(width: 44, height: 44)
-                    .background(.red)
-                    .clipShape(Circle())
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel(LiveActivityStrings.stopAccessibilityLabel)
+        Button(intent: StopTimerIntent()) {
+            Image(systemName: "stop.fill")
+                .font(.system(size: 12, weight: .bold))
+                .foregroundStyle(LiveActivityTheme.stopForeground)
+                .frame(width: 44, height: 44)
+                .background(LiveActivityTheme.stopBackground)
+                .clipShape(Circle())
         }
+        .buttonStyle(.plain)
+        .accessibilityLabel(LiveActivityStrings.stopAccessibilityLabel)
     }
 }
 
 /// Pill Stop control (experimental alternative to the circle, currently
 /// live in the expanded card so both can be compared on-device).
-/// Same full-color-only rule as `LiveActivityStopButton`.
+/// Same always-render rule as `LiveActivityStopButton`.
 struct LiveActivityStopPill: View {
-    @Environment(\.widgetRenderingMode)
-    private var renderingMode
-    @Environment(\.isLuminanceReduced)
-    private var isLuminanceReduced
-
     var body: some View {
-        if renderingMode == .fullColor, !isLuminanceReduced {
-            Button(intent: StopTimerIntent()) {
-                Label(LiveActivityStrings.stopTitle, systemImage: "stop.fill")
-                    .font(.subheadline)
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 8)
-                    .background(.red)
-                    .clipShape(Capsule(style: .continuous))
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel(LiveActivityStrings.stopAccessibilityLabel)
+        Button(intent: StopTimerIntent()) {
+            Label(LiveActivityStrings.stopTitle, systemImage: "stop.fill")
+                .font(.subheadline)
+                .foregroundStyle(LiveActivityTheme.stopForeground)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 8)
+                .background(LiveActivityTheme.stopBackground)
+                .clipShape(Capsule(style: .continuous))
         }
+        .buttonStyle(.plain)
+        .accessibilityLabel(LiveActivityStrings.stopAccessibilityLabel)
     }
 }

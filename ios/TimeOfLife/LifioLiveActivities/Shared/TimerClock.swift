@@ -36,13 +36,4 @@ enum TimerClock {
         }
         return "\(minutes):\(paddedSeconds)"
     }
-
-    /// Coarse Always-on-style reading (`0:--`, `12:--`, `1:23:--`): the
-    /// live style with the seconds masked. Mirrors Apple Timer's AoD face,
-    /// which likewise shows hours/minutes statically rather than ticking
-    /// seconds the dimmed renderer cannot sustain.
-    static func maskedCoarse(_ totalSeconds: Int) -> String {
-        let live = liveStyle(totalSeconds)
-        return String(live.dropLast(2)) + "--"
-    }
 }
