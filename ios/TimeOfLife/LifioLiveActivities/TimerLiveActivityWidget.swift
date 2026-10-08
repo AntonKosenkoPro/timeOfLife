@@ -104,7 +104,9 @@ struct TimerLiveActivityWidget: Widget {
                     .font(.headline)
                     .lineLimit(1)
                 Text(timerInterval: startedAt...Date.distantFuture, countsDown: false)
-                    .font(.caption.monospacedDigit())
+                    // Headline-bold: the banner timer must survive AoD
+                    // dimming (device finding) — caption was too small.
+                    .font(.headline.bold().monospacedDigit())
                     .lineLimit(1)
             }
             Spacer()
@@ -112,7 +114,8 @@ struct TimerLiveActivityWidget: Widget {
         }
         // Banner breathing room: the HStack otherwise sits flush against
         // the banner's top/bottom edges (device finding).
-        .padding(.vertical, 8)
+        .padding(.vertical, 16)
+        .padding(.horizontal, 16)
         .accessibilityElement(children: .combine)
         .accessibilityLabel(LiveActivityStrings.runningAccessibilityLabel(text: text))
         .widgetURL(trackURL)
