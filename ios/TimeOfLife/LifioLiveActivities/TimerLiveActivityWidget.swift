@@ -133,6 +133,10 @@ struct TimerLiveActivityWidget: Widget {
             }
         }
         .font(.caption.monospacedDigit())
+        // View-level alignment comes from the call-site frame; this aligns
+        // the glyph run inside the (filled) text box — without it the
+        // digits sit leading despite the trailing frame.
+        .multilineTextAlignment(.trailing)
         .accessibilityLabel(LiveActivityStrings.runningAccessibilityLabel(text: context.attributes.entryText))
     }
     
