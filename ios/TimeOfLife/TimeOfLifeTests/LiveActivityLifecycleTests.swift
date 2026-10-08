@@ -116,6 +116,17 @@ struct LiveActivityLifecycleTests {
         #expect(fake.orphanEnds == [60, nil])
     }
 
+    @Test("orphan reaping fails closed when the draft read throws")
+    func orphanReapFailsClosedOnReadError() async {
+        let fake = FakeLiveActivities()
+        // Unbound store: every operation throws — must end nothing.
+        let service = TimerService(store: LocalStore(), liveActivities: fake)
+
+        await service.endOrphanedActivities(knownDurationSeconds: 60)
+
+        #expect(fake.orphanEnds.isEmpty)
+    }
+
     // MARK: - Helpers
 
     private func makeService(liveActivities: LiveActivityControlling) -> TimerService {

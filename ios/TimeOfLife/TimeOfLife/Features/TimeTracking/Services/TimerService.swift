@@ -101,8 +101,18 @@ final class TimerService: ObservableObject {
     /// them on contact: Darwin signal, foreground, load-reconcile). A
     /// present draft means the run is genuinely active: nothing is
     /// orphaned, nothing ends. Never throws.
+    ///
+    /// Fail-closed on read errors: `try? … == nil` would mistake a
+    /// transient DB failure for "no draft" and dismiss a live Island —
+    /// the exact blank-island report from the device.
     func endOrphanedActivities(knownDurationSeconds: Int? = nil) async {
-        guard (try? await store.timerDraft()) == nil else { return }
+        let draft: RunningTimerDraft?
+        do {
+            draft = try await store.timerDraft()
+        } catch {
+            return
+        }
+        guard draft == nil else { return }
         await liveActivities.endOrphanedActivities(knownDurationSeconds: knownDurationSeconds)
     }
 
