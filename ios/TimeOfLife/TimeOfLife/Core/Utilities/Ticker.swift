@@ -7,8 +7,10 @@ import Foundation
 enum Ticker {
     /// Publishes every second on the main run loop, delivering to `receive`.
     /// The caller holds the returned cancellable and cancels it to stop.
+    ///
+    /// TEMP-TEST-10X (revert before merging): 0.1s for testing only.
     static func everySecond(_ receive: @escaping () -> Void) -> AnyCancellable {
-        Timer.publish(every: 1, on: .main, in: .common)
+        Timer.publish(every: 0.1, on: .main, in: .common)
             .autoconnect()
             .sink { _ in receive() }
     }
