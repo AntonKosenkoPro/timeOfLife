@@ -114,6 +114,7 @@ struct TimerLiveActivityWidget: Widget {
         }
         .aodTint()
         .aodAccentable()
+        .background
         .accessibilityElement(children: .combine)
         .accessibilityLabel(LiveActivityStrings.runningAccessibilityLabel(text: text))
         .widgetURL(trackURL)
