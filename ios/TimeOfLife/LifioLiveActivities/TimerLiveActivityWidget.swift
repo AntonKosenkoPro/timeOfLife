@@ -74,6 +74,13 @@ struct TimerLiveActivityWidget: Widget {
                     .widgetURL(trackURL)
             } compactTrailing: {
                 islandElapsed(context: context)
+                    // Explicit width (proven on-device; the twin-overlay
+                    // experiment does not constrain in the compact slot).
+                    // The timer view has no intrinsic size — it fills any
+                    // proposal (edge-to-edge pill) and collapses to zero
+                    // under fixedSize. 52pt fits H:MM:SS in the ~52–62pt
+                    // slot; monospaced digits keep shorter values stable.
+                    .frame(width: 52)
                     .widgetURL(trackURL)
             } minimal: {
                 Image(systemName: context.attributes.iconSymbol)
@@ -115,35 +122,18 @@ struct TimerLiveActivityWidget: Widget {
 
     // MARK: - Dynamic Island
 
-    /// Compact trailing timer in a stable narrow pill: sized by a
-    /// phase-independent full skeleton (`00:00:00`) — widget bodies do
-    /// not re-render on their own (device-proven: a render-time twin
-    /// froze while the live text kept ticking into `10:…` truncation),
-    /// so anything sized at render time goes stale within minutes. The
-    /// live view has no intrinsic size (fills any proposal — the
-    /// edge-to-edge pill; collapses under `fixedSize`), so the hidden
-    /// twin sizes it via `overlay`, which takes no part in layout.
+    /// Compact trailing timer: plain live view; the width contract lives
+    /// at the call site (`.frame(width: 52)` — see there for why).
     private func islandElapsed(context: ActivityViewContext<TimerActivityAttributes>) -> some View {
         Group {
             if let saved = context.state.savedDurationSeconds {
                 Text(TimerClock.formatted(saved))
             } else {
-                huggingTimer(startedAt: context.state.startedAt)
+                Text(timerInterval: context.state.startedAt...Date.distantFuture, countsDown: false)
             }
         }
         .font(.caption.monospacedDigit())
         .accessibilityLabel(LiveActivityStrings.runningAccessibilityLabel(text: context.attributes.entryText))
-    }
-
-    /// Live timer that hugs its content (see `islandElapsed`): the
-    /// phase-independent full-skeleton twin sizes, the live view fills
-    /// exactly that rect.
-    private func huggingTimer(startedAt: Date) -> some View {
-        Text("00:00:00")
-            .hidden()
-            .overlay(alignment: .leading) {
-                Text(timerInterval: startedAt...Date.distantFuture, countsDown: false)
-            }
     }
     
     /// Expanded leading timer with a stable full-skeleton border: the
