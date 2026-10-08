@@ -80,7 +80,7 @@ struct TimerLiveActivityWidget: Widget {
                     // proposal (edge-to-edge pill) and collapses to zero
                     // under fixedSize. 52pt fits H:MM:SS in the ~52–62pt
                     // slot; monospaced digits keep shorter values stable.
-                    .frame(width: 48)
+                    .frame(width: 52, alignment: .trailing)
                     .widgetURL(trackURL)
             } minimal: {
                 Image(systemName: context.attributes.iconSymbol)
@@ -99,21 +99,15 @@ struct TimerLiveActivityWidget: Widget {
                 Text(text)
                     .font(.headline)
                     .lineLimit(1)
-                // Build fingerprint for on-device testing (which appex is
-                // actually rendering): the extension's own stamped SHA.
-                // Shown unconditionally during WIP — device runs Release,
-                // so a DEBUG gate would hide it. Remove before archive
-                // (tasks 5.3).
-                Text(Bundle.main.object(forInfoDictionaryKey: "GIT_COMMIT_SHA") as? String ?? "?")
-                    .font(.caption2.monospacedDigit())
-                    .lineLimit(1)
+                // AoD probe (WIP): SHA fingerprint line removed — it stole
+                // vertical space in the height-budgeted banner (tasks 5.3).
                 BannerElapsed(startedAt: startedAt)
             }
             Spacer()
             LiveActivityStopButton()
         }
-        .aodTint()
-        .aodAccentable()
+        // AoD probe (WIP): no accent/tint wrappers — plain static banner to
+        // isolate whether accent-group membership blanks the dimmed face.
         .accessibilityElement(children: .combine)
         .accessibilityLabel(LiveActivityStrings.runningAccessibilityLabel(text: text))
         .widgetURL(trackURL)
@@ -194,30 +188,17 @@ struct TimerLiveActivityWidget: Widget {
     }
 }
 
-/// Banner elapsed readout: ticking timer normally, coarse masked reading
-/// (`58:--`) under reduced luminance — mirroring Apple Timer's AoD face.
-/// Always-On is detected via `isLuminanceReduced` (the documented signal;
-/// `widgetRenderingMode` stays fullColor under dimming, so it cannot gate
-/// this): the dimmed renderer cannot sustain ticking seconds.
+/// Banner elapsed readout — AoD probe (WIP): fully static coarse masked
+/// reading (`0:--`), no ticking view, no luminance gating, no accent.
+/// Isolates whether the live `Text(timerInterval:)` or the accent wrappers
+/// blank the dimmed face. Restore the gated variant once AoD reads.
 struct BannerElapsed: View {
     let startedAt: Date
 
-    @Environment(\.isLuminanceReduced)
-    private var isLuminanceReduced
-
     var body: some View {
-        Group {
-            if !isLuminanceReduced {
-                Text(timerInterval: startedAt...Date.distantFuture, countsDown: false)
-                    .font(.caption.monospacedDigit())
-            } else {
-                // Big and bold: dimmed small text photographs as blur —
-                // Apple's own AoD face uses a large readout for the same
-                // reason (device finding).
-                Text(TimerClock.maskedCoarse(Int(Date().timeIntervalSince(startedAt))))
-                    .font(.title.bold().monospacedDigit())
-            }
-        }
+        Text(TimerClock.maskedCoarse(Int(Date().timeIntervalSince(startedAt))))
+            .font(.headline)
+            .lineLimit(1)
     }
 }
 /// Always-On visibility: joins the accent group when dimmed so content
