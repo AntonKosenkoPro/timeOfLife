@@ -110,6 +110,9 @@ struct TimerLiveActivityWidget: Widget {
             Spacer()
             LiveActivityStopButton()
         }
+        // Banner breathing room: the HStack otherwise sits flush against
+        // the banner's top/bottom edges (device finding).
+        .padding(.vertical, 8)
         .accessibilityElement(children: .combine)
         .accessibilityLabel(LiveActivityStrings.runningAccessibilityLabel(text: text))
         .widgetURL(trackURL)
