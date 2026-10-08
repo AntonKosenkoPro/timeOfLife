@@ -91,23 +91,18 @@ struct TimerLiveActivityWidget: Widget {
 
     // MARK: - Lock Screen banner
 
+    // AoD content-flow probe v2 (WIP): maximum-signal banner — giant
+    // static text only, no image, no button, no stack complexity. If AoD
+    // shows different blocks, our content flows but gets redacted; if
+    // identical blocks, the system isn't rendering our hierarchy at all.
     private func runningBanner(text: String, iconSymbol: String, startedAt: Date) -> some View {
-        HStack(spacing: 12) {
-            Image(systemName: iconSymbol)
-                .font(.title2)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(text)
-                    .font(.headline)
-                    .lineLimit(1)
-                // AoD probe (WIP): SHA fingerprint line removed — it stole
-                // vertical space in the height-budgeted banner (tasks 5.3).
-                BannerElapsed(startedAt: startedAt)
-            }
-            Spacer()
-            LiveActivityStopButton()
+        VStack(alignment: .leading, spacing: 4) {
+            Text("TEST 123")
+                .font(.largeTitle.bold())
+            Text(text)
+                .font(.headline)
+                .lineLimit(1)
         }
-        // AoD probe (WIP): no accent/tint wrappers — plain static banner to
-        // isolate whether accent-group membership blanks the dimmed face.
         .accessibilityElement(children: .combine)
         .accessibilityLabel(LiveActivityStrings.runningAccessibilityLabel(text: text))
         .widgetURL(trackURL)
