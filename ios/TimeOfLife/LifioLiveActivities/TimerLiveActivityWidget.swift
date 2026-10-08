@@ -80,7 +80,7 @@ struct TimerLiveActivityWidget: Widget {
                     // proposal (edge-to-edge pill) and collapses to zero
                     // under fixedSize. 52pt fits H:MM:SS in the ~52–62pt
                     // slot; monospaced digits keep shorter values stable.
-                    .frame(width: 52)
+                    .frame(width: 48)
                     .widgetURL(trackURL)
             } minimal: {
                 Image(systemName: context.attributes.iconSymbol)
@@ -99,8 +99,7 @@ struct TimerLiveActivityWidget: Widget {
                 Text(text)
                     .font(.headline)
                     .lineLimit(1)
-                Text(timerInterval: startedAt...Date.distantFuture, countsDown: false)
-                    .font(.caption.monospacedDigit())
+                BannerElapsed(startedAt: startedAt)
             }
             Spacer()
             LiveActivityStopButton()
@@ -140,22 +139,38 @@ struct TimerLiveActivityWidget: Widget {
         .accessibilityLabel(LiveActivityStrings.runningAccessibilityLabel(text: context.attributes.entryText))
     }
     
-    /// Expanded leading timer with a stable full-skeleton border: the
-    /// capsule always fits `H:MM:SS`, narrow and truncation-free — widget
-    /// bodies do not re-render on their own (device-proven: a render-time
-    /// twin froze while the live text kept ticking into truncation), so
-    /// anything sized at render time goes stale within minutes.
+    /// Expanded leading timer with a dimmed hour placeholder: while the
+    /// run is under an hour, a dimmed "0:" precedes the live MM:SS, holding
+    /// the bordered capsule at full H:MM:SS width from the start — no
+    /// oversized empty border, no layout shift at the hour mark. The
+    /// placeholder resolves at render time; at/past the hour the live (or
+    /// saved) text carries the hour digit itself.
+    /// Expanded leading timer with a dynamically hugging border: the
+    /// capsule wraps the visible digits only and grows with them
+    /// (`0:01` narrow → `1:23:45` wide). The live timer view has no
+    /// intrinsic size (it fills any proposal and collapses to zero under
+    /// fixedSize), so the size comes from a hidden static twin in the same
+    /// format (`TimerClock.liveStyle`) that the live view fills exactly —
+    /// no fixed points, so Dynamic Type stays safe. The twin freezes at
+    /// render time: a phase crossing (59→1:00) without a re-render keeps
+    /// the previous width until the next render.
     private func expandedTimer(context: ActivityViewContext<TimerActivityAttributes>) -> some View {
-        Group {
+        let totalSeconds: Int = {
             if let saved = context.state.savedDurationSeconds {
-                Text(TimerClock.liveStyle(saved))
+                return saved
+            }
+            return max(0, Int(Date().timeIntervalSince(context.state.startedAt)))
+        }()
+        return Group {
+            if context.state.savedDurationSeconds != nil {
+                Text(TimerClock.liveStyle(totalSeconds))
             } else {
                 // Overlay (not ZStack): overlay content takes no part in
                 // layout, so the hidden twin alone sizes the capsule and
                 // the live view fills exactly that rect. (A ZStack sizes
                 // to every child including the stretchy live view, which
                 // is why the border went full-width again.)
-                Text("00:00:00")
+                Text(TimerClock.liveStyle(totalSeconds))
                     .hidden()
                     .overlay(alignment: .leading) {
                         Text(timerInterval: context.state.startedAt...Date.distantFuture, countsDown: false)
@@ -167,6 +182,27 @@ struct TimerLiveActivityWidget: Widget {
     }
 }
 
+/// Banner elapsed readout: ticking timer in full color, coarse masked
+/// reading (`58:--`) anywhere dimmed — mirroring Apple Timer's AoD face,
+/// which likewise keeps hours/minutes statically instead of ticking
+/// seconds the dimmed renderer cannot sustain.
+struct BannerElapsed: View {
+    let startedAt: Date
+
+    @Environment(\.widgetRenderingMode)
+    private var renderingMode
+
+    var body: some View {
+        Group {
+            if renderingMode == .fullColor {
+                Text(timerInterval: startedAt...Date.distantFuture, countsDown: false)
+            } else {
+                Text(TimerClock.maskedCoarse(Int(Date().timeIntervalSince(startedAt))))
+            }
+        }
+        .font(.caption.monospacedDigit())
+    }
+}
 /// Circular Stop control shared by the banner and the expanded card (the
 /// `CompactTimer` language: white glyph on a danger-red circle).
 ///

@@ -32,4 +32,12 @@ struct TimerClockTests {
     func negativeClamps() {
         #expect(TimerClock.liveStyle(-30) == "0:00")
     }
+
+    @Test("masked coarse readings mask the seconds (Apple Timer AoD pattern)")
+    func maskedCoarse() {
+        #expect(TimerClock.maskedCoarse(1) == "0:--")
+        #expect(TimerClock.maskedCoarse(754) == "12:--")
+        #expect(TimerClock.maskedCoarse(5025) == "1:23:--")
+        #expect(TimerClock.maskedCoarse(45296) == "12:34:--")
+    }
 }
