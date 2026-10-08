@@ -113,8 +113,9 @@ struct TimerLiveActivityWidget: Widget {
         }
         // Banner breathing room: the HStack otherwise sits flush against
         // the banner's top/bottom edges (device finding).
-        .padding(.vertical, 16)
-        .padding(.horizontal, 16)
+        // Banner breathing room: the HStack otherwise sits flush against
+        // the banner's top/bottom edges (device finding, verified 8pt).
+        .padding(.vertical, 8)
         .accessibilityElement(children: .combine)
         .accessibilityLabel(LiveActivityStrings.runningAccessibilityLabel(text: text))
         .widgetURL(trackURL)

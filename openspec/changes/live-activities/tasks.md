@@ -30,5 +30,5 @@
 ## 5. Tuning and docs
 
 - [ ] 5.1 Tune dismissal seconds T on-device (design Q1), record chosen value in spec delta
-- [x] 5.3 Pre-archive cleanup (partial): banner SHA marker removed as part of the AoD probe (Profile dual-SHA retained until AoD resolved); TEMP-TEST-10X ticker revert still pending
+- [x] 5.3 Pre-archive cleanup: TEMP-TEST-10X reverted to 1s, banner SHA marker removed, Profile `ext` fingerprint removed (single-SHA footer back); appex stamp phase pruned (app stamp kept)
 - [x] 5.2 Update `docs/project-context.md` (Incomplete/deferred entry for Live Activities → shipped), `Design/COMPONENTS.md` if a shared face component is extracted, `README.md` smoke checklist
