@@ -7,20 +7,26 @@ struct AppVersionTests {
 
     @Test("Release formats marketing and commit SHA with v prefix and no suffix")
     func releaseFormat() {
-        let text = AppVersion.formatted(marketing: "0.1.0", build: "a1b2c3d", isDebug: false, debugSuffix: "Debug")
+        let text = AppVersion.formatted(marketing: "0.1.0", build: "a1b2c3d", extensionBuild: nil, isDebug: false, debugSuffix: "Debug")
         #expect(text == "v0.1.0 (a1b2c3d)")
     }
 
     @Test("Debug appends the localized suffix after a bullet")
     func debugFormat() {
-        let text = AppVersion.formatted(marketing: "0.1.0", build: "a1b2c3d", isDebug: true, debugSuffix: "Debug")
+        let text = AppVersion.formatted(marketing: "0.1.0", build: "a1b2c3d", extensionBuild: nil, isDebug: true, debugSuffix: "Debug")
         #expect(text == "v0.1.0 (a1b2c3d) • Debug")
     }
 
     @Test("missing bundle keys fall back to placeholders")
     func missingKeys() {
-        let text = AppVersion.formatted(marketing: nil, build: nil, isDebug: false, debugSuffix: "Debug")
+        let text = AppVersion.formatted(marketing: nil, build: nil, extensionBuild: nil, isDebug: false, debugSuffix: "Debug")
         #expect(text == "v? (?)")
+    }
+
+    @Test("extension SHA appends whenever the appex reports one")
+    func extensionSHAAppended() {
+        let text = AppVersion.formatted(marketing: "0.1.0", build: "a1b2c3d", extensionBuild: "e4f5g6h", isDebug: false, debugSuffix: "Debug")
+        #expect(text == "v0.1.0 (a1b2c3d) • ext (e4f5g6h)")
     }
 
     @Test("runtime text reflects the stamped commit SHA or the placeholder")

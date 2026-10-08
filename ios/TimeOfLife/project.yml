@@ -270,6 +270,16 @@ targets:
     dependencies:
       - package: GRDB
         product: GRDB
+    # Same commit-SHA stamp as the app target (profile-version-sha): the
+    # Profile version row shows both SHAs, so a stale appex (app updated,
+    # extension not) is diagnosable on-device in one glance.
+    postBuildScripts:
+      - name: Stamp GIT_COMMIT_SHA
+        basedOnDependencyAnalysis: false
+        script: |
+          SHA="$(git rev-parse --short=7 HEAD 2>/dev/null || echo "?")"
+          /usr/libexec/PlistBuddy -c "Set :GIT_COMMIT_SHA $SHA" "${TARGET_BUILD_DIR}/${INFOPLIST_PATH}" 2>/dev/null \
+            || /usr/libexec/PlistBuddy -c "Add :GIT_COMMIT_SHA string $SHA" "${TARGET_BUILD_DIR}/${INFOPLIST_PATH}"
   TimeOfLifeTests:
     type: bundle.unit-test
     platform: iOS
