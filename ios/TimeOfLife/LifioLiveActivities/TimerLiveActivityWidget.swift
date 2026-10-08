@@ -104,6 +104,7 @@ struct TimerLiveActivityWidget: Widget {
             Spacer()
             LiveActivityStopButton()
         }
+        .aodTint()
         .accessibilityElement(children: .combine)
         .accessibilityLabel(LiveActivityStrings.runningAccessibilityLabel(text: text))
         .widgetURL(trackURL)
@@ -116,6 +117,7 @@ struct TimerLiveActivityWidget: Widget {
             Text(LiveActivityStrings.savedCardTitle(duration: duration))
                 .font(.headline)
         }
+        .aodTint()
         .widgetURL(trackURL)
     }
 
@@ -204,6 +206,24 @@ struct BannerElapsed: View {
         .font(.caption.monospacedDigit())
     }
 }
+/// Always-On tint: saturated color survives dimming (Apple Timer's own
+/// orange face) while white is crushed to invisible — device finding
+/// (blank-black banner). Applied to banner content; no-op in full color.
+struct AodTint: ViewModifier {
+    @Environment(\.isLuminanceReduced)
+    private var isLuminanceReduced
+
+    func body(content: Content) -> some View {
+        content.foregroundStyle(isLuminanceReduced ? .orange : .primary)
+    }
+}
+
+extension View {
+    func aodTint() -> some View {
+        modifier(AodTint())
+    }
+}
+
 /// Circular Stop control shared by the banner and the expanded card (the
 /// `CompactTimer` language: white glyph on a danger-red circle).
 ///
