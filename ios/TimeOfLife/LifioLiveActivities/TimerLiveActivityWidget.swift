@@ -114,7 +114,6 @@ struct TimerLiveActivityWidget: Widget {
         }
         .aodTint()
         .aodAccentable()
-        .background
         .accessibilityElement(children: .combine)
         .accessibilityLabel(LiveActivityStrings.runningAccessibilityLabel(text: text))
         .widgetURL(trackURL)
@@ -210,11 +209,15 @@ struct BannerElapsed: View {
         Group {
             if !isLuminanceReduced {
                 Text(timerInterval: startedAt...Date.distantFuture, countsDown: false)
+                    .font(.caption.monospacedDigit())
             } else {
+                // Big and bold: dimmed small text photographs as blur —
+                // Apple's own AoD face uses a large readout for the same
+                // reason (device finding).
                 Text(TimerClock.maskedCoarse(Int(Date().timeIntervalSince(startedAt))))
+                    .font(.title.bold().monospacedDigit())
             }
         }
-        .font(.caption.monospacedDigit())
     }
 }
 /// Always-On visibility: joins the accent group when dimmed so content
