@@ -182,19 +182,20 @@ struct TimerLiveActivityWidget: Widget {
     }
 }
 
-/// Banner elapsed readout: ticking timer in full color, coarse masked
-/// reading (`58:--`) anywhere dimmed — mirroring Apple Timer's AoD face,
-/// which likewise keeps hours/minutes statically instead of ticking
-/// seconds the dimmed renderer cannot sustain.
+/// Banner elapsed readout: ticking timer normally, coarse masked reading
+/// (`58:--`) under reduced luminance — mirroring Apple Timer's AoD face.
+/// Always-On is detected via `isLuminanceReduced` (the documented signal;
+/// `widgetRenderingMode` stays fullColor under dimming, so it cannot gate
+/// this): the dimmed renderer cannot sustain ticking seconds.
 struct BannerElapsed: View {
     let startedAt: Date
 
-    @Environment(\.widgetRenderingMode)
-    private var renderingMode
+    @Environment(\.isLuminanceReduced)
+    private var isLuminanceReduced
 
     var body: some View {
         Group {
-            if renderingMode == .fullColor {
+            if !isLuminanceReduced {
                 Text(timerInterval: startedAt...Date.distantFuture, countsDown: false)
             } else {
                 Text(TimerClock.maskedCoarse(Int(Date().timeIntervalSince(startedAt))))
@@ -212,9 +213,14 @@ struct BannerElapsed: View {
 struct LiveActivityStopButton: View {
     @Environment(\.widgetRenderingMode)
     private var renderingMode
+    @Environment(\.isLuminanceReduced)
+    private var isLuminanceReduced
 
     var body: some View {
-        if renderingMode == .fullColor {
+        // Hidden outside interactive contexts: non-fullColor (StandBy
+        // accent) or dimmed (Always-On) — the button is not interactive
+        // there, and its saturated red is all that survives the dimming.
+        if renderingMode == .fullColor, !isLuminanceReduced {
             Button(intent: StopTimerIntent()) {
                 Image(systemName: "stop.fill")
                     .font(.system(size: 12, weight: .bold))
@@ -235,9 +241,11 @@ struct LiveActivityStopButton: View {
 struct LiveActivityStopPill: View {
     @Environment(\.widgetRenderingMode)
     private var renderingMode
+    @Environment(\.isLuminanceReduced)
+    private var isLuminanceReduced
 
     var body: some View {
-        if renderingMode == .fullColor {
+        if renderingMode == .fullColor, !isLuminanceReduced {
             Button(intent: StopTimerIntent()) {
                 Label(LiveActivityStrings.stopTitle, systemImage: "stop.fill")
                     .font(.subheadline)
