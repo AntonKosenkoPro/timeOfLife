@@ -115,14 +115,14 @@ struct TimerLiveActivityWidget: Widget {
 
     // MARK: - Dynamic Island
 
-    /// Compact trailing timer that hugs its content: the pill takes only
-    /// the space the digits need and grows with them (`9:59` → `10:00`
-    /// requests more width on re-render). The live view has no intrinsic
-    /// size (fills any proposal — the edge-to-edge pill; collapses under
-    /// fixedSize), so a hidden static twin in the same format
-    /// (`TimerClock.liveStyle`) sizes it via `overlay`, which takes no
-    /// part in layout (a `ZStack` would stretch again). Same mechanism as
-    /// the expanded border.
+    /// Compact trailing timer in a stable narrow pill: sized by a
+    /// phase-independent full skeleton (`00:00:00`) — widget bodies do
+    /// not re-render on their own (device-proven: a render-time twin
+    /// froze while the live text kept ticking into `10:…` truncation),
+    /// so anything sized at render time goes stale within minutes. The
+    /// live view has no intrinsic size (fills any proposal — the
+    /// edge-to-edge pill; collapses under `fixedSize`), so the hidden
+    /// twin sizes it via `overlay`, which takes no part in layout.
     private func islandElapsed(context: ActivityViewContext<TimerActivityAttributes>) -> some View {
         Group {
             if let saved = context.state.savedDurationSeconds {
@@ -135,49 +135,33 @@ struct TimerLiveActivityWidget: Widget {
         .accessibilityLabel(LiveActivityStrings.runningAccessibilityLabel(text: context.attributes.entryText))
     }
 
-    /// Live timer that hugs its content (see `islandElapsed`): hidden
-    /// static twin sizes, live view fills exactly that rect.
+    /// Live timer that hugs its content (see `islandElapsed`): the
+    /// phase-independent full-skeleton twin sizes, the live view fills
+    /// exactly that rect.
     private func huggingTimer(startedAt: Date) -> some View {
-        let totalSeconds = max(0, Int(Date().timeIntervalSince(startedAt)))
-        return Text(TimerClock.liveStyle(totalSeconds))
+        Text("00:00:00")
             .hidden()
             .overlay(alignment: .leading) {
                 Text(timerInterval: startedAt...Date.distantFuture, countsDown: false)
             }
     }
     
-    /// Expanded leading timer with a dimmed hour placeholder: while the
-    /// run is under an hour, a dimmed "0:" precedes the live MM:SS, holding
-    /// the bordered capsule at full H:MM:SS width from the start — no
-    /// oversized empty border, no layout shift at the hour mark. The
-    /// placeholder resolves at render time; at/past the hour the live (or
-    /// saved) text carries the hour digit itself.
-    /// Expanded leading timer with a dynamically hugging border: the
-    /// capsule wraps the visible digits only and grows with them
-    /// (`0:01` narrow → `1:23:45` wide). The live timer view has no
-    /// intrinsic size (it fills any proposal and collapses to zero under
-    /// fixedSize), so the size comes from a hidden static twin in the same
-    /// format (`TimerClock.liveStyle`) that the live view fills exactly —
-    /// no fixed points, so Dynamic Type stays safe. The twin freezes at
-    /// render time: a phase crossing (59→1:00) without a re-render keeps
-    /// the previous width until the next render.
+    /// Expanded leading timer with a stable full-skeleton border: the
+    /// capsule always fits `H:MM:SS`, narrow and truncation-free — widget
+    /// bodies do not re-render on their own (device-proven: a render-time
+    /// twin froze while the live text kept ticking into truncation), so
+    /// anything sized at render time goes stale within minutes.
     private func expandedTimer(context: ActivityViewContext<TimerActivityAttributes>) -> some View {
-        let totalSeconds: Int = {
+        Group {
             if let saved = context.state.savedDurationSeconds {
-                return saved
-            }
-            return max(0, Int(Date().timeIntervalSince(context.state.startedAt)))
-        }()
-        return Group {
-            if context.state.savedDurationSeconds != nil {
-                Text(TimerClock.liveStyle(totalSeconds))
+                Text(TimerClock.liveStyle(saved))
             } else {
                 // Overlay (not ZStack): overlay content takes no part in
                 // layout, so the hidden twin alone sizes the capsule and
                 // the live view fills exactly that rect. (A ZStack sizes
                 // to every child including the stretchy live view, which
                 // is why the border went full-width again.)
-                Text(TimerClock.liveStyle(totalSeconds))
+                Text("00:00:00")
                     .hidden()
                     .overlay(alignment: .leading) {
                         Text(timerInterval: context.state.startedAt...Date.distantFuture, countsDown: false)
