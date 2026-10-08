@@ -65,6 +65,10 @@ Tapping any face SHALL deep-link to Track (`lifio://track`). The expanded card a
 - **WHEN** the activity renders outside full color (Always-on dim, StandBy accent modes)
 - **THEN** faces show the same layout without the Stop control (it is not interactive there and its saturated red otherwise dominates the dimmed face); the control returns in full color
 
+#### Scenario: Dimmed banner masks the seconds
+- **WHEN** the banner renders outside full color
+- **THEN** the elapsed readout shows the name plus a coarse static `H:MM:--` reading (Apple Timer pattern) instead of the ticking timer, which the dimmed renderer cannot sustain
+
 ### Requirement: Saved card then dismissal
 Ending the activity SHALL show a final `✓ Saved <duration>` banner and then remove it via a timed dismissal (`.after`, seconds tuned during testing) whenever the true duration is known; the Island SHALL collapse at once. The system default linger (hours) SHALL NOT be used.
 
