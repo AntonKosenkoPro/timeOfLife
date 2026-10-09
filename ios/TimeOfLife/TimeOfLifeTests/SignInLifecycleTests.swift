@@ -3,15 +3,11 @@ import Foundation
 @testable import TimeOfLife
 
 /// Seed-before-reveal lifecycle (fix-track-empty-after-reinstall 1.2):
-/// the shell must never mount before the account file is bound AND seeded,
+/// `RootView.beginSignIn` reveals only after `prepareAccountStore`
+/// (open → commit → seed) succeeds, and activates sync after the
+/// cancellation/session guards — the first paint already carries the seed,
 /// so Track's first `load()` can never observe an empty category map.
-///
-/// `RootView.beginSignIn` currently reveals (`boundUserID = id`, which mounts
-/// the shell and fires `TrackView.task { load() }`) BEFORE `commitAll`,
-/// `activate`, and `seedStarterCategoriesIfNeeded` run — the first paint
-/// races seeding and the first-sync pull. These tests pin the required seam:
-/// `AppContainer.prepareAccountStore` (open → commit → seed) must complete
-/// before any reveal.
+/// These tests pin that seam across the success and failure paths.
 @MainActor
 @Suite("SignInLifecycle")
 struct SignInLifecycleTests {
@@ -20,9 +16,12 @@ struct SignInLifecycleTests {
 
     @Test("a Track load racing the seed observes empty categories")
     func unseededLoadObservesEmptyCategories() async {
-        // A fresh account file opened but not yet seeded: exactly what
-        // Track's first `load()` reads when the shell mounts before the
-        // seed lands (the reinstall empty-Track paint).
+        // Documents the pre-fix race window: a fresh account file opened but
+        // not yet seeded is what Track's first `load()` read when the shell
+        // mounted before the seed landed (the reinstall empty-Track paint).
+        // Post-fix the gate seeds before reveal, so this interleaving is
+        // unreachable through `beginSignIn` — the test pins why the ordering
+        // matters, not a reachable state.
         let container = makeContainer()
         let userID = uniqueUserID()
         defer { removeAccountFile(userID: userID) }
@@ -39,7 +38,7 @@ struct SignInLifecycleTests {
         #expect(vm.errorMessage == nil, "bound-but-empty is not an error, just a race")
     }
 
-    // MARK: - Prepare-before-reveal (fails until 2.1 lands)
+    // MARK: - Prepare-before-reveal (slice 2.1, landed in this change)
 
     @Test("prepare binds and seeds a fresh account before reveal")
     func prepareBindsAndSeedsFreshAccount() async throws {
@@ -102,10 +101,11 @@ struct SignInLifecycleTests {
 
     @Test("prepare never activates sync (activation stays a post-reveal decision)")
     func prepareLeavesSyncInactive() async {
-        // Rapid sign-out mid-prepare must not leak a sync cycle for a stale
-        // account: `prepare` only touches the file, so even if the caller
-        // vanished, no cycle can be in flight. Activation happens solely in
-        // `RootView.beginSignIn` after the cancellation/session guards.
+        // Pins that preparation itself never touches sync: open/commit/seed
+        // are local-file-only work, so `prepareAccountStore` cannot leave a
+        // cycle in flight even if the caller is cancelled mid-prepare. The
+        // sign-out-mid-prepare guards are view-layer (`RootView.beginSignIn`)
+        // and are not exercised by this unit test.
         let container = makeContainer()
         let userID = uniqueUserID()
         defer { removeAccountFile(userID: userID) }

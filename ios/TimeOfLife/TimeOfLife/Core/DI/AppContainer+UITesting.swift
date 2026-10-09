@@ -87,9 +87,12 @@ extension AppContainer {
         sessionStore: SessionStore,
         navigation: AppNavigationStack
     ) {
-        // The stub graph never runs the launch restore: clear the restoring
-        // flag explicitly or `RootView` would hold the splash over every
-        // stub screen.
+        // The stub graph never resolves the restore before the first frame:
+        // clear the flag so `RootView` starts on gated content, not the
+        // splash. NOTE: `RootView.task` still runs `restoreSession()`, which
+        // re-latches `isRestoring = true` for one actor hop before its defer
+        // clears it — a transient splash frame can still appear over stub
+        // screens; gate the restore in the stub path if that matters.
         sessionStore.setRestoring(false)
         switch screen {
         case "emailEntry":
