@@ -203,6 +203,9 @@ struct TimerLiveActivityWidget: Widget {
 /// Passcode → Allow Access When Locked → Live Activities), not rendering —
 /// hiding the control would only remove a working lock-screen action.
 struct LiveActivityStopButton: View {
+    @Environment(\.isLuminanceReduced)
+    private var isLuminanceReduced
+
     var body: some View {
         Button(intent: StopTimerIntent()) {
             Image(systemName: "stop.fill")
@@ -213,6 +216,10 @@ struct LiveActivityStopButton: View {
                 .clipShape(Circle())
         }
         .buttonStyle(.plain)
+        // AoD: dimmed and inert (pocket-stop protection — the auth policy
+        // covers the woken-locked case, this covers the dimmed case).
+        .disabled(isLuminanceReduced)
+        .opacity(isLuminanceReduced ? 0.4 : 1.0)
         .accessibilityLabel(LiveActivityStrings.stopAccessibilityLabel)
     }
 }
@@ -221,6 +228,9 @@ struct LiveActivityStopButton: View {
 /// live in the expanded card so both can be compared on-device).
 /// Same always-render rule as `LiveActivityStopButton`.
 struct LiveActivityStopPill: View {
+    @Environment(\.isLuminanceReduced)
+    private var isLuminanceReduced
+
     var body: some View {
         Button(intent: StopTimerIntent()) {
             Label(LiveActivityStrings.stopTitle, systemImage: "stop.fill")
@@ -232,6 +242,9 @@ struct LiveActivityStopPill: View {
                 .clipShape(Capsule(style: .continuous))
         }
         .buttonStyle(.plain)
+        // Same AoD-dimmed/inert rule as `LiveActivityStopButton`.
+        .disabled(isLuminanceReduced)
+        .opacity(isLuminanceReduced ? 0.4 : 1.0)
         .accessibilityLabel(LiveActivityStrings.stopAccessibilityLabel)
     }
 }

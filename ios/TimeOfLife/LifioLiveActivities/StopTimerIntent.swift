@@ -25,18 +25,24 @@ import LifioLiveActivityCore
 /// app's requests. No app contact needed — the Saved card appears within
 /// seconds of the tap.
 ///
-/// `alwaysAllowed`: device unlock is the authorization (lock-screen-controls
-/// pattern) — no account auth of its own. With no active account file, an
-/// unreadable store, or no running draft, it returns success having written
-/// nothing and created no file (spec: "Stop fails gracefully").
+/// `requiresLocalDeviceAuthentication`: a locked-phone tap demands Face ID /
+/// passcode first (pocket-stop protection); unlocked it runs immediately.
+/// With no active account file, an unreadable store, or no running draft,
+/// it returns success having written nothing and created no file
+/// (spec: "Stop fails gracefully").
 struct StopTimerIntent: AppIntent {
     // A literal: the metadata processor only accepts literals here, and at
     // runtime it resolves as a key against the extension's shared
     // Localizable.strings ("Stop" / "Стоп").
     static var title: LocalizedStringResource { "timer.stop" }
 
+    // Pocket-stop protection (spec flow): the banner/island Stop is
+    // dimmed-disabled on AoD, and this policy makes a locked-phone tap
+    // demand Face ID / passcode first — while an unlocked tap runs
+    // immediately and the activity disappears via direct end. `alwaysAllowed`
+    // would let a pocket tap through the (woken) lock screen.
     static var authenticationPolicy: IntentAuthenticationPolicy {
-        .alwaysAllowed
+        .requiresLocalDeviceAuthentication
     }
 
     func perform() async throws -> some IntentResult {
