@@ -65,7 +65,7 @@ Resolved design precedents for Lifio. Add a new entry here when a visual or inte
 
 ## D12 — Sign Out lives in Profile
 
-- Sign Out is a destructive, low-frequency account action owned by the Profile destination (D30), not the Track toolbar. It shows a confirmation alert before clearing the local session, because local timer data may be lost.
+- Sign Out is a destructive, low-frequency account action owned by the Profile destination (D30), not the Track toolbar. Tapping Sign Out signs the user out with no confirmation (local account files are kept; only the session is cleared) and works offline.
 - Reason: user request; keeps the low-frequency account action out of the primary time-tracking controls. Supersedes the interim TimerView toolbar placement.
 
 ## D13 — Primary input and action stay above the keyboard
@@ -83,17 +83,16 @@ Resolved design precedents for Lifio. Add a new entry here when a visual or inte
 
 - Superseded by the activity/category model reconciliation: activities no longer carry color or icon, categories carry a validated catalog icon, and the palette plus `Theme.activityColor(_:)` resolver are removed.
 
-## D16 — On-device recency suggestions
+## D16 — On-device recency from committed entries
 
-- The timer's top recency suggestions are computed locally from the synced catalog, ranked by `last_used_at`; there is no suggestions endpoint. Works fully offline. `last_used_at` still syncs so recency is shared across devices.
-- Capture suggestions show Activity names and recency only; search results and the selected-Activity row remain category-free — Category icons and names are intentionally omitted from those surfaces; they belong to Activity management and Insights.
-- Revision (refine-track-recents, D3): the Recents chip flow is the single exception — each chip shows the icon of the first assigned Category (icon-only, never names), and categoryless Activities render name-only chips.
-- Reason: F5/P1 — the client already holds the synced catalog, so a server round-trip would buy nothing and break offline; the backend only keeps `last_used_at` correct on entry start.
+- Timer Recents are up-to-6 exact entry texts computed on-device from committed entries (`GROUP BY activity_text`, newest `started_at` wins per group); there is no suggestions endpoint. Works fully offline.
+- Capture shows exact texts only; the Recents chip flow is the single exception — each chip shows the icon of the first-position Category (icon-only, never names), and categoryless texts render name-only chips. The running tag selector stays category-name-free.
+- Reason: F5/P1 — the client already holds the synced store, so a server round-trip would buy nothing and break offline; the text IS the identity (exact, case-sensitive).
 
-## D17 — Soft-delete via client undo buffer
+## D17 — Durable undo buffer, system prompt only
 
-- Deletions are held 30 s in a client-side undo buffer (transient `UndoToast` + system shake-to-undo) and only committed to the local store / pushed to sync after the window passes; the server hard-deletes (no long-lived trash). The buffer is superseded by the next undoable action or cleared on relaunch.
-- Reason: R3/U6/U7 — undoable deletion without server-side trash; keeps destructive actions reversible for the common "oops" case while staying simple.
+- Deletions enter the client-side durable undo buffer (`undo_buffer` table) and stay restorable until the app restarts — no wall-clock window, no countdown UI, no toast. A cold launch commits whatever is still buffered (never while the process is alive); no background timer. Only the most recent buffered deletion is restorable via the DEFAULT system Undo confirmation (shake → prompt → confirm); older rows stay buffered until undone or the app restarts (supersession). No outbox row is created while a deletion is buffered.
+- Reason: R3/U6/U7 — undoable deletion without server-side trash (`unify-catalog-deletion`); keeps destructive actions reversible for the common "oops" case while staying simple.
 
 ## D18 — Delete-scope confirmation for activities with history
 
@@ -162,30 +161,30 @@ Resolved design precedents for Lifio. Add a new entry here when a visual or inte
 - While running, History and Insights show a compact timer immediately above the tab bar. Its main area returns to Track; a separate Stop button saves in place. Track does not duplicate it.
 - Reason: a running timer is global app state and must not disappear on navigation; a bottom safe-area inset stays close to primary navigation, avoids covering content, and creates a visual grammar reusable by widgets and Live Activities.
 
-## D30 — Profile is useful without an account
+## D30 — Profile is signed-in-only
 
-- The person control opens Profile for all users. Its account section offers Enable Sync when signed out and sync/account management when signed in; local activity/category management, integrations, export, appearance, and data controls remain accessible independently.
-- Reason: local-first behavior means "profile" cannot be shorthand for a mandatory remote identity; one destination avoids separate Settings and Account concepts.
+- The person control opens Profile for the signed-in user — sign-in is the mandatory launch gate (`RootView` renders the auth flow full-screen when signed out), so Profile is unreachable unsigned and there is no "Enable Sync" row or auth-flow sheet anywhere. Its account section shows sync status plus "Sync now" and sign-out; Library holds Manage Categories; App holds the per-account Erase local data (active file only).
+- Reason: account-bound local-first (account-bound-local-data) — one destination for low-frequency configuration and account state; a tab would overstate its importance.
 
 ## D31 — Motion and haptics explain state rather than decorate it
 
 - Start uses a subtle selection haptic, Stop/save uses success feedback, and invalid input uses error feedback. State transitions remain restrained; Reduce Motion replaces rotational/spring transitions with fades or immediate updates.
 - Reason: physical feedback marks consequential state changes without making routine navigation noisy; motion must clarify readiness, running, and saved state and remain optional.
 
-## D32 — Profile-owned local category management
+## D32 — Profile-owned category management (signed-in-only)
 
-- Categories are managed from Profile for both signed-in and signed-out users. The local catalog is alphabetized and editable offline; assignment to Activities remains optional and ordered.
-- Category deletion is tag-only and uses the durable local undo buffer. Manage Categories registers the newest eligible deletion with `UndoManager` and shows a wall-clock countdown; this does not claim that activity/history undo UI is complete.
-- Reason: local-first capture must not depend on account state, while a dedicated Profile surface keeps capture uncluttered and gives category deletion an explicit, recoverable boundary.
+- Categories are managed from Profile for the signed-in user (the launch gate precedes every tab). The list is name-ordered and editable offline; assignment to entries is optional and ordered.
+- Category deletion is tag-only and uses the durable undo buffer (system prompt only, no toast, no countdown). This does not claim that bulk-delete UX is complete.
+- Reason: local-first capture must not depend on network state, while a dedicated Profile surface keeps capture uncluttered and gives category deletion an explicit, recoverable boundary.
 
 ## D33 — Editor sheets use one native collapsing-header scaffold
 
-- Activity, Category, and future editor sheets use `EditorSheetScaffold`: a native large navigation title with Cancel floating at rest, collapsing into the material navigation bar beside Cancel on scroll and expanding again at the top edge. The scaffold also owns the standard scroll container and keyboard-safe pinned action bar.
+- Category and future editor sheets use `EditorSheetScaffold` (`ActivityEditor` was deleted with the activities layer): a native large navigation title with Cancel floating at rest, collapsing into the material navigation bar beside Cancel on scroll and expanding again at the top edge. The scaffold also owns the standard scroll container and keyboard-safe pinned action bar. The unified entry form (`LogTimeView`) is a full-height sheet for CREATE and a navigation push for EDIT/LOCKED (see `SCREENS/EntryForm.md`).
 - Reason: the previous custom title scrolled under an otherwise empty Cancel bar. The system large-title mechanism removes that overlap without custom header geometry or appearance code, while one scaffold keeps all present and future editors consistent. See `openspec/changes/archive/2026-08-13-collapsing-editor-sheet-headers/design.md`.
 
 ## D34 — Track uses a dual-flow adaptive layout with a 48 pt spacer cap and no editing affordance
 
-- Track is one vertical composition in this order: navigation title → top adaptive spacer → completion-mark region → timer numbers → timer status → reserved non-field-error region → central separator → Activity search/refine row → state-specific main action → Recents → bottom adaptive spacer → tab bar.
+- Track is one vertical composition in this order: navigation title → top adaptive spacer → completion-mark region → timer numbers → timer status → reserved non-field-error region → central separator → name push row → state-specific main action → Recents / running tag selector → bottom adaptive spacer → tab bar.
 - The top and bottom spacers share one maximum-height token — **48 pt**, selected by the user from the 24/48/72/96 Pro Max spike comparison and validated on iPhone SE (default and Large Dynamic Type). With positive free space (`slack = viewport - content`) each spacer resolves to `min(cap, slack / 2)`, so the ends are always equal; surplus beyond twice the cap goes to the central separator between the error region and the search/refine flow. Under constraint all three flexible regions collapse to zero and the ordered content scrolls. The main action sits above Recents so Choose Activity / Start / Stop stays reachable without scrolling. The reserved error region preserves geometry when empty (no empty accessibility element), wraps error text fully, and grows past the reservation with the flexible spacing yielding first. The local-first Track screen shows no offline hint.
 - The Track editing affordance is removed — the former beside-picker Refine and the interim "Edit activity" variant are gone; its placement is deferred to a later change (the editor sheet machinery remains in `TrackViewModel`).
 - Reason: equal capped ends give the composition a symmetric rhythm (the timer stack hangs from the top, the control stack from the bottom), the central separator makes the cap visible on roomy screens, and a zero minimum ensures spacing disappears before controls overlap or become unreachable on short screens or under accessibility text sizes. The user rejected a pinned `.safeAreaInset` action bar, fixed padding, bottom-first surplus distribution, and a main action below Recents during the SE spike.

@@ -35,8 +35,11 @@ Keep design under version control as plain Markdown so:
 | `INTERACTIONS.md` | Shared patterns: loading, errors, offline, empty states, haptics, focus. |
 | `SCREENS/Auth.md` | Auth flow screens (Welcome, EmailEntry, OtpEntry). |
 | `SCREENS/AppShell.md` | App shell: Track/History/Insights tabs, Profile destination, compact timer placement. |
-| `SCREENS/TimeTracking.md` | Track screen — the capture destination; covers the numeric timer state machine + plain-text field and Recents chips. |
-| `SCREENS/History.md` | History screen — read-only, day-grouped list of committed time entries (EntryRow, day totals, persistent nav bar). |
+| `SCREENS/TimeTracking.md` | Track screen — the capture destination; covers the numeric timer state machine + name push row, Recents chips, and running tag selector. |
+| `SCREENS/History.md` | History screen — day-grouped list of committed time entries (EntryRow, day totals, persistent nav bar; entry-form push, Log Time sheet, pull-to-refresh, shake-to-undo). |
+| `SCREENS/Insights.md` | Insights screen — read-only mirror-only breakdown (period switch, hero total, lens toggle, proportional rows). |
+| `SCREENS/NamePicker.md` | Shared dedicated name-picking page pushed from Track and the entry form. |
+| `SCREENS/EntryForm.md` | Unified entry form (`LogTimeView`) — CREATE sheet (Log Time), EDIT/LOCKED push from History. |
 | `SCREENS/ManageCategories.md` | Manage Categories screen — category CRUD, seeding, undo. |
 | `SCREENS/CategoryEditor.md` | Shared sheet to create/edit a category. |
 | `DECISIONS.md` | Design precedents and rationale. |
@@ -52,7 +55,7 @@ Keep design under version control as plain Markdown so:
 4. **Minimum tap area.** All tappable targets are at least `44×44 pt`.
 5. **Dynamic Type.** Use text styles (`.largeTitle`, `.title`, `.title2`, `.headline`, `.body`, `.subheadline`, `.caption`) instead of fixed sizes.
 6. **Color scheme.** Light and dark variants must be previewed and tested. The app follows the system scheme by default.
-7. **Offline awareness.** Every screen documents its offline behavior; network-dependent actions are disabled or show the offline banner.
+7. **Offline awareness.** Every screen documents its offline behavior; network-dependent actions are disabled offline with `error.offline`. There is no global offline banner — offline surfaces via the History pull-to-refresh inline notice and the Profile sync status.
 
 ## Decisions log
 
