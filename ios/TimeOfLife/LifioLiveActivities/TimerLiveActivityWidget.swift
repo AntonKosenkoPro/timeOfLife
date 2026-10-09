@@ -212,10 +212,8 @@ struct LiveActivityStopButton: View {
                 .font(.system(size: 12, weight: .bold))
                 .foregroundStyle(LiveActivityTheme.stopForeground)
                 .frame(width: 44, height: 44)
-                .background(LiveActivityTheme.stopBackground)
-                .clipShape(Circle())
         }
-        .buttonStyle(.plain)
+        .modifier(StopGlass(shape: Circle()))
         // AoD: dimmed and inert (pocket-stop protection — the auth policy
         // covers the woken-locked case, this covers the dimmed case).
         .disabled(isLuminanceReduced)
@@ -238,13 +236,32 @@ struct LiveActivityStopPill: View {
                 .foregroundStyle(LiveActivityTheme.stopForeground)
                 .padding(.horizontal, 10)
                 .padding(.vertical, 8)
-                .background(LiveActivityTheme.stopBackground)
-                .clipShape(Capsule(style: .continuous))
         }
-        .buttonStyle(.plain)
+        .modifier(StopGlass(shape: Capsule(style: .continuous)))
         // Same AoD-dimmed/inert rule as `LiveActivityStopButton`.
         .disabled(isLuminanceReduced)
         .opacity(isLuminanceReduced ? 0.4 : 1.0)
         .accessibilityLabel(LiveActivityStrings.stopAccessibilityLabel)
+    }
+}
+
+/// Liquid Glass Stop container: on iOS 26+ a prominent glass button
+/// tinted danger-red (system-consistent, readable in both modes); below
+/// 26 the previous plain red shape. The banner/island containers
+/// themselves are already system glass — only the controls need this.
+struct StopGlass<S: Shape>: ViewModifier {
+    let shape: S
+
+    func body(content: Content) -> some View {
+        if #available(iOS 26, *) {
+            content
+                .buttonStyle(.glassProminent)
+                .tint(LiveActivityTheme.stopBackground)
+        } else {
+            content
+                .buttonStyle(.plain)
+                .background(LiveActivityTheme.stopBackground)
+                .clipShape(shape)
+        }
     }
 }

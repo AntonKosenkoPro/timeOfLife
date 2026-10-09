@@ -23,6 +23,7 @@
 - [x] 3.8 Stop intent saves + signals via `LiveActivitySignal` (shared `LifioLiveActivityCore` framework); app ends with the Saved card on contact. Direct end from the intent was attempted and disproven (enumeration process-scoped, device-verified) — path reverted, see D8
 - [x] 3.9 Widget-stop reap without app contact: entry-recency heuristic in `TimerService.endOrphanedActivities` (nil caller duration resolves to the latest entry's true duration when it ended within 10min via `LocalStore.latestEntry()` LIMIT-1, else silent nil) + unit tests (recent/old/absent-entry, draft-present)
 - [x] 3.10 Background reap chain: `BackgroundReapScheduler` BGAppRefreshTask (`com.antonkosenko.timeoflifeapp.reap-check`) scheduled on Start, cancelled on definitive ends, registered in `AppContainer.init` with draft-gated re-arm; plist (`UIBackgroundModes=fetch` + permitted identifiers, both plists) + Background Modes capability in `project.yml`; BG fire timing is OS-determined — device verifies (4.3)
+- [ ] 3.11 Liquid Glass Stop controls (`StopGlass`: prominent glass tinted danger-red on iOS 26+, plain red shape below) — device verifies bright/AoD
 
 ## 4. Quality gates
 
