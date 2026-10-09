@@ -103,8 +103,8 @@ struct RootView: View {
                 if case .signedIn = session.state {
                     container.syncController.trigger(userID: sessionUserID())
                     // Island Stop while suspended: the Darwin signal may
-                    // have been missed, so reap here too (silent immediate
-                    // dismiss — no invented Saved card; live-activities D8).
+                    // have been missed, so reap here too (the entry-recency
+                    // heuristic resolves Saved-vs-silent; live-activities D8).
                     Task { await container.timerService.endOrphanedActivities() }
                 }
             }

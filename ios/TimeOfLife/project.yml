@@ -91,6 +91,16 @@ targets:
         # every `xcodegen generate` — hand-edits here are wiped. Keep the
         # unmanaged Info-Debug.plist (Debug config) in sync by hand.
         NSSupportsLiveActivities: true
+        # Background reap chain (live-activities): a BGAppRefreshTask wakes
+        # the app so a widget-orphaned banner clears without the user
+        # opening the app. `fetch` mode + the permitted identifier below;
+        # NOTE: this plist is REGENERATED from these properties on every
+        # `xcodegen generate` — keep the unmanaged Info-Debug.plist (Debug
+        # config) in sync by hand, like NSSupportsLiveActivities above.
+        UIBackgroundModes:
+          - fetch
+        BGTaskSchedulerPermittedIdentifiers:
+          - com.antonkosenko.timeoflifeapp.reap-check
         CFBundleURLTypes:
           - CFBundleURLName: com.antonkosenko.timeoflifeapp.track
             CFBundleURLSchemes: [lifio]
@@ -143,6 +153,11 @@ targets:
         com.apple.ApplicationGroups.iOS:
           enabled: 1
         com.apple.SignInWithApple:
+          enabled: 1
+        # Background fetch mode (live-activities BG reap chain) — mirrors
+        # the App Group / SIWA pattern above; the postGenCommand hook
+        # normalizes every com.apple.* entry generically.
+        com.apple.BackgroundModes:
           enabled: 1
     dependencies:
       # Embeds the Live Activities widget extension (live-activities

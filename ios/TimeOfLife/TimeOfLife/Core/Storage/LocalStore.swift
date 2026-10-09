@@ -994,6 +994,18 @@ actor LocalStore {
         }
     }
 
+    /// The single most recently finished entry, or nil (orphan-reap
+    /// heuristic, live-activities). `LIMIT 1` — never a full-table scan.
+    /// Ordered by end time, falling back to start for entries without one.
+    func latestEntry() throws -> TimeEntry? {
+        try queue.read { db in
+            guard let row = try Row.fetchOne(db, sql: """
+                SELECT * FROM entries ORDER BY COALESCE(ended_at, started_at) DESC, id DESC LIMIT 1
+                """) else { return nil }
+            return try Self.entry(from: row, db: db)
+        }
+    }
+
     /// Maps an entries row into a TimeEntry, resolving its ordered categories
     /// from `entry_categories`.
     private static func entry(from row: Row, db: Database) throws -> TimeEntry {

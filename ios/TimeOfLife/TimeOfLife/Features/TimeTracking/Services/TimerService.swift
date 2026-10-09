@@ -38,6 +38,7 @@ final class TimerService: ObservableObject {
             iconSymbol: firstIconSymbol(for: categoryIDs),
             startedAt: startedAt
         )
+        BackgroundReapScheduler.scheduleReapCheck()
     }
 
     /// Rewrites only the persisted running draft's live notes snapshot (a
@@ -80,6 +81,7 @@ final class TimerService: ObservableObject {
         try await store.createEntry(entry)
         try await store.clearTimerDraft()
         await liveActivities.runEnded(startedAt: startedAt, durationSeconds: durationSeconds)
+        BackgroundReapScheduler.cancelReapCheck()
     }
 
     /// Re-mirrors an already-persisted run on the Live Activity without
@@ -98,13 +100,25 @@ final class TimerService: ObservableObject {
     }
     /// Ends live activities whose persisted draft is gone (stopped from
     /// the Island — the intent can't end them itself, so the app reaps
-    /// them on contact: Darwin signal, foreground, load-reconcile). A
-    /// present draft means the run is genuinely active: nothing is
-    /// orphaned, nothing ends. Never throws.
+    /// them on contact: Darwin signal, foreground, load-reconcile, and
+    /// the background reap task). A present draft means the run is
+    /// genuinely active: nothing is orphaned, nothing ends. Never throws.
     ///
     /// Fail-closed on read errors: `try? … == nil` would mistake a
     /// transient DB failure for "no draft" and dismiss a live Island —
     /// the exact blank-island report from the device.
+    ///
+    /// Nil-duration resolution (entry-recency heuristic): a nil caller
+    /// duration means the stop arrived without one (catch-up sweep) — the
+    /// most recent entry is then consulted, and when it ended within the
+    /// last 10 minutes its true duration drives the Saved card; an older
+    /// or absent entry keeps the silent immediate dismiss.
+    ///
+    /// Self-consistency: an in-app stop ends activities synchronously in
+    /// `runEnded`, so a later sweep finds nothing live and no-ops; a crash
+    /// between save and end leaves draft-nil + a recent entry + a live
+    /// activity, which CORRECTLY yields the Saved card here. No marker
+    /// file or new state — the entry is the record.
     func endOrphanedActivities(knownDurationSeconds: Int? = nil) async {
         let draft: RunningTimerDraft?
         do {
@@ -113,7 +127,28 @@ final class TimerService: ObservableObject {
             return
         }
         guard draft == nil else { return }
-        await liveActivities.endOrphanedActivities(knownDurationSeconds: knownDurationSeconds)
+        var duration = knownDurationSeconds
+        if duration == nil {
+            duration = await recentlyEndedDuration()
+        }
+        await liveActivities.endOrphanedActivities(knownDurationSeconds: duration)
+    }
+
+    /// The recency window for the reap heuristic: only an entry that
+    /// ended this recently counts as the orphan's Saved-card duration.
+    private static let reapRecencySeconds = 600.0
+
+    /// The entry-recency heuristic: the latest entry's duration when it
+    /// ended within `reapRecencySeconds`, else nil. Fail-closed: any read
+    /// error (or missing timing) yields nil — the silent dismiss path.
+    private func recentlyEndedDuration() async -> Int? {
+        guard let latest = try? await store.latestEntry(),
+              let endedAt = latest.endedAt,
+              let durationSeconds = latest.durationSeconds
+        else { return nil }
+        let now = Date()
+        guard endedAt <= now, now.timeIntervalSince(endedAt) <= Self.reapRecencySeconds else { return nil }
+        return durationSeconds
     }
 
     /// The first-position category's display icon for the Live Activity

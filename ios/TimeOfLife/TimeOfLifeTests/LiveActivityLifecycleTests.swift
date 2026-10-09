@@ -127,6 +127,63 @@ struct LiveActivityLifecycleTests {
         #expect(fake.orphanEnds.isEmpty)
     }
 
+    @Test("nil-duration reap resolves a recent entry's duration (widget stop)")
+    func orphanReapResolvesRecentEntryDuration() async throws {
+        let fake = FakeLiveActivities()
+        let service = makeService(liveActivities: fake)
+        let now = Date()
+        _ = try await service.store.createEntry(TimeEntry(
+            id: UUID().uuidString,
+            activityText: "Gym",
+            startedAt: now.addingTimeInterval(-300),
+            endedAt: now.addingTimeInterval(-60),
+            durationSeconds: 240
+        ))
+
+        await service.endOrphanedActivities()
+
+        #expect(fake.orphanEnds == [240])
+    }
+
+    @Test("nil-duration reap stays silent for an old entry (>10min)")
+    func orphanReapIgnoresOldEntry() async throws {
+        let fake = FakeLiveActivities()
+        let service = makeService(liveActivities: fake)
+        let now = Date()
+        _ = try await service.store.createEntry(TimeEntry(
+            id: UUID().uuidString,
+            activityText: "Gym",
+            startedAt: now.addingTimeInterval(-7_200),
+            endedAt: now.addingTimeInterval(-3_600),
+            durationSeconds: 3_600
+        ))
+
+        await service.endOrphanedActivities()
+
+        #expect(fake.orphanEnds == [nil])
+    }
+
+    @Test("nil-duration reap stays silent with no entries")
+    func orphanReapSilentWithNoEntries() async throws {
+        let fake = FakeLiveActivities()
+        let service = makeService(liveActivities: fake)
+
+        await service.endOrphanedActivities()
+
+        #expect(fake.orphanEnds == [nil])
+    }
+
+    @Test("nil-duration reap skips when a draft is present (run genuinely active)")
+    func orphanReapSkipsActiveDraftNilDuration() async throws {
+        let fake = FakeLiveActivities()
+        let service = makeService(liveActivities: fake)
+        try await service.startTimerDraft(text: "Gym", categoryIDs: [], startedAt: Date())
+
+        await service.endOrphanedActivities()
+
+        #expect(fake.orphanEnds.isEmpty)
+    }
+
     // MARK: - Helpers
 
     private func makeService(liveActivities: LiveActivityControlling) -> TimerService {

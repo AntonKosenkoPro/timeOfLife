@@ -79,17 +79,43 @@ final class AppContainer: ObservableObject {
         self.undoBuffer = undoBuffer
         self.syncController = syncController
         self.clientHolder = clientHolder
+        registerReapCheck()
         observeExternalStopSignal()
     }
 
     /// Handles an Island Stop: reaps activities orphaned by the intent and
     /// tells tracker surfaces to reload (the intent already saved the entry
     /// and cleared the draft — Track/compact would otherwise keep ticking
-    /// stale in-memory state).
+    /// stale in-memory state). The run is definitively over, so the
+    /// background reap chain is cancelled (no pointless wakes).
     func handleExternalStop(durationSeconds: Int?) {
         Task {
             await timerService.endOrphanedActivities(knownDurationSeconds: durationSeconds)
+            BackgroundReapScheduler.cancelReapCheck()
             NotificationCenter.default.post(name: .timerStoppedExternally, object: nil)
+        }
+    }
+
+    /// Registers the background reap check (live-activities BG chain): a
+    /// background launch runs `AppContainer.init` too, so registering here
+    /// covers both foreground and background launches. The handler runs
+    /// the orphan-reap funnel (which resolves Saved-vs-silent itself) and
+    /// re-arms only while a draft is still live — a finished run ends the
+    /// chain, and the next Start re-arms it.
+    private func registerReapCheck() {
+        BackgroundReapScheduler.register { [weak self] in
+            guard let self else { return false }
+            await self.timerService.endOrphanedActivities()
+            // Fail-open toward re-arming: an unreadable store must not drop
+            // the chain (the funnel itself already failed closed by ending
+            // nothing), or a transient DB error would strand a live banner.
+            let draft: RunningTimerDraft?
+            do {
+                draft = try await self.timerService.runningTimerDraft()
+            } catch {
+                return true
+            }
+            return draft != nil
         }
     }
 
