@@ -174,13 +174,15 @@ struct TrackContent: View {
     // MARK: - Name capture (plain text, remove-activities-layer 4.1/4.2)
 
     /// Idle/ready/saved: the name push row opening the shared picker.
-    /// Running/saving/error: the locked name label (name is non-editable
-    /// after Start).
+    /// Running/error: the locked name plus the standalone notes button.
+    /// Saving: the plain locked name label (mid-flight, no editing).
     @ViewBuilder private var nameControl: some View {
         switch vm.state {
         case .idle, .ready, .saved:
             nameRow
-        case .running, .saving, .error:
+        case .running, .error:
+            runningNameRow
+        case .saving:
             lockedNameLabel
         }
     }
@@ -216,6 +218,55 @@ struct TrackContent: View {
         .accessibilityValue(vm.nameDraft)
     }
 
+    /// Running/error: the locked name card plus the standalone notes
+    /// button outside it (separate-notes-editor, spike-approved): the
+    /// card keeps the screen's leading alignment while the 44 pt button
+    /// rides beside it at the screen's trailing padding, its tint
+    /// signalling draft-notes presence. Tapping pushes the shared
+    /// `NotesEditorPage` prefilled from the running draft (✓ rewrites
+    /// the draft snapshot, X discards). The row keeps standard insets,
+    /// so every other row — including the main action — keeps its exact
+    /// frame across states (D10).
+    private var runningNameRow: some View {
+        HStack(spacing: Theme.spacingSmall) {
+            FieldCard {
+                HStack(spacing: Theme.spacingSmall) {
+                    Image(systemName: "timer")
+                        .foregroundStyle(Theme.textSecondary)
+                        .accessibilityHidden(true)
+                    Text(vm.state.draft?.text ?? "")
+                        .lineLimit(1)
+                        .foregroundStyle(Theme.textPrimary)
+                    Spacer()
+                }
+                .font(.body)
+                .frame(maxWidth: .infinity, minHeight: Theme.minTapArea)
+            }
+            NavigationLink {
+                NotesEditorPage(initialText: vm.state.draft?.notes ?? "", entryName: vm.state.draft?.text ?? "") { notes in
+                    Task { await vm.updateDraftNotes(notes) }
+                }
+            } label: {
+                Image(systemName: "note.text")
+                    .font(.title2)
+                    .foregroundStyle(runningNotes.isEmpty ? Theme.textSecondary : Theme.accentPrimary)
+                    .frame(minWidth: Theme.minTapArea, minHeight: Theme.minTapArea)
+                    .contentShape(Rectangle())
+                    .accessibilityLabel(L10n.entryNotesLabel.text)
+                    .accessibilityValue(
+                        runningNotes.isEmpty ? L10n.entryNotesPlaceholder.text : runningNotes
+                    )
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("RunningNotesButton")
+        }
+    }
+
+    /// The running draft's notes, empty when not recording.
+    private var runningNotes: String {
+        vm.state.draft?.notes ?? ""
+    }
+
     private var lockedNameLabel: some View {
         FieldCard {
             HStack(spacing: Theme.spacingSmall) {
@@ -248,6 +299,7 @@ struct TrackContent: View {
             Text(L10n.entryCategoriesLabel.text)
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(Theme.textSecondary)
+            Divider().background(Theme.hairline)
             TagSelector(
                 options: Array(vm.categories.values).sorted { $0.name < $1.name },
                 selected: runningSelectedIDs,
@@ -368,6 +420,7 @@ struct TrackContent: View {
             Text(L10n.timerChooserRecent.text)
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(Theme.textSecondary)
+            Divider().background(Theme.hairline)
 
             if vm.recents.isEmpty {
                 Text(L10n.timerRecentsEmptyHint.text)

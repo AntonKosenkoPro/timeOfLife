@@ -16,6 +16,10 @@ struct AppShellView: View {
     /// (`trackVM` below already follows this pattern.)
     @StateObject var vm: AppShellViewModel
     @EnvironmentObject var container: AppContainer
+    /// Observed directly (not via `container`): `AppContainer` publishes
+    /// nothing, so a nested read would never invalidate this view and the
+    /// sync-exit reload below would be missed (HistoryView precedent).
+    @EnvironmentObject var sync: SyncController
     @StateObject private var trackVM: TrackViewModel
     /// Presents the Log Time sheet from History (manual-entry spec). Owned
     /// here so the [+] lives in the same toolbar scope as the Profile
@@ -55,8 +59,30 @@ struct AppShellView: View {
         // History edits are inherited and chip icons stay current.
         // `dropFirst` skips the initial value (already covered by `.task`).
         .onReceive(vm.$selectedTab.dropFirst().filter { $0 == .track }) { _ in
-            Task { await trackVM.load() }
+            Task { await reloadTrack() }
         }
+        // A sync cycle merges relay state into LocalStore behind Track: the
+        // first-sync pull lands after the shell mounts, so reload on exit
+        // from `.syncing` (idle or error — a failed cycle may have applied
+        // partial merges before throwing). Same staleness contract as
+        // HistoryView/InsightsView; the guarded reload never blanks the
+        // last good snapshot.
+        .onChange(of: sync.status) { _, status in
+            switch status {
+            case .idle, .error:
+                Task { await reloadTrack() }
+            case .inactive, .syncing:
+                break
+            }
+        }
+    }
+
+    /// Serialized Track reload shared by the tab-return, Profile-exit, and
+    /// sync-exit paths.
+    @MainActor
+    private func reloadTrack() async {
+        trackVM.invalidate()
+        await trackVM.loadIfNeeded()
     }
 
     /// Track tab: its own push state. Profile is a path value here, so
@@ -191,7 +217,7 @@ struct AppShellView: View {
 
     private func profilePoppedReload(old: [ShellRoute], new: [ShellRoute]) {
         if AppShellViewModel.profileWasPopped(old: old, new: new) {
-            Task { await trackVM.load() }
+            Task { await reloadTrack() }
         }
     }
 
@@ -248,5 +274,6 @@ private struct ShellToolbar: ViewModifier {
     let container = AppContainer.production()
     AppShellView(vm: AppShellViewModel(service: container.timerService), container: container)
         .environmentObject(container)
+        .environmentObject(container.syncController)
 }
 #endif

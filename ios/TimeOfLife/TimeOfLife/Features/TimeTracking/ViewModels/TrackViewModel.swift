@@ -18,13 +18,21 @@ final class TrackViewModel: ObservableObject {
     @Published var errorMessage: String?
     /// The name-field draft (trimmed at Start; a draft, never committed).
     @Published var nameDraft = ""
-    /// The 6 exact-text recents (newest first, first-category icon data).
+    /// The 12 exact-text recents (newest first, first-category icon data).
     /// Settable for the same test-seeding reason as `state`.
     @Published var recents: [ExactName] = []
     /// Every committed exact-text name, newest first, uncapped — the source
     /// for the shared name picker (dedicated-name-picker). The chips stay
-    /// capped at 6 (`recents`); the picker suggests everything ever used.
+    /// capped at `recentsLimit` (`recents`); the picker
+    /// suggests everything ever used.
     @Published var allNames: [ExactName] = []
+    /// Recents cap (timer-capture-experience): single source of truth,
+    /// consumed by `storeRecents`, the `RecentActivitiesChips` default,
+    /// and the test helpers — the compiler carries the invariant, not
+    /// comments. Lives on the view model (not the view) so the
+    /// persistence query never resolves domain policy through UI types.
+    /// `nonisolated` so the `nonisolated` slice helper can default to it.
+    nonisolated static let recentsLimit = 12
     /// The id→Category map used to resolve recents chip icons (design D5).
     @Published private(set) var categories: [String: Category] = [:]
 
@@ -33,6 +41,14 @@ final class TrackViewModel: ObservableObject {
     private let nowProvider: () -> Date
     private var ticker: AnyCancellable?
     private var savedResetTask: Task<Void, Never>?
+    /// Serializes reloads (fix-track-empty-after-reinstall): the tab-return
+    /// reload and the sync-exit reload race on every first-sync landing.
+    /// `needsReload` starts true so the first appear loads; `invalidate()`
+    /// marks the snapshot stale and the next `loadIfNeeded()` reloads it.
+    /// A call arriving mid-load keeps `needsReload` set so the next appear
+    /// retries (HistoryViewModel precedent).
+    private var isLoading = false
+    private var needsReload = true
 
     init(
         service: TimerService,
@@ -54,12 +70,17 @@ final class TrackViewModel: ObservableObject {
     /// (stopped from the compact timer on another destination) returns to
     /// `.ready`/`.idle` instead of counting elapsed time forever. Call on
     /// appear.
+    ///
+    /// A failed load keeps the last good snapshot (mirror-only convergence):
+    /// only the recoverable error surfaces, never blanked recents.
     func load() async {
         do {
-            // Seeding lives behind the sign-in gate (`RootView`) only: this
-            // load races it on first appear, and seeding is idempotent, but
-            // the gate is the single owner — a second racing call site only
-            // doubles file traffic on every cold start.
+            // Seeding completes before the shell mounts (seed-before-reveal
+            // in `RootView`), so this load never races it; the first-sync
+            // pull still lands in the background, and the sync-exit reload
+            // below converges on it. Seeding stays gate-owned — a second
+            // racing call site here would only double file traffic on
+            // every cold start.
             recents = try await storeRecents()
             allNames = try await storeAllNames()
             categories = Dictionary(uniqueKeysWithValues: try await service.store.categories().map { ($0.id, $0) })
@@ -67,7 +88,11 @@ final class TrackViewModel: ObservableObject {
             if let persisted, !persisted.activityText.isEmpty {
                 let startedAt = persisted.startedAt ?? Date()
                 state = .running(
-                    TrackState.Draft(text: persisted.activityText, categoryIDs: persisted.categoryIDs),
+                    TrackState.Draft(
+                        text: persisted.activityText,
+                        categoryIDs: persisted.categoryIDs,
+                        notes: persisted.notes
+                    ),
                     startedAt: startedAt
                 )
                 nameDraft = persisted.activityText
@@ -80,8 +105,27 @@ final class TrackViewModel: ObservableObject {
         }
     }
 
+    /// Reloads only when the snapshot is stale or was never loaded.
+    /// Re-entrancy safe: never runs two loads concurrently; a call arriving
+    /// mid-load keeps `needsReload` set so the next appear retries
+    /// (HistoryViewModel precedent).
+    func loadIfNeeded() async {
+        guard needsReload, !isLoading else { return }
+        needsReload = false
+        isLoading = true
+        defer { isLoading = false }
+        await load()
+    }
+
+    /// Marks the snapshot stale so the next `loadIfNeeded` reloads it.
+    /// Call on tab return, Profile exit, and sync-cycle exit.
+    func invalidate() {
+        needsReload = true
+    }
+
     private func storeRecents() async throws -> [ExactName] {
-        try await service.store.recents(limit: 6).map(ExactName.init(storeRecent:))
+        try await service.store.recents(limit: Self.recentsLimit)
+            .map(ExactName.init(storeRecent:))
     }
 
     private func storeAllNames() async throws -> [ExactName] {
@@ -98,7 +142,12 @@ final class TrackViewModel: ObservableObject {
         stopTicker()
         UIApplication.shared.isIdleTimerDisabled = false
         elapsed = 0
-        state = draft.text.isEmpty ? .idle : .ready(draft)
+        // Same grammar as scheduleSavedReset: a restart must not inherit
+        // the previous run's notes (e.g. mid-run notes preserved in memory
+        // while the persisted draft was stopped elsewhere).
+        state = draft.text.isEmpty
+            ? .idle
+            : .ready(TrackState.Draft(text: draft.text, categoryIDs: draft.categoryIDs))
     }
 
     // MARK: - Capture (plain text)
@@ -186,7 +235,12 @@ final class TrackViewModel: ObservableObject {
         UIApplication.shared.isIdleTimerDisabled = true
         Task {
             do {
-                try await service.startTimerDraft(text: draft.text, categoryIDs: draft.categoryIDs, startedAt: startedAt)
+                try await service.startTimerDraft(
+                    text: draft.text,
+                    categoryIDs: draft.categoryIDs,
+                    notes: draft.notes,
+                    startedAt: startedAt
+                )
             } catch {
                 // Local persistence failure: keep the timer running in memory
                 // so the user can still stop and retry (recoverable error).
@@ -210,13 +264,44 @@ final class TrackViewModel: ObservableObject {
             try? await service.startTimerDraft(
                 text: updated.text,
                 categoryIDs: updated.categoryIDs,
+                notes: updated.notes,
                 startedAt: startedAt
             )
         }
     }
 
+    /// Saves notes on the running draft (separate-notes-editor): rewrites
+    /// only the running draft notes snapshot — never an entry, history
+    /// row, or recents. History learns the notes at Stop. Available in
+    /// both recording states (running + error), preserving whichever holds.
+    /// A persistence failure surfaces the recoverable error (the
+    /// beginRunning grammar) with the in-memory notes intact — never a
+    /// silent success, or a kill/compact-stop could lose the edit.
+    func updateDraftNotes(_ notes: String) async {
+        switch state {
+        case let .running(draft, startedAt):
+            var updated = draft
+            updated.notes = notes
+            state = .running(updated, startedAt: startedAt)
+        case let .error(draft, startedAt):
+            var updated = draft
+            updated.notes = notes
+            state = .error(updated, startedAt: startedAt)
+        case .idle, .ready, .saving, .saved:
+            return
+        }
+        do {
+            try await service.updateTimerDraftNotes(notes)
+        } catch {
+            // Local persistence failure: keep the notes in memory so the
+            // user can retry (recoverable error), like beginRunning.
+            errorMessage = L10n.text(in: .default, code: "error.unknown")
+        }
+    }
+
     /// Stops the running timer and saves the completed entry locally with
-    /// the final ordered categories (empty notes) and a single outbox row.
+    /// the final ordered categories, the final draft notes, and a single
+    /// outbox row.
     func stop() async {
         guard case let .running(draft, startedAt) = state else { return }
         state = .saving(draft, startedAt: startedAt)
@@ -226,7 +311,8 @@ final class TrackViewModel: ObservableObject {
                 text: draft.text,
                 categoryIDs: draft.categoryIDs,
                 startedAt: startedAt,
-                endedAt: Date()
+                endedAt: Date(),
+                notes: draft.notes
             )
             let duration = max(0, Date().timeIntervalSince(startedAt))
             state = .saved(draft, duration: duration)
@@ -267,14 +353,16 @@ final class TrackViewModel: ObservableObject {
     }
 
     /// Returns the state to ready for the same text after the brief saved
-    /// confirmation (timer-capture-experience spec).
+    /// confirmation (timer-capture-experience spec). The draft notes reset
+    /// to empty: each run starts noteless, and a restart must not inherit
+    /// the previous run's notes.
     private func scheduleSavedReset() {
         savedResetTask?.cancel()
         savedResetTask = Task { [weak self] in
             try? await Task.sleep(nanoseconds: 1_600_000_000)
             guard !Task.isCancelled else { return }
             guard let self, case let .saved(draft, _) = self.state else { return }
-            self.state = .ready(draft)
+            self.state = .ready(TrackState.Draft(text: draft.text, categoryIDs: draft.categoryIDs))
             self.elapsed = 0
         }
     }

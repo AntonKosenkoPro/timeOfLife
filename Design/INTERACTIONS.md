@@ -19,9 +19,9 @@ These rules apply across all screens unless a screen spec explicitly overrides t
 
 ## Offline
 
-- Show `OfflineBanner` at the top of every screen when `connectivity.isConnected == false`.
-- Render the banner below the navigation bar / top safe area using `.safeAreaInset(edge: .top)` so it does not overlap back buttons or navigation controls.
+- There is no global offline banner (`fix-offline-banner-duplication` removed it): offline is surfaced per-surface, never as a top-of-screen banner on every screen.
 - Disable network-dependent submit buttons while offline.
+- History pull-to-refresh shows the inline offline notice while offline; Profile shows the sync status.
 - Cache the authenticated session; restore it on app launch.
 - Logout must work offline by clearing the local session.
 

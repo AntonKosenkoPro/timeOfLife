@@ -1,6 +1,6 @@
 # History Screen
 
-Implements the `history-entry-list` capability (`openspec/specs/history-entry-list/spec.md`): a read-only, day-grouped list of committed time entries in the History tab. Deferred items live in `docs/history-roadmap.md`.
+Implements the `history-entry-list` capability (`openspec/specs/history-entry-list/spec.md`): a day-grouped list of committed time entries in the History tab. Rows are read-only (`EntryRow` is purely presentational); the screen owns the entry-form push, the Log Time sheet, pull-to-refresh, and shake-to-undo. Deferred items live in `docs/history-roadmap.md`.
 
 The History destination answers "what did I spend time on and when?" — a chronology of timed events (entries), not definitions. Entries are grouped by the calendar day they started on; each entry owns its text, ordered categories, and notes at write time (no resolution, no retroactive mutation).
 
@@ -14,7 +14,7 @@ The History destination answers "what did I spend time on and when?" — a chron
 
 ### Layout
 
-- Body: `List` with a section per calendar day (newest day first), `EntryRow` per entry (newest first within the day), `accessibilityIdentifier("HistoryList")`. List background `Theme.backgroundPrimary`.
+- Body: `ScrollView` + `LazyVStack(pinnedViews: [.sectionHeaders])` with a section per calendar day (newest day first), `EntryRow` per entry (newest first within the day), `accessibilityIdentifier("HistoryList")`. List background `Theme.backgroundPrimary`. (`List` is deliberately not used: pinned `List` headers are re-hosted in a separate UIKit layer, so the elevation-tracking `GeometryReader` preferences never reach the scroll modifiers.)
 - Day-group headers: `SectionHeader` with the day label (`SectionHeader` history usage, D8/D10) — day label left-aligned to the `EntryRow` icon column's leading edge (`contentLeadingInset: EntryRow.iconColumnWidth + EntryRow.columnSpacing` minus the list's own content inset). When the header is elevated (pinned at the top of the list), it also shows the day's total tracked time, right-aligned ("2h 35m tracked"). In-list headers show only the day label.
 - Row dividers lead after the icon column (Variant H).
 - Inline navigation title: "History" (`L10n.tabHistory`), shown at rest.
@@ -24,7 +24,8 @@ The History destination answers "what did I spend time on and when?" — a chron
 
 ### Behaviors
 
-- On appear, load entries (`LocalStore.entries()`) and categories (`LocalStore.categories()`); rebuild day groups. Read-only — no mutation paths on this screen.
+- On appear, load entries (`LocalStore.entries()`) and categories (`LocalStore.categories()`); rebuild day groups. Rows are read-only — the screen's mutation paths are the entry-form push (EDIT/LOCKED), the Log Time sheet (`[+]` in the toolbar, CREATE mode), pull-to-refresh sync (`HistoryPullModel` verdict flow with the inline offline notice and OK-only failure dialog), and shake-to-undo (`ShakeFirstResponderHost`).
+- Entry rows show the localized "via <Source>" provenance label on line 2 for non-`manual` sources (`EntryRow.viaText`); `manual` shows nothing.
 - Tapping a row pushes the unified entry form onto the History navigation stack (EDIT for `manual`, LOCKED read-only for imported with delete only) — the push provides the system back button and edge-back gesture; there is no intermediate detail surface.
 - Elevated-header tracking is view state owned by `HistoryView`; `HistoryViewModel` owns data only (design risk note).
 
@@ -34,7 +35,7 @@ The History destination answers "what did I spend time on and when?" — a chron
 |---|---|
 | Loading | Progress indicator while the local store is read |
 | Empty | `EmptyState` (`clock.arrow.circlepath`, `historyEmptyTitle` / `historyEmptySubtitle`) |
-| Loaded | Day-grouped `List` of `EntryRow` |
+| Loaded | Day-grouped `ScrollView` of `EntryRow` |
 | Elevated header | Pinned day-group header shows the day total ("2h 35m tracked"); in-list headers show only the day label |
 
 ### Data model

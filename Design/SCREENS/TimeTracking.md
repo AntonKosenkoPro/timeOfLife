@@ -36,15 +36,14 @@ engages.
 
 Top-to-bottom order:
 
-1. Navigation title: `L10n.timerTitle` (`Track`).
+1. Navigation title: `L10n.tabTrack` (`Track`), `.inline` display mode (per-tab stack owns the chrome).
 2. Top adaptive spacer (see adaptive spacing below).
 3. Completion-mark region: the saved-state confirmation appears here, above
    the readout, without moving the timer content.
 4. Numeric timer readout:
    - Elapsed time formatted as `MM:SS` or `H:MM:SS`.
    - Centered in the main content region.
-   - Font: `.system(size: 78, weight: .ultraLight, design: .rounded)` or the
-     approved Theme equivalent.
+    - Font: `Theme.timerFont()` — `.system(size: 64, weight: .semibold, design: .rounded)`.
    - Uses `Theme.textPrimary` and `.monospacedDigit()`.
    - Keeps a stable frame across all timer states.
    - `accessibilityIdentifier`: `TimerDisplay`.
@@ -60,10 +59,9 @@ Top-to-bottom order:
    - `accessibilityIdentifier`: `TrackErrorBanner`.
 7. Central separator: receives free space beyond twice the shared cap (see
    adaptive spacing below).
-8. Name field (idle/ready/saved) or locked name label (running/saving/
-   error): a plain-text field with the name placeholder while idle
-   (`TimerNameField`); the label (`TimerActivityLabel`) is non-editable
-   after Start. No state renders more than one preparation control.
+8. Name control (idle/ready/saved) or locked name label (running/saving/
+    error): idle shows the name push row (`TimerNameRow`, `accessibilityIdentifier("TimerNameRow")`) opening the shared `NamePicker` page (see `SCREENS/NamePicker.md`) — there is no inline text field on Track (dedicated-name-picker; issue #69 keeps Start uncovered with no floating layer). The running label (`TimerNameLabel`) is non-editable
+    after Start. No state renders more than one preparation control.
     - No control shows a Category name.
     - No editing affordance for past entries: history is corrected from the
       entry form; editing placement on Track is deferred to a later change.
@@ -115,9 +113,12 @@ progress visualization.
 
 ### Recents
 
-- Wrapping chip flow of the most-recently-used exact texts, capped at six,
+- Wrapping chip flow of the most-recently-used exact texts, capped at twelve,
   newest `started_at` first (`GROUP BY activity_text` over committed entries,
-  `id DESC` tiebreak); no horizontal scrolling.
+  `id DESC` tiebreak); no horizontal scrolling. The chips live in a
+  fixed-height area (three chip rows) with its own vertical scroll, so
+  overflow never grows the Track page.
+- A `Divider` separates the section caption from the chips.
 - Each chip shows the icon of the first-position Category (first by the stored
   order) in a fixed symbol slot; categoryless entries render name-only
   chips with no icon and no placeholder glyph. Category names are never shown.
@@ -132,10 +133,10 @@ progress visualization.
   "Texts you track will appear here." / «Здесь появятся названия,
   которые вы отслеживаете.»), inviting free-text start.
 
-### Plain-text field (no search sheet)
+### Plain-text capture (dedicated picker, no search sheet)
 
-There is no search sheet, no quick-create, and no catalog. The idle field is
-the single capture entry point:
+There is no search sheet, no quick-create, and no catalog. Capture is the
+name push row plus the dedicated picker page (see `SCREENS/NamePicker.md`):
 
 - Empty field: typing any name is valid; Start is disabled until the trimmed
   text is non-empty (≤ 60 chars).
@@ -145,8 +146,13 @@ the single capture entry point:
 - The field content is a temporary draft: it never changes committed history.
   Stopping is the only commit boundary — it creates the entry and dismisses
   nothing (the same text stays prepared).
-- The running name is locked: it cannot be edited until Stop. Category
-  toggles while running rewrite the draft snapshot only.
+- The running name is locked: it cannot be edited until Stop, and it renders
+  leading-aligned like the idle field. A `Divider` separates the Categories
+  caption from the tag chips. Category
+  toggles while running rewrite the draft snapshot only. A standalone notes
+  button sits outside the locked-name row (its tint signals whether the
+  draft holds notes); mid-run notes saves rewrite the draft notes snapshot
+  only, and Stop commits the entry with the final notes.
 
 ### Text and Category relationship
 
@@ -161,8 +167,8 @@ the single capture entry point:
 
 ### Keyboard handling
 
-The Track screen keeps a plain-text field in the primary capture
-layout. The field follows `Design/INTERACTIONS.md` -> **Keyboard and primary
+Track keeps no inline text field — the capture field lives on the pushed
+`NamePicker` page. The picker field follows `Design/INTERACTIONS.md` -> **Keyboard and primary
 input placement**: it stays above the keyboard while focused; there is no
 Save action on Track (Stop commits).
 
@@ -283,7 +289,7 @@ Add English and Russian values, then add corresponding `L10n` cases:
 ## Capture behavior
 
 Recents are computed on-device from committed entries and ranked by newest
-`started_at` per exact text, capped at six. Each chip contains the exact
+`started_at` per exact text, capped at twelve. Each chip contains the exact
 text and, when the entry has Categories, the icon of the first-position
 Category — never a Category name. Category icons belong in Manage
 Categories, the entry form, and Insights; on Track they

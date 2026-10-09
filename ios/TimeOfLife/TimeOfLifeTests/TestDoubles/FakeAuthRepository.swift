@@ -68,6 +68,9 @@ final class FakeAuthRepository: AuthRepository, @unchecked Sendable {
     var logoutError: Error?
     /// If set, `me` throws this error.
     var meError: Error?
+    /// Injected latency for `me`: the restoring-splash tests hold the launch
+    /// gate mid-restore to assert the splash stays up until resolution.
+    var meDelayNanoseconds: UInt64 = 0
 
     // MARK: - Recording
 
@@ -141,6 +144,9 @@ final class FakeAuthRepository: AuthRepository, @unchecked Sendable {
 
     func me() async throws -> UserDTO {
         record(.me)
+        if meDelayNanoseconds > 0 {
+            try await Task.sleep(nanoseconds: meDelayNanoseconds)
+        }
         if let e = meError { throw e }
         return meResult
     }

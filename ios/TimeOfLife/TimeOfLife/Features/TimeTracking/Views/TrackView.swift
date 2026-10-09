@@ -25,8 +25,9 @@ struct TrackView: View {
             .navigationTitle(L10n.tabTrack.text)
             .navigationBarTitleDisplayMode(.inline)
             // First appear: pull recents + categories and restore a persisted
-            // running draft. Returns to this tab refresh via AppShellView.
-            .task { await vm.load() }
+            // running draft (guarded: re-entry while loading retries on the
+            // next appear). Returns to this tab refresh via AppShellView.
+            .task { await vm.loadIfNeeded() }
     }
 
     private var content: some View {

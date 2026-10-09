@@ -19,14 +19,15 @@ struct TimerServiceTests {
             text: "Gym",
             categoryIDs: ["c1"],
             startedAt: startedAt,
-            endedAt: endedAt
+            endedAt: endedAt,
+            notes: "evening session"
         )
 
         let entries = try await store.entries()
         #expect(entries.count == 1)
         #expect(entries.first?.activityText == "Gym")
         #expect(entries.first?.categoryIDs == ["c1"])
-        #expect(entries.first?.notes.isEmpty == true)
+        #expect(entries.first?.notes == "evening session")
         #expect(entries.first?.durationSeconds == 600)
         #expect(entries.first?.source == "manual")
         #expect(try await store.outboxRows().filter { $0.resource == "entry" }.count == 1)
@@ -52,6 +53,18 @@ struct TimerServiceTests {
         try await service.startTimerDraft(text: "Work", categoryIDs: [], startedAt: Date())
 
         #expect(try await service.store.outboxRows().isEmpty)
+    }
+
+    @Test("updateTimerDraftNotes rewrites the persisted notes snapshot")
+    func updateNotesPersists() async throws {
+        let service = makeService()
+        try await service.startTimerDraft(text: "Gym", categoryIDs: [], startedAt: Date())
+
+        try await service.updateTimerDraftNotes("mid-run thought")
+
+        let draft = try await service.runningTimerDraft()
+        #expect(draft?.notes == "mid-run thought")
+        #expect(draft?.activityText == "Gym")
     }
 
     // MARK: - Helpers

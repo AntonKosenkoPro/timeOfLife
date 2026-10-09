@@ -6,15 +6,16 @@ Implements the `app-shell` capability (OpenSpec change `redesign-track-experienc
 
 ```
 TabView (Track | History | Insights)
-  ├─ Track      — capture: plain-text name field + Recents chips + numeric timer (SCREENS/TimeTracking.md)
-  ├─ History    — retrospective review (empty state in this change)
-  └─ Insights   — analysis: period breakdown with hero total (insights-breakdown)
+  ├─ Track      — capture: name push row + shared picker + Recents chips + numeric timer (SCREENS/TimeTracking.md, SCREENS/NamePicker.md)
+  ├─ History    — retrospective review (SCREENS/History.md; entry-form push, Log Time sheet, pull-to-refresh)
+  └─ Insights   — analysis: period breakdown with hero total (SCREENS/Insights.md)
 Profile (pushed page, top-trailing person control on every tab; signed-in only — unreachable until the launch gate signs the user in)
   ├─ Account    — account + sync management (sync status, "Sync now", Sign Out)
   ├─ Library    — Manage Categories
   └─ App        — Erase local data (active account file only)
 ```
 
+- Each tab owns its own `NavigationStack` path (`trackPath` / `historyPath` / `insightsPath`, per-tab-navigation-paths): entry taps append to the History path only, Profile pushes per-tab — opening Profile on one tab never pre-pushes it on another. Destinations live next to their stack (History's entry-form + Profile destinations render inside `HistoryView`).
 - Track is the initially selected destination and the only place that starts or stops a timer.
 - Profile is opened from a consistent top-trailing person control and is **not** a fourth tab.
 - The hierarchy maps to a future macOS sidebar without changing meaning: Track, History, Insights become primary sidebar destinations; profile-owned features remain secondary.
@@ -33,13 +34,13 @@ Profile (pushed page, top-trailing person control on every tab; signed-in only �
    - Insights — `Label(L10n.tabInsights, systemImage: "chart.line.uptrend.xyaxis")`, `accessibilityIdentifier("TabInsights")`.
 2. Each tab root carries the top-trailing person control (`ProfileButton`) pushing the Profile page.
 3. While a timer is running, History and Insights render the compact timer immediately above the tab bar via `.safeAreaInset(edge: .bottom)` (see `CompactTimer` in `COMPONENTS.md`). Track does not duplicate it — the full numeric timer is already visible.
-4. `OfflineBanner` is rendered at the top by the root shell (unchanged).
+4. There is no global offline banner. Offline surfaces via the History pull-to-refresh inline notice and the Profile sync status.
 
 ### Behaviors
 
 - Switching destinations never changes timer state and never discards the previous destination's state (tab state is preserved by `TabView`).
 - The app launches into the auth flow when signed out (the auth flow is the root until sign-in completes) and into Track when signed in; there is no unsigned use and no "Enable Sync" action.
-- Insights shows a mirror-only breakdown of committed time: a `Today | This week | All time` period switch (default `This week`), a hero period total, a `By category | By text` lens toggle (default `By category`), and proportional rows with max-scaled bars. Category rows attribute the full duration to every attached category (rows may sum above the hero) with a one-line footnote naming the rule; rows are not tappable; empty periods show a one-line sentence, and the true-zero state keeps the honest placeholder.
+- Insights shows a mirror-only breakdown of committed time (full spec: `SCREENS/Insights.md`): a `Today | This week | All time` period switch (default `This week`), a hero period total, a `By category | By text` lens toggle (default `By category`), and proportional rows with max-scaled bars. Category rows attribute the full duration to every attached category (rows may sum above the hero) with a one-line footnote naming the rule; rows are not tappable; empty periods show a one-line sentence, and the true-zero state keeps the honest placeholder.
 - Profile is signed-in-only and shows the active account and sync state. Dismissing Profile restores the previously selected destination and its state.
 - The compact timer's main area returns to Track; its Stop button saves in place and keeps the current destination selected.
 

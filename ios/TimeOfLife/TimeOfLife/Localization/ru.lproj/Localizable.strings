@@ -183,7 +183,8 @@
 "name.clear" = "Очистить название";
 "name.pickerTitle" = "Выберите название";
 "name.pickerNoMatchHint" = "Совпадений нет — «%@» будет использовано как новое название.";
-"notes.clear" = "Очистить заметки";
+"notes.editorSubtitle" = "%@ • %d/2000";
+"notes.editorCounter" = "%d/2000";
 
 // Starter categories (category-management spec, seed requirement)
 "category.seed.work" = "Работа";

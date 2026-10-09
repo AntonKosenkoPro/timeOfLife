@@ -1,6 +1,7 @@
 // swiftlint:disable file_length
 import Testing
 import Foundation
+import GRDB
 @testable import TimeOfLife
 
 @MainActor
@@ -39,7 +40,7 @@ struct TrackViewModelTests {
         vm.state = .ready(TrackState.Draft(text: "Coding", categoryIDs: ["c1"]))
         vm.start()
 
-        try? await Task.sleep(nanoseconds: 50_000_000)
+        await waitForPersistedDraft(vm)
         guard case let .running(draft, _) = vm.state else {
             Issue.record("expected running state")
             return
@@ -77,7 +78,7 @@ struct TrackViewModelTests {
         vm.nameDraft = "Reading"
         vm.state = .ready(TrackState.Draft(text: "Reading"))
         vm.start()
-        try? await Task.sleep(nanoseconds: 10_000_000)
+        await waitForPersistedDraft(vm)
         guard case .running = vm.state else {
             Issue.record("expected running state")
             return
@@ -106,16 +107,38 @@ struct TrackViewModelTests {
         #expect(state == nil)
     }
 
+    @Test("stop saves the entry with the final draft notes")
+    func stopSavesNotes() async throws {
+        let vm = makeViewModel()
+        vm.nameDraft = "Reading"
+        vm.state = .ready(TrackState.Draft(text: "Reading"))
+        vm.start()
+        await waitForPersistedDraft(vm)
+        guard case .running = vm.state else {
+            Issue.record("expected running state")
+            return
+        }
+        await vm.updateDraftNotes("steady pace\nsecond wind")
+
+        await vm.stop()
+
+        let entries = try await vm.service.store.entries()
+        #expect(entries.count == 1)
+        #expect(entries.first?.notes == "steady pace\nsecond wind")
+    }
+
     @Test("toggling tags mid-run rewrites only the running draft snapshot")
     func toggleRewritesDraftOnly() async throws {
         let vm = makeViewModel()
-        vm.nameDraft = "Work"
-        vm.state = .ready(TrackState.Draft(text: "Work", categoryIDs: ["c1"]))
-        vm.start()
-        try? await Task.sleep(nanoseconds: 10_000_000)
+        // Seeded explicitly (awaited): the toggle persist is fire-and-forget,
+        // so racing it against start()'s own un-awaited write would flake.
+        let startedAt = Date()
+        try await vm.service.store.saveTimerDraft(activityText: "Work", categoryIDs: ["c1"], startedAt: startedAt)
+        vm.state = .running(TrackState.Draft(text: "Work", categoryIDs: ["c1"]), startedAt: startedAt)
 
         vm.toggleDraftCategory("c1") // deselect
         vm.toggleDraftCategory("c2") // select
+        await waitForPersistedDraft(vm) { $0?.categoryIDs == ["c2"] }
 
         guard case let .running(draft, _) = vm.state else {
             Issue.record("expected running state")
@@ -128,6 +151,126 @@ struct TrackViewModelTests {
         #expect(persisted?.categoryIDs == ["c2"])
         // No entry exists mid-run; nothing entered History.
         #expect(try await vm.service.store.outboxRows().allSatisfy { $0.resource != "entry" })
+    }
+
+    @Test("saving notes mid-run rewrites only the draft snapshot")
+    func notesRewritesDraftOnly() async throws {
+        let vm = makeViewModel()
+        vm.nameDraft = "Work"
+        vm.state = .ready(TrackState.Draft(text: "Work", categoryIDs: ["c1"]))
+        vm.start()
+        await waitForPersistedDraft(vm)
+
+        await vm.updateDraftNotes("remember HR belt")
+
+        guard case let .running(draft, _) = vm.state else {
+            Issue.record("expected running state")
+            return
+        }
+        #expect(draft.notes == "remember HR belt")
+        #expect(draft.text == "Work")
+        #expect(draft.categoryIDs == ["c1"])
+        #expect(try await vm.service.store.entries().isEmpty)
+        let persisted = try await vm.service.runningTimerDraft()
+        #expect(persisted?.notes == "remember HR belt")
+        #expect(persisted?.activityText == "Work")
+        // No entry exists mid-run; nothing entered History.
+        #expect(try await vm.service.store.outboxRows().allSatisfy { $0.resource != "entry" })
+    }
+
+    @Test("saving notes in the error state preserves the error case")
+    func notesInErrorPreservesCase() async throws {
+        let vm = makeViewModel()
+        let startedAt = Date()
+        try await vm.service.store.saveTimerDraft(activityText: "Work", categoryIDs: [], startedAt: startedAt)
+        vm.state = .error(TrackState.Draft(text: "Work"), startedAt: startedAt)
+
+        await vm.updateDraftNotes("retry with notes")
+
+        guard case let .error(draft, _) = vm.state else {
+            Issue.record("expected error state")
+            return
+        }
+        #expect(draft.notes == "retry with notes")
+        #expect(try await vm.service.runningTimerDraft()?.notes == "retry with notes")
+    }
+
+    @Test("notes save failure surfaces an error preserving the draft")
+    func notesSaveFailureSurfacesError() async throws {
+        // A failed persist must never report silent success: with the
+        // table gone the UPDATE throws, the banner raises, and the
+        // in-memory notes survive for a retry (beginRunning grammar).
+        let url = temporaryStoreURL()
+        // swiftlint:disable:next force_try
+        let store = try! LocalStore(url: url)
+        let service = TimerService(store: store)
+        let vm = TrackViewModel(service: service, connectivity: MockConnectivity(connected: true))
+        let startedAt = Date()
+        try await store.saveTimerDraft(activityText: "Work", categoryIDs: [], startedAt: startedAt)
+        vm.state = .running(TrackState.Draft(text: "Work"), startedAt: startedAt)
+        try dropTimerStateTable(at: url)
+
+        await vm.updateDraftNotes("unsaved thought")
+
+        #expect(vm.errorMessage != nil)
+        guard case let .running(draft, _) = vm.state else {
+            Issue.record("expected running state")
+            return
+        }
+        #expect(draft.notes == "unsaved thought")
+    }
+
+    /// Drops the draft table to force persistence failures. Fixture-only:
+    /// app mutation paths stay behind LocalStore.
+    private func dropTimerStateTable(at url: URL) throws {
+        let queue = try DatabaseQueue(path: url.path)
+        try queue.write { db in
+            try db.execute(sql: "DROP TABLE timer_state")
+        }
+    }
+
+    @Test("load restores persisted draft notes into the running state")
+    func loadRestoresDraftNotes() async throws {
+        let vm = makeViewModel()
+        let startedAt = Date().addingTimeInterval(-60)
+        try await vm.service.store.saveTimerDraft(
+            activityText: "Work",
+            categoryIDs: [],
+            startedAt: startedAt,
+            notes: "resumed thought"
+        )
+
+        await vm.load()
+
+        guard case let .running(draft, _) = vm.state else {
+            Issue.record("expected running state")
+            return
+        }
+        #expect(draft.notes == "resumed thought")
+    }
+
+    @Test("load with no persisted draft reconciles a running state back to ready")
+    func loadReconcilesExternallyStoppedTimer() async {
+        // The external-stop path (compact-timer stop on another
+        // destination): a `.running` state with no persisted draft must
+        // leave running instead of counting forever — and must not carry
+        // the previous run's notes into the next Start.
+        let vm = makeViewModel()
+        vm.state = .running(
+            TrackState.Draft(text: "Work", categoryIDs: ["c1"], notes: "stale"),
+            startedAt: Date().addingTimeInterval(-30)
+        )
+
+        await vm.load()
+
+        guard case let .ready(draft) = vm.state else {
+            Issue.record("expected ready state")
+            return
+        }
+        #expect(draft.text == "Work")
+        #expect(draft.categoryIDs == ["c1"])
+        #expect(draft.notes.isEmpty)
+        #expect(vm.elapsed == 0)
     }
 
     @Test("elapsed formatting matches TimeFormatter")
@@ -346,7 +489,7 @@ struct TrackViewModelTests {
         let vm = makeViewModel()
         let store = vm.service.store
         let base = Date(timeIntervalSinceReferenceDate: 1_000)
-        for index in 0..<8 {
+        for index in 0..<14 {
             try await store.createEntry(makeEntry(
                 id: "e\(index)",
                 text: "Text\(index)",
@@ -354,9 +497,10 @@ struct TrackViewModelTests {
             ))
         }
         await vm.load()
-        #expect(vm.recents.count == 6)
-        #expect(vm.allNames.count == 8)
-        #expect(vm.allNames.first?.text == "Text7")
+        #expect(vm.recents.count == 12)
+        #expect(vm.recents.first?.text == "Text13")
+        #expect(vm.allNames.count == 14)
+        #expect(vm.allNames.first?.text == "Text13")
     }
 
     @Test("stop refreshes recents and picker names in lockstep")
@@ -390,7 +534,7 @@ struct TrackViewModelTests {
     }
 
     private func storeRecents(_ store: LocalStore) async throws -> [ExactName] {
-        try await store.recents(limit: 6).map(ExactName.init(storeRecent:))
+        try await store.recents(limit: TrackViewModel.recentsLimit).map(ExactName.init(storeRecent:))
     }
 
     private func makeViewModel() -> TrackViewModel {
@@ -399,6 +543,24 @@ struct TrackViewModelTests {
         let store = try! LocalStore(url: temporaryStoreURL())
         let service = TimerService(store: store)
         return TrackViewModel(service: service, connectivity: connectivity)
+    }
+
+    /// Waits for a persisted-draft condition (bounded): `start()` persists
+    /// via an un-awaited Task, so fixed delays flake under CI load. Callers
+    /// asserting persisted state must wait on the signal, not the clock.
+    private func waitForPersistedDraft(
+        _ vm: TrackViewModel,
+        matching condition: (RunningTimerDraft?) -> Bool = { $0 != nil }
+    ) async {
+        for _ in 0..<100 {
+            do {
+                if condition(try await vm.service.runningTimerDraft()) { return }
+            } catch {
+                // Store read failed; retry within the bound.
+                continue
+            }
+            try? await Task.sleep(nanoseconds: 1_000_000)
+        }
     }
 
     private func temporaryStoreURL() -> URL {
