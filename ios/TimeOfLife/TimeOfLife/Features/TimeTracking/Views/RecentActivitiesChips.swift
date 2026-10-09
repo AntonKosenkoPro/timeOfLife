@@ -38,11 +38,12 @@ struct RecentActivitiesChips: View {
     }
 
     /// Visible chip-area budget: three chip rows at `minTapArea` with
-    /// `spacingSmall` gaps (the common six-chip footprint). `fixedSize`
-    /// makes the scroll view hug its rows up to this budget; content
-    /// beyond it is capped into a scrolling viewport instead of growing
-    /// the Track page. One always-mounted view: no first-frame flash,
-    /// no branch teardown, scroll offset survives threshold crossings.
+    /// `spacingSmall` gaps (the common six-chip footprint). Order matters:
+    /// `maxHeight` sits INSIDE `fixedSize`, so the chain reports
+    /// `min(content, budget)` — hugging rows up to the budget, scrolling
+    /// beyond it. Reversed (fixedSize inside maxHeight) the flexible frame
+    /// would report the full proposal regardless of content: dead space
+    /// for few chips, unclipped spillover instead of scroll for many.
     private static let maxVisibleHeight: CGFloat = 3 * Theme.minTapArea + 2 * Theme.spacingSmall
 
     var body: some View {
@@ -50,8 +51,8 @@ struct RecentActivitiesChips: View {
             flow
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .fixedSize(horizontal: false, vertical: true)
         .frame(maxHeight: Self.maxVisibleHeight)
+        .fixedSize(horizontal: false, vertical: true)
     }
 
     /// The chip flow: hugged by `fixedSize` up to the budget above.
