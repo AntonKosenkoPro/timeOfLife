@@ -229,8 +229,8 @@ struct LiveActivityStopButton: View {
     }
 }
 
-/// Pill Stop control (experimental alternative to the circle, currently
-/// live in the expanded card so both can be compared on-device).
+/// Pill Stop control for the expanded card (circle lives on the banner —
+/// one shape per face, no experiment pending).
 /// Same always-render rule as `LiveActivityStopButton`.
 struct LiveActivityStopPill: View {
     @Environment(\.isLuminanceReduced)

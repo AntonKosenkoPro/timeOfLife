@@ -9,22 +9,23 @@ import Foundation
 /// empty even with a unified attributes type (device-proven: the daemon
 /// scopes enumeration by calling process, so ending stays app-side).
 ///
+/// Name-only: Darwin notifications ignore `object`/`userInfo` (Apple docs:
+/// "If center is a Darwin notification center, this value is ignored"), so
+/// no duration rides along — the app resolves the Saved duration from the
+/// saved entry itself (entry-recency heuristic in `TimerService`).
+///
 /// Lives in the shared framework so both processes resolve one symbol.
-/// Payload is property-list-safe.
 public enum LiveActivitySignal {
     public static let name = "com.antonkosenko.timeoflifeapp.timer-stopped-externally"
-    public static let durationKey = "durationSeconds"
 
     /// Posts the signal from the Stop intent after a successful save.
-    public static func post(durationSeconds: Int) {
+    public static func post() {
         let center = CFNotificationCenterGetDarwinNotifyCenter()
-        // swiftlint:disable:next legacy_objc_type
-        let userInfo = [durationKey: NSNumber(value: durationSeconds)] as CFDictionary
         CFNotificationCenterPostNotification(
             center,
             CFNotificationName(rawValue: name as CFString),
             nil,
-            userInfo,
+            nil,
             true
         )
     }

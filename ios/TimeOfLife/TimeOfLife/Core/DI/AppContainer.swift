@@ -87,11 +87,15 @@ final class AppContainer: ObservableObject {
     /// tells tracker surfaces to reload (the intent already saved the entry
     /// and cleared the draft — Track/compact would otherwise keep ticking
     /// stale in-memory state). The run is definitively over, so the
-    /// background reap chain is cancelled (no pointless wakes).
-    func handleExternalStop(durationSeconds: Int?) {
+    /// background reap chain is cancelled — unless a new run started in
+    /// the meantime (its Start re-armed the chain; cancelling here would
+    /// strand it), so the cancel is draft-gated.
+    func handleExternalStop() {
         Task {
-            await timerService.endOrphanedActivities(knownDurationSeconds: durationSeconds)
-            BackgroundReapScheduler.cancelReapCheck()
+            await timerService.endOrphanedActivities()
+            if (try? await timerService.runningTimerDraft()) == nil {
+                BackgroundReapScheduler.cancelReapCheck()
+            }
             NotificationCenter.default.post(name: .timerStoppedExternally, object: nil)
         }
     }
@@ -124,22 +128,22 @@ final class AppContainer: ObservableObject {
     /// container (app lifetime) by design.
     private func observeExternalStopSignal() {
         final class HandlerBox: Sendable {
-            let onSignal: @Sendable (Int?) -> Void
-            init(_ onSignal: @escaping @Sendable (Int?) -> Void) {
+            let onSignal: @Sendable () -> Void
+            init(_ onSignal: @escaping @Sendable () -> Void) {
                 self.onSignal = onSignal
             }
         }
-        let box = HandlerBox { [weak self] duration in
-            Task { await self?.handleExternalStop(durationSeconds: duration) }
+        let box = HandlerBox { [weak self] in
+            Task { await self?.handleExternalStop() }
         }
         let context = Unmanaged.passRetained(box).toOpaque()
         CFNotificationCenterAddObserver(
             CFNotificationCenterGetDarwinNotifyCenter(),
             context,
-            { _, observer, _, _, userInfo in
+            { _, observer, _, _, _ in
                 guard let observer else { return }
                 let box = Unmanaged<HandlerBox>.fromOpaque(observer).takeUnretainedValue()
-                box.onSignal(signalDuration(userInfo))
+                box.onSignal()
             } as CFNotificationCallback,
             LiveActivitySignal.name as CFString,
             nil,
@@ -305,19 +309,4 @@ extension Notification.Name {
     /// Posted (in-process) after an Island Stop is handled: tracker surfaces
     /// reload so no stale running state survives (live-activities D8).
     static let timerStoppedExternally = Notification.Name("timerStoppedExternally")
-}
-
-// MARK: - Darwin signal payload
-
-// Darwin payloads arrive as CoreFoundation dictionaries — the casts below
-// are the toll-free bridge at the system boundary, not a layering choice.
-private func signalDuration(_ userInfo: CFDictionary?) -> Int? {
-    guard let userInfo else { return nil }
-    // swiftlint:disable:next legacy_objc_type
-    let payload = userInfo as NSDictionary
-    // swiftlint:disable:next legacy_objc_type
-    guard let number = payload[LiveActivitySignal.durationKey] as? NSNumber else {
-        return nil
-    }
-    return number.intValue
 }

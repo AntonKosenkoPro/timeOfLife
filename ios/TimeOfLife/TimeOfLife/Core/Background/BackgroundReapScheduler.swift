@@ -1,5 +1,6 @@
 import BackgroundTasks
 import Foundation
+import OSLog
 
 /// Schedules and registers the widget-stop reap check (live-activities):
 /// a `BGAppRefreshTask` that wakes the app in the background so a banner
@@ -17,6 +18,11 @@ enum BackgroundReapScheduler {
     /// `BGTaskSchedulerPermittedIdentifiers` in the app plists).
     static let taskIdentifier = "com.antonkosenko.timeoflifeapp.reap-check"
 
+    private static let logger = Logger(
+        subsystem: "com.antonkosenko.timeoflifeapp",
+        category: "BackgroundReapScheduler"
+    )
+
     /// How far out the reap check is requested — a hint only; the OS
     /// fires whenever it decides (typically minutes, never guaranteed).
     private static let rearmDelaySeconds = 60.0
@@ -33,7 +39,14 @@ enum BackgroundReapScheduler {
         center.cancel(taskRequestWithIdentifier: taskIdentifier)
         let request = BGAppRefreshTaskRequest(identifier: taskIdentifier)
         request.earliestBeginDate = Date(timeIntervalSinceNow: rearmDelaySeconds)
-        try? center.submit(request)
+        do {
+            try center.submit(request)
+        } catch {
+            // The submit is the only signal the chain died (e.g. a
+            // permitted-identifiers mismatch): record it — a banner that
+            // never clears without app contact starts here.
+            Self.logger.error("BackgroundReapScheduler: submit failed: \(String(describing: error))")
+        }
         #endif
     }
 
@@ -69,9 +82,11 @@ enum BackgroundReapScheduler {
 
 /// Once-only, thread-safe `BGTask` completion. The box crosses into the
 /// `Task` above (so it must be `Sendable`), and the guard keeps the
-/// expiration handler from double-completing a finished task.
+/// expiration handler from double-completing a finished task. The task
+/// reference is weak to break the task → expirationHandler → box → task
+/// retain cycle (the system holds the task for the duration anyway).
 private final class TaskCompletion: @unchecked Sendable {
-    private let task: BGTask
+    private weak var task: BGTask?
     private let lock = NSLock()
     private var done = false
 
@@ -84,6 +99,6 @@ private final class TaskCompletion: @unchecked Sendable {
         defer { lock.unlock() }
         guard !done else { return }
         done = true
-        task.setTaskCompleted(success: success)
+        task?.setTaskCompleted(success: success)
     }
 }

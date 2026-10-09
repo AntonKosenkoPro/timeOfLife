@@ -42,13 +42,21 @@ final class SessionCache: @unchecked Sendable {
     /// Best-effort: a failed write must never fail the sign-in itself.
     /// The sidecar is read by lock-screen extension surfaces with a locked
     /// keybag, so it carries the same after-first-unlock class as the db.
+    /// A failed sign-out removal falls back to blanking the file: a stale
+    /// id would otherwise keep resolving the logged-out account (and a
+    /// lock-screen intent could write into it), while a blank file
+    /// resolves `.locked` — the safe direction.
     private func mirrorSessionFile(userID: String?) {
         guard let url = sessionFileURL else { return }
         if let userID {
             try? userID.write(to: url, atomically: true, encoding: .utf8)
             FileManager.default.ensureAccessibleAfterFirstUnlock(url)
         } else {
-            try? FileManager.default.removeItem(at: url)
+            do {
+                try FileManager.default.removeItem(at: url)
+            } catch {
+                try? "".write(to: url, atomically: true, encoding: .utf8)
+            }
         }
     }
 

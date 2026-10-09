@@ -58,7 +58,16 @@ struct StopTimerIntent: AppIntent {
         let startedAt = draft.startedAt ?? Date()
         let endedAt = Date()
         let durationSeconds = max(0, Int(endedAt.timeIntervalSince(startedAt)))
-        let existingIDs = Set((try? await store.categories().map(\.id)) ?? [])
+        // Fail closed on a transient categories-read failure: the `?? []`
+        // fallback would prune EVERYTHING and persist an untagged entry.
+        // The draft is untouched, so the run survives for an in-app retry.
+        let existingIDs: Set<String>
+        do {
+            existingIDs = Set(try await store.categories().map(\.id))
+        } catch {
+            Self.logger.error("StopTimerIntent ignored: categories unreadable")
+            return .result()
+        }
         let pruned = draft.categoryIDs.filter { existingIDs.contains($0) }
         let entry = TimeEntry(
             id: await store.newRecordID(),
@@ -70,16 +79,28 @@ struct StopTimerIntent: AppIntent {
             categoryIDs: pruned,
             notes: draft.notes
         )
-        guard (try? await store.createEntry(entry)) != nil,
-              (try? await store.clearTimerDraft()) != nil else {
-            // Recoverable: the draft is untouched, so the user can retry
-            // from the app (mirrors the in-app `.error` grammar).
-            Self.logger.error("StopTimerIntent failed: entry save or draft clear threw")
+        // Proceed ONLY on `.created`: `.invalid`, `.restorableDeletion`
+        // and `.failure` are non-throwing non-saves — clearing the draft
+        // for any of them would make the run vanish with no entry.
+        // The draft is untouched, so the user can retry from the app
+        // (mirrors the in-app `.error` grammar).
+        guard let mutation = try? await store.createEntry(entry), case .created = mutation else {
+            Self.logger.error("StopTimerIntent failed: entry not created")
+            return .result()
+        }
+        guard (try? await store.clearTimerDraft()) != nil else {
+            // Recoverable: the entry is saved but the draft is still live —
+            // the run survives (re-mirror no-ops on the live activity) and
+            // the user can stop again from the app. No signal: a present
+            // draft means the run is genuinely active, so no reap may run.
+            Self.logger.error("StopTimerIntent failed: draft clear threw")
             return .result()
         }
         // Signal, don't end: enumeration stays app-side (see type docs).
-        // The duration rides along so the Saved card shows the true value.
-        LiveActivitySignal.post(durationSeconds: durationSeconds)
+        // The app resolves the Saved duration from the saved entry itself
+        // (entry-recency heuristic) — Darwin notifications carry no
+        // payload, so nothing rides along.
+        LiveActivitySignal.post()
         Self.logger.info("StopTimerIntent saved entry with duration")
         return .result()
     }
