@@ -409,8 +409,10 @@ final class SyncController: ObservableObject {
     // MARK: - Pull (LWW merge, D4/D5)
 
     /// Pulls the relay's state and merges it locally, server-wins on
-    /// `updated_at` (LWW). Advances the per-resource cursor to the max
-    /// `updated_at` received.
+    /// `updated_at` (LWW). Follows entry pagination to exhaustion (the relay
+    /// pages newest-first by `started_at`): a pull is complete only when the
+    /// relay returns no `next_cursor`. Advances the per-resource cursor to the
+    /// max `updated_at` over ALL pages received.
     ///
     /// Ordering: the full Category snapshot is fetched and merged FIRST so
     /// every referenced category exists locally before Entries are merged
@@ -443,15 +445,34 @@ final class SyncController: ObservableObject {
         } else {
             entryCursor = try await store.lastSyncedAt(resource: "entry")
         }
-        let entries = try await remote.fetchEntries(modifiedSince: entryCursor)
-        try requireSameAccount(userID)
         let serverCategoriesByID = Dictionary(uniqueKeysWithValues: categories.map { ($0.id, $0) })
-        for entry in entries {
+        // Page loop: one relay request is never the whole history. The delta
+        // filter stays fixed across pages while the page cursor resumes
+        // within it. The same-account guard runs after each page fetch and
+        // before merging that page, so a mid-pull swap fetches nothing
+        // further and merges nothing foreign.
+        var pageCursor: String?
+        var seenPageCursors: Set<String> = []
+        var maxUpdatedAt: Date?
+        while true {
+            let page = try await remote.fetchEntryPage(modifiedSince: entryCursor, cursor: pageCursor)
             try requireSameAccount(userID)
-            try await applyServer(entry, serverCategories: serverCategoriesByID)
+            for entry in page.entries {
+                try requireSameAccount(userID)
+                try await applyServer(entry, serverCategories: serverCategoriesByID)
+            }
+            if let receivedMax = page.entries.map(\.updatedAt).max(),
+               receivedMax > (maxUpdatedAt ?? .distantPast) {
+                maxUpdatedAt = receivedMax
+            }
+            guard let next = page.nextCursor, !next.isEmpty, !seenPageCursors.contains(next) else {
+                break
+            }
+            seenPageCursors.insert(next)
+            pageCursor = next
         }
         try requireSameAccount(userID)
-        if let max = entries.map(\.updatedAt).max() {
+        if let max = maxUpdatedAt {
             try await store.setLastSyncedAt(resource: "entry", date: max)
         }
     }

@@ -45,6 +45,52 @@ struct SyncControllerTests {
         #expect(mock.fetchedModifiedSince.first == cursor)
     }
 
+    @Test("paged pull converges the full history and advances the cursor over all pages")
+    func pagedPullConvergesFullHistory() async throws {
+        let (store, mock, controller) = makeContext()
+        let base = Date(timeIntervalSince1970: 1_700_000_000)
+        // 120 server entries, relay order newest-started_at first across 3
+        // pages (50/50/20). The global updated_at max sits on the LAST page:
+        // page order (started_at) is uncorrelated with cursor order
+        // (updated_at), so advancing to a partial-page max would strand the
+        // tail forever.
+        let globalMax = base.addingTimeInterval(1_000_000)
+        var all: [TimeEntry] = []
+        for i in 0..<120 {
+            let updatedAt = i == 5 ? globalMax : base.addingTimeInterval(TimeInterval(i))
+            all.append(makeEntry(
+                id: "pg-e\(i)", text: "Entry \(i)",
+                startedAt: base.addingTimeInterval(TimeInterval(i) * 3600),
+                createdAt: base.addingTimeInterval(TimeInterval(i) * 3600),
+                updatedAt: updatedAt
+            ))
+        }
+        let newestFirst = all.sorted { $0.startedAt > $1.startedAt }
+        mock.entriesPages = [
+            Array(newestFirst[0..<50]),
+            Array(newestFirst[50..<100]),
+            Array(newestFirst[100..<120]),
+        ]
+
+        controller.activate(userID: "u1")
+        await waitForCycle(controller)
+
+        // Every page fetched with the delta filter held fixed, resumed by cursor.
+        #expect(mock.fetchedEntryPageCursors == [nil, "page-1", "page-2"])
+        // The complete history merged — including the last page's rows.
+        #expect(try await store.entries().count == 120)
+        #expect(try await store.entry(id: "pg-e5")?.activityText == "Entry 5")
+        // The cursor reflects the complete result, not the first page.
+        #expect(try await store.lastSyncedAt(resource: "entry") == globalMax)
+
+        // The follow-up delta reuses the global cursor.
+        mock.clearLog()
+        await controller.syncNow(userID: "u1")
+
+        #expect(mock.fetchedModifiedSince.first == globalMax)
+        #expect(isIdle(controller.status))
+    }
+
     // MARK: - LWW merge
 
     @Test("LWW merge applies a newer server entry")
@@ -1945,6 +1991,11 @@ struct SyncControllerTests {
         }
         func fetchEntries(modifiedSince: Date?) async throws -> [TimeEntry] {
             let result = try await inner.fetchEntries(modifiedSince: modifiedSince)
+            session.value = "u2"
+            return result
+        }
+        func fetchEntryPage(modifiedSince: Date?, cursor: String?) async throws -> EntryPage {
+            let result = try await inner.fetchEntryPage(modifiedSince: modifiedSince, cursor: cursor)
             session.value = "u2"
             return result
         }

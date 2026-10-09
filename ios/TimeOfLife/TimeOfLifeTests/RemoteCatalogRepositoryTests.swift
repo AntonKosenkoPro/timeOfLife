@@ -279,4 +279,96 @@ struct RemoteCatalogRepositoryTests {
         #expect(entries.first?.categoryIDs.isEmpty == true)
         #expect(entries.first?.notes.isEmpty == true)
     }
+
+    private func pageEntryJSON(id: String, text: String, startedAt: String) -> String {
+        """
+        {
+          "id": "\(id)",
+          "activity_text": "\(text)",
+          "categories": [],
+          "notes": "",
+          "started_at": "\(startedAt)",
+          "ended_at": "\(startedAt)",
+          "duration_seconds": 60,
+          "source": "manual",
+          "source_ref": null,
+          "created_at": "\(startedAt)",
+          "updated_at": "\(startedAt)"
+        }
+        """
+    }
+
+    @Test("fetchEntries follows next_cursor until exhausted (sync pagination)")
+    func fetchEntriesFollowsPaginationCursor() async throws {
+        let page1 = """
+        {"items": [\(pageEntryJSON(id: "e1", text: "Gym", startedAt: "2026-07-29T09:00:00Z")), \(pageEntryJSON(id: "e2", text: "Read", startedAt: "2026-07-28T09:00:00Z"))], "next_cursor": "PAGE2"}
+        """
+        let page2 = """
+        {"items": [\(pageEntryJSON(id: "e3", text: "Run", startedAt: "2026-07-27T09:00:00Z"))]}
+        """
+        var requests: [String] = []
+        URLProtocolStub.responseHandler = { request in
+            let url = request.url!.absoluteString
+            requests.append(url)
+            let body = url.contains("cursor=") ? page2 : page1
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (body.data(using: .utf8)!, response)
+        }
+        defer { URLProtocolStub.clear() }
+        let repository = RemoteCatalogRepository(client: makeClient())
+
+        let entries = try await repository.fetchEntries(modifiedSince: nil)
+
+        // The whole history converges: both pages merged in relay order.
+        #expect(entries.map(\.id) == ["e1", "e2", "e3"])
+        #expect(requests.count == 2)
+        // Sync pulls page at the relay max page size and resumes with the cursor.
+        #expect(requests[0].contains("limit=200"))
+        #expect(requests[1].contains("cursor=PAGE2"))
+    }
+
+    @Test("fetchEntryPage decodes one page with its cursor")
+    func fetchEntryPageDecodesCursor() async throws {
+        stubJSON("""
+        {"items": [\(pageEntryJSON(id: "e1", text: "Gym", startedAt: "2026-07-29T09:00:00Z"))], "next_cursor": "PAGE2"}
+        """)
+        defer { URLProtocolStub.clear() }
+        let repository = RemoteCatalogRepository(client: makeClient())
+
+        let page = try await repository.fetchEntryPage(modifiedSince: nil, cursor: nil)
+
+        #expect(page.entries.map(\.id) == ["e1"])
+        #expect(page.nextCursor == "PAGE2")
+    }
+
+    @Test("fetchEntries treats an empty last page as terminal")
+    func fetchEntriesEmptyLastPageTerminates() async throws {
+        var requests: [String] = []
+        URLProtocolStub.responseHandler = { request in
+            let url = request.url!.absoluteString
+            requests.append(url)
+            let body = url.contains("cursor=")
+                ? #"{"items": []}"#
+                : #"{"items": [], "next_cursor": "PAGE2"}"#
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (body.data(using: .utf8)!, response)
+        }
+        defer { URLProtocolStub.clear() }
+        let repository = RemoteCatalogRepository(client: makeClient())
+
+        let entries = try await repository.fetchEntries(modifiedSince: nil)
+
+        #expect(entries.isEmpty)
+        #expect(requests.count == 2)
+    }
 }
