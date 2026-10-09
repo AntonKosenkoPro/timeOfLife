@@ -13,9 +13,10 @@ import LifioLiveActivityCore
 /// icon arrives pre-validated from the app (`CatalogIcon.displaySymbol`
 /// at request time, `"timer"` fallback), so the extension never validates.
 struct TimerLiveActivityWidget: Widget {
-    /// Deep link to Track (D5): every face navigates here on tap.
+    /// Deep link to Track (D5): every face navigates here on tap. Delegates
+    /// to the shared contract — never a local literal (drift kills taps).
     private var trackURL: URL? {
-        URL(string: "lifio://track")
+        LiveActivityDeepLink.trackURL
     }
 
     var body: some WidgetConfiguration {

@@ -274,8 +274,14 @@ actor LocalStore {
     }
 
     /// Creates the database queue for one file. `DatabaseQueue` is
-    /// sufficient: the app is the only writer in practice, and cross-process
-    /// access is serialized by SQLite's own file locking.
+    /// sufficient: concurrent writers (app sync drain, widget Stop intent)
+    /// are serialized by SQLite's own file locking, and every multi-step
+    /// flow is fail-closed per step (a `BUSY`/IO throw aborts that step
+    /// without partial commits leaking past the chokepoint). Multi-step
+    /// flows are deliberately NOT single transactions across steps — a
+    /// crash between entry-save and draft-clear is reconciled on next
+    /// contact (draft present → run resumes; entry-recency heuristic),
+    /// identically in-app and in the intent.
     private static func makeDatabaseQueue(at url: URL) throws -> DatabaseQueue {
         let directory = url.deletingLastPathComponent()
         try FileManager.default.createDirectory(
