@@ -104,6 +104,17 @@ Proceed only when all mandatory checks are green.
   until the run concludes (check `gh run list --workflow ai-review.yml`).
   Timeout (~15 min, workflow `timeout-minutes: 60`): report + ask.
 - Collect every inline finding (file:line + message) plus the summary.
+- **Attribute by run ID, never by timestamp.** Record the concluded run's
+  ID from `gh run list`; a comment belongs to this round iff its body
+  contains `ocr-review-run:<runId>-`. Guessing a `created_at` cutoff is
+  forbidden — a wrong cutoff silently drops findings (precedent: PR #130
+  round 3, a bug-high missed by a `> 19:30` filter when it posted at 19:23).
+- **Reconcile before triaging.** The sticky summary states how many issues
+  were found/posted inline — the collected count MUST match. On mismatch,
+  paginate (`--paginate`, default page is 30) and recount. An empty result
+  is never proof of a clean round; it is proof of a broken query until
+  the summary count agrees. Also list unresolved review threads and match
+  each to a collected finding.
 
 ### 5. Triage findings — fix only what is proven
 
@@ -134,6 +145,14 @@ validation, and a noisy one is mostly noise until proven. For EACH finding:
 
 ### 7. Handoff to human (STOP — never merge)
 
+- **Handoff gate (all must hold; check in order, stop at the first failure):**
+  1. Mandatory checks green on the HEAD sha (`gh pr checks` + head match).
+  2. Zero unresolved review threads across ALL rounds (GraphQL
+     `reviewThreads`, `isResolved == false` is empty).
+  3. Ledger reconciled for the latest run: `fixed + waived ==
+     summary finding count`, every finding fixed-pushed or waive-replied.
+  Do NOT run `gh pr ready`, post highlights, or end the turn until all three
+  hold — a premature all-clear is how findings get ignored (precedent: #130).
 - Mark ready only when mandatory checks are green:
   `gh pr ready <PR#>` (draft → ready is the stage-1→stage-2 switch).
 - Post the highlights comment on the PR AND print it in chat:
@@ -171,6 +190,8 @@ Run ONLY as a follow-up when the human replies that everything is OK
 - After step 1: `PR: <url> (draft) | change: <name|none> | base: main`
 - After step 3: `CI: backend ✅ ios ✅ openspec ✅ (reruns: N)`
 - After each review round: `Review round N: fixed <k>, waived <m> (reasons), pushed <sha>`
+  — with `k + m` equal to that run's summary finding count, or an explicit
+  note on the gap.
 - Final handoff: the step-7 highlights block (PR comment + chat).
 
 ## Guardrails
@@ -182,6 +203,10 @@ Run ONLY as a follow-up when the human replies that everything is OK
   a clean AI review is not proof (stage 2 still runs).
 - **Prove before fixing.** No code change for an unproven finding;
   waive with evidence instead.
+- **Reconcile, don't assume.** Findings are attributed by review-run ID
+  (`ocr-review-run:<runId>-`), never by timestamp cutoff; summary counts
+  must equal triaged counts; handoff requires zero unresolved threads.
+  An empty findings query proves a broken query, never a clean round.
 - **Bound the loop.** 3 fix→review rounds max, then hand off with a ledger.
 - **Template honesty.** Check only boxes you verified; leave stage-2 boxes
   for the human.
