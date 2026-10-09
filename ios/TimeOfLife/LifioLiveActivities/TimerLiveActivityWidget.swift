@@ -123,6 +123,11 @@ struct TimerLiveActivityWidget: Widget {
         // Banner breathing room: the HStack otherwise sits flush against
         // the banner's top/bottom edges (device finding, verified 8pt).
         .padding(.vertical, 8)
+        // Frosted (not solid) banner: the default activity background is
+        // an opaque black slab — a translucent tint lets the wallpaper
+        // bleed through in the lock-screen language (true refraction is
+        // system-only for third-party archived renders).
+        .activityBackgroundTint(Color.black.opacity(0.4))
         .accessibilityElement(children: .combine)
         .accessibilityLabel(LiveActivityStrings.runningAccessibilityLabel(text: text))
     }
@@ -134,6 +139,7 @@ struct TimerLiveActivityWidget: Widget {
             Text(LiveActivityStrings.savedCardTitle(duration: duration))
                 .font(.headline)
         }
+        .activityBackgroundTint(Color.black.opacity(0.4))
         .widgetURL(trackURL)
     }
 
@@ -245,18 +251,19 @@ struct LiveActivityStopPill: View {
     }
 }
 
-/// Liquid Glass Stop container: on iOS 26+ a prominent glass button
-/// tinted danger-red (system-consistent, readable in both modes); below
-/// 26 the previous plain red shape. The banner/island containers
-/// themselves are already system glass — only the controls need this.
+/// Liquid Glass Stop container: on iOS 26+ an explicit glass effect
+/// tinted danger-red (a `glassEffect` container carries live-compositing
+/// metadata — a glass *button style* flattens in the archived activity
+/// render, device-verified); below 26 the plain red shape. The
+/// banner/island containers themselves are system glass already.
 struct StopGlass<S: Shape>: ViewModifier {
     let shape: S
 
     func body(content: Content) -> some View {
         if #available(iOS 26, *) {
             content
-                .buttonStyle(.glassProminent)
-                .tint(LiveActivityTheme.stopBackground)
+                .buttonStyle(.plain)
+                .glassEffect(.regular.tint(LiveActivityTheme.stopBackground), in: shape)
         } else {
             content
                 .buttonStyle(.plain)
