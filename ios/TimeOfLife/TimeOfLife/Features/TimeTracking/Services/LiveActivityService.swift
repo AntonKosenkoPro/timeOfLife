@@ -81,6 +81,7 @@ final class LiveActivityService: LiveActivityControlling {
             return
         }
         let live = Activity<TimerActivityAttributes>.activities
+        Self.logger.info("LiveActivityService: type is \(String(describing: TimerActivityAttributes.self)), liveCount=\(live.count)")
         if live.contains(where: { $0.attributes.entryText == text }) { return }
         for activity in live {
             await activity.end(nil, dismissalPolicy: .immediate)
