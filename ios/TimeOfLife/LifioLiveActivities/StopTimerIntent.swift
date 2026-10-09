@@ -38,10 +38,15 @@ struct StopTimerIntent: AppIntent {
             Self.logger.info("StopTimerIntent ignored: no active account file")
             return .result()
         }
-        guard let store = try? LocalStore(url: url),
-              let draft = try? await store.timerDraft(),
+        guard let store = try? LocalStore(url: url) else {
+            // Locked keybag with pre-fix file protection, or a damaged
+            // file: the draft is untouched, retry from the app unlocked.
+            Self.logger.info("StopTimerIntent ignored: store open failed")
+            return .result()
+        }
+        guard let draft = try? await store.timerDraft(),
               !draft.activityText.isEmpty else {
-            Self.logger.info("StopTimerIntent ignored: store or draft unavailable")
+            Self.logger.info("StopTimerIntent ignored: no running draft")
             return .result()
         }
         let startedAt = draft.startedAt ?? Date()

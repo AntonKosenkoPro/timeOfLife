@@ -40,10 +40,13 @@ final class SessionCache: @unchecked Sendable {
 
     /// Writes (sign-in) or removes (sign-out) the resolver sidecar.
     /// Best-effort: a failed write must never fail the sign-in itself.
+    /// The sidecar is read by lock-screen extension surfaces with a locked
+    /// keybag, so it carries the same after-first-unlock class as the db.
     private func mirrorSessionFile(userID: String?) {
         guard let url = sessionFileURL else { return }
         if let userID {
             try? userID.write(to: url, atomically: true, encoding: .utf8)
+            FileManager.default.ensureAccessibleAfterFirstUnlock(url)
         } else {
             try? FileManager.default.removeItem(at: url)
         }

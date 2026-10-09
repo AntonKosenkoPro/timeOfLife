@@ -289,7 +289,14 @@ actor LocalStore {
             // cascades to its join rows, mirroring the backend relay.
             try db.execute(sql: "PRAGMA foreign_keys = ON")
         }
-        return try DatabaseQueue(path: url.path, configuration: configuration)
+        let queue = try DatabaseQueue(path: url.path, configuration: configuration)
+        // Lock-screen surfaces (Stop intent) run with a locked keybag: the
+        // db must stay readable/writable after first unlock (device finding:
+        // locked Stop no-op'd with "store or draft unavailable"). Journals
+        // created later inherit the db file's class on iOS; re-applied on
+        // every open so pre-existing files heal on next unlocked launch.
+        FileManager.default.ensureAccessibleAfterFirstUnlock(url)
+        return queue
     }
 
     /// Reads the per-file account marker, or nil when absent.
@@ -2164,4 +2171,25 @@ struct DeletionSnapshot: Codable, Equatable, Sendable {
 enum AssociationError: Error, Equatable, Sendable {
     /// A referenced category does not exist locally.
     case invalidCategory(String)
+}
+
+extension FileManager {
+    /// Marks `url` (plus SQLite `-wal`/`-shm`/`-journal` siblings when
+    /// present) readable/writable after first unlock, so lock-screen
+    /// extension surfaces (Stop intent) keep working with a locked keybag.
+    /// Best-effort and never throwing: a failed stamp must not fail the
+    /// open/write it follows (and cannot heal anything while locked — files
+    /// heal on the next unlocked open instead).
+    func ensureAccessibleAfterFirstUnlock(_ url: URL) {
+        var candidates = [url]
+        for suffix in ["-wal", "-shm", "-journal"] {
+            candidates.append(URL(fileURLWithPath: url.path + suffix))
+        }
+        for candidate in candidates where fileExists(atPath: candidate.path) {
+            try? setAttributes(
+                [.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication],
+                ofItemAtPath: candidate.path
+            )
+        }
+    }
 }
