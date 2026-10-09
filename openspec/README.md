@@ -49,7 +49,8 @@ archived `changes/`. The CLI generates or updates workflow adapters on demand.
 
 - **Baselines never edited directly**; every behavior change adds a delta to a change.
 - **Incomplete UI surfaces must not be claimed done**: app-wide UndoToast/shake-to-undo,
-  "via <Source>" labels, and the iOS 18 lock-screen ControlWidget (no target in `project.yml` —
+  "via <Source>" labels, and the iOS 18 lock-screen ControlWidget itself (a widget
+  extension target exists for Live Activities; the Control toggle is still deferred —
   deferred again as excessive under `bump-ios-deployment-to-18`) remain deferred.
   Entry and category deletions undo through the DEFAULT system Undo confirmation
   (archived `unify-catalog-deletion`) and do not close the app-wide undo work.

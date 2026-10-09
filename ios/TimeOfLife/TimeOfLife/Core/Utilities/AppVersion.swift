@@ -16,7 +16,12 @@ enum AppVersion {
     /// Missing bundle keys fall back to `"?"` (defensive only — a built app
     /// bundle always carries the marketing key, and the stamp script leaves
     /// `"?"` in `GIT_COMMIT_SHA` when git is unavailable).
-    static func formatted(marketing: String?, build: String?, isDebug: Bool, debugSuffix: String) -> String {
+    static func formatted(
+        marketing: String?,
+        build: String?,
+        isDebug: Bool,
+        debugSuffix: String
+    ) -> String {
         let base = "v\(marketing ?? "?") (\(build ?? "?"))"
         guard isDebug else { return base }
         return "\(base) • \(debugSuffix)"

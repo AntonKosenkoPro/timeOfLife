@@ -274,8 +274,14 @@ actor LocalStore {
     }
 
     /// Creates the database queue for one file. `DatabaseQueue` is
-    /// sufficient: the app is the only writer in practice, and cross-process
-    /// access is serialized by SQLite's own file locking.
+    /// sufficient: concurrent writers (app sync drain, widget Stop intent)
+    /// are serialized by SQLite's own file locking, and every multi-step
+    /// flow is fail-closed per step (a `BUSY`/IO throw aborts that step
+    /// without partial commits leaking past the chokepoint). Multi-step
+    /// flows are deliberately NOT single transactions across steps — a
+    /// crash between entry-save and draft-clear is reconciled on next
+    /// contact (draft present → run resumes; entry-recency heuristic),
+    /// identically in-app and in the intent.
     private static func makeDatabaseQueue(at url: URL) throws -> DatabaseQueue {
         let directory = url.deletingLastPathComponent()
         try FileManager.default.createDirectory(
@@ -289,7 +295,14 @@ actor LocalStore {
             // cascades to its join rows, mirroring the backend relay.
             try db.execute(sql: "PRAGMA foreign_keys = ON")
         }
-        return try DatabaseQueue(path: url.path, configuration: configuration)
+        let queue = try DatabaseQueue(path: url.path, configuration: configuration)
+        // Lock-screen surfaces (Stop intent) run with a locked keybag: the
+        // db must stay readable/writable after first unlock (device finding:
+        // locked Stop no-op'd with "store or draft unavailable"). Journals
+        // created later inherit the db file's class on iOS; re-applied on
+        // every open so pre-existing files heal on next unlocked launch.
+        FileManager.default.ensureAccessibleAfterFirstUnlock(url)
+        return queue
     }
 
     /// Reads the per-file account marker, or nil when absent.
@@ -983,6 +996,18 @@ actor LocalStore {
             guard let row = try Row.fetchOne(db, sql: """
                 SELECT * FROM entries WHERE id = ?
                 """, arguments: [id]) else { return nil }
+            return try Self.entry(from: row, db: db)
+        }
+    }
+
+    /// The single most recently finished entry, or nil (orphan-reap
+    /// heuristic, live-activities). `LIMIT 1` — never a full-table scan.
+    /// Ordered by end time, falling back to start for entries without one.
+    func latestEntry() throws -> TimeEntry? {
+        try queue.read { db in
+            guard let row = try Row.fetchOne(db, sql: """
+                SELECT * FROM entries ORDER BY COALESCE(ended_at, started_at) DESC, id DESC LIMIT 1
+                """) else { return nil }
             return try Self.entry(from: row, db: db)
         }
     }
@@ -2164,4 +2189,25 @@ struct DeletionSnapshot: Codable, Equatable, Sendable {
 enum AssociationError: Error, Equatable, Sendable {
     /// A referenced category does not exist locally.
     case invalidCategory(String)
+}
+
+extension FileManager {
+    /// Marks `url` (plus SQLite `-wal`/`-shm`/`-journal` siblings when
+    /// present) readable/writable after first unlock, so lock-screen
+    /// extension surfaces (Stop intent) keep working with a locked keybag.
+    /// Best-effort and never throwing: a failed stamp must not fail the
+    /// open/write it follows (and cannot heal anything while locked — files
+    /// heal on the next unlocked open instead).
+    func ensureAccessibleAfterFirstUnlock(_ url: URL) {
+        var candidates = [url]
+        for suffix in ["-wal", "-shm", "-journal"] {
+            candidates.append(URL(fileURLWithPath: url.path + suffix))
+        }
+        for candidate in candidates where fileExists(atPath: candidate.path) {
+            try? setAttributes(
+                [.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication],
+                ofItemAtPath: candidate.path
+            )
+        }
+    }
 }

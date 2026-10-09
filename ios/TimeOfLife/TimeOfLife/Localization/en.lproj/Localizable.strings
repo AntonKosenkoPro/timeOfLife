@@ -75,6 +75,9 @@
 "timer.compactReturnHint" = "Returns to Track";
 "timer.compactRunning" = "%@, timer running";
 
+// Live Activity (renders in the widget extension from the shared strings)
+"activity.savedWithDuration" = "Saved %@";
+
 // App shell
 "tab.track" = "Track";
 "tab.history" = "History";

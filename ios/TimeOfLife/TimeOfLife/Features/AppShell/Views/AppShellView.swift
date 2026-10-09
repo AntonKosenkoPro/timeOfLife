@@ -16,6 +16,7 @@ struct AppShellView: View {
     /// (`trackVM` below already follows this pattern.)
     @StateObject var vm: AppShellViewModel
     @EnvironmentObject var container: AppContainer
+    @EnvironmentObject var navigation: AppNavigationStack
     /// Observed directly (not via `container`): `AppContainer` publishes
     /// nothing, so a nested read would never invalidate this view and the
     /// sync-exit reload below would be missed (HistoryView precedent).
@@ -60,6 +61,24 @@ struct AppShellView: View {
         // `dropFirst` skips the initial value (already covered by `.task`).
         .onReceive(vm.$selectedTab.dropFirst().filter { $0 == .track }) { _ in
             Task { await reloadTrack() }
+        }
+        // Foreground return never re-appears the visible tab: reconcile here
+        // too, or a widget-side stop leaves the Track timer ticking until
+        // the next tab switch (device finding — draft gone, in-memory run
+        // stale). Serialized reload, same as the tab-return path.
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
+            Task { await reloadTrack() }
+        }
+        // Island Stop while the compact timer is up: the draft is gone —
+        // reload clears the stale running surface (live-activities D8).
+        .onReceive(NotificationCenter.default.publisher(for: .timerStoppedExternally)) { _ in
+            Task { await vm.load() }
+        }
+        // Live Activity tap: a bumped counter selects Track without
+        // disturbing per-tab push state. `dropFirst` skips the initial
+        // value (no request has arrived yet).
+        .onReceive(navigation.$trackRequestID.dropFirst()) { _ in
+            vm.selectedTab = .track
         }
         // A sync cycle merges relay state into LocalStore behind Track: the
         // first-sync pull lands after the shell mounts, so reload on exit
@@ -238,6 +257,7 @@ private struct ShellToolbar: ViewModifier {
     let container = AppContainer.production()
     AppShellView(vm: AppShellViewModel(service: container.timerService), container: container)
         .environmentObject(container)
+        .environmentObject(AppNavigationStack())
         .environmentObject(container.syncController)
 }
 #endif

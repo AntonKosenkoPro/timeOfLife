@@ -1,4 +1,5 @@
 import Foundation
+import UIKit
 
 /// Orchestrates the timer against the local database (local-first-store spec).
 ///
@@ -10,17 +11,34 @@ import Foundation
 @MainActor
 final class TimerService: ObservableObject {
     let store: LocalStore
+    private let liveActivities: LiveActivityControlling
 
-    init(store: LocalStore) {
+    init(
+        store: LocalStore,
+        liveActivities: LiveActivityControlling = LiveActivityService {
+            UIApplication.shared.applicationState == .active
+        }
+    ) {
         self.store = store
+        self.liveActivities = liveActivities
     }
 
     /// Starts (or rewrites) the persisted running draft for the given
     /// trimmed text, ordered category snapshot, and notes snapshot (D3/D4)
     /// so it survives a crash and is readable by widgets and lock-screen
     /// Controls.
+    ///
+    /// Also mirrors the run on the Live Activity (live-activities spec):
+    /// the singleton guard inside makes rewrites (mid-run retags, crash
+    /// relaunches with the same text) safe no-ops.
     func startTimerDraft(text: String, categoryIDs: [String], notes: String = "", startedAt: Date = Date()) async throws {
         try await store.saveTimerDraft(activityText: text, categoryIDs: categoryIDs, startedAt: startedAt, notes: notes)
+        await liveActivities.runStarted(
+            text: text,
+            iconSymbol: firstIconSymbol(for: categoryIDs),
+            startedAt: startedAt
+        )
+        BackgroundReapScheduler.scheduleReapCheck()
     }
 
     /// Rewrites only the persisted running draft's live notes snapshot (a
@@ -42,20 +60,104 @@ final class TimerService: ObservableObject {
     /// with its single outbox row and clears the persisted running draft.
     /// Category ids that vanished mid-run (deleted elsewhere while timing)
     /// are pruned with the remainder kept — a stop never fails on a dead tag.
+    ///
+    /// Also ends the Live Activity with the Saved card (live-activities
+    /// spec) — every Stop path (Track, compact timer, retry, Island intent)
+    /// flows through here, so this is the single end call site.
     func stopTimerDraft(text: String, categoryIDs: [String], startedAt: Date, endedAt: Date = Date(), notes: String = "") async throws {
         let existing = Set(try await store.categories().map(\.id))
         let pruned = categoryIDs.filter { existing.contains($0) }
+        let durationSeconds = Int(endedAt.timeIntervalSince(startedAt))
         let entry = TimeEntry(
             id: await store.newRecordID(),
             activityText: text,
             startedAt: startedAt,
             endedAt: endedAt,
-            durationSeconds: Int(endedAt.timeIntervalSince(startedAt)),
+            durationSeconds: durationSeconds,
             source: "manual",
             categoryIDs: pruned,
             notes: notes
         )
         try await store.createEntry(entry)
         try await store.clearTimerDraft()
+        await liveActivities.runEnded(startedAt: startedAt, durationSeconds: durationSeconds)
+        BackgroundReapScheduler.cancelReapCheck()
+    }
+
+    /// Re-mirrors an already-persisted run on the Live Activity without
+    /// touching the draft (cold-start/restore path: `load()` revives
+    /// `.running` from storage, and a fresh `request()` is the only thing
+    /// that brings the Island back — restores never pass through
+    /// `beginRunning`). The singleton guard inside makes repeats and
+    /// already-live activities safe no-ops. Never throws: ActivityKit
+    /// failures must not break loading Track.
+    func refreshLiveActivity(text: String, categoryIDs: [String], startedAt: Date) async {
+        await liveActivities.runStarted(
+            text: text,
+            iconSymbol: firstIconSymbol(for: categoryIDs),
+            startedAt: startedAt
+        )
+    }
+    /// Ends live activities whose persisted draft is gone (stopped from
+    /// the Island — the intent can't end them itself, so the app reaps
+    /// them on contact: Darwin signal, foreground, load-reconcile, and
+    /// the background reap task). A present draft means the run is
+    /// genuinely active: nothing is orphaned, nothing ends. Never throws.
+    ///
+    /// Fail-closed on read errors: `try? … == nil` would mistake a
+    /// transient DB failure for "no draft" and dismiss a live Island —
+    /// the exact blank-island report from the device.
+    ///
+    /// Nil-duration resolution (entry-recency heuristic): a nil caller
+    /// duration means the stop arrived without one (catch-up sweep) — the
+    /// most recent entry is then consulted, and when it ended within the
+    /// last 10 minutes its true duration drives the Saved card; an older
+    /// or absent entry keeps the silent immediate dismiss.
+    ///
+    /// Self-consistency: an in-app stop ends activities synchronously in
+    /// `runEnded`, so a later sweep finds nothing live and no-ops; a crash
+    /// between save and end leaves draft-nil + a recent entry + a live
+    /// activity, which CORRECTLY yields the Saved card here. No marker
+    /// file or new state — the entry is the record.
+    func endOrphanedActivities(knownDurationSeconds: Int? = nil) async {
+        let draft: RunningTimerDraft?
+        do {
+            draft = try await store.timerDraft()
+        } catch {
+            return
+        }
+        guard draft == nil else { return }
+        var duration = knownDurationSeconds
+        if duration == nil {
+            duration = await recentlyEndedDuration()
+        }
+        await liveActivities.endOrphanedActivities(knownDurationSeconds: duration)
+    }
+
+    /// The recency window for the reap heuristic: only an entry that
+    /// ended this recently counts as the orphan's Saved-card duration.
+    private static let reapRecencySeconds = 600.0
+
+    /// The entry-recency heuristic: the latest entry's duration when it
+    /// ended within `reapRecencySeconds`, else nil. Fail-closed: any read
+    /// error (or missing timing) yields nil — the silent dismiss path.
+    private func recentlyEndedDuration() async -> Int? {
+        guard let latest = try? await store.latestEntry(),
+              let endedAt = latest.endedAt,
+              let durationSeconds = latest.durationSeconds
+        else { return nil }
+        let now = Date()
+        guard endedAt <= now, now.timeIntervalSince(endedAt) <= Self.reapRecencySeconds else { return nil }
+        return durationSeconds
+    }
+
+    /// The first-position category's display icon for the Live Activity
+    /// (recents-chip rule), or `"timer"` when the run has no categories
+    /// or the category is unknown locally.
+    private func firstIconSymbol(for categoryIDs: [String]) async -> String {
+        guard let firstID = categoryIDs.first,
+              let match = (try? await store.categories())?.first(where: { $0.id == firstID })
+        else { return "timer" }
+        return CatalogIcon(validated: match.icon).displaySymbol
     }
 }

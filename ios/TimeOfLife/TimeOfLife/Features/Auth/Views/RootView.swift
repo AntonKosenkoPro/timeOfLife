@@ -61,6 +61,10 @@ struct RootView: View {
                 // deletions stay restorable until their push succeeds).
                 if case .signedIn = session.state {
                     container.syncController.trigger(userID: sessionUserID())
+                    // Island Stop while suspended: the Darwin signal may
+                    // have been missed, so reap here too (the entry-recency
+                    // heuristic resolves Saved-vs-silent; live-activities D8).
+                    Task { await container.timerService.endOrphanedActivities() }
                 }
             }
     }

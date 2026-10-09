@@ -75,6 +75,10 @@ final class AuthService: ObservableObject {
 
         // If we have a cached session and tokens, optimistically show signed-in.
         if let cached, refreshToken != nil {
+            // Re-save: refreshes the resolver sidecar file even when `/me`
+            // below never runs (offline), so extension surfaces resolve
+            // from the first cold start after upgrade, not just fresh sign-in.
+            cache.save(cached)
             sessionStore.setSignedIn(cached)
         }
 

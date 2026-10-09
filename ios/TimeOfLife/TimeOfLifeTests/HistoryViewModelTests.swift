@@ -170,23 +170,27 @@ struct HistoryViewModelTests {
 
     @Test("rows read categories from the entry itself, position-preserved")
     func loadsAndResolvesCategories() async throws {
+        // Fixed midday anchors: relative `Date(timeIntervalSinceNow:)`
+        // offsets straddle midnight when the suite runs just after 00:00,
+        // splitting the two entries across day groups (device/CI flake).
+        let noon = Date(timeIntervalSince1970: 1_718_449_200)
         let store = try makeStore()
         try await store.createCategory(Category(id: "c1", name: "Health", icon: "figure.run"))
         try await store.createCategory(Category(id: "c2", name: "Work", icon: "briefcase"))
         try await store.createEntry(entry(
             id: "e1",
-            startedAt: Date(timeIntervalSinceNow: -3600),
+            startedAt: noon.addingTimeInterval(-3600),
             text: "Running",
             categoryIDs: ["c2", "c1"],
             durationSeconds: 3600,
-            endedAt: Date()
+            endedAt: noon
         ))
         try await store.createEntry(entry(
             id: "e2",
-            startedAt: Date(timeIntervalSinceNow: -7200),
+            startedAt: noon.addingTimeInterval(-7200),
             text: "Meditation",
             durationSeconds: 600,
-            endedAt: Date(timeIntervalSinceNow: -6000)
+            endedAt: noon.addingTimeInterval(-6000)
         ))
 
         let vm = HistoryViewModel(store: store, undoBuffer: UndoBufferStore(store: store))

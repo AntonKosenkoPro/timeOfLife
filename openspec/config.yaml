@@ -25,8 +25,8 @@ context: |
   Non-negotiables: LocalStore is the single mutation chokepoint (GRDB, App Group
   `group.com.antonkosenko.timeoflifeapp`) — no raw GRDB writes outside it. Several local-first UI
   surfaces are INCOMPLETE (see docs/project-context.md → "Incomplete / deferred"): UndoToast /
-  shake-to-undo, "via <Source>" labels, and the iOS 18 lock-screen ControlWidget (no
-  target in `project.yml`). OpenAPI (`backend/api/openapi.yaml`) is the authoritative API
+  shake-to-undo, "via <Source>" labels, and the iOS 18 lock-screen ControlWidget itself (a
+  widget extension target exists for Live Activities; the Control toggle is still deferred). OpenAPI (`backend/api/openapi.yaml`) is the authoritative API
   contract (S10). No backward compat for on-disk formats (pre-release). No passwords, no
   plaintext secrets (R1). iOS strings go to both `en.lproj` and `ru.lproj` + `L10n` (U4).
   XcodeGen-managed: edit `project.yml`, run `xcodegen generate`, never hand-edit the `.pbxproj`.

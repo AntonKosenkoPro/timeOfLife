@@ -34,12 +34,11 @@ struct ActiveAccountFileResolverTests {
     @Test("the active account's existing file resolves ready with its URL")
     func activeFileResolvesReady() throws {
         let base = temporaryBaseDirectory()
-        // swiftlint:disable:next force_try
-        let store = try! LocalStore(
-            url: base.appendingPathComponent(LocalStore.databaseFileName(userID: "u1")),
-            userID: "u1"
-        )
-        _ = store
+        // An explicit placeholder file: resolution only stats existence —
+        // no store side effects involved.
+        try FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
+        let fileURL = base.appendingPathComponent(LocalStore.databaseFileName(userID: "u1"))
+        _ = FileManager.default.createFile(atPath: fileURL.path, contents: nil)
         let resolver = ActiveAccountFileResolver(
             sessionDefaults: makeDefaults(userID: "u1")
         )
@@ -88,5 +87,47 @@ struct ActiveAccountFileResolverTests {
             sessionDefaults: makeDefaults(userID: "../evil")
         )
         #expect(resolver.resolve(base: base) == .locked)
+    }
+
+    @Test("sidecar file id resolves ready with empty defaults (extension case)")
+    func sidecarFileResolvesWithoutDefaults() throws {
+        let base = temporaryBaseDirectory()
+        try FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
+        let fileURL = base.appendingPathComponent(LocalStore.databaseFileName(userID: "u9"))
+        _ = FileManager.default.createFile(atPath: fileURL.path, contents: nil)
+        try "u9".write(
+            to: base.appendingPathComponent(ActiveAccountFileResolver.sessionFileName),
+            atomically: true,
+            encoding: .utf8
+        )
+        let resolver = ActiveAccountFileResolver(
+            sessionDefaults: makeDefaults(userID: nil)
+        )
+        guard case let .ready(url) = resolver.resolve(base: base) else {
+            Issue.record("expected ready, got \(resolver.resolve(base: base))")
+            return
+        }
+        #expect(url == base.appendingPathComponent(LocalStore.databaseFileName(userID: "u9")))
+    }
+
+    @Test("sidecar file takes precedence over defaults")
+    func sidecarFileBeatsDefaults() throws {
+        let base = temporaryBaseDirectory()
+        try FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
+        let fileURL = base.appendingPathComponent(LocalStore.databaseFileName(userID: "u9"))
+        _ = FileManager.default.createFile(atPath: fileURL.path, contents: nil)
+        try "u9".write(
+            to: base.appendingPathComponent(ActiveAccountFileResolver.sessionFileName),
+            atomically: true,
+            encoding: .utf8
+        )
+        let resolver = ActiveAccountFileResolver(
+            sessionDefaults: makeDefaults(userID: "u1")
+        )
+        guard case let .ready(url) = resolver.resolve(base: base) else {
+            Issue.record("expected ready, got \(resolver.resolve(base: base))")
+            return
+        }
+        #expect(url == base.appendingPathComponent(LocalStore.databaseFileName(userID: "u9")))
     }
 }

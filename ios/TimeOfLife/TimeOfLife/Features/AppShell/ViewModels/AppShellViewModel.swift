@@ -100,7 +100,7 @@ final class AppShellViewModel: ObservableObject {
 
     private func startTicker() {
         ticker?.cancel()
-        ticker = Timer.publish(every: 1, on: .main, in: .common)
+        ticker = Timer.publish(every: 1.0, on: .main, in: .common)
             .autoconnect()
             .sink { [weak self] _ in
                 Task { @MainActor in

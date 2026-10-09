@@ -4,13 +4,22 @@ import Foundation
 /// so the UI can render a cached session after a cold launch, before `/me`
 /// resolves. Tokens never go here — only `KeychainStoring`.
 ///
+/// Additionally mirrors the user id into a sidecar file
+/// (`ActiveAccountFileResolver.sessionFileName`) when `sessionFileURL` is
+/// set (production App Group container): extension processes cannot reliably
+/// read suite `UserDefaults` (`cfprefsd` detaches), but group-container file
+/// reads stay reliable — that file is what cross-process surfaces resolve.
+/// Nil (tests, previews, UI-testing) keeps defaults-only behavior.
+///
 /// Thread-safe via a serial `DispatchQueue`.
 final class SessionCache: @unchecked Sendable {
     private let defaults: UserDefaults
+    private let sessionFileURL: URL?
     private let queue = DispatchQueue(label: "com.timeoflife.SessionCache")
 
-    init(defaults: UserDefaults = .standard) {
+    init(defaults: UserDefaults = .standard, sessionFileURL: URL? = nil) {
         self.defaults = defaults
+        self.sessionFileURL = sessionFileURL
     }
 
     func save(_ session: CachedSession?) {
@@ -19,10 +28,34 @@ final class SessionCache: @unchecked Sendable {
                 defaults.set(session.id, forKey: Keys.id)
                 defaults.set(session.email, forKey: Keys.email)
                 defaults.set(session.emailVerified, forKey: Keys.emailVerified)
+                mirrorSessionFile(userID: session.id)
             } else {
                 defaults.removeObject(forKey: Keys.id)
                 defaults.removeObject(forKey: Keys.email)
                 defaults.removeObject(forKey: Keys.emailVerified)
+                mirrorSessionFile(userID: nil)
+            }
+        }
+    }
+
+    /// Writes (sign-in) or removes (sign-out) the resolver sidecar.
+    /// Best-effort: a failed write must never fail the sign-in itself.
+    /// The sidecar is read by lock-screen extension surfaces with a locked
+    /// keybag, so it carries the same after-first-unlock class as the db.
+    /// A failed sign-out removal falls back to blanking the file: a stale
+    /// id would otherwise keep resolving the logged-out account (and a
+    /// lock-screen intent could write into it), while a blank file
+    /// resolves `.locked` — the safe direction.
+    private func mirrorSessionFile(userID: String?) {
+        guard let url = sessionFileURL else { return }
+        if let userID {
+            try? userID.write(to: url, atomically: true, encoding: .utf8)
+            FileManager.default.ensureAccessibleAfterFirstUnlock(url)
+        } else {
+            do {
+                try FileManager.default.removeItem(at: url)
+            } catch {
+                try? "".write(to: url, atomically: true, encoding: .utf8)
             }
         }
     }

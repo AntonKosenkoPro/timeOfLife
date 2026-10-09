@@ -91,6 +91,18 @@ Prerequisites: Release build installed on the device (`Product → Destination �
 8. [ ] **Offline gates the button** — airplane mode on; the Apple button is disabled (dimmed); the email path still navigates.
 9. [ ] **Idempotent re-sign-in** — sign out, sign in with Apple again; same user (the same account file reattaches, no duplicate account or duplicate seeded categories).
 
+### Live Activities — manual smoke checklist
+
+Live Activities need a real device with Dynamic Island (the simulator shows the Lock Screen banner only) and a signed-in account with at least one category.
+
+1. [ ] **Island appears** — start a timer on Track; the Dynamic Island shows the compact face (first-category icon + ticking elapsed).
+2. [ ] **Expanded card** — long-press the Island; the expanded card shows the exact name, icon, elapsed, Stop, and Go-to-Track.
+3. [ ] **Go to Track** — tap the compact face (or the Go row); the app opens on the Track tab with the timer running.
+4. [ ] **Stop from the Island** — stop from the expanded card or the Lock Screen banner; the entry saves as `manual` (no "via" label), the banner shows the Saved card with the final duration, then dismisses within seconds and the Island collapses.
+5. [ ] **Minimal face** — with music (or another Live Activity) active, the timer collapses to the icon-only minimal face without layout breakage.
+6. [ ] **Lock Screen banner** — lock the device while running; the banner shows icon + name + ticking elapsed + Stop.
+7. [ ] **Dismissal delay** — confirm the Saved card lingers long enough to read but never minutes; record the final seconds in the change's spec delta (task 5.1).
+
 ## CI (S6)
 
 `.github/workflows/backend.yml` (gofmt, go vet, golangci-lint, test + coverage) and `ios.yml` (xcodegen, swiftlint, warning-as-error build, test) are **mandatory PR checks**. See [`docs/ci.md`](docs/ci.md) for the full pipeline guide.
@@ -103,6 +115,6 @@ The backend deploys to a **GCP Compute Engine VM** (`timeoflife-backend`, us-eas
 
 - **Sign in with Apple follow-ups** — account-deletion token revocation via Apple `/auth/revoke`, nonce replay defense, credential-state observation, identity merging between email-OTP and Apple accounts (kept separate by design for now).
 - **iOS History list/edit UI** — the History day-grouped list and entry editing (tap a row → unified entry form) have shipped (deferred filtering lives in `docs/history-roadmap.md`); the Insights breakdown v1 (period switch + category/text lenses, mirror-only) is implemented.
-- **App-wide Undo UI, "via <Source>" labels, lock-screen Control** — local-first storage/sync foundations are done; these UI surfaces are open tasks. **Device quota counting + 6th-device picker (#46)** is a pre-release blocker on top of the per-device session foundation; a multi-session device switcher is future work (one active session per device; switching re-authenticates).
+- **App-wide Undo UI, "via <Source>" labels, lock-screen Control** — local-first storage/sync foundations are done; these UI surfaces are open tasks (the widget extension target exists for Live Activities — Dynamic Island + Lock Screen banner, #40 — but the ControlWidget toggle itself is still deferred). **Device quota counting + 6th-device picker (#46)** is a pre-release blocker on top of the per-device session foundation; a multi-session device switcher is future work (one active session per device; switching re-authenticates).
 - **Kafka** — deferred (S1 names it; not needed yet). **Rate-limit store** — in-memory; Redis before multi-instance.
 - **SwiftUI snapshot / on-device keychain tests** — not automated; verified manually in the simulator.

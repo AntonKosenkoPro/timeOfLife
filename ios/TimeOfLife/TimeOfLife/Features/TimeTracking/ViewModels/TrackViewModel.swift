@@ -1,3 +1,6 @@
+// swiftlint:disable file_length
+// (hosts both the guarded reload contract and the reconcile paths;
+// splitting the VM is future work, not this change.)
 import Combine
 import Foundation
 import SwiftUI
@@ -97,6 +100,15 @@ final class TrackViewModel: ObservableObject {
                 )
                 nameDraft = persisted.activityText
                 startTicker(from: startedAt)
+                // Revived runs never pass through beginRunning, so no
+                // Live Activity would exist for them (cold start, upgrade
+                // install, relaunch) — re-mirror here. Singleton-guarded:
+                // an already-live activity is a no-op.
+                await service.refreshLiveActivity(
+                    text: persisted.activityText,
+                    categoryIDs: persisted.categoryIDs,
+                    startedAt: startedAt
+                )
             } else if case let .running(draft, _) = state {
                 await reconcileExternalStop(draft: draft)
             }
@@ -148,6 +160,11 @@ final class TrackViewModel: ObservableObject {
         state = draft.text.isEmpty
             ? .idle
             : .ready(TrackState.Draft(text: draft.text, categoryIDs: draft.categoryIDs))
+        // The draft is gone so no run is active, but an Island may still be
+        // live (terminated app missed the Darwin signal): reap — the
+        // entry-recency heuristic resolves Saved-vs-silent from the saved
+        // entry itself (live-activities D8).
+        await service.endOrphanedActivities()
     }
 
     // MARK: - Capture (plain text)

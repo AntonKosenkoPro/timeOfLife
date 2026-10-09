@@ -143,6 +143,7 @@ struct LocalizationTests {
     }
 
     private static let expectedKeys: [String] = [
+        "activity.savedWithDuration",
         "app.name",
         "appleSignIn.error",
         "appleSignIn.title",

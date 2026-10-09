@@ -2,6 +2,8 @@ import Foundation
 import OSLog
 import SwiftUI
 
+import LifioLiveActivityCore
+
 /// Composition root. Builds the real production graph and exposes the
 /// objects views/view models need. Everything is injectable for tests.
 ///
@@ -77,6 +79,76 @@ final class AppContainer: ObservableObject {
         self.undoBuffer = undoBuffer
         self.syncController = syncController
         self.clientHolder = clientHolder
+        registerReapCheck()
+        observeExternalStopSignal()
+    }
+
+    /// Handles an Island Stop: reaps activities orphaned by the intent and
+    /// tells tracker surfaces to reload (the intent already saved the entry
+    /// and cleared the draft — Track/compact would otherwise keep ticking
+    /// stale in-memory state). The run is definitively over, so the
+    /// background reap chain is cancelled — unless a new run started in
+    /// the meantime (its Start re-armed the chain; cancelling here would
+    /// strand it), so the cancel is draft-gated.
+    func handleExternalStop() {
+        Task {
+            await timerService.endOrphanedActivities()
+            if (try? await timerService.runningTimerDraft()) == nil {
+                BackgroundReapScheduler.cancelReapCheck()
+            }
+            NotificationCenter.default.post(name: .timerStoppedExternally, object: nil)
+        }
+    }
+
+    /// Registers the background reap check (live-activities BG chain): a
+    /// background launch runs `AppContainer.init` too, so registering here
+    /// covers both foreground and background launches. The handler runs
+    /// the orphan-reap funnel (which resolves Saved-vs-silent itself) and
+    /// re-arms only while a draft is still live — a finished run ends the
+    /// chain, and the next Start re-arms it.
+    private func registerReapCheck() {
+        BackgroundReapScheduler.register { [weak self] in
+            guard let self else { return false }
+            await self.timerService.endOrphanedActivities()
+            // Fail-open toward re-arming: an unreadable store must not drop
+            // the chain (the funnel itself already failed closed by ending
+            // nothing), or a transient DB error would strand a live banner.
+            let draft: RunningTimerDraft?
+            do {
+                draft = try await self.timerService.runningTimerDraft()
+            } catch {
+                return true
+            }
+            return draft != nil
+        }
+    }
+
+    /// Observes the Darwin signal posted by the Stop intent (live-activities
+    /// D8). The C callback hops to the actor; the box lives as long as the
+    /// container (app lifetime) by design.
+    private func observeExternalStopSignal() {
+        final class HandlerBox: Sendable {
+            let onSignal: @Sendable () -> Void
+            init(_ onSignal: @escaping @Sendable () -> Void) {
+                self.onSignal = onSignal
+            }
+        }
+        let box = HandlerBox { [weak self] in
+            Task { await self?.handleExternalStop() }
+        }
+        let context = Unmanaged.passRetained(box).toOpaque()
+        CFNotificationCenterAddObserver(
+            CFNotificationCenterGetDarwinNotifyCenter(),
+            context,
+            { _, observer, _, _, _ in
+                guard let observer else { return }
+                let box = Unmanaged<HandlerBox>.fromOpaque(observer).takeUnretainedValue()
+                box.onSignal()
+            } as CFNotificationCallback,
+            LiveActivitySignal.name as CFString,
+            nil,
+            .deliverImmediately
+        )
     }
 
     /// Default production graph wired against `AppConfig.baseURL`. The local
@@ -89,8 +161,12 @@ final class AppContainer: ObservableObject {
         // The cache must write the session id to the App Group defaults —
         // the same store `ActiveAccountFileResolver` reads (lock-screen-
         // controls delta 4.2), or resolve() sees `.locked` for real sessions.
+        // The id is additionally mirrored to the group-container sidecar
+        // file, which is what extension processes actually read (suite
+        // UserDefaults detach from cfprefsd in extensions).
         let sessionCache = SessionCache(
-            defaults: UserDefaults(suiteName: LocalStore.appGroupID) ?? .standard
+            defaults: UserDefaults(suiteName: LocalStore.appGroupID) ?? .standard,
+            sessionFileURL: ActiveAccountFileResolver.sessionFileURL()
         )
         let sessionStore = SessionStore()
         let navigation = AppNavigationStack()
@@ -260,4 +336,10 @@ final class APIClientHolder {
     weak var service: AuthService?
     var client: APIClient?
     init() {}
+}
+
+extension Notification.Name {
+    /// Posted (in-process) after an Island Stop is handled: tracker surfaces
+    /// reload so no stale running state survives (live-activities D8).
+    static let timerStoppedExternally = Notification.Name("timerStoppedExternally")
 }
