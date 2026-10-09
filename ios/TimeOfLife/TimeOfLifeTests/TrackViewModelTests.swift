@@ -489,7 +489,7 @@ struct TrackViewModelTests {
         let vm = makeViewModel()
         let store = vm.service.store
         let base = Date(timeIntervalSinceReferenceDate: 1_000)
-        for index in 0..<8 {
+        for index in 0..<14 {
             try await store.createEntry(makeEntry(
                 id: "e\(index)",
                 text: "Text\(index)",
@@ -497,9 +497,10 @@ struct TrackViewModelTests {
             ))
         }
         await vm.load()
-        #expect(vm.recents.count == 6)
-        #expect(vm.allNames.count == 8)
-        #expect(vm.allNames.first?.text == "Text7")
+        #expect(vm.recents.count == 12)
+        #expect(vm.recents.first?.text == "Text13")
+        #expect(vm.allNames.count == 14)
+        #expect(vm.allNames.first?.text == "Text13")
     }
 
     @Test("stop refreshes recents and picker names in lockstep")
@@ -533,7 +534,7 @@ struct TrackViewModelTests {
     }
 
     private func storeRecents(_ store: LocalStore) async throws -> [ExactName] {
-        try await store.recents(limit: 6).map(ExactName.init(storeRecent:))
+        try await store.recents(limit: TrackViewModel.recentsLimit).map(ExactName.init(storeRecent:))
     }
 
     private func makeViewModel() -> TrackViewModel {

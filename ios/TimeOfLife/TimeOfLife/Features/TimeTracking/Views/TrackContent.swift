@@ -244,6 +244,7 @@ struct TrackContent: View {
                     Text(vm.state.draft?.text ?? "")
                         .lineLimit(1)
                         .foregroundStyle(Theme.textPrimary)
+                    Spacer()
                 }
                 .font(.body)
                 .frame(maxWidth: .infinity, minHeight: Theme.minTapArea)
@@ -305,6 +306,7 @@ struct TrackContent: View {
             Text(L10n.entryCategoriesLabel.text)
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(Theme.textSecondary)
+            Divider().background(Theme.hairline)
             TagSelector(
                 options: Array(vm.categories.values).sorted { $0.name < $1.name },
                 selected: runningSelectedIDs,
@@ -425,6 +427,7 @@ struct TrackContent: View {
             Text(L10n.timerChooserRecent.text)
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(Theme.textSecondary)
+            Divider().background(Theme.hairline)
 
             if vm.recents.isEmpty {
                 Text(L10n.timerRecentsEmptyHint.text)
