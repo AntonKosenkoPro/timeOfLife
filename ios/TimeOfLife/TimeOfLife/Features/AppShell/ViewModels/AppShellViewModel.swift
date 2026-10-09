@@ -6,15 +6,20 @@ import Combine
 /// `profile` opens the Profile page on the tab that pushed it; `entry`
 /// carries the tapped History entry snapshot for the pushed unified entry
 /// form (EDIT for `manual`, LOCKED for imported — resolved at the
-/// destination, so the snapshot never changes spec behavior). NamePicker
-/// pushes stay caller-local `NavigationLink`s on purpose: they complete
-/// through caller-owned closures over live view-model state, which a value
-/// route cannot carry — and they are already per-tab, so they need no
-/// path to stay independent. Every case hides the tab bar at the
-/// destination (app-shell "Tab bar hidden on pushed destinations").
+/// destination, so the snapshot never changes spec behavior); `namePicker`
+/// carries the Track draft snapshot for the pushed shared picker
+/// (completion closures resolve at the destination from the owning tab's
+/// view model, so the route itself stays a value). Remaining
+/// caller-local `NavigationLink`s (Manage Categories from Profile, pickers
+/// inside the entry form and sheets) always sit under a non-empty path or
+/// outside any tab bar, so every push past a tab root is path-observed.
+/// Path-driven pushes hide the tab bar through the owning stack's
+/// path-driven visibility (app-shell "Tab bar hidden on pushed
+/// destinations"); destinations keep agreeing backstop modifiers.
 enum ShellRoute: Hashable {
     case profile
     case entry(TimeEntry)
+    case namePicker(initialText: String)
 }
 
 /// View model for the app shell (app-shell spec): owns the selected
@@ -64,6 +69,17 @@ final class AppShellViewModel: ObservableObject {
     /// Categories/editor traffic.
     static func profileWasPopped(old: [ShellRoute], new: [ShellRoute]) -> Bool {
         old.contains(.profile) && !new.contains(.profile)
+    }
+
+    /// Whether a tab's stack hides the tab bar (fix-tab-bar-return-jump):
+    /// the bar shows iff the tab sits at its root. Every push past a tab
+    /// root is path-observed (path-driven pushes plus the Track name picker
+    /// route; remaining caller-local links always sit under a non-empty
+    /// path or outside any tab bar), so a stack-level declaration never
+    /// disagrees with a destination backstop. Pure function of depth —
+    /// unit-tested, no view state involved.
+    static func isTabBarHidden(path: [ShellRoute]) -> Bool {
+        !path.isEmpty
     }
 
     /// Loads the persisted running draft (R2) and starts a periodic refresh so

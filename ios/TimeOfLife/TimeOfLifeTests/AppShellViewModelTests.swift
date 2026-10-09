@@ -145,6 +145,32 @@ struct AppShellViewModelTests {
         #expect(AppShellViewModel.profileWasPopped(old: [.profile], new: [.profile]) == false)
     }
 
+    // MARK: - Stack-owned tab-bar visibility (fix-tab-bar-return-jump)
+
+    @Test("tab bar shows at every tab root")
+    func tabBarVisibleAtRoots() {
+        #expect(AppShellViewModel.isTabBarHidden(path: []) == false)
+    }
+
+    @Test("any push hides the tab bar")
+    func tabBarHiddenOnPush() {
+        #expect(AppShellViewModel.isTabBarHidden(path: [.profile]) == true)
+        let entry = TimeEntry(id: "e1", activityText: "Gym", startedAt: Date())
+        #expect(AppShellViewModel.isTabBarHidden(path: [.entry(entry)]) == true)
+        #expect(AppShellViewModel.isTabBarHidden(path: [.namePicker(initialText: "Gy")]) == true)
+        #expect(AppShellViewModel.isTabBarHidden(path: [.profile, .entry(entry)]) == true)
+    }
+
+    @Test("visibility follows only the owning tab's path")
+    func tabBarVisibilityIsPerTab() {
+        let vm = makeViewModel()
+        vm.selectedTab = .track
+        vm.openProfile()
+        #expect(AppShellViewModel.isTabBarHidden(path: vm.trackPath) == true)
+        #expect(AppShellViewModel.isTabBarHidden(path: vm.historyPath) == false)
+        #expect(AppShellViewModel.isTabBarHidden(path: vm.insightsPath) == false)
+    }
+
     // MARK: - Helpers
 
     private func makeViewModel() -> AppShellViewModel {

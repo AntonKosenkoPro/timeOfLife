@@ -63,8 +63,10 @@ struct ManageCategoriesView: View {
         }
         .navigationTitle(L10n.manageCategoriesTitle.text)
         .navigationBarTitleDisplayMode(.inline)
-        // Second-depth push from Profile (per-tab-navigation-paths): keeps
-        // the tab bar hidden, like every destination past a tab root.
+        // Second-depth push from Profile over a caller-local NavigationLink
+        // (per-tab-navigation-paths): no path observes it, so the owning
+        // stack's path-driven visibility cannot cover it — this destination
+        // keeps its own modifier (fix-tab-bar-return-jump exception).
         .toolbar(.hidden, for: .tabBar)
         .background(Theme.backgroundPrimary.ignoresSafeArea())
         .toolbar {

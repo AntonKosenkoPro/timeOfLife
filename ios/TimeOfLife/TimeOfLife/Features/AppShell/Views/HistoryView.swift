@@ -182,6 +182,10 @@ struct HistoryView: View {
                 ProfileView()
                     .environmentObject(container)
                     .environmentObject(container.sessionStore)
+            case .namePicker:
+                // Unreachable: the Track picker route lives on the Track
+                // path only. Exhaustiveness, no behavior.
+                EmptyView()
             case .entry(let entry):
                 LogTimeView(
                     service: container.timerService,

@@ -83,9 +83,12 @@ struct NamePicker: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .navigationTitle(L10n.namePickerTitle.text)
         .navigationBarTitleDisplayMode(.inline)
-        // Pushed from Track, the entry form, or the Log Time sheet
-        // (per-tab-navigation-paths): past a tab root the tab bar hides.
-        // No-op inside the sheet stack, which owns no tab bar.
+        // Pushed over caller-local NavigationLinks from Track, the entry
+        // form, or the Log Time sheet (per-tab-navigation-paths): no path
+        // observes these pushes, so the owning stack's path-driven
+        // visibility cannot cover them — this destination keeps its own
+        // modifier (fix-tab-bar-return-jump exception). No-op inside the
+        // sheet stack, which owns no tab bar.
         .toolbar(.hidden, for: .tabBar)
         .background(Theme.backgroundPrimary.ignoresSafeArea())
         .task {
