@@ -255,6 +255,39 @@ final class AppContainer: ObservableObject {
         await localStore.closeAccount()
     }
 
+    /// Prepares the account's local store for shell reveal
+    /// (fix-track-empty-after-reinstall): opens the account file, commits
+    /// deletions buffered by the previous process, then seeds the starter
+    /// categories — all BEFORE the caller reveals the shell, so the first
+    /// Track paint already carries the seed and never flashes an empty
+    /// store. Sync activation stays with the caller (background, post-reveal).
+    ///
+    /// Returns whether the store is bound AND seeded. The caller (`RootView`
+    /// `beginSignIn`) MUST check this and must not reveal on `false`: the
+    /// gate stays up with `localStoreOpenError` (same branch as a failed
+    /// bind, with the same sign-out escape) and the next sign-in retries.
+    /// `seedNames` defaults to the localized starter set; tests inject a
+    /// short array to drive the seed-failure path.
+    @discardableResult
+    func prepareAccountStore(
+        userID: String,
+        seedNames: [String] = String.starterCategoryNames
+    ) async -> Bool {
+        let opened = await openLocalStore(userID: userID)
+        guard opened else { return false }
+        // Best-effort like before: a commit failure must not block reveal —
+        // the buffer retries on the next launch.
+        try? await undoBuffer.commitAll()
+        do {
+            _ = try await localStore.seedStarterCategoriesIfNeeded(names: seedNames)
+        } catch {
+            localStoreOpenError = error
+            Self.logger.error("LocalStore starter seeding failed: \(String(describing: error), privacy: .public)")
+            return false
+        }
+        return true
+    }
+
     /// Deletes ONLY the active account's database file (explicit per-account
     /// Erase in Profile; never a side effect of logout/switch/revoke). The
     /// store ends unbound; the caller clears the session artifacts. Throwing:

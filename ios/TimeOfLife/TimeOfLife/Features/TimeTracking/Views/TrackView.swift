@@ -22,8 +22,9 @@ struct TrackView: View {
             .navigationTitle(L10n.tabTrack.text)
             .navigationBarTitleDisplayMode(.inline)
             // First appear: pull recents + categories and restore a persisted
-            // running draft. Returns to this tab refresh via AppShellView.
-            .task { await vm.load() }
+            // running draft (guarded: re-entry while loading retries on the
+            // next appear). Returns to this tab refresh via AppShellView.
+            .task { await vm.loadIfNeeded() }
             // Island Stop while this screen is up: the draft is gone under
             // a live `.running` state — reload reconciles back to ready
             // instead of ticking stale (live-activities D8).

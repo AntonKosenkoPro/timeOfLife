@@ -30,51 +30,10 @@ struct RootView: View {
 
     var body: some View {
         Group {
-            switch session.state {
-            case .signedIn(let current):
-                if boundUserID == current.id {
-                    AppShellView(
-                        vm: AppShellViewModel(service: container.timerService),
-                        container: container
-                    )
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else {
-                    // Bind-then-reveal: the gate stays up (a spinner, never
-                    // the shell) until the account's file is bound. The
-                    // startup runs here — not in `onChange` — so it fires on
-                    // every shell mount, including the restore-driven one.
-                    // A failed bind keeps the gate up with the error surfaced
-                    // instead of the shell — the store is unbound, so no
-                    // tracker read may mount.
-                    if container.localStoreOpenError != nil {
-                        // Bind failure dead-ends here without an escape hatch:
-                        // beginSignIn (the only site that clears the error via
-                        // openLocalStore) runs solely in the spinner branch,
-                        // and the shell with Profile's sign-out is unreachable
-                        // while this gate is up. So offer sign-out right here
-                        // (same L10n key + logout shape as ProfileView) — the
-                        // next sign-in retries the bind.
-                        VStack(spacing: 12) {
-                            Text(L10n.errorLocalPersistence.text)
-                                .font(.footnote)
-                                .foregroundStyle(Theme.textSecondary)
-                                .multilineTextAlignment(.center)
-                                .accessibilityIdentifier("LocalStoreOpenError")
-                            Button(L10n.profileSignOut.text, role: .destructive) {
-                                Task { await container.authService.logout() }
-                            }
-                            .accessibilityIdentifier("GateSignOutButton")
-                        }
-                        .padding()
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    } else {
-                        ProgressView()
-                            .frame(maxWidth: .infinity, maxHeight: .infinity)
-                            .task { beginSignIn(userID: current.id) }
-                    }
-                }
-            case .signedOut:
-                AuthFlowView()
+            if session.isRestoring {
+                restoringSplash
+            } else {
+                gatedContent
             }
         }
             .background(Theme.backgroundPrimary.ignoresSafeArea())
@@ -110,38 +69,110 @@ struct RootView: View {
             }
     }
 
+    /// Launch restore unresolved (cold start always restores): the app
+    /// brand (same mark + name as the welcome screen) over a spinner, never
+    /// the auth flow — a restorable session must not flash the login screen
+    /// while `/me` is in flight.
+    private var restoringSplash: some View {
+        VStack(spacing: Theme.spacingMedium) {
+            Image(systemName: "clock.arrow.circlepath")
+                .font(.system(size: 48, weight: .light))
+                .foregroundStyle(Theme.accentPrimary)
+                .accessibilityHidden(true)
+            Text(L10n.appName.text)
+                .font(.largeTitle.bold())
+                .foregroundStyle(Theme.textPrimary)
+            ProgressView()
+                .padding(.top, Theme.spacingSmall)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .accessibilityIdentifier("RestoringSplash")
+    }
+
+    /// The signed-in/signed-out gate (restoring resolved): the auth flow
+    /// full-screen while signed out, the shell once the account's store is
+    /// bound and seeded, a spinner in between.
+    private var gatedContent: some View {
+        Group {
+            switch session.state {
+        case .signedIn(let current):
+            if boundUserID == current.id {
+                AppShellView(
+                    vm: AppShellViewModel(service: container.timerService),
+                    container: container
+                )
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                // Bind-then-reveal: the gate stays up (a spinner, never
+                // the shell) until the account's file is bound. The
+                // startup runs here — not in `onChange` — so it fires on
+                // every shell mount, including the restore-driven one.
+                // A failed bind keeps the gate up with the error surfaced
+                // instead of the shell — the store is unbound, so no
+                // tracker read may mount.
+                if container.localStoreOpenError != nil {
+                    // Bind failure dead-ends here without an escape hatch:
+                    // beginSignIn (the only site that clears the error via
+                    // openLocalStore) runs solely in the spinner branch,
+                    // and the shell with Profile's sign-out is unreachable
+                    // while this gate is up. So offer sign-out right here
+                    // (same L10n key + logout shape as ProfileView) — the
+                    // next sign-in retries the bind.
+                    VStack(spacing: 12) {
+                        Text(L10n.errorLocalPersistence.text)
+                            .font(.footnote)
+                            .foregroundStyle(Theme.textSecondary)
+                            .multilineTextAlignment(.center)
+                            .accessibilityIdentifier("LocalStoreOpenError")
+                        Button(L10n.profileSignOut.text, role: .destructive) {
+                            Task { await container.authService.logout() }
+                        }
+                        .accessibilityIdentifier("GateSignOutButton")
+                    }
+                    .padding()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    ProgressView()
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .task { beginSignIn(userID: current.id) }
+                }
+            }
+        case .signedOut:
+            AuthFlowView()
+        }
+        }
+    }
+
     /// Runs once per signed-in shell mount: every sign-in path (fresh OTP/
     /// Apple sign-in, silent session restore at launch, re-login) lands here.
-    /// Ordering matters: the account's file is opened FIRST (`lifio_<userId>.db`
-    /// via `openLocalStore`, account-bound-store spec — nothing may touch a
-    /// tracker file before an account is bound); a restart then finalizes
-    /// deletions buffered by the previous process BEFORE the first sync cycle
-    /// runs; seeding is idempotent (per-file marker) and activation records
-    /// the bound account and performs the pull-first first-sync (sync-client
-    /// spec).
+    /// Ordering matters (seed-before-reveal): the account's file is opened
+    /// (`lifio_<userId>.db` via `prepareAccountStore`, account-bound-store
+    /// spec — nothing may touch a tracker file before an account is bound),
+    /// a restart finalizes deletions buffered by the previous process, and
+    /// starter categories seed idempotently (per-file marker) — all BEFORE
+    /// the shell mounts, so the first Track paint already carries the seed.
+    /// Sync activation (pull-first first-sync, sync-client spec) runs after
+    /// the reveal, in the background; Track converges on pulled data via its
+    /// sync-exit reload.
     ///
     /// The caller cancels superseded lifecycles, so every suspension point
     /// re-checks cancellation and the live session: a sign-out that lands
-    /// mid-bind must neither reveal the shell nor activate sync for it.
+    /// mid-prepare must neither reveal the shell nor activate sync for it.
     private func beginSignIn(userID: String) {
         lifecycleTask?.cancel()
         lifecycleTask = Task {
             if Task.isCancelled { return }
-            let opened = await container.openLocalStore(userID: userID)
+            let ready = await container.prepareAccountStore(userID: userID)
             if Task.isCancelled { return }
             guard case let .signedIn(current) = session.state, current.id == userID else { return }
-            // A failed bind leaves the store cleanly unbound: the gate stays
-            // up (the error is surfaced via `localStoreOpenError` above) and
-            // `boundUserID` is never set — commitAll/seed/sync must not run
-            // against the wrong file or an unbound store. The next sign-in
-            // (or relaunch restore) retries the bind.
-            guard opened else { return }
+            // A failed prepare leaves the store unbound (failed open) or
+            // bound-but-unseeded (failed seed): either way the gate stays up
+            // (the error is surfaced via `localStoreOpenError` above) and
+            // `boundUserID` is never set — no tracker read may mount. The
+            // next sign-in (or relaunch restore) retries the prepare.
+            guard ready else { return }
             boundUserID = userID
-            try? await container.undoBuffer.commitAll()
-            if Task.isCancelled { return }
-            guard case let .signedIn(current) = session.state, current.id == userID else { return }
             container.syncController.activate(userID: userID)
-            await seedStarterCategoriesIfNeeded()
         }
     }
 
@@ -191,13 +222,5 @@ struct RootView: View {
     private func sessionUserID() -> String {
         if case let .signedIn(session) = session.state { return session.id }
         return ""
-    }
-
-    /// Seeds the seven localized starter categories on the active local
-    /// dataset's first setup (category-management D2). Names are materialized
-    /// in the active supported language once; the marker prevents re-seeding,
-    /// and the operation is a no-op after the first launch.
-    private func seedStarterCategoriesIfNeeded() async {
-        _ = try? await container.localStore.seedStarterCategoriesIfNeeded(names: String.starterCategoryNames)
     }
 }
