@@ -2,6 +2,8 @@ import Foundation
 import OSLog
 import SwiftUI
 
+import LifioLiveActivityCore
+
 /// Composition root. Builds the real production graph and exposes the
 /// objects views/view models need. Everything is injectable for tests.
 ///
@@ -77,6 +79,46 @@ final class AppContainer: ObservableObject {
         self.undoBuffer = undoBuffer
         self.syncController = syncController
         self.clientHolder = clientHolder
+        observeExternalStopSignal()
+    }
+
+    /// Handles an Island Stop: reaps activities orphaned by the intent and
+    /// tells tracker surfaces to reload (the intent already saved the entry
+    /// and cleared the draft — Track/compact would otherwise keep ticking
+    /// stale in-memory state).
+    func handleExternalStop(durationSeconds: Int?) {
+        Task {
+            await timerService.endOrphanedActivities(knownDurationSeconds: durationSeconds)
+            NotificationCenter.default.post(name: .timerStoppedExternally, object: nil)
+        }
+    }
+
+    /// Observes the Darwin signal posted by the Stop intent (live-activities
+    /// D8). The C callback hops to the actor; the box lives as long as the
+    /// container (app lifetime) by design.
+    private func observeExternalStopSignal() {
+        final class HandlerBox: Sendable {
+            let onSignal: @Sendable (Int?) -> Void
+            init(_ onSignal: @escaping @Sendable (Int?) -> Void) {
+                self.onSignal = onSignal
+            }
+        }
+        let box = HandlerBox { [weak self] duration in
+            Task { await self?.handleExternalStop(durationSeconds: duration) }
+        }
+        let context = Unmanaged.passRetained(box).toOpaque()
+        CFNotificationCenterAddObserver(
+            CFNotificationCenterGetDarwinNotifyCenter(),
+            context,
+            { _, observer, _, _, userInfo in
+                guard let observer else { return }
+                let box = Unmanaged<HandlerBox>.fromOpaque(observer).takeUnretainedValue()
+                box.onSignal(signalDuration(userInfo))
+            } as CFNotificationCallback,
+            LiveActivitySignal.name as CFString,
+            nil,
+            .deliverImmediately
+        )
     }
 
     /// Default production graph wired against `AppConfig.baseURL`. The local
@@ -231,4 +273,25 @@ final class APIClientHolder {
     weak var service: AuthService?
     var client: APIClient?
     init() {}
+}
+
+extension Notification.Name {
+    /// Posted (in-process) after an Island Stop is handled: tracker surfaces
+    /// reload so no stale running state survives (live-activities D8).
+    static let timerStoppedExternally = Notification.Name("timerStoppedExternally")
+}
+
+// MARK: - Darwin signal payload
+
+// Darwin payloads arrive as CoreFoundation dictionaries — the casts below
+// are the toll-free bridge at the system boundary, not a layering choice.
+private func signalDuration(_ userInfo: CFDictionary?) -> Int? {
+    guard let userInfo else { return nil }
+    // swiftlint:disable:next legacy_objc_type
+    let payload = userInfo as NSDictionary
+    // swiftlint:disable:next legacy_objc_type
+    guard let number = payload[LiveActivitySignal.durationKey] as? NSNumber else {
+        return nil
+    }
+    return number.intValue
 }

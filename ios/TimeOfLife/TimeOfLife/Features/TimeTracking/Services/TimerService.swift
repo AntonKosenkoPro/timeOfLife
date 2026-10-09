@@ -96,16 +96,16 @@ final class TimerService: ObservableObject {
             startedAt: startedAt
         )
     }
-    /// Ends live activities whose persisted draft is gone (crash hygiene —
-    /// the Stop intent ends its own activity directly, so the only orphan
-    /// source is a crash/kill that left a live Island behind). A present
-    /// draft means the run is genuinely active: nothing is orphaned,
-    /// nothing ends. Never throws.
+    /// Ends live activities whose persisted draft is gone (stopped from
+    /// the Island — the intent can't end them itself, so the app reaps
+    /// them on contact: Darwin signal, foreground, load-reconcile). A
+    /// present draft means the run is genuinely active: nothing is
+    /// orphaned, nothing ends. Never throws.
     ///
     /// Fail-closed on read errors: `try? … == nil` would mistake a
     /// transient DB failure for "no draft" and dismiss a live Island —
     /// the exact blank-island report from the device.
-    func endOrphanedActivities() async {
+    func endOrphanedActivities(knownDurationSeconds: Int? = nil) async {
         let draft: RunningTimerDraft?
         do {
             draft = try await store.timerDraft()
@@ -113,7 +113,7 @@ final class TimerService: ObservableObject {
             return
         }
         guard draft == nil else { return }
-        await liveActivities.endOrphanedActivities()
+        await liveActivities.endOrphanedActivities(knownDurationSeconds: knownDurationSeconds)
     }
 
     /// The first-position category's display icon for the Live Activity

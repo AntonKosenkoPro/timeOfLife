@@ -20,7 +20,7 @@
 - [x] 3.5 Device-feedback polish: ship strings in the appex (explicit resource files), expanded bottom uses the circular red Stop + plain Track link, Stop hidden outside full-color rendering (D7)
 - [x] 3.6 Stop-intent session channel: suite UserDefaults detach from cfprefsd in extensions (device log) — SessionCache mirrors the user id to a group-container sidecar file, resolver reads file-first with defaults fallback, restore re-saves for upgraders
 - [x] 3.7 Island stop completion: intent posts a Darwin signal instead of ending (module-distinct attributes type blinds the extension); app reaps orphans with the true duration, reloads tracker surfaces, silent immediate dismiss on catch-up paths
-- [x] 3.8 Stop intent ends directly via the shared `LifioLiveActivityCore` framework (single attributes module): Saved card within seconds, no app contact; Darwin reap path removed, crash-hygiene sweep kept
+- [x] 3.8 Stop intent saves + signals via `LiveActivitySignal` (shared `LifioLiveActivityCore` framework); app ends with the Saved card on contact. Direct end from the intent was attempted and disproven (enumeration process-scoped, device-verified) — path reverted, see D8
 
 ## 4. Quality gates
 
@@ -31,7 +31,7 @@
 ## 5. Tuning and docs
 
 - [x] 4.4 Locked Stop fix (device-verified logs): banner `widgetURL` scoped to the label zone so Stop taps don't engage the unlock-requiring deep link; db + session sidecar stamped `.completeUntilFirstUserAuthentication` on every open/write so the intent works with a locked keybag (LocalStore docs already required this class — code now enforces it); intent logs split (account/open/draft)
-- [x] 4.5 Stop flow vs pocket stops: AoD-dimmed/inert Stop (`isLuminanceReduced` disabled+40%), woken-locked tap demands Face ID/passcode (`requiresLocalDeviceAuthentication`), unlocked tap stops + direct-ends to Saved card
+- [x] 4.5 Stop flow vs pocket stops: AoD-dimmed/inert Stop (`isLuminanceReduced` disabled+40%), woken-locked tap demands Face ID/passcode (`requiresLocalDeviceAuthentication`), unlocked tap stops + ends to Saved card on app contact (D8)
 - [ ] 5.1 Tune dismissal seconds T on-device (design Q1), record chosen value in spec delta
 - [x] 5.3 Pre-archive cleanup: TEMP-TEST-10X reverted to 1s, banner SHA marker removed, Profile `ext` fingerprint removed (single-SHA footer back); appex stamp phase pruned (app stamp kept)
 - [x] 5.2 Update `docs/project-context.md` (Incomplete/deferred entry for Live Activities → shipped), `Design/COMPONENTS.md` if a shared face component is extracted, `README.md` smoke checklist

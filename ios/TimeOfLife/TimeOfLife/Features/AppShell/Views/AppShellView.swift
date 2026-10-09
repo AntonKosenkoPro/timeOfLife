@@ -65,6 +65,11 @@ struct AppShellView: View {
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
             Task { await trackVM.load() }
         }
+        // Island Stop while the compact timer is up: the draft is gone —
+        // reload clears the stale running surface (live-activities D8).
+        .onReceive(NotificationCenter.default.publisher(for: .timerStoppedExternally)) { _ in
+            Task { await vm.load() }
+        }
         // Live Activity tap: a bumped counter selects Track without
         // disturbing per-tab push state. `dropFirst` skips the initial
         // value (no request has arrived yet).

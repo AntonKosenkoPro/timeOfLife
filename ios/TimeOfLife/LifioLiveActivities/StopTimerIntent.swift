@@ -1,9 +1,3 @@
-// ActivityKit's `Activity`/`ActivityContent` are not Sendable on this
-// SDK, so iterating `activities` and awaiting `end` trips Swift 6 region
-// isolation under the repo's `complete` checking. The preconcurrency
-// import scopes the relaxation to this file only (same as
-// `LiveActivityService.swift`).
-@preconcurrency import ActivityKit
 import AppIntents
 import Foundation
 import OSLog
@@ -18,12 +12,12 @@ import LifioLiveActivityCore
 /// app process may be suspended while the intent runs in the extension
 /// process. If `TimerService.stopTimerDraft` changes, update this in step.
 ///
-/// The intent ends the activity DIRECTLY with the Saved final state: the
-/// attributes type lives in the shared `LifioLiveActivityCore` framework
-/// linked by both the app and the extension (a single module), so the
-/// extension's `Activity<TimerActivityAttributes>.activities` matches the
-/// app's requests. No app contact needed — the Saved card appears within
-/// seconds of the tap.
+/// The intent does NOT end the activity itself: `ActivityKit` enumeration is
+/// scoped by calling process — the extension's `activities` is always empty
+/// even with the attributes type unified in `LifioLiveActivityCore`
+/// (device-proven). Instead it posts `LiveActivitySignal`, and the app ends
+/// the activity with the Saved card on contact (Darwin handler when
+/// background-alive, foreground/load sweep otherwise).
 ///
 /// `requiresLocalDeviceAuthentication`: a locked-phone tap demands Face ID /
 /// passcode first (pocket-stop protection); unlocked it runs immediately.
@@ -83,26 +77,9 @@ struct StopTimerIntent: AppIntent {
             Self.logger.error("StopTimerIntent failed: entry save or draft clear threw")
             return .result()
         }
-        // End directly with the Saved card. Only `.active` activities: an
-        // `.ended` one keeps its own dismissal. Dismissal delay mirrors
-        // `LiveActivityService.dismissalDelaySeconds` (6s, tuned in 5.1) —
-        // the service type is app-target-only, so the value is repeated here.
-        let final = TimerActivityAttributes.ContentState(
-            startedAt: startedAt,
-            savedDurationSeconds: durationSeconds
-        )
-        // Logged count is the direct-end discriminator: 0 here with a live
-        // banner means the shared-type contract broke (device debugging).
-        let all = Activity<TimerActivityAttributes>.activities
-        Self.logger.info("StopTimerIntent sees \(all.count) activities of type \(String(describing: TimerActivityAttributes.self), privacy: .public)")
-        let live = all.filter { $0.activityState == .active }
-        Self.logger.info("StopTimerIntent ending \(live.count) active activities")
-        for activity in live {
-            await activity.end(
-                .init(state: final, staleDate: nil),
-                dismissalPolicy: .after(.now + 6.0)
-            )
-        }
+        // Signal, don't end: enumeration stays app-side (see type docs).
+        // The duration rides along so the Saved card shows the true value.
+        LiveActivitySignal.post(durationSeconds: durationSeconds)
         Self.logger.info("StopTimerIntent saved entry with duration")
         return .result()
     }

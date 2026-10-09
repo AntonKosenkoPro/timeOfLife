@@ -102,9 +102,9 @@ struct RootView: View {
                 // deletions stay restorable until their push succeeds).
                 if case .signedIn = session.state {
                     container.syncController.trigger(userID: sessionUserID())
-                    // Crash hygiene: a kill that left a live Island behind
-                    // with no draft is reaped here (silent immediate
-                    // dismiss — no invented Saved card).
+                    // Island Stop while suspended: the Darwin signal may
+                    // have been missed, so reap here too (silent immediate
+                    // dismiss — no invented Saved card; live-activities D8).
                     Task { await container.timerService.endOrphanedActivities() }
                 }
             }
