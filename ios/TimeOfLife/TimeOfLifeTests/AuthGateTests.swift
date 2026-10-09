@@ -107,6 +107,65 @@ struct AuthGateTests {
         #expect(await keychain.string(for: .refreshToken) == nil)
     }
 
+    // MARK: - Restoring splash (fix-track-empty-after-reinstall 4.2)
+
+    @Test("fresh store starts restoring (gate shows splash, never a login flash)")
+    func freshStoreStartsRestoring() {
+        #expect(SessionStore().isRestoring)
+    }
+
+    @Test("restore clears restoring with a restorable session")
+    func restoreClearsRestoringWithSession() async {
+        let cached = CachedSession(id: "u1", email: "a@b.com", emailVerified: true)
+        let (service, _, _, _, store) = makeService(
+            initialTokens: [.refreshToken: "rt", .accessToken: "at"],
+            cached: cached
+        )
+
+        await service.restoreSession()
+
+        #expect(!store.isRestoring)
+        guard case .signedIn = store.state else {
+            Issue.record("expected signed-in after restore, got \(store.state)")
+            return
+        }
+    }
+
+    @Test("restore clears restoring without a session (auth, no stuck splash)")
+    func restoreClearsRestoringWithoutSession() async {
+        let (service, repo, _, _, store) = makeService()
+
+        await service.restoreSession()
+
+        #expect(!store.isRestoring)
+        #expect(store.state == .signedOut)
+        #expect(repo.calls.isEmpty, "no network traffic without a refresh token")
+    }
+
+    @Test("restoring stays up during a slow resolve, then clears")
+    func restoringStaysUpDuringSlowResolve() async {
+        // No cached session: restore must await the (slow) `/me` call with
+        // the gate still signed-out — the reinstall login-flash window.
+        let (service, repo, _, _, store) = makeService(
+            initialTokens: [.refreshToken: "rt", .accessToken: "at"]
+        )
+        repo.meDelayNanoseconds = 300_000_000
+        store.setRestoring(false)
+
+        let restore = Task { await service.restoreSession() }
+        await Task.yield()
+        await Task.yield()
+        let midFlight = store.isRestoring
+        await restore.value
+
+        #expect(midFlight, "splash stays up while /me is in flight")
+        #expect(!store.isRestoring)
+        guard case .signedIn = store.state else {
+            Issue.record("expected signed-in via /me, got \(store.state)")
+            return
+        }
+    }
+
     // MARK: - Failed bind keeps the gate up (Wave 5 re-review finding 1)
 
     @Test("a failed store bind reports failure without mounting (gate stays up)")

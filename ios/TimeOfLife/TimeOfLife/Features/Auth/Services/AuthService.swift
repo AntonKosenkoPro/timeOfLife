@@ -65,6 +65,11 @@ final class AuthService: ObservableObject {
     /// On transient non-auth failures (offline, 5xx, transport) keeps the
     /// cached session. Only `unauthorized` after a failed refresh clears local state.
     func restoreSession() async {
+        // The gate renders a splash (not the auth flow) while this is
+        // unresolved — set on entry (re-entrant safe) and always cleared,
+        // so a slow/offline restore can never stick the splash.
+        sessionStore.setRestoring(true)
+        defer { sessionStore.setRestoring(false) }
         let cached = cache.load()
         let refreshToken = await keychain.string(for: .refreshToken)
 

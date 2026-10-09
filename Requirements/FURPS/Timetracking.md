@@ -1,6 +1,6 @@
 # Timetracking — FURPS
 
-Requirements for the **account-bound local-first sync architecture** (OpenSpec change `account-bound-local-data`): the device is the source of truth, the backend is the identity + sync relay, and **sign-in is mandatory** before any tracking use — the app launches into the auth flow (email-OTP or Sign in with Apple), then works fully offline. There is no anonymous use: local data is per-account (`lifio_<userId>.db`, one active file, dormant files kept), sessions are per-device, and sync is same-account-only.
+Requirements for the **account-bound local-first sync architecture** (OpenSpec change `account-bound-local-data`): the device is the source of truth, the backend is the identity + sync relay, and **sign-in is mandatory** before any tracking use — the app shows a restoring splash while the launch session restore resolves, then the auth flow (email-OTP or Sign in with Apple), then works fully offline. There is no anonymous use: local data is per-account (`lifio_<userId>.db`, one active file, dormant files kept), sessions are per-device, and sync is same-account-only.
 
 App-wide requirements (minimalism, dark/light, offline, EN+RU localization, HIG, secure storage, linters, tests, CI, OpenAPI, `AGENTS.md`) live in [`Common.md`](./Common.md) and are not repeated here; only feature-specific rows are listed.
 
@@ -37,7 +37,7 @@ App-wide requirements (minimalism, dark/light, offline, EN+RU localization, HIG,
 - **First-sync** (D4): pull-first (full pull + server-wins merge, then drain the outbox). Push-first rejected (409 name-collision remapping during push is more complex).
 - **Backend additions** (D5): additive only — `modified_since` query param + nullable `source`/`source_ref` columns; no contract break.
 - **SyncController** (D6): `@MainActor`, long-lived, session-gated; observes `SessionStore` and `Connectivity`; exposes `@Published status`; records the bound `userId` and refuses cycles on account mismatch.
-- **RootView** (D7): gates on `SessionStore` — signed-out renders the auth flow full-screen, signed-in renders the app shell. Anonymous use is removed; auth is the launch gate, not a Profile action.
+- **RootView** (D7): gates on `SessionStore` — restoring shows a splash (never the auth flow), signed-out renders the auth flow full-screen, signed-in renders the app shell only after the account file is bound, buffered deletions committed, and starter categories seeded (seed-before-reveal; first-sync pull stays background and Track converges via its sync-exit reload). Anonymous use is removed; auth is the launch gate, not a Profile action.
 - **Running timer state** (D8): `timer_state` singleton row in GRDB.
 - **Lock-screen Controls** (D9): iOS 18+ `ControlWidget` + `alwaysAllowed` AppIntent, deferred (no widget target); deployment target is iOS 18, no availability guards; reads/writes the active account file post-first-unlock, no auth of its own.
 - **Account-bound store** (D11): per-account files `lifio_<userId>.db` (one active at a time, active marker = `user_id`); dormant files kept, no eviction; per-account seeding on first open; explicit per-account Erase deletes only the active file; per-account data migration rejected (pre-release discard).
