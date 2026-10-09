@@ -123,11 +123,6 @@ struct TimerLiveActivityWidget: Widget {
         // Banner breathing room: the HStack otherwise sits flush against
         // the banner's top/bottom edges (device finding, verified 8pt).
         .padding(.vertical, 8)
-        // Frosted (not solid) banner: the default activity background is
-        // an opaque black slab — a translucent tint lets the wallpaper
-        // bleed through in the lock-screen language (true refraction is
-        // system-only for third-party archived renders).
-        .activityBackgroundTint(Color.black.opacity(0.4))
         .accessibilityElement(children: .combine)
         .accessibilityLabel(LiveActivityStrings.runningAccessibilityLabel(text: text))
     }
@@ -139,7 +134,6 @@ struct TimerLiveActivityWidget: Widget {
             Text(LiveActivityStrings.savedCardTitle(duration: duration))
                 .font(.headline)
         }
-        .activityBackgroundTint(Color.black.opacity(0.4))
         .widgetURL(trackURL)
     }
 
@@ -218,8 +212,10 @@ struct LiveActivityStopButton: View {
                 .font(.system(size: 12, weight: .bold))
                 .foregroundStyle(LiveActivityTheme.stopForeground)
                 .frame(width: 44, height: 44)
+                .background(LiveActivityTheme.stopBackground)
+                .clipShape(Circle())
         }
-        .modifier(StopGlass(shape: Circle()))
+        .buttonStyle(.plain)
         // AoD: dimmed and inert (pocket-stop protection — the auth policy
         // covers the woken-locked case, this covers the dimmed case).
         .disabled(isLuminanceReduced)
@@ -242,33 +238,13 @@ struct LiveActivityStopPill: View {
                 .foregroundStyle(LiveActivityTheme.stopForeground)
                 .padding(.horizontal, 10)
                 .padding(.vertical, 8)
+                .background(LiveActivityTheme.stopBackground)
+                .clipShape(Capsule(style: .continuous))
         }
-        .modifier(StopGlass(shape: Capsule(style: .continuous)))
+        .buttonStyle(.plain)
         // Same AoD-dimmed/inert rule as `LiveActivityStopButton`.
         .disabled(isLuminanceReduced)
         .opacity(isLuminanceReduced ? 0.4 : 1.0)
         .accessibilityLabel(LiveActivityStrings.stopAccessibilityLabel)
-    }
-}
-
-/// Liquid Glass Stop container: on iOS 26+ an explicit glass effect
-/// tinted danger-red (a `glassEffect` container carries live-compositing
-/// metadata — a glass *button style* flattens in the archived activity
-/// render, device-verified); below 26 the plain red shape. The
-/// banner/island containers themselves are system glass already.
-struct StopGlass<S: Shape>: ViewModifier {
-    let shape: S
-
-    func body(content: Content) -> some View {
-        if #available(iOS 26, *) {
-            content
-                .buttonStyle(.plain)
-                .glassEffect(.regular.tint(LiveActivityTheme.stopBackground), in: shape)
-        } else {
-            content
-                .buttonStyle(.plain)
-                .background(LiveActivityTheme.stopBackground)
-                .clipShape(shape)
-        }
     }
 }
