@@ -1,9 +1,11 @@
 import SwiftUI
 
 /// The Track Recents chip flow (timer-capture-experience spec,
-/// design D5). Presents up to six most-recently-used exact entry texts as a
-/// wrapping flow of chips with 44 pt tap targets; chips wrap onto additional
-/// rows and never require horizontal scrolling.
+/// design D5). Presents up to twelve most-recently-used exact entry texts as
+/// a wrapping flow of chips with 44 pt tap targets; chips wrap onto
+/// additional rows inside a fixed-height area and overflow scrolls
+/// internally on the chip axis, so the Track page footprint never grows for
+/// Recents overflow.
 ///
 /// Each chip shows the icon of the first category of that exact text's
 /// newest committed entry (first by stored position, resolved through the
@@ -23,25 +25,35 @@ struct RecentActivitiesChips: View {
     private var dynamicTypeSize
 
     /// The capped, most-recently-used-first slice (the store already sorts
-    /// by the text's newest `started_at`).
+    /// by the text's newest `started_at`). Keep in sync with
+    /// `TrackViewModel.storeRecents`: either layer alone silently re-caps.
     private var capped: [ExactName] { Self.recents(from: recents) }
 
     /// The capped, most-recently-used-first slice of the given recents.
     /// Pure (no view state), so `nonisolated` like `EntryRow.accessibilityLabel`.
     nonisolated static func recents(
         from recents: [ExactName],
-        limit: Int = 6
+        limit: Int = 12
     ) -> [ExactName] {
         Array(recents.prefix(limit))
     }
 
+    /// Visible chip-area budget: three chip rows at `minTapArea` with
+    /// `spacingSmall` gaps (the common six-chip footprint). Content beyond
+    /// it scrolls inside the area instead of growing the Track page.
+    private static let maxVisibleHeight: CGFloat = 3 * Theme.minTapArea + 2 * Theme.spacingSmall
+
     var body: some View {
-        FlowLayout(spacing: Theme.spacingSmall) {
-            ForEach(capped) { recent in
-                chip(recent)
+        ScrollView(.vertical) {
+            FlowLayout(spacing: Theme.spacingSmall) {
+                ForEach(capped) { recent in
+                    chip(recent)
+                }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxHeight: Self.maxVisibleHeight)
     }
 
     // MARK: - Sizing
@@ -158,6 +170,29 @@ extension DynamicTypeSize {
         recents: recents,
         categories: Dictionary(uniqueKeysWithValues: categories.map { ($0.id, $0) }),
         selectedText: "Deep work"
+    ) { _ in }
+    .padding()
+    .background(Theme.backgroundPrimary)
+}
+
+#Preview("Recents — Twelve, overflow scrolls internally") {
+    let categories = [
+        Category(id: "c1", name: "Work", icon: "laptopcomputer"),
+        Category(id: "c2", name: "Study", icon: "book"),
+        Category(id: "c3", name: "Sport", icon: "figure.run")
+    ]
+    let recents = (0..<12).map { index in
+        let categorized = index < 6
+        return ExactName(
+            text: "Entry number \(index)",
+            categoryIDs: categorized ? ["c1"] : [],
+            firstCategoryID: categorized ? ["c1", "c2", "c3"][index / 2] : nil
+        )
+    }
+    return RecentActivitiesChips(
+        recents: recents,
+        categories: Dictionary(uniqueKeysWithValues: categories.map { ($0.id, $0) }),
+        selectedText: "Entry number 0"
     ) { _ in }
     .padding()
     .background(Theme.backgroundPrimary)

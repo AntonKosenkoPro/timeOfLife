@@ -18,7 +18,7 @@ final class TrackViewModel: ObservableObject {
     @Published var errorMessage: String?
     /// The name-field draft (trimmed at Start; a draft, never committed).
     @Published var nameDraft = ""
-    /// The 6 exact-text recents (newest first, first-category icon data).
+    /// The 12 exact-text recents (newest first, first-category icon data).
     /// Settable for the same test-seeding reason as `state`.
     @Published var recents: [ExactName] = []
     /// Every committed exact-text name, newest first, uncapped — the source
@@ -85,7 +85,8 @@ final class TrackViewModel: ObservableObject {
     }
 
     private func storeRecents() async throws -> [ExactName] {
-        try await service.store.recents(limit: 6).map(ExactName.init(storeRecent:))
+        // Keep in sync with `RecentActivitiesChips.recents(from:limit:)`.
+        try await service.store.recents(limit: 12).map(ExactName.init(storeRecent:))
     }
 
     private func storeAllNames() async throws -> [ExactName] {

@@ -470,9 +470,10 @@ TagSelector(
 
 ## `RecentActivitiesChips`
 
-The Track Recents chip flow (D2/D3/D4): a wrapping flow of at most six
+The Track Recents chip flow (D2/D3/D4): a wrapping flow of at most twelve
 most-recently-used exact entry texts with 44 pt tap targets; chips wrap onto
-additional rows and never require horizontal scrolling. A single tap fills the
+additional rows inside a fixed-height area (three chip rows) with its own
+vertical scroll and never require horizontal scrolling. A single tap fills the
 name field with that exact text plus its newest entry's ordered categories
 without starting timing. There is no activity entity — chips represent entry
 texts, never activities. (The type name is kept for code continuity.)
@@ -493,8 +494,10 @@ struct RecentActivitiesChips: View {
 - Wrapping flow of content-sized chips, left-aligned, equal `Theme.spacingSmall`
   gaps between chips and rows, laid out by the shared `FlowLayout`
   (same greedy packing as `TagSelector`).
-- Cap of six, most-recently-used first (`recents.prefix(6)`; the store
-  already sorts by each text's newest `started_at`).
+- Cap of twelve, most-recently-used first (`recents.prefix(12)`; the store
+  already sorts by each text's newest `started_at`). The flow sits in a
+  `ScrollView` capped at three chip rows (`3 * minTapArea + 2 * spacingSmall`),
+  so overflow scrolls on the chip axis without growing the page.
 - Each chip: fixed icon slot with the first assigned Category's
   `CatalogIcon(validated:).displaySymbol` + exact text (`.subheadline.weight(.medium)`,
   one line, tail-truncated), `Theme.spacingMedium` horizontal / 12 pt vertical
