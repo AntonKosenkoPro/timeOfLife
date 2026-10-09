@@ -30,7 +30,10 @@ See `proposal.md` (Why). Current state in `ios/TimeOfLife/TimeOfLife/Features/Ap
      the Track name row's caller-local `NavigationLink` became the
      `ShellRoute.namePicker(initialText:)` value (snapshot rides the
      route; completions resolve at the destination from the owning tab's
-     view model), so no push from a tab root escapes path state. The
+     view model), so no push from a tab root escapes path state. The same
+     conversion covers the running notes button merged from main mid-change
+     (`ShellRoute.notesEditor(initialText:entryName:)` — a second empty-path
+     push from the Track root with no destination hiding of its own). The
      remaining caller-local links (Manage Categories from Profile,
      pickers inside the pushed entry form and sheets) always sit under a
      non-empty path or outside any tab bar. Destination backstop

@@ -1,3 +1,4 @@
+// swiftlint:disable file_length
 import SwiftUI
 
 /// The stable Track timer layout, built on the adaptive dual-flow stack
@@ -29,11 +30,20 @@ struct TrackContent: View {
     /// tab-bar visibility observes the push. Defaults to no-op for
     /// previews and picker-less hosts.
     let onOpenNamePicker: () -> Void
+    /// Opens the running notes editor through the owning tab's path (same
+    /// contract as the name picker). Defaults to no-op for previews.
+    let onOpenNotesEditor: () -> Void
 
-    init(vm: TrackViewModel, spacerCap: CGFloat = 48, onOpenNamePicker: @escaping () -> Void = {}) {
+    init(
+        vm: TrackViewModel,
+        spacerCap: CGFloat = 48,
+        onOpenNamePicker: @escaping () -> Void = {},
+        onOpenNotesEditor: @escaping () -> Void = {}
+    ) {
         self.vm = vm
         self.spacerCap = spacerCap
         self.onOpenNamePicker = onOpenNamePicker
+        self.onOpenNotesEditor = onOpenNotesEditor
     }
 
     var body: some View {
@@ -223,7 +233,9 @@ struct TrackContent: View {
     /// card keeps the screen's leading alignment while the 44 pt button
     /// rides beside it at the screen's trailing padding, its tint
     /// signalling draft-notes presence. Tapping pushes the shared
-    /// `NotesEditorPage` prefilled from the running draft (✓ rewrites
+    /// `NotesEditorPage` through the owning tab's path (fix-tab-bar-return-jump:
+    /// a `ShellRoute` value prefilled from the running draft, so the
+    /// stack-level tab-bar visibility observes the push; ✓ rewrites
     /// the draft snapshot, X discards). The row keeps standard insets,
     /// so every other row — including the main action — keeps its exact
     /// frame across states (D10).
@@ -242,12 +254,7 @@ struct TrackContent: View {
                 .font(.body)
                 .frame(maxWidth: .infinity, minHeight: Theme.minTapArea)
             }
-            NavigationLink {
-                NotesEditorPage(initialText: vm.state.draft?.notes ?? "", entryName: vm.state.draft?.text ?? "") { notes in
-                    Task { await vm.updateDraftNotes(notes) }
-                }
-            } label: {
-                Image(systemName: "note.text")
+            Button(action: onOpenNotesEditor) {                Image(systemName: "note.text")
                     .font(.title2)
                     .foregroundStyle(runningNotes.isEmpty ? Theme.textSecondary : Theme.accentPrimary)
                     .frame(minWidth: Theme.minTapArea, minHeight: Theme.minTapArea)

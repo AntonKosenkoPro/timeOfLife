@@ -164,6 +164,7 @@ struct AppShellViewModelTests {
         let entry = TimeEntry(id: "e1", activityText: "Gym", startedAt: Date())
         #expect(AppShellViewModel.isTabBarHidden(path: [.entry(entry)]) == true)
         #expect(AppShellViewModel.isTabBarHidden(path: [.namePicker(initialText: "Gy")]) == true)
+        #expect(AppShellViewModel.isTabBarHidden(path: [.notesEditor(initialText: "n", entryName: "Gym")]) == true)
         #expect(AppShellViewModel.isTabBarHidden(path: [.profile, .entry(entry)]) == true)
     }
 

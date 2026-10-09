@@ -94,6 +94,11 @@ struct AppShellView: View {
         NavigationStack(path: $vm.trackPath) {
             TrackView(vm: trackVM) {
                 vm.trackPath.append(.namePicker(initialText: trackVM.nameDraft))
+            } onOpenNotesEditor: {
+                vm.trackPath.append(.notesEditor(
+                    initialText: trackVM.state.draft?.notes ?? "",
+                    entryName: trackVM.state.draft?.text ?? ""
+                ))
             }
                 .navigationTitle(L10n.tabTrack.text)
                 .navigationBarTitleDisplayMode(.inline)
@@ -122,6 +127,13 @@ struct AppShellView: View {
                                 trackVM.syncReadyFromDraft()
                             }
                         )
+                    case let .notesEditor(initialText, entryName):
+                        // The running notes editor for Track
+                        // (separate-notes-editor): ✓ writes back through the
+                        // owning tab's view model; X discards. Back cancels.
+                        NotesEditorPage(initialText: initialText, entryName: entryName) { notes in
+                            Task { await trackVM.updateDraftNotes(notes) }
+                        }
                     case .entry:
                         EmptyView()
                     }

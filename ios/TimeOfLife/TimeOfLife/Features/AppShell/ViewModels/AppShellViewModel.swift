@@ -7,9 +7,10 @@ import Combine
 /// carries the tapped History entry snapshot for the pushed unified entry
 /// form (EDIT for `manual`, LOCKED for imported — resolved at the
 /// destination, so the snapshot never changes spec behavior); `namePicker`
-/// carries the Track draft snapshot for the pushed shared picker
-/// (completion closures resolve at the destination from the owning tab's
-/// view model, so the route itself stays a value). Remaining
+/// carries the Track draft snapshot for the pushed shared picker and
+/// `notesEditor` the running draft's notes snapshot for the pushed notes
+/// page (completion closures resolve at the destination from the owning
+/// tab's view model, so the route itself stays a value). Remaining
 /// caller-local `NavigationLink`s (Manage Categories from Profile, pickers
 /// inside the entry form and sheets) always sit under a non-empty path or
 /// outside any tab bar, so every push past a tab root is path-observed.
@@ -20,6 +21,7 @@ enum ShellRoute: Hashable {
     case profile
     case entry(TimeEntry)
     case namePicker(initialText: String)
+    case notesEditor(initialText: String, entryName: String)
 }
 
 /// View model for the app shell (app-shell spec): owns the selected
