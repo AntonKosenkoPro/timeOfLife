@@ -31,6 +31,7 @@
 ## 5. Tuning and docs
 
 - [x] 4.4 Locked Stop fix (device-verified logs): banner `widgetURL` scoped to the label zone so Stop taps don't engage the unlock-requiring deep link; db + session sidecar stamped `.completeUntilFirstUserAuthentication` on every open/write so the intent works with a locked keybag (LocalStore docs already required this class — code now enforces it); intent logs split (account/open/draft)
+- [x] 4.5 Stop flow vs pocket stops: AoD-dimmed/inert Stop (`isLuminanceReduced` disabled+40%), woken-locked tap demands Face ID/passcode (`requiresLocalDeviceAuthentication`), unlocked tap stops + direct-ends to Saved card
 - [ ] 5.1 Tune dismissal seconds T on-device (design Q1), record chosen value in spec delta
 - [x] 5.3 Pre-archive cleanup: TEMP-TEST-10X reverted to 1s, banner SHA marker removed, Profile `ext` fingerprint removed (single-SHA footer back); appex stamp phase pruned (app stamp kept)
 - [x] 5.2 Update `docs/project-context.md` (Incomplete/deferred entry for Live Activities → shipped), `Design/COMPONENTS.md` if a shared face component is extracted, `README.md` smoke checklist
