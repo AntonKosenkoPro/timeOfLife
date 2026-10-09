@@ -41,6 +41,10 @@ struct TimerLiveActivityWidget: Widget {
                         .padding(.vertical, 8)
                         .padding(.horizontal, 4)
                         .padding(.vertical, 4)
+                        // Hugging capsule, restored after the debug-blue
+                        // removal took the border with it: subtle white —
+                        // the island is always black (see LiveActivityTheme).
+                        .overlay(Capsule().stroke(LiveActivityTheme.timerBorder, lineWidth: 1))
                         .widgetURL(trackURL)
                 }
                 DynamicIslandExpandedRegion(.trailing) {
