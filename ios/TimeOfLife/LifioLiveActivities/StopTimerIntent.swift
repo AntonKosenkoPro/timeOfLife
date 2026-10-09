@@ -94,7 +94,7 @@ struct StopTimerIntent: AppIntent {
         // Logged count is the direct-end discriminator: 0 here with a live
         // banner means the shared-type contract broke (device debugging).
         let all = Activity<TimerActivityAttributes>.activities
-        Self.logger.info("StopTimerIntent sees \(all.count) activities of type \(String(describing: TimerActivityAttributes.self))")
+        Self.logger.info("StopTimerIntent sees \(all.count) activities of type \(String(describing: TimerActivityAttributes.self), privacy: .public)")
         let live = all.filter { $0.activityState == .active }
         Self.logger.info("StopTimerIntent ending \(live.count) active activities")
         for activity in live {
