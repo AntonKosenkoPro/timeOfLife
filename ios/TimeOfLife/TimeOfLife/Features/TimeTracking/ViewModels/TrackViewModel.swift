@@ -33,6 +33,14 @@ final class TrackViewModel: ObservableObject {
     private let nowProvider: () -> Date
     private var ticker: AnyCancellable?
     private var savedResetTask: Task<Void, Never>?
+    /// Serializes reloads (fix-track-empty-after-reinstall): the tab-return
+    /// reload and the sync-exit reload race on every first-sync landing.
+    /// `needsReload` starts true so the first appear loads; `invalidate()`
+    /// marks the snapshot stale and the next `loadIfNeeded()` reloads it.
+    /// A call arriving mid-load keeps `needsReload` set so the next appear
+    /// retries (HistoryViewModel precedent).
+    private var isLoading = false
+    private var needsReload = true
 
     init(
         service: TimerService,
@@ -54,12 +62,17 @@ final class TrackViewModel: ObservableObject {
     /// (stopped from the compact timer on another destination) returns to
     /// `.ready`/`.idle` instead of counting elapsed time forever. Call on
     /// appear.
+    ///
+    /// A failed load keeps the last good snapshot (mirror-only convergence):
+    /// only the recoverable error surfaces, never blanked recents.
     func load() async {
         do {
-            // Seeding lives behind the sign-in gate (`RootView`) only: this
-            // load races it on first appear, and seeding is idempotent, but
-            // the gate is the single owner — a second racing call site only
-            // doubles file traffic on every cold start.
+            // Seeding completes before the shell mounts (seed-before-reveal
+            // in `RootView`), so this load never races it; the first-sync
+            // pull still lands in the background, and the sync-exit reload
+            // below converges on it. Seeding stays gate-owned — a second
+            // racing call site here would only double file traffic on
+            // every cold start.
             recents = try await storeRecents()
             allNames = try await storeAllNames()
             categories = Dictionary(uniqueKeysWithValues: try await service.store.categories().map { ($0.id, $0) })
@@ -78,6 +91,24 @@ final class TrackViewModel: ObservableObject {
         } catch {
             errorMessage = L10n.text(in: .default, code: "error.unknown")
         }
+    }
+
+    /// Reloads only when the snapshot is stale or was never loaded.
+    /// Re-entrancy safe: never runs two loads concurrently; a call arriving
+    /// mid-load keeps `needsReload` set so the next appear retries
+    /// (HistoryViewModel precedent).
+    func loadIfNeeded() async {
+        guard needsReload, !isLoading else { return }
+        needsReload = false
+        isLoading = true
+        defer { isLoading = false }
+        await load()
+    }
+
+    /// Marks the snapshot stale so the next `loadIfNeeded` reloads it.
+    /// Call on tab return, Profile exit, and sync-cycle exit.
+    func invalidate() {
+        needsReload = true
     }
 
     private func storeRecents() async throws -> [ExactName] {

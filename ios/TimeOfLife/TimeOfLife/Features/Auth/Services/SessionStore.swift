@@ -7,6 +7,11 @@ import Combine
 final class SessionStore: ObservableObject {
     @Published private(set) var state: SessionState = .signedOut
     @Published private(set) var cachedEmail: String?
+    /// True while the launch restore is unresolved (fix-track-empty-after-
+    /// reinstall): cold launch always runs `restoreSession`, so the gate
+    /// starts restoring and shows a splash instead of flashing the auth
+    /// flow. Cleared when the restore resolves (signed-in or signed-out).
+    @Published private(set) var isRestoring = true
 
     enum SessionState: Equatable {
         case signedOut
@@ -27,5 +32,9 @@ final class SessionStore: ObservableObject {
 
     func setCachedEmail(_ email: String?) {
         cachedEmail = email
+    }
+
+    func setRestoring(_ restoring: Bool) {
+        isRestoring = restoring
     }
 }

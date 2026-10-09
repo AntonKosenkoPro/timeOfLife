@@ -87,6 +87,10 @@ extension AppContainer {
         sessionStore: SessionStore,
         navigation: AppNavigationStack
     ) {
+        // The stub graph never runs the launch restore: clear the restoring
+        // flag explicitly or `RootView` would hold the splash over every
+        // stub screen.
+        sessionStore.setRestoring(false)
         switch screen {
         case "emailEntry":
             // Auth flow pushed to the email entry screen.
