@@ -261,6 +261,9 @@ targets:
       - path: LifioLiveActivities/Info.plist
         type: file
         buildPhase: none
+      - path: LifioLiveActivities/Info-Debug.plist
+        type: file
+        buildPhase: none
       - path: LifioLiveActivities/LifioLiveActivities.entitlements
         type: file
         buildPhase: none
@@ -273,6 +276,13 @@ targets:
         # (without it sim installs fail with "extensionDictionary must
         # be set in placeholder attributes").
         CFBundleDisplayName: Lifio
+        # Release versions: must match the containing app's Release plist
+        # (0.1.4/5) — build warning now, App Store rejection later. Debug
+        # uses the unmanaged Info-Debug.plist below (0.1.3/4); keep both
+        # in sync with TimeOfLife/Configuration/Info*.plist under the
+        # release-versioning spec when bumping.
+        CFBundleShortVersionString: "0.1.4"
+        CFBundleVersion: "5"
         NSExtension:
           NSExtensionPointIdentifier: com.apple.widgetkit-extension
     settings:
@@ -292,15 +302,11 @@ targets:
         # aids in the extension).
         Debug:
           SWIFT_ACTIVE_COMPILATION_CONDITIONS: DEBUG
-        # NOTE: no version keys here on purpose. The extension must ship
-        # the same CFBundleShortVersionString/CFBundleVersion as the
-        # containing app (build warning now, App Store rejection later),
-        # but the app versions differ per config (Debug 0.1.3/4,
-        # Release 0.1.4/5) while `info.properties` is config-independent —
-        # and INFOPLIST_KEY_ overrides are not honored for this target on
-        # the current toolchain (verified: settings present, plist
-        # unchanged). Align versions in the release flow before the first
-        # TestFlight upload instead.
+          # Debug uses the unmanaged Info-Debug.plist (Debug versions
+          # 0.1.3/4, matching the app's Debug plist); Release uses the
+          # generated base plist above (0.1.4/5). Same split as the app
+          # target — keep all four version pairs in sync on bumps.
+          INFOPLIST_FILE: LifioLiveActivities/Info-Debug.plist
         Release:
           DEVELOPMENT_TEAM: 7923U48U87
           CODE_SIGNING_REQUIRED: YES
