@@ -113,9 +113,12 @@ progress visualization.
 
 ### Recents
 
-- Wrapping chip flow of the most-recently-used exact texts, capped at six,
+- Wrapping chip flow of the most-recently-used exact texts, capped at twelve,
   newest `started_at` first (`GROUP BY activity_text` over committed entries,
-  `id DESC` tiebreak); no horizontal scrolling.
+  `id DESC` tiebreak); no horizontal scrolling. The chips live in a
+  fixed-height area (three chip rows) with its own vertical scroll, so
+  overflow never grows the Track page.
+- A `Divider` separates the section caption from the chips.
 - Each chip shows the icon of the first-position Category (first by the stored
   order) in a fixed symbol slot; categoryless entries render name-only
   chips with no icon and no placeholder glyph. Category names are never shown.
@@ -143,7 +146,9 @@ name push row plus the dedicated picker page (see `SCREENS/NamePicker.md`):
 - The field content is a temporary draft: it never changes committed history.
   Stopping is the only commit boundary — it creates the entry and dismisses
   nothing (the same text stays prepared).
-- The running name is locked: it cannot be edited until Stop. Category
+- The running name is locked: it cannot be edited until Stop, and it renders
+  leading-aligned like the idle field. A `Divider` separates the Categories
+  caption from the tag chips. Category
   toggles while running rewrite the draft snapshot only. A standalone notes
   button sits outside the locked-name row (its tint signals whether the
   draft holds notes); mid-run notes saves rewrite the draft notes snapshot
@@ -284,7 +289,7 @@ Add English and Russian values, then add corresponding `L10n` cases:
 ## Capture behavior
 
 Recents are computed on-device from committed entries and ranked by newest
-`started_at` per exact text, capped at six. Each chip contains the exact
+`started_at` per exact text, capped at twelve. Each chip contains the exact
 text and, when the entry has Categories, the icon of the first-position
 Category — never a Category name. Category icons belong in Manage
 Categories, the entry form, and Insights; on Track they
