@@ -4,7 +4,6 @@
 
 The on-device source of truth for the user's time-tracking data — a SQLite database in the App Group shared container that the app, widgets, extensions, and lock-screen Controls all read and write cross-process.
 ## Requirements
-
 ### Requirement: Device is the source of truth
 The system SHALL treat the active signed-in account's local SQLite database in the App Group shared container as the authoritative source of the user's categories, entries, entry-category assignments, and running timer draft. All app features (timer, history, insights) SHALL operate against this active account's database while the user is signed in, and SHALL function fully with no network connectivity. No app feature SHALL operate against any local database while the user is signed out: the auth gate is the only reachable surface, and it SHALL neither read nor write tracker data.
 
@@ -15,6 +14,7 @@ The system SHALL treat the active signed-in account's local SQLite database in t
 #### Scenario: Sync is unavailable
 - **WHEN** the user is signed in but offline, or is not signed in
 - **THEN** a signed-in user retains full local function (timer, categories, history) against the active account's database with no network connectivity, while a signed-out user has no tracker function and remains at the auth gate
+
 ### Requirement: App Group shared container
 The system SHALL store the local database in an App Group shared container (`group.com.antonkosenko.timeoflifeapp`) so that the main app, widget extensions, Screen Time extension, and lock-screen Control intents can read and write the same data cross-process.
 
@@ -38,15 +38,16 @@ The system SHALL store the local database with iOS data protection `.completeUnt
 - **THEN** the intent fails gracefully (catches the database-open error), returns a "please unlock" state to the Control, and does not crash or leave the data in an inconsistent state
 
 ### Requirement: Running timer state persistence
-The system SHALL persist the running timer's draft state (entry text, ordered category ids, started_at, status) in the local database, not solely in app memory, so that the timer survives app crashes and is readable by widgets and lock-screen Controls.
+The system SHALL persist the running timer's draft state (entry text, ordered category ids, notes, started_at, status) in the local database, not solely in app memory, so that the timer survives app crashes and is readable by widgets and lock-screen Controls. Widgets and Controls SHALL continue to read only text/status/elapsed and SHALL ignore the notes column.
 
 #### Scenario: Timer survives app crash
 - **WHEN** a timer is running and the app crashes or is killed by the OS
-- **THEN** on next launch the app reads the draft from the database and resumes the running-timer UI (shows the elapsed time, the locked text, and the tags as left)
+- **THEN** on next launch the app reads the draft from the database and resumes the running-timer UI (shows the elapsed time, the locked text, the tags as left, and the draft notes as left)
 
 #### Scenario: Control displays running timer
 - **WHEN** a lock-screen Control or widget renders while a timer is running
 - **THEN** it reads the draft from the shared container database and displays the running status and elapsed time
+
 ### Requirement: Transactional outbox
 The system SHALL record every local mutation (create, update, delete) as a row in a transactional `outbox` table, written in the same database transaction as the state change. The outbox is the durable queue of operations to propagate to the backend relay when sync is active.
 
@@ -136,6 +137,7 @@ The local store SHALL apply a relay tombstone `(resource, record_id, deleted_at)
 #### Scenario: Pending deletes survive tombstone application
 - **WHEN** an outbox DELETE row exists for the tombstoned id
 - **THEN** the DELETE row remains queued (it converges via 404-as-success on drain)
+
 ### Requirement: Entries own text, categories, and notes
 Each entry SHALL own its `activity_text` (trimmed, non-empty, max 60 chars; case-sensitive identity), its ordered `category_ids` (zero or more, position-preserved via `entry_categories`), and its `notes` (max 280 runes, default empty). No entry SHALL reference any other record for its display name or classification.
 
@@ -146,12 +148,21 @@ Each entry SHALL own its `activity_text` (trimmed, non-empty, max 60 chars; case
 #### Scenario: Per-entry isolation
 - **WHEN** one entry's text, categories, or notes change
 - **THEN** no other entry changes
+
 ### Requirement: Timer draft holds text and live categories
-The `timer_state` singleton SHALL hold `(activity_text, ordered category_ids, started_at, status)` for the running draft. Toggles SHALL rewrite the snapshot in the same chokepoint transaction. Stop SHALL create the entry from the draft and clear it.
+The `timer_state` singleton SHALL hold `(activity_text, ordered category_ids, notes, started_at, status)` for the running draft. Toggles SHALL rewrite the snapshot in the same chokepoint transaction. Notes saves SHALL rewrite only the notes field in the same chokepoint transaction. Stop SHALL create the entry from the draft (text + final categories + final notes) and clear it.
 
 #### Scenario: Crash restores draft tags
 - **WHEN** the app restarts with a persisted running draft
 - **THEN** the timer resumes with the locked text and the tags as last left
+
+#### Scenario: Crash restores draft notes
+- **WHEN** the app restarts with a persisted running draft holding notes
+- **THEN** the timer resumes with the draft notes as last left, and Stop saves the entry with those notes unless edited further
+
+#### Scenario: Mid-run notes edit rewrites the snapshot
+- **WHEN** the user saves notes while running
+- **THEN** only the draft notes field updates in the same chokepoint transaction; text, categories, and `started_at` are untouched
 
 ### Requirement: Anonymous data is discarded on first login
 Because this change ships pre-release, the system SHALL NOT migrate existing anonymous or prior-dev-install local data into any per-account database file. On the first sign-in under the account-bound model, the system SHALL discard the anonymous local database content and start the signed-in account with its own fresh per-account file. No compatibility branch or legacy-format read path SHALL be kept for anonymous data.
@@ -178,3 +189,4 @@ The system SHALL seed starter categories into a per-account database file the fi
 #### Scenario: Seeding is scoped to the opened account
 - **WHEN** an account's file is opened and seeded
 - **THEN** no other account's dormant file is created, modified, or seeded as a side effect
+

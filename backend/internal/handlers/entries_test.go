@@ -41,7 +41,7 @@ func TestCreateEntry_WithTextAndCategories(t *testing.T) {
 }
 
 // Entry create validation: activity_text (trimmed non-empty, 60 runes) and
-// notes (280 runes) gate the write; category id format is checked.
+// notes (2000 runes) gate the write; category id format is checked.
 func TestCreateEntry_Validation(t *testing.T) {
 	h, _, _, tok := newCatalogHandler(t)
 
@@ -130,6 +130,63 @@ func TestCreateEntry_TrimsText(t *testing.T) {
 	decodeBody(t, w, &e)
 	if e.ActivityText != "Gym" {
 		t.Errorf("expected trimmed Gym, got %q", e.ActivityText)
+	}
+}
+
+// Notes bound is 2000 trimmed runes: 2000 pass, 2001 fail, and surrounding
+// whitespace is free (only the trimmed count gates the write).
+func TestCreateEntry_NotesBound(t *testing.T) {
+	h, _, _, tok := newCatalogHandler(t)
+	repeatRune := func(n int) string {
+		s := ""
+		for i := 0; i < n; i++ {
+			s += "я"
+		}
+		return s
+	}
+
+	// 2000 trimmed runes pass.
+	w := serve(h, jsonReq(t, "POST", "/api/v1/entries", tok, map[string]any{
+		"id": v7(), "activity_text": "Gym", "notes": repeatRune(2000),
+		"started_at": "2026-07-27T09:00:00Z",
+	}))
+	if w.Code != http.StatusCreated {
+		t.Fatalf("2000-rune notes: expected 201, got %d (body=%s)", w.Code, w.Body.String())
+	}
+
+	// 2001 trimmed runes fail with a notes validation_error.
+	w2 := serve(h, jsonReq(t, "POST", "/api/v1/entries", tok, map[string]any{
+		"id": v7(), "activity_text": "Gym", "notes": repeatRune(2001),
+		"started_at": "2026-07-27T09:00:00Z",
+	}))
+	if w2.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("2001-rune notes: expected 422, got %d (body=%s)", w2.Code, w2.Body.String())
+	}
+	var resp struct {
+		Error struct {
+			Code    string            `json:"code"`
+			Details map[string]string `json:"details"`
+		} `json:"error"`
+	}
+	decodeBody(t, w2, &resp)
+	if resp.Error.Code != "validation_error" {
+		t.Errorf("expected code validation_error, got %q", resp.Error.Code)
+	}
+	msg, ok := resp.Error.Details["notes"]
+	if !ok {
+		t.Fatalf("expected notes in details, got %+v", resp.Error.Details)
+	}
+	if msg != "Notes must be 2000 characters or fewer" {
+		t.Errorf("unexpected notes message, got %q", msg)
+	}
+
+	// Surrounding whitespace is free: padded 2000 trimmed runes pass.
+	w3 := serve(h, jsonReq(t, "POST", "/api/v1/entries", tok, map[string]any{
+		"id": v7(), "activity_text": "Gym", "notes": "  " + repeatRune(2000) + "  ",
+		"started_at": "2026-07-27T09:00:00Z",
+	}))
+	if w3.Code != http.StatusCreated {
+		t.Fatalf("padded 2000-rune notes: expected 201, got %d (body=%s)", w3.Code, w3.Body.String())
 	}
 }
 

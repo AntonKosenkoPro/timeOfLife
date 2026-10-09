@@ -47,7 +47,7 @@ Pinned bottom action bar via `.safeAreaInset(edge: .bottom)` → `MeasuredBottom
 
 - Apple sign-in calls `WelcomeViewModel.signInWithApple()`. On success `AuthService` persists the session and `SessionStore` flips to `.signedIn`, activating `SyncController`; the app shell (Track) remains the root.
 - “Continue with Email” pushes `.emailEntry` through `AppNavigationStack`.
-- Offline: show `OfflineBanner` and disable both sign-in actions.
+- Offline: disable both sign-in actions while offline (no global banner).
 - No keyboard handling needed on this screen.
 
 ### Implementation checklist
@@ -110,7 +110,7 @@ Follows `Design/INTERACTIONS.md` → **Keyboard and primary input placement**. T
 - When the user navigates back from `OtpEntryView`, pre-fill the email from `SessionStore.cachedEmail`.
 - Clear field error when `vm.email` changes.
 - Disable the Continue button while loading or when email is empty.
-- Offline: show banner and disable submit; set `errorMessage` to `String.localized("error.offline")` if submit is attempted.
+- Offline: disable submit while offline (no global banner); set `errorMessage` to `String.localized("error.offline")` if submit is attempted.
 
 ### Implementation checklist
 
@@ -165,7 +165,7 @@ Follows `Design/INTERACTIONS.md` → **Keyboard and primary input placement**. T
 - On success, `AuthService` updates `SessionStore`; `SyncController` activates. The app shell (Track) replaces the auth flow — sign-in is the mandatory launch gate.
 - Resend is enabled after a 30-second cooldown; on resend show a feedback message via `L10n.otpResent`.
 - Clear field error when `vm.code` changes.
-- Offline: show banner, disable submit, set `errorMessage` to `String.localized("error.offline")` if submit is attempted.
+- Offline: disable submit while offline (no global banner), set `errorMessage` to `String.localized("error.offline")` if submit is attempted.
 
 ### OTP input details
 

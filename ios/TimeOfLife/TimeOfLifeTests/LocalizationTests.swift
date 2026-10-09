@@ -231,6 +231,8 @@ struct LocalizationTests {
         "name.clear",
         "name.pickerNoMatchHint",
         "name.pickerTitle",
+        "notes.editorCounter",
+        "notes.editorSubtitle",
         "otp.codeHint",
         "otp.codeLabel",
         "otp.resend",
