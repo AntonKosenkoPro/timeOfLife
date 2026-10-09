@@ -42,7 +42,7 @@ struct SignInLifecycleTests {
     // MARK: - Prepare-before-reveal (fails until 2.1 lands)
 
     @Test("prepare binds and seeds a fresh account before reveal")
-    func prepareBindsAndSeedsFreshAccount() async {
+    func prepareBindsAndSeedsFreshAccount() async throws {
         let container = makeContainer()
         let userID = uniqueUserID()
         defer { removeAccountFile(userID: userID) }
@@ -52,10 +52,8 @@ struct SignInLifecycleTests {
         #expect(ready)
         #expect(container.localStoreOpenError == nil)
         #expect(await container.localStore.boundUserID == userID)
-        let seeded = try? await container.localStore.categoryStartersSeeded()
-        #expect(seeded == true)
-        let categories = try? await container.localStore.categories()
-        #expect(categories?.count == 7)
+        #expect(try await container.localStore.categoryStartersSeeded())
+        #expect(try await container.localStore.categories().count == 7)
     }
 
     @Test("Track first load after prepare sees starter categories")
