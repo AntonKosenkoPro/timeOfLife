@@ -104,15 +104,15 @@ struct TimerLiveActivityWidget: Widget {
             // alwaysAllowed intent. Body taps still go to Track.
             HStack(spacing: 12) {
                 Image(systemName: iconSymbol)
-                    .font(.title2)
+                    .font(.title)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(text)
                         .font(.headline)
                         .lineLimit(1)
                     Text(timerInterval: startedAt...Date.distantFuture, countsDown: false)
-                        // Headline-bold: the banner timer must survive AoD
-                        // dimming (device finding) — caption was too small.
-                        .font(.headline.bold().monospacedDigit())
+                        // Subheadline monospaced: legible dimmed without
+                        // crowding the name line (device-tuned).
+                        .font(.subheadline.monospacedDigit())
                         .lineLimit(1)
                 }
             }
@@ -120,9 +120,10 @@ struct TimerLiveActivityWidget: Widget {
             Spacer()
             LiveActivityStopButton()
         }
-        // Banner breathing room: the HStack otherwise sits flush against
-        // the banner's top/bottom edges (device finding, verified 8pt).
+        // Banner breathing room, verified on-device: 8pt vertical (flush
+        // edges otherwise) + 8pt horizontal.
         .padding(.vertical, 8)
+        .padding(.horizontal, 8)
         .accessibilityElement(children: .combine)
         .accessibilityLabel(LiveActivityStrings.runningAccessibilityLabel(text: text))
     }
