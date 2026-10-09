@@ -23,61 +23,38 @@ struct RecentActivitiesChips: View {
     @Environment(\.dynamicTypeSize)
     private var dynamicTypeSize
 
-    /// Single source of truth for the Recents cap (timer-capture-experience):
-    /// consumed by the view default below, `TrackViewModel.storeRecents`,
-    /// and the test helpers — the compiler carries the invariant, not comments.
-    /// `nonisolated` so the `nonisolated` slice helper can use it as a default.
-    nonisolated static let recentsLimit = 12
-
     /// The capped, most-recently-used-first slice (the store already sorts
-    /// by the text's newest `started_at`).
+    /// by the text's newest `started_at`; the cap is
+    /// `TrackViewModel.recentsLimit`).
     private var capped: [ExactName] { Self.recents(from: recents) }
 
     /// The capped, most-recently-used-first slice of the given recents.
     /// Pure (no view state), so `nonisolated` like `EntryRow.accessibilityLabel`.
     nonisolated static func recents(
         from recents: [ExactName],
-        limit: Int = recentsLimit
+        limit: Int = TrackViewModel.recentsLimit
     ) -> [ExactName] {
         Array(recents.prefix(limit))
     }
 
     /// Visible chip-area budget: three chip rows at `minTapArea` with
-    /// `spacingSmall` gaps (the common six-chip footprint). The flow hugs
-    /// its rows up to this budget; content beyond it scrolls inside a
-    /// fixed viewport instead of growing the Track page.
+    /// `spacingSmall` gaps (the common six-chip footprint). `fixedSize`
+    /// makes the scroll view hug its rows up to this budget; content
+    /// beyond it is capped into a scrolling viewport instead of growing
+    /// the Track page. One always-mounted view: no first-frame flash,
+    /// no branch teardown, scroll offset survives threshold crossings.
     private static let maxVisibleHeight: CGFloat = 3 * Theme.minTapArea + 2 * Theme.spacingSmall
 
-    @State private var contentHeight: CGFloat = 0
-
     var body: some View {
-        Group {
-            if contentHeight > Self.maxVisibleHeight {
-                ScrollView(.vertical) {
-                    flow
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .frame(height: Self.maxVisibleHeight)
-            } else {
-                flow
-            }
-        }
-        // Always measures the plain flow's natural height (row packing
-        // depends on width only, so the budget-capped proposal in the
-        // scrolling branch still measures true height). Latches the branch
-        // above without feedback: the measurement never depends on which
-        // branch displays.
-        .background {
+        ScrollView(.vertical) {
             flow
-                .opacity(0)
-                .allowsHitTesting(false)
-                .accessibilityHidden(true)
-                .onGeometryChange(for: CGFloat.self, of: \.size.height) { contentHeight = $0 }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .fixedSize(horizontal: false, vertical: true)
+        .frame(maxHeight: Self.maxVisibleHeight)
     }
 
-    /// The plain chip flow: measured in `background` always, displayed
-    /// directly while within budget.
+    /// The chip flow: hugged by `fixedSize` up to the budget above.
     private var flow: some View {
         FlowLayout(spacing: Theme.spacingSmall) {
             ForEach(capped) { recent in

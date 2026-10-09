@@ -23,9 +23,16 @@ final class TrackViewModel: ObservableObject {
     @Published var recents: [ExactName] = []
     /// Every committed exact-text name, newest first, uncapped — the source
     /// for the shared name picker (dedicated-name-picker). The chips stay
-    /// capped at `RecentActivitiesChips.recentsLimit` (`recents`); the picker
+    /// capped at `recentsLimit` (`recents`); the picker
     /// suggests everything ever used.
     @Published var allNames: [ExactName] = []
+    /// Recents cap (timer-capture-experience): single source of truth,
+    /// consumed by `storeRecents`, the `RecentActivitiesChips` default,
+    /// and the test helpers — the compiler carries the invariant, not
+    /// comments. Lives on the view model (not the view) so the
+    /// persistence query never resolves domain policy through UI types.
+    /// `nonisolated` so the `nonisolated` slice helper can default to it.
+    nonisolated static let recentsLimit = 12
     /// The id→Category map used to resolve recents chip icons (design D5).
     @Published private(set) var categories: [String: Category] = [:]
 
@@ -86,7 +93,7 @@ final class TrackViewModel: ObservableObject {
     }
 
     private func storeRecents() async throws -> [ExactName] {
-        try await service.store.recents(limit: RecentActivitiesChips.recentsLimit)
+        try await service.store.recents(limit: Self.recentsLimit)
             .map(ExactName.init(storeRecent:))
     }
 
