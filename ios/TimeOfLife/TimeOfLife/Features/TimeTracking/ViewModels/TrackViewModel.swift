@@ -23,7 +23,8 @@ final class TrackViewModel: ObservableObject {
     @Published var recents: [ExactName] = []
     /// Every committed exact-text name, newest first, uncapped — the source
     /// for the shared name picker (dedicated-name-picker). The chips stay
-    /// capped at 6 (`recents`); the picker suggests everything ever used.
+    /// capped at `RecentActivitiesChips.recentsLimit` (`recents`); the picker
+    /// suggests everything ever used.
     @Published var allNames: [ExactName] = []
     /// The id→Category map used to resolve recents chip icons (design D5).
     @Published private(set) var categories: [String: Category] = [:]
@@ -85,8 +86,8 @@ final class TrackViewModel: ObservableObject {
     }
 
     private func storeRecents() async throws -> [ExactName] {
-        // Keep in sync with `RecentActivitiesChips.recents(from:limit:)`.
-        try await service.store.recents(limit: 12).map(ExactName.init(storeRecent:))
+        try await service.store.recents(limit: RecentActivitiesChips.recentsLimit)
+            .map(ExactName.init(storeRecent:))
     }
 
     private func storeAllNames() async throws -> [ExactName] {

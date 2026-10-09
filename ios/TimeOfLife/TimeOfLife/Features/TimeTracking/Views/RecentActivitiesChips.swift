@@ -2,10 +2,9 @@ import SwiftUI
 
 /// The Track Recents chip flow (timer-capture-experience spec,
 /// design D5). Presents up to twelve most-recently-used exact entry texts as
-/// a wrapping flow of chips with 44 pt tap targets; chips wrap onto
-/// additional rows inside a fixed-height area and overflow scrolls
-/// internally on the chip axis, so the Track page footprint never grows for
-/// Recents overflow.
+/// a wrapping flow of chips with 44 pt tap targets; the flow hugs its rows
+/// up to a three-row budget and overflow scrolls internally on the chip
+/// axis, so the Track page footprint never grows for Recents overflow.
 ///
 /// Each chip shows the icon of the first category of that exact text's
 /// newest committed entry (first by stored position, resolved through the
@@ -24,36 +23,68 @@ struct RecentActivitiesChips: View {
     @Environment(\.dynamicTypeSize)
     private var dynamicTypeSize
 
+    /// Single source of truth for the Recents cap (timer-capture-experience):
+    /// consumed by the view default below, `TrackViewModel.storeRecents`,
+    /// and the test helpers — the compiler carries the invariant, not comments.
+    /// `nonisolated` so the `nonisolated` slice helper can use it as a default.
+    nonisolated static let recentsLimit = 12
+
     /// The capped, most-recently-used-first slice (the store already sorts
-    /// by the text's newest `started_at`). Keep in sync with
-    /// `TrackViewModel.storeRecents`: either layer alone silently re-caps.
+    /// by the text's newest `started_at`).
     private var capped: [ExactName] { Self.recents(from: recents) }
 
     /// The capped, most-recently-used-first slice of the given recents.
     /// Pure (no view state), so `nonisolated` like `EntryRow.accessibilityLabel`.
     nonisolated static func recents(
         from recents: [ExactName],
-        limit: Int = 12
+        limit: Int = recentsLimit
     ) -> [ExactName] {
         Array(recents.prefix(limit))
     }
 
     /// Visible chip-area budget: three chip rows at `minTapArea` with
-    /// `spacingSmall` gaps (the common six-chip footprint). Content beyond
-    /// it scrolls inside the area instead of growing the Track page.
+    /// `spacingSmall` gaps (the common six-chip footprint). The flow hugs
+    /// its rows up to this budget; content beyond it scrolls inside a
+    /// fixed viewport instead of growing the Track page.
     private static let maxVisibleHeight: CGFloat = 3 * Theme.minTapArea + 2 * Theme.spacingSmall
 
+    @State private var contentHeight: CGFloat = 0
+
     var body: some View {
-        ScrollView(.vertical) {
-            FlowLayout(spacing: Theme.spacingSmall) {
-                ForEach(capped) { recent in
-                    chip(recent)
+        Group {
+            if contentHeight > Self.maxVisibleHeight {
+                ScrollView(.vertical) {
+                    flow
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .frame(height: Self.maxVisibleHeight)
+            } else {
+                flow
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        // Always measures the plain flow's natural height (row packing
+        // depends on width only, so the budget-capped proposal in the
+        // scrolling branch still measures true height). Latches the branch
+        // above without feedback: the measurement never depends on which
+        // branch displays.
+        .background {
+            flow
+                .opacity(0)
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
+                .onGeometryChange(for: CGFloat.self, of: \.size.height) { contentHeight = $0 }
+        }
+    }
+
+    /// The plain chip flow: measured in `background` always, displayed
+    /// directly while within budget.
+    private var flow: some View {
+        FlowLayout(spacing: Theme.spacingSmall) {
+            ForEach(capped) { recent in
+                chip(recent)
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .frame(maxHeight: Self.maxVisibleHeight)
     }
 
     // MARK: - Sizing

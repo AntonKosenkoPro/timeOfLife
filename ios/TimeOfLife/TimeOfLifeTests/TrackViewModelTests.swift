@@ -534,7 +534,7 @@ struct TrackViewModelTests {
     }
 
     private func storeRecents(_ store: LocalStore) async throws -> [ExactName] {
-        try await store.recents(limit: 12).map(ExactName.init(storeRecent:))
+        try await store.recents(limit: RecentActivitiesChips.recentsLimit).map(ExactName.init(storeRecent:))
     }
 
     private func makeViewModel() -> TrackViewModel {
