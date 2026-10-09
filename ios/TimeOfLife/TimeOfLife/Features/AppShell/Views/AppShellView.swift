@@ -58,6 +58,13 @@ struct AppShellView: View {
         .onReceive(vm.$selectedTab.dropFirst().filter { $0 == .track }) { _ in
             Task { await trackVM.load() }
         }
+        // Foreground return never re-appears the visible tab: reconcile here
+        // too, or a widget-side stop leaves the Track timer ticking until
+        // the next tab switch (device finding — draft gone, in-memory run
+        // stale). `load()` is idempotent and already owns this reconcile.
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
+            Task { await trackVM.load() }
+        }
         // Live Activity tap: a bumped counter selects Track without
         // disturbing per-tab push state. `dropFirst` skips the initial
         // value (no request has arrived yet).

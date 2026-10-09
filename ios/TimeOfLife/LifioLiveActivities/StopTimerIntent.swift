@@ -91,7 +91,11 @@ struct StopTimerIntent: AppIntent {
             startedAt: startedAt,
             savedDurationSeconds: durationSeconds
         )
-        for activity in Activity<TimerActivityAttributes>.activities where activity.activityState == .active {
+        // Logged count is the direct-end discriminator: 0 here with a live
+        // banner means the shared-type contract broke (device debugging).
+        let live = Activity<TimerActivityAttributes>.activities.filter { $0.activityState == .active }
+        Self.logger.info("StopTimerIntent ending \(live.count) active activities")
+        for activity in live {
             await activity.end(
                 .init(state: final, staleDate: nil),
                 dismissalPolicy: .after(.now + 6.0)
