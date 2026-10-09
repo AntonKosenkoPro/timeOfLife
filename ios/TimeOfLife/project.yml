@@ -56,17 +56,11 @@ targets:
         buildPhase: none
       - path: TimeOfLife/Localization/en.lproj
       - path: TimeOfLife/Localization/ru.lproj
-      # Shared ActivityKit attributes (live-activities change): the same
-      # file compiles into the widget extension (its sources glob picks it
-      # up) and here into the app (which requests/ends the activity).
-      # Pure Foundation + ActivityKit — no app-module imports allowed.
-      - path: LifioLiveActivities/Shared/TimerActivityAttributes.swift
-      # Shared clock (phantom skeleton + live style): unit-tested here,
-      # rendered in the extension. Foundation-only.
-      - path: LifioLiveActivities/Shared/TimerClock.swift
-      # Shared Darwin signal (posted by the Stop intent, observed by the
-      # app): Foundation-only, no app-module imports.
-      - path: LifioLiveActivities/Shared/LiveActivitySignal.swift
+      # Live Activity contract types (live-activities change): TimerActivityAttributes,
+      # TimerClock, LiveActivityStrings live in the shared LifioLiveActivityCore
+      # framework linked below — a single module, so ActivityKit matches both
+      # sides' `Activity<Attributes>.activities`. Nothing compiles Shared/ into
+      # this target directly.
     resources:
       - TimeOfLife/Resources/Assets.xcassets
       - TimeOfLife/PrivacyInfo.xcprivacy
@@ -155,6 +149,13 @@ targets:
       # change): XcodeGen creates the Embed App Extensions phase from an
       # app-extension target dependency.
       - target: LifioLiveActivities
+      # Shared Live Activity contract (live-activities change): the app embeds
+      # this dynamic framework (XcodeGen embeds every non-static dependency of
+      # app targets); the appex below links the same binary without embedding
+      # it (non-app targets don't embed), loading it from the containing app's
+      # Frameworks at runtime — the standard containing-app-embedded-framework
+      # pattern for appex linking.
+      - target: LifioLiveActivityCore
       - package: GRDB
         product: GRDB
     # Trailing stamp (profile-version-sha): writes the built commit's 7-char
@@ -173,6 +174,32 @@ targets:
           SHA="$(git rev-parse --short=7 HEAD 2>/dev/null || echo "?")"
           /usr/libexec/PlistBuddy -c "Set :GIT_COMMIT_SHA $SHA" "${TARGET_BUILD_DIR}/${INFOPLIST_PATH}" 2>/dev/null \
             || /usr/libexec/PlistBuddy -c "Add :GIT_COMMIT_SHA string $SHA" "${TARGET_BUILD_DIR}/${INFOPLIST_PATH}"
+  LifioLiveActivityCore:
+    type: framework
+    platform: iOS
+    deploymentTarget: "18.0"
+    sources:
+      - path: LifioLiveActivityCore
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.antonkosenko.timeoflifeapp.liveactivitycore
+        GENERATE_INFOPLIST_FILE: YES
+        # Linked by the widget extension: only extension-safe APIs allowed
+        # (no UIApplication etc.) — enforced at compile time.
+        APPLICATION_EXTENSION_API_ONLY: YES
+        # Target-scoped warnings-as-errors, same rationale as the app
+        # target (never global: GRDB compiles with -suppress-warnings).
+        SWIFT_TREAT_WARNINGS_AS_ERRORS: YES
+        GCC_TREAT_WARNINGS_AS_ERRORS: YES
+      configs:
+        # Signing parity with the app/appex targets: Debug unsigned
+        # (simulator/CI), Release signed with the distribution team.
+        Debug:
+          SWIFT_ACTIVE_COMPILATION_CONDITIONS: DEBUG
+        Release:
+          DEVELOPMENT_TEAM: 7923U48U87
+          CODE_SIGNING_REQUIRED: YES
+          CODE_SIGN_IDENTITY: Apple Development
   LifioLiveActivities:
     type: app-extension
     platform: iOS
@@ -198,10 +225,9 @@ targets:
       - path: TimeOfLife/Features/Catalog/Models/CategoryName.swift
       - path: TimeOfLife/Features/Catalog/Models/ExactName.swift
       - path: TimeOfLife/Features/Sync/ActiveAccountFileResolver.swift
-      # NOTE: LiveActivityService.swift is deliberately NOT here: the
-      # intent never touches ActivityKit (module-distinct attributes type
-      # makes the extension's `activities` always empty) — it posts the
-      # Darwin signal and the app reaps (D8).
+      # NOTE: LiveActivityService.swift is deliberately NOT here: the Stop
+      # intent ends the activity directly via ActivityKit (shared
+      # `LifioLiveActivityCore` type, linked below) — no Darwin reap.
       # The shared user-facing strings (single source with the app): the
       # extension reads them from its own bundle at runtime. Declared as
       # explicit resource files HERE (not a separate `resources:` block):
@@ -272,6 +298,10 @@ targets:
         com.apple.ApplicationGroups.iOS:
           enabled: 1
     dependencies:
+      # Shared Live Activity contract (live-activities change): linked, NOT
+      # embedded (only app targets embed) — loads from the containing app's
+      # Frameworks at runtime.
+      - target: LifioLiveActivityCore
       - package: GRDB
         product: GRDB
   TimeOfLifeTests:
@@ -282,6 +312,9 @@ targets:
       - TimeOfLifeTests
     dependencies:
       - target: TimeOfLife
+      # Contract types under test (TimerActivityAttributes, TimerClock) now
+      # live in the shared framework — imported directly by the test files.
+      - target: LifioLiveActivityCore
       # Legacy-schema fixtures only (e.g. regressing timer_state to its
       # pre-notes shape): no app mutation path may use this — LocalStore
       # stays the single chokepoint (see .opencodereview/rule.json).
@@ -300,6 +333,7 @@ schemes:
     build:
       targets:
         TimeOfLife: all
+        LifioLiveActivityCore: all
         LifioLiveActivities: all
         TimeOfLifeTests: [test]
     run:

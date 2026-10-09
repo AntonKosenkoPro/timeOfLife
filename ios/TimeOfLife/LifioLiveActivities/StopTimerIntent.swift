@@ -1,6 +1,14 @@
+// ActivityKit's `Activity`/`ActivityContent` are not Sendable on this
+// SDK, so iterating `activities` and awaiting `end` trips Swift 6 region
+// isolation under the repo's `complete` checking. The preconcurrency
+// import scopes the relaxation to this file only (same as
+// `LiveActivityService.swift`).
+@preconcurrency import ActivityKit
 import AppIntents
 import Foundation
 import OSLog
+
+import LifioLiveActivityCore
 
 /// Stops the running timer from the Live Activity (live-activities spec:
 /// "Stop and return actions").
@@ -10,14 +18,12 @@ import OSLog
 /// app process may be suspended while the intent runs in the extension
 /// process. If `TimerService.stopTimerDraft` changes, update this in step.
 ///
-/// The intent does NOT end the activity itself: the shared attributes file
-/// compiles into two modules (`TimeOfLife` + `LifioLiveActivities`), which
-/// ActivityKit treats as two distinct types — the extension's
-/// `Activity<Attributes>.activities` is always empty (observed on-device:
-/// "Activities changed: []" with a live island), so ending there is a
-/// guaranteed no-op. Instead it posts `LiveActivitySignal`, and the app
-/// reaps the orphaned activity on contact (Darwin handler, foreground,
-/// load-reconcile) where its own type matches.
+/// The intent ends the activity DIRECTLY with the Saved final state: the
+/// attributes type lives in the shared `LifioLiveActivityCore` framework
+/// linked by both the app and the extension (a single module), so the
+/// extension's `Activity<TimerActivityAttributes>.activities` matches the
+/// app's requests. No app contact needed — the Saved card appears within
+/// seconds of the tap.
 ///
 /// `alwaysAllowed`: device unlock is the authorization (lock-screen-controls
 /// pattern) — no account auth of its own. With no active account file, an
@@ -71,10 +77,20 @@ struct StopTimerIntent: AppIntent {
             Self.logger.error("StopTimerIntent failed: entry save or draft clear threw")
             return .result()
         }
-        // Signal, don't end: the app reaps the orphaned activity (see
-        // type docs above). The duration rides along so the Saved card
-        // shows the true value.
-        LiveActivitySignal.post(durationSeconds: durationSeconds)
+        // End directly with the Saved card. Only `.active` activities: an
+        // `.ended` one keeps its own dismissal. Dismissal delay mirrors
+        // `LiveActivityService.dismissalDelaySeconds` (6s, tuned in 5.1) —
+        // the service type is app-target-only, so the value is repeated here.
+        let final = TimerActivityAttributes.ContentState(
+            startedAt: startedAt,
+            savedDurationSeconds: durationSeconds
+        )
+        for activity in Activity<TimerActivityAttributes>.activities where activity.activityState == .active {
+            await activity.end(
+                .init(state: final, staleDate: nil),
+                dismissalPolicy: .after(.now + 6.0)
+            )
+        }
         Self.logger.info("StopTimerIntent saved entry with duration")
         return .result()
     }

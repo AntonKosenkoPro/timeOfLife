@@ -30,6 +30,20 @@
             buildForAnalyzing = "YES">
             <BuildableReference
                BuildableIdentifier = "primary"
+               BlueprintIdentifier = "6EFD6F733E93A58CC33A6DB1"
+               BuildableName = "LifioLiveActivityCore.framework"
+               BlueprintName = "LifioLiveActivityCore"
+               ReferencedContainer = "container:TimeOfLife.xcodeproj">
+            </BuildableReference>
+         </BuildActionEntry>
+         <BuildActionEntry
+            buildForTesting = "YES"
+            buildForRunning = "YES"
+            buildForProfiling = "YES"
+            buildForArchiving = "YES"
+            buildForAnalyzing = "YES">
+            <BuildableReference
+               BuildableIdentifier = "primary"
                BlueprintIdentifier = "EB1E59A9D1AC06C64272B862"
                BuildableName = "TimeOfLife.app"
                BlueprintName = "TimeOfLife"

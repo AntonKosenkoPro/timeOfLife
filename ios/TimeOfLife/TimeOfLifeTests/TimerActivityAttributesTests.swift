@@ -1,6 +1,7 @@
 import Testing
 import Foundation
 @testable import TimeOfLife
+import LifioLiveActivityCore
 
 @Suite("TimerActivityAttributes")
 struct TimerActivityAttributesTests {

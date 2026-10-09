@@ -99,21 +99,20 @@ struct LiveActivityLifecycleTests {
         let service = makeService(liveActivities: fake)
         try await service.startTimerDraft(text: "Gym", categoryIDs: [], startedAt: Date())
 
-        await service.endOrphanedActivities(knownDurationSeconds: 60)
+        await service.endOrphanedActivities()
 
-        #expect(fake.orphanEnds.isEmpty)
+        #expect(fake.orphanEndCount == 0)
         #expect(try await service.runningTimerDraft() != nil)
     }
 
-    @Test("orphan reaping delegates with the signaled duration when no draft exists")
+    @Test("orphan reaping delegates when no draft exists (crash hygiene)")
     func orphanReapDelegatesWithoutDraft() async throws {
         let fake = FakeLiveActivities()
         let service = makeService(liveActivities: fake)
 
-        await service.endOrphanedActivities(knownDurationSeconds: 60)
         await service.endOrphanedActivities()
 
-        #expect(fake.orphanEnds == [60, nil])
+        #expect(fake.orphanEndCount == 1)
     }
 
     @Test("orphan reaping fails closed when the draft read throws")
@@ -122,9 +121,9 @@ struct LiveActivityLifecycleTests {
         // Unbound store: every operation throws — must end nothing.
         let service = TimerService(store: LocalStore(), liveActivities: fake)
 
-        await service.endOrphanedActivities(knownDurationSeconds: 60)
+        await service.endOrphanedActivities()
 
-        #expect(fake.orphanEnds.isEmpty)
+        #expect(fake.orphanEndCount == 0)
     }
 
     // MARK: - Helpers
@@ -158,7 +157,7 @@ final class FakeLiveActivities: LiveActivityControlling {
 
     var started: [Started] = []
     var ended: [Ended] = []
-    var orphanEnds: [Int?] = []
+    var orphanEndCount = 0
 
     func runStarted(text: String, iconSymbol: String, startedAt: Date) async {
         started.append(Started(text: text, iconSymbol: iconSymbol, startedAt: startedAt))
@@ -168,7 +167,7 @@ final class FakeLiveActivities: LiveActivityControlling {
         ended.append(Ended(startedAt: startedAt, durationSeconds: durationSeconds))
     }
 
-    func endOrphanedActivities(knownDurationSeconds: Int?) async {
-        orphanEnds.append(knownDurationSeconds)
+    func endOrphanedActivities() async {
+        orphanEndCount += 1
     }
 }

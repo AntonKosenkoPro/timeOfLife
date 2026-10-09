@@ -20,6 +20,7 @@
 - [x] 3.5 Device-feedback polish: ship strings in the appex (explicit resource files), expanded bottom uses the circular red Stop + plain Track link, Stop hidden outside full-color rendering (D7)
 - [x] 3.6 Stop-intent session channel: suite UserDefaults detach from cfprefsd in extensions (device log) — SessionCache mirrors the user id to a group-container sidecar file, resolver reads file-first with defaults fallback, restore re-saves for upgraders
 - [x] 3.7 Island stop completion: intent posts a Darwin signal instead of ending (module-distinct attributes type blinds the extension); app reaps orphans with the true duration, reloads tracker surfaces, silent immediate dismiss on catch-up paths
+- [x] 3.8 Stop intent ends directly via the shared `LifioLiveActivityCore` framework (single attributes module): Saved card within seconds, no app contact; Darwin reap path removed, crash-hygiene sweep kept
 
 ## 4. Quality gates
 

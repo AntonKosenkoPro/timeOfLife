@@ -64,11 +64,6 @@ struct AppShellView: View {
         .onReceive(navigation.$trackRequestID.dropFirst()) { _ in
             vm.selectedTab = .track
         }
-        // Island Stop while the compact timer is up: the draft is gone —
-        // reload clears the stale running surface (live-activities D8).
-        .onReceive(NotificationCenter.default.publisher(for: .timerStoppedExternally)) { _ in
-            Task { await vm.load() }
-        }
     }
 
     /// Track tab: its own push state. Profile is a path value here, so

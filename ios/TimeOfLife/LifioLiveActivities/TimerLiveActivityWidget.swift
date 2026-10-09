@@ -2,6 +2,8 @@ import ActivityKit
 import SwiftUI
 import WidgetKit
 
+import LifioLiveActivityCore
+
 /// Live Activity presentations for the running timer (live-activities
 /// spec: "Island and banner presentations").
 ///

@@ -4,11 +4,13 @@ import Foundation
 /// ActivityKit attributes for the running-timer Live Activity
 /// (live-activities spec: "Live Activity follows the running timer").
 ///
-/// The file compiles into BOTH the app target (which requests/ends the
-/// activity from `TimerService`) and the widget extension (which renders
-/// it) — so it depends only on Foundation + ActivityKit, never on app
-/// modules (`LocalStore`, `Theme`, `L10n`). Data only: all copy lives in
-/// the extension's views (localized in 3.4).
+/// Lives in the shared `LifioLiveActivityCore` framework linked by BOTH the
+/// app target (which requests/ends the activity) and the widget extension
+/// (which renders it and ends it from the Stop intent) — a single module,
+/// so ActivityKit matches both sides' `Activity<Attributes>.activities`.
+/// Depends only on Foundation + ActivityKit, never on app modules
+/// (`LocalStore`, `Theme`, `L10n`). Data only: all copy lives in the
+/// extension's views (localized in 3.4). Extension-safe: no UIApplication.
 public struct TimerActivityAttributes: ActivityAttributes, Equatable {
     /// The exact entry text, verbatim. Identity is trimmed exact text
     /// (case-sensitive: `Gym` ≠ `GYM`) — faces truncate to one line but

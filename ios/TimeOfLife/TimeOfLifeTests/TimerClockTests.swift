@@ -1,6 +1,7 @@
 import Testing
 import Foundation
 @testable import TimeOfLife
+import LifioLiveActivityCore
 
 /// Live-style duration for the expanded timer (device finding): leftmost
 /// unit unpadded (`0:01`, `12:34`, `1:23:45`) — matches what

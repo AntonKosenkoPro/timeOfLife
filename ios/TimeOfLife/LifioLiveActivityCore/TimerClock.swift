@@ -2,14 +2,15 @@ import Foundation
 
 /// Clock formatting for the Live Activity faces.
 ///
-/// Lives in Shared (compiled into the widget extension) instead of reusing
-/// `DurationFormatting` because that file's sync-age tail depends on
-/// `SyncAgeBucket` (Sync feature) — the extension must stay
-/// dependency-light (design D4). If the clock grammar ever changes, update
-/// both together.
-enum TimerClock {
+/// Lives in the shared `LifioLiveActivityCore` framework (linked by the app
+/// and the widget extension) instead of reusing `DurationFormatting`
+/// because that file's sync-age tail depends on `SyncAgeBucket` (Sync
+/// feature) — the extension must stay dependency-light (design D4). If the
+/// clock grammar ever changes, update both together. Extension-safe:
+/// Foundation only, no UIApplication.
+public enum TimerClock {
     /// Clock duration: `HH:MM:SS` past the hour, else `MM:SS`, zero-padded.
-    static func formatted(_ totalSeconds: Int) -> String {
+    public static func formatted(_ totalSeconds: Int) -> String {
         let total = max(0, totalSeconds)
         let hours = total / 3600
         let minutes = (total % 3600) / 60
@@ -24,7 +25,7 @@ enum TimerClock {
 
     /// Live-style duration with the leftmost unit unpadded (`0:01`,
     /// `12:34`, `1:23:45`) — matches what `Text(timerInterval:)` renders.
-    static func liveStyle(_ totalSeconds: Int) -> String {
+    public static func liveStyle(_ totalSeconds: Int) -> String {
         let total = max(0, totalSeconds)
         let hours = total / 3600
         let minutes = (total % 3600) / 60
