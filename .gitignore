@@ -65,3 +65,4 @@ Packages/
 
 ### Agent tooling (local-only session state)
 .argent/recordings/
+.argent/secrets.env
