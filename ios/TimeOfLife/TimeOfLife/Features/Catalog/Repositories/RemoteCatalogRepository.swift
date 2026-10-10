@@ -9,7 +9,12 @@ protocol CatalogSending: Sendable {
     /// `GET /categories` — full pull (the authoritative category snapshot).
     func fetchCategories() async throws -> [Category]
     /// `GET /entries?modified_since=` — full pull when `modifiedSince` is nil.
+    /// Follows relay pagination to exhaustion: every page is fetched with the
+    /// relay's `cursor` and concatenated in relay order.
     func fetchEntries(modifiedSince: Date?) async throws -> [TimeEntry]
+    /// One page of `GET /entries` — full pull when `modifiedSince` is nil,
+    /// first page when `cursor` is nil. `nextCursor` is nil on the last page.
+    func fetchEntryPage(modifiedSince: Date?, cursor: String?) async throws -> EntryPage
     /// `GET /deletions?deleted_since=` — full list when `since` is nil
     /// (cross-device-delete-propagation; entries and categories only).
     func fetchDeletions(since: Date?) async throws -> [Deletion]
@@ -49,13 +54,36 @@ final class RemoteCatalogRepository: CatalogSending {
         return response.map(Self.localCategory(from:))
     }
 
+    /// Sync page size: the relay maximum, so a pull converges in the fewest
+    /// round-trips. Correctness never depends on it — the loop terminates on
+    /// the absent `next_cursor`, not on page size.
+    private static let syncPageLimit = 200
+
     func fetchEntries(modifiedSince: Date?) async throws -> [TimeEntry] {
+        var all: [TimeEntry] = []
+        var cursor: String?
+        var seenCursors: Set<String> = []
+        while true {
+            let page = try await fetchEntryPage(modifiedSince: modifiedSince, cursor: cursor)
+            all.append(contentsOf: page.entries)
+            guard let next = page.nextCursor, !next.isEmpty, !seenCursors.contains(next) else {
+                break
+            }
+            // A repeating cursor means a relay bug, not more data: stop
+            // instead of paging forever.
+            seenCursors.insert(next)
+            cursor = next
+        }
+        return all
+    }
+
+    func fetchEntryPage(modifiedSince: Date?, cursor: String?) async throws -> EntryPage {
         let response = try await client.send(
-            APIEndpoint.value(method: .get, path: entriesPath(modifiedSince: modifiedSince),
+            APIEndpoint.value(method: .get, path: entriesPath(modifiedSince: modifiedSince, cursor: cursor),
                               requiresAuth: true),
             as: EntryListResponse.self
         )
-        return response.items.map(Self.localEntry(from:))
+        return EntryPage(entries: response.items.map(Self.localEntry(from:)), nextCursor: response.nextCursor)
     }
 
     func fetchDeletions(since: Date?) async throws -> [Deletion] {
@@ -158,10 +186,14 @@ final class RemoteCatalogRepository: CatalogSending {
 
     // MARK: - Paths
 
-    private func entriesPath(modifiedSince: Date?) -> String {
-        var path = "\(basePath)/entries"
+    private func entriesPath(modifiedSince: Date?, cursor: String?) -> String {
+        // The cursor is base64url (relay RawURLEncoding) — URL-safe raw.
+        var path = "\(basePath)/entries?limit=\(Self.syncPageLimit)"
         if let modifiedSince {
-            path += "?modified_since=\(Self.rfc3339(modifiedSince))"
+            path += "&modified_since=\(Self.rfc3339(modifiedSince))"
+        }
+        if let cursor {
+            path += "&cursor=\(cursor)"
         }
         return path
     }
@@ -183,9 +215,26 @@ final class RemoteCatalogRepository: CatalogSending {
     }
 }
 
-/// `GET /entries` response envelope.
+/// `GET /entries` response envelope: one page of entries plus the opaque
+/// cursor for the next page. The relay omits `next_cursor` on the last page,
+/// so a synthesized optional decode (absent/null → nil) is the terminal
+/// condition — no legacy branches.
 struct EntryListResponse: Decodable, Sendable {
     let items: [EntryWireDTO]
+    let nextCursor: String?
+
+    enum CodingKeys: String, CodingKey {
+        case items
+        case nextCursor = "next_cursor"
+    }
+}
+
+/// One page of the relay's entry list, in relay order.
+struct EntryPage: Sendable {
+    /// The page's entries in relay order.
+    let entries: [TimeEntry]
+    /// Opaque cursor for the following page; nil on the last page.
+    let nextCursor: String?
 }
 
 /// RFC 3339 date codec for the relay wire format (OpenAPI `format: date-time`).

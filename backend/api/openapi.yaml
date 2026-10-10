@@ -655,7 +655,10 @@ paths:
         Returns the authenticated user's entries, newest first, with filters and
         cursor pagination. Each entry carries its own `activity_text`, ordered
         category tags, and notes — no record is resolved at query time. Used by
-        History; entries sync cross-device from the start.
+        History; entries sync cross-device from the start. Sync clients MUST
+        exhaust pagination (follow `next_cursor` until absent) and advance
+        their `modified_since` cursor over the complete result — a single page
+        is never the whole history.
       tags:
         - Entries
       security:

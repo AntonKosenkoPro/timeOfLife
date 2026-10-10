@@ -19,6 +19,7 @@ final class MockCatalogRepository: CatalogSending, @unchecked Sendable {
     private var _calls: [Call] = []
     private var _fetchedModifiedSince: [Date?] = []
     private var _fetchedDeletionsSince: [Date?] = []
+    private var _fetchedEntryPageCursors: [String?] = []
 
     var calls: [Call] {
         lock.lock(); defer { lock.unlock() }
@@ -35,17 +36,28 @@ final class MockCatalogRepository: CatalogSending, @unchecked Sendable {
         return _fetchedDeletionsSince
     }
 
+    /// One entry per `fetchEntryPage` call, in call order (nil = first page).
+    var fetchedEntryPageCursors: [String?] {
+        lock.lock(); defer { lock.unlock() }
+        return _fetchedEntryPageCursors
+    }
+
     func clearLog() {
         lock.lock()
         _calls = []
         _fetchedModifiedSince = []
         _fetchedDeletionsSince = []
+        _fetchedEntryPageCursors = []
         lock.unlock()
     }
 
     var categoriesResult: [Category] = []
     var entriesResult: [TimeEntry] = []
     var deletionsResult: [Deletion] = []
+    /// Pages served by `fetchEntryPage` (nil = a single page of
+    /// `entriesResult`). Page i is served for cursor "page-i" (nil = page 0);
+    /// an unknown cursor ends the pull with an empty page.
+    var entriesPages: [[TimeEntry]]?
 
     // Handlers are async so tests can inject slow or failing relay
     // behavior (e.g. a delayed push that keeps a cycle in flight while a
@@ -53,6 +65,7 @@ final class MockCatalogRepository: CatalogSending, @unchecked Sendable {
     // so existing assignments keep compiling.
     var fetchCategoryHandler: ((String) async throws -> Category)?
     var fetchEntryHandler: ((String) async throws -> TimeEntry)?
+    var fetchEntryPageHandler: ((Date?, String?) async throws -> EntryPage)?
     var fetchDeletionsHandler: ((Date?) async throws -> [Deletion])?
     var createCategoryHandler: ((Category) async throws -> Void)?
     var updateCategoryHandler: ((Category) async throws -> Void)?
@@ -79,6 +92,12 @@ final class MockCatalogRepository: CatalogSending, @unchecked Sendable {
         lock.unlock()
     }
 
+    private func recordPageCursor(_ cursor: String?) {
+        lock.lock()
+        _fetchedEntryPageCursors.append(cursor)
+        lock.unlock()
+    }
+
     func fetchCategories() async throws -> [Category] {
         record("fetchCategories", "category")
         return categoriesResult
@@ -88,6 +107,32 @@ final class MockCatalogRepository: CatalogSending, @unchecked Sendable {
         record("fetchEntries", "entry")
         recordPull(modifiedSince)
         return entriesResult
+    }
+
+    func fetchEntryPage(modifiedSince: Date?, cursor: String?) async throws -> EntryPage {
+        // Recorded under the same "fetchEntries" call name the pull has
+        // always logged, so existing pull-happened assertions keep passing;
+        // page-level detail lives in `fetchedEntryPageCursors`.
+        record("fetchEntries", "entry")
+        recordPull(modifiedSince)
+        recordPageCursor(cursor)
+        if let fetchEntryPageHandler { return try await fetchEntryPageHandler(modifiedSince, cursor) }
+        guard let pages = entriesPages, !pages.isEmpty else {
+            return EntryPage(entries: entriesResult, nextCursor: nil)
+        }
+        let index: Int
+        if cursor == nil {
+            index = 0
+        } else if let cursor, cursor.hasPrefix("page-"), let n = Int(cursor.dropFirst(5)) {
+            index = n
+        } else {
+            return EntryPage(entries: [], nextCursor: nil)
+        }
+        guard index < pages.count else {
+            return EntryPage(entries: [], nextCursor: nil)
+        }
+        let next: String? = index + 1 < pages.count ? "page-\(index + 1)" : nil
+        return EntryPage(entries: pages[index], nextCursor: next)
     }
 
     func fetchDeletions(since: Date?) async throws -> [Deletion] {
