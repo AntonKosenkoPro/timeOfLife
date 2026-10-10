@@ -41,7 +41,9 @@ struct TagSelector: View {
 
     /// Resolves which glyph a chip shows for `id` within the ordered
     /// `selected` ids. Ordinals cap at 99 (a third digit is impossible).
-    static func glyph(for id: String, in selected: [String]) -> ChipGlyph {
+    /// Pure and `nonisolated` so unit tests (and any nonisolated caller)
+    /// can use it without an actor hop.
+    nonisolated static func glyph(for id: String, in selected: [String]) -> ChipGlyph {
         guard let index = selected.firstIndex(of: id) else { return .icon }
         guard selected.count > 1 else { return .checkmark }
         return .ordinal(min(index + 1, 99))
