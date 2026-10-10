@@ -28,8 +28,11 @@ struct WelcomeView: View {
                 Spacer(minLength: Theme.spacingExtraLarge)
 
                 // Decorative brand mark; hidden from VoiceOver.
-                Image(systemName: "clock.arrow.circlepath")
-                    .font(.system(size: 48, weight: .light))
+                Image("BrandMark")
+                    .renderingMode(.template)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(height: 68)
                     .foregroundStyle(Theme.accentPrimary)
                     .accessibilityHidden(true)
 
