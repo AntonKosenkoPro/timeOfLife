@@ -75,10 +75,12 @@ struct TrackSyncReloadTests {
     }
 
     /// Island open-and-stop ordering (fix-terminated-stop-saved-face Spike D):
-    /// a caller arriving mid-load must observe the loaded snapshot, not an
-    /// unloaded one — otherwise the sequenced `stop()` no-ops on `.idle`.
-    @Test("a waiter arriving mid-load observes the loaded snapshot")
-    func waiterArrivingMidLoadObservesLoadedSnapshot() async throws {
+    /// each waiter runs the exact production sequence, so a `loadIfNeeded`
+    /// that early-returns mid-load fails here: its `stop()` no-ops on `.idle`
+    /// and the run is never saved. (Asserting bare loaded state would pass
+    /// either way — the original load repaints `.running` regardless.)
+    @Test("interleaved reload-stop waiters save exactly one entry")
+    func interleavedReloadStopWaitersSaveOnce() async throws {
         let store = try LocalStore(url: temporaryStoreURL())
         _ = try await store.seedStarterCategoriesIfNeeded(names: String.starterCategoryNames)
         let service = TimerService(store: store)
@@ -91,13 +93,19 @@ struct TrackSyncReloadTests {
                 group.addTask {
                     await MainActor.run { vm.invalidate() }
                     await vm.loadIfNeeded()
+                    await vm.stop()
                 }
             }
             await group.waitForAll()
         }
 
-        #expect(vm.state.isRunning)
-        #expect(vm.state.draft?.text == "Gym")
+        guard case let .saved(draft, _) = vm.state else {
+            Issue.record("expected .saved after interleaved reload-stop, got \(vm.state)")
+            return
+        }
+        #expect(draft.text == "Gym")
+        let entries = try await store.entries()
+        #expect(entries.map(\.activityText) == ["Gym"])
     }
 
     /// The exact island-stop sequence (`invalidate` → `loadIfNeeded` →

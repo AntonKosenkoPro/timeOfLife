@@ -8,6 +8,13 @@ import Foundation
 /// outlives the shell at app scope — so sign-out must clear them, or the next
 /// shell mount re-fires the last tap and can stop a run the user never
 /// stopped. A fresh process starts at zero, so cold opens are unaffected.
+///
+/// Untested seam (mirroring the `SignInLifecycleTests` note on `beginSignIn`'s
+/// guards): these tests pin the counter API only — the actual wiring
+/// (`container.navigation.resetTapRequests()` inside `RootView.beginSignOut`)
+/// is view-layer teardown this repo leaves un-unit-tested. Deleting the
+/// `RootView` call leaves this suite green; the sign-out path is covered by
+/// device/manual smoke instead.
 @MainActor
 @Suite("AppNavigationStackTapRequests")
 struct AppNavigationStackTapRequestsTests {

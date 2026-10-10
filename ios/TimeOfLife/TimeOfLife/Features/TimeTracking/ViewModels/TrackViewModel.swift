@@ -136,7 +136,13 @@ final class TrackViewModel: ObservableObject {
         let load = Task { await self.load() }
         inFlightLoad = load
         await load.value
-        inFlightLoad = nil
+        // Deliberately NOT cleared: resumption order after `load.value` is
+        // unspecified, and nulling here can discard a NEWER in-flight load
+        // installed by another waiter's mid-load resumption (an `invalidate()`
+        // landing between its claim and this resumption) — breaking the
+        // single-load invariant. Awaiting a completed task's `.value`
+        // returns immediately, so a stale handle is harmless and is
+        // overwritten at the next claim.
     }
 
     /// Marks the snapshot stale so the next `loadIfNeeded` reloads it.
