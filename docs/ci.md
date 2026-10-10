@@ -13,7 +13,7 @@ Plus the **advisory, on-demand** stage-1 AI review (`ai-review.yml`, OpenCodeRev
 
 Adding an Xcode target with its own `info.properties` versions or `Info.plist` (e.g. the `LifioLiveActivities` widget extension, which broke the `0.2.1` release with a duplicate-key guard failure) MUST update the pipelines in the same PR:
 
-1. **`release.yml`** — add the target's Release `Info.plist` to `RELEASE_PLISTS` in the Bump step and to `git add` in "Commit and push"; keep its `CFBundleShortVersionString`/`CFBundleVersion` in `project.yml` equal to the app's (App Store rejects skewed bundles). Debug (`Info-Debug.plist`, unmanaged) stays pinned — release bumps never touch it.
+1. **`release.yml`** — add the target's Release `Info.plist` to `RELEASE_PLISTS` in the Bump step (the single source of truth — "Commit and push" consumes it via step outputs); keep its `CFBundleShortVersionString`/`CFBundleVersion` in `project.yml` equal to the app's (App Store rejects skewed bundles). Debug (`Info-Debug.plist`, unmanaged) stays pinned — release bumps never touch it.
 2. **`ios.yml`** — confirm the scheme builds/tests cover the new target (the `verify` job in `release.yml` reuses `ios.yml` via `workflow_call`, so gaps here weaken release verification).
 3. **Path filters** — if the target introduces a new top-level directory, extend the `on:` path filters of every affected workflow so PRs touching it still trigger CI.
 
