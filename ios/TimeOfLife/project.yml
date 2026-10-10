@@ -199,6 +199,13 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.antonkosenko.timeoflifeapp.liveactivitycore
         GENERATE_INFOPLIST_FILE: YES
+        # Version keys for the generated Info.plist (ITMS-90057): Xcode fills
+        # CFBundleShortVersionString from MARKETING_VERSION and CFBundleVersion
+        # from CURRENT_PROJECT_VERSION. Both ride the release workflow's
+        # lockstep bump with the app/appex versions (see RELEASE_PLISTS guard
+        # in release.yml) — a new target MUST wire its versions in there.
+        MARKETING_VERSION: "0.2.1"
+        CURRENT_PROJECT_VERSION: "6"
         # Linked by the widget extension: only extension-safe APIs allowed
         # (no UIApplication etc.) — enforced at compile time.
         APPLICATION_EXTENSION_API_ONLY: YES
