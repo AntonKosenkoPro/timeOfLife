@@ -18,7 +18,7 @@ The Categories header (running `TagSelector` branch) and the Recents header (idl
 ## MODIFIED Requirements
 
 ### Requirement: Recents present a capped wrapping chip flow
-Track SHALL present its most-recently-used exact entry texts as a wrapping chip flow below the name field, ordered by each text's newest committed `started_at` first, and SHALL cap the flow at twelve chips. Identity SHALL be trimmed exact text (case-sensitive: `Gym` and `GYM` are distinct). There is no activity entity — chips represent entry texts, never activities. The chip area SHALL keep a fixed on-screen footprint equal to the current 6-chip layout budget: chips SHALL wrap onto additional rows inside that area as needed and SHALL NOT require horizontal scrolling; when twelve chips overflow the footprint the chip area SHALL scroll internally on its own axis and the Track page itself SHALL NOT grow or scroll for Recents overflow. A single tap on a chip SHALL fill the name plus that recent's full ordered categories without starting timing. Recents SHALL yield the below-button slot to the running TagSelector while a timer is running (inactive branch opacity-hidden with the slot keeping the taller branch's height). Returning to Track SHALL reload recents and categories — seeding the starter set first on a fresh install — so History edits and new categories are reflected immediately.
+Track SHALL present its most-recently-used exact entry texts as a wrapping chip flow below the name field, ordered by each text's newest committed `started_at` first, and SHALL cap the flow at twelve chips. Identity SHALL be trimmed exact text (case-sensitive: `Gym` and `GYM` are distinct). There is no activity entity — chips represent entry texts, never activities. The chip area SHALL keep a fixed on-screen footprint equal to the current 6-chip layout budget: chips SHALL wrap onto additional rows inside that area as needed and SHALL NOT require horizontal scrolling; when twelve chips overflow the footprint the chip area SHALL scroll internally on its own axis and the Track page itself SHALL NOT grow or scroll for Recents overflow. A single tap on a chip SHALL fill the name plus that recent's full ordered categories without starting timing. Recents SHALL yield the below-button slot to the running TagSelector while a timer is running (inactive branch opacity-hidden with the slot keeping the taller branch's height). Returning to Track SHALL reload recents and categories — seeding the starter set first on a fresh install — so History edits and new categories are reflected immediately. Track SHALL also reload recents, the full name list, and the category map when a sync cycle exits (idle or error), so relay-pulled entries and categories converge without requiring a tab switch; a failed cycle MAY have applied partial merges before throwing and still triggers the reload.
 
 #### Scenario: More Activities than the cap
 - **WHEN** the user has more than twelve distinct exact texts
@@ -52,6 +52,14 @@ Track SHALL present its most-recently-used exact entry texts as a wrapping chip 
 - **WHEN** the user returns to Track from another tab or sheet
 - **THEN** Recents and the category map reload (seeding first when needed), so entries edited in History are inherited and chip icons stay current
 
+#### Scenario: Sync exit refreshes Track
+- **WHEN** a background sync cycle finishes (idle) or fails after partial merges (error) while Track is mounted
+- **THEN** Track reloads recents, the full name list, and the category map once, so first-sync data appears without leaving the tab and a transient failure never blanks the last good snapshot
+
+#### Scenario: Fresh reinstall shows categories on first paint
+- **WHEN** the user signs in on a reinstall with an empty account file and the shell mounts after seeding
+- **THEN** the first Track paint already carries the starter categories and the name picker suggests seeded names, with recents filling in as the first sync lands
+
 ### Requirement: Plain-text name capture
 Track SHALL capture the entry name as plain trimmed text with no catalog, no search sheet, and no quick-create. The idle screen SHALL show a plain-text name field plus the 12 exact-match recents chips. Start SHALL be enabled only when the trimmed text is non-empty. Typing a name that exactly matches a recent SHALL NOT start anything until Start is activated.
 
@@ -68,7 +76,7 @@ Track SHALL capture the entry name as plain trimmed text with no catalog, no sea
 - **THEN** the two are treated as different names with separate recents and separate inherited categories
 
 ### Requirement: Running timer hosts the category TagSelector
-While a timer is running, Track SHALL show the shared ordered `TagSelector` (select-only from existing categories, zero allowed, order preserved) below the readout. The name SHALL be locked after Start; tags SHALL stay live until Stop. The locked name card SHALL align its text to the leading edge, matching the idle/ready name-row grammar (icon + text pushed leading, never centered). Toggles SHALL rewrite only the running draft (persisted `timer_state` snapshot) and SHALL never touch history. Stop SHALL save the entry with the final ordered categories.
+While a timer is running, Track SHALL show the shared ordered `TagSelector` (select-only from existing categories, zero allowed, order preserved) below the readout. The name SHALL be locked after Start; tags SHALL stay live until Stop. The locked name card SHALL align its text to the leading edge, matching the idle/ready name-row grammar (icon + text pushed leading, never centered). Toggles SHALL rewrite only the running draft (persisted `timer_state` snapshot) and SHALL never touch history. Notes edits SHALL rewrite only the running draft notes snapshot the same way. Stop SHALL save the entry with the final ordered categories, the final draft notes, and derived duration, plus a single outbox row.
 
 #### Scenario: Toggle tags mid-run
 - **WHEN** the user toggles a category while the timer runs
@@ -88,4 +96,4 @@ While a timer is running, Track SHALL show the shared ordered `TagSelector` (sel
 
 #### Scenario: Stop saves final tags
 - **WHEN** the user activates Stop
-- **THEN** the entry is created with the trimmed locked text, the final ordered categories, empty notes, and derived duration, plus a single outbox row
+- **THEN** the entry is created with the trimmed locked text, the final ordered categories, the final draft notes, and derived duration, plus a single outbox row

@@ -10,8 +10,8 @@ Agent entrypoint for this repo. **Read [`docs/project-context.md`](docs/project-
 
 The repo is spec-driven (`openspec/config.yaml`, `schema: spec-driven`). See `openspec/README.md` for the workflow; the essentials:
 
-- **Baseline specs** (`openspec/specs/<capability>/spec.md`): current contract (19 baselines incl. `app-shell`, `timer-capture-experience`, `apple-signin`). Never edit directly — behavior changes go through a change.
-- **Active deltas**: none — `reduce-codebase-complexity` (wording-only docs-contract sync, no behavior change) is archived at `openspec/changes/archive/2026-10-02-reduce-codebase-complexity/` and folded into the baselines. Check `openspec list` before starting new behavior work.
+- **Baseline specs** (`openspec/specs/<capability>/spec.md`): current contract (20 baselines incl. `app-shell`, `timer-capture-experience`, `apple-signin`, `live-activities`). Never edit directly — behavior changes go through a change.
+- **Active deltas**: none — umbrella archive of 8 changes (`separate-notes-editor`, `extend-notes-limit`, `fix-sync-entry-truncation`, `fix-track-empty-after-reinstall`, `fix-track-visual-glitches`, `fix-tab-bar-return-jump`, `category-chip-order-numbers`, `live-activities`) landed 2026-10-10 and folded into the baselines. Check `openspec list` before starting new behavior work.
 - **Archives** (`openspec/changes/archive/`): history (e.g. `redesign-track-experience`); their deltas are already folded into the baselines.
 
 ## Non-negotiables
