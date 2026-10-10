@@ -582,6 +582,29 @@ struct LocalStoreTests {
         #expect(otherResource == nil)
     }
 
+    @Test("rebaselineEntryCursorIfNeeded clears the entry cursor once and flags")
+    func rebaselineEntryCursorRunsOnce() async throws {
+        let store = try makeStore()
+        let cursor = Date(timeIntervalSinceReferenceDate: 10_000)
+        try await store.setLastSyncedAt(resource: "entry", date: cursor)
+        try await store.setLastSyncedAt(resource: "deletions", date: cursor)
+
+        #expect(try await store.rebaselineEntryCursorIfNeeded() == true)
+        #expect(try await store.lastSyncedAt(resource: "entry") == nil)
+        #expect(try await store.lastSyncedAt(resource: "deletions") == cursor)
+
+        #expect(try await store.rebaselineEntryCursorIfNeeded() == false)
+        #expect(try await store.lastSyncedAt(resource: "entry") == nil)
+    }
+
+    @Test("rebaselineEntryCursorIfNeeded flags a cursor-less file without error")
+    func rebaselineWithoutCursorStillFlags() async throws {
+        let store = try makeStore()
+
+        #expect(try await store.rebaselineEntryCursorIfNeeded() == true)
+        #expect(try await store.rebaselineEntryCursorIfNeeded() == false)
+    }
+
     private func secondOf(_ first: Date, _ second: Date) -> Date { second }
 
     // MARK: - Outbox ordering

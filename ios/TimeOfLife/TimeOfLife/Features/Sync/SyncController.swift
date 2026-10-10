@@ -310,6 +310,16 @@ final class SyncController: ObservableObject {
         status = .syncing
         Self.logger.info("sync cycle start firstSync=\(firstSync)")
         do {
+            // One-time entry-cursor re-baseline
+            // (fix-sync-cursor-rebaseline): cursors recorded before
+            // pagination-aware pulls hide older rows from every delta.
+            // Clearing it here — after the binding, before any pull reads
+            // it — makes the next pull a full paged one through the
+            // idempotent merge. Exactly-once per account file; a no-op
+            // afterward. A swap aborts via the same guard as every stage.
+            try await guardedStage(userID: userID) {
+                _ = try await self.store.rebaselineEntryCursorIfNeeded()
+            }
             if firstSync {
                 try await guardedStage(userID: userID) {
                     try await self.pull(modifiedSince: nil, userID: userID)

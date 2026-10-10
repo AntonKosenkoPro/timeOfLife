@@ -58,6 +58,11 @@ final class MockCatalogRepository: CatalogSending, @unchecked Sendable {
     /// `entriesResult`). Page i is served for cursor "page-i" (nil = page 0);
     /// an unknown cursor ends the pull with an empty page.
     var entriesPages: [[TimeEntry]]?
+    /// When true, `fetchEntryPage` honors `modifiedSince` like the real
+    /// relay (strictly newer `updatedAt` only), keeping the page chain
+    /// intact. Default false: existing tests serve fixed pages regardless
+    /// of the filter.
+    var filterPagesByModifiedSince = false
 
     // Handlers are async so tests can inject slow or failing relay
     // behavior (e.g. a delayed push that keeps a cycle in flight while a
@@ -132,7 +137,11 @@ final class MockCatalogRepository: CatalogSending, @unchecked Sendable {
             return EntryPage(entries: [], nextCursor: nil)
         }
         let next: String? = index + 1 < pages.count ? "page-\(index + 1)" : nil
-        return EntryPage(entries: pages[index], nextCursor: next)
+        var entries = pages[index]
+        if filterPagesByModifiedSince, let modifiedSince {
+            entries = entries.filter { $0.updatedAt > modifiedSince }
+        }
+        return EntryPage(entries: entries, nextCursor: next)
     }
 
     func fetchDeletions(since: Date?) async throws -> [Deletion] {
