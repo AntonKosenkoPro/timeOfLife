@@ -75,8 +75,11 @@ struct RootView: View {
     /// while `/me` is in flight.
     private var restoringSplash: some View {
         VStack(spacing: Theme.spacingMedium) {
-            Image(systemName: "clock.arrow.circlepath")
-                .font(.system(size: 48, weight: .light))
+            Image("BrandMark")
+                .renderingMode(.template)
+                .resizable()
+                .scaledToFit()
+                .frame(height: 68)
                 .foregroundStyle(Theme.accentPrimary)
                 .accessibilityHidden(true)
             Text(L10n.appName.text)

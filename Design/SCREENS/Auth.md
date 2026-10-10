@@ -29,7 +29,7 @@ session for a later retry.
 Centered `ScrollView` → `VStack(spacing: Theme.spacingLarge)` with horizontal padding `Theme.screenHorizontalPadding` and `Theme.maxContentWidth`:
 
 1. `Spacer()`
-2. Brand icon — `Image(systemName: "clock.arrow.circlepath")`, `.font(.system(size: 48, weight: .light))`, `Theme.accentPrimary`, `accessibilityHidden(true)`
+2. Brand mark — `Image("BrandMark")` (the `^▬` product glyph; `BrandMark.imageset` in `Assets.xcassets`, trimmed from the IconKitchen monochrome source), `.renderingMode(.template)`, `.resizable().scaledToFit().frame(height: 68)`, `Theme.accentPrimary`, `accessibilityHidden(true)` — same mark, tint, and size as the restoring splash (`RootView.restoringSplash`)
 3. App name: `L10n.appName` — `.largeTitle.bold()`, `Theme.textPrimary`, `multilineTextAlignment(.center)`
 4. Tagline: `L10n.welcomeTagline` — `.headline`, `Theme.textSecondary`, `multilineTextAlignment(.center)`
 5. `Spacer().frame(height: Theme.spacingExtraLarge)`
