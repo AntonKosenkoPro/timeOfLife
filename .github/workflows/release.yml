@@ -3,11 +3,16 @@ name: release
 # Manual release bump: workflow_dispatch with the desired marketing version.
 # Normal mode (build_only=false): validates strictly-greater semver on main,
 # edits ios/TimeOfLife/project.yml (the single version writer — design.md D1)
-# and mirrors the two values into the tracked Info.plist statics (xcodegen
-# rewrites that file from project.yml on every generate, so the mirror keeps
-# the committed file from reading stale between the bump and the next
+# and mirrors the values into the tracked Release Info.plist statics (xcodegen
+# rewrites those files from project.yml on every generate, so the mirror keeps
+# the committed files from reading stale between the bump and the next
 # generate; generation remains authoritative), then commits
 # chore(release): bump to X.Y.Z (N) and pushes annotated tag vX.Y.Z.
+# Multi-target: every CFBundleShortVersionString/CFBundleVersion occurrence in
+# project.yml (app + each extension) is bumped in lockstep and every Release
+# Info.plist is mirrored — a new target MUST be added to RELEASE_PLISTS below
+# (the commit step consumes it via step outputs), or the next release fails
+# loudly on the unanimity guard instead of shipping a version-skewed bundle.
 # Rebuild mode (build_only=true, spec "Re-upload without a new marketing
 # version"): VERSION must equal the current marketing version; only the build
 # number increments (no new tag — vX.Y.Z already exists and never moves).
@@ -92,11 +97,20 @@ jobs:
 
           with open("ios/TimeOfLife/project.yml", encoding="utf-8") as f:
               text = f.read()
-          m = re.search(r'CFBundleShortVersionString:\s*"([^"]+)"', text)
-          if not m:
+          # Multi-target: every occurrence must agree — a new target whose
+          # versions were not kept in sync fails here loudly instead of
+          # shipping a version-skewed bundle (see live-activities appex).
+          currents = re.findall(r'CFBundleShortVersionString:\s*"([^"]+)"', text)
+          if not currents:
               print("::error::Could not find CFBundleShortVersionString in ios/TimeOfLife/project.yml.")
               sys.exit(1)
-          current = m.group(1)
+          if len(set(currents)) != 1:
+              print(
+                  f"::error::Version drift across targets in project.yml: {sorted(set(currents))}. "
+                  f"Sync every target to one version first. Nothing changed."
+              )
+              sys.exit(1)
+          current = currents[0]
 
 
           def emit(name, value):
@@ -212,6 +226,7 @@ jobs:
           EOF
 
       - name: Bump (marketing + build, assert equality, mirror plist)
+        id: bump
         if: steps.mode.outputs.mode == 'release' || steps.mode.outputs.mode == 'rebuild'
         env:
           VERSION: ${{ inputs.version }}
@@ -226,54 +241,80 @@ jobs:
           with open(path, encoding="utf-8") as f:
               text = f.read()
 
-          m = re.search(r'CFBundleVersion:\s*"(\d+)"', text)
-          if not m:
-              print("::error::Could not find numeric CFBundleVersion in project.yml.")
-              sys.exit(1)
-          new_build = str(int(m.group(1)) + 1)
-
-          # Exactly one match per key is required first: with a capped
-          # substitution a duplicated key would otherwise go stale silently.
+          # Multi-target lockstep: every occurrence of each key must agree
+          # before the bump (a new target with a stale version fails here,
+          # not in a half-written tree), then all are rewritten together.
           # Overwriting wholesale also normalizes legacy two-component "1.0".
           # (In rebuild mode requested == current, so the marketing edit is a no-op.)
+          shorts = re.findall(r'CFBundleShortVersionString:\s*"([^"]+)"', text)
+          if not shorts or len(set(shorts)) != 1:
+              print(f"::error::Expected unanimous CFBundleShortVersionString in project.yml, got {sorted(set(shorts))}; refusing to bump.")
+              sys.exit(1)
+          # Mirror the rewrite patterns exactly, so values the scan is blind
+          # to can't slip through to a silent re.sub normalisation below.
+          bundles = re.findall(r'CFBundleVersion:\s*"([^"]+)"', text)
+          if not bundles or len(set(bundles)) != 1 or not bundles[0].isdigit():
+              print(f"::error::Expected unanimous numeric CFBundleVersion in project.yml, got {sorted(set(bundles))}; refusing to bump.")
+              sys.exit(1)
+          projs = re.findall(r'CURRENT_PROJECT_VERSION:\s*"([^"]+)"', text)
+          if not projs or len(set(projs)) != 1:
+              print(f"::error::Expected unanimous CURRENT_PROJECT_VERSION in project.yml, got {sorted(set(projs))}; refusing to bump.")
+              sys.exit(1)
+          new_build = str(int(bundles[0]) + 1)
+
           for pattern, repl in (
               (r'CFBundleShortVersionString:\s*"[^"]+"', f'CFBundleShortVersionString: "{requested}"'),
               (r'CFBundleVersion:\s*"[^"]+"', f'CFBundleVersion: "{new_build}"'),
               (r'CURRENT_PROJECT_VERSION:\s*"[^"]+"', f'CURRENT_PROJECT_VERSION: "{new_build}"'),
           ):
-              if len(re.findall(pattern, text)) != 1:
-                  print(f"::error::Expected exactly one match for {pattern}; refusing to bump.")
+              if not re.search(pattern, text):
+                  print(f"::error::Expected at least one match for {pattern}; refusing to bump.")
                   sys.exit(1)
               text = re.sub(pattern, repl, text)
 
           # Equality assertion before anything is written.
-          short = re.search(r'CFBundleShortVersionString:\s*"([^"]+)"', text).group(1)
-          bundle = re.search(r'CFBundleVersion:\s*"([^"]+)"', text).group(1)
-          current_proj = re.search(r'CURRENT_PROJECT_VERSION:\s*"([^"]+)"', text).group(1)
-          assert short == requested, f"marketing mismatch: {short} != {requested}"
-          assert bundle == current_proj, f"build drift: CFBundleVersion={bundle} != CURRENT_PROJECT_VERSION={current_proj}"
+          shorts = re.findall(r'CFBundleShortVersionString:\s*"([^"]+)"', text)
+          bundles = re.findall(r'CFBundleVersion:\s*"([^"]+)"', text)
+          projs = re.findall(r'CURRENT_PROJECT_VERSION:\s*"([^"]+)"', text)
+          assert len(set(shorts)) == 1 and shorts[0] == requested, f"marketing mismatch: {shorts} != {requested}"
+          assert len(set(bundles)) == 1 and len(set(projs)) == 1 and bundles[0] == projs[0], f"build drift: CFBundleVersion={bundles} vs CURRENT_PROJECT_VERSION={projs}"
 
           with open(path, "w", encoding="utf-8") as f:
               f.write(text)
-          print(f"Bumped to {short} ({bundle}); CFBundleVersion == CURRENT_PROJECT_VERSION holds.")
+          print(f"Bumped to {shorts[0]} ({bundles[0]}); CFBundleVersion == CURRENT_PROJECT_VERSION holds across {len(bundles)} target(s).")
 
-          # Mirror into the tracked Info.plist statics so the committed file
-          # never reads stale between this bump and the next xcodegen
-          # generate (which rewrites it from project.yml anyway).
-          plist = "ios/TimeOfLife/TimeOfLife/Configuration/Info.plist"
-          with open(plist, encoding="utf-8") as f:
-              ptext = f.read()
-          for pattern, repl in (
-              (r"(<key>CFBundleShortVersionString</key>\s*<string>)[^<]+(</string>)", rf"\g<1>{requested}\g<2>"),
-              (r"(<key>CFBundleVersion</key>\s*<string>)[^<]+(</string>)", rf"\g<1>{new_build}\g<2>"),
-          ):
-              if len(re.findall(pattern, ptext)) != 1:
-                  print(f"::error::Expected exactly one Info.plist match for {pattern}; refusing to mirror.")
-                  sys.exit(1)
-              ptext = re.sub(pattern, repl, ptext)
-          with open(plist, "w", encoding="utf-8") as f:
-              f.write(ptext)
-          print(f"Mirrored {requested} ({new_build}) into Info.plist.")
+          # Mirror into the tracked Release Info.plist statics so the
+          # committed files never read stale between this bump and the next
+          # xcodegen generate (which rewrites them from project.yml anyway).
+          # One entry per Release (generated) plist — a new extension target
+          # MUST add its Release Info.plist here; "Commit and push" consumes
+          # this list via step outputs, so one entry wires both.
+          # Debug (unmanaged Info-Debug.plist) files stay pinned: release
+          # bumps have never touched them (see v0.1.4 bump 206cc3d).
+          RELEASE_PLISTS = [
+              "ios/TimeOfLife/TimeOfLife/Configuration/Info.plist",
+              "ios/TimeOfLife/LifioLiveActivities/Info.plist",
+          ]
+          # Single source of truth for the commit step (see PLISTS env there).
+          if "GITHUB_OUTPUT" in os.environ:
+              with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as f:
+                  f.write(f"plists={' '.join(RELEASE_PLISTS)}\n")
+          else:  # local simulation without GitHub outputs
+              print(f"[output] plists={' '.join(RELEASE_PLISTS)}")
+          for plist in RELEASE_PLISTS:
+              with open(plist, encoding="utf-8") as f:
+                  ptext = f.read()
+              for pattern, repl in (
+                  (r"(<key>CFBundleShortVersionString</key>\s*<string>)[^<]+(</string>)", rf"\g<1>{requested}\g<2>"),
+                  (r"(<key>CFBundleVersion</key>\s*<string>)[^<]+(</string>)", rf"\g<1>{new_build}\g<2>"),
+              ):
+                  if len(re.findall(pattern, ptext)) != 1:
+                      print(f"::error::Expected exactly one {plist} match for {pattern}; refusing to mirror.")
+                      sys.exit(1)
+                  ptext = re.sub(pattern, repl, ptext)
+              with open(plist, "w", encoding="utf-8") as f:
+                  f.write(ptext)
+              print(f"Mirrored {requested} ({new_build}) into {plist}.")
           EOF
 
       - name: Commit and push (single push — no partial tag state)
@@ -281,12 +322,15 @@ jobs:
         env:
           VERSION: ${{ inputs.version }}
           MODE: ${{ steps.mode.outputs.mode }}
+          PLISTS: ${{ steps.bump.outputs.plists }}
         run: |
           set -euo pipefail
           BUILD=$(python3 -c 'import re; print(re.search(r"CFBundleVersion:\s*\"([^\"]+)\"", open("ios/TimeOfLife/project.yml").read()).group(1))')
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add ios/TimeOfLife/project.yml ios/TimeOfLife/TimeOfLife/Configuration/Info.plist
+          # $PLISTS is intentionally unquoted (word-split the step output);
+          # :? fails loud if the Bump step did not emit it.
+          git add ios/TimeOfLife/project.yml ${PLISTS:?RELEASE_PLISTS output missing}
           if [ "$MODE" = "rebuild" ]; then
             git commit -m "chore(release): rebuild $VERSION ($BUILD)"
             git push --atomic origin HEAD:main
@@ -343,7 +387,7 @@ jobs:
             elif [ "$MODE" = "recover" ]; then
               echo "Pushed the missing \`v$VERSION\` tag onto its bump commit. No version numbers changed."
             else
-              echo "Bumped \`ios/TimeOfLife/project.yml\` to \`$VERSION\` (Info.plist mirrored), committed, tagged \`v$VERSION\`, and pushed."
+              echo "Bumped \`ios/TimeOfLife/project.yml\` to \`$VERSION\` (Release Info.plists mirrored for every target), committed, tagged \`v$VERSION\`, and pushed."
             fi
             echo ""
             echo "Verification: the \`verify\` job runs \`ios.yml\` on the pushed head automatically (GITHUB_TOKEN pushes trigger no workflows on their own). Do not upload to App Store Connect until it is green."

@@ -305,7 +305,10 @@ targets:
           # Debug uses the unmanaged Info-Debug.plist (Debug versions
           # 0.1.3/4, matching the app's Debug plist); Release uses the
           # generated base plist above (0.1.4/5). Same split as the app
-          # target — keep all four version pairs in sync on bumps.
+          # target — the release workflow bumps the Release pair only and
+          # mirrors both Release Info.plists (see RELEASE_PLISTS in
+          # release.yml); Debug stays pinned, and a new target MUST be wired
+          # in there or the unanimity guard fails the next release.
           INFOPLIST_FILE: LifioLiveActivities/Info-Debug.plist
         Release:
           DEVELOPMENT_TEAM: 7923U48U87
