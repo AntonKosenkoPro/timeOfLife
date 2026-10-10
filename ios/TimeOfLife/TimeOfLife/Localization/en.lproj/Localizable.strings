@@ -201,6 +201,7 @@
 // Undo (chip selection accessibility)
 "undo.selected" = "Selected";
 "undo.notSelected" = "Not selected";
+"undo.selectedPosition" = "Selected, %d of %d";
 
 // Manage categories (category-management D4)
 "manage.categories.title" = "Categories";

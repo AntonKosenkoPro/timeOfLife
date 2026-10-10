@@ -323,9 +323,9 @@ struct TrackContent: View {
     /// The running draft's ordered selection while running, empty otherwise.
     /// Selection never affects the selector's geometry (rows come from the
     /// options alone).
-    private var runningSelectedIDs: Set<String> {
+    private var runningSelectedIDs: [String] {
         if case let .running(draft, _) = vm.state {
-            Set(draft.categoryIDs)
+            draft.categoryIDs
         } else {
             []
         }
