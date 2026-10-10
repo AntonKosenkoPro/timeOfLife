@@ -1542,6 +1542,28 @@ actor LocalStore {
         }
     }
 
+    /// One-time entry-cursor re-baseline (fix-sync-cursor-rebaseline): cursors
+    /// recorded before pagination-aware pulls existed are partial-page maxima
+    /// that hide older rows from every future delta. The first call per
+    /// account file deletes the `entry` cursor row and records
+    /// `entry_rebaseline` = now in the same write (returns true), so the next
+    /// cycle runs a full paged pull through the idempotent LWW merge; later
+    /// calls no-op (return false). Nothing else in `sync_state` is touched.
+    func rebaselineEntryCursorIfNeeded() throws -> Bool {
+        try queue.write { db in
+            let flagged = try Date.fetchOne(db, sql: """
+                SELECT last_synced_at FROM sync_state WHERE resource = ?
+                """, arguments: ["entry_rebaseline"]) != nil
+            guard !flagged else { return false }
+            try db.execute(sql: "DELETE FROM sync_state WHERE resource = ?", arguments: ["entry"])
+            try db.execute(
+                sql: "INSERT INTO sync_state (resource, last_synced_at) VALUES (?, ?)",
+                arguments: ["entry_rebaseline", Date()]
+            )
+            return true
+        }
+    }
+
     // MARK: - Undo buffer (durable, D3)
 
     /// Set while a buffered deletion's relay push is in flight

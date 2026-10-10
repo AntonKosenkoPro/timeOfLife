@@ -91,6 +91,77 @@ struct SyncControllerTests {
         #expect(isIdle(controller.status))
     }
 
+    @Test("upgrade with a poisoned cursor heals the truncated tail on the next cycle")
+    func poisonedCursorHealsOnUpgrade() async throws {
+        let (store, _, controller, _, globalMax) = try await makePoisonedUpgradeContext()
+
+        controller.activate(userID: "u1")
+        await waitForCycle(controller)
+
+        // The re-baseline ran (flag row present) ...
+        #expect(try await store.lastSyncedAt(resource: "entry_rebaseline") != nil)
+        // ... so the poisoned cursor never constrained the pull: all 120
+        // rows converged, including a first-page row no delta could see.
+        #expect(try await store.entries().count == 120)
+        #expect(try await store.entry(id: "up-e119")?.activityText == "Entry 119")
+        // ... and the cursor landed on the global max.
+        #expect(try await store.lastSyncedAt(resource: "entry") == globalMax)
+        #expect(isIdle(controller.status))
+    }
+
+    @Test("re-baseline runs exactly once: the next cycle is a normal delta")
+    func rebaselineRunsExactlyOnce() async throws {
+        let (store, mock, controller, _, globalMax) = try await makePoisonedUpgradeContext()
+
+        controller.activate(userID: "u1")
+        await waitForCycle(controller)
+        #expect(try await store.entries().count == 120)
+
+        mock.clearLog()
+        await controller.syncNow(userID: "u1")
+
+        // No cursor discard: the delta starts at the healed global max, the
+        // relay (filtering strictly newer) returns nothing, and the cursor
+        // is untouched.
+        #expect(mock.fetchedModifiedSince.first == globalMax)
+        #expect(try await store.entries().count == 120)
+        #expect(try await store.lastSyncedAt(resource: "entry") == globalMax)
+        #expect(isIdle(controller.status))
+    }
+
+    /// A relay history whose first page holds the SMALLEST updatedAts
+    /// (updatedAt inverse to startedAt, except a global-max trap on the last
+    /// page) plus a store cursor poisoned by a pre-fix single-page pull
+    /// (that page's partial max). Returns the poisoned cursor and global max.
+    private func makePoisonedUpgradeContext() async throws -> (
+        store: LocalStore, mock: MockCatalogRepository, controller: SyncController,
+        poisoned: Date, globalMax: Date
+    ) {
+        let (store, mock, controller) = makeContext()
+        let base = Date(timeIntervalSince1970: 1_700_000_000)
+        let globalMax = base.addingTimeInterval(10_000)
+        var all: [TimeEntry] = []
+        for i in 0..<120 {
+            let updatedAt = i == 5 ? globalMax : base.addingTimeInterval(TimeInterval(119 - i))
+            all.append(makeEntry(
+                id: "up-e\(i)", text: "Entry \(i)",
+                startedAt: base.addingTimeInterval(TimeInterval(i) * 3600),
+                createdAt: base.addingTimeInterval(TimeInterval(i) * 3600),
+                updatedAt: updatedAt
+            ))
+        }
+        let newestFirst = all.sorted { $0.startedAt > $1.startedAt }
+        mock.entriesPages = [
+            Array(newestFirst[0..<50]),
+            Array(newestFirst[50..<100]),
+            Array(newestFirst[100..<120]),
+        ]
+        mock.filterPagesByModifiedSince = true
+        let poisoned = base.addingTimeInterval(49)
+        try await store.setLastSyncedAt(resource: "entry", date: poisoned)
+        return (store, mock, controller, poisoned, globalMax)
+    }
+
     // MARK: - LWW merge
 
     @Test("LWW merge applies a newer server entry")
@@ -1746,11 +1817,14 @@ struct SyncControllerTests {
         try await signedIn.setLastSyncedAt(resource: "entry", date: cursor)
         await signedIn.closeAccount()
 
-        // Re-login reopens the same file: the outbox drains and the cursor
-        // continues — no full re-pull (the fetch ran with the stored cursor).
+        // Re-login reopens the same file: the first cycle re-baselines the
+        // stored (pre-pagination) cursor — a full pull fetched with nil —
+        // while the dormant outbox still drains; the next cycle resumes
+        // normal deltas from the healed cursor.
         // swiftlint:disable:next force_try
         let reopened = try! LocalStore(url: url, userID: "u1")
         let mock = MockCatalogRepository()
+        mock.entriesResult = [makeEntry(id: "srv-1", text: "Server", updatedAt: cursor.addingTimeInterval(60))]
         let controller = SyncController(
             store: reopened, remote: mock, connectivity: MockConnectivity(connected: true)
         ) { "u1" }
@@ -1759,7 +1833,15 @@ struct SyncControllerTests {
 
         #expect(mock.calls.contains(Call("createEntry", "entry", "e1")))
         #expect(try await reopened.outboxRows().isEmpty)
-        #expect(mock.fetchedModifiedSince.first == cursor)
+        let firstFilter = try #require(mock.fetchedModifiedSince.first)
+        #expect(firstFilter == nil)
+        #expect(try await reopened.lastSyncedAt(resource: "entry") == cursor.addingTimeInterval(60))
+        #expect(isIdle(controller.status))
+
+        mock.clearLog()
+        await controller.syncNow(userID: "u1")
+
+        #expect(mock.fetchedModifiedSince.first == cursor.addingTimeInterval(60))
         #expect(isIdle(controller.status))
     }
 
