@@ -36,11 +36,12 @@ struct TagSelectorTests {
         #expect(TagSelector.glyph(for: "c3", in: ["c3"]) == .checkmark)
     }
 
-    @Test("reselecting appends at the end")
-    func reselectAppendsAtEnd() {
-        let selected = ["c2", "c1"]
-        #expect(TagSelector.glyph(for: "c2", in: selected) == .ordinal(1))
+    @Test("three selections show ordinals in tap order")
+    func threeSelectionsShowOrdinals() {
+        let selected = ["c3", "c1", "c2"]
+        #expect(TagSelector.glyph(for: "c3", in: selected) == .ordinal(1))
         #expect(TagSelector.glyph(for: "c1", in: selected) == .ordinal(2))
+        #expect(TagSelector.glyph(for: "c2", in: selected) == .ordinal(3))
     }
 
     @Test("ordinals cap at 99")

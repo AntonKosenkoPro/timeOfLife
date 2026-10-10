@@ -97,10 +97,17 @@ struct TagSelector: View {
 
     /// VoiceOver value: not-selected when unselected, selected for a lone
     /// selection, and the ordinal position when two or more are selected.
+    /// Derived from `glyph(for:in:)` so the spoken position always agrees
+    /// with the visible numeral, including at the 99 cap.
     private func accessibilityValue(for id: String) -> String {
-        guard let index = selected.firstIndex(of: id) else { return L10n.undoNotSelected.text }
-        guard selected.count > 1 else { return L10n.undoSelected.text }
-        return String(format: L10n.undoSelectedPosition.text, locale: .current, index + 1, selected.count)
+        switch Self.glyph(for: id, in: selected) {
+        case .icon:
+            return L10n.undoNotSelected.text
+        case .checkmark:
+            return L10n.undoSelected.text
+        case let .ordinal(position):
+            return String(format: L10n.undoSelectedPosition.text, locale: .current, position, selected.count)
+        }
     }
 
     private func chipLabel(category: Category, glyph: ChipGlyph) -> some View {

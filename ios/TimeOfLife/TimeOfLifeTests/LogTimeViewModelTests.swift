@@ -137,6 +137,16 @@ struct LogTimeViewModelTests {
         #expect(vm.categoryIDs == ["c1", "c3"])
     }
 
+    @Test("deselect-then-reselect appends at the end (ordinal source order)")
+    func reselectAppendsAtEnd() {
+        let vm = makeViewModel()
+        vm.toggleCategory("c1")
+        vm.toggleCategory("c2")
+        vm.toggleCategory("c1")
+        vm.toggleCategory("c1")
+        #expect(vm.categoryIDs == ["c2", "c1"])
+    }
+
     // MARK: - Save
 
     @Test("save persists a manual entry with text, tags, notes, and derived duration")
