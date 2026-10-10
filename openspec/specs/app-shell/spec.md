@@ -6,7 +6,7 @@ Defines a stable product hierarchy for frequent capture, retrospective review, a
 ## Requirements
 
 ### Requirement: Three primary destinations
-The app SHALL provide Track, History, and Insights as its primary destinations, and SHALL identify Track as the destination for starting and controlling a timer. The History destination SHALL present committed time entries as a day-grouped, read-only list (see `history-entry-list` capability). The Insights destination SHALL present a period-scoped breakdown of committed tracked time with a hero total (see `insights-breakdown` capability), replacing the empty-state placeholder whenever committed entries exist. The History destination SHALL show the navigation bar (inline title and Profile button) at rest and collapse it on scroll; the Profile button remains present on Track and Insights. The app SHALL require authentication before presenting any primary destination: when the user is signed out, the app SHALL render the auth flow full-screen in place of the shell and MUST NOT render Track, History, Insights, or the tab bar; primary destinations become reachable only after sign-in.
+The app SHALL provide Track, History, and Insights as its primary destinations, and SHALL identify Track as the destination for starting and controlling a timer. The History destination SHALL present committed time entries as a day-grouped, read-only list (see `history-entry-list` capability). The Insights destination SHALL present a period-scoped breakdown of committed tracked time with a hero total (see `insights-breakdown` capability), replacing the empty-state placeholder whenever committed entries exist. The History destination SHALL show the navigation bar (inline title and Profile button) at rest and collapse it on scroll; the Profile button remains present on Track and Insights. The app SHALL require authentication before presenting any primary destination: when the user is signed out, the app SHALL render the auth flow full-screen in place of the shell and MUST NOT render Track, History, Insights, or the tab bar; primary destinations become reachable only after sign-in. While a cached session restore is in flight and its outcome is still unknown, the app SHALL render a restoring splash (activity indicator, app identity) instead of the auth flow, so a restorable session never flashes the login screen. The shell SHALL mount only after the signed-in account's local store is bound, buffered deletions are committed, and starter categories are seeded; the first-sync network pull stays background and MUST NOT block the reveal.
 
 #### Scenario: Local launch
 - **WHEN** the user launches the app signed out, with no account or active timer
@@ -27,6 +27,14 @@ The app SHALL provide Track, History, and Insights as its primary destinations, 
 #### Scenario: Auth gate is not a sheet
 - **WHEN** the user is signed out at launch
 - **THEN** the auth flow covers the full screen with no shell visible behind it, and there is no way to dismiss it into the app without signing in
+
+#### Scenario: Restoring session shows splash, not login
+- **WHEN** the app launches with a cached session and tokens whose server validation is still in flight
+- **THEN** the gate renders a restoring splash instead of the auth flow, and the auth flow appears only if the restore resolves to signed-out
+
+#### Scenario: Shell mounts after local ready
+- **WHEN** the user signs in (fresh, restored, or re-login) on a device whose account file needs binding, buffered-deletion commit, or starter seeding
+- **THEN** the shell appears only after the bind, commit, and seed complete, so the first Track paint already carries starter categories and never flashes an empty store
 
 ### Requirement: Profile owns secondary destinations
 The app SHALL expose account, sync, category management, and destructive data controls from a profile destination rather than as a primary tab. The profile destination SHALL open as a pushed page on the current tab's own navigation path with the system back button, and SHALL NOT present as a sheet or offer a Done/dismiss control. Each tab (Track, History, Insights) SHALL own an independent navigation path: opening Profile on one tab SHALL NOT push Profile on any other tab, and switching tabs SHALL NOT carry Profile state across. Manage Categories SHALL keep pushing from Profile on the same tab path, and the category editor SHALL remain a sheet. The profile destination SHALL be signed-in-only: it SHALL NOT present an Enable Sync row or auth-flow sheet, and the auth flow SHALL NOT be presented from Profile as a sheet. Because the launch auth gate guarantees a signed-in user, the account and sync state shown in Profile SHALL reflect the active signed-in account at all times. The profile destination SHALL NOT expose integrations, export, appearance, or data-and-privacy placeholder rows, and no activity catalog exists. Destructive rows in Profile (Sign Out, Erase local data) SHALL share one list-row visual contract: the shared list row geometry with a leading icon and the danger tint.
@@ -149,7 +157,7 @@ The auth flow presented at launch SHALL use required-voice copy that frames sign
 - **THEN** the required-voice copy is provided for that locale alongside the English strings
 
 ### Requirement: Tab bar hidden on pushed destinations
-The app SHALL hide the tab bar on every destination pushed past a tab root (Profile, Manage Categories, the pushed entry form, NamePicker), so a pushed page presents as a page with system Back and offers no tab-switch path while pushed. Returning via Back SHALL reveal the tab bar again on the originating tab root with its state intact.
+The app SHALL hide the tab bar on every destination pushed past a tab root (Profile, Manage Categories, the pushed entry form, NamePicker), so a pushed page presents as a page with system Back and offers no tab-switch path while pushed. Returning via Back SHALL reveal the tab bar again on the originating tab root with its state intact, synchronously with the pop transition: the bar and the root content SHALL settle in a single coordinated layout pass with no post-settle relayout or content jump.
 
 #### Scenario: Profile hides tabs
 - **WHEN** the user opens Profile from any tab
@@ -162,3 +170,15 @@ The app SHALL hide the tab bar on every destination pushed past a tab root (Prof
 #### Scenario: No tab-switch-while-pushed
 - **WHEN** a pushed destination is visible
 - **THEN** there is no user-reachable path to change the selected tab without first navigating back
+
+#### Scenario: Back reveals tab bar without relayout
+- **WHEN** the user navigates back from any pushed destination to its originating tab root via the system Back button
+- **THEN** the tab bar reappears as part of the pop transition and the root content holds its final layout with no second jump after the transition settles
+
+#### Scenario: Cancelled swipe-back keeps tab bar hidden
+- **WHEN** the user starts an interactive swipe-back from a pushed destination but releases without completing the pop
+- **THEN** the pushed destination remains visible with the tab bar hidden and the originating tab root is unchanged
+
+#### Scenario: Tab switch mid-push does not leak bar state
+- **WHEN** a pushed destination is visible on one tab and the user returns to the tab bar path only via Back (no tab switch is reachable while pushed), then opens a destination on another tab
+- **THEN** each tab's bar visibility follows only its own push depth: roots show the bar, pushed destinations hide it, independently per tab

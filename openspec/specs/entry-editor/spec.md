@@ -88,7 +88,7 @@ The entry-form Name row's trailing clear (`×`) button SHALL be visible only whe
 - **THEN** a trailing `×` is visible, and one tap empties the field while categories, notes, and Start/End stay unchanged
 
 ### Requirement: Entry-form Notes row has a clear button
-The entry-form Notes row SHALL present a read-only multiline presenter instead of an inline editor: a `Text` label with a 1–5 line window that shows the localized notes placeholder when the draft notes are empty and truncates past 5 lines. The presenter SHALL carry the caption row with a trailing chevron in balanced corner margins (the caption row's top inset equals the card's trailing inset; approved spike variant B). Tapping the presenter SHALL push a dedicated Notes editor page carrying X (cancel/discard) and ✓ (save/commit) in the navigation bar with no system Back button (X is the sole cancel path; swipe-back still pops and discards). The editor SHALL be a multiline `TextEditor` where Return inserts a newline and never dismisses the keyboard (there is no keyboard Done key); dismissal and commit happen only through X/✓ (plus the system push-pop). X SHALL discard keystrokes and restore the pre-open draft; ✓ SHALL write the edited text back to the form draft (name, categories, and interval untouched; the validity gate re-evaluates) and pop. The 280-rune notes cap is unchanged. In LOCKED mode the presenter SHALL render multiline read-only (disabled and dimmed) with no editing and no navigation. All strings localized (EN + RU), `Theme` semantic colors only.
+The entry-form Notes row SHALL present a read-only multiline presenter instead of an inline editor: a `Text` label with a 1–5 line window that shows the localized notes placeholder when the draft notes are empty and truncates past 5 lines. The presenter SHALL carry the caption row with a trailing chevron in balanced corner margins (the caption row's top inset equals the card's trailing inset; approved spike variant B). Tapping the presenter SHALL push a dedicated Notes editor page carrying X (cancel/discard) and ✓ (save/commit) in the navigation bar with no system Back button (X is the sole cancel path; swipe-back still pops and discards). The editor page SHALL show a live localized subtitle pairing the entry name with the notes counter (`<name> • <count>/2000`, name omitted when empty), counting every rune against the 2000 bound. Past the bound the counter SHALL render red; the confirm action SHALL stay enabled and an over-limit save attempt SHALL shake the counter subtitle and play the error haptic without saving or popping. The 2000-rune notes cap is enforced by the relay; the 60-char name bound is unchanged. In LOCKED mode the presenter SHALL render multiline read-only (disabled and dimmed) with no editing and no navigation. All strings localized (EN + RU), `Theme` semantic colors only.
 
 #### Scenario: Return inserts a newline
 - **WHEN** the Notes editor page field is focused and the user presses Return
@@ -133,6 +133,18 @@ The entry-form Notes row SHALL present a read-only multiline presenter instead o
 #### Scenario: Save commits notes only
 - **WHEN** the user edits notes on the editor page and activates ✓
 - **THEN** the page pops, the form draft notes update to the edited text, and name, categories, and Start/End stay unchanged
+
+#### Scenario: Counter shows name and live count
+- **WHEN** the Notes editor page is open with a non-empty entry name
+- **THEN** the subtitle pairs the name with the live counter (`<name> • <count>/2000`) updating as the user types
+
+#### Scenario: Over-limit counter renders red
+- **WHEN** the draft notes exceed 2000 runes on the editor page
+- **THEN** the counter renders red while the page otherwise behaves identically
+
+#### Scenario: Over-limit save shakes the subtitle without saving
+- **WHEN** the user activates ✓ with notes past the bound
+- **THEN** the counter subtitle shakes, the error haptic plays, the page stays open with the draft intact, and nothing is written back
 
 ### Requirement: Notes clear never dismisses the keyboard
 Tapping the Notes-row clear (`×`) SHALL clear the field and keep the keyboard open with no dismiss/reappear transition. Taps on the card's labels, padding, and background SHALL still resign focus, and taps on the name row, category chips, and start/end pills SHALL still resign focus.

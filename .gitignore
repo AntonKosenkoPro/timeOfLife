@@ -62,3 +62,6 @@ Packages/
 ### Editor / OS
 .vscode/
 .idea/
+
+### Agent tooling (local-only session state)
+.argent/recordings/
