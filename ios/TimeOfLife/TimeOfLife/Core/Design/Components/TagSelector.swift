@@ -8,19 +8,44 @@ import SwiftUI
 /// forces a selection.
 ///
 /// Chips follow category-management D9: each chip is as wide as its content
-/// (uniform `Theme.spacingChip` padding on all sides), unselected chips show
-/// only the category icon, selected chips swap the icon for a `checkmark`
-/// (both 30% larger than `.caption`, scaling with Dynamic Type), no outline
-/// circles, and a 44 pt minimum tap target. Chips wrap via the shared
+/// (uniform `Theme.spacingChip` padding on all sides). The leading slot shows
+/// the category icon when unselected, a `checkmark` for a lone selection, and
+/// the 1-based selection ordinal when two or more chips are selected (both
+/// 30% larger than `.caption`, scaling with Dynamic Type; two-digit ordinals
+/// shrink to fit), no outline circles, and a 44 pt minimum tap target. The
+/// slot keeps the measured chip width exact in every state, so toggling never
+/// re-packs rows. Glyph changes fade in place. Chips wrap via the shared
 /// `FlowLayout` with equal `Theme.spacingSmall` gaps.
 struct TagSelector: View {
     let options: [Category]
-    /// The selected ids as a set (for chip rendering state).
-    let selected: Set<String>
+    /// The selected ids in selection (tap) order; deselect-then-reselect
+    /// appends at the end. The parent owns the order.
+    let selected: [String]
     /// Called with the toggled category id; the parent owns the ordered
     /// selection.
     let onToggle: (String) -> Void
     let accessibilityId: String
+
+    /// Fade duration for glyph transitions (select, deselect, renumber,
+    /// checkmark↔ordinal swap).
+    private static let glyphFadeDuration = 0.2
+
+    /// The leading-slot content contract: icon when unselected, checkmark for
+    /// a lone selection, else the 1-based selection ordinal. Pure so the
+    /// ordinal derivation is unit-testable.
+    enum ChipGlyph: Equatable {
+        case icon
+        case checkmark
+        case ordinal(Int)
+    }
+
+    /// Resolves which glyph a chip shows for `id` within the ordered
+    /// `selected` ids. Ordinals cap at 99 (a third digit is impossible).
+    static func glyph(for id: String, in selected: [String]) -> ChipGlyph {
+        guard let index = selected.firstIndex(of: id) else { return .icon }
+        guard selected.count > 1 else { return .checkmark }
+        return .ordinal(min(index + 1, 99))
+    }
 
     var body: some View {
         FlowLayout(spacing: Theme.spacingSmall) {
@@ -39,10 +64,16 @@ struct TagSelector: View {
         UIFontMetrics(forTextStyle: .caption1).scaledValue(for: 12 * 1.3)
     }
 
+    /// Ordinal glyph size: full size for a single digit, shrunk for two
+    /// digits so the pair fits the fixed slot.
+    private func ordinalFontSize(position: Int) -> CGFloat {
+        position < 10 ? symbolFontSize : symbolFontSize * 0.8
+    }
+
     /// Fixed symbol slot: wide SF Symbols (e.g. `figure.run`) stay fully
     /// visible while the slot keeps the measured chip width exact. The same
-    /// slot serves the icon and the checkmark, so toggling never re-packs
-    /// rows.
+    /// slot serves the icon, the checkmark, and the ordinal, so toggling
+    /// never re-packs rows.
     private var symbolSlotSize: CGFloat {
         ceil(symbolFontSize * 1.5)
     }
@@ -51,37 +82,71 @@ struct TagSelector: View {
 
     @ViewBuilder
     private func chip(_ category: Category) -> some View {
-        let isSelected = selected.contains(category.id)
+        let glyph = Self.glyph(for: category.id, in: selected)
         Button {
             onToggle(category.id)
         } label: {
-            chipLabel(category: category, isSelected: isSelected)
+            chipLabel(category: category, glyph: glyph)
         }
         .accessibilityLabel("\(L10n.manageCategoriesRowA11y.text), \(category.name)")
-        .accessibilityValue(isSelected ? L10n.undoSelected.text : L10n.undoNotSelected.text)
+        .accessibilityValue(accessibilityValue(for: category.id))
         .accessibilityIdentifier("\(accessibilityId)Chip(\(category.id))")
     }
 
-    private func chipLabel(category: Category, isSelected: Bool) -> some View {
+    /// VoiceOver value: not-selected when unselected, selected for a lone
+    /// selection, and the ordinal position when two or more are selected.
+    private func accessibilityValue(for id: String) -> String {
+        guard let index = selected.firstIndex(of: id) else { return L10n.undoNotSelected.text }
+        guard selected.count > 1 else { return L10n.undoSelected.text }
+        return String(format: L10n.undoSelectedPosition.text, locale: .current, index + 1, selected.count)
+    }
+
+    private func chipLabel(category: Category, glyph: ChipGlyph) -> some View {
         HStack(spacing: Theme.spacingExtraSmall) {
-            Image(systemName: isSelected ? "checkmark" : CatalogIcon(validated: category.icon).displaySymbol)
-                .font(.system(size: symbolFontSize, weight: isSelected ? .semibold : .regular))
-                .frame(width: symbolSlotSize, height: symbolFontSize)
-                .accessibilityHidden(true)
+            glyphView(category: category, glyph: glyph)
             Text(category.name)
                 .font(.caption)
                 .lineLimit(1)
                 .truncationMode(.tail)
         }
-        .foregroundStyle(isSelected ? Theme.textOnAccent : Theme.textPrimary)
+        .foregroundStyle(glyph == .icon ? Theme.textPrimary : Theme.textOnAccent)
         .padding(Theme.spacingChip)
         .frame(minHeight: Theme.minTapArea)
-        .background(isSelected ? Theme.accentPrimary : Theme.backgroundSecondary)
+        .background(glyph == .icon ? Theme.backgroundSecondary : Theme.accentPrimary)
         .clipShape(Capsule())
         .overlay {
-            if !isSelected {
+            if glyph == .icon {
                 Capsule().stroke(Theme.hairline, lineWidth: 1)
             }
         }
+    }
+
+    /// The leading slot. Branch swaps (icon↔checkmark↔ordinal) fade via the
+    /// opacity transition; digit-to-digit changes fade via the opacity
+    /// content transition. The explicit animation is scoped to the slot so it
+    /// survives ancestor nil-transactions (Track's `bottomFlow` keeps the
+    /// Start/Stop swap instant without silencing this fade).
+    @ViewBuilder
+    private func glyphView(category: Category, glyph: ChipGlyph) -> some View {
+        Group {
+            switch glyph {
+            case .icon:
+                Image(systemName: CatalogIcon(validated: category.icon).displaySymbol)
+                    .font(.system(size: symbolFontSize, weight: .regular))
+            case .checkmark:
+                Image(systemName: "checkmark")
+                    .font(.system(size: symbolFontSize, weight: .semibold))
+            case let .ordinal(position):
+                Text("\(position)")
+                    .font(.system(size: ordinalFontSize(position: position), weight: .semibold))
+                    .minimumScaleFactor(0.6)
+                    .lineLimit(1)
+            }
+        }
+        .frame(width: symbolSlotSize, height: symbolFontSize)
+        .accessibilityHidden(true)
+        .transition(.opacity)
+        .contentTransition(.opacity)
+        .animation(.easeInOut(duration: Self.glyphFadeDuration), value: glyph)
     }
 }

@@ -293,6 +293,7 @@ struct LocalizationTests {
         "timer.stopHint",
         "undo.notSelected",
         "undo.selected",
+        "undo.selectedPosition",
         "validation.email.prefix",
         "validation.email.rule.invalid",
         "validation.email.rule.tooLong",

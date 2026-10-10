@@ -187,6 +187,7 @@ enum L10n: String, CaseIterable {
     // deletions undo through the system Undo confirmation instead)
     case undoSelected = "undo.selected"
     case undoNotSelected = "undo.notSelected"
+    case undoSelectedPosition = "undo.selectedPosition"
 
     // Manage categories (category-management D4)
     case manageCategoriesTitle = "manage.categories.title"

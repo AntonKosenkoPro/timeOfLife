@@ -407,7 +407,7 @@ Multi-select category chips for an entry (F3). A wrapping flow of content-sized 
 ```swift
 struct TagSelector: View {
     let options: [Category]
-    let selected: Set<String>
+    let selected: [String]
     let onToggle: (String) -> Void
     let accessibilityId: String
 }
@@ -415,9 +415,9 @@ struct TagSelector: View {
 
 ### Visual
 
-- Wrapping flow of content-sized chips (each chip as wide as its icon/checkmark, name, and uniform padding), left-aligned, equal `Theme.spacingSmall` gaps between chips and rows, laid out by the shared `FlowLayout` (`Layout` protocol).
+- Wrapping flow of content-sized chips (each chip as wide as its icon/checkmark/ordinal, name, and uniform padding), left-aligned, equal `Theme.spacingSmall` gaps between chips and rows, laid out by the shared `FlowLayout` (`Layout` protocol).
 - Unselected chip: only the category icon (30% larger than `.caption`, scaling with Dynamic Type) + name (`.caption`); `Theme.backgroundSecondary` fill + 1 pt `Theme.hairline` border; no outline circle.
-- Selected chip: the icon is swapped for a `checkmark` of the same enlarged size (`.semibold`); `Theme.accentPrimary` fill, `Theme.textOnAccent` icon/checkmark and text; no outline circle.
+- Selected chip: the icon is swapped for a `checkmark` of the same enlarged size (`.semibold`) when exactly one chip is selected, or for the 1-based selection ordinal when two or more are selected (ordinals use the same enlarged semibold size; two-digit ordinals shrink to fit the slot); `Theme.accentPrimary` fill, `Theme.textOnAccent` glyph and text; no outline circle. Glyph changes fade in place.
 - Each chip: `Theme.spacingChip` (10 pt) uniform padding on all sides, `minHeight Theme.minTapArea` (44 pt — Apple HIG / WCAG 2.2 SC 2.5.5 AAA), `Capsule` shape; long names truncate with `lineLimit(1)`.
 - When `options` is empty, the selector renders no chips and the parent editor shows the localized Add-category action.
 
@@ -426,13 +426,14 @@ struct TagSelector: View {
 | State | Visual |
 |---|---|
 | Unselected | `Theme.backgroundSecondary` fill + `Theme.hairline` border; enlarged category icon + name |
-| Selected | `Theme.accentPrimary` fill, `Theme.textOnAccent` text, enlarged `checkmark` in place of the icon |
+| Selected (lone) | `Theme.accentPrimary` fill, `Theme.textOnAccent` text, enlarged `checkmark` in place of the icon |
+| Selected (2+) | `Theme.accentPrimary` fill, `Theme.textOnAccent` text, enlarged 1-based selection ordinal in place of the icon, fading in place on every change |
 | Empty options | No chips; parent editor renders the Add-category action |
 
 ### Requirements
 
-- Tapping a chip toggles its id in `selected` (F3).
-- Chips are content-sized; gaps between chips are uniform (`Theme.spacingSmall`); toggling swaps the icon for the checkmark without re-packing rows.
+- Tapping a chip toggles its id in `selected` (F3); `selected` is in selection (tap) order and deselect-then-reselect appends at the end. Ordinals cap at 99.
+- Chips are content-sized; gaps between chips are uniform (`Theme.spacingSmall`); toggling swaps the icon for the checkmark/ordinal without re-packing rows (the ordinal fits the existing fixed symbol slot).
 - Each chip's tap target is at least 44×44 pt (`Theme.minTapArea`).
 - Each chip `accessibilityIdentifier("\(accessibilityId)Chip(\(id))")`.
 - Tags are optional; an entry with no tags is valid (F3). The selector never forces a selection.
@@ -451,8 +452,8 @@ TagSelector(
 
 ### Accessibility
 
-- Each chip is a button element with a localized category label and localized selected/not-selected value.
-- The icon/checkmark is `.accessibilityHidden(true)` decoration; selection state is conveyed visually by the icon↔checkmark swap in addition to fill color, and announced by the button's selected/not-selected value.
+- Each chip is a button element with a localized category label and localized selected/not-selected value; when two or more chips are selected the value also announces the ordinal position.
+- The icon/checkmark/ordinal is `.accessibilityHidden(true)` decoration; selection state and order are conveyed visually by the icon↔checkmark↔ordinal swap in addition to fill color, and announced by the button's value.
 - The parent screen owns the empty-state "create category" action.
 
 ---

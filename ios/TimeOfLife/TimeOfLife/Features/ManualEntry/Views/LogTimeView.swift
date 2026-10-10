@@ -302,7 +302,7 @@ struct LogTimeView: View {
                 Spacer()
                 TagSelector(
                     options: vm.availableCategories,
-                    selected: Set(vm.categoryIDs),
+                    selected: vm.categoryIDs,
                     onToggle: {
                         vm.toggleCategory($0)
                         // The plain card tap-away stays silent on chip taps
