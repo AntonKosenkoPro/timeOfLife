@@ -46,10 +46,10 @@ struct ProfileView: View {
         }
         .navigationTitle(L10n.profileTitle.text)
         .navigationBarTitleDisplayMode(.inline)
-        // Pushed page (per-tab-navigation-paths): the tab bar hides here,
-        // so Profile presents as a page with system Back and no
-        // tab-switch path. Pop restores the bar on the originating root.
-        .toolbar(.hidden, for: .tabBar)
+        // Pushed page (per-tab-navigation-paths): presents with system Back
+        // and no tab-switch path. The tab bar hides through the owning
+        // stack's path-driven visibility (fix-tab-bar-return-jump) — this
+        // view declares nothing, so pop restores the bar in the same pass.
         .alert(L10n.profileEraseLocalDataConfirmTitle.text, isPresented: $isShowingEraseConfirm) {
             Button(L10n.profileEraseConfirm.text, role: .destructive) {
                 Task { await eraseLocalData() }

@@ -111,7 +111,14 @@ struct AppShellView: View {
     /// toolchain — a single body-wide chain timed out CI's build.
     private var trackStack: some View {
         NavigationStack(path: $vm.trackPath) {
-            TrackView(vm: trackVM)
+            TrackView(vm: trackVM) {
+                vm.trackPath.append(.namePicker(initialText: trackVM.nameDraft))
+            } onOpenNotesEditor: {
+                vm.trackPath.append(.notesEditor(
+                    initialText: trackVM.state.draft?.notes ?? "",
+                    entryName: trackVM.state.draft?.text ?? ""
+                ))
+            }
                 .navigationTitle(L10n.tabTrack.text)
                 .navigationBarTitleDisplayMode(.inline)
                 .modifier(ShellToolbar(
@@ -120,11 +127,43 @@ struct AppShellView: View {
                     onProfile: { vm.openProfile() }
                 ))
                 .navigationDestination(for: ShellRoute.self) { route in
-                    if route == .profile {
+                    switch route {
+                    case .profile:
                         profileDestination
+                    case .namePicker(let initialText):
+                        // The shared picker for Track (dedicated-name-picker):
+                        // completions resolve here from the owning tab's view
+                        // model, so the route stays a value. Back cancels.
+                        NamePicker(
+                            initialText: initialText,
+                            recents: trackVM.allNames,
+                            categories: trackVM.categories,
+                            placeholder: L10n.timerNamePlaceholder.text,
+                            emptyHint: L10n.timerRecentsEmptyHint.text,
+                            onCompleteSuggestion: { trackVM.select($0) },
+                            onCompleteText: {
+                                trackVM.nameDraft = $0
+                                trackVM.syncReadyFromDraft()
+                            }
+                        )
+                    case let .notesEditor(initialText, entryName):
+                        // The running notes editor for Track
+                        // (separate-notes-editor): ✓ writes back through the
+                        // owning tab's view model; X discards. Back cancels.
+                        NotesEditorPage(initialText: initialText, entryName: entryName) { notes in
+                            Task { await trackVM.updateDraftNotes(notes) }
+                        }
+                    case .entry:
+                        EmptyView()
                     }
                 }
         }
+        // Stack-owned tab-bar visibility (fix-tab-bar-return-jump): the bar
+        // shows iff this tab sits at its root. Flipping at pop commit (not
+        // after the destination disappears) settles bar + content in one
+        // pass instead of two. Every push past a tab root is path-observed;
+        // remaining caller-local links sit under non-empty paths or sheets.
+        .toolbar(AppShellViewModel.isTabBarHidden(path: vm.trackPath) ? .hidden : .automatic, for: .tabBar)
         // Per-tab Profile-exit reload: popping Profile here reloads Track
         // data once (the sheet's old onDismiss contract). Pushes to
         // Categories never touch a path value, so no spurious reloads.
@@ -157,6 +196,10 @@ struct AppShellView: View {
                 onProfile: { vm.openProfile() }
             ))
         }
+        // Stack-owned tab-bar visibility (fix-tab-bar-return-jump): same
+        // contract as the Track stack — the bar shows iff this tab sits at
+        // its root. The pushed entry form declares nothing itself.
+        .toolbar(AppShellViewModel.isTabBarHidden(path: vm.historyPath) ? .hidden : .automatic, for: .tabBar)
         .onChange(of: vm.historyPath) { old, new in
             profilePoppedReload(old: old, new: new)
         }
@@ -183,6 +226,10 @@ struct AppShellView: View {
                 }
             }
         }
+        // Stack-owned tab-bar visibility (fix-tab-bar-return-jump): same
+        // contract as the Track stack — the bar shows iff this tab sits at
+        // its root.
+        .toolbar(AppShellViewModel.isTabBarHidden(path: vm.insightsPath) ? .hidden : .automatic, for: .tabBar)
         .onChange(of: vm.insightsPath) { old, new in
             profilePoppedReload(old: old, new: new)
         }
@@ -191,7 +238,8 @@ struct AppShellView: View {
     /// The Profile page (app-shell spec: pushed page, system Back, no Done).
     /// Built once here for the Track/Insights stacks; the History stack
     /// builds its own inside `HistoryView`, next to the entry destination.
-    /// The tab bar hides on Profile itself (see `ProfileView`).
+    /// The tab bar hides on Profile through the owning stack's path-driven
+    /// visibility above — Profile itself declares nothing.
     private var profileDestination: some View {
         ProfileView()
             .environmentObject(container)

@@ -16,6 +16,12 @@ import SwiftUI
 /// input and the recents chips are exact-text shortcuts.
 struct TrackView: View {
     @ObservedObject var vm: TrackViewModel
+    /// Opens the shared name picker through the owning tab's path
+    /// (fix-tab-bar-return-jump). Defaults to no-op for previews.
+    var onOpenNamePicker: () -> Void = {}
+    /// Opens the running notes editor through the owning tab's path
+    /// (fix-tab-bar-return-jump). Defaults to no-op for previews.
+    var onOpenNotesEditor: () -> Void = {}
 
     var body: some View {
         content
@@ -34,7 +40,7 @@ struct TrackView: View {
     }
 
     private var content: some View {
-        TrackContent(vm: vm)
+        TrackContent(vm: vm, onOpenNamePicker: onOpenNamePicker, onOpenNotesEditor: onOpenNotesEditor)
     }
 }
 

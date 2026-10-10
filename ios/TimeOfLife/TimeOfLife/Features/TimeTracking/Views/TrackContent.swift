@@ -25,10 +25,25 @@ struct TrackContent: View {
     /// The spike-approved shared maximum for both adaptive spacers
     /// (refine-track-recents D1/D7).
     let spacerCap: CGFloat
+    /// Opens the shared name picker through the owning tab's path
+    /// (fix-tab-bar-return-jump): a `ShellRoute` value, so the stack-level
+    /// tab-bar visibility observes the push. Defaults to no-op for
+    /// previews and picker-less hosts.
+    let onOpenNamePicker: () -> Void
+    /// Opens the running notes editor through the owning tab's path (same
+    /// contract as the name picker). Defaults to no-op for previews.
+    let onOpenNotesEditor: () -> Void
 
-    init(vm: TrackViewModel, spacerCap: CGFloat = 48) {
+    init(
+        vm: TrackViewModel,
+        spacerCap: CGFloat = 48,
+        onOpenNamePicker: @escaping () -> Void = {},
+        onOpenNotesEditor: @escaping () -> Void = {}
+    ) {
         self.vm = vm
         self.spacerCap = spacerCap
+        self.onOpenNamePicker = onOpenNamePicker
+        self.onOpenNotesEditor = onOpenNotesEditor
     }
 
     var body: some View {
@@ -183,25 +198,13 @@ struct TrackContent: View {
     }
 
     /// Name push row (dedicated-name-picker): tapping pushes the shared
-    /// picker prefilled with the draft; picking or Done completes through
-    /// the Recents-tap contract, Back cancels restoring the draft. There is
-    /// no inline field and no floating layer, so the Start action below can
-    /// never be covered (issue #69).
+    /// picker through the owning tab's path (pre-filled with the draft —
+    /// the snapshot rides the route value); picking or Done completes
+    /// through the Recents-tap contract, Back cancels restoring the draft.
+    /// There is no inline field and no floating layer, so the Start action
+    /// below can never be covered (issue #69).
     private var nameRow: some View {
-        NavigationLink {
-            NamePicker(
-                initialText: vm.nameDraft,
-                recents: vm.allNames,
-                categories: vm.categories,
-                placeholder: L10n.timerNamePlaceholder.text,
-                emptyHint: L10n.timerRecentsEmptyHint.text,
-                onCompleteSuggestion: { vm.select($0) },
-                onCompleteText: {
-                    vm.nameDraft = $0
-                    vm.syncReadyFromDraft()
-                }
-            )
-        } label: {
+        Button(action: onOpenNamePicker) {
             FieldCard {
                 HStack(spacing: Theme.spacingSmall) {
                     Text(vm.nameDraft.isEmpty ? L10n.timerNamePlaceholder.text : vm.nameDraft)
@@ -230,7 +233,9 @@ struct TrackContent: View {
     /// card keeps the screen's leading alignment while the 44 pt button
     /// rides beside it at the screen's trailing padding, its tint
     /// signalling draft-notes presence. Tapping pushes the shared
-    /// `NotesEditorPage` prefilled from the running draft (✓ rewrites
+    /// `NotesEditorPage` through the owning tab's path (fix-tab-bar-return-jump:
+    /// a `ShellRoute` value prefilled from the running draft, so the
+    /// stack-level tab-bar visibility observes the push; ✓ rewrites
     /// the draft snapshot, X discards). The row keeps standard insets,
     /// so every other row — including the main action — keeps its exact
     /// frame across states (D10).
@@ -249,11 +254,7 @@ struct TrackContent: View {
                 .font(.body)
                 .frame(maxWidth: .infinity, minHeight: Theme.minTapArea)
             }
-            NavigationLink {
-                NotesEditorPage(initialText: vm.state.draft?.notes ?? "", entryName: vm.state.draft?.text ?? "") { notes in
-                    Task { await vm.updateDraftNotes(notes) }
-                }
-            } label: {
+            Button(action: onOpenNotesEditor) {
                 Image(systemName: "note.text")
                     .font(.title2)
                     .foregroundStyle(runningNotes.isEmpty ? Theme.textSecondary : Theme.accentPrimary)
