@@ -119,6 +119,9 @@
 // Day total suffix
 "history.tracked" = "tracked";
 
+// Notes indicator (history-entry-list)
+"history.hasNotes" = "has notes";
+
 // History pull-to-refresh (history-pull-to-sync)
 "history.pull.offline" = "You're offline. Connect and try again.";
 "history.syncError.title" = "Sync failed";

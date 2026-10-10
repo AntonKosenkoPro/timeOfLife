@@ -238,7 +238,8 @@ struct HistoryView: View {
                                 timeframeText: vm.timeframeText(for: entry),
                                 durationText: vm.durationText(for: entry),
                                 isInProgress: vm.isInProgress(entry),
-                                viaText: vm.viaText(for: entry)
+                                viaText: vm.viaText(for: entry),
+                                hasNotes: vm.hasNotes(for: entry)
                             )
                             .padding(.horizontal, Theme.spacingMedium)
                             // Tap → pushed unified entry form on this tab's path

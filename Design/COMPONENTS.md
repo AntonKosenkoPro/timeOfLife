@@ -710,6 +710,7 @@ struct EntryRow: View {
     let durationText: String
     let isInProgress: Bool
     var viaText: String = ""   // localized "via <Source>"; empty for manual
+    var hasNotes: Bool = false // non-empty notes show the notes indicator
 }
 ```
 
@@ -726,7 +727,7 @@ Variant H (spike-confirmed, design.md D4):
   - Leading icon: first category's SF Symbol, `.title3`, `Theme.textSecondary`, 28 pt column, vertically spanning both text lines. Its optical top is top-aligned with the entry text's **cap-height top** (top of capital letters), not the text frame top — achieved with a negative top padding tuned for `.title3` icon + `.headline` name (`EntryRow.iconTopAdjustment`). If the font stack changes, the offset needs re-tuning.
   - `VStack(alignment: .leading, spacing: 2)`:
     - Line 1: entry text `.headline`, `Theme.textPrimary` (left, flexible) + duration `.headline`, `Theme.textPrimary`, `.monospacedDigit()` (right).
-    - Line 2: category names + provenance label `.caption`, `Theme.textSecondary` (left, flexible) + timeframe `.caption`, `Theme.textSecondary`, `.monospacedDigit()` (right). The "via <Source>" label (entry-provenance spec) is appended to the category caption after a comma; `manual` entries show nothing.
+    - Line 2: category names + provenance label `.caption`, `Theme.textSecondary` (left, flexible) + timeframe `.caption`, `Theme.textSecondary`, `.monospacedDigit()` (right). The "via <Source>" label (entry-provenance spec) is appended to the category caption after a comma; `manual` entries show nothing. When `hasNotes` is true, a `note.text` glyph (`.caption`, `Theme.accentPrimary`) renders immediately left of the timeframe — the position is identical on every row, so neither line reflows. Whitespace-only notes count as empty (no icon).
 - Min height `Theme.minTapArea`; dividers between rows lead after the icon column.
 
 ### States
@@ -735,6 +736,7 @@ Variant H (spike-confirmed, design.md D4):
 |---|---|
 | With categories | First category's icon leading; name + duration line 1; category names + timeframe line 2 |
 | With provenance | The "via <Source>" label appended to line 2's left caption (after category names, or alone when no categories) |
+| With notes | `note.text` glyph (`.caption`, `Theme.accentPrimary`) on line 2, immediately left of the timeframe; `HistoryViewModel.hasNotes(for:)` owns the trimmed non-empty check |
 | No categories | `questionmark` fallback icon; line 2 shows only the timeframe (plus the "via" label when present) |
 | In progress (no `endedAt`) | Duration slot shows the localized in-progress indicator; timeframe shows the start time |
 
@@ -754,14 +756,15 @@ EntryRow(
     timeframeText: vm.timeframeText(for: entry),
     durationText: vm.durationText(for: entry),
     isInProgress: vm.isInProgress(entry),
-    viaText: vm.viaText(for: entry)
+    viaText: vm.viaText(for: entry),
+    hasNotes: vm.hasNotes(for: entry)
 )
 ```
 
 ### Accessibility
 
 - `accessibilityIdentifier("EntryRow(\(entry.id))")`.
-- The whole row is a single element: category names, timeframe, and duration are `.accessibilityHidden(true)` and folded into the row label, so VoiceOver reads one line per entry.
+- The whole row is a single element: category names, timeframe, and duration are `.accessibilityHidden(true)` and folded into the row label, so VoiceOver reads one line per entry. When `hasNotes` is true the label appends the localized `historyHasNotes` segment ("has notes").
 
 ---
 

@@ -26,6 +26,7 @@ The History destination answers "what did I spend time on and when?" — a chron
 
 - On appear, load entries (`LocalStore.entries()`) and categories (`LocalStore.categories()`); rebuild day groups. Rows are read-only — the screen's mutation paths are the entry-form push (EDIT/LOCKED), the Log Time sheet (`[+]` in the toolbar, CREATE mode), pull-to-refresh sync (`HistoryPullModel` verdict flow with the inline offline notice and OK-only failure dialog), and shake-to-undo (`ShakeFirstResponderHost`).
 - Entry rows show the localized "via <Source>" provenance label on line 2 for non-`manual` sources (`EntryRow.viaText`); `manual` shows nothing.
+- Entry rows with non-empty notes show the small blue notes indicator on line 2, immediately left of the timeframe (`EntryRow.hasNotes`, resolved by `HistoryViewModel.hasNotes(for:)` — whitespace-only counts as empty); the glyph is presentational and VoiceOver folds the localized `historyHasNotes` segment into the row label.
 - Tapping a row pushes the unified entry form onto the History navigation stack (EDIT for `manual`, LOCKED read-only for imported with delete only) — the push provides the system back button and edge-back gesture; there is no intermediate detail surface.
 - Elevated-header tracking is view state owned by `HistoryView`; `HistoryViewModel` owns data only (design risk note).
 
@@ -64,6 +65,7 @@ final class HistoryViewModel: ObservableObject {
 - [ ] All strings use `L10n.*` keys (EN + RU).
 - [ ] List has `accessibilityIdentifier("HistoryList")`.
 - [ ] Rows use `EntryRow` with `EntryRow(<id>)` identifiers (per `COMPONENTS.md`).
+- [ ] Rows with non-empty notes show the line-2 notes indicator left of the timeframe; empty/whitespace-only notes show none.
 - [ ] Day-group headers use `SectionHeader` with column alignment; the total renders only when elevated.
 - [ ] Empty state preserved (`historyEmptyTitle` / `historyEmptySubtitle`).
 - [ ] Compact timer `safeAreaInset` preserved.
@@ -83,6 +85,9 @@ Add to `en.lproj/Localizable.strings` and `ru.lproj/Localizable.strings`, then t
 
 // Day total suffix
 "history.tracked" = "tracked";
+
+// Notes indicator
+"history.hasNotes" = "has notes";
 ```
 
 Russian:
@@ -94,4 +99,7 @@ Russian:
 
 // Day total suffix
 "history.tracked" = "отслеживано";
+
+// Notes indicator
+"history.hasNotes" = "есть заметки";
 ```

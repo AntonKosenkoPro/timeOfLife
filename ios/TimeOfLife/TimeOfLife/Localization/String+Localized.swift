@@ -89,6 +89,7 @@ enum L10n: String, CaseIterable {
     case historyDayYesterday = "history.day.yesterday"
     case historyInProgress = "history.inProgress"
     case historyTracked = "history.tracked"
+    case historyHasNotes = "history.hasNotes"
 
     // History pull-to-refresh (history-pull-to-sync change)
     case historyPullOffline = "history.pull.offline"

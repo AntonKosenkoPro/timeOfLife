@@ -119,6 +119,9 @@
 // Day total suffix
 "history.tracked" = "учтено";
 
+// Notes indicator (history-entry-list)
+"history.hasNotes" = "есть заметки";
+
 // History pull-to-refresh (history-pull-to-sync)
 "history.pull.offline" = "Нет подключения к сети. Подключитесь и попробуйте снова.";
 "history.syncError.title" = "Не удалось синхронизировать";
