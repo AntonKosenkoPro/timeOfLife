@@ -83,11 +83,12 @@ struct NamePicker: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .navigationTitle(L10n.namePickerTitle.text)
         .navigationBarTitleDisplayMode(.inline)
-        // Pushed over caller-local NavigationLinks from Track, the entry
-        // form, or the Log Time sheet (per-tab-navigation-paths): no path
-        // observes these pushes, so the owning stack's path-driven
-        // visibility cannot cover them — this destination keeps its own
-        // modifier (fix-tab-bar-return-jump exception). No-op inside the
+        // Pushed from Track (path-observed via ShellRoute.namePicker), the
+        // entry form, or the Log Time sheet (per-tab-navigation-paths).
+        // Every reachable context sits under a non-empty path or outside
+        // any tab bar, so this destination modifier is only a backstop that
+        // always agrees with the owning stack's path-driven visibility
+        // (fix-tab-bar-return-jump) — never a conflict. No-op inside the
         // sheet stack, which owns no tab bar.
         .toolbar(.hidden, for: .tabBar)
         .background(Theme.backgroundPrimary.ignoresSafeArea())

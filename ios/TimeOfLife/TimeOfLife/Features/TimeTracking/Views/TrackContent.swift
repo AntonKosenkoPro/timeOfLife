@@ -254,7 +254,8 @@ struct TrackContent: View {
                 .font(.body)
                 .frame(maxWidth: .infinity, minHeight: Theme.minTapArea)
             }
-            Button(action: onOpenNotesEditor) {                Image(systemName: "note.text")
+            Button(action: onOpenNotesEditor) {
+                Image(systemName: "note.text")
                     .font(.title2)
                     .foregroundStyle(runningNotes.isEmpty ? Theme.textSecondary : Theme.accentPrimary)
                     .frame(minWidth: Theme.minTapArea, minHeight: Theme.minTapArea)

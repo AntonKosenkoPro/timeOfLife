@@ -142,9 +142,9 @@ struct AppShellView: View {
         // Stack-owned tab-bar visibility (fix-tab-bar-return-jump): the bar
         // shows iff this tab sits at its root. Flipping at pop commit (not
         // after the destination disappears) settles bar + content in one
-        // pass instead of two. Caller-local links (NamePicker) keep their
-        // own destination modifier — no path observes them.
-        .toolbar(vm.trackPath.isEmpty ? .automatic : .hidden, for: .tabBar)
+        // pass instead of two. Every push past a tab root is path-observed;
+        // remaining caller-local links sit under non-empty paths or sheets.
+        .toolbar(AppShellViewModel.isTabBarHidden(path: vm.trackPath) ? .hidden : .automatic, for: .tabBar)
         // Per-tab Profile-exit reload: popping Profile here reloads Track
         // data once (the sheet's old onDismiss contract). Pushes to
         // Categories never touch a path value, so no spurious reloads.
@@ -180,7 +180,7 @@ struct AppShellView: View {
         // Stack-owned tab-bar visibility (fix-tab-bar-return-jump): same
         // contract as the Track stack — the bar shows iff this tab sits at
         // its root. The pushed entry form declares nothing itself.
-        .toolbar(vm.historyPath.isEmpty ? .automatic : .hidden, for: .tabBar)
+        .toolbar(AppShellViewModel.isTabBarHidden(path: vm.historyPath) ? .hidden : .automatic, for: .tabBar)
         .onChange(of: vm.historyPath) { old, new in
             profilePoppedReload(old: old, new: new)
         }
@@ -210,7 +210,7 @@ struct AppShellView: View {
         // Stack-owned tab-bar visibility (fix-tab-bar-return-jump): same
         // contract as the Track stack — the bar shows iff this tab sits at
         // its root.
-        .toolbar(vm.insightsPath.isEmpty ? .automatic : .hidden, for: .tabBar)
+        .toolbar(AppShellViewModel.isTabBarHidden(path: vm.insightsPath) ? .hidden : .automatic, for: .tabBar)
         .onChange(of: vm.insightsPath) { old, new in
             profilePoppedReload(old: old, new: new)
         }

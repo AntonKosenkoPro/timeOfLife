@@ -14,9 +14,13 @@ import Combine
 /// caller-local `NavigationLink`s (Manage Categories from Profile, pickers
 /// inside the entry form and sheets) always sit under a non-empty path or
 /// outside any tab bar, so every push past a tab root is path-observed.
-/// Path-driven pushes hide the tab bar through the owning stack's
-/// path-driven visibility (app-shell "Tab bar hidden on pushed
-/// destinations"); destinations keep agreeing backstop modifiers.
+/// Path-driven pushes (profile, entry, the Track name picker and notes
+/// routes) hide the tab bar through the owning stack's path-driven
+/// visibility (app-shell "Tab bar hidden on pushed destinations"); only
+/// destinations reached through caller-local links (Manage Categories
+/// from Profile, pickers inside the entry form and sheets — always under
+/// a non-empty path or outside any tab bar) keep their own agreeing
+/// backstop modifiers.
 enum ShellRoute: Hashable {
     case profile
     case entry(TimeEntry)
