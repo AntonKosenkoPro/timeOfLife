@@ -9,10 +9,12 @@ name: release
 # generate; generation remains authoritative), then commits
 # chore(release): bump to X.Y.Z (N) and pushes annotated tag vX.Y.Z.
 # Multi-target: every CFBundleShortVersionString/CFBundleVersion occurrence in
-# project.yml (app + each extension) is bumped in lockstep and every Release
-# Info.plist is mirrored — a new target MUST be added to RELEASE_PLISTS below
-# (the commit step consumes it via step outputs), or the next release fails
-# loudly on the unanimity guard instead of shipping a version-skewed bundle.
+# project.yml (app + each extension) plus every MARKETING_VERSION build setting
+# (framework targets with generated Info.plists — ITMS-90057) is bumped in
+# lockstep and every Release Info.plist is mirrored — a new target MUST be
+# added to RELEASE_PLISTS below (the commit step consumes it via step outputs)
+# with its versions wired to the same bump, or the next release fails loudly
+# on the unanimity guard instead of shipping a version-skewed bundle.
 # Rebuild mode (build_only=true, spec "Re-upload without a new marketing
 # version"): VERSION must equal the current marketing version; only the build
 # number increments (no new tag — vX.Y.Z already exists and never moves).
@@ -111,6 +113,16 @@ jobs:
               )
               sys.exit(1)
           current = currents[0]
+          # Framework targets carry their version in build settings rather
+          # than info.properties (ITMS-90057 fix): MARKETING_VERSION must
+          # exist, be unanimous, and equal the plist marketing version.
+          marketings = re.findall(r'MARKETING_VERSION:\s*"([^"]+)"', text)
+          if not marketings or len(set(marketings)) != 1 or marketings[0] != current:
+              print(
+                  f"::error::MARKETING_VERSION drift in project.yml: {sorted(set(marketings))} "
+                  f"vs plist version {current}. Sync every target first. Nothing changed."
+              )
+              sys.exit(1)
 
 
           def emit(name, value):
@@ -260,12 +272,19 @@ jobs:
           if not projs or len(set(projs)) != 1:
               print(f"::error::Expected unanimous CURRENT_PROJECT_VERSION in project.yml, got {sorted(set(projs))}; refusing to bump.")
               sys.exit(1)
+          # Framework build-settings marketing version (ITMS-90057 fix): must
+          # agree with the plist marketing version before the rewrite.
+          marketings = re.findall(r'MARKETING_VERSION:\s*"([^"]+)"', text)
+          if not marketings or len(set(marketings)) != 1 or marketings[0] != shorts[0]:
+              print(f"::error::Expected unanimous MARKETING_VERSION == {shorts[0]} in project.yml, got {sorted(set(marketings))}; refusing to bump.")
+              sys.exit(1)
           new_build = str(int(bundles[0]) + 1)
 
           for pattern, repl in (
               (r'CFBundleShortVersionString:\s*"[^"]+"', f'CFBundleShortVersionString: "{requested}"'),
               (r'CFBundleVersion:\s*"[^"]+"', f'CFBundleVersion: "{new_build}"'),
               (r'CURRENT_PROJECT_VERSION:\s*"[^"]+"', f'CURRENT_PROJECT_VERSION: "{new_build}"'),
+              (r'MARKETING_VERSION:\s*"[^"]+"', f'MARKETING_VERSION: "{requested}"'),
           ):
               if not re.search(pattern, text):
                   print(f"::error::Expected at least one match for {pattern}; refusing to bump.")
@@ -276,7 +295,9 @@ jobs:
           shorts = re.findall(r'CFBundleShortVersionString:\s*"([^"]+)"', text)
           bundles = re.findall(r'CFBundleVersion:\s*"([^"]+)"', text)
           projs = re.findall(r'CURRENT_PROJECT_VERSION:\s*"([^"]+)"', text)
+          marketings = re.findall(r'MARKETING_VERSION:\s*"([^"]+)"', text)
           assert len(set(shorts)) == 1 and shorts[0] == requested, f"marketing mismatch: {shorts} != {requested}"
+          assert len(set(marketings)) == 1 and marketings[0] == requested, f"framework marketing mismatch: {marketings} != {requested}"
           assert len(set(bundles)) == 1 and len(set(projs)) == 1 and bundles[0] == projs[0], f"build drift: CFBundleVersion={bundles} vs CURRENT_PROJECT_VERSION={projs}"
 
           with open(path, "w", encoding="utf-8") as f:
