@@ -19,6 +19,13 @@ struct TimerLiveActivityWidget: Widget {
         LiveActivityDeepLink.trackURL
     }
 
+    /// Stop link for the expanded Island pill (fix-terminated-stop-saved-face
+    /// Spike D): tapping it opens the app and the app stops itself. Shares
+    /// the `trackURL` contract family — never a local literal.
+    private var trackStopURL: URL? {
+        LiveActivityDeepLink.stopURL
+    }
+
     var body: some WidgetConfiguration {
         ActivityConfiguration(for: TimerActivityAttributes.self) { context in
             if let saved = context.state.savedDurationSeconds {
@@ -51,7 +58,17 @@ struct TimerLiveActivityWidget: Widget {
                 DynamicIslandExpandedRegion(.trailing) {
                     HStack {
                         if context.state.savedDurationSeconds == nil {
-                            LiveActivityStopPill()
+                            // Spike D: a Link, not the intent button — the
+                            // widget cannot stop anything with the app dead
+                            // (Spikes A–C), so opening the app IS the stop.
+                            // Nil URL is impossible (literal contract), but
+                            // the intent pill stays as the fail-safe so Stop
+                            // never vanishes.
+                            if let stopURL = trackStopURL {
+                                LiveActivityStopLink(destination: stopURL)
+                            } else {
+                                LiveActivityStopPill()
+                            }
                         } else {
                             Image(systemName: "checkmark")
                                 .font(.title2)
@@ -239,16 +256,46 @@ struct LiveActivityStopPill: View {
 
     var body: some View {
         Button(intent: StopTimerIntent()) {
-            Label(LiveActivityStrings.stopTitle, systemImage: "stop.fill")
-                .font(.subheadline)
-                .foregroundStyle(LiveActivityTheme.stopForeground)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 8)
-                .background(LiveActivityTheme.stopBackground)
-                .clipShape(Capsule(style: .continuous))
+            LiveActivityStopPillLabel()
         }
         .buttonStyle(.plain)
         // Same AoD-dimmed/inert rule as `LiveActivityStopButton`.
+        .disabled(isLuminanceReduced)
+        .opacity(isLuminanceReduced ? 0.4 : 1.0)
+        .accessibilityLabel(LiveActivityStrings.stopAccessibilityLabel)
+    }
+}
+
+/// The pill's visuals, shared by the intent button (banner + Link
+/// fallback) and the stop `Link` (Spike D) — one shape, never two.
+struct LiveActivityStopPillLabel: View {
+    var body: some View {
+        Label(LiveActivityStrings.stopTitle, systemImage: "stop.fill")
+            .font(.subheadline)
+            .foregroundStyle(LiveActivityTheme.stopForeground)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .background(LiveActivityTheme.stopBackground)
+            .clipShape(Capsule(style: .continuous))
+    }
+}
+
+/// Link Stop control for the expanded Island card
+/// (fix-terminated-stop-saved-face Spike D): opens the app at the stop URL
+/// and the app stops itself — the widget cannot stop anything with the app
+/// dead (Spikes A–C device-proven). Identical pill visuals; the banner keeps
+/// the intent button (`Link` is unsupported on lock-screen faces).
+struct LiveActivityStopLink: View {
+    @Environment(\.isLuminanceReduced)
+    private var isLuminanceReduced
+
+    let destination: URL
+
+    var body: some View {
+        Link(destination: destination) {
+            LiveActivityStopPillLabel()
+        }
+        // Same AoD-dimmed/inert rule as the intent controls.
         .disabled(isLuminanceReduced)
         .opacity(isLuminanceReduced ? 0.4 : 1.0)
         .accessibilityLabel(LiveActivityStrings.stopAccessibilityLabel)

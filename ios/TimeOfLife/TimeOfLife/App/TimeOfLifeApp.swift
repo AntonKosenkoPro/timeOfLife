@@ -80,10 +80,18 @@ struct TimeOfLifeApp: App {
             .environmentObject(session)
             .environmentObject(navigation)
             // Live Activity taps (`lifio://track`): select the Track tab.
-            // Unknown links are ignored (DeepLink.parse returns nil).
+            // Island-Stop links (`lifio://track?stop=1`, Spike D): the app
+            // itself performs the stop on open — the widget cannot stop
+            // anything with the app dead. Unknown links are ignored
+            // (DeepLink.parse returns nil).
             .onOpenURL { url in
-                if DeepLink.parse(url) == .track {
+                switch DeepLink.parse(url) {
+                case .track:
                     navigation.requestTrack()
+                case .stopTimer:
+                    navigation.requestIslandStop()
+                case nil:
+                    break
                 }
             }
             // Sync status is read directly by Profile (status row, Sync now

@@ -74,6 +74,64 @@ struct TrackSyncReloadTests {
         #expect(vm.state == .idle)
     }
 
+    /// Island open-and-stop ordering (fix-terminated-stop-saved-face Spike D):
+    /// the single waiter runs the exact production sequence, so a
+    /// `loadIfNeeded` that early-returns mid-load fails here: its `stop()`
+    /// no-ops on `.idle` and nothing is ever saved. (Asserting bare loaded
+    /// state would pass either way — the original load repaints `.running`
+    /// regardless.) One stopper only: production runs a single island-stop
+    /// waiter, and amplifying it would let a reload revive `.running`
+    /// mid-save for a flaky double entry.
+    @Test("interleaved reload-stop waiter saves exactly one entry")
+    func interleavedReloadStopWaiterSavesOnce() async throws {
+        let store = try LocalStore(url: temporaryStoreURL())
+        _ = try await store.seedStarterCategoriesIfNeeded(names: String.starterCategoryNames)
+        let service = TimerService(store: store)
+        try await service.startTimerDraft(text: "Gym", categoryIDs: [], startedAt: Date())
+        let vm = TrackViewModel(service: service, connectivity: MockConnectivity(connected: true))
+
+        await withTaskGroup(of: Void.self) { group in
+            group.addTask { await vm.loadIfNeeded() }
+            group.addTask {
+                await MainActor.run { vm.invalidate() }
+                await vm.loadIfNeeded()
+                await vm.stop()
+            }
+            await group.waitForAll()
+        }
+
+        guard case let .saved(draft, _) = vm.state else {
+            Issue.record("expected .saved after interleaved reload-stop, got \(vm.state)")
+            return
+        }
+        #expect(draft.text == "Gym")
+        let entries = try await store.entries()
+        #expect(entries.map(\.activityText) == ["Gym"])
+    }
+
+    /// The exact island-stop sequence (`invalidate` → `loadIfNeeded` →
+    /// `stop`) saves the persisted running draft through the in-app path.
+    @Test("reload-then-stop sequence saves the persisted running draft")
+    func reloadThenStopSavesPersistedDraft() async throws {
+        let store = try LocalStore(url: temporaryStoreURL())
+        _ = try await store.seedStarterCategoriesIfNeeded(names: String.starterCategoryNames)
+        let service = TimerService(store: store)
+        try await service.startTimerDraft(text: "Gym", categoryIDs: [], startedAt: Date())
+        let vm = TrackViewModel(service: service, connectivity: MockConnectivity(connected: true))
+
+        vm.invalidate()
+        await vm.loadIfNeeded()
+        await vm.stop()
+
+        guard case let .saved(draft, _) = vm.state else {
+            Issue.record("expected .saved after reload-then-stop, got \(vm.state)")
+            return
+        }
+        #expect(draft.text == "Gym")
+        let entries = try await store.entries()
+        #expect(entries.map(\.activityText) == ["Gym"])
+    }
+
     @Test("a failed reload never blanks the last good snapshot")
     func reloadKeepsSnapshotOnFailure() async {
         // Unbound store: every read throws `notBound`.

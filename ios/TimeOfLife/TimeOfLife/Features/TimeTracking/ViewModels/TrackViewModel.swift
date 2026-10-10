@@ -48,9 +48,8 @@ final class TrackViewModel: ObservableObject {
     /// reload and the sync-exit reload race on every first-sync landing.
     /// `needsReload` starts true so the first appear loads; `invalidate()`
     /// marks the snapshot stale and the next `loadIfNeeded()` reloads it.
-    /// A call arriving mid-load keeps `needsReload` set so the next appear
-    /// retries (HistoryViewModel precedent).
-    private var isLoading = false
+    /// A call arriving mid-load awaits `inFlightLoad` (see `loadIfNeeded`).
+    private var inFlightLoad: Task<Void, Never>?
     private var needsReload = true
 
     init(
@@ -118,15 +117,32 @@ final class TrackViewModel: ObservableObject {
     }
 
     /// Reloads only when the snapshot is stale or was never loaded.
-    /// Re-entrancy safe: never runs two loads concurrently; a call arriving
-    /// mid-load keeps `needsReload` set so the next appear retries
-    /// (HistoryViewModel precedent).
+    /// Re-entrancy safe: never runs two loads concurrently. A call arriving
+    /// mid-load awaits the in-flight load's task value instead of returning
+    /// with an unloaded snapshot — callers awaiting this expect loaded state
+    /// afterwards (fix-terminated-stop-saved-face Spike D: the cold-open
+    /// island-stop bump lands while the first appear load still runs; an
+    /// early return lets the sequenced `stop()` no-op on `.idle` while the
+    /// late load repaints Running). Awaiting `Task<Void, Never>.value` is
+    /// precise (no polling), never throws, and does not inherit caller
+    /// cancellation — the load-then-stop sequencing holds even if the
+    /// waiter was cancelled (e.g. sign-out teardown mid cold-open load).
     func loadIfNeeded() async {
-        guard needsReload, !isLoading else { return }
+        if let inFlightLoad {
+            await inFlightLoad.value
+        }
+        guard needsReload else { return }
         needsReload = false
-        isLoading = true
-        defer { isLoading = false }
-        await load()
+        let load = Task { await self.load() }
+        inFlightLoad = load
+        await load.value
+        // Deliberately NOT cleared: resumption order after `load.value` is
+        // unspecified, and nulling here can discard a NEWER in-flight load
+        // installed by another waiter's mid-load resumption (an `invalidate()`
+        // landing between its claim and this resumption) — breaking the
+        // single-load invariant. Awaiting a completed task's `.value`
+        // returns immediately, so a stale handle is harmless and is
+        // overwritten at the next claim.
     }
 
     /// Marks the snapshot stale so the next `loadIfNeeded` reloads it.
