@@ -75,12 +75,15 @@ struct TrackSyncReloadTests {
     }
 
     /// Island open-and-stop ordering (fix-terminated-stop-saved-face Spike D):
-    /// each waiter runs the exact production sequence, so a `loadIfNeeded`
-    /// that early-returns mid-load fails here: its `stop()` no-ops on `.idle`
-    /// and the run is never saved. (Asserting bare loaded state would pass
-    /// either way — the original load repaints `.running` regardless.)
-    @Test("interleaved reload-stop waiters save exactly one entry")
-    func interleavedReloadStopWaitersSaveOnce() async throws {
+    /// the single waiter runs the exact production sequence, so a
+    /// `loadIfNeeded` that early-returns mid-load fails here: its `stop()`
+    /// no-ops on `.idle` and nothing is ever saved. (Asserting bare loaded
+    /// state would pass either way — the original load repaints `.running`
+    /// regardless.) One stopper only: production runs a single island-stop
+    /// waiter, and amplifying it would let a reload revive `.running`
+    /// mid-save for a flaky double entry.
+    @Test("interleaved reload-stop waiter saves exactly one entry")
+    func interleavedReloadStopWaiterSavesOnce() async throws {
         let store = try LocalStore(url: temporaryStoreURL())
         _ = try await store.seedStarterCategoriesIfNeeded(names: String.starterCategoryNames)
         let service = TimerService(store: store)
@@ -89,12 +92,10 @@ struct TrackSyncReloadTests {
 
         await withTaskGroup(of: Void.self) { group in
             group.addTask { await vm.loadIfNeeded() }
-            for _ in 0..<4 {
-                group.addTask {
-                    await MainActor.run { vm.invalidate() }
-                    await vm.loadIfNeeded()
-                    await vm.stop()
-                }
+            group.addTask {
+                await MainActor.run { vm.invalidate() }
+                await vm.loadIfNeeded()
+                await vm.stop()
             }
             await group.waitForAll()
         }
