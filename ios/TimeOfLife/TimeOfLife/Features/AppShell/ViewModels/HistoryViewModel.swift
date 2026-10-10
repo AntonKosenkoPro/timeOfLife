@@ -157,6 +157,13 @@ final class HistoryViewModel: ObservableObject {
         EntryProvenance.viaText(for: entry.source)
     }
 
+    /// Whether the entry's row shows the notes indicator: true when notes
+    /// are non-empty. Whitespace-only notes count as empty
+    /// (history-entry-list notes indicator).
+    func hasNotes(for entry: TimeEntry) -> Bool {
+        !entry.notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
     /// The start–end timeframe caption ("14:00 – 15:20"); an in-progress
     /// entry shows the start time followed by the in-progress indicator (D5).
     func timeframeText(for entry: TimeEntry) -> String {

@@ -459,6 +459,22 @@ struct HistoryViewModelTests {
         #expect(vm.undoError == nil)
     }
 
+    // MARK: - Notes indicator (history-entry-notes-icon)
+
+    @Test("hasNotes is true only for non-blank notes")
+    func hasNotesFlagsNonBlankNotes() throws {
+        let store = try makeStore()
+        let vm = HistoryViewModel(store: store, undoBuffer: UndoBufferStore(store: store))
+        func flagged(_ notes: String) -> Bool {
+            vm.hasNotes(for: TimeEntry(id: "e", activityText: "T", startedAt: Date(), notes: notes))
+        }
+        #expect(!flagged(""))
+        #expect(!flagged("   "))
+        #expect(!flagged("\n  \n"))
+        #expect(flagged("leg day"))
+        #expect(flagged("  padded  "))
+    }
+
     // MARK: - Helpers
 
     private static func date(_ iso: String, calendar: Calendar) -> Date {

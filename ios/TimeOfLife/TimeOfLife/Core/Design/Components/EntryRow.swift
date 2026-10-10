@@ -57,6 +57,11 @@ struct EntryRow: View {
     /// Localized "via <Source>" provenance label; empty for `manual`
     /// entries and unknown sources (entry-provenance D7).
     var viaText: String = ""
+    /// Whether the entry carries non-empty notes. When true, a small blue
+    /// notes icon renders on line 2, immediately left of the timeframe
+    /// (history-entry-list notes indicator). Caller-computed so the row
+    /// stays presentational.
+    var hasNotes: Bool = false
 
     /// The caption metadata line: category names, then the provenance
     /// label. Both are caller-computed so the row stays presentational.
@@ -89,6 +94,11 @@ struct EntryRow: View {
                         .font(.caption)
                         .foregroundStyle(Theme.textSecondary)
                     Spacer(minLength: Theme.spacingSmall)
+                    if hasNotes {
+                        Image(systemName: "note.text")
+                            .font(.caption)
+                            .foregroundStyle(Theme.accentPrimary)
+                    }
                     Text(timeframeText)
                         .font(.caption)
                         .foregroundStyle(Theme.textSecondary)
@@ -106,7 +116,8 @@ struct EntryRow: View {
                 timeframeText: timeframeText,
                 durationText: durationText,
                 isInProgress: isInProgress,
-                viaText: viaText
+                viaText: viaText,
+                hasNotes: hasNotes
             )
         )
         .accessibilityIdentifier("EntryRow(\(entry.id))")
@@ -120,13 +131,15 @@ struct EntryRow: View {
         timeframeText: String,
         durationText: String,
         isInProgress: Bool,
-        viaText: String = ""
+        viaText: String = "",
+        hasNotes: Bool = false
     ) -> String {
         var parts = [entryText, durationText]
         if !categoryNames.isEmpty { parts.append(categoryNames) }
         if !viaText.isEmpty { parts.append(viaText) }
         parts.append(timeframeText)
         if isInProgress { parts.append(L10n.historyInProgress.text) }
+        if hasNotes { parts.append(L10n.historyHasNotes.text) }
         return parts.joined(separator: ", ")
     }
 }
@@ -166,6 +179,27 @@ struct EntryRow: View {
         timeframeText: "09:00 – 09:33",
         durationText: "33m",
         isInProgress: false
+    )
+    .padding(.horizontal, Theme.spacingMedium)
+    .background(Theme.backgroundPrimary)
+}
+
+#Preview("Entry with notes") {
+    EntryRow(
+        entry: TimeEntry(
+            id: "e3",
+            activityText: "Deep work",
+            startedAt: Date(timeIntervalSinceNow: -4800),
+            endedAt: Date(),
+            durationSeconds: 4800,
+            notes: "remember the HR belt"
+        ),
+        icon: "figure.run",
+        categoryNames: "Health, Morning",
+        timeframeText: "14:00 – 15:20",
+        durationText: "1h 20m",
+        isInProgress: false,
+        hasNotes: true
     )
     .padding(.horizontal, Theme.spacingMedium)
     .background(Theme.backgroundPrimary)

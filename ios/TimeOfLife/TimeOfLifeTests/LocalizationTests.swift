@@ -202,6 +202,7 @@ struct LocalizationTests {
         "history.day.yesterday",
         "history.emptySubtitle",
         "history.emptyTitle",
+        "history.hasNotes",
         "history.inProgress",
         "history.logTime",
         "history.pull.offline",

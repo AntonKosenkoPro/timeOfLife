@@ -46,6 +46,32 @@ struct EntryRowAccessibilityTests {
         #expect(label.contains(L10n.historyInProgress.text))
     }
 
+    @Test("rows with notes fold the has-notes affordance into the label")
+    func hasNotesLabel() {
+        let label = EntryRow.accessibilityLabel(
+            entryText: "Deep work",
+            categoryNames: "Health",
+            timeframeText: "14:00 – 15:20",
+            durationText: "1h 20m",
+            isInProgress: false,
+            hasNotes: true
+        )
+        #expect(label.contains(L10n.historyHasNotes.text))
+    }
+
+    @Test("rows without notes omit the has-notes affordance")
+    func noNotesLabel() {
+        let label = EntryRow.accessibilityLabel(
+            entryText: "Deep work",
+            categoryNames: "Health",
+            timeframeText: "14:00 – 15:20",
+            durationText: "1h 20m",
+            isInProgress: false,
+            hasNotes: false
+        )
+        #expect(!label.contains(L10n.historyHasNotes.text))
+    }
+
     @Test("rows with provenance fold the via label into the a11y label")
     func viaTextLabel() {
         let label = EntryRow.accessibilityLabel(
