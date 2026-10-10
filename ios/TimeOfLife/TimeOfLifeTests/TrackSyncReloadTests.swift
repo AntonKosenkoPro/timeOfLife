@@ -74,6 +74,55 @@ struct TrackSyncReloadTests {
         #expect(vm.state == .idle)
     }
 
+    /// Island open-and-stop ordering (fix-terminated-stop-saved-face Spike D):
+    /// a caller arriving mid-load must observe the loaded snapshot, not an
+    /// unloaded one — otherwise the sequenced `stop()` no-ops on `.idle`.
+    @Test("a waiter arriving mid-load observes the loaded snapshot")
+    func waiterArrivingMidLoadObservesLoadedSnapshot() async throws {
+        let store = try LocalStore(url: temporaryStoreURL())
+        _ = try await store.seedStarterCategoriesIfNeeded(names: String.starterCategoryNames)
+        let service = TimerService(store: store)
+        try await service.startTimerDraft(text: "Gym", categoryIDs: [], startedAt: Date())
+        let vm = TrackViewModel(service: service, connectivity: MockConnectivity(connected: true))
+
+        await withTaskGroup(of: Void.self) { group in
+            group.addTask { await vm.loadIfNeeded() }
+            for _ in 0..<4 {
+                group.addTask {
+                    await MainActor.run { vm.invalidate() }
+                    await vm.loadIfNeeded()
+                }
+            }
+            await group.waitForAll()
+        }
+
+        #expect(vm.state.isRunning)
+        #expect(vm.state.draft?.text == "Gym")
+    }
+
+    /// The exact island-stop sequence (`invalidate` → `loadIfNeeded` →
+    /// `stop`) saves the persisted running draft through the in-app path.
+    @Test("reload-then-stop sequence saves the persisted running draft")
+    func reloadThenStopSavesPersistedDraft() async throws {
+        let store = try LocalStore(url: temporaryStoreURL())
+        _ = try await store.seedStarterCategoriesIfNeeded(names: String.starterCategoryNames)
+        let service = TimerService(store: store)
+        try await service.startTimerDraft(text: "Gym", categoryIDs: [], startedAt: Date())
+        let vm = TrackViewModel(service: service, connectivity: MockConnectivity(connected: true))
+
+        vm.invalidate()
+        await vm.loadIfNeeded()
+        await vm.stop()
+
+        guard case let .saved(draft, _) = vm.state else {
+            Issue.record("expected .saved after reload-then-stop, got \(vm.state)")
+            return
+        }
+        #expect(draft.text == "Gym")
+        let entries = try await store.entries()
+        #expect(entries.map(\.activityText) == ["Gym"])
+    }
+
     @Test("a failed reload never blanks the last good snapshot")
     func reloadKeepsSnapshotOnFailure() async {
         // Unbound store: every read throws `notBound`.

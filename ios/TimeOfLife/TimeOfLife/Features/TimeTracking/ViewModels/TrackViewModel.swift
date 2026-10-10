@@ -48,8 +48,8 @@ final class TrackViewModel: ObservableObject {
     /// reload and the sync-exit reload race on every first-sync landing.
     /// `needsReload` starts true so the first appear loads; `invalidate()`
     /// marks the snapshot stale and the next `loadIfNeeded()` reloads it.
-    /// A call arriving mid-load waits for it (bounded — see `loadIfNeeded`).
-    private var isLoading = false
+    /// A call arriving mid-load awaits `inFlightLoad` (see `loadIfNeeded`).
+    private var inFlightLoad: Task<Void, Never>?
     private var needsReload = true
 
     init(
@@ -118,24 +118,25 @@ final class TrackViewModel: ObservableObject {
 
     /// Reloads only when the snapshot is stale or was never loaded.
     /// Re-entrancy safe: never runs two loads concurrently. A call arriving
-    /// mid-load WAITS for the in-flight load (bounded) instead of returning
+    /// mid-load awaits the in-flight load's task value instead of returning
     /// with an unloaded snapshot — callers awaiting this expect loaded state
     /// afterwards (fix-terminated-stop-saved-face Spike D: the cold-open
-    /// island-stop bump lands while the first appear load still runs; the
-    /// old early return let the sequenced `stop()` no-op on `.idle` while
-    /// the late load repainted Running). A wedged load expires the wait and
-    /// the caller proceeds with the last good snapshot, same as before.
+    /// island-stop bump lands while the first appear load still runs; an
+    /// early return lets the sequenced `stop()` no-op on `.idle` while the
+    /// late load repaints Running). Awaiting `Task<Void, Never>.value` is
+    /// precise (no polling), never throws, and does not inherit caller
+    /// cancellation — the load-then-stop sequencing holds even if the
+    /// waiter was cancelled (e.g. sign-out teardown mid cold-open load).
     func loadIfNeeded() async {
-        var spins = 0
-        while isLoading, spins < 500 {
-            try? await Task.sleep(nanoseconds: 10_000_000)
-            spins += 1
+        if let inFlightLoad {
+            await inFlightLoad.value
         }
-        guard needsReload, !isLoading else { return }
+        guard needsReload else { return }
         needsReload = false
-        isLoading = true
-        defer { isLoading = false }
-        await load()
+        let load = Task { await self.load() }
+        inFlightLoad = load
+        await load.value
+        inFlightLoad = nil
     }
 
     /// Marks the snapshot stale so the next `loadIfNeeded` reloads it.

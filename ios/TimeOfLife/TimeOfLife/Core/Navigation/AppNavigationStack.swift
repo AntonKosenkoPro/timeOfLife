@@ -34,6 +34,19 @@ final class AppNavigationStack: ObservableObject {
     func requestIslandStop() {
         islandStopRequestID += 1
     }
+
+    /// Clears both tap counters (AI-review round 1: a `filter { $0 > 0 }`
+    /// observer replays the counter's CURRENT value on every shell
+    /// (re)subscription, and the shell remounts on every sign-in while this
+    /// stack outlives it at app scope — without a reset, the NEXT shell
+    /// mount after any Island/Track tap re-fires the stale request and can
+    /// stop a run the user never stopped). Called from `beginSignOut` next
+    /// to the existing path reset; a fresh process starts at zero, so cold
+    /// opens are unaffected.
+    func resetTapRequests() {
+        trackRequestID = 0
+        islandStopRequestID = 0
+    }
 }
 
 /// SwiftUI container view that renders content inside a `NavigationStack`
