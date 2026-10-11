@@ -53,8 +53,11 @@ final class TrackViewModel: ObservableObject {
     private var needsReload = true
     /// Test hook (nil in production): awaited while `.saving`, before the
     /// save — lets tests hold the save window open and interleave a `load()`
-    /// or a chip tap deterministically. Never set outside tests.
+    /// or a chip tap deterministically. Debug-only so no Release caller can
+    /// ever suspend a stop mid-save; never set outside tests.
+#if DEBUG
     var stopGate: (@Sendable () async -> Void)?
+#endif
 
     init(
         service: TimerService,
@@ -350,7 +353,9 @@ final class TrackViewModel: ObservableObject {
         guard case let .running(draft, startedAt) = state else { return }
         state = .saving(draft, startedAt: startedAt)
         stopTicker()
+#if DEBUG
         if let stopGate { await stopGate() }
+#endif
         do {
             try await service.stopTimerDraft(
                 text: draft.text,

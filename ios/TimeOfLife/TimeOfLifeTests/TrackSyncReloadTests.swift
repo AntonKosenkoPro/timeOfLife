@@ -167,6 +167,7 @@ struct TrackSyncReloadTests {
         let stopTask = Task { await vm.stop() }
         guard await waitUntilSaving(vm) else {
             Issue.record("stop() never entered .saving")
+            await gate.go()
             return
         }
         // Foreground/tab-return/sync-exit reload landing mid-save, while the
@@ -181,14 +182,20 @@ struct TrackSyncReloadTests {
             return
         }
         let frozen = vm.elapsed
-        // One ticker interval plus margin, still inside the 1.6s saved
-        // window: a leaked ticker fires at least once here.
+        // One ticker interval plus margin: a leaked ticker fires at least
+        // once in any 1.2s window (period 1.0s). The sleep may overshoot past
+        // the 1.6s saved window on loaded CI — then the ready branch below
+        // (elapsed zeroed) is the assertion target instead.
         try? await Task.sleep(nanoseconds: 1_200_000_000)
-        guard case .saved = vm.state else {
-            Issue.record("saved confirmation ended early, got \(vm.state)")
-            return
+        if case .saved = vm.state {
+            #expect(vm.elapsed == frozen, "elapsed must freeze after save — the ticker leaked")
+        } else {
+            guard case .ready = vm.state else {
+                Issue.record("expected .saved or .ready after the detector sleep, got \(vm.state)")
+                return
+            }
+            #expect(vm.elapsed == 0, "elapsed must be zeroed after the saved reset — the ticker leaked")
         }
-        #expect(vm.elapsed == frozen, "elapsed must freeze after save — the ticker leaked")
     }
 
     /// Same family: `select()` never excluded `.saving`, so a recents-chip
@@ -209,6 +216,7 @@ struct TrackSyncReloadTests {
         let stopTask = Task { await vm.stop() }
         guard await waitUntilSaving(vm) else {
             Issue.record("stop() never entered .saving")
+            await gate.go()
             return
         }
         vm.select(ExactName(text: "Gym", categoryIDs: [], firstCategoryID: nil))
