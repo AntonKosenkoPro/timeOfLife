@@ -124,6 +124,12 @@ struct TimerLiveActivityWidget: Widget {
             // widgetURL — a root URL also engages on Stop taps and demands
             // unlock on a locked phone (device finding), fighting the
             // alwaysAllowed intent. Body taps still go to Track.
+            // NOTE (Spike E log-proven): the outer stack must NOT combine
+            // accessibility children — `.accessibilityElement(children:
+            // .combine)` collapses both widgetURLs into one element and the
+            // label-zone track URL wins every Stop tap (log showed
+            // `lifio://track` on a Stop tap). Each zone stays its own
+            // accessible element so the Stop circle keeps its stop URL.
             HStack(spacing: 12) {
                 Image(systemName: iconSymbol)
                     .font(.title)
@@ -139,15 +145,25 @@ struct TimerLiveActivityWidget: Widget {
                 }
             }
             .widgetURL(trackURL)
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel(LiveActivityStrings.runningAccessibilityLabel(text: text))
             Spacer()
-            LiveActivityStopButton()
+            // Spike E: a stop-URL link, not the intent button — tapping it
+            // opens the app and the app stops itself (same mechanism as the
+            // Island pill). Sibling widgetURL scoping (no root URL, no outer
+            // combine — see above). Nil URL is impossible (literal
+            // contract), but the intent button stays as the fail-safe so
+            // Stop never vanishes.
+            if let stopURL = trackStopURL {
+                LiveActivityStopCircleLink(destination: stopURL)
+            } else {
+                LiveActivityStopButton()
+            }
         }
         // Banner breathing room, verified on-device: 8pt vertical (flush
         // edges otherwise) + 8pt horizontal.
         .padding(.vertical, 8)
         .padding(.horizontal, 8)
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel(LiveActivityStrings.runningAccessibilityLabel(text: text))
     }
 
     private func savedBanner(duration: String) -> some View {
@@ -247,6 +263,34 @@ struct LiveActivityStopButton: View {
     }
 }
 
+/// Circular Stop link for the banner (Spike E): the `Link` twin of the
+/// Island's pill — the sibling-`widgetURL` shape log-proved to lose (Stop
+/// taps delivered `lifio://track`), so the banner now mirrors the
+/// device-proven Island shape (`Link` inside a `widgetURL` zone). Tapping it
+/// opens the app at the stop URL and the app stops itself; the banner keeps
+/// the intent button only as the nil-URL fail-safe. Identical circle visuals
+/// and AoD-dimmed/inert rule.
+struct LiveActivityStopCircleLink: View {
+    @Environment(\.isLuminanceReduced)
+    private var isLuminanceReduced
+
+    let destination: URL
+
+    var body: some View {
+        Link(destination: destination) {
+            Image(systemName: "stop.fill")
+                .font(.system(size: 12, weight: .bold))
+                .foregroundStyle(LiveActivityTheme.stopForeground)
+                .frame(width: 44, height: 44)
+                .background(LiveActivityTheme.stopBackground)
+                .clipShape(Circle())
+        }
+        .disabled(isLuminanceReduced)
+        .opacity(isLuminanceReduced ? 0.4 : 1.0)
+        .accessibilityLabel(LiveActivityStrings.stopAccessibilityLabel)
+    }
+}
+
 /// Pill Stop control for the expanded card (circle lives on the banner —
 /// one shape per face, no experiment pending).
 /// Same always-render rule as `LiveActivityStopButton`.
@@ -266,8 +310,8 @@ struct LiveActivityStopPill: View {
     }
 }
 
-/// The pill's visuals, shared by the intent button (banner + Link
-/// fallback) and the stop `Link` (Spike D) — one shape, never two.
+/// The pill's visuals, shared by the intent button (Link fallback) and the
+/// stop `Link` (Spike D) — one shape, never two.
 struct LiveActivityStopPillLabel: View {
     var body: some View {
         Label(LiveActivityStrings.stopTitle, systemImage: "stop.fill")
@@ -283,8 +327,9 @@ struct LiveActivityStopPillLabel: View {
 /// Link Stop control for the expanded Island card
 /// (fix-terminated-stop-saved-face Spike D): opens the app at the stop URL
 /// and the app stops itself — the widget cannot stop anything with the app
-/// dead (Spikes A–C device-proven). Identical pill visuals; the banner keeps
-/// the intent button (`Link` is unsupported on lock-screen faces).
+/// dead (Spikes A–C device-proven). Identical pill visuals; the banner uses
+/// the `widgetURL` circle twin (Spike E), keeping the intent pill only as
+/// the nil-URL fail-safe.
 struct LiveActivityStopLink: View {
     @Environment(\.isLuminanceReduced)
     private var isLuminanceReduced

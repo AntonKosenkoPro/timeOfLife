@@ -80,7 +80,7 @@ struct TimeOfLifeApp: App {
             .environmentObject(session)
             .environmentObject(navigation)
             // Live Activity taps (`lifio://track`): select the Track tab.
-            // Island-Stop links (`lifio://track?stop=1`, Spike D): the app
+            // Stop links (`lifio://track?stop=1`, Spikes D+E): the app
             // itself performs the stop on open — the widget cannot stop
             // anything with the app dead. Unknown links are ignored
             // (DeepLink.parse returns nil).

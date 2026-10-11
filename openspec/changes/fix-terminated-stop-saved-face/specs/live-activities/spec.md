@@ -3,7 +3,7 @@
 ## MODIFIED Requirements
 
 ### Requirement: Stop and return actions
-Tapping any face SHALL deep-link to Track (`lifio://track`). The expanded Island face SHALL offer Stop as a `Link` to the stop URL (`lifio://track?stop=1`): tapping it opens the app, which stops and saves the entry through the exact in-app path (`LocalStore`, `source='manual'`, outbox row in the same transaction) and ends the activity with the Saved card — including when the app process was dead (cold open performs reload-then-stop; no draft → graceful no-op). The banner SHALL keep the intent Stop button (`StopTimerIntent` saves and signals; it never ends and never opens the app). Compact and minimal faces SHALL offer no buttons (tap navigates only).
+Tapping any face SHALL deep-link to Track (`lifio://track`). The expanded Island face SHALL offer Stop as a `Link` to the stop URL (`lifio://track?stop=1`): tapping it opens the app, which stops and saves the entry through the exact in-app path (`LocalStore`, `source='manual'`, outbox row in the same transaction) and ends the activity with the Saved card — including when the app process was dead (cold open performs reload-then-stop; no draft → graceful no-op). The banner SHALL offer Stop as a `Link` to the same stop URL with identical open-and-stop semantics (Spike E, device-proven: sibling-`widgetURL` loses to the label URL, `Link` wins) — the intent button remains only as the nil-URL fail-safe and the AoD-dimmed/inert rule is unchanged. Compact and minimal faces SHALL offer no buttons (tap navigates only).
 
 #### Scenario: Tap returns to Track
 - **WHEN** the user taps the compact, minimal, expanded, or banner surface (outside Stop)
@@ -21,9 +21,9 @@ Tapping any face SHALL deep-link to Track (`lifio://track`). The expanded Island
 - **WHEN** the stop link opens the app with no active run (double tap, stale face)
 - **THEN** the app opens to Track, nothing is written, and no error surfaces
 
-#### Scenario: Banner Stop with a terminated app saves without opening
-- **WHEN** the user activates Stop in the banner while the app process is dead and the save succeeds
-- **THEN** the entry is saved exactly as an in-app Stop (intent save path, unchanged); the banner face keeps ticking until the next app contact reaps it — a known, banner-scoped limitation (banner faces cannot host a `Link`)
+#### Scenario: Banner Stop with a terminated app opens and stops
+- **WHEN** the user activates Stop in the banner while the app process is dead and a run is active
+- **THEN** the entry is saved exactly as an in-app Stop AND the app opens, where the cold-open reload-then-stop ends the activity — no ticking orphan survives first contact, and no second tap is needed (device-proven 2026-10-11: `Banner probe|16m47s`)
 
 #### Scenario: Stop fails gracefully
 - **WHEN** Stop is activated with no active account file or an inaccessible database (e.g. cold boot before first unlock)
@@ -47,6 +47,10 @@ Ending the activity SHALL show a final `✓ Saved <duration>` banner and then re
 #### Scenario: Terminated-app Island Stop shows Saved after opening
 - **WHEN** an Island Stop opens the dead app (entry saved in-app on open, no prior app contact)
 - **THEN** the banner shows the `✓ Saved <duration>` face with the true duration through the normal end path and is removed after the tuned dismissal — no double card, no invented duration, no lingering running face
+
+#### Scenario: Terminated-app banner Stop ends the activity on opening
+- **WHEN** a banner Stop opens the dead app (entry saved in-app on open, no prior app contact)
+- **THEN** the activity ends through the normal end path — no lingering running face (device-proven 2026-10-11: no banner on re-lock after `Banner probe|16m47s` save)
 
 #### Scenario: Stop with a terminated app dismisses silently
 - **WHEN** an orphaned Island is reaped without a known save (terminated app, missed signal, no recent entry)
