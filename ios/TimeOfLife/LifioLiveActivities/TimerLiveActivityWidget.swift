@@ -247,12 +247,7 @@ struct LiveActivityStopButton: View {
 
     var body: some View {
         Button(intent: StopTimerIntent()) {
-            Image(systemName: "stop.fill")
-                .font(.system(size: 12, weight: .bold))
-                .foregroundStyle(LiveActivityTheme.stopForeground)
-                .frame(width: 44, height: 44)
-                .background(LiveActivityTheme.stopBackground)
-                .clipShape(Circle())
+            LiveActivityStopCircleLabel()
         }
         .buttonStyle(.plain)
         // AoD: dimmed and inert (pocket-stop protection — the auth policy
@@ -260,6 +255,20 @@ struct LiveActivityStopButton: View {
         .disabled(isLuminanceReduced)
         .opacity(isLuminanceReduced ? 0.4 : 1.0)
         .accessibilityLabel(LiveActivityStrings.stopAccessibilityLabel)
+    }
+}
+
+/// The circle's visuals, shared by the intent button (banner `Link`
+/// fallback) and the stop `Link` (Spike E) — one shape, never two,
+/// mirroring `LiveActivityStopPillLabel` for the pill.
+struct LiveActivityStopCircleLabel: View {
+    var body: some View {
+        Image(systemName: "stop.fill")
+            .font(.system(size: 12, weight: .bold))
+            .foregroundStyle(LiveActivityTheme.stopForeground)
+            .frame(width: 44, height: 44)
+            .background(LiveActivityTheme.stopBackground)
+            .clipShape(Circle())
     }
 }
 
@@ -278,12 +287,7 @@ struct LiveActivityStopCircleLink: View {
 
     var body: some View {
         Link(destination: destination) {
-            Image(systemName: "stop.fill")
-                .font(.system(size: 12, weight: .bold))
-                .foregroundStyle(LiveActivityTheme.stopForeground)
-                .frame(width: 44, height: 44)
-                .background(LiveActivityTheme.stopBackground)
-                .clipShape(Circle())
+            LiveActivityStopCircleLabel()
         }
         .disabled(isLuminanceReduced)
         .opacity(isLuminanceReduced ? 0.4 : 1.0)
