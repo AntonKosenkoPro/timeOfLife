@@ -51,6 +51,10 @@ final class TrackViewModel: ObservableObject {
     /// A call arriving mid-load awaits `inFlightLoad` (see `loadIfNeeded`).
     private var inFlightLoad: Task<Void, Never>?
     private var needsReload = true
+    /// Test hook (nil in production): awaited while `.saving`, before the
+    /// save — lets tests hold the save window open and interleave a `load()`
+    /// or a chip tap deterministically. Never set outside tests.
+    var stopGate: (@Sendable () async -> Void)?
 
     init(
         service: TimerService,
@@ -88,26 +92,31 @@ final class TrackViewModel: ObservableObject {
             categories = Dictionary(uniqueKeysWithValues: try await service.store.categories().map { ($0.id, $0) })
             let persisted = try await service.runningTimerDraft()
             if let persisted, !persisted.activityText.isEmpty {
-                let startedAt = persisted.startedAt ?? Date()
-                state = .running(
-                    TrackState.Draft(
+                // An in-flight save owns `.saving`: reviving over it would
+                // clobber the state back to `.running` and start a ticker no
+                // later transition stops (ticking digits on an idle screen).
+                if !state.isSaving {
+                    let startedAt = persisted.startedAt ?? Date()
+                    state = .running(
+                        TrackState.Draft(
+                            text: persisted.activityText,
+                            categoryIDs: persisted.categoryIDs,
+                            notes: persisted.notes
+                        ),
+                        startedAt: startedAt
+                    )
+                    nameDraft = persisted.activityText
+                    startTicker(from: startedAt)
+                    // Revived runs never pass through beginRunning, so no
+                    // Live Activity would exist for them (cold start, upgrade
+                    // install, relaunch) — re-mirror here. Singleton-guarded:
+                    // an already-live activity is a no-op.
+                    await service.refreshLiveActivity(
                         text: persisted.activityText,
                         categoryIDs: persisted.categoryIDs,
-                        notes: persisted.notes
-                    ),
-                    startedAt: startedAt
-                )
-                nameDraft = persisted.activityText
-                startTicker(from: startedAt)
-                // Revived runs never pass through beginRunning, so no
-                // Live Activity would exist for them (cold start, upgrade
-                // install, relaunch) — re-mirror here. Singleton-guarded:
-                // an already-live activity is a no-op.
-                await service.refreshLiveActivity(
-                    text: persisted.activityText,
-                    categoryIDs: persisted.categoryIDs,
-                    startedAt: startedAt
-                )
+                        startedAt: startedAt
+                    )
+                }
             } else if case let .running(draft, _) = state {
                 await reconcileExternalStop(draft: draft)
             }
@@ -221,9 +230,11 @@ final class TrackViewModel: ObservableObject {
 
     /// Selects a recents chip: fills the exact text plus that recent's full
     /// ordered categories without starting timing and without creating
-    /// anything.
+    /// anything. Ignored while saving (like `syncReadyFromDraft`): a
+    /// mid-save tap must not flip to `.ready`, or the completing `stop()`
+    /// no-ops and the run is never saved.
     func select(_ recent: ExactName) {
-        guard !state.isRunning else { return }
+        guard !state.isRunning, !state.isSaving else { return }
         nameDraft = recent.text
         state = .ready(TrackState.Draft(text: recent.text, categoryIDs: recent.categoryIDs))
         elapsed = 0
@@ -339,6 +350,7 @@ final class TrackViewModel: ObservableObject {
         guard case let .running(draft, startedAt) = state else { return }
         state = .saving(draft, startedAt: startedAt)
         stopTicker()
+        if let stopGate { await stopGate() }
         do {
             try await service.stopTimerDraft(
                 text: draft.text,
@@ -347,6 +359,10 @@ final class TrackViewModel: ObservableObject {
                 endedAt: Date(),
                 notes: draft.notes
             )
+            // A concurrent revive may have restarted the ticker mid-save
+            // (pre-revive-guard histories); it owns nothing now — kill it so
+            // the saved confirmation (and the ready state after it) freezes.
+            stopTicker()
             let duration = max(0, Date().timeIntervalSince(startedAt))
             state = .saved(draft, duration: duration)
             elapsed = duration

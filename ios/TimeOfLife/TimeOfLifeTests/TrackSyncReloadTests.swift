@@ -147,7 +147,110 @@ struct TrackSyncReloadTests {
         #expect(vm.errorMessage != nil)
     }
 
+    /// Ticking-while-idle race (device finding): a `load()` landing inside
+    /// `stop()`'s save-await saw the still-persisted draft and revived
+    /// `.running` over `.saving`, restarting a ticker nothing ever stopped —
+    /// the digits kept climbing through `.saved` into `.ready`. The save is
+    /// held open with the VM's `stopGate` so the interleave is deterministic.
+    @Test("a load landing mid-save neither revives running nor leaks the ticker")
+    func midSaveLoadNeitherRevivesNorLeaksTicker() async throws {
+        let store = try LocalStore(url: temporaryStoreURL())
+        _ = try await store.seedStarterCategoriesIfNeeded(names: String.starterCategoryNames)
+        let service = TimerService(store: store)
+        try await service.startTimerDraft(text: "Gym", categoryIDs: [], startedAt: Date())
+        let vm = TrackViewModel(service: service, connectivity: MockConnectivity(connected: true))
+        await vm.loadIfNeeded()
+        #expect(vm.state.isRunning)
+
+        let gate = Gate()
+        vm.stopGate = { await gate.wait() }
+        let stopTask = Task { await vm.stop() }
+        guard await waitUntilSaving(vm) else {
+            Issue.record("stop() never entered .saving")
+            return
+        }
+        // Foreground/tab-return/sync-exit reload landing mid-save, while the
+        // draft is still persisted.
+        await vm.load()
+        #expect(vm.state.isSaving, "a mid-save load must not revive .running")
+        await gate.go()
+        await stopTask.value
+
+        guard case .saved = vm.state else {
+            Issue.record("expected .saved after the held save, got \(vm.state)")
+            return
+        }
+        let frozen = vm.elapsed
+        // One ticker interval plus margin, still inside the 1.6s saved
+        // window: a leaked ticker fires at least once here.
+        try? await Task.sleep(nanoseconds: 1_200_000_000)
+        guard case .saved = vm.state else {
+            Issue.record("saved confirmation ended early, got \(vm.state)")
+            return
+        }
+        #expect(vm.elapsed == frozen, "elapsed must freeze after save — the ticker leaked")
+    }
+
+    /// Same family: `select()` never excluded `.saving`, so a recents-chip
+    /// tap mid-save flipped to `.ready` and the completing `stop()` no-op'd —
+    /// the run was never saved.
+    @Test("a recents-chip tap mid-save is ignored and the save completes")
+    func chipTapMidSaveIsIgnored() async throws {
+        let store = try LocalStore(url: temporaryStoreURL())
+        _ = try await store.seedStarterCategoriesIfNeeded(names: String.starterCategoryNames)
+        let service = TimerService(store: store)
+        try await service.startTimerDraft(text: "Gym", categoryIDs: [], startedAt: Date())
+        let vm = TrackViewModel(service: service, connectivity: MockConnectivity(connected: true))
+        await vm.loadIfNeeded()
+        #expect(vm.state.isRunning)
+
+        let gate = Gate()
+        vm.stopGate = { await gate.wait() }
+        let stopTask = Task { await vm.stop() }
+        guard await waitUntilSaving(vm) else {
+            Issue.record("stop() never entered .saving")
+            return
+        }
+        vm.select(ExactName(text: "Gym", categoryIDs: [], firstCategoryID: nil))
+        #expect(vm.state.isSaving, "chip tap mid-save must not flip to .ready")
+        await gate.go()
+        await stopTask.value
+
+        guard case let .saved(draft, _) = vm.state else {
+            Issue.record("expected .saved after the held save, got \(vm.state)")
+            return
+        }
+        #expect(draft.text == "Gym")
+        let entries = try await store.entries()
+        #expect(entries.map(\.activityText) == ["Gym"])
+    }
+
     // MARK: - Helpers
+
+    /// Holds a `stop()` inside its save window: the test resumes it with
+    /// `go()` after interleaving the racy call.
+    actor Gate {
+        private var continuation: CheckedContinuation<Void, Never>?
+
+        func wait() async {
+            await withCheckedContinuation { self.continuation = $0 }
+        }
+
+        func go() {
+            continuation?.resume()
+            continuation = nil
+        }
+    }
+
+    /// Polls for the transient `.saving` state (the save is gate-held, so
+    /// this always resolves; the cap only bounds a broken-seam hang).
+    private func waitUntilSaving(_ vm: TrackViewModel) async -> Bool {
+        for _ in 0..<400 {
+            if vm.state.isSaving { return true }
+            try? await Task.sleep(nanoseconds: 5_000_000)
+        }
+        return false
+    }
 
     private func temporaryStoreURL() -> URL {
         URL(fileURLWithPath: NSTemporaryDirectory())
