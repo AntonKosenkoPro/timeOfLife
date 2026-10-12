@@ -8,6 +8,9 @@
 # DB project): set BACKUP_BUCKET=gs://<bucket> (VM has gsutil); the transfer
 # then runs on every backup and Cron activation REQUIRES the bucket set —
 # without it dumps are VM-local only. Bucket creation is operator one-time setup.
+# Tool override for hosts without postgres clients (VM cron):
+#   PGDUMP_BIN="docker run --rm postgres:15-alpine pg_dump"  (must dump to STDOUT)
+# RETENTION_DAYS (default 30): prune threshold for local artifacts.
 # Never prints connection strings or secrets: no `set -x`, errors are redacted to host/port only.
 set -eu
 umask 077 # never leave partial dumps world-readable if a run aborts before chmod
@@ -25,16 +28,22 @@ SHA="$DUMP.sha256"
 
 # --no-owner/--no-privileges: roles differ between Supabase and any restore target.
 $PGDUMP_BIN "$DATABASE_URL" --no-owner --no-privileges > "$DUMP"
-# Full sha256sum format (hash + path) so `sha256sum -c "$SHA"` verifies directly;
-# a failing sha256sum aborts the run here (POSIX sh has no pipefail to catch pipes).
-sha256sum "$DUMP" > "$SHA"
+# Basename path so `sha256sum -c` verifies in any directory holding the artifact
+# pair (VM dir, or a scratch dir after downloading the off-site copy); a failing
+# sha256sum aborts the run here (POSIX sh has no pipefail to catch pipes).
+( cd "$OUT_DIR" && sha256sum "$(basename "$DUMP")" ) > "$SHA"
 chmod 600 "$DUMP" "$SHA"
 
 # Off-site leg (see header): mandatory once the cron activates.
 if [ -n "${BACKUP_BUCKET:-}" ]; then
+  # Bucket must be private (uniform bucket-level access, no public readers):
+  # it holds full database dumps, and 600 perms do not carry over to GCS.
   gsutil -m cp "$DUMP" "$SHA" "$BACKUP_BUCKET/"
 else
   echo "WARNING: BACKUP_BUCKET unset — artifacts are VM-local only (spec requires off-site; set the bucket when activating the cron)" >&2
+  # Cron notifies on non-zero exit only, so a missing bucket must fail the run
+  # (not just warn); one-off pre-activation drills set BACKUP_LOCAL_ONLY_OK=1.
+  [ "${BACKUP_LOCAL_ONLY_OK:-0}" = "1" ] || exit 2
 fi
 
 # Prune artifacts older than the retention window (mtime-based).
