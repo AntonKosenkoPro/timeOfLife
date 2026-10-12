@@ -31,6 +31,7 @@ permissions:
 jobs:
   lint-and-test:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
 
@@ -89,6 +90,7 @@ jobs:
       github.event_name == 'workflow_dispatch'
     needs: [lint-and-test]
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     environment: ${{ github.event.inputs.environment || 'stage' }}
     steps:
       - uses: actions/checkout@v4
@@ -192,6 +194,14 @@ jobs:
               case "$DATABASE_URL" in
                 *sslmode=require*) ;;
                 *) echo "DATABASE_URL for hosted Postgres must use sslmode=require"; exit 1 ;;
+              esac
+              # Session-scoped migration advisory lock is invalid through a
+              # transaction-mode pooler: reject port 6543 (Supabase UI surfaces
+              # it prominently) so a set-once secret mistake fails here instead
+              # of hanging boots on pg_advisory_lock. Use port 5432.
+              case "$DATABASE_URL" in
+                *:6543/*)
+                  echo "DATABASE_URL uses the transaction-mode pooler (6543), which breaks the migration advisory lock; use the session-mode pooler (5432)."; exit 1 ;;
               esac
             fi
 

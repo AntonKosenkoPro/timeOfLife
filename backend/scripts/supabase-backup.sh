@@ -4,13 +4,13 @@
 #
 # Usage (VM cron): 0 3 * * 0 /opt/timeoflife/scripts/supabase-backup.sh /var/backups/supabase
 # Reads DATABASE_URL from the environment (VM: `set -a; . /opt/timeoflife/.env`).
-# Writes a timestamped, checksummed dump; prunes artifacts older than $RETENTION_DAYS (default 30).
-# Tool override for hosts without postgres clients (VM cron):
-#   PGDUMP_BIN="docker run --rm postgres:15-alpine pg_dump"
-# The tool must write the dump to STDOUT (the script redirects to $DUMP) so no
-# volume mounts are needed in the docker form.
+# Off-site leg (spec backend-database: >=30d retention outside this VM and the
+# DB project): set BACKUP_BUCKET=gs://<bucket> (VM has gsutil); the transfer
+# then runs on every backup and Cron activation REQUIRES the bucket set —
+# without it dumps are VM-local only. Bucket creation is operator one-time setup.
 # Never prints connection strings or secrets: no `set -x`, errors are redacted to host/port only.
 set -eu
+umask 077 # never leave partial dumps world-readable if a run aborts before chmod
 
 : "${PGDUMP_BIN:=pg_dump}"
 
@@ -25,8 +25,17 @@ SHA="$DUMP.sha256"
 
 # --no-owner/--no-privileges: roles differ between Supabase and any restore target.
 $PGDUMP_BIN "$DATABASE_URL" --no-owner --no-privileges > "$DUMP"
-sha256sum "$DUMP" | awk '{print $1}' > "$SHA"
+# Full sha256sum format (hash + path) so `sha256sum -c "$SHA"` verifies directly;
+# a failing sha256sum aborts the run here (POSIX sh has no pipefail to catch pipes).
+sha256sum "$DUMP" > "$SHA"
 chmod 600 "$DUMP" "$SHA"
+
+# Off-site leg (see header): mandatory once the cron activates.
+if [ -n "${BACKUP_BUCKET:-}" ]; then
+  gsutil -m cp "$DUMP" "$SHA" "$BACKUP_BUCKET/"
+else
+  echo "WARNING: BACKUP_BUCKET unset — artifacts are VM-local only (spec requires off-site; set the bucket when activating the cron)" >&2
+fi
 
 # Prune artifacts older than the retention window (mtime-based).
 find "$OUT_DIR" -maxdepth 1 -name 'supabase-*.sql' -mtime +"$RETENTION_DAYS" -delete

@@ -20,7 +20,7 @@ SIZE_MB=$((SIZE_BYTES / 1024 / 1024))
 echo "database size: ${SIZE_MB} MB (alert line: ${ALERT_MB} MB)"
 
 if [ "$SIZE_MB" -ge "$ALERT_MB" ]; then
-  echo "ALERT: database at ${SIZE_MB} MB — over the ${ALERT_MB} MB line. See the paid-tier upgrade runbook; repoint is blocked above the line."
+  echo "ALERT: database at ${SIZE_MB} MB — over the ${ALERT_MB} MB line. See the paid-tier upgrade runbook. This script alerts only — check size manually before any repoint; the repoint gate itself is the operator runbook, not this script."
   exit 2
 fi
 echo "OK: below the alert line."
