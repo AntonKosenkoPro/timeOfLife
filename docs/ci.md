@@ -29,7 +29,7 @@ Toolchain pins (bump together with the local toolchain; version-skew failures ar
 | Tool | Pinned | Local (2026-10-12) |
 |---|---|---|
 | `xcodegen` | `2.46.0` (`XCODEGEN_PIN` in `ci_post_clone.sh`) | 2.46.0 |
-| `swiftlint` | `0.65.0` (`SWIFTLINT_PIN` in `ci_pre_xcodebuild.sh`) | 0.65.0 |
+| `swiftlint` | `0.65.1` (`SWIFTLINT_PIN` in `ci_pre_xcodebuild.sh`) | 0.65.1 |
 | Xcode (Cloud selection) | nearest 27.x | 27.0 (27A266a) |
 
 Cloud usage is metered in App Store Connect (Users and Access → Xcode Cloud tab; per-app tab; CSV export). The account holds 25 compute-hours/mo free — the Oct 2026 baseline (~11 GH iOS runs/day × ~7.7 min wall ≈ 1.4h wall/day) fits inside it; a paid tier is a separate future decision, not this change.

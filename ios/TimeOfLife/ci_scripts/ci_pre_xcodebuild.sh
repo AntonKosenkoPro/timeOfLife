@@ -15,7 +15,7 @@ set -e
 
 cd "$(dirname "$0")/.."
 
-SWIFTLINT_PIN="0.65.0"
+SWIFTLINT_PIN="0.65.1"
 
 if ! command -v swiftlint >/dev/null 2>&1; then
   echo "swiftlint not found — installing via Homebrew..."
