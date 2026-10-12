@@ -9,8 +9,15 @@
 # then runs on every backup and Cron activation REQUIRES the bucket set —
 # without it dumps are VM-local only. Bucket creation is operator one-time setup.
 # Tool override for hosts without postgres clients (VM cron):
-#   PGDUMP_BIN="docker run --rm postgres:15-alpine pg_dump"  (must dump to STDOUT)
+#   PGDUMP_BIN="docker run --rm postgres:17-alpine pg_dump"  (must dump to STDOUT)
+# Pin the image major to the DB's major version: pg_dump cannot dump a newer
+# server (e.g. pg_dump 15 aborts with "server version mismatch" against the
+# Supabase PG17 project). Re-pin when the DB major changes.
 # RETENTION_DAYS (default 30): prune threshold for local artifacts.
+case "${RETENTION_DAYS:-30}" in
+  *[!0-9]*|'') echo "ERROR: RETENTION_DAYS must be a non-negative integer" >&2; exit 2 ;;
+esac
+[ "${RETENTION_DAYS:-30}" -ge 30 ] || echo "WARNING: RETENTION_DAYS=${RETENTION_DAYS:-30} is below the spec's 30-day retention floor" >&2
 # Never prints connection strings or secrets: no `set -x`, errors are redacted to host/port only.
 set -eu
 umask 077 # never leave partial dumps world-readable if a run aborts before chmod
