@@ -8,14 +8,38 @@
 # the build phase it gates, and a lint failure must read as a build
 # failure in Cloud's action reporting.
 #
+# Location caveat (PR #147 spike): the Build action runs this script from
+# its repo location (ios/TimeOfLife/ci_scripts), but Test-action VMs replay
+# it from a canonical <clone-root>/ci_scripts path — `dirname $0`/.. is
+# NOT the project dir there. Resolve robustly via the .swiftlint.yml
+# marker (adjacent first, then <git-root>/ios/TimeOfLife); when no iOS
+# sources are present at all, skip quietly — the Build action already
+# gated lint, and failing here would red four parallel Test runs for
+# nothing.
+#
 # Pin (move-ios-checks-to-xcode-cloud): asserted fail-closed like xcodegen
 # in ci_post_clone.sh. Bump SWIFTLINT_PIN (and docs/ci.md) with the local
 # toolchain; never relax --strict to fix a version-skew failure — pin.
 set -e
 
-cd "$(dirname "$0")/.."
-
 SWIFTLINT_PIN="0.65.1"
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PROJECT_DIR=""
+if [ -f "$SCRIPT_DIR/../.swiftlint.yml" ]; then
+  PROJECT_DIR="$SCRIPT_DIR/.."
+else
+  GIT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+  if [ -n "$GIT_ROOT" ] && [ -f "$GIT_ROOT/ios/TimeOfLife/.swiftlint.yml" ]; then
+    PROJECT_DIR="$GIT_ROOT/ios/TimeOfLife"
+  fi
+fi
+
+if [ -z "$PROJECT_DIR" ]; then
+  echo "iOS sources not present in this context — skipping SwiftLint (the Build action already gated lint)."
+  exit 0
+fi
+cd "$PROJECT_DIR"
 
 if ! command -v swiftlint >/dev/null 2>&1; then
   echo "swiftlint not found — installing via Homebrew..."

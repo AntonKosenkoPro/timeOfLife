@@ -21,7 +21,7 @@ GitHub workflows and their scope:
 | File filters | `ios/**` (mirrors the old `on: pull_request paths:` — `backend/`-only PRs burn no Cloud hours) |
 | Scheme / config | `TimeOfLife`, Debug, iOS Simulator destination, `OS=latest` (never Release signing on PR builds) |
 | Post-clone | `ios/TimeOfLife/ci_scripts/ci_post_clone.sh` — brew-install `xcodegen`, fail-closed `XCODEGEN_PIN` assert, `xcodegen generate` (fires `postGenCommand normalize-system-capabilities.py`), `.xcodeproj` existence check |
-| Pre-build | `ios/TimeOfLife/ci_scripts/ci_pre_xcodebuild.sh` — brew-install `swiftlint`, fail-closed `SWIFTLINT_PIN` assert, `swiftlint lint --strict` (also gates tag archives; no-op there since tags build from lint-green `main`) |
+| Pre-build | `ios/TimeOfLife/ci_scripts/ci_pre_xcodebuild.sh` — brew-install `swiftlint`, fail-closed `SWIFTLINT_PIN` assert, `swiftlint lint --strict` (also gates tag archives; no-op there since tags build from lint-green `main`). Resolves the project dir via the `.swiftlint.yml` marker (Test VMs replay the script from clone-root, not its repo location) and skips cleanly when no iOS sources are present — the Build action already gated lint |
 | Logs | App Store Connect build page (replaces `xcpretty` GH logs); link the build in the PR when reporting iOS failures |
 
 Toolchain pins (bump together with the local toolchain; version-skew failures are fixed by pinning, never by relaxing `--strict` or per-target warnings-as-errors):
