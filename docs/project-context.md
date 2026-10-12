@@ -95,7 +95,7 @@ ios/TimeOfLife/          SwiftUI app (iOS 18+), XcodeGen-managed (project.yml)
   TimeOfLife/Core/                 networking, keychain, reachability, theme, navigation, DI, design components
   TimeOfLife/Localization/         en + ru Localizable.strings + L10n enum
   project.yml              XcodeGen spec — edit this, then `xcodegen generate`; never hand-edit the .pbxproj
-.github/workflows/       CI: backend.yml + ios.yml (mandatory on every PR)
+.github/workflows/       CI: backend.yml (PR checks) + ios.yml (release verify) + Xcode Cloud (iOS PR checks)
 .golangci.yml            Go linters (run from backend/)
 ios/TimeOfLife/.swiftlint.yml   Swift linters (run from ios/TimeOfLife/)
 docs/                    Durable repo documentation (this file, docs/ci.md, docs/ios-test-loop.md)
@@ -185,7 +185,7 @@ No bugfix implementation without a recorded reproduction on the current tree:
 
 ## CI (Requirements S6)
 
-`.github/workflows/backend.yml` (Go: gofmt, go vet, golangci-lint, test + coverage) and `.github/workflows/ios.yml` (xcodegen, swiftlint, warning-as-error xcodebuild build, test) run on pull requests that touch their subsystem and on similarly path-filtered pushes to `main`. Both are **mandatory** PR checks when triggered — a PR is not mergeable until the applicable checks are green. `.github/workflows/openspec.yml` additionally enforces `openspec validate --all --strict` on every PR. An **advisory** AI review (`ai-review.yml`) comments on every PR but never blocks — the two-stage review process (AI stage 1 → human stage 2) is defined in [`docs/review-process.md`](review-process.md). See `docs/ci.md` for the full pipeline guide.
+`.github/workflows/backend.yml` (Go: gofmt, go vet, golangci-lint, test + coverage) runs on pull requests that touch `backend/` and on similarly path-filtered pushes to `main`; iOS verification (xcodegen, swiftlint, warning-as-error xcodebuild build, test) runs on Xcode Cloud on PRs touching `ios/**` (`.github/workflows/ios.yml` is release-verification-only via `workflow_call`). Each is a **mandatory** PR check when triggered — a PR is not mergeable until the applicable checks are green. `.github/workflows/openspec.yml` additionally enforces `openspec validate --all --strict` on every PR. An **advisory** AI review (`ai-review.yml`) comments on every PR but never blocks — the two-stage review process (AI stage 1 → human stage 2) is defined in [`docs/review-process.md`](review-process.md). See `docs/ci.md` for the full pipeline guide.
 
 ## Deployment (S4)
 
