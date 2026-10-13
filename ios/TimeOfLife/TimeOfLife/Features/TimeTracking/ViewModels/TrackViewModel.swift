@@ -308,7 +308,6 @@ final class TrackViewModel: ObservableObject {
     }
 
     private func beginRunning(draft: TrackState.Draft, startedAt: Date) {        state = .running(draft, startedAt: startedAt)
-        elapsed = 0
         errorMessage = nil
         startTicker(from: startedAt)
         UIApplication.shared.isIdleTimerDisabled = true
@@ -421,6 +420,11 @@ final class TrackViewModel: ObservableObject {
 
     private func startTicker(from startedAt: Date) {
         ticker?.cancel()
+        // Seed synchronously: the readout must be correct on the very first
+        // paint — a restored minutes-old run shows its true elapsed, never
+        // 00:00 until the first tick fires (steady-track-launch elapsed
+        // seeding; the tick closure below only keeps it fresh).
+        elapsed = max(0, Date().timeIntervalSince(startedAt))
         ticker = Ticker.everySecond { [weak self] in
             self?.elapsed = max(0, Date().timeIntervalSince(startedAt))
         }

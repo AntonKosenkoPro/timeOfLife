@@ -83,6 +83,24 @@ struct TrackSnapshotTests {
         #expect(vm.firstLoadSettled)
     }
 
+    @Test("adopt seeds elapsed synchronously for a running draft")
+    func adoptSeedsElapsed() async throws {
+        // swiftlint:disable:next force_try
+        let store = try! LocalStore(url: temporaryStoreURL(), userID: "snap-u1")
+        let service = TimerService(store: store)
+        try await service.startTimerDraft(
+            text: "Running", categoryIDs: [],
+            startedAt: Date().addingTimeInterval(-150)
+        )
+        let snapshot = try await service.loadSnapshot(recentsLimit: TrackViewModel.recentsLimit)
+        let vm = TrackViewModel(service: service, connectivity: MockConnectivity(connected: true))
+
+        vm.adopt(snapshot)
+
+        #expect(vm.elapsed > 140 && vm.elapsed <= 180,
+                "first paint shows the true elapsed, never 00:00-until-first-tick")
+    }
+
     // MARK: - Single-commit and suppression
 
     @Test("identical reload publishes nothing")

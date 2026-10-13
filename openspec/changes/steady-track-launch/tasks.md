@@ -10,6 +10,7 @@
 - [x] 2.3 Batch every snapshot publish into a single render commit (locals-then-assign, including `nameDraft`); diff-guard reloads to skip identical snapshots.
 - [x] 2.4 Disable the name row while the first snapshot is pending (Start is already draft-gated); auth-button loading during fresh sign-in bind uses existing strings only.
 - [x] 2.5 Delete the veil apparatus: `LaunchCover.swift`, the readiness signal + notification, overlay/fade/zIndex/accessibilityHidden wiring in `RootView`, restoring splash view; unbound branch renders the auth-gated spinner-free hold only via existing views (no new waiting UI).
+- [x] 2.6 Seed `elapsed` synchronously in `startTicker` (device repro: restored run painted 00:00 for ~1–2 s until the first tick; `elapsed` was only ever assigned inside the tick closure). Covers adopt, load-restore, and fresh starts; compact timer already immune (`TimelineView` from `startedAt`). Test: adopt-seeds-elapsed.
 
 ## 3. Tests
 
