@@ -166,6 +166,9 @@ jobs:
             # secret and redeploy. Prefer alphanumeric-safe secrets ($ in a
             # value breaks the sourcing step below, same as DB_PASSWORD).
             DATABASE_URL=${{ secrets.DATABASE_URL }}
+            # Error reporting (observability-stage-0): empty keeps Sentry
+            # disabled; set the secret to enable panic/5xx capture.
+            SENTRY_DSN=${{ secrets.SENTRY_DSN }}
             ENVEOF
             chmod 600 .env
 

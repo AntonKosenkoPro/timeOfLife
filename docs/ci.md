@@ -80,6 +80,11 @@ Required GitHub Actions secrets (configured in repo Settings → Secrets and var
 | `AWS_ACCESS_KEY_ID` | deploy (EMAIL_BACKEND=ses) | only when SES |
 | `AWS_SECRET_ACCESS_KEY` | deploy (EMAIL_BACKEND=ses) | only when SES |
 | `APPLE_CLIENT_ID` | deploy (optional feature) | only when Apple enabled |
+| `SENTRY_AUTH_TOKEN` | ios.yml sentry-dsym (dSYM upload auth) | only when Sentry wired; absent = upload skips with a warning |
+| `SENTRY_ORG` | ios.yml sentry-dsym (Sentry org slug) | only when Sentry wired; absent = upload skips with a warning |
+| `SENTRY_PROJECT_STAGING` | ios.yml sentry-dsym (staging project slug) | only when Sentry wired; absent = staging upload skips |
+| `SENTRY_PROJECT_RELEASE` | ios.yml sentry-dsym (release project slug) | only when Sentry wired; absent = release upload skips |
+| `SENTRY_IOS_DSN` | ios.yml sentry-dsym (threaded into the archive as `SENTRY_DSN`) | only when Sentry wired; absent = archived binary ships with the SDK disabled |
 
 Non-secret variables: `EMAIL_BACKEND`, `AWS_REGION`, `SES_FROM` (set as repository variables).
 
