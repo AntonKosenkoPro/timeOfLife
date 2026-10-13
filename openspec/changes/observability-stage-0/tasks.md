@@ -25,7 +25,11 @@
 
 - [x] 3.1 Backend: add Sentry Go SDK (env `SENTRY_DSN`, empty = disabled);
   panics + 5xx with context; no PII in tags (allowlist applies).
-  (DONE: `sentry-go v0.50.0`, `InitSentry`/`sentryMiddleware`/`BeforeSend` scrub,
+  (DONE: `sentry-go v0.45.1` — NOT v0.50.0: v0.46+ requires Go 1.25 but the
+  repo toolchain is pinned to Go 1.24 (CI `setup-go 1.24`); v0.50.0 broke CI
+  with `no such tool "covdata"` under `-race -coverprofile`. `go.mod` stays
+  `go 1.24.0`, x/* deps re-pinned to main's versions. Lesson: new Go deps must
+  declare `go < repo toolchain` or the toolchain bump becomes its own change.)
   7 tests green; needs `SENTRY_DSN` secret value — user-side, see 3.4.)
 - [x] 3.2 iOS: add Sentry SDK via SPM; crashes + backend-bridged errors;
   verify a test crash from a staging build arrives symbolicated.
@@ -52,7 +56,9 @@
 
 ## 5. Verification + close-out
 
-- [ ] 5.1 `backend.yml` + `ios.yml` green; linters strict-clean.
+- [x] 5.1 `backend.yml` + `ios.yml` green; linters strict-clean.
+  (DONE 2026-10-13: backend lint-and-test pass, openspec validate pass,
+  Xcode Cloud Build + Test pass on PR #151.)
 - [ ] 5.2 End-to-end drill: failing /health → Telegram in < 5 min;
   test crash → Sentry issue with symbols.
 - [x] 5.3 Stage 1 GitHub issue exists and references this change's design.md.
