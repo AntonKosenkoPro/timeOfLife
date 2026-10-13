@@ -30,7 +30,7 @@ struct TrackSnapshotTests {
         let snapshot = try await service.loadSnapshot(recentsLimit: TrackViewModel.recentsLimit)
 
         #expect(snapshot.recents.count == 3)
-        #expect(snapshot.allNames.count == 4, "committed names plus the running draft")
+        #expect(snapshot.allNames.count == 3, "committed entry names only — the running draft is not an entry")
         #expect(snapshot.categories.count == 1)
         #expect(snapshot.draft?.activityText == "Running")
         #expect(snapshot.restoredName == "Running")
