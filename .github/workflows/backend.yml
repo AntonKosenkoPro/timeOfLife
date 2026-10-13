@@ -220,6 +220,17 @@ jobs:
             # Recreate all services
             docker compose up -d
 
+            # Dead-man's-switch pinger (observability-stage-0): every minute,
+            # curl /health through nginx and ping Healthchecks.io only on 200.
+            # Missed pings page Telegram via the HC integration. Empty secret =
+            # skipped with a warning (staging can deploy before accounts exist).
+            if [ -n "${{ secrets.HC_PING_URL }}" ]; then
+              (crontab -l 2>/dev/null | grep -v 'hc-ping.com' || true; echo "*/1 * * * * curl -sk -m 10 -f https://127.0.0.1/health >/dev/null 2>&1 && curl -sm 10 \"${{ secrets.HC_PING_URL }}\" >/dev/null 2>&1") | crontab -
+              echo "healthchecks pinger installed"
+            else
+              echo "::warning::HC_PING_URL secret is empty — skipping healthchecks pinger install"
+            fi
+
             # Clean up old images
             docker image prune -f
 

@@ -2,8 +2,12 @@
 
 ## 1. Off-box uptime watch
 
-- [ ] 1.1 Pick free-tier ping (UptimeRobot or BetterStack): 1-min `/health`
+- [x] 1.1 Pick free-tier ping (UptimeRobot or BetterStack): 1-min `/health`
   checks, alert after 3 consecutive failures.
+  (DECIDED 2026-10-13: Healthchecks.io — native Telegram, dead-man's-switch;
+  check created user-side, cron pinger installs from `HC_PING_URL` secret on
+  deploy. BetterStack dropped: no native Telegram, relay would live on the
+  watched VM. UptimeRobot dropped: no Telegram + 5-min free polls.)
 - [ ] 1.2 Create Telegram channel + bot; ping failures route here (sound on).
 - [ ] 1.3 Verify: stop backend on VM, confirm alert arrives; restart, confirm
   recovery notice.

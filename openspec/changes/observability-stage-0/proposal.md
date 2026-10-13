@@ -10,8 +10,9 @@ in days, with zero architecture lock-in, before the real pipeline (Stage 1) land
 
 ## What changes
 
-- **External /health watch**: free-tier uptime ping (UptimeRobot or BetterStack)
-  against `https://<host>/health`; the watchdog lives off-box, never on the VM.
+- **External /health watch**: Healthchecks.io free tier (dead-man's-switch:
+  a VM cron pings on every healthy minute, missed pings page Telegram via the
+  native integration); the watchdog brain lives off-box, never on the VM.
 - **Docker log rotation**: `max-size`/`max-file` on all compose services so the
   10 GB VM disk cannot fill from unbounded json-file logs.
 - **Quiet /health**: exclude the uptime ping from request access logs (keep a
