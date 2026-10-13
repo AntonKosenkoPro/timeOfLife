@@ -52,6 +52,14 @@ final class TrackViewModel: ObservableObject {
     /// retries (HistoryViewModel precedent).
     private var isLoading = false
     private var needsReload = true
+    /// The last applied snapshot: reloads resolving an identical snapshot
+    /// publish nothing, so no-op sync cycles render literally nothing
+    /// (steady-track-launch).
+    private var lastSnapshot: TrackSnapshot?
+    /// Whether a first snapshot has been applied (preloaded adoption or a
+    /// completed load, success or failure alike). Gates the name row until
+    /// the screen has something true to show.
+    @Published private(set) var firstLoadSettled = false
 
     init(
         service: TimerService,
@@ -76,6 +84,12 @@ final class TrackViewModel: ObservableObject {
     ///
     /// A failed load keeps the last good snapshot (mirror-only convergence):
     /// only the recoverable error surfaces, never blanked recents.
+    ///
+    /// Resolution and publication are separated (steady-track-launch): the
+    /// snapshot resolves across awaits, then applies in one synchronous
+    /// commit — the first paint after a load never shows a half-filled
+    /// screen. An identical snapshot publishes nothing, so no-op reloads
+    /// (including sync cycles that merge nothing new) render nothing.
     func load() async {
         do {
             // Seeding completes before the shell mounts (seed-before-reveal
@@ -84,36 +98,84 @@ final class TrackViewModel: ObservableObject {
             // below converges on it. Seeding stays gate-owned — a second
             // racing call site here would only double file traffic on
             // every cold start.
-            recents = try await storeRecents()
-            allNames = try await storeAllNames()
-            categories = Dictionary(uniqueKeysWithValues: try await service.store.categories().map { ($0.id, $0) })
-            let persisted = try await service.runningTimerDraft()
-            if let persisted, !persisted.activityText.isEmpty {
-                let startedAt = persisted.startedAt ?? Date()
-                state = .running(
-                    TrackState.Draft(
-                        text: persisted.activityText,
-                        categoryIDs: persisted.categoryIDs,
-                        notes: persisted.notes
-                    ),
-                    startedAt: startedAt
-                )
-                nameDraft = persisted.activityText
-                startTicker(from: startedAt)
+            let snapshot = try await service.loadSnapshot(recentsLimit: Self.recentsLimit)
+            defer { markSettled() }
+            guard snapshot != lastSnapshot else { return }
+            applySnapshot(snapshot)
+            if let draft = snapshot.draft, !(draft.activityText.isEmpty) {
                 // Revived runs never pass through beginRunning, so no
                 // Live Activity would exist for them (cold start, upgrade
                 // install, relaunch) — re-mirror here. Singleton-guarded:
                 // an already-live activity is a no-op.
                 await service.refreshLiveActivity(
-                    text: persisted.activityText,
-                    categoryIDs: persisted.categoryIDs,
-                    startedAt: startedAt
+                    text: draft.activityText,
+                    categoryIDs: draft.categoryIDs,
+                    startedAt: draft.startedAt ?? Date()
                 )
             } else if case let .running(draft, _) = state {
                 await reconcileExternalStop(draft: draft)
             }
         } catch {
+            markSettled()
             errorMessage = L10n.text(in: .default, code: "error.unknown")
+        }
+    }
+
+    /// Adopts a gate-preloaded snapshot without re-querying
+    /// (steady-track-launch): synchronous single-commit assignments
+    /// identical to `load()`'s, so a shell mounted with a snapshot paints
+    /// complete on its first commit. Live-Activity re-mirroring rides a
+    /// Task (it never throws); reconciliation cannot trigger (a freshly
+    /// constructed view model starts idle, never stale-running).
+    func adopt(_ snapshot: TrackSnapshot) {
+        applySnapshot(snapshot)
+        markSettled()
+        // Adopted snapshots are fresh by construction: the appear-time
+        // `loadIfNeeded` below would only re-resolve the identical snapshot
+        // (a no-op publish), so skip the queries outright.
+        needsReload = false
+        if let draft = snapshot.draft, !draft.activityText.isEmpty {
+            Task { [weak self] in
+                guard let self else { return }
+                await self.service.refreshLiveActivity(
+                    text: draft.activityText,
+                    categoryIDs: draft.categoryIDs,
+                    startedAt: draft.startedAt ?? Date()
+                )
+            }
+        }
+    }
+
+    /// Marks the first snapshot settled, once: repeated assignments would
+    /// emit redundant `objectWillChange` signals and defeat the no-op
+    /// reload suppression (steady-track-launch).
+    private func markSettled() {
+        if !firstLoadSettled {
+            firstLoadSettled = true
+        }
+    }
+
+    /// Applies a resolved snapshot in one synchronous commit: recents, names,
+    /// categories, and the running state (if a draft persists) land together.
+    /// A plain (draft-less) resolution never touches an in-flight typed
+    /// `nameDraft` — typing is reconciled by `syncReadyFromDraft`, not here.
+    private func applySnapshot(_ snapshot: TrackSnapshot) {
+        recents = snapshot.recents
+        allNames = snapshot.allNames
+        categories = snapshot.categories
+        lastSnapshot = snapshot
+        if let draft = snapshot.draft, !draft.activityText.isEmpty {
+            let startedAt = draft.startedAt ?? Date()
+            state = .running(
+                TrackState.Draft(
+                    text: draft.activityText,
+                    categoryIDs: draft.categoryIDs,
+                    notes: draft.notes
+                ),
+                startedAt: startedAt
+            )
+            nameDraft = draft.activityText
+            startTicker(from: startedAt)
         }
     }
 
