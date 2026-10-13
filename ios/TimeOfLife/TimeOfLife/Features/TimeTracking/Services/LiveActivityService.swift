@@ -85,7 +85,9 @@ final class LiveActivityService: LiveActivityControlling {
         }
         let live = Activity<TimerActivityAttributes>.activities
         Self.logger.info("LiveActivityService: type is \(String(describing: TimerActivityAttributes.self), privacy: .public), liveCount=\(live.count)")
-        if let same = live.first(where: { $0.attributes.entryText == text }) {
+        if let same = live.first(where: {
+            $0.attributes.entryText == text && $0.activityState == .active
+        }) {
             // Same-text singleton: refresh the chips in place
             // (mid-run retag) instead of re-requesting. Started-at stays
             // as-is; identical chips skip the update (no flicker).
