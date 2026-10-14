@@ -22,8 +22,8 @@
 ## 4. Verify, lint, and document
 
 - [x] 4.1 `swiftlint lint --strict` clean; warning-as-error `xcodebuild` build green; `xcodebuild test` suite green (blocked on this machine by the 0-test discovery environment issue — CI `ios.yml` is the backstop); `go test ./...` still green (backend untouched — confirmation only).
-- [ ] 4.2 Record the fixed cold boot and frame-diff against the 1.1 evidence: OS launch background → complete Track in one cut, no empty flash, no pop-in, no post-reveal shift. Attach the comparison to the PR.
-- [ ] 4.3 Re-check the relevant `Requirements/FURPS/*.md` rows; assert no new user-facing strings (both locales + `L10n` untouched) and `Theme`-only colors; update `docs/project-context.md` only if the launch-sequence description drifts.
+- [ ] 4.2 Record the fixed cold boot and frame-diff against the 1.1 evidence: OS launch background → complete Track in one cut, no empty flash, no pop-in, no post-reveal shift. Attach the comparison to the PR. (Superseded: human verified the final direction on-device — "swift", complete first paint. Repro binaries removed from the repo pre-archive; videos held by the human.)
+- [x] 4.3 Re-check the relevant `Requirements/FURPS/*.md` rows; assert no new user-facing strings (both locales + `L10n` untouched) and `Theme`-only colors; update `docs/project-context.md` only if the launch-sequence description drifts.
 
 ## 5. Superseded (veil direction — kept as record, do not implement)
 

@@ -1,5 +1,11 @@
 # Verification evidence (task 4.2) — recorded on the fixed tree
 
+> Note: frame/video files were removed from the repo during pre-archive
+> cleanup (binaries don't belong in the repo); the analysis below covers the
+> superseded veil direction and is preserved as the record. The final
+> optimistic direction was verified on-device by the human (cold boot:
+> solid launch background → complete Track in one cut, no waiting UI).
+
 Device: iPhone 17 simulator (iOS 27.0, light appearance), Debug build with
 the change. Signed in as `repro-steady@test.example`; the local account file
 carries the "Morning run" entry (pulled from the relay on the previous

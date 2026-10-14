@@ -1,5 +1,9 @@
 # Repro evidence (task 1.1) — recorded on current tree before the fix
 
+> Note: frame/video files were removed from the repo during pre-archive
+> cleanup (binaries don't belong in the repo); the analysis below is
+> preserved as the record. Videos held by the human.
+
 Device: iPhone 17 Pro simulator (iOS 26.4, light appearance), Debug build at
 `main` head. Signed in as `repro-steady@test.example` against the local dev
 backend with one committed entry ("Morning run"). App terminated, then
