@@ -14,8 +14,8 @@ The History destination answers "what did I spend time on and when?" — a chron
 
 ### Layout
 
-- Body: `ScrollView` + `LazyVStack(pinnedViews: [.sectionHeaders])` with a section per calendar day (newest day first), `EntryRow` per entry (newest first within the day), `accessibilityIdentifier("HistoryList")`. List background `Theme.backgroundPrimary`. (`List` is deliberately not used: pinned `List` headers are re-hosted in a separate UIKit layer, so the elevation-tracking `GeometryReader` preferences never reach the scroll modifiers.)
-- Day-group headers: `SectionHeader` with the day label (`SectionHeader` history usage, D8/D10) — day label left-aligned to the `EntryRow` icon column's leading edge (`contentLeadingInset: EntryRow.iconColumnWidth + EntryRow.columnSpacing` minus the list's own content inset). When the header is elevated (pinned at the top of the list), it also shows the day's total tracked time, right-aligned ("2h 35m tracked"). In-list headers show only the day label.
+- Body: `HistoryListTable` (`Features/AppShell/Views/HistoryListTable.swift`) — a `UITableView(style: .plain)` `UIViewRepresentable` whose sections map one per calendar day (newest day first), `EntryRow` per row via `UIHostingConfiguration` with zero margins (the row carries its own horizontal `Theme.spacingMedium` padding), `accessibilityIdentifier("HistoryList")` on the table. Chrome is stripped to the page: no separators, transparent cell backgrounds (`UIBackgroundConfiguration.clear()`), clear table background over `Theme.backgroundPrimary`. The bridge (not `List`, not a custom ScrollView): UIKit's pinned header draws **above** cells deterministically on every OS — SwiftUI `List` pinned headers never occlude (scrolled rows composite over them on iOS 18 regardless of header background, proven on-device; see the change's design.md D4/D6).
+- Day-group headers: `SectionHeader(title:subtitle:)` in `UIHostingConfiguration` header views — static two-line block (day label + total subline "2h 35m tracked", Calendar-Agenda-like), identical in-list and pinned with no scroll-state gating; day label left-aligned to the `EntryRow` icon column's leading edge. The header hosting content paints an opaque `Theme.backgroundPrimary` full-width band — invisible against the page at rest, the deterministic occluder when pinned (no `.bar` material, no hairline: the user rejected the boxed slab look). Cell data lives in `HistorySectionModel` (diff-applied by the table; identical models skip `reloadData`).
 - Row dividers lead after the icon column (Variant H).
 - Inline navigation title: "History" (`L10n.tabHistory`), shown at rest.
 - Navigation bar (inline title + Profile button) permanently visible at every scroll position (the scroll-driven collapse from the original change was reverted — see the `revert-history-nav-collapse` change). Profile is reachable at all times on History.
@@ -28,7 +28,6 @@ The History destination answers "what did I spend time on and when?" — a chron
 - Entry rows show the localized "via <Source>" provenance label on line 2 for non-`manual` sources (`EntryRow.viaText`); `manual` shows nothing.
 - Entry rows with non-empty notes show the small blue notes indicator on line 2, immediately left of the timeframe (`EntryRow.hasNotes`, resolved by `HistoryViewModel.hasNotes(for:)` — whitespace-only counts as empty); the glyph is presentational and VoiceOver folds the localized `historyHasNotes` segment into the row label.
 - Tapping a row pushes the unified entry form onto the History navigation stack (EDIT for `manual`, LOCKED read-only for imported with delete only) — the push provides the system back button and edge-back gesture; there is no intermediate detail surface.
-- Elevated-header tracking is view state owned by `HistoryView`; `HistoryViewModel` owns data only (design risk note).
 
 ### States
 
@@ -36,8 +35,8 @@ The History destination answers "what did I spend time on and when?" — a chron
 |---|---|
 | Loading | Progress indicator while the local store is read |
 | Empty | `EmptyState` (`clock.arrow.circlepath`, `historyEmptyTitle` / `historyEmptySubtitle`) |
-| Loaded | Day-grouped `ScrollView` of `EntryRow` |
-| Elevated header | Pinned day-group header shows the day total ("2h 35m tracked"); in-list headers show only the day label |
+| Loaded | Day-grouped `HistoryListTable` of `EntryRow` |
+| Day-group header | Static two-line header (day label + total subline) on an opaque page-color band, identical in-list and pinned |
 
 ### Data model
 
@@ -66,7 +65,7 @@ final class HistoryViewModel: ObservableObject {
 - [ ] List has `accessibilityIdentifier("HistoryList")`.
 - [ ] Rows use `EntryRow` with `EntryRow(<id>)` identifiers (per `COMPONENTS.md`).
 - [ ] Rows with non-empty notes show the line-2 notes indicator left of the timeframe; empty/whitespace-only notes show none.
-- [ ] Day-group headers use `SectionHeader` with column alignment; the total renders only when elevated.
+- [ ] Day-group headers use two-line `SectionHeader(title:subtitle:)` inside `HistoryListTable` header hosting (opaque page-color band, no `.bar`); label + subline never overlap at accessibility sizes.
 - [ ] Empty state preserved (`historyEmptyTitle` / `historyEmptySubtitle`).
 - [ ] Compact timer `safeAreaInset` preserved.
 - [ ] Nav bar visible at every scroll position (no collapse).

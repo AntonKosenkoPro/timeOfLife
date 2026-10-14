@@ -1,0 +1,55 @@
+## Context
+
+See proposal.md (Why). Current state: `HistoryView` renders day sections in a `ScrollView + LazyVStack(pinnedViews: [.sectionHeaders])` (deliberately not `List` — pinned `List` headers are re-hosted in a separate UIKit layer, so the `GeometryReader`-based elevation prefs that gate the day total never arrive). Each header paints `.background(Theme.backgroundPrimary)` — fully opaque — while the navigation bar floats transparent Liquid Glass with the system's automatic scroll-edge blur. Constraints from `docs/project-context.md`: `Theme` semantic colors only, EN+RU `L10n`, iOS 18 floor (no availability guards for older OS), Dynamic Type + light/dark support, spec-driven deltas only.
+
+External docs (ctx7 `/websites/developer_apple_swiftui`): `scrollEdgeEffectStyle` (automatic default; `.hard` = linear nearly-opaque boundary for pinned controls, `.soft` = subtle blurred boundary), `Material ultraThinMaterial toolbar background` (`.bar` matches system toolbars, iOS 15+), `pinnedViews LazyVStack section headers` (pin via `PinnedScrollableViews.sectionHeaders`). HIG Scroll Views (v26) + WWDC25 sessions 356/323: one scroll-edge effect per view, remove custom backgrounds behind bars, Calendar cited as the dense UI that tunes toward hard.
+
+## Goals / Non-Goals
+
+**Goals:**
+- Replace the opaque header slab with a translucent material + scroll-edge treatment continuous with the nav bar, on iPhone and iPad panes.
+- Decide material (`bar` vs thin/ultraThin), edge style (automatic vs hard), and header typography scale from on-device spike evidence, not training data.
+- Keep the elevation-gated total unless spike B proves native `List` strictly better.
+
+**Non-Goals:**
+- Per-header `.glassEffect()` capsules; readable-width (`maxContentWidth`) iPad reflow (follow-up); new strings; VoiceOver grammar changes.
+
+## Decisions
+
+### D1: Toolbar-matching `.bar` material (revised 2026-10-14)
+Header chrome is the `.bar` system material + hairline (the same blur family as the navigation bar, so no contrast seam; spike-A verdict: rows visibly blur beneath, total stays legible — `ultraThinMaterial` was too legible over dense rows). No opaque slab, no scroll-edge treatment (verified no-op on iOS 26 Liquid Glass). From-scratch user reqs (2026-10-14): sticky, day + total subline, no navbar contrast, iPhone-first (iPad may diverge), no rows visible above header, Calendar/Mail reference. Calendar ground truth corrected: headers DO stick (`IMG_2603.MP4` frames `calendar-ref-docked-*.png`). iOS 18 floor; no post-18 API gates remain.
+*Alternatives:* `.ultraThinMaterial` (more translucency, risks legibility over busy rows); keeping opaque with a top hairline (rejected — preserves the slab cut the issue reports).
+
+### D2: Elevation tracker deleted; day total is a static subline (revised by D5)
+User decision (2026-10-14, from the Calendar Agenda screencast `IMG_2603.MP4`): the day total becomes a static subheader line under the day label — always visible, like Calendar's "W43" week-number subline — instead of appearing only when pinned. This deletes the entire elevation mechanism (`elevatedGroupID`, `HeaderFramePreferenceKey`, header `GeometryReader`, `onPreferenceChange`, scroll coordinate space) along with its proven failure mode (reporter screenshot shows a total on a non-pinned header; the never-clear hysteresis cannot self-correct). With the tracker gone, the original reason for avoiding `List` (prefs never reaching re-hosted headers) is gone too. D5 supersedes this decision's "keep `LazyVStack`" clause: the list migrates to native `List.plain`.
+*Alternatives:* unpinned scrolling headers exactly like Calendar Agenda (rejected — pinned day context is the point of sticky plain headers per HIG, and our lists are long).
+
+### D3: Two-line Calendar-grammar header, title scale unchanged
+`SectionHeader` gains an optional subline (nil in editor usage — pure additive, no existing call site changes): line 1 day label (`.title2.bold()`, unchanged scale), line 2 total + "tracked" (`.caption`, `Theme.textSecondary`, `monospacedDigit()` — the exact total view that used to be the trailing slot, moved down). No new strings, VoiceOver header label becomes uniformly "Today, 8h 30m tracked" (simpler than the old state-dependent label). Title downscaling is explicitly deferred: placement, not scale, is what the issue and the user decision target; spike screenshots will show whether `.title2.bold()` still shouts.
+*Alternatives:* downscale title unconditionally (rejected — bigger visual-contract change than authorized); trailing total kept + subline added (rejected — duplicates the total).
+
+### D4: Custom ScrollView clipping is unfixable — abandoned (evidence 2026-10-14)
+Glass stays on the navigation/toolbar layer only. `.scrollEdgeEffectStyle` + `.toolbarBackground` are no-ops on iOS 26 Liquid Glass. Three custom clipping attempts failed on-device: a `topClearance` Spacer created a giant void above the list (user-rejected), a frame-anchored overlay fade cover measured with named-space preferences mis-measured on iOS 18 (pinned headers resolve named spaces content-side), and a global-coordinate-measured cover still let scrolled rows paint over the status bar on iOS 18 — pixel probes show scroll content composites above overlays there (the "portal" behavior is per-OS-version, not deterministic). Conclusion: no SwiftUI overlay/cover mechanism reliably hides rows scrolling under transparent chrome on both iOS 18 and iOS 26.
+*Alternatives:* keep iterating on cover anchoring (rejected — three consecutive failures, each verified with red-probe evidence; the mechanism itself is the problem).
+
+### D5: Native `List.plain` — superseded by D6 (2026-10-14)
+Consolidated user requirements (2026-10-14): sticky; day + total subline; **no contrast with the navbar if sticky**; **as native as possible while fitting the requirements**; no rows above the header; Calendar/Mail reference; no void, no fade over the first header. Migrated from `ScrollView + LazyVStack` to native `List` (`.listStyle(.plain)`) with stripped chrome (hidden separators, zeroed row insets, `listRowBackground(Theme.backgroundPrimary)`, `scrollContentBackground(.hidden)`), header pinning + `SectionHeader(title:subtitle:)` in `.bar`. Verified on-device; superseded by D6 (the `.bar` header material reads as a rectangle slab) the same day.
+*Alternatives:* keep the custom ScrollView (rejected — D4); cover overlays (rejected — D4); `Form`/grouped inset styles (rejected — visually heavy chrome, less Calendar-like).
+
+### D6: UIKit `UITableView(.plain)` bridge — bare headers with deterministic occlusion (final, 2026-10-14)
+User verdict on the on-device pass: "These rectangles around Headers seems excessive. Could we remove them?" — the `.bar` material band pinned over dense rows reads as a boxed slab. Removing the box on `List` is impossible to make correct: pinned SwiftUI headers **cannot occlude rows on iOS 18** — bare (no background) headers collide with scrolled row text, and an opaque page-color header still gets painted over by cells compositing above it (verified on-device, both attempts); the reporter's iOS 27 screenshot shows the same bleed in reverse. `HistoryListTable` (new `UIViewRepresentable`) hosts a `UITableView(style: .plain)` whose rows and headers keep the existing SwiftUI components (`EntryRow`, `SectionHeader`) via `UIHostingConfiguration` margins-zero: rows carry the horizontal padding, header content paints an opaque `Theme.backgroundPrimary` band full-width — invisible against the page at rest, deterministic occluder when pinned (UIKit draws pinned header views above cells on every OS). Table chrome stripped: no separators, clear/`listRowBackground`-free transparent cells (`UIBackgroundConfiguration.clear()`), clear background, row/header estimates set, tap → entry-form push and pull-to-refresh through closures, `HistoryList` accessibility identifier preserved. No `.bar`, no hairline, no contrast with the navbar (bare type over the page). Evidence: `evidence/3.2-uikit-table-{iphone-{dark,light},ipad-light}-{rest,scrolled}.png`; tap-to-edit verified on-device on iOS 18 and iOS 27. Known edge (documented, self-healing): a hard synthetic momentum fling downward at the top can momentarily freeze the stretch offset after a fast-resolving pull; the next touch settles it — retirement is guarded (in-flight flag, drag-end/deceleration net, post-dismiss settle net).
+*Alternatives:* keep `List` with bare headers (rejected — pinned occlusion impossible on the iOS 18 floor); keep `.bar` slab (rejected by user); ScrollView + overlay covers (rejected — D4).
+
+## Risks / Trade-offs
+
+- [Risk] Translucent header illegible over dense/long entry text → Mitigation: spike matrix covers light/dark + real data; Reduce Transparency forces opaque per spec.
+- [Risk] Two-line pinned header consumes vertical space / subline overlaps label at large Dynamic Type → Mitigation: spec scenario pins non-overlap at accessibility sizes; verified in spike 2.4 on-device.
+- [Trade-off] The History list is a UIKit table behind SwiftUI components — accepted: read-only list semantics survive (no selection state retained, tap routed to the entry-form push), reuse is native, and the same `EntryRow`/`SectionHeader` components render inside `UIHostingConfiguration`. Tracker deletion removes the oscillation/staleness class entirely (no scroll-linked state left in the view).
+
+## Migration Plan
+
+Visual-only change, no data migration. Rollout: spikes (throwaway) → implement winner → snapshot evidence (iPhone + iPad landscape, light/dark) → archive folds the delta into `history-entry-list`. Rollback: revert header background + edge-effect lines; spec delta reverted with it.
+
+## Open Questions
+
+None blocking: soft-vs-hard, `.bar`-vs-thinner, and typography scale are all resolved by the spike evidence criteria above without changing specs, approach, or task breakdown.

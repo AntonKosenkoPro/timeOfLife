@@ -72,6 +72,7 @@ extension AppContainer {
         )
 
         seed(screen: screen, sessionStore: sessionStore, navigation: navigation)
+        seedHistoryIfNeeded(screen: screen, localStore: localStore)
         return container
     }
 
@@ -109,10 +110,66 @@ extension AppContainer {
                 id: "ui-test", email: "user@example.com", emailVerified: true
             ))
             navigation.path = []
+        case "history":
+            // History with committed entries across three day groups (fix-35
+            // repro/spike harness): the shell opens on Track and the loop
+            // taps the History tab. Entries carry no categories (fallback
+            // icon rows) — the headers and totals are what is inspected.
+            sessionStore.setSignedIn(CachedSession(
+                id: "ui-test", email: "user@example.com", emailVerified: true
+            ))
+            navigation.path = []
         default:
             // "welcome" (and any unknown value) → auth-flow root.
             sessionStore.setSignedOut()
             navigation.path = []
+        }
+    }
+
+    /// Kicks off History entry seeding for the `"history"` screen.
+    /// Actor-isolated seeding runs before the first History load (enqueued
+    /// at init, ahead of any appear-driven read).
+    private static func seedHistoryIfNeeded(screen: String, localStore: LocalStore) {
+        guard screen == "history" else { return }
+        Task { await seedHistoryEntries(into: localStore) }
+    }
+
+    /// Seeds committed entries across three calendar days (today, yesterday,
+    /// three days ago) for the History repro/spike harness. Deterministic
+    /// relative to `now` so day labels always read Today / Yesterday /
+    /// absolute. Failures are ignored: the harness degrades to an empty
+    /// History rather than crashing the loop.
+    private static func seedHistoryEntries(into store: LocalStore) async {
+        let calendar = Calendar(identifier: .gregorian)
+        let now = Date()
+        let dayStarts = [
+            calendar.startOfDay(for: now),
+            calendar.date(byAdding: .day, value: -1, to: calendar.startOfDay(for: now))!,
+            calendar.date(byAdding: .day, value: -3, to: calendar.startOfDay(for: now))!,
+        ]
+        let texts = [
+            "Morning run", "Deep work", "Code review", "Lunch break",
+            "Design sync", "Inbox zero", "Gym session", "Reading",
+            "Side project", "Evening walk",
+        ]
+        let dayCounts = [10, 6, 4]
+        for (dayIndex, dayStart) in dayStarts.enumerated() {
+            for i in 0..<dayCounts[dayIndex] {
+                let start = calendar.date(
+                    byAdding: .minute,
+                    value: 8 * 60 + i * 47,
+                    to: dayStart
+                )!
+                let minutes = 25 + (i * 13) % 65
+                let entry = TimeEntry(
+                    id: "uitest-h-\(dayIndex)-\(i)",
+                    activityText: texts[(i + dayIndex * 3) % texts.count],
+                    startedAt: start,
+                    endedAt: calendar.date(byAdding: .minute, value: minutes, to: start),
+                    durationSeconds: minutes * 60
+                )
+                _ = try? await store.createEntry(entry)
+            }
         }
     }
 }
