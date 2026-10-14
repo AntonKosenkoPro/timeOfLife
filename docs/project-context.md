@@ -201,6 +201,10 @@ The backend is deployed to a **Google Cloud Compute Engine VM** (`timeoflife-bac
 
 **Production URL**: `https://timeoflife-api.antonkosenko.pro`.
 
+**Database topology** (remote since 2026-10-13, `migrate-db-to-supabase-free`): the relay's system of record is Supabase Postgres 17 (N. Virginia) reached via the session-mode pooler (`aws-0-us-east-1.pooler.supabase.com:5432`, `sslmode=require`, pool capped at 5). `DATABASE_URL` selects the database and is rendered into the VM `.env` from the GitHub `stage`-env secret on every deploy — empty keeps VM-local Postgres (rollback is config-only). The orphan VM `pgdata` volume is retained, never mounted. **Never reboot casually**: the original GCE `startup-script` metadata rewrote deploy-managed files with placeholders on every boot (found + neutered 2026-10-14 after a reboot clobbered `.env`/compose/nginx conf); post-boot, always re-run the `backend` workflow and verify `/health`.
+
+**Backup floor**: weekly `pg_dump` (Sunday 03:00 UTC VM cron) to `gs://lifio-supabase-backups` (30-day retention, sha256 per artifact); quota guard runs Sunday 04:00 UTC (`supabase-size-check.sh`, alert line 350 MB of the 500 MB read-only tripwire). Cron-failure notification is still unwired (no MTA on the VM) — follow-up: ping a dead-man's-switch check on failure. **Paid-tier trigger**: armed, not tripped (11 MB measured 2026-10-14); upgrade at sustained >70% or at launch.
+
 **Required GitHub Actions secrets**: `VM_HOST` (VM external IP), `VM_USER` (SSH user `deploy`), `VM_SSH_KEY` (SSH private key for deployment).
 
 **iOS production config**: `API_BASE_URL` is per build configuration, injected into `Info.plist` via xcconfig: `Debug` → `Config.Debug.xcconfig` → `http://127.0.0.1:8080` (local backend; ATS allows plain HTTP to `127.0.0.1` only); `Release` → `Config.Release.xcconfig` → `https://timeoflife-api.antonkosenko.pro` (production, HTTPS — no ATS exception needed). `AppConfig` reads it at runtime and falls back to the dev URL if missing/malformed. Unit tests run under `Debug`, so they keep asserting `127.0.0.1:8080`.
