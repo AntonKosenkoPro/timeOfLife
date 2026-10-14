@@ -62,6 +62,10 @@ struct HistoryListTable: UIViewRepresentable {
         table.rowHeight = UITableView.automaticDimension
         table.estimatedRowHeight = 66
         table.estimatedSectionHeaderHeight = 44
+        // iOS 26+ inserts clearance above pinned headers by default, so the
+        // header docks low, leaving a band where the outgoing section's row
+        // stays visible. Pin the header flush below the navigation bar.
+        table.sectionHeaderTopPadding = 0
         table.backgroundColor = .clear
         table.accessibilityIdentifier = "HistoryList"
         let control = UIRefreshControl()
