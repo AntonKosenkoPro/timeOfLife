@@ -43,6 +43,12 @@ struct HistorySectionModel: Equatable {
 /// actions); a row tap and the pull-to-refresh land through the closures.
 struct HistoryListTable: UIViewRepresentable {
     let sectionModels: [HistorySectionModel]
+    /// Bottom content inset (tab bar + compact-timer safe area, measured in
+    /// SwiftUI outside the ignored subtree): the bottom-edge ignore zeroes
+    /// the automatic adjustment, so the behavior is `.never` and this inset
+    /// is applied explicitly to `contentInset.bottom` (D7). Zero until the
+    /// first measurement.
+    let bottomContentInset: CGFloat
     let entryTapped: (TimeEntry) -> Void
     let refresh: () async -> Void
 
@@ -68,6 +74,12 @@ struct HistoryListTable: UIViewRepresentable {
         table.sectionHeaderTopPadding = 0
         table.backgroundColor = .clear
         table.accessibilityIdentifier = "HistoryList"
+        // Bottom-edge ignore (D7) zeroes the automatic content adjustment,
+        // so it is disabled and the SwiftUI-measured bottom inset
+        // (tab bar + compact timer) is applied explicitly in
+        // `setBottomInset`. Top is unaffected: the frame still stops at the
+        // safe area with a zero top inset, exactly as before.
+        table.contentInsetAdjustmentBehavior = .never
         let control = UIRefreshControl()
         control.addTarget(
             context.coordinator,
@@ -77,6 +89,7 @@ struct HistoryListTable: UIViewRepresentable {
         table.refreshControl = control
         context.coordinator.table = table
         context.coordinator.apply(sectionModels, in: table)
+        context.coordinator.setBottomInset(bottomContentInset, in: table)
         return table
     }
 
@@ -84,6 +97,7 @@ struct HistoryListTable: UIViewRepresentable {
         let coordinator = context.coordinator
         coordinator.entryTapped = entryTapped
         coordinator.refresh = refresh
+        coordinator.setBottomInset(bottomContentInset, in: table)
         coordinator.apply(sectionModels, in: table)
         coordinator.settleStaleRefresh(in: table)
     }
@@ -122,6 +136,17 @@ struct HistoryListTable: UIViewRepresentable {
             defer { appliedSectionModels = models }
             guard models != appliedSectionModels else { return }
             table.reloadData()
+        }
+
+        /// Restores the bottom content inset (tab bar + compact timer,
+        /// measured in SwiftUI): the representable's bottom-edge ignore
+        /// zeroes the automatic adjustment, so the behavior is set to
+        /// `.never` (set once in `makeUIView`) and the measured inset is
+        /// applied explicitly here. Guarded: setting it unconditionally
+        /// re-triggers layout on every SwiftUI re-render.
+        func setBottomInset(_ inset: CGFloat, in table: UITableView) {
+            guard table.contentInset.bottom != inset else { return }
+            table.contentInset.bottom = inset
         }
 
         @objc

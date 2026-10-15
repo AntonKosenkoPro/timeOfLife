@@ -41,6 +41,12 @@ struct HistoryView: View {
     @StateObject private var vm: HistoryViewModel
     /// Owns the pull-to-refresh verdict flow (history-pull-to-sync spec).
     @StateObject private var pull: HistoryPullModel
+    /// Bottom safe-area inset (tab bar + compact-timer `safeAreaInset`,
+    /// measured below): `.ignoresSafeArea(.bottom)` on the table zeroes the
+    /// automatic bottom content inset, so the measured value is passed into
+    /// the bridge and applied explicitly (D7). Changes
+    /// only on rotation/timer visibility — no scroll linkage.
+    @State private var bottomSafeInset: CGFloat = 0
     /// Presents the Log Time sheet (manual-entry spec). Owned by the shell
     /// so the [+] shares the nav-bar toolbar scope; the sheet and its
     /// refresh stay here.
@@ -97,6 +103,20 @@ struct HistoryView: View {
                 } else {
                     historyList
                 }
+            }
+            // Measures the bottom safe area (tab bar + compact-timer inset)
+            // OUTSIDE the table's ignored subtree (D7): a reader inside the
+            // table would observe the ignored (zeroed) value.
+            .background(
+                GeometryReader { proxy in
+                    Color.clear.preference(
+                        key: BottomSafeInsetPreferenceKey.self,
+                        value: proxy.safeAreaInsets.bottom
+                    )
+                }
+            )
+            .onPreferenceChange(BottomSafeInsetPreferenceKey.self) {
+                bottomSafeInset = $0
             }
         }
         .background(Theme.backgroundPrimary.ignoresSafeArea())
@@ -224,12 +244,23 @@ struct HistoryView: View {
     /// occlusion of scrolled rows on every OS — SwiftUI's `List` cannot
     /// clip rows above pinned headers on iOS 18, and a custom ScrollView
     /// loses the same clipping to overlay portals there.
+    ///
+    /// Bottom edge-to-edge (fix-history-sticky-headers D7): the table frame
+    /// extends under the glass tab bar so scrolled rows blur beneath it
+    /// (TestFlight parity). Only the bottom edge is ignored — the top stays
+    /// stopped at the safe area, preserving the D6 nav-bar guarantee. The
+    /// ignore also zeroes the automatic bottom content inset, so the
+    /// measured `bottomSafeInset` (tab bar + compact timer) is passed in
+    /// and applied explicitly to the table's bottom content inset — the
+    /// last row stays reachable above the timer/tab-bar chrome.
     private var historyList: some View {
         HistoryListTable(
             sectionModels: daySectionModels,
+            bottomContentInset: bottomSafeInset,
             entryTapped: { entry in shell.historyPath.append(.entry(entry)) },
             refresh: { await pull.refresh() }
         )
+        .ignoresSafeArea(.container, edges: .bottom)
     }
 
     private var daySectionModels: [HistorySectionModel] {
@@ -271,6 +302,19 @@ private struct PullNoticeBanner: View {
             .frame(maxWidth: .infinity)
             .background(Theme.backgroundSecondary)
             .accessibilityIdentifier("HistoryOfflineNotice")
+    }
+}
+
+// MARK: - Bottom safe-area measurement (D7)
+
+/// Carries the measured bottom safe area (tab bar + compact-timer inset)
+/// from the background reader to `HistoryView`. Written and read only on
+/// the main actor (SwiftUI layout passes); `nonisolated(unsafe)` satisfies
+/// the strict-concurrency check for the required mutable `defaultValue`.
+private struct BottomSafeInsetPreferenceKey: PreferenceKey {
+    nonisolated(unsafe) static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
     }
 }
 
