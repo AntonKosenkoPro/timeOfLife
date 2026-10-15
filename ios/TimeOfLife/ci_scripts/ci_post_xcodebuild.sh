@@ -33,11 +33,10 @@ if ! command -v sentry-cli >/dev/null 2>&1; then
     echo "WARNING — sentry-cli install failed; skipping dSYM uploads (crashes from this build will be unsymbolicated). Not failing the archive."
     exit 0
   fi
-fi
-
-if ! command -v sentry-cli >/dev/null 2>&1; then
-  echo "WARNING — sentry-cli unavailable after install (not on PATH); skipping dSYM uploads (crashes from this build will be unsymbolicated). Not failing the archive."
-  exit 0
+  if ! command -v sentry-cli >/dev/null 2>&1; then
+    echo "WARNING — sentry-cli unavailable after install (not on PATH); skipping dSYM uploads (crashes from this build will be unsymbolicated). Not failing the archive."
+    exit 0
+  fi
 fi
 
 echo "sentry-cli $(sentry-cli --version)"
