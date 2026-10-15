@@ -29,7 +29,7 @@
 
 ## 3. Roll out
 
-- [ ] 3.1 Implementing PR links issue #161, states the cutover date, and
+- [x] 3.1 Implementing PR links issue #161, states the cutover date, and
   shows one real trailer + one real footer as evidence (own dogfood).
-- [ ] 3.2 Note the deferred follow-up in the PR (CI lint enforcing markers)
+- [x] 3.2 Note the deferred follow-up in the PR (CI lint enforcing markers)
   without implementing it.
