@@ -18,14 +18,21 @@
 # degrades crash reports; a failed archive would block TestFlight entirely.
 set -e
 
-if [ -z "$CI_ARCHIVE_PATH" ] || [ ! -d "$CI_ARCHIVE_PATH/dSYMs" ]; then
-  echo "No archive dSYMs present — skipping Sentry upload (Test-only build)."
+if [ -z "$CI_ARCHIVE_PATH" ]; then
+  echo "No archive produced by this build (Test-only) — skipping Sentry upload."
+  exit 0
+fi
+if [ ! -d "$CI_ARCHIVE_PATH/dSYMs" ]; then
+  echo "WARNING — archive exists but dSYMs are missing; skipping Sentry upload (crashes from this build may be unsymbolicated)."
   exit 0
 fi
 
 if ! command -v sentry-cli >/dev/null 2>&1; then
   echo "sentry-cli not found — installing via Homebrew..."
-  brew install getsentry/tools/sentry-cli
+  if ! brew install getsentry/tools/sentry-cli; then
+    echo "WARNING — sentry-cli install failed; skipping dSYM uploads (crashes from this build will be unsymbolicated). Not failing the archive."
+    exit 0
+  fi
 fi
 
 echo "sentry-cli $(sentry-cli --version)"
