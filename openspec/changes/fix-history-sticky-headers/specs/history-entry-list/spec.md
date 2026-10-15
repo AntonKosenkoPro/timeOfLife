@@ -47,3 +47,14 @@ On regular-width (iPad) panes the pinned day group header SHALL keep the day lab
 #### Scenario: Large Dynamic Type keeps label and subline apart
 - **WHEN** the device uses an accessibility-large Dynamic Type size
 - **THEN** the day label and the total subline do not overlap or clip
+
+### Requirement: List content passes under the glass tab bar
+The History list SHALL extend its scroll content beneath the bottom tab bar so rows blur behind the glass mid-scroll (TestFlight parity); the bottom content inset SHALL keep the final row fully reachable above the tab bar and above the compact timer when it is shown.
+
+#### Scenario: Rows blur beneath the tab bar
+- **WHEN** the user scrolls History so content crosses the tab-bar line
+- **THEN** rows pass visibly blurred beneath the bar with no hard cut at its top edge
+
+#### Scenario: Final row reachable with and without the compact timer
+- **WHEN** the compact timer is shown or hidden
+- **THEN** the last entry row scrolls fully above the timer/tab-bar chrome (no row permanently obscured)

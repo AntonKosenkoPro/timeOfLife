@@ -43,3 +43,12 @@
   - DONE 2026-10-14: SCREENS/History.md (Layout bullet → bridge + occluder band; States table; checklist row), COMPONENTS.md (History usage: occluder in `HistoryListTable`, no `.bar`), project-context.md History bullet (bridge + pinned-occlusion rationale), design.md D5 marked superseded + D6 added; validate green earlier in 4.7.
 - [x] 4.9 Release build + install to Tony's iPhone for the user's final on-device pass.
   - DONE 2026-10-14: Release build SUCCEEDED; `devicectl device install app` to Tony's iPhone succeeded.
+
+## 5. Tab-bar transparency (in-PR regression, 2026-10-15)
+
+- [ ] 5.1 Reproduce on the PR head (`be5eda4`): `UITEST_SCREEN=history` harness, iPhone sim (iOS 18 + 26 if available); slow-scroll screen-recording with a row crossing the tab-bar line, compact timer off then on; file `evidence/5.1-tabbar-{rest,midscroll}[-timer].*`. Confirm Track/Insights still blur (History-local check).
+- [ ] 5.2 Confirm ctx7 bundle recorded in proposal (done above — no separate fetch needed).
+- [ ] 5.3 Implement design.md D7 (bottom edge-to-edge + bottom inset); top pinning/occlusion untouched; no new strings; `Theme` colors only.
+- [ ] 5.4 Re-run the identical 5.1 repro on the fixed tree; file after-evidence; rows blur under the bar, final row reachable, timer on/off.
+- [ ] 5.5 Gates: `swiftlint lint --strict`, warning-as-error build, focused History tests green (full `xcodebuild test` if the loop allows); `openspec validate --all --strict`.
+- [ ] 5.6 Docs re-pass (`Design/SCREENS/History.md` checklist if it describes the tab-bar behavior, `docs/project-context.md` only if architecture wording changed); PR description updated with evidence links.
