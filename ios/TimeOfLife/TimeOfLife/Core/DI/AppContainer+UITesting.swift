@@ -111,10 +111,11 @@ extension AppContainer {
             ))
             navigation.path = []
         case "history":
-            // History with committed entries across three day groups (fix-35
-            // repro/spike harness): the shell opens on Track and the loop
-            // taps the History tab. Entries carry no categories (fallback
-            // icon rows) — the headers and totals are what is inspected.
+            // History with committed entries across twelve day groups
+            // (repro/spike/scroll harness, 264 entries): the shell opens on
+            // Track and the loop taps the History tab. Entries carry no
+            // categories (fallback icon rows) — the headers, totals, and
+            // scroll behavior are what is inspected.
             sessionStore.setSignedIn(CachedSession(
                 id: "ui-test", email: "user@example.com", emailVerified: true
             ))
@@ -134,36 +135,43 @@ extension AppContainer {
         Task { await seedHistoryEntries(into: localStore) }
     }
 
-    /// Seeds committed entries across three calendar days (today, yesterday,
-    /// three days ago) for the History repro/spike harness. Deterministic
-    /// relative to `now` so day labels always read Today / Yesterday /
-    /// absolute. Failures are ignored: the harness degrades to an empty
-    /// History rather than crashing the loop.
+    /// Seeds committed entries across twelve calendar days (today back
+    /// eleven days) for the History repro/spike/scroll harness: 22 entries
+    /// per day, 264 total. Deterministic relative to `now` so day labels
+    /// always read Today / Yesterday / absolute. A couple of long activity
+    /// texts exercise row wrapping. Failures are ignored: the harness
+    /// degrades to an empty History rather than crashing the loop.
+    /// Re-running against an already-seeded store is a no-op in effect
+    /// (duplicate ids throw inside the `try?`).
     private static func seedHistoryEntries(into store: LocalStore) async {
         let calendar = Calendar(identifier: .gregorian)
         let now = Date()
-        let dayStarts = [
-            calendar.startOfDay(for: now),
-            calendar.date(byAdding: .day, value: -1, to: calendar.startOfDay(for: now))!,
-            calendar.date(byAdding: .day, value: -3, to: calendar.startOfDay(for: now))!,
-        ]
+        let todayStart = calendar.startOfDay(for: now)
         let texts = [
             "Morning run", "Deep work", "Code review", "Lunch break",
             "Design sync", "Inbox zero", "Gym session", "Reading",
             "Side project", "Evening walk",
+            "Quarterly planning workshop with the platform team",
+            "Dentist appointment and pharmacy pickup afterwards",
         ]
-        let dayCounts = [10, 6, 4]
-        for (dayIndex, dayStart) in dayStarts.enumerated() {
-            for i in 0..<dayCounts[dayIndex] {
+        let days = 12
+        let perDay = 22
+        for dayIndex in 0..<days {
+            let dayStart = calendar.date(
+                byAdding: .day, value: -dayIndex, to: todayStart
+            )!
+            for i in 0..<perDay {
+                // 00:05 + hourly slots: the last start (21:05) plus the
+                // longest duration (89m) still ends before midnight.
                 let start = calendar.date(
                     byAdding: .minute,
-                    value: 8 * 60 + i * 47,
+                    value: 5 + i * 60,
                     to: dayStart
                 )!
-                let minutes = 25 + (i * 13) % 65
+                let minutes = 20 + (i * 17 + dayIndex * 7) % 70
                 let entry = TimeEntry(
                     id: "uitest-h-\(dayIndex)-\(i)",
-                    activityText: texts[(i + dayIndex * 3) % texts.count],
+                    activityText: texts[(i + dayIndex * 5) % texts.count],
                     startedAt: start,
                     endedAt: calendar.date(byAdding: .minute, value: minutes, to: start),
                     durationSeconds: minutes * 60

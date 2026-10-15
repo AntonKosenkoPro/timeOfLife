@@ -47,6 +47,8 @@ The `UIViewRepresentable` frame stops at the safe area on every edge — the D6 
 
 Correction (same day, simulator-verified): the bottom ignore alone also discards the timer's added safe area (`safeAreaInset` is safe-area addition), zeroing the automatic bottom inset — the final row parked behind the compact timer with the timer up. So the bottom inset (tab bar + timer, measured in SwiftUI outside the ignored subtree via a background `GeometryReader` preference — static per rotation/timer visibility, no scroll linkage) is passed into the bridge, where the adjustment behavior is set to `.never` and the measured value is applied explicitly to `contentInset.bottom` (`additionalSafeAreaInsets` is a view-controller API and does not exist on `UIView`). The measuring reader sits on the list container, never inside the ignored table.
 
+OS gating (2026-10-15, user verdict on-device): ghost rows behind the full-width iOS 18 bar read wrong; behind the floating iOS 26+ glass they read right. So the bottom bleed (ignore + measured inset) applies on iOS 26+ only (Swift `if #available(iOS 26, *)` at the call site — no new API, just the verified D7 mechanism); on iOS 18 the table keeps the default safe-area frame with a zero explicit inset, which reproduces the pre-bridge parking exactly. The bar itself is never restyled on either OS — only whether content flows under it changes.
+
 ## Risks / Trade-offs
 
 - [Risk] Translucent header illegible over dense/long entry text → Mitigation: spike matrix covers light/dark + real data; Reduce Transparency forces opaque per spec.

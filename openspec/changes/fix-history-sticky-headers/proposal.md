@@ -7,7 +7,8 @@ History day-group headers render as an opaque slab (`Theme.backgroundPrimary`) d
 - History sticky day headers stop being opaque: pinned and in-list headers share one continuous translucent treatment with the navigation bar (system material + scroll-edge effect), Calendar-Agenda-like.
 - The exact winning treatment (material, soft-vs-hard edge style, header typography scale) is decided by three throwaway spikes run on-device (iPhone + iPad landscape, light + dark, Reduce Transparency) before implementation.
 - Elevation-gated day total ("2h 35m tracked" only when pinned) is preserved unless the spikes prove the native-`List` option wins, in which case the total moves to an always-visible home (decision recorded in design.md).
-- History list content returns under the glass tab bar (rows blur beneath it mid-scroll, TestFlight parity): bottom-edge handling of the `HistoryListTable` bridge only — top pinning/occlusion (design.md D6) untouched (follow-up 2026-10-15, design.md D7).
+- History list content returns under the glass tab bar (rows blur beneath it mid-scroll, TestFlight parity): bottom-edge handling of the `HistoryListTable` bridge only — top pinning/occlusion (design.md D6) untouched (follow-up 2026-10-15, design.md D7). Per user verdict the bleed applies on iOS 26+ only; iOS 18 keeps the default bar (design.md D7 gating, tasks §6).
+- DEBUG harness seeds ~264 History entries across 12 day groups for realistic scroll testing (tasks §6; seeds only, no production behavior).
 - No new strings, no data or API changes, no behavior changes outside History headers.
 
 ## Capabilities

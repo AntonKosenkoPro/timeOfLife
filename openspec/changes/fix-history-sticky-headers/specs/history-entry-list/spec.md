@@ -49,11 +49,15 @@ On regular-width (iPad) panes the pinned day group header SHALL keep the day lab
 - **THEN** the day label and the total subline do not overlap or clip
 
 ### Requirement: List content passes under the glass tab bar
-The History list SHALL extend its scroll content beneath the bottom tab bar so rows blur behind the glass mid-scroll (TestFlight parity); the bottom content inset SHALL keep the final row fully reachable above the tab bar and above the compact timer when it is shown.
+On iOS 26 and later, the History list SHALL extend its scroll content beneath the bottom tab bar so rows blur behind the glass mid-scroll (TestFlight parity); the bottom content inset SHALL keep the final row fully reachable above the tab bar and above the compact timer when it is shown. On iOS 18 the list SHALL stop at the safe area above the default tab bar with no content beneath it.
 
-#### Scenario: Rows blur beneath the tab bar
-- **WHEN** the user scrolls History so content crosses the tab-bar line
+#### Scenario: Rows blur beneath the tab bar (iOS 26+)
+- **WHEN** the user scrolls History so content crosses the tab-bar line on iOS 26 or later
 - **THEN** rows pass visibly blurred beneath the bar with no hard cut at its top edge
+
+#### Scenario: Default tab bar on iOS 18
+- **WHEN** the user scrolls History on iOS 18
+- **THEN** content stops at the safe area above the default tab bar (no rows beneath it), matching the pre-bridge parking
 
 #### Scenario: Final row reachable with and without the compact timer
 - **WHEN** the compact timer is shown or hidden

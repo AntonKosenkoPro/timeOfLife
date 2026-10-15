@@ -253,14 +253,27 @@ struct HistoryView: View {
     /// measured `bottomSafeInset` (tab bar + compact timer) is passed in
     /// and applied explicitly to the table's bottom content inset — the
     /// last row stays reachable above the timer/tab-bar chrome.
+    ///
+    /// iOS 26+ only (`drawsUnderTabBar`): on iOS 18 the table keeps the
+    /// default safe-area frame with a zero explicit inset — ghost rows
+    /// behind the full-width bar read wrong there, right behind the
+    /// floating glass here.
     private var historyList: some View {
         HistoryListTable(
             sectionModels: daySectionModels,
-            bottomContentInset: bottomSafeInset,
+            bottomContentInset: drawsUnderTabBar ? bottomSafeInset : 0,
             entryTapped: { entry in shell.historyPath.append(.entry(entry)) },
             refresh: { await pull.refresh() }
         )
-        .ignoresSafeArea(.container, edges: .bottom)
+        .ignoresSafeArea(.container, edges: drawsUnderTabBar ? Edge.Set.bottom : Edge.Set())
+    }
+
+    /// Whether list content flows under the tab bar (D7 gating): the
+    /// translucent blur over rows suits the floating iOS 26+ glass bar;
+    /// iOS 18 keeps the default bar.
+    private var drawsUnderTabBar: Bool {
+        if #available(iOS 26, *) { return true }
+        return false
     }
 
     private var daySectionModels: [HistorySectionModel] {
