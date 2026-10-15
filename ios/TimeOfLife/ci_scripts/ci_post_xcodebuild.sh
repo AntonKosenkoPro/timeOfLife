@@ -23,7 +23,7 @@ if [ -z "$CI_ARCHIVE_PATH" ]; then
   exit 0
 fi
 if [ ! -d "$CI_ARCHIVE_PATH/dSYMs" ]; then
-  echo "WARNING — archive exists but dSYMs are missing; skipping Sentry upload (crashes from this build may be unsymbolicated)."
+  echo "WARNING — no dSYMs at $CI_ARCHIVE_PATH/dSYMs; skipping Sentry upload (crashes from this build may be unsymbolicated)."
   exit 0
 fi
 
@@ -33,6 +33,11 @@ if ! command -v sentry-cli >/dev/null 2>&1; then
     echo "WARNING — sentry-cli install failed; skipping dSYM uploads (crashes from this build will be unsymbolicated). Not failing the archive."
     exit 0
   fi
+fi
+
+if ! command -v sentry-cli >/dev/null 2>&1; then
+  echo "WARNING — sentry-cli unavailable after install (not on PATH); skipping dSYM uploads (crashes from this build will be unsymbolicated). Not failing the archive."
+  exit 0
 fi
 
 echo "sentry-cli $(sentry-cli --version)"
