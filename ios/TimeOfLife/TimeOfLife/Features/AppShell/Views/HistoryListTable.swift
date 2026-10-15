@@ -184,15 +184,18 @@ extension HistoryListTable.Coordinator: UITableViewDataSource, UITableViewDelega
                 hasNotes: row.hasNotes
             )
             .padding(.horizontal, Theme.spacingMedium)
+            // VoiceOver role parity with the previous SwiftUI composition
+            // (tap opens the entry form): EntryRow carries no button trait,
+            // and the hosted row element — not the cell — is what VoiceOver
+            // exposes (a trait on the cell never reaches it; verified via
+            // the simulator accessibility tree).
+            .accessibilityAddTraits(.isButton)
         }
         .margins(.all, 0)
         // Transparent cell over the page color; the row content carries the
         // horizontal padding (the hosting configuration adds none).
         cell.backgroundConfiguration = UIBackgroundConfiguration.clear()
         cell.selectionStyle = .none
-        // VoiceOver role parity with the previous SwiftUI composition
-        // (tap opens the entry form): EntryRow carries no button trait.
-        cell.accessibilityTraits = .button
         return cell
     }
 
