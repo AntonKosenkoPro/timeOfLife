@@ -190,6 +190,9 @@ extension HistoryListTable.Coordinator: UITableViewDataSource, UITableViewDelega
         // horizontal padding (the hosting configuration adds none).
         cell.backgroundConfiguration = UIBackgroundConfiguration.clear()
         cell.selectionStyle = .none
+        // VoiceOver role parity with the previous SwiftUI composition
+        // (tap opens the entry form): EntryRow carries no button trait.
+        cell.accessibilityTraits = .button
         return cell
     }
 
