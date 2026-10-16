@@ -63,12 +63,15 @@ swiftlint lint --strict
 # a single token, so prose ("// return the value") never trips the build.
 # Fail closed: a renamed/missing scan dir must break the build, not
 # silently disable the gate below (`|| true` would swallow grep's error).
-for d in TimeOfLife LifioLiveActivities LifioLiveActivityCore TimeOfLifeTests; do
+# Single source of truth for the gate's scan roots (loop + grep below must
+# never drift apart). Unquoted `$scan_dirs` word-splitting is intentional.
+scan_dirs="TimeOfLife LifioLiveActivities LifioLiveActivityCore TimeOfLifeTests"
+for d in $scan_dirs; do
   [ -d "$d" ] || { echo "error: expected scan dir '$d' is missing — commented-code gate cannot run"; exit 1; }
 done
 commented_code="$(grep -rEn --include='*.swift' \
   '// ?(func [A-Za-z_]+[(]|let [A-Za-z_]+ ?[:=]|var [A-Za-z_]+ ?[:=]|class [A-Za-z_]+ ?[<(:{]|struct [A-Za-z_]+ ?[<(:{]|enum [A-Za-z_]+ ?[<(:{]|if [^{]*[{]|for [^{]*[{]|while [^{]*[{]|return [^ ]+$)' \
-  TimeOfLife LifioLiveActivities LifioLiveActivityCore TimeOfLifeTests \
+  $scan_dirs \
   | grep -v '///' | grep -v '// MARK:' | grep -vE 'https?://' || true)"
 if [ -n "$commented_code" ]; then
   printf '%s\n' "$commented_code"
