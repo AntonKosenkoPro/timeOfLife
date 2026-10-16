@@ -43,6 +43,6 @@ struct SectionHeader: View {
 #Preview("Section header with subtitle") {
     SectionHeader(title: "Today", subtitle: "8h 30m tracked")
         .padding(.horizontal, Theme.spacingMedium)
-        .background(.bar)
+        .background(Theme.backgroundPrimary)
 }
 #endif

@@ -128,8 +128,10 @@ extension AppContainer {
     }
 
     /// Kicks off History entry seeding for the `"history"` screen.
-    /// Actor-isolated seeding runs before the first History load (enqueued
-    /// at init, ahead of any appear-driven read).
+    /// The seeding task is enqueued at init, ahead of any appear-driven
+    /// read (best-effort ordering, not a runtime guarantee: a read that
+    /// interleaves mid-seed would see a partial list; History's
+    /// appear/disappear reloads cover that).
     private static func seedHistoryIfNeeded(screen: String, localStore: LocalStore) {
         guard screen == "history" else { return }
         Task { await seedHistoryEntries(into: localStore) }
@@ -142,7 +144,10 @@ extension AppContainer {
     /// texts exercise row wrapping. Failures are ignored: the harness
     /// degrades to an empty History rather than crashing the loop.
     /// Re-running against an already-seeded store is a no-op in effect
-    /// (duplicate ids throw inside the `try?`).
+    /// (`createEntry` is idempotent on `id`: a replay returns the existing
+    /// record and adds no outbox row). Silently ignored here are its
+    /// non-throwing `.invalid`/`.failure` results, matching the degrade-to-
+    /// empty policy above.
     private static func seedHistoryEntries(into store: LocalStore) async {
         let calendar = Calendar(identifier: .gregorian)
         let now = Date()
