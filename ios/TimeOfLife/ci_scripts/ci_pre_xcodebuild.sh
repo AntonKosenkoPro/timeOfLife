@@ -59,9 +59,13 @@ swiftlint lint --strict
 
 # Commented-out Swift gate (cleanup-dead-code-comments): `//` lines shaped like
 # code are dead code — delete them. Doc `///`, `// MARK:`, and URLs stay exempt.
-if grep -rEn --include='*.swift' \
-  '// ?(func [A-Za-z_]+[(]|let [A-Za-z_]+ ?[:=]|var [A-Za-z_]+ ?[:=]|class [A-Za-z_]+|struct [A-Za-z_]+|enum [A-Za-z_]+|if [^{]*[{]|for [^{]*[{]|while [^{]*[{]|return [^ ]+)' \
+# Declaration alternatives require a trailing `:`/`(`/`{` and `return` anchors to
+# a single token, so prose ("// return the value") never trips the build.
+commented_code="$(grep -rEn --include='*.swift' \
+  '// ?(func [A-Za-z_]+[(]|let [A-Za-z_]+ ?[:=]|var [A-Za-z_]+ ?[:=]|class [A-Za-z_]+ ?[:({]|struct [A-Za-z_]+ ?[:({]|enum [A-Za-z_]+ ?[:({]|if [^{]*[{]|for [^{]*[{]|while [^{]*[{]|return [^ ]+$)' \
   TimeOfLife LifioLiveActivities LifioLiveActivityCore TimeOfLifeTests \
-  | grep -v '///' | grep -v '// MARK:' | grep -vE 'https?://' | grep -q .; then
+  | grep -v '///' | grep -v '// MARK:' | grep -vE 'https?://' || true)"
+if [ -n "$commented_code" ]; then
+  printf '%s\n' "$commented_code"
   echo "error: commented-out Swift code found — delete it or convert to /// docs"; exit 1
 fi
