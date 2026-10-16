@@ -2,7 +2,7 @@
 
 ### Requirement: Untouched drafts use a display mapping with touch-to-adopt
 
-Pills and picker selections SHALL show minute-exact display values: the minute floor of Start, and for End the minute floor — except an EDIT prefill whose duration is strictly between zero and one minute (0 < end − start < 60s), where the End pill SHALL show `floor(start)` plus one minute (flooring both ends there would collapse, e.g. 0:00:15–0:00:25 to the invalid 0:00–0:00 pair). The pill time formatter truncates seconds, so pills always agree with the mapping. An EDIT prefill with 0 < duration < 60s SHALL keep its backing times untouched: the duration subtitle SHALL show the true duration (e.g. `33s`), the confirm action SHALL stay enabled for such untouched drafts, and saving SHALL write back the original backing times — a category/notes-only edit SHALL never force a time change. The first write through any of the four time pickers (Start/End × date/time) SHALL minute-normalize both ends (floor both — e.g. 23:59:34–00:01:58 becomes 23:59–00:01, 2m; 23:59:34–00:02:03 becomes 23:59–00:02, 3m), then apply the gesture on top; from then on the 1-minute floor and End picker ranges (manual-entry capability) apply and saving writes the draft. Normalization of a draft of at least one minute provably keeps at least one minute, so it SHALL never disable the confirm action by itself. A prefill with end at or before start SHALL keep the existing invalid path (confirm disabled).
+Pills and picker selections SHALL show minute-exact display values: the minute floor of Start, and for End the minute floor — except an EDIT prefill whose duration is strictly between zero and one minute (0 < end − start < 60s), where the End pill SHALL show `floor(start)` plus one minute (flooring both ends there would collapse, e.g. 0:00:15–0:00:25 to the invalid 0:00–0:00 pair). The pill time formatter truncates seconds, so pills always agree with the mapping. An EDIT prefill with 0 < duration < 60s SHALL keep its backing times untouched: the duration subtitle SHALL show the true duration (e.g. `33s`), the confirm action SHALL stay enabled for such untouched drafts, and saving SHALL write back the original backing times — a category/notes-only edit SHALL never force a time change. The first write through any of the four time pickers (Start/End × date/time) SHALL minute-normalize both ends (floor both — e.g. 23:59:34–00:01:58 becomes 23:59–00:01, 2m; 23:59:34–00:02:03 becomes 23:59–00:02, 3m), then apply the gesture on top; from then on the 1-minute floor and End picker ranges (manual-entry capability) apply and saving writes the draft. Normalization of a draft of at least one minute provably keeps at least one minute, so it SHALL never disable the confirm action by itself. End picker ranges SHALL derive from the minute-exact display values so the picker's selection always lies inside its range. A prefill with end at or before start SHALL keep the existing invalid path (confirm disabled, unbounded End date picker).
 
 #### Scenario: Sub-minute prefill displays mapped times with true subtitle
 
@@ -26,8 +26,13 @@ Pills and picker selections SHALL show minute-exact display values: the minute f
 
 #### Scenario: First time touch adopts display values
 
-- **WHEN** the user moves any time picker on such a draft
+- **WHEN** the user moves any time picker on a 2:35:00–2:35:33 draft
 - **THEN** the draft becomes the displayed 2:35–2:36 pair first, the gesture applies on top, and saving writes the resulting draft (always at least one minute long)
+
+#### Scenario: Corrupt prefill keeps unbounded pickers with disabled confirm
+
+- **WHEN** the form opens for a `manual` entry whose end precedes its start
+- **THEN** the End date picker is unbounded, the confirm action is disabled with the invalid-interval subtitle, and saving is refused
 
 ## MODIFIED Requirements
 
