@@ -568,34 +568,18 @@ struct LogTimeView: View {
         .clipped()
     }
 
-    /// Selectable range for a picker (nil = unbounded Start pickers).
-    /// End date: no day before the Start day. End time: from
-    /// `ceil(start + 60s)` when End shares the Start day, the whole End
-    /// day otherwise (any time on a later day already exceeds the floor).
-    /// Bounds recompute live from the draft. Same-day degenerate case
-    /// (Start in the last minute of the day, so no valid same-day End
-    /// exists) falls back to the full End day — the gate stays the
-    /// enforcer there instead of risking an inverted range.
+    /// Selectable range for a picker: Start pickers stay unbounded; End
+    /// ranges come from the view model (derived from the minute-exact
+    /// display values, so the picker's selection always lies inside — or
+    /// the range is nil). Bounds recompute live from the draft.
     private func range(for picker: InlinePicker) -> ClosedRange<Date>? {
-        let calendar = Calendar.current
         switch picker {
         case .startDate, .startTime:
             return nil
         case .endDate:
-            let lower = calendar.startOfDay(for: vm.startsAt)
-            return lower...Date.distantFuture
+            return vm.endDateRange
         case .endTime:
-            let endDay = calendar.startOfDay(for: vm.endsAt)
-            let endDayEnd = (calendar.date(byAdding: .day, value: 1, to: endDay) ?? endDay.addingTimeInterval(86_399))
-                .addingTimeInterval(-1)
-            guard calendar.isDate(vm.endsAt, inSameDayAs: vm.startsAt) else {
-                return endDay...endDayEnd
-            }
-            let lower = LogTimeViewModel.ceiledToMinute(
-                vm.startsAt.addingTimeInterval(LogTimeViewModel.minimumDuration)
-            )
-            guard lower <= endDayEnd else { return endDay...endDayEnd }
-            return lower...endDayEnd
+            return vm.endTimeRange
         }
     }
 

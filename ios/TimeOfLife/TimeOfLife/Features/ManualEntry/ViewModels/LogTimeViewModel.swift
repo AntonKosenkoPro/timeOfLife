@@ -333,6 +333,37 @@ final class LogTimeViewModel: ObservableObject {
         endsAt = mappedEnd
     }
 
+    /// Selectable End-date range: no day before the Start day. Nil when the
+    /// current End selection would fall below the bound (only reachable
+    /// with a corrupt end-before-start prefill) — an unbounded picker plus
+    /// the disabled gate beats a clamped selection there.
+    var endDateRange: ClosedRange<Date>? {
+        let lower = Calendar.current.startOfDay(for: displayStartsAt)
+        guard displayEndsAt >= lower else { return nil }
+        return lower...Date.distantFuture
+    }
+
+    /// Selectable End-time range, derived from the minute-exact display
+    /// Start so the selection (`displayEndsAt`) always lies inside: from
+    /// `displayStartsAt + 60s` when End shares the Start day, the whole End
+    /// day otherwise (any time on a later day already exceeds the floor).
+    /// Same-day degenerate case (no valid same-day End exists, or a
+    /// corrupt end-before-start selection) falls back to the full End day
+    /// with the gate as enforcer, instead of risking an inverted range or
+    /// an out-of-range selection.
+    var endTimeRange: ClosedRange<Date> {
+        let calendar = Calendar.current
+        let endDay = calendar.startOfDay(for: displayEndsAt)
+        let endDayEnd = (calendar.date(byAdding: .day, value: 1, to: endDay) ?? endDay.addingTimeInterval(86_399))
+            .addingTimeInterval(-1)
+        guard calendar.isDate(displayEndsAt, inSameDayAs: displayStartsAt) else {
+            return endDay...endDayEnd
+        }
+        let lower = Self.ceiledToMinute(displayStartsAt.addingTimeInterval(Self.minimumDuration))
+        guard lower <= endDayEnd, displayEndsAt >= lower else { return endDay...endDayEnd }
+        return lower...endDayEnd
+    }
+
     /// Ceils a date up to the minute boundary (minute-exact inputs stay
     /// exact: Double division of an integral-second interval by 60 is
     /// exact, so no epsilon is needed). Used for the same-day End time

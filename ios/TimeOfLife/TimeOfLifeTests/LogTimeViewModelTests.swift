@@ -631,6 +631,75 @@ struct LogTimeViewModelTests {
         #expect(vm.endsAt.timeIntervalSince(vm.startsAt) == 120)
     }
 
+    // MARK: - End range consistency (selection always inside range)
+
+    @Test("seconds grandfathered selection lies inside the end-time range")
+    func rangeContainsSecondsGrandfatheredSelection() {
+        // The bot's exact example: raw backing would bind 2:37, the
+        // display-derived bound is 2:36 == selection.
+        let day = Calendar.current.startOfDay(for: Date())
+        let start = day.addingTimeInterval(2 * 3_600 + 35 * 60 + 20)
+        let vm = makeViewModel(editing: storedEntry(start: start, duration: 33))
+
+        #expect(vm.endTimeRange.lowerBound == day.addingTimeInterval(2 * 3_600 + 36 * 60))
+        #expect(vm.endTimeRange.contains(vm.displayEndsAt))
+    }
+
+    @Test("normal seconds draft selection lies inside both end ranges")
+    func rangeContainsNormalSecondsSelection() {
+        let day = Calendar.current.startOfDay(for: Date())
+        let start = day.addingTimeInterval(2 * 3_600 + 35 * 60 + 33)
+        let vm = makeViewModel(editing: storedEntry(start: start, duration: 3_600))
+
+        #expect(vm.endTimeRange.contains(vm.displayEndsAt))
+        #expect(vm.endDateRange?.contains(vm.displayEndsAt) == true)
+    }
+
+    @Test("cross-day start move keeps the selection inside the end ranges")
+    func rangeFollowsCrossDayStartMove() {
+        let day = Calendar.current.startOfDay(for: Date())
+        let start = day.addingTimeInterval(10 * 3_600)
+        let vm = makeViewModel(editing: storedEntry(start: start, duration: 3_600))
+
+        vm.setStartsAt(start.addingTimeInterval(2 * 86_400))
+
+        #expect(vm.endTimeRange.contains(vm.displayEndsAt))
+        #expect(vm.endDateRange?.contains(vm.displayEndsAt) == true)
+    }
+
+    @Test("touched minute-exact bound is exactly start plus one minute")
+    func rangeBoundExactForMinuteExactStart() {
+        let day = Calendar.current.startOfDay(for: Date())
+        let start = day.addingTimeInterval(2 * 3_600 + 35 * 60)
+        let vm = makeViewModel(editing: storedEntry(start: start, duration: 3_600))
+
+        #expect(vm.endTimeRange.lowerBound == vm.displayStartsAt.addingTimeInterval(60))
+    }
+
+    @Test("corrupt same-day end-before-start falls back with the gate disabled")
+    func rangeCorruptSameDayFallback() {
+        let day = Calendar.current.startOfDay(for: Date())
+        let start = day.addingTimeInterval(3 * 3_600)
+        // End an hour before Start, same day.
+        let vm = makeViewModel(editing: storedEntry(start: start, duration: -3_600))
+
+        #expect(vm.endTimeRange.contains(vm.displayEndsAt))
+        #expect(!vm.isAddEnabled)
+        #expect(vm.durationSubtitleSeconds == nil)
+    }
+
+    @Test("corrupt cross-day end-before-start leaves the date picker unbounded")
+    func rangeCorruptCrossDayUnboundedDate() {
+        let day = Calendar.current.startOfDay(for: Date())
+        let start = day.addingTimeInterval(86_400 + 10 * 3_600)
+        // End a full day before Start.
+        let vm = makeViewModel(editing: storedEntry(start: start, duration: -86_400))
+
+        #expect(vm.endDateRange == nil)
+        #expect(vm.endTimeRange.contains(vm.displayEndsAt))
+        #expect(!vm.isAddEnabled)
+    }
+
     // MARK: - Helpers
 
     private func storedEntry(
