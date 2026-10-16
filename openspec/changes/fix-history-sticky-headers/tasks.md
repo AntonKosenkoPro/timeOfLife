@@ -88,3 +88,12 @@
   - DONE 2026-10-16: swiftlint 0 violations; build SUCCEEDED; full suite **670 passed / 0 failed**; validate 26 passed.
 - [x] 8.4 Docs (`Design/SCREENS/History.md` back to `List`, `COMPONENTS.md` History usage, `docs/project-context.md` History bullet).
   - DONE 2026-10-16: History.md Body bullet + header bullet (zero top padding kept); COMPONENTS.md History usage (bare List headers, bleed accepted); project-context History bullet (List, no bridge). REMAINS (human, same as §§5–7): push + PR description update.
+
+## 9. Remove SectionHeader dead knobs (2026-10-16, user verdict)
+
+- [x] 9.1 Delete `trailing` + `contentLeadingInset` (both unused at every call site; `trailing()` already commented out at runtime); collapse to a plain `View`. Clean the leftover commented modifiers in `HistoryView`.
+  - DONE 2026-10-16: plain `struct SectionHeader: View` (title + subtitle); previews dropped `{ EmptyView() }`; HistoryView comment cruft removed. GitHub issue #168 filed for the systematic dead-code sweep.
+- [x] 9.2 Gates: `swiftlint lint --strict`, warning-as-error build, full `xcodebuild test`; `openspec validate --all --strict`. Quick sim check that headers render unchanged.
+  - DONE 2026-10-16: lint clean; build SUCCEEDED; full suite **670 passed / 0 failed**; validate 26 passed; sim re-check shows identical headers. (Detour worth recording: `let` + default excludes the property from memberwise init — proven with isolated `swiftc` probes — so the simplified struct keeps an explicit `init(title:subtitle:)`.)
+- [x] 9.3 Docs (`COMPONENTS.md` signature already updated here).
+  - DONE 2026-10-16: signature block shows the plain struct; usage example already matched.

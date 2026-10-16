@@ -255,10 +255,6 @@ struct HistoryView: View {
                         title: group.label,
                         subtitle: "\(group.total) \(L10n.historyTracked.text)"
                     )
-                    .padding(.horizontal, Theme.spacingMedium)
-                    // Tight top (History-only): cancels the component's
-                    // internal top padding, mirroring the §7 bridge regime.
-                    .padding(.top, -Theme.spacingSmall)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }

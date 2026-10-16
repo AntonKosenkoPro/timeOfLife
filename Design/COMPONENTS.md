@@ -825,16 +825,11 @@ Simple section title used in editor screens to label input sections, and in Hist
 ### Signature
 
 ```swift
-struct SectionHeader<Trailing: View>: View {
+struct SectionHeader: View {
     let title: String
     /// Optional second line under the title (History day total). Nil renders
     /// the single-line editor presentation.
     let subtitle: String?
-    /// Leading inset that visually aligns the title with a row's text column
-    /// (e.g. flush with `EntryRow`'s content past its icon column). When nil,
-    /// the title sits at the container's default leading inset.
-    let contentLeadingInset: CGFloat?
-    @ViewBuilder let trailing: () -> Trailing
 }
 ```
 
