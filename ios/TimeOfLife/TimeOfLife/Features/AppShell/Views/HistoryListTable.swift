@@ -243,6 +243,10 @@ extension HistoryListTable.Coordinator: UITableViewDataSource, UITableViewDelega
                 subtitle: sectionModel.subtitle
             )
             .padding(.horizontal, Theme.spacingMedium)
+            // Tight top (user verdict 2026-10-16): cancels SectionHeader's
+            // internal top `spacingSmall` for History headers only — editors
+            // keep it. Pinned and in-list share this view, so both tighten.
+            .padding(.top, -Theme.spacingSmall)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(Theme.backgroundPrimary)
         }

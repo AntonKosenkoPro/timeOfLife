@@ -68,3 +68,12 @@
   - DONE 2026-10-15: swiftlint 0 violations; warning-as-error build SUCCEEDED (proves `if #available(iOS 26, *)` compiles on the project toolchain); full suite **670 passed / 0 failed** on the final code. Validate below.
 - [x] 6.4 Docs re-pass for the gating wording (this spec/design already updated here; `Design/SCREENS/History.md` checklist + `docs/project-context.md` only if the OS split isn't reflected).
   - DONE 2026-10-15: `History.md` Body bullet + two checklist rows carry the iOS 18 / 26+ split; `project-context.md` History bullet carries it. REMAINS (human, same as §5): push + PR description update.
+
+## 7. Tighten History header top padding (2026-10-16, user verdict with photo)
+
+- [x] 7.1 Zero the top padding of the History day-group header in the bridge hosting only (editors keep `spacingSmall`); pinned and in-list share the view so both tighten together.
+  - DONE 2026-10-16: `.padding(.top, -Theme.spacingSmall)` on the hosted header content (bridge-local; shared component untouched).
+- [x] 7.2 Verify on the iOS 27 sim: rest + pinned screenshots, pixel-measure capsule-bottom → title-top before/after; rows/occlusion/timer behavior unchanged.
+  - DONE 2026-10-16: header text top moved up exactly 8pt (387px → 363px @3x); pinned header docks tighter with rows occluded underneath, no bleed; rest of behavior untouched.
+- [x] 7.3 Docs touch-up (`Design/SCREENS/History.md` History day-group paddings line) + `openspec validate --strict`.
+  - DONE 2026-10-16: History.md header bullet carries the zero-top-padding regime. Validate below.
