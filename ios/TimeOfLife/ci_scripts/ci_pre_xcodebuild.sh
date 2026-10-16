@@ -56,3 +56,12 @@ case "$(swiftlint version)" in
 esac
 
 swiftlint lint --strict
+
+# Commented-out Swift gate (cleanup-dead-code-comments): `//` lines shaped like
+# code are dead code — delete them. Doc `///`, `// MARK:`, and URLs stay exempt.
+if grep -rEn --include='*.swift' \
+  '// ?(func [A-Za-z_]+[(]|let [A-Za-z_]+ ?[:=]|var [A-Za-z_]+ ?[:=]|class [A-Za-z_]+|struct [A-Za-z_]+|enum [A-Za-z_]+|if [^{]*[{]|for [^{]*[{]|while [^{]*[{]|return [^ ]+)' \
+  TimeOfLife LifioLiveActivities LifioLiveActivityCore TimeOfLifeTests \
+  | grep -v '///' | grep -v '// MARK:' | grep -vE 'https?://' | grep -q .; then
+  echo "error: commented-out Swift code found — delete it or convert to /// docs"; exit 1
+fi
