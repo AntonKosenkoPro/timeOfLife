@@ -61,8 +61,13 @@ swiftlint lint --strict
 # code are dead code — delete them. Doc `///`, `// MARK:`, and URLs stay exempt.
 # Declaration alternatives require a trailing `:`/`(`/`{` and `return` anchors to
 # a single token, so prose ("// return the value") never trips the build.
+# Fail closed: a renamed/missing scan dir must break the build, not
+# silently disable the gate below (`|| true` would swallow grep's error).
+for d in TimeOfLife LifioLiveActivities LifioLiveActivityCore TimeOfLifeTests; do
+  [ -d "$d" ] || { echo "error: expected scan dir '$d' is missing — commented-code gate cannot run"; exit 1; }
+done
 commented_code="$(grep -rEn --include='*.swift' \
-  '// ?(func [A-Za-z_]+[(]|let [A-Za-z_]+ ?[:=]|var [A-Za-z_]+ ?[:=]|class [A-Za-z_]+ ?[:({]|struct [A-Za-z_]+ ?[:({]|enum [A-Za-z_]+ ?[:({]|if [^{]*[{]|for [^{]*[{]|while [^{]*[{]|return [^ ]+$)' \
+  '// ?(func [A-Za-z_]+[(]|let [A-Za-z_]+ ?[:=]|var [A-Za-z_]+ ?[:=]|class [A-Za-z_]+ ?[<(:{]|struct [A-Za-z_]+ ?[<(:{]|enum [A-Za-z_]+ ?[<(:{]|if [^{]*[{]|for [^{]*[{]|while [^{]*[{]|return [^ ]+$)' \
   TimeOfLife LifioLiveActivities LifioLiveActivityCore TimeOfLifeTests \
   | grep -v '///' | grep -v '// MARK:' | grep -vE 'https?://' || true)"
 if [ -n "$commented_code" ]; then
