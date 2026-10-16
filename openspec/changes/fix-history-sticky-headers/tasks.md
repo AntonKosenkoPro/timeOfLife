@@ -77,3 +77,14 @@
   - DONE 2026-10-16: header text top moved up exactly 8pt (387px → 363px @3x); pinned header docks tighter with rows occluded underneath, no bleed; rest of behavior untouched.
 - [x] 7.3 Docs touch-up (`Design/SCREENS/History.md` History day-group paddings line) + `openspec validate --strict`.
   - DONE 2026-10-16: History.md header bullet carries the zero-top-padding regime. Validate below.
+
+## 8. Adopt native List; delete the bridge (2026-10-16, user verdict — D8)
+
+- [x] 8.1 `HistoryView.historyList` becomes native `List(.plain)` (bare two-line headers with zero top padding, stripped chrome, `.refreshable`, tap parity, `HistoryList` identifier); bar-visibility gating (opaque tab bar on iOS 18, glass on 26+). DELETE `HistoryListTable.swift` + `bottomSafeInset`/preference/`drawsUnderTabBar`/`daySectionModels` machinery; `xcodegen generate` to drop the file reference.
+  - DONE 2026-10-16: `List` with stripped chrome + call-site top tightening; `.toolbarBackground(.visible/.automatic, for: .tabBar)` gated by `usesGlassTabBar`; bridge file deleted via `git rm`, `xcodegen generate` dropped the pbxproj reference; lint clean, warning-as-error build SUCCEEDED.
+- [x] 8.2 Verify on both sims: rest/pinned/bottom/timer; pinned bleed present-and-accepted (screenshot it); iOS 18 opaque bar, iOS 26+ glass blur; file `evidence/8.2-*`.
+  - DONE 2026-10-16 (same binary, fresh installs, 264 seeds): iOS 18 — pinned bleed visible (accepted), tab bar opaque at every position, final row parks above bar/timer (`8.2-ios18-pinned-bleed-opaquebar.png`, `8.2-ios18-bottom-opaquebar.png`, `8.2-ios18-bottom-timer-opaquebar.png`). iOS 27 — pinned bleed + glass-bar ghosts (`8.2-ios27-pinned-bleed-glassbar.png`). (Procedural: stale-process skip + direct-chip-tap misses — uninstall+reinstall and name-picker path used.)
+- [x] 8.3 Gates: `swiftlint lint --strict`, warning-as-error build, full `xcodebuild test`; `openspec validate --all --strict`.
+  - DONE 2026-10-16: swiftlint 0 violations; build SUCCEEDED; full suite **670 passed / 0 failed**; validate 26 passed.
+- [x] 8.4 Docs (`Design/SCREENS/History.md` back to `List`, `COMPONENTS.md` History usage, `docs/project-context.md` History bullet).
+  - DONE 2026-10-16: History.md Body bullet + header bullet (zero top padding kept); COMPONENTS.md History usage (bare List headers, bleed accepted); project-context History bullet (List, no bridge). REMAINS (human, same as §§5–7): push + PR description update.

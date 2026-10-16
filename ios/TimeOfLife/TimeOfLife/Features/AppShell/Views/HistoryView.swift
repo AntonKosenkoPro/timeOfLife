@@ -2,18 +2,12 @@ import SwiftUI
 
 /// Read-only, day-grouped list of committed time entries (history-entry-list
 /// spec). Day headers are static two-line blocks (label + total subline,
-/// Calendar-Agenda-like) that pin under the navigation bar and occlude the
-/// rows scrolling beneath;
-/// `HistoryViewModel` owns data only. The navigation bar stays visible at
-/// every scroll position (the scroll-driven collapse from the original
-/// change was reverted — see the `revert-history-nav-collapse` change).
-///
-/// A read-only, day-grouped UIKit table (see `HistoryListTable`) whose day
-/// headers pin under the navigation bar and occlude the rows scrolling
-/// beneath — `HistoryViewModel` owns data only. The navigation bar stays
-/// visible at every scroll position (the scroll-driven collapse from the
-/// original change was reverted — see the `revert-history-nav-collapse`
-/// change).
+/// Calendar-Agenda-like) that pin under the navigation bar;
+/// `HistoryViewModel` owns data only. Pinned bleed (row text crossing
+/// beneath pinned headers) is accepted on every OS (design.md D8). The
+/// navigation bar stays visible at every scroll position (the scroll-driven
+/// collapse from the original change was reverted — see the
+/// `revert-history-nav-collapse` change).
 ///
 /// Tapping an entry row pushes the unified entry form onto this tab's
 /// NavigationStack (remove-activities-layer D6 as amended by
@@ -41,12 +35,6 @@ struct HistoryView: View {
     @StateObject private var vm: HistoryViewModel
     /// Owns the pull-to-refresh verdict flow (history-pull-to-sync spec).
     @StateObject private var pull: HistoryPullModel
-    /// Bottom safe-area inset (tab bar + compact-timer `safeAreaInset`,
-    /// measured below): `.ignoresSafeArea(.bottom)` on the table zeroes the
-    /// automatic bottom content inset, so the measured value is passed into
-    /// the bridge and applied explicitly (D7). Changes
-    /// only on rotation/timer visibility — no scroll linkage.
-    @State private var bottomSafeInset: CGFloat = 0
     /// Presents the Log Time sheet (manual-entry spec). Owned by the shell
     /// so the [+] shares the nav-bar toolbar scope; the sheet and its
     /// refresh stay here.
@@ -104,21 +92,10 @@ struct HistoryView: View {
                     historyList
                 }
             }
-            // Measures the bottom safe area (tab bar + compact-timer inset)
-            // OUTSIDE the table's ignored subtree (D7): a reader inside the
-            // table would observe the ignored (zeroed) value.
-            .background(
-                GeometryReader { proxy in
-                    Color.clear.preference(
-                        key: BottomSafeInsetPreferenceKey.self,
-                        value: proxy.safeAreaInsets.bottom
-                    )
-                }
-            )
-            .onPreferenceChange(BottomSafeInsetPreferenceKey.self) {
-                bottomSafeInset = $0
-            }
         }
+        // Opaque tab bar on iOS 18, glass on iOS 26+ (D8): the bar itself
+        // is the only thing gated — list content always flows under it.
+        .toolbarBackground(usesGlassTabBar ? .automatic : .visible, for: .tabBar)
         .background(Theme.backgroundPrimary.ignoresSafeArea())
         // System shake-to-undo for entry deletions (history-entry-list,
         // fix-87): the passive host returns this surface's undo manager so
@@ -240,62 +217,65 @@ struct HistoryView: View {
         await reloadAndRegister()
     }
 
-    /// UIKit table (see `HistoryListTable`): system pinning with real
-    /// occlusion of scrolled rows on every OS — SwiftUI's `List` cannot
-    /// clip rows above pinned headers on iOS 18, and a custom ScrollView
-    /// loses the same clipping to overlay portals there.
-    ///
-    /// Bottom edge-to-edge (fix-history-sticky-headers D7): the table frame
-    /// extends under the glass tab bar so scrolled rows blur beneath it
-    /// (TestFlight parity). Only the bottom edge is ignored — the top stays
-    /// stopped at the safe area, preserving the D6 nav-bar guarantee. The
-    /// ignore also zeroes the automatic bottom content inset, so the
-    /// measured `bottomSafeInset` (tab bar + compact timer) is passed in
-    /// and applied explicitly to the table's bottom content inset — the
-    /// last row stays reachable above the timer/tab-bar chrome.
-    ///
-    /// iOS 26+ only (`drawsUnderTabBar`): on iOS 18 the table keeps the
-    /// default safe-area frame with a zero explicit inset — ghost rows
-    /// behind the full-width bar read wrong there, right behind the
-    /// floating glass here.
+    /// Native day-grouped list (D8): bare two-line headers pin under the
+    /// navigation bar; pinned bleed (row text crossing beneath headers) is
+    /// accepted on every OS. Chrome stripped to the page; the pull verdict
+    /// flow, tap parity, and identifiers are unchanged from the bridge.
     private var historyList: some View {
-        HistoryListTable(
-            sectionModels: daySectionModels,
-            bottomContentInset: drawsUnderTabBar ? bottomSafeInset : 0,
-            entryTapped: { entry in shell.historyPath.append(.entry(entry)) },
-            refresh: { await pull.refresh() }
-        )
-        .ignoresSafeArea(.container, edges: drawsUnderTabBar ? Edge.Set.bottom : Edge.Set())
+        List {
+            ForEach(vm.dayGroups) { group in
+                Section {
+                    ForEach(group.entries) { entry in
+                        EntryRow(
+                            entry: entry,
+                            icon: vm.icon(for: entry),
+                            categoryNames: vm.categoryNames(for: entry),
+                            timeframeText: vm.timeframeText(for: entry),
+                            durationText: vm.durationText(for: entry),
+                            isInProgress: vm.isInProgress(entry),
+                            viaText: vm.viaText(for: entry),
+                            hasNotes: vm.hasNotes(for: entry)
+                        )
+                        .listRowInsets(EdgeInsets(
+                            top: 0,
+                            leading: Theme.spacingMedium,
+                            bottom: 0,
+                            trailing: Theme.spacingMedium
+                        ))
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
+                        // Tap → pushed unified entry form on this tab's path
+                        // (history D6 as amended). No swipe/long-press actions.
+                        .contentShape(Rectangle())
+                        .onTapGesture { shell.historyPath.append(.entry(entry)) }
+                        .accessibilityAddTraits(.isButton)
+                    }
+                } header: {
+                    SectionHeader(
+                        title: group.label,
+                        subtitle: "\(group.total) \(L10n.historyTracked.text)"
+                    )
+                    .padding(.horizontal, Theme.spacingMedium)
+                    // Tight top (History-only): cancels the component's
+                    // internal top padding, mirroring the §7 bridge regime.
+                    .padding(.top, -Theme.spacingSmall)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+        }
+        .listStyle(.plain)
+        .scrollContentBackground(.hidden)
+        .refreshable {
+            await pull.refresh()
+        }
+        .accessibilityIdentifier("HistoryList")
     }
 
-    /// Whether list content flows under the tab bar (D7 gating): the
-    /// translucent blur over rows suits the floating iOS 26+ glass bar;
-    /// iOS 18 keeps the default bar.
-    private var drawsUnderTabBar: Bool {
+    /// Glass tab bar on iOS 26+; opaque bar on iOS 18 so no scrolled
+    /// content shows through it (D8).
+    private var usesGlassTabBar: Bool {
         if #available(iOS 26, *) { return true }
         return false
-    }
-
-    private var daySectionModels: [HistorySectionModel] {
-        vm.dayGroups.map { group in
-            HistorySectionModel(
-                id: group.id,
-                title: group.label,
-                subtitle: "\(group.total) \(L10n.historyTracked.text)",
-                rows: group.entries.map { entry in
-                    HistorySectionModel.Row(
-                        entry: entry,
-                        icon: vm.icon(for: entry),
-                        categoryNames: vm.categoryNames(for: entry),
-                        timeframeText: vm.timeframeText(for: entry),
-                        durationText: vm.durationText(for: entry),
-                        isInProgress: vm.isInProgress(entry),
-                        viaText: vm.viaText(for: entry),
-                        hasNotes: vm.hasNotes(for: entry)
-                    )
-                }
-            )
-        }
     }
 }
 
@@ -315,19 +295,6 @@ private struct PullNoticeBanner: View {
             .frame(maxWidth: .infinity)
             .background(Theme.backgroundSecondary)
             .accessibilityIdentifier("HistoryOfflineNotice")
-    }
-}
-
-// MARK: - Bottom safe-area measurement (D7)
-
-/// Carries the measured bottom safe area (tab bar + compact-timer inset)
-/// from the background reader to `HistoryView`. Written and read only on
-/// the main actor (SwiftUI layout passes); `nonisolated(unsafe)` satisfies
-/// the strict-concurrency check for the required mutable `defaultValue`.
-private struct BottomSafeInsetPreferenceKey: PreferenceKey {
-    nonisolated(unsafe) static var defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = max(value, nextValue())
     }
 }
 

@@ -9,6 +9,7 @@ History day-group headers render as an opaque slab (`Theme.backgroundPrimary`) d
 - Elevation-gated day total ("2h 35m tracked" only when pinned) is preserved unless the spikes prove the native-`List` option wins, in which case the total moves to an always-visible home (decision recorded in design.md).
 - History list content returns under the glass tab bar (rows blur beneath it mid-scroll, TestFlight parity): bottom-edge handling of the `HistoryListTable` bridge only — top pinning/occlusion (design.md D6) untouched (follow-up 2026-10-15, design.md D7). Per user verdict the bleed applies on iOS 26+ only; iOS 18 keeps the default bar (design.md D7 gating, tasks §6).
 - DEBUG harness seeds ~264 History entries across 12 day groups for realistic scroll testing (tasks §6; seeds only, no production behavior).
+- Final implementation (2026-10-16, user verdict on the `List(.plain)` spike, design.md D8): native `List(.plain)` with bare two-line headers — the UIKit bridge (`HistoryListTable`, measured inset, OS gate) is deleted. Pinned-header bleed (row text crossing beneath pinned headers on all OS versions) is explicitly accepted; the tab-bar split is kept via bar visibility (opaque bar on iOS 18, glass on iOS 26+) instead of frame games.
 - No new strings, no data or API changes, no behavior changes outside History headers.
 
 ## Capabilities

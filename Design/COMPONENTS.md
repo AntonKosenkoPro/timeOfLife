@@ -844,7 +844,7 @@ struct SectionHeader<Trailing: View>: View {
 - Optional subline `Text(subtitle).font(.caption).foregroundStyle(Theme.textSecondary).monospacedDigit()` under the title (History day total; nil in editors).
 - Optional trailing view (right-aligned) for editor usage.
 - Padded with `Theme.spacingMedium` leading / `Theme.spacingSmall` vertical (editors), or the History day-group paddings (see `SCREENS/History.md`).
-- History day-group usage (D8/D10): static two-line block (day label + total subline, Calendar-Agenda-like), identical in-list and pinned — no scroll-state gating. The opaque page-color occluder band and the sticky pinning live in `HistoryListTable` (the hosting header content paints `Theme.backgroundPrimary` full-width; `UITableView(.plain)` draws pinned headers above cells). No `.bar` material, no hairline — the user rejected the boxed slab look.
+- History day-group usage (D8): static two-line block (day label + total subline, Calendar-Agenda-like), identical in-list and pinned — no scroll-state gating, zero top padding. Bare `List(.plain)` section headers: no background fill, no `.bar` material, no hairline — the user rejected the boxed slab look, and the pinned bleed (row text crossing beneath headers) is accepted on every OS.
 
 ### States
 
