@@ -411,7 +411,7 @@ struct LogTimeView: View {
             VStack(alignment: .leading, spacing: Theme.spacingSmall) {
                 timeRow(
                     title: L10n.logTimeStarts.text,
-                    date: vm.startsAt,
+                    date: vm.displayStartsAt,
                     datePicker: .startDate,
                     timePicker: .startTime,
                     dateId: "LogTimeStartDatePill",
@@ -426,7 +426,7 @@ struct LogTimeView: View {
             VStack(alignment: .leading, spacing: Theme.spacingSmall) {
                 timeRow(
                     title: L10n.logTimeEnds.text,
-                    date: vm.endsAt,
+                    date: vm.displayEndsAt,
                     datePicker: .endDate,
                     timePicker: .endTime,
                     dateId: "LogTimeEndDatePill",
@@ -470,39 +470,16 @@ struct LogTimeView: View {
             // hidden from accessibility, and clipped to zero height so they
             // take no space and intercept no touches.
             VStack(spacing: 0) {
-                DatePicker(
-                    "",
+                monthPicker(
                     selection: dateBinding(for: datePicker),
-                    displayedComponents: .date
+                    range: range(for: datePicker),
+                    isExpanded: expandedPicker == datePicker
                 )
-                .datePickerStyle(.graphical)
-                .labelsHidden()
-                // FB9614392 workaround: a parent TapGesture (the FormCard
-                // background tap-away) steals the calendar's header-button
-                // touches (month steppers) even from the background layer.
-                // An unfulfillable tap count on the picker itself restores
-                // the calendar's internal gesture precedence without ever
-                // firing; day cells already win without it, steppers need it.
-                .onTapGesture(count: 99) {}
-                .frame(maxWidth: .infinity)
-                .frame(height: expandedPicker == datePicker ? Self.graphicalPickerHeight : 0)
-                .opacity(expandedPicker == datePicker ? 1 : 0)
-                .disabled(expandedPicker != datePicker)
-                .accessibilityHidden(expandedPicker != datePicker)
-                .clipped()
-                DatePicker(
-                    "",
+                timeWheel(
                     selection: dateBinding(for: timePicker),
-                    displayedComponents: .hourAndMinute
+                    range: range(for: timePicker),
+                    isExpanded: expandedPicker == timePicker
                 )
-                .datePickerStyle(.wheel)
-                .labelsHidden()
-                .frame(maxWidth: .infinity)
-                .frame(height: expandedPicker == timePicker ? Self.wheelPickerHeight : 0)
-                .opacity(expandedPicker == timePicker ? 1 : 0)
-                .disabled(expandedPicker != timePicker)
-                .accessibilityHidden(expandedPicker != timePicker)
-                .clipped()
             }
             // Only the picker container animates; pills above stay instant.
             .animation(.easeInOut(duration: 0.2), value: expandedPicker)
@@ -540,12 +517,94 @@ struct LogTimeView: View {
         focusedField = nil
     }
 
+    /// Graphical month picker with an optional selectable range (nil =
+    /// unbounded). The style stays applied directly on each DatePicker —
+    /// only the range-capable `init` differs between branches.
+    private func monthPicker(selection: Binding<Date>, range: ClosedRange<Date>?, isExpanded: Bool) -> some View {
+        Group {
+            if let range {
+                DatePicker("", selection: selection, in: range, displayedComponents: .date)
+                    .datePickerStyle(.graphical)
+                    // FB9614392 workaround: a parent TapGesture (the FormCard
+                    // background tap-away) steals the calendar's header-button
+                    // touches (month steppers) even from the background layer.
+                    // An unfulfillable tap count on the picker itself restores
+                    // the calendar's internal gesture precedence without ever
+                    // firing; day cells already win without it, steppers need it.
+                    .onTapGesture(count: 99) {}
+            } else {
+                DatePicker("", selection: selection, displayedComponents: .date)
+                    .datePickerStyle(.graphical)
+                    .onTapGesture(count: 99) {}
+            }
+        }
+        .labelsHidden()
+        .frame(maxWidth: .infinity)
+        .frame(height: isExpanded ? Self.graphicalPickerHeight : 0)
+        .opacity(isExpanded ? 1 : 0)
+        .disabled(!isExpanded)
+        .accessibilityHidden(!isExpanded)
+        .clipped()
+    }
+
+    /// Hour/minute wheel with an optional selectable range (nil =
+    /// unbounded). Same branch structure as `monthPicker`.
+    private func timeWheel(selection: Binding<Date>, range: ClosedRange<Date>?, isExpanded: Bool) -> some View {
+        Group {
+            if let range {
+                DatePicker("", selection: selection, in: range, displayedComponents: .hourAndMinute)
+                    .datePickerStyle(.wheel)
+            } else {
+                DatePicker("", selection: selection, displayedComponents: .hourAndMinute)
+                    .datePickerStyle(.wheel)
+            }
+        }
+        .labelsHidden()
+        .frame(maxWidth: .infinity)
+        .frame(height: isExpanded ? Self.wheelPickerHeight : 0)
+        .opacity(isExpanded ? 1 : 0)
+        .disabled(!isExpanded)
+        .accessibilityHidden(!isExpanded)
+        .clipped()
+    }
+
+    /// Selectable range for a picker (nil = unbounded Start pickers).
+    /// End date: no day before the Start day. End time: from
+    /// `ceil(start + 60s)` when End shares the Start day, the whole End
+    /// day otherwise (any time on a later day already exceeds the floor).
+    /// Bounds recompute live from the draft. Same-day degenerate case
+    /// (Start in the last minute of the day, so no valid same-day End
+    /// exists) falls back to the full End day — the gate stays the
+    /// enforcer there instead of risking an inverted range.
+    private func range(for picker: InlinePicker) -> ClosedRange<Date>? {
+        let calendar = Calendar.current
+        switch picker {
+        case .startDate, .startTime:
+            return nil
+        case .endDate:
+            let lower = calendar.startOfDay(for: vm.startsAt)
+            return lower...Date.distantFuture
+        case .endTime:
+            let endDay = calendar.startOfDay(for: vm.endsAt)
+            let endDayEnd = (calendar.date(byAdding: .day, value: 1, to: endDay) ?? endDay.addingTimeInterval(86_399))
+                .addingTimeInterval(-1)
+            guard calendar.isDate(vm.endsAt, inSameDayAs: vm.startsAt) else {
+                return endDay...endDayEnd
+            }
+            let lower = LogTimeViewModel.ceiledToMinute(
+                vm.startsAt.addingTimeInterval(LogTimeViewModel.minimumDuration)
+            )
+            guard lower <= endDayEnd else { return endDay...endDayEnd }
+            return lower...endDayEnd
+        }
+    }
+
     private func dateBinding(for picker: InlinePicker) -> Binding<Date> {
         Binding(
             get: {
                 switch picker {
-                case .startDate, .startTime: vm.startsAt
-                case .endDate, .endTime: vm.endsAt
+                case .startDate, .startTime: vm.displayStartsAt
+                case .endDate, .endTime: vm.displayEndsAt
                 }
             },
             set: {
