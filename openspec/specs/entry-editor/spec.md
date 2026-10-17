@@ -171,7 +171,7 @@ Tapping the Notes-row clear (`×`) SHALL clear the field and keep the keyboard o
 
 #### Scenario: Calendar day taps select the date
 - **WHEN** a Start or End date picker is expanded and the user taps a visible day cell
-- **THEN** the draft date updates to that day (date pill text, duration subtitle, and validity gate re-evaluate; moving Start at/past End auto-pushes End per the Calendar-style duration rule) and the picker stays expanded
+- **THEN** the draft date updates to that day (date pill text, duration subtitle, and validity gate re-evaluate; moving Start shifts End per the always-preserve duration rule) and the picker stays expanded
 
 ### Requirement: Unified entry form field order
 The unified entry form SHALL lay out its input cards in exactly this order in every mode (CREATE, EDIT, LOCKED): Activity name → Start time → End time → Categories → Notes. Start and Ends SHALL be separate cards (one `timeRow` each with its own date + time pills and inline single-open picker), not one combined Starts/Ends card. The validity gate, picker behavior (single-open, device locale/calendar), mode chrome (titles/actions/LOCKED dimming + provenance note), and bottom destructive Delete are unchanged.
