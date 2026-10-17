@@ -186,7 +186,9 @@ struct LogTimeView: View {
                 CategoryEditorForm(
                     store: container.localStore,
                     category: nil,
-                    onSaved: { vm.attachCreatedCategory($0) },
+                    onSaved: { category in
+                        Task { await vm.attachCreatedCategory(category) }
+                    },
                     onDuplicate: { _ in },
                     showsDismiss: false
                 )
