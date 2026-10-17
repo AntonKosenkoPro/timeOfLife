@@ -375,6 +375,29 @@ final class TrackViewModel: ObservableObject {
         }
     }
 
+    /// Attaches an inline-created category (inline-category-creation):
+    /// merges it into the pool and, while running, appends its id to the
+    /// running draft in tap order with the draft snapshot persisted
+    /// (toggle parity). Draft-only — never an entry, history row, or
+    /// recents. Outside running (unreachable through the UI: the tag row is
+    /// hidden and ignores hits) it only freshens the pool.
+    func attachCreatedCategory(_ category: Category) {
+        categories[category.id] = category
+        guard case let .running(draft, startedAt) = state else { return }
+        guard !draft.categoryIDs.contains(category.id) else { return }
+        var updated = draft
+        updated.categoryIDs.append(category.id)
+        state = .running(updated, startedAt: startedAt)
+        Task {
+            try? await service.startTimerDraft(
+                text: updated.text,
+                categoryIDs: updated.categoryIDs,
+                notes: updated.notes,
+                startedAt: startedAt
+            )
+        }
+    }
+
     /// Saves notes on the running draft (separate-notes-editor): rewrites
     /// only the running draft notes snapshot — never an entry, history
     /// row, or recents. History learns the notes at Stop. Available in

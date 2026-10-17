@@ -208,6 +208,22 @@ final class LogTimeViewModel: ObservableObject {
         }
     }
 
+    /// Attaches an inline-created category (inline-category-creation):
+    /// merges it into the options at the store's sort position and appends
+    /// its id to the ordered selection unless already present. Draft-only —
+    /// nothing persists until the entry itself saves.
+    func attachCreatedCategory(_ category: Category) {
+        if !availableCategories.contains(where: { $0.id == category.id }) {
+            let key = category.name.lowercased()
+            let index = availableCategories.firstIndex { $0.name.lowercased() > key }
+                ?? availableCategories.endIndex
+            availableCategories.insert(category, at: index)
+        }
+        if !categoryIDs.contains(category.id) {
+            categoryIDs.append(category.id)
+        }
+    }
+
     /// Moves Start, shifting End by the same delta so the duration stays
     /// constant — whether Start moves earlier or later. The first write on
     /// an untouched draft adopts the minute-normalized display values, then
