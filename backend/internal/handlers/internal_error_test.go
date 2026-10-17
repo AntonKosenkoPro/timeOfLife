@@ -21,13 +21,12 @@ func TestInternalErrorEnvelopePreserved(t *testing.T) {
 		}
 		t.Run(name, func(t *testing.T) {
 			if enabled {
-				// Capture the pre-test flag first (off without SENTRY_DSN)
-				// so cleanup restores it; InitSentry then arms reporting
-				// with a dummy DSN (no network I/O, no Flush → hermetic).
-				observe.SetEnabledForTest(t, true)
-				if err := observe.InitSentry("https://public@example.com/1"); err != nil {
-					t.Fatalf("InitSentry(dummy DSN): %v", err)
-				}
+				// Arm only the flag (restored by Cleanup): with no
+				// initialized client, capture short-circuits as a no-op, so
+				// this stays truly hermetic — no network I/O, no leftover
+				// global client — while ReportError still runs its full
+				// enabled branch (filter, tags, fingerprint, context).
+				t.Cleanup(observe.SetEnabledForTest(true))
 			}
 
 			store := newTestStore(t)

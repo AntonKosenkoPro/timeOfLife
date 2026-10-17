@@ -18,7 +18,6 @@ import (
 	"fmt"
 	"net/http"
 	"sync/atomic"
-	"testing"
 	"time"
 
 	"github.com/getsentry/sentry-go"
@@ -56,14 +55,14 @@ func SentryEnabled() bool {
 	return sentryEnabled.Load()
 }
 
-// SetEnabledForTest flips the reporting flag from tests in other packages.
-// Production code must use InitSentry. Callers must not assume the prior
-// value: it is restored automatically via t.Cleanup.
-func SetEnabledForTest(t *testing.T, enabled bool) {
-	t.Helper()
+// SetEnabledForTest flips the reporting flag from tests in other packages
+// and returns a restore function the caller must invoke (e.g. via
+// t.Cleanup). Production code must use InitSentry. It takes no *testing.T
+// so the testing framework stays out of the shipped binary.
+func SetEnabledForTest(enabled bool) (restore func()) {
 	prev := sentryEnabled.Load()
-	t.Cleanup(func() { sentryEnabled.Store(prev) })
 	sentryEnabled.Store(enabled)
+	return func() { sentryEnabled.Store(prev) }
 }
 
 // FlushSentry flushes buffered Sentry events, waiting up to timeout.
@@ -91,7 +90,12 @@ func Middleware(next http.Handler) http.Handler {
 		// A 5xx on a dead request context means the client went away mid-flight
 		// (nginx logs 499): nobody waited for the response, so there is no
 		// server fault to page. The handler's slog line is the record.
-		if ww.Status() >= 500 && !errors.Is(r.Context().Err(), context.Canceled) {
+		// Status 500 is excluded on purpose: handlers report those via
+		// ReportError (with the error object attached), so capturing them here
+		// too would file every handled failure as two separate Sentry issues.
+		// This path backstops the rest: 503s, timeout 504s, and any future
+		// 5xx written outside the helper.
+		if ww.Status() > 500 && !errors.Is(r.Context().Err(), context.Canceled) {
 			captureSentry5xx(r, ww.Status())
 		}
 	})
@@ -125,9 +129,26 @@ func ReportError(r *http.Request, op string, err error) {
 			hub.CaptureMessage(fmt.Sprintf("server error: %s %s", r.Method, routeTemplate(r)))
 			return
 		}
-		scope.SetContext("error", map[string]any{"message": err.Error(), "op": op})
-		hub.CaptureException(err)
+		// Bound the error string: store/driver errors can echo request input
+		// (e.g. pgx "invalid input syntax for type uuid" quotes the raw path
+		// id, which is attacker-controlled and unbounded). The same truncated
+		// value is captured as the exception so the full literal reaches
+		// neither the context nor the exception payload.
+		msg := truncateSentryMessage(err.Error())
+		scope.SetContext("error", map[string]any{"message": msg, "op": op})
+		hub.CaptureException(errors.New(msg))
 	})
+}
+
+// maxSentryErrorMessageLen caps error strings attached to Sentry events.
+const maxSentryErrorMessageLen = 1024
+
+// truncateSentryMessage bounds an error string before it leaves the process.
+func truncateSentryMessage(msg string) string {
+	if len(msg) > maxSentryErrorMessageLen {
+		return msg[:maxSentryErrorMessageLen] + "… (truncated)"
+	}
+	return msg
 }
 
 // captureSentryPanic captures a recovered panic value as a fatal event.

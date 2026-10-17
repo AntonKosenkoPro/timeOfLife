@@ -270,29 +270,87 @@ func TestReportErrorSkipsClientDisconnect(t *testing.T) {
 	}
 }
 
-// TestMiddlewareSkips5xxOnDeadContext proves the status-based middleware
-// capture also stays quiet when the 500 went to a disconnected client, while
-// a live-context 500 still reports (existing contract).
-func TestMiddlewareSkips5xxOnDeadContext(t *testing.T) {
+// TestMiddlewareBackstopSkipsDeadContext proves the status-based backstop
+// (503s and other non-500 5xx) still reports on a live context but stays
+// quiet when the 5xx went to a disconnected client.
+func TestMiddlewareBackstopSkipsDeadContext(t *testing.T) {
 	ft := initFakeHub(t)
 
 	h := Middleware(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusInternalServerError)
+		w.WriteHeader(http.StatusServiceUnavailable)
 	}))
 
-	live := httptest.NewRequest(http.MethodGet, "/api/v1/auth/me", nil)
+	live := httptest.NewRequest(http.MethodGet, "/api/v1/auth/apple", nil)
 	h.ServeHTTP(httptest.NewRecorder(), live)
 
 	dead, cancel := context.WithCancel(context.Background())
 	cancel()
-	deadReq := httptest.NewRequest(http.MethodGet, "/api/v1/auth/me", nil).WithContext(dead)
+	deadReq := httptest.NewRequest(http.MethodGet, "/api/v1/auth/apple", nil).WithContext(dead)
 	h.ServeHTTP(httptest.NewRecorder(), deadReq)
 
 	if ok := sentry.Flush(2 * time.Second); !ok {
 		t.Fatal("expected fake transport flush to succeed")
 	}
 	if events := ft.captured(); len(events) != 1 {
-		t.Fatalf("expected exactly 1 event (live-context 500 only), got %d", len(events))
+		t.Fatalf("expected exactly 1 event (live-context 503 only), got %d", len(events))
+	}
+}
+
+// TestHandled500ReportsOnce proves the end-to-end handled-500 path emits
+// exactly one Sentry event: ReportError (rich, with error context) owns
+// status-500 reporting, and the middleware backstop must not double-file it
+// as a second issue.
+func TestHandled500ReportsOnce(t *testing.T) {
+	ft := initFakeHub(t)
+
+	h := Middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ReportError(r, "list categories", errTestStore("list categories: connection refused"))
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+
+	r := chi.NewRouter()
+	r.Get("/api/v1/categories", h.ServeHTTP)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/categories", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500, got %d", w.Code)
+	}
+
+	if ok := sentry.Flush(2 * time.Second); !ok {
+		t.Fatal("expected fake transport flush to succeed")
+	}
+	if events := ft.captured(); len(events) != 1 {
+		t.Fatalf("expected exactly 1 event for a handled 500, got %d", len(events))
+	}
+}
+
+// TestReportErrorTruncatesLongMessages proves attacker-influenced error
+// strings (e.g. pgx echoing a raw path id) are bounded before leaving the
+// process, in both the context and the captured exception.
+func TestReportErrorTruncatesLongMessages(t *testing.T) {
+	ft := initFakeHub(t)
+
+	req := chiRequest(t, http.MethodGet, "/api/v1/categories", "/api/v1/categories")
+	ReportError(req, "get category", errTestStore("invalid input syntax for type uuid: \""+strings.Repeat("a", 4096)+"\""))
+	if ok := sentry.Flush(2 * time.Second); !ok {
+		t.Fatal("expected fake transport flush to succeed")
+	}
+
+	events := ft.captured()
+	if len(events) != 1 {
+		t.Fatalf("expected exactly 1 event, got %d", len(events))
+	}
+	errCtx, ok := events[0].Contexts["error"]
+	if !ok {
+		t.Fatal("expected error context on the event")
+	}
+	msg, _ := errCtx["message"].(string)
+	if len(msg) > maxSentryErrorMessageLen+len("… (truncated)") {
+		t.Errorf("expected truncated message, got %d bytes", len(msg))
+	}
+	if !strings.HasSuffix(msg, "… (truncated)") {
+		t.Error("expected truncation marker on an over-long message")
 	}
 }
 
