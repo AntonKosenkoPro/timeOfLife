@@ -487,39 +487,50 @@ struct LogTimeViewModelTests {
 
     // MARK: - Inline category creation
 
-    @Test("attaching a created category merges options and selects it")
-    func attachCreatedCategorySelects() {
-        let vm = makeViewModel()
-        vm.attachCreatedCategory(Category(id: "c2", name: "Garden", icon: "leaf"))
+    @Test("attaching a created category selects it and loads store order")
+    func attachCreatedCategorySelects() async throws {
+        let store = try await makeStore()
+        let garden = Category(id: "c2", name: "Garden", icon: "leaf")
+        try await store.createCategory(garden)
+        let vm = makeViewModel(store: store)
+        await vm.attachCreatedCategory(garden)
         #expect(vm.availableCategories.map(\.id) == ["c2"])
         #expect(vm.categoryIDs == ["c2"])
     }
 
-    @Test("attaching inserts options at the store sort position, selection stays tap-ordered")
-    func attachCreatedCategorySortsOptions() {
-        let vm = makeViewModel()
-        vm.attachCreatedCategory(Category(id: "c1", name: "Work", icon: "briefcase"))
-        vm.attachCreatedCategory(Category(id: "c2", name: "Garden", icon: "leaf"))
+    @Test("attaching loads the canonical store order, not client collation")
+    func attachCreatedCategoryLoadsStoreOrder() async throws {
+        let store = try await makeStore()
+        try await store.createCategory(Category(id: "c1", name: "Work", icon: "briefcase"))
+        let vm = makeViewModel(store: store)
+        let garden = Category(id: "c2", name: "Garden", icon: "leaf")
+        try await store.createCategory(garden)
+        await vm.attachCreatedCategory(garden)
         #expect(vm.availableCategories.map(\.name) == ["Garden", "Work"])
-        #expect(vm.categoryIDs == ["c1", "c2"])
+        #expect(vm.categoryIDs == ["c2"])
     }
 
-    @Test("re-attaching never duplicates options or selection")
-    func attachCreatedCategoryIdempotent() {
-        let vm = makeViewModel()
+    @Test("re-attaching never duplicates selection")
+    func attachCreatedCategoryIdempotent() async throws {
+        let store = try await makeStore()
         let category = Category(id: "c1", name: "Work", icon: "briefcase")
-        vm.attachCreatedCategory(category)
-        vm.attachCreatedCategory(category)
+        try await store.createCategory(category)
+        let vm = makeViewModel(store: store)
+        await vm.attachCreatedCategory(category)
+        await vm.attachCreatedCategory(category)
         #expect(vm.availableCategories.count == 1)
         #expect(vm.categoryIDs == ["c1"])
     }
 
     @Test("attaching preserves the rest of the draft")
-    func attachCreatedCategoryPreservesDraft() {
-        let vm = makeViewModel()
+    func attachCreatedCategoryPreservesDraft() async throws {
+        let store = try await makeStore()
+        let garden = Category(id: "c9", name: "Garden", icon: "leaf")
+        try await store.createCategory(garden)
+        let vm = makeViewModel(store: store)
         vm.name = "Planting"
         vm.notes = "Bed three"
-        vm.attachCreatedCategory(Category(id: "c9", name: "Garden", icon: "leaf"))
+        await vm.attachCreatedCategory(garden)
         #expect(vm.name == "Planting")
         #expect(vm.notes == "Bed three")
         #expect(vm.categoryIDs == ["c9"])

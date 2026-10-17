@@ -177,18 +177,19 @@ final class LogTimeViewModel: ObservableObject {
     }
 
     /// Attaches an inline-created category (inline-category-creation):
-    /// merges it into the options at the store's sort position and appends
-    /// its id to the ordered selection unless already present. Draft-only —
+    /// appends its id to the ordered selection unless already present, then
+    /// reloads the options from the store so the order is always the
+    /// canonical `ORDER BY lower(name)` — no client-side collation to drift
+    /// from SQLite's (ASCII-only) fold on non-ASCII names. Draft-only —
     /// nothing persists until the entry itself saves.
-    func attachCreatedCategory(_ category: Category) {
-        if !availableCategories.contains(where: { $0.id == category.id }) {
-            let key = category.name.lowercased()
-            let index = availableCategories.firstIndex { $0.name.lowercased() > key }
-                ?? availableCategories.endIndex
-            availableCategories.insert(category, at: index)
-        }
+    func attachCreatedCategory(_ category: Category) async {
         if !categoryIDs.contains(category.id) {
             categoryIDs.append(category.id)
+        }
+        if let fresh = try? await service.store.categories() {
+            availableCategories = fresh
+        } else if !availableCategories.contains(where: { $0.id == category.id }) {
+            availableCategories.append(category)
         }
     }
 
