@@ -33,17 +33,23 @@ struct TrackContent: View {
     /// Opens the running notes editor through the owning tab's path (same
     /// contract as the name picker). Defaults to no-op for previews.
     let onOpenNotesEditor: () -> Void
+    /// Opens the inline category editor through the owning tab's path
+    /// (inline-category-creation, same contract as the notes editor).
+    /// Defaults to no-op for previews.
+    let onOpenCategoryEditor: () -> Void
 
     init(
         vm: TrackViewModel,
         spacerCap: CGFloat = 48,
         onOpenNamePicker: @escaping () -> Void = {},
-        onOpenNotesEditor: @escaping () -> Void = {}
+        onOpenNotesEditor: @escaping () -> Void = {},
+        onOpenCategoryEditor: @escaping () -> Void = {}
     ) {
         self.vm = vm
         self.spacerCap = spacerCap
         self.onOpenNamePicker = onOpenNamePicker
         self.onOpenNotesEditor = onOpenNotesEditor
+        self.onOpenCategoryEditor = onOpenCategoryEditor
     }
 
     var body: some View {
@@ -307,13 +313,13 @@ struct TrackContent: View {
             Text(L10n.entryCategoriesLabel.text)
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(Theme.textSecondary)
-            Divider().background(Theme.hairline)
             TagSelector(
                 options: Array(vm.categories.values).sorted { $0.name < $1.name },
                 selected: runningSelectedIDs,
                 onToggle: { toggledID in
                     vm.toggleDraftCategory(toggledID)
                 },
+                onCreate: onOpenCategoryEditor,
                 accessibilityId: "RunningTags"
             )
         }
@@ -424,7 +430,6 @@ struct TrackContent: View {
             Text(L10n.timerChooserRecent.text)
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(Theme.textSecondary)
-            Divider().background(Theme.hairline)
 
             if vm.recents.isEmpty {
                 Text(L10n.timerRecentsEmptyHint.text)

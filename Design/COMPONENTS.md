@@ -409,17 +409,24 @@ struct TagSelector: View {
     let options: [Category]
     let selected: [String]
     let onToggle: (String) -> Void
+    let onCreate: (() -> Void)?
     let accessibilityId: String
 }
 ```
 
+`onCreate` is opt-in (default `nil`): when non-nil a trailing creation chip renders last; when nil the selector stays select-only.
+
 ### Visual
 
 - Wrapping flow of content-sized chips (each chip as wide as its icon/checkmark/ordinal, name, and uniform padding), left-aligned, equal `Theme.spacingSmall` gaps between chips and rows, laid out by the shared `FlowLayout` (`Layout` protocol).
-- Unselected chip: only the category icon (30% larger than `.caption`, scaling with Dynamic Type) + name (`.caption`); `Theme.backgroundSecondary` fill + 1 pt `Theme.hairline` border; no outline circle.
+- Unselected chip: only the category icon (14 pt subheadline, scaling with Dynamic Type) + name (`.subheadline` regular); `Theme.backgroundSecondary` fill + 1 pt `Theme.hairline` border; no outline circle.
 - Selected chip: the icon is swapped for a `checkmark` of the same enlarged size (`.semibold`) when exactly one chip is selected, or for the 1-based selection ordinal when two or more are selected (ordinals use the same enlarged semibold size; two-digit ordinals shrink to fit the slot); `Theme.accentPrimary` fill, `Theme.textOnAccent` glyph and text; no outline circle. Glyph changes fade in place.
+- Chip typography (label + glyph size) is identical to `RecentActivitiesChips` (Recents as reference, `.subheadline` regular per HIG compact-control guidance).
 - Each chip: `Theme.spacingChip` (10 pt) uniform padding on all sides, `minHeight Theme.minTapArea` (44 pt — Apple HIG / WCAG 2.2 SC 2.5.5 AAA), `Capsule` shape; long names truncate with `lineLimit(1)`.
-- When `options` is empty, the selector renders no chips and the parent editor shows the localized Add-category action.
+- Creation footer (only when `onCreate` is non-nil): quiet leading `+ Add category` text button pinned below the chip viewport — accent text, no fill or outline; 44 pt target spanning the row width; never a chip, icon, checkmark, or ordinal. Toggling categories never moves or restyles it.
+- Edge-aware hairline dividers: a `Theme.hairline` divider fades in above the viewport once chips scroll under it and below the viewport while content remains; the bottom divider fades out at the content end, and both stay hidden when the catalog fits without scrolling.
+- Chip viewport: grows with content up to 3.5 visible rows (three full rows + half-row peek), then scrolls internally. Row height derives from scaled type metrics with a `Theme.minTapArea` floor, so the clamp holds under Dynamic Type.
+- When `options` is empty and no `onCreate` is provided, the selector renders no chips and the parent editor shows the localized Add-category action. With `onCreate`, the footer still renders alone.
 
 ### States
 
@@ -428,14 +435,16 @@ struct TagSelector: View {
 | Unselected | `Theme.backgroundSecondary` fill + `Theme.hairline` border; enlarged category icon + name |
 | Selected (lone) | `Theme.accentPrimary` fill, `Theme.textOnAccent` text, enlarged `checkmark` in place of the icon |
 | Selected (2+) | `Theme.accentPrimary` fill, `Theme.textOnAccent` text, enlarged 1-based selection ordinal in place of the icon, fading in place on every change |
-| Empty options | No chips; parent editor renders the Add-category action |
+| Empty options | No category chips (creation footer still renders alone when `onCreate` is set); otherwise the parent editor renders the Add-category action |
+| Creation footer | Quiet leading `+ Add category` text button, pinned below the viewport, outside the selection model |
+| Clamped viewport | Up to 3.5 rows, then internal scroll; compact when smaller |
 
 ### Requirements
 
 - Tapping a chip toggles its id in `selected` (F3); `selected` is in selection (tap) order and deselect-then-reselect appends at the end. Ordinals cap at 99.
 - Chips are content-sized; gaps between chips are uniform (`Theme.spacingSmall`); toggling swaps the icon for the checkmark/ordinal without re-packing rows (the ordinal fits the existing fixed symbol slot).
 - Each chip's tap target is at least 44×44 pt (`Theme.minTapArea`).
-- Each chip `accessibilityIdentifier("\(accessibilityId)Chip(\(id))")`.
+- Each chip `accessibilityIdentifier("\(accessibilityId)Chip(\(id))")`; the creation footer uses `"\(accessibilityId)NewCategory"` with the localized Add-category label (no trait word) as its VoiceOver label.
 - Tags are optional; an entry with no tags is valid (F3). The selector never forces a selection.
 - Empty-state action follows U8 — guides toward Category creation without blocking the editor.
 
@@ -446,6 +455,7 @@ TagSelector(
     options: vm.allCategories,
     selected: vm.selectedCategoryIds,
     onToggle: { vm.toggleCategory($0) },
+    onCreate: { isShowingCategoryEditor = true },
     accessibilityId: "RunningTags"
 )
 ```
@@ -455,6 +465,7 @@ TagSelector(
 - Each chip is a button element with a localized category label and localized selected/not-selected value; when two or more chips are selected the value also announces the ordinal position.
 - The icon/checkmark/ordinal is `.accessibilityHidden(true)` decoration; selection state and order are conveyed visually by the icon↔checkmark↔ordinal swap in addition to fill color, and announced by the button's value.
 - The parent screen owns the empty-state "create category" action.
+- The creation footer is a button element announcing the localized Add-category action; its `plus` glyph is `.accessibilityHidden(true)` decoration.
 
 ---
 
@@ -486,10 +497,15 @@ struct RecentActivitiesChips: View {
   (same greedy packing as `TagSelector`).
 - Cap of twelve, most-recently-used first (`recents.prefix(12)`; the store
   already sorts by each text's newest `started_at`). The flow sits in a
-  `ScrollView` capped at three chip rows (`3 * minTapArea + 2 * spacingSmall`),
-  so overflow scrolls on the chip axis without growing the page.
+  `ScrollView` that hugs content up to 3.5 chip rows (shared `ChipViewport`
+  clamp math, row height from scaled subheadline metrics), so small sets stay
+  compact and overflow scrolls on the chip axis with a half-row peek —
+  never growing the page.
+- Edge-aware `Theme.hairline` dividers (same contract as `TagSelector`):
+  top fades in once scrolled, bottom fades out at the content end, both
+  hidden when everything fits.
 - Each chip: fixed icon slot with the first assigned Category's
-  `CatalogIcon(validated:).displaySymbol` + exact text (`.subheadline.weight(.medium)`,
+  `CatalogIcon(validated:).displaySymbol` + exact text (`.subheadline`,
   one line, tail-truncated), `Theme.spacingMedium` horizontal / 12 pt vertical
   padding, `minHeight Theme.minTapArea` (44 pt), `Capsule` shape.
 - Categoryless texts render name-only chips with no icon and no

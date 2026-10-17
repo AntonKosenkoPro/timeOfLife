@@ -8,14 +8,22 @@ import SwiftUI
 /// forces a selection.
 ///
 /// Chips follow category-management D9: each chip is as wide as its content
-/// (uniform `Theme.spacingChip` padding on all sides). The leading slot shows
-/// the category icon when unselected, a `checkmark` for a lone selection, and
-/// the 1-based selection ordinal when two or more chips are selected (both
-/// 30% larger than `.caption`, scaling with Dynamic Type; two-digit ordinals
-/// shrink to fit), no outline circles, and a 44 pt minimum tap target. The
-/// slot keeps the measured chip width exact in every state, so toggling never
-/// re-packs rows. Glyph changes fade in place. Chips wrap via the shared
-/// `FlowLayout` with equal `Theme.spacingSmall` gaps.
+/// (uniform `Theme.spacingChip` padding on all sides). Typography matches
+/// `RecentActivitiesChips` (Recents as reference): subheadline labels
+/// with a 14 pt subheadline-scaled leading slot, scaling with Dynamic Type.
+/// The leading slot shows the category icon when unselected, a `checkmark`
+/// for a lone selection, and the 1-based selection ordinal when two or more
+/// chips are selected (two-digit ordinals shrink to fit), no outline
+/// circles, and a 44 pt minimum tap target. The slot keeps the measured chip
+/// width exact in every state, so toggling never re-packs rows. Glyph changes
+/// fade in place. Chips wrap via the shared `FlowLayout` with equal
+/// `Theme.spacingSmall` gaps.
+///
+/// The optional creation footer (inline-category-creation) renders pinned
+/// below the chips only when `onCreate` is non-nil: a quiet leading text
+/// button, never a chip. The chip viewport grows with content and clamps
+/// at 3.5 visible rows with internal scroll, so small catalogs stay
+/// compact and large ones never push the footer off-screen.
 struct TagSelector: View {
     let options: [Category]
     /// The selected ids in selection (tap) order; deselect-then-reselect
@@ -24,7 +32,36 @@ struct TagSelector: View {
     /// Called with the toggled category id; the parent owns the ordered
     /// selection.
     let onToggle: (String) -> Void
+    /// When non-nil, the pinned creation footer renders below the chips and
+    /// tapping it calls this closure. Nil (the default) keeps the selector
+    /// select-only.
+    let onCreate: (() -> Void)?
     let accessibilityId: String
+
+    /// Whether the creation footer renders. Pure so the opt-in contract is
+    /// unit-testable.
+    var showsCreateFooter: Bool { onCreate != nil }
+
+    /// Scroll-edge state for the viewport dividers (shared `ChipViewport`
+    /// math — same clamp and fade contract as Recents).
+    @State private var edges = ChipViewport.Edges()
+    @Environment(\.dynamicTypeSize)
+    private var dynamicTypeSize
+
+    /// Chip row height: subheadline line height at the environment's Dynamic
+    /// Type size plus uniform padding, floored at the 44 pt target so the
+    /// clamp holds under Dynamic Type. Resolved against the environment
+    /// trait (Recents `sizeTrait` pattern) — `preferredFont` alone already
+    /// resolves at the current category, so it must not be re-scaled.
+    private var chipRowHeight: CGFloat {
+        let lineHeight = UIFont.preferredFont(
+            forTextStyle: .subheadline,
+            compatibleWith: UITraitCollection(
+                preferredContentSizeCategory: dynamicTypeSize.uiContentSizeCategory
+            )
+        ).lineHeight
+        return max(Theme.minTapArea, lineHeight + Theme.spacingChip * 2)
+    }
 
     /// Fade duration for glyph transitions (select, deselect, renumber,
     /// checkmark↔ordinal swap).
@@ -50,18 +87,58 @@ struct TagSelector: View {
     }
 
     var body: some View {
-        FlowLayout(spacing: Theme.spacingSmall) {
-            ForEach(options) { category in
-                chip(category)
+        // Zero inter-spacing: dividers sit exactly on the viewport cuts.
+        // The top divider fades in once chips scroll under it; the bottom
+        // one fades out at the content end — both stay hidden when the
+        // catalog fits without scrolling.
+        VStack(alignment: .leading, spacing: 0) {
+            if !edges.atTop {
+                Divider().background(Theme.hairline)
+                    .transition(.opacity)
+            }
+            ScrollView {
+                FlowLayout(spacing: Theme.spacingSmall) {
+                    ForEach(options) { category in
+                        chip(category)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            // Flexible viewport (inline-category-creation): sizes to content
+            // until the 3.5-row clamp, then scrolls internally. Small catalogs
+            // stay compact; the half-row peek signals scrollability.
+            .frame(maxHeight: ChipViewport.clampedHeight(
+                rowHeight: chipRowHeight,
+                spacing: Theme.spacingSmall
+            ))
+            // Hug content up to the clamp (Recents pattern): without this
+            // the ScrollView claims the full clamp even for 1–2 rows.
+            .fixedSize(horizontal: false, vertical: true)
+            .onScrollGeometryChange(for: ChipViewport.Edges.self, of: { geometry in
+                ChipViewport.edges(
+                    offsetY: geometry.contentOffset.y,
+                    containerHeight: geometry.containerSize.height,
+                    contentHeight: geometry.contentSize.height
+                )
+            }, action: { _, new in
+                edges = new
+            })
+            if !edges.atEnd {
+                Divider().background(Theme.hairline)
+                    .transition(.opacity)
+            }
+            if showsCreateFooter {
+                createFooterButton
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        .animation(.easeInOut(duration: 0.2), value: edges)
     }
 
-    /// Icon and checkmark glyph size: 30% larger than the caption1 standard
-    /// size (12 pt), scaled with Dynamic Type via `UIFontMetrics`.
+    /// Icon and checkmark glyph size: 14 pt subheadline scaled with Dynamic
+    /// Type via `UIFontMetrics` — identical to the Recents chip glyphs.
     private var symbolFontSize: CGFloat {
-        UIFontMetrics(forTextStyle: .caption1).scaledValue(for: 12 * 1.3)
+        UIFontMetrics(forTextStyle: .subheadline).scaledValue(for: 14)
     }
 
     /// Ordinal glyph size: full size for a single digit, shrunk for two
@@ -91,6 +168,31 @@ struct TagSelector: View {
         .accessibilityIdentifier("\(accessibilityId)Chip(\(category.id))")
     }
 
+    /// The pinned creation footer (inline-category-creation): a quiet
+    /// leading `+ Add category` text button below the chip viewport — accent
+    /// text, no fill or outline, 44 pt target spanning the row width. Never
+    /// a chip, so toggling categories cannot move, restyle, or select it:
+    /// it sits outside the selection model.
+    private var createFooterButton: some View {
+        Button {
+            onCreate?()
+        } label: {
+            HStack(spacing: Theme.spacingExtraSmall) {
+                Image(systemName: "plus")
+                    .font(.system(size: symbolFontSize, weight: .semibold))
+                    .accessibilityHidden(true)
+                Text(L10n.manageCategoriesAdd.text)
+                    .font(.subheadline)
+                    .lineLimit(1)
+            }
+            .foregroundStyle(Theme.accentPrimary)
+            .frame(maxWidth: .infinity, minHeight: Theme.minTapArea, alignment: .leading)
+            .contentShape(Rectangle())
+        }
+        .accessibilityLabel(L10n.manageCategoriesAdd.text)
+        .accessibilityIdentifier("\(accessibilityId)NewCategory")
+    }
+
     /// VoiceOver value: not-selected when unselected, selected for a lone
     /// selection, and the ordinal position when two or more are selected.
     /// Derived from `glyph(for:in:)` so the spoken position always agrees
@@ -110,7 +212,7 @@ struct TagSelector: View {
         HStack(spacing: Theme.spacingExtraSmall) {
             glyphView(category: category, glyph: glyph)
             Text(category.name)
-                .font(.caption)
+                .font(.subheadline)
                 .lineLimit(1)
                 .truncationMode(.tail)
         }
@@ -155,3 +257,47 @@ struct TagSelector: View {
         .animation(.easeInOut(duration: Self.glyphFadeDuration), value: glyph)
     }
 }
+
+#if DEBUG
+#Preview("TagSelector — with creation EN Light") {
+    TagSelector(
+        options: [
+            Category(id: "c1", name: "Work", icon: "briefcase"),
+            Category(id: "c2", name: "Sport", icon: "figure.run"),
+        ],
+        selected: ["c1"],
+        onToggle: { _ in },
+        onCreate: {},
+        accessibilityId: "PreviewTags"
+    )
+    .padding()
+}
+
+#Preview("TagSelector — with creation RU Dark") {
+    TagSelector(
+        options: [
+            Category(id: "c1", name: "Работа", icon: "briefcase"),
+        ],
+        selected: [],
+        onToggle: { _ in },
+        onCreate: {},
+        accessibilityId: "PreviewTags"
+    )
+    .padding()
+    .preferredColorScheme(.dark)
+    .environment(\.locale, .init(identifier: "ru"))
+}
+
+#Preview("TagSelector — clamped viewport, many categories") {
+    TagSelector(
+        options: (1...12).map {
+            Category(id: "c\($0)", name: "Category \($0)", icon: "tag")
+        },
+        selected: ["c1", "c3"],
+        onToggle: { _ in },
+        onCreate: {},
+        accessibilityId: "PreviewTags"
+    )
+    .padding()
+}
+#endif
