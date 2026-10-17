@@ -52,3 +52,64 @@ struct TagSelectorTests {
         #expect(TagSelector.glyph(for: "c99", in: selected) == .ordinal(99))
     }
 }
+
+@Suite("TagSelector.createFooter")
+struct TagSelectorCreateFooterTests {
+
+    private func makeSelector(onCreate: (@Sendable () -> Void)?) -> TagSelector {
+        TagSelector(
+            options: [Category(id: "c1", name: "Work", icon: "briefcase")],
+            selected: [],
+            onToggle: { _ in },
+            onCreate: onCreate,
+            accessibilityId: "TestTags"
+        )
+    }
+
+    @Test("creation footer renders only when onCreate is provided")
+    func createFooterOptIn() {
+        #expect(makeSelector {}.showsCreateFooter)
+        #expect(!makeSelector(onCreate: nil).showsCreateFooter)
+    }
+
+    @Test("nil onCreate keeps the selector select-only")
+    func nilOnCreateIsSelectOnly() {
+        let selector = makeSelector(onCreate: nil)
+        #expect(!selector.showsCreateFooter)
+        #expect(selector.selected.isEmpty)
+    }
+
+    @Test("viewport clamps at 3.5 rows plus inter-row gaps")
+    func clampMath() {
+        #expect(ChipViewport.clampedHeight(rowHeight: 44, spacing: 8) == 3.5 * 44 + 3 * 8)
+        #expect(ChipViewport.clampedHeight(rowHeight: 60, spacing: 8) == 3.5 * 60 + 3 * 8)
+    }
+
+    @Test("both dividers hide when the catalog fits without scrolling")
+    func edgesFitHideBoth() {
+        let edges = ChipViewport.edges(offsetY: 0, containerHeight: 200, contentHeight: 100)
+        #expect(edges.atTop)
+        #expect(edges.atEnd)
+    }
+
+    @Test("top divider hides at rest, bottom shows while content remains")
+    func edgesAtTop() {
+        let edges = ChipViewport.edges(offsetY: 0, containerHeight: 178, contentHeight: 400)
+        #expect(edges.atTop)
+        #expect(!edges.atEnd)
+    }
+
+    @Test("both dividers show mid-scroll")
+    func edgesMidScroll() {
+        let edges = ChipViewport.edges(offsetY: 100, containerHeight: 178, contentHeight: 400)
+        #expect(!edges.atTop)
+        #expect(!edges.atEnd)
+    }
+
+    @Test("bottom divider hides at the content end")
+    func edgesAtEnd() {
+        let edges = ChipViewport.edges(offsetY: 222, containerHeight: 178, contentHeight: 400)
+        #expect(!edges.atTop)
+        #expect(edges.atEnd)
+    }
+}

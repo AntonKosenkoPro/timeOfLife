@@ -1,12 +1,12 @@
 # Category Editor Screen
 
-Implements F2/U1/U2 of `Requirements/FURPS/Activity_Catalog_and_Categories.md`. Shared sheet for creating and editing a category; reached from Manage Categories. Per decision D21.
+Implements F2/U1/U2 of `Requirements/FURPS/Activity_Catalog_and_Categories.md`. Shared editor for creating and editing a category: the `CategoryEditorForm` (name + icon + validation + toolbar grammar, no presentation chrome) hosted either as a full-height `.sheet` (`CategoryEditorView`, reached from Manage Categories) or pushed as a `navigationDestination` (inline creation from the entry form and the running-tag row). Per decision D21.
 
 ---
 
-## Screen: CategoryEditorView
+## Screen: CategoryEditorView (sheet host)
 
-- **File**: `ios/TimeOfLife/TimeOfLife/Features/Catalog/Views/CategoryEditorView.swift`
+- **File**: `ios/TimeOfLife/TimeOfLife/Features/Catalog/Views/CategoryEditorView.swift` (thin wrapper; behavior lives in `CategoryEditorForm.swift`)
 - **Route**: presented as a `.sheet`. Create / edit modes.
 - **ViewModel**: `CategoryEditorViewModel`
 
@@ -45,6 +45,12 @@ Follows `Design/INTERACTIONS.md` → **Editor sheets and keyboard placement** (D
 - Save success: dismiss the sheet. The new category is available in the `TagSelector` options immediately.
 - Clear field error when `vm.name` changes.
 - Disable Save while `vm.isLoading` or name is empty/whitespace-only.
+
+### Push hosting (inline-category-creation)
+
+- The same `CategoryEditorForm` renders as a `navigationDestination`: the entry form pushes it on the nearest stack (CREATE sheet's internal stack, History stack for pushed EDIT forms) via a local `navigationDestination(isPresented:)`; Track pushes it on `trackPath` via the `ShellRoute.categoryEditor` value. Never a stacked sheet.
+- Pushed editor shows no toolbar X — the system Back button is the only cancel (LogTime pushed-form parity); the sheet keeps X. Save pops the push via the form's own self-dismissal; the host's `onSaved` only attaches the new category (entry-form `categoryIDs` / running draft, tap-ordered) and reloads options. Duplicates keep the editor open with the banner everywhere — no winner-selection shortcut.
+- The creation chip that opens the editor is reachable only while the timer runs or from the entry form; in non-running Track states the slot shows Recents and the tag row is hidden and ignores hits.
 
 ### Delete flow (unify-catalog-deletion, edit mode only)
 
@@ -95,6 +101,7 @@ struct Category: Identifiable, Codable, Sendable {
 - [x] Keyboard placement follows D13 (name upper, toolbar checkmark save, full-height sheet).
 - [x] Validation uses unified category-name messages (U2).
 - [x] Duplicate names preserve the draft and keep the editor open.
+- [x] Push hosting: form renders as `navigationDestination` (entry form, Track `ShellRoute.categoryEditor`); Back cancels like X; save pops with host attach; pushed-form preview exists.
 - [x] Edit mode pre-fills name + icon from the passed-in `Category`.
 - [x] iOS 18 floor — no availability guards (plain `.sheet`, no detents).
 - [ ] Screen previews exist for light/dark and EN/RU.

@@ -23,6 +23,10 @@ struct RecentActivitiesChips: View {
     @Environment(\.dynamicTypeSize)
     private var dynamicTypeSize
 
+    /// Scroll-edge state for the viewport dividers (shared `ChipViewport`
+    /// math — same clamp and fade contract as the tag selector).
+    @State private var edges = ChipViewport.Edges()
+
     /// The capped, most-recently-used-first slice (the store already sorts
     /// by the text's newest `started_at`; the cap is
     /// `TrackViewModel.recentsLimit`).
@@ -37,22 +41,51 @@ struct RecentActivitiesChips: View {
         Array(recents.prefix(limit))
     }
 
-    /// Visible chip-area budget: three chip rows at `minTapArea` with
-    /// `spacingSmall` gaps (the common six-chip footprint). Order matters:
-    /// `maxHeight` sits INSIDE `fixedSize`, so the chain reports
-    /// `min(content, budget)` — hugging rows up to the budget, scrolling
-    /// beyond it. Reversed (fixedSize inside maxHeight) the flexible frame
-    /// would report the full proposal regardless of content: dead space
-    /// for few chips, unclipped spillover instead of scroll for many.
-    private static let maxVisibleHeight: CGFloat = 3 * Theme.minTapArea + 2 * Theme.spacingSmall
+    /// Chip row height: scaled subheadline text plus the uniform vertical
+    /// padding, floored at the 44 pt target so the clamp holds under
+    /// Dynamic Type (mirrors the `TagSelector` row math for its own type).
+    private var chipRowHeight: CGFloat {
+        let lineHeight = UIFont.preferredFont(
+            forTextStyle: .subheadline,
+            compatibleWith: sizeTrait
+        ).lineHeight
+        return max(Theme.minTapArea, lineHeight + 2 * 12)
+    }
 
     var body: some View {
-        ScrollView(.vertical) {
-            flow
+        // Zero inter-spacing: dividers sit exactly on the viewport cuts —
+        // top fades in once chips scroll under it, bottom fades out at the
+        // content end, both hidden when everything fits.
+        VStack(alignment: .leading, spacing: 0) {
+            if !edges.atTop {
+                Divider().background(Theme.hairline)
+                    .transition(.opacity)
+            }
+            ScrollView(.vertical) {
+                flow
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(maxHeight: ChipViewport.clampedHeight(
+                rowHeight: chipRowHeight,
+                spacing: Theme.spacingSmall
+            ))
+            .fixedSize(horizontal: false, vertical: true)
+            .onScrollGeometryChange(for: ChipViewport.Edges.self, of: { geometry in
+                ChipViewport.edges(
+                    offsetY: geometry.contentOffset.y,
+                    containerHeight: geometry.containerSize.height,
+                    contentHeight: geometry.contentSize.height
+                )
+            }, action: { _, new in
+                edges = new
+            })
+            if !edges.atEnd {
+                Divider().background(Theme.hairline)
+                    .transition(.opacity)
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .frame(maxHeight: Self.maxVisibleHeight)
-        .fixedSize(horizontal: false, vertical: true)
+        .animation(.easeInOut(duration: 0.2), value: edges)
     }
 
     /// The chip flow: hugged by `fixedSize` up to the budget above.
@@ -116,7 +149,7 @@ struct RecentActivitiesChips: View {
                     .accessibilityHidden(true)
             }
             Text(recent.text)
-                .font(.subheadline.weight(.medium))
+                .font(.subheadline)
                 .lineLimit(1)
                 .truncationMode(.tail)
         }

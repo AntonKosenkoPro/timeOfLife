@@ -115,10 +115,11 @@ progress visualization.
 
 - Wrapping chip flow of the most-recently-used exact texts, capped at twelve,
   newest `started_at` first (`GROUP BY activity_text` over committed entries,
-  `id DESC` tiebreak); no horizontal scrolling. The chips live in a
-  fixed-height area (three chip rows) with its own vertical scroll, so
-  overflow never grows the Track page.
-- A `Divider` separates the section caption from the chips.
+  `id DESC` tiebreak); no horizontal scrolling. The chips live in a flexible
+  viewport (up to 3.5 rows, then internal scroll with a half-row peek), so
+  small sets stay compact and overflow never grows the Track page. Edge-aware
+  hairline dividers fade in/out with the scroll position (`ChipViewport`
+  contract, shared with the tag selector); no constant caption divider.
 - Each chip shows the icon of the first-position Category (first by the stored
   order) in a fixed symbol slot; categoryless entries render name-only
   chips with no icon and no placeholder glyph. Category names are never shown.
