@@ -45,14 +45,22 @@ struct TagSelector: View {
     /// Scroll-edge state for the viewport dividers (shared `ChipViewport`
     /// math — same clamp and fade contract as Recents).
     @State private var edges = ChipViewport.Edges()
+    @Environment(\.dynamicTypeSize)
+    private var dynamicTypeSize
 
-    /// Chip row height: scaled subheadline text plus uniform padding (same
-    /// reference as `RecentActivitiesChips`), floored at the 44 pt target so
-    /// the clamp holds under Dynamic Type.
+    /// Chip row height: subheadline line height at the environment's Dynamic
+    /// Type size plus uniform padding, floored at the 44 pt target so the
+    /// clamp holds under Dynamic Type. Resolved against the environment
+    /// trait (Recents `sizeTrait` pattern) — `preferredFont` alone already
+    /// resolves at the current category, so it must not be re-scaled.
     private var chipRowHeight: CGFloat {
-        let scaled = UIFontMetrics(forTextStyle: .subheadline)
-            .scaledValue(for: UIFont.preferredFont(forTextStyle: .subheadline).lineHeight)
-        return max(Theme.minTapArea, scaled + Theme.spacingChip * 2)
+        let lineHeight = UIFont.preferredFont(
+            forTextStyle: .subheadline,
+            compatibleWith: UITraitCollection(
+                preferredContentSizeCategory: dynamicTypeSize.uiContentSizeCategory
+            )
+        ).lineHeight
+        return max(Theme.minTapArea, lineHeight + Theme.spacingChip * 2)
     }
 
     /// Fade duration for glyph transitions (select, deselect, renumber,
@@ -103,6 +111,9 @@ struct TagSelector: View {
                 rowHeight: chipRowHeight,
                 spacing: Theme.spacingSmall
             ))
+            // Hug content up to the clamp (Recents pattern): without this
+            // the ScrollView claims the full clamp even for 1–2 rows.
+            .fixedSize(horizontal: false, vertical: true)
             .onScrollGeometryChange(for: ChipViewport.Edges.self, of: { geometry in
                 ChipViewport.edges(
                     offsetY: geometry.contentOffset.y,
@@ -112,11 +123,11 @@ struct TagSelector: View {
             }, action: { _, new in
                 edges = new
             })
+            if !edges.atEnd {
+                Divider().background(Theme.hairline)
+                    .transition(.opacity)
+            }
             if showsCreateFooter {
-                if !edges.atEnd {
-                    Divider().background(Theme.hairline)
-                        .transition(.opacity)
-                }
                 createFooterButton
             }
         }

@@ -66,17 +66,10 @@ struct TagSelectorCreateFooterTests {
         )
     }
 
-    @Test("creation footer renders only when onCreate is provided")
+    @Test("creation footer renders if and only if onCreate is provided")
     func createFooterOptIn() {
         #expect(makeSelector {}.showsCreateFooter)
         #expect(!makeSelector(onCreate: nil).showsCreateFooter)
-    }
-
-    @Test("nil onCreate keeps the selector select-only")
-    func nilOnCreateIsSelectOnly() {
-        let selector = makeSelector(onCreate: nil)
-        #expect(!selector.showsCreateFooter)
-        #expect(selector.selected.isEmpty)
     }
 
     @Test("viewport clamps at 3.5 rows plus inter-row gaps")

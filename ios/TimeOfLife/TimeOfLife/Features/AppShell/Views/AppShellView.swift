@@ -192,9 +192,10 @@ struct AppShellView: View {
                         // Completions resolve here from the owning tab's view
                         // model, so the route stays a value (namePicker
                         // precedent). Saving attaches the new category to
-                        // the running draft (or freshens the pool outside
-                        // running); duplicates keep the editor open with the
-                        // banner via the shared view model. No toolbar X —
+                        // the held draft (running or recoverable error) or
+                        // freshens the pool outside a draft; duplicates keep
+                        // the editor open with the banner via the shared
+                        // view model. No toolbar X —
                         // the system Back button cancels.
                         CategoryEditorForm(
                             store: container.localStore,

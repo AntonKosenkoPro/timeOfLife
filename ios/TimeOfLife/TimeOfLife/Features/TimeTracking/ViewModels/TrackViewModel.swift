@@ -376,18 +376,37 @@ final class TrackViewModel: ObservableObject {
     }
 
     /// Attaches an inline-created category (inline-category-creation):
-    /// merges it into the pool and, while running, appends its id to the
-    /// running draft in tap order with the draft snapshot persisted
-    /// (toggle parity). Draft-only — never an entry, history row, or
-    /// recents. Outside running (unreachable through the UI: the tag row is
-    /// hidden and ignores hits) it only freshens the pool.
+    /// merges it into the pool and, while a draft is held (running or the
+    /// recoverable error state), appends its id to the draft in tap order
+    /// with the draft snapshot persisted (toggle + `updateDraftNotes`
+    /// parity: both rewrite whichever draft the state holds). Draft-only —
+    /// never an entry, history row, or recents. Outside a held draft
+    /// (unreachable through the UI: the tag row is hidden and ignores hits)
+    /// it only freshens the pool.
     func attachCreatedCategory(_ category: Category) {
         categories[category.id] = category
-        guard case let .running(draft, startedAt) = state else { return }
-        guard !draft.categoryIDs.contains(category.id) else { return }
+        switch state {
+        case let .running(draft, startedAt):
+            attachToDraft(category.id, draft: draft, startedAt: startedAt) { .running($0, startedAt: $1) }
+        case let .error(draft, startedAt):
+            attachToDraft(category.id, draft: draft, startedAt: startedAt) { .error($0, startedAt: $1) }
+        case .idle, .ready, .saving, .saved:
+            break
+        }
+    }
+
+    /// Appends an id to a held draft and persists the snapshot, rewrapped
+    /// into the state it came from.
+    private func attachToDraft(
+        _ categoryID: String,
+        draft: TrackState.Draft,
+        startedAt: Date,
+        rewrap: (TrackState.Draft, Date) -> TrackState
+    ) {
+        guard !draft.categoryIDs.contains(categoryID) else { return }
         var updated = draft
-        updated.categoryIDs.append(category.id)
-        state = .running(updated, startedAt: startedAt)
+        updated.categoryIDs.append(categoryID)
+        state = rewrap(updated, startedAt)
         Task {
             try? await service.startTimerDraft(
                 text: updated.text,
