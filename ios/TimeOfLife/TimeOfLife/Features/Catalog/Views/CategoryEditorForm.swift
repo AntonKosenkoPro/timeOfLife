@@ -126,6 +126,10 @@ struct CategoryEditorForm: View {
         // Scroll-away dismisses the keyboard (native interactive behavior).
         .scrollDismissesKeyboard(.interactively)
         .interactiveDismissDisabled(vm.isLoading)
+        // Sheet parity on push hosts: gate the system Back while a save is
+        // in flight (hides the chevron and disables the pop gesture), so a
+        // mid-save pop cannot race the committing Task.
+        .navigationBarBackButtonHidden(vm.isLoading)
         .task {
             // Autofocus waits out the presentation (issue #82, NamePicker
             // precedent): focusing instantly fires the keyboard

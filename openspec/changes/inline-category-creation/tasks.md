@@ -27,6 +27,16 @@
 - [x] 9.3 Artifacts: `COMPONENTS.md` TagSelector visual, `SCREENS/TimeTracking.md` divider doc, REMOVED `timer-capture-experience` header-separator requirement with reason + migration.
 - [x] 9.4 Verify: lint + full suite green; deploy to iPhone.
 
+## 10. AI review round 1 fixes (PR #178)
+
+- [x] 10.1 Fix `chipRowHeight` double-scaling (resolve against the `dynamicTypeSize` environment trait, Recents pattern).
+- [x] 10.2 Add missing `.fixedSize(horizontal: false, vertical: true)` to the TagSelector viewport (hug content up to the clamp).
+- [x] 10.3 Bottom edge divider renders whenever content remains (not only with footer).
+- [x] 10.4 `attachCreatedCategory` appends in `.error` too (updateDraftNotes parity) + test; fix AppShell comment.
+- [x] 10.5 Gate push Back while a save is in flight (`navigationBarBackButtonHidden(vm.isLoading)`, sheet parity).
+- [x] 10.6 Trim vacuous footer test to a single iff opt-in assertion.
+- [x] 10.7 Re-verify (lint + full suite) and push.
+
 ## 3. Pushable category editor form
 
 - [x] 3.1 Extract the editor form (name field + icon grid + validation + toolbar grammar) from `CategoryEditorView` sheet chrome so it can serve as a `navigationDestination`; keep a thin sheet wrapper with identical Manage Categories behavior (sheet parity check).

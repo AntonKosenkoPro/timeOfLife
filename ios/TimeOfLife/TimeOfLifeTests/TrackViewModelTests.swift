@@ -533,7 +533,24 @@ struct TrackViewModelTests {
         await waitForPersistedDraft(vm) { $0?.categoryIDs == ["c1"] }
     }
 
-    @Test("attaching outside running only freshens the pool")
+    /// Attaching in the recoverable error state appends to the held draft
+    /// (updateDraftNotes parity), so a category created mid-run is not lost
+    /// when the stop is retried.
+    @Test("attaching in the error state appends to the held draft")
+    func attachCreatedCategoryWhileError() async {
+        let vm = makeViewModel()
+        vm.state = .error(TrackState.Draft(text: "Reading"), startedAt: Date())
+        vm.attachCreatedCategory(Category(id: "c1", name: "Garden", icon: "leaf"))
+        guard case let .error(draft, _) = vm.state else {
+            Issue.record("expected error state")
+            return
+        }
+        #expect(draft.categoryIDs == ["c1"])
+        #expect(vm.categories["c1"]?.name == "Garden")
+        await waitForPersistedDraft(vm) { $0?.categoryIDs == ["c1"] }
+    }
+
+    @Test("attaching outside a held draft only freshens the pool")
     func attachCreatedCategoryWhileIdle() {
         let vm = makeViewModel()
         vm.attachCreatedCategory(Category(id: "c1", name: "Garden", icon: "leaf"))
