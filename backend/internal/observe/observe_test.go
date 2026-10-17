@@ -9,6 +9,7 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/getsentry/sentry-go"
 	"github.com/go-chi/chi/v5"
@@ -327,12 +328,14 @@ func TestHandled500ReportsOnce(t *testing.T) {
 
 // TestReportErrorTruncatesLongMessages proves attacker-influenced error
 // strings (e.g. pgx echoing a raw path id) are bounded before leaving the
-// process, in both the context and the captured exception.
+// process — in the error context AND in the captured exception value (trimmed
+// centrally by the BeforeSend scrub, which runs before the transport) — and
+// that truncation never splits a multi-byte rune.
 func TestReportErrorTruncatesLongMessages(t *testing.T) {
 	ft := initFakeHub(t)
 
 	req := chiRequest(t, http.MethodGet, "/api/v1/categories", "/api/v1/categories")
-	ReportError(req, "get category", errTestStore("invalid input syntax for type uuid: \""+strings.Repeat("a", 4096)+"\""))
+	ReportError(req, "get category", errTestStore("invalid input syntax for type uuid: \""+strings.Repeat("é", 4096)+"\""))
 	if ok := sentry.Flush(2 * time.Second); !ok {
 		t.Fatal("expected fake transport flush to succeed")
 	}
@@ -351,6 +354,18 @@ func TestReportErrorTruncatesLongMessages(t *testing.T) {
 	}
 	if !strings.HasSuffix(msg, "… (truncated)") {
 		t.Error("expected truncation marker on an over-long message")
+	}
+	if !utf8.ValidString(msg) {
+		t.Error("expected truncated message to remain valid UTF-8")
+	}
+	if len(events[0].Exception) == 0 {
+		t.Fatal("expected a captured exception on the event")
+	}
+	if val := events[0].Exception[0].Value; !strings.HasSuffix(val, "… (truncated)") {
+		t.Errorf("expected truncation marker on the exception value, got %.64q", val)
+	}
+	if typ := events[0].Exception[0].Type; typ != "*observe.testStoreError" {
+		t.Errorf("expected original error type preserved, got %q", typ)
 	}
 }
 

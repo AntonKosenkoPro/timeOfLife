@@ -19,6 +19,7 @@ import (
 	"net/http"
 	"sync/atomic"
 	"time"
+	"unicode/utf8"
 
 	"github.com/getsentry/sentry-go"
 	"github.com/go-chi/chi/v5"
@@ -131,24 +132,30 @@ func ReportError(r *http.Request, op string, err error) {
 		}
 		// Bound the error string: store/driver errors can echo request input
 		// (e.g. pgx "invalid input syntax for type uuid" quotes the raw path
-		// id, which is attacker-controlled and unbounded). The same truncated
-		// value is captured as the exception so the full literal reaches
-		// neither the context nor the exception payload.
+		// id, which is attacker-controlled and unbounded). Capture the
+		// original error so the SDK still records its concrete type and wrap
+		// chain; the exception value is bounded centrally in sentryScrubEvent
+		// (BeforeSend), which runs after extraction.
 		msg := truncateSentryMessage(err.Error())
 		scope.SetContext("error", map[string]any{"message": msg, "op": op})
-		hub.CaptureException(errors.New(msg))
+		hub.CaptureException(err)
 	})
 }
 
 // maxSentryErrorMessageLen caps error strings attached to Sentry events.
 const maxSentryErrorMessageLen = 1024
 
-// truncateSentryMessage bounds an error string before it leaves the process.
+// truncateSentryMessage bounds an error string before it leaves the process,
+// backing up to a rune boundary so multi-byte input is never split.
 func truncateSentryMessage(msg string) string {
-	if len(msg) > maxSentryErrorMessageLen {
-		return msg[:maxSentryErrorMessageLen] + "… (truncated)"
+	if len(msg) <= maxSentryErrorMessageLen {
+		return msg
 	}
-	return msg
+	cut := maxSentryErrorMessageLen
+	for cut > 0 && !utf8.RuneStart(msg[cut]) {
+		cut--
+	}
+	return msg[:cut] + "… (truncated)"
 }
 
 // captureSentryPanic captures a recovered panic value as a fatal event.
@@ -227,11 +234,17 @@ func operationForRoute(method, pattern string) string {
 
 // sentryScrubEvent is the BeforeSend backstop: it strips anything that could
 // carry PII or infra details (user context, the full HTTP request with
-// headers/cookies, server hostname). We never attach those in the first
-// place; this guarantees they cannot reach Sentry even if SDK defaults change.
+// headers/cookies, server hostname) and bounds exception values (driver
+// errors can echo unbounded request input). We never attach those in the
+// first place; this guarantees they cannot reach Sentry even if SDK defaults
+// change. It runs after exception extraction, so concrete error types and
+// wrap chains survive — only the rendered value strings are trimmed.
 func sentryScrubEvent(event *sentry.Event, _ *sentry.EventHint) *sentry.Event {
 	event.User = sentry.User{}
 	event.Request = nil
 	event.ServerName = ""
+	for i := range event.Exception {
+		event.Exception[i].Value = truncateSentryMessage(event.Exception[i].Value)
+	}
 	return event
 }
