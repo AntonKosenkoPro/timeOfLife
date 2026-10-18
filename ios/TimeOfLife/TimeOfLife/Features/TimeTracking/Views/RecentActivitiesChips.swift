@@ -41,21 +41,12 @@ struct RecentActivitiesChips: View {
         Array(recents.prefix(limit))
     }
 
-    /// Chip row height: scaled subheadline text plus the uniform vertical
-    /// padding, floored at the 44 pt target so the clamp holds under
-    /// Dynamic Type (mirrors the `TagSelector` row math for its own type).
-    private var chipRowHeight: CGFloat {
-        let lineHeight = UIFont.preferredFont(
-            forTextStyle: .subheadline,
-            compatibleWith: sizeTrait
-        ).lineHeight
-        return max(Theme.minTapArea, lineHeight + 2 * 12)
-    }
-
     var body: some View {
         // Zero inter-spacing: dividers sit exactly on the viewport cuts —
         // top fades in once chips scroll under it, bottom fades out at the
-        // content end, both hidden when everything fits.
+        // content end, both hidden when everything fits. The viewport is
+        // flexible: hugs content, grows into available slack, and scrolls
+        // internally beyond it — never pushing siblings or the page.
         VStack(alignment: .leading, spacing: 0) {
             if !edges.atTop {
                 Divider().background(Theme.hairline)
@@ -65,10 +56,7 @@ struct RecentActivitiesChips: View {
                 flow
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .frame(maxHeight: ChipViewport.clampedHeight(
-                rowHeight: chipRowHeight,
-                spacing: Theme.spacingSmall
-            ))
+            .frame(maxHeight: .infinity)
             .fixedSize(horizontal: false, vertical: true)
             .onScrollGeometryChange(for: ChipViewport.Edges.self, of: { geometry in
                 ChipViewport.edges(
@@ -88,7 +76,7 @@ struct RecentActivitiesChips: View {
         .animation(.easeInOut(duration: 0.2), value: edges)
     }
 
-    /// The chip flow: hugged by `fixedSize` up to the budget above.
+    /// The chip flow: hugged by `fixedSize` up to the available slack above.
     private var flow: some View {
         FlowLayout(spacing: Theme.spacingSmall) {
             ForEach(capped) { recent in

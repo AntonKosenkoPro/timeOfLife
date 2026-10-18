@@ -69,10 +69,11 @@
 - [x] 7.2 Backend untouched — no `go` verify required (state the waiver explicitly in the PR).
 - [ ] 7.3 Fresh-base double rebase (`git fetch origin` + rebase before implementing and before the PR; `push --force-with-lease`; never merge main), re-running affected linters/tests after each.
 
-## 12. Back to trailing chip (retain hairlines + clamp)
+## 13. Flexible slack-bound viewport + scrollable mode
 
-- [x] 12.1 Restore the trailing dashed creation chip inside the flow; remove the footer button; keep the clamped viewport + edge-aware dividers (bottom divider now unconditional).
-- [x] 12.2 Update tests (chip opt-in), previews, artifacts (proposal/specs/design/COMPONENTS).
-- [x] 12.3 Verify: lint + full suite green; deploy to iPhone.
+- [x] 13.1 `TagSelector`: `isScrollable` mode (default true); entry form passes false for natural height. Flexible `maxHeight: .infinity` + hug; drop the point clamp math.
+- [x] 13.2 Recents: same flexible treatment; drop point clamp.
+- [x] 13.3 `ChipViewport` keeps edge math only; update artifacts (proposal/specs/design/COMPONENTS).
+- [ ] 13.4 Verify: lint + full suite green; deploy to iPhone (25+ categories case: siblings pinned, dividers correct).
 
 - [x] 11.1 Attach reloads options from the store (canonical order, no client collation); `attachCreatedCategory` async; callers Task-wrap; tests rewritten against a real store.

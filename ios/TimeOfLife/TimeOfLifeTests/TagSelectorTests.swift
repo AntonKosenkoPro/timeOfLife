@@ -72,12 +72,6 @@ struct TagSelectorCreateChipTests {
         #expect(!makeSelector(onCreate: nil).showsCreateChip)
     }
 
-    @Test("viewport clamps at 3.5 rows plus inter-row gaps")
-    func clampMath() {
-        #expect(ChipViewport.clampedHeight(rowHeight: 44, spacing: 8) == 3.5 * 44 + 3 * 8)
-        #expect(ChipViewport.clampedHeight(rowHeight: 60, spacing: 8) == 3.5 * 60 + 3 * 8)
-    }
-
     @Test("both dividers hide when the catalog fits without scrolling")
     func edgesFitHideBoth() {
         let edges = ChipViewport.edges(offsetY: 0, containerHeight: 200, contentHeight: 100)

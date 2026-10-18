@@ -331,7 +331,10 @@ struct LogTimeView: View {
                         focusedField = nil
                     },
                     onCreate: { isShowingCategoryEditor = true },
-                    accessibilityId: "EntryCategories"
+                    accessibilityId: "EntryCategories",
+                    // Natural height: the outer form scrolls (pre-PR
+                    // behavior), so the selector never scrolls internally.
+                    isScrollable: false
                 )
             }
         }

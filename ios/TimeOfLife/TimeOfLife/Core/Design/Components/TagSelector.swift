@@ -41,6 +41,29 @@ struct TagSelector: View {
     let onCreate: (() -> Void)?
     let accessibilityId: String
 
+    /// When false, renders the plain wrapping flow at natural height with no
+    /// scroll view, clamp, or dividers (entry-form categories, which live
+    /// inside the outer form scroll). True (the default) hugs content and
+    /// grows into available slack with internal scroll plus edge-aware
+    /// dividers (Track).
+    let isScrollable: Bool
+
+    init(
+        options: [Category],
+        selected: [String],
+        onToggle: @escaping (String) -> Void,
+        onCreate: (() -> Void)? = nil,
+        accessibilityId: String,
+        isScrollable: Bool = true
+    ) {
+        self.options = options
+        self.selected = selected
+        self.onToggle = onToggle
+        self.onCreate = onCreate
+        self.accessibilityId = accessibilityId
+        self.isScrollable = isScrollable
+    }
+
     /// Whether the trailing creation chip renders. Pure so the opt-in
     /// contract is unit-testable.
     var showsCreateChip: Bool { onCreate != nil }
@@ -48,23 +71,6 @@ struct TagSelector: View {
     /// Scroll-edge state for the viewport dividers (shared `ChipViewport`
     /// math — same clamp and fade contract as Recents).
     @State private var edges = ChipViewport.Edges()
-    @Environment(\.dynamicTypeSize)
-    private var dynamicTypeSize
-
-    /// Chip row height: subheadline line height at the environment's Dynamic
-    /// Type size plus uniform padding, floored at the 44 pt target so the
-    /// clamp holds under Dynamic Type. Resolved against the environment
-    /// trait (Recents `sizeTrait` pattern) — `preferredFont` alone already
-    /// resolves at the current category, so it must not be re-scaled.
-    private var chipRowHeight: CGFloat {
-        let lineHeight = UIFont.preferredFont(
-            forTextStyle: .subheadline,
-            compatibleWith: UITraitCollection(
-                preferredContentSizeCategory: dynamicTypeSize.uiContentSizeCategory
-            )
-        ).lineHeight
-        return max(Theme.minTapArea, lineHeight + Theme.spacingChip * 2)
-    }
 
     /// Fade duration for glyph transitions (select, deselect, renumber,
     /// checkmark↔ordinal swap).
@@ -90,35 +96,49 @@ struct TagSelector: View {
     }
 
     var body: some View {
-        // Zero inter-spacing: dividers sit exactly on the viewport cuts.
-        // The top divider fades in once chips scroll under it; the bottom
-        // one fades out at the content end — both stay hidden when the
-        // catalog fits without scrolling.
+        Group {
+            if isScrollable {
+                scrollableBody
+            } else {
+                chipFlow
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// The plain wrapping flow at natural height (no scroll, clamp, or
+    /// dividers): entry-form usage inside the outer form scroll.
+    private var chipFlow: some View {
+        FlowLayout(spacing: Theme.spacingSmall) {
+            ForEach(options) { category in
+                chip(category)
+            }
+            if showsCreateChip {
+                createChip
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// The flexible viewport (Track usage): hugs content and grows into
+    /// available slack, scrolling internally beyond it. Zero inter-spacing:
+    /// dividers sit exactly on the viewport cuts. The top divider fades in
+    /// once chips scroll under it; the bottom one fades out at the content
+    /// end — both stay hidden when the catalog fits without scrolling.
+    private var scrollableBody: some View {
         VStack(alignment: .leading, spacing: 0) {
             if !edges.atTop {
                 Divider().background(Theme.hairline)
                     .transition(.opacity)
             }
             ScrollView {
-                FlowLayout(spacing: Theme.spacingSmall) {
-                    ForEach(options) { category in
-                        chip(category)
-                    }
-                    if showsCreateChip {
-                        createChip
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
+                chipFlow
             }
-            // Flexible viewport (inline-category-creation): sizes to content
-            // until the 3.5-row clamp, then scrolls internally. Small catalogs
-            // stay compact; the half-row peek signals scrollability.
-            .frame(maxHeight: ChipViewport.clampedHeight(
-                rowHeight: chipRowHeight,
-                spacing: Theme.spacingSmall
-            ))
-            // Hug content up to the clamp (Recents pattern): without this
-            // the ScrollView claims the full clamp even for 1–2 rows.
+            // Flexible height: min(content, available slack) via the hug
+            // below. Never pushes siblings — overflow scrolls internally.
+            .frame(maxHeight: .infinity)
+            // Hug content up to the available slack: without this the
+            // ScrollView claims the full offer even for 1–2 rows.
             .fixedSize(horizontal: false, vertical: true)
             .onScrollGeometryChange(for: ChipViewport.Edges.self, of: { geometry in
                 ChipViewport.edges(
