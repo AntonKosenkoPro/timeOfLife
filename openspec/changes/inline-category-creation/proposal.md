@@ -4,7 +4,7 @@ Creating a category today requires abandoning the entry form, navigating to Prof
 
 ## What Changes
 
-- `TagSelector` gains an opt-in creation footer: when the parent passes an `onCreate` closure, a quiet leading `+ Add category` text button renders pinned below the chips (never a chip itself); `nil` preserves today's select-only rendering. The chip region grows with content but clamps at 3.5 visible rows (half-row peek signals scrollability), scrolling internally beyond that — small catalogs stay compact with no dead space.
+- `TagSelector` gains an opt-in trailing creation chip: rendered last in the flow only when the parent passes an `onCreate` closure; `nil` preserves today's select-only rendering. The chip is visually distinct from both unselected and selected chips (dashed-outline action style, `plus` glyph, localized label). The chip region grows with content but clamps at 3.5 visible rows (half-row peek signals scrollability), scrolling internally beyond that — small catalogs stay compact with no dead space.
 - Tapping the chip pushes the full category editor (name + icon grid, identical validation and duplicate rules as Profile creation) onto the **host navigation stack** — never a stacked sheet:
   - LogTime CREATE (sheet with its own `NavigationStack`) → push inside the sheet.
   - LogTime EDIT/LOCKED host (pushed on `historyPath`) → push on the History stack.
@@ -24,7 +24,7 @@ Non-goals: no quick-create (name-only) path; no Track Recents changes; no backen
 
 ### Modified Capabilities
 
-- `category-management`: category creation gains two entry points (entry form, running-tag row) beyond Profile; editor form becomes hostable on a push stack in addition to its sheet; TagSelector contract gains the opt-in creation footer with a 3.5-row clamped chip viewport.
+- `category-management`: category creation gains two entry points (entry form, running-tag row) beyond Profile; editor form becomes hostable on a push stack in addition to its sheet; TagSelector contract gains the opt-in trailing creation chip with a 3.5-row clamped chip viewport.
 - `timer-capture-experience`: the running `TagSelector` is no longer strictly select-only — it offers the same creation entry point, scoped so plain-text capture, Recents behavior, and running-draft snapshot rules are otherwise unchanged.
 
 ## Impact

@@ -19,11 +19,14 @@ import SwiftUI
 /// fade in place. Chips wrap via the shared `FlowLayout` with equal
 /// `Theme.spacingSmall` gaps.
 ///
-/// The optional creation footer (inline-category-creation) renders pinned
-/// below the chips only when `onCreate` is non-nil: a quiet leading text
-/// button, never a chip. The chip viewport grows with content and clamps
-/// at 3.5 visible rows with internal scroll, so small catalogs stay
-/// compact and large ones never push the footer off-screen.
+/// The optional trailing creation chip (inline-category-creation) renders
+/// last in the flow only when `onCreate` is non-nil. It is an action, not a
+/// choice: dashed accent outline, `plus` glyph, and the localized
+/// Add-category label — never a category icon, checkmark, or ordinal — so it
+/// differs from both unselected and selected chips by shape as well as color.
+/// The chip viewport grows with content and clamps at 3.5 visible rows with
+/// internal scroll, so small catalogs stay compact and large ones never push
+/// past the clamp; edge-aware hairlines mark hidden content above/below.
 struct TagSelector: View {
     let options: [Category]
     /// The selected ids in selection (tap) order; deselect-then-reselect
@@ -38,9 +41,9 @@ struct TagSelector: View {
     let onCreate: (() -> Void)?
     let accessibilityId: String
 
-    /// Whether the creation footer renders. Pure so the opt-in contract is
-    /// unit-testable.
-    var showsCreateFooter: Bool { onCreate != nil }
+    /// Whether the trailing creation chip renders. Pure so the opt-in
+    /// contract is unit-testable.
+    var showsCreateChip: Bool { onCreate != nil }
 
     /// Scroll-edge state for the viewport dividers (shared `ChipViewport`
     /// math — same clamp and fade contract as Recents).
@@ -101,6 +104,9 @@ struct TagSelector: View {
                     ForEach(options) { category in
                         chip(category)
                     }
+                    if showsCreateChip {
+                        createChip
+                    }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
@@ -126,9 +132,6 @@ struct TagSelector: View {
             if !edges.atEnd {
                 Divider().background(Theme.hairline)
                     .transition(.opacity)
-            }
-            if showsCreateFooter {
-                createFooterButton
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -168,26 +171,37 @@ struct TagSelector: View {
         .accessibilityIdentifier("\(accessibilityId)Chip(\(category.id))")
     }
 
-    /// The pinned creation footer (inline-category-creation): a quiet
-    /// leading `+ Add category` text button below the chip viewport — accent
-    /// text, no fill or outline, 44 pt target spanning the row width. Never
-    /// a chip, so toggling categories cannot move, restyle, or select it:
-    /// it sits outside the selection model.
-    private var createFooterButton: some View {
+    /// The trailing creation chip (inline-category-creation): same padding
+    /// and 44 pt target as category chips so it packs identically, but
+    /// styled as an action — dashed accent outline, `plus` glyph, and
+    /// accent text on the secondary fill. Never a category icon, checkmark,
+    /// or ordinal, so it differs from both unselected and selected chips by
+    /// shape as well as color. Toggling categories never moves, restyles, or
+    /// selects it: it sits outside the selection model.
+    private var createChip: some View {
         Button {
             onCreate?()
         } label: {
             HStack(spacing: Theme.spacingExtraSmall) {
                 Image(systemName: "plus")
                     .font(.system(size: symbolFontSize, weight: .semibold))
+                    .frame(width: symbolSlotSize, height: symbolFontSize)
                     .accessibilityHidden(true)
                 Text(L10n.manageCategoriesAdd.text)
                     .font(.subheadline)
                     .lineLimit(1)
             }
             .foregroundStyle(Theme.accentPrimary)
-            .frame(maxWidth: .infinity, minHeight: Theme.minTapArea, alignment: .leading)
-            .contentShape(Rectangle())
+            .padding(Theme.spacingChip)
+            .frame(minHeight: Theme.minTapArea)
+            .background(Theme.backgroundSecondary)
+            .clipShape(Capsule())
+            .overlay {
+                Capsule().stroke(
+                    Theme.accentPrimary,
+                    style: StrokeStyle(lineWidth: 1, dash: [5, 4])
+                )
+            }
         }
         .accessibilityLabel(L10n.manageCategoriesAdd.text)
         .accessibilityIdentifier("\(accessibilityId)NewCategory")

@@ -69,6 +69,10 @@
 - [x] 7.2 Backend untouched — no `go` verify required (state the waiver explicitly in the PR).
 - [ ] 7.3 Fresh-base double rebase (`git fetch origin` + rebase before implementing and before the PR; `push --force-with-lease`; never merge main), re-running affected linters/tests after each.
 
-## 11. AI review round 2 fix (PR #178)
+## 12. Back to trailing chip (retain hairlines + clamp)
+
+- [x] 12.1 Restore the trailing dashed creation chip inside the flow; remove the footer button; keep the clamped viewport + edge-aware dividers (bottom divider now unconditional).
+- [x] 12.2 Update tests (chip opt-in), previews, artifacts (proposal/specs/design/COMPONENTS).
+- [x] 12.3 Verify: lint + full suite green; deploy to iPhone.
 
 - [x] 11.1 Attach reloads options from the store (canonical order, no client collation); `attachCreatedCategory` async; callers Task-wrap; tests rewritten against a real store.

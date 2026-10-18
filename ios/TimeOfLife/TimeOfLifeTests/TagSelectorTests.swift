@@ -53,8 +53,8 @@ struct TagSelectorTests {
     }
 }
 
-@Suite("TagSelector.createFooter")
-struct TagSelectorCreateFooterTests {
+@Suite("TagSelector.createChip")
+struct TagSelectorCreateChipTests {
 
     private func makeSelector(onCreate: (@Sendable () -> Void)?) -> TagSelector {
         TagSelector(
@@ -66,10 +66,10 @@ struct TagSelectorCreateFooterTests {
         )
     }
 
-    @Test("creation footer renders if and only if onCreate is provided")
-    func createFooterOptIn() {
-        #expect(makeSelector {}.showsCreateFooter)
-        #expect(!makeSelector(onCreate: nil).showsCreateFooter)
+    @Test("creation chip renders if and only if onCreate is provided")
+    func createChipOptIn() {
+        #expect(makeSelector {}.showsCreateChip)
+        #expect(!makeSelector(onCreate: nil).showsCreateChip)
     }
 
     @Test("viewport clamps at 3.5 rows plus inter-row gaps")

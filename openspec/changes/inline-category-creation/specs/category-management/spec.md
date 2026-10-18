@@ -63,7 +63,7 @@ The category editor SHALL preserve its draft until the user saves or cancels. Sa
 - **THEN** the latest version becomes visible and the user receives a non-blocking localized conflict explanation
 
 ### Requirement: Entries support optional multiple category assignments
-The unified entry form and the running timer's `TagSelector` SHALL display the available category catalog and allow zero, one, or multiple categories per entry with order preserved. The `TagSelector` SHALL offer an opt-in creation footer (rendered only when the host provides a creation action): a quiet leading `+ Add category` text button pinned below the chips — never a chip, category icon, checkmark, or ordinal — with a 44 pt minimum tap target spanning the row width. The chip region SHALL grow with content up to a 3.5-visible-row clamp (three full rows plus a half-row peek signaling scrollability), scrolling internally beyond that; smaller catalogs SHALL render compactly with no reserved dead space. Toggling categories SHALL NOT move or restyle the footer. Saving SHALL persist that entry's ordered category set. Category assignment SHALL remain optional. There is no activity entity and no Activity editor — category chips live on entry forms and the running timer only. Recents chips SHALL display only the icon of the first category of each exact text's newest entry and SHALL NOT display category names. Whenever two or more categories are selected, each selected chip SHALL display its 1-based position in the selection order (tap order; deselect-then-reselect appends at the end); deselecting any chip SHALL renumber the remaining selected chips to the dense sequence 1…n. Ordinal presentation SHALL cap at 99 (a third digit is impossible). Ordinal changes (select, deselect, renumber, checkmark↔ordinal swap) SHALL animate with a fade. Selecting or deselecting chips SHALL NOT change chip geometry: the ordinal glyph fits the existing fixed symbol slot (two-digit ordinals shrink to fit) so surrounding rows never re-pack.
+The unified entry form and the running timer's `TagSelector` SHALL display the available category catalog and allow zero, one, or multiple categories per entry with order preserved. The `TagSelector` SHALL offer an opt-in trailing creation chip (rendered last in the flow only when the host provides a creation action): a dashed-outline action chip with `plus` glyph and localized creation label — never a category icon, checkmark, or ordinal. The chip region SHALL grow with content up to a 3.5-visible-row clamp (three full rows plus a half-row peek signaling scrollability), scrolling internally beyond that; smaller catalogs SHALL render compactly with no reserved dead space. Toggling categories SHALL NOT move, restyle, or select the creation chip. Saving SHALL persist that entry's ordered category set. Category assignment SHALL remain optional. There is no activity entity and no Activity editor — category chips live on entry forms and the running timer only. Recents chips SHALL display only the icon of the first category of each exact text's newest entry and SHALL NOT display category names. Whenever two or more categories are selected, each selected chip SHALL display its 1-based position in the selection order (tap order; deselect-then-reselect appends at the end); deselecting any chip SHALL renumber the remaining selected chips to the dense sequence 1…n. Ordinal presentation SHALL cap at 99 (a third digit is impossible). Ordinal changes (select, deselect, renumber, checkmark↔ordinal swap) SHALL animate with a fade. Selecting or deselecting chips SHALL NOT change chip geometry: the ordinal glyph fits the existing fixed symbol slot (two-digit ordinals shrink to fit) so surrounding rows never re-pack.
 
 #### Scenario: Assign multiple categories
 - **WHEN** the user selects two or more categories for an entry and saves
@@ -105,13 +105,13 @@ The unified entry form and the running timer's `TagSelector` SHALL display the a
 - **WHEN** a Recents chip's newest entry has no categories
 - **THEN** the chip renders with the exact text and no icon
 
-#### Scenario: Creation footer is pinned and distinct
+#### Scenario: Creation chip is always last and distinct
 - **WHEN** the entry form or running-tag selector renders with a creation action
-- **THEN** a leading `+ Add category` text button appears pinned below the chips (not a chip), and selecting or deselecting categories never moves, restyles, or selects it
+- **THEN** a single creation chip appears after all category chips with action styling (dashed outline, plus glyph, localized label) that never participates in selection, and selecting or deselecting categories never moves, restyles, or selects it
 
 #### Scenario: Chip region clamps at 3.5 rows
 - **WHEN** the catalog holds more categories than fit in 3.5 rows
-- **THEN** the chip region shows three full rows plus a half-row peek and scrolls internally, while the creation footer stays visible and fixed
+- **THEN** the chip region shows three full rows plus a half-row peek and scrolls internally, with the trailing creation chip reachable at the flow end
 
 #### Scenario: Dividers follow the scroll edges
 - **WHEN** the chip region is scrolled down from the top
@@ -119,7 +119,7 @@ The unified entry form and the running timer's `TagSelector` SHALL display the a
 
 #### Scenario: Bottom divider hides at the content end
 - **WHEN** the chip region is scrolled to its end
-- **THEN** the bottom divider fades out, leaving the creation footer directly against the final row
+- **THEN** the bottom divider fades out at the content end
 
 #### Scenario: No dividers when everything fits
 - **WHEN** the catalog fits in the viewport without scrolling
@@ -127,16 +127,16 @@ The unified entry form and the running timer's `TagSelector` SHALL display the a
 
 #### Scenario: Small catalogs stay compact
 - **WHEN** the catalog fits in fewer than 3.5 rows
-- **THEN** the chip region sizes to its content with no reserved dead space above the creation footer
+- **THEN** the chip region sizes to its content with no reserved dead space
 
 #### Scenario: No creation action means select-only
 - **WHEN** a `TagSelector` host provides no creation action
-- **THEN** no creation footer renders and the selector behaves exactly as before (select-only)
+- **THEN** no creation chip renders and the selector behaves exactly as before (select-only)
 
 ## ADDED Requirements
 
 ### Requirement: Inline category creation from entry contexts
-The entry form (CREATE and EDIT modes) and the running timer's tag row SHALL offer inline category creation through the `TagSelector` creation footer: a quiet leading `+ Add category` button separated from the chips by a hairline divider. Activating the footer button SHALL push the full category editor (name field plus icon grid, identical validation and duplicate rules as Profile creation) onto the host navigation stack — the CREATE sheet's internal stack, the History stack for pushed entry forms, or the Track stack — and SHALL NEVER present a second sheet over the CREATE sheet. Saving a valid new category SHALL pop back to the originating form, reload its category options, and append the new category id to the originating selection in tap order (entry-form drafts and the running timer draft alike). The creation chip SHALL be reachable only while the timer runs or from the entry form: in every non-running Track state the slot shows Recents and the tag row (with its creation chip) is hidden and ignores hits. A duplicate name SHALL keep the editor open with the localized duplicate-name error and the draft intact, identical to Profile creation. The creation footer SHALL expose a stable accessibility identifier distinct from category-chip identifiers, a localized VoiceOver label naming the creation action (without embedding the Button trait word), and a 44 pt minimum tap target; all copy SHALL be localized in English and Russian.
+The entry form (CREATE and EDIT modes) and the running timer's tag row SHALL offer inline category creation through the `TagSelector` trailing creation chip: a dashed-outline action chip with `plus` glyph and localized label, rendered last in the flow. Activating the chip SHALL push the full category editor (name field plus icon grid, identical validation and duplicate rules as Profile creation) onto the host navigation stack — the CREATE sheet's internal stack, the History stack for pushed entry forms, or the Track stack — and SHALL NEVER present a second sheet over the CREATE sheet. Saving a valid new category SHALL pop back to the originating form, reload its category options, and append the new category id to the originating selection in tap order (entry-form drafts and the running timer draft alike). The creation chip SHALL be reachable only while the timer runs or from the entry form: in every non-running Track state the slot shows Recents and the tag row (with its creation chip) is hidden and ignores hits. A duplicate name SHALL keep the editor open with the localized duplicate-name error and the draft intact, identical to Profile creation. The creation chip SHALL expose a stable accessibility identifier distinct from category-chip identifiers, a localized VoiceOver label naming the creation action (without embedding the Button trait word), and a 44 pt minimum tap target; all copy SHALL be localized in English and Russian.
 
 #### Scenario: Create from the entry form
 - **WHEN** the user activates the creation chip in the entry form's categories row, enters a unique valid name with an icon, and saves
@@ -146,9 +146,9 @@ The entry form (CREATE and EDIT modes) and the running timer's tag row SHALL off
 - **WHEN** the user activates the creation chip in the running-tag row, enters a unique valid name with an icon, and saves
 - **THEN** the editor pops back to Track, the running draft gains the new category id in tap order, and the persisted draft snapshot updates
 
-#### Scenario: Creation footer unreachable while idle
+#### Scenario: Creation chip unreachable while idle
 - **WHEN** no timer is running (idle, ready, saving, or saved states)
-- **THEN** the below-button slot shows Recents and the tag row with its creation footer stays hidden, ignores hits, and stays silent for VoiceOver
+- **THEN** the below-button slot shows Recents and the tag row with its creation chip stays hidden, ignores hits, and stays silent for VoiceOver
 
 #### Scenario: Duplicate name from an entry context
 - **WHEN** the user attempts to save a name that differs from an existing category only by case or surrounding whitespace
@@ -158,6 +158,6 @@ The entry form (CREATE and EDIT modes) and the running timer's tag row SHALL off
 - **WHEN** the user goes back from the pushed editor without saving
 - **THEN** the catalog is unchanged and the originating entry or timer draft is exactly as before
 
-#### Scenario: VoiceOver identifies the creation footer
-- **WHEN** VoiceOver focuses the creation footer in English or Russian
+#### Scenario: VoiceOver identifies the creation chip
+- **WHEN** VoiceOver focuses the creation chip in English or Russian
 - **THEN** it announces the localized creation action (e.g. new-category wording) as a button, distinct from any category chip
