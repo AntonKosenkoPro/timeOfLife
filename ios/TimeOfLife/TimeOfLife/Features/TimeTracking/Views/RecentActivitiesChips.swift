@@ -41,6 +41,17 @@ struct RecentActivitiesChips: View {
         Array(recents.prefix(limit))
     }
 
+    /// Chip row height: subheadline line height at the environment's Dynamic
+    /// Type size plus uniform padding, floored at the 44 pt target so the
+    /// clamp holds under Dynamic Type.
+    private var chipRowHeight: CGFloat {
+        let lineHeight = UIFont.preferredFont(
+            forTextStyle: .subheadline,
+            compatibleWith: sizeTrait
+        ).lineHeight
+        return max(Theme.minTapArea, lineHeight + 2 * 12)
+    }
+
     var body: some View {
         // Zero inter-spacing: dividers sit exactly on the viewport cuts —
         // top fades in once chips scroll under it, bottom fades out at the
@@ -56,7 +67,10 @@ struct RecentActivitiesChips: View {
                 flow
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .frame(maxHeight: .infinity)
+            .frame(maxHeight: ChipViewport.clampedHeight(
+                rowHeight: chipRowHeight,
+                spacing: Theme.spacingSmall
+            ))
             .fixedSize(horizontal: false, vertical: true)
             .onScrollGeometryChange(for: ChipViewport.Edges.self, of: { geometry in
                 ChipViewport.edges(

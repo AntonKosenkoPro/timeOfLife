@@ -69,11 +69,18 @@
 - [x] 7.2 Backend untouched — no `go` verify required (state the waiver explicitly in the PR).
 - [ ] 7.3 Fresh-base double rebase (`git fetch origin` + rebase before implementing and before the PR; `push --force-with-lease`; never merge main), re-running affected linters/tests after each.
 
-## 13. Flexible slack-bound viewport + scrollable mode
+## 13. Viewport sizing: flexible attempt, then fixed 4-row clamp
 
-- [x] 13.1 `TagSelector`: `isScrollable` mode (default true); entry form passes false for natural height. Flexible `maxHeight: .infinity` + hug; drop the point clamp math.
-- [x] 13.2 Recents: same flexible treatment; drop point clamp.
-- [x] 13.3 `ChipViewport` keeps edge math only; update artifacts (proposal/specs/design/COMPONENTS).
-- [x] 13.4 Verify: lint + full suite green; deploy to iPhone (25+ categories case: siblings pinned, dividers correct).
+- [x] 13.1 `TagSelector`: `isScrollable` mode (default true); entry form passes false for natural height. (Kept.)
+- [x] 13.2 Recents: flexible treatment first (dropped — outer ScrollView offers unbounded height, so flexible claimed full content and slid under the tab bar).
+- [x] 13.3 `ChipViewport` keeps clamp + edge math (fixed 4 rows); update artifacts (proposal/specs/design/COMPONENTS).
+- [ ] 13.4 Tab-bar margin on the Track slot (glass-aware, zero on iOS 18/iPad); verify + deploy (25+ categories: slot bounded, siblings pinned, dividers correct).
 
 - [x] 11.1 Attach reloads options from the store (canonical order, no client collation); `attachCreatedCategory` async; callers Task-wrap; tests rewritten against a real store.
+
+## 14. Fixed 4-row clamp + tab-bar margin (post flexible-attempt)
+
+- [x] 14.1 Restore `ChipViewport.clampedHeight` with 4 rows (flexible .infinity abandoned: outer ScrollView offers unbounded height, viewport slid under the tab bar).
+- [x] 14.2 Track slot bottom margin mirroring the glass tab bar float (zero on iOS 18 opaque bar and bar-less iPad); explicit `TagSelector.init`.
+- [x] 14.3 Artifacts updated (proposal/specs/design/COMPONENTS); validate + lint green.
+- [x] 14.4 Full suite green; deploy to iPhone.

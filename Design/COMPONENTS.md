@@ -425,7 +425,7 @@ struct TagSelector: View {
 - Each chip: `Theme.spacingChip` (10 pt) uniform padding on all sides, `minHeight Theme.minTapArea` (44 pt — Apple HIG / WCAG 2.2 SC 2.5.5 AAA), `Capsule` shape; long names truncate with `lineLimit(1)`.
 - Creation chip (only when `onCreate` is non-nil): pinned last, same padding and 44 pt target so it packs like a chip, but styled as an action — dashed 1 pt `Theme.accentPrimary` outline, `plus` glyph, `Theme.accentPrimary` text on `Theme.backgroundSecondary` fill; never a category icon, checkmark, or ordinal. Toggling categories never moves, restyles, or selects it.
 - Edge-aware hairline dividers: a `Theme.hairline` divider fades in above the viewport once chips scroll under it and below the viewport while content remains; the bottom divider fades out at the content end, and both stay hidden when the catalog fits without scrolling.
-- Chip viewport: hugs content and grows into available slack down to the layout boundary above the tab bar, scrolling internally beyond it; compact when smaller, never pushing siblings.
+- Chip viewport: hugs content and clamps at 4 visible rows, scrolling internally beyond it; compact when smaller, never pushing siblings or underlapping the tab bar.
 - When `options` is empty and no `onCreate` is provided, the selector renders no chips and the parent editor shows the localized Add-category action. With `onCreate`, the creation chip still renders alone.
 
 ### States
@@ -437,7 +437,7 @@ struct TagSelector: View {
 | Selected (2+) | `Theme.accentPrimary` fill, `Theme.textOnAccent` text, enlarged 1-based selection ordinal in place of the icon, fading in place on every change |
 | Empty options | No category chips (creation chip still renders alone when `onCreate` is set); otherwise the parent editor renders the Add-category action |
 | Creation chip | Dashed accent outline + `plus` + localized Add-category label, pinned last; outside the selection model |
-| Flexible viewport | Hugs content, grows into available slack, scrolls internally; compact when smaller, never pushes siblings |
+| Fixed 4-row viewport | Hugs content, clamps at 4 rows, scrolls internally; compact when smaller, never pushes siblings |
 
 ### Requirements
 
@@ -497,7 +497,7 @@ struct RecentActivitiesChips: View {
   (same greedy packing as `TagSelector`).
 - Cap of twelve, most-recently-used first (`recents.prefix(12)`; the store
   already sorts by each text's newest `started_at`). The flow sits in a
-  flexible `ScrollView` (hug content, grow into available slack, scroll
+  fixed-clamp `ScrollView` (hug content, clamp at 4 rows, scroll
   internally) with a partial-row peek, so small sets stay compact and
   overflow never grows the page.
 - Edge-aware `Theme.hairline` dividers (same contract as `TagSelector`):

@@ -63,7 +63,7 @@ The category editor SHALL preserve its draft until the user saves or cancels. Sa
 - **THEN** the latest version becomes visible and the user receives a non-blocking localized conflict explanation
 
 ### Requirement: Entries support optional multiple category assignments
-The unified entry form and the running timer's `TagSelector` SHALL display the available category catalog and allow zero, one, or multiple categories per entry with order preserved. The `TagSelector` SHALL offer an opt-in trailing creation chip (rendered last in the flow only when the host provides a creation action): a dashed-outline action chip with `plus` glyph and localized creation label — never a category icon, checkmark, or ordinal. The chip region SHALL hug content and grow into available slack down to the layout boundary above the tab bar, scrolling internally beyond that; smaller catalogs SHALL render compactly with no reserved dead space, and the viewport SHALL never push sibling elements or grow the page. Toggling categories SHALL NOT move, restyle, or select the creation chip. Saving SHALL persist that entry's ordered category set. Category assignment SHALL remain optional. There is no activity entity and no Activity editor — category chips live on entry forms and the running timer only. Recents chips SHALL display only the icon of the first category of each exact text's newest entry and SHALL NOT display category names. Whenever two or more categories are selected, each selected chip SHALL display its 1-based position in the selection order (tap order; deselect-then-reselect appends at the end); deselecting any chip SHALL renumber the remaining selected chips to the dense sequence 1…n. Ordinal presentation SHALL cap at 99 (a third digit is impossible). Ordinal changes (select, deselect, renumber, checkmark↔ordinal swap) SHALL animate with a fade. Selecting or deselecting chips SHALL NOT change chip geometry: the ordinal glyph fits the existing fixed symbol slot (two-digit ordinals shrink to fit) so surrounding rows never re-pack.
+The unified entry form and the running timer's `TagSelector` SHALL display the available category catalog and allow zero, one, or multiple categories per entry with order preserved. The `TagSelector` SHALL offer an opt-in trailing creation chip (rendered last in the flow only when the host provides a creation action): a dashed-outline action chip with `plus` glyph and localized creation label — never a category icon, checkmark, or ordinal. The chip region SHALL hug content and clamp at 4 visible rows, scrolling internally beyond that; smaller catalogs SHALL render compactly with no reserved dead space, and the viewport SHALL never grow the page or slide under the tab bar. Toggling categories SHALL NOT move, restyle, or select the creation chip. Saving SHALL persist that entry's ordered category set. Category assignment SHALL remain optional. There is no activity entity and no Activity editor — category chips live on entry forms and the running timer only. Recents chips SHALL display only the icon of the first category of each exact text's newest entry and SHALL NOT display category names. Whenever two or more categories are selected, each selected chip SHALL display its 1-based position in the selection order (tap order; deselect-then-reselect appends at the end); deselecting any chip SHALL renumber the remaining selected chips to the dense sequence 1…n. Ordinal presentation SHALL cap at 99 (a third digit is impossible). Ordinal changes (select, deselect, renumber, checkmark↔ordinal swap) SHALL animate with a fade. Selecting or deselecting chips SHALL NOT change chip geometry: the ordinal glyph fits the existing fixed symbol slot (two-digit ordinals shrink to fit) so surrounding rows never re-pack.
 
 #### Scenario: Assign multiple categories
 - **WHEN** the user selects two or more categories for an entry and saves
@@ -109,7 +109,7 @@ The unified entry form and the running timer's `TagSelector` SHALL display the a
 - **WHEN** the entry form or running-tag selector renders with a creation action
 - **THEN** a single creation chip appears after all category chips with action styling (dashed outline, plus glyph, localized label) that never participates in selection, and selecting or deselecting categories never moves, restyles, or selects it
 
-#### Scenario: Chip region grows into available slack
+#### Scenario: Chip region clamps at 4 rows
 - **WHEN** the catalog holds more categories than fit the visible viewport
 - **THEN** the chip region shows as many rows as fit down to the layout boundary above the tab bar and scrolls internally, with edge dividers marking hidden content
 
@@ -126,7 +126,7 @@ The unified entry form and the running timer's `TagSelector` SHALL display the a
 - **THEN** neither divider appears
 
 #### Scenario: Small catalogs stay compact
-- **WHEN** the catalog fits in the available slack
+- **WHEN** the catalog fits in fewer than 4 rows
 - **THEN** the chip region sizes to its content with no reserved dead space
 
 #### Scenario: No creation action means select-only

@@ -4,13 +4,13 @@ Creating a category today requires abandoning the entry form, navigating to Prof
 
 ## What Changes
 
-- `TagSelector` gains an opt-in trailing creation chip: rendered last in the flow only when the parent passes an `onCreate` closure; `nil` preserves today's select-only rendering. The chip is visually distinct from both unselected and selected chips (dashed-outline action style, `plus` glyph, localized label). The chip region hugs content and grows into available slack down to the layout boundary above the tab bar (the tab bar's own margin mirrored: zero on iOS 18 opaque bars and iPads without a bottom bar), scrolling internally beyond that — small catalogs stay compact with no dead space, and sibling elements never move.
+- `TagSelector` gains an opt-in trailing creation chip: rendered last in the flow only when the parent passes an `onCreate` closure; `nil` preserves today's select-only rendering. The chip is visually distinct from both unselected and selected chips (dashed-outline action style, `plus` glyph, localized label). The chip region hugs content and clamps at 4 visible rows with internal scroll; smaller catalogs stay compact with no reserved dead space, and the viewport never grows the page or slides under the tab bar. A bottom margin mirrors the floating glass bar's own offset (zero on the opaque iOS 18 bar and bar-less iPads).
 - Tapping the chip pushes the full category editor (name + icon grid, identical validation and duplicate rules as Profile creation) onto the **host navigation stack** — never a stacked sheet:
   - LogTime CREATE (sheet with its own `NavigationStack`) → push inside the sheet.
   - LogTime EDIT/LOCKED host (pushed on `historyPath`) → push on the History stack.
   - Track tab (root of `trackPath`) → push a new `ShellRoute` destination.
 - Saving a new category reloads the host's category options and **auto-selects** the new id (ordered append): `LogTimeViewModel.categoryIDs` for CREATE/EDIT, the running draft's `categoryIDs` while Track is running. The footer is reachable only while the timer runs or from the entry form (non-running Track shows Recents).
-- Recents parity: `RecentActivitiesChips` adopts the same viewport contract — flexible height (hug content, grow into available slack, scroll internally) plus the same edge-aware hairline dividers (top fades in once scrolled, bottom fades out at the end, both hidden when everything fits). Shared edge math lives in `ChipViewport` so both groups behave identically.
+- Recents parity: `RecentActivitiesChips` adopts the same viewport contract — hugged content, fixed 4-row clamp with internal scroll, plus the same edge-aware hairline dividers (top fades in once scrolled, bottom fades out at the end, both hidden when everything fits). Shared clamp/edge math lives in `ChipViewport` so both groups behave identically.
 - Duplicate names keep the existing contract everywhere: editor stays open with the localized `errorCategoryExists` banner, draft preserved (no "select the winner" shortcut from entry forms).
 - New localized strings in `en` + `ru` + `L10n` (U4); `Theme` semantic colors only.
 
@@ -24,7 +24,7 @@ Non-goals: no quick-create (name-only) path; no Track Recents changes; no backen
 
 ### Modified Capabilities
 
-- `category-management`: category creation gains two entry points (entry form, running-tag row) beyond Profile; editor form becomes hostable on a push stack in addition to its sheet; TagSelector contract gains the opt-in trailing creation chip with a flexible slack-bound chip viewport.
+- `category-management`: category creation gains two entry points (entry form, running-tag row) beyond Profile; editor form becomes hostable on a push stack in addition to its sheet; TagSelector contract gains the opt-in trailing creation chip with a fixed 4-row clamped chip viewport.
 - `timer-capture-experience`: the running `TagSelector` is no longer strictly select-only — it offers the same creation entry point, scoped so plain-text capture, Recents behavior, and running-draft snapshot rules are otherwise unchanged.
 
 ## Impact

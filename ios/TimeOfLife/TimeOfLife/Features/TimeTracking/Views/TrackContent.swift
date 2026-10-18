@@ -185,6 +185,22 @@ struct TrackContent: View {
                 .allowsHitTesting(vm.state.isRunning)
                 .accessibilityHidden(!vm.state.isRunning)
         }
+        // Minimum gap between the chip viewport and the tab bar
+        // (inline-category-creation): mirrors the floating glass bar's own
+        // bottom margin so the viewport border never slides under the bar.
+        // Zero for the opaque iOS 18 bar and iPads without a bottom bar —
+        // the border then sits exactly on the bar / safe area.
+        .padding(.bottom, tabBarMargin)
+    }
+
+    /// The tab-bar float margin. Glass only (HistoryView glass-tab-bar
+    /// precedent): opaque bars and bar-less iPads need no gap.
+    private var tabBarMargin: CGFloat {
+        guard UIDevice.current.userInterfaceIdiom != .pad else { return 0 }
+        if #available(iOS 26, *) {
+            return Theme.spacingMedium
+        }
+        return 0
     }
 
     /// Idle/ready/saved: the name push row opening the shared picker.

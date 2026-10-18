@@ -71,6 +71,23 @@ struct TagSelector: View {
     /// Scroll-edge state for the viewport dividers (shared `ChipViewport`
     /// math — same clamp and fade contract as Recents).
     @State private var edges = ChipViewport.Edges()
+    @Environment(\.dynamicTypeSize)
+    private var dynamicTypeSize
+
+    /// Chip row height: subheadline line height at the environment's Dynamic
+    /// Type size plus uniform padding, floored at the 44 pt target so the
+    /// clamp holds under Dynamic Type. Resolved against the environment
+    /// trait (Recents `sizeTrait` pattern) — `preferredFont` alone already
+    /// resolves at the current category, so it must not be re-scaled.
+    private var chipRowHeight: CGFloat {
+        let lineHeight = UIFont.preferredFont(
+            forTextStyle: .subheadline,
+            compatibleWith: UITraitCollection(
+                preferredContentSizeCategory: dynamicTypeSize.uiContentSizeCategory
+            )
+        ).lineHeight
+        return max(Theme.minTapArea, lineHeight + Theme.spacingChip * 2)
+    }
 
     /// Fade duration for glyph transitions (select, deselect, renumber,
     /// checkmark↔ordinal swap).
@@ -136,7 +153,10 @@ struct TagSelector: View {
             }
             // Flexible height: min(content, available slack) via the hug
             // below. Never pushes siblings — overflow scrolls internally.
-            .frame(maxHeight: .infinity)
+            .frame(maxHeight: ChipViewport.clampedHeight(
+                rowHeight: chipRowHeight,
+                spacing: Theme.spacingSmall
+            ))
             // Hug content up to the available slack: without this the
             // ScrollView claims the full offer even for 1–2 rows.
             .fixedSize(horizontal: false, vertical: true)
