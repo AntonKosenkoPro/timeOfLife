@@ -74,6 +74,6 @@
 - [x] 13.1 `TagSelector`: `isScrollable` mode (default true); entry form passes false for natural height. Flexible `maxHeight: .infinity` + hug; drop the point clamp math.
 - [x] 13.2 Recents: same flexible treatment; drop point clamp.
 - [x] 13.3 `ChipViewport` keeps edge math only; update artifacts (proposal/specs/design/COMPONENTS).
-- [ ] 13.4 Verify: lint + full suite green; deploy to iPhone (25+ categories case: siblings pinned, dividers correct).
+- [x] 13.4 Verify: lint + full suite green; deploy to iPhone (25+ categories case: siblings pinned, dividers correct).
 
 - [x] 11.1 Attach reloads options from the store (canonical order, no client collation); `attachCreatedCategory` async; callers Task-wrap; tests rewritten against a real store.
