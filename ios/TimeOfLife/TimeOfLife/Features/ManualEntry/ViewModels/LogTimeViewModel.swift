@@ -354,7 +354,7 @@ final class LogTimeViewModel: ObservableObject {
     var endTimeRange: ClosedRange<Date> {
         let calendar = Calendar.current
         let endDay = calendar.startOfDay(for: displayEndsAt)
-        let endDayEnd = (calendar.date(byAdding: .day, value: 1, to: endDay) ?? endDay.addingTimeInterval(86_399))
+        let endDayEnd = (calendar.date(byAdding: .day, value: 1, to: endDay) ?? endDay.addingTimeInterval(86_400))
             .addingTimeInterval(-1)
         guard calendar.isDate(displayEndsAt, inSameDayAs: displayStartsAt) else {
             return endDay...endDayEnd
