@@ -13,9 +13,9 @@
 
 - [x] 3.1 `openspec validate --all --strict` green
 - [x] 3.2 `swiftlint lint --strict` green (from `ios/TimeOfLife`)
-- [ ] 3.3 Full iOS build green (parent-scheduled — no `xcodebuild` in this session)
-- [ ] 3.4 Full iOS test suite green incl. new `notesPlaceholders` regression (parent-scheduled; new test NOT executed here, so no fail-before/pass-after claim is made)
-- [ ] 3.5 Visual verification of the expanded editor empty state (EN + RU) and collapsed presenters (parent-scheduled: preview or simulator screenshot — no simulator interaction in this session)
+- [x] 3.3 Full iOS build green — parent-verified: `xcodebuild` TEST SUCCEEDED on iPhone16Pro sim F132A44E (log `/private/var/folders/8c/pwh55jk140g1shxfnwm7zxf80000gn/T/opencode/verify-notes.log`)
+- [x] 3.4 Full iOS test suite green incl. new `notesPlaceholders` regression — parent-verified: 689 Swift-Testing passes, 0 failures (same log)
+- [x] 3.5 Visual verification of the expanded editor empty state (EN + RU) and collapsed presenters — parent-verified: user acceptance of all four fixes on physical iPhone from combined Release build
 
 ## 4. Backend (no backend changes in scope — recorded for the parent verifier)
 
