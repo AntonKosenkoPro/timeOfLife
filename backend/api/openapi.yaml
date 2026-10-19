@@ -14,12 +14,8 @@ info:
     3. **Refresh** — `POST /api/v1/auth/refresh` with the refresh token and `X-Device-Id`.
        Issues a new token pair within the sending device's refresh family and revokes the
        old token. Reuse of a revoked token revokes only that device's family — other
-       devices' sessions keep working. With the optional `refresh_attempt_id` (one durable
-       UUID per logical rotation, always sent by current clients), a retry repeating the
-       same predecessor and accepted pending attempt after a lost response recovers the
-       committed successor plus a fresh access token instead of tripping reuse detection
-       (recovery holds until the successor's fixed refresh expiry and never extends it).
-       Requests without the field keep legacy behavior.
+       devices' sessions keep working. Response-loss recovery via the optional
+       `refresh_attempt_id` is specified normatively on the operation itself.
     4. **Logout** — `POST /api/v1/auth/logout` with a Bearer access token and `X-Device-Id`.
        Revokes only the calling device's refresh family; other devices' sessions remain valid.
     5. **Me** — `GET /api/v1/auth/me` with a Bearer access token. Returns the user profile.
@@ -1169,10 +1165,9 @@ components:
       description: |
         Request body for refreshing tokens. The device scope comes from the `X-Device-Id`
         header on the request, not from this body. The optional `refresh_attempt_id`
-        names one logical rotation for response-loss recovery (a client-generated UUID,
-        persisted before the first send and reused until a complete successor is durably
-        saved); absent keeps legacy behavior with no recovery. Refresh and access-token
-        lifetimes are unchanged by recovery.
+        carries the response-loss recovery contract specified on
+        POST /api/v1/auth/refresh; absent keeps legacy behavior with no recovery.
+        Refresh and access-token lifetimes are unchanged by recovery.
       required:
         - refresh_token
       properties:
