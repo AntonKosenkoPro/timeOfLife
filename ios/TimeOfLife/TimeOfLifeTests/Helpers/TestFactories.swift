@@ -28,6 +28,36 @@ enum TestFactories {
         )
     }
 
+    /// Creates a durable `CredentialSnapshot` with sensible defaults.
+    static func makeSnapshot(
+        accessToken: String = "at",
+        refreshToken: String = "rt",
+        accountId: String = "u1",
+        deviceId: String? = "device-1",
+        pendingAttemptId: String? = nil,
+        pendingPredecessor: String? = nil
+    ) -> CredentialSnapshot {
+        CredentialSnapshot(
+            accessToken: accessToken,
+            refreshToken: refreshToken,
+            accountId: accountId,
+            deviceId: deviceId,
+            pendingAttemptId: pendingAttemptId,
+            pendingPredecessor: pendingPredecessor
+        )
+    }
+
+    /// Reads the durable token pair (plus pending attempt) from a keychain.
+    /// Returns nils when storage is unavailable or no snapshot exists.
+    static func snapshotTokens(_ keychain: InMemoryKeychainStore) async -> (
+        access: String?, refresh: String?, attempt: String?
+    ) {
+        guard case .success(let snapshot) = await keychain.loadSnapshot() else {
+            return (nil, nil, nil)
+        }
+        return (snapshot?.accessToken, snapshot?.refreshToken, snapshot?.pendingAttemptId)
+    }
+
     /// Creates a JSON-encoded error envelope matching the server contract.
     static func makeErrorResponse(
         code: String,

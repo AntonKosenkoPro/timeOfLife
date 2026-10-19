@@ -38,7 +38,7 @@ func newParityStore(t *testing.T) *PostgresStore {
 	// Truncate for isolation (migrations run once per DB via schema_migrations).
 	if _, err := store.DB().Exec(ctx, `
 		TRUNCATE entry_categories, entries, categories,
-		         refresh_tokens, otp_codes, users RESTART IDENTITY CASCADE
+		         refresh_recovery_receipts, refresh_tokens, otp_codes, users RESTART IDENTITY CASCADE
 	`); err != nil {
 		t.Fatalf("truncate: %v", err)
 	}
@@ -555,6 +555,89 @@ func TestPostgres_ListDeletions_UserScoping(t *testing.T) {
 	}
 	if len(tombsB) != 1 || tombsB[0].ID != eB.ID {
 		t.Errorf("user B: expected only their tombstone, got %+v", tombsB)
+	}
+}
+
+// TestPostgres_RotateRefreshToken_Atomic exercises the transactional
+// rotation against real PostgreSQL: revoke + successor + receipt commit
+// together, a duplicate attempt loses without touching the family, and
+// device revocation closes the receipt.
+func TestPostgres_RotateRefreshToken_Atomic(t *testing.T) {
+	store := newParityStore(t)
+	ctx := context.Background()
+
+	u, err := store.UpsertUser(ctx, "pg-rotate@example.com")
+	if err != nil {
+		t.Fatalf("UpsertUser: %v", err)
+	}
+	if err := store.SaveRefreshToken(ctx, u.ID, "pred-hash", "device-A"); err != nil {
+		t.Fatalf("SaveRefreshToken: %v", err)
+	}
+	pred, err := store.GetRefreshToken(ctx, "pred-hash")
+	if err != nil {
+		t.Fatalf("GetRefreshToken: %v", err)
+	}
+
+	res, err := store.RotateRefreshToken(ctx, RotateArgs{
+		UserID:          u.ID,
+		DeviceID:        "device-A",
+		PredecessorID:   pred.ID,
+		PredecessorHash: "pred-hash",
+		SuccessorHash:   "succ-hash",
+		AttemptHash:     "attempt-hash",
+		SealedSuccessor: []byte("sealed"),
+		ExpiresAt:       time.Now().Add(time.Hour),
+	})
+	if err != nil {
+		t.Fatalf("RotateRefreshToken: %v", err)
+	}
+	if res.SuccessorID == "" || res.SuccessorCreatedAt.IsZero() {
+		t.Errorf("expected a committed successor, got %+v", res)
+	}
+
+	receipt, err := store.FindRecoveryReceipt(ctx, "attempt-hash")
+	if err != nil {
+		t.Fatalf("FindRecoveryReceipt: %v", err)
+	}
+	if receipt.SuccessorHash != "succ-hash" || receipt.Consumed {
+		t.Errorf("unexpected receipt: %+v", receipt)
+	}
+
+	// Duplicate attempt with another predecessor loses the race.
+	if err := store.SaveRefreshToken(ctx, u.ID, "pred-2-hash", "device-A"); err != nil {
+		t.Fatalf("SaveRefreshToken: %v", err)
+	}
+	pred2, err := store.GetRefreshToken(ctx, "pred-2-hash")
+	if err != nil {
+		t.Fatalf("GetRefreshToken: %v", err)
+	}
+	_, err = store.RotateRefreshToken(ctx, RotateArgs{
+		UserID:          u.ID,
+		DeviceID:        "device-A",
+		PredecessorID:   pred2.ID,
+		PredecessorHash: "pred-2-hash",
+		SuccessorHash:   "succ-2-hash",
+		AttemptHash:     "attempt-hash",
+		SealedSuccessor: []byte("sealed-2"),
+		ExpiresAt:       time.Now().Add(time.Hour),
+	})
+	if !errors.Is(err, ErrAttemptExists) {
+		t.Fatalf("expected ErrAttemptExists, got %v", err)
+	}
+	if live, err := store.GetRefreshToken(ctx, "pred-2-hash"); err != nil || live.Revoked {
+		t.Errorf("loser predecessor must stay usable, err=%v live=%+v", err, live)
+	}
+
+	// Device revocation closes the receipt.
+	if err := store.RevokeUserDeviceSessions(ctx, u.ID, "device-A"); err != nil {
+		t.Fatalf("RevokeUserDeviceSessions: %v", err)
+	}
+	receipt, err = store.FindRecoveryReceipt(ctx, "attempt-hash")
+	if err != nil {
+		t.Fatalf("FindRecoveryReceipt: %v", err)
+	}
+	if !receipt.Consumed {
+		t.Error("device revocation must close the receipt")
 	}
 }
 

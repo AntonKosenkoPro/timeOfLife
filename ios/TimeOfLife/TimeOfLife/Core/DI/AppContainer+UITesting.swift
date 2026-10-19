@@ -215,7 +215,7 @@ struct UITestingAuthRepository: AuthRepository {
         Self.session(for: "apple@privaterelay.appleid.com")
     }
 
-    func refresh(refreshToken: String) async throws -> AuthSession {
+    func refresh(refreshToken: String, attemptId: String) async throws -> AuthSession {
         Self.session(for: "user@example.com")
     }
 

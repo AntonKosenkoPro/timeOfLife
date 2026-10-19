@@ -2,6 +2,7 @@
 package config
 
 import (
+	"encoding/hex"
 	"os"
 	"strconv"
 	"strings"
@@ -54,6 +55,11 @@ type Config struct {
 	// SentryDSN enables Sentry error reporting (observability Stage 0).
 	// Empty (default) = fully disabled, zero behavior change.
 	SentryDSN string
+	// RecoveryKeys holds the parsed REFRESH_RECOVERY_KEYS keyring: AES-256
+	// keys sealing pending refresh successors for response-loss recovery.
+	// Keys[0] is the primary sealing key; the rest are retired keys kept
+	// for decrypting receipts sealed before rotation.
+	RecoveryKeys [][]byte
 }
 
 // Load reads configuration from the environment (.env first, non-fatal if missing).
@@ -200,7 +206,55 @@ func Load() (*Config, error) {
 	// Optional: SENTRY_DSN — Sentry error reporting. Empty = disabled.
 	cfg.SentryDSN = os.Getenv("SENTRY_DSN")
 
+	// Required: REFRESH_RECOVERY_KEYS — the stable server-side keyring
+	// sealing pending refresh successors (fix-refresh-response-loss).
+	// Recovery is always enabled, so startup fails fast without keys rather
+	// than running a relay that cannot recover lost refresh responses.
+	// Format: comma-separated hex-encoded 32-byte (AES-256) keys; the first
+	// is the primary sealing key, the rest are retired keys retained for
+	// decrypting older receipts. Generate with `openssl rand -hex 32`.
+	keys, err := ParseRecoveryKeys(os.Getenv("REFRESH_RECOVERY_KEYS"))
+	if err != nil {
+		return nil, err
+	}
+	if len(keys) == 0 {
+		return nil, requiredFieldError("REFRESH_RECOVERY_KEYS")
+	}
+	cfg.RecoveryKeys = keys
+
 	return cfg, nil
+}
+
+// ParseRecoveryKeys parses a comma-separated list of hex-encoded 32-byte
+// (AES-256) keys into raw key bytes. The first key is the primary sealing
+// key; the rest are retired keys. Empty entries are ignored; an empty input
+// yields no keys. Any malformed entry (non-hex or wrong length) is an error.
+func ParseRecoveryKeys(raw string) ([][]byte, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil, nil
+	}
+	var keys [][]byte
+	for _, part := range strings.Split(raw, ",") {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		key, err := parseRecoveryKey(part)
+		if err != nil {
+			return nil, err
+		}
+		keys = append(keys, key)
+	}
+	return keys, nil
+}
+
+func parseRecoveryKey(hexKey string) ([]byte, error) {
+	key, err := hex.DecodeString(hexKey)
+	if err != nil || len(key) != 32 {
+		return nil, invalidFieldError("REFRESH_RECOVERY_KEYS", "comma-separated 64-char hex keys (32 bytes each, `openssl rand -hex 32`)")
+	}
+	return key, nil
 }
 
 // ParseCORSAllowedOrigins parses a comma-separated allowlist of exact

@@ -37,4 +37,10 @@ var (
 	// on provenance). A source re-sending the same record (e.g. Screen Time
 	// firing twice for the same interval) is rejected rather than duplicated.
 	ErrDuplicateImport = errors.New("duplicate import")
+
+	// ErrAttemptExists is returned by RotateRefreshToken when the refresh
+	// attempt was already accepted by a concurrent duplicate delivery: the
+	// winner's successor stands and the loser must recover it instead of
+	// rotating forward.
+	ErrAttemptExists = errors.New("refresh attempt already accepted")
 )

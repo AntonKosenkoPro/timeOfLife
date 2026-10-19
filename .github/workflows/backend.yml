@@ -171,6 +171,14 @@ jobs:
             # Error reporting (observability-stage-0): empty keeps Sentry
             # disabled; set the secret to enable panic/5xx capture.
             SENTRY_DSN=${{ secrets.SENTRY_DSN }}
+            # Refresh recovery (fix-refresh-response-loss): comma-separated 64-hex
+            # AES-256 keys, first = primary. The backend fail-fasts without it,
+            # so this secret must exist before the new binary deploys. Rotation:
+            # prepend the new key (oldest stays usable for pending receipts),
+            # deploy, then remove the retired key on a later deploy. Never
+            # delete pending receipts as part of a rollback — previous binaries
+            # ignore the variable and pending receipts expire naturally.
+            REFRESH_RECOVERY_KEYS=${{ secrets.REFRESH_RECOVERY_KEYS }}
             ENVEOF
             chmod 600 .env
 
@@ -180,6 +188,7 @@ jobs:
             : "${DB_PASSWORD:?secret DB_PASSWORD is empty}"
             : "${JWT_SECRET:?secret JWT_SECRET is empty}"
             [ "${#JWT_SECRET}" -ge 32 ] || { echo "JWT_SECRET must be at least 32 bytes"; exit 1; }
+            : "${REFRESH_RECOVERY_KEYS:?secret REFRESH_RECOVERY_KEYS is empty (fix-refresh-response-loss: backend fail-fasts without the recovery keyring)}"
             # EMAIL_BACKEND is a non-secret per-environment variable (vars.EMAIL_BACKEND),
             # not a secret. Default to console when unset — compose also defaults to console.
             EMAIL_BACKEND="${EMAIL_BACKEND:-console}"

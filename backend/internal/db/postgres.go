@@ -187,10 +187,20 @@ func (s *PostgresStore) GetRefreshToken(ctx context.Context, tokenHash string) (
 
 // RevokeRefreshToken marks a refresh token as revoked.
 func (s *PostgresStore) RevokeRefreshToken(ctx context.Context, tokenID string) error {
-	_, err := s.pool.Exec(ctx, `
-		UPDATE refresh_tokens SET revoked = true WHERE id = $1
-	`, tokenID)
+	tx, err := s.pool.Begin(ctx)
 	if err != nil {
+		return fmt.Errorf("revoke refresh token: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if _, err := tx.Exec(ctx, `
+		UPDATE refresh_tokens SET revoked = true WHERE id = $1
+	`, tokenID); err != nil {
+		return fmt.Errorf("revoke refresh token: %w", err)
+	}
+	if err := closeSuccessorReceiptsPG(ctx, tx, tokenID); err != nil {
+		return err
+	}
+	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("revoke refresh token: %w", err)
 	}
 	return nil
@@ -198,10 +208,23 @@ func (s *PostgresStore) RevokeRefreshToken(ctx context.Context, tokenID string) 
 
 // RevokeAllUserSessions revokes all refresh tokens for a user.
 func (s *PostgresStore) RevokeAllUserSessions(ctx context.Context, userID string) error {
-	_, err := s.pool.Exec(ctx, `
-		UPDATE refresh_tokens SET revoked = true WHERE user_id = $1 AND revoked = false
-	`, userID)
+	tx, err := s.pool.Begin(ctx)
 	if err != nil {
+		return fmt.Errorf("revoke all user sessions: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if _, err := tx.Exec(ctx, `
+		UPDATE refresh_tokens SET revoked = true WHERE user_id = $1 AND revoked = false
+	`, userID); err != nil {
+		return fmt.Errorf("revoke all user sessions: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `
+		UPDATE refresh_recovery_receipts SET consumed = true
+		WHERE user_id = $1 AND consumed = false
+	`, userID); err != nil {
+		return fmt.Errorf("revoke all user sessions: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("revoke all user sessions: %w", err)
 	}
 	return nil
@@ -209,14 +232,115 @@ func (s *PostgresStore) RevokeAllUserSessions(ctx context.Context, userID string
 
 // RevokeUserDeviceSessions revokes the refresh family of one device.
 func (s *PostgresStore) RevokeUserDeviceSessions(ctx context.Context, userID, deviceID string) error {
-	_, err := s.pool.Exec(ctx, `
-		UPDATE refresh_tokens SET revoked = true
-		WHERE user_id = $1 AND device_id = $2 AND revoked = false
-	`, userID, deviceID)
+	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("revoke user device sessions: %w", err)
 	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if _, err := tx.Exec(ctx, `
+		UPDATE refresh_tokens SET revoked = true
+		WHERE user_id = $1 AND device_id = $2 AND revoked = false
+	`, userID, deviceID); err != nil {
+		return fmt.Errorf("revoke user device sessions: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `
+		UPDATE refresh_recovery_receipts SET consumed = true
+		WHERE user_id = $1 AND device_id = $2 AND consumed = false
+	`, userID, deviceID); err != nil {
+		return fmt.Errorf("revoke user device sessions: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("revoke user device sessions: %w", err)
+	}
 	return nil
+}
+
+// closeSuccessorReceiptsPG closes the pending receipts whose successor is
+// the revoked token, so a replayed attempt cannot recreate the session.
+func closeSuccessorReceiptsPG(ctx context.Context, tx pgx.Tx, tokenID string) error {
+	if _, err := tx.Exec(ctx, `
+		UPDATE refresh_recovery_receipts SET consumed = true
+		WHERE successor_hash = (SELECT token_hash FROM refresh_tokens WHERE id = $1)
+		  AND consumed = false
+	`, tokenID); err != nil {
+		return fmt.Errorf("revoke refresh token: %w", err)
+	}
+	return nil
+}
+
+// RotateRefreshToken atomically revokes the predecessor, inserts the
+// successor, records the pending recovery receipt, and closes the receipt
+// the predecessor itself recovered. The receipt insert arbitrates
+// concurrent duplicate deliveries: the loser sees zero inserted rows and
+// gets ErrAttemptExists, leaving the winner's family untouched.
+func (s *PostgresStore) RotateRefreshToken(ctx context.Context, args RotateArgs) (RotateResult, error) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return RotateResult{}, fmt.Errorf("rotate refresh token: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	res, err := tx.Exec(ctx, `
+		INSERT INTO refresh_recovery_receipts
+			(attempt_hash, user_id, device_id, predecessor_hash, successor_hash,
+			 sealed_successor, expires_at, consumed, created_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, false, NOW())
+		ON CONFLICT (attempt_hash) DO NOTHING
+	`, args.AttemptHash, args.UserID, args.DeviceID, args.PredecessorHash,
+		args.SuccessorHash, args.SealedSuccessor, args.ExpiresAt)
+	if err != nil {
+		return RotateResult{}, fmt.Errorf("rotate refresh token: %w", err)
+	}
+	if res.RowsAffected() == 0 {
+		return RotateResult{}, fmt.Errorf("rotate refresh token: %w", ErrAttemptExists)
+	}
+
+	if _, err := tx.Exec(ctx, `
+		UPDATE refresh_tokens SET revoked = true WHERE id = $1
+	`, args.PredecessorID); err != nil {
+		return RotateResult{}, fmt.Errorf("rotate refresh token: %w", err)
+	}
+
+	var out RotateResult
+	if err := tx.QueryRow(ctx, `
+		INSERT INTO refresh_tokens (id, user_id, token_hash, device_id, revoked, created_at)
+		VALUES (gen_random_uuid(), $1, $2, $3, false, NOW())
+		RETURNING id, created_at
+	`, args.UserID, args.SuccessorHash, args.DeviceID).Scan(&out.SuccessorID, &out.SuccessorCreatedAt); err != nil {
+		return RotateResult{}, fmt.Errorf("rotate refresh token: %w", err)
+	}
+
+	if _, err := tx.Exec(ctx, `
+		UPDATE refresh_recovery_receipts SET consumed = true
+		WHERE successor_hash = $1 AND consumed = false
+	`, args.PredecessorHash); err != nil {
+		return RotateResult{}, fmt.Errorf("rotate refresh token: %w", err)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return RotateResult{}, fmt.Errorf("rotate refresh token: %w", err)
+	}
+	return out, nil
+}
+
+// FindRecoveryReceipt returns the pending receipt for an attempt hash.
+func (s *PostgresStore) FindRecoveryReceipt(ctx context.Context, attemptHash string) (RecoveryReceipt, error) {
+	var rc RecoveryReceipt
+	err := s.pool.QueryRow(ctx, `
+		SELECT attempt_hash, user_id, device_id, predecessor_hash, successor_hash,
+		       sealed_successor, expires_at, consumed, created_at
+		FROM refresh_recovery_receipts
+		WHERE attempt_hash = $1
+	`, attemptHash).Scan(
+		&rc.AttemptHash, &rc.UserID, &rc.DeviceID, &rc.PredecessorHash,
+		&rc.SuccessorHash, &rc.SealedSuccessor, &rc.ExpiresAt, &rc.Consumed, &rc.CreatedAt)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return RecoveryReceipt{}, fmt.Errorf("find recovery receipt: %w", ErrNotFound)
+		}
+		return RecoveryReceipt{}, fmt.Errorf("find recovery receipt: %w", err)
+	}
+	return rc, nil
 }
 
 // GetUserByID returns a user by their ID.
