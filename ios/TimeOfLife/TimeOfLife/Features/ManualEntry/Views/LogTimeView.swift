@@ -287,7 +287,6 @@ struct LogTimeView: View {
                         .frame(minHeight: Theme.minTapArea)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .contentShape(Rectangle())
                 .padding(Theme.spacingMedium)
                 .background(Theme.backgroundSecondary)
                 .clipShape(RoundedRectangle(cornerRadius: Theme.cornerRadius))
@@ -372,7 +371,6 @@ struct LogTimeView: View {
                         .frame(maxWidth: .infinity, minHeight: Theme.minTapArea, alignment: .leading)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .contentShape(Rectangle())
                 .padding(Theme.spacingMedium)
                 .background(Theme.backgroundSecondary)
                 .clipShape(RoundedRectangle(cornerRadius: Theme.cornerRadius))
