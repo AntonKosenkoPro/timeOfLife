@@ -1,3 +1,4 @@
+// swiftlint:disable file_length
 import Foundation
 import Combine
 
@@ -35,6 +36,13 @@ final class AuthService: ObservableObject {
     /// that arrives while the refresh is running always joins rather than
     /// starts its own.
     private var refreshTask: Task<String, Error>?
+
+    /// Generation captured with the in-flight refresh. A caller joins the
+    /// in-flight task only when its own generation still matches: after a
+    /// sign-out/switch the stale task is already unwinding, and joining it
+    /// would surface a spurious cancellation instead of starting the fresh
+    /// attempt the new session needs.
+    private var refreshTaskGeneration: UInt64?
 
     /// Active account generation. Bumped on every sign-in and sign-out, so a
     /// refresh completing after sign-out/account switch is dropped and never
@@ -177,15 +185,21 @@ final class AuthService: ObservableObject {
     /// refresh (see `refreshTask`). The shared task mints one durable attempt
     /// for the logical rotation and every concurrent caller shares it.
     func performRefresh() async throws -> String {
-        if let existing = refreshTask {
+        let generation = sessionGeneration
+        if let existing = refreshTask, refreshTaskGeneration == generation {
             return try await existing.value
         }
-        let generation = sessionGeneration
         let task = Task<String, Error> { [self] in
             try await self.runRefresh(generation: generation)
         }
         refreshTask = task
-        defer { refreshTask = nil }
+        refreshTaskGeneration = generation
+        defer {
+            if refreshTaskGeneration == generation {
+                refreshTask = nil
+                refreshTaskGeneration = nil
+            }
+        }
         return try await task.value
     }
 
@@ -231,7 +245,7 @@ final class AuthService: ObservableObject {
         guard generation == sessionGeneration else {
             throw CancellationError()
         }
-        return await persistRefresh(session: session, prior: intent.snapshot)
+        return try await persistRefresh(session: session, prior: intent.snapshot, generation: generation)
     }
 
     /// Durable refresh intent: the predecessor to present plus the attempt to
@@ -326,8 +340,11 @@ final class AuthService: ObservableObject {
     /// Durably replaces the snapshot with the complete successor and clears
     /// the attempt. A failed replacement keeps the predecessor + attempt for
     /// later recovery and serves only the in-memory token for this call —
-    /// nothing half-written is ever published as durable success.
-    private func persistRefresh(session: AuthSession, prior: CredentialSnapshot) async -> String {
+    /// nothing half-written is ever published as durable success. The
+    /// generation is re-validated after the save: a sign-out/switch that
+    /// landed while the save was in flight must not resurrect the superseded
+    /// session by publishing afterwards.
+    private func persistRefresh(session: AuthSession, prior: CredentialSnapshot, generation: UInt64) async throws -> String {
         let successor = CredentialSnapshot(
             accessToken: session.accessToken,
             refreshToken: session.refreshToken,
@@ -337,6 +354,9 @@ final class AuthService: ObservableObject {
             pendingPredecessor: nil
         )
         if case .success = await keychain.saveSnapshot(successor) {
+            guard generation == sessionGeneration else {
+                throw CancellationError()
+            }
             let cached = CachedSession(
                 id: session.user.id,
                 email: session.user.email,

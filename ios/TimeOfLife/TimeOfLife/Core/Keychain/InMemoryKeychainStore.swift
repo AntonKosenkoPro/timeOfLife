@@ -14,6 +14,14 @@ actor InMemoryKeychainStore: KeychainStoring {
     private(set) var failNextSaves = 0
     /// When set, `loadSnapshot` fails with this error instead of reading.
     private(set) var loadSnapshotError: KeychainError?
+    /// When true, `saveSnapshot` suspends before writing until
+    /// `releaseSaveGate()`. Lets tests interleave sign-out between a
+    /// completed refresh response and its durable publish.
+    var saveGateHeld = false
+    private var saveWaiters: [CheckedContinuation<Void, Never>] = []
+    /// Set when a save first suspends on the gate; tests poll it to know
+    /// the interleaving point is reached (never sleep-and-hope).
+    private(set) var saveGateEntered = false
 
     init(initial: [KeychainKey: String] = [:], snapshot: CredentialSnapshot? = nil) {
         self.storage = initial
@@ -31,6 +39,26 @@ actor InMemoryKeychainStore: KeychainStoring {
         loadSnapshotError = error
     }
 
+    /// Arms or disarms the save gate (cross-actor mutation of the flag
+    /// above is not allowed, so tests go through this).
+    func setSaveGateHeld(_ held: Bool) {
+        saveGateHeld = held
+    }
+
+    /// Resumes every `saveSnapshot` call suspended on the gate.
+    func releaseSaveGate() {
+        saveGateHeld = false
+        for waiter in saveWaiters { waiter.resume() }
+        saveWaiters = []
+    }
+
+    private func waitForSaveGateRelease() async {
+        await withCheckedContinuation { continuation in
+            saveGateEntered = true
+            saveWaiters.append(continuation)
+        }
+    }
+
     func setString(_ string: String, for key: KeychainKey) async {
         storage[key] = string
     }
@@ -44,6 +72,9 @@ actor InMemoryKeychainStore: KeychainStoring {
     }
 
     func saveSnapshot(_ snapshot: CredentialSnapshot) async -> Result<Void, KeychainError> {
+        if saveGateHeld {
+            await waitForSaveGateRelease()
+        }
         if failNextSaves > 0, let error = saveSnapshotError {
             failNextSaves -= 1
             return .failure(error)

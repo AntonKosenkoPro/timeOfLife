@@ -82,6 +82,36 @@ enum TestFactories {
     /// rendezvous aborts the test instead of silently continuing.
     enum TestTimeoutError: Error {
         case waitForRefreshSend
+        case waitForSaveGate
+    }
+
+    /// Waits until the fake records a save-gate entry, throwing on timeout
+    /// so the interleaving point is proven — never sleep-and-hope.
+    static func waitForSaveGate(_ keychain: InMemoryKeychainStore) async throws {
+        var polls = 0
+        while await !keychain.saveGateEntered && polls < 500 {
+            try await Task.sleep(nanoseconds: 1_000_000)
+            polls += 1
+        }
+        if await !keychain.saveGateEntered {
+            Issue.record("save gate never entered — logout did not land mid-save")
+            throw TestTimeoutError.waitForSaveGate
+        }
+    }
+
+    /// Waits until the fake records the expected number of refresh sends,
+    /// throwing on timeout. Distinguishes "joined the stale task" (count
+    /// stays) from "started a fresh attempt" (count grows).
+    static func waitForRefreshSends(_ repo: FakeAuthRepository, count: Int) async throws {
+        var polls = 0
+        while repo.refreshSends.count < count && polls < 500 {
+            try await Task.sleep(nanoseconds: 1_000_000)
+            polls += 1
+        }
+        if repo.refreshSends.count < count {
+            Issue.record("expected \(count) refresh sends — a caller joined a stale task instead of starting fresh")
+            throw TestTimeoutError.waitForRefreshSend
+        }
     }
 
     /// Creates a JSON-encoded error envelope matching the server contract.

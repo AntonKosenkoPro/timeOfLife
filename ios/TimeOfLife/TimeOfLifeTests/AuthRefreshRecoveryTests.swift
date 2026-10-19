@@ -1,3 +1,4 @@
+// swiftlint:disable file_length
 import Testing
 import Foundation
 @testable import TimeOfLife
@@ -231,6 +232,69 @@ struct AuthRefreshRecoveryTests {
         await #expect(throws: CancellationError.self) { try await pending.value }
         #expect(store.state == .signedOut)
         #expect(await tokens(keychain) == (nil, nil))
+    }
+
+    @Test("a refresh after sign-out starts a fresh attempt instead of joining the stale task")
+    func refreshAfterSignOutDoesNotJoinStaleTask() async throws {
+        let (service, repo, _, _, store) = makeService(
+            initialSnapshot: TestFactories.makeSnapshot(accessToken: "at-A", refreshToken: "rt-A")
+        )
+        repo.refreshGateHeld = true
+
+        let stale = Task { try await service.performRefresh() }
+        try await waitForRefreshSend(repo)
+
+        // Sign-out lands mid-flight, then a new session starts while the
+        // stale task is still unwinding.
+        await service.logout()
+        repo.otpVerifyResult = AuthSession(
+            accessToken: "at-B",
+            refreshToken: "rt-B",
+            user: UserDTO(id: "uB", email: "b@c.com", emailVerified: true)
+        )
+        try await service.verifyOtp(email: "b@c.com", code: "123456")
+
+        // The new generation must not join the stale task: it sends its own
+        // refresh with its own attempt.
+        let fresh = Task { try await service.performRefresh() }
+        try await TestFactories.waitForRefreshSends(repo, count: 2)
+        repo.releaseRefreshGate()
+
+        await #expect(throws: CancellationError.self) { try await stale.value }
+        let token = try await fresh.value
+        #expect(!token.isEmpty)
+        let attempts = repo.refreshSends.map(\.attemptId)
+        #expect(Set(attempts).count == 2, "stale and fresh rotations must not share an attempt")
+        guard case .signedIn = store.state else {
+            Issue.record("expected the fresh session to publish, got \(store.state)")
+            return
+        }
+    }
+
+    @Test("logout during durable publish does not resurrect the signed-out session")
+    func noPublishAfterLogoutMidSave() async throws {
+        let (service, repo, keychain, _, store) = makeService(
+            initialSnapshot: TestFactories.makeSnapshot(accessToken: "at", refreshToken: "rt")
+        )
+        // Hold the network first so the intent save (which precedes the
+        // send) completes ungated; arm the save gate only after the send
+        // is recorded, then let the response through into the gated save.
+        repo.refreshGateHeld = true
+
+        let pending = Task { try await service.performRefresh() }
+        try await waitForRefreshSend(repo)
+        await keychain.setSaveGateHeld(true)
+        repo.releaseRefreshGate()
+        // The response is back; the task now suspends inside the durable
+        // save. Interleave sign-out exactly there.
+        try await TestFactories.waitForSaveGate(keychain)
+        await service.logout()
+        await keychain.releaseSaveGate()
+
+        // The superseded publish is dropped: the gate stays locked even
+        // though the save itself succeeded.
+        await #expect(throws: CancellationError.self) { try await pending.value }
+        #expect(store.state == .signedOut)
     }
 
     @Test("closed duplicate is ignored: current credentials survive")
