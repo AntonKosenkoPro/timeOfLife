@@ -257,6 +257,26 @@ func TestRevokeAll_ClosesReceipts(t *testing.T) {
 	}
 }
 
+func TestRevokeSuccessor_ClosesPendingReceipt(t *testing.T) {
+	store := newRecoveryTestStore(t)
+	ctx := context.Background()
+	userID, predecessorID := recoveryUser(t, store, "revoke-succ@example.com")
+	res := rotateOnce(t, store, userID, predecessorID)
+
+	// Revoking the successor by id (single-token revocation) must close
+	// the pending receipt, so a replayed attempt cannot recreate it.
+	if err := store.RevokeRefreshToken(ctx, res.SuccessorID); err != nil {
+		t.Fatalf("RevokeRefreshToken: %v", err)
+	}
+	receipt, err := store.FindRecoveryReceipt(ctx, "attempt-hash")
+	if err != nil {
+		t.Fatalf("FindRecoveryReceipt: %v", err)
+	}
+	if !receipt.Consumed {
+		t.Error("single-token revocation of the successor must close its receipt")
+	}
+}
+
 func TestFindRecoveryReceipt_NotFound(t *testing.T) {
 	store := newRecoveryTestStore(t)
 	if _, err := store.FindRecoveryReceipt(context.Background(), "no-such-attempt"); !errors.Is(err, ErrNotFound) {

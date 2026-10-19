@@ -9,7 +9,10 @@ enum RefreshAttempt {
     /// 74 random bits, version/variant bits set). Unpredictability matters:
     /// a replayable attempt would let a lost response be mistaken for theft.
     static func newID() -> String {
-        let millis = UInt64(Date().timeIntervalSince1970 * 1_000)
+        // Clamped: UInt64(Double) traps on negative values, and a device
+        // clock set before 1970 must mint a usable id, not crash auth.
+        // UUIDv7 tolerates a clamped timestamp far better than a trap.
+        let millis = UInt64(max(0, Date().timeIntervalSince1970) * 1_000)
         var rng = SystemRandomNumberGenerator()
         let randA = UInt16.random(in: 0 ... 0x0FFF, using: &rng)
         let randB = UInt64.random(in: 0 ... 0x3FFF_FFFF_FFFF_FFFF, using: &rng)

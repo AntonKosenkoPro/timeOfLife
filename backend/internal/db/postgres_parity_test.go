@@ -741,6 +741,7 @@ func TestPostgres_RotateRefreshToken_GuardAndPrune(t *testing.T) {
 	}
 
 	// All-user revocation closes every pending receipt of the user.
+	// ("attempt-hash" was already pruned above as consumed + long expired.)
 	if err := store.RevokeAllUserSessions(ctx, u.ID); err != nil {
 		t.Fatalf("RevokeAllUserSessions: %v", err)
 	}
@@ -752,6 +753,49 @@ func TestPostgres_RotateRefreshToken_GuardAndPrune(t *testing.T) {
 		if !receipt.Consumed {
 			t.Errorf("all-user revocation must close receipt %s", attempt)
 		}
+	}
+}
+
+// TestPostgres_RevokeSuccessor_ClosesPendingReceipt pins that revoking the
+// successor by id closes its receipt, so a replayed attempt cannot
+// recreate the session.
+func TestPostgres_RevokeSuccessor_ClosesPendingReceipt(t *testing.T) {
+	store := newParityStore(t)
+	ctx := context.Background()
+
+	u, err := store.UpsertUser(ctx, "pg-revoke-succ@example.com")
+	if err != nil {
+		t.Fatalf("UpsertUser: %v", err)
+	}
+	if err := store.SaveRefreshToken(ctx, u.ID, "pred-hash", "device-A"); err != nil {
+		t.Fatalf("SaveRefreshToken: %v", err)
+	}
+	pred, err := store.GetRefreshToken(ctx, "pred-hash")
+	if err != nil {
+		t.Fatalf("GetRefreshToken: %v", err)
+	}
+	res, err := store.RotateRefreshToken(ctx, RotateArgs{
+		UserID:          u.ID,
+		DeviceID:        "device-A",
+		PredecessorID:   pred.ID,
+		PredecessorHash: "pred-hash",
+		SuccessorHash:   "succ-hash",
+		AttemptHash:     "attempt-hash",
+		SealedSuccessor: []byte("sealed"),
+		ExpiresAt:       time.Now().Add(time.Hour),
+	})
+	if err != nil {
+		t.Fatalf("RotateRefreshToken: %v", err)
+	}
+	if err := store.RevokeRefreshToken(ctx, res.SuccessorID); err != nil {
+		t.Fatalf("RevokeRefreshToken: %v", err)
+	}
+	receipt, err := store.FindRecoveryReceipt(ctx, "attempt-hash")
+	if err != nil {
+		t.Fatalf("FindRecoveryReceipt: %v", err)
+	}
+	if !receipt.Consumed {
+		t.Error("single-token revocation of the successor must close its receipt")
 	}
 }
 
