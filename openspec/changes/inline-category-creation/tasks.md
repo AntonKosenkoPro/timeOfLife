@@ -74,7 +74,7 @@
 - [x] 13.1 `TagSelector`: `isScrollable` mode (default true); entry form passes false for natural height. (Kept.)
 - [x] 13.2 Recents: flexible treatment first (dropped — outer ScrollView offers unbounded height, so flexible claimed full content and slid under the tab bar).
 - [x] 13.3 `ChipViewport` keeps clamp + edge math (fixed 4 rows); update artifacts (proposal/specs/design/COMPONENTS).
-- [ ] 13.4 Tab-bar margin on the Track slot (glass-aware, zero on iOS 18/iPad); verify + deploy (25+ categories: slot bounded, siblings pinned, dividers correct).
+- [x] 13.4 Tab-bar margin on the Track slot (glass-aware, zero on iOS 18/iPad); verified on iPhone SE sim (12 cats: 4-row clamp, internal scroll, siblings stationary, tab bar clear).
 
 - [x] 11.1 Attach reloads options from the store (canonical order, no client collation); `attachCreatedCategory` async; callers Task-wrap; tests rewritten against a real store.
 
