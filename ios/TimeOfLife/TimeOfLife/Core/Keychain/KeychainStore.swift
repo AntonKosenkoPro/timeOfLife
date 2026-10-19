@@ -76,12 +76,17 @@ actor KeychainStore: KeychainStoring {
         let status = SecItemCopyMatching(query as CFDictionary, &result)
         switch status {
         case errSecSuccess:
-            guard let data = result as? Data,
-                  let snapshot = try? JSONDecoder().decode(CredentialSnapshot.self, from: data)
-            else {
-                return .failure(.storageUnavailable(underlying: "snapshot decode failed"))
+            guard let data = result as? Data else {
+                return .failure(.storageUnavailable(underlying: "snapshot data missing"))
             }
-            return .success(snapshot)
+            do {
+                return .success(try JSONDecoder().decode(CredentialSnapshot.self, from: data))
+            } catch {
+                // Decode detail is diagnostics-only: callers surface the
+                // localized fallback, never this string. The description
+                // names the schema mismatch, not secret bytes.
+                return .failure(.storageUnavailable(underlying: "snapshot decode failed: \(error)"))
+            }
         case errSecItemNotFound:
             return .success(nil)
         default:
