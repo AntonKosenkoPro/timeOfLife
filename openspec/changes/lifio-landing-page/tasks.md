@@ -14,7 +14,7 @@
 - [ ] 3.1 Create the Cloudflare Pages project (Git integration on this repo, production branch `main`, framework preset None, root/output `web/`, no build command) per design D2.
 - [x] 3.2 Attach custom domain `lifio.antonkosenko.pro` via dashboard setup; confirm Active + TLS (design D3). Fallback if stalled: manual CNAME, then CAA check; `*.pages.dev` preview URL recorded as fallback. (Done by owner 2026-10-19; verified: cert CN=lifio.antonkosenko.pro, Google Trust Services, valid to 2027-01-17; site DNS on Cloudflare anycast. Domain currently 404s — expected: it serves the production deployment built from `web/`-less `main`; goes live on PR merge.)
 - [x] 3.3 Confirm coexistence: SES DKIM CNAMEs stay DNS-only (grey), `_dmarc` TXT intact, site record proxied (orange). Re-verify `dig TXT _dmarc.lifio.antonkosenko.pro` after DNS edits. (Verified post-attach: DMARC TXT intact, site resolves to Cloudflare anycast; DKIM rows untouched by automatic setup.)
-- [ ] 3.4 Verify live: `https://lifio.antonkosenko.pro/` → 200 + landing, `https://lifio.antonkosenko.pro/privacy` → 200 + policy, valid cert. (Blocked on PR merge — production Pages build.)
+- [x] 3.4 Verify live: `https://lifio.antonkosenko.pro/` → 200 + landing, `https://lifio.antonkosenko.pro/privacy` → 200 + policy, valid cert. (Verified post-merge 2026-10-19: `/` → 200 with TestFlight slot; `/privacy` → 308 → `/privacy/` → 200 with policy per codified scenario; `/favicon.ico` → 200; cert CN match, valid to 2027-01-17.)
 
 ## 4. Docs + verification
 
