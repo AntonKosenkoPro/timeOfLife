@@ -24,9 +24,11 @@ import SwiftUI
 /// choice: dashed accent outline, `plus` glyph, and the localized
 /// Add-category label — never a category icon, checkmark, or ordinal — so it
 /// differs from both unselected and selected chips by shape as well as color.
-/// The chip viewport grows with content and clamps at 3.5 visible rows with
-/// internal scroll, so small catalogs stay compact and large ones never push
-/// past the clamp; edge-aware hairlines mark hidden content above/below.
+/// The chip viewport hugs content and grows into the measured host
+/// budget up to four full rows, scrolling internally beyond it, so small
+/// catalogs stay compact, large ones never push siblings, and compact
+/// phones shrink the viewport instead of sliding under the tab bar;
+/// edge-aware hairlines mark hidden content above/below.
 struct TagSelector: View {
     let options: [Category]
     /// The selected ids in selection (tap) order; deselect-then-reselect
@@ -44,9 +46,17 @@ struct TagSelector: View {
     /// When false, renders the plain wrapping flow at natural height with no
     /// scroll view, clamp, or dividers (entry-form categories, which live
     /// inside the outer form scroll). True (the default) hugs content and
-    /// grows into available slack with internal scroll plus edge-aware
-    /// dividers (Track).
+    /// grows into the measured host budget with internal scroll plus
+    /// edge-aware dividers (Track).
     let isScrollable: Bool
+    /// Finite host budget for the scrollable viewport (Track): the host
+    /// viewport minus the measured siblings, gaps, and tab-bar margin (see
+    /// `TrackContent`). The viewport renders `min(4-row cap, budget)` floored
+    /// at one row, so compact phones show fewer rows with internal scroll
+    /// while tall phones keep the full cap. Nil (the default) keeps the
+    /// fixed 4-row cap — entry forms, previews, and the unmeasured first
+    /// paint.
+    let availableHeight: CGFloat?
 
     init(
         options: [Category],
@@ -54,7 +64,8 @@ struct TagSelector: View {
         onToggle: @escaping (String) -> Void,
         onCreate: (() -> Void)? = nil,
         accessibilityId: String,
-        isScrollable: Bool = true
+        isScrollable: Bool = true,
+        availableHeight: CGFloat? = nil
     ) {
         self.options = options
         self.selected = selected
@@ -62,6 +73,7 @@ struct TagSelector: View {
         self.onCreate = onCreate
         self.accessibilityId = accessibilityId
         self.isScrollable = isScrollable
+        self.availableHeight = availableHeight
     }
 
     /// Whether the trailing creation chip renders. Pure so the opt-in
@@ -150,12 +162,20 @@ struct TagSelector: View {
             }
             ScrollView {
                 chipFlow
+                    // Content inset carries the border clearance: when the
+                    // catalog fits, `fixedSize` hugs the content height, so
+                    // frame slack alone never materializes. 1 pt top/bottom
+                    // keeps the centered 1 pt chip strokes fully visible.
+                    .padding(.vertical, ChipViewport.borderBleed / 2)
             }
-            // Flexible height: min(content, available slack) via the hug
+            // Flexible height: min(content, measured host budget) via the hug
             // below. Never pushes siblings — overflow scrolls internally.
-            .frame(maxHeight: ChipViewport.clampedHeight(
+            // A nil budget keeps the fixed 4-row cap, so tall phones and the
+            // first paint are unchanged.
+            .frame(maxHeight: ChipViewport.viewportHeight(
                 rowHeight: chipRowHeight,
-                spacing: Theme.spacingSmall
+                spacing: Theme.spacingSmall,
+                availableHeight: availableHeight
             ))
             // Hug content up to the available slack: without this the
             // ScrollView claims the full offer even for 1–2 rows.

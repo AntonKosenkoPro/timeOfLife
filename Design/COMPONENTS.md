@@ -425,7 +425,7 @@ struct TagSelector: View {
 - Each chip: `Theme.spacingChip` (10 pt) uniform padding on all sides, `minHeight Theme.minTapArea` (44 pt — Apple HIG / WCAG 2.2 SC 2.5.5 AAA), `Capsule` shape; long names truncate with `lineLimit(1)`.
 - Creation chip (only when `onCreate` is non-nil): pinned last, same padding and 44 pt target so it packs like a chip, but styled as an action — dashed 1 pt `Theme.accentPrimary` outline, `plus` glyph, `Theme.accentPrimary` text on `Theme.backgroundSecondary` fill; never a category icon, checkmark, or ordinal. Toggling categories never moves, restyles, or selects it.
 - Edge-aware hairline dividers: a `Theme.hairline` divider fades in above the viewport once chips scroll under it and below the viewport while content remains; the bottom divider fades out at the content end, and both stay hidden when the catalog fits without scrolling.
-- Chip viewport: hugs content and clamps at 4 visible rows, scrolling internally beyond it; compact when smaller, never pushing siblings or underlapping the tab bar.
+- Chip viewport: hugs content and clamps at up to 4 visible rows of the finite budget measured in `TrackContent` outside the outer `ScrollView` (viewport minus measured top/name/action/caption + fixed gaps + `tabBarMargin`), with a 1-row floor so the page scrolls only as the accessibility fallback; fewer rows on short viewports, always scrolling internally beyond the visible rows; compact when smaller, timer/name/Stop preserved, never pushing siblings or underlapping the tab bar. The scrollable viewport adds 1 pt top/bottom scroll-content padding (`.padding(.vertical, borderBleed / 2)`, `ChipViewport.borderBleed = 2`) plus a matching +2 pt max cap above the row clamp so the lowest row's hairline border never clips at the cut (prior frame-only +2 proved insufficient — user screenshot of exactly-four-row content showed hugging with the bottom border still clipped); the natural-height (non-scrollable) entry-form rendering is unchanged. Shared `ChipViewport` contract with `RecentActivitiesChips`, including identical clearance. Focused verify per iOS worker: 21 tests across 3 suites + lint/build green; device screenshot check still pending.
 - When `options` is empty and no `onCreate` is provided, the selector renders no chips and the parent editor shows the localized Add-category action. With `onCreate`, the creation chip still renders alone.
 
 ### States
@@ -437,7 +437,7 @@ struct TagSelector: View {
 | Selected (2+) | `Theme.accentPrimary` fill, `Theme.textOnAccent` text, enlarged 1-based selection ordinal in place of the icon, fading in place on every change |
 | Empty options | No category chips (creation chip still renders alone when `onCreate` is set); otherwise the parent editor renders the Add-category action |
 | Creation chip | Dashed accent outline + `plus` + localized Add-category label, pinned last; outside the selection model |
-| Fixed 4-row viewport | Hugs content, clamps at 4 rows, scrolls internally; compact when smaller, never pushes siblings |
+| Adaptive up-to-4-row viewport | Hugs content, clamps at up to 4 rows of available height + 1 pt top/bottom content padding with matching +2 pt cap, scrolls internally; compact when smaller, never pushes siblings |
 
 ### Requirements
 
@@ -496,10 +496,13 @@ struct RecentActivitiesChips: View {
   gaps between chips and rows, laid out by the shared `FlowLayout`
   (same greedy packing as `TagSelector`).
 - Cap of twelve, most-recently-used first (`recents.prefix(12)`; the store
-  already sorts by each text's newest `started_at`). The flow sits in a
-  fixed-clamp `ScrollView` (hug content, clamp at 4 rows, scroll
-  internally) with a partial-row peek, so small sets stay compact and
-  overflow never grows the page.
+  already sorts by each text's newest `started_at`). The flow sits in an
+  adaptive viewport (hug content, clamp at up to 4 rows of available
+  height, scroll internally) with the same 1 pt top/bottom scroll-content
+  padding plus matching +2 pt max cap as `TagSelector` (`ChipViewport`
+  contract, including `borderBleed`), so small sets stay compact, short
+  viewports show fewer rows with internal scroll, and overflow never grows
+  the page or slides under the tab bar.
 - Edge-aware `Theme.hairline` dividers (same contract as `TagSelector`):
   top fades in once scrolled, bottom fades out at the content end, both
   hidden when everything fits.

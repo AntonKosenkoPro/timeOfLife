@@ -3,8 +3,10 @@ import SwiftUI
 /// The Track Recents chip flow (timer-capture-experience spec,
 /// design D5). Presents up to twelve most-recently-used exact entry texts as
 /// a wrapping flow of chips with 44 pt tap targets; the flow hugs its rows
-/// up to a three-row budget and overflow scrolls internally on the chip
-/// axis, so the Track page footprint never grows for Recents overflow.
+/// up to a four-row budget measured against the host, and overflow scrolls
+/// internally on the chip axis, so the Track page footprint never grows for
+/// Recents overflow and compact phones shrink the viewport instead of
+/// sliding under the tab bar.
 ///
 /// Each chip shows the icon of the first category of that exact text's
 /// newest committed entry (first by stored position, resolved through the
@@ -19,6 +21,25 @@ struct RecentActivitiesChips: View {
     let categories: [String: Category]
     let selectedText: String?
     let onSelect: (ExactName) -> Void
+    /// Finite host budget for the viewport (Track): the host viewport minus
+    /// the measured siblings, gaps, and tab-bar margin (see `TrackContent`).
+    /// Same adaptive contract as `TagSelector` — `min(4-row cap, budget)`
+    /// floored at one row; nil keeps the fixed 4-row cap.
+    let availableHeight: CGFloat?
+
+    init(
+        recents: [ExactName],
+        categories: [String: Category],
+        selectedText: String?,
+        availableHeight: CGFloat? = nil,
+        onSelect: @escaping (ExactName) -> Void
+    ) {
+        self.recents = recents
+        self.categories = categories
+        self.selectedText = selectedText
+        self.availableHeight = availableHeight
+        self.onSelect = onSelect
+    }
 
     @Environment(\.dynamicTypeSize)
     private var dynamicTypeSize
@@ -55,8 +76,8 @@ struct RecentActivitiesChips: View {
     var body: some View {
         // Zero inter-spacing: dividers sit exactly on the viewport cuts —
         // top fades in once chips scroll under it, bottom fades out at the
-        // content end, both hidden when everything fits. The viewport is
-        // flexible: hugs content, grows into available slack, and scrolls
+        // content end, both hidden when everything fits. The viewport hugs
+        // content up to the measured host budget (four rows max) and scrolls
         // internally beyond it — never pushing siblings or the page.
         VStack(alignment: .leading, spacing: 0) {
             if !edges.atTop {
@@ -65,11 +86,18 @@ struct RecentActivitiesChips: View {
             }
             ScrollView(.vertical) {
                 flow
+                    // Content inset carries the border clearance (same as
+                    // `TagSelector`): when the catalog fits, `fixedSize` hugs
+                    // the content height, so frame slack alone never
+                    // materializes. 1 pt top/bottom keeps the chip strokes
+                    // fully visible.
+                    .padding(.vertical, ChipViewport.borderBleed / 2)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .frame(maxHeight: ChipViewport.clampedHeight(
+            .frame(maxHeight: ChipViewport.viewportHeight(
                 rowHeight: chipRowHeight,
-                spacing: Theme.spacingSmall
+                spacing: Theme.spacingSmall,
+                availableHeight: availableHeight
             ))
             .fixedSize(horizontal: false, vertical: true)
             .onScrollGeometryChange(for: ChipViewport.Edges.self, of: { geometry in

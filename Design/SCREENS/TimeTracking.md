@@ -115,10 +115,13 @@ progress visualization.
 
 - Wrapping chip flow of the most-recently-used exact texts, capped at twelve,
   newest `started_at` first (`GROUP BY activity_text` over committed entries,
-  `id DESC` tiebreak); no horizontal scrolling. The chips live in a flexible
-  viewport (hug content, clamp at 4 rows, internal scroll with a
-  partial-row peek), so small sets stay compact and overflow never grows the
-  Track page. Edge-aware hairline dividers fade in/out with the scroll
+  `id DESC` tiebreak); no horizontal scrolling. The chips live in an adaptive
+  viewport (hug content, clamp at up to 4 rows of available height with
+  1 pt top/bottom scroll-content padding plus matching +2 pt max cap,
+  internal scroll, shared `ChipViewport` contract), so small sets stay
+  compact, short viewports show fewer rows with internal scroll, and overflow
+  never grows the Track page or slides under the tab bar. Entire-page scroll
+  engages only as an accessibility fallback. Edge-aware hairline dividers fade in/out with the scroll
   position (`ChipViewport` contract, shared with the tag selector); no
   constant caption divider.
 - Each chip shows the icon of the first-position Category (first by the stored

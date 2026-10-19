@@ -21,6 +21,15 @@ struct TrackContent: View {
     private var dynamicTypeSize
     @State private var actionSlotWidth: CGFloat = 0
     @State private var measuredErrorRegionHeight: CGFloat = 0
+    /// Finite host geometry for the adaptive chip budget: the outer
+    /// `ScrollView` offers unbounded height, so the budget is measured here,
+    /// outside it, and passed down. Zero until the first layout pass — the
+    /// budget stays nil (fixed 4-row cap) until the viewport is measured.
+    @State private var measuredViewportHeight: CGFloat = 0
+    @State private var measuredTopHeight: CGFloat = 0
+    @State private var measuredNameHeight: CGFloat = 0
+    @State private var measuredActionHeight: CGFloat = 0
+    @State private var measuredCaptionHeight: CGFloat = 0
 
     /// The spike-approved shared maximum for both adaptive spacers
     /// (refine-track-recents D1/D7).
@@ -68,6 +77,34 @@ struct TrackContent: View {
             topContent: { topFlow },
             bottomContent: { bottomFlow }
         )
+        .background(
+            GeometryReader { geometry in
+                Color.clear.preference(
+                    key: TrackViewportHeightKey.self,
+                    value: geometry.size.height
+                )
+            }
+        )
+        .onPreferenceChange(TrackViewportHeightKey.self) { measuredViewportHeight = $0 }
+        .onPreferenceChange(TrackTopHeightKey.self) { measuredTopHeight = $0 }
+        .onPreferenceChange(TrackNameHeightKey.self) { measuredNameHeight = $0 }
+        .onPreferenceChange(TrackActionHeightKey.self) { measuredActionHeight = $0 }
+        .onPreferenceChange(TrackCaptionHeightKey.self) { measuredCaptionHeight = $0 }
+    }
+
+    /// Finite chip budget: the host viewport minus everything that must stay
+    /// put — the top flow, the name control, the main action, one caption
+    /// row, the two `spacingLarge` gaps around the action, the caption gap,
+    /// and the tab-bar margin. The chip viewport renders
+    /// `min(4-row cap, budget)`, so compact phones shrink to fewer rows with
+    /// internal scroll while the timer, name, Stop, and tab-bar clearance
+    /// hold. Nil until the viewport measures (fixed cap on first paint).
+    private var chipAvailableHeight: CGFloat? {
+        guard measuredViewportHeight > 0 else { return nil }
+        let fixed = measuredTopHeight + measuredNameHeight + measuredActionHeight
+            + measuredCaptionHeight + 2 * Theme.spacingLarge + Theme.spacingSmall
+            + tabBarMargin
+        return measuredViewportHeight - fixed
     }
 
     // MARK: - Top flow
@@ -82,6 +119,14 @@ struct TrackContent: View {
         .padding(.horizontal, Theme.screenHorizontalPadding)
         .frame(maxWidth: Theme.maxContentWidth)
         .frame(maxWidth: .infinity)
+        .background(
+            GeometryReader { geometry in
+                Color.clear.preference(
+                    key: TrackTopHeightKey.self,
+                    value: geometry.size.height
+                )
+            }
+        )
     }
 
     /// Reserved completion-mark region: keeps its height in every state and
@@ -153,6 +198,14 @@ struct TrackContent: View {
     private var bottomFlow: some View {
         VStack(spacing: 0) {
             nameControl
+                .background(
+                    GeometryReader { geometry in
+                        Color.clear.preference(
+                            key: TrackNameHeightKey.self,
+                            value: geometry.size.height
+                        )
+                    }
+                )
             primaryAction
                 .padding(.top, Theme.spacingLarge)
             belowActionSlot
@@ -329,6 +382,14 @@ struct TrackContent: View {
             Text(L10n.entryCategoriesLabel.text)
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(Theme.textSecondary)
+                .background(
+                    GeometryReader { geometry in
+                        Color.clear.preference(
+                            key: TrackCaptionHeightKey.self,
+                            value: geometry.size.height
+                        )
+                    }
+                )
             TagSelector(
                 options: Array(vm.categories.values).sorted { $0.name < $1.name },
                 selected: runningSelectedIDs,
@@ -336,7 +397,8 @@ struct TrackContent: View {
                     vm.toggleDraftCategory(toggledID)
                 },
                 onCreate: onOpenCategoryEditor,
-                accessibilityId: "RunningTags"
+                accessibilityId: "RunningTags",
+                availableHeight: chipAvailableHeight
             )
         }
         .accessibilityIdentifier("RunningTagSelector")
@@ -381,6 +443,14 @@ struct TrackContent: View {
                 Color.clear.preference(
                     key: MainActionSlotWidthKey.self,
                     value: geometry.size.width
+                )
+            }
+        )
+        .background(
+            GeometryReader { geometry in
+                Color.clear.preference(
+                    key: TrackActionHeightKey.self,
+                    value: geometry.size.height
                 )
             }
         )
@@ -446,6 +516,14 @@ struct TrackContent: View {
             Text(L10n.timerChooserRecent.text)
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(Theme.textSecondary)
+                .background(
+                    GeometryReader { geometry in
+                        Color.clear.preference(
+                            key: TrackCaptionHeightKey.self,
+                            value: geometry.size.height
+                        )
+                    }
+                )
 
             if vm.recents.isEmpty {
                 Text(L10n.timerRecentsEmptyHint.text)
@@ -455,7 +533,8 @@ struct TrackContent: View {
                 RecentActivitiesChips(
                     recents: vm.recents,
                     categories: vm.categories,
-                    selectedText: vm.state.draft?.text
+                    selectedText: vm.state.draft?.text,
+                    availableHeight: chipAvailableHeight
                 ) { vm.select($0) }
             }
         }
@@ -470,6 +549,44 @@ private struct MainActionSlotWidthKey: PreferenceKey {
 }
 
 private struct TrackErrorRegionHeightKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
+    }
+}
+
+/// Finite-budget measurement keys (adaptive chip viewport): the maximum
+/// wins, so the taller slot branch (Recents vs. tags caption) defines the
+/// shared caption height.
+private struct TrackViewportHeightKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
+    }
+}
+
+private struct TrackTopHeightKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
+    }
+}
+
+private struct TrackNameHeightKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
+    }
+}
+
+private struct TrackActionHeightKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
+    }
+}
+
+private struct TrackCaptionHeightKey: PreferenceKey {
     static let defaultValue: CGFloat = 0
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
         value = max(value, nextValue())

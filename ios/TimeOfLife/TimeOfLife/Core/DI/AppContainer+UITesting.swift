@@ -73,6 +73,7 @@ extension AppContainer {
 
         seed(screen: screen, sessionStore: sessionStore, navigation: navigation)
         seedHistoryIfNeeded(screen: screen, localStore: localStore)
+        seedTrackCategoriesIfNeeded(screen: screen, localStore: localStore)
         return container
     }
 
@@ -110,6 +111,13 @@ extension AppContainer {
                 id: "ui-test", email: "user@example.com", emailVerified: true
             ))
             navigation.path = []
+        case "trackCategories":
+            // Deterministic running-track fixture: the shell opens on Track
+            // with a running draft (see `seedTrackCategoriesIfNeeded`).
+            sessionStore.setSignedIn(CachedSession(
+                id: "ui-test", email: "user@example.com", emailVerified: true
+            ))
+            navigation.path = []
         case "history":
             // History with committed entries across twelve day groups
             // (repro/spike/scroll harness, 264 entries): the shell opens on
@@ -135,6 +143,63 @@ extension AppContainer {
     private static func seedHistoryIfNeeded(screen: String, localStore: LocalStore) {
         guard screen == "history" else { return }
         Task { await seedHistoryEntries(into: localStore) }
+    }
+
+    /// Kicks off the deterministic running-track fixture for the
+    /// `"trackCategories"` screen. Enqueued at init, ahead of Track's first
+    /// snapshot read (best-effort ordering, same caveat as History: Track's
+    /// appear reload converges a mid-seed interleave). Uses `LocalStore`
+    /// APIs exclusively — no raw SQLite writes. The `+Add` chip is rendered
+    /// by the UI itself, so it is not seeded as a category.
+    private static func seedTrackCategoriesIfNeeded(screen: String, localStore: LocalStore) {
+        guard screen == "trackCategories" else { return }
+        Task { await seedTrackCategories(into: localStore) }
+    }
+
+    /// Seeds the eleven fixture categories plus the running draft
+    /// `Работа над приложением` with ordered selection Work-then-Sport.
+    /// Idempotent: `createCategory(_:)` is a no-op replay on `id`, and the
+    /// draft upserts the singleton row — relaunching the fixture screen
+    /// converges to the same state.
+    private static func seedTrackCategories(into store: LocalStore) async {
+        let fixtures: [(id: String, name: String, icon: String)] = [
+            ("uitest-cat-work", "Work", "briefcase"),
+            ("uitest-cat-sport", "Sport", "figure.run"),
+            ("uitest-cat-education", "Education", "book"),
+            ("uitest-cat-entertainment", "Entertainment", "tv"),
+            ("uitest-cat-hobby", "Hobby", "paintbrush"),
+            ("uitest-cat-relax", "Relax", "cup.and.saucer"),
+            ("uitest-cat-sleep", "Sleep", "bed.double"),
+            ("uitest-cat-home", "Домашние дела", "house"),
+            ("uitest-cat-food", "Еда и готовка", "fork.knife"),
+            ("uitest-cat-selfcare", "Забота о себе", "brain.head.profile"),
+            ("uitest-cat-zoo", "Зоопарк", "pawprint"),
+        ]
+        for fixture in fixtures {
+            try? await store.createCategory(Category(
+                id: fixture.id,
+                name: fixture.name,
+                icon: fixture.icon
+            ))
+        }
+        try? await store.saveTimerDraft(
+            activityText: "Работа над приложением",
+            categoryIDs: [workID(into: store), sportID(into: store)],
+            startedAt: Date(),
+            notes: ""
+        )
+    }
+
+    /// Resolves the fixture's selected ids by name: the launch gate seeds
+    /// the 7 starter categories before the shell reveals, racing this task
+    /// — whichever side wins a contested name, the lookup lands on the same
+    /// name+icon row either way, so the draft selection always resolves.
+    private static func workID(into store: LocalStore) async -> String {
+        (try? await store.category(named: "Work")?.id) ?? "uitest-cat-work"
+    }
+
+    private static func sportID(into store: LocalStore) async -> String {
+        (try? await store.category(named: "Sport")?.id) ?? "uitest-cat-sport"
     }
 
     /// Seeds committed entries across twelve calendar days (today back
