@@ -1,5 +1,6 @@
 #if DEBUG
 import Foundation
+import os
 import SwiftUI
 
 /// DEBUG-only composition root for the UI-feedback loop.
@@ -12,6 +13,10 @@ import SwiftUI
 /// Never ships: the whole file is `#if DEBUG`. Release builds call
 /// `.production()` only.
 extension AppContainer {
+    /// Seed diagnostics (Console): DEBUG-only fixture, never ships with the
+    /// Release graph. Same `os.Logger` pattern as `SyncController`.
+    private static let seedLogger = Logger(subsystem: "com.antonkosenko.timeoflifeapp", category: "uitest")
+
     /// Builds the deterministic UI-testing graph and seeds it to `screen`.
     static func uiTesting(screen: String) -> AppContainer {
         let keychain = InMemoryKeychainStore()
@@ -158,9 +163,10 @@ extension AppContainer {
 
     /// Seeds the eleven fixture categories plus the running draft
     /// `Работа над приложением` with ordered selection Work-then-Sport.
-    /// Idempotent: `createCategory(_:)` is a no-op replay on `id`, and the
-    /// draft upserts the singleton row — relaunching the fixture screen
-    /// converges to the same state.
+    /// Idempotent: `createCategory(_:)` is a no-op replay on `id`, so the
+    /// categories converge to the same set on relaunch. The draft upserts
+    /// the singleton row, but a replay preserves the existing `startedAt`
+    /// (the first seed pins it) so the running timer does not drift.
     private static func seedTrackCategories(into store: LocalStore) async {
         let fixtures: [(id: String, name: String, icon: String)] = [
             ("uitest-cat-work", "Work", "briefcase"),
@@ -176,18 +182,33 @@ extension AppContainer {
             ("uitest-cat-zoo", "Зоопарк", "pawprint"),
         ]
         for fixture in fixtures {
-            try? await store.createCategory(Category(
-                id: fixture.id,
-                name: fixture.name,
-                icon: fixture.icon
-            ))
+            do {
+                try await store.createCategory(Category(
+                    id: fixture.id,
+                    name: fixture.name,
+                    icon: fixture.icon
+                ))
+            } catch {
+                seedLogger.error("UITest seed: createCategory failed id=\(fixture.id, privacy: .public): \(error.localizedDescription, privacy: .public)")
+            }
         }
-        try? await store.saveTimerDraft(
-            activityText: "Работа над приложением",
-            categoryIDs: [workID(into: store), sportID(into: store)],
-            startedAt: Date(),
-            notes: ""
-        )
+        let existingStartedAt: Date?
+        do {
+            existingStartedAt = try await store.timerDraft()?.startedAt ?? nil
+        } catch {
+            seedLogger.error("UITest seed: timerDraft read failed: \(error.localizedDescription, privacy: .public)")
+            existingStartedAt = nil
+        }
+        do {
+            try await store.saveTimerDraft(
+                activityText: "Работа над приложением",
+                categoryIDs: [workID(into: store), sportID(into: store)],
+                startedAt: existingStartedAt ?? Date(),
+                notes: ""
+            )
+        } catch {
+            seedLogger.error("UITest seed: saveTimerDraft failed: \(error.localizedDescription, privacy: .public)")
+        }
     }
 
     /// Resolves the fixture's selected ids by name: the launch gate seeds

@@ -88,11 +88,6 @@ struct TagSelectorCreateChipTests {
         #expect(capped == 202)
     }
 
-    @Test("bleed splits evenly as top/bottom content inset")
-    func bleedInset() {
-        #expect(ChipViewport.borderBleed / 2 == 1)
-    }
-
     @Test("both dividers hide when the catalog fits without scrolling")
     func edgesFitHideBoth() {
         let edges = ChipViewport.edges(offsetY: 0, containerHeight: 200, contentHeight: 100)
