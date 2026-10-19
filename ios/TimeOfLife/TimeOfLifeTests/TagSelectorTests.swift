@@ -53,6 +53,7 @@ struct TagSelectorTests {
     }
 }
 
+@MainActor
 @Suite("TagSelector.createChip")
 struct TagSelectorCreateChipTests {
 
