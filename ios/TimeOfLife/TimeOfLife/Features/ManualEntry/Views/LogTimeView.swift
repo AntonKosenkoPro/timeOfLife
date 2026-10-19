@@ -249,16 +249,11 @@ struct LogTimeView: View {
                 }
             }
         } else {
-            // Full-card push (fix-entry-editor-card-hit-targets): the
-            // NavigationLink wraps the card chrome so caption, chevron,
-            // value, blank space, AND padding all push the existing
-            // NamePicker. The chrome here mirrors FormCard (padding +
-            // secondary background + corner clip) but carries no tap-away
-            // gesture — every tap on this card pushes, and the Button
-            // claim keeps scroll/edge-back native. No resign here
-            // (issue #67): the pushed NamePicker autofocuses its own
-            // field, so focus transfers directly with no flicker. LOCKED
-            // keeps the FormCard branch above (inert, no link).
+            // Full-card push: the link owns the padded chrome (mirrors
+            // FormCard) so caption, chevron, value, blank, and padding
+            // all push. No tap-away here — it would consume those taps.
+            // No resign (issue #67): focus transfers to the picker with
+            // no keyboard flicker. LOCKED uses the FormCard branch (inert).
             NavigationLink {
                 NamePicker(
                     initialText: vm.name,
@@ -352,14 +347,10 @@ struct LogTimeView: View {
                 }
             }
         } else {
-            // Full-card push (fix-entry-editor-card-hit-targets): mirrors
-            // the Name card — the NavigationLink wraps the card chrome so
-            // caption, chevron, preview/placeholder, blank space, AND
-            // padding all push the existing NotesEditorPage with no visual
-            // change. No tap-away gesture on this card; the Button claim
-            // keeps scroll/edge-back native. Notes copy unchanged (owned
-            // by the placeholder worker). LOCKED keeps the FormCard
-            // branch above (inert, no link).
+            // Full-card push, mirrors the Name card: the link owns the
+            // padded chrome so caption, chevron, preview, blank, and
+            // padding all push. No tap-away here — it would consume those
+            // taps. LOCKED uses the FormCard branch (inert).
             NavigationLink {
                 NotesEditorPage(initialText: vm.notes, entryName: vm.name) { vm.notes = $0 }
             } label: {
