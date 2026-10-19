@@ -343,14 +343,19 @@ func (s *PostgresStore) RotateRefreshToken(ctx context.Context, args RotateArgs)
 // Consumed rows are kept while a very late duplicate replay could still
 // arrive (it turns into a harmless 409 instead of a family-burning reuse);
 // only rows expired well before the cutoff are swept, so retention stays
-// bounded without a background job.
+// bounded without a background job. Capped per rotation so a backlog drains
+// incrementally instead of lengthening one transaction's critical section.
 func pruneRecoveryReceiptsPG(ctx context.Context, tx pgx.Tx, before time.Time) error {
 	if before.IsZero() {
 		return nil
 	}
 	if _, err := tx.Exec(ctx, `
 		DELETE FROM refresh_recovery_receipts
-		WHERE consumed = true AND expires_at < $1
+		WHERE ctid IN (
+			SELECT ctid FROM refresh_recovery_receipts
+			WHERE consumed = true AND expires_at < $1
+			LIMIT 100
+		)
 	`, before); err != nil {
 		return fmt.Errorf("prune recovery receipts: %w", err)
 	}

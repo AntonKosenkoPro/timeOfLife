@@ -641,6 +641,120 @@ func TestPostgres_RotateRefreshToken_Atomic(t *testing.T) {
 	}
 }
 
+// TestPostgres_RotateRefreshToken_GuardAndPrune pins the round-1 review
+// fixes against real PostgreSQL: the single-use predecessor guard rejects a
+// rotation of an already-consumed predecessor (no fork), and the
+// opportunistic sweep prunes consumed long-expired receipts only.
+func TestPostgres_RotateRefreshToken_GuardAndPrune(t *testing.T) {
+	store := newParityStore(t)
+	ctx := context.Background()
+
+	u, err := store.UpsertUser(ctx, "pg-guard-prune@example.com")
+	if err != nil {
+		t.Fatalf("UpsertUser: %v", err)
+	}
+	if err := store.SaveRefreshToken(ctx, u.ID, "pred-hash", "device-A"); err != nil {
+		t.Fatalf("SaveRefreshToken: %v", err)
+	}
+	pred, err := store.GetRefreshToken(ctx, "pred-hash")
+	if err != nil {
+		t.Fatalf("GetRefreshToken: %v", err)
+	}
+	if _, err := store.RotateRefreshToken(ctx, RotateArgs{
+		UserID:          u.ID,
+		DeviceID:        "device-A",
+		PredecessorID:   pred.ID,
+		PredecessorHash: "pred-hash",
+		SuccessorHash:   "succ-hash",
+		AttemptHash:     "attempt-hash",
+		SealedSuccessor: []byte("sealed"),
+		ExpiresAt:       time.Now().Add(time.Hour),
+	}); err != nil {
+		t.Fatalf("RotateRefreshToken: %v", err)
+	}
+
+	// A second rotation citing the consumed predecessor with another
+	// attempt must fail closed with ErrPredecessorRevoked: no fork.
+	_, err = store.RotateRefreshToken(ctx, RotateArgs{
+		UserID:          u.ID,
+		DeviceID:        "device-A",
+		PredecessorID:   pred.ID,
+		PredecessorHash: "pred-hash",
+		SuccessorHash:   "forked-hash",
+		AttemptHash:     "attempt-other",
+		SealedSuccessor: []byte("sealed-other"),
+		ExpiresAt:       time.Now().Add(time.Hour),
+	})
+	if !errors.Is(err, ErrPredecessorRevoked) {
+		t.Fatalf("expected ErrPredecessorRevoked, got %v", err)
+	}
+	if _, err := store.GetRefreshToken(ctx, "forked-hash"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("no forked successor may persist, got %v", err)
+	}
+
+	// Consume the first receipt, age it, and verify the next rotation
+	// sweeps it while keeping the live receipt.
+	succ, err := store.GetRefreshToken(ctx, "succ-hash")
+	if err != nil {
+		t.Fatalf("GetRefreshToken: %v", err)
+	}
+	if _, err := store.RotateRefreshToken(ctx, RotateArgs{
+		UserID:          u.ID,
+		DeviceID:        "device-A",
+		PredecessorID:   succ.ID,
+		PredecessorHash: "succ-hash",
+		SuccessorHash:   "succ-2-hash",
+		AttemptHash:     "attempt-2-hash",
+		SealedSuccessor: []byte("sealed-2"),
+		ExpiresAt:       time.Now().Add(time.Hour),
+	}); err != nil {
+		t.Fatalf("second RotateRefreshToken: %v", err)
+	}
+	if _, err := store.DB().Exec(ctx, `
+		UPDATE refresh_recovery_receipts SET expires_at = $1
+		WHERE attempt_hash = $2
+	`, time.Now().Add(-30*24*time.Hour), "attempt-hash"); err != nil {
+		t.Fatalf("age receipt: %v", err)
+	}
+	third, err := store.GetRefreshToken(ctx, "succ-2-hash")
+	if err != nil {
+		t.Fatalf("GetRefreshToken: %v", err)
+	}
+	if _, err := store.RotateRefreshToken(ctx, RotateArgs{
+		UserID:              u.ID,
+		DeviceID:            "device-A",
+		PredecessorID:       third.ID,
+		PredecessorHash:     "succ-2-hash",
+		SuccessorHash:       "succ-3-hash",
+		AttemptHash:         "attempt-3-hash",
+		SealedSuccessor:     []byte("sealed-3"),
+		ExpiresAt:           time.Now().Add(time.Hour),
+		PruneConsumedBefore: time.Now(),
+	}); err != nil {
+		t.Fatalf("third RotateRefreshToken: %v", err)
+	}
+	if _, err := store.FindRecoveryReceipt(ctx, "attempt-hash"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("ancient consumed receipt must be pruned, got %v", err)
+	}
+	if _, err := store.FindRecoveryReceipt(ctx, "attempt-2-hash"); err != nil {
+		t.Errorf("live receipt must survive pruning: %v", err)
+	}
+
+	// All-user revocation closes every pending receipt of the user.
+	if err := store.RevokeAllUserSessions(ctx, u.ID); err != nil {
+		t.Fatalf("RevokeAllUserSessions: %v", err)
+	}
+	for _, attempt := range []string{"attempt-2-hash", "attempt-3-hash"} {
+		receipt, err := store.FindRecoveryReceipt(ctx, attempt)
+		if err != nil {
+			t.Fatalf("FindRecoveryReceipt %s: %v", attempt, err)
+		}
+		if !receipt.Consumed {
+			t.Errorf("all-user revocation must close receipt %s", attempt)
+		}
+	}
+}
+
 // TestPostgres_UpsertUserByAppleSubject exercises the SIWA upsert against real
 // PostgreSQL: the conflict target must match the partial unique index
 // (idx_users_apple_subject … WHERE apple_subject IS NOT NULL). Omitting the

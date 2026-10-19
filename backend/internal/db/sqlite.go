@@ -353,13 +353,18 @@ func (s *SQLiteStore) RotateRefreshToken(ctx context.Context, args RotateArgs) (
 
 // pruneRecoveryReceiptsSQLite deletes consumed receipts long past their
 // expiry (see pruneRecoveryReceiptsPG): bounded retention, no sweeper.
+// Capped per rotation like the Postgres twin.
 func pruneRecoveryReceiptsSQLite(ctx context.Context, tx *sql.Tx, before time.Time) error {
 	if before.IsZero() {
 		return nil
 	}
 	if _, err := tx.ExecContext(ctx, `
 		DELETE FROM refresh_recovery_receipts
-		WHERE consumed = true AND expires_at < ?
+		WHERE rowid IN (
+			SELECT rowid FROM refresh_recovery_receipts
+			WHERE consumed = true AND expires_at < ?
+			LIMIT 100
+		)
 	`, fmtTime(before)); err != nil {
 		return fmt.Errorf("prune recovery receipts: %w", err)
 	}

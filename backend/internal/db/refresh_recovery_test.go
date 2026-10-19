@@ -239,6 +239,24 @@ func TestRevoke_ClosesReceipts(t *testing.T) {
 	}
 }
 
+func TestRevokeAll_ClosesReceipts(t *testing.T) {
+	store := newRecoveryTestStore(t)
+	ctx := context.Background()
+	userID, predecessorID := recoveryUser(t, store, "revoke-all@example.com")
+	rotateOnce(t, store, userID, predecessorID)
+
+	if err := store.RevokeAllUserSessions(ctx, userID); err != nil {
+		t.Fatalf("RevokeAllUserSessions: %v", err)
+	}
+	receipt, err := store.FindRecoveryReceipt(ctx, "attempt-hash")
+	if err != nil {
+		t.Fatalf("FindRecoveryReceipt: %v", err)
+	}
+	if !receipt.Consumed {
+		t.Error("all-user revocation must close the pending receipt")
+	}
+}
+
 func TestFindRecoveryReceipt_NotFound(t *testing.T) {
 	store := newRecoveryTestStore(t)
 	if _, err := store.FindRecoveryReceipt(context.Background(), "no-such-attempt"); !errors.Is(err, ErrNotFound) {

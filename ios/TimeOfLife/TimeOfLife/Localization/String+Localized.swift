@@ -262,6 +262,7 @@ enum ErrorLocalization {
         case let .server(code, _, _): return L10n.text(in: .default, code: "error.\(code)")
         case let .authenticationRejected(code, _, _): return L10n.text(in: .default, code: "error.\(code)")
         case .unauthorized: return L10n.text(in: .default, code: "error.unauthorized")
+        case .storage: return L10n.text(in: .default, code: "error.localPersistence")
         default: return L10n.text(in: .default, code: "error.unknown")
         }
     }

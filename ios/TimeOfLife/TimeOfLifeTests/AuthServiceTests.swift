@@ -248,8 +248,8 @@ struct AuthServiceTests {
         #expect(await tokens(keychain) == ("at", "rt"))
     }
 
-    @Test("restoreSession signs out when refresh also fails")
-    func restoreSignsOutOnDoubleFailure() async throws {
+    @Test("restore locks the gate on 401 with no rotation landed (restore sends no refresh of its own)")
+    func restore401WithoutRotationLocksGate() async throws {
         let cached = CachedSession(id: "u1", email: "a@b.com", emailVerified: true)
         let (service, repo, keychain, _, store) = makeService(
             initialSnapshot: TestFactories.makeSnapshot(accessToken: "at", refreshToken: "rt"),
@@ -262,6 +262,7 @@ struct AuthServiceTests {
 
         #expect(await tokens(keychain) == (nil, nil))
         #expect(store.state == .signedOut)
+        #expect(repo.refreshSends.isEmpty, "restore must not start its own refresh; APIClient owns the single retry")
     }
 
     // MARK: - performRefresh

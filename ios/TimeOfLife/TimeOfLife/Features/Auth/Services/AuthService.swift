@@ -313,7 +313,11 @@ final class AuthService: ObservableObject {
             if let token = snapshot?.accessToken, !token.isEmpty {
                 return token
             }
-            throw CancellationError()
+            // CancellationError is reserved for genuinely superseded
+            // refreshes; an empty durable access token is an auth-state
+            // failure the caller must see, not a cancellation it may
+            // silently swallow.
+            throw fallback
         case .failure:
             throw fallback
         }

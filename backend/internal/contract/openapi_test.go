@@ -107,6 +107,7 @@ type rawComponents struct {
 type rawSchemaDef struct {
 	Properties map[string]any `yaml:"properties"`
 	Enum       []any          `yaml:"enum"`
+	Required   []any          `yaml:"required"`
 }
 
 func loadSpec(t *testing.T) *rawSpec {
@@ -486,6 +487,13 @@ func TestSpec_RefreshAttemptDocumented(t *testing.T) {
 	}
 	if _, ok := refresh.Properties["refresh_attempt_id"]; !ok {
 		t.Error("RefreshRequest schema must document the optional refresh_attempt_id")
+	}
+	// refresh_attempt_id must stay optional: promoting it to required
+	// would break legacy clients, which keep working without recovery.
+	for _, name := range refresh.Required {
+		if s, _ := name.(string); s == "refresh_attempt_id" {
+			t.Error("refresh_attempt_id must not become required (absent keeps legacy behavior)")
+		}
 	}
 
 	post, ok := s.Paths["/api/v1/auth/refresh"]["post"]

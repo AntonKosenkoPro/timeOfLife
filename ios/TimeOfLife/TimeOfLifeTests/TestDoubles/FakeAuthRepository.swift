@@ -119,6 +119,14 @@ final class FakeAuthRepository: AuthRepository, @unchecked Sendable {
     /// the SAME successor (stable recovery); a different attempt (or none)
     /// for a revoked predecessor reports `token_reuse`; a replay after the
     /// successor rotated forward reports `refresh_attempt_completed`.
+    ///
+    /// Contract mirror — keep codes AND semantics in sync with the
+    /// authoritative backend contract or these tests validate a fiction:
+    /// `backend/api/openapi.yaml` (POST /auth/refresh responses + the
+    /// refresh_attempt_id field), `backend/internal/handlers/auth.go`
+    /// (`recoverRefresh` / `serveRecovery` / `rotateWithRecovery`), pinned
+    /// by `backend/internal/contract/openapi_test.go`
+    /// (canonicalErrorCodes + refresh-attempt pin), which fails CI on drift.
     var attemptAwareServerEnabled = false
 
     /// When true, the next committed rotation throws a transport error AFTER

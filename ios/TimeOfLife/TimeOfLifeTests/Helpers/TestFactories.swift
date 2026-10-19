@@ -62,10 +62,10 @@ enum TestFactories {
         return (snapshot?.accessToken, snapshot?.refreshToken, snapshot?.pendingAttemptId)
     }
 
-    /// Waits until the fake records a refresh send, failing loudly on
-    /// timeout. A silent return would let the caller mutate state before the
-    /// refresh went in flight, misattributing later failures to the
-    /// behavior under test instead of request ordering.
+    /// Waits until the fake records a refresh send. Throws on timeout so the
+    /// caller aborts deterministically instead of mutating state while the
+    /// refresh never went in flight (which would misattribute later
+    /// failures to the behavior under test instead of request ordering).
     static func waitForRefreshSend(_ repo: FakeAuthRepository) async throws {
         var polls = 0
         while repo.refreshSends.isEmpty && polls < 500 {
@@ -74,7 +74,14 @@ enum TestFactories {
         }
         if repo.refreshSends.isEmpty {
             Issue.record("refresh send not recorded within 500ms — the refresh was not in flight when state was mutated")
+            throw TestTimeoutError.waitForRefreshSend
         }
+    }
+
+    /// Test-only timeout failures. Thrown (never returned) so a missed
+    /// rendezvous aborts the test instead of silently continuing.
+    enum TestTimeoutError: Error {
+        case waitForRefreshSend
     }
 
     /// Creates a JSON-encoded error envelope matching the server contract.
