@@ -30,11 +30,7 @@ struct AuthServiceTests {
     }
 
     private func waitForRefreshSend(_ repo: FakeAuthRepository) async throws {
-        var polls = 0
-        while repo.refreshSends.isEmpty && polls < 500 {
-            try await Task.sleep(nanoseconds: 1_000_000)
-            polls += 1
-        }
+        try await TestFactories.waitForRefreshSend(repo)
     }
 
     // MARK: - requestOTP

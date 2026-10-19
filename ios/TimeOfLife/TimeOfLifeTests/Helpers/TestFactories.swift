@@ -1,4 +1,5 @@
 import Foundation
+import Testing
 @testable import TimeOfLife
 
 /// Helpers for building decoded payloads and HTTP responses in tests.
@@ -48,14 +49,32 @@ enum TestFactories {
     }
 
     /// Reads the durable token pair (plus pending attempt) from a keychain.
-    /// Returns nils when storage is unavailable or no snapshot exists.
+    /// A storage failure is recorded as a test issue: callers must never
+    /// mistake "unreadable" for "cleared", or a faulted load would falsely
+    /// satisfy sign-out assertions.
     static func snapshotTokens(_ keychain: InMemoryKeychainStore) async -> (
         access: String?, refresh: String?, attempt: String?
     ) {
         guard case .success(let snapshot) = await keychain.loadSnapshot() else {
+            Issue.record("snapshotTokens: keychain load failed — nils here mean 'unreadable', not 'cleared'")
             return (nil, nil, nil)
         }
         return (snapshot?.accessToken, snapshot?.refreshToken, snapshot?.pendingAttemptId)
+    }
+
+    /// Waits until the fake records a refresh send, failing loudly on
+    /// timeout. A silent return would let the caller mutate state before the
+    /// refresh went in flight, misattributing later failures to the
+    /// behavior under test instead of request ordering.
+    static func waitForRefreshSend(_ repo: FakeAuthRepository) async throws {
+        var polls = 0
+        while repo.refreshSends.isEmpty && polls < 500 {
+            try await Task.sleep(nanoseconds: 1_000_000)
+            polls += 1
+        }
+        if repo.refreshSends.isEmpty {
+            Issue.record("refresh send not recorded within 500ms — the refresh was not in flight when state was mutated")
+        }
     }
 
     /// Creates a JSON-encoded error envelope matching the server contract.

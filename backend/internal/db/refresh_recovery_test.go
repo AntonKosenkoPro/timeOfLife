@@ -245,3 +245,98 @@ func TestFindRecoveryReceipt_NotFound(t *testing.T) {
 		t.Errorf("expected ErrNotFound, got %v", err)
 	}
 }
+
+func TestRotate_ConsumedPredecessorFailsSingleUseGuard(t *testing.T) {
+	store := newRecoveryTestStore(t)
+	ctx := context.Background()
+	userID, predecessorID := recoveryUser(t, store, "guard@example.com")
+	rotateOnce(t, store, userID, predecessorID)
+
+	// A second rotation citing the already-consumed predecessor with a
+	// different attempt must fail closed: no fork, family untouched.
+	_, err := store.RotateRefreshToken(ctx, RotateArgs{
+		UserID:          userID,
+		DeviceID:        "device-A",
+		PredecessorID:   predecessorID,
+		PredecessorHash: "predecessor-hash",
+		SuccessorHash:   "forked-hash",
+		AttemptHash:     "attempt-other",
+		SealedSuccessor: []byte("sealed-other"),
+		ExpiresAt:       time.Now().Add(time.Hour),
+	})
+	if !errors.Is(err, ErrPredecessorRevoked) {
+		t.Fatalf("expected ErrPredecessorRevoked, got %v", err)
+	}
+	if _, err := store.GetRefreshToken(ctx, "forked-hash"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("no forked successor may persist, got %v", err)
+	}
+	if _, err := store.FindRecoveryReceipt(ctx, "attempt-other"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("no receipt may persist for the failed rotation, got %v", err)
+	}
+	succ, err := store.GetRefreshToken(ctx, "successor-hash")
+	if err != nil {
+		t.Fatalf("GetRefreshToken successor: %v", err)
+	}
+	if succ.Revoked {
+		t.Error("the winner's successor must stay live after the guarded loss")
+	}
+}
+
+func TestRotate_PrunesConsumedLongExpiredReceipts(t *testing.T) {
+	store := newRecoveryTestStore(t)
+	ctx := context.Background()
+	userID, predecessorID := recoveryUser(t, store, "prune@example.com")
+	rotateOnce(t, store, userID, predecessorID)
+
+	// Consume the first receipt by rotating its successor forward, then age
+	// it well past expiry.
+	successor, err := store.GetRefreshToken(ctx, "successor-hash")
+	if err != nil {
+		t.Fatalf("GetRefreshToken: %v", err)
+	}
+	if _, err := store.RotateRefreshToken(ctx, RotateArgs{
+		UserID:          userID,
+		DeviceID:        "device-A",
+		PredecessorID:   successor.ID,
+		PredecessorHash: "successor-hash",
+		SuccessorHash:   "successor-2-hash",
+		AttemptHash:     "attempt-2-hash",
+		SealedSuccessor: []byte("sealed-2"),
+		ExpiresAt:       time.Now().Add(time.Hour),
+	}); err != nil {
+		t.Fatalf("second RotateRefreshToken: %v", err)
+	}
+	if _, err := store.DB().ExecContext(ctx, `
+		UPDATE refresh_recovery_receipts
+		SET expires_at = ?
+		WHERE attempt_hash = ?
+	`, fmtTime(time.Now().Add(-30*24*time.Hour)), "attempt-hash"); err != nil {
+		t.Fatalf("age receipt: %v", err)
+	}
+
+	// A further rotation with a prune cutoff sweeps the ancient consumed
+	// receipt but keeps the live one.
+	third, err := store.GetRefreshToken(ctx, "successor-2-hash")
+	if err != nil {
+		t.Fatalf("GetRefreshToken: %v", err)
+	}
+	if _, err := store.RotateRefreshToken(ctx, RotateArgs{
+		UserID:              userID,
+		DeviceID:            "device-A",
+		PredecessorID:       third.ID,
+		PredecessorHash:     "successor-2-hash",
+		SuccessorHash:       "successor-3-hash",
+		AttemptHash:         "attempt-3-hash",
+		SealedSuccessor:     []byte("sealed-3"),
+		ExpiresAt:           time.Now().Add(time.Hour),
+		PruneConsumedBefore: time.Now(),
+	}); err != nil {
+		t.Fatalf("third RotateRefreshToken: %v", err)
+	}
+	if _, err := store.FindRecoveryReceipt(ctx, "attempt-hash"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("ancient consumed receipt must be pruned, got %v", err)
+	}
+	if _, err := store.FindRecoveryReceipt(ctx, "attempt-2-hash"); err != nil {
+		t.Errorf("live receipt must survive pruning: %v", err)
+	}
+}

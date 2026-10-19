@@ -271,9 +271,11 @@ func closeSuccessorReceiptsSQLite(ctx context.Context, tx *sql.Tx, tokenID strin
 
 // RotateRefreshToken atomically revokes the predecessor, inserts the
 // successor, records the pending recovery receipt, and closes the receipt
-// the predecessor itself recovered. The receipt insert arbitrates
-// concurrent duplicate deliveries: the loser inserts zero rows and gets
-// ErrAttemptExists, leaving the winner's family untouched.
+// the predecessor itself recovered. Statements touch refresh_tokens before
+// refresh_recovery_receipts — the same lock order as the revocation paths.
+// The predecessor revocation is single-use guarded (`AND revoked = false`):
+// a concurrent rotation that already consumed it gets ErrPredecessorRevoked
+// and commits nothing, so cross-attempt races cannot fork the device family.
 func (s *SQLiteStore) RotateRefreshToken(ctx context.Context, args RotateArgs) (RotateResult, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -281,35 +283,31 @@ func (s *SQLiteStore) RotateRefreshToken(ctx context.Context, args RotateArgs) (
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	res, err := tx.ExecContext(ctx, `
-		INSERT OR IGNORE INTO refresh_recovery_receipts
-			(attempt_hash, user_id, device_id, predecessor_hash, successor_hash,
-			 sealed_successor, expires_at, consumed, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, false, datetime('now'))
-	`, args.AttemptHash, args.UserID, args.DeviceID, args.PredecessorHash,
-		args.SuccessorHash, args.SealedSuccessor, fmtTime(args.ExpiresAt))
+	// Single-use guard: only a live predecessor rotates.
+	updateres, err := tx.ExecContext(ctx, `
+		UPDATE refresh_tokens SET revoked = true
+		WHERE id = ? AND revoked = false
+	`, args.PredecessorID)
 	if err != nil {
 		return RotateResult{}, fmt.Errorf("rotate refresh token: %w", err)
 	}
-	affected, err := res.RowsAffected()
+	affected, err := updateres.RowsAffected()
 	if err != nil {
 		return RotateResult{}, fmt.Errorf("rotate refresh token: %w", err)
 	}
 	if affected == 0 {
-		return RotateResult{}, fmt.Errorf("rotate refresh token: %w", ErrAttemptExists)
+		return RotateResult{}, fmt.Errorf("rotate refresh token: %w", ErrPredecessorRevoked)
 	}
 
-	if _, err := tx.ExecContext(ctx, `
-		UPDATE refresh_tokens SET revoked = true WHERE id = ?
-	`, args.PredecessorID); err != nil {
-		return RotateResult{}, fmt.Errorf("rotate refresh token: %w", err)
-	}
-
+	// Bind the successor timestamp in Go so the committed row's created_at
+	// is known without a post-commit read (which could fail after commit
+	// and misreport a successful rotation as failed).
+	now := time.Now().UTC()
 	successorID := uuidV7()
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO refresh_tokens (id, user_id, token_hash, device_id, revoked, created_at)
-		VALUES (?, ?, ?, ?, false, datetime('now'))
-	`, successorID, args.UserID, args.SuccessorHash, args.DeviceID); err != nil {
+		VALUES (?, ?, ?, ?, false, ?)
+	`, successorID, args.UserID, args.SuccessorHash, args.DeviceID, fmtTime(now)); err != nil {
 		return RotateResult{}, fmt.Errorf("rotate refresh token: %w", err)
 	}
 
@@ -320,17 +318,52 @@ func (s *SQLiteStore) RotateRefreshToken(ctx context.Context, args RotateArgs) (
 		return RotateResult{}, fmt.Errorf("rotate refresh token: %w", err)
 	}
 
+	// Scoped conflict target: only a duplicate attempt_hash folds into
+	// ErrAttemptExists. Any other constraint failure surfaces as a real
+	// storage error instead of misrouting into the recovery path.
+	res, err := tx.ExecContext(ctx, `
+		INSERT INTO refresh_recovery_receipts
+			(attempt_hash, user_id, device_id, predecessor_hash, successor_hash,
+			 sealed_successor, expires_at, consumed, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, false, ?)
+		ON CONFLICT (attempt_hash) DO NOTHING
+	`, args.AttemptHash, args.UserID, args.DeviceID, args.PredecessorHash,
+		args.SuccessorHash, args.SealedSuccessor, fmtTime(args.ExpiresAt), fmtTime(now))
+	if err != nil {
+		return RotateResult{}, fmt.Errorf("rotate refresh token: %w", err)
+	}
+	affected, err = res.RowsAffected()
+	if err != nil {
+		return RotateResult{}, fmt.Errorf("rotate refresh token: %w", err)
+	}
+	if affected == 0 {
+		return RotateResult{}, fmt.Errorf("rotate refresh token: %w", ErrAttemptExists)
+	}
+
+	if err := pruneRecoveryReceiptsSQLite(ctx, tx, args.PruneConsumedBefore); err != nil {
+		return RotateResult{}, fmt.Errorf("rotate refresh token: %w", err)
+	}
+
 	if err := tx.Commit(); err != nil {
 		return RotateResult{}, fmt.Errorf("rotate refresh token: %w", err)
 	}
 
-	var createdAt string
-	if err := s.db.QueryRowContext(ctx, `
-		SELECT created_at FROM refresh_tokens WHERE id = ?
-	`, successorID).Scan(&createdAt); err != nil {
-		return RotateResult{}, fmt.Errorf("rotate refresh token: %w", err)
+	return RotateResult{SuccessorID: successorID, SuccessorCreatedAt: now}, nil
+}
+
+// pruneRecoveryReceiptsSQLite deletes consumed receipts long past their
+// expiry (see pruneRecoveryReceiptsPG): bounded retention, no sweeper.
+func pruneRecoveryReceiptsSQLite(ctx context.Context, tx *sql.Tx, before time.Time) error {
+	if before.IsZero() {
+		return nil
 	}
-	return RotateResult{SuccessorID: successorID, SuccessorCreatedAt: parseTime(createdAt)}, nil
+	if _, err := tx.ExecContext(ctx, `
+		DELETE FROM refresh_recovery_receipts
+		WHERE consumed = true AND expires_at < ?
+	`, fmtTime(before)); err != nil {
+		return fmt.Errorf("prune recovery receipts: %w", err)
+	}
+	return nil
 }
 
 // FindRecoveryReceipt returns the pending receipt for an attempt hash.

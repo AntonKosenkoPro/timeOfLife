@@ -798,15 +798,16 @@ func (h *Handler) rotateWithRecovery(
 		return
 	}
 
-	result, err := h.store.RotateRefreshToken(ctx, db.RotateArgs{
-		UserID:          storedToken.UserID,
-		DeviceID:        storedToken.DeviceID,
-		PredecessorID:   storedToken.ID,
-		PredecessorHash: tokenHash,
-		SuccessorHash:   successorHash,
-		AttemptHash:     attemptHash,
-		SealedSuccessor: sealed,
-		ExpiresAt:       expiresAt,
+	_, err = h.store.RotateRefreshToken(ctx, db.RotateArgs{
+		UserID:              storedToken.UserID,
+		DeviceID:            storedToken.DeviceID,
+		PredecessorID:       storedToken.ID,
+		PredecessorHash:     tokenHash,
+		SuccessorHash:       successorHash,
+		AttemptHash:         attemptHash,
+		SealedSuccessor:     sealed,
+		ExpiresAt:           expiresAt,
+		PruneConsumedBefore: time.Now().Add(-h.tokenService.RefreshTokenTTL),
 	})
 	if err != nil {
 		if errors.Is(err, db.ErrAttemptExists) {
@@ -827,11 +828,39 @@ func (h *Handler) rotateWithRecovery(
 			h.serveRecovery(ctx, w, r, receipt, storedToken)
 			return
 		}
+		if errors.Is(err, db.ErrPredecessorRevoked) {
+			// A concurrent rotation already consumed the predecessor: if
+			// our attempt was the accepted one, serve the winner's
+			// successor; otherwise this is genuine reuse of a dead token.
+			receipt, ferr := h.store.FindRecoveryReceipt(ctx, attemptHash)
+			if ferr != nil {
+				if errors.Is(ferr, db.ErrNotFound) {
+					h.revokeOnReuse(ctx, storedToken)
+					writeError(w, http.StatusUnauthorized, "token_reuse", "Token has been revoked. Sign in again.", nil)
+					return
+				}
+				h.writeInternalError(w, r, "recovery receipt lookup failed", ferr)
+				return
+			}
+			if receipt.UserID != storedToken.UserID || receipt.DeviceID != storedToken.DeviceID {
+				h.revokeOnReuse(ctx, storedToken)
+				writeError(w, http.StatusUnauthorized, "token_reuse", "Token has been revoked. Sign in again.", nil)
+				return
+			}
+			if receipt.PredecessorHash != tokenHash {
+				h.logger.Warn("refresh attempt rebound to another predecessor",
+					"userID", storedToken.UserID, "deviceID", storedToken.DeviceID)
+				writeError(w, http.StatusConflict, "refresh_attempt_conflict",
+					"Refresh attempt does not match this token. Retry with the attempt bound to this token.", nil)
+				return
+			}
+			h.serveRecovery(ctx, w, r, receipt, storedToken)
+			return
+		}
 		// The transaction rolled back: the predecessor stays usable.
 		h.writeInternalError(w, r, "failed to rotate refresh token", err)
 		return
 	}
-	_ = result
 
 	user, err := h.store.GetUserByID(ctx, storedToken.UserID)
 	if err != nil {

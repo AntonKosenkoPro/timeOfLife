@@ -43,4 +43,11 @@ var (
 	// winner's successor stands and the loser must recover it instead of
 	// rotating forward.
 	ErrAttemptExists = errors.New("refresh attempt already accepted")
+
+	// ErrPredecessorRevoked is returned by RotateRefreshToken when the
+	// predecessor was already revoked by a concurrent rotation: the
+	// single-use guard (`AND revoked = false`) matched zero rows, so this
+	// rotation committed nothing. The handler routes the loser to the
+	// winner's receipt (same attempt) or to reuse handling (other attempt).
+	ErrPredecessorRevoked = errors.New("refresh predecessor already revoked")
 )

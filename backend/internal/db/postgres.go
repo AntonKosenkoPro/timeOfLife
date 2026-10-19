@@ -270,9 +270,13 @@ func closeSuccessorReceiptsPG(ctx context.Context, tx pgx.Tx, tokenID string) er
 
 // RotateRefreshToken atomically revokes the predecessor, inserts the
 // successor, records the pending recovery receipt, and closes the receipt
-// the predecessor itself recovered. The receipt insert arbitrates
-// concurrent duplicate deliveries: the loser sees zero inserted rows and
-// gets ErrAttemptExists, leaving the winner's family untouched.
+// the predecessor itself recovered. Statements touch refresh_tokens before
+// refresh_recovery_receipts — the same lock order as the revocation paths —
+// so a concurrent logout/device revocation cannot deadlock against rotation.
+// The predecessor revocation is single-use guarded (`AND revoked = false`):
+// a concurrent rotation that already consumed it gets ErrPredecessorRevoked
+// and commits nothing, so cross-attempt races cannot fork the device family.
+// The receipt insert arbitrates same-attempt duplicates (ErrAttemptExists).
 func (s *PostgresStore) RotateRefreshToken(ctx context.Context, args RotateArgs) (RotateResult, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
@@ -280,25 +284,18 @@ func (s *PostgresStore) RotateRefreshToken(ctx context.Context, args RotateArgs)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	res, err := tx.Exec(ctx, `
-		INSERT INTO refresh_recovery_receipts
-			(attempt_hash, user_id, device_id, predecessor_hash, successor_hash,
-			 sealed_successor, expires_at, consumed, created_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, false, NOW())
-		ON CONFLICT (attempt_hash) DO NOTHING
-	`, args.AttemptHash, args.UserID, args.DeviceID, args.PredecessorHash,
-		args.SuccessorHash, args.SealedSuccessor, args.ExpiresAt)
+	// Single-use guard: only a live predecessor rotates. A concurrent
+	// rotation that already revoked it matches zero rows and loses here,
+	// before any successor or receipt is written.
+	updateres, err := tx.Exec(ctx, `
+		UPDATE refresh_tokens SET revoked = true
+		WHERE id = $1 AND revoked = false
+	`, args.PredecessorID)
 	if err != nil {
 		return RotateResult{}, fmt.Errorf("rotate refresh token: %w", err)
 	}
-	if res.RowsAffected() == 0 {
-		return RotateResult{}, fmt.Errorf("rotate refresh token: %w", ErrAttemptExists)
-	}
-
-	if _, err := tx.Exec(ctx, `
-		UPDATE refresh_tokens SET revoked = true WHERE id = $1
-	`, args.PredecessorID); err != nil {
-		return RotateResult{}, fmt.Errorf("rotate refresh token: %w", err)
+	if updateres.RowsAffected() == 0 {
+		return RotateResult{}, fmt.Errorf("rotate refresh token: %w", ErrPredecessorRevoked)
 	}
 
 	var out RotateResult
@@ -317,10 +314,47 @@ func (s *PostgresStore) RotateRefreshToken(ctx context.Context, args RotateArgs)
 		return RotateResult{}, fmt.Errorf("rotate refresh token: %w", err)
 	}
 
+	res, err := tx.Exec(ctx, `
+		INSERT INTO refresh_recovery_receipts
+			(attempt_hash, user_id, device_id, predecessor_hash, successor_hash,
+			 sealed_successor, expires_at, consumed, created_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, false, NOW())
+		ON CONFLICT (attempt_hash) DO NOTHING
+	`, args.AttemptHash, args.UserID, args.DeviceID, args.PredecessorHash,
+		args.SuccessorHash, args.SealedSuccessor, args.ExpiresAt)
+	if err != nil {
+		return RotateResult{}, fmt.Errorf("rotate refresh token: %w", err)
+	}
+	if res.RowsAffected() == 0 {
+		return RotateResult{}, fmt.Errorf("rotate refresh token: %w", ErrAttemptExists)
+	}
+
+	if err := pruneRecoveryReceiptsPG(ctx, tx, args.PruneConsumedBefore); err != nil {
+		return RotateResult{}, fmt.Errorf("rotate refresh token: %w", err)
+	}
+
 	if err := tx.Commit(ctx); err != nil {
 		return RotateResult{}, fmt.Errorf("rotate refresh token: %w", err)
 	}
 	return out, nil
+}
+
+// pruneRecoveryReceiptsPG deletes consumed receipts long past their expiry.
+// Consumed rows are kept while a very late duplicate replay could still
+// arrive (it turns into a harmless 409 instead of a family-burning reuse);
+// only rows expired well before the cutoff are swept, so retention stays
+// bounded without a background job.
+func pruneRecoveryReceiptsPG(ctx context.Context, tx pgx.Tx, before time.Time) error {
+	if before.IsZero() {
+		return nil
+	}
+	if _, err := tx.Exec(ctx, `
+		DELETE FROM refresh_recovery_receipts
+		WHERE consumed = true AND expires_at < $1
+	`, before); err != nil {
+		return fmt.Errorf("prune recovery receipts: %w", err)
+	}
+	return nil
 }
 
 // FindRecoveryReceipt returns the pending receipt for an attempt hash.

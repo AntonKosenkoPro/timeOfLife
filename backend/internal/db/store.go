@@ -58,15 +58,18 @@ type RecoveryReceipt struct {
 // receipt. SuccessorHash and AttemptHash are SHA-256 hex digests;
 // SealedSuccessor is the AES-256-GCM sealed successor; ExpiresAt is the
 // successor's fixed refresh expiry (retries never extend it).
+// PruneConsumedBefore bounds retention: receipts that are consumed and
+// expired before it are deleted opportunistically; zero disables pruning.
 type RotateArgs struct {
-	UserID          string
-	DeviceID        string
-	PredecessorID   string
-	PredecessorHash string
-	SuccessorHash   string
-	AttemptHash     string
-	SealedSuccessor []byte
-	ExpiresAt       time.Time
+	UserID              string
+	DeviceID            string
+	PredecessorID       string
+	PredecessorHash     string
+	SuccessorHash       string
+	AttemptHash         string
+	SealedSuccessor     []byte
+	ExpiresAt           time.Time
+	PruneConsumedBefore time.Time
 }
 
 // RotateResult reports the committed successor row.
@@ -211,9 +214,11 @@ type Store interface {
 	// successor, records the pending recovery receipt, and closes the
 	// receipt the predecessor itself recovered (successor consumption).
 	// Commit-all or commit-nothing: failures before commit leave the
-	// predecessor usable and persist no partial successor or receipt. A
-	// concurrent duplicate delivery that already accepted the attempt
-	// returns ErrAttemptExists without touching the family.
+	// predecessor usable and persist no partial successor or receipt. The
+	// predecessor revocation is single-use guarded: a concurrent rotation
+	// that already consumed it returns ErrPredecessorRevoked without
+	// touching the family. A concurrent duplicate delivery that already
+	// accepted the attempt returns ErrAttemptExists without touching it.
 	RotateRefreshToken(ctx context.Context, args RotateArgs) (RotateResult, error)
 
 	// FindRecoveryReceipt returns the pending receipt for an attempt hash,
