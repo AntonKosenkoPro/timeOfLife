@@ -168,8 +168,10 @@ struct CategoryEditorForm: View {
             title: L10n.categoryEditorDelete.text,
             accessibilityId: "CategoryEditorDeleteButton"
         ) {
+            guard !vm.isLoading else { return }
             isShowingDeleteConfirm = true
         }
+        .disabled(vm.isLoading)
     }
 
     /// Deletes the category into the durable undo buffer; notifies the

@@ -63,7 +63,10 @@ enters the durable undo buffer (category + ordered entry assignments, no
 outbox row), notifies the presenter via `onDeleted`, and dismisses; the list
 reloads. `deleteConfirmed` shares the save `isLoading` gate (refuses while busy,
 sets `true` / `defer` `false`), matching the disabled save/dismiss paths above,
-so a mid-delete dismiss cannot swallow the failure banner. Until the app restarts, the system Undo confirmation on Manage Categories
+so a mid-delete dismiss cannot swallow the failure banner. The Delete button
+itself is disabled while `vm.isLoading` (`.disabled(vm.isLoading)` plus an
+action `guard !vm.isLoading`), so the confirmation alert is unreachable while
+busy instead of presenting and then being silently refused. Until the app restarts, the system Undo confirmation on Manage Categories
 restores identity + assignments; a restart commits the hard delete on
 cold launch. Create mode offers no Delete.
 

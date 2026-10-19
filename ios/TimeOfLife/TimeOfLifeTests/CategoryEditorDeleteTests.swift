@@ -82,6 +82,35 @@ struct CategoryEditorDeleteTests {
         #expect(seen.last == false, "delete must release the shared isLoading gate")
     }
 
+    @Test("delete refuses while a save is in flight and leaves the category intact")
+    func deleteRefusesWhileSaveInFlight() async throws {
+        let store = try makeStore()
+        try await store.createCategory(draft: CategoryDraft(name: "Work", icon: .briefcase), id: "c1", now: Date())
+        let category = try #require(await store.category(id: "c1"))
+        let vm = CategoryEditorViewModel(store: store, category: category, onSaved: { _ in }, onDuplicate: { _ in })
+        vm.name = "Renamed"
+        vm.save()
+        // save() raises the shared gate synchronously before its Task suspends.
+        #expect(vm.isLoading, "save must raise the shared isLoading gate synchronously")
+        // Same MainActor, no suspend before the guard: deterministic refusal.
+        let refused = await vm.deleteConfirmed()
+        #expect(refused == false, "delete must refuse while the shared gate is held")
+        #expect(vm.isLoading, "refused delete must not clear the in-flight save gate")
+        #expect(try await store.category(id: "c1") != nil)
+        // Bounded settle for the in-flight save (no unbounded while).
+        var settled = false
+        for _ in 0..<200 where !settled {
+            if !vm.isLoading {
+                settled = true
+            } else {
+                try? await Task.sleep(nanoseconds: 10_000_000)
+            }
+        }
+        #expect(settled, "save must settle within the bounded wait")
+        #expect(try await store.category(id: "c1") != nil, "refused delete must not remove the category")
+        #expect(try await store.category(id: "c1")?.name == "Renamed")
+    }
+
     // MARK: - Helpers
 
     private func makeStore() throws -> LocalStore {
