@@ -232,62 +232,76 @@ struct LogTimeView: View {
     // MARK: - Name row
 
     private var nameCard: some View {
-        FormCard(accessibilityID: "EntryNameRow", resignFocus: focusedField = nil) {
-            VStack(alignment: .leading, spacing: Theme.spacingExtraSmall) {
-                HStack(spacing: Theme.spacingSmall) {
-                    Text(L10n.entryNameLabel.text)
-                        .font(.caption)
-                        .foregroundStyle(Theme.textSecondary)
-                    Spacer()
-                    // No chevron in LOCKED mode: the row offers no
-                    // navigation there, so the affordance would mislead.
-                    if !vm.isLocked {
-                        Image(systemName: "chevron.right")
-                            .font(.footnote.weight(.semibold))
+        if vm.isLocked {
+            FormCard(accessibilityID: "EntryNameRow", resignFocus: focusedField = nil) {
+                VStack(alignment: .leading, spacing: Theme.spacingExtraSmall) {
+                    HStack(spacing: Theme.spacingSmall) {
+                        Text(L10n.entryNameLabel.text)
+                            .font(.caption)
                             .foregroundStyle(Theme.textSecondary)
-                            .accessibilityHidden(true)
+                        Spacer()
                     }
-                }
-                if vm.isLocked {
                     Text(vm.name)
                         .font(.body)
                         .foregroundStyle(Theme.textPrimary)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .frame(minHeight: Theme.minTapArea)
-                } else {
-                    NavigationLink {
-                        NamePicker(
-                            initialText: vm.name,
-                            recents: vm.nameRecents,
-                            categories: Dictionary(uniqueKeysWithValues: vm.availableCategories.map { ($0.id, $0) }),
-                            placeholder: L10n.entryNamePlaceholder.text,
-                            emptyHint: L10n.timerRecentsEmptyHint.text,
-                            onCompleteSuggestion: {
-                                vm.applySuggestion(text: $0.text, categoryIDs: $0.categoryIDs)
-                            },
-                            onCompleteText: { vm.completeTypedName($0) }
-                        )
-                    } label: {
-                        HStack(spacing: Theme.spacingSmall) {
-                            Text(vm.name.isEmpty ? L10n.entryNamePlaceholder.text : vm.name)
-                                .font(.body)
-                                .lineLimit(1)
-                                .truncationMode(.tail)
-                                .foregroundStyle(vm.name.isEmpty ? Theme.textSecondary : Theme.textPrimary)
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .frame(minHeight: Theme.minTapArea)
-                        .contentShape(Rectangle())
-                    }
-                    // No resign here (issue #67): the pushed NamePicker
-                    // autofocuses its own field, so focus transfers directly
-                    // and the keyboard never drops — resigning first would
-                    // replay the dismiss/reappear flicker this change kills.
-                    .buttonStyle(.plain)
-                    .accessibilityLabel(L10n.entryNameLabel.text)
-                    .accessibilityValue(vm.name)
                 }
             }
+        } else {
+            // Full-card push (fix-entry-editor-card-hit-targets): the
+            // NavigationLink wraps the card chrome so caption, chevron,
+            // value, blank space, AND padding all push the existing
+            // NamePicker. The chrome here mirrors FormCard (padding +
+            // secondary background + corner clip) but carries no tap-away
+            // gesture — every tap on this card pushes, and the Button
+            // claim keeps scroll/edge-back native. No resign here
+            // (issue #67): the pushed NamePicker autofocuses its own
+            // field, so focus transfers directly with no flicker. LOCKED
+            // keeps the FormCard branch above (inert, no link).
+            NavigationLink {
+                NamePicker(
+                    initialText: vm.name,
+                    recents: vm.nameRecents,
+                    categories: Dictionary(uniqueKeysWithValues: vm.availableCategories.map { ($0.id, $0) }),
+                    placeholder: L10n.entryNamePlaceholder.text,
+                    emptyHint: L10n.timerRecentsEmptyHint.text,
+                    onCompleteSuggestion: {
+                        vm.applySuggestion(text: $0.text, categoryIDs: $0.categoryIDs)
+                    },
+                    onCompleteText: { vm.completeTypedName($0) }
+                )
+            } label: {
+                VStack(alignment: .leading, spacing: Theme.spacingExtraSmall) {
+                    HStack(spacing: Theme.spacingSmall) {
+                        Text(L10n.entryNameLabel.text)
+                            .font(.caption)
+                            .foregroundStyle(Theme.textSecondary)
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                            .font(.footnote.weight(.semibold))
+                            .foregroundStyle(Theme.textSecondary)
+                            .accessibilityHidden(true)
+                    }
+                    Text(vm.name.isEmpty ? L10n.entryNamePlaceholder.text : vm.name)
+                        .font(.body)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .foregroundStyle(vm.name.isEmpty ? Theme.textSecondary : Theme.textPrimary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .frame(minHeight: Theme.minTapArea)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+                .padding(Theme.spacingMedium)
+                .background(Theme.backgroundSecondary)
+                .clipShape(RoundedRectangle(cornerRadius: Theme.cornerRadius))
+                .contentShape(RoundedRectangle(cornerRadius: Theme.cornerRadius))
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(L10n.entryNameLabel.text)
+            .accessibilityValue(vm.name)
+            .accessibilityIdentifier("EntryNameRow")
         }
     }
 
@@ -324,8 +338,8 @@ struct LogTimeView: View {
     /// `vm.notes` only and the validity gate re-evaluates). LOCKED mode
     /// renders the same presenter read-only with no navigation.
     private var notesCard: some View {
-        FormCard(accessibilityID: "EntryNotesRow", resignFocus: focusedField = nil) {
-            if vm.isLocked {
+        if vm.isLocked {
+            FormCard(accessibilityID: "EntryNotesRow", resignFocus: focusedField = nil) {
                 VStack(alignment: .leading, spacing: Theme.spacingExtraSmall) {
                     Text(L10n.entryNotesLabel.text)
                         .font(.caption)
@@ -336,33 +350,47 @@ struct LogTimeView: View {
                         .foregroundStyle(vm.notes.isEmpty ? Theme.textSecondary : Theme.textPrimary)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
-            } else {
-                NavigationLink {
-                    NotesEditorPage(initialText: vm.notes, entryName: vm.name) { vm.notes = $0 }
-                } label: {
-                    VStack(alignment: .leading, spacing: Theme.spacingExtraSmall) {
-                        HStack(spacing: Theme.spacingSmall) {
-                            Text(L10n.entryNotesLabel.text)
-                                .font(.caption)
-                                .foregroundStyle(Theme.textSecondary)
-                            Spacer()
-                            Image(systemName: "chevron.right")
-                                .font(.footnote.weight(.semibold))
-                                .foregroundStyle(Theme.textSecondary)
-                                .accessibilityHidden(true)
-                        }
-                        Text(vm.notes.isEmpty ? L10n.entryNotesPlaceholder.text : vm.notes)
-                            .font(.body)
-                            .lineLimit(1...5)
-                            .foregroundStyle(vm.notes.isEmpty ? Theme.textSecondary : Theme.textPrimary)
-                            .frame(maxWidth: .infinity, minHeight: Theme.minTapArea, alignment: .leading)
-                            .contentShape(Rectangle())
-                    }
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel(L10n.entryNotesLabel.text)
-                .accessibilityValue(vm.notes.isEmpty ? L10n.entryNotesPlaceholder.text : vm.notes)
             }
+        } else {
+            // Full-card push (fix-entry-editor-card-hit-targets): mirrors
+            // the Name card — the NavigationLink wraps the card chrome so
+            // caption, chevron, preview/placeholder, blank space, AND
+            // padding all push the existing NotesEditorPage with no visual
+            // change. No tap-away gesture on this card; the Button claim
+            // keeps scroll/edge-back native. Notes copy unchanged (owned
+            // by the placeholder worker). LOCKED keeps the FormCard
+            // branch above (inert, no link).
+            NavigationLink {
+                NotesEditorPage(initialText: vm.notes, entryName: vm.name) { vm.notes = $0 }
+            } label: {
+                VStack(alignment: .leading, spacing: Theme.spacingExtraSmall) {
+                    HStack(spacing: Theme.spacingSmall) {
+                        Text(L10n.entryNotesLabel.text)
+                            .font(.caption)
+                            .foregroundStyle(Theme.textSecondary)
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                            .font(.footnote.weight(.semibold))
+                            .foregroundStyle(Theme.textSecondary)
+                            .accessibilityHidden(true)
+                    }
+                    Text(vm.notes.isEmpty ? L10n.entryNotesPlaceholder.text : vm.notes)
+                        .font(.body)
+                        .lineLimit(1...5)
+                        .foregroundStyle(vm.notes.isEmpty ? Theme.textSecondary : Theme.textPrimary)
+                        .frame(maxWidth: .infinity, minHeight: Theme.minTapArea, alignment: .leading)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+                .padding(Theme.spacingMedium)
+                .background(Theme.backgroundSecondary)
+                .clipShape(RoundedRectangle(cornerRadius: Theme.cornerRadius))
+                .contentShape(RoundedRectangle(cornerRadius: Theme.cornerRadius))
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(L10n.entryNotesLabel.text)
+            .accessibilityValue(vm.notes.isEmpty ? L10n.entryNotesPlaceholder.text : vm.notes)
+            .accessibilityIdentifier("EntryNotesRow")
         }
     }
 
