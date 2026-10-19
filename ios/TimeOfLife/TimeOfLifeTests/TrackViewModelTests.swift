@@ -531,6 +531,8 @@ struct TrackViewModelTests {
         #expect(draft.categoryIDs == ["c1"])
         #expect(vm.categories["c1"]?.name == "Garden")
         await waitForPersistedDraft(vm) { $0?.categoryIDs == ["c1"] }
+        let persisted = try? await vm.service.runningTimerDraft()
+        #expect(persisted?.categoryIDs == ["c1"], "persisted draft must carry the attached category; wait alone passes on timeout")
     }
 
     /// Attaching in the recoverable error state appends to the held draft
@@ -548,6 +550,8 @@ struct TrackViewModelTests {
         #expect(draft.categoryIDs == ["c1"])
         #expect(vm.categories["c1"]?.name == "Garden")
         await waitForPersistedDraft(vm) { $0?.categoryIDs == ["c1"] }
+        let persisted = try? await vm.service.runningTimerDraft()
+        #expect(persisted?.categoryIDs == ["c1"], "persisted draft must carry the attached category; wait alone passes on timeout")
     }
 
     @Test("attaching outside a held draft only freshens the pool")

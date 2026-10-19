@@ -424,7 +424,7 @@ struct TagSelector: View {
 - Chip typography (label + glyph size) is identical to `RecentActivitiesChips` (Recents as reference, `.subheadline` regular per HIG compact-control guidance).
 - Each chip: `Theme.spacingChip` (10 pt) uniform padding on all sides, `minHeight Theme.minTapArea` (44 pt — Apple HIG / WCAG 2.2 SC 2.5.5 AAA), `Capsule` shape; long names truncate with `lineLimit(1)`.
 - Creation chip (only when `onCreate` is non-nil): pinned last, same padding and 44 pt target so it packs like a chip, but styled as an action — dashed 1 pt `Theme.accentPrimary` outline, `plus` glyph, `Theme.accentPrimary` text on `Theme.backgroundSecondary` fill; never a category icon, checkmark, or ordinal. Toggling categories never moves, restyles, or selects it.
-- Edge-aware hairline dividers: a `Theme.hairline` divider fades in above the viewport once chips scroll under it and below the viewport while content remains; the bottom divider fades out at the content end, and both stay hidden when the catalog fits without scrolling.
+- Edge-aware hairline dividers: a `Theme.hairline` divider fades in above the viewport once chips scroll under it and below the viewport while content remains; the bottom divider fades out at the content end, and both stay hidden when the catalog fits without scrolling. Dividers render as `.overlay` on the capped `ScrollView` outer frame (zero layout height, `allowsHitTesting(false)`), so showing them never grows the viewport or intercepts taps/scroll.
 - Chip viewport: hugs content and clamps at up to 4 visible rows of the finite budget measured in `TrackContent` outside the outer `ScrollView` (viewport minus measured top/name/action/caption + fixed gaps + `tabBarMargin`), with a 1-row floor so the page scrolls only as the accessibility fallback; fewer rows on short viewports, always scrolling internally beyond the visible rows; compact when smaller, timer/name/Stop preserved, never pushing siblings or underlapping the tab bar. The scrollable viewport adds 1 pt top/bottom scroll-content padding (`.padding(.vertical, borderBleed / 2)`, `ChipViewport.borderBleed = 2`) plus a matching +2 pt max cap above the row clamp so the lowest row's hairline border never clips at the cut (prior frame-only +2 proved insufficient — user screenshot of exactly-four-row content showed hugging with the bottom border still clipped); the natural-height (non-scrollable) entry-form rendering is unchanged. Shared `ChipViewport` contract with `RecentActivitiesChips`, including identical clearance. Focused verify per iOS worker: 21 tests across 3 suites + lint/build green; device screenshot check still pending.
 - When `options` is empty and no `onCreate` is provided, the selector renders no chips and the parent editor shows the localized Add-category action. With `onCreate`, the creation chip still renders alone.
 
@@ -505,7 +505,8 @@ struct RecentActivitiesChips: View {
   the page or slides under the tab bar.
 - Edge-aware `Theme.hairline` dividers (same contract as `TagSelector`):
   top fades in once scrolled, bottom fades out at the content end, both
-  hidden when everything fits.
+  hidden when everything fits. Dividers render as `.overlay` on the capped
+  `ScrollView` outer frame (zero layout height, `allowsHitTesting(false)`).
 - Each chip: fixed icon slot with the first assigned Category's
   `CatalogIcon(validated:).displaySymbol` + exact text (`.subheadline`,
   one line, tail-truncated), `Theme.spacingMedium` horizontal / 12 pt vertical

@@ -1,5 +1,6 @@
 import Testing
 import Foundation
+import Combine
 @testable import TimeOfLife
 
 @MainActor
@@ -42,6 +43,43 @@ struct CategoryEditorDeleteTests {
         let vm = CategoryEditorViewModel(store: store, category: nil, onSaved: { _ in }, onDuplicate: { _ in })
 
         #expect(await vm.deleteConfirmed() == false)
+        #expect(!vm.isLoading)
+    }
+
+    @Test("successful delete releases the shared isLoading gate")
+    func deleteReleasesIsLoadingOnSuccess() async throws {
+        let store = try makeStore()
+        try await store.createCategory(draft: CategoryDraft(name: "Work", icon: .briefcase), id: "c1", now: Date())
+        let category = try #require(await store.category(id: "c1"))
+        let vm = CategoryEditorViewModel(store: store, category: category, onSaved: { _ in }, onDuplicate: { _ in })
+        var seen: [Bool] = []
+        let cancellable = vm.$isLoading.sink { seen.append($0) }
+        defer { cancellable.cancel() }
+
+        #expect(await vm.deleteConfirmed())
+        withExtendedLifetime(cancellable) {}
+        #expect(seen.contains(true), "delete must raise the shared isLoading gate while in flight")
+        #expect(seen.last == false, "delete must release the shared isLoading gate")
+        #expect(vm.canSave)
+    }
+
+    @Test("already-gone delete releases the shared isLoading gate")
+    func deleteReleasesIsLoadingWhenMissing() async throws {
+        let store = try makeStore()
+        let vm = CategoryEditorViewModel(
+            store: store,
+            category: Category(id: "gone", name: "Gone", icon: "tag"),
+            onSaved: { _ in },
+            onDuplicate: { _ in }
+        )
+        var seen: [Bool] = []
+        let cancellable = vm.$isLoading.sink { seen.append($0) }
+        defer { cancellable.cancel() }
+
+        #expect(await vm.deleteConfirmed())
+        withExtendedLifetime(cancellable) {}
+        #expect(seen.contains(true), "delete must raise the shared isLoading gate while in flight")
+        #expect(seen.last == false, "delete must release the shared isLoading gate")
     }
 
     // MARK: - Helpers

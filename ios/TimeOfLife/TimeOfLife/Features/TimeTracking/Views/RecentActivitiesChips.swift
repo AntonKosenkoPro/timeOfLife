@@ -74,44 +74,55 @@ struct RecentActivitiesChips: View {
     }
 
     var body: some View {
-        // Zero inter-spacing: dividers sit exactly on the viewport cuts —
-        // top fades in once chips scroll under it, bottom fades out at the
-        // content end, both hidden when everything fits. The viewport hugs
-        // content up to the measured host budget (four rows max) and scrolls
-        // internally beyond it — never pushing siblings or the page.
-        VStack(alignment: .leading, spacing: 0) {
+        // Zero-layout edge hairlines: overlays on the ScrollView's outer
+        // frame (not VStack siblings, never scrolled content), so the
+        // viewport total stays within the measured host budget as the top
+        // hairline fades in — top fades in once chips scroll under it,
+        // bottom fades out at the content end, both hidden when everything
+        // fits. The viewport hugs content up to the measured host budget
+        // (four rows max) and scrolls internally beyond it — never pushing
+        // siblings or the page.
+        ScrollView(.vertical) {
+            flow
+                // Content inset carries the border clearance (same as
+                // `TagSelector`): when the catalog fits, `fixedSize` hugs
+                // the content height, so frame slack alone never
+                // materializes. 1 pt top/bottom keeps the chip strokes
+                // fully visible.
+                .padding(.vertical, ChipViewport.borderBleed / 2)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxHeight: ChipViewport.viewportHeight(
+            rowHeight: chipRowHeight,
+            spacing: Theme.spacingSmall,
+            availableHeight: availableHeight
+        ))
+        .fixedSize(horizontal: false, vertical: true)
+        .onScrollGeometryChange(for: ChipViewport.Edges.self, of: { geometry in
+            ChipViewport.edges(
+                offsetY: geometry.contentOffset.y,
+                containerHeight: geometry.containerSize.height,
+                contentHeight: geometry.contentSize.height
+            )
+        }, action: { _, new in
+            edges = new
+        })
+        // Overlays add zero layout height and ignore hits, so divider
+        // visibility never changes geometry or intercepts chip taps/scroll.
+        .overlay(alignment: .top) {
             if !edges.atTop {
                 Divider().background(Theme.hairline)
+                    .frame(maxWidth: .infinity)
                     .transition(.opacity)
+                    .allowsHitTesting(false)
             }
-            ScrollView(.vertical) {
-                flow
-                    // Content inset carries the border clearance (same as
-                    // `TagSelector`): when the catalog fits, `fixedSize` hugs
-                    // the content height, so frame slack alone never
-                    // materializes. 1 pt top/bottom keeps the chip strokes
-                    // fully visible.
-                    .padding(.vertical, ChipViewport.borderBleed / 2)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .frame(maxHeight: ChipViewport.viewportHeight(
-                rowHeight: chipRowHeight,
-                spacing: Theme.spacingSmall,
-                availableHeight: availableHeight
-            ))
-            .fixedSize(horizontal: false, vertical: true)
-            .onScrollGeometryChange(for: ChipViewport.Edges.self, of: { geometry in
-                ChipViewport.edges(
-                    offsetY: geometry.contentOffset.y,
-                    containerHeight: geometry.containerSize.height,
-                    contentHeight: geometry.contentSize.height
-                )
-            }, action: { _, new in
-                edges = new
-            })
+        }
+        .overlay(alignment: .bottom) {
             if !edges.atEnd {
                 Divider().background(Theme.hairline)
+                    .frame(maxWidth: .infinity)
                     .transition(.opacity)
+                    .allowsHitTesting(false)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)

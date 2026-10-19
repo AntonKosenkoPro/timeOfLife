@@ -150,48 +150,60 @@ struct TagSelector: View {
     }
 
     /// The flexible viewport (Track usage): hugs content and grows into
-    /// available slack, scrolling internally beyond it. Zero inter-spacing:
-    /// dividers sit exactly on the viewport cuts. The top divider fades in
-    /// once chips scroll under it; the bottom one fades out at the content
-    /// end — both stay hidden when the catalog fits without scrolling.
+    /// available slack, scrolling internally beyond it. Zero layout
+    /// siblings: edge hairlines overlay the ScrollView's outer frame
+    /// (zero layout height), so the total stays within the measured host
+    /// budget as dividers fade. The top hairline fades in once chips
+    /// scroll under it; the bottom one fades out at the content end —
+    /// both stay hidden when the catalog fits without scrolling.
     private var scrollableBody: some View {
-        VStack(alignment: .leading, spacing: 0) {
+        ScrollView {
+            chipFlow
+                // Content inset carries the border clearance: when the
+                // catalog fits, `fixedSize` hugs the content height, so
+                // frame slack alone never materializes. 1 pt top/bottom
+                // keeps the centered 1 pt chip strokes fully visible.
+                .padding(.vertical, ChipViewport.borderBleed / 2)
+        }
+        // Flexible height: min(content, measured host budget) via the hug
+        // below. Never pushes siblings — overflow scrolls internally.
+        // A nil budget keeps the fixed 4-row cap, so tall phones and the
+        // first paint are unchanged.
+        .frame(maxHeight: ChipViewport.viewportHeight(
+            rowHeight: chipRowHeight,
+            spacing: Theme.spacingSmall,
+            availableHeight: availableHeight
+        ))
+        // Hug content up to the available slack: without this the
+        // ScrollView claims the full offer even for 1–2 rows.
+        .fixedSize(horizontal: false, vertical: true)
+        .onScrollGeometryChange(for: ChipViewport.Edges.self, of: { geometry in
+            ChipViewport.edges(
+                offsetY: geometry.contentOffset.y,
+                containerHeight: geometry.containerSize.height,
+                contentHeight: geometry.contentSize.height
+            )
+        }, action: { _, new in
+            edges = new
+        })
+        // Overlays (not VStack siblings): zero layout height, aligned to
+        // this outer frame — never to the scrolled content — so showing
+        // the top hairline cannot grow the viewport or feed back into the
+        // measured budget. Hit-testing stays on the chips/scroll below.
+        .overlay(alignment: .top) {
             if !edges.atTop {
                 Divider().background(Theme.hairline)
+                    .frame(maxWidth: .infinity)
                     .transition(.opacity)
+                    .allowsHitTesting(false)
             }
-            ScrollView {
-                chipFlow
-                    // Content inset carries the border clearance: when the
-                    // catalog fits, `fixedSize` hugs the content height, so
-                    // frame slack alone never materializes. 1 pt top/bottom
-                    // keeps the centered 1 pt chip strokes fully visible.
-                    .padding(.vertical, ChipViewport.borderBleed / 2)
-            }
-            // Flexible height: min(content, measured host budget) via the hug
-            // below. Never pushes siblings — overflow scrolls internally.
-            // A nil budget keeps the fixed 4-row cap, so tall phones and the
-            // first paint are unchanged.
-            .frame(maxHeight: ChipViewport.viewportHeight(
-                rowHeight: chipRowHeight,
-                spacing: Theme.spacingSmall,
-                availableHeight: availableHeight
-            ))
-            // Hug content up to the available slack: without this the
-            // ScrollView claims the full offer even for 1–2 rows.
-            .fixedSize(horizontal: false, vertical: true)
-            .onScrollGeometryChange(for: ChipViewport.Edges.self, of: { geometry in
-                ChipViewport.edges(
-                    offsetY: geometry.contentOffset.y,
-                    containerHeight: geometry.containerSize.height,
-                    contentHeight: geometry.contentSize.height
-                )
-            }, action: { _, new in
-                edges = new
-            })
+        }
+        .overlay(alignment: .bottom) {
             if !edges.atEnd {
                 Divider().background(Theme.hairline)
+                    .frame(maxWidth: .infinity)
                     .transition(.opacity)
+                    .allowsHitTesting(false)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)

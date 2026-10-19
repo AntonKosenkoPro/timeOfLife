@@ -61,7 +61,9 @@ opens the tag-only destructive confirmation alert (`L10n.deleteCategoryTitle`
 / message naming the category, entries kept, until-restart shake hint). Confirming
 enters the durable undo buffer (category + ordered entry assignments, no
 outbox row), notifies the presenter via `onDeleted`, and dismisses; the list
-reloads. Until the app restarts, the system Undo confirmation on Manage Categories
+reloads. `deleteConfirmed` shares the save `isLoading` gate (refuses while busy,
+sets `true` / `defer` `false`), matching the disabled save/dismiss paths above,
+so a mid-delete dismiss cannot swallow the failure banner. Until the app restarts, the system Undo confirmation on Manage Categories
 restores identity + assignments; a restart commits the hard delete on
 cold launch. Create mode offers no Delete.
 
