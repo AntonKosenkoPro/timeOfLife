@@ -12,9 +12,9 @@
 
 - [x] 3.1 `swiftlint lint --strict` clean (ios/TimeOfLife)
 - [x] 3.2 `openspec validate --all` green
-- [ ] 3.3 Current-tree repro on the fixed tree: re-run the Morning→Sport retag scenario (or the new `TimerActivityAttributesTests` live-icon cases) and record evidence — pending, owner: parent verifier (no simulator/xcodebuild in this worker)
-- [ ] 3.4 Fixed UI verification (banner + compact/minimal icons follow first ordered category, timer fallback on removal, no restart/time reset) — pending, owner: parent verifier
-- [ ] 3.5 `xcodebuild` build + full test suite green — pending, owner: parent verifier (single-writer resource — this worker does not touch it)
+- [x] 3.3 Current-tree repro on the fixed tree verified by parent: xcodebuild TEST SUCCEEDED, 692 Swift-Testing passes / 0 failures on iPhone16Pro sim F132A44E (log `/private/var/folders/8c/pwh55jk140g1shxfnwm7zxf80000gn/T/opencode/verify-icon.log`)
+- [x] 3.4 Fixed UI verified by parent: user acceptance of all four fixes on physical iPhone from combined Release build
+- [x] 3.5 `xcodebuild` build + full test suite green per parent evidence above (single-writer resource — run by parent verifier, not this worker)
 
 ## 4. Backend verification (no backend files in scope)
 
