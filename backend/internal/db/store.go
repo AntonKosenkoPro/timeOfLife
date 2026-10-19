@@ -224,6 +224,12 @@ type Store interface {
 	// FindRecoveryReceipt returns the pending receipt for an attempt hash,
 	// or ErrNotFound when the attempt was never accepted.
 	FindRecoveryReceipt(ctx context.Context, attemptHash string) (RecoveryReceipt, error)
+
+	// ConsumeRecoveryReceipt closes a pending receipt without revoking
+	// anything. Used when an expiry check rejects recovery: the receipt is
+	// dead from that moment, and closing it lets the opportunistic sweep
+	// reclaim the row once it is long past expiry.
+	ConsumeRecoveryReceipt(ctx context.Context, attemptHash string) error
 	// GetUserByID returns a user by their ID.
 	GetUserByID(ctx context.Context, userID string) (User, error)
 

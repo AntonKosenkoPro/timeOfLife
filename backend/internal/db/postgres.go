@@ -382,6 +382,17 @@ func (s *PostgresStore) FindRecoveryReceipt(ctx context.Context, attemptHash str
 	return rc, nil
 }
 
+// ConsumeRecoveryReceipt closes a pending receipt without revoking anything.
+func (s *PostgresStore) ConsumeRecoveryReceipt(ctx context.Context, attemptHash string) error {
+	if _, err := s.pool.Exec(ctx, `
+		UPDATE refresh_recovery_receipts SET consumed = true
+		WHERE attempt_hash = $1 AND consumed = false
+	`, attemptHash); err != nil {
+		return fmt.Errorf("consume recovery receipt: %w", err)
+	}
+	return nil
+}
+
 // GetUserByID returns a user by their ID.
 func (s *PostgresStore) GetUserByID(ctx context.Context, userID string) (User, error) {
 	var u User

@@ -478,11 +478,12 @@ func (h *Handler) AppleSignIn(w http.ResponseWriter, r *http.Request) {
 // With refresh_attempt_id (fix-refresh-response-loss), an eligible retry —
 // same device, same revoked predecessor, same accepted pending attempt —
 // recovers the committed successor plus a fresh access token without
-// rotating again and without revocation. Unknown or rebound attempts keep
-// token_reuse semantics; a wrong-device presentation is rejected without
-// revocation or recovery; database, crypto, and receipt failures are service
-// errors (never authentication rejections) and revoke nothing. Requests
-// without the field keep exact legacy behavior.
+// rotating again and without revocation. An attempt unknown to storage or
+// bound to another account/device replays as token_reuse; an attempt bound
+// to a different predecessor is a 409 conflict without revocation.
+// Database, crypto, and receipt failures are service errors (never
+// authentication rejections) and revoke nothing. Requests without the
+// field keep exact legacy behavior.
 func (h *Handler) RefreshToken(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
@@ -676,9 +677,15 @@ func (h *Handler) serveRecovery(
 		return
 	}
 
+	// An expired receipt is dead from this rejection: close it so the
+	// opportunistic sweep reclaims the row once it is long past expiry.
+	// The verdict stays refresh_expired; only retention changes.
 	if time.Now().After(receipt.ExpiresAt) {
 		h.logger.Warn("refresh recovery expired",
 			"userID", storedToken.UserID, "deviceID", storedToken.DeviceID)
+		if err := h.store.ConsumeRecoveryReceipt(ctx, receipt.AttemptHash); err != nil {
+			h.logger.Error("failed to close expired recovery receipt", "error", err)
+		}
 		writeError(w, http.StatusUnauthorized, "refresh_expired", "Refresh token has expired. Please sign in again.", nil)
 		return
 	}
@@ -707,6 +714,9 @@ func (h *Handler) serveRecovery(
 	if time.Since(successor.CreatedAt) > h.tokenService.RefreshTokenTTL {
 		h.logger.Warn("refresh recovery successor expired",
 			"userID", storedToken.UserID, "deviceID", storedToken.DeviceID)
+		if err := h.store.ConsumeRecoveryReceipt(ctx, receipt.AttemptHash); err != nil {
+			h.logger.Error("failed to close expired recovery receipt", "error", err)
+		}
 		writeError(w, http.StatusUnauthorized, "refresh_expired", "Refresh token has expired. Please sign in again.", nil)
 		return
 	}
@@ -812,10 +822,17 @@ func (h *Handler) rotateWithRecovery(
 	if err != nil {
 		if errors.Is(err, db.ErrAttemptExists) {
 			// A concurrent duplicate accepted the attempt first: serve
-			// the winner's successor.
+			// the winner's successor. Classified exactly like the
+			// pre-check path (account/device mismatch burns, rebound
+			// conflicts) so the four taxonomy sites cannot diverge.
 			receipt, ferr := h.store.FindRecoveryReceipt(ctx, attemptHash)
 			if ferr != nil {
 				h.writeInternalError(w, r, "recovery receipt lookup failed", ferr)
+				return
+			}
+			if receipt.UserID != storedToken.UserID || receipt.DeviceID != storedToken.DeviceID {
+				h.revokeOnReuse(ctx, storedToken)
+				writeError(w, http.StatusUnauthorized, "token_reuse", "Token has been revoked. Sign in again.", nil)
 				return
 			}
 			if receipt.PredecessorHash != tokenHash {

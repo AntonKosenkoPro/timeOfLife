@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -200,6 +201,16 @@ func TestRecovery_ExpiredReceipt(t *testing.T) {
 	}
 	if code := errCode(t, w); code != "refresh_expired" {
 		t.Fatalf("expected refresh_expired, got %q", code)
+	}
+
+	// The expiry rejection closes the receipt, so the retention sweep
+	// reclaims the row once it is long past expiry.
+	receipt, err := store.FindRecoveryReceipt(context.Background(), attemptHash)
+	if err != nil {
+		t.Fatalf("FindRecoveryReceipt: %v", err)
+	}
+	if !receipt.Consumed {
+		t.Error("expiry rejection must close the receipt for later sweeping")
 	}
 }
 

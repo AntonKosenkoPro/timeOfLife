@@ -206,7 +206,7 @@ jobs:
               __rec_count=$((__rec_count + 1))
               case "$__rec_edge" in
                 *[!0-9a-fA-F]*|"") __rec_ok=0 ;;
-                *) [ "${#__rec_edge}" -ne 64 ] && __rec_ok=0 ;;
+                *) if [ "${#__rec_edge}" -ne 64 ]; then __rec_ok=0; fi ;;
               esac
             done
             [ "$__rec_ok" -eq 1 ] && [ "$__rec_count" -ge 1 ] || { echo "REFRESH_RECOVERY_KEYS must be comma-separated 64-char hex keys (openssl rand -hex 32); empty or malformed values fail the backend boot check"; exit 1; }

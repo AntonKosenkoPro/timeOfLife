@@ -3,6 +3,7 @@ package config
 
 import (
 	"encoding/hex"
+	"fmt"
 	"os"
 	"strconv"
 	"strings"
@@ -235,12 +236,12 @@ func ParseRecoveryKeys(raw string) ([][]byte, error) {
 		return nil, nil
 	}
 	var keys [][]byte
-	for _, part := range strings.Split(raw, ",") {
+	for i, part := range strings.Split(raw, ",") {
 		part = strings.TrimSpace(part)
 		if part == "" {
 			continue
 		}
-		key, err := parseRecoveryKey(part)
+		key, err := parseRecoveryKey(i+1, part)
 		if err != nil {
 			return nil, err
 		}
@@ -249,12 +250,37 @@ func ParseRecoveryKeys(raw string) ([][]byte, error) {
 	return keys, nil
 }
 
-func parseRecoveryKey(hexKey string) ([]byte, error) {
+// parseRecoveryKey decodes one keyring entry: exactly 32 bytes of hex. The
+// 1-based index names the failing entry without ever logging the key
+// material itself. The all-zero key is rejected: it is a plausible
+// placeholder mistake, and sealing under a guessable key would defeat the
+// confidentiality the receipts exist to protect (`openssl rand -hex 32`
+// never emits it, so there is no false-positive risk).
+func parseRecoveryKey(index int, hexKey string) ([]byte, error) {
 	key, err := hex.DecodeString(hexKey)
 	if err != nil || len(key) != 32 {
-		return nil, invalidFieldError("REFRESH_RECOVERY_KEYS", "comma-separated 64-char hex keys (32 bytes each, `openssl rand -hex 32`)")
+		return nil, fmt.Errorf("invalid REFRESH_RECOVERY_KEYS entry %d: expected 64 hex chars: %w", index, errOrLength(err, len(key)))
+	}
+	if isZeroKey(key) {
+		return nil, invalidFieldError("REFRESH_RECOVERY_KEYS", "non-trivial 32-byte key (all-zero key rejected; generate with `openssl rand -hex 32`)")
 	}
 	return key, nil
+}
+
+func errOrLength(err error, n int) error {
+	if err != nil {
+		return err
+	}
+	return fmt.Errorf("decoded to %d bytes, want 32", n)
+}
+
+func isZeroKey(key []byte) bool {
+	for _, b := range key {
+		if b != 0 {
+			return false
+		}
+	}
+	return true
 }
 
 // ParseCORSAllowedOrigins parses a comma-separated allowlist of exact

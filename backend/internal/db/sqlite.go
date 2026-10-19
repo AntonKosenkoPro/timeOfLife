@@ -394,6 +394,17 @@ func (s *SQLiteStore) FindRecoveryReceipt(ctx context.Context, attemptHash strin
 	return rc, nil
 }
 
+// ConsumeRecoveryReceipt closes a pending receipt without revoking anything.
+func (s *SQLiteStore) ConsumeRecoveryReceipt(ctx context.Context, attemptHash string) error {
+	if _, err := s.db.ExecContext(ctx, `
+		UPDATE refresh_recovery_receipts SET consumed = true
+		WHERE attempt_hash = ? AND consumed = false
+	`, attemptHash); err != nil {
+		return fmt.Errorf("consume recovery receipt: %w", err)
+	}
+	return nil
+}
+
 // GetUserByID returns a user by their ID.
 func (s *SQLiteStore) GetUserByID(ctx context.Context, userID string) (User, error) {
 	var u User

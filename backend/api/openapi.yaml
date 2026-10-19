@@ -1177,9 +1177,12 @@ components:
           example: a1b2c3d4e5f6...
         refresh_attempt_id:
           type: string
-          format: uuid
-          description: Durable identifier for one logical rotation, reused across retries of the same predecessor
-          example: 019639f1-7a3b-7abc-9def-100000000009
+          description: |
+            Durable identifier for one logical rotation, reused across retries
+            of the same predecessor. Minted as a UUIDv7 by the reference
+            client; the server validates presence and length only (any
+            trimmed string up to 128 chars is accepted) and binds it to one
+            predecessor, account, and device.
 
     AppleSignInRequest:
       type: object
