@@ -27,7 +27,7 @@ The system SHALL serve a full privacy policy at `https://lifio.antonkosenko.pro/
 
 #### Scenario: Policy reachable
 - **WHEN** a reviewer opens `https://lifio.antonkosenko.pro/privacy`
-- **THEN** the server responds 200 with the privacy policy text
+- **THEN** the server responds with the privacy policy text (HTTP 200 directly or via the host's canonical trailing-slash redirect to `/privacy/`)
 
 #### Scenario: Policy claims match the product
 - **WHEN** a reader compares the policy against the app's Auth/Profile behavior
