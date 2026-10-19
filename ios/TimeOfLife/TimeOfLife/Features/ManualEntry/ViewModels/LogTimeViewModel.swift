@@ -208,15 +208,10 @@ final class LogTimeViewModel: ObservableObject {
         }
     }
 
-    /// Attaches an inline-created category (inline-category-creation):
-    /// appends its id to the ordered selection unless already present, then
-    /// reloads the options from the store so the order is always the
-    /// canonical `ORDER BY lower(name)` — no client-side collation to drift
-    /// from SQLite's (ASCII-only) fold on non-ASCII names. If the reload
-    /// read fails (local storage failure — the app is unusable anyway), the
-    /// fallback appends the category so it stays selectable, but that list
-    /// may be non-canonical until the form reopens. Draft-only — nothing
-    /// persists until the entry itself saves.
+    /// Appends the new id once and reloads options in canonical SQLite
+    /// `ORDER BY lower(name)` order (ASCII-only fold; no client collation).
+    /// On storage-read failure, appends to the options as a best-effort
+    /// fallback; order converges on reopen. Draft-only until entry save.
     func attachCreatedCategory(_ category: Category) async {
         if !categoryIDs.contains(category.id) {
             categoryIDs.append(category.id)
