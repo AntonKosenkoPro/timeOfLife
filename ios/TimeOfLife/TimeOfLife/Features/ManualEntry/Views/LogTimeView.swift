@@ -231,7 +231,7 @@ struct LogTimeView: View {
 
     // MARK: - Name row
 
-    private var nameCard: some View {
+    @ViewBuilder private var nameCard: some View {
         if vm.isLocked {
             FormCard(accessibilityID: "EntryNameRow", resignFocus: focusedField = nil) {
                 VStack(alignment: .leading, spacing: Theme.spacingExtraSmall) {
@@ -332,7 +332,7 @@ struct LogTimeView: View {
     /// shared `NotesEditorPage` (copy-on-open: X discards, ✓ writes
     /// `vm.notes` only and the validity gate re-evaluates). LOCKED mode
     /// renders the same presenter read-only with no navigation.
-    private var notesCard: some View {
+    @ViewBuilder private var notesCard: some View {
         if vm.isLocked {
             FormCard(accessibilityID: "EntryNotesRow", resignFocus: focusedField = nil) {
                 VStack(alignment: .leading, spacing: Theme.spacingExtraSmall) {
