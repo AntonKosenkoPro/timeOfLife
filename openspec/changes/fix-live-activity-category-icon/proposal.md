@@ -21,7 +21,7 @@ Mid-run retag updates the expanded Island chips but the Lock Screen banner and t
 
 ## Impact
 
-- `ios/TimeOfLife/LifioLiveActivities/TimerLiveActivityWidget.swift`, `RunningBannerFace.swift` (call site only), shared core helper + `TimeOfLifeTests` additions.
+- `ios/TimeOfLife/LifioLiveActivities/TimerLiveActivityWidget.swift` (banner/compact/minimal call sites), shared core helper + `TimeOfLifeTests` additions. `RunningBannerFace.swift` itself unchanged (its `iconSymbol` param is fed by the widget call site).
 - No `ActivityAttributes` shape change, no service/DB/outbox change, no strings change, no other faces changed.
 - Research: ctx7 `/websites/developer_apple_activitykit` — `ActivityAttributes immutable attributes vs mutable ContentState update` (attributes static, `ContentState` dynamic via `update()`; iOS 18 SDK via Xcode 16+). HIG waived: no new visual language — icon follows the existing recents-chip rule (one-line reason + evidence: widget-only diff).
 
