@@ -311,15 +311,42 @@ paths:
                       code: invalid_request
                       message: X-Device-Id header is required
         "401":
-          description: Apple identity token failed verification
+          description: |
+            Apple identity token or authorization failed verification
+            (`invalid_apple_token`): invalid identity token, Apple-rejected
+            authorization code, code-exchange identity mismatch, or an
+            authorization that predates the account's Apple consent cutoff
+            (the client must re-authorize with Apple).
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
-              example:
-                error:
-                  code: invalid_apple_token
-                  message: Invalid Apple identity token
+              examples:
+                invalid_identity_token:
+                  summary: Identity token failed verification
+                  value:
+                    error:
+                      code: invalid_apple_token
+                      message: Invalid Apple identity token
+                invalid_authorization_code:
+                  summary: Authorization code rejected or mismatched
+                  value:
+                    error:
+                      code: invalid_apple_token
+                      message: Invalid Apple authorization code
+                stale_authorization:
+                  summary: Authorization predates consent revocation
+                  description: Re-authorize with Apple; the token verifies but its authorization is older than the cutoff.
+                  value:
+                    error:
+                      code: invalid_apple_token
+                      message: This Apple authorization predates revocation. Re-authorize with Apple.
+                email_in_use:
+                  summary: Apple email already belongs to another account
+                  value:
+                    error:
+                      code: apple_email_in_use
+                      message: This email is already registered. Sign in with email instead.
         "429":
           description: Rate limited (per IP)
           content:
@@ -353,6 +380,19 @@ paths:
                     error:
                       code: apple_revocation_pending
                       message: Apple unlinking is still in progress. Please retry shortly.
+        "409":
+          description: |
+            The Apple identity's email already belongs to a different account
+            (`apple_email_in_use`). Sign in with email instead; identities are
+            never merged.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error:
+                  code: apple_email_in_use
+                  message: This email is already registered. Sign in with email instead.
         "500":
           $ref: "#/components/responses/InternalError"
 
@@ -794,6 +834,20 @@ paths:
           application/json:
             schema:
               $ref: "#/components/schemas/AppleNotificationRequest"
+          application/x-www-form-urlencoded:
+            description: |
+              Apple's actual delivery media type: the signed JWS arrives as a
+              single `payload` form value. The handler accepts both media
+              types; form takes precedence when both are present.
+            schema:
+              type: object
+              required:
+                - payload
+              properties:
+                payload:
+                  type: string
+                  description: Apple-signed notification JWS.
+                  example: eyJraWQiOi...notification...
       responses:
         "200":
           description: Notification accepted (processed or idempotent no-op).
@@ -821,6 +875,16 @@ paths:
                 error:
                   code: invalid_notification
                   message: Invalid Apple notification
+        "429":
+          description: Notification intake rate limited (per IP; high ceiling — Apple's delivery retries are never throttled in practice).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error:
+                  code: rate_limited
+                  message: Too many requests. Please try again later.
         "500":
           $ref: "#/components/responses/InternalError"
 
@@ -1567,6 +1631,8 @@ components:
         - access_token
         - refresh_token
         - user
+        - account_status_credential
+        - account_status_expires_at
       properties:
         access_token:
           type: string
@@ -1639,6 +1705,8 @@ components:
         requests never renew their own lifetime).
       required:
         - user
+        - account_status_credential
+        - account_status_expires_at
       properties:
         user:
           $ref: "#/components/schemas/User"

@@ -207,11 +207,12 @@ func TestSubjectDigest_Stability(t *testing.T) {
 	if d1 != SubjectDigest(k2, "apple-sub-1") {
 		t.Error("digest must be deterministic for the same key")
 	}
-	// Stable across token-key rotation: the digest key is NOT the primary
-	// token key, so prepending a rotation key cannot move the digest.
-	rotated := SubjectDigestKey([]byte("status-secret-at-least-32-bytes!!!"))
-	if SubjectDigest(rotated, "apple-sub-1") != d1 {
-		t.Error("digest must not depend on APPLE_TOKEN_KEYS rotation")
+	// Rotating ACCOUNT_STATUS_SECRET re-keys every digest — the documented
+	// rotate-only-after-the-job-table-drains rule exists because of this,
+	// so distinct secrets must derive distinct digest keys.
+	rotated := SubjectDigestKey([]byte("another-status-secret-at-least-32-bytes"))
+	if string(rotated) == string(k1) {
+		t.Error("distinct status secrets must derive distinct digest keys")
 	}
 	if SubjectDigest(k1, "apple-sub-2") == d1 {
 		t.Error("distinct subjects must digest distinctly")
@@ -231,6 +232,13 @@ func TestVaultAAD_DomainSeparation(t *testing.T) {
 	}
 	if !strings.HasPrefix(string(a), "lifio-apple-vault\x00") {
 		t.Error("AAD must carry the vault domain prefix")
+	}
+	// Second-granularity RFC3339 pins the cross-engine invariant: Postgres
+	// (microseconds) and SQLite (milliseconds) timestamps for the same
+	// instant must seal under identical AAD, or the worker decrypt fails.
+	base := time.Now()
+	if string(VaultAAD("lin", base)) != string(VaultAAD("lin", base.Truncate(time.Second))) {
+		t.Error("AAD must be stable at second granularity across timestamp precisions")
 	}
 }
 

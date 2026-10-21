@@ -30,6 +30,7 @@ var canonicalErrorCodes = []string{
 	"apple_unavailable",
 	"apple_credential_required",
 	"apple_revocation_pending",
+	"apple_email_in_use",
 	"invalid_notification",
 	"invalid_refresh",
 	"token_reuse",
@@ -63,6 +64,7 @@ type rawSpec struct {
 	Info       rawInfo            `yaml:"info"`
 	Paths      map[string]rawPath `yaml:"paths"`
 	Components rawComponents      `yaml:"components"`
+	Security   []map[string]any   `yaml:"security"`
 }
 
 type rawInfo struct {
@@ -709,9 +711,28 @@ func TestSpec_AppleDeletionPlumbingDocumented(t *testing.T) {
 	if requiresAuth(notif) {
 		t.Error("POST /api/v1/auth/apple/notifications must NOT require BearerAuth (Apple-signed payload)")
 	}
-	for _, want := range []string{"200", "400", "401", "500"} {
+	if len(s.Security) != 0 {
+		t.Error("spec must not define root-level security: it would silently add BearerAuth to bearer-less operations (/auth/apple/notifications, /auth/account/status)")
+	}
+	for _, want := range []string{"200", "400", "401", "429", "500"} {
 		if _, ok := notif.Responses[want]; !ok {
 			t.Errorf("POST /api/v1/auth/apple/notifications must document %s", want)
+		}
+	}
+}
+
+// POST /auth/apple documents every 401 cause (invalid identity, rejected
+// or mismatched code, stale pre-cutoff authorization) and the 409
+// apple_email_in_use collision (identities are never merged).
+func TestSpec_AppleSignInResponsesDocumented(t *testing.T) {
+	s := loadSpec(t)
+	post, ok := s.Paths["/api/v1/auth/apple"]["post"]
+	if !ok {
+		t.Fatal("expected POST /api/v1/auth/apple")
+	}
+	for _, want := range []string{"200", "400", "401", "409", "429", "503", "500"} {
+		if _, ok := post.Responses[want]; !ok {
+			t.Errorf("POST /api/v1/auth/apple must document %s", want)
 		}
 	}
 }

@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/antonkosenko/time-of-life/backend/internal/apple"
@@ -151,22 +152,26 @@ func (h *Handler) DeleteAccount(w http.ResponseWriter, r *http.Request) {
 	// Attempt Apple revocation inline. Success completes the job and the
 	// deletion acknowledges completion (204). Any failure keeps the durable
 	// job and acknowledges committed deletion with pending unlinking (202).
+	// Post-purge bookkeeping runs on a detached context: a client
+	// disconnect must not turn a completed purge into a spurious failure.
+	bookCtx, bookCancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer bookCancel()
 	plain, err := h.appleTokenKeys.Open(res.SealedAppleRefresh, apple.VaultAAD(res.AuthLineage, res.AuthTime))
 	if err != nil {
-		h.failDeletionJob(ctx, res, "decrypt sealed apple credential: "+err.Error())
+		h.failDeletionJob(bookCtx, res, "decrypt sealed apple credential: "+err.Error())
 		h.logger.Warn("account purged; apple revocation pending (decrypt failed)",
 			"userID", user.ID, "job_id", res.RevocationJobID)
 		writeJSON(w, http.StatusAccepted, accountDeletedPendingResponse{AccountDeleted: true, AppleRevocationPending: true})
 		return
 	}
-	if err := h.appleClient.RevokeToken(ctx, string(plain)); err != nil {
-		h.failDeletionJob(ctx, res, "apple revoke: "+err.Error())
+	if err := h.appleClient.RevokeToken(bookCtx, string(plain)); err != nil {
+		h.failDeletionJob(bookCtx, res, "apple revoke: "+err.Error())
 		h.logger.Warn("account purged; apple revocation pending",
 			"userID", user.ID, "job_id", res.RevocationJobID, "error", err)
 		writeJSON(w, http.StatusAccepted, accountDeletedPendingResponse{AccountDeleted: true, AppleRevocationPending: true})
 		return
 	}
-	if err := h.store.CompleteRevocationJob(ctx, res.RevocationJobID); err != nil {
+	if err := h.store.CompleteRevocationJob(bookCtx, res.RevocationJobID); err != nil {
 		// Revocation was acknowledged; the worker redrives completion.
 		h.logger.Error("apple revocation acknowledged but job removal failed",
 			"userID", user.ID, "job_id", res.RevocationJobID, "error", err)
@@ -206,6 +211,10 @@ type accountStatusResponse struct {
 //
 // Responses carry no-store and never renew the credential's lifetime.
 func (h *Handler) AccountStatus(w http.ResponseWriter, r *http.Request) {
+	// No-store first: every response from this endpoint carries deletion
+	// evidence, including rate-limited ones intermediaries might reuse.
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Pragma", "no-cache")
 	if h.rateLimiter.Status != nil {
 		if !h.rateLimiter.Status.Allow(h.clientIP(r)) {
 			writeError(w, http.StatusTooManyRequests, "rate_limited",
@@ -213,8 +222,6 @@ func (h *Handler) AccountStatus(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	w.Header().Set("Cache-Control", "no-store")
-	w.Header().Set("Pragma", "no-cache")
 
 	if h.statusService == nil {
 		h.writeInternalError(w, r, "account status service unconfigured", errors.New("nil status service"))
@@ -245,14 +252,15 @@ func (h *Handler) AccountStatus(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, accountStatusResponse{AccountID: userID, State: "active"})
 }
 
-// bearerToken extracts a Bearer credential without logging it.
+// bearerToken extracts a Bearer credential without logging it. The scheme
+// name is case-insensitive (RFC 7235), matching AuthMiddleware.
 func bearerToken(r *http.Request) string {
-	const prefix = "Bearer "
+	const prefixLen = len("Bearer ")
 	auth := r.Header.Get("Authorization")
-	if len(auth) <= len(prefix) || auth[:len(prefix)] != prefix {
+	if len(auth) <= prefixLen || !strings.EqualFold(auth[:prefixLen], "Bearer ") {
 		return ""
 	}
-	return auth[len(prefix):]
+	return strings.TrimSpace(auth[prefixLen:])
 }
 
 // ---------- POST /api/v1/auth/apple/deletion-credential ----------
@@ -402,8 +410,33 @@ type appleNotificationReq struct {
 func (h *Handler) AppleNotifications(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
+	// Unauthenticated JWS intake is rate-limited before the expensive
+	// signature verification. High ceiling: Apple's delivery retries must
+	// never be throttled.
+	if h.rateLimiter.AppleNotifications != nil {
+		if !h.rateLimiter.AppleNotifications.Allow(h.clientIP(r)) {
+			writeError(w, http.StatusTooManyRequests, "rate_limited",
+				"Too many requests. Please try again later.", nil)
+			return
+		}
+	}
+
 	var req appleNotificationReq
-	if err := decodeJSON(r, &req); err != nil || req.Payload == "" {
+	// Apple POSTs the signed JWS as a form value
+	// (application/x-www-form-urlencoded). Accept that first, falling back
+	// to JSON for test/tooling compatibility — the openapi contract
+	// documents both media types.
+	if strings.HasPrefix(r.Header.Get("Content-Type"), "application/x-www-form-urlencoded") {
+		if err := r.ParseForm(); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_body", "Invalid request body", nil)
+			return
+		}
+		req.Payload = r.PostFormValue("payload")
+	} else if err := decodeJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_body", "Invalid request body", nil)
+		return
+	}
+	if req.Payload == "" {
 		writeError(w, http.StatusBadRequest, "invalid_body", "Invalid request body", nil)
 		return
 	}

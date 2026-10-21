@@ -52,10 +52,11 @@ type Handler struct {
 // RateLimiterGroup holds the rate limiters used by the handlers.
 // Nil buckets disable that path's limiting (tests); production wires all.
 type RateLimiterGroup struct {
-	OTPRequest *ratelimit.TokenBucket
-	OTPVerify  *ratelimit.TokenBucket
-	Apple      *ratelimit.TokenBucket
-	Status     *ratelimit.TokenBucket
+	OTPRequest         *ratelimit.TokenBucket
+	OTPVerify          *ratelimit.TokenBucket
+	Apple              *ratelimit.TokenBucket
+	Status             *ratelimit.TokenBucket
+	AppleNotifications *ratelimit.TokenBucket
 }
 
 // HandlerOption customizes a Handler after construction.
@@ -201,6 +202,12 @@ func (h *Handler) AppleSignIn(w http.ResponseWriter, r *http.Request) {
 				"Apple unlinking is still in progress. Please retry shortly.", nil)
 			return
 		}
+		if errors.Is(err, db.ErrAppleEmailInUse) {
+			h.logger.Warn("apple signup email already registered", "sub", redactSubject(claims.Sub))
+			writeError(w, http.StatusConflict, "apple_email_in_use",
+				"This email is already registered. Sign in with email instead.", nil)
+			return
+		}
 		if errors.Is(err, db.ErrNotFound) {
 			h.writeInternalError(w, r, "apple upsert lost the user row", err)
 			return
@@ -262,7 +269,6 @@ func (h *Handler) AppleSignIn(w http.ResponseWriter, r *http.Request) {
 		lineage = *user.AppleAuthLineage
 	}
 	authTime := h.verifiedAuthTime(claims, exchanged != nil)
-	stamp := false
 	switch {
 	case user.AppleConsentCutoff != nil:
 		if _, ferr := h.appleAuthorizationFresh(claims, exchanged != nil, *user.AppleConsentCutoff); ferr != nil {
@@ -272,22 +278,20 @@ func (h *Handler) AppleSignIn(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		lineage = newLineageID()
-		stamp = true
 	case lineage == "":
 		lineage = newLineageID()
-		stamp = true
 	default:
 		// Existing lineage, no cutoff: keep the lineage for vault
 		// stability, but the latest-authorization metadata still advances
 		// to this sign-in so a later delayed revocation event can tell a
 		// fresh grant from a superseded one.
-		stamp = true
 	}
-	if stamp {
-		if err := h.store.SetAppleSession(ctx, user.ID, authTime, lineage); err != nil {
-			h.writeInternalError(w, r, "failed to stamp apple session", err)
-			return
-		}
+	// Every branch stamps the session: the invariant is that a completed
+	// sign-in always records its latest authorization (never silently keep
+	// stale lineage/auth-time metadata, which feeds cutoff enforcement).
+	if err := h.store.SetAppleSession(ctx, user.ID, authTime, lineage); err != nil {
+		h.writeInternalError(w, r, "failed to stamp apple session", err)
+		return
 	}
 
 	// Seal a successfully exchanged credential into the vault under the
@@ -513,11 +517,7 @@ func (h *Handler) issueTokens(ctx context.Context, w http.ResponseWriter, r *htt
 // account-status credential. Status issuance failure is a service error, not
 // an omitted field: clients must be able to rely on its presence.
 func (h *Handler) writeAuthResponse(w http.ResponseWriter, r *http.Request, user db.User, accessToken, rawRefresh string) {
-	hasApple, required, err := h.deletionReadiness(r.Context(), user)
-	if err != nil {
-		h.writeInternalError(w, r, "failed to read deletion readiness", err)
-		return
-	}
+	hasApple, required := h.deletionReadiness(r.Context(), user)
 	resp := authResponse{
 		AccessToken:  accessToken,
 		RefreshToken: rawRefresh,
@@ -545,19 +545,21 @@ func (h *Handler) writeAuthResponse(w http.ResponseWriter, r *http.Request, user
 // account has an Apple identity, and explicit deletion would need fresh
 // same-subject authorization (no stored revocable credential). Provider
 // handling is never inferred from an email suffix. A vault read failure
-// fails closed toward required (re-acquiring a credential is always safe;
-// silently claiming readiness is not).
-func (h *Handler) deletionReadiness(ctx context.Context, user db.User) (hasApple, required bool, err error) {
+// degrades to required=true with a warning: re-acquiring a credential is
+// always safe, while a 500 here would lose an already-completed
+// auth/refresh response (rotation has already committed).
+func (h *Handler) deletionReadiness(ctx context.Context, user db.User) (hasApple, required bool) {
 	if user.AppleSubject == nil || *user.AppleSubject == "" {
-		return false, false, nil
+		return false, false
 	}
 	if _, err := h.store.GetAppleCredential(ctx, user.ID); err != nil {
 		if errors.Is(err, db.ErrNotFound) {
-			return true, true, nil
+			return true, true
 		}
-		return true, true, err
+		h.logger.Warn("apple credential vault read failed; reporting required", "error", err, "userID", user.ID)
+		return true, true
 	}
-	return true, false, nil
+	return true, false
 }
 
 // maxBodyBytes caps request bodies (64 KB). Oversized bodies are rejected
@@ -683,6 +685,19 @@ func (h *Handler) VerifyOTP(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		h.logger.Warn("user not found for OTP verify", "email", maskEmail(req.Email))
 		writeError(w, http.StatusUnauthorized, "invalid_otp", "Invalid or expired code", nil)
+		return
+	}
+
+	// A set Apple consent cutoff ends every lineageless session — including
+	// email-OTP sessions for this Apple-registered account, which the
+	// middleware and refresh would immediately 401 as dead ends. Reject up
+	// front with the re-authorization instruction instead of minting
+	// credentials that can never be used.
+	if user.AppleSubject != nil && *user.AppleSubject != "" &&
+		h.sessionCutByRevocation(nil, nil, user) {
+		h.logger.Warn("otp sign-in fenced by apple consent cutoff", "userID", user.ID)
+		writeError(w, http.StatusUnauthorized, "invalid_apple_token",
+			"This Apple authorization predates revocation. Re-authorize with Apple.", nil)
 		return
 	}
 
@@ -887,7 +902,7 @@ func (h *Handler) RefreshToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.rotateWithRecovery(ctx, w, r, deviceID, tokenHash, storedToken, user, attemptHash)
+	h.rotateWithRecovery(ctx, w, r, deviceID, tokenHash, storedToken, attemptHash)
 }
 
 // sessionCutByRevocation reports whether an Apple consent cutoff ends the
@@ -1108,7 +1123,7 @@ func (h *Handler) serveRecovery(
 // successor instead of rotating forward.
 func (h *Handler) rotateWithRecovery(
 	ctx context.Context, w http.ResponseWriter, r *http.Request,
-	deviceID, tokenHash string, storedToken db.RefreshToken, user db.User, attemptHash string,
+	deviceID, tokenHash string, storedToken db.RefreshToken, attemptHash string,
 ) {
 	if receipt, err := h.store.FindRecoveryReceipt(ctx, attemptHash); err == nil {
 		if receipt.UserID == storedToken.UserID && receipt.DeviceID == storedToken.DeviceID &&
@@ -1239,7 +1254,7 @@ func (h *Handler) rotateWithRecovery(
 	// mid-rotation must not issue credentials for a dead session. The
 	// rotation itself already committed; the successor row is harmless
 	// (revoked-family semantics reject it on next use).
-	user, err = h.store.GetUserByID(ctx, storedToken.UserID)
+	user, err := h.store.GetUserByID(ctx, storedToken.UserID)
 	if err != nil {
 		if errors.Is(err, db.ErrNotFound) {
 			writeError(w, http.StatusUnauthorized, "invalid_refresh", "Invalid refresh token", nil)
@@ -1343,11 +1358,7 @@ func (h *Handler) Me(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	hasApple, required, err := h.deletionReadiness(ctx, user)
-	if err != nil {
-		h.writeInternalError(w, r, "failed to read deletion readiness", err)
-		return
-	}
+	hasApple, required := h.deletionReadiness(ctx, user)
 	resp := meResponse{
 		User: userResponse{
 			ID:                                 user.ID,

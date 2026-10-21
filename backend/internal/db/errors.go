@@ -63,6 +63,13 @@ var (
 	// authorization code or creating a session.
 	ErrAppleRevocationPending = errors.New("apple revocation pending for subject")
 
+	// ErrAppleEmailInUse is returned by the fenced Apple upsert when the
+	// presented Apple identity's email already belongs to a different
+	// account (email-OTP or another Apple subject). Identities are never
+	// merged: the handler maps it to 409 apple_email_in_use and the client
+	// signs in with email instead.
+	ErrAppleEmailInUse = errors.New("apple email already registered")
+
 	// ErrAppleCredentialMissing is returned by PurgeUser when an
 	// Apple-identity account reaches the purge transaction without a stored
 	// revocable credential (e.g. a consent-revocation callback erased the

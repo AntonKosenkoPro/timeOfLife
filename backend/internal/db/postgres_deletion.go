@@ -124,6 +124,18 @@ func (s *PostgresStore) UpsertAppleUser(ctx context.Context, appleSubject, email
 	`, email, appleSubject).Scan(&u.ID, &u.Email, &u.EmailVerified, &u.CreatedAt,
 		&u.AppleSubject, &u.AppleAuthTime, &u.AppleAuthLineage, &u.AppleConsentCutoff)
 	if err != nil {
+		// An email UNIQUE violation here means the presented Apple email
+		// belongs to a different account: identities are never merged.
+		// Surface it as its own sentinel (never the race-path ErrNotFound)
+		// so the handler can map a defined client error.
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" &&
+			pgErr.ConstraintName == "users_email_key" {
+			return User{}, fmt.Errorf("upsert apple user: %w", ErrAppleEmailInUse)
+		}
+		if errors.Is(err, pgx.ErrNoRows) {
+			return User{}, fmt.Errorf("upsert apple user: %w", ErrNotFound)
+		}
 		return User{}, fmt.Errorf("upsert apple user: %w", err)
 	}
 

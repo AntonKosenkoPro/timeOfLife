@@ -77,6 +77,20 @@ func (s *SQLiteStore) UpsertAppleUser(ctx context.Context, appleSubject, email, 
 		return User{}, fmt.Errorf("upsert apple user: %w", ErrAppleRevocationPending)
 	}
 
+	// Email belongs to a different account: identities are never merged.
+	// Checked in-transaction (single-writer SQLite serializes signups), so
+	// a concurrent OTP registration cannot slip between check and insert.
+	// A row carrying this same apple_subject is the re-signin path below,
+	// not a collision.
+	var holderSubject sql.NullString
+	if err := tx.QueryRowContext(ctx, `
+		SELECT apple_subject FROM users WHERE email = ?
+	`, email).Scan(&holderSubject); err != nil && err != sql.ErrNoRows {
+		return User{}, fmt.Errorf("upsert apple user email check: %w", err)
+	} else if err == nil && (!holderSubject.Valid || holderSubject.String != appleSubject) {
+		return User{}, fmt.Errorf("upsert apple user: %w", ErrAppleEmailInUse)
+	}
+
 	if _, err := tx.ExecContext(ctx, `
 		INSERT OR IGNORE INTO users (id, email, email_verified, created_at, apple_subject)
 		VALUES (?, ?, true, datetime('now'), ?)

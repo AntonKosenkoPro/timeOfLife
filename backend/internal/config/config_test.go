@@ -180,6 +180,15 @@ func TestConfig_Load_Branches(t *testing.T) {
 				t.Errorf("expected error for partial apple config (%s only), got nil", name)
 			}
 		}
+		// APPLE_REDIRECT_URI alone must NOT enable the all-or-nothing set:
+		// it stays optional even though it is an APPLE_* variable.
+		setAll(t, map[string]string{"APPLE_REDIRECT_URI": "https://example.com/callback"})
+		redirectCfg, redirectErr := Load()
+		if redirectErr != nil {
+			t.Errorf("redirect-only apple config should keep Apple disabled, got error: %v", redirectErr)
+		} else if redirectCfg.AppleClientID != "" || len(redirectCfg.AppleTokenKeys) != 0 || redirectCfg.AppleRedirectURI != "https://example.com/callback" {
+			t.Errorf("redirect-only apple config misapplied: %+v", redirectCfg)
+		}
 		// The redirect URI is optional: the full five pass with or without it.
 		setAll(t, full)
 		cfg, err := Load()

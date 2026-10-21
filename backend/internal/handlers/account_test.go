@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -15,6 +16,7 @@ import (
 	"github.com/antonkosenko/time-of-life/backend/internal/apple"
 	"github.com/antonkosenko/time-of-life/backend/internal/auth"
 	"github.com/antonkosenko/time-of-life/backend/internal/db"
+	"github.com/antonkosenko/time-of-life/backend/internal/ratelimit"
 	"github.com/antonkosenko/time-of-life/backend/internal/recovery"
 )
 
@@ -672,6 +674,137 @@ func TestNotifications_MissingUserAndBadPayload(t *testing.T) {
 	h.AppleNotifications(w, req)
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("empty body must 400, got %d", w.Code)
+	}
+}
+
+func TestAppleSignIn_EmailCollision409(t *testing.T) {
+	store := newTestStore(t)
+	h := newTestDeletionHandler(t, store,
+		fakeAppleVerifier{claims: apple.Claims{Sub: "apple-sub-fresh", Email: "taken@example.com"}},
+		&fakeAppleClient{}, fakeAppleNotifs{})
+
+	// The email already belongs to an email-OTP account.
+	signupEmail(t, h, store, "taken@example.com")
+
+	body, _ := json.Marshal(map[string]string{"identity_token": "id-token-fresh"})
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/apple", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Device-Id", testDevice)
+	w := httptest.NewRecorder()
+	h.AppleSignIn(w, req)
+	if w.Code != http.StatusConflict {
+		t.Fatalf("email collision must 409, got %d: %s", w.Code, w.Body.String())
+	}
+	var env map[string]map[string]string
+	if err := json.NewDecoder(w.Body).Decode(&env); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if env["error"]["code"] != "apple_email_in_use" {
+		t.Fatalf("expected apple_email_in_use, got %s", w.Body.String())
+	}
+	// Neither account was touched: the OTP user keeps its row with no
+	// Apple subject, and no Apple-subject row was created.
+	u, err := store.GetUserByEmail(context.Background(), "taken@example.com")
+	if err != nil {
+		t.Fatalf("otp user must survive: %v", err)
+	}
+	if u.AppleSubject != nil {
+		t.Errorf("otp user must not gain an apple subject: %+v", u)
+	}
+}
+
+func TestVerifyOTP_CutoffFenced(t *testing.T) {
+	store := newTestStore(t)
+	h := newTestDeletionHandler(t, store, nil, &fakeAppleClient{}, fakeAppleNotifs{})
+
+	sess := signupEmail(t, h, store, "fenced-otp@example.com")
+	// Bind the OTP account to an Apple subject, then revoke consent: the
+	// account-wide cutoff ends every lineageless session on it.
+	if _, err := store.DB().ExecContext(context.Background(),
+		`UPDATE users SET apple_subject = ? WHERE id = ?`, "apple-sub-otp", sess.User.ID); err != nil {
+		t.Fatalf("attach subject: %v", err)
+	}
+	if _, _, err := store.ApplyAppleConsentCutoff(context.Background(), "apple-sub-otp", time.Now()); err != nil {
+		t.Fatalf("cutoff: %v", err)
+	}
+
+	// A fresh OTP sign-in is rejected up front with the re-authorization
+	// instruction instead of minting tokens the middleware would kill.
+	sender := &captureSender{}
+	h2 := newTestHandlerWithDependencies(t, store, nil, sender)
+	if w := requestOTP(t, h2, "fenced-otp@example.com"); w.Code != http.StatusAccepted {
+		t.Fatalf("otp request: got %d", w.Code)
+	}
+	w := verifyOTPWithDevice(t, h, "fenced-otp@example.com", capturedOTP(t, sender), testDevice)
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("cutoff OTP sign-in must 401, got %d: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "invalid_apple_token") {
+		t.Fatalf("expected invalid_apple_token, got %s", w.Body.String())
+	}
+}
+
+func TestAccountStatus_LowercaseBearerScheme(t *testing.T) {
+	store := newTestStore(t)
+	h := newTestDeletionHandler(t, store, nil, &fakeAppleClient{}, fakeAppleNotifs{})
+
+	sess := signupEmail(t, h, store, "case@example.com")
+	// RFC 7235: the scheme name is case-insensitive; the middleware
+	// accepts it, so the status endpoint must too.
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/account/status", nil)
+	req.Header.Set("Authorization", "bearer "+sess.AccountStatusCredential)
+	w := httptest.NewRecorder()
+	h.AccountStatus(w, req)
+	if decodeStatus(t, w).State != "active" {
+		t.Errorf("lowercase bearer must authenticate, got %s", w.Body.String())
+	}
+}
+
+func TestNotifications_FormEncoded(t *testing.T) {
+	store := newTestStore(t)
+	verifier := fakeAppleVerifier{claims: apple.Claims{Sub: "apple-sub-f", Email: "r@privaterelay.appleid.com"}}
+	h := newTestDeletionHandler(t, store, verifier, &fakeAppleClient{}, fakeAppleNotifs{})
+	sess, _ := appleUserWithSession(t, h, store, "apple-sub-f", "r@privaterelay.appleid.com", "")
+
+	// Apple delivers form-encoded, not JSON: the handler must accept it.
+	h.appleNotifs = fakeAppleNotifs{event: apple.NotificationEvent{
+		Type: "consent-revoked", Sub: "apple-sub-f", JTI: "jti-form",
+		EventTime: time.Now().Add(time.Minute), HasEventTime: true,
+	}}
+	form := strings.NewReader("payload=signed-jws-form")
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/apple/notifications", form)
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w := httptest.NewRecorder()
+	h.AppleNotifications(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("form-encoded delivery must 200, got %d: %s", w.Code, w.Body.String())
+	}
+	stored, err := store.GetUserByID(context.Background(), sess.User.ID)
+	if err != nil {
+		t.Fatalf("account must survive: %v", err)
+	}
+	if stored.AppleConsentCutoff == nil {
+		t.Error("form delivery must apply the cutoff")
+	}
+}
+
+func TestNotifications_RateLimited(t *testing.T) {
+	store := newTestStore(t)
+	h := newTestDeletionHandler(t, store, nil, &fakeAppleClient{},
+		fakeAppleNotifs{event: apple.NotificationEvent{Type: "consent-revoked", Sub: "apple-sub-rl", JTI: "jti-rl-1", EventTime: time.Now(), HasEventTime: true}})
+	// Burst 1 with no refill: first delivery passes, the immediate retry
+	// is limited before any verification work happens.
+	h.rateLimiter.AppleNotifications = ratelimit.NewTokenBucket(1, 1, time.Hour)
+	if w := doNotifications(t, h, "signed-jws"); w.Code != http.StatusOK {
+		t.Fatalf("first delivery must 200, got %d", w.Code)
+	}
+	h.appleNotifs = fakeAppleNotifs{event: apple.NotificationEvent{Type: "consent-revoked", Sub: "apple-sub-rl", JTI: "jti-rl-2", EventTime: time.Now(), HasEventTime: true}}
+	w := doNotifications(t, h, "signed-jws")
+	if w.Code != http.StatusTooManyRequests {
+		t.Fatalf("second immediate delivery must 429, got %d: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "rate_limited") {
+		t.Fatalf("expected rate_limited code, got %s", w.Body.String())
 	}
 }
 

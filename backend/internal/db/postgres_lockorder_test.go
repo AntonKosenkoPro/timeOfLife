@@ -8,11 +8,12 @@ package db
 import (
 	"context"
 	"errors"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 func TestPostgres_PurgeVsSignupLockOrder(t *testing.T) {
@@ -33,17 +34,25 @@ func TestPostgres_PurgeVsSignupLockOrder(t *testing.T) {
 	}
 
 	var mu sync.Mutex
-	var deadlockHits []string
+	var deadlockHits, unexpectedHits []string
+	// Detect deadlocks the way production does (typed SQLSTATE via
+	// errors.As on *pgconn.PgError, not substring matching), and record
+	// anything else instead of swallowing it: call sites already filter
+	// the tolerated sentinels (purge filters ErrNotFound and
+	// ErrAppleCredentialMissing, upsert filters ErrAppleRevocationPending),
+	// so whatever reaches note() is unexpected by construction.
 	note := func(op string, err error) {
 		if err == nil {
 			return
 		}
-		msg := err.Error()
-		if strings.Contains(msg, "deadlock") || strings.Contains(msg, "40P01") {
-			mu.Lock()
-			deadlockHits = append(deadlockHits, op+": "+msg)
-			mu.Unlock()
+		var pgErr *pgconn.PgError
+		mu.Lock()
+		defer mu.Unlock()
+		if errors.As(err, &pgErr) && (pgErr.Code == "40P01" || pgErr.Code == "40001") {
+			deadlockHits = append(deadlockHits, op+": "+err.Error())
+			return
 		}
+		unexpectedHits = append(unexpectedHits, op+": "+err.Error())
 	}
 
 	const rounds = 25
@@ -77,9 +86,14 @@ func TestPostgres_PurgeVsSignupLockOrder(t *testing.T) {
 		wg.Wait()
 
 		// Reopen the fence + restore the vault so every round contends.
+		// Only ErrNotFound ends the drain: a real claim error fails the
+		// round instead of silently leaving a pending job behind.
 		for {
 			job, err := store.ClaimRevocationJob(ctx, time.Now().Add(time.Hour))
 			if err != nil {
+				if !errors.Is(err, ErrNotFound) {
+					t.Errorf("claim during job reopen: %v", err)
+				}
 				break
 			}
 			if err := store.CompleteRevocationJob(ctx, job.ID); err != nil {
@@ -109,20 +123,17 @@ func TestPostgres_PurgeVsSignupLockOrder(t *testing.T) {
 	if len(deadlockHits) > 0 {
 		t.Fatalf("deadlock detected (%d): %v", len(deadlockHits), deadlockHits[:min(3, len(deadlockHits))])
 	}
+	if len(unexpectedHits) > 0 {
+		t.Fatalf("unexpected contention errors (%d): %v", len(unexpectedHits), unexpectedHits[:min(3, len(unexpectedHits))])
+	}
 
-	// No orphans, no job leak.
-	var orphans, jobs int
-	queries := map[string]*int{
-		`SELECT COUNT(*) FROM refresh_tokens WHERE user_id NOT IN (SELECT id FROM users)`:   &orphans,
-		`SELECT COUNT(*) FROM apple_revocation_jobs WHERE subject_digest = 'digest-hammer'`: &jobs,
-	}
-	for q, dst := range queries {
-		if err := store.DB().QueryRow(ctx, q).Scan(dst); err != nil {
-			t.Fatalf("check %q: %v", q, err)
-		}
-	}
-	if orphans != 0 {
-		t.Errorf("orphan refresh rows: %d", orphans)
+	// No job leak. (A refresh_tokens orphan check would be vacuous here:
+	// user_id is FK-bound to users in Postgres, so committed orphans are
+	// impossible regardless of purge correctness — the only place state
+	// can genuinely leak is the FK-free revocation outbox, asserted below.)
+	var jobs int
+	if err := store.DB().QueryRow(ctx, `SELECT COUNT(*) FROM apple_revocation_jobs WHERE subject_digest = 'digest-hammer'`).Scan(&jobs); err != nil {
+		t.Fatalf("job leak check: %v", err)
 	}
 	if jobs != 0 {
 		t.Errorf("job leak: %d", jobs)

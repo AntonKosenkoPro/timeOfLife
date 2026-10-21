@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 
 	_ "modernc.org/sqlite" // pure-Go SQLite driver for testing
@@ -16,7 +17,18 @@ type SQLiteStore struct {
 
 // NewSQLiteStore creates a new SQLiteStore.
 func NewSQLiteStore(dsn string) (*SQLiteStore, error) {
-	db, err := sql.Open("sqlite", dsn)
+	// Enforce foreign keys like production Postgres. The pragma is a
+	// per-connection setting, so it rides the DSN (executed on every
+	// (re)opened pooled connection) instead of a one-shot Exec that a
+	// replacement connection after a driver reset would silently drop.
+	// Account-scoped writes after a purge then fail loudly instead of
+	// orphaning rows, and the purge's explicit ordered deletes stay valid
+	// under the same constraints.
+	sep := "?"
+	if strings.Contains(dsn, "?") {
+		sep = "&"
+	}
+	db, err := sql.Open("sqlite", dsn+sep+"_pragma=foreign_keys(1)")
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite: %w", err)
 	}
@@ -28,14 +40,6 @@ func NewSQLiteStore(dsn string) (*SQLiteStore, error) {
 	if err := db.Ping(); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("ping sqlite: %w", err)
-	}
-
-	// Enforce foreign keys like production Postgres: account-scoped writes
-	// after a purge fail loudly instead of orphaning rows, and the purge's
-	// explicit ordered deletes stay valid under the same constraints.
-	if _, err := db.Exec(`PRAGMA foreign_keys = ON`); err != nil {
-		_ = db.Close()
-		return nil, fmt.Errorf("enable sqlite foreign keys: %w", err)
 	}
 
 	return &SQLiteStore{db: db}, nil

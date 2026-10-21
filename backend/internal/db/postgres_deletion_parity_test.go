@@ -145,6 +145,23 @@ func TestPostgres_PurgeFenceCutoffParity(t *testing.T) {
 	}
 }
 
+// TestPostgres_AppleEmailCollisionIsTyped is the Postgres twin of the
+// SQLite collision test: an Apple subject whose email belongs to a
+// different account surfaces ErrAppleEmailInUse (never the race-path
+// ErrNotFound), proving the users_email_key constraint mapping.
+func TestPostgres_AppleEmailCollisionIsTyped(t *testing.T) {
+	store := newParityStore(t)
+	ctx := context.Background()
+	now := time.Now()
+
+	if _, err := store.UpsertUser(ctx, "pg-taken@example.com"); err != nil {
+		t.Fatalf("UpsertUser: %v", err)
+	}
+	if _, err := store.UpsertAppleUser(ctx, "pg-sub-collide", "pg-taken@example.com", "digest-pg-collide", now); !errors.Is(err, ErrAppleEmailInUse) {
+		t.Fatalf("expected ErrAppleEmailInUse, got %v", err)
+	}
+}
+
 // TestPostgres_PurgeMissingVaultAborts is the Postgres twin of the SQLite
 // precondition test: an Apple-identity account without a vault row aborts
 // the purge with ErrAppleCredentialMissing, rolling everything back.

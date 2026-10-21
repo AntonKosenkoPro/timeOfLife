@@ -184,7 +184,10 @@ jobs:
             # at least 32 random bytes and distinct from JWT_SECRET; the
             # backend fail-fasts without it, like REFRESH_RECOVERY_KEYS.
             # Single-quoted: values with $/backticks/whitespace must survive
-            # sourcing untouched (same rule as the PEM line below).
+            # sourcing untouched (same rule as the PEM line below). Constraint:
+            # the value must never contain a single quote — generate with
+            # `openssl rand -hex 32` (hex cannot emit one). A quote breaks the
+            # sourcing step below before the pre-flight can diagnose it.
             ACCOUNT_STATUS_SECRET='${{ secrets.ACCOUNT_STATUS_SECRET }}'
             # Automatic Apple unlink on account deletion (add-account-deletion
             # D6/D7): server-only Apple client-secret inputs + sealed Apple
@@ -286,13 +289,22 @@ jobs:
             # present — a half-provisioned deploy fails here instead of
             # silently skipping revocation. Fully empty keeps Apple disabled
             # and the OTP path usable. Never echo key material (lengths only).
-            __apple_cfg="${APPLE_CLIENT_ID}${APPLE_TEAM_ID}${APPLE_KEY_ID}${APPLE_PRIVATE_KEY}${APPLE_TOKEN_KEYS}"
+            # Presence is edge-trimmed to match config.Load: a whitespace-only
+            # value counts as missing on both sides, never as configured here
+            # and missing there.
+            apple_trim() { printf '%s' "$1" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//'; }
+            __apple_cfg="$(apple_trim "$APPLE_CLIENT_ID")$(apple_trim "$APPLE_TEAM_ID")$(apple_trim "$APPLE_KEY_ID")$(apple_trim "$APPLE_PRIVATE_KEY")$(apple_trim "$APPLE_TOKEN_KEYS")"
             if [ -n "$__apple_cfg" ]; then
-              : "${APPLE_CLIENT_ID:?APPLE_CLIENT_ID required when Apple deletion is provisioned (else Apple stays disabled)}"
-              : "${APPLE_TEAM_ID:?APPLE_TEAM_ID is empty (add-account-deletion: required to mint the Apple client secret)}"
-              : "${APPLE_KEY_ID:?APPLE_KEY_ID is empty (add-account-deletion: required to mint the Apple client secret)}"
-              : "${APPLE_PRIVATE_KEY:?APPLE_PRIVATE_KEY is empty (add-account-deletion: .p8 key material required to mint the Apple client secret)}"
-              : "${APPLE_TOKEN_KEYS:?APPLE_TOKEN_KEYS is empty (add-account-deletion: required to seal stored Apple credentials)}"
+              for __a_name in APPLE_CLIENT_ID APPLE_TEAM_ID APPLE_KEY_ID APPLE_PRIVATE_KEY APPLE_TOKEN_KEYS; do
+                case "$__a_name" in
+                  APPLE_CLIENT_ID) __a_val="$APPLE_CLIENT_ID" ;;
+                  APPLE_TEAM_ID) __a_val="$APPLE_TEAM_ID" ;;
+                  APPLE_KEY_ID) __a_val="$APPLE_KEY_ID" ;;
+                  APPLE_PRIVATE_KEY) __a_val="$APPLE_PRIVATE_KEY" ;;
+                  APPLE_TOKEN_KEYS) __a_val="$APPLE_TOKEN_KEYS" ;;
+                esac
+                [ -n "$(apple_trim "$__a_val")" ] || { echo "$__a_name is empty or blank (add-account-deletion: required when Apple deletion is provisioned)"; exit 1; }
+              done
               case "$APPLE_PRIVATE_KEY" in
                 *"BEGIN PRIVATE KEY"*) ;;
                 *) echo "APPLE_PRIVATE_KEY does not look like PEM (expected a BEGIN PRIVATE KEY block)"; exit 1 ;;

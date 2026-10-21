@@ -58,20 +58,13 @@ func TestAppleErrorBodyNeverEchoesSecret(t *testing.T) {
 }
 
 func TestAppleErrorCodeAllowlisted(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusBadRequest)
-		_, _ = w.Write([]byte(`{"error":"invalid_grant"}`))
-	}))
-	defer srv.Close()
-	c := newTestClient(t, srv)
-
-	_, err := c.ExchangeCode(t.Context(), "code")
-	if err == nil || !errors.Is(err, ErrInvalidGrant) {
-		t.Fatalf("expected ErrInvalidGrant, got %v", err)
+	if got := appleErrorCode([]byte(`{"error":"invalid_grant"}`)); got != "invalid_grant" {
+		t.Errorf("allowlisted apple code must surface verbatim, got %q", got)
 	}
-	if !strings.Contains(err.Error(), "invalid_grant") {
-		t.Fatalf("expected allowlisted code in error, got %v", err)
+	for _, body := range []string{"not-json", `{"error":"some_unlisted_code"}`, `{"error_description":"no code key"}`, ``} {
+		if got := appleErrorCode([]byte(body)); got != "invalid_request" {
+			t.Errorf("unallowlisted body %q must map to invalid_request, got %q", body, got)
+		}
 	}
 }
 

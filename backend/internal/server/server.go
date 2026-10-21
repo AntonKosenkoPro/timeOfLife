@@ -109,6 +109,10 @@ func NewDefaultDependencies(ctx context.Context, cfg *config.Config, store db.St
 		OTPRequest: ratelimit.OTPRequestLimit,
 		OTPVerify:  ratelimit.OTPVerifyLimit,
 		Status:     ratelimit.NewTokenBucket(10, 10, time.Minute),
+		// Apple server-to-server deliveries are unauthenticated: blunt
+		// floods before JWS verification, with a ceiling high enough that
+		// Apple's own delivery retries never throttle.
+		AppleNotifications: ratelimit.NewTokenBucket(60, 60, time.Minute),
 	}
 
 	trustedProxies, err := handlers.ParseTrustedProxies(cfg.TrustedProxies)

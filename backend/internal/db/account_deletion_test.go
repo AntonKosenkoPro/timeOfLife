@@ -115,6 +115,24 @@ func TestPurge_RemovesEveryOperationalRow(t *testing.T) {
 		t.Fatalf("CreateEntry: %v", err)
 	}
 
+	// A live entry + join on the purged account proves join cleanup. The
+	// seed's own entry was deleted before purge (leaving only its
+	// tombstone), and an entry-side subquery cannot observe an orphaned
+	// join (it only counts joins whose entry still exists) — so the join
+	// count below runs from the category side, where a leaked join stays
+	// visible. Categories stay FK-bound on both engines, which is the
+	// schema-enforced backstop this count double-checks.
+	liveCat, _, err := store.CreateCategory(ctx, Category{ID: uuidV7(), UserID: gone, Name: "Live", Icon: "tag"})
+	if err != nil {
+		t.Fatalf("CreateCategory: %v", err)
+	}
+	if _, _, err := store.CreateEntry(ctx, Entry{
+		ID: uuidV7(), UserID: gone, ActivityText: "Live",
+		Categories: []CategoryTag{{ID: liveCat.ID}}, StartedAt: time.Now(),
+	}); err != nil {
+		t.Fatalf("CreateEntry: %v", err)
+	}
+
 	res, err := store.PurgeUser(ctx, gone, "com.test.app", func(_ string) string { return "digest-apple-sub-gone" })
 	if err != nil {
 		t.Fatalf("PurgeUser: %v", err)
@@ -135,7 +153,7 @@ func TestPurge_RemovesEveryOperationalRow(t *testing.T) {
 		}
 	}
 	var joins int
-	if err := store.DB().QueryRow(`SELECT COUNT(*) FROM entry_categories WHERE entry_id IN (SELECT id FROM entries WHERE user_id = ?)`, gone).Scan(&joins); err != nil {
+	if err := store.DB().QueryRow(`SELECT COUNT(*) FROM entry_categories WHERE category_id IN (SELECT id FROM categories WHERE user_id = ?)`, gone).Scan(&joins); err != nil {
 		t.Fatalf("count joins: %v", err)
 	}
 	if joins != 0 {
@@ -182,7 +200,13 @@ func TestPurge_EmailAccountSkipsAppleWork(t *testing.T) {
 // TestPurge_RaceWithWriteLeavesNoOrphans runs purge against concurrent
 // catalog writes: the single-writer store serializes them, and the final
 // state holds rows for exactly one outcome (written-then-purged, or
-// rejected/never-written) — never orphans without an account.
+// rejected/never-written). Committed orphans are impossible here by schema:
+// categories.user_id REFERENCES users(id) is FK-enforced (PRAGMA
+// foreign_keys = ON in SQLite, native enforcement in Postgres), so this
+// count is a documented schema-enforced tripwire, not a purge-correctness
+// proof — it stays green regardless. The test's real value is the race
+// itself: purge and writes serialize with no deadlock, panic, or partial
+// transaction left behind.
 func TestPurge_RaceWithWriteLeavesNoOrphans(t *testing.T) {
 	store := setupTestStore(t)
 	ctx := context.Background()
@@ -212,6 +236,35 @@ func TestPurge_RaceWithWriteLeavesNoOrphans(t *testing.T) {
 	}
 	if orphans != 0 {
 		t.Errorf("expected no orphan categories, got %d", orphans)
+	}
+}
+
+// TestFencedUpsert_RejectsEmailOfAnotherAccount verifies identities are
+// never merged: an Apple subject signing in with an email that already
+// belongs to a different account (OTP or another Apple subject) fails with
+// ErrAppleEmailInUse — never a silent no-op, never the race-path ErrNotFound.
+func TestFencedUpsert_RejectsEmailOfAnotherAccount(t *testing.T) {
+	store := setupTestStore(t)
+	ctx := context.Background()
+
+	if _, err := store.UpsertUser(ctx, "taken@example.com"); err != nil {
+		t.Fatalf("UpsertUser: %v", err)
+	}
+	if _, err := store.UpsertAppleUser(ctx, "apple-sub-new", "taken@example.com", "digest-new", time.Now()); !errors.Is(err, ErrAppleEmailInUse) {
+		t.Fatalf("expected ErrAppleEmailInUse, got %v", err)
+	}
+
+	// Same-subject re-signin with its own email still works.
+	u1, err := store.UpsertAppleUser(ctx, "apple-sub-same", "same@example.com", "digest-same", time.Now())
+	if err != nil {
+		t.Fatalf("UpsertAppleUser: %v", err)
+	}
+	u2, err := store.UpsertAppleUser(ctx, "apple-sub-same", "same@example.com", "digest-same", time.Now())
+	if err != nil {
+		t.Fatalf("re-signin: %v", err)
+	}
+	if u1.ID != u2.ID {
+		t.Errorf("re-signin must return the same user, got %v vs %v", u1.ID, u2.ID)
 	}
 }
 
@@ -374,6 +427,18 @@ func TestJobs_ClaimCompleteFailCycle(t *testing.T) {
 	}
 	if job2.Attempts != job.Attempts+1 {
 		t.Fatalf("attempts must increment, got %+v after %+v", job2, job)
+	}
+	// Crashed-worker recovery: a claim that is neither failed nor completed
+	// must redeliver once its lease expires, never wedging the outbox (a
+	// wedged outbox would also keep the same-subject signup fence closed
+	// indefinitely). No wall-clock tuning: the expiry is the claim-time
+	// lease constant plus one minute.
+	orphaned, err := store.ClaimRevocationJob(ctx, next.Add(time.Minute).Add(claimLease))
+	if err != nil {
+		t.Fatalf("redelivery after expired lease: %v", err)
+	}
+	if orphaned.ID != job2.ID || orphaned.Attempts != job2.Attempts+1 {
+		t.Fatalf("expired lease must redeliver the abandoned job, got %+v after %+v", orphaned, job2)
 	}
 	if err := store.CompleteRevocationJob(ctx, job.ID); err != nil {
 		t.Fatalf("Complete: %v", err)

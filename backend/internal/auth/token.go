@@ -49,7 +49,8 @@ func (s *TokenService) CreateAccessToken(userID, email string) (string, error) {
 
 // CreateAccessTokenWithAuth creates an access token bound to the Apple
 // authorization lineage that issued the session (authTime/authLineage empty
-// for email-OTP sessions, which Apple consent cutoffs never touch).
+// for email-OTP sessions, which fail closed under a set Apple consent
+// cutoff — see VerifyOTP's cutoff fence).
 func (s *TokenService) CreateAccessTokenWithAuth(userID, email string, authTime time.Time, authLineage string) (string, error) {
 	now := time.Now()
 	claims := AccessTokenClaims{
