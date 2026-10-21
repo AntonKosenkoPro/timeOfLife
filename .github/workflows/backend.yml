@@ -183,7 +183,9 @@ jobs:
             # key for the short-lived account-status credential (D3). Must be
             # at least 32 random bytes and distinct from JWT_SECRET; the
             # backend fail-fasts without it, like REFRESH_RECOVERY_KEYS.
-            ACCOUNT_STATUS_SECRET=${{ secrets.ACCOUNT_STATUS_SECRET }}
+            # Single-quoted: values with $/backticks/whitespace must survive
+            # sourcing untouched (same rule as the PEM line below).
+            ACCOUNT_STATUS_SECRET='${{ secrets.ACCOUNT_STATUS_SECRET }}'
             # Automatic Apple unlink on account deletion (add-account-deletion
             # D6/D7): server-only Apple client-secret inputs + sealed Apple
             # credential keyring. TEAM/KEY IDs ride in secrets like the
@@ -209,28 +211,41 @@ jobs:
             : "${DB_PASSWORD:?secret DB_PASSWORD is empty}"
             : "${JWT_SECRET:?secret JWT_SECRET is empty}"
             [ "${#JWT_SECRET}" -ge 32 ] || { echo "JWT_SECRET must be at least 32 bytes"; exit 1; }
-            # Format check mirrors ParseRecoveryKeys (config.go): comma-separated,
-            # edge-trimmed, empties ignored, every entry 64 hex chars (32 bytes).
-            # A malformed value would otherwise pass this pre-flight and
-            # crash-loop the freshly deployed container at boot. Interior
-            # whitespace is rejected (Go trims edges only; hex.DecodeString
-            # fails on interior space), so strip-all must equal edge-trimmed.
-            __rec_ok=1; __rec_count=0
-            __rec_rest="${REFRESH_RECOVERY_KEYS},"
-            while [ -n "$__rec_rest" ]; do
-              __rec_raw="${__rec_rest%%,*}"; __rec_rest="${__rec_rest#*,}"
-              __rec_edge="$(printf '%s' "$__rec_raw" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
-              [ -z "$__rec_edge" ] && continue
-              case "$__rec_edge" in
-                *[[:space:]]*) __rec_ok=0; continue ;;
-              esac
-              __rec_count=$((__rec_count + 1))
-              case "$__rec_edge" in
-                *[!0-9a-fA-F]*|"") __rec_ok=0 ;;
-                *) if [ "${#__rec_edge}" -ne 64 ]; then __rec_ok=0; fi ;;
-              esac
-            done
-            [ "$__rec_ok" -eq 1 ] && [ "$__rec_count" -ge 1 ] || { echo "REFRESH_RECOVERY_KEYS must be comma-separated 64-char hex keys (openssl rand -hex 32); empty or malformed values fail the backend boot check"; exit 1; }
+            # Format check mirrors ParseRecoveryKeys + isZeroKey (config.go):
+            # comma-separated, edge-trimmed, empties ignored, every entry 64
+            # hex chars (32 bytes) and non-zero. A malformed or placeholder
+            # value would otherwise pass this pre-flight and crash-loop the
+            # freshly deployed container at boot. Interior whitespace is
+            # rejected (Go trims edges only; hex.DecodeString fails on
+            # interior space), so strip-all must equal edge-trimmed.
+            # One shared validator for every keyring so fixes cannot drift.
+            validate_hex_keyring() {
+              __v_value="$1"; __v_name="$2"
+              __v_ok=1; __v_count=0
+              __v_rest="${__v_value},"
+              while [ -n "$__v_rest" ]; do
+                __v_raw="${__v_rest%%,*}"; __v_rest="${__v_rest#*,}"
+                __v_edge="$(printf '%s' "$__v_raw" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+                [ -z "$__v_edge" ] && continue
+                case "$__v_edge" in
+                  *[[:space:]]*) __v_ok=0; continue ;;
+                esac
+                __v_count=$((__v_count + 1))
+                case "$__v_edge" in
+                  *[!0-9a-fA-F]*|"") __v_ok=0 ;;
+                  *) if [ "${#__v_edge}" -ne 64 ]; then __v_ok=0; fi ;;
+                esac
+                case "$__v_edge" in
+                  0000000000000000000000000000000000000000000000000000000000000000) __v_ok=0 ;;
+                esac
+              done
+              if [ "$__v_ok" -eq 1 ] && [ "$__v_count" -ge 1 ]; then
+                return 0
+              fi
+              echo "$__v_name must be comma-separated 64-char hex keys (openssl rand -hex 32); empty, malformed, or all-zero values fail the backend boot check"
+              return 1
+            }
+            validate_hex_keyring "$REFRESH_RECOVERY_KEYS" "REFRESH_RECOVERY_KEYS" || exit 1
             : "${REFRESH_RECOVERY_KEYS:?secret REFRESH_RECOVERY_KEYS is empty (fix-refresh-response-loss: backend fail-fasts without the recovery keyring)}"
             # Account-status credential key (add-account-deletion D3):
             # dedicated purpose-bound signer, never the access-token key.
@@ -282,25 +297,10 @@ jobs:
                 *"BEGIN PRIVATE KEY"*) ;;
                 *) echo "APPLE_PRIVATE_KEY does not look like PEM (expected a BEGIN PRIVATE KEY block)"; exit 1 ;;
               esac
-              # Format check mirrors ParseRecoveryKeys (config.go) and the
-              # REFRESH_RECOVERY_KEYS pre-flight above: comma-separated,
-              # edge-trimmed, empties ignored, every entry 64 hex chars.
-              __apple_ok=1; __apple_count=0
-              __apple_rest="${APPLE_TOKEN_KEYS},"
-              while [ -n "$__apple_rest" ]; do
-                __apple_raw="${__apple_rest%%,*}"; __apple_rest="${__apple_rest#*,}"
-                __apple_edge="$(printf '%s' "$__apple_raw" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
-                [ -z "$__apple_edge" ] && continue
-                case "$__apple_edge" in
-                  *[[:space:]]*) __apple_ok=0; continue ;;
-                esac
-                __apple_count=$((__apple_count + 1))
-                case "$__apple_edge" in
-                  *[!0-9a-fA-F]*|"") __apple_ok=0 ;;
-                  *) if [ "${#__apple_edge}" -ne 64 ]; then __apple_ok=0; fi ;;
-                esac
-              done
-              [ "$__apple_ok" -eq 1 ] && [ "$__apple_count" -ge 1 ] || { echo "APPLE_TOKEN_KEYS must be comma-separated 64-char hex keys (openssl rand -hex 32); empty or malformed values fail the backend boot check"; exit 1; }
+              # Format check mirrors ParseRecoveryKeys + isZeroKey (config.go);
+              # shared with the REFRESH_RECOVERY_KEYS pre-flight above so the
+              # two call sites cannot drift.
+              validate_hex_keyring "$APPLE_TOKEN_KEYS" "APPLE_TOKEN_KEYS" || exit 1
             fi
 
             # Use the production compose file (local .env is read from this cwd).

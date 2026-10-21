@@ -149,3 +149,29 @@ func TestVerifyNotification_StringEventTime(t *testing.T) {
 		t.Fatalf("expected quoted event time %d, got %+v", et, ev)
 	}
 }
+
+func TestFlexibleInt_StrictConsumption(t *testing.T) {
+	for _, ok := range []string{`123`, `"123"`, `0`, `-5`} {
+		var f flexibleInt
+		if err := json.Unmarshal([]byte(ok), &f); err != nil {
+			t.Errorf("%s: expected accept, got %v", ok, err)
+		}
+	}
+	// Prefix-parse traps: Sscanf %d would accept 12, 1, 1 from these.
+	for _, bad := range []string{`"12x"`, `1e3`, `1.5`, `"1.5"`, `""`, `"  "`, `12x`} {
+		var f flexibleInt
+		if err := json.Unmarshal([]byte(bad), &f); err == nil {
+			t.Errorf("%s: expected reject, got %d", bad, f)
+		}
+	}
+}
+
+func TestVerifyNotification_MissingSub(t *testing.T) {
+	key := testECKey(t)
+	v := NewNotificationVerifier("com.test.app", testJWKS(t, key, "kid-1"))
+	payload := signNotification(t, key, "kid-1", appleIssuer, "com.test.app",
+		time.Now().Add(-time.Minute), nil, map[string]any{"type": "consent-revoked"}, "jti-nosub")
+	if _, err := v.VerifyNotification(t.Context(), payload); err == nil {
+		t.Error("missing events.sub: expected error, got nil")
+	}
+}

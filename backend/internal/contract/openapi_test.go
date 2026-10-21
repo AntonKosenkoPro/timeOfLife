@@ -107,8 +107,10 @@ type rawSchema struct {
 }
 
 type rawComponents struct {
-	Responses map[string]rawResponse  `yaml:"responses"`
-	Schemas   map[string]rawSchemaDef `yaml:"schemas"`
+	Responses       map[string]rawResponse  `yaml:"responses"`
+	Schemas         map[string]rawSchemaDef `yaml:"schemas"`
+	Parameters      map[string]rawParameter `yaml:"parameters"`
+	SecuritySchemes map[string]any          `yaml:"securitySchemes"`
 }
 
 type rawSchemaDef struct {
@@ -573,6 +575,11 @@ func TestSpec_AccountDeletionDocumented(t *testing.T) {
 		if p.Name == "X-Device-Id" || p.Ref == "#/components/parameters/DeviceIdHeader" {
 			foundDevice = true
 		}
+		if p.Ref == "#/components/parameters/DeviceIdHeader" {
+			if _, ok := s.Components.Parameters["DeviceIdHeader"]; !ok {
+				t.Error("components.parameters must define DeviceIdHeader (the $ref target of DELETE /auth/account)")
+			}
+		}
 	}
 	if !foundDevice {
 		t.Error("DELETE /api/v1/auth/account must document the X-Device-Id header")
@@ -602,6 +609,12 @@ func TestSpec_AccountDeletionDocumented(t *testing.T) {
 	}
 	if !usesStatusScheme {
 		t.Error("POST /api/v1/auth/account/status must require the StatusAuth scheme")
+	}
+	if _, ok := s.Components.SecuritySchemes["StatusAuth"]; !ok {
+		t.Error("components.securitySchemes must define StatusAuth (referenced by /auth/account/status)")
+	}
+	if _, ok := s.Components.SecuritySchemes["BearerAuth"]; !ok {
+		t.Error("components.securitySchemes must define BearerAuth")
 	}
 	for _, want := range []string{"200", "401", "429", "500"} {
 		if _, ok := status.Responses[want]; !ok {

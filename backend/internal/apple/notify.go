@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -46,10 +47,13 @@ type NotificationEvent struct {
 type flexibleInt int64
 
 // UnmarshalJSON accepts a JSON number or a quoted/unquoted numeric string.
+// Parsing is strict full-string consumption: a quoted "12x", scientific
+// 1e3, or fractional 1.5 is rejected rather than prefix-parsed, so a
+// malformed event_time can never silently decide a consent cutoff.
 func (f *flexibleInt) UnmarshalJSON(data []byte) error {
 	s := strings.Trim(string(data), `"`)
-	var v int64
-	if _, err := fmt.Sscanf(s, "%d", &v); err != nil {
+	v, err := strconv.ParseInt(s, 10, 64)
+	if err != nil {
 		return fmt.Errorf("flexibleInt: unexpected value %q", string(data))
 	}
 	*f = flexibleInt(v)
@@ -145,6 +149,13 @@ func (v *notificationVerifier) VerifyNotification(_ context.Context, payload str
 	}
 	if claims.Events.Type == "" {
 		return NotificationEvent{}, fmt.Errorf("%w: missing events.type", ErrInvalidToken)
+	}
+	// Sub binds the event to the affected user; without it the event can
+	// never be applied, so a user-binding event without a subject is
+	// malformed rather than a verified no-op (an empty-sub dispatch would
+	// consume the jti receipt with no cutoff applied).
+	if claims.Events.Sub == "" {
+		return NotificationEvent{}, fmt.Errorf("%w: missing events.sub", ErrInvalidToken)
 	}
 	// Issued-at is required (replay-window bound); ParseWithClaims checks
 	// its freshness when present, this check pins its presence.
