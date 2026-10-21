@@ -27,6 +27,30 @@
 // Sign out confirmation
 "signOut.cancel" = "Cancel";
 
+// Account (Profile → Account; app-shell + account-deletion specs)
+"account.title" = "Account";
+"account.identitySection" = "Account";
+"account.identityFooter" = "Signing out keeps this iPhone's data. Signing back in restores it.";
+"account.thisDeviceSection" = "This Device";
+"account.thisDeviceFooter" = "Removes only this account's data from this iPhone. Synced data stays on the relay.";
+"account.deleteLocalData" = "Delete local data";
+"account.permanentSection" = "Permanent Deletion";
+"account.permanentFooter" = "Permanently deletes your Lifio account and synced data, plus this account's data on this iPhone. Your other devices will be signed out.";
+"account.deleteTitle" = "Delete account and local data?";
+"account.deleteMessage" = "This permanently deletes your Lifio account and all synced entries, categories, and notes, and removes this account's data from this iPhone. Your other devices will be signed out.";
+"account.deleteConfirm" = "Delete account and local data";
+"account.deletingProgress" = "Deleting account…";
+"account.deleteError" = "Could not delete your account. Please try again.";
+"account.deleteFailedTitle" = "Couldn't delete account";
+"account.deleteOffline" = "You are offline. Connect and try again.";
+"account.deleteOfflineTitle" = "You're offline";
+"account.stillExists" = "Your account still exists. No data was deleted.";
+"account.stillExistsTitle" = "Account still exists";
+"account.pendingAppleUnlink" = "Account deleted. Apple authorization unlinking is still in progress and completes automatically.";
+"account.cleanupRetryTitle" = "Finish account cleanup";
+"account.cleanupRetryMessage" = "Your account was deleted, but some local data could not be removed. Retry cleanup now.";
+"account.cleanupRetryConfirm" = "Clean up now";
+
 // Validation (unified messages — Requirements U2/U4: one merged message per field)
 "common.and" = "and";
 "validation.emailEmpty" = "Email is required.";

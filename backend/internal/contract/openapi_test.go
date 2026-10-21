@@ -27,6 +27,10 @@ var canonicalErrorCodes = []string{
 	"otp_attempts_exceeded",
 	"invalid_apple_token",
 	"apple_not_configured",
+	"apple_unavailable",
+	"apple_credential_required",
+	"apple_revocation_pending",
+	"invalid_notification",
 	"invalid_refresh",
 	"token_reuse",
 	"refresh_expired",
@@ -45,6 +49,8 @@ var canonicalErrorCodes = []string{
 var bearerProtectedPaths = []string{
 	"/api/v1/auth/logout",
 	"/api/v1/auth/me",
+	"/api/v1/auth/account",
+	"/api/v1/auth/apple/deletion-credential",
 	"/api/v1/categories",
 	"/api/v1/categories/{id}",
 	"/api/v1/entries",
@@ -73,6 +79,7 @@ type rawOperation struct {
 }
 
 type rawParameter struct {
+	Ref    string         `yaml:"$ref"`
 	Name   string         `yaml:"name"`
 	Schema rawParamSchema `yaml:"schema"`
 }
@@ -536,5 +543,162 @@ func TestSpec_Create422VsMergePrune(t *testing.T) {
 	lowered := strings.ToLower(desc)
 	if !strings.Contains(lowered, "pruned") || !strings.Contains(lowered, "unknown") {
 		t.Errorf("EntryUpdate.category_ids must document pruning of unknown ids, got %q", desc)
+	}
+}
+
+// Explicit account deletion (add-account-deletion): DELETE /auth/account is
+// self-only (no request-selected user), returns 204 on completion and 202
+// with explicit account_deleted + apple_revocation_pending on committed
+// purge with pending Apple unlink, distinguishes 409
+// apple_credential_required from 503 apple_not_configured, and documents the
+// rate-limited, no-store, non-renewing status endpoint plus the verified
+// notification endpoint. Each response is pinned here with the implementation.
+func TestSpec_AccountDeletionDocumented(t *testing.T) {
+	s := loadSpec(t)
+
+	del, ok := s.Paths["/api/v1/auth/account"]["delete"]
+	if !ok {
+		t.Fatal("expected DELETE /api/v1/auth/account")
+	}
+	if !requiresAuth(del) {
+		t.Error("DELETE /api/v1/auth/account must require BearerAuth")
+	}
+	for _, want := range []string{"204", "202", "400", "401", "409", "503", "500"} {
+		if _, ok := del.Responses[want]; !ok {
+			t.Errorf("DELETE /api/v1/auth/account must document %s", want)
+		}
+	}
+	foundDevice := false
+	for _, p := range del.Parameters {
+		if p.Name == "X-Device-Id" || p.Ref == "#/components/parameters/DeviceIdHeader" {
+			foundDevice = true
+		}
+	}
+	if !foundDevice {
+		t.Error("DELETE /api/v1/auth/account must document the X-Device-Id header")
+	}
+	pending, ok := s.Components.Schemas["AccountDeletionPendingResponse"]
+	if !ok {
+		t.Fatal("expected AccountDeletionPendingResponse schema")
+	}
+	for _, field := range []string{"account_deleted", "apple_revocation_pending"} {
+		if _, ok := pending.Properties[field]; !ok {
+			t.Errorf("AccountDeletionPendingResponse must document %q", field)
+		}
+	}
+
+	status, ok := s.Paths["/api/v1/auth/account/status"]["post"]
+	if !ok {
+		t.Fatal("expected POST /api/v1/auth/account/status")
+	}
+	if requiresAuth(status) {
+		t.Error("POST /api/v1/auth/account/status must NOT require BearerAuth (status-only credential)")
+	}
+	usesStatusScheme := false
+	for _, sec := range status.Security {
+		if _, ok := sec["StatusAuth"]; ok {
+			usesStatusScheme = true
+		}
+	}
+	if !usesStatusScheme {
+		t.Error("POST /api/v1/auth/account/status must require the StatusAuth scheme")
+	}
+	for _, want := range []string{"200", "401", "429", "500"} {
+		if _, ok := status.Responses[want]; !ok {
+			t.Errorf("POST /api/v1/auth/account/status must document %s", want)
+		}
+	}
+	verdict, ok := s.Components.Schemas["AccountStatusResponse"]
+	if !ok {
+		t.Fatal("expected AccountStatusResponse schema")
+	}
+	for _, field := range []string{"account_id", "state"} {
+		if _, ok := verdict.Properties[field]; !ok {
+			t.Errorf("AccountStatusResponse must document %q", field)
+		}
+	}
+}
+
+// The status credential is read-only evidence: AuthResponse and MeResponse
+// carry the root account_status_credential + account_status_expires_at, and
+// the User carries server-truth provider fields (never email-inferred).
+func TestSpec_StatusEvidenceDocumented(t *testing.T) {
+	s := loadSpec(t)
+	authResp, ok := s.Components.Schemas["AuthResponse"]
+	if !ok {
+		t.Fatal("expected AuthResponse schema")
+	}
+	for _, field := range []string{"account_status_credential", "account_status_expires_at"} {
+		if _, ok := authResp.Properties[field]; !ok {
+			t.Errorf("AuthResponse must document %q", field)
+		}
+	}
+	me, ok := s.Components.Schemas["MeResponse"]
+	if !ok {
+		t.Fatal("expected MeResponse schema")
+	}
+	for _, field := range []string{"user", "account_status_credential", "account_status_expires_at"} {
+		if _, ok := me.Properties[field]; !ok {
+			t.Errorf("MeResponse must document %q", field)
+		}
+	}
+	user, ok := s.Components.Schemas["User"]
+	if !ok {
+		t.Fatal("expected User schema")
+	}
+	for _, field := range []string{"has_apple_identity", "apple_deletion_authorization_required"} {
+		if _, ok := user.Properties[field]; !ok {
+			t.Errorf("User must document %q", field)
+		}
+	}
+	for _, name := range []string{"has_apple_identity", "apple_deletion_authorization_required"} {
+		found := false
+		for _, r := range user.Required {
+			if str, _ := r.(string); str == name {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("User.%s must be required", name)
+		}
+	}
+	if _, ok := s.Components.Schemas["AppleSignInRequest"]; !ok {
+		t.Fatal("expected AppleSignInRequest schema")
+	}
+	if _, ok := s.Components.Schemas["AppleSignInRequest"].Properties["authorization_code"]; !ok {
+		t.Error("AppleSignInRequest must document optional authorization_code")
+	}
+}
+
+// Apple revocation plumbing: the same-subject deletion-credential endpoint
+// (Bearer, no user creation) and the verified notification endpoint (no
+// bearer, consent-revoked without deletion). The StatusAuth scheme itself
+// must exist.
+func TestSpec_AppleDeletionPlumbingDocumented(t *testing.T) {
+	s := loadSpec(t)
+	cred, ok := s.Paths["/api/v1/auth/apple/deletion-credential"]["post"]
+	if !ok {
+		t.Fatal("expected POST /api/v1/auth/apple/deletion-credential")
+	}
+	if !requiresAuth(cred) {
+		t.Error("POST /api/v1/auth/apple/deletion-credential must require BearerAuth")
+	}
+	for _, want := range []string{"200", "400", "401", "503", "500"} {
+		if _, ok := cred.Responses[want]; !ok {
+			t.Errorf("POST /api/v1/auth/apple/deletion-credential must document %s", want)
+		}
+	}
+
+	notif, ok := s.Paths["/api/v1/auth/apple/notifications"]["post"]
+	if !ok {
+		t.Fatal("expected POST /api/v1/auth/apple/notifications")
+	}
+	if requiresAuth(notif) {
+		t.Error("POST /api/v1/auth/apple/notifications must NOT require BearerAuth (Apple-signed payload)")
+	}
+	for _, want := range []string{"200", "400", "401", "500"} {
+		if _, ok := notif.Responses[want]; !ok {
+			t.Errorf("POST /api/v1/auth/apple/notifications must document %s", want)
+		}
 	}
 }

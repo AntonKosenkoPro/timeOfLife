@@ -30,6 +30,14 @@ func NewSQLiteStore(dsn string) (*SQLiteStore, error) {
 		return nil, fmt.Errorf("ping sqlite: %w", err)
 	}
 
+	// Enforce foreign keys like production Postgres: account-scoped writes
+	// after a purge fail loudly instead of orphaning rows, and the purge's
+	// explicit ordered deletes stay valid under the same constraints.
+	if _, err := db.Exec(`PRAGMA foreign_keys = ON`); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("enable sqlite foreign keys: %w", err)
+	}
+
 	return &SQLiteStore{db: db}, nil
 }
 
@@ -43,22 +51,46 @@ func (s *SQLiteStore) DB() *sql.DB {
 	return s.db
 }
 
+// sqliteUserColumns is the full user projection, including the Apple
+// session-lineage and consent-cutoff columns added by 009.
+const sqliteUserColumns = `id, email, email_verified, created_at,
+	apple_subject, apple_auth_time, apple_auth_lineage, apple_consent_cutoff`
+
+// sqliteScanUser scans a user row in sqliteUserColumns order. Nullable
+// columns land in pointer fields (NULL → nil); timestamps parse through the
+// shared nullTimePtr helper.
+func sqliteScanUser(u *User, createdAt string, appleSubject, appleAuthTime, appleAuthLineage, appleConsentCutoff sql.NullString) {
+	u.CreatedAt = parseTime(createdAt)
+	if appleSubject.Valid {
+		v := appleSubject.String
+		u.AppleSubject = &v
+	}
+	u.AppleAuthTime = nullTimePtr(appleAuthTime)
+	if appleAuthLineage.Valid {
+		v := appleAuthLineage.String
+		u.AppleAuthLineage = &v
+	}
+	u.AppleConsentCutoff = nullTimePtr(appleConsentCutoff)
+}
+
 // GetUserByEmail returns a user by their email.
 func (s *SQLiteStore) GetUserByEmail(ctx context.Context, email string) (User, error) {
 	var u User
 	var createdAt string
+	var appleSubject, appleAuthTime, appleAuthLineage, appleConsentCutoff sql.NullString
 	err := s.db.QueryRowContext(ctx, `
-		SELECT id, email, email_verified, created_at
+		SELECT `+sqliteUserColumns+`
 		FROM users
 		WHERE email = ?
-	`, email).Scan(&u.ID, &u.Email, &u.EmailVerified, &createdAt)
+	`, email).Scan(&u.ID, &u.Email, &u.EmailVerified, &createdAt,
+		&appleSubject, &appleAuthTime, &appleAuthLineage, &appleConsentCutoff)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return User{}, fmt.Errorf("get user by email: %w", ErrNotFound)
 		}
 		return User{}, fmt.Errorf("get user by email: %w", err)
 	}
-	u.CreatedAt = parseTime(createdAt)
+	sqliteScanUser(&u, createdAt, appleSubject, appleAuthTime, appleAuthLineage, appleConsentCutoff)
 	return u, nil
 }
 
@@ -75,15 +107,17 @@ func (s *SQLiteStore) UpsertUser(ctx context.Context, email string) (User, error
 
 	var u User
 	var createdAt string
+	var appleSubject, appleAuthTime, appleAuthLineage, appleConsentCutoff sql.NullString
 	err = s.db.QueryRowContext(ctx, `
-		SELECT id, email, email_verified, created_at
+		SELECT `+sqliteUserColumns+`
 		FROM users
 		WHERE email = ?
-	`, email).Scan(&u.ID, &u.Email, &u.EmailVerified, &createdAt)
+	`, email).Scan(&u.ID, &u.Email, &u.EmailVerified, &createdAt,
+		&appleSubject, &appleAuthTime, &appleAuthLineage, &appleConsentCutoff)
 	if err != nil {
 		return User{}, fmt.Errorf("upsert user select: %w", err)
 	}
-	u.CreatedAt = parseTime(createdAt)
+	sqliteScanUser(&u, createdAt, appleSubject, appleAuthTime, appleAuthLineage, appleConsentCutoff)
 	return u, nil
 }
 
@@ -157,10 +191,24 @@ func (s *SQLiteStore) MarkOTPExhausted(ctx context.Context, otpID string) error 
 
 // SaveRefreshToken stores a new refresh token.
 func (s *SQLiteStore) SaveRefreshToken(ctx context.Context, userID string, tokenHash string, deviceID string) error {
+	return s.SaveRefreshTokenWithAuth(ctx, userID, tokenHash, deviceID, nil, "")
+}
+
+// SaveRefreshTokenWithAuth stores a refresh token with its session's Apple
+// auth pair (nil/empty = email-OTP session, unaffected by Apple cutoffs).
+func (s *SQLiteStore) SaveRefreshTokenWithAuth(ctx context.Context, userID string, tokenHash string, deviceID string, authTime *time.Time, authLineage string) error {
+	var at any
+	if authTime != nil {
+		at = fmtTime(*authTime)
+	}
+	var lineage any
+	if authLineage != "" {
+		lineage = authLineage
+	}
 	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO refresh_tokens (id, user_id, token_hash, device_id, revoked, created_at)
-		VALUES (?, ?, ?, ?, false, datetime('now'))
-	`, uuidV7(), userID, tokenHash, deviceID)
+		INSERT INTO refresh_tokens (id, user_id, token_hash, device_id, revoked, created_at, auth_time, auth_lineage)
+		VALUES (?, ?, ?, ?, false, datetime('now'), ?, ?)
+	`, uuidV7(), userID, tokenHash, deviceID, at, lineage)
 	if err != nil {
 		return fmt.Errorf("save refresh token: %w", err)
 	}
@@ -171,11 +219,13 @@ func (s *SQLiteStore) SaveRefreshToken(ctx context.Context, userID string, token
 func (s *SQLiteStore) GetRefreshToken(ctx context.Context, tokenHash string) (RefreshToken, error) {
 	var t RefreshToken
 	var createdAt string
+	var authTime sql.NullString
+	var authLineage sql.NullString
 	err := s.db.QueryRowContext(ctx, `
-		SELECT id, user_id, token_hash, device_id, revoked, created_at
+		SELECT id, user_id, token_hash, device_id, revoked, created_at, auth_time, auth_lineage
 		FROM refresh_tokens
 		WHERE token_hash = ?
-	`, tokenHash).Scan(&t.ID, &t.UserID, &t.TokenHash, &t.DeviceID, &t.Revoked, &createdAt)
+	`, tokenHash).Scan(&t.ID, &t.UserID, &t.TokenHash, &t.DeviceID, &t.Revoked, &createdAt, &authTime, &authLineage)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return RefreshToken{}, fmt.Errorf("get refresh token: %w", ErrNotFound)
@@ -183,6 +233,11 @@ func (s *SQLiteStore) GetRefreshToken(ctx context.Context, tokenHash string) (Re
 		return RefreshToken{}, fmt.Errorf("get refresh token: %w", err)
 	}
 	t.CreatedAt = parseTime(createdAt)
+	t.AuthTime = nullTimePtr(authTime)
+	if authLineage.Valid {
+		v := authLineage.String
+		t.AuthLineage = &v
+	}
 	return t, nil
 }
 
@@ -283,6 +338,19 @@ func (s *SQLiteStore) RotateRefreshToken(ctx context.Context, args RotateArgs) (
 	}
 	defer func() { _ = tx.Rollback() }()
 
+	// Account lifecycle fence first: a purge that removed the account races
+	// here as ErrUserMissing — never a partial successor. (Single-writer
+	// SQLite serializes writers, so no explicit row lock is needed.)
+	var one int
+	if err := tx.QueryRowContext(ctx, `
+		SELECT 1 FROM users WHERE id = ?
+	`, args.UserID).Scan(&one); err != nil {
+		if err == sql.ErrNoRows {
+			return RotateResult{}, fmt.Errorf("rotate refresh token: %w", ErrUserMissing)
+		}
+		return RotateResult{}, fmt.Errorf("rotate refresh token: %w", err)
+	}
+
 	// Single-use guard: only a live predecessor rotates.
 	updateres, err := tx.ExecContext(ctx, `
 		UPDATE refresh_tokens SET revoked = true
@@ -304,10 +372,14 @@ func (s *SQLiteStore) RotateRefreshToken(ctx context.Context, args RotateArgs) (
 	// and misreport a successful rotation as failed).
 	now := time.Now().UTC()
 	successorID := uuidV7()
+	// The successor inherits the predecessor's auth lineage in the same
+	// statement, so a rotation can never mint a lineage-clean token from a
+	// cutoff session — rotation cannot evade the cutoff.
 	if _, err := tx.ExecContext(ctx, `
-		INSERT INTO refresh_tokens (id, user_id, token_hash, device_id, revoked, created_at)
-		VALUES (?, ?, ?, ?, false, ?)
-	`, successorID, args.UserID, args.SuccessorHash, args.DeviceID, fmtTime(now)); err != nil {
+		INSERT INTO refresh_tokens (id, user_id, token_hash, device_id, revoked, created_at, auth_time, auth_lineage)
+		SELECT ?, ?, ?, ?, false, ?, auth_time, auth_lineage
+		FROM refresh_tokens WHERE id = ?
+	`, successorID, args.UserID, args.SuccessorHash, args.DeviceID, fmtTime(now), args.PredecessorID); err != nil {
 		return RotateResult{}, fmt.Errorf("rotate refresh token: %w", err)
 	}
 
@@ -409,18 +481,20 @@ func (s *SQLiteStore) ConsumeRecoveryReceipt(ctx context.Context, attemptHash st
 func (s *SQLiteStore) GetUserByID(ctx context.Context, userID string) (User, error) {
 	var u User
 	var createdAt string
+	var appleSubject, appleAuthTime, appleAuthLineage, appleConsentCutoff sql.NullString
 	err := s.db.QueryRowContext(ctx, `
-		SELECT id, email, email_verified, created_at
+		SELECT `+sqliteUserColumns+`
 		FROM users
 		WHERE id = ?
-	`, userID).Scan(&u.ID, &u.Email, &u.EmailVerified, &createdAt)
+	`, userID).Scan(&u.ID, &u.Email, &u.EmailVerified, &createdAt,
+		&appleSubject, &appleAuthTime, &appleAuthLineage, &appleConsentCutoff)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return User{}, fmt.Errorf("get user by id: %w", ErrNotFound)
 		}
 		return User{}, fmt.Errorf("get user by id: %w", err)
 	}
-	u.CreatedAt = parseTime(createdAt)
+	sqliteScanUser(&u, createdAt, appleSubject, appleAuthTime, appleAuthLineage, appleConsentCutoff)
 	return u, nil
 }
 
@@ -446,17 +520,19 @@ func (s *SQLiteStore) UpsertUserByAppleSubject(ctx context.Context, appleSubject
 
 	var u User
 	var createdAt string
+	var colSub, colAuthTime, colLineage, colCutoff sql.NullString
 	err = s.db.QueryRowContext(ctx, `
-		SELECT id, email, email_verified, created_at
+		SELECT `+sqliteUserColumns+`
 		FROM users
 		WHERE apple_subject = ?
-	`, appleSubject).Scan(&u.ID, &u.Email, &u.EmailVerified, &createdAt)
+	`, appleSubject).Scan(&u.ID, &u.Email, &u.EmailVerified, &createdAt,
+		&colSub, &colAuthTime, &colLineage, &colCutoff)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return User{}, fmt.Errorf("upsert apple user: %w", ErrNotFound)
 		}
 		return User{}, fmt.Errorf("upsert apple user select: %w", err)
 	}
-	u.CreatedAt = parseTime(createdAt)
+	sqliteScanUser(&u, createdAt, colSub, colAuthTime, colLineage, colCutoff)
 	return u, nil
 }

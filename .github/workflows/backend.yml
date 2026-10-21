@@ -179,6 +179,27 @@ jobs:
             # delete pending receipts as part of a rollback — previous binaries
             # ignore the variable and pending receipts expire naturally.
             REFRESH_RECOVERY_KEYS=${{ secrets.REFRESH_RECOVERY_KEYS }}
+            # Account deletion (add-account-deletion): dedicated HS256 signing
+            # key for the short-lived account-status credential (D3). Must be
+            # at least 32 random bytes and distinct from JWT_SECRET; the
+            # backend fail-fasts without it, like REFRESH_RECOVERY_KEYS.
+            ACCOUNT_STATUS_SECRET=${{ secrets.ACCOUNT_STATUS_SECRET }}
+            # Automatic Apple unlink on account deletion (add-account-deletion
+            # D6/D7): server-only Apple client-secret inputs + sealed Apple
+            # credential keyring. TEAM/KEY IDs ride in secrets like the
+            # existing APPLE_CLIENT_ID (never echoed to logs). The .p8 PEM
+            # holds newlines, so it is wrapped in single quotes: the quoted
+            # heredoc substitutes the secret literally, and sourcing a
+            # single-quoted multiline value preserves the newlines verbatim
+            # (valid PEM never contains a single quote).
+            APPLE_TEAM_ID=${{ secrets.APPLE_TEAM_ID }}
+            APPLE_KEY_ID=${{ secrets.APPLE_KEY_ID }}
+            APPLE_PRIVATE_KEY='${{ secrets.APPLE_PRIVATE_KEY }}'
+            # Apple-token encryption keyring: comma-separated 64-hex AES-256
+            # keys, first = primary. Same format rules as
+            # REFRESH_RECOVERY_KEYS (openssl rand -hex 32); rotate by
+            # prepending, never by dropping keys backing pending jobs.
+            APPLE_TOKEN_KEYS=${{ secrets.APPLE_TOKEN_KEYS }}
             ENVEOF
             chmod 600 .env
 
@@ -211,6 +232,11 @@ jobs:
             done
             [ "$__rec_ok" -eq 1 ] && [ "$__rec_count" -ge 1 ] || { echo "REFRESH_RECOVERY_KEYS must be comma-separated 64-char hex keys (openssl rand -hex 32); empty or malformed values fail the backend boot check"; exit 1; }
             : "${REFRESH_RECOVERY_KEYS:?secret REFRESH_RECOVERY_KEYS is empty (fix-refresh-response-loss: backend fail-fasts without the recovery keyring)}"
+            # Account-status credential key (add-account-deletion D3):
+            # dedicated purpose-bound signer, never the access-token key.
+            : "${ACCOUNT_STATUS_SECRET:?secret ACCOUNT_STATUS_SECRET is empty (add-account-deletion: backend fail-fasts without the status-signing key)}"
+            [ "${#ACCOUNT_STATUS_SECRET}" -ge 32 ] || { echo "ACCOUNT_STATUS_SECRET must be at least 32 bytes"; exit 1; }
+            [ "$ACCOUNT_STATUS_SECRET" != "$JWT_SECRET" ] || { echo "ACCOUNT_STATUS_SECRET must differ from JWT_SECRET (distinct purpose-bound keys)"; exit 1; }
             # EMAIL_BACKEND is a non-secret per-environment variable (vars.EMAIL_BACKEND),
             # not a secret. Default to console when unset — compose also defaults to console.
             EMAIL_BACKEND="${EMAIL_BACKEND:-console}"
@@ -239,6 +265,42 @@ jobs:
                 *:6543/*)
                   echo "DATABASE_URL uses the transaction-mode pooler (6543), which breaks the migration advisory lock; use the session-mode pooler (5432)."; exit 1 ;;
               esac
+            fi
+            # Automatic Apple unlink provisioning (add-account-deletion D6/D7):
+            # when Apple is configured at all, every revocation input must be
+            # present — a half-provisioned deploy fails here instead of
+            # silently skipping revocation. Fully empty keeps Apple disabled
+            # and the OTP path usable. Never echo key material (lengths only).
+            __apple_cfg="${APPLE_CLIENT_ID}${APPLE_TEAM_ID}${APPLE_KEY_ID}${APPLE_PRIVATE_KEY}${APPLE_TOKEN_KEYS}"
+            if [ -n "$__apple_cfg" ]; then
+              : "${APPLE_CLIENT_ID:?APPLE_CLIENT_ID required when Apple deletion is provisioned (else Apple stays disabled)}"
+              : "${APPLE_TEAM_ID:?APPLE_TEAM_ID is empty (add-account-deletion: required to mint the Apple client secret)}"
+              : "${APPLE_KEY_ID:?APPLE_KEY_ID is empty (add-account-deletion: required to mint the Apple client secret)}"
+              : "${APPLE_PRIVATE_KEY:?APPLE_PRIVATE_KEY is empty (add-account-deletion: .p8 key material required to mint the Apple client secret)}"
+              : "${APPLE_TOKEN_KEYS:?APPLE_TOKEN_KEYS is empty (add-account-deletion: required to seal stored Apple credentials)}"
+              case "$APPLE_PRIVATE_KEY" in
+                *"BEGIN PRIVATE KEY"*) ;;
+                *) echo "APPLE_PRIVATE_KEY does not look like PEM (expected a BEGIN PRIVATE KEY block)"; exit 1 ;;
+              esac
+              # Format check mirrors ParseRecoveryKeys (config.go) and the
+              # REFRESH_RECOVERY_KEYS pre-flight above: comma-separated,
+              # edge-trimmed, empties ignored, every entry 64 hex chars.
+              __apple_ok=1; __apple_count=0
+              __apple_rest="${APPLE_TOKEN_KEYS},"
+              while [ -n "$__apple_rest" ]; do
+                __apple_raw="${__apple_rest%%,*}"; __apple_rest="${__apple_rest#*,}"
+                __apple_edge="$(printf '%s' "$__apple_raw" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+                [ -z "$__apple_edge" ] && continue
+                case "$__apple_edge" in
+                  *[[:space:]]*) __apple_ok=0; continue ;;
+                esac
+                __apple_count=$((__apple_count + 1))
+                case "$__apple_edge" in
+                  *[!0-9a-fA-F]*|"") __apple_ok=0 ;;
+                  *) if [ "${#__apple_edge}" -ne 64 ]; then __apple_ok=0; fi ;;
+                esac
+              done
+              [ "$__apple_ok" -eq 1 ] && [ "$__apple_count" -ge 1 ] || { echo "APPLE_TOKEN_KEYS must be comma-separated 64-char hex keys (openssl rand -hex 32); empty or malformed values fail the backend boot check"; exit 1; }
             fi
 
             # Use the production compose file (local .env is read from this cwd).
