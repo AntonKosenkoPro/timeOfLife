@@ -3,7 +3,7 @@ name: ai-review
 # OpenCodeReview (alibaba/open-code-review): deterministic file bundling + review agent.
 # Manual trigger: comment "/review" on a PR. Advisory only — never blocks merge.
 # Optional per-run params: /review [effort=low|medium|high] [budget=<n>[k|m]]
-# [model=glm-5.3-flash|deepseek-v4.1-flash:1017] [think=max|medium|off] [full=true|false].
+# [model=<ollama-cloud-id>] [think=max|medium|off] [full=true|false] (trusted roles only).
 # Every run publishes a job summary (params, range, finding counts) for the Checks tab.
 on:
   issue_comment:
@@ -44,7 +44,7 @@ jobs:
         uses: actions/github-script@v7
         with:
           script: |
-            // Grammar: /review [effort=low|medium|high] [budget=<n>[k|m]] [model=<allowlisted>] [think=max|medium|off] [full=true|false]
+            // Grammar: /review [effort=low|medium|high] [budget=<n>[k|m]] [model=<ollama-cloud-id>] [think=max|medium|off] [full=true|false]
             // Only the /review line carries params (first line whose first token
             // is /review); all other text is ignored (bare-/review compatible).
             // First occurrence of a key wins; duplicates never override.
@@ -59,7 +59,7 @@ jobs:
               const m = t.match(/^(effort|budget|model|think|full)=(\S+)$/i);
               if (m && params[m[1].toLowerCase()] === undefined) params[m[1].toLowerCase()] = m[2];
             }
-            const usage = 'Usage: /review [effort=low|medium|high] [budget=<n>[k|m]] [model=glm-5.3-flash|deepseek-v4.1-flash:1017] [think=max|medium|off] [full=true|false]';
+            const usage = 'Usage: /review [effort=low|medium|high] [budget=<n>[k|m]] [model=<ollama-cloud-id>] [think=max|medium|off] [full=true|false]';
             const fail = (msg) => { core.setFailed(`::error::${msg}\n${usage}`); };
             // Tokens that look like params but sit outside the /review line are
             // never honored — say so loudly instead of silently running defaults.
@@ -97,8 +97,8 @@ jobs:
               budget = parseInt(m[1], 10) * (m[2] ? (m[2].toLowerCase() === 'k' ? 1e3 : 1e6) : 1);
               if (budget < 1e6 || budget > 1e8) return fail(`Budget ${budget} out of range [1000000, 100000000].`);
             }
-            let model = (params.model || 'glm-5.3-flash').toLowerCase();
-            if (!['glm-5.3-flash', 'deepseek-v4.1-flash:1017'].includes(model)) return fail(`Invalid model '${params.model}'.`);
+            let model = (params.model || 'deepseek-v4.1-flash:1017').toLowerCase();
+            if (!/^[a-z0-9._:/-]+$/.test(model)) return fail(`Invalid model '${params.model}'. Use an Ollama Cloud model ID (e.g. deepseek-v4.1-flash:1017, glm-5.3-flash).`);
             let think = (params.think || 'max').toLowerCase();
             if (!['max', 'medium', 'off'].includes(think)) return fail(`Invalid think '${params.think}'.`);
             let full = (params.full || 'false').toLowerCase();
@@ -130,9 +130,9 @@ jobs:
           # Ollama Cloud — OpenAI-compatible endpoint (models.dev: ollama-cloud base URL).
           llm_url: https://ollama.com/v1
           llm_auth_token: ${{ secrets.OLLAMA_API_KEY }}
-          # Model allowlist (endpoint fixed to Ollama Cloud; parse step validates).
-          # CI default stays glm-5.3-flash (benchmarked); override per-run via
-          # `/review model=deepseek-v4.1-flash:1017`.
+          # Any Ollama Cloud model ID (endpoint fixed; parse step validates
+          # charset, trusted roles only). CI default is deepseek-v4.1-flash:1017;
+          # e.g. `/review model=glm-5.3-flash` for the previous default.
           llm_model: ${{ env.REVIEW_MODEL }}
           # openai protocol (explicit; supersedes the required llm_use_anthropic boolean)
           llm_protocol: openai

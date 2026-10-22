@@ -7,9 +7,9 @@
 ## 2. Slash-command params
 
 - [x] 2.1 Add a parse step (after Resolve PR refs) extracting `effort`/`budget`/`model`/`think`/`full` key=value tokens from the trigger comment; ignore all other text; export normalized values with today's defaults (medium / 20000000 / glm-5.3-flash / max / false)
-- [x] 2.2 Enforce allowlists in the parse step: effort low|medium|high, model glm-5.3-flash|deepseek-v4.1-flash:1017, think max|medium|off, full true|false, budget integer with k/m suffix clamped to [1M, 100M]; fail the job with usage text on recognized-key-invalid-value; anchored to the /review line (first-wins); params restricted to OWNER/MEMBER/COLLABORATOR (bare /review open to all)
+- [x] 2.2 Enforce allowlists in the parse step: effort low|medium|high, think max|medium|off, full true|false, budget integer with k/m suffix clamped to [1M, 100M]; model accepts any Ollama Cloud ID (charset `^[A-Za-z0-9._:/-]+$`), default `deepseek-v4.1-flash:1017`; fail the job with usage text on recognized-key-invalid-value; anchored to the /review line (first-wins + displaced/duplicate notices); params restricted to OWNER/MEMBER/COLLABORATOR (bare /review open to all)
 - [x] 2.3 Build `llm_extra_body` as `{"think": value}` from the parsed think level; wire effort/budget/model/extra_body/full_review inputs into the Run OpenCodeReview step
-- [x] 2.4 Confirm default (bare `/review`) reproduces today's exact inputs so checkpoints survive (fingerprint unchanged)
+- [x] 2.4 Confirm default (bare `/review`) reproduces today's inputs except the intended model cutover (glm → DeepSeek rotates the fingerprint once → one fail-closed full review post-merge); extra_body byte-identical
 
 ## 3. Checks observability
 

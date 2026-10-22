@@ -9,9 +9,9 @@ Three related improvements to how this repo runs AI assistance, all stemming fro
 ## What Changes
 
 - `opencode.json`: default `model` → `ollama-cloud/deepseek-v4.1-flash:1017`; provider limits entry replaced (context 1000000 per `ollama show`; keep input/output caps 262144/131072).
-- `.github/workflows/ai-review.yml`: new parse step for `/review` params (`effort`, `budget`, `model`, `think`, `full`, allowlisted with today's values as defaults); wire parsed values into the `open-code-review` action inputs; new `always()` summary step writing params + action outputs to `$GITHUB_STEP_SUMMARY`; enable `stream_progress`.
+- `.github/workflows/ai-review.yml`: new parse step for `/review` params (`effort`, `budget`, `model`, `think`, `full`; CI defaults mirror the new DeepSeek default); wire parsed values into the `open-code-review` action inputs; new `always()` summary step writing params + action outputs to `$GITHUB_STEP_SUMMARY`; enable `stream_progress`.
 - `docs/review-process.md`: document the param syntax, defaults, allowlists, and the Checks summary.
-- Explicit non-goals: `small_model` and all pinned subagent models unchanged; CI default model stays `glm-5.3-flash` (separately benchmarked; DeepSeek reachable per-run via `model=`); no endpoint/secret params (URL and token stay fixed); no merge-blocking behavior (advisory stays advisory); no custom Check Run via the Checks API.
+- Explicit non-goals: `small_model` and all pinned subagent models unchanged; no endpoint/secret params (URL and token stay fixed); no merge-blocking behavior (advisory stays advisory); no custom Check Run via the Checks API.
 - No **BREAKING** changes: bare `/review` and free text (`/review focus on X`) behave exactly as today; invalid param values fail the run with a usage error rather than silently misconfiguring.
 
 ## Capabilities
