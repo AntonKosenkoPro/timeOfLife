@@ -34,6 +34,8 @@
 "account.thisDeviceSection" = "This Device";
 "account.thisDeviceFooter" = "Removes only this account's data from this device and signs you out. Synced data stays on the relay.";
 "account.deleteLocalData" = "Delete local data";
+"account.signOutConfirmTitle" = "Sign out?";
+"account.signOutConfirmMessage" = "You will be signed out on this device. Your data stays on this device and on the relay.";
 "account.permanentSection" = "Permanent Deletion";
 "account.permanentFooter" = "Permanently deletes your Lifio account and synced data, plus this account's data on this device. Your other devices will be signed out.";
 "account.deleteTitle" = "Delete account and local data?";

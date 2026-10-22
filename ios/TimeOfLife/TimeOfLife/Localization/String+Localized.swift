@@ -235,6 +235,8 @@ enum L10n: String, CaseIterable {
     case accountThisDeviceSection = "account.thisDeviceSection"
     case accountThisDeviceFooter = "account.thisDeviceFooter"
     case accountDeleteLocalData = "account.deleteLocalData"
+    case accountSignOutConfirmTitle = "account.signOutConfirmTitle"
+    case accountSignOutConfirmMessage = "account.signOutConfirmMessage"
     case accountPermanentSection = "account.permanentSection"
     case accountPermanentFooter = "account.permanentFooter"
     case accountDeleteTitle = "account.deleteTitle"

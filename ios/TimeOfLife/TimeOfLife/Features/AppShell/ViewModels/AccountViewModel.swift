@@ -36,6 +36,7 @@ final class AccountViewModel: ObservableObject {
     @Published private(set) var isDeleting = false
     @Published var isShowingDeleteConfirm = false
     @Published var isShowingEraseConfirm = false
+    @Published var isShowingSignOutConfirm = false
     @Published var deleteNotice: DeleteNotice?
     /// The last local-erase failure message, surfaced in an alert. Set only
     /// when the file survives on disk — the flow stays signed in for a retry

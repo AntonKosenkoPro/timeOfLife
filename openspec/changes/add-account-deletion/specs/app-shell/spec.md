@@ -76,7 +76,7 @@ The app SHALL expose account, sync, category management, and destructive data co
 
 #### Scenario: Sign out row parity
 - **WHEN** the user opens Account from Profile
-- **THEN** Sign out uses the same list-row geometry, leading icon, and danger tint as Delete local data, keeps the `ProfileSignOutButton` accessibility identifier, and tapping it signs out without confirmation
+- **THEN** Sign out uses the same list-row geometry, leading icon, and danger tint as Delete local data, keeps the `ProfileSignOutButton` accessibility identifier, and tapping it asks once before signing out
 
 #### Scenario: Profile retains convenient sync
 - **WHEN** the user opens Profile after account actions move

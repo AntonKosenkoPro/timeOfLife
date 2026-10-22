@@ -107,7 +107,7 @@ struct AccountView: View {
                 .accessibilityIdentifier(Self.emailAccessibilityId)
                 .accessibilityLabel("\(L10n.emailEntryEmail.text), \(vm.email)")
             Button(role: .destructive) {
-                Task { await vm.signOut() }
+                vm.isShowingSignOutConfirm = true
             } label: {
                 ListRow(
                     title: L10n.profileSignOut.text,
@@ -117,6 +117,14 @@ struct AccountView: View {
             }
             .accessibilityIdentifier(ProfileView.signOutAccessibilityId)
             .disabled(vm.isDeleting)
+            .alert(L10n.accountSignOutConfirmTitle.text, isPresented: $vm.isShowingSignOutConfirm) {
+                Button(L10n.profileSignOut.text, role: .destructive) {
+                    Task { await vm.signOut() }
+                }
+                Button(L10n.signOutCancel.text, role: .cancel) {}
+            } message: {
+                Text(L10n.accountSignOutConfirmMessage.text)
+            }
         }
     }
 

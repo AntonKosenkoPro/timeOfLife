@@ -13,7 +13,7 @@ Profile (pushed page, per-tab path, tab bar hidden)
 Account
   ├─ ACCOUNT
   │    ├─ Email (read-only, full wrapping)
-  │    └─ Sign out (no confirmation; keeps ProfileSignOutButton id)
+  │    └─ Sign out (one confirmation; keeps ProfileSignOutButton id)
   ├─ THIS DEVICE
   │    └─ Delete local data (single confirmation; server-untouched)
   └─ PERMANENT DELETION
@@ -35,7 +35,7 @@ Account
 1. `List` with native grouped sections, system Back, `.inline` title (`L10n.accountTitle`: EN "Account" / RU "Аккаунт").
 2. **ACCOUNT** section (`L10n.accountIdentitySection`):
    - Email row: full stored address, read-only wrapping text, `.accessibilityIdentifier("AccountEmailValue")`. Static text, never a field.
-   - Sign out row: existing `ListRow` geometry (leading icon `rectangle.portrait.and.arrow.right`, danger tint), keeps `ProfileSignOutButton` so existing tests keep passing. Tap signs out immediately with no confirmation; account files are kept.
+   - Sign out row: existing `ListRow` geometry (leading icon `rectangle.portrait.and.arrow.right`, danger tint), keeps `ProfileSignOutButton` so existing tests keep passing. Tap opens one confirmation naming the sign-out; confirming signs out, account files are kept.
    - Footer helper (`L10n.accountIdentityFooter`): EN "Signing out keeps this device's data. Signing back in restores it." / RU "Выход сохраняет данные на этом устройстве. Повторный вход восстановит их."
 3. **THIS DEVICE** section (`L10n.accountThisDeviceSection`: EN "This Device" / RU "Это устройство"):
    - Delete local data row (`ListRow`, `trash` icon, danger tint, `accessibilityIdentifier("AccountDeleteLocalDataButton")`; renamed from "Erase local data", existing `ProfileEraseLocalDataButton` id retired with the move).
@@ -72,6 +72,6 @@ Account
 - [ ] Email is read-only cached session state; relay addresses shown as-is.
 - [ ] Exactly one deletion-confirmation alert with the specified copy; Cancel sends nothing.
 - [ ] In-flight: progress visible, duplicates/conflicting actions disabled.
-- [ ] Sign out keeps its id and stays confirmation-free; local erase keeps single-confirm + server-untouched scope.
+- [ ] Sign out keeps its id with one confirmation; local erase keeps single-confirm + server-untouched scope.
 - [ ] VoiceOver, Dynamic Type, Reduce Motion, light/dark, and iOS 18 are tested.
 - [ ] SwiftLint and warning-as-error builds pass.

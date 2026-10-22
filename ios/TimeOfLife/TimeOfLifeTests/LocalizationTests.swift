@@ -199,6 +199,8 @@ struct LocalizationTests {
         "account.pendingAppleUnlink",
         "account.permanentFooter",
         "account.permanentSection",
+        "account.signOutConfirmMessage",
+        "account.signOutConfirmTitle",
         "account.stillExists",
         "account.stillExistsTitle",
         "account.thisDeviceFooter",
