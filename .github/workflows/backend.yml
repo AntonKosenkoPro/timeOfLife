@@ -280,11 +280,14 @@ jobs:
               # safe, but a pathological value (stray quote) still breaks the
               # source above — after sourcing, the value must still look like
               # a sender address or the deploy stops here instead of shipping
-              # a corrupted From to SES send time. (SES_FROM is a public
-              # sender address, safe to echo.)
+              # a corrupted From to SES send time. The value itself is never
+              # echoed: a quote-folded assignment can swallow following .env
+              # lines (including secrets) into SES_FROM, so printing it on
+              # failure could leak them into the log — read vars.SES_FROM in
+              # the GitHub UI instead.
               case "$SES_FROM" in
                 *"@"*) ;;
-                *) echo "SES_FROM does not look like a sender address: '$SES_FROM'"; exit 1 ;;
+                *) echo "SES_FROM failed validation (value withheld — inspect vars.SES_FROM)"; exit 1 ;;
               esac
             fi
             # DATABASE_URL selects the database: empty keeps VM-local Postgres;
