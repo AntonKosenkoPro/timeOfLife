@@ -61,7 +61,7 @@ struct ProfileView: View {
                     .environmentObject(container)
                     .environmentObject(session)
             } label: {
-                ListRow(title: L10n.accountTitle.text, icon: "person.crop.circle")
+                ListRow(title: L10n.accountTitle.text, icon: "person.crop.circle", subtitle: session.cachedEmail)
             }
             .accessibilityIdentifier(Self.accountRowAccessibilityId)
             syncStatusRow
