@@ -45,16 +45,27 @@ jobs:
         with:
           script: |
             // Grammar: /review [effort=low|medium|high] [budget=<n>[k|m]] [model=<allowlisted>] [think=max|medium|off] [full=true|false]
-            // Only key=value tokens are parsed; all other text (e.g. "/review focus on X") is ignored (bare-/review compatible).
-            // Recognized key + invalid value fails the job with usage (fail-closed, before any spend).
+            // Only the /review line carries params (first line whose first token
+            // is /review); all other text is ignored (bare-/review compatible).
+            // First occurrence of a key wins; duplicates never override.
+            // Recognized key + invalid value fails the job with usage (fail-closed,
+            // before any spend). Cost-affecting overrides are restricted to
+            // trusted roles; everyone else may run bare /review (CI defaults).
             const body = context.payload.comment?.body || '';
+            const reviewLine = (body.split('\n').find((l) => /^\s*\/review\b/i.test(l)) || '');
+            const tail = reviewLine.replace(/^\s*\/review\b/i, '');
             const params = {};
-            for (const t of body.split(/\s+/)) {
+            for (const t of tail.split(/\s+/)) {
               const m = t.match(/^(effort|budget|model|think|full)=(\S+)$/i);
-              if (m) params[m[1].toLowerCase()] = m[2];
+              if (m && params[m[1].toLowerCase()] === undefined) params[m[1].toLowerCase()] = m[2];
             }
             const usage = 'Usage: /review [effort=low|medium|high] [budget=<n>[k|m]] [model=glm-5.3-flash|deepseek-v4.1-flash:1017] [think=max|medium|off] [full=true|false]';
             const fail = (msg) => { core.setFailed(`::error::${msg}\n${usage}`); };
+            if (Object.keys(params).length > 0) {
+              const trusted = ['OWNER', 'MEMBER', 'COLLABORATOR']
+                .includes(context.payload.comment?.author_association);
+              if (!trusted) return fail('/review params are limited to owners/members/collaborators.');
+            }
             let effort = (params.effort || 'medium').toLowerCase();
             if (!['low', 'medium', 'high'].includes(effort)) return fail(`Invalid effort '${params.effort}'.`);
             let budget;
@@ -138,14 +149,30 @@ jobs:
         # Always report, even when the review failed: the Checks tab shows
         # params + outcome without opening comments or logs. Never changes
         # the job conclusion (advisory stays advisory).
+        # Third-party action outputs reach the shell only via env: (script-
+        # injection policy — GH expressions expand before the shell parses).
+        # The PARAMS_* values are allowlist-validated by the parse step.
         if: always()
+        env:
+          PARAMS_OUTCOME: ${{ steps.params.outcome }}
+          SUMMARY_RANGE: ${{ steps.review.outputs.range_summary || 'n/a' }}
+          SUMMARY_TOTAL: ${{ steps.review.outputs.comments_total || '0' }}
+          SUMMARY_INLINE: ${{ steps.review.outputs.comments_inline || '0' }}
+          SUMMARY_FAILED: ${{ steps.review.outputs.comments_failed || '0' }}
+          SUMMARY_ROUTED: ${{ steps.review.outputs.comments_routed || '0' }}
+          SUMMARY_URL: ${{ steps.review.outputs.summary_comment_url || 'n/a' }}
+          SUMMARY_CHECKPOINT: ${{ steps.review.outputs.checkpoint_after || 'n/a' }}
         run: |
           {
             echo "## AI review"
             echo ""
-            echo "- Params: effort=\`${{ env.EFFORT }}\` budget=\`${{ env.MAX_TOKENS_BUDGET }}\` model=\`${{ env.REVIEW_MODEL }}\` think=\`${{ env.THINK }}\` full=\`${{ env.FULL_REVIEW }}\`"
-            echo "- Range: \`${{ steps.review.outputs.range_summary || 'n/a' }}\`"
-            echo "- Findings: \`${{ steps.review.outputs.comments_total || '0' }}\` total, \`${{ steps.review.outputs.comments_inline || '0' }}\` inline, \`${{ steps.review.outputs.comments_failed || '0' }}\` failed, \`${{ steps.review.outputs.comments_routed || '0' }}\` routed"
-            echo "- Summary: ${{ steps.review.outputs.summary_comment_url || 'n/a' }}"
-            echo "- Checkpoint: \`${{ steps.review.outputs.checkpoint_after || 'n/a' }}\`"
+            if [ "$PARAMS_OUTCOME" != "success" ]; then
+              echo "- Params: not captured (parse step outcome: $PARAMS_OUTCOME; see job log for the failing value)"
+            else
+              echo "- Params: effort=\`${{ env.EFFORT }}\` budget=\`${{ env.MAX_TOKENS_BUDGET }}\` model=\`${{ env.REVIEW_MODEL }}\` think=\`${{ env.THINK }}\` full=\`${{ env.FULL_REVIEW }}\`"
+            fi
+            echo "- Range: \`$SUMMARY_RANGE\`"
+            echo "- Findings: \`$SUMMARY_TOTAL\` total, \`$SUMMARY_INLINE\` inline, \`$SUMMARY_FAILED\` failed, \`$SUMMARY_ROUTED\` routed"
+            echo "- Summary: $SUMMARY_URL"
+            echo "- Checkpoint: \`$SUMMARY_CHECKPOINT\`"
           } >> "$GITHUB_STEP_SUMMARY"
