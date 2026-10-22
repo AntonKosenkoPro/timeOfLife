@@ -63,11 +63,29 @@ jobs:
             const fail = (msg) => { core.setFailed(`::error::${msg}\n${usage}`); };
             // Tokens that look like params but sit outside the /review line are
             // never honored — say so loudly instead of silently running defaults.
+            // Same shape as the parse grammar (key + non-empty value; bare
+            // `key=` can never be a param), compared case-insensitively like
+            // the parser so a honored `Effort=low` isn't misreported.
+            const tailTokens = tail.split(/\s+/);
             const displaced = body.split(/\s+/).filter((t) =>
-              /^(effort|budget|model|think|full)=/i.test(t) &&
-              !tail.split(/\s+/).includes(t));
+              /^(effort|budget|model|think|full)=\S+$/i.test(t) &&
+              !tailTokens.some((u) => u.toLowerCase() === t.toLowerCase()));
             if (displaced.length > 0) {
               core.notice(`key=value params are only honored on the /review line; ignoring: ${displaced.join(' ')}`);
+            }
+            // Loudness parity: later duplicates of a captured key are also
+            // dropped (first occurrence wins) — surface those too.
+            const seenKeys = new Set();
+            const overridden = tailTokens.filter((t) => {
+              const m = t.match(/^(effort|budget|model|think|full)=(\S+)$/i);
+              if (!m) return false;
+              const k = m[1].toLowerCase();
+              if (seenKeys.has(k)) return true;
+              seenKeys.add(k);
+              return false;
+            });
+            if (overridden.length > 0) {
+              core.notice(`duplicate /review params are ignored (first occurrence wins): ${overridden.join(' ')}`);
             }
             let effort = (params.effort || 'medium').toLowerCase();
             if (!['low', 'medium', 'high'].includes(effort)) return fail(`Invalid effort '${params.effort}'.`);
