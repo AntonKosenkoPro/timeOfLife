@@ -22,12 +22,13 @@ struct AccountNavigationCopyTests {
 
     // MARK: - Stable identifiers
 
-    @Test("Profile links to Account with a stable row id")
+    // MainActor: the referenced view statics are MainActor-isolated.
+    @MainActor @Test("Profile links to Account with a stable row id")
     func profileAccountRowId() {
         #expect(ProfileView.accountRowAccessibilityId == "ProfileAccountRow")
     }
 
-    @Test("Account rows and progress keep the Account.md identifiers")
+    @MainActor @Test("Account rows and progress keep the Account.md identifiers")
     func accountRowIds() {
         #expect(AccountView.emailAccessibilityId == "AccountEmailValue")
         #expect(AccountView.deleteLocalDataAccessibilityId == "AccountDeleteLocalDataButton")
@@ -35,7 +36,7 @@ struct AccountNavigationCopyTests {
         #expect(AccountView.deletionProgressAccessibilityId == "AccountDeletionProgress")
     }
 
-    @Test("Sign out keeps its icon and accessibility id in Account")
+    @MainActor @Test("Sign out keeps its icon and accessibility id in Account")
     func signOutIdentityKept() {
         #expect(ProfileView.signOutAccessibilityId == "ProfileSignOutButton")
         #expect(ProfileView.signOutIcon == "rectangle.portrait.and.arrow.right")
