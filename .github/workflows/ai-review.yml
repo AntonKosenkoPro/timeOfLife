@@ -61,10 +61,13 @@ jobs:
             }
             const usage = 'Usage: /review [effort=low|medium|high] [budget=<n>[k|m]] [model=glm-5.3-flash|deepseek-v4.1-flash:1017] [think=max|medium|off] [full=true|false]';
             const fail = (msg) => { core.setFailed(`::error::${msg}\n${usage}`); };
-            if (Object.keys(params).length > 0) {
-              const trusted = ['OWNER', 'MEMBER', 'COLLABORATOR']
-                .includes(context.payload.comment?.author_association);
-              if (!trusted) return fail('/review params are limited to owners/members/collaborators.');
+            // Tokens that look like params but sit outside the /review line are
+            // never honored — say so loudly instead of silently running defaults.
+            const displaced = body.split(/\s+/).filter((t) =>
+              /^(effort|budget|model|think|full)=/i.test(t) &&
+              !tail.split(/\s+/).includes(t));
+            if (displaced.length > 0) {
+              core.notice(`key=value params are only honored on the /review line; ignoring: ${displaced.join(' ')}`);
             }
             let effort = (params.effort || 'medium').toLowerCase();
             if (!['low', 'medium', 'high'].includes(effort)) return fail(`Invalid effort '${params.effort}'.`);
@@ -82,6 +85,14 @@ jobs:
             if (!['max', 'medium', 'off'].includes(think)) return fail(`Invalid think '${params.think}'.`);
             let full = (params.full || 'false').toLowerCase();
             if (!['true', 'false'].includes(full)) return fail(`Invalid full '${params.full}'.`);
+            // Cost-affecting overrides are restricted to trusted roles (checked
+            // after value validation so a bad value still reports its usage
+            // error); everyone else may run bare /review (CI defaults).
+            if (Object.keys(params).length > 0) {
+              const trusted = ['OWNER', 'MEMBER', 'COLLABORATOR']
+                .includes(context.payload.comment?.author_association);
+              if (!trusted) return fail('/review params are limited to owners/members/collaborators.');
+            }
             core.exportVariable('EFFORT', effort);
             core.exportVariable('MAX_TOKENS_BUDGET', String(budget));
             core.exportVariable('REVIEW_MODEL', model);
@@ -169,7 +180,7 @@ jobs:
             if [ "$PARAMS_OUTCOME" != "success" ]; then
               echo "- Params: not captured (parse step outcome: $PARAMS_OUTCOME; see job log for the failing value)"
             else
-              echo "- Params: effort=\`${{ env.EFFORT }}\` budget=\`${{ env.MAX_TOKENS_BUDGET }}\` model=\`${{ env.REVIEW_MODEL }}\` think=\`${{ env.THINK }}\` full=\`${{ env.FULL_REVIEW }}\`"
+              echo "- Params: effort=\`$EFFORT\` budget=\`$MAX_TOKENS_BUDGET\` model=\`$REVIEW_MODEL\` think=\`$THINK\` full=\`$FULL_REVIEW\`"
             fi
             echo "- Range: \`$SUMMARY_RANGE\`"
             echo "- Findings: \`$SUMMARY_TOTAL\` total, \`$SUMMARY_INLINE\` inline, \`$SUMMARY_FAILED\` failed, \`$SUMMARY_ROUTED\` routed"
