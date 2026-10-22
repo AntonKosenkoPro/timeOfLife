@@ -36,22 +36,22 @@ Account
 2. **ACCOUNT** section (`L10n.accountIdentitySection`):
    - Email row: full stored address, read-only wrapping text, `.accessibilityIdentifier("AccountEmailValue")`. Static text, never a field.
    - Sign out row: existing `ListRow` geometry (leading icon `rectangle.portrait.and.arrow.right`, danger tint), keeps `ProfileSignOutButton` so existing tests keep passing. Tap signs out immediately with no confirmation; account files are kept.
-   - Footer helper (`L10n.accountIdentityFooter`): EN "Signing out keeps this iPhone's data. Signing back in restores it." / RU "Выход сохраняет данные на этом iPhone. Повторный вход восстановит их."
+   - Footer helper (`L10n.accountIdentityFooter`): EN "Signing out keeps this device's data. Signing back in restores it." / RU "Выход сохраняет данные на этом устройстве. Повторный вход восстановит их."
 3. **THIS DEVICE** section (`L10n.accountThisDeviceSection`: EN "This Device" / RU "Это устройство"):
    - Delete local data row (`ListRow`, `trash` icon, danger tint, `accessibilityIdentifier("AccountDeleteLocalDataButton")`; renamed from "Erase local data", existing `ProfileEraseLocalDataButton` id retired with the move).
    - Single confirmation alert (existing title/message keys, retargeted): deletes only this account's local file (state + outbox + undo buffer + cursors); dormant accounts untouched; relay data untouched; signs out after.
-   - Footer helper (`L10n.accountThisDeviceFooter`): EN "Removes only this account's data from this iPhone. Synced data stays on the relay." / RU "Удаляет с этого iPhone только данные этого аккаунта. Синхронизированные данные остаются на сервере."
+   - Footer helper (`L10n.accountThisDeviceFooter`): EN "Removes only this account's data from this device and signs you out. Synced data stays on the relay." / RU "Удаляет с этого устройства только данные этого аккаунта и выводит вас из аккаунта. Синхронизированные данные остаются на сервере."
 4. **PERMANENT DELETION** section (`L10n.accountPermanentSection`: EN "Permanent Deletion" / RU "Безвозвратное удаление"), visually separated from the groups above:
    - Delete account and local data row (`ListRow`, `person.crop.circle.badge.xmark` icon, danger tint, `accessibilityIdentifier("AccountDeleteAccountButton")`).
    - Exactly ONE confirmation alert (see Behaviors). No second confirmation anywhere.
-   - Footer helper (`L10n.accountPermanentFooter`): EN "Permanently deletes your Lifio account and synced data, plus this account's data on this iPhone. Your other devices are signed out." / RU "Навсегда удаляет ваш аккаунт Lifio и синхронизированные данные, а также данные этого аккаунта с этого iPhone. Другие ваши устройства будут выведены из аккаунта."
+   - Footer helper (`L10n.accountPermanentFooter`): EN "Permanently deletes your Lifio account and synced data, plus this account's data on this device. Your other devices are signed out." / RU "Навсегда удаляет ваш аккаунт Lifio и синхронизированные данные, а также данные этого аккаунта с этого устройства. Другие ваши устройства будут выведены из аккаунта."
 5. All three destructive rows share one visual contract: shared `ListRow` geometry (leading icon + label), `Theme.danger` tint. No new shared component — reuse `ListRow` (`COMPONENTS.md` unchanged).
 
 ### Behaviors
 
 - **One explicit alert.** Tapping Delete account and local data presents a single `.alert`:
   - Title: EN "Delete account and local data?" / RU "Удалить аккаунт и локальные данные?"
-  - Message: EN "This permanently deletes your Lifio account and all synced entries, categories, and notes, and removes this account's local data from this iPhone. Your other devices will be signed out." / RU "Это навсегда удалит ваш аккаунт Lifio и все синхронизированные записи, категории и заметки, а также удалит данные этого аккаунта с этого iPhone. Ваши другие устройства будут выведены из аккаунта."
+  - Message: EN "This permanently deletes your Lifio account and all synced entries, categories, and notes, and removes this account's local data from this device. Your other devices will be signed out." / RU "Это навсегда удалит ваш аккаунт Lifio и все синхронизированные записи, категории и заметки, а также удалит данные этого аккаунта с этого устройства. Ваши другие устройства будут выведены из аккаунта."
   - Buttons: destructive EN "Delete account and local data" / RU "Удалить аккаунт и локальные данные"; secondary Cancel (`role: .cancel`, existing key) — Cancel sends no request and changes nothing.
 - **Apple authorization is authentication, not a second alert.** Apple-created accounts without a stored revocable credential present the native Apple authorization sheet for the SAME identity before DELETE is sent (endpoint `POST /auth/apple/deletion-credential`). Dismissing that sheet cancels the flow — no request is sent. Email-only accounts skip this step entirely.
 - **In-flight protection.** While a deletion submission is running: the destructive button shows an inline `ProgressView` with an accessible progress label (`accessibilityIdentifier("AccountDeletionProgress")`), duplicate submissions are disabled, and conflicting account actions (Sign out, Delete local data, Sync now for this account) are unavailable. An error/result notice afterward is information, never a second confirmation.

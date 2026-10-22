@@ -30,14 +30,14 @@
 // Account (Profile → Account; app-shell + account-deletion specs)
 "account.title" = "Account";
 "account.identitySection" = "Account";
-"account.identityFooter" = "Signing out keeps this iPhone's data. Signing back in restores it.";
+"account.identityFooter" = "Signing out keeps this device's data. Signing back in restores it.";
 "account.thisDeviceSection" = "This Device";
-"account.thisDeviceFooter" = "Removes only this account's data from this iPhone. Synced data stays on the relay.";
+"account.thisDeviceFooter" = "Removes only this account's data from this device and signs you out. Synced data stays on the relay.";
 "account.deleteLocalData" = "Delete local data";
 "account.permanentSection" = "Permanent Deletion";
-"account.permanentFooter" = "Permanently deletes your Lifio account and synced data, plus this account's data on this iPhone. Your other devices will be signed out.";
+"account.permanentFooter" = "Permanently deletes your Lifio account and synced data, plus this account's data on this device. Your other devices will be signed out.";
 "account.deleteTitle" = "Delete account and local data?";
-"account.deleteMessage" = "This permanently deletes your Lifio account and all synced entries, categories, and notes, and removes this account's data from this iPhone. Your other devices will be signed out.";
+"account.deleteMessage" = "This permanently deletes your Lifio account and all synced entries, categories, and notes, and removes this account's data from this device. Your other devices will be signed out.";
 "account.deleteConfirm" = "Delete account and local data";
 "account.deletingProgress" = "Deleting account…";
 "account.deleteError" = "Could not delete your account. Please try again.";
@@ -122,7 +122,7 @@
 "profile.onDeviceFooter" = "Categories and time entries are stored on this device. Sync is optional.";
 "profile.eraseLocalData" = "Erase local data";
 "profile.eraseLocalDataConfirmTitle" = "Erase local data?";
-"profile.eraseLocalDataConfirmMessage" = "This permanently deletes all categories, entries, and pending sync data on this device.";
+"profile.eraseLocalDataConfirmMessage" = "This permanently deletes all categories, entries, and pending sync data on this device, and signs you out.";
 "profile.eraseConfirm" = "Erase";
 "profile.eraseCancel" = "Cancel";
 // Build-configuration suffix for the Profile version row (universal
