@@ -5,7 +5,7 @@
   --muted: #6e6e73;
   --accent: #0066cc;
   --card: #f2f2f7;
-  --card-hover: #e4e4e9;
+  --card-hover: #dcdce2;
 }
 
 @media (prefers-color-scheme: dark) {
