@@ -85,6 +85,8 @@ main {
   padding: 0.5rem 1rem;
   background: var(--card);
   border-radius: 0.75rem;
+  text-decoration: none;
+  font-weight: 600;
 }
 
 section {
