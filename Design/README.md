@@ -24,7 +24,7 @@ Keep design under version control as plain Markdown so:
 
 ### App icon assets
 
-`icon/ios/` is the authoritative approved iOS app-icon package. When the icon changes, replace that package first, then copy its `Contents.json` and referenced PNG files without transformation into `ios/TimeOfLife/TimeOfLife/Resources/Assets.xcassets/AppIcon.appiconset/`. Validate every image's pixel dimensions against its declared point size and scale before building.
+`icon/ios/` is the authoritative approved iOS app-icon package. When the icon changes, replace that package first, then copy its `Contents.json` and referenced PNG files without transformation into `ios/TimeOfLife/TimeOfLife/Resources/Assets.xcassets/AppIcon.appiconset/`. Validate every image's pixel dimensions against its declared point size and scale before building. The package is generated reproducibly from the vector master `icon/icon-master.svg` by `icon/render.py` (`rsvg-convert` 1024 → PIL Lanczos per-slot, opaque RGB) — edit the SVG and re-run the script instead of hand-editing PNGs.
 
 ## File guide
 
