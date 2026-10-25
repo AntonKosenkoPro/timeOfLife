@@ -53,7 +53,20 @@ private struct StartPresetRow: View {
                 from: DateComponents(minute: minutes)
             )
         }
-        return minutes == 15 ? L10n.timerStartForward15.text : L10n.timerStartForward30.text
+        switch minutes {
+        case 15:
+            return L10n.timerStartForward15.text
+        case 30:
+            return L10n.timerStartForward30.text
+        default:
+            // Future offsets fall back to the relative formatter so a new
+            // preset never silently inherits a sibling's label.
+            let formatter = RelativeDateTimeFormatter()
+            formatter.unitsStyle = .full
+            return formatter.localizedString(
+                from: DateComponents(minute: minutes)
+            )
+        }
     }
 }
 
