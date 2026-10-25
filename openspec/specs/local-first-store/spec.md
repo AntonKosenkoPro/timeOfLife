@@ -157,7 +157,7 @@ Each entry SHALL own its `activity_text` (trimmed, non-empty, max 60 chars; case
 - **THEN** the relay rejects the create/update with a notes `validation_error` and the local entry is unchanged
 
 ### Requirement: Timer draft holds text and live categories
-The `timer_state` singleton SHALL hold `(activity_text, ordered category_ids, notes, started_at, status)` for the running draft. Toggles SHALL rewrite the snapshot in the same chokepoint transaction. Notes saves SHALL rewrite only the notes field in the same chokepoint transaction. Stop SHALL create the entry from the draft (text + final categories + final notes) and clear it.
+The `timer_state` singleton SHALL hold `(activity_text, ordered category_ids, notes, started_at, status)` for the running draft. Toggles SHALL rewrite the snapshot in the same chokepoint transaction. Notes saves SHALL rewrite only the notes field in the same chokepoint transaction. Start-time edits SHALL rewrite only the `started_at` field in the same chokepoint transaction (text, categories, and notes untouched). Stop SHALL create the entry from the draft (text + final categories + final notes + final start) and clear it.
 
 #### Scenario: Crash restores draft tags
 - **WHEN** the app restarts with a persisted running draft
@@ -170,6 +170,10 @@ The `timer_state` singleton SHALL hold `(activity_text, ordered category_ids, no
 #### Scenario: Mid-run notes edit rewrites the snapshot
 - **WHEN** the user saves notes while running
 - **THEN** only the draft notes field updates in the same chokepoint transaction; text, categories, and `started_at` are untouched
+
+#### Scenario: Mid-run start edit rewrites only the start field
+- **WHEN** the user confirms a new start time while running
+- **THEN** only the draft `started_at` field updates in the same chokepoint transaction; text, categories, and notes are untouched, and no outbox row is written (the draft is never synced — Stop enqueues the single entry create)
 
 ### Requirement: Anonymous data is discarded on first login
 Because this change ships pre-release, the system SHALL NOT migrate existing anonymous or prior-dev-install local data into any per-account database file. On the first sign-in under the account-bound model, the system SHALL discard the anonymous local database content and start the signed-in account with its own fresh per-account file. No compatibility branch or legacy-format read path SHALL be kept for anonymous data.

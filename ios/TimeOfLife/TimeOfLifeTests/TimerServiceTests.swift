@@ -67,6 +67,59 @@ struct TimerServiceTests {
         #expect(draft?.activityText == "Gym")
     }
 
+    @Test("updateTimerDraftStartedAt rewrites the start without touching the draft")
+    func updateStartPersists() async throws {
+        let service = makeService()
+        let startedAt = Date(timeIntervalSince1970: 1_600_000_000)
+        try await service.startTimerDraft(text: "Gym", categoryIDs: [], startedAt: startedAt)
+        let backdated = startedAt.addingTimeInterval(-600)
+
+        try await service.updateTimerDraftStartedAt(backdated)
+
+        let draft = try await service.runningTimerDraft()
+        #expect(draft?.startedAt == backdated)
+        #expect(draft?.activityText == "Gym")
+        // The draft is never synced — Stop enqueues the single entry create.
+        #expect(try await service.store.outboxRows().isEmpty)
+    }
+
+    @Test("updateTimerDraftStartedAt re-anchors the Live Activity singleton")
+    func updateStartReanchorsLiveActivity() async throws {
+        // swiftlint:disable:next force_try
+        let store = try! LocalStore(url: temporaryStoreURL())
+        let fake = FakeLiveActivities()
+        let service = TimerService(store: store, liveActivities: fake)
+        let startedAt = Date(timeIntervalSince1970: 1_600_000_000)
+        try await service.startTimerDraft(text: "Gym", categoryIDs: [], startedAt: startedAt)
+        let backdated = startedAt.addingTimeInterval(-600)
+
+        try await service.updateTimerDraftStartedAt(backdated)
+
+        #expect(fake.startChanged == [backdated])
+        // The edit re-anchors in place: no re-request (no restart risk),
+        // no end.
+        #expect(fake.started.count == 1)
+        #expect(fake.ended.isEmpty)
+    }
+
+    @Test("a throwing store write still re-anchors and rethrows")
+    func updateStartReanchorsOnStoreFailure() async throws {
+        // An unbound store makes every write throw: the re-anchor must
+        // still fire (the Island follows the in-memory elapsed the app
+        // shows) and the error must propagate (no silent success).
+        let store = LocalStore()
+        let fake = FakeLiveActivities()
+        let service = TimerService(store: store, liveActivities: fake)
+        let backdated = Date(timeIntervalSince1970: 1_600_000_000)
+
+        await #expect(throws: LocalStore.LocalStoreError.self) {
+            try await service.updateTimerDraftStartedAt(backdated)
+        }
+        #expect(fake.startChanged == [backdated])
+        #expect(fake.started.isEmpty)
+        #expect(fake.ended.isEmpty)
+    }
+
     // MARK: - Helpers
 
     private func makeService() -> TimerService {

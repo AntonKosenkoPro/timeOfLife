@@ -51,6 +51,28 @@ final class TimerService: ObservableObject {
         try await store.updateTimerDraftNotes(notes)
     }
 
+    /// Rewrites only the persisted draft's start time (a mid-run backdate)
+    /// and re-anchors the Live Activity on the same singleton (chips and
+    /// icon unchanged). The locked text, categories, and notes are
+    /// untouched. The re-anchor fires whether or not the store write
+    /// succeeds, so the Island matches the in-memory elapsed the Track
+    /// screen shows (Track's own Stop derives from that same in-memory
+    /// start). Two caveats, both confined to the failed-write path: the
+    /// compact timer on other tabs and the Island Stop intent derive their
+    /// entry from the persisted draft, so after a failed write they keep
+    /// ticking from — and would save — the stale anchor until the next
+    /// successful persist converges everything. No outbox row is written
+    /// (Stop enqueues the single entry create).
+    func updateTimerDraftStartedAt(_ startedAt: Date) async throws {
+        do {
+            try await store.updateTimerDraftStartedAt(startedAt)
+        } catch {
+            await liveActivities.runStartChanged(startedAt: startedAt)
+            throw error
+        }
+        await liveActivities.runStartChanged(startedAt: startedAt)
+    }
+
     /// The persisted running-timer draft, or nil when no timer is running.
     /// Read on app launch to resume the running-timer UI after a crash or
     /// relaunch (local-first-store spec).

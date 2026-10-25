@@ -229,6 +229,99 @@ struct TrackViewModelTests {
         }
     }
 
+    @Test("backdating the start rewrites only the draft start and restarts the ticker")
+    func backdateRewritesStartOnly() async throws {
+        let vm = makeViewModel()
+        let startedAt = Date()
+        try await vm.service.store.saveTimerDraft(
+            activityText: "Work",
+            categoryIDs: ["c1"],
+            startedAt: startedAt,
+            notes: "keep"
+        )
+        vm.state = .running(
+            TrackState.Draft(text: "Work", categoryIDs: ["c1"], notes: "keep"),
+            startedAt: startedAt
+        )
+
+        vm.updateDraftStartedAt(startedAt.addingTimeInterval(-600))
+        await waitForPersistedDraft(vm) { $0?.startedAt != startedAt }
+
+        guard case let .running(draft, newStart) = vm.state else {
+            Issue.record("expected running state")
+            return
+        }
+        #expect(draft.text == "Work")
+        #expect(draft.categoryIDs == ["c1"])
+        #expect(draft.notes == "keep")
+        #expect(newStart <= Date())
+        // Elapsed jumped by ~10 minutes (bounded below for CI stability).
+        #expect(vm.elapsed > 500)
+        #expect(try await vm.service.runningTimerDraft()?.startedAt == newStart)
+        // The draft is never synced — Stop enqueues the single entry create.
+        #expect(try await vm.service.store.outboxRows().allSatisfy { $0.resource != "entry" })
+    }
+
+    @Test("a future picked time folds to yesterday")
+    func backdateFutureFoldsToYesterday() async throws {
+        // Fixed clock: the fold must not depend on the wall clock (a minute
+        // boundary between the pick and the resolve, or a run in the last
+        // minute before midnight, would otherwise flake this test).
+        var comps = DateComponents()
+        comps.year = 2026; comps.month = 10; comps.day = 25
+        comps.hour = 14; comps.minute = 20
+        comps.timeZone = TimeZone(identifier: "UTC")
+        let now = Calendar(identifier: .gregorian).date(from: comps)!
+        let vm = makeViewModel(now: now)
+        try await vm.service.store.saveTimerDraft(activityText: "Work", categoryIDs: [], startedAt: now)
+        vm.state = .running(TrackState.Draft(text: "Work"), startedAt: now)
+
+        // One minute in the future: the time-only wheel can only mean
+        // yesterday (midnight rule).
+        vm.updateDraftStartedAt(now.addingTimeInterval(60))
+        await waitForPersistedDraft(vm) { $0?.startedAt != now }
+
+        guard case let .running(_, newStart) = vm.state else {
+            Issue.record("expected running state")
+            return
+        }
+        #expect(newStart <= now)
+        #expect(!Calendar(identifier: .gregorian).isDate(newStart, inSameDayAs: now))
+    }
+
+    @Test("backdating in the error state preserves the error case")
+    func backdateInErrorPreservesCase() async throws {
+        let vm = makeViewModel()
+        let startedAt = Date()
+        try await vm.service.store.saveTimerDraft(activityText: "Work", categoryIDs: [], startedAt: startedAt)
+        vm.state = .error(TrackState.Draft(text: "Work"), startedAt: startedAt)
+
+        vm.updateDraftStartedAt(startedAt.addingTimeInterval(-300))
+        await waitForPersistedDraft(vm) { $0?.startedAt != startedAt }
+
+        guard case let .error(draft, newStart) = vm.state else {
+            Issue.record("expected error state")
+            return
+        }
+        #expect(draft.text == "Work")
+        #expect(newStart < startedAt)
+        #expect(try await vm.service.runningTimerDraft()?.startedAt == newStart)
+    }
+
+    @Test("backdating outside a run is a no-op")
+    func backdateWhenIdleIsNoOp() async throws {
+        let vm = makeViewModel()
+        vm.state = .ready(TrackState.Draft(text: "Work"))
+
+        vm.updateDraftStartedAt(Date().addingTimeInterval(-600))
+
+        guard case .ready = vm.state else {
+            Issue.record("expected ready state")
+            return
+        }
+        #expect(try await vm.service.runningTimerDraft() == nil)
+    }
+
     @Test("load restores persisted draft notes into the running state")
     func loadRestoresDraftNotes() async throws {
         let vm = makeViewModel()
@@ -586,11 +679,16 @@ struct TrackViewModelTests {
         try await store.recents(limit: TrackViewModel.recentsLimit).map(ExactName.init(storeRecent:))
     }
 
-    private func makeViewModel() -> TrackViewModel {
+    private func makeViewModel(now: Date? = nil) -> TrackViewModel {
         let connectivity = MockConnectivity(connected: true)
         // swiftlint:disable:next force_try
         let store = try! LocalStore(url: temporaryStoreURL())
         let service = TimerService(store: store)
+        if let now {
+            let fixed = now
+            // Trailing-closure form per swiftlint (binds the `now:` clock).
+            return TrackViewModel(service: service, connectivity: connectivity) { fixed }
+        }
         return TrackViewModel(service: service, connectivity: connectivity)
     }
 

@@ -504,6 +504,29 @@ struct LocalStoreTests {
         #expect(try await store.timerDraft() == nil)
     }
 
+    @Test("updateTimerDraftStartedAt rewrites only the start field")
+    func updateTimerDraftStartedAtIsSnapshotOnly() async throws {
+        let store = try makeStore()
+        let startedAt = Date(timeIntervalSinceReferenceDate: 5_000)
+        try await store.saveTimerDraft(activityText: "Gym", categoryIDs: ["a"], startedAt: startedAt, notes: "keep")
+        let backdated = Date(timeIntervalSinceReferenceDate: 4_000)
+        try await store.updateTimerDraftStartedAt(backdated)
+        let draft = try await store.timerDraft()
+        #expect(draft?.startedAt == backdated)
+        #expect(draft?.activityText == "Gym")
+        #expect(draft?.categoryIDs == ["a"])
+        #expect(draft?.notes == "keep")
+        // The draft is never synced — Stop enqueues the single entry create.
+        #expect(try await store.outboxRows().isEmpty)
+    }
+
+    @Test("updateTimerDraftStartedAt is a no-op with no draft")
+    func updateStartedAtWithoutDraftIsNoOp() async throws {
+        let store = try makeStore()
+        try await store.updateTimerDraftStartedAt(Date())
+        #expect(try await store.timerDraft() == nil)
+    }
+
     @Test("open forward-heals a pre-notes timer_state table")
     func openHealsPreNotesTimerState() async throws {
         // Simulate an install migrated before the notes column shipped:

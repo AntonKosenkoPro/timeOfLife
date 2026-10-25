@@ -102,6 +102,14 @@
 "timer.compactStop" = "Остановить таймер и сохранить запись";
 "timer.compactReturnHint" = "Вернуться в Трек";
 "timer.compactRunning" = "%@, идёт запись";
+"timer.startedAt" = "Начало %@";
+"timer.startedYesterday" = "Начало вчера %@";
+"timer.startEditorTitle" = "Время начала";
+"timer.startToday" = "Сегодня";
+"timer.startYesterday" = "Вчера";
+"timer.startConfirm" = "Подтвердить время начала";
+"timer.startForward15" = "Сдвинуть начало на 15 минут позже";
+"timer.startForward30" = "Сдвинуть начало на 30 минут позже";
 
 // Live Activity (renders in the widget extension from the shared strings)
 "activity.savedWithDuration" = "Запись сохранена: %@";

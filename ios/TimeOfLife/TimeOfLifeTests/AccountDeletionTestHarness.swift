@@ -13,6 +13,7 @@ final class RecordingLiveActivity: LiveActivityControlling, @unchecked Sendable 
     private(set) var endedOrphanedCalls = 0
     private(set) var endedRuns = 0
     func runStarted(text: String, iconSymbol: String, startedAt: Date, categoryChips: [LiveCategoryChip]) async {}
+    func runStartChanged(startedAt: Date) async {}
     func runEnded(startedAt: Date, durationSeconds: Int) async {
         incrementRuns()
     }

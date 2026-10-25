@@ -49,6 +49,14 @@ enum L10n: String, CaseIterable {
     case timerCompactStop = "timer.compactStop"
     case timerCompactReturnHint = "timer.compactReturnHint"
     case timerCompactRunning = "timer.compactRunning"
+    case timerStartedAt = "timer.startedAt"
+    case timerStartedYesterday = "timer.startedYesterday"
+    case timerStartEditorTitle = "timer.startEditorTitle"
+    case timerStartToday = "timer.startToday"
+    case timerStartYesterday = "timer.startYesterday"
+    case timerStartConfirm = "timer.startConfirm"
+    case timerStartForward15 = "timer.startForward15"
+    case timerStartForward30 = "timer.startForward30"
 
     // Live Activity end-card (renders in the widget extension from the
     // shared strings; the case exists so LocalizationTests pins the key

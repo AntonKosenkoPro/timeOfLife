@@ -656,6 +656,39 @@ struct NumericTimerReadout: View {
 
 ---
 
+## `RunningStartEditor`
+
+The tappable `Started HH:MM` caption under the Track timer plus its start editor sheet (editable-running-start-time). Its only purpose is backdating the running draft's start; it never touches text, categories, notes, history, or the outbox.
+
+### Signature
+
+```swift
+struct RunningStartEditor: View {
+    let startedAt: Date
+    let now: Date
+    let onPick: (Date) -> Void
+}
+```
+
+### Visual
+
+- One reserved caption line in every Track state (empty `Color.clear` when no run is active, so the name field and Stop never move — D10).
+- While running: `Started HH:MM` button (`.caption.weight(.semibold)`, `Theme.accentPrimary`); overnight runs read `Started yesterday HH:MM` (localized `en`+`ru`, `L10n.timerStartedAt` / `timerStartedYesterday`). Tapping opens a `.presentationDetents([.medium])` sheet — nothing on Track moves.
+- Sheet: `L10n.timerStartEditorTitle` headline, bidirectional preset steppers (`−30 −15 | +15 +30`, `Theme.backgroundPrimary` capsules — each moves the wheel N minutes from its position, cumulative; forward clamps at now), an explicit Today | Yesterday segment (`L10n.timerStartToday` / `timerStartYesterday`), an `hourAndMinute` wheel (216 pt, `in:`-bounded like the LogTime End pickers — Today offers nothing after now, Yesterday the whole prior day), and a checkmark confirm.
+- Presets move the wheel back another N minutes from its current position (cumulative — tapping −10 twice goes back 20 minutes; the day segment follows the result past midnight) without applying. The wheel previews locally; everything applies on Done through the single gated confirm path (Today with a future wheel time leaves Done disabled — the spec gate with no error text; Yesterday is always in the past). Pills meet a 48pt hit region with a press state (HIG Buttons requires 44pt minimum). Overlap with existing entries allowed. Text, categories, and notes are untouched; the write is draft-local (Stop enqueues the single entry create).
+- Applying restarts the elapsed ticker from the new anchor and re-anchors the Live Activity on the same singleton (chips/icon unchanged, no restart, no Saved card).
+- `accessibilityIdentifier("RunningStartCaption")`; presets share `RunningStartPresets` with system relative-date labels (free Russian plurals); wheel `RunningStartWheel`; confirm `RunningStartApply`; caption hint names the editor title.
+
+### States
+
+| State | Visual |
+|---|---|
+| No run | Reserved line stays empty |
+| Running, same day | `Started HH:MM` button |
+| Running, overnight | `Started yesterday HH:MM` button (picker stays time-only; future wheel times fold to yesterday) |
+
+---
+
 ## `CompactTimer`
 
 The persistent running-timer surface shown above the tab bar on History and Insights (D5). Track does not render it — the full numeric readout is already visible there.

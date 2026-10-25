@@ -60,6 +60,17 @@ enum TrackState: Equatable {
         return false
     }
 
+    /// The run's start anchor while timing (preserved through saving and
+    /// recoverable errors); nil when no run is active.
+    var startedAt: Date? {
+        switch self {
+        case let .running(_, startedAt), let .saving(_, startedAt), let .error(_, startedAt):
+            startedAt
+        case .idle, .ready, .saved:
+            nil
+        }
+    }
+
     /// The exact elapsed duration at `now` for the current state.
     func elapsed(at now: Date) -> TimeInterval {
         switch self {
