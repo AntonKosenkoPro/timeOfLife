@@ -169,19 +169,21 @@ struct RunningStartEditor: View {
                     .frame(height: 216)
                     .accessibilityIdentifier("RunningStartWheel")
                     .onChange(of: picksYesterday) { _, newYesterday in
-                        // After a segment switch the wheel must resolve under
-                        // the NEW segment's rules: a Today pick built from a
-                        // yesterday draft would otherwise sail through the
-                        // gate (a full yesterday Date is always <= now) and
-                        // strand Done disabled on an out-of-range wheel. Snap
-                        // to the reference now when the pick doesn't resolve.
+                        // Re-resolve under the NEW segment and materialize it:
+                        // leaving a yesterday-based draft in place while the
+                        // gate reads today would strand Done disabled on an
+                        // out-of-range wheel, and a later preset would compute
+                        // from the stale day and flip the segment back under
+                        // the user. When the pick doesn't resolve (future
+                        // time on Today), the draft stands and Done stays
+                        // disabled — the spec gate, no silent clamp.
                         let candidate = draft ?? startedAt
-                        if RunningStartTimeResolver.resolveForDay(
+                        if let valid = RunningStartTimeResolver.resolveForDay(
                             picked: candidate,
                             yesterday: newYesterday,
                             now: referenceNow
-                        ) == nil {
-                            draft = RunningStartTimeResolver.floorToMinute(referenceNow)
+                        ) {
+                            draft = valid
                         }
                     }
                 }
