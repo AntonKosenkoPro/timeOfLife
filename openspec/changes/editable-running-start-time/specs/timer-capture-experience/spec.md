@@ -23,6 +23,10 @@ While a timer is running, Track SHALL show a tappable `Started HH:MM` caption un
 - **WHEN** the running draft start falls on a prior calendar day
 - **THEN** the caption reads the localized yesterday form and the picker still edits time-only
 
+#### Scenario: Today segment rebuilds the pick on today's date
+- **WHEN** the user switches the editor's day segment to Today while the wheel shows a yesterday time (e.g. an overnight run started yesterday 08:00)
+- **THEN** confirming applies today at the wheel time when it is in the past, and stays disabled with no error text when the wheel time is still in the future
+
 ## MODIFIED Requirements
 
 ### Requirement: Running timer hosts the category TagSelector

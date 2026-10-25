@@ -96,6 +96,10 @@ struct TimerServiceTests {
         try await service.updateTimerDraftStartedAt(backdated)
 
         #expect(fake.startChanged == [backdated])
+        // The edit re-anchors in place: no re-request (no restart risk),
+        // no end.
+        #expect(fake.started.count == 1)
+        #expect(fake.ended.isEmpty)
     }
 
     // MARK: - Helpers

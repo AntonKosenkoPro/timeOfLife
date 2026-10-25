@@ -3,12 +3,13 @@ import SwiftUI
 /// Shared preset row: bidirectional minute steppers that move the wheel
 /// from its current position (cumulative taps accumulate) without
 /// applying. Back presets go earlier; forward presets go later, clamped
-/// at now so the wheel never strands Done disabled. The user confirms with
-/// Done, so presets and wheel share the single gated confirm path.
-/// Accessibility labels use the system relative formatter for back presets
-/// (free Russian plurals) and explicit localized strings for forward ones.
+/// at now so the wheel never strands Done disabled. The row owns no clock:
+/// the caller resolves the offset against its own reference time, so the
+/// row stays a pure function of the tap. The user confirms with Done, so
+/// presets and wheel share the single gated confirm path. Accessibility
+/// labels use the system relative formatter for back presets (free Russian
+/// plurals) and explicit localized strings for forward ones.
 private struct StartPresetRow: View {
-    let now: Date
     let onPreset: (Int) -> Void
 
     var body: some View {
@@ -81,20 +82,30 @@ struct RunningStartEditor: View {
     @State private var isPresented = false
     @State private var draft: Date?
     @State private var picksYesterday = false
+    /// The sheet's frozen reference clock, captured at open. The parent
+    /// re-renders every elapsed-tick second, but the open sheet must not
+    /// observe that: the wheel range, preset clamp, day snap, and gate all
+    /// read this single value so nothing shifts under the user's finger.
+    @State private var referenceNow = Date()
 
     var body: some View {
         Button {
             draft = nil
             // The wheel is time-only: seed the day from the current start so
-            // a reopened sheet reflects where the run actually began.
+            // a reopened sheet reflects where the run actually began, and
+            // freeze the reference clock for this editing session.
             picksYesterday = RunningStartTimeResolver.isYesterday(startedAt, now: now)
+            referenceNow = Date()
             isPresented = true
         } label: {
             Text(startCaption)
                 .font(.caption.weight(.semibold))
+                .lineLimit(1)
                 .foregroundStyle(Theme.accentPrimary)
         }
         .buttonStyle(.plain)
+        .frame(minHeight: Theme.minTapArea)
+        .contentShape(Rectangle())
         .accessibilityIdentifier("RunningStartCaption")
         .accessibilityHint(L10n.timerStartEditorTitle.text)
         .sheet(isPresented: $isPresented) {
@@ -102,21 +113,21 @@ struct RunningStartEditor: View {
                 VStack(spacing: Theme.spacingMedium) {
                     Text(L10n.timerStartEditorTitle.text)
                         .font(.headline)
-                    StartPresetRow(now: now) { minutes in
+                    StartPresetRow { minutes in
                         // Cumulative steppers: each tap moves the wheel
                         // another N minutes from its current position —
                         // back presets go earlier, forward presets go later
-                        // clamped at the floored now (a start can never be
-                        // in the future, so Done is never stranded disabled).
-                        // The day follows the result (past midnight lands on
-                        // Yesterday) so the wheel and the segment never
-                        // disagree.
-                        let base = min(draft ?? startedAt, now)
+                        // clamped at the floored reference now (a start can
+                        // never be in the future, so Done is never stranded
+                        // disabled). The day follows the result (past
+                        // midnight lands on Yesterday) so the wheel and the
+                        // segment never disagree.
+                        let base = min(draft ?? startedAt, referenceNow)
                         let target = RunningStartTimeResolver.floorToMinute(
-                            min(base.addingTimeInterval(Double(minutes * 60)), now)
+                            min(base.addingTimeInterval(Double(minutes * 60)), referenceNow)
                         )
                         draft = target
-                        picksYesterday = RunningStartTimeResolver.isYesterday(target, now: now)
+                        picksYesterday = RunningStartTimeResolver.isYesterday(target, now: referenceNow)
                     }
                     .accessibilityIdentifier("RunningStartPresets")
                     // Explicit day instead of a silent fold: Today rejects
@@ -146,13 +157,14 @@ struct RunningStartEditor: View {
                     .onChange(of: picksYesterday) {
                         // Switching back to Today with a future wheel time
                         // would strand Done disabled on a confusing wheel —
-                        // snap to now instead (same LogTime philosophy as the
-                        // range fallback below: the gate, not a clamp, is the
-                        // enforcer, but the default view is never invalid).
+                        // snap to the reference now instead (same LogTime
+                        // philosophy as the range fallback below: the gate,
+                        // not a clamp, is the enforcer, but the default view
+                        // is never invalid).
                         let candidate = draft ?? startedAt
                         if !picksYesterday,
-                           RunningStartTimeResolver.floorToMinute(candidate) > Date() {
-                            draft = Date()
+                           RunningStartTimeResolver.floorToMinute(candidate) > referenceNow {
+                            draft = referenceNow
                         }
                     }
                 }
@@ -173,11 +185,12 @@ struct RunningStartEditor: View {
                             Image(systemName: "checkmark")
                         }
                         .disabled(resolvedSelection == nil)
+                        .accessibilityLabel(L10n.timerStartConfirm.text)
                         .accessibilityIdentifier("RunningStartApply")
                     }
                 }
             }
-            .presentationDetents([.medium])
+            .presentationDetents([.medium, .large])
         }
     }
 
@@ -189,43 +202,37 @@ struct RunningStartEditor: View {
         )
     }
 
-    /// Selectable wheel range (LogTime `endTimeRange` grammar): Today is
-    /// bounded by now (the wheel offers no future times); Yesterday is the
-    /// whole prior day. The Done-disabled gate stays the enforcer for
-    /// degenerate cases (e.g. a same-day selection stranded by the clock
-    /// crossing midnight while the sheet is open), never a clamp.
+    /// Selectable wheel range (LogTime `endTimeRange` grammar), computed
+    /// from the frozen reference clock so the bounds never shift under the
+    /// user's finger: Today is bounded by the reference now (the wheel
+    /// offers no future times); Yesterday is the whole prior day. The
+    /// Done-disabled gate stays the enforcer for degenerate cases (e.g. a
+    /// same-day selection stranded by the clock crossing midnight while the
+    /// sheet is open), never a clamp.
     private var wheelRange: ClosedRange<Date> {
         let calendar = Calendar.current
         if picksYesterday {
-            let day = calendar.date(byAdding: .day, value: -1, to: now) ?? now
+            let day = calendar.date(byAdding: .day, value: -1, to: referenceNow) ?? referenceNow
             let start = calendar.startOfDay(for: day)
-            let end = (calendar.date(byAdding: .day, value: 1, to: start) ?? now)
+            let end = (calendar.date(byAdding: .day, value: 1, to: start) ?? referenceNow)
                 .addingTimeInterval(-1)
             return start...max(start, end)
         }
-        let start = calendar.startOfDay(for: now)
-        return start...max(start, now)
+        let start = calendar.startOfDay(for: referenceNow)
+        return start...max(start, referenceNow)
     }
 
-    /// The wheel pick with the segmented day applied, floored to the minute.
-    /// Nil while the pick is in the future (Today segment only — the spec
-    /// gate: Done stays disabled, no error text). Yesterday is always in
-    /// the past. The shared resolver's future-fold stays as a safety net
-    /// behind `updateDraftStartedAt`, but the UI never relies on it.
+    /// The wheel pick with the segmented day applied (Today rebuilds the
+    /// pick on today's date, so a yesterday-based draft can never leak
+    /// through the gate). Nil while the pick is in the future (Today
+    /// segment only — the spec gate: Done stays disabled, no error text).
+    /// Yesterday always resolves. The shared resolver stays the single
+    /// implementation; the UI never folds days on its own.
     private var resolvedSelection: Date? {
-        let calendar = Calendar.current
-        let picked = draft ?? startedAt
-        if picksYesterday {
-            let day = calendar.date(byAdding: .day, value: -1, to: now) ?? now
-            let comps = calendar.dateComponents([.hour, .minute], from: picked)
-            return calendar.date(
-                bySettingHour: comps.hour ?? 0,
-                minute: comps.minute ?? 0,
-                second: 0,
-                of: day
-            )
-        }
-        let floored = RunningStartTimeResolver.floorToMinute(picked, calendar: calendar)
-        return floored <= now ? floored : nil
+        RunningStartTimeResolver.resolveForDay(
+            picked: draft ?? startedAt,
+            yesterday: picksYesterday,
+            now: referenceNow
+        )
     }
 }

@@ -354,6 +354,7 @@ struct LocalizationTests {
         "timer.saving",
         "timer.selectActivity",
         "timer.start",
+        "timer.startConfirm",
         "timer.startEditorTitle",
         "timer.startForward15",
         "timer.startForward30",

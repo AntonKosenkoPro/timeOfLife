@@ -107,6 +107,7 @@
 "timer.startEditorTitle" = "Start time";
 "timer.startToday" = "Today";
 "timer.startYesterday" = "Yesterday";
+"timer.startConfirm" = "Confirm start time";
 "timer.startForward15" = "Move start 15 minutes later";
 "timer.startForward30" = "Move start 30 minutes later";
 

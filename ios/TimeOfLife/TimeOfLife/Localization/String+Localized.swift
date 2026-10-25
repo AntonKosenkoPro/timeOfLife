@@ -54,6 +54,7 @@ enum L10n: String, CaseIterable {
     case timerStartEditorTitle = "timer.startEditorTitle"
     case timerStartToday = "timer.startToday"
     case timerStartYesterday = "timer.startYesterday"
+    case timerStartConfirm = "timer.startConfirm"
     case timerStartForward15 = "timer.startForward15"
     case timerStartForward30 = "timer.startForward30"
 

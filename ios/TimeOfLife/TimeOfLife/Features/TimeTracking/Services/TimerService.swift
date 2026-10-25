@@ -54,10 +54,18 @@ final class TimerService: ObservableObject {
     /// Rewrites only the persisted draft's start time (a mid-run backdate)
     /// and re-anchors the Live Activity on the same singleton (chips and
     /// icon unchanged). The locked text, categories, and notes are
-    /// untouched; no outbox row is written (Stop enqueues the single entry
-    /// create).
+    /// untouched. The re-anchor fires whether or not the store write
+    /// succeeds, so the Island always matches the in-memory elapsed the app
+    /// is showing (on a write failure the entry Stop saves still derives
+    /// from that same in-memory start); no outbox row is written (Stop
+    /// enqueues the single entry create).
     func updateTimerDraftStartedAt(_ startedAt: Date) async throws {
-        try await store.updateTimerDraftStartedAt(startedAt)
+        do {
+            try await store.updateTimerDraftStartedAt(startedAt)
+        } catch {
+            await liveActivities.runStartChanged(startedAt: startedAt)
+            throw error
+        }
         await liveActivities.runStartChanged(startedAt: startedAt)
     }
 

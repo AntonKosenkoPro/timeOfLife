@@ -94,16 +94,20 @@ final class LiveActivityService: LiveActivityControlling {
         if let same = live.first(where: {
             $0.attributes.entryText == text && $0.activityState == .active
         }) {
-            // Same-text singleton: refresh the chips in place
-            // (mid-run retag) instead of re-requesting. Started-at stays
-            // as-is; identical chips skip the update (no flicker).
-            if same.content.state.categoryChips != categoryChips {
+            // Same-text singleton: converge chips AND the start anchor in
+            // place (mid-run retag refreshes chips; a missed start re-anchor
+            // — persisted but never pushed, e.g. crash between the store
+            // write and `update()` — heals on the next re-mirror instead of
+            // ticking stale for the rest of the run). Identical state skips
+            // the update (no flicker).
+            let current = same.content.state
+            if current.categoryChips != categoryChips || current.startedAt != startedAt {
                 let refreshed = TimerActivityAttributes.ContentState(
-                    startedAt: same.content.state.startedAt,
+                    startedAt: startedAt,
                     categoryChips: categoryChips
                 )
                 await same.update(.init(state: refreshed, staleDate: nil))
-                Self.logger.info("LiveActivityService: retag refresh ok")
+                Self.logger.info("LiveActivityService: singleton converged ok")
             }
             return
         }

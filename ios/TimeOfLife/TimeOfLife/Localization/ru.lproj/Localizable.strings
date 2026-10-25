@@ -107,6 +107,7 @@
 "timer.startEditorTitle" = "Время начала";
 "timer.startToday" = "Сегодня";
 "timer.startYesterday" = "Вчера";
+"timer.startConfirm" = "Подтвердить время начала";
 "timer.startForward15" = "Сдвинуть начало на 15 минут позже";
 "timer.startForward30" = "Сдвинуть начало на 30 минут позже";
 

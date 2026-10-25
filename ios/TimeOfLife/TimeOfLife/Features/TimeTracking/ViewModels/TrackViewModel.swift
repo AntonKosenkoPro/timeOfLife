@@ -455,7 +455,8 @@ final class TrackViewModel: ObservableObject {
     /// entry create). Available in both recording states (running + error),
     /// preserving whichever holds. A persistence failure keeps the new start
     /// in memory with the recoverable error (the beginRunning grammar) —
-    /// never a silent revert of the visible elapsed.
+    /// same as a mid-run notes save, whose in-memory value likewise stands
+    /// until the next successful load converges from the store.
     func updateDraftStartedAt(_ picked: Date) {
         let now = nowProvider()
         let resolved = RunningStartTimeResolver.resolve(picked: picked, now: now)

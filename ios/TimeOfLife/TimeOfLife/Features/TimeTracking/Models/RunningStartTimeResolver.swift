@@ -15,20 +15,46 @@ enum RunningStartTimeResolver {
     /// Resolves a picked time to the new draft start: floors to the minute
     /// and folds future times to yesterday (the wheel is time-only, so a
     /// time later than now can only mean the prior day). The result is
-    /// always `<= now`, so callers apply the spec gate by construction.
+    /// always `<= now`, so callers apply the spec gate by construction —
+    /// including the astronomically unlikely calendar failure below, which
+    /// clamps to `now` instead of leaking a future start.
     static func resolve(picked: Date, now: Date, calendar: Calendar = .current) -> Date {
         let floored = floorToMinute(picked, calendar: calendar)
-        if floored > now {
-            return calendar.date(byAdding: .day, value: -1, to: floored) ?? floored
+        guard floored > now else { return floored }
+        guard let folded = calendar.date(byAdding: .day, value: -1, to: floored), folded <= now else {
+            return now
         }
-        return floored
+        return folded
+    }
+
+    /// Resolves a wheel pick for an explicit day segment (the editor sheet):
+    /// Today rebuilds the pick on today's date (a yesterday-based draft can
+    /// never leak through — it either lands today or fails the gate), while
+    /// Yesterday applies the wheel's hour/minute to the prior day. Returns
+    /// nil when the result would be in the future (Today only — the spec
+    /// gate: Done stays disabled, no error text) or unrepresentable.
+    /// Yesterday always resolves: any prior-day wall time is in the past.
+    static func resolveForDay(picked: Date, yesterday: Bool, now: Date, calendar: Calendar = .current) -> Date? {
+        let comps = calendar.dateComponents([.hour, .minute], from: picked)
+        let day = yesterday
+            ? calendar.date(byAdding: .day, value: -1, to: now) ?? now
+            : now
+        guard let candidate = calendar.date(
+            bySettingHour: comps.hour ?? 0,
+            minute: comps.minute ?? 0,
+            second: 0,
+            of: day
+        ) else { return nil }
+        return candidate <= now ? candidate : nil
     }
 
     /// True when the start falls on a prior calendar day (the caption then
     /// uses the localized yesterday form; the picker itself stays
-    /// time-only).
+    /// time-only). Future dates report false — they belong to no prior day
+    /// (reachable only under a device clock change; the caption then shows
+    /// the today form rather than mislabeling the future as yesterday).
     static func isYesterday(_ start: Date, now: Date, calendar: Calendar = .current) -> Bool {
-        !calendar.isDate(start, inSameDayAs: now)
+        start < now && !calendar.isDate(start, inSameDayAs: now)
     }
 
     /// The caption line for a running start (`Started 14:20`, or the

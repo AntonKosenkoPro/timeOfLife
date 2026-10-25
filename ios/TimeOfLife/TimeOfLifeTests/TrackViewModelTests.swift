@@ -264,22 +264,29 @@ struct TrackViewModelTests {
 
     @Test("a future picked time folds to yesterday")
     func backdateFutureFoldsToYesterday() async throws {
-        let vm = makeViewModel()
-        let startedAt = Date()
-        try await vm.service.store.saveTimerDraft(activityText: "Work", categoryIDs: [], startedAt: startedAt)
-        vm.state = .running(TrackState.Draft(text: "Work"), startedAt: startedAt)
+        // Fixed clock: the fold must not depend on the wall clock (a minute
+        // boundary between the pick and the resolve, or a run in the last
+        // minute before midnight, would otherwise flake this test).
+        var comps = DateComponents()
+        comps.year = 2026; comps.month = 10; comps.day = 25
+        comps.hour = 14; comps.minute = 20
+        comps.timeZone = TimeZone(identifier: "UTC")
+        let now = Calendar(identifier: .gregorian).date(from: comps)!
+        let vm = makeViewModel(now: now)
+        try await vm.service.store.saveTimerDraft(activityText: "Work", categoryIDs: [], startedAt: now)
+        vm.state = .running(TrackState.Draft(text: "Work"), startedAt: now)
 
         // One minute in the future: the time-only wheel can only mean
         // yesterday (midnight rule).
-        vm.updateDraftStartedAt(Date().addingTimeInterval(60))
-        await waitForPersistedDraft(vm) { $0?.startedAt != startedAt }
+        vm.updateDraftStartedAt(now.addingTimeInterval(60))
+        await waitForPersistedDraft(vm) { $0?.startedAt != now }
 
         guard case let .running(_, newStart) = vm.state else {
             Issue.record("expected running state")
             return
         }
-        #expect(newStart <= Date())
-        #expect(!Calendar.current.isDate(newStart, inSameDayAs: Date()))
+        #expect(newStart <= now)
+        #expect(!Calendar(identifier: .gregorian).isDate(newStart, inSameDayAs: now))
     }
 
     @Test("backdating in the error state preserves the error case")
@@ -672,11 +679,16 @@ struct TrackViewModelTests {
         try await store.recents(limit: TrackViewModel.recentsLimit).map(ExactName.init(storeRecent:))
     }
 
-    private func makeViewModel() -> TrackViewModel {
+    private func makeViewModel(now: Date? = nil) -> TrackViewModel {
         let connectivity = MockConnectivity(connected: true)
         // swiftlint:disable:next force_try
         let store = try! LocalStore(url: temporaryStoreURL())
         let service = TimerService(store: store)
+        if let now {
+            let fixed = now
+            // Trailing-closure form per swiftlint (binds the `now:` clock).
+            return TrackViewModel(service: service, connectivity: connectivity) { fixed }
+        }
         return TrackViewModel(service: service, connectivity: connectivity)
     }
 

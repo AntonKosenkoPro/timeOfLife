@@ -146,28 +146,30 @@ struct TrackContent: View {
     }
 
     /// Running-start slot (editable-running-start-time): one reserved line
-    /// under the timer in every state (empty when no run is active, so the
-    /// name field and Stop never move — D10). While running it hosts the
-    /// `Started HH:MM` caption opening the start editor sheet; the sheet is
-    /// modal, so the slot never grows past its reservation.
+    /// under the timer in every state (empty when no run is actively being
+    /// recorded, so the name field and Stop never move — D10). While
+    /// running or recovering it hosts the `Started HH:MM` caption opening
+    /// the start editor sheet; the sheet is modal, so the slot never grows
+    /// past its reservation. The `.saving` mid-flight state shows no editor
+    /// (the write it would confirm is a deliberate no-op there).
     @ViewBuilder private var runningStartSlot: some View {
         Group {
-            if let startedAt = vm.state.startedAt {
+            if let startedAt = vm.state.startedAt, vm.state.isRunning {
                 RunningStartEditor(startedAt: startedAt, now: Date()) {
                     vm.updateDraftStartedAt($0)
                 }
             } else {
-                Color.clear
+                Color.clear.accessibilityHidden(true)
             }
         }
         .frame(minHeight: Self.runningStartSlotHeight)
     }
 
-    /// Reserved start-slot height: one scaled caption line, matching the
-    /// editor caption's font. The editor is modal, so the slot never grows
-    /// past this reservation.
+    /// Reserved start-slot height: the 44pt tap target (HIG Buttons), which
+    /// always covers one scaled caption line — the caption never wraps
+    /// (`lineLimit(1)`), so the slot never grows past this reservation.
     private static var runningStartSlotHeight: CGFloat {
-        UIFontMetrics(forTextStyle: .caption1).scaledValue(for: 16)
+        max(Theme.minTapArea, UIFontMetrics(forTextStyle: .caption1).scaledValue(for: 16))
     }
 
     /// Reserved non-field-error region immediately above the name/tags
