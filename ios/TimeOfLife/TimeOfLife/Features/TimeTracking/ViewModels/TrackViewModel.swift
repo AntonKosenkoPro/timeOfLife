@@ -446,6 +446,38 @@ final class TrackViewModel: ObservableObject {
         }
     }
 
+    /// Backdates the running start (editable-running-start-time): resolves
+    /// the picked time through the shared rules (minute floor, future folds
+    /// to yesterday — always `<= now` by construction), rewrites only the
+    /// draft's `started_at` snapshot, restarts the ticker from the new
+    /// anchor, and re-anchors the Live Activity. Text, categories, and notes
+    /// are untouched; no outbox row is written (Stop enqueues the single
+    /// entry create). Available in both recording states (running + error),
+    /// preserving whichever holds. A persistence failure keeps the new start
+    /// in memory with the recoverable error (the beginRunning grammar) —
+    /// never a silent revert of the visible elapsed.
+    func updateDraftStartedAt(_ picked: Date) {
+        let now = nowProvider()
+        let resolved = RunningStartTimeResolver.resolve(picked: picked, now: now)
+        switch state {
+        case let .running(draft, _):
+            state = .running(draft, startedAt: resolved)
+        case let .error(draft, _):
+            state = .error(draft, startedAt: resolved)
+        case .idle, .ready, .saving, .saved:
+            return
+        }
+        elapsed = max(0, now.timeIntervalSince(resolved))
+        startTicker(from: resolved)
+        Task {
+            do {
+                try await service.updateTimerDraftStartedAt(resolved)
+            } catch {
+                errorMessage = L10n.text(in: .default, code: "error.unknown")
+            }
+        }
+    }
+
     /// Stops the running timer and saves the completed entry locally with
     /// the final ordered categories, the final draft notes, and a single
     /// outbox row.

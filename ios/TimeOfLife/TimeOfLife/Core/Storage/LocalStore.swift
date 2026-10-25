@@ -1353,6 +1353,19 @@ actor LocalStore {
         }
     }
 
+    /// Rewrites only the running draft's start time (a mid-run backdate).
+    /// The locked text, categories, and notes are untouched, and no outbox
+    /// row is written (the draft is never synced — Stop enqueues the single
+    /// entry create). A no-op when no draft exists.
+    func updateTimerDraftStartedAt(_ startedAt: Date) throws {
+        try queue.write { db in
+            try db.execute(
+                sql: "UPDATE timer_state SET started_at = ? WHERE id = 'singleton'",
+                arguments: [startedAt]
+            )
+        }
+    }
+
     /// Clears the persisted running draft (Stop). Creating the entry from the
     /// draft is the caller's separate transaction (one outbox row per entry).
     func clearTimerDraft() throws {

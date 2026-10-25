@@ -23,6 +23,11 @@ protocol LiveActivityControlling: Sendable {
     /// that a changed chip set refreshes the live activity in
     /// place via `update()` (mid-run retag).
     func runStarted(text: String, iconSymbol: String, startedAt: Date, categoryChips: [LiveCategoryChip]) async
+    /// Re-anchors the system timer to a backdated start (mid-run start
+    /// edit): same singleton, chips and icon preserved, elapsed ticks
+    /// from the new anchor with no restart and no Saved card. Skips live
+    /// activities whose anchor already matches.
+    func runStartChanged(startedAt: Date) async
     /// Ends every live timer activity with the Saved card. No-op when
     /// none is live (idempotent — covers app/intent double stops).
     func runEnded(startedAt: Date, durationSeconds: Int) async
@@ -37,6 +42,7 @@ protocol LiveActivityControlling: Sendable {
 @MainActor
 final class NoopLiveActivityController: LiveActivityControlling {
     func runStarted(text: String, iconSymbol: String, startedAt: Date, categoryChips: [LiveCategoryChip] = []) async {}
+    func runStartChanged(startedAt: Date) async {}
     func runEnded(startedAt: Date, durationSeconds: Int) async {}
     func endOrphanedActivities(knownDurationSeconds: Int?) async {}
 }
@@ -116,6 +122,23 @@ final class LiveActivityService: LiveActivityControlling {
         } catch {
             // Never fail the timer: starting succeeds with no activity.
             Self.logger.error("LiveActivityService: request threw \(String(describing: error)) liveBefore=\(liveCount)")
+        }
+    }
+
+    /// Re-anchors the system timer to a backdated start (mid-run start
+    /// edit): every live activity keeps its singleton identity while its
+    /// elapsed readout re-anchors — chips and icon preserved, no restart,
+    /// no Saved card. Anchors that already match skip the update (no
+    /// flicker, same grammar as the retag refresh above).
+    func runStartChanged(startedAt: Date) async {
+        for activity in Activity<TimerActivityAttributes>.activities where activity.activityState == .active {
+            guard activity.content.state.startedAt != startedAt else { continue }
+            let refreshed = TimerActivityAttributes.ContentState(
+                startedAt: startedAt,
+                categoryChips: activity.content.state.categoryChips
+            )
+            await activity.update(.init(state: refreshed, staleDate: nil))
+            Self.logger.info("LiveActivityService: start re-anchor ok")
         }
     }
 

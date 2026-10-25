@@ -67,6 +67,37 @@ struct TimerServiceTests {
         #expect(draft?.activityText == "Gym")
     }
 
+    @Test("updateTimerDraftStartedAt rewrites the start without touching the draft")
+    func updateStartPersists() async throws {
+        let service = makeService()
+        let startedAt = Date(timeIntervalSince1970: 1_600_000_000)
+        try await service.startTimerDraft(text: "Gym", categoryIDs: [], startedAt: startedAt)
+        let backdated = startedAt.addingTimeInterval(-600)
+
+        try await service.updateTimerDraftStartedAt(backdated)
+
+        let draft = try await service.runningTimerDraft()
+        #expect(draft?.startedAt == backdated)
+        #expect(draft?.activityText == "Gym")
+        // The draft is never synced — Stop enqueues the single entry create.
+        #expect(try await service.store.outboxRows().isEmpty)
+    }
+
+    @Test("updateTimerDraftStartedAt re-anchors the Live Activity singleton")
+    func updateStartReanchorsLiveActivity() async throws {
+        // swiftlint:disable:next force_try
+        let store = try! LocalStore(url: temporaryStoreURL())
+        let fake = FakeLiveActivities()
+        let service = TimerService(store: store, liveActivities: fake)
+        let startedAt = Date(timeIntervalSince1970: 1_600_000_000)
+        try await service.startTimerDraft(text: "Gym", categoryIDs: [], startedAt: startedAt)
+        let backdated = startedAt.addingTimeInterval(-600)
+
+        try await service.updateTimerDraftStartedAt(backdated)
+
+        #expect(fake.startChanged == [backdated])
+    }
+
     // MARK: - Helpers
 
     private func makeService() -> TimerService {

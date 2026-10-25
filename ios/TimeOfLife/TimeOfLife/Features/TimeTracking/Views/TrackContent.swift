@@ -113,6 +113,7 @@ struct TrackContent: View {
         VStack(spacing: 0) {
             completionMarkRegion
             NumericTimerReadout(state: vm.state, elapsed: vm.elapsed)
+            runningStartSlot
             errorRegion
                 .padding(.top, Theme.spacingMedium)
         }
@@ -142,6 +143,31 @@ struct TrackContent: View {
                 }
             }
             .frame(height: 28)
+    }
+
+    /// Running-start slot (editable-running-start-time): one reserved line
+    /// under the timer in every state (empty when no run is active, so the
+    /// name field and Stop never move — D10). While running it hosts the
+    /// `Started HH:MM` caption opening the start editor sheet; the sheet is
+    /// modal, so the slot never grows past its reservation.
+    @ViewBuilder private var runningStartSlot: some View {
+        Group {
+            if let startedAt = vm.state.startedAt {
+                RunningStartEditor(startedAt: startedAt, now: Date()) {
+                    vm.updateDraftStartedAt($0)
+                }
+            } else {
+                Color.clear
+            }
+        }
+        .frame(minHeight: Self.runningStartSlotHeight)
+    }
+
+    /// Reserved start-slot height: one scaled caption line, matching the
+    /// editor caption's font. The editor is modal, so the slot never grows
+    /// past this reservation.
+    private static var runningStartSlotHeight: CGFloat {
+        UIFontMetrics(forTextStyle: .caption1).scaledValue(for: 16)
     }
 
     /// Reserved non-field-error region immediately above the name/tags

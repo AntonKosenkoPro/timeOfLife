@@ -51,6 +51,16 @@ final class TimerService: ObservableObject {
         try await store.updateTimerDraftNotes(notes)
     }
 
+    /// Rewrites only the persisted draft's start time (a mid-run backdate)
+    /// and re-anchors the Live Activity on the same singleton (chips and
+    /// icon unchanged). The locked text, categories, and notes are
+    /// untouched; no outbox row is written (Stop enqueues the single entry
+    /// create).
+    func updateTimerDraftStartedAt(_ startedAt: Date) async throws {
+        try await store.updateTimerDraftStartedAt(startedAt)
+        await liveActivities.runStartChanged(startedAt: startedAt)
+    }
+
     /// The persisted running-timer draft, or nil when no timer is running.
     /// Read on app launch to resume the running-timer UI after a crash or
     /// relaunch (local-first-store spec).

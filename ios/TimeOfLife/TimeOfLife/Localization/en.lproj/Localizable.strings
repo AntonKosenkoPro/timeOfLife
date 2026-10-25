@@ -102,6 +102,13 @@
 "timer.compactStop" = "Stop and save timer";
 "timer.compactReturnHint" = "Returns to Track";
 "timer.compactRunning" = "%@, timer running";
+"timer.startedAt" = "Started %@";
+"timer.startedYesterday" = "Started yesterday %@";
+"timer.startEditorTitle" = "Start time";
+"timer.startToday" = "Today";
+"timer.startYesterday" = "Yesterday";
+"timer.startForward15" = "Move start 15 minutes later";
+"timer.startForward30" = "Move start 30 minutes later";
 
 // Live Activity (renders in the widget extension from the shared strings)
 "activity.savedWithDuration" = "Saved %@";

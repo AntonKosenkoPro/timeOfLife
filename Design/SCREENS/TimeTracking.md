@@ -16,7 +16,10 @@ entity. History never mutates retroactively.
 4. The user taps Start; typing alone never starts timing.
 5. The numeric timer counts up from `00:00`.
 6. While running, the name is locked and the shared tag selector stays live
-   (select-only, zero allowed); toggles rewrite the draft snapshot.
+   (select-only, zero allowed); toggles rewrite the draft snapshot. A
+   `Started HH:MM` caption under the timer opens the start editor (presets
+   + wheel sheet) to backdate the run; applying rewrites the draft start
+   and restarts the elapsed readout.
 7. The user taps Stop to finish the session.
 8. The app saves the elapsed entry locally (single create + single outbox row)
    and syncs it when online.
@@ -50,6 +53,17 @@ Top-to-bottom order:
 5. State label below the readout:
    - `READY`, `RUNNING`, `SAVING`, or `SAVED` as appropriate.
    - The exact elapsed value remains the primary state information.
+   - Running-start slot (one reserved caption line in every state, empty
+     when no run is active so the name field and Stop never move — D10):
+     while running it shows the tappable `Started HH:MM` caption
+     (`Started yesterday HH:MM` for overnight runs, localized `en`+`ru`)
+     opening the start editor sheet (`RunningStartEditor`: backdate
+     presets `-5/-10/-15/-30` meaning "I started N minutes ago" plus an
+     hourAndMinute wheel with checkmark Done). Presets apply at once and
+     dismiss; the wheel applies on Done. Gate `newStart <= now` (future
+     rejected, no error text); overlap allowed; text, categories, and
+     notes untouched; draft-local (no outbox — Stop enqueues the single
+     entry create).
 6. Reserved non-field-error region, immediately above the central separator:
    - Preserves its reserved height when no error is shown, without exposing
      an empty accessibility element.
@@ -235,7 +249,7 @@ start, so a stale draft can never start.
 | Idle | No text entered; centered readout shows `00:00`; name prompt and Start are shown or Start is disabled according to validation policy. |
 | Ready | Prepared text shown; centered readout shows `00:00`; Start button shown. |
 | Search active | (Removed — no search sheet. Capture is the plain-text field plus Recents chips.) |
-| Running | Locked name label remains visible; readout updates live; Stop button shown with destructive tint; Recents yield the below-button slot to the running tag selector. |
+| Running | Locked name label remains visible; readout updates live; Stop button shown with destructive tint; Recents yield the below-button slot to the running tag selector. A `Started HH:MM` caption under the timer opens the start editor sheet to backdate the run. |
 | Saving | Readout remains stable; Stop action shows progress while the save completes. |
 | Saved | Brief saved confirmation in the completion-mark region above the readout; the same text remains prepared with `00:00` and Start, and the timer stays in its prior position. |
 | Error | Localized non-field error in the reserved region above the central separator; text wraps fully and the region grows past the reservation when needed, with the top spacer yielding first and then the central separator so the main action stays stationary; recoverable running state is preserved. |
@@ -271,6 +285,7 @@ per-record state).
 - [ ] Recents chips expose exact texts only.
 - [ ] Recents chips show the first-position Category's icon only; no names.
 - [ ] Start follows explicit selection and persists running state.
+- [ ] Running `Started HH:MM` caption opens the start editor; applying rewrites the draft start, restarts the ticker, and re-anchors the Live Activity (chips/icon unchanged).
 - [ ] Stop saves locally and preserves recoverable state on failure.
 - [ ] Compact timer is available above History and Insights navigation.
 - [x] VoiceOver, Dynamic Type, Reduce Motion, light/dark, and iOS 18 are tested.

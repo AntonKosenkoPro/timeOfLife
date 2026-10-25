@@ -255,11 +255,16 @@ final class FakeLiveActivities: LiveActivityControlling {
     }
 
     var started: [Started] = []
+    var startChanged: [Date] = []
     var ended: [Ended] = []
     var orphanEnds: [Int?] = []
 
     func runStarted(text: String, iconSymbol: String, startedAt: Date, categoryChips: [LiveCategoryChip] = []) async {
         started.append(Started(text: text, iconSymbol: iconSymbol, startedAt: startedAt, categoryChips: categoryChips))
+    }
+
+    func runStartChanged(startedAt: Date) async {
+        startChanged.append(startedAt)
     }
 
     func runEnded(startedAt: Date, durationSeconds: Int) async {
