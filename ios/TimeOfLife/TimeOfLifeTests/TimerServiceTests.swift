@@ -102,6 +102,24 @@ struct TimerServiceTests {
         #expect(fake.ended.isEmpty)
     }
 
+    @Test("a throwing store write still re-anchors and rethrows")
+    func updateStartReanchorsOnStoreFailure() async throws {
+        // An unbound store makes every write throw: the re-anchor must
+        // still fire (the Island follows the in-memory elapsed the app
+        // shows) and the error must propagate (no silent success).
+        let store = LocalStore()
+        let fake = FakeLiveActivities()
+        let service = TimerService(store: store, liveActivities: fake)
+        let backdated = Date(timeIntervalSince1970: 1_600_000_000)
+
+        await #expect(throws: LocalStore.LocalStoreError.self) {
+            try await service.updateTimerDraftStartedAt(backdated)
+        }
+        #expect(fake.startChanged == [backdated])
+        #expect(fake.started.isEmpty)
+        #expect(fake.ended.isEmpty)
+    }
+
     // MARK: - Helpers
 
     private func makeService() -> TimerService {

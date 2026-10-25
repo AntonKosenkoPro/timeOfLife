@@ -35,10 +35,16 @@ enum RunningStartTimeResolver {
     /// gate: Done stays disabled, no error text) or unrepresentable.
     /// Yesterday always resolves: any prior-day wall time is in the past.
     static func resolveForDay(picked: Date, yesterday: Bool, now: Date, calendar: Calendar = .current) -> Date? {
+        // A failed day computation fails closed (nil → Done stays
+        // disabled), never resolving to the wrong day.
+        let day: Date
+        if yesterday {
+            guard let priorDay = calendar.date(byAdding: .day, value: -1, to: now) else { return nil }
+            day = priorDay
+        } else {
+            day = now
+        }
         let comps = calendar.dateComponents([.hour, .minute], from: picked)
-        let day = yesterday
-            ? calendar.date(byAdding: .day, value: -1, to: now) ?? now
-            : now
         guard let candidate = calendar.date(
             bySettingHour: comps.hour ?? 0,
             minute: comps.minute ?? 0,

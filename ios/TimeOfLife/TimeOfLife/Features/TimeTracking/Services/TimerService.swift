@@ -55,10 +55,14 @@ final class TimerService: ObservableObject {
     /// and re-anchors the Live Activity on the same singleton (chips and
     /// icon unchanged). The locked text, categories, and notes are
     /// untouched. The re-anchor fires whether or not the store write
-    /// succeeds, so the Island always matches the in-memory elapsed the app
-    /// is showing (on a write failure the entry Stop saves still derives
-    /// from that same in-memory start); no outbox row is written (Stop
-    /// enqueues the single entry create).
+    /// succeeds, so the Island matches the in-memory elapsed the Track
+    /// screen shows (Track's own Stop derives from that same in-memory
+    /// start). Two caveats, both confined to the failed-write path: the
+    /// compact timer on other tabs and the Island Stop intent derive their
+    /// entry from the persisted draft, so after a failed write they keep
+    /// ticking from — and would save — the stale anchor until the next
+    /// successful persist converges everything. No outbox row is written
+    /// (Stop enqueues the single entry create).
     func updateTimerDraftStartedAt(_ startedAt: Date) async throws {
         do {
             try await store.updateTimerDraftStartedAt(startedAt)

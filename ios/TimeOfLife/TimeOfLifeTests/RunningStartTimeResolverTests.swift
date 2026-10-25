@@ -77,18 +77,26 @@ struct RunningStartTimeResolverTests {
     func resolveForDayRebuildsToday() {
         var comps = DateComponents()
         comps.year = 2026; comps.month = 10; comps.day = 25
-        comps.hour = 8; comps.minute = 0
+        comps.hour = 14; comps.minute = 20
         let now = calendar.date(from: comps)!
         // An overnight draft (yesterday 08:00) with the Today segment: the
-        // wheel shows 08:00, but the applied start must be today 08:00 —
-        // yesterday must never leak through the gate.
-        let yesterdayEight = calendar.date(byAdding: .day, value: -1, to: now)!
+        // wheel shows 08:00, and the applied start must be today 08:00 — a
+        // resolver that took the wall time from `now` (14:20) or ignored the
+        // pick would fail these.
+        var pickedComps = comps
+        pickedComps.day = 24
+        pickedComps.hour = 8
+        pickedComps.minute = 0
+        let picked = calendar.date(from: pickedComps)!
 
         let resolved = RunningStartTimeResolver.resolveForDay(
-            picked: yesterdayEight, yesterday: false, now: now, calendar: calendar
+            picked: picked, yesterday: false, now: now, calendar: calendar
         )
 
-        #expect(resolved == now)
+        #expect(resolved != nil)
+        #expect(calendar.isDate(resolved!, inSameDayAs: now))
+        #expect(calendar.component(.hour, from: resolved!) == 8)
+        #expect(calendar.component(.minute, from: resolved!) == 0)
     }
 
     @Test("resolveForDay rejects future Today picks")
@@ -111,15 +119,21 @@ struct RunningStartTimeResolverTests {
         comps.year = 2026; comps.month = 10; comps.day = 25
         comps.hour = 14; comps.minute = 20
         let now = calendar.date(from: comps)!
+        // A picked wall time differing from now's proves the result carries
+        // the pick, not the clock.
+        var pickedComps = comps
+        pickedComps.hour = 8
+        pickedComps.minute = 5
+        let picked = calendar.date(from: pickedComps)!
 
         let resolved = RunningStartTimeResolver.resolveForDay(
-            picked: now, yesterday: true, now: now, calendar: calendar
+            picked: picked, yesterday: true, now: now, calendar: calendar
         )
 
         #expect(resolved != nil)
         #expect(resolved! <= now)
         #expect(!calendar.isDate(resolved!, inSameDayAs: now))
-        #expect(calendar.component(.hour, from: resolved!) == 14)
-        #expect(calendar.component(.minute, from: resolved!) == 20)
+        #expect(calendar.component(.hour, from: resolved!) == 8)
+        #expect(calendar.component(.minute, from: resolved!) == 5)
     }
 }

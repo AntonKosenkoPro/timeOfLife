@@ -36,12 +36,13 @@ private struct StartPresetRow: View {
                 .font(.callout.weight(.semibold))
                 .padding(.horizontal, Theme.spacingSmall + 4)
                 .padding(.vertical, Theme.spacingSmall - 2)
+                .frame(minHeight: 48)
+                .contentShape(Capsule())
                 .foregroundStyle(Theme.textPrimary)
                 .background(Theme.backgroundSecondary)
                 .clipShape(Capsule())
         }
         .buttonStyle(PressablePillStyle())
-        .frame(minHeight: 48)
         .accessibilityLabel(Self.presetLabel(minutes: minutes))
     }
 
@@ -114,11 +115,11 @@ struct RunningStartEditor: View {
             Text(startCaption)
                 .font(.caption.weight(.semibold))
                 .lineLimit(1)
+                .frame(minHeight: Theme.minTapArea)
+                .contentShape(Rectangle())
                 .foregroundStyle(Theme.accentPrimary)
         }
         .buttonStyle(.plain)
-        .frame(minHeight: Theme.minTapArea)
-        .contentShape(Rectangle())
         .accessibilityIdentifier("RunningStartCaption")
         .accessibilityHint(L10n.timerStartEditorTitle.text)
         .sheet(isPresented: $isPresented) {
@@ -167,17 +168,20 @@ struct RunningStartEditor: View {
                     .labelsHidden()
                     .frame(height: 216)
                     .accessibilityIdentifier("RunningStartWheel")
-                    .onChange(of: picksYesterday) {
-                        // Switching back to Today with a future wheel time
-                        // would strand Done disabled on a confusing wheel —
-                        // snap to the reference now instead (same LogTime
-                        // philosophy as the range fallback below: the gate,
-                        // not a clamp, is the enforcer, but the default view
-                        // is never invalid).
+                    .onChange(of: picksYesterday) { _, newYesterday in
+                        // After a segment switch the wheel must resolve under
+                        // the NEW segment's rules: a Today pick built from a
+                        // yesterday draft would otherwise sail through the
+                        // gate (a full yesterday Date is always <= now) and
+                        // strand Done disabled on an out-of-range wheel. Snap
+                        // to the reference now when the pick doesn't resolve.
                         let candidate = draft ?? startedAt
-                        if !picksYesterday,
-                           RunningStartTimeResolver.floorToMinute(candidate) > referenceNow {
-                            draft = referenceNow
+                        if RunningStartTimeResolver.resolveForDay(
+                            picked: candidate,
+                            yesterday: newYesterday,
+                            now: referenceNow
+                        ) == nil {
+                            draft = RunningStartTimeResolver.floorToMinute(referenceNow)
                         }
                     }
                 }
