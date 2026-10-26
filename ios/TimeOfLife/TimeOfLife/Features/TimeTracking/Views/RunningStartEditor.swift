@@ -101,10 +101,15 @@ struct RunningStartEditor: View {
     /// observe that: the wheel range, preset clamp, day snap, and gate all
     /// read this single value so nothing shifts under the user's finger.
     @State private var referenceNow = Date()
+    /// Handoff for the sheet's Done: the sheet content sets this instead of
+    /// calling `onPick` directly, so the content needs no callback prop and
+    /// stays fully tick-stable (see `RunningStartSheetContent`).
+    @State private var confirmedSelection: Date?
 
     var body: some View {
         Button {
             draft = nil
+            confirmedSelection = nil
             // The wheel is time-only: seed the day from the current start so
             // a reopened sheet reflects where the run actually began, and
             // freeze the reference clock for this editing session.
@@ -123,10 +128,41 @@ struct RunningStartEditor: View {
         .accessibilityIdentifier("RunningStartCaption")
         .accessibilityHint(L10n.timerStartEditorTitle.text)
         .sheet(isPresented: $isPresented) {
-            NavigationStack {
-                VStack(spacing: Theme.spacingMedium) {
-                    Text(L10n.timerStartEditorTitle.text)
-                        .font(.headline)
+            RunningStartSheetContent(
+                startedAt: startedAt,
+                referenceNow: referenceNow,
+                draft: $draft,
+                picksYesterday: $picksYesterday,
+                confirmed: $confirmedSelection
+            )
+        }
+        .onChange(of: confirmedSelection) { _, confirmed in
+            guard let confirmed else { return }
+            onPick(confirmed)
+            draft = nil
+            confirmedSelection = nil
+            isPresented = false
+        }
+    }
+}
+
+/// Sheet content, fully insulated from the elapsed ticker: every input is
+/// either frozen at open (`startedAt`, `referenceNow`) or user-driven state
+/// (`draft`, `picksYesterday`, `confirmed`). The parent re-renders every
+/// tick, but with no changed inputs this subtree is left alone — previously
+/// the per-second rebuilds raced the detent layout and the preset row
+/// intermittently tucked under the nav bar (#204). Confirmation flows back
+/// through the `confirmed` binding so no callback prop is needed.
+private struct RunningStartSheetContent: View {
+    let startedAt: Date
+    let referenceNow: Date
+    @Binding var draft: Date?
+    @Binding var picksYesterday: Bool
+    @Binding var confirmed: Date?
+
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: Theme.spacingMedium) {
                     StartPresetRow { minutes in
                         // Cumulative steppers: each tap moves the wheel
                         // another N minutes from its current position —
@@ -186,20 +222,29 @@ struct RunningStartEditor: View {
                             draft = valid
                         }
                     }
-                }
+            }
                 .padding()
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                 .background(Theme.backgroundPrimary.ignoresSafeArea())
                 .toolbarBackground(.visible, for: .navigationBar)
                 .toolbarBackground(Theme.backgroundPrimary, for: .navigationBar)
+                // Pin the bar mode: without this the bar intermittently
+                // lays out tall and covers the preset row (#204).
+                .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
+                    // Title lives in the nav bar (LogTime titleSubtitle
+                    // pattern): an in-content headline CJK title clipped to
+                    // its top half in this sheet on 13 mini (zh-Hans fit
+                    // finding) across headline/body/regular + lineLimit +
+                    // fixedSize variants — nav-bar titles render correctly.
+                    ToolbarItem(placement: .principal) {
+                        Text(L10n.timerStartEditorTitle.text)
+                            .font(.headline)
+                            .lineLimit(1)
+                    }
                     ToolbarItem(placement: .confirmationAction) {
                         Button {
-                            if let selection = resolvedSelection {
-                                onPick(selection)
-                            }
-                            self.draft = nil
-                            isPresented = false
+                            confirmed = resolvedSelection
                         } label: {
                             Image(systemName: "checkmark")
                         }
@@ -208,18 +253,9 @@ struct RunningStartEditor: View {
                         .accessibilityIdentifier("RunningStartApply")
                     }
                 }
-            }
+        }
             .presentationDetents([.medium, .large])
         }
-    }
-
-    private var startCaption: String {
-        RunningStartTimeResolver.caption(
-            for: startedAt,
-            now: now,
-            timeText: HistoryViewModel.timeText(for:)
-        )
-    }
 
     /// Selectable wheel range (LogTime `endTimeRange` grammar), computed
     /// from the frozen reference clock so the bounds never shift under the
@@ -252,6 +288,17 @@ struct RunningStartEditor: View {
             picked: draft ?? startedAt,
             yesterday: picksYesterday,
             now: referenceNow
+        )
+    }
+}
+
+private extension RunningStartEditor {
+
+    private var startCaption: String {
+        RunningStartTimeResolver.caption(
+            for: startedAt,
+            now: now,
+            timeText: HistoryViewModel.timeText(for:)
         )
     }
 }

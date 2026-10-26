@@ -57,8 +57,8 @@ Top-to-bottom order:
      when no run is active so the name field and Stop never move — D10):
      while running it shows the tappable `Started HH:MM` caption
      (`Started yesterday HH:MM` for overnight runs, localized `en`+`ru`)
-     opening the start editor sheet (`RunningStartEditor`: backdate
-     presets `-5/-10/-15/-30` meaning "I started N minutes ago" plus an
+     opening the start editor sheet (`RunningStartEditor`: nav-bar title,
+     backdate presets `-5/-10/-15/-30` meaning "I started N minutes ago" plus an
      hourAndMinute wheel with checkmark Done). Presets apply at once and
      dismiss; the wheel applies on Done. Gate `newStart <= now` (future
      rejected, no error text); overlap allowed; text, categories, and
