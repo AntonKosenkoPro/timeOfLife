@@ -1,12 +1,9 @@
 name: ios
 
-# Requirements S6: linters + tests run on every pull request as mandatory checks.
-# Provider split (move-ios-checks-to-xcode-cloud): PR/push verification moved
-# to Xcode Cloud (see docs/ci.md). This workflow keeps NO automatic triggers —
-# it runs only as release verification via `workflow_call` from release.yml
-# (GITHUB_TOKEN pushes trigger no workflows, so release invokes it
-# explicitly). Intentional billed-minutes residue: one macOS run per release.
+# Requirements S6: linters + tests run on every pull request as a mandatory check.
 on:
+  # Also callable as release verification: GITHUB_TOKEN pushes trigger no
+  # workflows, so the release workflow invokes this explicitly on the bump.
   workflow_call:
     # Sentry symbolication wiring (observability Stage 0, task 3.3). All
     # optional: when any are absent the upload step skips with a warning
@@ -25,6 +22,14 @@ on:
       # dSYM upload still proceeds if its own secrets exist.
       SENTRY_IOS_DSN:
         required: false
+  pull_request:
+    paths:
+      - "ios/**"
+      - ".github/workflows/ios.yml"
+  push:
+    branches: [main]
+    paths:
+      - "ios/**"
 
 permissions:
   contents: read

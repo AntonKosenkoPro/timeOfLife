@@ -1,29 +1,28 @@
 # CI Pipeline Guide
 
-Split-provider quality pipeline for Lifio. Mandatory PR checks (Requirements S6) come from two providers:
+GitHub Actions carries the mandatory PR checks (Requirements S6); Xcode Cloud is archive-only (TestFlight distribution + signed-dSYM symbolication). Rationale: PR-frequency Cloud builds burned the 25h/month free quota (Oct 2026: 24h 9m used, 137 builds), so iOS verification moved back to allowance-bound GitHub `macos-15` runners.
 
-- **GitHub Actions** — `backend.yml` (Go), `openspec.yml` (spec gate), `release.yml` (manual version bump), advisory `ai-review.yml`
-- **Xcode Cloud** — iOS checks: the `iOS PR Checks` workflow (Build + Test actions on PRs touching `ios/`, SwiftLint via `ci_pre_xcodebuild.sh`, path-filtered to `ios/**`) and the tag workflow (`v*` tags: Test → Archive → TestFlight upload, with `ci_post_xcodebuild.sh` uploading the signed archive's dSYMs to Sentry staging + release; see below)
+- **GitHub Actions** — `backend.yml` (Go), `ios.yml` (iOS: xcodegen, SwiftLint, warnings-as-errors build, tests), `openspec.yml` (spec gate), `release.yml` (manual version bump), advisory `ai-review.yml`
+- **Xcode Cloud** — tag workflow only (`v*` tags: Archive → TestFlight upload, with `ci_post_xcodebuild.sh` uploading the signed archive's dSYMs to Sentry staging + release; see below). The `iOS PR Checks` workflow is disabled — no PR/push verification runs on Cloud.
 
-Workflows and their scope (PR/push iOS verification is Cloud-owned — `.github/workflows/ios.yml` keeps no automatic triggers and runs only as release verification via `workflow_call` from `release.yml`; the Cloud `iOS PR Checks` workflow's pre-build + Test action carries the PR lint/build/test bar):
+Workflows and their scope (`ios.yml` carries the iOS PR lint/build/test bar with `pull_request` + `push`-to-`main` triggers path-filtered to `ios/**`, and stays callable as release verification via `workflow_call` from `release.yml`; the tag-triggered Cloud Archive covers the signed Release build + TestFlight upload):
 
 - **`backend.yml`** — Go: gofmt, go vet, golangci-lint, race tests, OpenAPI contract gate, coverage gate, deploy
-- **Xcode Cloud `iOS PR Checks`** — iOS: Build + Test actions on PRs touching `ios/` (path-filtered to `ios/**`); SwiftLint via `ci_pre_xcodebuild.sh` (`swiftlint lint --strict`), xcodegen via `ci_post_clone.sh`, warnings-as-errors build, unit tests
+- **`ios.yml`** — iOS: `pull_request` + `push`-to-`main` path-filtered to `ios/**` (plus `workflow_call` from `release.yml verify`); xcodegen via `xcodegen generate`, SwiftLint `lint --strict`, warnings-as-errors build (per-target `SWIFT_TREAT_WARNINGS_AS_ERRORS`/`GCC_TREAT_WARNINGS_AS_ERRORS` — the Analyse bar, no separate analyzer step), unit tests, plus the release-only `sentry-dsym` job (unsigned Release archive purely for dSYMs, skips gracefully without secrets)
 - **`openspec.yml`** — spec-integrity gate: `openspec validate --all --strict` (CLI pinned 1.8.0) on every PR and push to `main`
 - **`release.yml`** — manual `workflow_dispatch` marketing-version bump: validates semver on `main`, bumps every target's versions in `project.yml` in lockstep, mirrors every Release `Info.plist`, commits + tags `vX.Y.Z` (see checklist below — a new target MUST be wired in or the next release fails)
 
-## Xcode Cloud — iOS PR checks
+## Xcode Cloud — tag archives only
 
 | Setting | Value |
 |---|---|
-| Workflow | PR-checks workflow in App Store Connect (UI-managed; `ci_scripts/` + this doc are the reviewed source of truth) |
-| Start conditions | Pull Request Changes (target `main`) + Branch Changes (`main`) |
-| File filters | `ios/**` (mirrors the old `on: pull_request paths:` — `backend/`-only PRs burn no Cloud hours) |
-| Scheme / config | `TimeOfLife`, Debug, iOS Simulator destination, `OS=latest` (never Release signing on PR builds) |
+| Workflow | Tag workflow in App Store Connect (UI-managed; `ci_scripts/` + this doc are the reviewed source of truth) |
+| Start conditions | Tag Changes (`v*` pattern only). The former `iOS PR Checks` workflow (Pull Request Changes + Branch Changes on `main`) is disabled — no PR/push verification runs on Cloud |
+| Scheme / config | `TimeOfLife`, Release, Archive action with signing (team `7923U48U87`); Debug simulator builds never run on Cloud |
 | Post-clone | `ios/TimeOfLife/ci_scripts/ci_post_clone.sh` — brew-install `xcodegen`, fail-closed `XCODEGEN_PIN` assert, `xcodegen generate` (fires `postGenCommand normalize-system-capabilities.py`), `.xcodeproj` existence check |
-| Pre-build | `ios/TimeOfLife/ci_scripts/ci_pre_xcodebuild.sh` — brew-install `swiftlint`, fail-closed `SWIFTLINT_PIN` assert, `swiftlint lint --strict` (also gates tag archives; no-op there since tags build from lint-green `main`). Resolves the project dir via the `.swiftlint.yml` marker (Test VMs replay the script from clone-root, not its repo location) and skips cleanly when no iOS sources are present — the Build action already gated lint |
-| Post-build | `ios/TimeOfLife/ci_scripts/ci_post_xcodebuild.sh` — Sentry dSYM upload from Cloud's own signed archive (`$CI_ARCHIVE_PATH/dSYMs`, the exact binary TestFlight ships) to the staging + release projects via `sentry-cli debug-files upload`. Skips quietly without an archive (PR Test-only builds); per project skips with a warning when its secrets are absent; upload failures warn but never fail the archive. Replaces the former GitHub `sentry-dsym` job's separate unsigned archive (that job still runs inside `ios.yml`, now release-verification-only) |
-| Logs | App Store Connect build page (replaces `xcpretty` GH logs); link the build in the PR when reporting iOS failures |
+| Pre-build | `ios/TimeOfLife/ci_scripts/ci_pre_xcodebuild.sh` — brew-install `swiftlint`, fail-closed `SWIFTLINT_PIN` assert, `swiftlint lint --strict` backstop on the archive path (near-zero cost: tags build from lint-green `main`). Resolves the project dir via the `.swiftlint.yml` marker (Test VMs replay the script from clone-root, not its repo location) |
+| Post-build | `ios/TimeOfLife/ci_scripts/ci_post_xcodebuild.sh` — Sentry dSYM upload from Cloud's own signed archive (`$CI_ARCHIVE_PATH/dSYMs`, the exact binary TestFlight ships) to the staging + release projects via `sentry-cli debug-files upload`. Per project skips with a warning when its secrets are absent; upload failures warn but never fail the archive |
+| Logs | App Store Connect build page; link the build in the release notes when reporting archive failures |
 
 ### Xcode Cloud shared secret env vars (Sentry; tag workflow)
 
@@ -45,7 +44,7 @@ Toolchain pins (bump together with the local toolchain; version-skew failures ar
 | `swiftlint` | `0.65.1` (`SWIFTLINT_PIN` in `ci_pre_xcodebuild.sh`) | 0.65.1 |
 | Xcode (Cloud selection) | nearest 27.x | 27.0 (27A266a) |
 
-Cloud usage is metered in App Store Connect (Users and Access → Xcode Cloud tab; per-app tab; CSV export). The account holds 25 compute-hours/mo free — the Oct 2026 baseline (~11 GH iOS runs/day × ~7.7 min wall ≈ 1.4h wall/day) fits inside it; a paid tier is a separate future decision, not this change.
+Cloud usage is metered in App Store Connect (Users and Access → Xcode Cloud tab; per-app tab; CSV export). The account holds 25 compute-hours/mo free — archive-only (a few tag builds/month) fits comfortably; the Oct 2026 PR-frequency setup (137 builds / 33h 31m) burned 97% of quota and motivated this move back to GitHub runners. GitHub `macos-15` runners bill at 10× minutes — the `ios/**` path filters (backend-only PRs run nothing iOS-side) are the cost control.
 
 Plus the **advisory, on-demand** stage-1 AI review (`ai-review.yml`, OpenCodeReview on Ollama Cloud's `deepseek-v4.1-flash`; trigger: comment `/review` on a PR) — see `docs/review-process.md`; it posts review comments but never blocks.
 
@@ -54,8 +53,8 @@ Plus the **advisory, on-demand** stage-1 AI review (`ai-review.yml`, OpenCodeRev
 Adding an Xcode target with its own `info.properties` versions or `Info.plist` (e.g. the `LifioLiveActivities` widget extension, which broke the `0.2.1` release with a duplicate-key guard failure) MUST update the pipelines in the same PR:
 
 1. **`release.yml`** — add the target's Release `Info.plist` to `RELEASE_PLISTS` in the Bump step (the single source of truth — "Commit and push" consumes it via step outputs); keep its `CFBundleShortVersionString`/`CFBundleVersion` in `project.yml` equal to the app's (App Store rejects skewed bundles). A target with a *generated* plist (`GENERATE_INFOPLIST_FILE: YES`, e.g. the `LifioLiveActivityCore` framework) has no plist to mirror — wire `MARKETING_VERSION`/`CURRENT_PROJECT_VERSION` build settings instead (missing keys fail App Store validation with ITMS-90057); the workflow bumps them in lockstep. Debug (`Info-Debug.plist`, unmanaged) stays pinned — release bumps never touch it.
-2. **Cloud scheme** — confirm the `TimeOfLife` scheme builds/tests cover the new target (the Cloud `iOS PR Checks` workflow's Test action builds the same scheme — gaps weaken every PR and the tag-triggered Test→Archive that verifies releases; the `RELEASE_PLISTS` wiring in item 1 stays GitHub-side). No per-target dSYM wiring is needed — `ci_post_xcodebuild.sh` uploads the whole archive's dSYMs.
-3. **Path filters** — if the target introduces a new top-level directory, extend the `on:` path filters of every affected GitHub workflow AND the Cloud workflow's file filters so PRs touching it still trigger CI.
+2. **`ios.yml` scheme** — confirm the `TimeOfLife` scheme builds/tests cover the new target (the `ios.yml` `lint-build-test` job builds the same scheme — gaps weaken every PR and the `verify` job that gates the tag-triggered Archive; the `RELEASE_PLISTS` wiring in item 1 stays GitHub-side). No per-target dSYM wiring is needed — `ci_post_xcodebuild.sh` uploads the whole Cloud archive's dSYMs, and the `sentry-dsym` job archives the same scheme unsigned.
+3. **Path filters** — if the target introduces a new top-level directory, extend the `on:` path filters of every affected GitHub workflow so PRs touching it still trigger CI.
 
 ## Stages (`backend.yml`)
 
@@ -106,9 +105,9 @@ Non-secret variables: `EMAIL_BACKEND`, `AWS_REGION`, `SES_FROM` (set as reposito
 
 - **PostgreSQL behavior needs verification** — run `make test:pg` locally after starting PostgreSQL; parity is not currently a CI job.
 - **Coverage gate fails** — total coverage dropped below the floor; add/keep tests. Raise the floor in `backend.yml` as coverage grows.
-- **Workflow not triggering** — workflow file paths must match the `on:` path filters (`backend/**`, `.github/workflows/backend.yml`); for iOS, the PR must touch `ios/**` or the Cloud file filter skips it by design.
+- **Workflow not triggering** — workflow file paths must match the `on:` path filters (`backend/**`, `.github/workflows/backend.yml`); for iOS, the PR must touch `ios/**` or `ios.yml`'s path filter skips it by design.
 - **Cloud build fails on version assert** (`expected XCODEGEN_PIN/SWIFTLINT_PIN`) — Homebrew drifted: confirm the new version locally (`xcodegen generate` diff clean + `swiftlint lint --strict` green), then bump the pin in `ci_scripts/` and the pin table above in the same PR.
-- **Cloud status check missing on a PR** — the App Store Connect ↔ GitHub connection needs Checks/Statuses write permission; verify the workflow's start conditions still target `main` and the PR's base is `main`.
+- **GitHub `ios` check missing on a PR** — verify the PR touches `ios/**` (path filter) and branch protection still requires `ios / lint-build-test` (Settings → branch protection for `main`).
 - **AI review missing after /review** — check the `OLLAMA_API_KEY` secret exists (Ollama Cloud key from ollama.com → Settings → Keys) and the job didn't skip (the comment must be on a PR, contain `/review`, and not come from a bot). Rules/tuning per `docs/review-process.md` and `.opencodereview/rule.json`.
 
 ## Worktrees and rebase discipline
