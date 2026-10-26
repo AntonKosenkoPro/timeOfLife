@@ -253,10 +253,9 @@ extension AppContainer {
     /// Returns name → id.
     private static func seedZhFitCategories(into store: LocalStore) async -> [String: String] {
         var catID: [String: String] = [:]
-        let starters = zip(
-            ["工作", "爱好", "运动", "学习", "休闲", "睡眠", "娱乐"],
-            LocalStore.starterCategoryIcons
-        )
+        let names = ["工作", "爱好", "运动", "学习", "休闲", "睡眠", "娱乐"]
+        assert(names.count == LocalStore.starterCategoryIcons.count)
+        let starters = zip(names, LocalStore.starterCategoryIcons)
         for (name, icon) in starters {
             if let found = try? await store.category(named: name)?.id {
                 catID[name] = found
@@ -271,7 +270,7 @@ extension AppContainer {
                 try await store.createCategory(category)
                 catID[name] = category.id
             } catch {
-                seedLogger.error("UITest seed: zhFit starter failed")
+                seedLogger.error("UITest seed: zhFit starter failed name=\(name, privacy: .public): \(error.localizedDescription, privacy: .public)")
             }
             if let found = try? await store.category(named: name)?.id {
                 catID[name] = found

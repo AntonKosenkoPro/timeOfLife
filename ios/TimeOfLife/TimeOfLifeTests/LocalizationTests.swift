@@ -11,10 +11,14 @@ struct LocalizationTests {
     }
 
     /// Every shipped locale, derived from the app bundle so a newly added
-    /// `.lproj` is covered automatically (a missing key then fails loudly
-    /// instead of silently skipping the locale).
+    /// `.lproj` is covered automatically, pinned against the expected set so
+    /// a dropped locale fails loudly instead of passing vacuously.
+    private static let expectedLocales = ["en", "es-419", "pt-BR", "ru", "zh-Hans"]
+
     private static var allLocales: [String] {
-        Bundle.main.localizations.filter { $0 != "Base" }.sorted()
+        let locales = Bundle.main.localizations.filter { $0 != "Base" }.sorted()
+        #expect(locales == expectedLocales, "Shipped locales changed: \(locales)")
+        return locales
     }
 
     private func bundle(for locale: String) throws -> Bundle {
