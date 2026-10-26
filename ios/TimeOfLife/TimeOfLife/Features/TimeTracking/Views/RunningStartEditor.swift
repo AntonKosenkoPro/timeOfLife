@@ -241,6 +241,7 @@ private struct RunningStartSheetContent: View {
                         Text(L10n.timerStartEditorTitle.text)
                             .font(.headline)
                             .lineLimit(1)
+                            .minimumScaleFactor(0.75)
                     }
                     ToolbarItem(placement: .confirmationAction) {
                         Button {
