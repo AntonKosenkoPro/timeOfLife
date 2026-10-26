@@ -10,8 +10,12 @@ struct LocalizationTests {
         L10n.allCases
     }
 
-    /// Every shipped locale. Extend here when adding a locale.
-    private static let allLocales = ["en", "ru", "zh-Hans", "es-419", "pt-BR"]
+    /// Every shipped locale, derived from the app bundle so a newly added
+    /// `.lproj` is covered automatically (a missing key then fails loudly
+    /// instead of silently skipping the locale).
+    private static var allLocales: [String] {
+        Bundle.main.localizations.filter { $0 != "Base" }.sorted()
+    }
 
     private func bundle(for locale: String) throws -> Bundle {
         let path = try #require(Bundle.main.path(forResource: locale, ofType: "lproj"),
@@ -91,7 +95,7 @@ struct LocalizationTests {
         #expect(!msg.isEmpty)
     }
 
-    @Test("refresh recovery codes resolve in en + ru bundles")
+    @Test("refresh recovery codes resolve in every locale bundle")
     func refreshRecoveryCodesResolve() throws {
         let keys = [
             "error.refresh_attempt_completed",
@@ -113,7 +117,7 @@ struct LocalizationTests {
 
     // MARK: - Validation fragment keys
 
-    @Test("validation fragment keys resolve in en + ru bundles")
+    @Test("validation fragment keys resolve in every locale bundle")
     func validationFragmentKeysResolve() throws {
         let keys = [
             "common.and",
@@ -179,6 +183,7 @@ struct LocalizationTests {
         "activity.savedWithDuration",
         "app.name",
         "appleSignIn.error",
+        "appleSignIn.title",
         "authGate.title",
         "category.nameRequired",
         "category.nameTooLong",

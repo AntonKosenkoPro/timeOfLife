@@ -83,6 +83,7 @@
 "error.invalid_apple_token" = "Falha ao iniciar sessão com a Apple. Tente de novo.";
 
 // Apple sign in
+"appleSignIn.title" = "Iniciar sessão com a Apple";
 "appleSignIn.error" = "Falha ao iniciar sessão com a Apple. Tente de novo.";
 
 // Timer
