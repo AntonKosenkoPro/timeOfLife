@@ -3,7 +3,7 @@
 | U1    | Should have minimalistic design                                                                                                                                         |         |
 | U2    | Should support Dark and light theme                                                                                                                                     |         |
 | U3    | Should work correctly offline (after the mandatory sign-in; anonymous offline use is removed)                                                                                                                            |         |
-| U4    | Should support localization (English and Russian at least)                                                                                                               |         |
+| U4    | Should support localization (English, Russian, Simplified Chinese, Latin American Spanish, Brazilian Portuguese)                                                                                                               |         |
 | U5    | Should be in strict compliance with Apple Human Interface Guidelines                                                                                                     |         |
 | R1    | Should store auth data securely (no direct password store for instance)                                                                                                 |         |
 | S1    | Should use most mainstream technologies (e.g. PostgreSQL for SQL DB, Kafka for MQ, etc.)                                                                                |         |

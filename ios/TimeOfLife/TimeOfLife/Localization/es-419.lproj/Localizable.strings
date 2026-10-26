@@ -1,0 +1,338 @@
+/* Lifio — Español (Latinoamérica) */
+
+// App
+"app.name" = "Lifio";
+
+// Welcome
+"welcome.tagline" = "Seguimiento personal del tiempo.";
+"welcome.continueWithEmail" = "Continuar con correo electrónico";
+
+// Auth gate (account-bound-local-data: required-voice launch gate)
+"authGate.title" = "Iniciar sesión para empezar a registrar";
+
+// Email entry (passwordless: sign-in + sign-up collapse into email → OTP)
+"emailEntry.title" = "Continuar con correo electrónico";
+"emailEntry.email" = "Correo electrónico";
+"emailEntry.subtitle" = "Ingresar el correo electrónico para recibir un código de un solo uso.";
+"emailEntry.submit" = "Continuar";
+
+// OTP entry
+"otp.title" = "Ingresar código";
+"otp.sentTo" = "Ingresar el código de 6 dígitos enviado a %@";
+"otp.resend" = "Reenviar código";
+"otp.resendCountdown" = "Reenviar código en %ds";
+"otp.codeLabel" = "Código de un solo uso, %d dígitos";
+"otp.codeHint" = "Tocar dos veces para editar";
+
+// Sign out confirmation
+"signOut.cancel" = "Cancelar";
+
+// Account (Profile → Account; app-shell + account-deletion specs)
+"account.title" = "Cuenta";
+"account.identitySection" = "Cuenta";
+"account.identityFooter" = "Cerrar sesión conserva los datos de este dispositivo. Volver a iniciar sesión los restaura.";
+"account.thisDeviceSection" = "Este dispositivo";
+"account.thisDeviceFooter" = "Elimina solo los datos de esta cuenta en este dispositivo y cierra la sesión. Los datos sincronizados permanecen en el servidor.";
+"account.deleteLocalData" = "Eliminar datos locales";
+"account.signOutConfirmTitle" = "¿Cerrar sesión?";
+"account.signOutConfirmMessage" = "Se cerrará la sesión en este dispositivo. Los datos permanecen en este dispositivo y en el servidor.";
+"account.permanentSection" = "Eliminación permanente";
+"account.permanentFooter" = "Elimina permanentemente la cuenta de Lifio y los datos sincronizados, además de los datos de esta cuenta en este dispositivo. Se cerrará la sesión en los demás dispositivos.";
+"account.deleteTitle" = "¿Eliminar la cuenta y los datos locales?";
+"account.deleteMessage" = "Esto elimina permanentemente la cuenta de Lifio y todas las entradas, categorías y notas sincronizadas, y quita los datos de esta cuenta en este dispositivo. Se cerrará la sesión en los demás dispositivos.";
+"account.deleteConfirm" = "Eliminar cuenta y datos locales";
+"account.deletingProgress" = "Eliminando cuenta…";
+"account.deleteError" = "No se pudo eliminar la cuenta. Intentar de nuevo.";
+"account.deleteFailedTitle" = "No se pudo eliminar la cuenta";
+"account.deleteOffline" = "Sin conexión. Conectar e intentar de nuevo.";
+"account.deleteOfflineTitle" = "Sin conexión";
+"account.stillExists" = "La cuenta sigue existiendo. No se eliminó ningún dato.";
+"account.stillExistsTitle" = "La cuenta sigue existiendo";
+"account.pendingAppleUnlink" = "Cuenta eliminada. La desvinculación de la autorización de Apple sigue en curso y se completa automáticamente.";
+"account.cleanupRetryTitle" = "Terminar la limpieza de la cuenta";
+"account.cleanupRetryMessage" = "La cuenta fue eliminada, pero algunos datos locales no se pudieron quitar. Reintentar la limpieza ahora.";
+"account.cleanupRetryConfirm" = "Limpiar ahora";
+
+// Validation (unified messages — Requirements U2/U4: one merged message per field)
+"common.and" = "y";
+"validation.emailEmpty" = "El correo electrónico es obligatorio.";
+"validation.email.prefix" = "El correo electrónico debe";
+"validation.email.rule.invalid" = "ser una dirección válida";
+"validation.email.rule.tooLong" = "tener como máximo 254 caracteres";
+"validation.otpEmpty" = "Ingresar el código.";
+"validation.otp.prefix" = "El código debe";
+"validation.otp.rule.invalid" = "ser un código de 6 dígitos";
+
+// Server errors (mapped from error codes)
+"error.invalid_body" = "Revisar los datos ingresados.";
+"error.internal_error" = "El servidor encontró un error. Intentar de nuevo.";
+"error.rate_limited" = "Demasiados intentos. Intentar más tarde.";
+"error.invalid_otp" = "Código incorrecto. Intentar de nuevo.";
+"error.otp_expired" = "Este código venció. Solicitar uno nuevo.";
+"error.otp_attempts_exceeded" = "Demasiados intentos. Solicitar un código nuevo.";
+"error.invalid_refresh" = "La sesión venció. Iniciar sesión de nuevo.";
+"error.token_reuse" = "Sesión invalidada por seguridad. Iniciar sesión de nuevo.";
+"error.offline" = "Sin conexión.";
+"error.unknown" = "Algo salió mal. Intentar de nuevo.";
+"error.unauthorized" = "La sesión venció. Iniciar sesión de nuevo.";
+"error.invalid_request" = "Falta información del dispositivo. Actualizar la app e intentar de nuevo.";
+"error.refresh_expired" = "La sesión venció. Iniciar sesión de nuevo.";
+"error.refresh_attempt_completed" = "Sesión ya actualizada. Intentar de nuevo.";
+"error.refresh_attempt_conflict" = "Conflicto de inicio de sesión. Intentar de nuevo.";
+"error.apple_not_configured" = "El inicio de sesión con Apple no está disponible temporalmente. Intentar más tarde.";
+"error.invalid_apple_token" = "Falló el inicio de sesión con Apple. Intentar de nuevo.";
+
+// Apple sign in
+"appleSignIn.error" = "Falló el inicio de sesión con Apple. Intentar de nuevo.";
+
+// Timer
+"timer.start" = "Iniciar";
+"timer.stop" = "Detener";
+"timer.stopHint" = "Detiene el temporizador y guarda la entrada";
+"timer.idlePrompt" = "Ingresar el nombre de una actividad para iniciar";
+"timer.namePlaceholder" = "¿En qué se trabajó?";
+"timer.saved" = "Guardado";
+"timer.saving" = "Guardando…";
+"timer.running" = "En curso";
+"timer.ready" = "Listo";
+"timer.chooserRecent" = "Recientes";
+"timer.recentsEmptyHint" = "Las actividades registradas aparecerán aquí.";
+"timer.selectActivity" = "Seleccionar %@";
+"timer.compactStop" = "Detener temporizador y guardar";
+"timer.compactReturnHint" = "Volver a Registrar";
+"timer.compactRunning" = "%@, temporizador en curso";
+"timer.startedAt" = "Inicio %@";
+"timer.startedYesterday" = "Inicio ayer %@";
+"timer.startEditorTitle" = "Hora de inicio";
+"timer.startToday" = "Hoy";
+"timer.startYesterday" = "Ayer";
+"timer.startConfirm" = "Confirmar hora de inicio";
+"timer.startForward15" = "Mover el inicio 15 minutos después";
+"timer.startForward30" = "Mover el inicio 30 minutos después";
+
+// Live Activity (renders in the widget extension from the shared strings)
+"activity.savedWithDuration" = "Guardado %@";
+
+// App shell
+"tab.track" = "Registrar";
+"tab.history" = "Historial";
+"tab.insights" = "Análisis";
+"profile.title" = "Perfil";
+"profile.account" = "Cuenta";
+"profile.signOut" = "Cerrar sesión";
+"profile.syncNow" = "Sincronizar ahora";
+"profile.syncing" = "Sincronizando…";
+"profile.syncedSuccessfully" = "Sincronización exitosa";
+"profile.lastSynced.ago" = "hace %@";
+"profile.lastSynced.justNow" = "Hace menos de un minuto";
+"profile.syncError" = "Falló la sincronización. Intentar de nuevo.";
+"profile.categories" = "Categorías";
+"profile.onDevice" = "En este dispositivo";
+"profile.onDeviceFooter" = "Las categorías y entradas se guardan en este dispositivo. La sincronización es opcional.";
+"profile.eraseLocalData" = "Borrar datos locales";
+"profile.eraseLocalDataConfirmTitle" = "¿Borrar datos locales?";
+"profile.eraseLocalDataConfirmMessage" = "Esto elimina permanentemente todas las categorías, entradas y datos de sincronización pendientes en este dispositivo, y cierra la sesión.";
+"profile.eraseConfirm" = "Borrar";
+"profile.eraseCancel" = "Cancelar";
+// Build-configuration suffix for the Profile version row (universal
+// technical term — identical in ru).
+"profile.versionDebugSuffix" = "Debug";
+
+// Destination empty states
+"history.emptyTitle" = "Aún no hay nada aquí";
+"history.emptySubtitle" = "Las sesiones completadas formarán una cronología aquí.";
+"insights.emptyTitle" = "Aún no hay nada aquí";
+"insights.emptySubtitle" = "Los patrones aparecen después de registrar un poco de tiempo.";
+
+// History day-group labels
+"history.day.today" = "Hoy";
+"history.day.yesterday" = "Ayer";
+
+// In-progress indicator
+"history.inProgress" = "En curso";
+
+// Day total suffix
+"history.tracked" = "registrado";
+
+// Notes indicator (history-entry-list)
+"history.hasNotes" = "tiene notas";
+
+// History pull-to-refresh (history-pull-to-sync)
+"history.pull.offline" = "Sin conexión. Conectar e intentar de nuevo.";
+"history.syncError.title" = "Falló la sincronización";
+"common.ok" = "OK";
+
+// Insights breakdown (insights-breakdown)
+"insights.period.today" = "Hoy";
+"insights.period.week" = "Esta semana";
+"insights.period.all" = "Todo el tiempo";
+"insights.lens.category" = "Por categoría";
+"insights.lens.activity" = "Por actividad";
+"insights.noCategory" = "Sin categoría";
+"insights.footnote" = "Una entrada con varias categorías cuenta completa en cada una.";
+"insights.empty.today" = "Hoy aún no hay nada registrado.";
+"insights.empty.week" = "Esta semana aún no hay nada registrado.";
+
+// Entry provenance (entry-provenance spec, activity-detail-sheet)
+"provenance.via.widget" = "vía Widget";
+"provenance.via.siri" = "vía Siri";
+"provenance.via.control" = "vía Control";
+"provenance.via.screentime" = "vía Screen Time";
+"provenance.via.garmin" = "vía Garmin";
+"provenance.via.calendar" = "vía Calendario";
+"provenance.via.healthkit" = "vía HealthKit";
+
+// Entry source names (activity-detail-sheet entry rows: sync icon + name)
+"provenance.name.widget" = "Widget";
+"provenance.name.siri" = "Siri";
+"provenance.name.control" = "Control";
+"provenance.name.screentime" = "Screen Time";
+"provenance.name.garmin" = "Garmin";
+"provenance.name.calendar" = "Calendario";
+"provenance.name.healthkit" = "HealthKit";
+
+// Log Time sheet (manual-entry spec)
+"logTime.title" = "Registrar tiempo";
+"logTime.cancel" = "Cancelar";
+"logTime.starts" = "Inicio";
+"logTime.ends" = "Fin";
+
+// Unified entry form (entry-editor spec: EDIT + LOCKED modes)
+"entry.editTitle" = "Editar entrada";
+"entry.lockedTitle" = "Entrada importada";
+"entry.dismissLabel" = "Cerrar";
+"entry.confirmAddLabel" = "Añadir entrada";
+"entry.confirmSaveLabel" = "Guardar entrada";
+"entry.delete" = "Eliminar entrada";
+"entry.deleteTitle" = "¿Eliminar esta entrada?";
+"entry.deleteMessage" = "Esta entrada será eliminada. Agitar para deshacer.";
+"entry.deleteConfirm" = "Eliminar";
+"entry.staleError" = "Esta entrada cambió en otro lugar. Descartar y volver a abrirla e intentar de nuevo.";
+"entry.lockedNote" = "Importado vía %@ — la edición está desactivada para evitar conflictos con la fuente.";
+"entry.nameLabel" = "Nombre";
+"entry.namePlaceholder" = "p. ej., Gimnasio";
+"entry.duration" = "Duración: %@";
+"entry.invalidInterval" = "El fin debe ser posterior al inicio";
+"entry.categoriesLabel" = "Categorías";
+"entry.notesLabel" = "Notas";
+"entry.notesPlaceholder" = "Notas opcionales";
+
+// History manual entry (add-manual-entry)
+"history.logTime" = "Registrar tiempo";
+
+// Name picker (dedicated-name-picker: shared push page)
+"name.clear" = "Borrar nombre";
+"name.pickerTitle" = "Elegir nombre";
+"name.pickerNoMatchHint" = "Sin coincidencias — Listo usará “%@” como nombre nuevo.";
+"notes.editorSubtitle" = "%@ • %d/2000";
+"notes.editorCounter" = "%d/2000";
+"notes.editorPlaceholder" = "Querido diario...";
+
+// Starter categories (category-management spec, seed requirement)
+"category.seed.work" = "Trabajo";
+"category.seed.hobby" = "Pasatiempo";
+"category.seed.sport" = "Deporte";
+"category.seed.education" = "Estudio";
+"category.seed.relax" = "Descanso";
+"category.seed.sleep" = "Sueño";
+"category.seed.entertainment" = "Entretenimiento";
+
+// Undo (chip selection accessibility)
+"undo.selected" = "Seleccionado";
+"undo.notSelected" = "No seleccionado";
+"undo.selectedPosition" = "Seleccionado, %d de %d";
+
+// Manage categories (category-management D4)
+"manage.categories.title" = "Categorías";
+"manage.categories.add" = "Añadir categoría";
+"manage.categories.emptyTitle" = "Aún no hay categorías";
+"manage.categories.emptySubtitle" = "Añadir una para etiquetar las entradas.";
+"manage.categories.rowA11y" = "Categoría";
+"manage.categories.editHint" = "Tocar dos veces para editar.";
+"manage.categories.loading" = "Cargando categorías…";
+"delete.category.title" = "¿Eliminar categoría?";
+"delete.category.message" = "%@ se quitará de todas las entradas. Las entradas se conservan. Agitar para deshacer.";
+"delete.category.confirm" = "Eliminar";
+"error.categoryExists" = "Ya existe una categoría con este nombre.";
+"error.conflict" = "Editado en otro dispositivo. Mostrando la versión más reciente.";
+"error.localPersistence" = "No se pudo guardar localmente. Intentar de nuevo.";
+
+// Category editor (category-management D4)
+"categoryEditor.createTitle" = "Nueva categoría";
+"categoryEditor.editTitle" = "Editar categoría";
+"categoryEditor.nameLabel" = "Nombre";
+"categoryEditor.namePlaceholder" = "p. ej., Deporte";
+"categoryEditor.iconLabel" = "Icono";
+"categoryEditor.iconUnavailable" = "Este icono no está disponible en esta versión de iOS y se muestra como etiqueta.";
+"categoryEditor.save" = "Guardar";
+"categoryEditor.cancel" = "Cancelar";
+"categoryEditor.dismissLabel" = "Cerrar";
+"categoryEditor.confirmSaveLabel" = "Guardar categoría";
+"categoryEditor.delete" = "Eliminar categoría";
+"category.nameRequired" = "Ingresar el nombre de la categoría.";
+"category.nameTooLong" = "El nombre debe tener como máximo 60 caracteres.";
+
+// Catalog icon accessibility names
+"catalogIcon.clock" = "Reloj";
+"catalogIcon.laptopcomputer" = "Laptop";
+"catalogIcon.briefcase" = "Maletín";
+"catalogIcon.book" = "Libro";
+"catalogIcon.pencil.and.ruler" = "Lápiz y regla";
+"catalogIcon.brain.head.profile" = "Cerebro";
+"catalogIcon.figure.walk" = "Caminar";
+"catalogIcon.figure.run" = "Correr";
+"catalogIcon.figure.strengthtraining" = "Entrenamiento de fuerza";
+"catalogIcon.figure.yoga" = "Yoga";
+"catalogIcon.figure.cycling" = "Ciclismo";
+"catalogIcon.figure.swimming" = "Natación";
+"catalogIcon.figure.soccer" = "Fútbol";
+"catalogIcon.figure.basketball" = "Baloncesto";
+"catalogIcon.figure.tennis" = "Tenis";
+"catalogIcon.figure.gymnastics" = "Gimnasia";
+"catalogIcon.figure.mindandbody" = "Mente y cuerpo";
+"catalogIcon.figure.core.training" = "Entrenamiento de core";
+"catalogIcon.dumbbell" = "Mancuerna";
+"catalogIcon.bicycle" = "Bicicleta";
+"catalogIcon.books" = "Libros";
+"catalogIcon.graduationcap" = "Birrete de graduación";
+"catalogIcon.desktopcomputer" = "Computadora de escritorio";
+"catalogIcon.keyboard" = "Teclado";
+"catalogIcon.gamecontroller" = "Control de videojuegos";
+"catalogIcon.fork.knife" = "Tenedor y cuchillo";
+"catalogIcon.cup.and.saucer" = "Taza y platillo";
+"catalogIcon.bed.double" = "Cama";
+"catalogIcon.moon.stars" = "Luna y estrellas";
+"catalogIcon.moon.zzz" = "Luna dormida";
+"catalogIcon.film" = "Película";
+"catalogIcon.music.note" = "Nota musical";
+"catalogIcon.guitar" = "Guitarra";
+"catalogIcon.camera" = "Cámara";
+"catalogIcon.tv" = "Televisión";
+"catalogIcon.musicalnotes" = "Notas musicales";
+"catalogIcon.paintbrush" = "Pincel";
+"catalogIcon.house" = "Casa";
+"catalogIcon.car.fill" = "Auto";
+"catalogIcon.airplane" = "Avión";
+"catalogIcon.cart" = "Carrito de compras";
+"catalogIcon.phone" = "Teléfono";
+"catalogIcon.hammer" = "Martillo";
+"catalogIcon.heart" = "Corazón";
+"catalogIcon.leaf" = "Hoja";
+"catalogIcon.sparkles" = "Destellos";
+"catalogIcon.pawprint" = "Huella de pata";
+"catalogIcon.dog" = "Perro";
+"catalogIcon.cat" = "Gato";
+"catalogIcon.fish" = "Pez";
+"catalogIcon.bird" = "Pájaro";
+"catalogIcon.washer" = "Lavadora";
+"catalogIcon.dryer" = "Secadora";
+"catalogIcon.dishwasher" = "Lavavajillas";
+"catalogIcon.refrigerator" = "Refrigerador";
+"catalogIcon.sofa" = "Sofá";
+"catalogIcon.shower" = "Ducha";
+"catalogIcon.lamp.table" = "Lámpara de mesa";
+"catalogIcon.person.2" = "Personas";
+"catalogIcon.figure.and.child.holdinghands" = "Familia";
+"catalogIcon.stethoscope" = "Estetoscopio";
+"catalogIcon.pill" = "Pastilla";
+"catalogIcon.tag" = "Etiqueta";

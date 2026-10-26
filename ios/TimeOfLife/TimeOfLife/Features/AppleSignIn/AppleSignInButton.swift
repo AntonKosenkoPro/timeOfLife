@@ -25,7 +25,10 @@ struct AppleSignInButton: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel(L10n.appleSignInTitle.text)
+                // No custom accessibility label: the system button provides
+                // Apple's canonical localized title + VoiceOver label per
+                // HIG (sign-in-with-apple). Overriding it would substitute
+                // our own guess in every locale.
                 .accessibilityIdentifier("AppleSignInButton")
             }
     }
