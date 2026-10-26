@@ -246,10 +246,33 @@ extension AppContainer {
     }
 
     /// Resolves the gate-seeded zh starter categories by name and creates
-    /// two extras. Returns name → id.
+    /// two extras. Starter seeding races this task (and seeds in the device
+    /// language, not necessarily zh), so a missed lookup creates the zh-named
+    /// starter with the canonical icon instead of dropping its entries: the
+    /// gate skips present names, so whichever side wins, entries resolve.
+    /// Returns name → id.
     private static func seedZhFitCategories(into store: LocalStore) async -> [String: String] {
         var catID: [String: String] = [:]
-        for name in ["工作", "爱好", "运动", "学习", "休闲", "睡眠", "娱乐"] {
+        let starters = zip(
+            ["工作", "爱好", "运动", "学习", "休闲", "睡眠", "娱乐"],
+            LocalStore.starterCategoryIcons
+        )
+        for (name, icon) in starters {
+            if let found = try? await store.category(named: name)?.id {
+                catID[name] = found
+                continue
+            }
+            do {
+                let category = Category(
+                    id: "zhfit-starter-\(icon.rawValue)",
+                    name: name,
+                    icon: icon.rawValue
+                )
+                try await store.createCategory(category)
+                catID[name] = category.id
+            } catch {
+                seedLogger.error("UITest seed: zhFit starter failed")
+            }
             if let found = try? await store.category(named: name)?.id {
                 catID[name] = found
             }

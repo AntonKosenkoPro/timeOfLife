@@ -29,8 +29,9 @@ enum L10n: String, CaseIterable {
     case otpCodeLabel = "otp.codeLabel"
     case otpCodeHint = "otp.codeHint"
 
-    // Apple (error copy only — the button itself is Apple's
-    // ASAuthorizationAppleIDButton with the system localized title + label)
+    // Apple sign in (overlay label — the native control is hidden
+    // from the accessibility tree, so this carries the spoken title)
+    case appleSignInTitle = "appleSignIn.title"
     case appleSignInError = "appleSignIn.error"
 
     // Timer (plain-text capture, remove-activities-layer)
