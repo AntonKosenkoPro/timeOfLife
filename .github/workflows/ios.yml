@@ -34,9 +34,16 @@ on:
 permissions:
   contents: read
 
+# Rapid PR pushes (or a PR + merge-to-main pair) cancel superseded runs
+# instead of queueing redundant macos-15 jobs.
+concurrency:
+  group: ios-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   lint-build-test:
     runs-on: macos-15
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
@@ -87,9 +94,14 @@ jobs:
   # ID, so one archive covers both environments — the upload loops over the
   # staging and release projects, skipping each whose secrets are absent.
   # Runs only after lint-build-test is green (no symbols for unverified code).
+  # Release-path only: PR/push runs skip it (one macos-15 job per PR) —
+  # release.yml verify invokes this workflow via workflow_call, so the
+  # post-bump head still gets its dSYMs.
   sentry-dsym:
+    if: github.event_name == 'workflow_call'
     needs: lint-build-test
     runs-on: macos-15
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
 

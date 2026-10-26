@@ -11,7 +11,7 @@
 
 - [x] 3.1 Disable the `iOS PR Checks` Cloud workflow (PR Changes + Branch Changes start conditions off). Record the workflow state (screenshot or ASC build-list output) as evidence. [DONE 2026-10-26: operator (user) confirms PR workflow off + tag Test stripped; user-attested, no ASC artifact pasted — trusted per user]
 - [x] 3.2 Strip the `Test` action from the Cloud tag workflow (`v*`), keeping Archive + `ci_post_clone.sh` + signing + `ci_post_xcodebuild.sh` dSYM upload. Record the action list as evidence. [DONE 2026-10-26: covered by the same user confirmation as 3.1; Analyze was never enabled as a required gate, so nothing to strip there]
-- [ ] 3.3 Merge-day branch protection (GitHub Settings → `main`): require `ios / lint-build-test`, drop any required Cloud check; verify with the required-checks list (`gh api` output or screenshot) before merging, or every PR blocks/mis-gates post-merge.
+- [ ] 3.3 Merge-day branch protection (GitHub Settings → `main`): require `ios / lint-build-test`, drop any required Cloud check; verify with the required-checks list (`gh api` output or screenshot) before merging, or every PR blocks/mis-gates post-merge. Paths-filter caveat (AI-review round 1, waived as code change): a required path-filtered check stays pending on PRs that touch no matching path (backend-/docs-only) — when requiring it, either accept admin-override for those PRs or revisit with an always-run aggregator job; do NOT restructure the lane here.
 
 ## 4. Docs
 
