@@ -27,7 +27,7 @@ Stage 1 (AI review) runs automatically on this PR. Stage 2 is your self-review b
 
 - [ ] All mutations via `LocalStore` — no raw GRDB writes outside it
 - [ ] Tokens/OTP codes: Keychain/hashes only, no plaintext; `otp/request` stays 202-always
-- [ ] New iOS strings in **both** `en.lproj` and `ru.lproj` + `L10n`
+- [ ] New iOS strings in all five locales (`en`, `ru`, `zh-Hans`, `es-419`, `pt-BR`) + `L10n`
 - [ ] `Theme` semantic colors only — no raw `Color` literals
 - [ ] If `openapi.yaml` changed: handlers + iOS client + spec all moved together
 - [ ] `project.yml` + `xcodegen generate`, never hand-edited `.pbxproj`

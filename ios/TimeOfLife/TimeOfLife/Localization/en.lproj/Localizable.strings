@@ -83,7 +83,6 @@
 "error.invalid_apple_token" = "Sign in with Apple failed. Please try again.";
 
 // Apple sign in
-"appleSignIn.title" = "Sign in with Apple";
 "appleSignIn.error" = "Sign in with Apple failed. Please try again.";
 
 // Timer

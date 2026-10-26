@@ -29,7 +29,7 @@ context: |
   polish + bulk-delete cap, and the iOS 18 lock-screen ControlWidget itself (a
   widget extension target exists for Live Activities; the Control toggle is still deferred). OpenAPI (`backend/api/openapi.yaml`) is the authoritative API
   contract (S10). No backward compat for on-disk formats (pre-release). No passwords, no
-  plaintext secrets (R1). iOS strings go to both `en.lproj` and `ru.lproj` + `L10n` (U4).
+  plaintext secrets (R1). iOS strings go to all five locales (`en`, `ru`, `zh-Hans`, `es-419`, `pt-BR`) + `L10n` (U4).
   XcodeGen-managed: edit `project.yml`, run `xcodegen generate`, never hand-edit the `.pbxproj`.
   SwiftUI views use `Theme` semantic colors only.
 

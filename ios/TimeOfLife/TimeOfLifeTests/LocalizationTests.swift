@@ -10,65 +10,35 @@ struct LocalizationTests {
         L10n.allCases
     }
 
+    /// Every shipped locale. Extend here when adding a locale.
+    private static let allLocales = ["en", "ru", "zh-Hans", "es-419", "pt-BR"]
+
+    private func bundle(for locale: String) throws -> Bundle {
+        let path = try #require(Bundle.main.path(forResource: locale, ofType: "lproj"),
+                                "Missing \(locale).lproj in main bundle")
+        return try #require(Bundle(path: path))
+    }
+
     // MARK: - Key resolution
 
-    @Test("all L10n keys resolve to non-empty strings in en.lproj")
-    func allKeysResolveEN() throws {
-        let main = Bundle.main
-        let path = try #require(main.path(forResource: "en", ofType: "lproj"),
-                                "Missing en.lproj in main bundle")
-        let bundle = try #require(Bundle(path: path))
-
-        for caseValue in l10nCases {
-            let value = NSLocalizedString(caseValue.rawValue, bundle: bundle, comment: "")
-            #expect(value != caseValue.rawValue,
-                    "Unresolved key \(caseValue.rawValue) in en")
-            #expect(!value.isEmpty,
-                    "Empty value for key \(caseValue.rawValue) in en")
-        }
-    }
-
-    @Test("all L10n keys resolve to non-empty strings in ru.lproj")
-    func allKeysResolveRU() throws {
-        let main = Bundle.main
-        let path = try #require(main.path(forResource: "ru", ofType: "lproj"),
-                                "Missing ru.lproj in main bundle")
-        let bundle = try #require(Bundle(path: path))
-
-        for caseValue in l10nCases {
-            let value = NSLocalizedString(caseValue.rawValue, bundle: bundle, comment: "")
-            #expect(value != caseValue.rawValue,
-                    "Unresolved key \(caseValue.rawValue) in ru")
-            #expect(!value.isEmpty,
-                    "Empty value for key \(caseValue.rawValue) in ru")
-        }
-    }
-
-    @Test("both locales have the same set of keys")
-    func keyParity() throws {
-        let main = Bundle.main
-        let enPath = try #require(main.path(forResource: "en", ofType: "lproj"))
-        let ruPath = try #require(main.path(forResource: "ru", ofType: "lproj"))
-        let enBundle = try #require(Bundle(path: enPath))
-        let ruBundle = try #require(Bundle(path: ruPath))
-
-        for caseValue in l10nCases {
-            let enValue = NSLocalizedString(caseValue.rawValue, bundle: enBundle, comment: "")
-            let ruValue = NSLocalizedString(caseValue.rawValue, bundle: ruBundle, comment: "")
-
-            #expect(enValue != caseValue.rawValue,
-                    "Key \(caseValue.rawValue) missing in en")
-            #expect(ruValue != caseValue.rawValue,
-                    "Key \(caseValue.rawValue) missing in ru")
+    @Test("all L10n keys resolve to non-empty strings in every locale")
+    func allKeysResolve() throws {
+        for locale in Self.allLocales {
+            let bundle = try bundle(for: locale)
+            for caseValue in l10nCases {
+                let value = NSLocalizedString(caseValue.rawValue, bundle: bundle, comment: "")
+                #expect(value != caseValue.rawValue,
+                        "Unresolved key \(caseValue.rawValue) in \(locale)")
+                #expect(!value.isEmpty,
+                        "Empty value for key \(caseValue.rawValue) in \(locale)")
+            }
         }
     }
 
     @Test("every catalog icon has a localized accessibility name")
     func catalogIconNamesResolve() throws {
-        let main = Bundle.main
-        for locale in ["en", "ru"] {
-            let path = try #require(main.path(forResource: locale, ofType: "lproj"))
-            let bundle = try #require(Bundle(path: path))
+        for locale in Self.allLocales {
+            let bundle = try bundle(for: locale)
             for icon in CatalogIcon.allCases {
                 let value = L10n.catalogIconName(icon, in: bundle)
                 #expect(value != icon.rawValue, "Missing icon name for \(icon.rawValue) in \(locale)")
@@ -129,7 +99,7 @@ struct LocalizationTests {
         ]
         let main = Bundle.main
 
-        for code in ["en", "ru"] {
+        for code in Self.allLocales {
             let path = try #require(main.path(forResource: code, ofType: "lproj"))
             let bundle = try #require(Bundle(path: path))
 
@@ -157,7 +127,7 @@ struct LocalizationTests {
         ]
         let main = Bundle.main
 
-        for code in ["en", "ru"] {
+        for code in Self.allLocales {
             let path = try #require(main.path(forResource: code, ofType: "lproj"))
             let bundle = try #require(Bundle(path: path))
 
@@ -209,7 +179,6 @@ struct LocalizationTests {
         "activity.savedWithDuration",
         "app.name",
         "appleSignIn.error",
-        "appleSignIn.title",
         "authGate.title",
         "category.nameRequired",
         "category.nameTooLong",

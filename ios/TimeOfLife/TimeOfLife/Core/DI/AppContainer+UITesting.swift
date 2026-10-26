@@ -89,6 +89,7 @@ extension AppContainer {
         seed(screen: screen, sessionStore: sessionStore, navigation: navigation)
         seedHistoryIfNeeded(screen: screen, localStore: localStore)
         seedTrackCategoriesIfNeeded(screen: screen, localStore: localStore)
+        seedZhFitIfNeeded(screen: screen, localStore: localStore)
         seedDeletionEvidence(keychain: keychain)
     }
 
@@ -139,6 +140,15 @@ extension AppContainer {
             // Track and the loop taps the History tab. Entries carry no
             // categories (fallback icon rows) — the headers, totals, and
             // scroll behavior are what is inspected.
+            sessionStore.setSignedIn(CachedSession(
+                id: "ui-test", email: "user@example.com", emailVerified: true
+            ))
+            navigation.path = []
+        case "zhFit":
+            // zh-Hans UI-fit harness (localization change): the shell opens
+            // on Track with 21 days of Shanghai-persona entries already
+            // committed (see `seedZhFit`). A human drives the timer from
+            // idle to check running states themselves.
             sessionStore.setSignedIn(CachedSession(
                 id: "ui-test", email: "user@example.com", emailVerified: true
             ))
@@ -206,6 +216,122 @@ extension AppContainer {
         guard screen == "trackCategories" else { return }
         Task { await seedTrackCategories(into: localStore) }
     }
+
+    /// Kicks off the zh-Hans UI-fit dataset for the `"zhFit"` screen:
+    /// 21 days × ~5 committed Shanghai-persona entries with categories and
+    /// notes, deterministic relative to `now` (Today / Yesterday / absolute
+    /// labels always read correctly). Covers the fit-critical rows: a
+    /// multi-category entry (Insights double-count footnote), entries with
+    /// notes (History glyph), one long name (row wrapping), and day totals
+    /// in the 2–6h band. Idempotent on `id`; degrades to fewer entries on
+    /// partial failure, never a crash.
+    private static func seedZhFitIfNeeded(screen: String, localStore: LocalStore) {
+        guard screen == "zhFit" else { return }
+        Task { await seedZhFit(into: localStore) }
+    }
+
+    /// One zhFit day row: text, start hour/minute, duration, categories, notes.
+    private typealias ZhFitRow = (
+        text: String,
+        hour: Int,
+        minute: Int,
+        duration: Int,
+        categories: [String],
+        notes: String
+    )
+
+    private static func seedZhFit(into store: LocalStore) async {
+        let catID = await seedZhFitCategories(into: store)
+        await seedZhFitEntries(into: store, catID: catID)
+    }
+
+    /// Resolves the gate-seeded zh starter categories by name and creates
+    /// two extras. Returns name → id.
+    private static func seedZhFitCategories(into store: LocalStore) async -> [String: String] {
+        var catID: [String: String] = [:]
+        for name in ["工作", "爱好", "运动", "学习", "休闲", "睡眠", "娱乐"] {
+            if let found = try? await store.category(named: name)?.id {
+                catID[name] = found
+            }
+        }
+        let extras: [(id: String, name: String, icon: String)] = [
+            ("zhfit-cat-commute", "通勤", "car.fill"),
+            ("zhfit-cat-social", "社交", "person.2"),
+        ]
+        for fixture in extras {
+            do {
+                try await store.createCategory(Category(
+                    id: fixture.id,
+                    name: fixture.name,
+                    icon: fixture.icon
+                ))
+                catID[fixture.name] = fixture.id
+            } catch {
+                seedLogger.error("UITest seed: zhFit category failed")
+            }
+            if let found = try? await store.category(named: fixture.name)?.id {
+                catID[fixture.name] = found
+            }
+        }
+        return catID
+    }
+
+    private static func seedZhFitEntries(into store: LocalStore, catID: [String: String]) async {
+        let calendar = Calendar(identifier: .gregorian)
+        let todayStart = calendar.startOfDay(for: Date())
+        for dayIndex in 0..<21 {
+            let dayStart = calendar.date(byAdding: .day, value: -dayIndex, to: todayStart)!
+            let plan = dayIndex == 0 ? zhFitDayPlan : zhFitVariations[dayIndex % zhFitVariations.count]
+            for (slot, row) in plan.enumerated() {
+                let start = calendar.date(
+                    byAdding: .minute,
+                    value: row.hour * 60 + row.minute,
+                    to: dayStart
+                )!
+                let end = calendar.date(byAdding: .minute, value: row.duration, to: start)!
+                let entry = TimeEntry(
+                    id: "zhfit-\(dayIndex)-\(slot)",
+                    activityText: row.text,
+                    startedAt: start,
+                    endedAt: end,
+                    durationSeconds: row.duration * 60,
+                    categoryIDs: row.categories.compactMap { catID[$0] },
+                    notes: row.notes
+                )
+                _ = try? await store.createEntry(entry)
+            }
+        }
+    }
+
+    /// (text, startHour, startMinute, durationMinutes, categories, notes)
+    private static let zhFitDayPlan: [ZhFitRow] = [
+        ("地铁通勤", 8, 10, 50, ["通勤"], ""),
+        ("晨会", 9, 30, 15, ["工作"], ""),
+        ("深度工作", 10, 0, 120, ["工作"], "今天状态不错，完成了核心模块"),
+        ("午饭", 12, 30, 40, [], ""),
+        ("午睡", 13, 20, 25, ["休闲"], ""),
+        ("健身房", 18, 30, 70, ["运动"], "力量训练，加了5公斤"),
+    ]
+
+    private static let zhFitVariations: [[ZhFitRow]] = [
+        [
+            ("回复邮件", 9, 0, 30, ["工作"], ""),
+            ("项目例会", 14, 0, 60, ["工作"], ""),
+            ("买菜做饭", 18, 0, 55, [], "买了三文鱼"),
+            ("睡前阅读", 22, 30, 35, ["学习"], ""),
+        ],
+        [
+            ("加班赶项目", 19, 30, 110, ["工作"], "上线前最后的检查"),
+            ("和平台团队的季度规划研讨会", 15, 0, 90, ["工作"], ""),
+            ("足球之夜", 21, 0, 105, ["运动", "娱乐"], "和朋友们一起看球"),
+        ],
+        [
+            ("傍晚散步", 18, 0, 40, ["休闲"], ""),
+            ("喝咖啡休息", 15, 30, 25, ["社交"], ""),
+            ("晚饭", 19, 0, 45, [], ""),
+            ("阅读", 22, 0, 30, ["学习"], ""),
+        ],
+    ]
 
     /// Seeds the eleven fixture categories plus the running draft
     /// `Работа над приложением` with ordered selection Work-then-Sport.
