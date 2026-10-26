@@ -421,6 +421,9 @@ jobs:
     needs: bump-and-tag
     if: needs.bump-and-tag.result == 'success'
     uses: ./.github/workflows/ios.yml
+    with:
+      # Release-path dSYM production (sentry-dsym is skipped on PR/push).
+      upload_dsyms: true
     permissions:
       contents: read
     # Threads Sentry secrets (dSYM upload + archive DSN; all optional in

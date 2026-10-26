@@ -5,7 +5,7 @@
 ## 2. GitHub lane restore
 
 - [x] 2.1 Restore automatic triggers in `.github/workflows/ios.yml`: `pull_request` (`paths: ios/**`, `.github/workflows/ios.yml`) + `push` to `main` (`paths: ios/**`) alongside the existing `workflow_call` (+ Sentry secrets block). Job contents (`lint-build-test`, `sentry-dsym`) byte-unchanged from the current file. [DONE: diff vs 32202d4^ is exactly the #151 Sentry block + sentry-dsym job]
-- [x] 2.2 Confirm `release.yml verify` still resolves (`uses: ./.github/workflows/ios.yml`, `secrets: inherit`) — no edits expected; fail the task if the job needs touching. [DONE: resolve block intact at release.yml:423-428, no edits needed]
+- [x] 2.2 Confirm `release.yml verify` still resolves (`uses: ./.github/workflows/ios.yml`, `secrets: inherit`) — no edits expected; fail the task if the job needs touching. [DONE, then AMENDED in AI-review round 2: the `verify` job gained `with: upload_dsyms: true` because the proven-correct release-only gate is an explicit input (github context belongs to the caller, so a bare event_name check can never match) — see round-2 ledger]
 
 ## 3. Cloud cutover (manual operator steps, human in App Store Connect + GitHub Settings)
 

@@ -5,6 +5,17 @@ on:
   # Also callable as release verification: GITHUB_TOKEN pushes trigger no
   # workflows, so the release workflow invokes this explicitly on the bump.
   workflow_call:
+    # Release-path flag: release.yml verify passes upload_dsyms=true so the
+    # post-bump head gets its dSYMs. PR/push runs keep the default false —
+    # one macos-15 job per PR. (A plain event_name check cannot do this:
+    # inside a called workflow the github context belongs to the caller,
+    # so event_name reports the caller's trigger, never workflow_call.)
+    inputs:
+      upload_dsyms:
+        description: "Run the sentry-dsym job (unsigned Release archive + Sentry upload)"
+        required: false
+        default: false
+        type: boolean
     # Sentry symbolication wiring (observability Stage 0, task 3.3). All
     # optional: when any are absent the upload step skips with a warning
     # instead of failing. release.yml passes them via `secrets: inherit`.
@@ -34,10 +45,12 @@ on:
 permissions:
   contents: read
 
-# Rapid PR pushes (or a PR + merge-to-main pair) cancel superseded runs
-# instead of queueing redundant macos-15 jobs.
+# Rapid PR pushes cancel superseded runs instead of queueing redundant
+# macos-15 jobs. The group is keyed on event as well as ref: a push to main
+# and the release-verify call (both ref main, different events) must never
+# cancel each other mid-flight.
 concurrency:
-  group: ios-${{ github.ref }}
+  group: ios-${{ github.ref }}-${{ github.event_name }}
   cancel-in-progress: true
 
 jobs:
@@ -94,11 +107,13 @@ jobs:
   # ID, so one archive covers both environments — the upload loops over the
   # staging and release projects, skipping each whose secrets are absent.
   # Runs only after lint-build-test is green (no symbols for unverified code).
-  # Release-path only: PR/push runs skip it (one macos-15 job per PR) —
-  # release.yml verify invokes this workflow via workflow_call, so the
-  # post-bump head still gets its dSYMs.
+  # Release-path only (see the upload_dsyms input above): PR/push runs
+  # skip it — one macos-15 job per PR — while release.yml verify still gets
+  # its dSYMs. Runs only after lint-build-test is green (the default
+  # success() gate still applies: a bare expression if adds no status
+  # check, so needs stays success-gated) — no symbols for unverified code.
   sentry-dsym:
-    if: github.event_name == 'workflow_call'
+    if: ${{ inputs.upload_dsyms }}
     needs: lint-build-test
     runs-on: macos-15
     timeout-minutes: 15
