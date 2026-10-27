@@ -1,6 +1,6 @@
 ## Context
 
-See proposal.md (Why) for motivation. Current state: `release.yml` bumps `project.yml` + mirrors Release plists + pushes commit and `vX.Y.Z` tag atomically to `main` — the push leg is dead under the `main protection` ruleset (dry run `40211312698`, `GH013`). Tags are unprotected (only one branch ruleset exists; the tag leg died solely via the atomic transaction). Xcode Cloud has two workflows in App Store Connect (invisible from the repo): `iOS PR Checks` and the tag workflow (`Tag Changes v*` → Test → Archive); the only in-repo Cloud surface is `ci_scripts/ci_post_clone.sh` (xcodegen-only). Backend has no identity: always-overwritten `:latest` image, `/health` → `{"status":"ok"}`, one `stage` environment while `backend.yml:92` defaults to it against a comment promising `prod`. Constraints: S6 mandatory-check coverage must survive; Debug unsigned / Release signed `7923U48U87`; XcodeGen-managed; `openapi.yaml` is authoritative for the `/health` shape change (S10).
+See proposal.md (Why) for motivation. Current state: `release.yml` is deleted by this change (its bump/mirror/push-to-`main` model died under the `main protection` ruleset: dry run `40211312698`, `GH013`). Tags are guarded by the you-only `Release tags` ruleset. Xcode Cloud is archive-only (PR checks disabled for quota; tag workflows Archive → TestFlight); GH `ios.yml` carries the PR gate. The only in-repo Cloud surfaces are `ci_scripts/ci_post_clone.sh` (xcodegen + version stamp), `ci_pre_xcodebuild.sh` (lint backstop) and `ci_post_xcodebuild.sh` (signed-dSYM Sentry upload).
 
 ## Goals / Non-Goals
 
@@ -38,7 +38,7 @@ See proposal.md (Why) for motivation. Current state: `release.yml` bumps `projec
 - **Phase 1 — iOS channels.** Extend `ci_post_clone.sh`, create Cloud workflows A/B on the two tag patterns, Profile channel badge, delete `release.yml` bump machinery, rewrite `release-versioning` deltas into the baseline on archive.
 - **Phase 2 — backend identity.** Tag trigger + pinned pushes in `backend.yml`, `ldflags` stamping, `/health` fields + `openapi.yaml` sync, fix `stage`/`prod` split.
 - **Phase 3 — timeline + drill.** Create the three environments, record the rollback drill per platform (internal-only), fold learnings into the runbook.
-- **Merge order:** coordinate with `migrate-ios-ci-to-xcode-cloud` (owns the GH→Cloud cutover + the same five docs) — either land the cutover first and rebase this change onto it, or fold that change's remaining tasks into Phase 1 here. The doc edits land once, not twice.
+- **Merge order:** land on rebased `main` (post-#209: GH PR gate, Cloud archive-only). `migrate-ios-ci-to-xcode-cloud` is archived separately without merging — its premise was reversed. The doc edits land here, once.
 
 ## Open Questions
 

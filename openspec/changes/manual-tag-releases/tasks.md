@@ -13,11 +13,11 @@
 ## 3. Phase 1 — iOS channels
 
 - [x] 3.1 Extend `ios/TimeOfLife/ci_scripts/ci_post_clone.sh`: parse exact-match tag (`internal/vM.m.p[.n]` / `release/vM.m.p[.n]`), derive MARKETING/CHANNEL, take Cloud per-workflow run number as build, stamp all targets post-`xcodegen generate`, assert unanimity or fail loudly. `sh -n` + local simulation with fake tags green.
-- [ ] 3.2 Create Cloud workflows A (`Tag Changes internal/*` → Test → Archive → TestFlight Internal) and B (`release/*` → Test → Archive → External/Store per the open question). Record workflow IDs + first green internal build number as evidence.
+- [ ] 3.2 Create new Cloud workflows "iOS Internal Release" (`Tag Changes internal/*` → Archive → TestFlight Internal) and "iOS Public Release" (`release/*` → Archive → TestFlight External/Store per the open question). Names are pinned — the stamp script maps `CI_WORKFLOW` to the release channel (see docs/ci.md runbook). No Test action (the tagged head was proven by GH `ios.yml` PR checks; Archive-only preserves Cloud quota). Record workflow IDs + first green internal build number as evidence.
 - [ ] 3.3 Proof builds: throwaway `internal/v0.0.0[.2]` tags on a scratch commit go green with correct stamped versions (paste ASC log excerpts); a mistyped tag (e.g. `v0.0.0`) triggers nothing (screenshot or build-list evidence).
 - [x] 3.4 Profile channel badge (` • Internal` on internal builds; dummy `0.0.0-dev` locally) with `en`+`ru` strings + `L10n` if new user-facing copy is added; unit tests on `AppVersion.formatted` inputs.
 - [x] 3.5 Set `project.yml` versions to the dev dummy; confirm local simulator + `xcodebuild test` green on the dummy.
-- [x] 3.6 Delete `release.yml` bump machinery (guards, bump, commit+push, recover, `verify` job + its comments/summary line); coordinate merge order with `migrate-ios-ci-to-xcode-cloud` so shared doc edits land once.
+- [x] 3.6 Delete `release.yml` bump machinery (guards, bump, commit+push, recover, `verify` job + its comments/summary line); reconciled with #209 (GH PR gate kept, Cloud archive-only) on rebase.
 
 ## 4. Phase 2 — backend identity
 
