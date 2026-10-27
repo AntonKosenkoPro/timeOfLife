@@ -11,14 +11,18 @@ struct LocalizationTests {
     }
 
     /// Every shipped locale, derived from the app bundle so a newly added
-    /// `.lproj` is covered automatically, pinned against the expected set so
-    /// a dropped locale fails loudly instead of passing vacuously.
+    /// `.lproj` is covered automatically. Pinned by `shippedLocales` below
+    /// so a dropped locale fails loudly instead of passing vacuously.
     private static let expectedLocales = ["en", "es-419", "pt-BR", "ru", "zh-Hans"]
 
     private static var allLocales: [String] {
-        let locales = Bundle.main.localizations.filter { $0 != "Base" }.sorted()
-        #expect(locales == expectedLocales, "Shipped locales changed: \(locales)")
-        return locales
+        Bundle.main.localizations.filter { $0 != "Base" }.sorted()
+    }
+
+    @Test("shipped locales match the expected set")
+    func shippedLocales() {
+        #expect(Self.allLocales == Self.expectedLocales,
+                "Shipped locales changed: \(Self.allLocales)")
     }
 
     private func bundle(for locale: String) throws -> Bundle {
@@ -55,17 +59,59 @@ struct LocalizationTests {
         }
     }
 
+    /// The Live Activity copy is read from the extension's own bundle, so the
+    /// appex must ship the same locales as the app.
+    @Test("LifioLiveActivities appex ships every locale")
+    func appexShipsAllLocales() throws {
+        let plugIns = try #require(Bundle.main.builtInPlugInsPath)
+        let appexPath = URL(fileURLWithPath: plugIns, isDirectory: true)
+            .appendingPathComponent("LifioLiveActivities.appex", isDirectory: true).path
+        let appex = try #require(Bundle(path: appexPath), "Missing appex at \(appexPath)")
+        let shipped = Set(appex.localizations.filter { $0 != "Base" })
+        #expect(shipped == Set(Self.expectedLocales), "Appex locales changed: \(shipped.sorted())")
+    }
+
+    /// Format specifiers must match `en` in every locale: a dropped or
+    /// duplicated `%@`/`%d` only shows up as garbage text at runtime.
+    @Test("format specifiers match en in every locale")
+    func formatSpecifiersMatchEN() throws {
+        let keys = l10nCases.map(\.rawValue)
+            + CatalogIcon.allCases.map { "catalogIcon.\($0.rawValue)" }
+        let enBundle = try bundle(for: "en")
+        for locale in Self.allLocales where locale != "en" {
+            let bundle = try bundle(for: locale)
+            for key in keys {
+                let enValue = NSLocalizedString(key, bundle: enBundle, comment: "")
+                let value = NSLocalizedString(key, bundle: bundle, comment: "")
+                #expect(
+                    Self.formatSpecifiers(in: value) == Self.formatSpecifiers(in: enValue),
+                    "Specifier drift for key \(key) in \(locale)"
+                )
+            }
+        }
+    }
+
+    private static func formatSpecifiers(in text: String) -> [String] {
+        // `%@`, `%d`, `%s`, positional `%1$@` — `%ds` first so the countdown
+        // suffix isn't mistaken for a second specifier.
+        let pattern = "%ds|%(?:\\d+\\$)?[@dfsu]"
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return [] }
+        let range = NSRange(text.startIndex..<text.endIndex, in: text)
+        return regex.matches(in: text, range: range).compactMap { match -> String? in
+            guard let range = Range(match.range, in: text) else { return nil }
+            let specifier = String(text[range])
+            return specifier == "%ds" ? "%d" : specifier
+        }
+    }
+
     // MARK: - Notes placeholders
 
     /// Collapsed presenters keep "Optional notes" while the expanded editor
     /// page uses its own "Dear diary..." prompt (change-expanded-notes-placeholder).
     @Test("collapsed and expanded notes placeholders are exact and distinct")
     func notesPlaceholders() throws {
-        let main = Bundle.main
-        let enPath = try #require(main.path(forResource: "en", ofType: "lproj"))
-        let ruPath = try #require(main.path(forResource: "ru", ofType: "lproj"))
-        let en = try #require(Bundle(path: enPath))
-        let ru = try #require(Bundle(path: ruPath))
+        let en = try bundle(for: "en")
+        let ru = try bundle(for: "ru")
 
         #expect(NSLocalizedString("entry.notesPlaceholder", bundle: en, comment: "") == "Optional notes")
         #expect(NSLocalizedString("entry.notesPlaceholder", bundle: ru, comment: "") == "Необязательные заметки")
@@ -105,11 +151,9 @@ struct LocalizationTests {
             "error.refresh_attempt_completed",
             "error.refresh_attempt_conflict",
         ]
-        let main = Bundle.main
 
         for code in Self.allLocales {
-            let path = try #require(main.path(forResource: code, ofType: "lproj"))
-            let bundle = try #require(Bundle(path: path))
+            let bundle = try bundle(for: code)
 
             for key in keys {
                 let value = NSLocalizedString(key, bundle: bundle, comment: "")
@@ -133,11 +177,9 @@ struct LocalizationTests {
             "validation.otp.prefix",
             "validation.otp.rule.invalid",
         ]
-        let main = Bundle.main
 
         for code in Self.allLocales {
-            let path = try #require(main.path(forResource: code, ofType: "lproj"))
-            let bundle = try #require(Bundle(path: path))
+            let bundle = try bundle(for: code)
 
             for key in keys {
                 let value = NSLocalizedString(key, bundle: bundle, comment: "")

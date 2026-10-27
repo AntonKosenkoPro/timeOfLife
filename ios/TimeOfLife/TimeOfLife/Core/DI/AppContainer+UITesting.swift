@@ -245,35 +245,39 @@ extension AppContainer {
         await seedZhFitEntries(into: store, catID: catID)
     }
 
-    /// Resolves the gate-seeded zh starter categories by name and creates
-    /// two extras. Starter seeding races this task (and seeds in the device
-    /// language, not necessarily zh), so a missed lookup creates the zh-named
-    /// starter with the canonical icon instead of dropping its entries: the
-    /// gate skips present names, so whichever side wins, entries resolve.
-    /// Returns name → id.
+    /// Resolves the gate-seeded starter categories (device language) by
+    /// position and keys them by zh fixture token: the fixture entry texts
+    /// stay zh (layout check only — real per-locale decks are a follow-up),
+    /// but entries attach to the gate-seeded rows instead of spawning a
+    /// parallel zh-named set with duplicate icons. Starter seeding races
+    /// this task, so a missed lookup creates the gate-named starter with
+    /// the canonical icon (the gate skips present names). Returns
+    /// zh-token → id.
     private static func seedZhFitCategories(into store: LocalStore) async -> [String: String] {
         var catID: [String: String] = [:]
-        let names = ["工作", "爱好", "运动", "学习", "休闲", "睡眠", "娱乐"]
-        assert(names.count == LocalStore.starterCategoryIcons.count)
-        let starters = zip(names, LocalStore.starterCategoryIcons)
-        for (name, icon) in starters {
-            if let found = try? await store.category(named: name)?.id {
-                catID[name] = found
+        let tokens = ["工作", "爱好", "运动", "学习", "休闲", "睡眠", "娱乐"]
+        let starterNames = String.starterCategoryNames
+        assert(tokens.count == starterNames.count)
+        assert(starterNames.count == LocalStore.starterCategoryIcons.count)
+        let starters = zip(zip(tokens, starterNames), LocalStore.starterCategoryIcons)
+        for ((token, starterName), icon) in starters {
+            if let found = try? await store.category(named: starterName)?.id {
+                catID[token] = found
                 continue
             }
             do {
                 let category = Category(
                     id: "zhfit-starter-\(icon.rawValue)",
-                    name: name,
+                    name: starterName,
                     icon: icon.rawValue
                 )
                 try await store.createCategory(category)
-                catID[name] = category.id
+                catID[token] = category.id
             } catch {
-                seedLogger.error("UITest seed: zhFit starter failed name=\(name, privacy: .public): \(error.localizedDescription, privacy: .public)")
+                seedLogger.error("UITest seed: zhFit starter failed name=\(starterName, privacy: .public): \(error.localizedDescription, privacy: .public)")
             }
-            if let found = try? await store.category(named: name)?.id {
-                catID[name] = found
+            if let found = try? await store.category(named: starterName)?.id {
+                catID[token] = found
             }
         }
         let extras: [(id: String, name: String, icon: String)] = [
@@ -320,7 +324,14 @@ extension AppContainer {
                     categoryIDs: row.categories.compactMap { catID[$0] },
                     notes: row.notes
                 )
-                _ = try? await store.createEntry(entry)
+                do {
+                    let result = try await store.createEntry(entry)
+                    if case .failure = result {
+                        seedLogger.error("UITest seed: zhFit entry failed id=\(entry.id, privacy: .public)")
+                    }
+                } catch {
+                    seedLogger.error("UITest seed: zhFit entry threw id=\(entry.id, privacy: .public): \(error.localizedDescription, privacy: .public)")
+                }
             }
         }
     }
