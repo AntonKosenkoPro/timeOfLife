@@ -83,37 +83,52 @@ jobs:
         # brew install would let the PR gate drift from the release gate the
         # day Homebrew moves on. Pins are read from the scripts themselves
         # (single source of truth) and validated before use so a reformatted
-        # pin line fails loudly instead of installing from a `//` URL.
+        # pin line fails loudly instead of installing from a `//` URL
+        # (grep -m1 + cut: no `| head` pipe, so no SIGPIPE hazard under
+        # `set -e` — same reason BIN below uses find -print -quit).
         run: |
-          XCODEGEN_PIN="$(sed -n 's/^XCODEGEN_PIN="\([^"]*\)"$/\1/p' ios/TimeOfLife/ci_scripts/ci_post_clone.sh | head -n1)"
+          XCODEGEN_PIN="$(grep -m1 '^XCODEGEN_PIN="' ios/TimeOfLife/ci_scripts/ci_post_clone.sh | cut -d'"' -f2)"
           [ -n "$XCODEGEN_PIN" ] || { echo "::error::cannot read XCODEGEN_PIN from ci_post_clone.sh — refusing to install an unpinned xcodegen"; exit 1; }
-          SWIFTLINT_PIN="$(sed -n 's/^SWIFTLINT_PIN="\([^"]*\)"$/\1/p' ios/TimeOfLife/ci_scripts/ci_pre_xcodebuild.sh | head -n1)"
+          SWIFTLINT_PIN="$(grep -m1 '^SWIFTLINT_PIN="' ios/TimeOfLife/ci_scripts/ci_pre_xcodebuild.sh | cut -d'"' -f2)"
           [ -n "$SWIFTLINT_PIN" ] || { echo "::error::cannot read SWIFTLINT_PIN from ci_pre_xcodebuild.sh — refusing to install an unpinned swiftlint"; exit 1; }
-          # -f: curl exits non-zero on HTTP errors instead of writing an
-          # error page that later surfaces as an opaque unzip/installer
-          # failure before a sudo-installed binary ever runs.
-          curl -fsSL "https://github.com/yonaskolb/XcodeGen/releases/download/${XCODEGEN_PIN}/xcodegen.zip" -o "${RUNNER_TEMP}/xcodegen.zip"
+          # Recorded digests: upstream release assets can be replaced in
+          # place, and the SwiftLint pkg is unsigned (verified: `pkgutil
+          # --check-signature` reports "no signature"), so the digest is the
+          # only integrity control — a replaced artifact fails here instead
+          # of being sudo-installed. Bump with the pin.
+          XCODEGEN_ZIP_SHA256="4d9e34b62172d645eed6457cac13fc222569974098ef4ee9c3368bedf0196806"
+          SWIFTLINT_PKG_SHA256="3fb0202842701762880cc2cf04fc394398bab3f16a04dd76e000e02d07e32486"
+          # -f fails on HTTP errors (no error pages written to disk);
+          # --retry rides out transient CDN 5xx instead of red-laning the PR.
+          curl -fsSL --retry 5 --retry-delay 2 --retry-all-errors "https://github.com/yonaskolb/XcodeGen/releases/download/${XCODEGEN_PIN}/xcodegen.zip" -o "${RUNNER_TEMP}/xcodegen.zip"
+          echo "${XCODEGEN_ZIP_SHA256}  ${RUNNER_TEMP}/xcodegen.zip" | shasum -a 256 -c -
           rm -rf "${RUNNER_TEMP}/xcodegen" && mkdir -p "${RUNNER_TEMP}/xcodegen"
           unzip -o -q "${RUNNER_TEMP}/xcodegen.zip" -d "${RUNNER_TEMP}/xcodegen"
           # The zip is a prefix tree (bin/xcodegen + share/xcodegen presets),
           # not a flat binary — and the wrapper layout is not contractual, so
           # locate it. The presets must travel with the binary: XcodeGen
           # resolves SettingPresets relative to its prefix, and a lone
-          # binary fails generate on a clean runner.
-          BIN="$(find "${RUNNER_TEMP}/xcodegen" -path '*/bin/xcodegen' -type f | head -n1)"
+          # binary fails generate on a clean runner. Assert the exact
+          # share/xcodegen subdir BEFORE installing so a bad archive leaves
+          # no half-installed state.
+          BIN="$(find "${RUNNER_TEMP}/xcodegen" -path '*/bin/xcodegen' -type f -print -quit)"
           [ -n "$BIN" ] || { echo "::error::xcodegen binary not found in release archive"; exit 1; }
           XG_ROOT="$(dirname "$(dirname "$BIN")")"
+          [ -d "$XG_ROOT/share/xcodegen" ] || { echo "::error::xcodegen share/xcodegen presets missing from release archive"; exit 1; }
           sudo install -m 755 "$BIN" /usr/local/bin/xcodegen
-          [ -d "$XG_ROOT/share" ] || { echo "::error::xcodegen share/ presets missing from release archive"; exit 1; }
-          sudo mkdir -p /usr/local/share && sudo cp -R "$XG_ROOT/share/." /usr/local/share/
-          curl -fsSL "https://github.com/realm/SwiftLint/releases/download/${SWIFTLINT_PIN}/SwiftLint.pkg" -o "${RUNNER_TEMP}/swiftlint.pkg"
+          sudo mkdir -p /usr/local/share && sudo cp -R "$XG_ROOT/share/xcodegen" /usr/local/share/
+          curl -fsSL --retry 5 --retry-delay 2 --retry-all-errors "https://github.com/realm/SwiftLint/releases/download/${SWIFTLINT_PIN}/SwiftLint.pkg" -o "${RUNNER_TEMP}/swiftlint.pkg"
+          echo "${SWIFTLINT_PKG_SHA256}  ${RUNNER_TEMP}/swiftlint.pkg" | shasum -a 256 -c -
           sudo installer -pkg "${RUNNER_TEMP}/swiftlint.pkg" -target /
-          # Prove the pins: a stray runner-image/Homebrew binary earlier in
-          # PATH must not silently pass while looking validated.
-          test "$(xcodegen --version | grep -o '[0-9][0-9.]*' | head -n1)" = "$XCODEGEN_PIN" || \
-            { echo "::error::xcodegen drift: got $(xcodegen --version), want $XCODEGEN_PIN"; exit 1; }
-          test "$(swiftlint version)" = "$SWIFTLINT_PIN" || \
-            { echo "::error::swiftlint drift: got $(swiftlint version), want $SWIFTLINT_PIN"; exit 1; }
+          # Prove the pins against the installed paths (not PATH: the
+          # macos-15 image ships its own swiftlint earlier in PATH, which
+          # would false-fail — or worse, false-pass — a PATH-resolved
+          # check), then put the pinned prefix first for later steps.
+          test "$(/usr/local/bin/xcodegen --version | grep -m1 -o '[0-9][0-9.]*')" = "$XCODEGEN_PIN" || \
+            { echo "::error::xcodegen drift: got $(/usr/local/bin/xcodegen --version), want $XCODEGEN_PIN"; exit 1; }
+          test "$(/usr/local/bin/swiftlint version)" = "$SWIFTLINT_PIN" || \
+            { echo "::error::swiftlint drift: got $(/usr/local/bin/swiftlint version), want $SWIFTLINT_PIN"; exit 1; }
+          echo "/usr/local/bin" >> "$GITHUB_PATH"
 
       - name: Generate Xcode project
         working-directory: ios/TimeOfLife

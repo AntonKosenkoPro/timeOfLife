@@ -34,18 +34,25 @@ permissions:
   packages: write  # needed to push to GHCR
 
 # Concurrency model: PR runs get one group per PR (cancel superseded
-# pushes); every run that PUBLISHES `:latest` shares one non-cancelling
-# group — push-to-main plus dispatches with an empty image_tag (those rebuild
-# from source and push `:latest` too), so two such runs can never interleave
-# their push (flock starts inside the SSH step, i.e. after the image push,
-# so it cannot order pushes; a queued publisher waits, a superseded queued
-# one is evicted visibly and needs re-dispatch). Rollback dispatches
-# (image_tag set — no publish, pinned pull only) keep their own per-run_id
-# group so an emergency rollback is never silently cancelled.
+# pushes); runs that genuinely PUBLISH `:latest` from main share one
+# non-cancelling group — push-to-main plus main-ref dispatches with an empty
+# image_tag (those rebuild from source and push `:latest` too), so two such
+# runs can never interleave their push (flock starts inside the SSH step,
+# i.e. after the image push, so it cannot order pushes). Membership is gated
+# on main: a mis-ref dispatch can never publish (deploy `if:` + guard job),
+# so letting it join would only let it evict a queued genuine publisher.
+# Rollback dispatches (image_tag set — no publish, pinned pull only) keep
+# their own per-run_id group so an emergency rollback is never cancelled.
+# Residual trade-off (accepted, visible): GitHub keeps one pending run per
+# group, so a queued publisher can still be evicted by a newer publisher of
+# the other event type (push vs dispatch) — the evicted run shows
+# "cancelled" in the UI and must be manually re-dispatched. That is strictly
+# better than the alternative (a stale `:latest` silently deployed), which
+# per-run groups for publishers would reintroduce.
 # Mutual exclusion on the single VM directory itself is enforced by flock
 # in the deploy script (a contender waits 600s, then fails loudly).
 concurrency:
-  group: ${{ github.event_name == 'pull_request' && format('backend-{0}', github.ref) || format('backend-publish-{0}', (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.image_tag == '')) && 'latest' || github.run_id) }}
+  group: ${{ github.event_name == 'pull_request' && format('backend-{0}', github.ref) || format('backend-publish-{0}', (github.ref == 'refs/heads/main' && (github.event_name == 'push' || inputs.image_tag == '')) && 'latest' || github.run_id) }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
@@ -214,9 +221,10 @@ jobs:
     # otherwise the runner kills a flock contender mid-deploy instead of
     # letting it fail loudly.
     timeout-minutes: 60
-    # No job-level group: the workflow group is already unique per non-PR
-    # run, and the VM itself is serialized by flock below. A second group
-    # here would only reintroduce silent cancellation of queued runs.
+    # No job-level group: publishers already share the workflow-level
+    # backend-publish-latest group (rollbacks are per-run), and the VM
+    # itself is serialized by flock below. A second group here would only
+    # reintroduce silent cancellation of queued runs.
     environment: ${{ github.event_name == 'push' && 'backend-prod' || github.event.inputs.environment || 'stage' }}
     steps:
       - uses: actions/checkout@v4
