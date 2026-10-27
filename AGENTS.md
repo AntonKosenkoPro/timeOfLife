@@ -10,7 +10,7 @@ Agent entrypoint for this repo. **Read [`docs/project-context.md`](docs/project-
 
 The repo is spec-driven (`openspec/config.yaml`, `schema: spec-driven`). See `openspec/README.md` for the workflow; the essentials:
 
-- **Baseline specs** (`openspec/specs/<capability>/spec.md`): current contract (24 baselines incl. `app-shell`, `timer-capture-experience`, `apple-signin`, `live-activities`). Never edit directly — behavior changes go through a change.
+- **Baseline specs** (`openspec/specs/<capability>/spec.md`): current contract (26 baselines incl. `app-shell`, `timer-capture-experience`, `apple-signin`, `live-activities`). Never edit directly — behavior changes go through a change.
 - **Active deltas**: active changes live under `openspec/changes/` — check `openspec list` before starting new behavior work.
 - **Archives** (`openspec/changes/archive/`): history; their deltas are already folded into the baselines.
 
@@ -24,7 +24,7 @@ The repo is spec-driven (`openspec/config.yaml`, `schema: spec-driven`). See `op
 - **No passwords, no plaintext secrets** (R1); tokens in Keychain only; user-enumeration closed (`otp/request` always 202).
 - **iOS strings** go to both `en.lproj` and `ru.lproj` + `L10n` (U4).
 - **XcodeGen-managed** — edit `project.yml`, run `xcodegen generate`; never hand-edit the `.pbxproj`.
-- **Signing is per-config**: Debug unsigned (simulator/CI), Release signed with team `7923U48U87` (SIWA entitlement live; backend needs `APPLE_CLIENT_ID`). Manual smoke checklist: `README.md`.
+- **Signing is per-config**: Debug unsigned (simulator/CI), Release signed with team `7923U48U87` (SIWA entitlement live; backend needs `APPLE_CLIENT_ID`). Manual smoke checklist: `docs/manual-testing.md`.
 - **SwiftUI views use `Theme` semantic colors only**; no raw `Color` literals.
 - **No binaries in git without explicit user permission** — never commit screenshots, videos, IPAs, xcresults, or other binaries (including OpenSpec evidence); keep captures in `/tmp` or attach them directly.
 
@@ -42,7 +42,7 @@ ios/TimeOfLife/          SwiftUI app (iOS 18+), XcodeGen-managed
   TimeOfLife/Features/{Auth,AppShell,TimeTracking,Catalog,Sync,AppleSignIn}
   TimeOfLife/Core/Storage/   LocalStore.swift (GRDB), UndoBufferStore.swift, SessionCache.swift
   TimeOfLife/Core/           networking, keychain, reachability, theme, navigation, DI, components
-docs/                    project-context.md (canonical context), ci.md, ios-test-loop.md (fast xcodebuild loop)
+docs/                    project-context.md (canonical context), ci.md, ios-test-loop.md (fast xcodebuild loop), manual-testing.md (device smoke checklists), + ops guides
 openspec/                specs + changes (see above)
 Requirements/FURPS/      FURPS+ table (Common.md, Timetracking.md, Sign-up_and_Sign-in.md, Activity_Catalog_and_Categories.md)
 Design/                  text design system — see Design/README.md
