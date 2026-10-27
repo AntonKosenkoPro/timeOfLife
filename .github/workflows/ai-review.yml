@@ -61,24 +61,30 @@ jobs:
           HEAD_SHA: ${{ steps.refs.outputs.head_sha }}
         with:
           script: |
-            const headSha = process.env.HEAD_SHA;
-            if (!/^[0-9a-f]{40}$/i.test(headSha || '')) {
-              core.warning(`Not creating an ai-review check run for unexpected head_sha '${headSha}'.`);
-              return;
+            // Fail-open: any failure here only warns — the review steps run
+            // regardless and the job summary + comments remain the fallback.
+            try {
+              const headSha = process.env.HEAD_SHA;
+              if (!/^[0-9a-f]{40}$/i.test(headSha || '')) {
+                core.warning(`Not creating an ai-review check run for unexpected head_sha '${headSha}'.`);
+                return;
+              }
+              const detailsUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+              const { data: run } = await github.rest.checks.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                name: 'ai-review',
+                head_sha: headSha,
+                status: 'in_progress',
+                started_at: new Date().toISOString(),
+                details_url: detailsUrl,
+                external_id: `${context.runId}/${context.runAttempt}`
+              });
+              core.setOutput('check_run_id', String(run.id));
+              core.info(`ai-review check run ${run.id} opened on ${headSha}`);
+            } catch (err) {
+              core.warning(`Could not create ai-review check run (review continues without it): ${err.message}`);
             }
-            const detailsUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
-            const { data: run } = await github.rest.checks.create({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              name: 'ai-review',
-              head_sha: headSha,
-              status: 'in_progress',
-              started_at: new Date().toISOString(),
-              details_url: detailsUrl,
-              external_id: `${context.runId}/${context.runAttempt}`
-            });
-            core.setOutput('check_run_id', String(run.id));
-            core.info(`ai-review check run ${run.id} opened on ${headSha}`);
 
       - name: Parse /review params
         id: params
@@ -226,6 +232,7 @@ jobs:
         if: always()
         env:
           PARAMS_OUTCOME: ${{ steps.params.outcome }}
+          REVIEW_OUTCOME: ${{ steps.review.outcome }}
           SUMMARY_RANGE: ${{ steps.review.outputs.range_summary || 'n/a' }}
           SUMMARY_TOTAL: ${{ steps.review.outputs.comments_total || '0' }}
           SUMMARY_INLINE: ${{ steps.review.outputs.comments_inline || '0' }}
@@ -242,6 +249,7 @@ jobs:
             else
               echo "- Params: effort=\`$EFFORT\` budget=\`$MAX_TOKENS_BUDGET\` model=\`$REVIEW_MODEL\` think=\`$THINK\` full=\`$FULL_REVIEW\`"
             fi
+            echo "- Review step: \`$REVIEW_OUTCOME\` (skipped/failure means the counts below are not a clean review)"
             echo "- Range: \`$SUMMARY_RANGE\`"
             echo "- Findings: \`$SUMMARY_TOTAL\` total, \`$SUMMARY_INLINE\` inline, \`$SUMMARY_FAILED\` failed, \`$SUMMARY_ROUTED\` routed"
             echo "- Summary: $SUMMARY_URL"
@@ -262,6 +270,7 @@ jobs:
           CHECK_RUN_ID: ${{ steps.check.outputs.check_run_id }}
           JOB_CANCELLED: ${{ cancelled() }}
           PARAMS_OUTCOME: ${{ steps.params.outcome }}
+          REVIEW_OUTCOME: ${{ steps.review.outcome }}
           SUMMARY_RANGE: ${{ steps.review.outputs.range_summary || 'n/a' }}
           SUMMARY_TOTAL: ${{ steps.review.outputs.comments_total || '0' }}
           SUMMARY_INLINE: ${{ steps.review.outputs.comments_inline || '0' }}
@@ -285,26 +294,31 @@ jobs:
             } else {
               lines.push(`- Params: effort=\`${process.env.EFFORT}\` budget=\`${process.env.MAX_TOKENS_BUDGET}\` model=\`${process.env.REVIEW_MODEL}\` think=\`${process.env.THINK}\` full=\`${process.env.FULL_REVIEW}\``);
             }
+            lines.push(`- Review step: \`${process.env.REVIEW_OUTCOME}\` (skipped/failure means the counts below are not a clean review)`);
             lines.push(`- Range: \`${process.env.SUMMARY_RANGE}\``);
             lines.push(`- Findings: \`${process.env.SUMMARY_TOTAL}\` total, \`${process.env.SUMMARY_INLINE}\` inline, \`${process.env.SUMMARY_FAILED}\` failed, \`${process.env.SUMMARY_ROUTED}\` routed`);
             lines.push(`- Summary: ${process.env.SUMMARY_URL}`);
             lines.push(`- Checkpoint: \`${process.env.SUMMARY_CHECKPOINT}\``);
             const cancelled = process.env.JOB_CANCELLED === 'true';
-            await github.rest.checks.update({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              check_run_id: id,
-              status: 'completed',
-              // Advisory stays advisory: success whenever the bridge ran,
-              // cancelled when superseded. Findings, parse failures, and
-              // action errors are reported in the output text, never mapped
-              // to the conclusion. No annotations: inline findings remain
-              // the only per-file surface.
-              conclusion: cancelled ? 'cancelled' : 'success',
-              completed_at: new Date().toISOString(),
-              output: {
-                title: 'AI review (advisory)',
-                summary: lines.join('\n')
-              }
-            });
-            core.info(`ai-review check run ${id} finalized (${cancelled ? 'cancelled' : 'success'}).`);
+            try {
+              await github.rest.checks.update({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                check_run_id: id,
+                status: 'completed',
+                // Advisory stays advisory: success whenever the bridge ran,
+                // cancelled when superseded. Findings, parse failures, and
+                // action errors are reported in the output text, never mapped
+                // to the conclusion. No annotations: inline findings remain
+                // the only per-file surface.
+                conclusion: cancelled ? 'cancelled' : 'success',
+                completed_at: new Date().toISOString(),
+                output: {
+                  title: 'AI review (advisory)',
+                  summary: lines.join('\n')
+                }
+              });
+              core.info(`ai-review check run ${id} finalized (${cancelled ? 'cancelled' : 'success'}).`);
+            } catch (err) {
+              core.warning(`Could not finalize ai-review check run ${id}: ${err.message}`);
+            }
