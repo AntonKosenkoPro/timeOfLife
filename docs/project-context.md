@@ -171,7 +171,6 @@ Mandatory before implementing every feature/bugfix: research the topic, applicab
 ## Per-iteration revising process (Requirements S5)
 
 On every iteration (feature/fix PR) the author MUST:
-0. Start every explore/propose on the main base (sole mandatory step of explore/propose; on conflict with generated skill text, `AGENTS.md` + this file win): in the main checkout run `git fetch origin`, confirm the toplevel is the main checkout (not `timeOfLife.wt/*`), stash tracked dirt with `git stash push -m "step0-autostash/<date>/<reason>"` (never `-u` — untracked `timeOfLife.wt/`, `.scroll-evidence-*`, untracked `openspec/changes/*` stay put) and report `git stash list`, checkout `main` and fast-forward to `origin/main`, verify `HEAD == origin/main` via `git rev-parse`, then run `openspec list --json`. Fallback when `main` is held by a stale worktree: proceed at the `origin/main` commit, flag the holder for cleanup, never force-remove a worktree.
 1. Start from a fresh base and stay isolated: work in a separated git worktree (`timeOfLife.wt/<change-name>`, one branch per worktree; main checkout stays clean); `git fetch origin` + rebase onto `origin/main` before implementing and again before opening the PR (re-run affected linters/tests after each rebase; `push --force-with-lease`; never `merge main`). Worktrees do not lift the one-`xcodebuild` / one-simulator / single-writer-file serialization.
 2. Complete the ctx7 research bundle before coding (topic + applicable HIG + Apple API + best practice, max 5 — see "External docs first (ctx7)"), with cites or waiver reasons recorded; re-confirm at apply time.
 3. Run both linters and fix every finding: `golangci-lint run` (backend), `swiftlint lint --strict` (iOS); run the iOS build and inspect/fix every `xcodebuild` warning (app/test warnings are errors through `project.yml`); `gofmt -l .` must be empty.
@@ -179,7 +178,6 @@ On every iteration (feature/fix PR) the author MUST:
 5. Re-read the relevant `Requirements/FURPS/*.md` rows and confirm the change aligns; correct the requirements doc if rows conflict (see the passwordless correction as precedent).
 6. Update `AGENTS.md`, `README.md`, `docs/project-context.md`, the relevant `Design/*.md` files, and [`backend/api/openapi.yaml`](../backend/api/openapi.yaml) if architecture/contract/run steps or visual design changed. The OpenAPI spec is the authoritative API contract — keep it in sync with the handlers. Advance or archive the active OpenSpec change as appropriate.
 7. Prefer reusing existing utilities/patterns over new code; remove dead code.
-8. Never block on a foreground wait longer than ~60s: run long shells backgrounded to a log file and poll every ~60s (`tail`/`grep` for progress, compare elapsed vs. budget), and run subagents with `background=true` while doing useful overlapping work. Budgets: `go test` seconds, warm iOS suite ~30s, cold GRDB builds minutes; anything over budget is stalled — kill, diagnose (`ps`, `simctl`, log tail), retry once, never just raise the timeout. Serialization (one `xcodebuild`, one simulator, single-writer files) still applies.
 
 ### Reproduce before fixing, verify after (bugfix rule)
 
