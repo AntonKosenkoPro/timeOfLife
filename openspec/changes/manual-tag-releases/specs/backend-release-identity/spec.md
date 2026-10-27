@@ -6,12 +6,12 @@ Backend builds are currently anonymous: the image is always overwritten as `back
 
 ### Requirement: Pinned backend image tags
 
-Every push of a `backend/*` tag SHALL produce an immutable container image tagged with the tag name (e.g. `ghcr.io/<repo>/backend:backend-v2.5.0`) in addition to the floating `backend:latest`. Pushed backend tags SHALL be annotated, signed, owner-only, and never moved — the same tag discipline as iOS namespaces.
+Every push of a `backend/*` tag SHALL produce an immutable container image tagged with the tag name (e.g. `ghcr.io/<repo>/backend:backend-v2.5.0`). Tag builds SHALL NOT move the floating `:latest`, which advances on main pushes alone — concurrent publishers must never leave `:latest` pointing at an older image, and a rare tag publish must never be silently superseded by a frequent deploy (single pending run per concurrency group). Pushed backend tags SHALL be annotated, signed, owner-only, and never moved — the same tag discipline as iOS namespaces.
 
 #### Scenario: Backend tag produces a pinned image
 
 - **WHEN** the owner pushes signed `backend/v2.5.0`
-- **THEN** the backend workflow builds and pushes both `backend:backend-v2.5.0` (immutable) and `backend:latest` (floating pointer)
+- **THEN** the backend workflow builds and pushes `backend:backend-v2.5.0` (immutable), and `:latest` is untouched
 
 #### Scenario: Rollback redeploys a pinned image
 

@@ -13,15 +13,20 @@ on:
   workflow_dispatch:
     inputs:
       environment:
-        description: "Target environment to deploy to"
+        description: "Target environment to deploy to (backend-prod carries the wait timer + main-only policy)"
         type: choice
-        options: [stage, prod]
+        options: [stage, backend-prod]
         default: stage
         required: true
       skip_checks:
         description: "Skip lint + test (re-deploy only)"
         type: boolean
         default: false
+        required: false
+      image_tag:
+        description: "Pinned backend image tag for rollback redeploys (e.g. backend-v2.4.0); empty builds :latest from source"
+        type: string
+        default: ""
         required: false
 
 permissions:
@@ -162,18 +167,35 @@ jobs:
           esac
 
   deploy:
-    # Push to main auto-deploys to the prod environment; workflow_dispatch
-    # deploys the chosen environment (default stage). backend/* tag pushes are
-    # built (but never deployed) by backend-release.yml, which has no `paths:`
-    # filter so tag-only pushes always trigger it. Per-environment branch +
-    # reviewer gating is enforced in GitHub's Environment settings, not here.
+    # Push to main auto-deploys to the backend-prod environment (created with
+    # a wait timer + main-only branch policy — see docs/ci.md runbook);
+    # workflow_dispatch deploys the chosen environment (default stage).
+    # backend/* tag pushes are built (but never deployed) by
+    # backend-release.yml, which has no `paths:` filter so tag-only pushes
+    # always trigger it. Per-environment branch + reviewer gating is enforced
+    # in GitHub's Environment settings, not here.
+    # Deploys run only from main: without the ref guard a manual dispatch on
+    # a feature branch (or an old tag) would publish `:latest` from an
+    # unreviewed tree and deploy it — the stale-`:latest` class of bug
+    # through a different door. Rollback dispatches (image_tag) also run
+    # from main; the tag only selects the image.
     if: >
-      github.event_name == 'push' ||
-      github.event_name == 'workflow_dispatch'
+      (github.event_name == 'push' ||
+      github.event_name == 'workflow_dispatch') &&
+      github.ref == 'refs/heads/main'
     needs: [lint-and-test]
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    environment: ${{ github.event_name == 'push' && 'prod' || github.event.inputs.environment || 'stage' }}
+    # Serializes main-push publishes so two back-to-back merges can never
+    # interleave their `:latest` push and the deploy's pull below (which
+    # would otherwise fetch a stale image). Kept separate from
+    # backend-release.yml's own group: that job publishes the immutable
+    # pinned tag only, and sharing one group would let frequent deploys
+    # silently cancel a queued tag publish (single pending run per group).
+    concurrency:
+      group: backend-publish
+      cancel-in-progress: false
+    environment: ${{ github.event_name == 'push' && 'backend-prod' || github.event.inputs.environment || 'stage' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -240,6 +262,13 @@ jobs:
             cat > .env <<'ENVEOF'
             DB_PASSWORD=${{ secrets.DB_PASSWORD }}
             JWT_SECRET=${{ secrets.JWT_SECRET }}
+            # Pinned-image rollback (manual-tag-releases): empty (normal
+            # deploys) resolves to :latest in compose; a rollback dispatch
+            # sets e.g. backend-v2.4.0 and the pull below fetches the pinned
+            # image instead. A bad tag fails loudly at `docker compose pull`
+            # (set -euo pipefail aborts before `up`), leaving .env written —
+            # re-dispatch with an empty/correct tag to recover.
+            BACKEND_IMAGE_TAG=${{ inputs.image_tag }}
             EMAIL_BACKEND=${{ vars.EMAIL_BACKEND }}
             AWS_ACCESS_KEY_ID=${{ secrets.AWS_ACCESS_KEY_ID }}
             AWS_SECRET_ACCESS_KEY=${{ secrets.AWS_SECRET_ACCESS_KEY }}
@@ -310,6 +339,14 @@ jobs:
             : "${DB_PASSWORD:?secret DB_PASSWORD is empty}"
             : "${JWT_SECRET:?secret JWT_SECRET is empty}"
             [ "${#JWT_SECRET}" -ge 32 ] || { echo "JWT_SECRET must be at least 32 bytes"; exit 1; }
+            # Rollback input guard: a typo here must fail before `docker
+            # compose pull`, and must never break `.env` sourcing above
+            # (spaces/newlines would). Empty = normal :latest deploy.
+            case "${BACKEND_IMAGE_TAG:-}" in
+              ''|[A-Za-z0-9_][A-Za-z0-9_.-]*)
+                [ "${#BACKEND_IMAGE_TAG}" -le 128 ] || { echo "BACKEND_IMAGE_TAG exceeds Docker's 128-char limit"; exit 1; } ;;
+              *) echo "BACKEND_IMAGE_TAG '$BACKEND_IMAGE_TAG' is not a valid Docker tag suffix"; exit 1 ;;
+            esac
             # Format check mirrors ParseRecoveryKeys + isZeroKey (config.go):
             # comma-separated, edge-trimmed, empties ignored, every entry 64
             # hex chars (32 bytes) and non-zero. A malformed or placeholder

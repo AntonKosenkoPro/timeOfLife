@@ -54,14 +54,87 @@ generate_project
 # `xcodegen generate` so the generated Info.plists pick the stamped values
 # up, then asserts unanimity across all targets (failing the archive on
 # skew). $TAG_OVERRIDE (local simulation only — Cloud never sets it)
-# replaces `git describe` when set, even when set to empty (which forces
-# the no-tag path). The build number is Xcode Cloud's per-workflow
-# $CI_BUILD_NUMBER (monotonic per workflow, so App Store Connect build
-# numbers increase); local simulations must export it explicitly.
+# replaces tag discovery when set, even when set to empty (which forces
+# the no-tag path). Tags are discovered with `git tag --points-at HEAD`
+# (after a retried tag fetch that fails closed): the same-commit promotion
+# (`internal/vX` + `release/vX`, the normal dogfood→public path) is
+# allowed and disambiguated by $CI_WORKFLOW (pinned names, docs/ci.md);
+# two tags in one namespace, or a pair with different marketing versions,
+# abort. Non-iOS tags sharing HEAD are ignored. A tag-triggered archive
+# must never ship the dev dummy.
+# The build number is channel-banded (N*2+chanbit)*STRIDE plus Xcode
+# Cloud's per-workflow $CI_BUILD_NUMBER: internal and public are separate
+# workflows with independent counters, so raw run numbers can order
+# backwards across channels for one marketing line (App Store Connect
+# rejects re-uploads at or below the previous build). Tags are cut in
+# (N, channel) time order (dogfood before public), which keeps the stamped
+# number increasing while RUN stays below STRIDE.
+# Local simulations must export CI_BUILD_NUMBER explicitly.
 if [ "${TAG_OVERRIDE+x}" = "x" ]; then
   TAG="$TAG_OVERRIDE"
 else
-  TAG="$(git describe --tags --exact-match HEAD 2>/dev/null || true)"
+  # The fetch is retried-then-fatal on purpose: without tag refs a
+  # tag-triggered archive cannot be told apart from a PR build, and guessing
+  # wrong ships the dev dummy (fail-closed beats a green-but-wrong archive).
+  # A transient hiccup retries so unrelated PR CI isn't blocked by a git
+  # blip; a genuinely unreachable remote still aborts.
+  FETCH_OK=0
+  for _ in 1 2 3; do
+    if git fetch --tags origin >/dev/null 2>&1; then
+      FETCH_OK=1
+      break
+    fi
+    sleep 5
+  done
+  if [ "$FETCH_OK" != "1" ]; then
+    echo "error: tag fetch failed 3x and no \$TAG_OVERRIDE is set — refusing to guess (a tag-triggered archive must never ship the dev dummy). Archiving nothing."
+    exit 1
+  fi
+  TAGS="$(git tag --points-at HEAD 2>/dev/null || echo __GIT_FAILED__)"
+  if [ "$TAGS" = "__GIT_FAILED__" ]; then
+    echo "error: cannot enumerate tags at HEAD and no \$TAG_OVERRIDE is set — refusing to guess (a tag-triggered archive must never ship the dev dummy). Archiving nothing."
+    exit 1
+  fi
+  # At most one iOS release namespace may tag a commit — except the
+  # same-commit promotion (internal/vX + release/vX, the normal
+  # dogfood→public path), which CI_WORKFLOW disambiguates. Workflow names
+  # are pinned (docs/ci.md runbook): "iOS Internal Release" cuts internal,
+  # "iOS Public Release" cuts public. Non-iOS tags sharing HEAD
+  # (backend/*, checkpoint tags) are ignored, not errors.
+  IOS_TAGS="$(printf '%s\n' "$TAGS" | grep -E '^(internal|release)/' || true)"
+  IOS_TAG_COUNT="$(printf '%s\n' "$TAGS" | grep -cE '^(internal|release)/' || true)"
+  if [ "$IOS_TAG_COUNT" -gt 1 ]; then
+    case "${CI_WORKFLOW:-}" in
+      "iOS Internal Release") WANT_NS="internal" ;;
+      "iOS Public Release") WANT_NS="release" ;;
+      *)
+        echo "error: multiple iOS release tags at HEAD and CI_WORKFLOW='${CI_WORKFLOW:-}' cannot disambiguate:"
+        printf '%s\n' "$IOS_TAGS"
+        echo "Archiving nothing."
+        exit 1
+        ;;
+    esac
+    TAG="$(printf '%s\n' "$IOS_TAGS" | grep -E "^${WANT_NS}/" || true)"
+    M="$(printf '%s\n' "$TAG" | grep -c . || true)"
+    if [ "$M" != "1" ]; then
+      echo "error: workflow '$CI_WORKFLOW' expects exactly one $WANT_NS tag at HEAD; found:"
+      printf '%s\n' "$TAG"
+      echo "Archiving nothing."
+      exit 1
+    fi
+    # A promotion pair must share one marketing version: internal/v0.2.7 +
+    # release/v0.3.0 at one commit is a typo (or a half-tagged fix), and
+    # stamping the workflow's pick would silently ship the wrong marketing
+    # while skipping the dogfood-before-public guarantee. The sibling is
+    # printed here, never silently dropped.
+    PAIR_VERSIONS="$(printf '%s\n' "$IOS_TAGS" | sed -E 's|^[^/]*/v||' | cut -d. -f1-3 | sort -u | tr '\n' ' ')"
+    if [ "$(printf '%s\n' "$IOS_TAGS" | sed -E 's|^[^/]*/v||' | cut -d. -f1-3 | sort -u | grep -c . || true)" != "1" ]; then
+      echo "error: iOS tags at HEAD span multiple marketing versions [$PAIR_VERSIONS]— a promotion pair must share one vM.m.p. The '$TAG' pick is NOT stamped. Archiving nothing."
+      exit 1
+    fi
+  else
+    TAG="$IOS_TAGS"
+  fi
 fi
 
 if [ -z "$TAG" ]; then
@@ -91,14 +164,64 @@ if ! printf '%s' "$VERSION" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+(\.[0-9]+)?$'; t
 fi
 
 MARKETING="$(printf '%s' "${VERSION#v}" | cut -d. -f1-3)"
+SEQ="$(printf '%s' "${VERSION#v}" | cut -d. -f4)"
+if [ -z "$SEQ" ]; then
+  SEQ=1
+fi
+# Sequence is part of the build number, so it must be a real positive
+# integer in range: `0` (or leading zeros, which $(( )) would read as
+# octal) collapses/mis-orders the stamped build, and App Store Connect
+# accepts CFBundleVersion only up to 2^31-1.
+SEQ="$(printf '%s' "$SEQ" | sed 's/^0*//')"
+if [ -z "$SEQ" ]; then
+  echo "error: tag '$TAG' carries re-upload sequence 0 — the banded ordering ((N*2+chanbit)*STRIDE+RUN) assumes N >= 1. Archiving nothing."
+  exit 1
+fi
 
-BUILD="${CI_BUILD_NUMBER:-}"
-case "$BUILD" in
+STRIDE=100000
+BUILD_RUN="${CI_BUILD_NUMBER:-}"
+case "$BUILD_RUN" in
   ''|*[!0-9]*)
-    echo "error: tag '$TAG' is present but \$CI_BUILD_NUMBER is missing or not a positive integer — refusing to stamp a guessable build number. Archiving nothing."
+    echo "error: tag '$TAG' is present but \$CI_BUILD_NUMBER is missing or not numeric — refusing to stamp a guessable build number. Archiving nothing."
     exit 1
     ;;
 esac
+# Strip leading zeros ($(( )) would read them as octal), then reject 0:
+# a CFBundleVersion of 0 is not uploadable.
+BUILD_RUN="$(printf '%s' "$BUILD_RUN" | sed 's/^0*//')"
+if [ -z "$BUILD_RUN" ]; then
+  echo "error: tag '$TAG' resolved to build number 0, which App Store Connect rejects — refusing to stamp it. Archiving nothing."
+  exit 1
+fi
+if [ "$BUILD_RUN" -ge "$STRIDE" ]; then
+  echo "error: \$CI_BUILD_NUMBER=$BUILD_RUN reaches stride $STRIDE — the banded scheme below can no longer order it. Bump STRIDE. Archiving nothing."
+  exit 1
+fi
+# Channel-banded build number: internal and public are separate Cloud
+# workflows with independent run counters, so raw run numbers can order
+# backwards across channels for one marketing line (App Store Connect
+# rejects a re-upload with a build number at or below the previous one).
+# Each sequence number N owns a band of 2*STRIDE; public takes the upper
+# half. Tags are cut in (N, channel) time order (dogfood before public),
+# so (N*2+chanbit)*STRIDE+RUN increases along any legal tag sequence
+# while RUN stays below STRIDE. Reversing channels at one N (public
+# before internal) violates the runbook and is rejected by ASC, not here.
+if [ "$CHANNEL" = "public" ]; then
+  CHANBIT=1
+else
+  CHANBIT=0
+fi
+# App Store Connect accepts CFBundleVersion up to 2^31-1: keep the whole
+# stamped number inside that range at the largest accepted sequence.
+MAX_SEQ="$(( (2147483647 - 2 * STRIDE + 1) / (2 * STRIDE) ))"
+# Length guard first: beyond 5 digits the value may exceed the shell's
+# integer range, in which case `[ -gt ]` errors (status 2, silently skipped
+# in an `if` condition) and $(( )) wraps — failing open. MAX_SEQ is 10736.
+if [ "${#SEQ}" -gt 5 ] || [ "$SEQ" -gt "$MAX_SEQ" ]; then
+  echo "error: tag '$TAG' has re-upload sequence $SEQ — the banded build would exceed App Store Connect's 2^31-1 limit (max sequence $MAX_SEQ). Archiving nothing."
+  exit 1
+fi
+BUILD="$(( (SEQ * 2 + CHANBIT) * STRIDE + BUILD_RUN ))"
 
 echo "Release tag '$TAG': stamping MARKETING_VERSION=$MARKETING BUILD=$BUILD CHANNEL=$CHANNEL."
 

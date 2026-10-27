@@ -107,9 +107,10 @@ paths:
       operationId: healthCheck
       summary: Health check
       description: |
-        Returns the server health status plus the running build's release
-        identity (release tag + short commit SHA, stamped at image build
-        time; "?" when unstamped, e.g. local `go run`). The shape stays
+        Returns the server health status plus the running build's identity
+        (release tag on `backend/*` tagged builds, `main-<sha>` on
+        main-branch and manual deploys, short commit SHA — all stamped at
+        image build time; "?" when unstamped, e.g. local `go run`). The shape stays
         backward-compatible: existing `status`-only readers keep working.
       tags:
         - Health
@@ -131,7 +132,7 @@ paths:
                     description: Health status
                   version:
                     type: string
-                    description: Release tag stamped at build time (e.g. backend/v2.5.0), or "?" when unstamped
+                    description: Build identity stamped at build time — the release tag on `backend/*` tagged builds (e.g. backend/v2.5.0) or `main-<sha>` on main-branch deploys; "?" when unstamped
                     example: backend/v2.5.0
                   sha:
                     type: string

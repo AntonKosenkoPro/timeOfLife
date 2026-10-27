@@ -5,7 +5,9 @@
 
 ## 2. Phase 0 — unblock (manual operator steps + one paragraph)
 
-- [ ] 2.1 Create you-only signed-tag rulesets for `internal/*`, `release/*`, `backend/*` (Settings → rulesets); verify with `gh api` output pasted as evidence. Confirm a bot-side tag push would be rejected (dry-run or ruleset evaluation).
+- [x] 2.1 Create you-only signed-tag rulesets for `internal/*`, `release/*`, `backend/*` (Settings → rulesets); verify with `gh api` output pasted as evidence. Confirm a bot-side tag push would be rejected (dry-run or ruleset evaluation).
+  - Evidence 2026-10-26: ruleset `Release tags` (id 25900491) active, tag target, refs `internal/*`+`release/*`+`backend/*`, rules creation+update+deletion+non_fast_forward, bypass=[User 2052851/AntonKosenkoPro always].
+  - Evidence 2026-10-26: probe `internal/v0.0.0-probe` push as owner succeeded with server line "Bypassed rule violations … creations being restricted" — the creation rule fires and only the bypass passes, so any non-bypass actor (bots, GITHUB_TOKEN) is rejected by the same engine that produced GH013 on main. Remote+local probe deleted after (deletion likewise bypass-gated).
 - [x] 2.2 Document "bump retired, signed tags are the release act" in `docs/ci.md` (one paragraph + tag grammar table). No workflow edits yet.
 
 ## 3. Phase 1 — iOS channels
@@ -32,4 +34,4 @@
 - [x] 6.1 `grep -rn "workflow_call\|RELEASE_PLISTS\|chore(release): bump" .github/ docs/ README.md AGENTS.md` returns only historical mentions (noted) or empty.
 - [x] 6.2 `openspec validate --all --strict` green on the PR.
 - [x] 6.3 Backend suite green (`go test ./...` from `backend/`; `gofmt -l .` empty) + local iOS build + test pass (`xcodegen generate`, `swiftlint lint --strict`, `xcodebuild` build and `test` per `docs/ios-test-loop.md`).
-- [ ] 6.4 Phase 3 follow-up filed (environments `testflight-internal`/`testflight-public`/`backend-prod` + one rollback drill per platform, internal-only) — linked issue or tasks section, not blocking archive.
+- [x] 6.4 Phase 3 follow-up filed (environments `testflight-internal`/`testflight-public`/`backend-prod` + one rollback drill per platform, internal-only) — linked issue or tasks section, not blocking archive.

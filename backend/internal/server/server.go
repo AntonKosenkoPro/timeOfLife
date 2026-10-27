@@ -59,9 +59,11 @@ type Dependencies struct {
 	AppleDigestKey []byte
 	// AppleClientID is the Bundle ID referenced by revocation jobs.
 	AppleClientID string
-	// Version is the release tag stamped at build time via ldflags
-	// (-X main.version). Empty (literal-constructed Dependencies in tests)
-	// falls back to "?" at serve time.
+	// Version is the build identity stamped at build time via ldflags
+	// (-X main.version): the release tag on `backend/*` tagged builds,
+	// `main-<sha>` on main-branch and manual deploys. Empty
+	// (literal-constructed Dependencies in tests) falls back to "?" at
+	// serve time.
 	Version string
 	// SHA is the short commit SHA stamped at build time via ldflags
 	// (-X main.sha). Empty falls back to "?" at serve time.
@@ -393,15 +395,17 @@ func corsMiddlewareWithAllowlist(allowedOrigins []string) func(http.Handler) htt
 func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(healthResponse{
+	if err := json.NewEncoder(w).Encode(healthResponse{
 		Status:  "ok",
 		Version: s.version,
 		SHA:     s.sha,
-	})
+	}); err != nil {
+		slog.Error("failed to encode health response", "error", err)
+	}
 }
 
 // healthResponse is the GET /health body: status plus the stamped build
-// identity (release tag + short commit SHA, "?" when unstamped).
+// identity (release tag on tagged builds, main-<sha> on main deploys, "?" when unstamped).
 type healthResponse struct {
 	Status  string `json:"status"`
 	Version string `json:"version"`

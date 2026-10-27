@@ -1,11 +1,11 @@
 name: backend-release
 
 # Pinned backend image builds: the owner pushes a signed backend/* tag
-# (grammar + runbook: docs/ci.md) and this workflow builds + pushes both the
-# immutable pinned image and the floating :latest. No lint/test here — tags
-# are created only on main, whose pushes already ran the backend checks. No
-# SSH deploy here either — deploys stay on main pushes (backend.yml) until
-# the Phase 3 environments land.
+# (grammar + runbook: docs/ci.md) and this workflow builds + pushes the
+# immutable pinned image. No lint/test here — tags are created only on main,
+# whose pushes already ran the backend checks. No `:latest` push and no SSH
+# deploy here either — `:latest` advances on main pushes (backend.yml) and
+# deploys stay there until the Phase 3 environments land.
 #
 # NOTE: this trigger intentionally has NO `paths:` filter. A tag-only push
 # carries no new commits, so a paths filter would match nothing and the
@@ -19,10 +19,15 @@ permissions:
   contents: read
   packages: write  # needed to push to GHCR
 
-# Manual tags are sequential by construction; serialize just in case two
-# land close together so :latest never ends up older than a pinned tag.
+# Manual tags are rare and sequential by construction; scope the group per
+# ref. Tags never move, so one tag can never produce two competing runs,
+# while distinct tags must never cancel each other: GitHub keeps a single
+# pending run per group and silently cancels it when a newer run queues,
+# which would drop a pinned-image publish without error. This job publishes
+# the immutable pinned image only (never `:latest`, which advances on main
+# pushes alone), so there is no shared mutable tag left to serialize.
 concurrency:
-  group: backend-release
+  group: backend-release-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
@@ -31,6 +36,9 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Full history: the on-main ancestor guard below needs it.
+          fetch-depth: 0
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -42,17 +50,60 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Validate release tag
+        env:
+          TAG_NAME: ${{ github.ref_name }}
+          TAG_SHA: ${{ github.sha }}
+        run: |
+          set -e
+          # Fail-closed grammar gate (spec: backend/vM.m.p, numeric semver).
+          # The `backend/*` trigger glob alone would also match `backend/v2.5`
+          # or `backend/release-1` and silently republish `:latest` — refuse.
+          if ! printf '%s' "$TAG_NAME" | grep -Eq '^backend/v[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::tag '$TAG_NAME' is not backend/vM.m.p with numeric semver (e.g. backend/v2.5.0). Never move a pushed tag — cut a new one with a fixed name. Publishing nothing."
+            exit 1
+          fi
+          # Translated image tag must satisfy Docker's tag grammar.
+          TAG_SUFFIX="$(printf '%s' "$TAG_NAME" | tr '/' '-')"
+          case "$TAG_SUFFIX" in
+            ''|*[!A-Za-z0-9_.-]*)
+              echo "::error::tag '$TAG_NAME' translates to '$TAG_SUFFIX', which is not a valid Docker tag. Publishing nothing."
+              exit 1
+              ;;
+          esac
+          if [ "${#TAG_SUFFIX}" -gt 128 ]; then
+            echo "::error::translated tag '$TAG_SUFFIX' exceeds Docker's 128-char limit. Publishing nothing."
+            exit 1
+          fi
+          # Tags are created only on main (spec) — verify the target is
+          # reachable from main instead of trusting the pusher. fetch-depth: 0
+          # already provides a current origin/main; compare against it
+          # directly (a masked `git fetch` + stale FETCH_HEAD would pass
+          # trivially and publish an unreviewed tree).
+          if ! git merge-base --is-ancestor "$TAG_SHA" origin/main; then
+            echo "::error::tag '$TAG_NAME' ($TAG_SHA) does not point at a commit on main — refusing to publish an unreviewed tree. Publishing nothing."
+            exit 1
+          fi
+          echo "Tag '$TAG_NAME' valid ($TAG_SHA on main)."
+
       - name: Set image tags and version
         id: image
+        env:
+          # Never interpolate github.ref_name inline: ref names may legally
+          # contain shell metacharacters. Pass through env only.
+          TAG_NAME: ${{ github.ref_name }}
         run: |
           REPO="${{ github.repository }}"
           REPO_LC="${REPO,,}"
           SHA_SHORT="$(git rev-parse --short HEAD)"
-          # backend/v2.5.0 -> backend-v2.5.0 (pinned, immutable) + :latest (floating).
-          TAG_SUFFIX="$(echo "${{ github.ref_name }}" | tr '/' '-')"
+          # backend/v2.5.0 -> backend-v2.5.0 (pinned, immutable). The floating
+          # `:latest` is deliberately NOT pushed here: it advances on main
+          # pushes alone (backend.yml), so no two publishers can race it stale
+          # and no tag publish can be silently superseded.
+          TAG_SUFFIX="$(printf '%s' "$TAG_NAME" | tr '/' '-')"
           echo "sha=${SHA_SHORT}" >> "$GITHUB_OUTPUT"
-          echo "version=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
-          echo "tags=ghcr.io/${REPO_LC}/backend:${TAG_SUFFIX},ghcr.io/${REPO_LC}/backend:latest" >> "$GITHUB_OUTPUT"
+          echo "version=${TAG_NAME}" >> "$GITHUB_OUTPUT"
+          echo "tags=ghcr.io/${REPO_LC}/backend:${TAG_SUFFIX}" >> "$GITHUB_OUTPUT"
 
       - name: Build and push Docker image
         uses: docker/build-push-action@v6
