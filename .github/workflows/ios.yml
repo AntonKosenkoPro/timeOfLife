@@ -88,8 +88,13 @@ jobs:
           brew install swiftlint
           XCODEGEN_PIN="$(grep -m1 '^XCODEGEN_PIN=' ios/TimeOfLife/ci_scripts/ci_post_clone.sh | cut -d'"' -f2)"
           curl -sSL "https://github.com/yonaskolb/XcodeGen/releases/download/${XCODEGEN_PIN}/xcodegen.zip" -o "${RUNNER_TEMP}/xcodegen.zip"
+          rm -rf "${RUNNER_TEMP}/xcodegen" && mkdir -p "${RUNNER_TEMP}/xcodegen"
           unzip -o -q "${RUNNER_TEMP}/xcodegen.zip" -d "${RUNNER_TEMP}/xcodegen"
-          sudo install -m 755 "${RUNNER_TEMP}/xcodegen/xcodegen" /usr/local/bin/xcodegen
+          # The zip layout is not contractual (flat binary today, folder
+          # tomorrow) — locate the executable instead of hardcoding a path.
+          BIN="$(find "${RUNNER_TEMP}/xcodegen" -name xcodegen -type f | head -1)"
+          [ -n "$BIN" ] || { echo "::error::xcodegen binary not found in release zip"; exit 1; }
+          sudo install -m 755 "$BIN" /usr/local/bin/xcodegen
           xcodegen --version
 
       - name: Generate Xcode project
