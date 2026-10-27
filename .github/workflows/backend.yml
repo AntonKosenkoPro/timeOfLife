@@ -29,9 +29,12 @@ permissions:
   packages: write  # needed to push to GHCR
 
 # Rapid PR pushes cancel superseded runs instead of queueing duplicates.
-# Push/dispatch runs (deploy) are never cancelled mid-flight.
+# Push/dispatch runs (deploy) are never cancelled mid-flight. The group is
+# keyed per dispatch target: a queued manual deploy (e.g. prod waiting on
+# environment approval) must not be evicted by a later push or a dispatch
+# to the other target — GitHub keeps a single pending slot per group.
 concurrency:
-  group: backend-${{ github.ref }}-${{ github.event_name }}
+  group: backend-${{ github.ref }}-${{ github.event.inputs.environment || github.event_name }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
@@ -59,13 +62,14 @@ jobs:
           # Same-repo branches assumed (opsx/* flow). Any detection failure
           # resolves to true (lane runs — minutes, never a silent skip).
           # NOTE: no pipefail-negation here — a failing git diff must not
-          # read as "no match" (fail-open). The diff exit is checked
-          # separately; core.quotePath=false keeps non-ASCII paths matchable.
+          # read as "no match" (fail-open). Local object checked first so
+          # the defensive fetch (fetch-depth: 0 usually has the base)
+          # only runs when genuinely missing; core.quotePath=false keeps
+          # non-ASCII paths matchable.
           if [ "$EVENT" != "pull_request" ]; then
             echo "backend=true" >> "$GITHUB_OUTPUT"  # push path-filters already matched
-          elif ! git fetch origin "$BASE" 2>/dev/null; then
-            echo "backend=true" >> "$GITHUB_OUTPUT"  # fail-closed: base unavailable
-          elif files="$(git -c core.quotePath=false diff --name-only "$BASE...HEAD")" \
+          elif { git cat-file -e "$BASE^{commit}" 2>/dev/null || git fetch origin "$BASE" 2>/dev/null; } \
+            && files="$(git -c core.quotePath=false diff --name-only "$BASE...HEAD")" \
             && ! printf '%s\n' "$files" | grep -Eq '^(backend/|\.github/workflows/backend\.yml)'; then
             echo "backend=false" >> "$GITHUB_OUTPUT"
           else

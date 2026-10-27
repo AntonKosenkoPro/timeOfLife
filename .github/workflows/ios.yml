@@ -76,13 +76,14 @@ jobs:
           # Same-repo branches assumed (opsx/* flow). Any detection failure
           # resolves to true (lane runs — minutes, never a silent skip).
           # NOTE: no pipefail-negation here — a failing git diff must not
-          # read as "no match" (fail-open). The diff exit is checked
-          # separately; core.quotePath=false keeps non-ASCII paths matchable.
+          # read as "no match" (fail-open). Local object checked first so
+          # the defensive fetch (fetch-depth: 0 usually has the base)
+          # only runs when genuinely missing; core.quotePath=false keeps
+          # non-ASCII paths matchable.
           if [ "$EVENT" != "pull_request" ]; then
             echo "ios=true" >> "$GITHUB_OUTPUT"  # push path-filters already matched
-          elif ! git fetch origin "$BASE" 2>/dev/null; then
-            echo "ios=true" >> "$GITHUB_OUTPUT"  # fail-closed: base unavailable
-          elif files="$(git -c core.quotePath=false diff --name-only "$BASE...HEAD")" \
+          elif { git cat-file -e "$BASE^{commit}" 2>/dev/null || git fetch origin "$BASE" 2>/dev/null; } \
+            && files="$(git -c core.quotePath=false diff --name-only "$BASE...HEAD")" \
             && ! printf '%s\n' "$files" | grep -Eq '^(ios/|\.github/workflows/ios\.yml)'; then
             echo "ios=false" >> "$GITHUB_OUTPUT"
           else
