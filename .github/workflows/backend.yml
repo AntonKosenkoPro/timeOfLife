@@ -28,13 +28,14 @@ permissions:
   contents: read
   packages: write  # needed to push to GHCR
 
-# Rapid PR pushes cancel superseded runs instead of queueing duplicates.
-# Push/dispatch runs (deploy) are never cancelled mid-flight. The group is
-# keyed per dispatch target: a queued manual deploy (e.g. prod waiting on
-# environment approval) must not be evicted by a later push or a dispatch
-# to the other target — GitHub keeps a single pending slot per group.
+# Concurrency model: PR runs get one group per PR (cancel superseded
+# pushes); every deploy path — push-to-main and any workflow_dispatch
+# target — shares a single backend-deploy group that never cancels.
+# Rationale: all environments SSH to the same VM (repo-level VM_HOST,
+# hardcoded /opt/timeoflife), so stage/prod/push deploys must serialize,
+# never overlap; a queued deploy waits, it is not evicted by another target.
 concurrency:
-  group: backend-${{ github.ref }}-${{ github.event.inputs.environment || github.event_name }}
+  group: ${{ github.event_name == 'pull_request' && format('backend-{0}', github.ref) || 'backend-deploy' }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
