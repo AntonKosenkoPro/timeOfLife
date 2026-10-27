@@ -3,9 +3,9 @@ name: backend
 # Requirements S6: linters + tests run on every pull request as a mandatory check.
 on:
   pull_request:
-    paths:
-      - "backend/**"
-      - ".github/workflows/backend.yml"
+    # No path filter: the backend-gate job must run and report on EVERY PR —
+    # path-skipped workflows leave required checks Pending forever and block
+    # the PR (observed: #211). Path selection happens in the changes job.
   push:
     branches: [main]
     paths:
@@ -29,7 +29,39 @@ permissions:
   packages: write  # needed to push to GHCR
 
 jobs:
+  # In-workflow path detection (the required backend-gate must always run,
+  # so the workflow itself cannot be path-filtered). Same-repo branches
+  # assumed; any detection failure resolves to true (lane runs — never a
+  # silent skip).
+  changes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      backend: ${{ steps.filter.outputs.backend }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - id: filter
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          if [ "$EVENT" != "pull_request" ]; then
+            echo "backend=true" >> "$GITHUB_OUTPUT"  # push path-filters already matched
+          elif git fetch origin "$BASE" --depth=1 2>/dev/null && ! git diff --name-only "$BASE...HEAD" | grep -Eq '^(backend/|\.github/workflows/backend\.yml)'; then
+            echo "backend=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "backend=true" >> "$GITHUB_OUTPUT"
+          fi
+
   lint-and-test:
+    needs: [changes]
+    # Push (path-filtered) and manual dispatches always run the lane; PRs
+    # only when the diff touches it. Skipped (not failed) otherwise —
+    # backend-gate still reports.
+    if: github.event_name != 'pull_request' || needs.changes.outputs.backend == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -82,6 +114,20 @@ jobs:
             echo "::error::total coverage ${cov}% below floor ${floor}%"
             exit 1
           fi
+
+  # Required check (ruleset): always reports, even when the lane is skipped
+  # on non-backend PRs. Passes on success OR skip; fails on failure/cancel.
+  backend-gate:
+    if: always()
+    needs: [lint-and-test]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - run: |
+          case "${{ needs.lint-and-test.result }}" in
+            success|skipped) echo "lint-and-test ${{ needs.lint-and-test.result }} — gate green";;
+            *) echo "::error::lint-and-test ${{ needs.lint-and-test.result }}"; exit 1;;
+          esac
 
   deploy:
     # push to main auto-deploys to prod; workflow_dispatch deploys the chosen

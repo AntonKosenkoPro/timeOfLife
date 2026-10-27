@@ -34,9 +34,9 @@ on:
       SENTRY_IOS_DSN:
         required: false
   pull_request:
-    paths:
-      - "ios/**"
-      - ".github/workflows/ios.yml"
+    # No path filter: the ios-gate job must run and report on EVERY PR —
+    # path-skipped workflows leave required checks Pending forever and block
+    # the PR (observed: #211). Path selection happens in the changes job.
   push:
     branches: [main]
     paths:
@@ -54,7 +54,39 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # In-workflow path detection (the required ios-gate must always run, so the
+  # workflow itself cannot be path-filtered). Same-repo opsx/* branches
+  # assumed; any detection failure resolves to true (lane runs — minutes,
+  # never a silent skip).
+  changes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      ios: ${{ steps.filter.outputs.ios }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - id: filter
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          if [ "$EVENT" != "pull_request" ]; then
+            echo "ios=true" >> "$GITHUB_OUTPUT"  # push path-filters already matched
+          elif git fetch origin "$BASE" --depth=1 2>/dev/null && ! git diff --name-only "$BASE...HEAD" | grep -Eq '^(ios/|\.github/workflows/ios\.yml)'; then
+            echo "ios=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ios=true" >> "$GITHUB_OUTPUT"
+          fi
+
   lint-build-test:
+    needs: [changes]
+    # Push (path-filtered) and release-verify always run the lane; PRs only
+    # when the diff touches it. Skipped (not failed) otherwise — ios-gate
+    # still reports.
+    if: github.event_name != 'pull_request' || needs.changes.outputs.ios == 'true'
     runs-on: macos-15
     timeout-minutes: 30
     steps:
@@ -100,6 +132,20 @@ jobs:
           xcodebuild -scheme TimeOfLife \
             -destination "platform=iOS Simulator,name=${{ steps.sim.outputs.name }},OS=latest" \
             test | xcpretty
+
+  # Required check (ruleset): always reports, even when the lane is skipped
+  # on non-ios PRs. Passes on success OR skip; fails on failure/cancel.
+  ios-gate:
+    if: always()
+    needs: [lint-build-test]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - run: |
+          case "${{ needs.lint-build-test.result }}" in
+            success|skipped) echo "lint-build-test ${{ needs.lint-build-test.result }} — gate green";;
+            *) echo "::error::lint-build-test ${{ needs.lint-build-test.result }}"; exit 1;;
+          esac
 
   # Symbolication for shipped crashes (observability Stage 0, task 3.3):
   # archives Release unsigned (no signing identity on CI runners) purely to
