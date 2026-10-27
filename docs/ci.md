@@ -5,10 +5,14 @@ GitHub Actions carries the mandatory PR checks (Requirements S6); Xcode Cloud is
 - **GitHub Actions** — `backend.yml` (Go), `ios.yml` (iOS: xcodegen, SwiftLint, warnings-as-errors build, tests), `openspec.yml` (spec gate), `release.yml` (manual version bump), advisory `ai-review.yml`
 - **Xcode Cloud** — tag workflow only (`v*` tags: Archive → TestFlight upload, with `ci_post_xcodebuild.sh` uploading the signed archive's dSYMs to Sentry staging + release; see below). The `iOS PR Checks` workflow is disabled — no PR/push verification runs on Cloud.
 
-Workflows and their scope (`ios.yml` carries the iOS PR lint/build/test bar with `pull_request` + `push`-to-`main` triggers path-filtered to `ios/**`, and stays callable as release verification via `workflow_call` from `release.yml`; the tag-triggered Cloud Archive covers the signed Release build + TestFlight upload):
+Workflows and their scope (`ios.yml` carries the iOS PR lint/build/test bar with unfiltered `pull_request` + path-filtered `push`-to-`main` triggers, and stays callable as release verification via `workflow_call` from `release.yml`; the tag-triggered Cloud Archive covers the signed Release build + TestFlight upload):
 
 - **`backend.yml`** — Go: gofmt, go vet, golangci-lint, race tests, OpenAPI contract gate, coverage gate, deploy
-- **`ios.yml`** — iOS: `pull_request` + `push`-to-`main` path-filtered to `ios/**` (plus `workflow_call` from `release.yml verify`); xcodegen via `xcodegen generate`, SwiftLint `lint --strict`, warnings-as-errors build (per-target `SWIFT_TREAT_WARNINGS_AS_ERRORS`/`GCC_TREAT_WARNINGS_AS_ERRORS` — the Analyse bar, no separate analyzer step), unit tests, plus the release-only `sentry-dsym` job (unsigned Release archive purely for dSYMs, skips gracefully without secrets)
+- **`ios.yml`** — iOS: unfiltered `pull_request` + path-filtered `push`-to-`main` (plus `workflow_call` from `release.yml verify`); xcodegen via `xcodegen generate`, SwiftLint `lint --strict`, warnings-as-errors build (per-target `SWIFT_TREAT_WARNINGS_AS_ERRORS`/`GCC_TREAT_WARNINGS_AS_ERRORS` — the Analyse bar, no separate analyzer step), unit tests, plus the release-only `sentry-dsym` job (unsigned Release archive purely for dSYMs, skips gracefully without secrets)
+
+## Required gates (ruleset)
+
+Path-filtered workflows report nothing on non-matching PRs, and GitHub leaves those required checks Pending forever (observed: PR #211 blocked with only `validate` reporting). So neither workflow is path-filtered on `pull_request` anymore — instead each has an in-workflow ubuntu `changes` job (`git diff --name-only base...HEAD`, fail-closed to true) gating its lane job, plus an always-run gate job (`ios-gate` / `backend-gate`, `if: always()`) that passes iff the lane ∈ {success, skipped}. The ruleset requires the **gates**, never the lanes: a docs-only PR gets both gates green in seconds with both lanes skipped; a matching PR must pass its lane. Cost of a non-matching PR: two ubuntu jobs, seconds. Detection failures resolve to running the lane (minutes, never a silent skip).
 - **`openspec.yml`** — spec-integrity gate: `openspec validate --all --strict` (CLI pinned 1.8.0) on every PR and push to `main`
 - **`release.yml`** — manual `workflow_dispatch` marketing-version bump: validates semver on `main`, bumps every target's versions in `project.yml` in lockstep, mirrors every Release `Info.plist`, commits + tags `vX.Y.Z` (see checklist below — a new target MUST be wired in or the next release fails)
 
@@ -105,9 +109,10 @@ Non-secret variables: `EMAIL_BACKEND`, `AWS_REGION`, `SES_FROM` (set as reposito
 
 - **PostgreSQL behavior needs verification** — run `make test:pg` locally after starting PostgreSQL; parity is not currently a CI job.
 - **Coverage gate fails** — total coverage dropped below the floor; add/keep tests. Raise the floor in `backend.yml` as coverage grows.
-- **Workflow not triggering** — workflow file paths must match the `on:` path filters (`backend/**`, `.github/workflows/backend.yml`); for iOS, the PR must touch `ios/**` or `ios.yml`'s path filter skips it by design.
+- **Workflow not triggering** — `push` runs keep their `on:` path filters (`backend/**`, `ios/**`); `pull_request` is unfiltered by design so the gates always report — lane path selection happens in the `changes` job.
 - **Cloud build fails on version assert** (`expected XCODEGEN_PIN/SWIFTLINT_PIN`) — Homebrew drifted: confirm the new version locally (`xcodegen generate` diff clean + `swiftlint lint --strict` green), then bump the pin in `ci_scripts/` and the pin table above in the same PR.
-- **GitHub `ios` check missing on a PR** — verify the PR touches `ios/**` (path filter) and branch protection still requires `ios / lint-build-test` (Settings → branch protection for `main`).
+- **PR stuck on Pending checks** — a required check that never reports means its workflow was path-skipped: the fix is the gate model above (require `ios-gate`/`backend-gate`, never the lanes). If gates are required and still pend, the gate job itself failed to run — check the workflow run list, not the paths.
+- **GitHub `ios` check missing on a PR** — the lane runs only when the PR diff touches `ios/**` (in-workflow filter); the `ios-gate` check must report on every PR regardless. Ruleset must require `ios-gate` (Settings → Rulesets → `main protection`), not `lint-build-test`.
 - **AI review missing after /review** — check the `OLLAMA_API_KEY` secret exists (Ollama Cloud key from ollama.com → Settings → Keys) and the job didn't skip (the comment must be on a PR, contain `/review`, and not come from a bot). Rules/tuning per `docs/review-process.md` and `.opencodereview/rule.json`.
 
 ## Worktrees and rebase discipline

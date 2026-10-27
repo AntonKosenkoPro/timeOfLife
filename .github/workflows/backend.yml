@@ -3,9 +3,9 @@ name: backend
 # Requirements S6: linters + tests run on every pull request as a mandatory check.
 on:
   pull_request:
-    paths:
-      - "backend/**"
-      - ".github/workflows/backend.yml"
+    # No path filter: the backend-gate job must run and report on EVERY PR —
+    # path-skipped workflows leave required checks Pending forever and block
+    # the PR (observed: #211). Path selection happens in the changes job.
   push:
     branches: [main]
     paths:
@@ -28,8 +28,66 @@ permissions:
   contents: read
   packages: write  # needed to push to GHCR
 
+# Concurrency model: PR runs get one group per PR (cancel superseded
+# pushes); every deploy path — push-to-main and any workflow_dispatch
+# target — shares a single backend-deploy group with no cancellation of a
+# RUNNING deploy. Trade-off (accepted): GitHub keeps one pending slot per
+# group, so a queued deploy can be evicted by a later deploy intent and
+# needs re-dispatch (visible in the UI, recoverable). This is preferred
+# over per-target groups, under which stage/prod/push deploys overlap on
+# the same VM (repo-level VM_HOST, hardcoded /opt/timeoflife) and can
+# interleave the .env rewrite — a silent bad deploy beats a stalled one
+# on harm. Hard mutual exclusion (e.g. flock on the VM) belongs to
+# deploy ownership, not this change.
+concurrency:
+  group: ${{ github.event_name == 'pull_request' && format('backend-{0}', github.ref) || 'backend-deploy' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
+  # In-workflow path detection (the required backend-gate must always run,
+  # so the workflow itself cannot be path-filtered). Same-repo branches
+  # assumed; any detection failure resolves to true (lane runs — never a
+  # silent skip).
+  changes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      backend: ${{ steps.filter.outputs.backend }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - id: filter
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          # Same-repo branches assumed (opsx/* flow). Any detection failure
+          # resolves to true (lane runs — minutes, never a silent skip).
+          # NOTE: no pipefail-negation here — a failing git diff must not
+          # read as "no match" (fail-open). Local object checked first so
+          # the defensive fetch (fetch-depth: 0 usually has the base)
+          # only runs when genuinely missing; core.quotePath=false keeps
+          # non-ASCII paths matchable.
+          if [ "$EVENT" != "pull_request" ]; then
+            echo "backend=true" >> "$GITHUB_OUTPUT"  # push path-filters already matched
+          elif { git cat-file -e "$BASE^{commit}" 2>/dev/null || git fetch origin "$BASE" 2>/dev/null; } \
+            && files="$(git -c core.quotePath=false diff --name-only "$BASE...HEAD")" \
+            && ! printf '%s\n' "$files" | grep -Eq '^(backend/|\.github/workflows/backend\.yml)'; then
+            echo "backend=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "backend=true" >> "$GITHUB_OUTPUT"
+          fi
+
   lint-and-test:
+    needs: [changes]
+    # Push (path-filtered) and manual dispatches always run the lane; PRs
+    # only when the diff touches it. Skipped (not failed) otherwise —
+    # backend-gate still reports.
+    if: github.event_name != 'pull_request' || needs.changes.outputs.backend == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -82,6 +140,26 @@ jobs:
             echo "::error::total coverage ${cov}% below floor ${floor}%"
             exit 1
           fi
+
+  # Required check (ruleset): always reports, even when the lane is skipped
+  # on non-backend PRs. Passes only if detection succeeded AND the lane is
+  # success-or-skip; a changes failure fails the gate (never green-unverified).
+  backend-gate:
+    if: always()
+    needs: [changes, lint-and-test]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - run: |
+          if [ "${{ needs.changes.result }}" != "success" ]; then
+            echo "::error::changes ${{ needs.changes.result }}"; exit 1
+          fi
+          case "${{ needs.lint-and-test.result }}" in
+            success|skipped) echo "lint-and-test ${{ needs.lint-and-test.result }} — gate green";;
+            *) echo "::error::lint-and-test ${{ needs.lint-and-test.result }}"; exit 1;;
+          esac
 
   deploy:
     # push to main auto-deploys to prod; workflow_dispatch deploys the chosen
