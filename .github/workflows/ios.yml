@@ -1,13 +1,21 @@
 name: ios
 
-# Requirements S6: linters + tests run on every pull request as mandatory checks.
-# Provider split (move-ios-checks-to-xcode-cloud): PR/push verification moved
-# to Xcode Cloud (see docs/ci.md). This workflow keeps NO automatic triggers —
-# it runs only as release verification via `workflow_call` from release.yml
-# (GITHUB_TOKEN pushes trigger no workflows, so release invokes it
-# explicitly). Intentional billed-minutes residue: one macOS run per release.
+# Requirements S6: linters + tests run on every pull request as a mandatory check.
 on:
+  # Also callable as release verification: GITHUB_TOKEN pushes trigger no
+  # workflows, so the release workflow invokes this explicitly on the bump.
   workflow_call:
+    # Release-path flag: release.yml verify passes upload_dsyms=true so the
+    # post-bump head gets its dSYMs. PR/push runs keep the default false —
+    # one macos-15 job per PR. (A plain event_name check cannot do this:
+    # inside a called workflow the github context belongs to the caller,
+    # so event_name reports the caller's trigger, never workflow_call.)
+    inputs:
+      upload_dsyms:
+        description: "Run the sentry-dsym job (unsigned Release archive + Sentry upload)"
+        required: false
+        default: false
+        type: boolean
     # Sentry symbolication wiring (observability Stage 0, task 3.3). All
     # optional: when any are absent the upload step skips with a warning
     # instead of failing. release.yml passes them via `secrets: inherit`.
@@ -25,13 +33,30 @@ on:
       # dSYM upload still proceeds if its own secrets exist.
       SENTRY_IOS_DSN:
         required: false
+  pull_request:
+    paths:
+      - "ios/**"
+      - ".github/workflows/ios.yml"
+  push:
+    branches: [main]
+    paths:
+      - "ios/**"
 
 permissions:
   contents: read
 
+# Rapid PR pushes cancel superseded runs instead of queueing redundant
+# macos-15 jobs. The group is keyed on event as well as ref: a push to main
+# and the release-verify call (both ref main, different events) must never
+# cancel each other mid-flight.
+concurrency:
+  group: ios-${{ github.ref }}-${{ github.event_name }}
+  cancel-in-progress: true
+
 jobs:
   lint-build-test:
     runs-on: macos-15
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
@@ -82,9 +107,16 @@ jobs:
   # ID, so one archive covers both environments — the upload loops over the
   # staging and release projects, skipping each whose secrets are absent.
   # Runs only after lint-build-test is green (no symbols for unverified code).
+  # Release-path only (see the upload_dsyms input above): PR/push runs
+  # skip it — one macos-15 job per PR — while release.yml verify still gets
+  # its dSYMs. Runs only after lint-build-test is green (the default
+  # success() gate still applies: a bare expression if adds no status
+  # check, so needs stays success-gated) — no symbols for unverified code.
   sentry-dsym:
+    if: ${{ inputs.upload_dsyms }}
     needs: lint-build-test
     runs-on: macos-15
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
 
