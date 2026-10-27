@@ -21,8 +21,7 @@ struct LocalizationTests {
 
     @Test("shipped locales match the expected set")
     func shippedLocales() {
-        #expect(Self.allLocales == Self.expectedLocales,
-                "Shipped locales changed: \(Self.allLocales)")
+        #expect(Self.allLocales == Self.expectedLocales, "Shipped locales changed")
     }
 
     private func bundle(for locale: String) throws -> Bundle {
@@ -63,8 +62,7 @@ struct LocalizationTests {
     /// appex must ship the same locales as the app.
     @Test("LifioLiveActivities appex ships every locale")
     func appexShipsAllLocales() throws {
-        let plugIns = try #require(Bundle.main.builtInPlugInsPath)
-        let appexPath = URL(fileURLWithPath: plugIns, isDirectory: true)
+        let appexPath = URL(fileURLWithPath: try #require(Bundle.main.builtInPlugInsPath), isDirectory: true)
             .appendingPathComponent("LifioLiveActivities.appex", isDirectory: true).path
         let appex = try #require(Bundle(path: appexPath), "Missing appex at \(appexPath)")
         let shipped = Set(appex.localizations.filter { $0 != "Base" })
@@ -84,23 +82,34 @@ struct LocalizationTests {
                 let enValue = NSLocalizedString(key, bundle: enBundle, comment: "")
                 let value = NSLocalizedString(key, bundle: bundle, comment: "")
                 #expect(
-                    Self.formatSpecifiers(in: value) == Self.formatSpecifiers(in: enValue),
+                    try Self.formatSpecifiers(in: value) == Self.formatSpecifiers(in: enValue),
                     "Specifier drift for key \(key) in \(locale)"
                 )
             }
         }
     }
 
-    private static func formatSpecifiers(in text: String) -> [String] {
-        // `%@`, `%d`, `%s`, positional `%1$@` — `%ds` first so the countdown
-        // suffix isn't mistaken for a second specifier.
+    private static func formatSpecifiers(in text: String) throws -> [String] {
+        // `%@`, `%d`, `%s`, positional `%1$@` — normalized so a legitimate
+        // positional translation compares equal to plain en markers (order
+        // still matters: translators must preserve en order). `%ds` first
+        // so the countdown suffix isn't mistaken for a second specifier;
+        // the trailing "s" is translator-owned literal text, not a marker.
         let pattern = "%ds|%(?:\\d+\\$)?[@dfsu]"
-        guard let regex = try? NSRegularExpression(pattern: pattern) else { return [] }
+        let regex = try NSRegularExpression(pattern: pattern)
         let range = NSRange(text.startIndex..<text.endIndex, in: text)
-        return regex.matches(in: text, range: range).compactMap { match -> String? in
-            guard let range = Range(match.range, in: text) else { return nil }
-            let specifier = String(text[range])
-            return specifier == "%ds" ? "%d" : specifier
+        return try regex.matches(in: text, range: range).map { match -> String in
+            guard let range = Range(match.range, in: text) else {
+                throw CocoaError(.coderInvalidValue)
+            }
+            var specifier = String(text[range])
+            if specifier == "%ds" {
+                return "%d"
+            }
+            if let dollar = specifier.firstIndex(of: "$") {
+                specifier = "%" + specifier[specifier.index(after: dollar)...]
+            }
+            return specifier
         }
     }
 
@@ -147,27 +156,17 @@ struct LocalizationTests {
 
     @Test("refresh recovery codes resolve in every locale bundle")
     func refreshRecoveryCodesResolve() throws {
-        let keys = [
+        try resolveKeys([
             "error.refresh_attempt_completed",
             "error.refresh_attempt_conflict",
-        ]
-
-        for code in Self.allLocales {
-            let bundle = try bundle(for: code)
-
-            for key in keys {
-                let value = NSLocalizedString(key, bundle: bundle, comment: "")
-                #expect(value != key, "Unresolved key \(key) in \(code)")
-                #expect(!value.isEmpty, "Empty value for key \(key) in \(code)")
-            }
-        }
+        ])
     }
 
     // MARK: - Validation fragment keys
 
     @Test("validation fragment keys resolve in every locale bundle")
     func validationFragmentKeysResolve() throws {
-        let keys = [
+        try resolveKeys([
             "common.and",
             "validation.emailEmpty",
             "validation.email.prefix",
@@ -176,11 +175,12 @@ struct LocalizationTests {
             "validation.otpEmpty",
             "validation.otp.prefix",
             "validation.otp.rule.invalid",
-        ]
+        ])
+    }
 
+    private func resolveKeys(_ keys: [String]) throws {
         for code in Self.allLocales {
             let bundle = try bundle(for: code)
-
             for key in keys {
                 let value = NSLocalizedString(key, bundle: bundle, comment: "")
                 #expect(value != key, "Unresolved key \(key) in \(code)")
