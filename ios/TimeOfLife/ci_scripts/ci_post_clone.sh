@@ -73,6 +73,18 @@ generate_project
 # Sequence numbers: the bare tag (no fourth component) is the base, N=0;
 # explicit re-uploads start at .1. Prints nothing for a present-but-invalid
 # sequence (all-zeros, non-numeric) so callers fail closed on it.
+# Namespace a Cloud workflow cuts, from the pinned CI_WORKFLOW name
+# (docs/ci.md runbook). Single definition shared by both disambiguation
+# paths below so a rename can never update one and silently fail open
+# the other. Prints the namespace; fails with no output otherwise —
+# callers print their own context and exit.
+wanted_ns() {
+  case "${CI_WORKFLOW:-}" in
+    "iOS Internal Release") printf 'internal' ;;
+    "iOS Public Release") printf 'release' ;;
+    *) return 1 ;;
+  esac
+}
 tag_seq() {
   _s="$(printf '%s' "$1" | cut -d. -f4)"
   if [ -z "$_s" ]; then
@@ -119,16 +131,12 @@ else
   IOS_TAGS="$(printf '%s\n' "$TAGS" | grep -E '^(internal|release)/' || true)"
   IOS_TAG_COUNT="$(printf '%s\n' "$TAGS" | grep -cE '^(internal|release)/' || true)"
   if [ "$IOS_TAG_COUNT" -gt 1 ]; then
-    case "${CI_WORKFLOW:-}" in
-      "iOS Internal Release") WANT_NS="internal" ;;
-      "iOS Public Release") WANT_NS="release" ;;
-      *)
-        echo "error: multiple iOS release tags at HEAD and CI_WORKFLOW='${CI_WORKFLOW:-}' cannot disambiguate:"
-        printf '%s\n' "$IOS_TAGS"
-        echo "Archiving nothing."
-        exit 1
-        ;;
-    esac
+    if ! WANT_NS="$(wanted_ns)"; then
+      echo "error: multiple iOS release tags at HEAD and CI_WORKFLOW='${CI_WORKFLOW:-}' cannot disambiguate:"
+      printf '%s\n' "$IOS_TAGS"
+      echo "Archiving nothing."
+      exit 1
+    fi
     NS_TAGS="$(printf '%s\n' "$IOS_TAGS" | grep -E "^${WANT_NS}/" || true)"
     # A promotion pair must share one marketing version: internal/v0.2.7 +
     # release/v0.3.0 at one commit is a typo (or a half-tagged fix), and
@@ -168,9 +176,7 @@ else
       fi
     done
     if [ -z "$TAG" ]; then
-      echo "error: workflow '$CI_WORKFLOW' found no $WANT_NS tag at HEAD; found:"
-      printf '%s\n' "$IOS_TAGS"
-      echo "Archiving nothing."
+      echo "error: workflow '$CI_WORKFLOW' found no $WANT_NS tag at HEAD (all iOS tags: $(printf '%s' "$IOS_TAGS" | tr '\n' ' ')). Archiving nothing."
       exit 1
     fi
   else
@@ -187,11 +193,7 @@ fi
 # namespace (e.g. only release/v0.3.0 while "iOS Internal Release" runs)
 # would otherwise stamp the wrong channel silently.
 if [ -n "${CI_WORKFLOW:-}" ]; then
-  case "$CI_WORKFLOW" in
-    "iOS Internal Release") EXPECT_NS="internal" ;;
-    "iOS Public Release") EXPECT_NS="release" ;;
-    *) EXPECT_NS="" ;;
-  esac
+  EXPECT_NS="$(wanted_ns || true)"
   if [ -n "$EXPECT_NS" ]; then
     case "$TAG" in
       "${EXPECT_NS}/"*) ;;
@@ -242,19 +244,20 @@ case "$BUILD_RUN" in
     exit 1
     ;;
 esac
-# Length guard before any arithmetic: an over-long value makes `[ -ge ]`
-# exit status 2 (treated as false inside `if`, skipping the check) and
-# `$(( ))` wrap — failing open with a bogus build number. Five digits
-# always suffice (STRIDE is six).
-if [ "${#BUILD_RUN}" -gt 5 ] || [ "$BUILD_RUN" -ge "$STRIDE" ]; then
-  echo "error: \$CI_BUILD_NUMBER=$BUILD_RUN is not a usable run number (must be 1..99999) — refusing to stamp it. Archiving nothing."
-  exit 1
-fi
-# Strip leading zeros ($(( )) would read them as octal), then reject 0:
-# a CFBundleVersion of 0 is not uploadable.
+# Strip leading zeros first ($(( )) would read them as octal), then reject
+# 0: a CFBundleVersion of 0 is not uploadable.
 BUILD_RUN="$(printf '%s' "$BUILD_RUN" | sed 's/^0*//')"
 if [ -z "$BUILD_RUN" ]; then
   echo "error: tag '$TAG' resolved to build number 0, which App Store Connect rejects — refusing to stamp it. Archiving nothing."
+  exit 1
+fi
+# Range check on the normalized value: an over-long value makes `[ -ge ]`
+# exit status 2 (treated as false inside `if`, skipping the check) and
+# `$(( ))` wrap — failing open with a bogus build number. The ceiling
+# derives from STRIDE so the message cannot drift from it; for equal-length
+# digit strings the numeric compare below still decides.
+if [ "${#BUILD_RUN}" -gt "${#STRIDE}" ] || [ "$BUILD_RUN" -ge "$STRIDE" ]; then
+  echo "error: \$CI_BUILD_NUMBER=$BUILD_RUN is not a usable run number (must be 1..$((STRIDE - 1))) — refusing to stamp it. Archiving nothing."
   exit 1
 fi
 # Channel-banded build number: internal and public are separate Cloud

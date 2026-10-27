@@ -78,18 +78,28 @@ struct AppVersionTests {
         #endif
     }
 
-    @Test("internal badge follows the bundle RELEASE_CHANNEL key when present")
-    func channelBadgeFollowsBundleKey() {
-        // Deliberately not a literal key-presence assert: Bundle.main is the
-        // test host app under Xcode but isn't guaranteed to carry built-plist
-        // keys in every harness (see runtimeSHA's conditional pattern). What
-        // this guards is the wiring — text() must agree with the key.
+    @Test("text renders bundle values through the formatter")
+    func textMatchesFormattedBundleValues() {
+        // Asserts the wiring, not the values: text() must faithfully render
+        // whatever the bundle carries (branching on the live key, as the old
+        // version did, can only ever exercise the negative direction in a
+        // Debug harness). The pure formatter's channel matrix is covered by
+        // channelBadge() above.
+        let marketing = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
+        let sha = Bundle.main.object(forInfoDictionaryKey: "GIT_COMMIT_SHA") as? String
         let channel = Bundle.main.object(forInfoDictionaryKey: "RELEASE_CHANNEL") as? String
-        let badge = "• \(L10n.profileVersionInternalSuffix.text)"
-        if channel == "internal" {
-            #expect(AppVersion.text.contains(badge))
-        } else {
-            #expect(!AppVersion.text.contains(badge))
-        }
+        #if DEBUG
+        let isDebug = true
+        #else
+        let isDebug = false
+        #endif
+        #expect(AppVersion.text == AppVersion.formatted(
+            marketing: marketing,
+            build: sha,
+            isDebug: isDebug,
+            debugSuffix: L10n.profileVersionDebugSuffix.text,
+            channel: channel,
+            internalSuffix: L10n.profileVersionInternalSuffix.text
+        ))
     }
 }

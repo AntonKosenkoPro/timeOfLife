@@ -13,6 +13,8 @@ set -e
 cd "$(dirname "$0")/../.."
 [ -f project.yml ] || { echo "FAIL: harness must run with ios/TimeOfLife as the project root"; exit 1; }
 SCRIPT="ci_scripts/ci_post_clone.sh"
+REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+[ -n "$REPO_ROOT" ] || { echo "FAIL: not inside a git work tree"; exit 1; }
 BACKUP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/stamp-test.XXXXXX")"
 PASS=0
 FAIL=0
@@ -23,6 +25,23 @@ for f in $tracked; do
   cp "$f" "$BACKUP_DIR/$f"
 done
 CREATED_TAGS=""
+# Hermetic origin for the real-tag cases below: the script under test runs
+# `git fetch --tags origin`, which otherwise needs the network and writes
+# remote tags into the developer's repo. Point origin at a throwaway local
+# bare clone instead (restored by restore()).
+ORIGIN_MODE=""
+ORIGIN_URL=""
+setup_test_origin() {
+  TEST_ORIGIN="$BACKUP_DIR/origin.git"
+  git clone --quiet --bare "$REPO_ROOT" "$TEST_ORIGIN" || { echo "FAIL: cannot clone throwaway origin"; exit 1; }
+  if ORIGIN_URL="$(git remote get-url origin 2>/dev/null)"; then
+    ORIGIN_MODE="set-url"
+    git remote set-url origin "$TEST_ORIGIN"
+  else
+    ORIGIN_MODE="add"
+    git remote add origin "$TEST_ORIGIN"
+  fi
+}
 restore() {
   for f in $tracked; do
     cp "$BACKUP_DIR/$f" "$f"
@@ -31,6 +50,10 @@ restore() {
   for t in $CREATED_TAGS; do
     git tag -d "$t" >/dev/null 2>&1 || true
   done
+  case "$ORIGIN_MODE" in
+    add) git remote remove origin 2>/dev/null || true ;;
+    set-url) git remote set-url origin "$ORIGIN_URL" 2>/dev/null || true ;;
+  esac
   rm -rf "$BACKUP_DIR"
 }
 trap restore EXIT INT TERM
@@ -48,7 +71,15 @@ expect() { # expect <want-exit> <desc> [want-grep] -- cmd...
   echo "ok: $desc"; PASS=$((PASS + 1))
 }
 
-mktag() { git tag "$1" HEAD 2>/dev/null; CREATED_TAGS="$CREATED_TAGS $1"; }
+mktag() {
+  # Never touch a pre-existing tag: devs reuse names like internal/v0.0.1,
+  # and silently stamping (then deleting) a real tag would be destructive.
+  if git rev-parse -q --verify "refs/tags/$1" >/dev/null 2>&1; then
+    echo "FAIL: tag '$1' already exists locally — refusing to overwrite/delete a real tag (delete it yourself if it is scratch)"; exit 1
+  fi
+  git tag "$1" HEAD 2>/dev/null || { echo "FAIL: cannot create tag '$1'"; exit 1; }
+  CREATED_TAGS="$CREATED_TAGS $1"
+}
 
 command -v xcodegen >/dev/null 2>&1 || { echo "FAIL: xcodegen not on PATH"; exit 1; }
 sh -n "$SCRIPT" || { echo "FAIL: syntax"; exit 1; }
@@ -75,7 +106,16 @@ expect 1 "zero run refused" "build number 0" \
 expect 1 "huge sequence refused" "2^31-1" \
   env TAG_OVERRIDE="internal/v0.3.0.99999999999999999999" CI_BUILD_NUMBER=5 CI_WORKFLOW="" sh "$SCRIPT"
 
-# 5. Real-tag paths: same-namespace highest-.n wins; promotion pair picks by workflow.
+# 4b. New guard paths: padded / out-of-range run number, duplicate sequence.
+expect 0 "padded run number accepted" "build=42" \
+  env TAG_OVERRIDE="internal/v0.2.7" CI_BUILD_NUMBER=000042 CI_WORKFLOW="" sh "$SCRIPT"
+expect 1 "over-range run number refused" "not a usable run number" \
+  env TAG_OVERRIDE="internal/v0.2.7" CI_BUILD_NUMBER=100000 CI_WORKFLOW="" sh "$SCRIPT"
+
+# 5. Real-tag paths (hermetic: origin points at the throwaway bare clone,
+# so no network and no writes to the developer's remote refs): same-namespace
+# highest-.n wins; promotion pair picks by workflow.
+setup_test_origin
 mktag internal/v0.0.1; mktag internal/v0.0.1.2
 expect 0 "same-namespace pair stamps highest .n" "Version unanimity OK: marketing=0.0.1 build=400005 channel=internal" \
   env -u TAG_OVERRIDE CI_BUILD_NUMBER=5 CI_WORKFLOW="iOS Internal Release" sh "$SCRIPT"
@@ -90,6 +130,10 @@ expect 1 "explicit .0 in pair aborts" "sequences start at 1" \
 for t in $CREATED_TAGS; do git tag -d "$t" >/dev/null 2>&1 || true; done; CREATED_TAGS=""
 mktag internal/v0.0.2; mktag internal/v0.0.2.999999
 expect 1 "oversize sequence in pair aborts" "out of range" \
+  env -u TAG_OVERRIDE CI_BUILD_NUMBER=5 CI_WORKFLOW="iOS Internal Release" sh "$SCRIPT"
+for t in $CREATED_TAGS; do git tag -d "$t" >/dev/null 2>&1 || true; done; CREATED_TAGS=""
+mktag internal/v0.0.3.1; mktag internal/v0.0.3.01
+expect 1 "duplicate sequence aborts" "duplicate re-upload sequence" \
   env -u TAG_OVERRIDE CI_BUILD_NUMBER=5 CI_WORKFLOW="iOS Internal Release" sh "$SCRIPT"
 for t in $CREATED_TAGS; do git tag -d "$t" >/dev/null 2>&1 || true; done; CREATED_TAGS=""
 mktag internal/v0.0.1; mktag release/v0.0.1

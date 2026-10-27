@@ -24,7 +24,7 @@ on:
         default: false
         required: false
       image_tag:
-        description: "Pinned backend image tag for rollback redeploys (e.g. backend-v2.4.0); empty builds :latest from source"
+        description: "Pinned backend image tag for rollback redeploys (e.g. backend-v2.4.0); empty builds :latest from source. Rollbacks also need skip_checks: true, or lint-and-test still gates the deploy."
         type: string
         default: ""
         required: false
@@ -195,9 +195,9 @@ jobs:
     # would otherwise fetch a stale image). Rollback dispatches
     # (image_tag set) run in their own group: GitHub silently cancels a
     # queued run when a newer one enters a shared group, and a dropped
-    # emergency rollback must never fail silently. Concurrent deploy +
-    # rollback on the VM is prevented by procedure (single operator —
-    # never dispatch both at once), not by locking.
+    # emergency rollback must never fail silently. The two groups can still
+    # overlap on the VM itself — that last mile is serialized by flock in
+    # the deploy script below, not by procedure alone.
     concurrency:
       group: backend-publish-${{ inputs.image_tag && 'rollback' || 'deploy' }}
       cancel-in-progress: false
@@ -205,10 +205,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Validate rollback image tag
         # Rollback dispatches carry operator-typed input straight toward the
-        # VM: validate the charset on the runner, before anything is written
-        # into `.env` or sourced there. Skipped when empty (normal deploys).
+        # VM: validate on the runner, before anything is written into `.env`
+        # or sourced there. Skipped when empty (normal deploys).
         # Truthiness, not `!= ''`: on push events the input is null, and
         # `null != ''` evaluates true.
         if: inputs.image_tag
@@ -217,11 +224,23 @@ jobs:
           # metacharacters): pass through env only.
           IMAGE_TAG: ${{ inputs.image_tag }}
         run: |
+          # grep anchors per line, so a multi-line value matches on line one
+          # and sails through — reject any newline first (fail-closed).
+          if [ "$(printf '%s' "$IMAGE_TAG" | wc -l)" -ne 0 ]; then
+            echo "::error::image_tag contains a newline — refusing to publish. Nothing deployed."
+            exit 1
+          fi
           if ! printf '%s' "$IMAGE_TAG" | grep -Eq '^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$'; then
             echo "::error::image_tag '$IMAGE_TAG' is not a valid Docker tag suffix (allowed: A-Za-z0-9_.-, max 128 chars, no leading ./-). Nothing deployed."
             exit 1
           fi
-          echo "Rollback image tag '$IMAGE_TAG' valid."
+          # Fail closed before the VM is touched: a syntactically valid but
+          # never-published tag must not rewrite VM configs mid-incident.
+          if ! docker manifest inspect "ghcr.io/${GITHUB_REPOSITORY,,}/backend:${IMAGE_TAG}" >/dev/null 2>&1; then
+            echo "::error::image_tag '$IMAGE_TAG' does not resolve to a published backend image. Nothing deployed."
+            exit 1
+          fi
+          echo "Rollback image tag '$IMAGE_TAG' valid and published."
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -242,6 +261,12 @@ jobs:
           echo "sha=${SHA_SHORT}" >> "$GITHUB_OUTPUT"
           echo "version=main-${SHA_SHORT}" >> "$GITHUB_OUTPUT"
           echo "tags=ghcr.io/${REPO_LC}/backend:latest" >> "$GITHUB_OUTPUT"
+
+      - name: Record skipped gate (audit)
+        # A skipped lint-and-test looks identical to a green one in history —
+        # leave an explicit marker so a bypassed gate is auditable later.
+        if: inputs.skip_checks
+        run: echo "::warning::lint-and-test gate bypassed (skip_checks=true) — deploy proceeds without lint/test"
 
       - name: Build and push Docker image
         # Rollback dispatches (image_tag set) deploy the pinned image as-is:
@@ -296,17 +321,18 @@ jobs:
             cat > .env <<'ENVEOF'
             DB_PASSWORD=${{ secrets.DB_PASSWORD }}
             JWT_SECRET=${{ secrets.JWT_SECRET }}
-            # Pinned-image rollback (manual-tag-releases): appended after the
-            # heredoc via printf %s (never interpolated — the value travels
-            # in $BACKEND_IMAGE_TAG through the action's `envs`, since ref
-            # names may carry shell metacharacters and a newline/ENVEOF value
-            # would otherwise break out of the heredoc). Empty (normal
+            # Pinned-image rollback (manual-tag-releases): the value travels
+            # in $BACKEND_IMAGE_TAG through the action's `envs` (never
+            # interpolated — ref names may carry shell metacharacters and a
+            # newline/ENVEOF value would otherwise break out of the heredoc).
+            # It is appended AFTER the ENVEOF terminator below, never inside
+            # this quoted heredoc (literal text there would be sourced as
+            # shell while reading the file it appends to). Empty (normal
             # deploys) resolves to :latest in compose; a rollback dispatch
             # sets e.g. backend-v2.4.0 and the pull below fetches the pinned
             # image instead. A bad tag fails loudly at `docker compose pull`
             # (set -euo pipefail aborts before `up`), leaving .env written —
             # re-dispatch with an empty/correct tag to recover.
-            printf 'BACKEND_IMAGE_TAG=%s\n' "${BACKEND_IMAGE_TAG:-}" >> .env
             EMAIL_BACKEND=${{ vars.EMAIL_BACKEND }}
             AWS_ACCESS_KEY_ID=${{ secrets.AWS_ACCESS_KEY_ID }}
             AWS_SECRET_ACCESS_KEY=${{ secrets.AWS_SECRET_ACCESS_KEY }}
@@ -370,6 +396,19 @@ jobs:
             APPLE_TOKEN_KEYS=${{ secrets.APPLE_TOKEN_KEYS }}
             ENVEOF
             chmod 600 .env
+            # Rollback tag lands here — after the terminator, never inside the
+            # quoted heredoc above (literal text there would execute while the
+            # file is sourced below). printf %s writes it byte-safe; the value
+            # was already charset+newline validated GH-side before SSH.
+            printf 'BACKEND_IMAGE_TAG=%s\n' "${BACKEND_IMAGE_TAG:-}" >> .env
+
+            # Mutual exclusion across concurrent deploys (normal + rollback
+            # run in separate GH groups by design): two runs must never
+            # interleave backup/regenerate/pull/up on this one directory.
+            # The lock is held to script exit; a contender waits 600s then
+            # fails LOUDLY (never silently dropped, never interleaved).
+            exec 9>/opt/timeoflife/.deploy.lock
+            flock -w 600 9 || { echo "another deploy holds /opt/timeoflife/.deploy.lock — refusing to interleave; re-dispatch after it finishes"; exit 1; }
 
             # Validate before bringing services up — fail loudly in CI instead of
             # crashlooping on the VM with empty/missing config.
