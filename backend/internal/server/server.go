@@ -70,6 +70,12 @@ type Dependencies struct {
 	SHA string
 }
 
+// UnknownBuildIdentity is the build-identity sentinel reported when no
+// stamped value exists (local go run, missing Docker build args, tests
+// constructing Dependencies literally). Single definition so Dockerfile
+// defaults, ldflags fallbacks, and the OpenAPI wording cannot diverge.
+const UnknownBuildIdentity = "?"
+
 // defaultAccessTokenTTL and defaultRefreshTokenTTL mirror the config defaults
 // so a literally-constructed Config (tests) behaves like a loaded one.
 const (
@@ -237,8 +243,8 @@ func New(deps Dependencies) *Server {
 
 	s := &Server{
 		worker:  apple.NewWorker(deps.Store, deps.AppleClient, deps.AppleTokenKeyring, logger, time.Minute),
-		version: firstNonEmpty(deps.Version, "?"),
-		sha:     firstNonEmpty(deps.SHA, "?"),
+		version: firstNonEmpty(deps.Version, UnknownBuildIdentity),
+		sha:     firstNonEmpty(deps.SHA, UnknownBuildIdentity),
 	}
 
 	r := chi.NewRouter()

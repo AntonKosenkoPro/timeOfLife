@@ -86,6 +86,11 @@ wanted_ns() {
   esac
 }
 tag_seq() {
+  # Prints the numeric re-upload sequence: absent means the base (0).
+  # Return codes distinguish the cases callers must message differently:
+  # 0 with a number = usable (absent prints "0"); 2 with no output =
+  # invalid input (non-numeric, or present-but-all-zeros) — callers fail
+  # closed naming the tag, never "sequence 0" for a typo.
   _s="$(printf '%s' "$1" | cut -d. -f4)"
   if [ -z "$_s" ]; then
     printf '0'
@@ -93,7 +98,7 @@ tag_seq() {
   fi
   _s="$(printf '%s' "$_s" | sed 's/^0*//')"
   case "$_s" in
-    ''|*[!0-9]*) return 0 ;;
+    ''|*[!0-9]*) return 2 ;;
   esac
   printf '%s' "$_s"
 }
@@ -155,9 +160,8 @@ else
     TAG=""
     BEST_N=-1
     for CANDIDATE_TAG in $NS_TAGS; do
-      CANDIDATE_N="$(tag_seq "${CANDIDATE_TAG#*/}")"
-      if [ -z "$CANDIDATE_N" ]; then
-        echo "error: tag '$CANDIDATE_TAG' carries re-upload sequence 0 — sequences start at 1 for explicit re-uploads (the bare tag is the base). Archiving nothing."
+      if ! CANDIDATE_N="$(tag_seq "${CANDIDATE_TAG#*/}")"; then
+        echo "error: tag '$CANDIDATE_TAG' has an invalid or zero re-upload sequence — explicit re-uploads need .1+ numeric (the bare tag is the base; check for typos like .abc or .0). Archiving nothing."
         exit 1
       fi
       # Length guard (same class as SEQ/BUILD_RUN below): an over-long value
@@ -176,7 +180,7 @@ else
       fi
     done
     if [ -z "$TAG" ]; then
-      echo "error: workflow '$CI_WORKFLOW' found no $WANT_NS tag at HEAD (all iOS tags: $(printf '%s' "$IOS_TAGS" | tr '\n' ' ')). Archiving nothing."
+      echo "error: workflow '$CI_WORKFLOW' found no $WANT_NS tag at HEAD (candidates considered: [$(printf '%s' "$NS_TAGS" | tr '\n' ' ')]; all iOS tags: [$(printf '%s' "$IOS_TAGS" | tr '\n' ' ')]). Archiving nothing."
       exit 1
     fi
   else
@@ -191,18 +195,21 @@ fi
 
 # The single-tag path still verifies the trigger: a lone tag from the other
 # namespace (e.g. only release/v0.3.0 while "iOS Internal Release" runs)
-# would otherwise stamp the wrong channel silently.
+# would otherwise stamp the wrong channel silently. An unrecognized
+# CI_WORKFLOW with a tag present means the pinned workflow names drifted
+# (docs/ci.md) and the channel cannot be verified — fail closed, never skip.
 if [ -n "${CI_WORKFLOW:-}" ]; then
-  EXPECT_NS="$(wanted_ns || true)"
-  if [ -n "$EXPECT_NS" ]; then
-    case "$TAG" in
-      "${EXPECT_NS}/"*) ;;
-      *)
-        echo "error: tag '$TAG' is not in the $EXPECT_NS namespace, but workflow '$CI_WORKFLOW' triggered this build — refusing to stamp the wrong channel. Archiving nothing."
-        exit 1
-        ;;
-    esac
+  if ! EXPECT_NS="$(wanted_ns)"; then
+    echo "error: CI_WORKFLOW='$CI_WORKFLOW' is not a pinned release workflow name (docs/ci.md) — cannot verify the channel for tag '$TAG'. Archiving nothing."
+    exit 1
   fi
+  case "$TAG" in
+    "${EXPECT_NS}/"*) ;;
+    *)
+      echo "error: tag '$TAG' is not in the $EXPECT_NS namespace, but workflow '$CI_WORKFLOW' triggered this build — refusing to stamp the wrong channel. Archiving nothing."
+      exit 1
+      ;;
+  esac
 fi
 
 case "$TAG" in
@@ -230,13 +237,24 @@ MARKETING="$(printf '%s' "${VERSION#v}" | cut -d. -f1-3)"
 # Sequence is part of the build number: the bare tag is the base (N=0) and
 # explicit re-uploads start at .1. App Store Connect accepts CFBundleVersion
 # only up to 2^31-1 (bounded below).
-SEQ="$(tag_seq "${VERSION#v}")"
-if [ -z "$SEQ" ]; then
-  echo "error: tag '$TAG' carries re-upload sequence 0 — sequences start at 1 for explicit re-uploads (the bare tag is the base). Archiving nothing."
+if ! SEQ="$(tag_seq "${VERSION#v}")"; then
+  echo "error: tag '$TAG' has an invalid or zero re-upload sequence — explicit re-uploads need .1+ numeric (the bare tag is the base; check for typos like .abc or .0). Archiving nothing."
+  exit 1
+fi
+# Length guard before any arithmetic on SEQ: an over-long value makes
+# `[ -gt ]` exit status 2 (treated as false inside `if`, skipping the
+# check) and `$(( ))` wrap — failing open with a bogus build number.
+if [ "${#SEQ}" -gt 5 ]; then
+  echo "error: tag '$TAG' has re-upload sequence $SEQ — out of range (max sequence $MAX_SEQ). Archiving nothing."
   exit 1
 fi
 
 STRIDE=100000
+# App Store Connect accepts CFBundleVersion up to 2^31-1: keep the whole
+# stamped number inside that range at the largest accepted sequence.
+# Computed once here so every bound below derives from it — never duplicate
+# the literal.
+MAX_SEQ="$(( (2147483647 - 2 * STRIDE + 1) / (2 * STRIDE) ))"
 BUILD_RUN="${CI_BUILD_NUMBER:-}"
 case "$BUILD_RUN" in
   ''|*[!0-9]*)
@@ -264,27 +282,45 @@ fi
 # workflows with independent run counters, so raw run numbers can order
 # backwards across channels for one marketing line (App Store Connect
 # rejects a re-upload with a build number at or below the previous one).
-# Each sequence number N owns a band of 2*STRIDE; public takes the upper
-# half. Tags are cut in (N, channel) time order (dogfood before public),
-# so (N*2+chanbit)*STRIDE+RUN increases along any legal tag sequence
-# while RUN stays below STRIDE. Reversing channels at one N (public
-# before internal) violates the runbook and is rejected by ASC, not here.
+# The band index is the highest sequence EVER cut for this marketing line,
+# across BOTH namespaces — never just the picked tag's own N. Tags never
+# move, so history is monotonic knowledge; banding on the picked tag alone
+# breaks the moment a promotion follows a re-upload (release/v0.3.0 after
+# internal/v0.3.0.1 was uploaded would band below it). Each sequence number
+# N owns a band of 2*STRIDE; public takes the upper half. Reversing channels
+# at one N (public before internal) violates the runbook and is rejected by
+# ASC, not here.
 if [ "$CHANNEL" = "public" ]; then
   CHANBIT=1
 else
   CHANBIT=0
 fi
+HIST_MAX=0
+for _t in $(git tag -l "internal/v${MARKETING}" "internal/v${MARKETING}.*" \
+  "release/v${MARKETING}" "release/v${MARKETING}.*" 2>/dev/null || true); do
+  if _n="$(tag_seq "${_t#*/}")"; then
+    # Oversize historical entries can never have uploaded (their own
+    # archive would have refused them), so they contribute no ordering
+    # knowledge — skip rather than letting a huge value near arithmetic.
+    # Empty print here means explicit-.0, likewise never uploaded; the
+    # -n test skips both without disturbing the max.
+    if [ -n "$_n" ] && [ "${#_n}" -le 5 ] && [ "$_n" -gt "$HIST_MAX" ]; then HIST_MAX="$_n"; fi
+  fi
+done
+# Floor at the picked tag (validated numeric above): a listing hiccup must
+# never band below the tag being stamped — worst case is the old behavior.
+if [ "$SEQ" -gt "$HIST_MAX" ]; then HIST_MAX="$SEQ"; fi
 # App Store Connect accepts CFBundleVersion up to 2^31-1: keep the whole
 # stamped number inside that range at the largest accepted sequence.
 MAX_SEQ="$(( (2147483647 - 2 * STRIDE + 1) / (2 * STRIDE) ))"
 # Length guard first: beyond 5 digits the value may exceed the shell's
 # integer range, in which case `[ -gt ]` errors (status 2, silently skipped
 # in an `if` condition) and $(( )) wraps — failing open. MAX_SEQ is 10736.
-if [ "${#SEQ}" -gt 5 ] || [ "$SEQ" -gt "$MAX_SEQ" ]; then
-  echo "error: tag '$TAG' has re-upload sequence $SEQ — the banded build would exceed App Store Connect's 2^31-1 limit (max sequence $MAX_SEQ). Archiving nothing."
+if [ "${#HIST_MAX}" -gt 5 ] || [ "$HIST_MAX" -gt "$MAX_SEQ" ]; then
+  echo "error: marketing $MARKETING already reached re-upload sequence $HIST_MAX — the banded build would exceed App Store Connect's 2^31-1 limit (max sequence $MAX_SEQ). Archiving nothing."
   exit 1
 fi
-BUILD="$(( (SEQ * 2 + CHANBIT) * STRIDE + BUILD_RUN ))"
+BUILD="$(( (HIST_MAX * 2 + CHANBIT) * STRIDE + BUILD_RUN ))"
 
 echo "Release tag '$TAG': stamping MARKETING_VERSION=$MARKETING BUILD=$BUILD CHANNEL=$CHANNEL."
 

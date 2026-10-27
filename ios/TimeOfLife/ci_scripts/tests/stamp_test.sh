@@ -2,9 +2,11 @@
 # Stamp-script harness (manual-tag-releases, review finding: stamp logic had
 # no automated coverage — a wrong build number surfaces only at ASC upload).
 #
-# Local-only, never runs in CI: exercises ci_post_clone.sh against a scratch
-# copy of project.yml + generated plists via TAG_OVERRIDE (and real local
-# tags for the points-at paths — created and deleted here, never pushed).
+# Runs in CI (ios.yml lint-build-test, after SwiftLint) and locally:
+# exercises ci_post_clone.sh against a scratch copy of project.yml +
+# generated plists via TAG_OVERRIDE (and real local tags for the points-at
+# paths — created and deleted here, never pushed). Restores everything on
+# exit, so later CI steps see a clean tree.
 # Requires: xcodegen on PATH (matches XCODEGEN_PIN), git repo, bash or sh.
 #
 # Usage: sh ios/TimeOfLife/ci_scripts/tests/stamp_test.sh
@@ -103,7 +105,7 @@ expect 1 "bad semver refused" "not <namespace>/vM.m.p" \
   env TAG_OVERRIDE="internal/v1.0" CI_BUILD_NUMBER=5 CI_WORKFLOW="" sh "$SCRIPT"
 expect 1 "zero run refused" "build number 0" \
   env TAG_OVERRIDE="internal/v0.2.7" CI_BUILD_NUMBER=0 CI_WORKFLOW="" sh "$SCRIPT"
-expect 1 "huge sequence refused" "2^31-1" \
+expect 1 "huge sequence refused" "out of range" \
   env TAG_OVERRIDE="internal/v0.3.0.99999999999999999999" CI_BUILD_NUMBER=5 CI_WORKFLOW="" sh "$SCRIPT"
 
 # 4b. New guard paths: padded / out-of-range run number, duplicate sequence.
@@ -111,11 +113,22 @@ expect 0 "padded run number accepted" "build=42" \
   env TAG_OVERRIDE="internal/v0.2.7" CI_BUILD_NUMBER=000042 CI_WORKFLOW="" sh "$SCRIPT"
 expect 1 "over-range run number refused" "not a usable run number" \
   env TAG_OVERRIDE="internal/v0.2.7" CI_BUILD_NUMBER=100000 CI_WORKFLOW="" sh "$SCRIPT"
+expect 1 "missing run refused" "CI_BUILD_NUMBER is missing" \
+  env -u CI_BUILD_NUMBER TAG_OVERRIDE="internal/v0.2.7" CI_WORKFLOW="" sh "$SCRIPT"
+expect 1 "non-numeric run refused" "CI_BUILD_NUMBER is missing or not numeric" \
+  env TAG_OVERRIDE="internal/v0.2.7" CI_BUILD_NUMBER=42x CI_WORKFLOW="" sh "$SCRIPT"
 
 # 5. Real-tag paths (hermetic: origin points at the throwaway bare clone,
 # so no network and no writes to the developer's remote refs): same-namespace
 # highest-.n wins; promotion pair picks by workflow.
 setup_test_origin
+# Real-tag cases enumerate `git tag --points-at HEAD`, so a genuine release
+# tag at HEAD (common right after cutting a release — mktag's guard only
+# protects the exact names it creates) would corrupt every expectation
+# below. Fail fast instead of leaving a trap for the next maintainer.
+if git tag --points-at HEAD | grep -qE '^(internal|release)/'; then
+  echo "FAIL: HEAD already carries an iOS release tag — run this harness from an untagged commit (or a scratch worktree)"; exit 1
+fi
 mktag internal/v0.0.1; mktag internal/v0.0.1.2
 expect 0 "same-namespace pair stamps highest .n" "Version unanimity OK: marketing=0.0.1 build=400005 channel=internal" \
   env -u TAG_OVERRIDE CI_BUILD_NUMBER=5 CI_WORKFLOW="iOS Internal Release" sh "$SCRIPT"
@@ -125,7 +138,7 @@ expect 0 "bare vs .1 stamps .1" "Version unanimity OK: marketing=0.0.4 build=200
   env -u TAG_OVERRIDE CI_BUILD_NUMBER=5 CI_WORKFLOW="iOS Internal Release" sh "$SCRIPT"
 for t in $CREATED_TAGS; do git tag -d "$t" >/dev/null 2>&1 || true; done; CREATED_TAGS=""
 mktag internal/v0.0.5; mktag internal/v0.0.5.0
-expect 1 "explicit .0 in pair aborts" "sequences start at 1" \
+expect 1 "explicit .0 in pair aborts" "invalid or zero re-upload sequence" \
   env -u TAG_OVERRIDE CI_BUILD_NUMBER=5 CI_WORKFLOW="iOS Internal Release" sh "$SCRIPT"
 for t in $CREATED_TAGS; do git tag -d "$t" >/dev/null 2>&1 || true; done; CREATED_TAGS=""
 mktag internal/v0.0.2; mktag internal/v0.0.2.999999
@@ -151,19 +164,57 @@ for t in $CREATED_TAGS; do git tag -d "$t" >/dev/null 2>&1 || true; done; CREATE
 mktag release/v0.0.1
 expect 1 "lone cross-namespace tag aborts" "wrong channel" \
   env -u TAG_OVERRIDE CI_BUILD_NUMBER=5 CI_WORKFLOW="iOS Internal Release" sh "$SCRIPT"
+expect 1 "unrecognized workflow fails closed" "not a pinned release workflow" \
+  env -u TAG_OVERRIDE CI_BUILD_NUMBER=5 CI_WORKFLOW="iOS Renamed Workflow" sh "$SCRIPT"
 for t in $CREATED_TAGS; do git tag -d "$t" >/dev/null 2>&1 || true; done; CREATED_TAGS=""
 
 # 6. Ordering across a realistic sequence (dogfood → public → re-upload).
-b1="$(TAG_OVERRIDE="internal/v0.3.0" CI_BUILD_NUMBER=45 CI_WORKFLOW="" sh "$SCRIPT" >/dev/null 2>&1; grep -m1 'CFBundleVersion:' project.yml | grep -o '[0-9]*')"
+# Each run is asserted like the cases above (exit + unanimity line): a
+# failed stamp leaves the dummy behind, and comparing raw CFBundleVersion
+# values would mask a mixed failure as long as they still order.
+stamp() { # stamp <override> <run> <workflow> <want-exit> <want-grep> <desc>
+  if out="$(TAG_OVERRIDE="$1" CI_BUILD_NUMBER="$2" CI_WORKFLOW="$3" sh "$SCRIPT" 2>&1)"; then code=0; else code=$?; fi
+  if [ "$code" != "$4" ]; then
+    echo "FAIL: $6 — exit $code, want $4"; printf '%s\n' "$out" | tail -3; FAIL=$((FAIL + 1)); return 0
+  fi
+  if [ -n "$5" ] && ! printf '%s\n' "$out" | grep -q "$5"; then
+    echo "FAIL: $6 — missing '$5'"; printf '%s\n' "$out" | tail -3; FAIL=$((FAIL + 1)); return 0
+  fi
+  echo "ok: $6"; PASS=$((PASS + 1))
+}
+stamp "internal/v0.3.0" 45 "" 0 "Version unanimity OK" "ordering run b1 stamps"
+b1="$(grep -m1 'CFBundleVersion:' project.yml | grep -o '[0-9]*')"
 cp "$BACKUP_DIR/project.yml" project.yml
-b2="$(TAG_OVERRIDE="release/v0.3.0" CI_BUILD_NUMBER=3 CI_WORKFLOW="" sh "$SCRIPT" >/dev/null 2>&1; grep -m1 'CFBundleVersion:' project.yml | grep -o '[0-9]*')"
+stamp "release/v0.3.0" 3 "" 0 "Version unanimity OK" "ordering run b2 stamps"
+b2="$(grep -m1 'CFBundleVersion:' project.yml | grep -o '[0-9]*')"
 cp "$BACKUP_DIR/project.yml" project.yml
-b3="$(TAG_OVERRIDE="internal/v0.3.0.2" CI_BUILD_NUMBER=90 CI_WORKFLOW="" sh "$SCRIPT" >/dev/null 2>&1; grep -m1 'CFBundleVersion:' project.yml | grep -o '[0-9]*')"
+stamp "internal/v0.3.0.2" 90 "" 0 "Version unanimity OK" "ordering run b3 stamps"
+b3="$(grep -m1 'CFBundleVersion:' project.yml | grep -o '[0-9]*')"
 cp "$BACKUP_DIR/project.yml" project.yml
-if [ "$b1" -lt "$b2" ] && [ "$b2" -lt "$b3" ]; then
+if [ -z "$b1" ] || [ -z "$b2" ] || [ -z "$b3" ] || [ "$b1" = "0" ] || [ "$b2" = "0" ] || [ "$b3" = "0" ]; then
+  echo "FAIL: banded builds unreadable or dummy ($b1, $b2, $b3)"; FAIL=$((FAIL + 1))
+elif [ "$b1" -lt "$b2" ] && [ "$b2" -lt "$b3" ]; then
   echo "ok: banded builds increase ($b1 < $b2 < $b3)"; PASS=$((PASS + 1))
 else
   echo "FAIL: banded builds not increasing ($b1, $b2, $b3)"; FAIL=$((FAIL + 1))
+fi
+# 7. Band follows history, not just HEAD: an internal re-upload cut on an
+# ancestor commit must lift a later same-commit promotion above it, or App
+# Store Connect rejects the public upload. Needs a parent commit; skipped
+# loudly (not silently) where history is too shallow for one.
+if PARENT="$(git rev-parse --verify HEAD~1 2>/dev/null)"; then
+  mktag_at() {
+    if git rev-parse -q --verify "refs/tags/$1" >/dev/null 2>&1; then
+      echo "FAIL: tag '$1' already exists locally — refusing to overwrite it"; exit 1
+    fi
+    git tag "$1" "$2" 2>/dev/null || { echo "FAIL: cannot create tag '$1'"; exit 1; }; CREATED_TAGS="$CREATED_TAGS $1"; }
+  mktag_at internal/v0.4.0.1 "$PARENT"
+  mktag internal/v0.4.0; mktag release/v0.4.0
+  expect 0 "promotion after ancestor re-upload bands above it" "build=300007" \
+    env -u TAG_OVERRIDE CI_BUILD_NUMBER=7 CI_WORKFLOW="iOS Public Release" sh "$SCRIPT"
+  for t in $CREATED_TAGS; do git tag -d "$t" >/dev/null 2>&1 || true; done; CREATED_TAGS=""
+else
+  echo "SKIP: history-aware band case needs a parent commit (shallow checkout?)"
 fi
 
 echo "---"

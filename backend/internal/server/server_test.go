@@ -96,12 +96,13 @@ func TestHealthEndpoint(t *testing.T) {
 		t.Errorf("expected status 'ok', got %q", resp["status"])
 	}
 	// Unstamped test servers (literal-constructed Dependencies) fall back
-	// to "?" without changing the 200 status or the status field.
-	if resp["version"] != "?" {
-		t.Errorf("expected version fallback '?', got %q", resp["version"])
+	// to UnknownBuildIdentity without changing the 200 status or the status
+	// field.
+	if resp["version"] != UnknownBuildIdentity {
+		t.Errorf("expected version fallback %q, got %q", UnknownBuildIdentity, resp["version"])
 	}
-	if resp["sha"] != "?" {
-		t.Errorf("expected sha fallback '?', got %q", resp["sha"])
+	if resp["sha"] != UnknownBuildIdentity {
+		t.Errorf("expected sha fallback %q, got %q", UnknownBuildIdentity, resp["sha"])
 	}
 }
 

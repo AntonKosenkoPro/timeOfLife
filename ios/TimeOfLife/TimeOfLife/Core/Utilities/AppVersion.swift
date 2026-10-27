@@ -25,8 +25,12 @@ enum AppVersion {
         build: String?,
         isDebug: Bool,
         debugSuffix: String,
-        channel: String? = nil,
-        internalSuffix: String = "Internal"
+        // No defaults on either tail parameter: every call site must
+        // consciously choose the channel and the badge string, so neither
+        // an untranslated literal nor a silently bare channel can slip into
+        // the localized version label.
+        channel: String?,
+        internalSuffix: String
     ) -> String {
         var text = "v\(marketing ?? "?") (\(build ?? "?"))"
         if channel == "internal" {
@@ -43,10 +47,14 @@ enum AppVersion {
     /// `SWIFT_ACTIVE_COMPILATION_CONDITIONS: DEBUG` pattern), not a runtime
     /// config lookup; the channel comes from the `RELEASE_CHANNEL` bundle
     /// key (empty default locally, stamped by `ci_post_clone.sh` on tags).
-    static var text: String {
-        let marketing = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
-        let sha = Bundle.main.object(forInfoDictionaryKey: "GIT_COMMIT_SHA") as? String
-        let channel = Bundle.main.object(forInfoDictionaryKey: "RELEASE_CHANNEL") as? String
+    static var text: String { text(bundle: .main) }
+
+    /// Bundle-injectable core so tests can exercise the positive (internal
+    /// channel) path, which the Debug test bundle itself never carries.
+    static func text(bundle: Bundle) -> String {
+        let marketing = bundle.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
+        let sha = bundle.object(forInfoDictionaryKey: "GIT_COMMIT_SHA") as? String
+        let channel = bundle.object(forInfoDictionaryKey: "RELEASE_CHANNEL") as? String
         #if DEBUG
         let isDebug = true
         #else

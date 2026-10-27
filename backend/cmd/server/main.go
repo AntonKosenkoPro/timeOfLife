@@ -25,10 +25,11 @@ func main() {
 
 // version and sha carry the release identity stamped at image build time
 // via ldflags (-X main.version/main.sha from the Docker VERSION/SHA build
-// args). Unstamped builds (local go run) keep the "?" fallback.
+// args). Unstamped builds (local go run) keep the server.UnknownBuildIdentity
+// fallback.
 var (
-	version = "?"
-	sha     = "?"
+	version = server.UnknownBuildIdentity
+	sha     = server.UnknownBuildIdentity
 )
 
 func run() int {

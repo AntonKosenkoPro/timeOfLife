@@ -73,6 +73,8 @@ Runbook:
 
 GH environments: `backend-prod` exists (wait timer + main-only branch policy); `testflight-internal` / `testflight-public` with a wait timer are Phase 3 (approval gate + deployment timeline). Until then Cloud status is reconciled manually.
 
+> **Owner action — populate `backend-prod` secrets.** Push-to-main deploys target `backend-prod`, whose environment secrets are currently empty: every deploy fails loudly at the `DB_PASSWORD:?` preflight until they are copied. In GitHub → Settings → Environments → `backend-prod` → Environment secrets, duplicate every deploy secret from `stage` (`DATABASE_URL`, `DB_PASSWORD`, `JWT_SECRET`, `REFRESH_RECOVERY_KEYS`, `ACCOUNT_STATUS_SECRET`, `APPLE_*`, `AWS_*`, `SENTRY_DSN`, `VM_HOST`, `VM_SSH_KEY`, `VM_USER`, `HC_PING_URL`) plus the vars (`AWS_REGION`, `EMAIL_BACKEND`, `SES_FROM`, `APPLE_JWKS_URL`, `TRUSTED_PROXIES`). The deploy script additionally refuses to run prod on an empty `DATABASE_URL` (VM-local fallback is stage-only) so a half-populated environment fails closed, never silently repointed.
+
 Cloud tag-workflow names are pinned — the stamp script maps `CI_WORKFLOW` to the release channel, and same-commit promotion (`internal/vX` + `release/vX`) depends on these exact names: **"iOS Internal Release"** cuts internal, **"iOS Public Release"** cuts public. Keep them in sync with `ci_post_clone.sh` if they ever change.
 
 ## New-target checklist (extensions, widgets, watch apps)
@@ -123,7 +125,7 @@ Required secrets — GitHub Actions secrets (repo Settings → Secrets and varia
 | `SENTRY_ORG` | Xcode Cloud shared secret env (Sentry org slug) | only when Sentry wired; absent = upload skips with a warning |
 | `SENTRY_PROJECT_STAGING` | Xcode Cloud shared secret env (staging project slug) | only when Sentry wired; absent = staging upload skips |
 | `SENTRY_PROJECT_RELEASE` | Xcode Cloud shared secret env (release project slug) | only when Sentry wired; absent = release upload skips |
-| `SENTRY_DSN` | Xcode Cloud shared secret env, threaded into the Cloud archive (the former `SENTRY_IOS_DSN` GitHub secret died with `ios.yml`'s callerless `workflow_call` block) + backend deploy (rendered into VM `.env`) | only when Sentry wired; absent = shipped binary ships with reporting off |
+| `SENTRY_DSN` | Xcode Cloud shared secret env, threaded into the Cloud archive (the former `SENTRY_IOS_DSN` GitHub secret died with the removed `workflow_call` block) + backend deploy (rendered into VM `.env`) | only when Sentry wired; absent = shipped binary ships with reporting off |
 | `HC_PING_URL` | backend deploy (installs the every-minute dead-man's-switch cron pinger) | only when Healthchecks wired; absent = install skips with a warning |
 
 Non-secret variables: `EMAIL_BACKEND`, `AWS_REGION`, `SES_FROM` (set as repository variables).
@@ -134,6 +136,7 @@ Non-secret variables: `EMAIL_BACKEND`, `AWS_REGION`, `SES_FROM` (set as reposito
 - **Coverage gate fails** — total coverage dropped below the floor; add/keep tests. Raise the floor in `backend.yml` as coverage grows.
 - **Workflow not triggering** — `push` runs keep their `on:` path filters (`backend/**`, `ios/**`); `pull_request` is unfiltered by design so the gates always report — lane path selection happens in the `changes` job.
 - **Cloud build fails on version assert** (`expected XCODEGEN_PIN/SWIFTLINT_PIN`) — Homebrew drifted: confirm the new version locally (`xcodegen generate` diff clean + `swiftlint lint --strict` green), then bump the pin in `ci_scripts/` and the pin table above in the same PR.
+- **Cloud post-clone fails on tag fetch** — `ci_post_clone.sh` fetches `--tags origin` with retries, then aborts; an unreachable origin fails every Cloud action using the script (including tag-less Test builds), not just archives. Check App Store Connect's repo connection before re-running.
 - **PR stuck on Pending checks** — a required check that never reports means its workflow was path-skipped: the fix is the gate model above (require `ios-gate`/`backend-gate`, never the lanes). If gates are required and still pend, the gate job itself failed to run — check the workflow run list, not the paths.
 - **GitHub `ios` check missing on a PR** — the lane runs only when the PR diff touches `ios/**` (in-workflow filter); the `ios-gate` check must report on every PR regardless. Ruleset must require `ios-gate` (Settings → Rulesets → `main protection`), not `lint-build-test`.
 - **Pushed a tag but nothing builds** — the tag matches no workflow (fail-closed by design): check the spelling against the release grammar table above, then check the Cloud build list (iOS) or the Actions runs (backend).

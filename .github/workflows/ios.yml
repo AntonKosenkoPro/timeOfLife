@@ -83,6 +83,15 @@ jobs:
         working-directory: ios/TimeOfLife
         run: swiftlint lint --strict
 
+      - name: Release stamp harness
+        # Regression gate for ci_post_clone.sh (banding math, sequence
+        # parsing, tag/pair disambiguation): a wrong build number surfaces
+        # only at App Store Connect, so this runs before the long build.
+        # Self-restoring (project files + tags + origin URL); leaves a clean
+        # tree for the steps below.
+        working-directory: ios/TimeOfLife
+        run: sh ci_scripts/tests/stamp_test.sh
+
       - name: Build with warnings as errors
         # SWIFT_TREAT_WARNINGS_AS_ERRORS/GCC_TREAT_WARNINGS_AS_ERRORS are set
         # per-target in project.yml — the CLI variants conflict with the

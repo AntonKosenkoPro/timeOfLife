@@ -56,6 +56,12 @@ jobs:
           TAG_SHA: ${{ github.sha }}
         run: |
           set -e
+          # grep anchors per line: a multi-line tag name would match on line
+          # one and sail through — reject any newline first (fail-closed).
+          if [ "$(printf '%s' "$TAG_NAME" | wc -l)" -ne 0 ]; then
+            echo "::error::tag name contains a newline — refusing to publish. Publishing nothing."
+            exit 1
+          fi
           # Fail-closed grammar gate (spec: backend/vM.m.p, numeric semver).
           # The `backend/*` trigger glob alone would also match `backend/v2.5`
           # or `backend/release-1` and silently republish `:latest` — refuse.
@@ -92,6 +98,20 @@ jobs:
           fi
           if ! git merge-base --is-ancestor "$COMMIT" origin/main; then
             echo "::error::tag '$TAG_NAME' ($COMMIT) does not point at a commit on main — refusing to publish an unreviewed tree. Publishing nothing."
+            exit 1
+          fi
+          # Pinned means pinned: if this tag's image already exists, someone
+          # re-pushed (delete + re-create) or force-moved the tag — either
+          # way a rollback referencing it could later resolve to different
+          # bytes. Refuse; cut a new version instead. A transient registry
+          # failure must NOT read as "absent" (that would fail open into an
+          # overwrite), so anything but a clear not-found aborts too.
+          _suffix="$(printf '%s' "$TAG_NAME" | tr '/' '-')"
+          if _manifest_out="$(docker manifest inspect "ghcr.io/${GITHUB_REPOSITORY,,}/backend:${_suffix}" 2>&1)"; then
+            echo "::error::image tag 'backend:${_suffix}' is already published — refusing to overwrite an immutable release. Cut a new version."
+            exit 1
+          elif ! printf '%s' "$_manifest_out" | grep -qiE "manifest unknown|not found|no such"; then
+            echo "::error::could not verify tag absence (transient registry error?): ${_manifest_out}"
             exit 1
           fi
           echo "Tag '$TAG_NAME' valid ($COMMIT on main)."

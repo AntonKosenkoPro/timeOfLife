@@ -773,4 +773,7 @@ func TestSpec_HealthReportsBuildIdentity(t *testing.T) {
 			t.Errorf("GET /health schema must require %q", field)
 		}
 	}
+	if mt.Schema.Type != "object" {
+		t.Errorf("GET /health schema must be type object, got %q", mt.Schema.Type)
+	}
 }
