@@ -25,6 +25,11 @@ struct AppleSignInButton: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                // Spoken label for the overlay: the native control below is
+                // hidden from the accessibility tree
+                // (`isAccessibilityElement = false`), so without this the
+                // button would announce nothing. Keep the value aligned with
+                // Apple's official button title per locale (stage-2 check).
                 .accessibilityLabel(L10n.appleSignInTitle.text)
                 .accessibilityIdentifier("AppleSignInButton")
             }

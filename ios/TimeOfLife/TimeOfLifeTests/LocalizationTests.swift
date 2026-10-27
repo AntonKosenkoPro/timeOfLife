@@ -10,70 +10,106 @@ struct LocalizationTests {
         L10n.allCases
     }
 
+    /// Every shipped locale, derived from the app bundle so a newly added
+    /// `.lproj` is covered automatically. Pinned by `shippedLocales` below
+    /// so a dropped locale fails loudly instead of passing vacuously.
+    private static let expectedLocales = ["en", "es-419", "pt-BR", "ru", "zh-Hans"]
+
+    private static var allLocales: [String] {
+        Bundle.main.localizations.filter { $0 != "Base" }.sorted()
+    }
+
+    @Test("shipped locales match the expected set")
+    func shippedLocales() {
+        #expect(Self.allLocales == Self.expectedLocales,
+                "Shipped locales changed: \(Self.allLocales)")
+    }
+
+    private func bundle(for locale: String) throws -> Bundle {
+        let path = try #require(Bundle.main.path(forResource: locale, ofType: "lproj"),
+                                "Missing \(locale).lproj in main bundle")
+        return try #require(Bundle(path: path))
+    }
+
     // MARK: - Key resolution
 
-    @Test("all L10n keys resolve to non-empty strings in en.lproj")
-    func allKeysResolveEN() throws {
-        let main = Bundle.main
-        let path = try #require(main.path(forResource: "en", ofType: "lproj"),
-                                "Missing en.lproj in main bundle")
-        let bundle = try #require(Bundle(path: path))
-
-        for caseValue in l10nCases {
-            let value = NSLocalizedString(caseValue.rawValue, bundle: bundle, comment: "")
-            #expect(value != caseValue.rawValue,
-                    "Unresolved key \(caseValue.rawValue) in en")
-            #expect(!value.isEmpty,
-                    "Empty value for key \(caseValue.rawValue) in en")
-        }
-    }
-
-    @Test("all L10n keys resolve to non-empty strings in ru.lproj")
-    func allKeysResolveRU() throws {
-        let main = Bundle.main
-        let path = try #require(main.path(forResource: "ru", ofType: "lproj"),
-                                "Missing ru.lproj in main bundle")
-        let bundle = try #require(Bundle(path: path))
-
-        for caseValue in l10nCases {
-            let value = NSLocalizedString(caseValue.rawValue, bundle: bundle, comment: "")
-            #expect(value != caseValue.rawValue,
-                    "Unresolved key \(caseValue.rawValue) in ru")
-            #expect(!value.isEmpty,
-                    "Empty value for key \(caseValue.rawValue) in ru")
-        }
-    }
-
-    @Test("both locales have the same set of keys")
-    func keyParity() throws {
-        let main = Bundle.main
-        let enPath = try #require(main.path(forResource: "en", ofType: "lproj"))
-        let ruPath = try #require(main.path(forResource: "ru", ofType: "lproj"))
-        let enBundle = try #require(Bundle(path: enPath))
-        let ruBundle = try #require(Bundle(path: ruPath))
-
-        for caseValue in l10nCases {
-            let enValue = NSLocalizedString(caseValue.rawValue, bundle: enBundle, comment: "")
-            let ruValue = NSLocalizedString(caseValue.rawValue, bundle: ruBundle, comment: "")
-
-            #expect(enValue != caseValue.rawValue,
-                    "Key \(caseValue.rawValue) missing in en")
-            #expect(ruValue != caseValue.rawValue,
-                    "Key \(caseValue.rawValue) missing in ru")
+    @Test("all L10n keys resolve to non-empty strings in every locale")
+    func allKeysResolve() throws {
+        for locale in Self.allLocales {
+            let bundle = try bundle(for: locale)
+            for caseValue in l10nCases {
+                let value = NSLocalizedString(caseValue.rawValue, bundle: bundle, comment: "")
+                #expect(value != caseValue.rawValue,
+                        "Unresolved key \(caseValue.rawValue) in \(locale)")
+                #expect(!value.isEmpty,
+                        "Empty value for key \(caseValue.rawValue) in \(locale)")
+            }
         }
     }
 
     @Test("every catalog icon has a localized accessibility name")
     func catalogIconNamesResolve() throws {
-        let main = Bundle.main
-        for locale in ["en", "ru"] {
-            let path = try #require(main.path(forResource: locale, ofType: "lproj"))
-            let bundle = try #require(Bundle(path: path))
+        for locale in Self.allLocales {
+            let bundle = try bundle(for: locale)
             for icon in CatalogIcon.allCases {
                 let value = L10n.catalogIconName(icon, in: bundle)
                 #expect(value != icon.rawValue, "Missing icon name for \(icon.rawValue) in \(locale)")
                 #expect(!value.isEmpty)
             }
+        }
+    }
+
+    /// The Live Activity copy is read from the extension's own bundle, so the
+    /// appex must ship the same locales as the app.
+    @Test("LifioLiveActivities appex ships every locale")
+    func appexShipsAllLocales() throws {
+        let appexPath = URL(fileURLWithPath: try #require(Bundle.main.builtInPlugInsPath), isDirectory: true).appendingPathComponent("LifioLiveActivities.appex", isDirectory: true).path
+        let appex = try #require(Bundle(path: appexPath), "Missing appex at \(appexPath)")
+        let shipped = Set(appex.localizations.filter { $0 != "Base" })
+        #expect(shipped == Set(Self.expectedLocales), "Appex locales changed: \(shipped.sorted())")
+    }
+
+    /// Format specifiers must match `en` in every locale: a dropped or
+    /// duplicated `%@`/`%d` only shows up as garbage text at runtime.
+    @Test("format specifiers match en in every locale")
+    func formatSpecifiersMatchEN() throws {
+        let keys = l10nCases.map(\.rawValue)
+            + CatalogIcon.allCases.map { "catalogIcon.\($0.rawValue)" }
+        let enBundle = try bundle(for: "en")
+        for locale in Self.allLocales where locale != "en" {
+            let bundle = try bundle(for: locale)
+            for key in keys {
+                let enValue = NSLocalizedString(key, bundle: enBundle, comment: "")
+                let value = NSLocalizedString(key, bundle: bundle, comment: "")
+                #expect(
+                    try Self.formatSpecifiers(in: value) == Self.formatSpecifiers(in: enValue),
+                    "Specifier drift for key \(key) in \(locale)"
+                )
+            }
+        }
+    }
+
+    private static func formatSpecifiers(in text: String) throws -> [String] {
+        // Normalized markers (`%ds` → `%d`; in-order `%N$` stripped) so a
+        // legitimate positional translation compares equal while reordered
+        // or mixed markers stay raw and fail against en's plain sequence.
+        let pattern = "%ds|%(?:\\d+\\$)?[@dfsu]"
+        let regex = try NSRegularExpression(pattern: pattern)
+        let range = NSRange(text.startIndex..<text.endIndex, in: text)
+        return try regex.matches(in: text, range: range).enumerated().map { position, match -> String in
+            guard let range = Range(match.range, in: text) else {
+                throw CocoaError(.coderInvalidValue)
+            }
+            var specifier = String(text[range])
+            if specifier == "%ds" {
+                return "%d"
+            }
+            if let dollar = specifier.firstIndex(of: "$"),
+               let slot = Int(specifier[specifier.index(specifier.startIndex, offsetBy: 1)..<dollar]),
+               slot == position + 1 {
+                specifier = "%" + specifier[specifier.index(after: dollar)...]
+            }
+            return specifier
         }
     }
 
@@ -83,11 +119,8 @@ struct LocalizationTests {
     /// page uses its own "Dear diary..." prompt (change-expanded-notes-placeholder).
     @Test("collapsed and expanded notes placeholders are exact and distinct")
     func notesPlaceholders() throws {
-        let main = Bundle.main
-        let enPath = try #require(main.path(forResource: "en", ofType: "lproj"))
-        let ruPath = try #require(main.path(forResource: "ru", ofType: "lproj"))
-        let en = try #require(Bundle(path: enPath))
-        let ru = try #require(Bundle(path: ruPath))
+        let en = try bundle(for: "en")
+        let ru = try bundle(for: "ru")
 
         #expect(NSLocalizedString("entry.notesPlaceholder", bundle: en, comment: "") == "Optional notes")
         #expect(NSLocalizedString("entry.notesPlaceholder", bundle: ru, comment: "") == "Необязательные заметки")
@@ -121,31 +154,19 @@ struct LocalizationTests {
         #expect(!msg.isEmpty)
     }
 
-    @Test("refresh recovery codes resolve in en + ru bundles")
+    @Test("refresh recovery codes resolve in every locale bundle")
     func refreshRecoveryCodesResolve() throws {
-        let keys = [
+        try resolveKeys([
             "error.refresh_attempt_completed",
             "error.refresh_attempt_conflict",
-        ]
-        let main = Bundle.main
-
-        for code in ["en", "ru"] {
-            let path = try #require(main.path(forResource: code, ofType: "lproj"))
-            let bundle = try #require(Bundle(path: path))
-
-            for key in keys {
-                let value = NSLocalizedString(key, bundle: bundle, comment: "")
-                #expect(value != key, "Unresolved key \(key) in \(code)")
-                #expect(!value.isEmpty, "Empty value for key \(key) in \(code)")
-            }
-        }
+        ])
     }
 
     // MARK: - Validation fragment keys
 
-    @Test("validation fragment keys resolve in en + ru bundles")
+    @Test("validation fragment keys resolve in every locale bundle")
     func validationFragmentKeysResolve() throws {
-        let keys = [
+        try resolveKeys([
             "common.and",
             "validation.emailEmpty",
             "validation.email.prefix",
@@ -154,13 +175,12 @@ struct LocalizationTests {
             "validation.otpEmpty",
             "validation.otp.prefix",
             "validation.otp.rule.invalid",
-        ]
-        let main = Bundle.main
+        ])
+    }
 
-        for code in ["en", "ru"] {
-            let path = try #require(main.path(forResource: code, ofType: "lproj"))
-            let bundle = try #require(Bundle(path: path))
-
+    private func resolveKeys(_ keys: [String]) throws {
+        for code in Self.allLocales {
+            let bundle = try bundle(for: code)
             for key in keys {
                 let value = NSLocalizedString(key, bundle: bundle, comment: "")
                 #expect(value != key, "Unresolved key \(key) in \(code)")

@@ -22,7 +22,7 @@ The repo is spec-driven (`openspec/config.yaml`, `schema: spec-driven`). See `op
 - **External docs first (ctx7)**: before implementing anything that depends on external library/framework/SDK/API/CLI/cloud-service behavior, fetch current docs via `npx ctx7@latest library` → `docs` and cite library ID + query in proposal/design; never rely on training data alone. Procedure: `docs/project-context.md` → "External docs first (ctx7)".
 - **No backward compat for on-disk formats** (pre-release): edit `Codable` shapes in place, no legacy branches.
 - **No passwords, no plaintext secrets** (R1); tokens in Keychain only; user-enumeration closed (`otp/request` always 202).
-- **iOS strings** go to both `en.lproj` and `ru.lproj` + `L10n` (U4).
+- **iOS strings** go to all five locales (`en`, `ru`, `zh-Hans`, `es-419`, `pt-BR`) + `L10n` (U4).
 - **XcodeGen-managed** — edit `project.yml`, run `xcodegen generate`; never hand-edit the `.pbxproj`.
 - **Signing is per-config**: Debug unsigned (simulator/CI), Release signed with team `7923U48U87` (SIWA entitlement live; backend needs `APPLE_CLIENT_ID`). Manual smoke checklist: `docs/manual-testing.md`.
 - **SwiftUI views use `Theme` semantic colors only**; no raw `Color` literals.

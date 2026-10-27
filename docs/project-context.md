@@ -153,7 +153,7 @@ Keep code **minimal and standardized**, following modern best practices.
 - **iOS (Swift):** SwiftUI, MVVM + Repository, all dependencies injected via `AppContainer`; every layer replaceable in tests; `@MainActor` on view models; views use only `Theme` semantic colors (no raw `Color` literals); user-facing strings via `L10n`/`Localizable.strings` (never hard-coded); iOS 18+ with no availability guards for older OS versions.
 - **Tests (S3):** logic layer ~100% covered. Backend `go test` (SQLite, no Docker); iOS SwiftTesting. Don't leave failing tests; don't lower coverage by deleting tests.
 - **Security (R1):** never persist/log passwords, OTP codes, or tokens in plaintext. Secrets from env. Keep user-enumeration closed (`otp/request` always 202).
-- **Locales (U4):** every new user-facing string must be added to **both** `en.lproj` and `ru.lproj`, and to the `L10n` enum's `allCases` in `LocalizationTests` if enumerated.
+- **Locales (U4):** every new user-facing string must be added to all five locales (`en`, `ru`, `zh-Hans`, `es-419`, `pt-BR`), and to the `L10n` enum's `allCases` in `LocalizationTests` if enumerated.
 
 ### External docs first (ctx7)
 

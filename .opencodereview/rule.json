@@ -17,7 +17,7 @@
     },
     {
       "path": "ios/TimeOfLife/TimeOfLife/**/*.swift",
-      "rule": "SwiftUI views must use Theme semantic colors only — flag any raw Color literal (Color.red, Color(hex:) etc.) in view code. New user-facing strings must be added to BOTH en.lproj and ru.lproj and to the L10n enum if enumerated — flag strings that appear in only one. Never hand-edit .pbxproj; project.yml + xcodegen only.",
+      "rule": "SwiftUI views must use Theme semantic colors only — flag any raw Color literal (Color.red, Color(hex:) etc.) in view code. New user-facing strings must be added to ALL FIVE locales (en, ru, zh-Hans, es-419, pt-BR) and to the L10n enum if enumerated — flag strings that appear in fewer. Never hand-edit .pbxproj; project.yml + xcodegen only.",
       "merge_system_rule": true
     },
     {

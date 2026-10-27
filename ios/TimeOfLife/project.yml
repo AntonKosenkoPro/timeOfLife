@@ -55,6 +55,9 @@ targets:
         buildPhase: none
       - path: TimeOfLife/Localization/en.lproj
       - path: TimeOfLife/Localization/ru.lproj
+      - path: TimeOfLife/Localization/zh-Hans.lproj
+      - path: TimeOfLife/Localization/es-419.lproj
+      - path: TimeOfLife/Localization/pt-BR.lproj
       # Live Activity contract types (live-activities change): TimerActivityAttributes,
       # TimerClock, LiveActivityStrings live in the shared LifioLiveActivityCore
       # framework linked below — a single module, so ActivityKit matches both
@@ -274,6 +277,15 @@ targets:
         type: file
         buildPhase: resources
       - path: TimeOfLife/Localization/ru.lproj/Localizable.strings
+        type: file
+        buildPhase: resources
+      - path: TimeOfLife/Localization/zh-Hans.lproj/Localizable.strings
+        type: file
+        buildPhase: resources
+      - path: TimeOfLife/Localization/es-419.lproj/Localizable.strings
+        type: file
+        buildPhase: resources
+      - path: TimeOfLife/Localization/pt-BR.lproj/Localizable.strings
         type: file
         buildPhase: resources
       - path: LifioLiveActivities/Info.plist

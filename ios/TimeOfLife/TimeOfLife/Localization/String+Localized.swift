@@ -29,7 +29,8 @@ enum L10n: String, CaseIterable {
     case otpCodeLabel = "otp.codeLabel"
     case otpCodeHint = "otp.codeHint"
 
-    // Apple
+    // Apple sign in (overlay label — the native control is hidden
+    // from the accessibility tree, so this carries the spoken title)
     case appleSignInTitle = "appleSignIn.title"
     case appleSignInError = "appleSignIn.error"
 

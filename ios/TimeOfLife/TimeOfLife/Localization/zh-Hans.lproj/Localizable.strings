@@ -1,0 +1,339 @@
+/* Lifio — Simplified Chinese (mainland) */
+
+// App
+"app.name" = "Lifio";
+
+// Welcome
+"welcome.tagline" = "个人时间记录。";
+"welcome.continueWithEmail" = "使用邮箱继续";
+
+// Auth gate (account-bound-local-data: required-voice launch gate)
+"authGate.title" = "登录后开始记录";
+
+// Email entry (passwordless: sign-in + sign-up collapse into email → OTP)
+"emailEntry.title" = "使用邮箱继续";
+"emailEntry.email" = "邮箱";
+"emailEntry.subtitle" = "输入邮箱地址，将收到一次性验证码。";
+"emailEntry.submit" = "继续";
+
+// OTP entry
+"otp.title" = "输入验证码";
+"otp.sentTo" = "请输入发送至 %@ 的 6 位验证码";
+"otp.resend" = "重新发送验证码";
+"otp.resendCountdown" = "%ds 后可重新发送验证码";
+"otp.codeLabel" = "%d 位一次性验证码";
+"otp.codeHint" = "双击进行编辑";
+
+// Sign out confirmation
+"signOut.cancel" = "取消";
+
+// Account (Profile → Account; app-shell + account-deletion specs)
+"account.title" = "账号";
+"account.identitySection" = "账号";
+"account.identityFooter" = "退出登录会保留此设备上的数据，重新登录即可恢复。";
+"account.thisDeviceSection" = "此设备";
+"account.thisDeviceFooter" = "仅删除此设备上该账号的数据并退出登录，已同步数据保留在中转服务器上。";
+"account.deleteLocalData" = "删除本地数据";
+"account.signOutConfirmTitle" = "确定要退出登录吗？";
+"account.signOutConfirmMessage" = "将在此设备上退出登录，数据保留在此设备和中转服务器上。";
+"account.permanentSection" = "永久删除";
+"account.permanentFooter" = "永久删除 Lifio 账号及已同步数据，并删除此设备上该账号的数据，其他设备将被退出登录。";
+"account.deleteTitle" = "删除账号和本地数据？";
+"account.deleteMessage" = "将永久删除 Lifio 账号及所有已同步条目、分类和备注，并移除此设备上该账号的数据，其他设备将被退出登录。";
+"account.deleteConfirm" = "删除账号和本地数据";
+"account.deletingProgress" = "正在删除账号…";
+"account.deleteError" = "无法删除账号，请重试。";
+"account.deleteFailedTitle" = "无法删除账号";
+"account.deleteOffline" = "当前无网络，请连接后重试。";
+"account.deleteOfflineTitle" = "当前无网络";
+"account.stillExists" = "账号仍然存在，未删除任何数据。";
+"account.stillExistsTitle" = "账号仍然存在";
+"account.pendingAppleUnlink" = "账号已删除，Apple 授权解绑仍在进行，将自动完成。";
+"account.cleanupRetryTitle" = "完成账号清理";
+"account.cleanupRetryMessage" = "账号已删除，但部分本地数据未能清除，请立即重试清理。";
+"account.cleanupRetryConfirm" = "立即清理";
+
+// Validation (unified messages — Requirements U2/U4: one merged message per field)
+"common.and" = "且";
+"validation.emailEmpty" = "请输入邮箱。";
+"validation.email.prefix" = "邮箱须";
+"validation.email.rule.invalid" = "为有效邮箱地址";
+"validation.email.rule.tooLong" = "不超过 254 个字符";
+"validation.otpEmpty" = "请输入验证码。";
+"validation.otp.prefix" = "验证码须";
+"validation.otp.rule.invalid" = "为 6 位数字";
+
+// Server errors (mapped from error codes)
+"error.invalid_body" = "请检查输入。";
+"error.internal_error" = "服务器出错，请重试。";
+"error.rate_limited" = "尝试次数过多，请稍后再试。";
+"error.invalid_otp" = "验证码有误，请重试。";
+"error.otp_expired" = "验证码已过期，请重新获取。";
+"error.otp_attempts_exceeded" = "尝试次数过多，请重新获取验证码。";
+"error.invalid_refresh" = "会话已过期，请重新登录。";
+"error.token_reuse" = "出于安全考虑会话已失效，请重新登录。";
+"error.offline" = "当前无网络。";
+"error.unknown" = "出错了，请重试。";
+"error.unauthorized" = "会话已过期，请重新登录。";
+"error.invalid_request" = "缺少设备信息，请更新 App 后重试。";
+"error.refresh_expired" = "会话已过期，请重新登录。";
+"error.refresh_attempt_completed" = "会话已更新，请重试。";
+"error.refresh_attempt_conflict" = "登录冲突，请重试。";
+"error.apple_not_configured" = "使用 Apple 登录暂不可用，请稍后再试。";
+"error.invalid_apple_token" = "使用 Apple 登录失败，请重试。";
+
+// Apple sign in
+"appleSignIn.title" = "使用 Apple 登录";
+"appleSignIn.error" = "使用 Apple 登录失败，请重试。";
+
+// Timer
+"timer.start" = "开始";
+"timer.stop" = "停止";
+"timer.stopHint" = "停止计时并保存条目";
+"timer.idlePrompt" = "输入活动名称后开始";
+"timer.namePlaceholder" = "刚才在做什么？";
+"timer.saved" = "已保存";
+"timer.saving" = "保存中…";
+"timer.running" = "进行中";
+"timer.ready" = "就绪";
+"timer.chooserRecent" = "最近";
+"timer.recentsEmptyHint" = "记录的活动将显示在这里。";
+"timer.selectActivity" = "选择 %@";
+"timer.compactStop" = "停止并保存计时";
+"timer.compactReturnHint" = "返回“记录”";
+"timer.compactRunning" = "%@，计时进行中";
+"timer.startedAt" = "开始于 %@";
+"timer.startedYesterday" = "昨天开始于 %@";
+"timer.startEditorTitle" = "开始时间";
+"timer.startToday" = "今天";
+"timer.startYesterday" = "昨天";
+"timer.startConfirm" = "确认开始时间";
+"timer.startForward15" = "开始时间推后 15 分钟";
+"timer.startForward30" = "开始时间推后 30 分钟";
+
+// Live Activity (renders in the widget extension from the shared strings)
+"activity.savedWithDuration" = "已保存 %@";
+
+// App shell
+"tab.track" = "记录";
+"tab.history" = "历史";
+"tab.insights" = "洞察";
+"profile.title" = "我的";
+"profile.account" = "账号";
+"profile.signOut" = "退出登录";
+"profile.syncNow" = "立即同步";
+"profile.syncing" = "同步中…";
+"profile.syncedSuccessfully" = "同步成功";
+"profile.lastSynced.ago" = "%@ 前";
+"profile.lastSynced.justNow" = "不到一分钟前";
+"profile.syncError" = "同步失败，请重试。";
+"profile.categories" = "分类";
+"profile.onDevice" = "此设备";
+"profile.onDeviceFooter" = "分类和时间条目保存在此设备上，同步为可选功能。";
+"profile.eraseLocalData" = "抹掉本地数据";
+"profile.eraseLocalDataConfirmTitle" = "要抹掉本地数据吗？";
+"profile.eraseLocalDataConfirmMessage" = "将永久删除此设备上的所有分类、条目和待同步数据，并退出登录。";
+"profile.eraseConfirm" = "抹掉";
+"profile.eraseCancel" = "取消";
+// Build-configuration suffix for the Profile version row (universal
+// technical term — identical in ru).
+"profile.versionDebugSuffix" = "Debug";
+
+// Destination empty states
+"history.emptyTitle" = "这里还没有内容";
+"history.emptySubtitle" = "完成的记录将在此形成时间线。";
+"insights.emptyTitle" = "这里还没有内容";
+"insights.emptySubtitle" = "记录一段时间后，这里会呈现规律。";
+
+// History day-group labels
+"history.day.today" = "今天";
+"history.day.yesterday" = "昨天";
+
+// In-progress indicator
+"history.inProgress" = "进行中";
+
+// Day total suffix
+"history.tracked" = "已记录";
+
+// Notes indicator (history-entry-list)
+"history.hasNotes" = "有备注";
+
+// History pull-to-refresh (history-pull-to-sync)
+"history.pull.offline" = "当前无网络，请连接后重试。";
+"history.syncError.title" = "同步失败";
+"common.ok" = "好";
+
+// Insights breakdown (insights-breakdown)
+"insights.period.today" = "今天";
+"insights.period.week" = "本周";
+"insights.period.all" = "全部";
+"insights.lens.category" = "按分类";
+"insights.lens.activity" = "按活动";
+"insights.noCategory" = "未分类";
+"insights.footnote" = "含多个分类的条目会对每个分类都计入完整时长。";
+"insights.empty.today" = "今天还没有记录。";
+"insights.empty.week" = "本周还没有记录。";
+
+// Entry provenance (entry-provenance spec, activity-detail-sheet)
+"provenance.via.widget" = "通过小组件";
+"provenance.via.siri" = "通过 Siri";
+"provenance.via.control" = "通过控制中心";
+"provenance.via.screentime" = "通过屏幕使用时间";
+"provenance.via.garmin" = "通过 Garmin";
+"provenance.via.calendar" = "通过日历";
+"provenance.via.healthkit" = "通过“健康”";
+
+// Entry source names (activity-detail-sheet entry rows: sync icon + name)
+"provenance.name.widget" = "小组件";
+"provenance.name.siri" = "Siri";
+"provenance.name.control" = "控制中心";
+"provenance.name.screentime" = "屏幕使用时间";
+"provenance.name.garmin" = "Garmin";
+"provenance.name.calendar" = "日历";
+"provenance.name.healthkit" = "健康";
+
+// Log Time sheet (manual-entry spec)
+"logTime.title" = "补记时间";
+"logTime.cancel" = "取消";
+"logTime.starts" = "开始";
+"logTime.ends" = "结束";
+
+// Unified entry form (entry-editor spec: EDIT + LOCKED modes)
+"entry.editTitle" = "编辑条目";
+"entry.lockedTitle" = "导入的条目";
+"entry.dismissLabel" = "关闭";
+"entry.confirmAddLabel" = "添加条目";
+"entry.confirmSaveLabel" = "存储条目";
+"entry.delete" = "删除条目";
+"entry.deleteTitle" = "确定要删除此条目吗？";
+"entry.deleteMessage" = "该条目将被删除，可摇动设备撤销。";
+"entry.deleteConfirm" = "删除";
+"entry.staleError" = "该条目已在别处更改，请关闭后重新打开再试。";
+"entry.lockedNote" = "通过 %@ 导入——为避免与来源冲突，已禁用编辑。";
+"entry.nameLabel" = "名称";
+"entry.namePlaceholder" = "例如：健身房";
+"entry.duration" = "时长：%@";
+"entry.invalidInterval" = "结束时间须晚于开始时间";
+"entry.categoriesLabel" = "分类";
+"entry.notesLabel" = "备注";
+"entry.notesPlaceholder" = "可选备注";
+
+// History manual entry (add-manual-entry)
+"history.logTime" = "补记时间";
+
+// Name picker (dedicated-name-picker: shared push page)
+"name.clear" = "清除名称";
+"name.pickerTitle" = "选择名称";
+"name.pickerNoMatchHint" = "无匹配项——“完成”将把“%@”作为新名称。";
+"notes.editorSubtitle" = "%@ • %d/2000";
+"notes.editorCounter" = "%d/2000";
+"notes.editorPlaceholder" = "亲爱的日记…";
+
+// Starter categories (category-management spec, seed requirement)
+"category.seed.work" = "工作";
+"category.seed.hobby" = "爱好";
+"category.seed.sport" = "运动";
+"category.seed.education" = "学习";
+"category.seed.relax" = "休闲";
+"category.seed.sleep" = "睡眠";
+"category.seed.entertainment" = "娱乐";
+
+// Undo (chip selection accessibility)
+"undo.selected" = "已选中";
+"undo.notSelected" = "未选中";
+"undo.selectedPosition" = "已选中，第 %d 项，共 %d 项";
+
+// Manage categories (category-management D4)
+"manage.categories.title" = "分类";
+"manage.categories.add" = "添加分类";
+"manage.categories.emptyTitle" = "还没有分类";
+"manage.categories.emptySubtitle" = "添加分类以标记条目。";
+"manage.categories.rowA11y" = "分类";
+"manage.categories.editHint" = "双击进行编辑。";
+"manage.categories.loading" = "正在加载分类…";
+"delete.category.title" = "要删除分类吗？";
+"delete.category.message" = "%@ 将从所有条目中取消标记，条目本身保留，可摇动设备撤销。";
+"delete.category.confirm" = "删除";
+"error.categoryExists" = "已存在同名分类。";
+"error.conflict" = "已在其他设备上编辑，现显示最新版本。";
+"error.localPersistence" = "无法保存在本地，请重试。";
+
+// Category editor (category-management D4)
+"categoryEditor.createTitle" = "新建分类";
+"categoryEditor.editTitle" = "编辑分类";
+"categoryEditor.nameLabel" = "名称";
+"categoryEditor.namePlaceholder" = "例如：运动";
+"categoryEditor.iconLabel" = "图标";
+"categoryEditor.iconUnavailable" = "此图标在当前 iOS 版本上不可用，将显示为标签。";
+"categoryEditor.save" = "存储";
+"categoryEditor.cancel" = "取消";
+"categoryEditor.dismissLabel" = "关闭";
+"categoryEditor.confirmSaveLabel" = "存储分类";
+"categoryEditor.delete" = "删除分类";
+"category.nameRequired" = "请输入分类名称。";
+"category.nameTooLong" = "名称不能超过 60 个字符。";
+
+// Catalog icon accessibility names
+"catalogIcon.clock" = "时钟";
+"catalogIcon.laptopcomputer" = "笔记本电脑";
+"catalogIcon.briefcase" = "公文包";
+"catalogIcon.book" = "书";
+"catalogIcon.pencil.and.ruler" = "铅笔和尺子";
+"catalogIcon.brain.head.profile" = "大脑";
+"catalogIcon.figure.walk" = "步行";
+"catalogIcon.figure.run" = "跑步";
+"catalogIcon.figure.strengthtraining" = "力量训练";
+"catalogIcon.figure.yoga" = "瑜伽";
+"catalogIcon.figure.cycling" = "骑行";
+"catalogIcon.figure.swimming" = "游泳";
+"catalogIcon.figure.soccer" = "足球";
+"catalogIcon.figure.basketball" = "篮球";
+"catalogIcon.figure.tennis" = "网球";
+"catalogIcon.figure.gymnastics" = "体操";
+"catalogIcon.figure.mindandbody" = "身心";
+"catalogIcon.figure.core.training" = "核心训练";
+"catalogIcon.dumbbell" = "哑铃";
+"catalogIcon.bicycle" = "自行车";
+"catalogIcon.books" = "书籍";
+"catalogIcon.graduationcap" = "毕业帽";
+"catalogIcon.desktopcomputer" = "台式电脑";
+"catalogIcon.keyboard" = "键盘";
+"catalogIcon.gamecontroller" = "游戏手柄";
+"catalogIcon.fork.knife" = "刀叉";
+"catalogIcon.cup.and.saucer" = "杯碟";
+"catalogIcon.bed.double" = "床";
+"catalogIcon.moon.stars" = "月亮和星星";
+"catalogIcon.moon.zzz" = "熟睡的月亮";
+"catalogIcon.film" = "电影";
+"catalogIcon.music.note" = "音符";
+"catalogIcon.guitar" = "吉他";
+"catalogIcon.camera" = "相机";
+"catalogIcon.tv" = "电视";
+"catalogIcon.musicalnotes" = "多个音符";
+"catalogIcon.paintbrush" = "画笔";
+"catalogIcon.house" = "房子";
+"catalogIcon.car.fill" = "汽车";
+"catalogIcon.airplane" = "飞机";
+"catalogIcon.cart" = "购物车";
+"catalogIcon.phone" = "电话";
+"catalogIcon.hammer" = "锤子";
+"catalogIcon.heart" = "爱心";
+"catalogIcon.leaf" = "叶子";
+"catalogIcon.sparkles" = "星光";
+"catalogIcon.pawprint" = "爪印";
+"catalogIcon.dog" = "狗";
+"catalogIcon.cat" = "猫";
+"catalogIcon.fish" = "鱼";
+"catalogIcon.bird" = "鸟";
+"catalogIcon.washer" = "洗衣机";
+"catalogIcon.dryer" = "烘干机";
+"catalogIcon.dishwasher" = "洗碗机";
+"catalogIcon.refrigerator" = "冰箱";
+"catalogIcon.sofa" = "沙发";
+"catalogIcon.shower" = "淋浴";
+"catalogIcon.lamp.table" = "台灯";
+"catalogIcon.person.2" = "两人";
+"catalogIcon.figure.and.child.holdinghands" = "家庭";
+"catalogIcon.stethoscope" = "听诊器";
+"catalogIcon.pill" = "药片";
+"catalogIcon.tag" = "标签";
