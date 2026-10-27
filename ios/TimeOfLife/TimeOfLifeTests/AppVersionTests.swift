@@ -23,6 +23,42 @@ struct AppVersionTests {
         #expect(text == "v? (?)")
     }
 
+    @Test("internal channel appends the localized badge, public renders bare")
+    func channelBadge() {
+        #expect(
+            AppVersion.formatted(
+                marketing: "0.2.7", build: "a1b2c3d", isDebug: false,
+                debugSuffix: "Debug", channel: "internal", internalSuffix: "Internal"
+            ) == "v0.2.7 (a1b2c3d) • Internal"
+        )
+        #expect(
+            AppVersion.formatted(
+                marketing: "0.3.0", build: "a1b2c3d", isDebug: false,
+                debugSuffix: "Debug", channel: "public", internalSuffix: "Internal"
+            ) == "v0.3.0 (a1b2c3d)"
+        )
+    }
+
+    @Test("empty or unknown channel renders bare like a local build")
+    func nonInternalChannel() {
+        for channel: String? in [nil, "", "beta"] {
+            let text = AppVersion.formatted(
+                marketing: "0.0.0-dev", build: "a1b2c3d", isDebug: false,
+                debugSuffix: "Debug", channel: channel, internalSuffix: "Internal"
+            )
+            #expect(text == "v0.0.0-dev (a1b2c3d)")
+        }
+    }
+
+    @Test("internal channel and debug suffix stack")
+    func internalDebug() {
+        let text = AppVersion.formatted(
+            marketing: "0.2.7", build: "a1b2c3d", isDebug: true,
+            debugSuffix: "Debug", channel: "internal", internalSuffix: "Internal"
+        )
+        #expect(text == "v0.2.7 (a1b2c3d) • Internal • Debug")
+    }
+
     @Test("runtime text reflects the stamped commit SHA or the placeholder")
     func runtimeSHA() {
         let stamped = Bundle.main.object(forInfoDictionaryKey: "GIT_COMMIT_SHA") as? String

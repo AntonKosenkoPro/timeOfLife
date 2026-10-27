@@ -343,6 +343,7 @@ struct LocalizationTests {
         "profile.syncing",
         "profile.title",
         "profile.versionDebugSuffix",
+        "profile.versionInternalSuffix",
         "provenance.name.calendar",
         "provenance.name.control",
         "provenance.name.garmin",

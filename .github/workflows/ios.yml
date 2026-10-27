@@ -1,9 +1,14 @@
 name: ios
 
 # Requirements S6: linters + tests run on every pull request as a mandatory check.
+# GH-owned iOS PR gate (see docs/ci.md): pull_request + push triggers below.
+# workflow_call is retained but callerless — manual-tag-releases retired
+# release.yml (its only caller). Remove the block with the next change that
+# touches this file.
 on:
-  # Also callable as release verification: GITHUB_TOKEN pushes trigger no
-  # workflows, so the release workflow invokes this explicitly on the bump.
+  # Formerly release verification (retired with release.yml): GITHUB_TOKEN
+  # pushes trigger no workflows, which is why the caller invoked this
+  # explicitly on the bump. No callers remain.
   workflow_call:
     # Release-path flag: release.yml verify passes upload_dsyms=true so the
     # post-bump head gets its dSYMs. PR/push runs keep the default false —
@@ -18,7 +23,9 @@ on:
         type: boolean
     # Sentry symbolication wiring (observability Stage 0, task 3.3). All
     # optional: when any are absent the upload step skips with a warning
-    # instead of failing. release.yml passes them via `secrets: inherit`.
+    # instead of failing. No caller passes them today (the release.yml
+    # `secrets: inherit` caller was retired); workflow_call is retained
+    # until the Cloud cutover change removes this file.
     secrets:
       SENTRY_AUTH_TOKEN:
         required: false
@@ -167,8 +174,8 @@ jobs:
   # staging and release projects, skipping each whose secrets are absent.
   # Runs only after lint-build-test is green (no symbols for unverified code).
   # Release-path only (see the upload_dsyms input above): PR/push runs
-  # skip it — one macos-15 job per PR — while release.yml verify still gets
-  # its dSYMs. Runs only after lint-build-test is green (the default
+  # skip it — one macos-15 job per PR. No caller sets the flag today
+  # (release.yml verify was retired with release.yml). Runs only after lint-build-test is green (the default
   # success() gate still applies: a bare expression if adds no status
   # check, so needs stays success-gated) — no symbols for unverified code.
   sentry-dsym:

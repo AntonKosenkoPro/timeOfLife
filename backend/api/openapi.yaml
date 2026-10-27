@@ -106,7 +106,11 @@ paths:
     get:
       operationId: healthCheck
       summary: Health check
-      description: Returns the server health status.
+      description: |
+        Returns the server health status plus the running build's release
+        identity (release tag + short commit SHA, stamped at image build
+        time; "?" when unstamped, e.g. local `go run`). The shape stays
+        backward-compatible: existing `status`-only readers keep working.
       tags:
         - Health
       responses:
@@ -118,13 +122,25 @@ paths:
                 type: object
                 required:
                   - status
+                  - version
+                  - sha
                 properties:
                   status:
                     type: string
                     enum: [ok]
                     description: Health status
+                  version:
+                    type: string
+                    description: Release tag stamped at build time (e.g. backend/v2.5.0), or "?" when unstamped
+                    example: backend/v2.5.0
+                  sha:
+                    type: string
+                    description: Short commit SHA stamped at build time, or "?" when unstamped
+                    example: a1b2c3d
               example:
                 status: ok
+                version: backend/v2.5.0
+                sha: a1b2c3d
 
   /api/v1/auth/otp/request:
     post:

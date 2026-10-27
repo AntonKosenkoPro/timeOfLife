@@ -28,6 +28,11 @@ func newTestServer(t *testing.T) *Server {
 
 func newTestServerWithAllowlist(t *testing.T, allowed []string) *Server {
 	t.Helper()
+	return newTestServerWithAllowlistAndIdentity(t, allowed, "", "")
+}
+
+func newTestServerWithAllowlistAndIdentity(t *testing.T, allowed []string, version, sha string) *Server {
+	t.Helper()
 
 	store, err := db.NewSQLiteStore(":memory:")
 	if err != nil {
@@ -65,6 +70,8 @@ func newTestServerWithAllowlist(t *testing.T, allowed []string) *Server {
 		RateLimiter:        rateLimiter,
 		HandlerCfg:         handlerCfg,
 		CORSAllowedOrigins: allowed,
+		Version:            version,
+		SHA:                sha,
 	}
 
 	return New(deps)
@@ -87,6 +94,42 @@ func TestHealthEndpoint(t *testing.T) {
 	}
 	if resp["status"] != "ok" {
 		t.Errorf("expected status 'ok', got %q", resp["status"])
+	}
+	// Unstamped test servers (literal-constructed Dependencies) fall back
+	// to "?" without changing the 200 status or the status field.
+	if resp["version"] != "?" {
+		t.Errorf("expected version fallback '?', got %q", resp["version"])
+	}
+	if resp["sha"] != "?" {
+		t.Errorf("expected sha fallback '?', got %q", resp["sha"])
+	}
+}
+
+// TestHealthEndpointReportsStampedIdentity proves a stamped build answers
+// with its release tag + short SHA (manual-tag-releases backend identity).
+func TestHealthEndpointReportsStampedIdentity(t *testing.T) {
+	s := newTestServerWithAllowlistAndIdentity(t, nil, "backend/v2.5.0", "a1b2c3d")
+
+	req := httptest.NewRequest(http.MethodGet, "/health", nil)
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+
+	var resp map[string]string
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if resp["status"] != "ok" {
+		t.Errorf("expected status 'ok', got %q", resp["status"])
+	}
+	if resp["version"] != "backend/v2.5.0" {
+		t.Errorf("expected version 'backend/v2.5.0', got %q", resp["version"])
+	}
+	if resp["sha"] != "a1b2c3d" {
+		t.Errorf("expected sha 'a1b2c3d', got %q", resp["sha"])
 	}
 }
 

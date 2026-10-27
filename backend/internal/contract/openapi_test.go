@@ -105,7 +105,10 @@ type rawMediaType struct {
 }
 
 type rawSchema struct {
-	Ref string `yaml:"$ref"`
+	Ref        string         `yaml:"$ref"`
+	Type       string         `yaml:"type"`
+	Required   []string       `yaml:"required"`
+	Properties map[string]any `yaml:"properties"`
 }
 
 type rawComponents struct {
@@ -733,6 +736,41 @@ func TestSpec_AppleSignInResponsesDocumented(t *testing.T) {
 	for _, want := range []string{"200", "400", "401", "409", "429", "503", "500"} {
 		if _, ok := post.Responses[want]; !ok {
 			t.Errorf("POST /api/v1/auth/apple must document %s", want)
+		}
+	}
+}
+
+// Build identity (manual-tag-releases): GET /health reports the stamped
+// release tag + short commit SHA alongside status, with "?" fallback
+// unstamped. The shape stays backward-compatible (status-only readers keep
+// working), so the spec pins all three fields on the inline 200 schema.
+func TestSpec_HealthReportsBuildIdentity(t *testing.T) {
+	s := loadSpec(t)
+	get, ok := s.Paths["/health"]["get"]
+	if !ok {
+		t.Fatal("expected GET /health to be documented")
+	}
+	resp, ok := get.Responses["200"]
+	if !ok {
+		t.Fatal("GET /health must document 200")
+	}
+	mt, ok := resp.Content["application/json"]
+	if !ok {
+		t.Fatal("GET /health 200 must document application/json")
+	}
+	for _, field := range []string{"status", "version", "sha"} {
+		if _, ok := mt.Schema.Properties[field]; !ok {
+			t.Errorf("GET /health schema must document %q", field)
+		}
+		found := false
+		for _, r := range mt.Schema.Required {
+			if r == field {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("GET /health schema must require %q", field)
 		}
 	}
 }

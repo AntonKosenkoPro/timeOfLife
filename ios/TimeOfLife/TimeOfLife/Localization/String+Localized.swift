@@ -86,6 +86,7 @@ enum L10n: String, CaseIterable {
     case profileEraseConfirm = "profile.eraseConfirm"
     case profileEraseCancel = "profile.eraseCancel"
     case profileVersionDebugSuffix = "profile.versionDebugSuffix"
+    case profileVersionInternalSuffix = "profile.versionInternalSuffix"
 
     // Destination empty states
     case historyEmptyTitle = "history.emptyTitle"

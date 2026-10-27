@@ -23,6 +23,14 @@ func main() {
 	os.Exit(run())
 }
 
+// version and sha carry the release identity stamped at image build time
+// via ldflags (-X main.version/main.sha from the Docker VERSION/SHA build
+// args). Unstamped builds (local go run) keep the "?" fallback.
+var (
+	version = "?"
+	sha     = "?"
+)
+
 func run() int {
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
 		Level: slog.LevelInfo,
@@ -74,6 +82,8 @@ func run() int {
 	slog.Info("migrations applied successfully")
 
 	deps := server.NewDefaultDependencies(ctx, cfg, store)
+	deps.Version = version
+	deps.SHA = sha
 	srv := server.New(deps)
 
 	// The Apple revocation worker drains the durable revocation outbox
