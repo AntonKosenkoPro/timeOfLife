@@ -27,11 +27,3 @@ Start here: [`CONTRIBUTING.md`](CONTRIBUTING.md) (quickstart, environment, drivi
 | [`Requirements/FURPS/`](Requirements/FURPS/) | Requirements (FURPS+ table + use cases) |
 | [`Design/`](Design/) | Text-based design system (colors, components, screens) |
 | [`backend/api/openapi.yaml`](backend/api/openapi.yaml) | Authoritative API contract (OpenAPI 3.0, S10) |
-
-## Deferred / out of scope
-
-- **Sign in with Apple follow-ups** — account deletion with Apple `/auth/revoke` revocation shipped behind deployment gates (see [`docs/account-deletion-operations.md`](docs/account-deletion-operations.md)); remaining deferred: nonce replay defense, identity merging between email-OTP and Apple accounts (kept separate by design), localized Apple-path server error copy.
-- **History filtering** — deferred; the follow-ups live in `docs/history-roadmap.md`.
-- **Shake-to-undo polish + bulk-delete cap; lock-screen ControlWidget toggle** — deletions undo through the DEFAULT system Undo confirmation; remaining deferred: supersession UX polish and the bulk-delete cap. Live Activities (Dynamic Island + Lock Screen banner) are shipped — only the ControlWidget toggle itself is still deferred. **Device quota counting + 6th-device picker (#46)** is a pre-release blocker; a multi-session device switcher is future work.
-- **Kafka** — deferred (not needed yet). **Rate-limit store** — in-memory; Redis before multi-instance.
-- **SwiftUI snapshot / on-device keychain tests** — not automated; verified manually on device (see `docs/manual-testing.md`).
