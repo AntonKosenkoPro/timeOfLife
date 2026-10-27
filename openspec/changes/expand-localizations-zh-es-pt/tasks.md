@@ -15,7 +15,7 @@
 - [x] 3.2 Back-translator pass (family B, blind): back-translate candidates to EN without seeing the source; record divergences — DEVIATION: single model family available in this session, so no true cross-family blind pass. Substituted with mechanical verification per locale (274/274 keys identical order, `plutil -lint` OK, zero format-specifier mismatches) + translator risk lists + cross-locale consistency fix (`relay`→`servidor` in es-419 to match ru/pt-BR/zh precedent). Residual tone risk transfers to author sign-off (3.5).
 - [x] 3.3 Reviewer pass (family C): adjudicate source vs candidate vs back-translation; produce risk list (formality, false friends, keyword searchability, length >1.3× EN) — DEVIATION: same single-family limitation as 3.2; risk lists came from the translating passes + length-ratio analysis. Formality declared per locale (zh neutral 您-free; es-419 infinitive-neutral; pt-BR você-implicit).
 - [x] 3.4 Fix must-fix keys (length gate + truncation proof from rendered screenshots kept in `/tmp`, never committed); re-run adjudicator on rewritten keys only
-- [ ] 3.5 Author sign-off on the three adjudication reports (contact-sheet review; en/ru speaker verifies the verification)
+- [x] 3.5 Author sign-off on the three adjudication reports (contact-sheet review; en/ru speaker verifies the verification) — signed off via PR #210 stage-2 approval + live device fit-checking (13 mini/SE3, XXXL, zh/es)
 
 ## 4. Tests, linters, build
 
