@@ -66,3 +66,6 @@ Packages/
 ### Agent tooling (local-only session state)
 .argent/recordings/
 .argent/secrets.env
+
+### Change worktrees (local-only; one branch per worktree, created from origin/main)
+timeOfLife.wt/
