@@ -87,9 +87,9 @@ jobs:
         # (grep -m1 + cut: no `| head` pipe, so no SIGPIPE hazard under
         # `set -e` — same reason BIN below uses find -print -quit).
         run: |
-          XCODEGEN_PIN="$(grep -m1 '^XCODEGEN_PIN="' ios/TimeOfLife/ci_scripts/ci_post_clone.sh | cut -d'"' -f2)"
+          XCODEGEN_PIN="$(grep -m1 '^XCODEGEN_PIN="' ios/TimeOfLife/ci_scripts/ci_post_clone.sh | cut -d'"' -f2 || true)"
           [ -n "$XCODEGEN_PIN" ] || { echo "::error::cannot read XCODEGEN_PIN from ci_post_clone.sh — refusing to install an unpinned xcodegen"; exit 1; }
-          SWIFTLINT_PIN="$(grep -m1 '^SWIFTLINT_PIN="' ios/TimeOfLife/ci_scripts/ci_pre_xcodebuild.sh | cut -d'"' -f2)"
+          SWIFTLINT_PIN="$(grep -m1 '^SWIFTLINT_PIN="' ios/TimeOfLife/ci_scripts/ci_pre_xcodebuild.sh | cut -d'"' -f2 || true)"
           [ -n "$SWIFTLINT_PIN" ] || { echo "::error::cannot read SWIFTLINT_PIN from ci_pre_xcodebuild.sh — refusing to install an unpinned swiftlint"; exit 1; }
           # Recorded digests: upstream release assets can be replaced in
           # place, and the SwiftLint pkg is unsigned (verified: `pkgutil
@@ -101,7 +101,8 @@ jobs:
           # -f fails on HTTP errors (no error pages written to disk);
           # --retry rides out transient CDN 5xx instead of red-laning the PR.
           curl -fsSL --retry 5 --retry-delay 2 --retry-all-errors "https://github.com/yonaskolb/XcodeGen/releases/download/${XCODEGEN_PIN}/xcodegen.zip" -o "${RUNNER_TEMP}/xcodegen.zip"
-          echo "${XCODEGEN_ZIP_SHA256}  ${RUNNER_TEMP}/xcodegen.zip" | shasum -a 256 -c -
+          echo "${XCODEGEN_ZIP_SHA256}  ${RUNNER_TEMP}/xcodegen.zip" | shasum -a 256 -c - || \
+            { echo "::error::xcodegen.zip digest mismatch for pin ${XCODEGEN_PIN} — if the pin was bumped, update XCODEGEN_ZIP_SHA256 (see docs/ci.md pin table)"; exit 1; }
           rm -rf "${RUNNER_TEMP}/xcodegen" && mkdir -p "${RUNNER_TEMP}/xcodegen"
           unzip -o -q "${RUNNER_TEMP}/xcodegen.zip" -d "${RUNNER_TEMP}/xcodegen"
           # The zip is a prefix tree (bin/xcodegen + share/xcodegen presets),
@@ -116,15 +117,20 @@ jobs:
           XG_ROOT="$(dirname "$(dirname "$BIN")")"
           [ -d "$XG_ROOT/share/xcodegen" ] || { echo "::error::xcodegen share/xcodegen presets missing from release archive"; exit 1; }
           sudo install -m 755 "$BIN" /usr/local/bin/xcodegen
+          # rm -rf first: cp -R nests (share/xcodegen/xcodegen/...) when the
+          # destination already exists (reused/self-hosted runners), silently
+          # mixing stale presets with the new binary.
+          sudo rm -rf /usr/local/share/xcodegen
           sudo mkdir -p /usr/local/share && sudo cp -R "$XG_ROOT/share/xcodegen" /usr/local/share/
           curl -fsSL --retry 5 --retry-delay 2 --retry-all-errors "https://github.com/realm/SwiftLint/releases/download/${SWIFTLINT_PIN}/SwiftLint.pkg" -o "${RUNNER_TEMP}/swiftlint.pkg"
-          echo "${SWIFTLINT_PKG_SHA256}  ${RUNNER_TEMP}/swiftlint.pkg" | shasum -a 256 -c -
+          echo "${SWIFTLINT_PKG_SHA256}  ${RUNNER_TEMP}/swiftlint.pkg" | shasum -a 256 -c - || \
+            { echo "::error::SwiftLint.pkg digest mismatch for pin ${SWIFTLINT_PIN} — if the pin was bumped, update SWIFTLINT_PKG_SHA256 (see docs/ci.md pin table)"; exit 1; }
           sudo installer -pkg "${RUNNER_TEMP}/swiftlint.pkg" -target /
           # Prove the pins against the installed paths (not PATH: the
           # macos-15 image ships its own swiftlint earlier in PATH, which
           # would false-fail — or worse, false-pass — a PATH-resolved
           # check), then put the pinned prefix first for later steps.
-          test "$(/usr/local/bin/xcodegen --version | grep -m1 -o '[0-9][0-9.]*')" = "$XCODEGEN_PIN" || \
+          test "$(/usr/local/bin/xcodegen --version | grep -m1 -o '[0-9][0-9.]*' | head -n1)" = "$XCODEGEN_PIN" || \
             { echo "::error::xcodegen drift: got $(/usr/local/bin/xcodegen --version), want $XCODEGEN_PIN"; exit 1; }
           test "$(/usr/local/bin/swiftlint version)" = "$SWIFTLINT_PIN" || \
             { echo "::error::swiftlint drift: got $(/usr/local/bin/swiftlint version), want $SWIFTLINT_PIN"; exit 1; }

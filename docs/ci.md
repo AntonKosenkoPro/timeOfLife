@@ -43,9 +43,11 @@ Toolchain pins (bump together with the local toolchain; version-skew failures ar
 
 | Tool | Pinned | Local (2026-10-12) |
 |---|---|---|
-| `xcodegen` | `2.46.0` (`XCODEGEN_PIN` in `ci_post_clone.sh`) | 2.46.0 |
-| `swiftlint` | `0.65.1` (`SWIFTLINT_PIN` in `ci_pre_xcodebuild.sh`) | 0.65.1 |
+| `xcodegen` | `2.46.0` (`XCODEGEN_PIN` in `ci_post_clone.sh`) + zip SHA256 `4d9e34b6…198680` (`XCODEGEN_ZIP_SHA256` in `ios.yml`) | 2.46.0 |
+| `swiftlint` | `0.65.1` (`SWIFTLINT_PIN` in `ci_pre_xcodebuild.sh`) + pkg SHA256 `3fb02028…000e02d0` (`SWIFTLINT_PKG_SHA256` in `ios.yml`) | 0.65.1 |
 | Xcode (Cloud selection) | nearest 27.x | 27.0 (27A266a) |
+
+> **Bump rule:** pin + digest move together. The digests live in `ios.yml` (a digest cannot be reviewed from the repo alone — verify with `shasum -a 256` after downloading from the release page); bumping a pin without its digest fails the install step at `shasum -c` with an explicit "update the digest" message.
 
 Cloud usage is metered in App Store Connect (Users and Access → Xcode Cloud tab; per-app tab; CSV export). The account holds 25 compute-hours/mo free — archive-only (a few tag builds/month) fits comfortably; the Oct 2026 PR-frequency setup (137 builds / 33h 31m) burned 97% of quota and motivated this move back to GitHub runners. GitHub `macos-15` runners bill at 10× minutes — the `ios/**` path filters (backend-only PRs run nothing iOS-side) are the cost control.
 
