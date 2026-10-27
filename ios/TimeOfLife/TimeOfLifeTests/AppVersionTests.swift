@@ -7,19 +7,19 @@ struct AppVersionTests {
 
     @Test("Release formats marketing and commit SHA with v prefix and no suffix")
     func releaseFormat() {
-        let text = AppVersion.formatted(marketing: "0.1.0", build: "a1b2c3d", isDebug: false, debugSuffix: "Debug", internalSuffix: "Internal")
+        let text = AppVersion.formatted(marketing: "0.1.0", build: "a1b2c3d", isDebug: false, debugSuffix: "Debug", channel: nil, internalSuffix: "Internal")
         #expect(text == "v0.1.0 (a1b2c3d)")
     }
 
     @Test("Debug appends the localized suffix after a bullet")
     func debugFormat() {
-        let text = AppVersion.formatted(marketing: "0.1.0", build: "a1b2c3d", isDebug: true, debugSuffix: "Debug", internalSuffix: "Internal")
+        let text = AppVersion.formatted(marketing: "0.1.0", build: "a1b2c3d", isDebug: true, debugSuffix: "Debug", channel: nil, internalSuffix: "Internal")
         #expect(text == "v0.1.0 (a1b2c3d) • Debug")
     }
 
     @Test("missing bundle keys fall back to placeholders")
     func missingKeys() {
-        let text = AppVersion.formatted(marketing: nil, build: nil, isDebug: false, debugSuffix: "Debug", internalSuffix: "Internal")
+        let text = AppVersion.formatted(marketing: nil, build: nil, isDebug: false, debugSuffix: "Debug", channel: nil, internalSuffix: "Internal")
         #expect(text == "v? (?)")
     }
 
