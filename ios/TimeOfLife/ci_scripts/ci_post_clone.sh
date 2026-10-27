@@ -70,6 +70,21 @@ generate_project
 # (N, channel) time order (dogfood before public), which keeps the stamped
 # number increasing while RUN stays below STRIDE.
 # Local simulations must export CI_BUILD_NUMBER explicitly.
+# Sequence numbers: the bare tag (no fourth component) is the base, N=0;
+# explicit re-uploads start at .1. Prints nothing for a present-but-invalid
+# sequence (all-zeros, non-numeric) so callers fail closed on it.
+tag_seq() {
+  _s="$(printf '%s' "$1" | cut -d. -f4)"
+  if [ -z "$_s" ]; then
+    printf '0'
+    return 0
+  fi
+  _s="$(printf '%s' "$_s" | sed 's/^0*//')"
+  case "$_s" in
+    ''|*[!0-9]*) return 0 ;;
+  esac
+  printf '%s' "$_s"
+}
 if [ "${TAG_OVERRIDE+x}" = "x" ]; then
   TAG="$TAG_OVERRIDE"
 else
@@ -132,17 +147,11 @@ else
     TAG=""
     BEST_N=-1
     for CANDIDATE_TAG in $NS_TAGS; do
-      CANDIDATE_N="$(printf '%s' "${CANDIDATE_TAG#*/}" | cut -d. -f4)"
+      CANDIDATE_N="$(tag_seq "${CANDIDATE_TAG#*/}")"
       if [ -z "$CANDIDATE_N" ]; then
-        CANDIDATE_N=1
+        echo "error: tag '$CANDIDATE_TAG' carries re-upload sequence 0 — sequences start at 1 for explicit re-uploads (the bare tag is the base). Archiving nothing."
+        exit 1
       fi
-      CANDIDATE_N="$(printf '%s' "$CANDIDATE_N" | sed 's/^0*//')"
-      if [ -z "$CANDIDATE_N" ]; then
-        CANDIDATE_N=0
-      fi
-      case "$CANDIDATE_N" in
-        *[!0-9]*) echo "error: tag '$CANDIDATE_TAG' carries a non-numeric sequence — refusing to order it. Archiving nothing."; exit 1 ;;
-      esac
       # Length guard (same class as SEQ/BUILD_RUN below): an over-long value
       # makes the integer comparisons error out and skip silently. Five
       # digits always suffice (MAX_SEQ is 10736).
@@ -216,17 +225,12 @@ if ! printf '%s' "$VERSION" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+(\.[0-9]+)?$'; t
 fi
 
 MARKETING="$(printf '%s' "${VERSION#v}" | cut -d. -f1-3)"
-SEQ="$(printf '%s' "${VERSION#v}" | cut -d. -f4)"
+# Sequence is part of the build number: the bare tag is the base (N=0) and
+# explicit re-uploads start at .1. App Store Connect accepts CFBundleVersion
+# only up to 2^31-1 (bounded below).
+SEQ="$(tag_seq "${VERSION#v}")"
 if [ -z "$SEQ" ]; then
-  SEQ=1
-fi
-# Sequence is part of the build number, so it must be a real positive
-# integer in range: `0` (or leading zeros, which $(( )) would read as
-# octal) collapses/mis-orders the stamped build, and App Store Connect
-# accepts CFBundleVersion only up to 2^31-1.
-SEQ="$(printf '%s' "$SEQ" | sed 's/^0*//')"
-if [ -z "$SEQ" ]; then
-  echo "error: tag '$TAG' carries re-upload sequence 0 — the banded ordering ((N*2+chanbit)*STRIDE+RUN) assumes N >= 1. Archiving nothing."
+  echo "error: tag '$TAG' carries re-upload sequence 0 — sequences start at 1 for explicit re-uploads (the bare tag is the base). Archiving nothing."
   exit 1
 fi
 

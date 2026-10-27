@@ -59,7 +59,8 @@ expect 0 "no tag leaves dummy" "leaving project.yml versions untouched" \
 
 # 2. Internal stamp: marketing/build/channel + unanimity.
 # Banded builds: internal N=1 → (1*2+0)*100000+RUN.
-expect 0 "internal stamps 0.2.7/200042" "Version unanimity OK: marketing=0.2.7 build=200042 channel=internal" \
+# Bare tag is the base (N=0): build is just the run number.
+expect 0 "internal stamps 0.2.7/42" "Version unanimity OK: marketing=0.2.7 build=42 channel=internal" \
   env TAG_OVERRIDE="internal/v0.2.7" CI_BUILD_NUMBER=42 CI_WORKFLOW="" sh "$SCRIPT"
 
 # 3. Release .n stamp: N=2 public → (2*2+1)*100000+RUN.
@@ -74,15 +75,22 @@ expect 1 "zero run refused" "build number 0" \
 expect 1 "huge sequence refused" "2^31-1" \
   env TAG_OVERRIDE="internal/v0.3.0.99999999999999999999" CI_BUILD_NUMBER=5 CI_WORKFLOW="" sh "$SCRIPT"
 
-# 5. Real-tag paths: same-namespace pair aborts; promotion pair picks by workflow.
+# 5. Real-tag paths: same-namespace highest-.n wins; promotion pair picks by workflow.
 mktag internal/v0.0.1; mktag internal/v0.0.1.2
 expect 0 "same-namespace pair stamps highest .n" "Version unanimity OK: marketing=0.0.1 build=400005 channel=internal" \
+  env -u TAG_OVERRIDE CI_BUILD_NUMBER=5 CI_WORKFLOW="iOS Internal Release" sh "$SCRIPT"
+for t in $CREATED_TAGS; do git tag -d "$t" >/dev/null 2>&1 || true; done; CREATED_TAGS=""
+mktag internal/v0.0.4; mktag internal/v0.0.4.1
+expect 0 "bare vs .1 stamps .1" "Version unanimity OK: marketing=0.0.4 build=200005 channel=internal" \
+  env -u TAG_OVERRIDE CI_BUILD_NUMBER=5 CI_WORKFLOW="iOS Internal Release" sh "$SCRIPT"
+for t in $CREATED_TAGS; do git tag -d "$t" >/dev/null 2>&1 || true; done; CREATED_TAGS=""
+mktag internal/v0.0.5; mktag internal/v0.0.5.0
+expect 1 "explicit .0 in pair aborts" "sequences start at 1" \
   env -u TAG_OVERRIDE CI_BUILD_NUMBER=5 CI_WORKFLOW="iOS Internal Release" sh "$SCRIPT"
 for t in $CREATED_TAGS; do git tag -d "$t" >/dev/null 2>&1 || true; done; CREATED_TAGS=""
 mktag internal/v0.0.2; mktag internal/v0.0.2.999999
 expect 1 "oversize sequence in pair aborts" "out of range" \
   env -u TAG_OVERRIDE CI_BUILD_NUMBER=5 CI_WORKFLOW="iOS Internal Release" sh "$SCRIPT"
-for t in $CREATED_TAGS; do git tag -d "$t" >/dev/null 2>&1 || true; done; CREATED_TAGS=""
 for t in $CREATED_TAGS; do git tag -d "$t" >/dev/null 2>&1 || true; done; CREATED_TAGS=""
 mktag internal/v0.0.1; mktag release/v0.0.1
 expect 0 "promotion pair picks internal" "channel=internal" \
