@@ -83,7 +83,7 @@ jobs:
               core.setOutput('check_run_id', String(run.id));
               core.info(`ai-review check run ${run.id} opened on ${headSha}`);
             } catch (err) {
-              core.warning(`Could not create ai-review check run (review continues without it): ${err.message}`);
+              core.warning(`Could not create ai-review check run (review continues without it): ${err?.stack ?? err}`);
             }
 
       - name: Parse /review params
@@ -249,7 +249,7 @@ jobs:
             else
               echo "- Params: effort=\`$EFFORT\` budget=\`$MAX_TOKENS_BUDGET\` model=\`$REVIEW_MODEL\` think=\`$THINK\` full=\`$FULL_REVIEW\`"
             fi
-            echo "- Review step: \`$REVIEW_OUTCOME\` (skipped/failure means the counts below are not a clean review)"
+            echo "- Review step: \`$REVIEW_OUTCOME\` (only \`success\` means the counts below are a clean review)"
             echo "- Range: \`$SUMMARY_RANGE\`"
             echo "- Findings: \`$SUMMARY_TOTAL\` total, \`$SUMMARY_INLINE\` inline, \`$SUMMARY_FAILED\` failed, \`$SUMMARY_ROUTED\` routed"
             echo "- Summary: $SUMMARY_URL"
@@ -294,7 +294,7 @@ jobs:
             } else {
               lines.push(`- Params: effort=\`${process.env.EFFORT}\` budget=\`${process.env.MAX_TOKENS_BUDGET}\` model=\`${process.env.REVIEW_MODEL}\` think=\`${process.env.THINK}\` full=\`${process.env.FULL_REVIEW}\``);
             }
-            lines.push(`- Review step: \`${process.env.REVIEW_OUTCOME}\` (skipped/failure means the counts below are not a clean review)`);
+            lines.push(`- Review step: \`${process.env.REVIEW_OUTCOME}\` (only \`success\` means the counts below are a clean review)`);
             lines.push(`- Range: \`${process.env.SUMMARY_RANGE}\``);
             lines.push(`- Findings: \`${process.env.SUMMARY_TOTAL}\` total, \`${process.env.SUMMARY_INLINE}\` inline, \`${process.env.SUMMARY_FAILED}\` failed, \`${process.env.SUMMARY_ROUTED}\` routed`);
             lines.push(`- Summary: ${process.env.SUMMARY_URL}`);
@@ -320,5 +320,5 @@ jobs:
               });
               core.info(`ai-review check run ${id} finalized (${cancelled ? 'cancelled' : 'success'}).`);
             } catch (err) {
-              core.warning(`Could not finalize ai-review check run ${id}: ${err.message}`);
+              core.warning(`Could not finalize ai-review check run ${id}: ${err?.stack ?? err}`);
             }
