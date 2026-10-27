@@ -30,10 +30,15 @@ permissions:
 
 # Concurrency model: PR runs get one group per PR (cancel superseded
 # pushes); every deploy path — push-to-main and any workflow_dispatch
-# target — shares a single backend-deploy group that never cancels.
-# Rationale: all environments SSH to the same VM (repo-level VM_HOST,
-# hardcoded /opt/timeoflife), so stage/prod/push deploys must serialize,
-# never overlap; a queued deploy waits, it is not evicted by another target.
+# target — shares a single backend-deploy group with no cancellation of a
+# RUNNING deploy. Trade-off (accepted): GitHub keeps one pending slot per
+# group, so a queued deploy can be evicted by a later deploy intent and
+# needs re-dispatch (visible in the UI, recoverable). This is preferred
+# over per-target groups, under which stage/prod/push deploys overlap on
+# the same VM (repo-level VM_HOST, hardcoded /opt/timeoflife) and can
+# interleave the .env rewrite — a silent bad deploy beats a stalled one
+# on harm. Hard mutual exclusion (e.g. flock on the VM) belongs to
+# deploy ownership, not this change.
 concurrency:
   group: ${{ github.event_name == 'pull_request' && format('backend-{0}', github.ref) || 'backend-deploy' }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
