@@ -20,6 +20,6 @@
 
 ## 5. Verification
 
-- [ ] 5.1 `openspec validate --all --strict` green on the PR.
-- [ ] 5.2 Backend suite green (`gofmt -l .`, `go vet`, `go test ./...`) plus local iOS pass (`swiftlint lint --strict`, `xcodebuild` build + test) proving the tree is green; Ruby YAML-validity check on both workflow files.
+- [x] 5.1 `openspec validate --all --strict` green on the PR. [DONE: 31 passed, 0 failed]
+- [x] 5.2 Backend suite green (`gofmt -l .`, `go vet`, `go test ./...`) plus local iOS pass (`swiftlint lint --strict`, `xcodebuild` build + test) proving the tree is green; Ruby YAML-validity check on both workflow files. [DONE: backend gofmt/vet/lint/test green; iOS xcodegen + swiftlint 0 violations + build SUCCEEDED + 846 passed / 0 failed; both YAMLs valid]
 - [ ] 5.3 Post-merge proof: a docs-only PR shows `ios-gate` + `backend-gate` green with both lanes skipped; an `ios/`-touching PR shows the lane running and the gate passing through.
