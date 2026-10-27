@@ -102,6 +102,14 @@ tag_seq() {
   esac
   printf '%s' "$_s"
 }
+# Banding constants, defined ONCE at the top so every bound below derives
+# from them — never duplicate the literal (a second copy edited alone would
+# silently diverge the bounds). STRIDE is the per-(sequence,channel) band
+# width; MAX_SEQ the largest sequence whose stamped build stays within App
+# Store Connect's CFBundleVersion limit of 2^31-1 (10736). All length
+# guards below use ${#MAX_SEQ} rather than a hardcoded digit count.
+STRIDE=100000
+MAX_SEQ="$(( (2147483647 - 2 * STRIDE + 1) / (2 * STRIDE) ))"
 if [ "${TAG_OVERRIDE+x}" = "x" ]; then
   TAG="$TAG_OVERRIDE"
 else
@@ -165,9 +173,9 @@ else
         exit 1
       fi
       # Length guard (same class as SEQ/BUILD_RUN below): an over-long value
-      # makes the integer comparisons error out and skip silently. Five
-      # digits always suffice (MAX_SEQ is 10736).
-      if [ "${#CANDIDATE_N}" -gt 5 ]; then
+      # makes the integer comparisons error out and skip silently. Cap
+      # derives from MAX_SEQ so a future STRIDE change cannot strand it.
+      if [ "${#CANDIDATE_N}" -gt "${#MAX_SEQ}" ]; then
         echo "error: tag '$CANDIDATE_TAG' carries re-upload sequence $CANDIDATE_N — out of range. Archiving nothing."
         exit 1
       fi
@@ -234,13 +242,6 @@ if ! printf '%s' "$VERSION" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+(\.[0-9]+)?$'; t
 fi
 
 MARKETING="$(printf '%s' "${VERSION#v}" | cut -d. -f1-3)"
-# Banding constants, defined ONCE here so every bound below derives from
-# them — never duplicate the literal (a second copy edited alone would
-# silently diverge the bounds). STRIDE is the per-(sequence,channel) band
-# width; MAX_SEQ the largest sequence whose stamped build stays within App
-# Store Connect's CFBundleVersion limit of 2^31-1 (10736).
-STRIDE=100000
-MAX_SEQ="$(( (2147483647 - 2 * STRIDE + 1) / (2 * STRIDE) ))"
 # Sequence is part of the build number: the bare tag is the base (N=0) and
 # explicit re-uploads start at .1.
 if ! SEQ="$(tag_seq "${VERSION#v}")"; then
@@ -250,8 +251,9 @@ fi
 # Length guard before any arithmetic on SEQ: an over-long value makes
 # `[ -gt ]` exit status 2 (treated as false inside `if`, skipping the
 # check) and `$(( ))` wrap — failing open with a bogus build number.
-if [ "${#SEQ}" -gt 5 ]; then
-  echo "error: tag '$TAG' has re-upload sequence $SEQ — out of range (more than 5 digits; max sequence $MAX_SEQ). Archiving nothing."
+# Cap derives from MAX_SEQ (defined at the top).
+if [ "${#SEQ}" -gt "${#MAX_SEQ}" ]; then
+  echo "error: tag '$TAG' has re-upload sequence $SEQ — out of range (longer than ${#MAX_SEQ} digits; max sequence $MAX_SEQ). Archiving nothing."
   exit 1
 fi
 
@@ -300,20 +302,21 @@ for _t in $(git tag -l "internal/v${MARKETING}" "internal/v${MARKETING}.*" \
   "release/v${MARKETING}" "release/v${MARKETING}.*" 2>/dev/null || true); do
   if _n="$(tag_seq "${_t#*/}")"; then
     # Entries that could never have uploaded contribute no ordering
-    # knowledge: explicit-.0 (empty print), over-long values (length guard),
-    # and well-formed-but-above-MAX_SEQ sequences (their own archive refused
-    # them — e.g. a typo'd .99999 poisons the line forever otherwise, since
-    # tags never move). Skip all three without disturbing the max.
-    if [ -n "$_n" ] && [ "${#_n}" -le 5 ] && [ "$_n" -le "$MAX_SEQ" ] && [ "$_n" -gt "$HIST_MAX" ]; then HIST_MAX="$_n"; fi
+    # knowledge: explicit-.0 (empty print), over-limit values, and malformed
+    # input all skip without disturbing the max. The length pre-check derives
+    # from MAX_SEQ (not a second literal) so a future STRIDE change that
+    # grows MAX_SEQ cannot silently strand valid history here.
+    if [ -n "$_n" ] && [ "${#_n}" -le "${#MAX_SEQ}" ] && [ "$_n" -le "$MAX_SEQ" ] && [ "$_n" -gt "$HIST_MAX" ]; then HIST_MAX="$_n"; fi
   fi
 done
 # Floor at the picked tag (validated numeric above): a listing hiccup must
 # never band below the tag being stamped — worst case is the old behavior.
 if [ "$SEQ" -gt "$HIST_MAX" ]; then HIST_MAX="$SEQ"; fi
-# Length guard first: beyond 5 digits the value may exceed the shell's
-# integer range, in which case `[ -gt ]` errors (status 2, silently skipped
-# in an `if` condition) and $(( )) wraps — failing open. MAX_SEQ is 10736.
-if [ "${#HIST_MAX}" -gt 5 ] || [ "$HIST_MAX" -gt "$MAX_SEQ" ]; then
+# Length guard first: beyond MAX_SEQ's digit count the value may exceed the
+# shell's integer range, in which case `[ -gt ]` errors (status 2, silently
+# skipped in an `if` condition) and $(( )) wraps — failing open. MAX_SEQ is
+# 10736.
+if [ "${#HIST_MAX}" -gt "${#MAX_SEQ}" ] || [ "$HIST_MAX" -gt "$MAX_SEQ" ]; then
   echo "error: marketing $MARKETING already reached re-upload sequence $HIST_MAX — the banded build would exceed App Store Connect's 2^31-1 limit (max sequence $MAX_SEQ). Archiving nothing."
   exit 1
 fi

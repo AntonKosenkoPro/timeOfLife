@@ -34,17 +34,18 @@ permissions:
   packages: write  # needed to push to GHCR
 
 # Concurrency model: PR runs get one group per PR (cancel superseded
-# pushes); push-to-main runs share one non-cancelling publish group so two
-# back-to-back merges can never interleave their `:latest` push (flock
-# starts inside the SSH step, i.e. after the image push, so it cannot order
-# pushes — only this group serializes publish+deploy; a queued push waits,
-# and a superseded queued push is evicted visibly and needs re-dispatch).
-# Every other run (dispatches, including emergency rollbacks) gets its own
-# group (per run_id), so a queued rollback is never silently cancelled.
+# pushes); every run that PUBLISHES `:latest` shares one non-cancelling
+# group — push-to-main plus dispatches with an empty image_tag (those rebuild
+# from source and push `:latest` too), so two such runs can never interleave
+# their push (flock starts inside the SSH step, i.e. after the image push,
+# so it cannot order pushes; a queued publisher waits, a superseded queued
+# one is evicted visibly and needs re-dispatch). Rollback dispatches
+# (image_tag set — no publish, pinned pull only) keep their own per-run_id
+# group so an emergency rollback is never silently cancelled.
 # Mutual exclusion on the single VM directory itself is enforced by flock
 # in the deploy script (a contender waits 600s, then fails loudly).
 concurrency:
-  group: ${{ github.event_name == 'pull_request' && format('backend-{0}', github.ref) || format('backend-publish-{0}', github.event_name == 'push' && 'deploy' || github.run_id) }}
+  group: ${{ github.event_name == 'pull_request' && format('backend-{0}', github.ref) || format('backend-publish-{0}', (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.image_tag == '')) && 'latest' || github.run_id) }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
@@ -208,7 +209,11 @@ jobs:
       github.ref == 'refs/heads/main'
     needs: [lint-and-test]
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # Must strictly exceed the SSH command_timeout below (30m): the job
+    # budget also covers checkout, GHCR login, image build+push, and SCP —
+    # otherwise the runner kills a flock contender mid-deploy instead of
+    # letting it fail loudly.
+    timeout-minutes: 60
     # No job-level group: the workflow group is already unique per non-PR
     # run, and the VM itself is serialized by flock below. A second group
     # here would only reintroduce silent cancellation of queued runs.
@@ -323,13 +328,10 @@ jobs:
           key: ${{ secrets.VM_SSH_KEY }}
           # Must exceed flock's 600s wait plus deploy minutes: appleboy's
           # default 10m would kill a lock contender before its loud failure.
+          # (Single `with:` mapping — a duplicate key here silently
+          # last-wins in some parsers, dropping command_timeout/envs.)
           command_timeout: 30m
           envs: BACKEND_IMAGE_TAG,DEPLOY_ENVIRONMENT,DATABASE_URL_PRESENT
-        with:
-          host: ${{ secrets.VM_HOST }}
-          username: ${{ secrets.VM_USER }}
-          key: ${{ secrets.VM_SSH_KEY }}
-          envs: BACKEND_IMAGE_TAG,DEPLOY_ENVIRONMENT
           script: |
             set -euo pipefail
             cd /opt/timeoflife

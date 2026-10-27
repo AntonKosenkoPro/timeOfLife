@@ -108,13 +108,15 @@ jobs:
           # charset/length checks. A transient registry failure must NOT
           # read as "absent" (that would fail open into an overwrite), so
           # anything but a clear not-found aborts too — narrowed to the
-          # registry's real not-found signatures (MANIFEST_UNKNOWN and the
-          # classic "no such manifest"); anything looser (bare "not found",
+          # registry's real not-found signatures: MANIFEST_UNKNOWN for a
+          # missing tag, NAME_UNKNOWN ("name unknown") for a package that
+          # does not exist yet (first pinned release), and the classic CLI
+          # "no such manifest". Anything looser (bare "not found", DNS
           # "no such host") fails closed as a transient.
           if _manifest_out="$(docker manifest inspect "ghcr.io/${GITHUB_REPOSITORY,,}/backend:${TAG_SUFFIX}" 2>&1)"; then
             echo "::error::image tag 'backend:${TAG_SUFFIX}' is already published — refusing to overwrite an immutable release. Cut a new version."
             exit 1
-          elif ! printf '%s' "$_manifest_out" | grep -qiE "manifest unknown|no such manifest"; then
+          elif ! printf '%s' "$_manifest_out" | grep -qiE "manifest unknown|no such manifest|name unknown"; then
             echo "::error::could not verify tag absence (transient registry error?): ${_manifest_out}"
             exit 1
           fi

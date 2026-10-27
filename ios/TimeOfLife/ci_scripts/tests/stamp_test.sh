@@ -86,6 +86,21 @@ mktag() {
 command -v xcodegen >/dev/null 2>&1 || { echo "FAIL: xcodegen not on PATH"; exit 1; }
 sh -n "$SCRIPT" || { echo "FAIL: syntax"; exit 1; }
 
+# Isolation preflight FIRST (before every case, including the TAG_OVERRIDE
+# ones in sections 1-4b): history banding reads `git tag -l` regardless of
+# TAG_OVERRIDE, so ANY local tag for the harness versions — anywhere in
+# history, not just at HEAD — shifts HIST_MAX and corrupts the exact build
+# assertions with misleading "missing ..." failures. The versions use the
+# v9.9.* namespace, which real releases never touch; fail fast if anything
+# is there anyway. The HEAD check guards the points-at enumeration used by
+# the real-tag cases below.
+if git tag -l "internal/v9.9.*" "release/v9.9.*" | grep -q .; then
+  echo "FAIL: local tags already exist for the harness v9.9.* versions ($(git tag -l "internal/v9.9.*" "release/v9.9.*" | tr '\n' ' ')) — run this harness from a checkout without them (or a scratch worktree)"; exit 1
+fi
+if git tag --points-at HEAD | grep -qE '^(internal|release)/'; then
+  echo "FAIL: HEAD already carries an iOS release tag — run this harness from an untagged commit (or a scratch worktree)"; exit 1
+fi
+
 # 1. No tag: exit 0, versions untouched.
 expect 0 "no tag leaves dummy" "leaving project.yml versions untouched" \
   env TAG_OVERRIDE="" CI_BUILD_NUMBER=9 CI_WORKFLOW="" sh "$SCRIPT"
@@ -107,6 +122,12 @@ expect 1 "zero run refused" "build number 0" \
   env TAG_OVERRIDE="internal/v9.9.7" CI_BUILD_NUMBER=0 CI_WORKFLOW="" sh "$SCRIPT"
 expect 1 "huge sequence refused" "out of range" \
   env TAG_OVERRIDE="internal/v9.9.3.99999999999999999999" CI_BUILD_NUMBER=5 CI_WORKFLOW="" sh "$SCRIPT"
+# 4c. MAX_SEQ boundary from the picked-tag side (MAX_SEQ = 10736):
+# the largest accepted sequence stamps just under 2^31-1, one more aborts.
+expect 0 "max sequence 10736 accepted" "Version unanimity OK: marketing=9.9.0 build=2147200005 channel=internal" \
+  env TAG_OVERRIDE="internal/v9.9.0.10736" CI_BUILD_NUMBER=5 CI_WORKFLOW="" sh "$SCRIPT"
+expect 1 "sequence 10737 refused" "already reached re-upload sequence" \
+  env TAG_OVERRIDE="internal/v9.9.9.10737" CI_BUILD_NUMBER=5 CI_WORKFLOW="" sh "$SCRIPT"
 
 # 4b. New guard paths: padded / out-of-range run number, duplicate sequence.
 expect 0 "padded run number accepted" "build=42" \
@@ -122,19 +143,6 @@ expect 1 "non-numeric run refused" "CI_BUILD_NUMBER is missing or not numeric" \
 # so no network and no writes to the developer's remote refs): same-namespace
 # highest-.n wins; promotion pair picks by workflow.
 setup_test_origin
-# Isolation preflight: the history-aware banding reads `git tag -l` for the
-# marketing versions below (not just tags at HEAD), and the fetch inside the
-# script re-imports real tags from the throwaway origin — so ANY local tag
-# for the harness versions, anywhere in history, shifts HIST_MAX and flips
-# the exact build assertions. The versions use the v9.9.* namespace, which
-# real releases never touch; fail fast if anything is there anyway instead
-# of leaving a trap for the next maintainer.
-if git tag -l "internal/v9.9.*" "release/v9.9.*" | grep -q .; then
-  echo "FAIL: local tags already exist for the harness v9.9.* versions ($(git tag -l "internal/v9.9.*" "release/v9.9.*" | tr '\n' ' ')) — run this harness from a checkout without them (or a scratch worktree)"; exit 1
-fi
-if git tag --points-at HEAD | grep -qE '^(internal|release)/'; then
-  echo "FAIL: HEAD already carries an iOS release tag — run this harness from an untagged commit (or a scratch worktree)"; exit 1
-fi
 mktag internal/v9.9.1; mktag internal/v9.9.1.2
 expect 0 "same-namespace pair stamps highest .n" "Version unanimity OK: marketing=9.9.1 build=400005 channel=internal" \
   env -u TAG_OVERRIDE CI_BUILD_NUMBER=5 CI_WORKFLOW="iOS Internal Release" sh "$SCRIPT"
@@ -150,6 +158,21 @@ for t in $CREATED_TAGS; do git tag -d "$t" >/dev/null 2>&1 || true; done; CREATE
 mktag internal/v9.9.2; mktag internal/v9.9.2.999999
 expect 1 "oversize sequence in pair aborts" "out of range" \
   env -u TAG_OVERRIDE CI_BUILD_NUMBER=5 CI_WORKFLOW="iOS Internal Release" sh "$SCRIPT"
+for t in $CREATED_TAGS; do git tag -d "$t" >/dev/null 2>&1 || true; done; CREATED_TAGS=""
+# 5b. History filter: a well-formed but over-limit entry that is NOT the
+# picked tag must be skipped, not fatal. Pair shares one marketing line;
+# Public picks release/v9.9.5 (SEQ 0) while internal/v9.9.5.99999 poisons
+# history — the filter skips it and bands (0*2+1)*STRIDE+RUN. The old code
+# exited 1 here for every future stamp of the line, forever.
+mktag release/v9.9.5; mktag internal/v9.9.5.99999
+expect 0 "over-limit history entry skipped" "Version unanimity OK: marketing=9.9.5 build=100005 channel=public" \
+  env -u TAG_OVERRIDE CI_BUILD_NUMBER=5 CI_WORKFLOW="iOS Public Release" sh "$SCRIPT"
+for t in $CREATED_TAGS; do git tag -d "$t" >/dev/null 2>&1 || true; done; CREATED_TAGS=""
+# Companion: an in-range history entry still lifts the band (10736 from
+# history, public channel → (10736*2+1)*STRIDE+RUN, just under 2^31-1).
+mktag release/v9.9.5; mktag internal/v9.9.5.10736
+expect 0 "in-range history sequence bands" "Version unanimity OK: marketing=9.9.5 build=2147300005 channel=public" \
+  env -u TAG_OVERRIDE CI_BUILD_NUMBER=5 CI_WORKFLOW="iOS Public Release" sh "$SCRIPT"
 for t in $CREATED_TAGS; do git tag -d "$t" >/dev/null 2>&1 || true; done; CREATED_TAGS=""
 mktag internal/v9.9.8.1; mktag internal/v9.9.8.01
 expect 1 "duplicate sequence aborts" "duplicate re-upload sequence" \

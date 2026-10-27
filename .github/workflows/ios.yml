@@ -79,23 +79,41 @@ jobs:
           fetch-depth: 0
 
       - name: Install pinned xcodegen + swiftlint
-        # The harness invokes ci_post_clone.sh, which fail-closed asserts
-        # XCODEGEN_PIN — an unpinned brew install would break every iOS PR
-        # the day Homebrew moves on. Pin is read from the script itself
-        # (single source of truth); swiftlint stays on brew (its own
-        # --strict gate is version-tolerant).
+        # Both tools are fail-closed pinned in the Cloud scripts; an unpinned
+        # brew install would let the PR gate drift from the release gate the
+        # day Homebrew moves on. Pins are read from the scripts themselves
+        # (single source of truth) and validated before use so a reformatted
+        # pin line fails loudly instead of installing from a `//` URL.
         run: |
-          brew install swiftlint
-          XCODEGEN_PIN="$(grep -m1 '^XCODEGEN_PIN=' ios/TimeOfLife/ci_scripts/ci_post_clone.sh | cut -d'"' -f2)"
-          curl -sSL "https://github.com/yonaskolb/XcodeGen/releases/download/${XCODEGEN_PIN}/xcodegen.zip" -o "${RUNNER_TEMP}/xcodegen.zip"
+          XCODEGEN_PIN="$(sed -n 's/^XCODEGEN_PIN="\([^"]*\)"$/\1/p' ios/TimeOfLife/ci_scripts/ci_post_clone.sh | head -n1)"
+          [ -n "$XCODEGEN_PIN" ] || { echo "::error::cannot read XCODEGEN_PIN from ci_post_clone.sh — refusing to install an unpinned xcodegen"; exit 1; }
+          SWIFTLINT_PIN="$(sed -n 's/^SWIFTLINT_PIN="\([^"]*\)"$/\1/p' ios/TimeOfLife/ci_scripts/ci_pre_xcodebuild.sh | head -n1)"
+          [ -n "$SWIFTLINT_PIN" ] || { echo "::error::cannot read SWIFTLINT_PIN from ci_pre_xcodebuild.sh — refusing to install an unpinned swiftlint"; exit 1; }
+          # -f: curl exits non-zero on HTTP errors instead of writing an
+          # error page that later surfaces as an opaque unzip/installer
+          # failure before a sudo-installed binary ever runs.
+          curl -fsSL "https://github.com/yonaskolb/XcodeGen/releases/download/${XCODEGEN_PIN}/xcodegen.zip" -o "${RUNNER_TEMP}/xcodegen.zip"
           rm -rf "${RUNNER_TEMP}/xcodegen" && mkdir -p "${RUNNER_TEMP}/xcodegen"
           unzip -o -q "${RUNNER_TEMP}/xcodegen.zip" -d "${RUNNER_TEMP}/xcodegen"
-          # The zip layout is not contractual (flat binary today, folder
-          # tomorrow) — locate the executable instead of hardcoding a path.
-          BIN="$(find "${RUNNER_TEMP}/xcodegen" -name xcodegen -type f | head -1)"
-          [ -n "$BIN" ] || { echo "::error::xcodegen binary not found in release zip"; exit 1; }
+          # The zip is a prefix tree (bin/xcodegen + share/xcodegen presets),
+          # not a flat binary — and the wrapper layout is not contractual, so
+          # locate it. The presets must travel with the binary: XcodeGen
+          # resolves SettingPresets relative to its prefix, and a lone
+          # binary fails generate on a clean runner.
+          BIN="$(find "${RUNNER_TEMP}/xcodegen" -path '*/bin/xcodegen' -type f | head -n1)"
+          [ -n "$BIN" ] || { echo "::error::xcodegen binary not found in release archive"; exit 1; }
+          XG_ROOT="$(dirname "$(dirname "$BIN")")"
           sudo install -m 755 "$BIN" /usr/local/bin/xcodegen
-          xcodegen --version
+          [ -d "$XG_ROOT/share" ] || { echo "::error::xcodegen share/ presets missing from release archive"; exit 1; }
+          sudo mkdir -p /usr/local/share && sudo cp -R "$XG_ROOT/share/." /usr/local/share/
+          curl -fsSL "https://github.com/realm/SwiftLint/releases/download/${SWIFTLINT_PIN}/SwiftLint.pkg" -o "${RUNNER_TEMP}/swiftlint.pkg"
+          sudo installer -pkg "${RUNNER_TEMP}/swiftlint.pkg" -target /
+          # Prove the pins: a stray runner-image/Homebrew binary earlier in
+          # PATH must not silently pass while looking validated.
+          test "$(xcodegen --version | grep -o '[0-9][0-9.]*' | head -n1)" = "$XCODEGEN_PIN" || \
+            { echo "::error::xcodegen drift: got $(xcodegen --version), want $XCODEGEN_PIN"; exit 1; }
+          test "$(swiftlint version)" = "$SWIFTLINT_PIN" || \
+            { echo "::error::swiftlint drift: got $(swiftlint version), want $SWIFTLINT_PIN"; exit 1; }
 
       - name: Generate Xcode project
         working-directory: ios/TimeOfLife
