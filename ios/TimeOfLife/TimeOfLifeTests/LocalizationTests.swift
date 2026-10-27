@@ -21,7 +21,8 @@ struct LocalizationTests {
 
     @Test("shipped locales match the expected set")
     func shippedLocales() {
-        #expect(Self.allLocales == Self.expectedLocales, "Shipped locales changed")
+        #expect(Self.allLocales == Self.expectedLocales,
+                "Shipped locales changed: \(Self.allLocales)")
     }
 
     private func bundle(for locale: String) throws -> Bundle {
@@ -62,8 +63,7 @@ struct LocalizationTests {
     /// appex must ship the same locales as the app.
     @Test("LifioLiveActivities appex ships every locale")
     func appexShipsAllLocales() throws {
-        let appexPath = URL(fileURLWithPath: try #require(Bundle.main.builtInPlugInsPath), isDirectory: true)
-            .appendingPathComponent("LifioLiveActivities.appex", isDirectory: true).path
+        let appexPath = URL(fileURLWithPath: try #require(Bundle.main.builtInPlugInsPath), isDirectory: true).appendingPathComponent("LifioLiveActivities.appex", isDirectory: true).path
         let appex = try #require(Bundle(path: appexPath), "Missing appex at \(appexPath)")
         let shipped = Set(appex.localizations.filter { $0 != "Base" })
         #expect(shipped == Set(Self.expectedLocales), "Appex locales changed: \(shipped.sorted())")
@@ -90,15 +90,13 @@ struct LocalizationTests {
     }
 
     private static func formatSpecifiers(in text: String) throws -> [String] {
-        // `%@`, `%d`, `%s`, positional `%1$@` — normalized so a legitimate
-        // positional translation compares equal to plain en markers (order
-        // still matters: translators must preserve en order). `%ds` first
-        // so the countdown suffix isn't mistaken for a second specifier;
-        // the trailing "s" is translator-owned literal text, not a marker.
+        // Normalized markers (`%ds` → `%d`; in-order `%N$` stripped) so a
+        // legitimate positional translation compares equal while reordered
+        // or mixed markers stay raw and fail against en's plain sequence.
         let pattern = "%ds|%(?:\\d+\\$)?[@dfsu]"
         let regex = try NSRegularExpression(pattern: pattern)
         let range = NSRange(text.startIndex..<text.endIndex, in: text)
-        return try regex.matches(in: text, range: range).map { match -> String in
+        return try regex.matches(in: text, range: range).enumerated().map { position, match -> String in
             guard let range = Range(match.range, in: text) else {
                 throw CocoaError(.coderInvalidValue)
             }
@@ -106,7 +104,9 @@ struct LocalizationTests {
             if specifier == "%ds" {
                 return "%d"
             }
-            if let dollar = specifier.firstIndex(of: "$") {
+            if let dollar = specifier.firstIndex(of: "$"),
+               let slot = Int(specifier[specifier.index(specifier.startIndex, offsetBy: 1)..<dollar]),
+               slot == position + 1 {
                 specifier = "%" + specifier[specifier.index(after: dollar)...]
             }
             return specifier
