@@ -10,7 +10,7 @@ Agent entrypoint for this repo. **Read [`docs/project-context.md`](docs/project-
 
 The repo is spec-driven (`openspec/config.yaml`, `schema: spec-driven`). See `openspec/README.md` for the workflow; the essentials:
 
-- **Baseline specs** (`openspec/specs/<capability>/spec.md`): current contract (24 baselines incl. `app-shell`, `timer-capture-experience`, `apple-signin`, `live-activities`). Never edit directly — behavior changes go through a change.
+- **Baseline specs** (`openspec/specs/<capability>/spec.md`): current contract (26 baselines incl. `app-shell`, `timer-capture-experience`, `apple-signin`, `live-activities`). Never edit directly — behavior changes go through a change.
 - **Active deltas**: active changes live under `openspec/changes/` — check `openspec list` before starting new behavior work.
 - **Archives** (`openspec/changes/archive/`): history; their deltas are already folded into the baselines.
 
@@ -24,7 +24,7 @@ The repo is spec-driven (`openspec/config.yaml`, `schema: spec-driven`). See `op
 - **No passwords, no plaintext secrets** (R1); tokens in Keychain only; user-enumeration closed (`otp/request` always 202).
 - **iOS strings** go to all five locales (`en`, `ru`, `zh-Hans`, `es-419`, `pt-BR`) + `L10n` (U4).
 - **XcodeGen-managed** — edit `project.yml`, run `xcodegen generate`; never hand-edit the `.pbxproj`.
-- **Signing is per-config**: Debug unsigned (simulator/CI), Release signed with team `7923U48U87` (SIWA entitlement live; backend needs `APPLE_CLIENT_ID`). Manual smoke checklist: `README.md`.
+- **Signing is per-config**: Debug unsigned (simulator/CI), Release signed with team `7923U48U87` (SIWA entitlement live; backend needs `APPLE_CLIENT_ID`). Manual smoke checklist: `docs/manual-testing.md`.
 - **SwiftUI views use `Theme` semantic colors only**; no raw `Color` literals.
 - **No binaries in git without explicit user permission** — never commit screenshots, videos, IPAs, xcresults, or other binaries (including OpenSpec evidence); keep captures in `/tmp` or attach them directly.
 
@@ -42,7 +42,7 @@ ios/TimeOfLife/          SwiftUI app (iOS 18+), XcodeGen-managed
   TimeOfLife/Features/{Auth,AppShell,TimeTracking,Catalog,Sync,AppleSignIn}
   TimeOfLife/Core/Storage/   LocalStore.swift (GRDB), UndoBufferStore.swift, SessionCache.swift
   TimeOfLife/Core/           networking, keychain, reachability, theme, navigation, DI, components
-docs/                    project-context.md (canonical context), ci.md, ios-test-loop.md (fast xcodebuild loop)
+docs/                    project-context.md (canonical context), ci.md, ios-test-loop.md (fast xcodebuild loop), manual-testing.md (device smoke checklists), + ops guides
 openspec/                specs + changes (see above)
 Requirements/FURPS/      FURPS+ table (Common.md, Timetracking.md, Sign-up_and_Sign-in.md, Activity_Catalog_and_Categories.md)
 Design/                  text design system — see Design/README.md
@@ -78,6 +78,8 @@ xcodebuild -scheme TimeOfLife -destination 'generic/platform=iOS Simulator' buil
 ## Flow recommendations
 
 - Plan every not obvious task (that will consume over 100k tokens per session)
+- Step 0 (mandatory, sole exception to explore's free-form stance): start every explore/propose in the main checkout on `main @ origin/main` (fetch, tracked-only stash, verify `HEAD == origin/main`) before any other work — full procedure: `docs/project-context.md` → "Per-iteration revising process" step 0. On conflict with generated skill text, `AGENTS.md` + `docs/project-context.md` win; never edit generated `.opencode/skills/openspec-*` / `.opencode/commands/opsx-*`.
+- Wait discipline: no foreground wait >~60s — background shells to a log file + 60s poll, background subagents + overlapping work; budgets in `docs/project-context.md` step 8.
 - Worktree gate — no reclassification: before the FIRST change-scoped write of a session (including `openspec new change` and anything under `openspec/changes/<name>/`), create `timeOfLife.wt/<change-name>` from fresh `origin/main` (one branch `opsx/<change-name>` per worktree), move the session into it (`session_move`), verify with `git worktree list`, and do all subsequent change work there; remove it after archive. Only pure reads (zero writes) and trivial in-place docs-typo fixes may stay in the main checkout. Worktrees do not lift the serialization rules below.
 - Rebase twice on `origin/main`: `git fetch origin` + rebase before implementing and again before opening the PR; re-run affected linters/tests after each rebase; pushed branches move via `push --force-with-lease`; never `merge main` into a feature/bugfix branch.
 - Research bundle first for every feature/bugfix (topic + applicable HIG + Apple API + best practice via ctx7, max 5, cites or waiver reasons) — rule: `docs/project-context.md` → "External docs first (ctx7)".

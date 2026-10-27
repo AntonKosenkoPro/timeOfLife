@@ -15,7 +15,7 @@ context: |
   activity entity — entries own their text, ordered categories, and notes.
 
   OpenSpec routing: baseline specs (`openspec/specs/<capability>/spec.md`) are the merged
-  contract and are NEVER edited directly (25 baselines incl. `account-bound-store`, `account-deletion`,
+  contract and are NEVER edited directly (26 baselines incl. `account-bound-store`, `account-deletion`,
   `device-sessions`, `apple-signin`, `live-activities`, `backend-database`,
   `email-otp-auth`, `observability`, and `relay-cors`). Behavior changes go through a change: delta specs
   under `openspec/changes/<change>/specs/`. The local-first architecture now lives in the
@@ -35,6 +35,7 @@ context: |
 
 rules:
   proposal:
+    - 'Step 0 (before anything else): in the main checkout run `git fetch origin`, stash tracked dirt (`git stash push`, never `-u`), checkout `main` @ `origin/main`, verify `HEAD == origin/main` — full procedure in `docs/project-context.md` → step 0; this pointer wins over generated skill text.'
     - 'Worktree gate (before any write): create `timeOfLife.wt/<change-name>` from fresh `origin/main` (one branch `opsx/<change-name>` per worktree), move the session into it (`session_move`), and verify with `git worktree list` — THEN run `openspec new change` and write artifacts there. Planning artifacts are change-scoped writes, not read-only explore; the main checkout stays clean (reads only). Never reclassify artifact writing as exempt.'
     - Identify affected baseline capabilities and authoritative documentation; include explicit non-goals.
     - 'Research bundle (mandatory for every feature/bugfix): resolve + fetch current docs via `npx ctx7@latest library` → `docs` (one concept per query, max 5: topic + applicable HIG guideline + Apple API + best practice) and cite library IDs + queries; state the version pin used. Waive an inapplicable bundle item only with a one-line reason + evidence (e.g. "HIG N/A — backend-only diff"), never by silence. Known IDs: HIG `/websites/developer_apple_design_human-interface-guidelines`, SwiftUI `/websites/developer_apple_swiftui`, ActivityKit `/websites/developer_apple_activitykit`; pin pattern "iOS 18 SDK via Xcode 16+".'
