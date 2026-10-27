@@ -234,9 +234,15 @@ if ! printf '%s' "$VERSION" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+(\.[0-9]+)?$'; t
 fi
 
 MARKETING="$(printf '%s' "${VERSION#v}" | cut -d. -f1-3)"
+# Banding constants, defined ONCE here so every bound below derives from
+# them — never duplicate the literal (a second copy edited alone would
+# silently diverge the bounds). STRIDE is the per-(sequence,channel) band
+# width; MAX_SEQ the largest sequence whose stamped build stays within App
+# Store Connect's CFBundleVersion limit of 2^31-1 (10736).
+STRIDE=100000
+MAX_SEQ="$(( (2147483647 - 2 * STRIDE + 1) / (2 * STRIDE) ))"
 # Sequence is part of the build number: the bare tag is the base (N=0) and
-# explicit re-uploads start at .1. App Store Connect accepts CFBundleVersion
-# only up to 2^31-1 (bounded below).
+# explicit re-uploads start at .1.
 if ! SEQ="$(tag_seq "${VERSION#v}")"; then
   echo "error: tag '$TAG' has an invalid or zero re-upload sequence — explicit re-uploads need .1+ numeric (the bare tag is the base; check for typos like .abc or .0). Archiving nothing."
   exit 1
@@ -245,16 +251,10 @@ fi
 # `[ -gt ]` exit status 2 (treated as false inside `if`, skipping the
 # check) and `$(( ))` wrap — failing open with a bogus build number.
 if [ "${#SEQ}" -gt 5 ]; then
-  echo "error: tag '$TAG' has re-upload sequence $SEQ — out of range (max sequence $MAX_SEQ). Archiving nothing."
+  echo "error: tag '$TAG' has re-upload sequence $SEQ — out of range (more than 5 digits; max sequence $MAX_SEQ). Archiving nothing."
   exit 1
 fi
 
-STRIDE=100000
-# App Store Connect accepts CFBundleVersion up to 2^31-1: keep the whole
-# stamped number inside that range at the largest accepted sequence.
-# Computed once here so every bound below derives from it — never duplicate
-# the literal.
-MAX_SEQ="$(( (2147483647 - 2 * STRIDE + 1) / (2 * STRIDE) ))"
 BUILD_RUN="${CI_BUILD_NUMBER:-}"
 case "$BUILD_RUN" in
   ''|*[!0-9]*)
@@ -299,20 +299,17 @@ HIST_MAX=0
 for _t in $(git tag -l "internal/v${MARKETING}" "internal/v${MARKETING}.*" \
   "release/v${MARKETING}" "release/v${MARKETING}.*" 2>/dev/null || true); do
   if _n="$(tag_seq "${_t#*/}")"; then
-    # Oversize historical entries can never have uploaded (their own
-    # archive would have refused them), so they contribute no ordering
-    # knowledge — skip rather than letting a huge value near arithmetic.
-    # Empty print here means explicit-.0, likewise never uploaded; the
-    # -n test skips both without disturbing the max.
-    if [ -n "$_n" ] && [ "${#_n}" -le 5 ] && [ "$_n" -gt "$HIST_MAX" ]; then HIST_MAX="$_n"; fi
+    # Entries that could never have uploaded contribute no ordering
+    # knowledge: explicit-.0 (empty print), over-long values (length guard),
+    # and well-formed-but-above-MAX_SEQ sequences (their own archive refused
+    # them — e.g. a typo'd .99999 poisons the line forever otherwise, since
+    # tags never move). Skip all three without disturbing the max.
+    if [ -n "$_n" ] && [ "${#_n}" -le 5 ] && [ "$_n" -le "$MAX_SEQ" ] && [ "$_n" -gt "$HIST_MAX" ]; then HIST_MAX="$_n"; fi
   fi
 done
 # Floor at the picked tag (validated numeric above): a listing hiccup must
 # never band below the tag being stamped — worst case is the old behavior.
 if [ "$SEQ" -gt "$HIST_MAX" ]; then HIST_MAX="$SEQ"; fi
-# App Store Connect accepts CFBundleVersion up to 2^31-1: keep the whole
-# stamped number inside that range at the largest accepted sequence.
-MAX_SEQ="$(( (2147483647 - 2 * STRIDE + 1) / (2 * STRIDE) ))"
 # Length guard first: beyond 5 digits the value may exceed the shell's
 # integer range, in which case `[ -gt ]` errors (status 2, silently skipped
 # in an `if` condition) and $(( )) wraps — failing open. MAX_SEQ is 10736.

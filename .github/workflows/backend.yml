@@ -34,12 +34,17 @@ permissions:
   packages: write  # needed to push to GHCR
 
 # Concurrency model: PR runs get one group per PR (cancel superseded
-# pushes); every other run gets its own group (per run_id), so nothing is
-# ever silently cancelled — not a queued deploy, not a queued rollback.
-# Mutual exclusion on the single VM is enforced by flock in the deploy
-# script (a contender waits 600s, then fails loudly), never by grouping.
+# pushes); push-to-main runs share one non-cancelling publish group so two
+# back-to-back merges can never interleave their `:latest` push (flock
+# starts inside the SSH step, i.e. after the image push, so it cannot order
+# pushes — only this group serializes publish+deploy; a queued push waits,
+# and a superseded queued push is evicted visibly and needs re-dispatch).
+# Every other run (dispatches, including emergency rollbacks) gets its own
+# group (per run_id), so a queued rollback is never silently cancelled.
+# Mutual exclusion on the single VM directory itself is enforced by flock
+# in the deploy script (a contender waits 600s, then fails loudly).
 concurrency:
-  group: ${{ github.event_name == 'pull_request' && format('backend-{0}', github.ref) || format('backend-run-{0}', github.run_id) }}
+  group: ${{ github.event_name == 'pull_request' && format('backend-{0}', github.ref) || format('backend-publish-{0}', github.event_name == 'push' && 'deploy' || github.run_id) }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
@@ -171,10 +176,16 @@ jobs:
     if: github.event_name == 'workflow_dispatch' && github.ref != 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    permissions: {} # least privilege: only echoes and exits
     steps:
       - run: |
-          echo "::error::refusing to deploy from '${{ github.ref }}' — dispatches (including rollbacks) must run from 'refs/heads/main'; re-dispatch from main"
+          echo "::error::refusing to deploy from '$REF' — dispatches (including rollbacks) must run from 'refs/heads/main'; re-dispatch from main"
           exit 1
+        env:
+          # Never interpolate github.ref into script text: ref names may
+          # legally contain $, backticks, and parens (only space ~^:?*[ and
+          # controls are forbidden) — pass through env only.
+          REF: ${{ github.ref }}
 
   deploy:
     # Push to main auto-deploys to the backend-prod environment (created with
@@ -301,6 +312,19 @@ jobs:
           # fallback would silently repoint prod at an orphan volume).
           BACKEND_IMAGE_TAG: ${{ inputs.image_tag }}
           DEPLOY_ENVIRONMENT: ${{ github.event_name == 'push' && 'backend-prod' || github.event.inputs.environment || 'stage' }}
+          # Presence bit for the pre-rewrite prod guard below: the script
+          # must refuse a backend-prod deploy before regenerating .env, or a
+          # failed run leaves an emptied DATABASE_URL on disk for the next
+          # manual compose-up to silently boot onto VM-local Postgres.
+          DATABASE_URL_PRESENT: ${{ secrets.DATABASE_URL != '' }}
+        with:
+          host: ${{ secrets.VM_HOST }}
+          username: ${{ secrets.VM_USER }}
+          key: ${{ secrets.VM_SSH_KEY }}
+          # Must exceed flock's 600s wait plus deploy minutes: appleboy's
+          # default 10m would kill a lock contender before its loud failure.
+          command_timeout: 30m
+          envs: BACKEND_IMAGE_TAG,DEPLOY_ENVIRONMENT,DATABASE_URL_PRESENT
         with:
           host: ${{ secrets.VM_HOST }}
           username: ${{ secrets.VM_USER }}
@@ -318,6 +342,15 @@ jobs:
             # dropped, never interleaved).
             exec 9>/opt/timeoflife/.deploy.lock
             flock -w 600 9 || { echo "another deploy holds /opt/timeoflife/.deploy.lock — refusing to interleave; re-dispatch after it finishes"; exit 1; }
+
+            # Prod pre-rewrite guard (first layer): backend-prod must never
+            # run on the VM-local fallback DB. Checked here — before the
+            # heredoc rewrite — so a refused deploy leaves the on-disk .env
+            # untouched for the next manual recovery. (The post-source
+            # check below remains as the second layer.)
+            if [ "${DEPLOY_ENVIRONMENT:-}" = "backend-prod" ] && [ "${DATABASE_URL_PRESENT:-}" != "true" ]; then
+              echo "DATABASE_URL is empty in backend-prod — populate the backend-prod environment secrets (see docs/ci.md) instead of deploying prod onto VM-local Postgres"; exit 1
+            fi
 
             # Back up the current .env before regenerating (recoverable, not authoritative).
             [ -f .env ] && cp .env ".env.bak.$(date +%Y%m%d-%H%M%S)" || true
@@ -408,12 +441,16 @@ jobs:
             # Rollback input guard FIRST of the write path (fail-closed layer
             # 2 — layer 1 is the GH-side validate step): the value is checked
             # BEFORE it is written into .env, because the file is sourced
-            # below and sourcing is the injection point. grep, not shell
+            # below and sourcing is the injection point. grep ERE with ^…$
+            # matches when ANY line matches, so an embedded newline would
+            # pass the charset check and land verbatim in the sourced file —
+            # reject newlines explicitly first (GH-side already does; this
+            # keeps layer 2 independently fail-closed). grep, not shell
             # brackets: adjacent `[..][..]` classes misbehave on some shells
             # (observed: `a;b` passing), while grep ERE is stable.
             # Empty = normal :latest deploy.
-            if [ -n "${BACKEND_IMAGE_TAG:-}" ] && ! printf '%s' "$BACKEND_IMAGE_TAG" | grep -Eq '^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$'; then
-              echo "BACKEND_IMAGE_TAG '$BACKEND_IMAGE_TAG' is not a valid Docker tag suffix (allowed: A-Za-z0-9_.-, max 128 chars, no leading ./-)"; exit 1
+            if [ -n "${BACKEND_IMAGE_TAG:-}" ] && { [ "$(printf '%s' "$BACKEND_IMAGE_TAG" | wc -l)" -ne 0 ] || ! printf '%s' "$BACKEND_IMAGE_TAG" | grep -Eq '^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$'; }; then
+              echo "BACKEND_IMAGE_TAG '$BACKEND_IMAGE_TAG' is not a valid Docker tag suffix (allowed: A-Za-z0-9_.-, max 128 chars, no leading ./-, no newline)"; exit 1
             fi
             # Rollback tag lands here — after the terminator, never inside the
             # quoted heredoc above (literal text there would execute while the

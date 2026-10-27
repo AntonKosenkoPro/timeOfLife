@@ -72,8 +72,10 @@ type Dependencies struct {
 
 // UnknownBuildIdentity is the build-identity sentinel reported when no
 // stamped value exists (local go run, missing Docker build args, tests
-// constructing Dependencies literally). Single definition so Dockerfile
-// defaults, ldflags fallbacks, and the OpenAPI wording cannot diverge.
+// constructing Dependencies literally). Single Go-side definition for the
+// serve-time fallback and main.go defaults; the Dockerfile ARG defaults
+// and the OpenAPI wording are separate artifacts that cannot reference
+// this const — keep them in sync by hand when the sentinel changes.
 const UnknownBuildIdentity = "?"
 
 // defaultAccessTokenTTL and defaultRefreshTokenTTL mirror the config defaults

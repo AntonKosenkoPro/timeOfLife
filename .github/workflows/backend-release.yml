@@ -103,14 +103,18 @@ jobs:
           # Pinned means pinned: if this tag's image already exists, someone
           # re-pushed (delete + re-create) or force-moved the tag — either
           # way a rollback referencing it could later resolve to different
-          # bytes. Refuse; cut a new version instead. A transient registry
-          # failure must NOT read as "absent" (that would fail open into an
-          # overwrite), so anything but a clear not-found aborts too.
-          _suffix="$(printf '%s' "$TAG_NAME" | tr '/' '-')"
-          if _manifest_out="$(docker manifest inspect "ghcr.io/${GITHUB_REPOSITORY,,}/backend:${_suffix}" 2>&1)"; then
-            echo "::error::image tag 'backend:${_suffix}' is already published — refusing to overwrite an immutable release. Cut a new version."
+          # bytes. Refuse; cut a new version instead. Reuses the validated
+          # TAG_SUFFIX above so the probe can never diverge from the
+          # charset/length checks. A transient registry failure must NOT
+          # read as "absent" (that would fail open into an overwrite), so
+          # anything but a clear not-found aborts too — narrowed to the
+          # registry's real not-found signatures (MANIFEST_UNKNOWN and the
+          # classic "no such manifest"); anything looser (bare "not found",
+          # "no such host") fails closed as a transient.
+          if _manifest_out="$(docker manifest inspect "ghcr.io/${GITHUB_REPOSITORY,,}/backend:${TAG_SUFFIX}" 2>&1)"; then
+            echo "::error::image tag 'backend:${TAG_SUFFIX}' is already published — refusing to overwrite an immutable release. Cut a new version."
             exit 1
-          elif ! printf '%s' "$_manifest_out" | grep -qiE "manifest unknown|not found|no such"; then
+          elif ! printf '%s' "$_manifest_out" | grep -qiE "manifest unknown|no such manifest"; then
             echo "::error::could not verify tag absence (transient registry error?): ${_manifest_out}"
             exit 1
           fi

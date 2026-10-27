@@ -70,10 +70,27 @@ jobs:
     runs-on: macos-15
     timeout-minutes: 30
     steps:
+      # Full history + tags: the stamp harness asserts history-aware banding
+      # (ancestor re-upload case needs HEAD~1) and enumerates tags per
+      # marketing line — a shallow checkout would SKIP the former and run
+      # the latter empty, both silently.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-      - name: Install xcodegen + swiftlint
-        run: brew install xcodegen swiftlint
+      - name: Install pinned xcodegen + swiftlint
+        # The harness invokes ci_post_clone.sh, which fail-closed asserts
+        # XCODEGEN_PIN — an unpinned brew install would break every iOS PR
+        # the day Homebrew moves on. Pin is read from the script itself
+        # (single source of truth); swiftlint stays on brew (its own
+        # --strict gate is version-tolerant).
+        run: |
+          brew install swiftlint
+          XCODEGEN_PIN="$(grep -m1 '^XCODEGEN_PIN=' ios/TimeOfLife/ci_scripts/ci_post_clone.sh | cut -d'"' -f2)"
+          curl -sSL "https://github.com/yonaskolb/XcodeGen/releases/download/${XCODEGEN_PIN}/xcodegen.zip" -o "${RUNNER_TEMP}/xcodegen.zip"
+          unzip -o -q "${RUNNER_TEMP}/xcodegen.zip" -d "${RUNNER_TEMP}/xcodegen"
+          sudo install -m 755 "${RUNNER_TEMP}/xcodegen/xcodegen" /usr/local/bin/xcodegen
+          xcodegen --version
 
       - name: Generate Xcode project
         working-directory: ios/TimeOfLife
