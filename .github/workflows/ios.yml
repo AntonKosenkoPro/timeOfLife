@@ -73,9 +73,17 @@ jobs:
           EVENT: ${{ github.event_name }}
           BASE: ${{ github.event.pull_request.base.sha }}
         run: |
+          # Same-repo branches assumed (opsx/* flow). Any detection failure
+          # resolves to true (lane runs — minutes, never a silent skip).
+          # NOTE: no pipefail-negation here — a failing git diff must not
+          # read as "no match" (fail-open). The diff exit is checked
+          # separately; core.quotePath=false keeps non-ASCII paths matchable.
           if [ "$EVENT" != "pull_request" ]; then
             echo "ios=true" >> "$GITHUB_OUTPUT"  # push path-filters already matched
-          elif git fetch origin "$BASE" --depth=1 2>/dev/null && ! git diff --name-only "$BASE...HEAD" | grep -Eq '^(ios/|\.github/workflows/ios\.yml)'; then
+          elif ! git fetch origin "$BASE" 2>/dev/null; then
+            echo "ios=true" >> "$GITHUB_OUTPUT"  # fail-closed: base unavailable
+          elif files="$(git -c core.quotePath=false diff --name-only "$BASE...HEAD")" \
+            && ! printf '%s\n' "$files" | grep -Eq '^(ios/|\.github/workflows/ios\.yml)'; then
             echo "ios=false" >> "$GITHUB_OUTPUT"
           else
             echo "ios=true" >> "$GITHUB_OUTPUT"
@@ -134,14 +142,18 @@ jobs:
             test | xcpretty
 
   # Required check (ruleset): always reports, even when the lane is skipped
-  # on non-ios PRs. Passes on success OR skip; fails on failure/cancel.
+  # on non-ios PRs. Passes only if detection succeeded AND the lane is
+  # success-or-skip; a changes failure fails the gate (never green-unverified).
   ios-gate:
     if: always()
-    needs: [lint-build-test]
+    needs: [changes, lint-build-test]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - run: |
+          if [ "${{ needs.changes.result }}" != "success" ]; then
+            echo "::error::changes ${{ needs.changes.result }}"; exit 1
+          fi
           case "${{ needs.lint-build-test.result }}" in
             success|skipped) echo "lint-build-test ${{ needs.lint-build-test.result }} — gate green";;
             *) echo "::error::lint-build-test ${{ needs.lint-build-test.result }}"; exit 1;;

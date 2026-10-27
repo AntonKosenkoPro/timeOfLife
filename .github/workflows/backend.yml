@@ -28,6 +28,12 @@ permissions:
   contents: read
   packages: write  # needed to push to GHCR
 
+# Rapid PR pushes cancel superseded runs instead of queueing duplicates.
+# Push/dispatch runs (deploy) are never cancelled mid-flight.
+concurrency:
+  group: backend-${{ github.ref }}-${{ github.event_name }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   # In-workflow path detection (the required backend-gate must always run,
   # so the workflow itself cannot be path-filtered). Same-repo branches
@@ -36,6 +42,8 @@ jobs:
   changes:
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    permissions:
+      contents: read
     outputs:
       backend: ${{ steps.filter.outputs.backend }}
     steps:
@@ -48,9 +56,17 @@ jobs:
           EVENT: ${{ github.event_name }}
           BASE: ${{ github.event.pull_request.base.sha }}
         run: |
+          # Same-repo branches assumed (opsx/* flow). Any detection failure
+          # resolves to true (lane runs — minutes, never a silent skip).
+          # NOTE: no pipefail-negation here — a failing git diff must not
+          # read as "no match" (fail-open). The diff exit is checked
+          # separately; core.quotePath=false keeps non-ASCII paths matchable.
           if [ "$EVENT" != "pull_request" ]; then
             echo "backend=true" >> "$GITHUB_OUTPUT"  # push path-filters already matched
-          elif git fetch origin "$BASE" --depth=1 2>/dev/null && ! git diff --name-only "$BASE...HEAD" | grep -Eq '^(backend/|\.github/workflows/backend\.yml)'; then
+          elif ! git fetch origin "$BASE" 2>/dev/null; then
+            echo "backend=true" >> "$GITHUB_OUTPUT"  # fail-closed: base unavailable
+          elif files="$(git -c core.quotePath=false diff --name-only "$BASE...HEAD")" \
+            && ! printf '%s\n' "$files" | grep -Eq '^(backend/|\.github/workflows/backend\.yml)'; then
             echo "backend=false" >> "$GITHUB_OUTPUT"
           else
             echo "backend=true" >> "$GITHUB_OUTPUT"
@@ -116,14 +132,20 @@ jobs:
           fi
 
   # Required check (ruleset): always reports, even when the lane is skipped
-  # on non-backend PRs. Passes on success OR skip; fails on failure/cancel.
+  # on non-backend PRs. Passes only if detection succeeded AND the lane is
+  # success-or-skip; a changes failure fails the gate (never green-unverified).
   backend-gate:
     if: always()
-    needs: [lint-and-test]
+    needs: [changes, lint-and-test]
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    permissions:
+      contents: read
     steps:
       - run: |
+          if [ "${{ needs.changes.result }}" != "success" ]; then
+            echo "::error::changes ${{ needs.changes.result }}"; exit 1
+          fi
           case "${{ needs.lint-and-test.result }}" in
             success|skipped) echo "lint-and-test ${{ needs.lint-and-test.result }} — gate green";;
             *) echo "::error::lint-and-test ${{ needs.lint-and-test.result }}"; exit 1;;
