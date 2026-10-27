@@ -63,7 +63,10 @@ jobs:
             echo "::error::tag '$TAG_NAME' is not backend/vM.m.p with numeric semver (e.g. backend/v2.5.0). Never move a pushed tag — cut a new one with a fixed name. Publishing nothing."
             exit 1
           fi
-          # Translated image tag must satisfy Docker's tag grammar.
+          # Translated image tag must satisfy Docker's tag grammar. Negated
+          # single-bracket form on purpose: adjacent positive `[..][..]`
+          # classes misbehave on some shells (observed: `a;b` passing) —
+          # never "simplify" this to a positive match.
           TAG_SUFFIX="$(printf '%s' "$TAG_NAME" | tr '/' '-')"
           case "$TAG_SUFFIX" in
             ''|*[!A-Za-z0-9_.-]*)
@@ -79,12 +82,19 @@ jobs:
           # reachable from main instead of trusting the pusher. fetch-depth: 0
           # already provides a current origin/main; compare against it
           # directly (a masked `git fetch` + stale FETCH_HEAD would pass
-          # trivially and publish an unreviewed tree).
-          if ! git merge-base --is-ancestor "$TAG_SHA" origin/main; then
-            echo "::error::tag '$TAG_NAME' ($TAG_SHA) does not point at a commit on main — refusing to publish an unreviewed tree. Publishing nothing."
+          # trivially and publish an unreviewed tree). Dereference first:
+          # for annotated tags (all releases are signed) github.sha is the
+          # tag object, and merge-base on it errors — dereference to the
+          # commit so signed releases don't all fail this guard.
+          if ! COMMIT="$(git rev-parse --verify "${TAG_SHA}^{commit}" 2>/dev/null)"; then
+            echo "::error::tag '$TAG_NAME' ($TAG_SHA) does not resolve to a commit — refusing to publish. Publishing nothing."
             exit 1
           fi
-          echo "Tag '$TAG_NAME' valid ($TAG_SHA on main)."
+          if ! git merge-base --is-ancestor "$COMMIT" origin/main; then
+            echo "::error::tag '$TAG_NAME' ($COMMIT) does not point at a commit on main — refusing to publish an unreviewed tree. Publishing nothing."
+            exit 1
+          fi
+          echo "Tag '$TAG_NAME' valid ($COMMIT on main)."
 
       - name: Set image tags and version
         id: image

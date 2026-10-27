@@ -114,14 +114,7 @@ else
         exit 1
         ;;
     esac
-    TAG="$(printf '%s\n' "$IOS_TAGS" | grep -E "^${WANT_NS}/" || true)"
-    M="$(printf '%s\n' "$TAG" | grep -c . || true)"
-    if [ "$M" != "1" ]; then
-      echo "error: workflow '$CI_WORKFLOW' expects exactly one $WANT_NS tag at HEAD; found:"
-      printf '%s\n' "$TAG"
-      echo "Archiving nothing."
-      exit 1
-    fi
+    NS_TAGS="$(printf '%s\n' "$IOS_TAGS" | grep -E "^${WANT_NS}/" || true)"
     # A promotion pair must share one marketing version: internal/v0.2.7 +
     # release/v0.3.0 at one commit is a typo (or a half-tagged fix), and
     # stamping the workflow's pick would silently ship the wrong marketing
@@ -129,7 +122,46 @@ else
     # printed here, never silently dropped.
     PAIR_VERSIONS="$(printf '%s\n' "$IOS_TAGS" | sed -E 's|^[^/]*/v||' | cut -d. -f1-3 | sort -u | tr '\n' ' ')"
     if [ "$(printf '%s\n' "$IOS_TAGS" | sed -E 's|^[^/]*/v||' | cut -d. -f1-3 | sort -u | grep -c . || true)" != "1" ]; then
-      echo "error: iOS tags at HEAD span multiple marketing versions [$PAIR_VERSIONS]— a promotion pair must share one vM.m.p. The '$TAG' pick is NOT stamped. Archiving nothing."
+      echo "error: iOS tags at HEAD span multiple marketing versions [$PAIR_VERSIONS]— a promotion pair must share one vM.m.p. Nothing is stamped. Archiving nothing."
+      exit 1
+    fi
+    # Re-uploads share the commit (the original tag never moves), so one
+    # namespace routinely holds several tags here (internal/v0.2.7,
+    # internal/v0.2.7.2, ...). Stamp the highest re-upload sequence —
+    # deterministically the newest intent; equal sequences are ambiguous.
+    TAG=""
+    BEST_N=-1
+    for CANDIDATE_TAG in $NS_TAGS; do
+      CANDIDATE_N="$(printf '%s' "${CANDIDATE_TAG#*/}" | cut -d. -f4)"
+      if [ -z "$CANDIDATE_N" ]; then
+        CANDIDATE_N=1
+      fi
+      CANDIDATE_N="$(printf '%s' "$CANDIDATE_N" | sed 's/^0*//')"
+      if [ -z "$CANDIDATE_N" ]; then
+        CANDIDATE_N=0
+      fi
+      case "$CANDIDATE_N" in
+        *[!0-9]*) echo "error: tag '$CANDIDATE_TAG' carries a non-numeric sequence — refusing to order it. Archiving nothing."; exit 1 ;;
+      esac
+      # Length guard (same class as SEQ/BUILD_RUN below): an over-long value
+      # makes the integer comparisons error out and skip silently. Five
+      # digits always suffice (MAX_SEQ is 10736).
+      if [ "${#CANDIDATE_N}" -gt 5 ]; then
+        echo "error: tag '$CANDIDATE_TAG' carries re-upload sequence $CANDIDATE_N — out of range. Archiving nothing."
+        exit 1
+      fi
+      if [ "$CANDIDATE_N" -gt "$BEST_N" ]; then
+        BEST_N="$CANDIDATE_N"
+        TAG="$CANDIDATE_TAG"
+      elif [ "$CANDIDATE_N" -eq "$BEST_N" ]; then
+        echo "error: duplicate re-upload sequence $CANDIDATE_N among $WANT_NS tags at HEAD — ambiguous which to stamp. Archiving nothing."
+        exit 1
+      fi
+    done
+    if [ -z "$TAG" ]; then
+      echo "error: workflow '$CI_WORKFLOW' found no $WANT_NS tag at HEAD; found:"
+      printf '%s\n' "$IOS_TAGS"
+      echo "Archiving nothing."
       exit 1
     fi
   else
@@ -140,6 +172,26 @@ fi
 if [ -z "$TAG" ]; then
   echo "No release tag at HEAD — leaving project.yml versions untouched."
   exit 0
+fi
+
+# The single-tag path still verifies the trigger: a lone tag from the other
+# namespace (e.g. only release/v0.3.0 while "iOS Internal Release" runs)
+# would otherwise stamp the wrong channel silently.
+if [ -n "${CI_WORKFLOW:-}" ]; then
+  case "$CI_WORKFLOW" in
+    "iOS Internal Release") EXPECT_NS="internal" ;;
+    "iOS Public Release") EXPECT_NS="release" ;;
+    *) EXPECT_NS="" ;;
+  esac
+  if [ -n "$EXPECT_NS" ]; then
+    case "$TAG" in
+      "${EXPECT_NS}/"*) ;;
+      *)
+        echo "error: tag '$TAG' is not in the $EXPECT_NS namespace, but workflow '$CI_WORKFLOW' triggered this build — refusing to stamp the wrong channel. Archiving nothing."
+        exit 1
+        ;;
+    esac
+  fi
 fi
 
 case "$TAG" in
@@ -186,15 +238,19 @@ case "$BUILD_RUN" in
     exit 1
     ;;
 esac
+# Length guard before any arithmetic: an over-long value makes `[ -ge ]`
+# exit status 2 (treated as false inside `if`, skipping the check) and
+# `$(( ))` wrap — failing open with a bogus build number. Five digits
+# always suffice (STRIDE is six).
+if [ "${#BUILD_RUN}" -gt 5 ] || [ "$BUILD_RUN" -ge "$STRIDE" ]; then
+  echo "error: \$CI_BUILD_NUMBER=$BUILD_RUN is not a usable run number (must be 1..99999) — refusing to stamp it. Archiving nothing."
+  exit 1
+fi
 # Strip leading zeros ($(( )) would read them as octal), then reject 0:
 # a CFBundleVersion of 0 is not uploadable.
 BUILD_RUN="$(printf '%s' "$BUILD_RUN" | sed 's/^0*//')"
 if [ -z "$BUILD_RUN" ]; then
   echo "error: tag '$TAG' resolved to build number 0, which App Store Connect rejects — refusing to stamp it. Archiving nothing."
-  exit 1
-fi
-if [ "$BUILD_RUN" -ge "$STRIDE" ]; then
-  echo "error: \$CI_BUILD_NUMBER=$BUILD_RUN reaches stride $STRIDE — the banded scheme below can no longer order it. Bump STRIDE. Archiving nothing."
   exit 1
 fi
 # Channel-banded build number: internal and public are separate Cloud

@@ -57,28 +57,30 @@ The owner's signed tag push is the single release act — no bot writes to `main
 
 | Tag | Who cuts | What triggers | Where it ships |
 |---|---|---|---|
-| `internal/vM.m.p[.n]` | owner only (you-only ruleset) | Cloud workflow A: Test → Archive | TestFlight Internal (dogfood) |
-| `release/vM.m.p[.n]` | owner only (you-only ruleset) | Cloud workflow B: Test → Archive | TestFlight External / App Store |
-| `backend/vM.m.p` | owner only (you-only ruleset) | `backend-release.yml` tag build + push (no `paths:` filter — tag-only pushes carry no commits to match) | GHCR pinned image `backend-<tag>` (`:latest` keeps floating); `/health` reports the tag + short SHA |
+| `internal/vM.m.p[.n]` | owner only (you-only ruleset) | Cloud "iOS Internal Release": Archive | TestFlight Internal (dogfood) |
+| `release/vM.m.p[.n]` | owner only (you-only ruleset) | Cloud "iOS Public Release": Archive | TestFlight External / App Store |
+| `backend/vM.m.p` | owner only (you-only ruleset) | `backend-release.yml` tag build + push (no `paths:` filter — tag-only pushes carry no commits to match) | GHCR pinned image `backend-<tag>` (pinned only; `:latest` advances on main pushes alone); `/health` reports the tag + short SHA |
 
-The optional fourth-dot sequence (`.n`) re-uploads under the same marketing version without moving a tag. `project.yml` keeps a checked-in dev dummy (e.g. `0.0.0-dev`) so local/simulator builds compile; it never ships — the Cloud stamp parses the tag into `MARKETING_VERSION` / build (Cloud per-workflow run number, monotonic per marketing line) / `CHANNEL`, stamps every target in lockstep after `xcodegen generate`, and fails the archive on skew. Profile shows the channel: internal builds render `v0.2.8 (abc1234) • Internal`, public builds keep `v0.3.0 (e4f5a6b)`, local builds read the dummy.
+The optional fourth-dot sequence (`.n`) re-uploads under the same marketing version without moving a tag. `project.yml` keeps a checked-in dev dummy (e.g. `0.0.0-dev`) so local/simulator builds compile; it never ships — the Cloud stamp parses the tag into `MARKETING_VERSION` / build (channel-banded `(N*2+chanbit)*STRIDE+RUN`: internal and public are separate Cloud workflows with independent run counters, so the public half-band always orders above internal for one marketing line as long as tags are cut dogfood-first) / `CHANNEL`, stamps every target in lockstep after `xcodegen generate`, and fails the archive on skew. Profile shows the channel: internal builds render `v0.2.8 (abc1234) • Internal`, public builds keep `v0.3.0 (e4f5a6b)`, local builds read the dummy.
 
 You-only tag rulesets guard the three namespaces with the owner as the sole bypass actor, so even a compromised workflow cannot cut a release. Branch protection on `main` is untouched.
 
 Runbook:
 
-- **Typo → no build (fail-closed, by design).** A mistyped tag matches no workflow and builds nothing. If nothing builds: check the tag spelling against the grammar table above, then check the Cloud build list.
+- **Typo → no build (fail-closed, by design).** A mistyped tag matches no workflow and builds nothing. If nothing builds: check the tag spelling against the grammar table above, then check the Cloud build list (iOS) or the Actions runs (backend).
 - **Signing-key loss blocks all releases by design.** Keep the signing key in two places from day one. If it is lost: generate a new key, register it as a signing key, verify with `git tag -v` on a recent release tag, and cut future releases with the new key. Existing tags stay verifiable under the old key (signatures persist) — never move or re-cut an old tag; cut a new tag instead.
-- **Rollback is revert-forward.** iOS: never move a tag — `git revert` the offending commit and cut a new tag through the internal channel first (installed apps can't downgrade; App Store Connect retains every build; halt a phased rollout while verifying). Backend: redeploy the previous pinned image; migrations are expand-contract, so a redeploy is never blocked by schema.
+- **Rollback is revert-forward.** iOS: never move a tag — `git revert` the offending commit and cut a new tag through the internal channel first (installed apps can't downgrade; App Store Connect retains every build; halt a phased rollout while verifying). Backend: dispatch `backend.yml` **from `main`** with `environment: backend-prod` (or `stage`), `image_tag: backend-vX.Y.Z`, **and `skip_checks: true`** — lint/test and the source rebuild are skipped so a rollback never blocks on the red tree it escapes; the VM pulls the pinned image instead. Rollback dispatches run in their own concurrency group, but a concurrent normal deploy on the VM is prevented by procedure (single operator — never dispatch both at once), not by locking. Never hand-edit deploy-managed files on the VM.
 
-GH environments (`testflight-internal` / `testflight-public` / `backend-prod`) with a wait timer are Phase 3 (approval gate + deployment timeline); until then Cloud status is reconciled manually.
+GH environments: `backend-prod` exists (wait timer + main-only branch policy); `testflight-internal` / `testflight-public` with a wait timer are Phase 3 (approval gate + deployment timeline). Until then Cloud status is reconciled manually.
+
+Cloud tag-workflow names are pinned — the stamp script maps `CI_WORKFLOW` to the release channel, and same-commit promotion (`internal/vX` + `release/vX`) depends on these exact names: **"iOS Internal Release"** cuts internal, **"iOS Public Release"** cuts public. Keep them in sync with `ci_post_clone.sh` if they ever change.
 
 ## New-target checklist (extensions, widgets, watch apps)
 
 Adding an Xcode target with its own `info.properties` versions or `Info.plist` (e.g. the `LifioLiveActivities` widget extension, which broke the `0.2.1` release with a duplicate-key guard failure) MUST update the pipelines in the same PR:
 
 1. **Stamp script + `project.yml` lockstep** — keep the target's `CFBundleShortVersionString`/`CFBundleVersion` in `project.yml` equal to the app's (App Store rejects skewed bundles) and add the target to the version-stamp list in `ci_post_clone.sh` (the single source of truth — the build-time unanimity assert fails the archive on skew). A target with a *generated* plist (`GENERATE_INFOPLIST_FILE: YES`, e.g. the `LifioLiveActivityCore` framework) has no plist to stamp — wire `MARKETING_VERSION`/`CURRENT_PROJECT_VERSION` build settings instead (missing keys fail App Store validation with ITMS-90057). Debug (`Info-Debug.plist`, unmanaged) stays pinned — stamping never touches it.
-2. **Scheme coverage on both providers** — confirm the `TimeOfLife` scheme builds/tests cover the new target: the `ios.yml` `lint-build-test` job builds the same scheme (gaps weaken every PR) and the tag-triggered Cloud Archive ships it (gaps weaken releases); the stamp-list wiring in item 1 runs Cloud-side. No per-target dSYM wiring is needed — `ci_post_xcodebuild.sh` uploads the whole Cloud archive's dSYMs, and the `sentry-dsym` job archives the same scheme unsigned.
+2. **Scheme coverage on both providers** — confirm the `TimeOfLife` scheme builds/tests cover the new target: the `ios.yml` `lint-build-test` job builds the same scheme (gaps weaken every PR) and the tag-triggered Cloud Archive ships it (gaps weaken releases); the stamp-list wiring in item 1 runs Cloud-side. No per-target dSYM wiring is needed — `ci_post_xcodebuild.sh` uploads the whole Cloud archive's dSYMs.
 3. **Path filters** — if the target introduces a new top-level directory, extend the `on:` path filters of every affected GitHub workflow AND the Cloud workflow's file filters so PRs touching it still trigger CI.
 
 ## Stages (`backend.yml`)

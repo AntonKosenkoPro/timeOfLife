@@ -91,8 +91,10 @@ jobs:
     needs: [changes]
     # Push (path-filtered) and manual dispatches always run the lane; PRs
     # only when the diff touches it. Skipped (not failed) otherwise —
-    # backend-gate still reports.
-    if: github.event_name != 'pull_request' || needs.changes.outputs.backend == 'true'
+    # backend-gate still reports. skip_checks (re-deploy/rollback only)
+    # bypasses the lane too; the deploy job's guard still requires an
+    # explicit opt-in per run.
+    if: ${{ !inputs.skip_checks && (github.event_name != 'pull_request' || needs.changes.outputs.backend == 'true') }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -180,6 +182,8 @@ jobs:
     # through a different door. Rollback dispatches (image_tag) also run
     # from main; the tag only selects the image.
     if: >
+      always() && !cancelled() &&
+      (needs.lint-and-test.result == 'success' || inputs.skip_checks) &&
       (github.event_name == 'push' ||
       github.event_name == 'workflow_dispatch') &&
       github.ref == 'refs/heads/main'
@@ -188,16 +192,36 @@ jobs:
     timeout-minutes: 30
     # Serializes main-push publishes so two back-to-back merges can never
     # interleave their `:latest` push and the deploy's pull below (which
-    # would otherwise fetch a stale image). Kept separate from
-    # backend-release.yml's own group: that job publishes the immutable
-    # pinned tag only, and sharing one group would let frequent deploys
-    # silently cancel a queued tag publish (single pending run per group).
+    # would otherwise fetch a stale image). Rollback dispatches
+    # (image_tag set) run in their own group: GitHub silently cancels a
+    # queued run when a newer one enters a shared group, and a dropped
+    # emergency rollback must never fail silently. Concurrent deploy +
+    # rollback on the VM is prevented by procedure (single operator —
+    # never dispatch both at once), not by locking.
     concurrency:
-      group: backend-publish
+      group: backend-publish-${{ inputs.image_tag && 'rollback' || 'deploy' }}
       cancel-in-progress: false
     environment: ${{ github.event_name == 'push' && 'backend-prod' || github.event.inputs.environment || 'stage' }}
     steps:
       - uses: actions/checkout@v4
+
+      - name: Validate rollback image tag
+        # Rollback dispatches carry operator-typed input straight toward the
+        # VM: validate the charset on the runner, before anything is written
+        # into `.env` or sourced there. Skipped when empty (normal deploys).
+        # Truthiness, not `!= ''`: on push events the input is null, and
+        # `null != ''` evaluates true.
+        if: inputs.image_tag
+        env:
+          # Never interpolate the input into shell text (ref names may carry
+          # metacharacters): pass through env only.
+          IMAGE_TAG: ${{ inputs.image_tag }}
+        run: |
+          if ! printf '%s' "$IMAGE_TAG" | grep -Eq '^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$'; then
+            echo "::error::image_tag '$IMAGE_TAG' is not a valid Docker tag suffix (allowed: A-Za-z0-9_.-, max 128 chars, no leading ./-). Nothing deployed."
+            exit 1
+          fi
+          echo "Rollback image tag '$IMAGE_TAG' valid."
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -220,6 +244,10 @@ jobs:
           echo "tags=ghcr.io/${REPO_LC}/backend:latest" >> "$GITHUB_OUTPUT"
 
       - name: Build and push Docker image
+        # Rollback dispatches (image_tag set) deploy the pinned image as-is:
+        # rebuilding current main here would block the rollback on a broken
+        # head and re-push a `:latest` the rollback exists to avoid.
+        if: ${{ !inputs.image_tag }}
         uses: docker/build-push-action@v6
         with:
           context: backend
@@ -243,10 +271,16 @@ jobs:
 
       - name: Deploy to VM
         uses: appleboy/ssh-action@v1.2.0
+        env:
+          # Rollback image tag travels via env (never interpolated into the
+          # script text — ref names may carry shell metacharacters). Empty on
+          # normal deploys; validated GH-side before this step runs.
+          BACKEND_IMAGE_TAG: ${{ inputs.image_tag }}
         with:
           host: ${{ secrets.VM_HOST }}
           username: ${{ secrets.VM_USER }}
           key: ${{ secrets.VM_SSH_KEY }}
+          envs: BACKEND_IMAGE_TAG
           script: |
             set -euo pipefail
             cd /opt/timeoflife
@@ -262,13 +296,17 @@ jobs:
             cat > .env <<'ENVEOF'
             DB_PASSWORD=${{ secrets.DB_PASSWORD }}
             JWT_SECRET=${{ secrets.JWT_SECRET }}
-            # Pinned-image rollback (manual-tag-releases): empty (normal
+            # Pinned-image rollback (manual-tag-releases): appended after the
+            # heredoc via printf %s (never interpolated — the value travels
+            # in $BACKEND_IMAGE_TAG through the action's `envs`, since ref
+            # names may carry shell metacharacters and a newline/ENVEOF value
+            # would otherwise break out of the heredoc). Empty (normal
             # deploys) resolves to :latest in compose; a rollback dispatch
             # sets e.g. backend-v2.4.0 and the pull below fetches the pinned
             # image instead. A bad tag fails loudly at `docker compose pull`
             # (set -euo pipefail aborts before `up`), leaving .env written —
             # re-dispatch with an empty/correct tag to recover.
-            BACKEND_IMAGE_TAG=${{ inputs.image_tag }}
+            printf 'BACKEND_IMAGE_TAG=%s\n' "${BACKEND_IMAGE_TAG:-}" >> .env
             EMAIL_BACKEND=${{ vars.EMAIL_BACKEND }}
             AWS_ACCESS_KEY_ID=${{ secrets.AWS_ACCESS_KEY_ID }}
             AWS_SECRET_ACCESS_KEY=${{ secrets.AWS_SECRET_ACCESS_KEY }}
@@ -339,14 +377,14 @@ jobs:
             : "${DB_PASSWORD:?secret DB_PASSWORD is empty}"
             : "${JWT_SECRET:?secret JWT_SECRET is empty}"
             [ "${#JWT_SECRET}" -ge 32 ] || { echo "JWT_SECRET must be at least 32 bytes"; exit 1; }
-            # Rollback input guard: a typo here must fail before `docker
-            # compose pull`, and must never break `.env` sourcing above
-            # (spaces/newlines would). Empty = normal :latest deploy.
-            case "${BACKEND_IMAGE_TAG:-}" in
-              ''|[A-Za-z0-9_][A-Za-z0-9_.-]*)
-                [ "${#BACKEND_IMAGE_TAG}" -le 128 ] || { echo "BACKEND_IMAGE_TAG exceeds Docker's 128-char limit"; exit 1; } ;;
-              *) echo "BACKEND_IMAGE_TAG '$BACKEND_IMAGE_TAG' is not a valid Docker tag suffix"; exit 1 ;;
-            esac
+            # Rollback input guard (second layer — the fail-closed gate is the
+            # GH-side validate step before SSH): a typo here must fail before
+            # `docker compose pull`. Empty = normal :latest deploy. grep, not
+            # shell brackets: adjacent `[..][..]` classes misbehave on some
+            # shells (observed: `a;b` passing), while grep ERE is stable.
+            if [ -n "${BACKEND_IMAGE_TAG:-}" ] && ! printf '%s' "$BACKEND_IMAGE_TAG" | grep -Eq '^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$'; then
+              echo "BACKEND_IMAGE_TAG '$BACKEND_IMAGE_TAG' is not a valid Docker tag suffix (allowed: A-Za-z0-9_.-, max 128 chars, no leading ./-)"; exit 1
+            fi
             # Format check mirrors ParseRecoveryKeys + isZeroKey (config.go):
             # comma-separated, edge-trimmed, empties ignored, every entry 64
             # hex chars (32 bytes) and non-zero. A malformed or placeholder

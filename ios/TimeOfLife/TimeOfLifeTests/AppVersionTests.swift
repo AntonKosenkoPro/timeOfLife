@@ -77,4 +77,19 @@ struct AppVersionTests {
         #expect(!AppVersion.text.contains("•"))
         #endif
     }
+
+    @Test("internal badge follows the bundle RELEASE_CHANNEL key when present")
+    func channelBadgeFollowsBundleKey() {
+        // Deliberately not a literal key-presence assert: Bundle.main is the
+        // test host app under Xcode but isn't guaranteed to carry built-plist
+        // keys in every harness (see runtimeSHA's conditional pattern). What
+        // this guards is the wiring — text() must agree with the key.
+        let channel = Bundle.main.object(forInfoDictionaryKey: "RELEASE_CHANNEL") as? String
+        let badge = "• \(L10n.profileVersionInternalSuffix.text)"
+        if channel == "internal" {
+            #expect(AppVersion.text.contains(badge))
+        } else {
+            #expect(!AppVersion.text.contains(badge))
+        }
+    }
 }
