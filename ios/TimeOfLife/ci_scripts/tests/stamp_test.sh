@@ -5,7 +5,8 @@
 # Runs in CI (ios.yml lint-build-test, after SwiftLint) and locally:
 # exercises ci_post_clone.sh against a scratch copy of project.yml +
 # generated plists via TAG_OVERRIDE (and real local tags for the points-at
-# paths — created and deleted here, never pushed). Restores everything on
+# paths — created and deleted here, never pushed; signed with a throwaway
+# key via STAMP_SIGNING_KEY since the script verifies signatures). Restores everything on
 # exit, so later CI steps see a clean tree.
 # Requires: xcodegen on PATH (matches XCODEGEN_PIN), git repo, bash or sh.
 #
@@ -20,6 +21,11 @@ REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || true)"
 BACKUP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/stamp-test.XXXXXX")"
 PASS=0
 FAIL=0
+# The signing setup below exports GNUPGHOME; save the caller's so restore()
+# puts it back (the harness is its own process, but sourced runs and later
+# gpg use inside it must not see the deleted throwaway home).
+HARNESS_GNUPGHOME_WAS_SET="${GNUPGHOME+x}"
+HARNESS_GNUPGHOME_SAVED="${GNUPGHOME:-}"
 
 tracked="project.yml TimeOfLife/Configuration/Info.plist LifioLiveActivities/Info.plist"
 for f in $tracked; do
@@ -56,6 +62,11 @@ restore() {
     add) git remote remove origin 2>/dev/null || true ;;
     set-url) git remote set-url origin "$ORIGIN_URL" 2>/dev/null || true ;;
   esac
+  if [ "$HARNESS_GNUPGHOME_WAS_SET" = "x" ]; then
+    GNUPGHOME="$HARNESS_GNUPGHOME_SAVED"; export GNUPGHOME
+  else
+    unset GNUPGHOME
+  fi
   rm -rf "$BACKUP_DIR"
 }
 trap restore EXIT INT TERM
@@ -73,13 +84,75 @@ expect() { # expect <want-exit> <desc> [want-grep] -- cmd...
   echo "ok: $desc"; PASS=$((PASS + 1))
 }
 
+# Throwaway signing key for the real-tag cases: the script under test now
+# verifies tag signatures, so harness-created tags must be signed — with a
+# throwaway key (never the developer's), selected via STAMP_SIGNING_KEY.
+# gpg is brew-installed when missing and its absence is a hard FAIL, never
+# a skip: the signature cases gate releases and must always run.
+HAVE_GPG=0
+HARNESS_KEYID=""
+setup_signing() {
+  if ! command -v gpg >/dev/null 2>&1; then
+    echo "gpg not found — installing via Homebrew..."
+    brew install gnupg || { echo "FAIL: cannot install gnupg — signature cases gate releases and must never skip"; exit 1; }
+  fi
+  if ! command -v gpg >/dev/null 2>&1; then
+    echo "FAIL: gpg unavailable — refusing to skip signature cases (they gate releases)"
+    exit 1
+  fi
+  export GNUPGHOME="$BACKUP_DIR/gnupg"
+  mkdir -p -m 700 "$GNUPGHOME"
+  chmod 700 "$GNUPGHOME"
+  gpg --batch --gen-key <<'EOF' 2>/dev/null || { echo "FAIL: cannot generate throwaway signing key"; exit 1; }
+%no-protection
+Key-Type: eddsa
+Key-Curve: ed25519
+Name-Email: harness@local.invalid
+Expire-Date: 1d
+%commit
+EOF
+  HARNESS_KEYID="$(gpg --batch --with-colons --list-secret-keys harness@local.invalid 2>/dev/null | awk -F: '/^fpr:/{print $10; exit}')"
+  [ -n "$HARNESS_KEYID" ] || { echo "FAIL: throwaway key has no fingerprint"; exit 1; }
+  STAMP_SIGNING_KEY="$BACKUP_DIR/harness-signing.pub"
+  export STAMP_SIGNING_KEY
+  gpg --batch --armor --export harness@local.invalid > "$STAMP_SIGNING_KEY" 2>/dev/null || { echo "FAIL: cannot export throwaway public key"; exit 1; }
+  HAVE_GPG=1
+}
 mktag() {
   # Never touch a pre-existing tag: devs reuse names like internal/v9.9.1,
   # and silently stamping (then deleting) a real tag would be destructive.
   if git rev-parse -q --verify "refs/tags/$1" >/dev/null 2>&1; then
     echo "FAIL: tag '$1' already exists locally — refusing to overwrite/delete a real tag (delete it yourself if it is scratch)"; exit 1
   fi
-  git tag "$1" HEAD 2>/dev/null || { echo "FAIL: cannot create tag '$1'"; exit 1; }
+  # Signed with the throwaway key (explicit -c: never the developer's key,
+  # regardless of their tag.gpgsign/user.signingkey settings; gpg.format is
+  # forced to OpenPGP so an inherited gpg.format=ssh cannot divert signing).
+  git -c tag.gpgsign=false -c gpg.format=openpgp -c user.signingkey="$HARNESS_KEYID" tag -s -m "harness $1" "$1" HEAD 2>/dev/null || { echo "FAIL: cannot create tag '$1'"; exit 1; }
+  CREATED_TAGS="$CREATED_TAGS $1"
+}
+mktag_unsigned() {
+  if git rev-parse -q --verify "refs/tags/$1" >/dev/null 2>&1; then
+    echo "FAIL: tag '$1' already exists locally — refusing to overwrite it"; exit 1
+  fi
+  # Explicitly unsigned (tag.gpgsign=false defeats a developer-global
+  # tag.gpgsign=true, which would otherwise sign with their real key).
+  git -c tag.gpgsign=false tag -a -m "harness unsigned $1" "$1" HEAD 2>/dev/null || { echo "FAIL: cannot create tag '$1'"; exit 1; }
+  CREATED_TAGS="$CREATED_TAGS $1"
+}
+mktag_lightweight() {
+  if git rev-parse -q --verify "refs/tags/$1" >/dev/null 2>&1; then
+    echo "FAIL: tag '$1' already exists locally — refusing to overwrite it"; exit 1
+  fi
+  # Lightweight (no -a/-s/-m): a bare ref with no tag object and no
+  # signature — must be refused like an unsigned tag.
+  git -c tag.gpgsign=false tag "$1" HEAD 2>/dev/null || { echo "FAIL: cannot create tag '$1'"; exit 1; }
+  CREATED_TAGS="$CREATED_TAGS $1"
+}
+mktag_at() { # mktag_at <tag> <commit>: throwaway-signed at an ancestor commit
+  if git rev-parse -q --verify "refs/tags/$1" >/dev/null 2>&1; then
+    echo "FAIL: tag '$1' already exists locally — refusing to overwrite it"; exit 1
+  fi
+  git -c tag.gpgsign=false -c gpg.format=openpgp -c user.signingkey="$HARNESS_KEYID" tag -s -m "harness $1" "$1" "$2" 2>/dev/null || { echo "FAIL: cannot create tag '$1'"; exit 1; }
   CREATED_TAGS="$CREATED_TAGS $1"
 }
 
@@ -143,6 +216,11 @@ expect 1 "non-numeric run refused" "CI_BUILD_NUMBER is missing or not numeric" \
 # so no network and no writes to the developer's remote refs): same-namespace
 # highest-.n wins; promotion pair picks by workflow.
 setup_test_origin
+# Real-tag sections below need the throwaway signing key (the script under
+# test verifies signatures on the non-override path). setup_signing fails
+# closed where gpg cannot be provided — the signature cases gate releases
+# and must never skip.
+setup_signing
 mktag internal/v9.9.1; mktag internal/v9.9.1.2
 expect 0 "same-namespace pair stamps highest .n" "Version unanimity OK: marketing=9.9.1 build=400005 channel=internal" \
   env -u TAG_OVERRIDE CI_BUILD_NUMBER=5 CI_WORKFLOW="iOS Internal Release" sh "$SCRIPT"
@@ -196,6 +274,36 @@ expect 1 "lone cross-namespace tag aborts" "wrong channel" \
 expect 1 "unrecognized workflow fails closed" "not a pinned release workflow" \
   env -u TAG_OVERRIDE CI_BUILD_NUMBER=5 CI_WORKFLOW="iOS Renamed Workflow" sh "$SCRIPT"
 for t in $CREATED_TAGS; do git tag -d "$t" >/dev/null 2>&1 || true; done; CREATED_TAGS=""
+# 5c. Signature gate: an unsigned tag that is otherwise perfect (right
+# namespace, valid grammar) must be refused before anything is stamped.
+mktag_unsigned internal/v9.9.0
+expect 1 "unsigned tag refused" "no valid release signature" \
+  env -u TAG_OVERRIDE CI_BUILD_NUMBER=5 CI_WORKFLOW="iOS Internal Release" sh "$SCRIPT"
+for t in $CREATED_TAGS; do git tag -d "$t" >/dev/null 2>&1 || true; done; CREATED_TAGS=""
+# 5d. Lightweight tags are bare refs (no tag object, no signature) and must
+# be refused like unsigned ones.
+mktag_lightweight internal/v9.9.0
+expect 1 "lightweight tag refused" "no valid release signature" \
+  env -u TAG_OVERRIDE CI_BUILD_NUMBER=5 CI_WORKFLOW="iOS Internal Release" sh "$SCRIPT"
+for t in $CREATED_TAGS; do git tag -d "$t" >/dev/null 2>&1 || true; done; CREATED_TAGS=""
+# 5e. Wrong-key tags must be refused: the scratch tag is signed by the
+# throwaway key but verified against the repo release key (STAMP_SIGNING_KEY
+# unset selects the default anchor).
+mktag internal/v9.9.0
+expect 1 "wrong-key tag refused" "no valid release signature" \
+  env -u TAG_OVERRIDE -u STAMP_SIGNING_KEY CI_BUILD_NUMBER=5 CI_WORKFLOW="iOS Internal Release" sh "$SCRIPT"
+for t in $CREATED_TAGS; do git tag -d "$t" >/dev/null 2>&1 || true; done; CREATED_TAGS=""
+# 5f. Tag-to-HEAD binding: a validly signed tag that is NOT at HEAD must not
+# stamp — the build keeps the dev dummy. Needs a parent commit; skipped
+# loudly (not silently) where history is too shallow for one.
+if PARENT_BIND="$(git rev-parse --verify HEAD~1 2>/dev/null)"; then
+  mktag_at internal/v9.9.0 "$PARENT_BIND"
+  expect 0 "signed tag off HEAD does not stamp" "leaving project.yml versions untouched" \
+    env -u TAG_OVERRIDE CI_BUILD_NUMBER=5 CI_WORKFLOW="iOS Internal Release" sh "$SCRIPT"
+  for t in $CREATED_TAGS; do git tag -d "$t" >/dev/null 2>&1 || true; done; CREATED_TAGS=""
+else
+  echo "SKIP: tag-to-HEAD binding case needs a parent commit (shallow checkout?)"
+fi
 
 # 6. Ordering across a realistic sequence (dogfood → public → re-upload).
 # Each run is asserted like the cases above (exit + unanimity line): a
@@ -234,11 +342,6 @@ fi
 # Store Connect rejects the public upload. Needs a parent commit; skipped
 # loudly (not silently) where history is too shallow for one.
 if PARENT="$(git rev-parse --verify HEAD~1 2>/dev/null)"; then
-  mktag_at() {
-    if git rev-parse -q --verify "refs/tags/$1" >/dev/null 2>&1; then
-      echo "FAIL: tag '$1' already exists locally — refusing to overwrite it"; exit 1
-    fi
-    git tag "$1" "$2" 2>/dev/null || { echo "FAIL: cannot create tag '$1'"; exit 1; }; CREATED_TAGS="$CREATED_TAGS $1"; }
   mktag_at internal/v9.9.6.1 "$PARENT"
   mktag internal/v9.9.6; mktag release/v9.9.6
   expect 0 "promotion after ancestor re-upload bands above it" "build=300007" \
