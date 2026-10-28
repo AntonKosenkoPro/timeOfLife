@@ -4,7 +4,10 @@ name: ai-review
 # Manual trigger: comment "/review" on a PR. Advisory only — never blocks merge.
 # Optional per-run params: /review [effort=low|medium|high] [budget=<n>[k|m]]
 # [model=<ollama-cloud-id>] [think=max|medium|off] [full=true|false] (trusted roles only).
-# Every run publishes a job summary (params, range, finding counts) for the Checks tab.
+# Every run attaches a first-class `ai-review` entry to the PR Checks tab via
+# the Checks API (issue_comment runs anchor to main HEAD, so without this bridge
+# the review is invisible where reviewers look), plus a job summary (params,
+# range, finding counts) on the run page.
 on:
   issue_comment:
     types: [created]
@@ -24,6 +27,10 @@ jobs:
     permissions:
       contents: read
       pull-requests: write
+      # Attach the review to the PR head as a first-class Checks entry
+      # (issue_comment runs otherwise anchor to main HEAD and stay invisible
+      # on the PR). Least privilege: only this bridge needs it.
+      checks: write
     steps:
       # issue_comment carries no PR refs — resolve head/base from the PR itself.
       - name: Resolve PR refs
@@ -38,6 +45,46 @@ jobs:
             });
             core.setOutput('base_ref', pr.base.ref);
             core.setOutput('head_sha', pr.head.sha);
+
+      - name: Create AI review check run
+        id: check
+        # issue_comment runs anchor their automatic check runs to the
+        # default-branch HEAD, so the PR Checks tab never shows this review.
+        # Bridge that gap explicitly: a first-class `ai-review` entry on the
+        # PR head, kept in_progress while the model works and finalized below.
+        # Advisory only — it concludes success even with findings (never gates
+        # merge); superseded runs (concurrency cancel) finalize as cancelled.
+        # Fail-open: a create failure warns and lets the review run anyway
+        # (the job summary + comments remain the fallback surface).
+        uses: actions/github-script@v7
+        env:
+          HEAD_SHA: ${{ steps.refs.outputs.head_sha }}
+        with:
+          script: |
+            // Fail-open: any failure here only warns — the review steps run
+            // regardless and the job summary + comments remain the fallback.
+            try {
+              const headSha = process.env.HEAD_SHA;
+              if (!/^[0-9a-f]{40}$/i.test(headSha || '')) {
+                core.warning(`Not creating an ai-review check run for unexpected head_sha '${headSha}'.`);
+                return;
+              }
+              const detailsUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+              const { data: run } = await github.rest.checks.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                name: 'ai-review',
+                head_sha: headSha,
+                status: 'in_progress',
+                started_at: new Date().toISOString(),
+                details_url: detailsUrl,
+                external_id: `${context.runId}/${context.runAttempt}`
+              });
+              core.setOutput('check_run_id', String(run.id));
+              core.info(`ai-review check run ${run.id} opened on ${headSha}`);
+            } catch (err) {
+              core.warning(`Could not create ai-review check run (review continues without it): ${err?.stack ?? err}`);
+            }
 
       - name: Parse /review params
         id: params
@@ -175,15 +222,17 @@ jobs:
           head_sha: ${{ steps.refs.outputs.head_sha }}
 
       - name: Publish review summary
-        # Always report, even when the review failed: the Checks tab shows
+        # Always report, even when the review failed: the run page shows
         # params + outcome without opening comments or logs. Never changes
-        # the job conclusion (advisory stays advisory).
+        # the job conclusion (advisory stays advisory). The next step mirrors
+        # this markdown onto the PR Checks tab entry created above.
         # Third-party action outputs reach the shell only via env: (script-
         # injection policy — GH expressions expand before the shell parses).
         # The PARAMS_* values are allowlist-validated by the parse step.
         if: always()
         env:
           PARAMS_OUTCOME: ${{ steps.params.outcome }}
+          REVIEW_OUTCOME: ${{ steps.review.outcome }}
           SUMMARY_RANGE: ${{ steps.review.outputs.range_summary || 'n/a' }}
           SUMMARY_TOTAL: ${{ steps.review.outputs.comments_total || '0' }}
           SUMMARY_INLINE: ${{ steps.review.outputs.comments_inline || '0' }}
@@ -200,8 +249,76 @@ jobs:
             else
               echo "- Params: effort=\`$EFFORT\` budget=\`$MAX_TOKENS_BUDGET\` model=\`$REVIEW_MODEL\` think=\`$THINK\` full=\`$FULL_REVIEW\`"
             fi
+            echo "- Review step: \`$REVIEW_OUTCOME\` (only \`success\` means the counts below are a clean review)"
             echo "- Range: \`$SUMMARY_RANGE\`"
             echo "- Findings: \`$SUMMARY_TOTAL\` total, \`$SUMMARY_INLINE\` inline, \`$SUMMARY_FAILED\` failed, \`$SUMMARY_ROUTED\` routed"
             echo "- Summary: $SUMMARY_URL"
             echo "- Checkpoint: \`$SUMMARY_CHECKPOINT\`"
           } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Finalize AI review check run
+        # Always finalize our own check run (created above), even when the
+        # review failed or this run was superseded: the PR Checks tab shows
+        # params + outcome without opening comments or logs. Never changes
+        # the job conclusion (advisory stays advisory).
+        # Third-party action outputs reach the script only via env: (script-
+        # injection policy — GH expressions expand before the JS parses).
+        # The PARAMS_*/EFFORT values are allowlist-validated by the parse step.
+        if: always()
+        uses: actions/github-script@v7
+        env:
+          CHECK_RUN_ID: ${{ steps.check.outputs.check_run_id }}
+          JOB_CANCELLED: ${{ cancelled() }}
+          PARAMS_OUTCOME: ${{ steps.params.outcome }}
+          REVIEW_OUTCOME: ${{ steps.review.outcome }}
+          SUMMARY_RANGE: ${{ steps.review.outputs.range_summary || 'n/a' }}
+          SUMMARY_TOTAL: ${{ steps.review.outputs.comments_total || '0' }}
+          SUMMARY_INLINE: ${{ steps.review.outputs.comments_inline || '0' }}
+          SUMMARY_FAILED: ${{ steps.review.outputs.comments_failed || '0' }}
+          SUMMARY_ROUTED: ${{ steps.review.outputs.comments_routed || '0' }}
+          SUMMARY_URL: ${{ steps.review.outputs.summary_comment_url || 'n/a' }}
+          SUMMARY_CHECKPOINT: ${{ steps.review.outputs.checkpoint_after || 'n/a' }}
+        with:
+          script: |
+            // Each job only ever finalizes the check run its own create step
+            // returned (passed via step output, never re-queried by name), so
+            // a superseding run can never clobber its predecessor's entry.
+            const id = Number(process.env.CHECK_RUN_ID);
+            if (!id) {
+              core.warning('No ai-review check run to finalize (create step was skipped or failed).');
+              return;
+            }
+            const lines = ['## AI review', ''];
+            if (process.env.PARAMS_OUTCOME !== 'success') {
+              lines.push(`- Params: not captured (parse step outcome: ${process.env.PARAMS_OUTCOME}; see job log for the failing value)`);
+            } else {
+              lines.push(`- Params: effort=\`${process.env.EFFORT}\` budget=\`${process.env.MAX_TOKENS_BUDGET}\` model=\`${process.env.REVIEW_MODEL}\` think=\`${process.env.THINK}\` full=\`${process.env.FULL_REVIEW}\``);
+            }
+            lines.push(`- Review step: \`${process.env.REVIEW_OUTCOME}\` (only \`success\` means the counts below are a clean review)`);
+            lines.push(`- Range: \`${process.env.SUMMARY_RANGE}\``);
+            lines.push(`- Findings: \`${process.env.SUMMARY_TOTAL}\` total, \`${process.env.SUMMARY_INLINE}\` inline, \`${process.env.SUMMARY_FAILED}\` failed, \`${process.env.SUMMARY_ROUTED}\` routed`);
+            lines.push(`- Summary: ${process.env.SUMMARY_URL}`);
+            lines.push(`- Checkpoint: \`${process.env.SUMMARY_CHECKPOINT}\``);
+            const cancelled = process.env.JOB_CANCELLED === 'true';
+            try {
+              await github.rest.checks.update({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                check_run_id: id,
+                status: 'completed',
+                // Advisory stays advisory: success whenever the bridge ran,
+                // cancelled when superseded. Findings, parse failures, and
+                // action errors are reported in the output text, never mapped
+                // to the conclusion. No annotations: inline findings remain
+                // the only per-file surface.
+                conclusion: cancelled ? 'cancelled' : 'success',
+                completed_at: new Date().toISOString(),
+                output: {
+                  title: 'AI review (advisory)',
+                  summary: lines.join('\n')
+                }
+              });
+              core.info(`ai-review check run ${id} finalized (${cancelled ? 'cancelled' : 'success'}).`);
+            } catch (err) {
+              core.warning(`Could not finalize ai-review check run ${id}: ${err?.stack ?? err}`);
+            }
