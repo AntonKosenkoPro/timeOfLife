@@ -77,6 +77,14 @@ actor SyncSpanBuffer {
         writeLines(remaining)
     }
 
+    /// Delta-acknowledges exported loss: call after a flush reported
+    /// `count` dropped spans to the Collector. Drops that happened
+    /// concurrently with the flush survive (they were never reported).
+    func acknowledgeDropped(_ count: Int) {
+        guard count > 0 else { return }
+        setDroppedSpans(max(0, droppedSpans - count))
+    }
+
     /// Clears the whole buffer (used after a fully-sent flush).
     func clear() {
         writeLines([])

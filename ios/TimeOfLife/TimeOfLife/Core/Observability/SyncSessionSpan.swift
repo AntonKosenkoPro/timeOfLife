@@ -12,6 +12,19 @@ enum SyncSessionOutcome: String, Codable, Sendable {
     case aborted
 }
 
+/// Per-cycle span accumulator (mutable reference so stage methods share one
+/// instance through the task-local binding). Counts and depths only — same
+/// PII-free rule as `SyncSessionSpanCounts`, from which spans are built.
+///
+/// `unchecked Sendable`: confined to the cycle task's extent via the
+/// `@TaskLocal` binding (each task sees only its own instance) and touched
+/// only from `@MainActor` controller code — never shared across threads.
+final class SpanCounts: @unchecked Sendable {
+    var pushed = 0
+    var pulled = 0
+    var conflicts = 0
+}
+
 /// Counter snapshot for one finished cycle (input to `SyncSessionSpan.build`).
 /// Counts and depths only — this type has no field that could hold user
 /// content, which is what makes the span builder PII-safe by construction.

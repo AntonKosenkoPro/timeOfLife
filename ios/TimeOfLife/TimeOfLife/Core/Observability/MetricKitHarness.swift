@@ -23,11 +23,18 @@ final class MetricKitHarness: NSObject, MXMetricManagerSubscriber, @unchecked Se
         subsystem: "com.antonkosenko.timeoflifeapp",
         category: "MetricKitHarness"
     )
+    // Lock-guarded (not main-actor-bound): AppContainer is built from the
+    // app entry and from SwiftUI previews with no isolation guarantee, so
+    // two concurrent starts must not double-subscribe or race the flag.
+    private let lock = NSLock()
     private var didStart = false
 
     func start() {
-        guard !didStart else { return }
-        didStart = true
+        let first = lock.withLock { () -> Bool in
+            defer { didStart = true }
+            return !didStart
+        }
+        guard first else { return }
         MXMetricManager.shared.add(self)
         logger.info("metrickit harness started (debug only, no upload)")
     }

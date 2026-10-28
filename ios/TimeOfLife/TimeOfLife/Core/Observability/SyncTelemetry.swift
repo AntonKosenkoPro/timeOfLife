@@ -47,15 +47,30 @@ final class SyncTelemetry {
 
     /// Buffers one finished-cycle span and flushes best-effort when export
     /// is enabled. A failed flush is silent: the spans stay buffered.
+    /// Gated on export: when the exporter is off (Release default) nothing
+    /// is buffered at all — no disk/battery cost for telemetry that can
+    /// never drain. Distress (recordFailure/recordOffline) is ungated: it
+    /// travels Sentry, never the buffer.
     func recordSpan(_ span: SyncSessionSpan) async {
+        guard exporter?.isEnabled == true else { return }
         await buffer.append(span)
-        await flushIfEnabled()
+        // Detached: a slow/blackholed Collector must never hold the sync
+        // cycle's single-flight flag or delay the user-visible status.
+        Task.detached { [exporter, buffer] in
+            guard let exporter, exporter.isEnabled else { return }
+            _ = await exporter.flush(buffer: buffer)
+        }
     }
 
     /// A cycle succeeded: the distress streak resets.
     func recordSuccess() {
         consecutiveFailures = 0
     }
+
+    /// A cycle was skipped for lack of connectivity: expected for a
+    /// local-first app, never distress. The span still records the gap;
+    /// the Sentry streak (relay-outage signal) stays untouched.
+    func recordOffline() {}
 
     /// A cycle failed: the streak grows, firing distress once per streak.
     func recordFailure() {

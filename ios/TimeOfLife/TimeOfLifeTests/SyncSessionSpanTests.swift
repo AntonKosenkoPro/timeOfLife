@@ -24,6 +24,11 @@ struct SyncSessionSpanTests {
         #expect(span.wallDurationMs == 1_500)
         #expect(span.offlineDurationMs == 0)
         #expect(span.endNanos >= span.startNanos)
+        let offline = SyncSessionSpan.build(
+            start: start, end: end, outcome: .offline,
+            counts: SyncSessionSpanCounts(offlineDurationMs: 9_000)
+        )
+        #expect(offline.offlineDurationMs == 9_000)
     }
 
     @Test("ids are hex, fixed length, and unique per span")
@@ -56,5 +61,13 @@ struct SyncSessionSpanTests {
         for forbidden in ["user_id", "email", "token", "activity_text", "category"] {
             #expect(!json.contains(forbidden))
         }
+        // Exact key allowlist: substring checks go blind the moment a new
+        // field serializes camelCase (JSONEncoder uses default keys).
+        let object = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+        #expect(Set(object.keys) == [
+            "traceID", "spanID", "name", "startNanos", "endNanos", "outcome",
+            "wallDurationMs", "offlineDurationMs", "pushedCount", "pulledCount",
+            "conflictCount", "outboxDepthBefore", "outboxDepthAfter",
+        ])
     }
 }

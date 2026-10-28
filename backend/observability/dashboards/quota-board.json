@@ -1,5 +1,101 @@
-{"__comment": "lifio dashboard 5/5: quota/tripwire board. INTENT FILE (§4.3 SaaS half at deploy). Series + log-volume panels read the grafanacloud-usage datasource; Sentry events + Supabase MB are tracked off-Grafana (digest + size-check script) and recorded here as threshold notes. LOAD-TIME CHECK: confirm usage-metric names against the Billing/Usage dashboard; adjust. 70% = Telegram ping; 90% = shed-load (see alerts/*.yaml).", "schemaVersion": 39, "templating": {"list": []}, "timezone": "browser", "title": "Lifio 5 — Quotas & tripwires", "uid": "lifio-quotas", "version": 1,
+{
+  "__comment": "lifio dashboard 5/5: quota/tripwire board. INTENT FILE (\u00a74.3 SaaS half at deploy). Series + log-volume panels read the grafanacloud-usage datasource; Sentry events + Supabase MB are tracked off-Grafana (digest + size-check script) and recorded here as threshold notes. LOAD-TIME CHECK: confirm usage-metric names against the Billing/Usage dashboard; adjust. 70% = Telegram ping; 90% = shed-load (see alerts/*.yaml).",
+  "schemaVersion": 39,
+  "templating": {
+    "list": [
+      {
+        "name": "DS_PROMETHEUS",
+        "type": "datasource",
+        "query": "prometheus",
+        "current": {},
+        "hide": 0,
+        "label": "DS_PROMETHEUS"
+      },
+      {
+        "name": "DS_GRAFANACLOUD_USAGE",
+        "type": "datasource",
+        "query": "prometheus",
+        "current": {},
+        "hide": 0,
+        "label": "DS_GRAFANACLOUD_USAGE"
+      }
+    ]
+  },
+  "timezone": "browser",
+  "title": "Lifio 5 \u2014 Quotas & tripwires",
+  "uid": "lifio-quotas",
+  "version": 1,
   "panels": [
-    {"datasource": "${DS_PROMETHEUS}", "fieldConfig": {"defaults": {"thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 7000}, {"color": "red", "value": 9000}]}}, "overrides": []}, "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0}, "id": 1, "options": {}, "targets": [{"expr": "grafanacloud_instance_active_series", "refId": "A"}], "title": "Active series (70% = 7000, cap = 10000)", "type": "stat"},
-    {"gridPos": {"h": 8, "w": 12, "x": 12, "y": 0}, "id": 2, "options": {"content": "- **Sentry events/mo**: 70% → Telegram ping; 90% → errors-only, drop breadcrumbs/perf (see `alerts/sentry-events.yaml`).\n- **Supabase 500 MB**: alert at ~350 MB via `backend/scripts/supabase-size-check.sh`; paid-tier upgrade before repointing above the line.\n- **VM disk**: >80% → Telegram (Stage-0 interrupt).", "mode": "markdown"}, "title": "Off-Grafana tripwires", "type": "text"}
-  ]}
+    {
+      "datasource": "${DS_GRAFANACLOUD_USAGE}",
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 7000
+              },
+              {
+                "color": "red",
+                "value": 9000
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 0
+      },
+      "id": 1,
+      "options": {},
+      "targets": [
+        {
+          "expr": "grafanacloud_instance_active_series",
+          "refId": "A"
+        }
+      ],
+      "title": "Active series (70% = 7000, cap = 10000)",
+      "type": "stat"
+    },
+    {
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 0
+      },
+      "id": 2,
+      "options": {
+        "content": "- **Sentry events/mo**: 70% \u2192 Telegram ping; 90% \u2192 errors-only, drop breadcrumbs/perf (see `alerts/sentry-events.yaml`).\n- **Supabase 500 MB**: alert at ~350 MB via `backend/scripts/supabase-size-check.sh`; paid-tier upgrade before repointing above the line.\n- **VM disk**: >80% \u2192 Telegram (Stage-0 interrupt).",
+        "mode": "markdown"
+      },
+      "title": "Off-Grafana tripwires",
+      "type": "text"
+    },
+    {
+      "gridPos": {
+        "h": 4,
+        "w": 24,
+        "x": 0,
+        "y": 8
+      },
+      "id": 3,
+      "options": {
+        "content": "Logs ingest (GB) + weekly quota trend are tracked via the morning digest until the usage-metric names are verified against Billing/Usage at load (see header). Sentry events/mo + Supabase MB are off-Grafana (digest + size-check script).",
+        "mode": "markdown"
+      },
+      "title": "Logs + trend (digest-linked until verified)",
+      "type": "text"
+    }
+  ]
+}

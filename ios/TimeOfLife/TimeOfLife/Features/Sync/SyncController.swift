@@ -49,13 +49,16 @@ final class SyncController: ObservableObject {
     /// (the default) disables all telemetry — production passes a live
     /// instance; most existing tests leave it off so no files are touched.
     private let telemetry: SyncTelemetry?
-    /// Per-cycle span counters, reset at each cycle entry. Safe as instance
-    /// state: the single-flight guard runs at most one cycle at a time.
-    /// Counts and depths only — never record content.
-    private var spanPushed = 0
-    private var spanPulled = 0
-    private var spanConflicts = 0
-    /// End of the previous cycle, for the next cycle's offline-duration gap.
+    /// Per-cycle span counters, bound to the cycle task's extent (see
+    /// runCycle). A cancelled predecessor still unwinding cannot attribute
+    /// its counts to the successor's span, and vice versa — each task sees
+    /// only its own accumulator. Nil outside a cycle.
+    @TaskLocal static var currentSpanCounts: SpanCounts?
+    /// End of the last *successful* cycle, for the next cycle's
+    /// offline-duration gap. Stamped on success only (never on aborted or
+    /// failed cycles): a week offline with periodic triggers reports the
+    /// growing stretch since the last success, not the gap since the
+    /// immediately preceding attempt.
     private var lastCycleEndAt: Date?
     /// Reads the authenticated session's `userId` at guard time (the session
     /// itself is not retained — no cycle). Production wires `SessionStore`;
@@ -350,14 +353,26 @@ final class SyncController: ObservableObject {
         // flag nor run its body against the successor's binding.
         guard cycleGeneration == generation else { return }
         cycleRunning = true
-        // Span setup (sync.session, Stage 1): reset the per-cycle counters,
-        // snapshot the outbox depth, and note the gap since the last cycle
-        // end (the offline-duration signal for offline-skipped cycles).
-        let spanStart = Date()
-        resetSpanCounters()
-        let depthBefore = (try? await store.outboxRows().count) ?? 0
-        let gapSinceLastCycle = lastCycleEndAt.map { max(0, Int(spanStart.timeIntervalSince($0) * 1_000)) } ?? 0
         defer { finishCycleTail(generation: generation) }
+        // Per-cycle span accumulator (Stage-1 `sync.session` telemetry):
+        // bound to THIS task's extent, so a cancelled predecessor still
+        // unwinding cannot attribute its counts to the successor's span,
+        // and vice versa — each task sees only its own accumulator.
+        await Self.$currentSpanCounts.withValue(SpanCounts()) {
+            await runCycleBody(firstSync: firstSync, generation: generation)
+        }
+    }
+
+    /// Body of one sync cycle (span boundaries + stage guards). Runs inside
+    /// the task-local accumulator scope installed by runCycle.
+    private func runCycleBody(firstSync: Bool, generation: Int) async {
+        // Span setup (sync.session, Stage 1): per-cycle counters live in the
+        // task-local accumulator bound by runCycle (no shared mutable state).
+        // Snapshot the outbox depth and note the gap since the last success
+        // (the offline-duration signal for offline-skipped cycles).
+        let spanStart = Date()
+        let depthBefore = await outboxDepthForTelemetry()
+        let gapSinceLastCycle = lastCycleEndAt.map { max(0, Int(spanStart.timeIntervalSince($0) * 1_000)) } ?? 0
         guard let userID = boundUserID else {
             Self.logger.error("sync cycle skipped: no bound account")
             status = .inactive
@@ -376,7 +391,7 @@ final class SyncController: ObservableObject {
         guard connectivity.isConnected else {
             Self.logger.error("sync cycle skipped: offline")
             status = .error("offline")
-            telemetry?.recordFailure()
+            telemetry?.recordOffline()
             await recordSpan(outcome: .offline, start: spanStart, offlineDurationMs: gapSinceLastCycle, depthBefore: depthBefore, depthAfter: depthBefore)
             return
         }
@@ -386,8 +401,9 @@ final class SyncController: ObservableObject {
             try await runCycleStages(firstSync: firstSync, userID: userID)
             status = .idle(Date())
             telemetry?.recordSuccess()
-            let depthAfter = (try? await store.outboxRows().count) ?? depthBefore
+            let depthAfter = await outboxDepthForTelemetry()
             await recordSpan(outcome: .success, start: spanStart, offlineDurationMs: 0, depthBefore: depthBefore, depthAfter: depthAfter)
+            lastCycleEndAt = Date()
             Self.logger.info("sync cycle finished")
         } catch is CancellationError {
             await recordSpan(outcome: .aborted, start: spanStart, offlineDurationMs: 0, depthBefore: depthBefore, depthAfter: depthBefore)
@@ -395,14 +411,6 @@ final class SyncController: ObservableObject {
         } catch {
             await finishFailedCycle(error, userID: userID, generation: generation, spanStart: spanStart, depthBefore: depthBefore)
         }
-    }
-
-    /// Resets the per-cycle span counters (single-flight: one cycle at a
-    /// time, so instance state is safe).
-    private func resetSpanCounters() {
-        spanPushed = 0
-        spanPulled = 0
-        spanConflicts = 0
     }
 
     /// The guarded drain+pull stage sequence of one cycle. Extracted so
@@ -441,9 +449,11 @@ final class SyncController: ObservableObject {
     }
 
     /// Records one `sync.session` span for the finished cycle (counts and
-    /// durations only — never record content) and stamps the cycle end used
-    /// for the next cycle's offline-duration gap. No-op when telemetry is
-    /// not wired.
+    /// durations only — never record content). No-op when telemetry is not
+    /// wired (and stamps nothing in that case). Counts come from the
+    /// task-local accumulator, so a stale predecessor can never borrow the
+    /// successor's numbers. Stamping `lastCycleEndAt` is the caller's job
+    /// (success only — see runCycleBody).
     private func recordSpan(
         outcome: SyncSessionOutcome,
         start: Date,
@@ -451,22 +461,31 @@ final class SyncController: ObservableObject {
         depthBefore: Int,
         depthAfter: Int
     ) async {
-        lastCycleEndAt = Date()
         guard let telemetry else { return }
+        let counts = Self.currentSpanCounts ?? SpanCounts()
         let span = SyncSessionSpan.build(
             start: start,
             end: Date(),
             outcome: outcome,
             counts: SyncSessionSpanCounts(
                 offlineDurationMs: offlineDurationMs,
-                pushed: spanPushed,
-                pulled: spanPulled,
-                conflicts: spanConflicts,
+                pushed: counts.pushed,
+                pulled: counts.pulled,
+                conflicts: counts.conflicts,
                 depthBefore: depthBefore,
                 depthAfter: depthAfter
             )
         )
         await telemetry.recordSpan(span)
+    }
+
+    /// Outbox depth for telemetry only. Skipped (0, no store read) when
+    /// telemetry is unwired, so the offline / no-account / fenced paths do
+    /// no extra store work; a read failure degrades to the passed-in depth
+    /// via the caller's `??` fallback.
+    private func outboxDepthForTelemetry() async -> Int {
+        guard telemetry != nil else { return 0 }
+        return (try? await store.outboxRowCount()) ?? 0
     }
 
     /// Tail of a finished cycle: releases the single-flight handle, the
@@ -507,15 +526,25 @@ final class SyncController: ObservableObject {
     /// Also feeds the distress streak (Sentry, not the relay) and the span.
     private func finishFailedCycle(_ error: Error, userID: String, generation: Int, spanStart: Date, depthBefore: Int) async {
         Self.logger.error("sync cycle failed: \(error.localizedDescription, privacy: .public)")
+        let ownsCycle = cycleGeneration == generation && boundUserID == userID
+        // Status first: a blackholed Collector must never delay the
+        // user-visible error behind telemetry awaits below.
+        if ownsCycle {
+            status = .error(error.localizedDescription)
+        }
         // Sync-distress breadcrumb (observability Stage 0): fixed string
         // only — error details can echo user content, so they stay out.
         SentryReporter.addSyncDistressBreadcrumb("sync cycle failed")
-        telemetry?.recordFailure()
-        let depthAfter = (try? await store.outboxRows().count) ?? depthBefore
-        await recordSpan(outcome: .failed, start: spanStart, offlineDurationMs: 0, depthBefore: depthBefore, depthAfter: depthAfter)
-        if cycleGeneration == generation, boundUserID == userID {
-            status = .error(error.localizedDescription)
+        // Same ownership gate as status: a cancelled predecessor (e.g. a
+        // mid-flight request surfacing as APIError.transport after a
+        // sign-out) must neither fire Sentry distress nor skew the SLI.
+        if ownsCycle {
+            telemetry?.recordFailure()
         }
+        // Skip the extra store read when telemetry is unwired.
+        guard telemetry != nil else { return }
+        let depthAfter = await outboxDepthForTelemetry()
+        await recordSpan(outcome: .failed, start: spanStart, offlineDurationMs: 0, depthBefore: depthBefore, depthAfter: depthAfter)
     }
 
     /// Per-item same-account guard for in-stage loops (pull merge,
@@ -642,14 +671,14 @@ final class SyncController: ObservableObject {
         if let rival = try await store.category(named: category.name), rival.id != category.id {
             if category.updatedAt > rival.updatedAt {
                 try await store.remapCategoryReferences(from: rival.id, to: category.id, winner: category)
-                spanPulled += 1
+                Self.currentSpanCounts?.pulled += 1
             } else {
                 Self.logger.info("sync pull keeps local category \(rival.id, privacy: .public); skipping server \(category.id, privacy: .public)")
             }
             return
         }
         try await store.mergeCategory(category)
-        spanPulled += 1
+        Self.currentSpanCounts?.pulled += 1
     }
 
     /// Applies a server entry only if `server.updated_at > local.updated_at`.
@@ -679,7 +708,7 @@ final class SyncController: ObservableObject {
         var merged = entry
         merged.categoryIDs = try await resolveEntryCategoryIDs(entry, serverCategories: serverCategories)
         try await store.mergeEntry(merged)
-        spanPulled += 1
+        Self.currentSpanCounts?.pulled += 1
     }
 
     /// Resolves an entry's category ids against the relay snapshot,
@@ -718,7 +747,7 @@ final class SyncController: ObservableObject {
                 continue
             }
             try await store.mergeCategory(snapshotRow)
-            spanPulled += 1
+            Self.currentSpanCounts?.pulled += 1
             if !resolved.contains(id) {
                 resolved.append(id)
             }
@@ -759,7 +788,7 @@ final class SyncController: ObservableObject {
             healed.categoryIDs = try await resolveEntryCategoryIDs(server, serverCategories: serverCategories)
             guard healed.categoryIDs != local.categoryIDs else { return }
             try await store.mergeEntry(healed)
-            spanPulled += 1
+            Self.currentSpanCounts?.pulled += 1
             Self.logger.info("sync pull heals category fork on entry \(local.id, privacy: .public)")
             return
         }
@@ -837,7 +866,7 @@ final class SyncController: ObservableObject {
         }
         if !known.isEmpty {
             Self.logger.info("sync applied \(known.count) deletion tombstones")
-            spanPulled += known.count
+            Self.currentSpanCounts?.pulled += known.count
         }
     }
 
@@ -944,7 +973,7 @@ final class SyncController: ObservableObject {
             do {
                 try await push(row)
                 try await store.removeOutboxRow(id: row.id)
-                spanPushed += 1
+                Self.currentSpanCounts?.pushed += 1
             } catch let error as APIError {
                 if try await resolvePushError(row, error: error) {
                     continue
@@ -1094,7 +1123,7 @@ final class SyncController: ObservableObject {
             try await remote.updateEntry(pruned)
         }
         try await store.removeOutboxRow(id: row.id)
-        spanPushed += 1
+        Self.currentSpanCounts?.pushed += 1
         return true
     }
 
@@ -1189,7 +1218,7 @@ final class SyncController: ObservableObject {
             return false
         }
         try await store.removeOutboxRow(id: row.id)
-        spanPushed += 1
+        Self.currentSpanCounts?.pushed += 1
         return true
     }
 
@@ -1199,7 +1228,7 @@ final class SyncController: ObservableObject {
     ///   + clear the row.
     /// - 409 `duplicate_import` → the relay already has the record; clear the row.
     private func resolveConflict(_ row: OutboxRow, code: String, details: [String: String]) async throws {
-        spanConflicts += 1
+        Self.currentSpanCounts?.conflicts += 1
         switch code {
         case "conflict":
             try await adoptServerVersion(row)
@@ -1230,11 +1259,11 @@ final class SyncController: ObservableObject {
         case "category":
             let server = try await remote.fetchCategory(id: row.recordID)
             try await store.mergeCategory(server)
-            spanPulled += 1
+            Self.currentSpanCounts?.pulled += 1
         case "entry":
             let server = try await remote.fetchEntry(id: row.recordID)
             try await store.mergeEntry(await prunedEntry(server))
-            spanPulled += 1
+            Self.currentSpanCounts?.pulled += 1
         default:
             break
         }

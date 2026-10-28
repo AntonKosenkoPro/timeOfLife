@@ -515,3 +515,137 @@ func keysOfBool(m map[string]bool) []string {
 	}
 	return out
 }
+
+// TestBoundedMethod proves scanner-grade method tokens cannot mint new
+// http.method series: known verbs pass through, everything else folds to
+// the semconv "HTTP" fallback (addressing the review finding on
+// otelRequestAttrs/finishOTelSpan cardinality).
+func TestBoundedMethod(t *testing.T) {
+	for _, m := range []string{http.MethodGet, http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete, http.MethodHead, http.MethodOptions} {
+		if got := boundedMethod(m); got != m {
+			t.Errorf("expected known method %q to pass through, got %q", m, got)
+		}
+	}
+	for _, m := range []string{"FOOBAR", "", "get", "G\u00c9T", strings.Repeat("A", 64)} {
+		if got := boundedMethod(m); got != "HTTP" {
+			t.Errorf("expected unknown method %q to fold to HTTP, got %q", m, got)
+		}
+	}
+}
+
+// TestEndpointOptsAcceptURLAndHostPort proves InitOTel accepts both the
+// bare host:port compose default and the URL form operators copy from OTel
+// docs (WithEndpointURL for scheme://, WithEndpoint otherwise). gRPC dials
+// lazily, so construction success is the contract under test.
+func TestEndpointOptsAcceptURLAndHostPort(t *testing.T) {
+	ctx := context.Background()
+	for _, endpoint := range []string{"otel-collector:4317", "http://otel-collector:4317", "https://collector.example:4317"} {
+		if _, err := newTraceExporter(ctx, endpoint); err != nil {
+			t.Errorf("trace exporter %q: %v", endpoint, err)
+		}
+		if _, err := newMetricExporter(ctx, endpoint); err != nil {
+			t.Errorf("metric exporter %q: %v", endpoint, err)
+		}
+		if _, err := newLogExporter(ctx, endpoint); err != nil {
+			t.Errorf("log exporter %q: %v", endpoint, err)
+		}
+	}
+}
+
+// gatedHandler wraps sliceHandler with a stdlib-style level gate so the
+// fan-out test below distinguishes "kept filtered it" from "never sent".
+type gatedHandler struct {
+	inner *sliceHandler
+	level slog.Level
+}
+
+func (h *gatedHandler) Enabled(_ context.Context, l slog.Level) bool { return l >= h.level }
+func (h *gatedHandler) Handle(ctx context.Context, r slog.Record) error {
+	return h.inner.Handle(ctx, r)
+}
+func (h *gatedHandler) WithAttrs(_ []slog.Attr) slog.Handler {
+	return &gatedHandler{inner: &sliceHandler{}, level: h.level}
+}
+func (h *gatedHandler) WithGroup(string) slog.Handler { return h }
+
+// TestSlogBridgeRespectsKeptLevel proves the fan-out gates the kept side on
+// its own Enabled (stdlib contract): a LevelError kept handler must not
+// print Info records just because the OTLP side stays enabled.
+func TestSlogBridgeRespectsKeptLevel(t *testing.T) {
+	tt := newTestTelemetry(t)
+	kept := &gatedHandler{inner: &sliceHandler{}, level: slog.LevelError}
+	logger := slog.New(FanoutHandler(kept))
+	logger.Info("dropped by kept")
+	logger.Error("kept by both")
+	if got := len(kept.inner.records); got != 1 {
+		t.Fatalf("expected kept handler to receive only the Error record, got %d", got)
+	}
+	if got := len(tt.logs.all()); got != 2 {
+		t.Fatalf("expected OTLP bridge to receive both records, got %d", got)
+	}
+}
+
+// TestGroupPrefixAppliedOnce proves WithGroup/WithAttrs keys land in the
+// fields payload exactly once: pre-group attrs keep their bind-time prefix
+// and are never re-prefixed at Handle time (g.g.k) nor dragged into later
+// groups.
+func TestGroupPrefixAppliedOnce(t *testing.T) {
+	tt := newTestTelemetry(t)
+	logger := slog.New(FanoutHandler(&sliceHandler{})).With("pre", "1").WithGroup("g")
+	logger.InfoContext(context.Background(), "msg", "k", "v")
+	records := tt.logs.all()
+	if len(records) != 1 {
+		t.Fatalf("expected 1 OTLP record, got %d", len(records))
+	}
+	fields := map[string]any{}
+	if err := json.Unmarshal([]byte(logAttrValues(records[0])["fields"]), &fields); err != nil {
+		t.Fatalf("expected fields JSON payload: %v", err)
+	}
+	if fields["pre"] != "1" {
+		t.Errorf("expected pre-group attr outside the group, got %v", fields)
+	}
+	if fields["g.k"] != "v" {
+		t.Errorf("expected grouped key g.k, got %v", fields)
+	}
+	for k := range fields {
+		if k == "g.g.k" || k == "g.pre" {
+			t.Errorf("mis-prefixed field key %q in %v", k, fields)
+		}
+	}
+}
+
+// TestPanicSpanEnriched proves a panicking handler still exports a fully
+// attributed span (name/route/operation + 5xx + counter sample) instead of
+// the "<METHOD> unknown" placeholder with no sample.
+func TestPanicSpanEnriched(t *testing.T) {
+	tt := newTestTelemetry(t)
+	r := chi.NewRouter()
+	r.Use(Middleware)
+	r.Get("/api/v1/entries/{id}", func(_ http.ResponseWriter, _ *http.Request) {
+		panic("boom")
+	})
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/entries/550e8400-e29b-41d4-a716-446655440000", nil)
+	func() {
+		defer func() { _ = recover() }()
+		r.ServeHTTP(httptest.NewRecorder(), req)
+	}()
+	ended := tt.spans.Ended()
+	if len(ended) != 1 {
+		t.Fatalf("expected exactly 1 span after panic, got %d", len(ended))
+	}
+	span := ended[0]
+	if want := "GET /api/v1/entries/{id}"; span.Name() != want {
+		t.Errorf("expected enriched span name %q, got %q", want, span.Name())
+	}
+	sattrs := spanAttrValues(span)
+	if sattrs["http.status_class"] != "5xx" || sattrs["http.route"] != "/api/v1/entries/{id}" {
+		t.Errorf("expected route + 5xx attribution, got %v", sattrs)
+	}
+	if span.Status().Code != codes.Error {
+		t.Errorf("expected span Error status on panic, got %v", span.Status())
+	}
+	metrics := collectMetrics(t, tt.metrics)
+	if points, ok := metrics["http.server.requests"]; !ok || len(points) != 1 {
+		t.Errorf("expected 1 request counter sample for the panic, got %v", metrics)
+	}
+}

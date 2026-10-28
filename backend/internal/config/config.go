@@ -68,14 +68,6 @@ type Config struct {
 	// local dev). Empty (default) = OTel fully disabled, mirroring the
 	// SENTRY_DSN empty-means-off contract — even with OTEL_ENABLED=1.
 	OTELExporterOTLPEndpoint string
-	// GrafanaCloudOTLPEndpoint is the SaaS OTLP gateway base URL consumed
-	// by the Collector config (never by app code). Empty (default) =
-	// exporters idle. Never commit a real value.
-	GrafanaCloudOTLPEndpoint string
-	// GrafanaCloudOTLPKey is the SaaS auth secret (Basic base64 of
-	// instanceID:apiToken) consumed by the Collector config. Empty default;
-	// never logged, never committed.
-	GrafanaCloudOTLPKey string
 	// RecoveryKeys holds the parsed REFRESH_RECOVERY_KEYS keyring: AES-256
 	// keys sealing pending refresh successors for response-loss recovery.
 	// Keys[0] is the primary sealing key; the rest are retired keys kept
@@ -265,8 +257,6 @@ func Load() (*Config, error) {
 		cfg.OTELEnabled = enabled
 	}
 	cfg.OTELExporterOTLPEndpoint = os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
-	cfg.GrafanaCloudOTLPEndpoint = os.Getenv("GRAFANA_CLOUD_OTLP_ENDPOINT")
-	cfg.GrafanaCloudOTLPKey = os.Getenv("GRAFANA_CLOUD_OTLP_KEY")
 
 	// Required: REFRESH_RECOVERY_KEYS — the stable server-side keyring
 	// sealing pending refresh successors (fix-refresh-response-loss).

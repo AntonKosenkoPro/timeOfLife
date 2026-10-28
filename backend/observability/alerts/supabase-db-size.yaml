@@ -21,7 +21,7 @@ alert:
     action: already specced — paid-tier upgrade BEFORE any repoint above the
       line; the deployment is not repointed above 500 MB without the upgrade
       first (Supabase convention from migrate-db-to-supabase-free, unchanged)
-  dashboard: quota-board
+  dashboard: lifio-quotas
   query_intent: >
     Weekly point-in-time gauge from supabase-size-check.sh output
     (db_size_mb by environment) — no per-user/per-row labels; the DB is the

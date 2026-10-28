@@ -10,24 +10,24 @@ alert:
   # Absolute GB is plan-dependent — resolve at apply time from the Grafana
   # Cloud quota API; this file pins the FRACTION, not the number.
   threshold:
-    fraction_of_monthly_quota: 0.7
+    fraction_of_quota: 0.7
   evaluation:
     window: 24h        # quota-burn alert: re-evaluate daily
     for: 1h
   route: telegram      # 70% crossings route to the existing Telegram channel
   shed_load_at_90pct:
-    fraction_of_monthly_quota: 0.9
+    fraction_of_quota: 0.9
     action: >
       retention 30d -> 7d, drop DEBUG (Stage-0/Stage-1 tripwire table:
       "retention 30->7d, drop DEBUG"); stdout drops to ERROR-only after the
       migration overlap window closes (D7-risk mitigation)
-  dashboard: quota-board
+  dashboard: lifio-quotas
   # Loki stream intent — boring labels ONLY
   # ({service, environment, level} + `operation` on the error stream only).
   # trace_id / span_id ride as structured fields, never as labels.
   query_intent: >
     sum by (service, environment, level)
-    (rate({service="lifio-relay"} |= `` [1h]))
+    (rate({service_name="lifio-backend"} | level="error" [1h]))
     — volume accounting per stream; no high-cardinality keys.
   notes: >
     /health emits nothing per-request in both paths, so health checks never

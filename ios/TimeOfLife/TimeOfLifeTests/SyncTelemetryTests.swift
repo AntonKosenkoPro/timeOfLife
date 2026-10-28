@@ -17,6 +17,20 @@ struct SyncTelemetryTests {
         #expect(config.endpoint.path == "/v1/traces")
     }
 
+    @Test("enablement rule: Debug on, Release needs an explicit endpoint")
+    func enablementRule() {
+        // Debug defaults on (simulator shares the host network).
+        #expect(SyncTelemetryConfig.enabled(raw: nil, overridePresent: false, debug: true))
+        #expect(SyncTelemetryConfig.enabled(raw: "0", overridePresent: false, debug: true) == false)
+        // Release requires OTEL_ENABLED=1 AND an explicit endpoint: deriving
+        // https://<relay-host>:4318 would emit an unusable URL (plaintext
+        // Collector behind an nginx TLS terminator), so Release stays off.
+        #expect(SyncTelemetryConfig.enabled(raw: nil, overridePresent: false, debug: false) == false)
+        #expect(SyncTelemetryConfig.enabled(raw: "1", overridePresent: false, debug: false) == false)
+        #expect(SyncTelemetryConfig.enabled(raw: "0", overridePresent: true, debug: false) == false)
+        #expect(SyncTelemetryConfig.enabled(raw: "1", overridePresent: true, debug: false))
+    }
+
     @Test("endpoint derives from the relay host")
     func endpointDerivesFromRelayHost() throws {
         let api = try #require(URL(string: "https://relay.example:8443/api"))
@@ -74,8 +88,8 @@ struct SyncTelemetryTests {
         #expect(stub.bodies.isEmpty)
     }
 
-    @Test("disabled export buffers without posting")
-    func disabledExportBuffersOnly() async throws {
+    @Test("disabled export records nothing")
+    func disabledExportRecordsNothing() async throws {
         let stub = StubTransport()
         let endpoint = try #require(URL(string: "http://127.0.0.1:4318/v1/traces"))
         let buffer = SyncSpanBuffer(directory: temporaryDirectory())
@@ -86,9 +100,54 @@ struct SyncTelemetryTests {
                 transport: stub
             )
         )
+        // Gated on export: with the exporter off (Release default) nothing is
+        // buffered — no disk/battery cost for telemetry that can never drain.
         await telemetry.recordSpan(makeSpan(outcome: .success, pushed: 1, pulled: 0, conflicts: 0))
         #expect(stub.bodies.isEmpty)
-        #expect(await buffer.bufferedCount == 1)
+        #expect(await buffer.bufferedCount == 0)
+    }
+
+    @Test("dropped counter reports its value, then resets on success")
+    func droppedCounterDelta() async throws {
+        let stub = StubTransport()
+        let endpoint = try #require(URL(string: "http://127.0.0.1:4318/v1/traces"))
+        let exporter = SyncSpanExporter(
+            config: SyncTelemetryConfig(isEnabled: true, endpoint: endpoint),
+            transport: stub
+        )
+        let buffer = SyncSpanBuffer(directory: temporaryDirectory(), maxSpans: 1)
+        await buffer.append(makeSpan(outcome: .success, pushed: 0, pulled: 0, conflicts: 0))
+        await buffer.append(makeSpan(outcome: .success, pushed: 1, pulled: 0, conflicts: 0))
+        #expect(await buffer.droppedSpans == 1)
+        #expect(await exporter.flush(buffer: buffer))
+        #expect(await buffer.bufferedCount == 0)
+        #expect(await buffer.droppedSpans == 0)
+        let body = try #require(stub.bodies.first)
+        let json = try #require(try JSONSerialization.jsonObject(with: body) as? [String: Any])
+        let resource = try #require((json["resourceSpans"] as? [[String: Any]])?.first)
+        let inner = try #require(resource["resource"] as? [String: Any])
+        let attrs = try #require(inner["attributes"] as? [[String: Any]])
+        let dropped = attrs.first { $0["key"] as? String == "dropped_spans" }
+        let value = (dropped?["value"] as? [String: Any])?["intValue"] as? String
+        #expect(value == "1")
+    }
+
+    @Test("permanent rejection drops the batch instead of retrying forever")
+    func permanentRejectionDropsBatch() async throws {
+        let stub = StubTransport()
+        stub.permanentStatus = 400
+        let endpoint = try #require(URL(string: "http://127.0.0.1:4318/v1/traces"))
+        let exporter = SyncSpanExporter(
+            config: SyncTelemetryConfig(isEnabled: true, endpoint: endpoint),
+            transport: stub
+        )
+        let buffer = SyncSpanBuffer(directory: temporaryDirectory())
+        await buffer.append(makeSpan(outcome: .success, pushed: 1, pulled: 0, conflicts: 0))
+        #expect(await exporter.flush(buffer: buffer) == false)
+        // Poison batch quarantined (dropped with a log), not retried: the
+        // buffer is empty so later spans are not wedged behind it.
+        #expect(await buffer.bufferedCount == 0)
+        #expect(stub.posts == 1)
     }
 
     @Test("offline soak: failures keep order, recovery forwards, growth bounded")
@@ -105,11 +164,13 @@ struct SyncTelemetryTests {
             await buffer.append(makeSpan(outcome: .failed, pushed: index, pulled: 0, conflicts: 0))
         }
         #expect(await exporter.flush(buffer: buffer) == false)
-        #expect(stub.bodies.isEmpty)
+        #expect(stub.bodies.count == 1)
+        #expect(stub.urls == [endpoint])
         #expect(await buffer.bufferedCount == 3)
         stub.shouldThrow = false
         #expect(await exporter.flush(buffer: buffer))
         #expect(await buffer.bufferedCount == 0)
+        #expect(stub.urls == [endpoint, endpoint])
         let body = try #require(stub.bodies.first)
         let json = try #require(try JSONSerialization.jsonObject(with: body) as? [String: Any])
         let resource = try #require((json["resourceSpans"] as? [[String: Any]])?.first)
@@ -134,7 +195,7 @@ struct SyncTelemetryTests {
         }
         // Distress fired exactly once — on the Sentry channel, while the
         // OTLP export kept failing (never piggybacked on the relay path).
-        #expect(await context.recorder.count == 1)
+        #expect(context.recorder.count == 1)
         #expect(context.telemetry.failureStreak == 3)
         // Volume was still buffered (not dropped, not smuggled into distress).
         let spans = await context.buffer.spans()
@@ -142,6 +203,79 @@ struct SyncTelemetryTests {
         #expect(spans.allSatisfy { $0.outcome == .failed })
     }
 
+    @Test("cycle span carries pushed/pulled counts and outbox depths")
+    func spanCarriesCycleCounts() async throws {
+        let store = try LocalStore(url: temporaryStoreURL())
+        let local = TimeEntry(id: UUID().uuidString, activityText: "Deep Work", startedAt: Date())
+        _ = try await store.createEntry(local)
+        let pulled = TimeEntry(id: UUID().uuidString, activityText: "Pulled", startedAt: Date())
+        let mock = MockCatalogRepository()
+        mock.entriesPages = [[pulled]]
+        let buffer = SyncSpanBuffer(directory: temporaryDirectory())
+        let stub = StubTransport()
+        stub.shouldThrow = true
+        let endpoint = try #require(URL(string: "http://127.0.0.1:4318/v1/traces"))
+        let telemetry = SyncTelemetry(
+            buffer: buffer,
+            exporter: SyncSpanExporter(
+                config: SyncTelemetryConfig(isEnabled: true, endpoint: endpoint),
+                transport: stub
+            )
+        )
+        let controller = SyncController(
+            store: store,
+            remote: mock,
+            connectivity: MockConnectivity(),
+            telemetry: telemetry
+        ) { "u1" }
+        controller.activate(userID: "u1")
+        await waitForCycle(controller)
+        // Note: activate() itself runs the first cycle (pull-first), which
+        // does the push + pull; no extra syncNow is needed.
+        let spans = await buffer.spans()
+        let span = try #require(spans.last)
+        #expect(span.outcome == .success)
+        #expect(span.pushedCount == 1)
+        #expect(span.pulledCount == 1)
+        #expect(span.outboxDepthBefore == 1)
+        #expect(span.outboxDepthAfter == 0)
+    }
+
+    @Test("offline skips buffer a span but never fire distress")
+    func offlineSkipsStayQuiet() async throws {
+        let store = try LocalStore(url: temporaryStoreURL())
+        let mock = MockCatalogRepository()
+        let buffer = SyncSpanBuffer(directory: temporaryDirectory())
+        let stub = StubTransport()
+        stub.shouldThrow = true
+        let endpoint = try #require(URL(string: "http://127.0.0.1:4318/v1/traces"))
+        let recorder = DistressRecorder()
+        let telemetry = SyncTelemetry(
+            buffer: buffer,
+            exporter: SyncSpanExporter(
+                config: SyncTelemetryConfig(isEnabled: true, endpoint: endpoint),
+                transport: stub
+            )
+        ) { recorder.note() }
+        let controller = SyncController(
+            store: store,
+            remote: mock,
+            connectivity: MockConnectivity(connected: false),
+            telemetry: telemetry
+        ) { "u1" }
+        controller.activate(userID: "u1")
+        await waitForCycle(controller)
+        // activate() runs the first offline skip; two more make three.
+        await controller.syncNow(userID: "u1")
+        await controller.syncNow(userID: "u1")
+        // Three offline skips: no distress (airplane mode is not a relay
+        // outage), no streak — but the spans still record the gap.
+        #expect(recorder.isEmpty)
+        #expect(telemetry.failureStreak == 0)
+        let spans = await buffer.spans()
+        #expect(spans.count == 3)
+        #expect(spans.allSatisfy { $0.outcome == .offline })
+    }
     @Test("a success resets the distress streak")
     func successResetsStreak() async throws {
         let context = try makeFailingContext()
@@ -153,14 +287,14 @@ struct SyncTelemetryTests {
         context.mock.fetchEntryPageHandler = nil
         await context.controller.syncNow(userID: "u1")
         #expect(context.telemetry.failureStreak == 0)
-        #expect(await context.recorder.isEmpty)
+        #expect(context.recorder.isEmpty)
         // Two more failures stay below the threshold; the third fires.
         context.mock.fetchEntryPageHandler = { _, _ in throw APIError.transport(underlying: "relay down") }
         await context.controller.syncNow(userID: "u1")
         await context.controller.syncNow(userID: "u1")
-        #expect(await context.recorder.isEmpty)
+        #expect(context.recorder.isEmpty)
         await context.controller.syncNow(userID: "u1")
-        #expect(await context.recorder.count == 1)
+        #expect(context.recorder.count == 1)
     }
 
     // MARK: - Helpers
@@ -189,7 +323,7 @@ struct SyncTelemetryTests {
                 config: SyncTelemetryConfig(isEnabled: true, endpoint: endpoint),
                 transport: stub
             )
-        ) { Task { await recorder.note() } }
+        ) { recorder.note() }
         let controller = SyncController(
             store: store,
             remote: mock,
@@ -229,48 +363,6 @@ struct SyncTelemetryTests {
                 return
             }
         }
-    }
-}
-
-final class StubTransport: OTLPTransport, @unchecked Sendable {
-    private let lock = NSLock()
-    private var storedBodies: [Data] = []
-    private var storedShouldThrow = false
-
-    var bodies: [Data] {
-        lock.withLock { storedBodies }
-    }
-
-    var shouldThrow: Bool {
-        get {
-            lock.withLock { storedShouldThrow }
-        }
-        set {
-            lock.withLock { storedShouldThrow = newValue }
-        }
-    }
-
-    func post(url: URL, body: Data) async throws {
-        let fail = lock.withLock { () -> Bool in
-            if !storedShouldThrow {
-                storedBodies.append(body)
-            }
-            return storedShouldThrow
-        }
-        if fail {
-            throw SyncExportError.rejected
-        }
-    }
-}
-
-actor DistressRecorder {
-    private(set) var count = 0
-
-    var isEmpty: Bool {
-        count < 1
-    }
-
-    func note() {
-        count += 1
+        Issue.record("waitForCycle timed out waiting for the cycle to settle")
     }
 }

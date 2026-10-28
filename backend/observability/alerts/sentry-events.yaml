@@ -10,18 +10,18 @@ alert:
   # Absolute event count is plan-dependent — resolve at apply time from the
   # Sentry quota API; this file pins the FRACTION, not the number.
   threshold:
-    fraction_of_monthly_quota: 0.7
+    fraction_of_quota: 0.7
   evaluation:
     window: 24h        # quota-burn alert: re-evaluate daily
     for: 1h            # must hold for 1h before firing (avoids one-spike pages)
   route: telegram      # INTERRUPT lane per Stage-0 routing (solo-dev, sound on)
   shed_load_at_90pct:
-    fraction_of_monthly_quota: 0.9
+    fraction_of_quota: 0.9
     action: >
       errors-only SDK — drop breadcrumbs and performance transactions,
       keep error capture (Stage-0 tripwire table:
       "errors-only, drop breadcrumbs/perf")
-  dashboard: quota-board
+  dashboard: lifio-quotas
   notes: >
     Sentry stays the errors/crashes pillar (DSN flip only). This alert watches
     quota burn, not error content. Panel/query fields are intent only — the

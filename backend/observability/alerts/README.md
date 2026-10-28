@@ -34,8 +34,10 @@
 #   http.route (templated, never raw UUIDs), http.status_class, operation.
 # Identifiers (user_id, device_id), route params, category names, entry text,
 # emails, tokens ride inside payloads/span attributes — never in labels.
-# Loki streams stay at ~{service, environment, level} (+ `operation` on the
-# error stream only); trace_id/span_id are structured fields.
+# Loki discipline: stream selection stays boring (service_name only —
+# `level` is structured metadata filtered post-selector, e.g.
+# `{service_name="lifio-backend"} | level="error"`, NOT a stream label) +
+# `operation` on the error stream only; trace_id/span_id are structured fields.
 #
 # Dashboard inventory (fixed at 5 — rebuild for Stage 2 stays bounded):
 #   1. relay health        (uptime, 5xx rate, latency from allowlisted metrics)

@@ -37,8 +37,14 @@ processors:
     limit_mib: 128
     spike_limit_mib: 32
   resource:
+    # Single `environment` key on both sides of the seam: Prometheus
+    # sanitizes dots to underscores (`deployment.environment.name` would
+    # arrive as `deployment_environment_name`), while every dashboard, alert,
+    # and SLI in backend/observability/ groups on `environment`. One key,
+    # no silent empty result sets. Rendered from the VM .env (see
+    # backend.yml: stage labels stage, backend-prod labels backend-prod).
     attributes:
-      - key: deployment.environment.name
+      - key: environment
         value: ${ENVIRONMENT:-production}
         action: upsert
   batch: {}

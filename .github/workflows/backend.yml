@@ -310,7 +310,7 @@ jobs:
           host: ${{ secrets.VM_HOST }}
           username: ${{ secrets.VM_USER }}
           key: ${{ secrets.VM_SSH_KEY }}
-          source: "backend/docker-compose.prod.yml,backend/nginx"
+          source: "backend/docker-compose.prod.yml,backend/nginx,backend/otelcol-config.yaml"
           target: "/opt/timeoflife"
           strip_components: 1
 
@@ -417,6 +417,10 @@ jobs:
             # backend from emitting. Base64 alphabet only (no $/quotes/newlines)
             # — safe unquoted like SENTRY_DSN above. Endpoint is not sensitive
             # (gateway URL) so it rides in vars; the Basic credential is secret.
+            # ENVIRONMENT feeds the Collector resource processor
+            # (deployment.environment.name) — same expression as
+            # DEPLOY_ENVIRONMENT so stage telemetry never labels as production.
+            ENVIRONMENT=${{ github.event_name == 'push' && 'production' || github.event.inputs.environment || 'stage' }}
             OTEL_ENABLED=${{ vars.OTEL_ENABLED }}
             OTEL_EXPORTER_OTLP_ENDPOINT=${{ vars.OTEL_EXPORTER_OTLP_ENDPOINT }}
             GRAFANA_CLOUD_OTLP_ENDPOINT=${{ vars.GRAFANA_CLOUD_OTLP_ENDPOINT }}
@@ -491,6 +495,16 @@ jobs:
             # fallback for local-parity deploys.
             if [ "${DEPLOY_ENVIRONMENT:-}" = "backend-prod" ] && [ -z "${DATABASE_URL:-}" ]; then
               echo "DATABASE_URL is empty in backend-prod — populate the backend-prod environment secrets (see docs/ci.md) instead of deploying prod onto VM-local Postgres"; exit 1
+            fi
+            # OTel/SaaS seam (observability-stage-1): OTEL_ENABLED outside the
+            # ParseBool vocabulary would fail config.Load and exit the whole
+            # backend at boot (not just telemetry) — reject it here instead.
+            # An endpoint without its key (or vice versa) would boot a silently
+            # degraded Collector (Basic disabled + retry off), so require the
+            # pair together. Empty/empty = Stage-0 posture, the valid default.
+            case "${OTEL_ENABLED:-}" in ''|0|1|true|false|TRUE|FALSE) ;; *) echo "OTEL_ENABLED must be empty, 0/1, or true/false (got '${OTEL_ENABLED}')"; exit 1 ;; esac
+            if [ -n "${GRAFANA_CLOUD_OTLP_ENDPOINT:-}" ] || [ -n "${GRAFANA_CLOUD_OTLP_KEY:-}" ]; then
+              [ -n "${GRAFANA_CLOUD_OTLP_ENDPOINT:-}" ] && [ -n "${GRAFANA_CLOUD_OTLP_KEY:-}" ] || { echo "GRAFANA_CLOUD_OTLP_ENDPOINT and GRAFANA_CLOUD_OTLP_KEY must be set together (or both empty)"; exit 1; }
             fi
             # Format check mirrors ParseRecoveryKeys + isZeroKey (config.go):
             # comma-separated, edge-trimmed, empties ignored, every entry 64

@@ -21,12 +21,26 @@ struct SyncTelemetryConfig: Sendable, Equatable {
 
     static func resolved(apiBaseURL: URL = AppConfig.baseURL) -> SyncTelemetryConfig {
         let raw = Bundle.main.object(forInfoDictionaryKey: "OTEL_ENABLED") as? String
+        let override = Bundle.main.object(forInfoDictionaryKey: "OTEL_EXPORTER_OTLP_ENDPOINT") as? String
         #if DEBUG
-        let isEnabled = raw != "0"
+        let isEnabled = enabled(raw: raw, overridePresent: override != nil, debug: true)
         #else
-        let isEnabled = raw == "1"
+        let isEnabled = enabled(raw: raw, overridePresent: override != nil, debug: false)
         #endif
         return SyncTelemetryConfig(isEnabled: isEnabled, endpoint: endpoint(apiBaseURL: apiBaseURL))
+    }
+
+    /// Pure enablement rule (testable without a bundle): Debug defaults on
+    /// (simulator shares the host network); Release requires an explicit
+    /// endpoint — deriving `https://<relay-host>:4318` would emit an
+    /// unusable URL (the Collector only exposes plaintext 4318 on the
+    /// compose network; TLS terminates at nginx on 443), so without an
+    /// override Release stays off rather than failing every flush silently.
+    static func enabled(raw: String?, overridePresent: Bool, debug: Bool) -> Bool {
+        if debug {
+            return raw != "0"
+        }
+        return raw == "1" && overridePresent
     }
 
     private static func endpoint(apiBaseURL: URL) -> URL {
@@ -50,13 +64,21 @@ protocol OTLPTransport: Sendable {
     func post(url: URL, body: Data) async throws
 }
 
-/// `URLSession` OTLP/HTTP transport: POSTs `application/json`, treats any
-/// non-2xx as failure (the buffer keeps the spans for the next flush).
+/// `URLSession` OTLP/HTTP transport: POSTs `application/json`, mapping
+/// permanent rejections (4xx) separately from transient failures so the
+/// exporter can drop poison batches instead of retrying them forever.
+/// Short request timeout: telemetry must never gate the sync cycle.
 struct URLSessionOTLPTransport: OTLPTransport {
     private let session: URLSession
 
-    init(session: URLSession = .shared) {
-        self.session = session
+    init(session: URLSession? = nil) {
+        if let session {
+            self.session = session
+            return
+        }
+        let config = URLSessionConfiguration.default
+        config.timeoutIntervalForRequest = 10
+        self.session = URLSession(configuration: config)
     }
 
     func post(url: URL, body: Data) async throws {
@@ -65,14 +87,27 @@ struct URLSessionOTLPTransport: OTLPTransport {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = body
         let (_, response) = try await session.data(for: request)
-        guard let http = response as? HTTPURLResponse, (200 ... 299).contains(http.statusCode) else {
+        guard let http = response as? HTTPURLResponse else {
+            throw SyncExportError.rejected
+        }
+        switch http.statusCode {
+        case 200 ... 299:
+            return
+        case 400 ... 499:
+            // Permanent: re-POSTing the same batch can never succeed.
+            throw SyncExportError.permanent(status: http.statusCode)
+        default:
             throw SyncExportError.rejected
         }
     }
 }
 
 enum SyncExportError: Error, Equatable, Sendable {
+    /// Transient: timeouts, 5xx, transport failures — keep buffering, retry.
     case rejected
+    /// Permanent: the batch itself is unacceptable (4xx) — retrying forever
+    /// wedges the buffer, so the caller drops/quarantines it instead.
+    case permanent(status: Int)
 }
 
 /// Forwards buffered `sync.session` spans to the Collector over OTLP/HTTP
@@ -104,7 +139,10 @@ final class SyncSpanExporter: Sendable {
 
     /// Sends everything buffered, in order. Returns true when there is
     /// nothing left to send (empty buffer counts as success and posts
-    /// nothing). On failure the buffer is untouched for the next attempt.
+    /// nothing). On transient failure the buffer is untouched for the next
+    /// attempt. On permanent rejection the batch is dropped with a log line:
+    /// re-POSTing poison forever would wedge the buffer at the cap and hide
+    /// every later span behind an un-exportable `dropped_spans` count.
     /// At-least-once: only the prefix read for this flush is removed.
     func flush(buffer: SyncSpanBuffer) async -> Bool {
         let spans = await buffer.spans()
@@ -112,11 +150,19 @@ final class SyncSpanExporter: Sendable {
         let dropped = await buffer.droppedSpans
         do {
             try await transport.post(url: config.endpoint, body: Self.otlpPayload(spans: spans, droppedSpans: dropped))
+        } catch let SyncExportError.permanent(status) {
+            logger.error("sync span export permanently rejected (status \(status)); dropping batch")
+            await buffer.dropFirst(spans.count)
+            await buffer.acknowledgeDropped(dropped)
+            return false
         } catch {
             logger.error("sync span export failed; spans stay buffered")
             return false
         }
         await buffer.dropFirst(spans.count)
+        // Delta semantics: only loss the SaaS never saw stays counted.
+        // Drops concurrent with this flush (appended while POSTing) survive.
+        await buffer.acknowledgeDropped(dropped)
         return true
     }
 

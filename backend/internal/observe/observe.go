@@ -103,13 +103,26 @@ func Middleware(next http.Handler) http.Handler {
 				trace.WithSpanKind(trace.SpanKindServer),
 				trace.WithAttributes(otelRequestAttrs(r)...),
 			)
-			// End before the Sentry re-panic defer runs (LIFO): the span
-			// still exports on panic, and Sentry still owns the panic event.
+			// End after the panic-enrichment defer below runs (LIFO): on the
+			// normal path the span is finished explicitly; on panic the
+			// enrichment defer fixes name/route/operation + 5xx before End
+			// exports, so panics keep route attribution and the request
+			// counter instead of exporting "<METHOD> unknown" with no sample.
+			// (Sentry still owns the panic event via its own re-panic defer,
+			// registered earlier so it runs last.)
 			defer span.End()
+			enriched := false
+			defer func() {
+				if !enriched {
+					finishOTelSpan(span, r, http.StatusInternalServerError)
+					enriched = true
+				}
+			}()
 			r = r.WithContext(ctx)
 			ww := chimw.NewWrapResponseWriter(w, r.ProtoMajor)
 			next.ServeHTTP(ww, r)
 			finishOTelSpan(span, r, ww.Status())
+			enriched = true
 			// A 5xx on a dead request context means the client went away mid-flight
 			// (nginx logs 499): nobody waited for the response, so there is no
 			// server fault to page. The handler's slog line is the record.

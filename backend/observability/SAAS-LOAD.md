@@ -17,8 +17,11 @@ dots vs underscores; fix the file, commit the fix), then load:
 
 ```bash
 for f in backend/observability/dashboards/*.json; do
-  # inject stack datasources: replace ${DS_PROMETHEUS}/${DS_LOKI}/${DS_TEMPO}
-  # with the stack's datasource UIDs (Stack → Connections → datasources)
+  # inject stack datasources: replace ${DS_PROMETHEUS}/${DS_LOKI}/${DS_TEMPO}/
+  # ${DS_GRAFANACLOUD_USAGE} with the stack's datasource UIDs (Stack →
+  # Connections → datasources; the usage datasource backs the quota board).
+  # The files declare template variables for these, so the same file works
+  # for every stack once the UIDs are substituted.
   curl -s -o /dev/null -w "$f %{http_code}\n" \
     -H "Content-Type: application/json" \
     -H "Authorization: Basic $GRAFANA_CLOUD_OTLP_KEY" \

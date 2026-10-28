@@ -21,13 +21,13 @@ alert:
     action: >
       cut the `operation` label, coarsen `http.status_class`
       (Stage-0/Stage-1 tripwire table: "cut `operation`, coarsen status")
-  dashboard: quota-board
+  dashboard: lifio-quotas
   # Illustrative query intent — allowlisted attributes ONLY
   # (service.name, service.version, environment, http.method,
   #  http.route templated, http.status_class, operation).
   # No user_id / device_id / raw UUIDs / category names / entry text, ever.
   query_intent: >
-    count(lifio_http_requests_total)
+    count(http_server_requests_total)
     by (service_name, service_version, environment, http_method,
         http_route, http_status_class, operation)
     — series count derived from the group cardinality, not from a new label.

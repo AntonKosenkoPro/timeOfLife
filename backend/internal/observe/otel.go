@@ -31,6 +31,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -38,6 +39,7 @@ import (
 	"go.opentelemetry.io/otel/codes"
 	otlploggrpc "go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploggrpc"
 	otlpmetricgrpc "go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetricgrpc"
+	"go.opentelemetry.io/otel/exporters/otlp/otlptrace"
 	otlptracegrpc "go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
 	otellog "go.opentelemetry.io/otel/log"
 	"go.opentelemetry.io/otel/metric"
@@ -149,26 +151,17 @@ func InitOTel(cfg OTelConfig) error {
 		return fmt.Errorf("otel: resource: %w", err)
 	}
 
-	traceExp, err := otlptracegrpc.New(ctx,
-		otlptracegrpc.WithEndpoint(endpoint),
-		otlptracegrpc.WithInsecure(),
-	)
+	traceExp, err := newTraceExporter(ctx, endpoint)
 	if err != nil {
 		return fmt.Errorf("otel: trace exporter: %w", err)
 	}
-	metricExp, err := otlpmetricgrpc.New(ctx,
-		otlpmetricgrpc.WithEndpoint(endpoint),
-		otlpmetricgrpc.WithInsecure(),
-	)
+	metricExp, err := newMetricExporter(ctx, endpoint)
 	if err != nil {
-		return fmt.Errorf("otel: metric exporter: %w", err)
+		return fmt.Errorf("otel: metric exporter: %w", errors.Join(err, traceExp.Shutdown(ctx)))
 	}
-	logExp, err := otlploggrpc.New(ctx,
-		otlploggrpc.WithEndpoint(endpoint),
-		otlploggrpc.WithInsecure(),
-	)
+	logExp, err := newLogExporter(ctx, endpoint)
 	if err != nil {
-		return fmt.Errorf("otel: log exporter: %w", err)
+		return fmt.Errorf("otel: log exporter: %w", errors.Join(err, traceExp.Shutdown(ctx), metricExp.Shutdown(ctx)))
 	}
 
 	tp := sdktrace.NewTracerProvider(
@@ -209,6 +202,47 @@ func ShutdownOTel(ctx context.Context) error {
 // instruments. Production passes OTLP-backed providers via InitOTel; tests
 // pass in-memory ones. It returns an error only for invalid instrument
 // definitions (a programming bug, not a runtime condition).
+// grpcEndpointOpts accepts a bare host:port (compose default) or a URL
+// (the shape operators copy from OTel docs): a scheme selects WithEndpointURL,
+// otherwise WithEndpoint. Plain-HTTP URLs stay insecure (the Collector serves
+// plaintext OTLP; TLS terminates at nginx on 443).
+func traceEndpointOpts(endpoint string) []otlptracegrpc.Option {
+	if strings.HasPrefix(endpoint, "http://") || strings.HasPrefix(endpoint, "https://") {
+		return []otlptracegrpc.Option{otlptracegrpc.WithEndpointURL(endpoint)}
+	}
+	return []otlptracegrpc.Option{otlptracegrpc.WithEndpoint(endpoint), otlptracegrpc.WithInsecure()}
+}
+
+func metricEndpointOpts(endpoint string) []otlpmetricgrpc.Option {
+	if strings.HasPrefix(endpoint, "http://") || strings.HasPrefix(endpoint, "https://") {
+		return []otlpmetricgrpc.Option{otlpmetricgrpc.WithEndpointURL(endpoint)}
+	}
+	return []otlpmetricgrpc.Option{otlpmetricgrpc.WithEndpoint(endpoint), otlpmetricgrpc.WithInsecure()}
+}
+
+func logEndpointOpts(endpoint string) []otlploggrpc.Option {
+	if strings.HasPrefix(endpoint, "http://") || strings.HasPrefix(endpoint, "https://") {
+		return []otlploggrpc.Option{otlploggrpc.WithEndpointURL(endpoint)}
+	}
+	return []otlploggrpc.Option{otlploggrpc.WithEndpoint(endpoint), otlploggrpc.WithInsecure()}
+}
+
+func newTraceExporter(ctx context.Context, endpoint string) (*otlptrace.Exporter, error) {
+	return otlptracegrpc.New(ctx, traceEndpointOpts(endpoint)...)
+}
+
+func newMetricExporter(ctx context.Context, endpoint string) (*otlpmetricgrpc.Exporter, error) {
+	return otlpmetricgrpc.New(ctx, metricEndpointOpts(endpoint)...)
+}
+
+func newLogExporter(ctx context.Context, endpoint string) (*otlploggrpc.Exporter, error) {
+	return otlploggrpc.New(ctx, logEndpointOpts(endpoint)...)
+}
+
+// initTelemetry installs already-built providers and creates the
+// instruments. Production passes OTLP-backed providers via InitOTel; tests
+// pass in-memory ones. It returns an error only for invalid instrument
+// definitions (a programming bug, not a runtime condition).
 func initTelemetry(tp *sdktrace.TracerProvider, mp *sdkmetric.MeterProvider, lp *sdklog.LoggerProvider) error {
 	otelTracer = tp.Tracer(otelScopeName)
 	meter := mp.Meter(otelScopeName)
@@ -238,25 +272,44 @@ func initTelemetry(tp *sdktrace.TracerProvider, mp *sdkmetric.MeterProvider, lp 
 	return nil
 }
 
+// boundedMethod normalizes the HTTP method for labels: known verbs pass
+// through, anything else (scanner tokens, garbage) becomes "HTTP" — the
+// same fallback the OTel semconv server helper uses — so the method label
+// can never explode series cardinality. Route and operation are already
+// bounded (templated route / closed operation map).
+func boundedMethod(method string) string {
+	switch method {
+	case http.MethodGet, http.MethodPost, http.MethodPut, http.MethodPatch,
+		http.MethodDelete, http.MethodHead, http.MethodOptions, http.MethodTrace,
+		http.MethodConnect:
+		return method
+	default:
+		return "HTTP"
+	}
+}
+
 // otelRequestAttrs builds the span-start attributes. Only http.method is
 // known before routing (chi matches the route inside next.ServeHTTP); the
 // templated route, status class, and operation land in finishOTelSpan once
 // the WrapResponseWriter has seen the outcome.
 func otelRequestAttrs(r *http.Request) []attribute.KeyValue {
-	return []attribute.KeyValue{attribute.String("http.method", r.Method)}
+	return []attribute.KeyValue{attribute.String("http.method", boundedMethod(r.Method))}
 }
 
 // finishOTelSpan completes a server span after the handler ran: it fixes the
 // span name to "{method} {route template}" (the only reliable fixed-name
 // path — routeTemplate() over chi.RouteContext), attaches the allowlisted
 // attributes, marks 5xx, and records the request counter. All attribute keys
-// come from MetricLabelAllowlist — never identifiers.
+// come from MetricLabelAllowlist — never identifiers. The method is bounded
+// (see boundedMethod) so scanner traffic cannot mint new series.
 func finishOTelSpan(span trace.Span, r *http.Request, status int) {
+	method := boundedMethod(r.Method)
 	pattern := routeTemplate(r)
 	op := operationForRoute(r.Method, pattern)
 	class := statusClass(status)
-	span.SetName(r.Method + " " + pattern)
+	span.SetName(method + " " + pattern)
 	span.SetAttributes(
+		attribute.String("http.method", method),
 		attribute.String("http.route", pattern),
 		attribute.String("http.status_class", class),
 		attribute.String("operation", op),
@@ -268,7 +321,7 @@ func finishOTelSpan(span trace.Span, r *http.Request, status int) {
 		return
 	}
 	httpRequestCounter.Add(r.Context(), 1, metric.WithAttributes(
-		attribute.String("http.method", r.Method),
+		attribute.String("http.method", method),
 		attribute.String("http.route", pattern),
 		attribute.String("http.status_class", class),
 		attribute.String("operation", op),
@@ -327,7 +380,10 @@ func (h *otlpHandler) Handle(ctx context.Context, rec slog.Record) error {
 		fields[key] = slogValueForPayload(v)
 	}
 	for _, a := range h.attrs {
-		collect(h.prefix+a.Key, a.Value)
+		// Already prefixed at bind time (WithAttrs snapshots h.prefix then),
+		// so use the key as-is: re-prefixing here would double-apply groups
+		// (g.g.k) and drag pre-group attrs into later groups.
+		collect(a.Key, a.Value)
 	}
 	rec.Attrs(func(a slog.Attr) bool {
 		collectGroup(h.prefix, a, collect)
@@ -456,8 +512,15 @@ func (f *fanoutHandler) Enabled(ctx context.Context, l slog.Level) bool {
 }
 
 // Handle writes to both sides; OTLP failure never drops the stderr line.
+// Each side is gated on its own Enabled: the stdlib contract only calls
+// Handle when Enabled is true, and the kept handler (Level: Info) must not
+// inherit the bridge's always-true gate, or sub-Info records would print.
 func (f *fanoutHandler) Handle(ctx context.Context, rec slog.Record) error {
-	return errors.Join(f.kept.Handle(ctx, rec), f.otlp.Handle(ctx, rec))
+	var keptErr error
+	if f.kept.Enabled(ctx, rec.Level) {
+		keptErr = f.kept.Handle(ctx, rec)
+	}
+	return errors.Join(keptErr, f.otlp.Handle(ctx, rec))
 }
 
 // WithAttrs fans out to both handlers.
