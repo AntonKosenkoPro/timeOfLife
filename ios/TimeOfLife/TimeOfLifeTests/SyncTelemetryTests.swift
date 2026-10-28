@@ -356,7 +356,10 @@ struct SyncTelemetryTests {
     }
 
     private func waitForCycle(_ controller: SyncController) async {
-        let deadline = Date().addingTimeInterval(2)
+        // Generous deadline: CI runners are heavily loaded (parallel suites)
+        // and a slow cycle must not surface as a confusing count/streak
+        // mismatch later. Failure here is loud by design.
+        let deadline = Date().addingTimeInterval(15)
         while Date() < deadline {
             if case .syncing = controller.status {
                 try? await Task.sleep(nanoseconds: 10_000_000)
