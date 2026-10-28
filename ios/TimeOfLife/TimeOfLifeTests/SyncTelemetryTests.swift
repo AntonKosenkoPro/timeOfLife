@@ -214,6 +214,7 @@ struct SyncTelemetryTests {
         let buffer = SyncSpanBuffer(directory: temporaryDirectory())
         let stub = StubTransport()
         stub.shouldThrow = true
+        stub.shouldThrow = true
         let endpoint = try #require(URL(string: "http://127.0.0.1:4318/v1/traces"))
         let telemetry = SyncTelemetry(
             buffer: buffer,
