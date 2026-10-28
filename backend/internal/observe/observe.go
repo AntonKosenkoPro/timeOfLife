@@ -24,6 +24,7 @@ import (
 	"github.com/getsentry/sentry-go"
 	"github.com/go-chi/chi/v5"
 	chimw "github.com/go-chi/chi/v5/middleware"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // sentryServiceName is the allowlisted service label attached to Sentry events.
@@ -74,29 +75,62 @@ func FlushSentry(timeout time.Duration) bool {
 // Middleware captures panics and HTTP 5xx for Sentry. It must stay registered
 // INSIDE (after) chi's Recoverer: on panic it captures the event and
 // re-panics so Recoverer still renders the 500 response.
+//
+// Observability Stage 1: the same middleware also starts the OTel server
+// span (reusing routeTemplate()/operationForRoute() — never raw paths) and
+// records the request counter, both skipped for /health (quiet health
+// endpoint: no span, no per-request metric series — the health series
+// increments instead). With Sentry and OTel both disabled it passes requests
+// through untouched (zero behavior change).
 func Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !sentryEnabled.Load() {
+		sentryOn := sentryEnabled.Load()
+		otelOn := otelEnabled.Load()
+		if !sentryOn && !otelOn {
 			next.ServeHTTP(w, r)
 			return
 		}
-		defer func() {
-			if rec := recover(); rec != nil {
-				captureSentryPanic(r, rec)
-				panic(rec)
+		if sentryOn {
+			defer func() {
+				if rec := recover(); rec != nil {
+					captureSentryPanic(r, rec)
+					panic(rec)
+				}
+			}()
+		}
+		if otelOn && r.URL.Path != "/health" {
+			ctx, span := otelTracer.Start(r.Context(), r.Method+" unknown",
+				trace.WithSpanKind(trace.SpanKindServer),
+				trace.WithAttributes(otelRequestAttrs(r)...),
+			)
+			// End before the Sentry re-panic defer runs (LIFO): the span
+			// still exports on panic, and Sentry still owns the panic event.
+			defer span.End()
+			r = r.WithContext(ctx)
+			ww := chimw.NewWrapResponseWriter(w, r.ProtoMajor)
+			next.ServeHTTP(ww, r)
+			finishOTelSpan(span, r, ww.Status())
+			// A 5xx on a dead request context means the client went away mid-flight
+			// (nginx logs 499): nobody waited for the response, so there is no
+			// server fault to page. The handler's slog line is the record.
+			// Status 500 is excluded on purpose: handlers report those via
+			// ReportError (with the error object attached), so capturing them here
+			// too would file every handled failure as two separate Sentry issues.
+			// This path backstops the rest: 503s, timeout 504s, and any future
+			// 5xx written outside the helper.
+			if sentryOn && ww.Status() > 500 && !errors.Is(r.Context().Err(), context.Canceled) {
+				captureSentry5xx(r, ww.Status())
 			}
-		}()
+			return
+		}
+		if otelOn {
+			// Quiet health endpoint: no span, no per-request metric — the
+			// single health-check series increments instead.
+			otelHealthCount.Add(1)
+		}
 		ww := chimw.NewWrapResponseWriter(w, r.ProtoMajor)
 		next.ServeHTTP(ww, r)
-		// A 5xx on a dead request context means the client went away mid-flight
-		// (nginx logs 499): nobody waited for the response, so there is no
-		// server fault to page. The handler's slog line is the record.
-		// Status 500 is excluded on purpose: handlers report those via
-		// ReportError (with the error object attached), so capturing them here
-		// too would file every handled failure as two separate Sentry issues.
-		// This path backstops the rest: 503s, timeout 504s, and any future
-		// 5xx written outside the helper.
-		if ww.Status() > 500 && !errors.Is(r.Context().Err(), context.Canceled) {
+		if sentryOn && ww.Status() > 500 && !errors.Is(r.Context().Err(), context.Canceled) {
 			captureSentry5xx(r, ww.Status())
 		}
 	})

@@ -107,6 +107,40 @@ func TestConfig_Load_Branches(t *testing.T) {
 		}
 	})
 
+	t.Run("otel defaults to stage-0 posture", func(t *testing.T) {
+		setRequired(t)
+		cfg, err := Load()
+		if err != nil {
+			t.Fatalf("Load: %v", err)
+		}
+		if cfg.OTELEnabled {
+			t.Error("expected OTel disabled by default")
+		}
+		if cfg.OTELExporterOTLPEndpoint != "" || cfg.GrafanaCloudOTLPEndpoint != "" || cfg.GrafanaCloudOTLPKey != "" {
+			t.Errorf("expected empty OTel/SaaS endpoints by default, got %+v", cfg)
+		}
+	})
+
+	t.Run("otel overrides", func(t *testing.T) {
+		setRequired(t)
+		t.Setenv("OTEL_ENABLED", "1")
+		t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "otel-collector:4317")
+		t.Setenv("GRAFANA_CLOUD_OTLP_ENDPOINT", "https://otlp-gateway.example.net/otlp")
+		t.Setenv("GRAFANA_CLOUD_OTLP_KEY", "aW5zdGFuY2UtaWQ6YXBpLWtleQ==")
+		cfg, err := Load()
+		if err != nil {
+			t.Fatalf("Load: %v", err)
+		}
+		if !cfg.OTELEnabled {
+			t.Error("expected OTel enabled with OTEL_ENABLED=1")
+		}
+		if cfg.OTELExporterOTLPEndpoint != "otel-collector:4317" {
+			t.Errorf("expected collector endpoint, got %q", cfg.OTELExporterOTLPEndpoint)
+		}
+		if cfg.GrafanaCloudOTLPEndpoint == "" || cfg.GrafanaCloudOTLPKey == "" {
+			t.Error("expected Grafana Cloud endpoint + key to pass through")
+		}
+	})
 	t.Run("missing required", func(t *testing.T) {
 		for _, missing := range []string{"DATABASE_URL", "JWT_SECRET", "EMAIL_BACKEND", "REFRESH_RECOVERY_KEYS", "ACCOUNT_STATUS_SECRET"} {
 			setRequired(t)
@@ -136,6 +170,7 @@ func TestConfig_Load_Branches(t *testing.T) {
 			{"HTTP_REQUEST_TIMEOUT", "x"},
 			{"SHUTDOWN_TIMEOUT", "x"},
 			{"SHUTDOWN_TIMEOUT", "-1m"},
+			{"OTEL_ENABLED", "maybe"},
 		}
 		for _, c := range cases {
 			setRequired(t)

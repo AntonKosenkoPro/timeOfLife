@@ -1,0 +1,79 @@
+# OTel Collector config — observability Stage 1 (VM forwarding only).
+#
+# Pipeline: OTLP gRPC+HTTP receivers (Go SDK speaks gRPC, future iOS spans
+# speak OTLP/HTTP) → memory-limiter + resource + batch → Grafana Cloud
+# otlphttp exporters. The Collector buffers SECONDS of telemetry and is never
+# a store of record: history lives in the SaaS backend (Stage 1) or Stage-2
+# self-hosting, never on the app VM. Disk bounded by construction: no filelog
+# receivers, no file storage extension, queueing disabled on the SaaS
+# exporters (failures drop with an error log instead of growing a backlog).
+#
+# SaaS seam: changing vendors = changing GRAFANA_CLOUD_OTLP_ENDPOINT (+ key)
+# and restarting this service. No app deploys, no SDK swaps (D1).
+#
+# Disabled posture (default): OTEL_ENABLED=0 means the backend emits nothing,
+# so these exporters stay idle. GRAFANA_CLOUD_OTLP_ENDPOINT ships empty and
+# falls back to a discard sentinel (port 9: connection refused, nothing
+# listens) so the Collector still starts healthy with zero series emitted —
+# an empty endpoint would fail exporter validation and crash-loop the
+# service. NEVER commit a real endpoint or key here: both arrive via the VM
+# .env / CI secrets (R1).
+#
+# Grafana Cloud auth: GRAFANA_CLOUD_OTLP_KEY must be the base64 of
+# "<instanceID>:<apiToken>" (Basic), per the Cloud OTLP docs — re-verify the
+# exact shape when provisioning (§4) before enabling.
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 128
+    spike_limit_mib: 32
+  resource:
+    attributes:
+      - key: deployment.environment.name
+        value: ${ENVIRONMENT:-production}
+        action: upsert
+  batch: {}
+
+exporters:
+  # Single OTLP/HTTP exporter serving all three signal pipelines. Traces,
+  # metrics, and logs fan out to the Grafana Cloud OTLP gateway, which routes
+  # them to Tempo / Mimir / Loki. Loki labels stay ~5 boring keys (D3):
+  # service.name + deployment.environment.name arrive as resource attributes,
+  # level/operation/trace_id/span_id arrive on the log records themselves —
+  # identifiers (user_id, device_id), tokens, and entry text ride in payloads
+  # only, never as labels (R1).
+  otlphttp/grafana:
+    endpoint: ${GRAFANA_CLOUD_OTLP_ENDPOINT:-http://127.0.0.1:9}
+    headers:
+      Authorization: Basic ${GRAFANA_CLOUD_OTLP_KEY:-disabled}
+    sending_queue:
+      enabled: false
+    retry_on_failure:
+      enabled: false
+
+service:
+  telemetry:
+    logs:
+      level: info
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, resource, batch]
+      exporters: [otlphttp/grafana]
+    metrics:
+      receivers: [otlp]
+      processors: [memory_limiter, resource, batch]
+      exporters: [otlphttp/grafana]
+    logs:
+      receivers: [otlp]
+      processors: [memory_limiter, resource, batch]
+      exporters: [otlphttp/grafana]

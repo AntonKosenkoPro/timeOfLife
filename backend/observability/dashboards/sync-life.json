@@ -1,0 +1,6 @@
+{"__comment": "lifio dashboard 2/5: sync life. INTENT FILE (§4.2 SaaS half at deploy). iOS sync.session spans arrive as Tempo traces (service lifio-ios); success-rate recording rules land once spanmetrics/exemplars exist — until then this board reads spans directly. Queries use span attributes only (counts/durations — never identifiers).", "schemaVersion": 39, "templating": {"list": []}, "timezone": "browser", "title": "Lifio 2 — Sync life", "uid": "lifio-sync-life", "version": 1,
+  "panels": [
+    {"datasource": "${DS_TEMPO}", "gridPos": {"h": 8, "w": 24, "x": 0, "y": 0}, "id": 1, "targets": [{"query": "{resource.service.name=\"lifio-ios\" && name=\"sync.session\"}", "queryType": "traceql", "refId": "A"}], "title": "Recent sync.session spans", "type": "table"},
+    {"datasource": "${DS_TEMPO}", "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8}, "id": 2, "targets": [{"query": "{resource.service.name=\"lifio-ios\" && name=\"sync.session\" && status=error}", "queryType": "traceql", "refId": "A"}], "title": "Failed sync sessions", "type": "table"},
+    {"gridPos": {"h": 8, "w": 12, "x": 12, "y": 8}, "id": 3, "options": {"content": "Future (recording rules, §4.4):\n- `lifio:sync_success_rate`\n- `lifio:sync_cycle_p95_seconds`\nDistress (Sentry) and volume (here) stay separate channels by design.", "mode": "markdown"}, "title": "SLI note", "type": "text"}
+  ]}

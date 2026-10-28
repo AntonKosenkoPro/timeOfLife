@@ -1,0 +1,35 @@
+# Tripwire: Grafana Cloud logs-ingest quota burn (GB per billing period)
+# schema: lifio.alert/v1 (schema_version: 1) — repo-kept intent; SaaS rules converge FROM this file.
+# Apply is MANUAL: plan-only CI (terraform-provider-grafana later); never console-edited.
+schema_version: 1
+alert:
+  name: grafana-logs-70pct
+  signal: grafana_cloud_logs_ingest_gb
+  tier: grafana-logs
+  # 70% of the plan's logs-ingest bytes consumed in the current billing period.
+  # Absolute GB is plan-dependent — resolve at apply time from the Grafana
+  # Cloud quota API; this file pins the FRACTION, not the number.
+  threshold:
+    fraction_of_monthly_quota: 0.7
+  evaluation:
+    window: 24h        # quota-burn alert: re-evaluate daily
+    for: 1h
+  route: telegram      # 70% crossings route to the existing Telegram channel
+  shed_load_at_90pct:
+    fraction_of_monthly_quota: 0.9
+    action: >
+      retention 30d -> 7d, drop DEBUG (Stage-0/Stage-1 tripwire table:
+      "retention 30->7d, drop DEBUG"); stdout drops to ERROR-only after the
+      migration overlap window closes (D7-risk mitigation)
+  dashboard: quota-board
+  # Loki stream intent — boring labels ONLY
+  # ({service, environment, level} + `operation` on the error stream only).
+  # trace_id / span_id ride as structured fields, never as labels.
+  query_intent: >
+    sum by (service, environment, level)
+    (rate({service="lifio-relay"} |= `` [1h]))
+    — volume accounting per stream; no high-cardinality keys.
+  notes: >
+    /health emits nothing per-request in both paths, so health checks never
+    contribute to ingest. Time-boxed stdout+OTLP overlap (one release) is the
+    only sanctioned double-emit window.

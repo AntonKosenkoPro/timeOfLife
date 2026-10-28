@@ -412,6 +412,15 @@ jobs:
             # Error reporting (observability-stage-0): empty keeps Sentry
             # disabled; set the secret to enable panic/5xx capture.
             SENTRY_DSN=${{ secrets.SENTRY_DSN }}
+            # OTel pipeline (observability-stage-1): empty keeps the Collector
+            # exporters on the discard sentinel and OTEL_ENABLED=0 keeps the
+            # backend from emitting. Base64 alphabet only (no $/quotes/newlines)
+            # — safe unquoted like SENTRY_DSN above. Endpoint is not sensitive
+            # (gateway URL) so it rides in vars; the Basic credential is secret.
+            OTEL_ENABLED=${{ vars.OTEL_ENABLED }}
+            OTEL_EXPORTER_OTLP_ENDPOINT=${{ vars.OTEL_EXPORTER_OTLP_ENDPOINT }}
+            GRAFANA_CLOUD_OTLP_ENDPOINT=${{ vars.GRAFANA_CLOUD_OTLP_ENDPOINT }}
+            GRAFANA_CLOUD_OTLP_KEY=${{ secrets.GRAFANA_CLOUD_OTLP_KEY }}
             # Refresh recovery (fix-refresh-response-loss): comma-separated 64-hex
             # AES-256 keys, first = primary. The backend fail-fasts without it,
             # so this secret must exist before the new binary deploys. Rotation:

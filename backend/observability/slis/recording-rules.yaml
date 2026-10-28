@@ -1,0 +1,68 @@
+# SLI recording rules (draft) — schema: lifio.sli/v1 (schema_version: 1).
+#
+# *** SLO THRESHOLDS UNSET — DO NOT ALERT ON THESE ***
+# Recording rules only (no alert rules). SLO numbers land after >= 2 weeks of
+# stable traffic sets a baseline; the SLO-gate task stays OPEN until then.
+# The weekly digest reads these SLIs. Vendor-neutral Prometheus recording-rule
+# shape; metric names are illustrative and converge with the OTel middleware
+# label set at §4.1/§4.2 implement time.
+#
+# Label discipline: group/filter by allowlisted attributes ONLY —
+# service.name, service.version, environment, http.method, http.route
+# (templated, never raw UUIDs), http.status_class, operation.
+schema_version: 1
+groups:
+  - name: lifio-sli
+    interval: 1m
+    rules:
+      # Share of off-box /health checks succeeding (INTERRUPT source of truth).
+      - record: lifio:uptime_pct
+        expr: >
+          avg_over_time(lifio_health_check_up{service_name="lifio-relay"}[7d])
+
+      # 5xx rate per operation (otp_verify, sync_push, ...). Uses the templated
+      # http.route + operation labels — never raw paths or user identifiers.
+      - record: lifio:http_5xx_rate_by_operation
+        expr: >
+          sum by (operation) (
+            rate(lifio_http_requests_total{
+              service_name="lifio-relay",
+              http_status_class="5xx"
+            }[5m])
+          )
+          /
+          sum by (operation) (
+            rate(lifio_http_requests_total{
+              service_name="lifio-relay"
+            }[5m])
+          )
+
+      # Share of iOS sync.session spans completing with outcome=success
+      # (vs failure/cancelled) over a trailing week.
+      - record: lifio:sync_success_rate
+        expr: >
+          sum (
+            rate(lifio_sync_session_total{
+              service_name="lifio-ios",
+              outcome="success"
+            }[7d])
+          )
+          /
+          sum (
+            rate(lifio_sync_session_total{
+              service_name="lifio-ios"
+            }[7d])
+          )
+
+      # p95 sync cycle duration (seconds) from the sync.session span durations.
+      # Histogram buckets stay behind the series-budget math (D7-risk); this
+      # rule assumes the agreed bucket set once counters+traces ship first.
+      - record: lifio:sync_cycle_p95_seconds
+        expr: >
+          histogram_quantile(0.95,
+            sum by (le) (
+              rate(lifio_sync_cycle_duration_seconds_bucket{
+                service_name="lifio-ios"
+              }[7d])
+            )
+          )

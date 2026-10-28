@@ -60,6 +60,27 @@ func run() int {
 		slog.Info("sentry error reporting enabled")
 	}
 
+	// OTel pipeline (observability Stage 1): empty endpoint or OTEL_ENABLED=0
+	// = Stage-0 posture, zero behavior change. Init failure is non-fatal:
+	// the server continues on Sentry + stdout alone. On success InitOTel
+	// installs the slog fan-out (stderr/stdout kept, OTLP export added).
+	if err := observe.InitOTel(observe.OTelConfig{
+		Enabled:        cfg.OTELEnabled,
+		Endpoint:       cfg.OTELExporterOTLPEndpoint,
+		ServiceVersion: version,
+	}); err != nil {
+		slog.Error("failed to initialize otel, continuing without telemetry", "error", err)
+	} else if observe.OTelEnabled() {
+		slog.Info("otel telemetry enabled", "endpoint", cfg.OTELExporterOTLPEndpoint)
+		defer func() {
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if err := observe.ShutdownOTel(shutdownCtx); err != nil {
+				slog.Error("otel shutdown failed", "error", err)
+			}
+		}()
+	}
+
 	ctx := context.Background()
 
 	store, err := db.NewPostgresStore(ctx, cfg.DatabaseURL)

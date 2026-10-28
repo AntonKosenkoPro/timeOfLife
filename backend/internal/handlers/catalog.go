@@ -74,7 +74,7 @@ func (h *Handler) CreateCategory(w http.ResponseWriter, r *http.Request) {
 	}
 	var req categoryCreateReq
 	if err := decodeJSON(r, &req); err != nil {
-		h.logger.Warn("invalid create category body", "error", err)
+		h.logger.WarnContext(r.Context(), "invalid create category body", "error", err)
 		writeError(w, http.StatusBadRequest, "invalid_body", "Invalid request body", nil)
 		return
 	}
@@ -99,7 +99,7 @@ func (h *Handler) CreateCategory(w http.ResponseWriter, r *http.Request) {
 	if !isNew {
 		status = http.StatusOK
 	}
-	h.logger.Info("category saved", "userID", userID, "categoryID", created.ID, "created", isNew)
+	h.logger.InfoContext(r.Context(), "category saved", "userID", userID, "categoryID", created.ID, "created", isNew)
 	writeJSON(w, status, created)
 }
 
@@ -125,7 +125,7 @@ func (h *Handler) UpdateCategory(w http.ResponseWriter, r *http.Request) {
 	}
 	var req categoryUpdateReq
 	if err := decodeJSON(r, &req); err != nil {
-		h.logger.Warn("invalid update category body", "error", err)
+		h.logger.WarnContext(r.Context(), "invalid update category body", "error", err)
 		writeError(w, http.StatusBadRequest, "invalid_body", "Invalid request body", nil)
 		return
 	}

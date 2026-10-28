@@ -102,7 +102,7 @@ func (h *Handler) DeleteAccount(w http.ResponseWriter, r *http.Request) {
 		// Required revocable material is checked BEFORE purge: absence is
 		// an explicit precondition failure, never a silent skip.
 		if h.appleClient == nil || h.appleTokenKeys == nil {
-			h.logger.Error("apple revocation unconfigured; refusing account deletion without purge",
+			h.logger.ErrorContext(r.Context(), "apple revocation unconfigured; refusing account deletion without purge",
 				"userID", user.ID)
 			writeError(w, http.StatusServiceUnavailable, "apple_not_configured",
 				"Apple unlinking is not configured; account deletion is unavailable", nil)
@@ -144,7 +144,7 @@ func (h *Handler) DeleteAccount(w http.ResponseWriter, r *http.Request) {
 		// Email-only deletion. An Apple account always carries a
 		// revocation job here: the purge transaction requires the vault
 		// row under its lock (missing → 409 above, rolled back).
-		h.logger.Info("account deleted", "userID", user.ID, "hadApple", hasApple)
+		h.logger.InfoContext(r.Context(), "account deleted", "userID", user.ID, "hadApple", hasApple)
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
@@ -159,24 +159,24 @@ func (h *Handler) DeleteAccount(w http.ResponseWriter, r *http.Request) {
 	plain, err := h.appleTokenKeys.Open(res.SealedAppleRefresh, apple.VaultAAD(res.AuthLineage, res.AuthTime))
 	if err != nil {
 		h.failDeletionJob(bookCtx, res, "decrypt sealed apple credential: "+err.Error())
-		h.logger.Warn("account purged; apple revocation pending (decrypt failed)",
+		h.logger.WarnContext(r.Context(), "account purged; apple revocation pending (decrypt failed)",
 			"userID", user.ID, "job_id", res.RevocationJobID)
 		writeJSON(w, http.StatusAccepted, accountDeletedPendingResponse{AccountDeleted: true, AppleRevocationPending: true})
 		return
 	}
 	if err := h.appleClient.RevokeToken(bookCtx, string(plain)); err != nil {
 		h.failDeletionJob(bookCtx, res, "apple revoke: "+err.Error())
-		h.logger.Warn("account purged; apple revocation pending",
+		h.logger.WarnContext(r.Context(), "account purged; apple revocation pending",
 			"userID", user.ID, "job_id", res.RevocationJobID, "error", err)
 		writeJSON(w, http.StatusAccepted, accountDeletedPendingResponse{AccountDeleted: true, AppleRevocationPending: true})
 		return
 	}
 	if err := h.store.CompleteRevocationJob(bookCtx, res.RevocationJobID); err != nil {
 		// Revocation was acknowledged; the worker redrives completion.
-		h.logger.Error("apple revocation acknowledged but job removal failed",
+		h.logger.ErrorContext(r.Context(), "apple revocation acknowledged but job removal failed",
 			"userID", user.ID, "job_id", res.RevocationJobID, "error", err)
 	}
-	h.logger.Info("account deleted with apple unlinking", "userID", user.ID)
+	h.logger.InfoContext(r.Context(), "account deleted with apple unlinking", "userID", user.ID)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -186,7 +186,7 @@ func (h *Handler) DeleteAccount(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) failDeletionJob(ctx context.Context, res db.PurgeResult, msg string) {
 	next := time.Now().Add(apple.RetryAfter(1))
 	if err := h.store.FailRevocationJob(ctx, res.RevocationJobID, msg, next); err != nil {
-		h.logger.Error("could not reschedule apple revocation job", "job_id", res.RevocationJobID, "error", err)
+		h.logger.ErrorContext(ctx, "could not reschedule apple revocation job", "job_id", res.RevocationJobID, "error", err)
 	}
 }
 
@@ -235,7 +235,7 @@ func (h *Handler) AccountStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	userID, err := h.statusService.Validate(tokenStr)
 	if err != nil {
-		h.logger.Warn("invalid account status credential")
+		h.logger.WarnContext(r.Context(), "invalid account status credential")
 		writeError(w, http.StatusUnauthorized, "unauthorized", "Invalid or expired status credential", nil)
 		return
 	}
@@ -308,7 +308,7 @@ func (h *Handler) AppleDeletionCredential(w http.ResponseWriter, r *http.Request
 
 	var req appleDeletionCredentialReq
 	if err := decodeJSON(r, &req); err != nil {
-		h.logger.Warn("invalid deletion credential body", "error", err)
+		h.logger.WarnContext(r.Context(), "invalid deletion credential body", "error", err)
 		writeError(w, http.StatusBadRequest, "invalid_body", "Invalid request body", nil)
 		return
 	}
@@ -319,7 +319,7 @@ func (h *Handler) AppleDeletionCredential(w http.ResponseWriter, r *http.Request
 
 	claims, err := h.appleVerifier.Verify(ctx, req.IdentityToken)
 	if err != nil {
-		h.logger.Warn("deletion credential identity verification failed", "error", err)
+		h.logger.WarnContext(r.Context(), "deletion credential identity verification failed", "error", err)
 		writeError(w, http.StatusUnauthorized, "invalid_apple_token",
 			"Invalid Apple identity token", nil)
 		return
@@ -327,7 +327,7 @@ func (h *Handler) AppleDeletionCredential(w http.ResponseWriter, r *http.Request
 	if claims.Sub != *user.AppleSubject {
 		// A different Apple identity authorizes nothing here: no upsert, no
 		// session, no deletion — the request simply fails.
-		h.logger.Warn("deletion credential subject mismatch", "userID", user.ID)
+		h.logger.WarnContext(r.Context(), "deletion credential subject mismatch", "userID", user.ID)
 		writeError(w, http.StatusUnauthorized, "invalid_apple_token",
 			"Apple identity does not match this account", nil)
 		return
@@ -336,18 +336,18 @@ func (h *Handler) AppleDeletionCredential(w http.ResponseWriter, r *http.Request
 	tr, err := h.appleClient.ExchangeCode(ctx, req.AuthorizationCode)
 	if err != nil {
 		if errors.Is(err, apple.ErrInvalidGrant) {
-			h.logger.Warn("deletion credential code rejected", "userID", user.ID)
+			h.logger.WarnContext(r.Context(), "deletion credential code rejected", "userID", user.ID)
 			writeError(w, http.StatusUnauthorized, "invalid_apple_token",
 				"Invalid Apple authorization code", nil)
 			return
 		}
-		h.logger.Warn("deletion credential exchange unavailable", "userID", user.ID, "error", err)
+		h.logger.WarnContext(r.Context(), "deletion credential exchange unavailable", "userID", user.ID, "error", err)
 		writeError(w, http.StatusServiceUnavailable, "apple_unavailable",
 			"Apple is temporarily unavailable. Please retry.", nil)
 		return
 	}
 	if idClaims, verr := h.appleVerifier.Verify(ctx, tr.IDToken); verr != nil || idClaims.Sub != claims.Sub {
-		h.logger.Warn("deletion credential exchange identity mismatch", "userID", user.ID)
+		h.logger.WarnContext(r.Context(), "deletion credential exchange identity mismatch", "userID", user.ID)
 		writeError(w, http.StatusUnauthorized, "invalid_apple_token",
 			"Invalid Apple authorization code", nil)
 		return
@@ -382,7 +382,7 @@ func (h *Handler) AppleDeletionCredential(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	h.logger.Info("apple deletion credential stored", "userID", user.ID)
+	h.logger.InfoContext(r.Context(), "apple deletion credential stored", "userID", user.ID)
 	writeJSON(w, http.StatusOK, map[string]bool{"stored": true})
 }
 
@@ -441,14 +441,14 @@ func (h *Handler) AppleNotifications(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if h.appleNotifs == nil {
-		h.logger.Error("apple notification verifier unconfigured")
+		h.logger.ErrorContext(r.Context(), "apple notification verifier unconfigured")
 		h.writeInternalError(w, r, "apple notification verifier unconfigured", errors.New("nil notification verifier"))
 		return
 	}
 
 	ev, err := h.appleNotifs.VerifyNotification(ctx, req.Payload)
 	if err != nil {
-		h.logger.Warn("invalid apple notification", "error", err)
+		h.logger.WarnContext(r.Context(), "invalid apple notification", "error", err)
 		writeError(w, http.StatusUnauthorized, "invalid_notification",
 			"Invalid Apple notification", nil)
 		return
@@ -461,7 +461,7 @@ func (h *Handler) AppleNotifications(w http.ResponseWriter, r *http.Request) {
 	if ev.Type != apple.EventConsentRevoked {
 		if err := h.store.RecordAppleNotification(ctx, ev.JTI); err != nil {
 			if errors.Is(err, db.ErrNotificationReplay) {
-				h.logger.Info("duplicate apple notification ignored", "jti", ev.JTI, "type", ev.Type)
+				h.logger.InfoContext(r.Context(), "duplicate apple notification ignored", "jti", ev.JTI, "type", ev.Type)
 				writeNotificationAccepted(w)
 				return
 			}
@@ -470,7 +470,7 @@ func (h *Handler) AppleNotifications(w http.ResponseWriter, r *http.Request) {
 		}
 		// email-enabled/disabled, account-deleted, and unknown future types:
 		// verified no-ops. Never delete, never upsert, never end sessions.
-		h.logger.Info("apple notification ignored (no state change)",
+		h.logger.InfoContext(r.Context(), "apple notification ignored (no state change)",
 			"jti", ev.JTI, "type", ev.Type, "sub", redactSubject(ev.Sub))
 		writeNotificationAccepted(w)
 		return
@@ -482,7 +482,7 @@ func (h *Handler) AppleNotifications(w http.ResponseWriter, r *http.Request) {
 	// substituting arrival time could kill a newer reauthorization.
 	// Missing event_time is rejected with no state change and no receipt.
 	if !ev.HasEventTime {
-		h.logger.Warn("consent-revoked without event_time", "jti", ev.JTI)
+		h.logger.WarnContext(r.Context(), "consent-revoked without event_time", "jti", ev.JTI)
 		writeError(w, http.StatusBadRequest, "invalid_body",
 			"consent-revoked notification requires event_time", nil)
 		return
@@ -500,7 +500,7 @@ func (h *Handler) AppleNotifications(w http.ResponseWriter, r *http.Request) {
 		h.writeInternalError(w, r, "failed to record apple notification", rerr)
 		return
 	}
-	h.logger.Info("apple consent revoked processed",
+	h.logger.InfoContext(r.Context(), "apple consent revoked processed",
 		"apple_sub", redactSubject(ev.Sub), "userID", userID, "applied", applied)
 	writeNotificationAccepted(w)
 }

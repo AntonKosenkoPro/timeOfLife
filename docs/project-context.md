@@ -244,6 +244,14 @@ All 70% alerts route to Telegram. The Telegram channel/bot itself is a separate 
 
 Uptime % (off-box `/health`), Sentry issue count (new + total), DB size in MB, quota consumption per tier; weekly quota trend on top.
 
+### Stage 1 (code-complete, SaaS load pending — `observability-stage-1`)
+
+- **Pipeline**: VM-local OTel Collector (`backend/otelcol-config.yaml`, image `otel/opentelemetry-collector-contrib:0.135.0`, forwarding-only — queue/retry off, discard sentinel default) + Go OTel SDK v1.41.0 train (`internal/observe/otel.go`, empty-means-off like `SENTRY_DSN`). Chi templating reused (`routeTemplate()`), `/health` skips spans and emits only the label-free `lifio.health.checks` series. `slog`→OTLP fan-out (stderr kept); request-path logs migrated to `*Context` so production records carry `trace_id`. Loki labels stay boring (level + error-stream operation); identifiers in payloads only (R1).
+- **iOS**: session-level `sync.session` spans (counts/durations only, PII-safe by construction) with file-backed buffer-and-forward (cap 200, tail-drop counted) + OTLP/HTTP export (Debug-on/Release-off); distress (N=3 streak via `SentryReporter.captureSyncDistress`) separate from volume. Debug-only MetricKit harness (no upload); endpoint decision open pending on-device data.
+- **Guards**: CI cardinality allowlist (`CheckLabelAllowlist` + negative test naming `user_id`).
+- **Repo files**: `backend/observability/` — `alerts/*.yaml` (intent, manual apply), `slis/recording-rules.yaml` (thresholds unset until ≥2 weeks traffic), `dashboards/*.json` ×5 (load-time naming checks noted), `SAAS-LOAD.md` (operator procedure). Deploy plumbing in `backend.yml` (`OTEL_ENABLED`/`OTEL_EXPORTER_OTLP_ENDPOINT`/`GRAFANA_CLOUD_OTLP_ENDPOINT` vars + `GRAFANA_CLOUD_OTLP_KEY` secret).
+- **Stack**: Grafana Cloud `bronzeporcupine1580` (prod-eu-central-0), endpoint verified (auth probe 200). `OTEL_ENABLED=0` default = Stage-0 posture until the §2.3 deploy check; series-budget check (<7000 active) and SLO numbers run post-deploy.
+
 ## Pre-release policy
 
 The app is unreleased; there is no on-disk data in the wild. **No backward compatibility / migration for local on-disk formats is needed before release.** Do not add legacy-decode branches, `legacy*` fields, or `migrateIfNeeded` paths to local stores. On-disk schema changes are applied by editing the `Codable` shape in place; existing test fixtures and dev devices simply start fresh. Revisit this policy once a build ships to TestFlight or any external tester — the first `vX.Y.Z` release tag marks that point.
