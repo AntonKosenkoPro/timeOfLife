@@ -3,6 +3,7 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -58,7 +59,24 @@ type Dependencies struct {
 	AppleDigestKey []byte
 	// AppleClientID is the Bundle ID referenced by revocation jobs.
 	AppleClientID string
+	// Version is the build identity stamped at build time via ldflags
+	// (-X main.version): the release tag on `backend/*` tagged builds,
+	// `main-<sha>` on main-branch and manual deploys. Empty
+	// (literal-constructed Dependencies in tests) falls back to "?" at
+	// serve time.
+	Version string
+	// SHA is the short commit SHA stamped at build time via ldflags
+	// (-X main.sha). Empty falls back to "?" at serve time.
+	SHA string
 }
+
+// UnknownBuildIdentity is the build-identity sentinel reported when no
+// stamped value exists (local go run, missing Docker build args, tests
+// constructing Dependencies literally). Single Go-side definition for the
+// serve-time fallback and main.go defaults; the Dockerfile ARG defaults
+// and the OpenAPI wording are separate artifacts that cannot reference
+// this const — keep them in sync by hand when the sentinel changes.
+const UnknownBuildIdentity = "?"
 
 // defaultAccessTokenTTL and defaultRefreshTokenTTL mirror the config defaults
 // so a literally-constructed Config (tests) behaves like a loaded one.
@@ -186,8 +204,10 @@ func NewDefaultDependencies(ctx context.Context, cfg *config.Config, store db.St
 
 // Server holds the HTTP server and its dependencies.
 type Server struct {
-	router http.Handler
-	worker *apple.Worker
+	router  http.Handler
+	worker  *apple.Worker
+	version string
+	sha     string
 }
 
 // StartWorkers runs the Apple revocation worker until ctx ends. A missing
@@ -224,7 +244,9 @@ func New(deps Dependencies) *Server {
 	)
 
 	s := &Server{
-		worker: apple.NewWorker(deps.Store, deps.AppleClient, deps.AppleTokenKeyring, logger, time.Minute),
+		worker:  apple.NewWorker(deps.Store, deps.AppleClient, deps.AppleTokenKeyring, logger, time.Minute),
+		version: firstNonEmpty(deps.Version, UnknownBuildIdentity),
+		sha:     firstNonEmpty(deps.SHA, UnknownBuildIdentity),
 	}
 
 	r := chi.NewRouter()
@@ -381,5 +403,27 @@ func corsMiddlewareWithAllowlist(allowedOrigins []string) func(http.Handler) htt
 func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write([]byte(`{"status":"ok"}`))
+	if err := json.NewEncoder(w).Encode(healthResponse{
+		Status:  "ok",
+		Version: s.version,
+		SHA:     s.sha,
+	}); err != nil {
+		slog.Error("failed to encode health response", "error", err)
+	}
+}
+
+// healthResponse is the GET /health body: status plus the stamped build
+// identity (release tag on tagged builds, main-<sha> on main deploys, "?" when unstamped).
+type healthResponse struct {
+	Status  string `json:"status"`
+	Version string `json:"version"`
+	SHA     string `json:"sha"`
+}
+
+// firstNonEmpty returns value unless it is empty, else fallback.
+func firstNonEmpty(value, fallback string) string {
+	if value != "" {
+		return value
+	}
+	return fallback
 }
