@@ -138,6 +138,9 @@
 // Build-configuration suffix for the Profile version row (universal
 // technical term — identical in en).
 "profile.versionDebugSuffix" = "Debug";
+// Release-channel badge for the Profile version row (manual-tag-releases;
+// universal technical term — identical in en).
+"profile.versionInternalSuffix" = "Internal";
 
 // Destination empty states
 "history.emptyTitle" = "Пока пусто";

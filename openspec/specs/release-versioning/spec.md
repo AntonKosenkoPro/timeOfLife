@@ -1,69 +1,77 @@
 ## Purpose
 
-Defines how the app's version is numbered, bumped, and tagged so every TestFlight build is traceable from the Profile row back to a single repo commit.
+Defines how the app's version is numbered, tagged, and stamped so every TestFlight build is traceable from the Profile row back to a single repo commit.
 
 ## Requirements
 
 ### Requirement: Marketing version follows semantic versioning
-The released marketing version SHALL be a three-component semantic version `MAJOR.MINOR.PATCH` (e.g. `1.0.0`). The existing two-component `1.0` is normalized to three components on the first bump and SHALL NOT reappear afterward.
+
+The released marketing version SHALL be a three-component semantic version `MAJOR.MINOR.PATCH` (e.g. `1.0.0`). Release tags carry the marketing version with an optional fourth-dot re-upload sequence (`internal/v0.2.7`, `internal/v0.2.7.2`); the sequence is NOT part of the marketing version and defaults to 1 when absent.
 
 #### Scenario: First bump normalizes the version
 - **WHEN** the current version is the legacy two-component `1.0`
 - **THEN** the next released marketing version is a three-component version strictly greater than `1.0.0`
 
 #### Scenario: Non-semver input is rejected
-- **WHEN** a requested version is not `X.Y.Z` numeric semver (e.g. `1.0`, `v1.0.0`, `1.0.0-beta`)
-- **THEN** the release flow refuses it with a clear message and changes nothing
+- **WHEN** a tag's marketing component is not `X.Y.Z` numeric semver (e.g. `internal/v1.0`, `release/v1.0.0-beta`)
+- **THEN** the build refuses it with a clear message and archives nothing
 
-### Requirement: Manual release bump with automatic build number
-A release SHALL be triggered manually with the desired marketing version as its only version parameter. The flow SHALL refuse the request unless it runs on the `main` branch, the requested version is valid semver strictly greater than the current version, and the working tree is clean. On acceptance it SHALL set the marketing version to the requested value, increment the build number by exactly +1, and record both in a single commit on `main`.
+#### Scenario: Re-upload sequence is distinct from marketing
+- **WHEN** a second TestFlight upload is needed for the same marketing version
+- **THEN** a new tag with an incremented fourth-dot sequence (e.g. `internal/v0.2.7.2`) triggers it; the stamped marketing version stays `0.2.7` while the App Store Connect build number increases
 
-#### Scenario: Successful bump
-- **WHEN** version `1.0.0` is requested on `main` while the current version is lower and the tree is clean
-- **THEN** a single commit lands on `main` with marketing version `1.0.0` and the build number incremented by one
+### Requirement: Manual tag-triggered releases
 
-#### Scenario: Downgrade or repeat is rejected
-- **WHEN** the requested version is equal to or lower than the current version
-- **THEN** the flow refuses it with a clear message and changes nothing
+A release SHALL be triggered only by the owner pushing a signed tag from `main` — no workflow, bot, or second human can cut one. On acceptance the tag-triggered Cloud workflow stamps the marketing version, an increasing build number, and the channel at build time; nothing version-related is committed to `main`. `project.yml` carries only a dev dummy version for local builds.
 
-#### Scenario: Off-main or dirty tree is rejected
-- **WHEN** the flow is triggered outside `main` or with uncommitted changes present
-- **THEN** the flow refuses to run and changes nothing
+#### Scenario: Owner tag triggers a channel build
+- **WHEN** the owner pushes signed `internal/v0.2.7` (or `release/v0.3.0`) pointing at a `main` commit
+- **THEN** the matching Cloud workflow archives and delivers to TestFlight Internal (or External/App Store) with the stamped marketing version
 
-#### Scenario: Re-upload without a new marketing version
-- **WHEN** a second TestFlight upload is needed for the same marketing version (e.g. a tester fix)
-- **THEN** the build number is incremented without changing the marketing version, keeping the upload acceptable to App Store Connect
+#### Scenario: Non-owner or bot tag cannot release
+- **WHEN** a tag in these namespaces is pushed by anyone (or any token) other than the owner
+- **THEN** the tag ruleset rejects the push and no build is triggered
 
-### Requirement: Release tag convention
-Every marketing-version bump commit on `main` SHALL carry exactly one annotated tag named `v<marketing-version>` (e.g. `v1.0.0`) pointing at the bump commit. Tags SHALL be created only on `main` and SHALL never be moved once pushed. Rebuild commits (same marketing version, incremented build — the re-upload case above) SHALL NOT create or move a tag: the existing `v<marketing-version>` tag keeps identifying the marketing release while the integer build number (retained solely as the App Store Connect upload identifier) identifies the upload sequence and the Profile label's short SHA identifies the exact commit.
+#### Scenario: Mistyped tag builds nothing
+- **WHEN** a pushed tag matches no namespace pattern (e.g. `v0.2.7`, `internl/v0.2.7`)
+- **THEN** no Cloud release workflow triggers (fail-closed)
 
-#### Scenario: Tag lands with the bump
-- **WHEN** a release bump commit lands on `main` for version `1.0.0`
-- **THEN** the annotated tag `v1.0.0` points at that commit and is pushed
+### Requirement: Tag namespaces and channel routing
 
-#### Scenario: Rebuild reuses the existing tag
-- **WHEN** a rebuild commit lands for the same marketing version with a higher build number
-- **THEN** no tag is created or moved, and the existing `v1.0.0` tag still points at the original bump commit
+iOS release tags SHALL live in exactly two namespaces: `internal/*` (dogfood → TestFlight Internal group, no Beta review) and `release/*` (public → TestFlight External / App Store). Every tag SHALL be annotated and signed, created only on `main`, and never moved once pushed. The tag message records the intent (e.g. what was verified, what the public notes are).
 
-#### Scenario: Tag matches the app label
-- **WHEN** a tester reads the Profile version row `1.0.0 (a1b2c3d)` from a TestFlight build
-- **THEN** the 7-character SHA in the row identifies the exact commit the build came from (resolvable via `git show` / GitHub lookup), and the tag `v1.0.0` identifies the marketing release it belongs to
+#### Scenario: Internal tag routes to the internal group
+- **WHEN** signed `internal/v0.2.7` is pushed
+- **THEN** the internal Cloud workflow archives and the build appears in the TestFlight Internal group only
 
-### Requirement: Profile version label shows commit SHA
-The Profile version footer SHALL render `v<marketing> (<7-char-SHA>)` where the parenthetical is the first 7 hex characters of the built commit's SHA (`git rev-parse --short=7 HEAD` at build time), not the integer `CFBundleVersion`. Debug builds SHALL append the existing localized suffix (`v0.1.3 (a1b2c3d) • Debug`). A dirty working tree SHALL NOT alter the label — the footer reports the base commit's SHA with no dirty marker. When the SHA is unavailable at build time (no `.git`, shallow export, script failure), the footer SHALL render the existing `"?"` placeholder (`v0.1.3 (?)`).
+#### Scenario: Public tag routes to the public destination
+- **WHEN** signed `release/v0.3.0` is pushed
+- **THEN** the public Cloud workflow archives and the build goes to TestFlight External / App Store submission
 
-#### Scenario: Release shows short SHA
-- **WHEN** a Release build is produced from commit `a1b2c3d...` with marketing version `0.1.3`
-- **THEN** the Profile footer reads `v0.1.3 (a1b2c3d)`
+### Requirement: Profile version label shows commit SHA and channel
 
-#### Scenario: Debug keeps its suffix
-- **WHEN** a Debug build is produced from commit `a1b2c3d...` with marketing version `0.1.3`
-- **THEN** the Profile footer reads `v0.1.3 (a1b2c3d) • Debug` (localized suffix unchanged)
+The Profile version footer SHALL render `v<marketing> (<7-char-SHA>)` where the parenthetical is the first 7 hex characters of the built commit's SHA, plus ` • Internal` on internal-channel builds. Debug builds SHALL append the existing localized suffix (`v0.0.0-dev (a1b2c3d) • Debug`). A dirty working tree SHALL NOT alter the label — the footer reports the base commit's SHA with no dirty marker. When the SHA is unavailable at build time (no `.git`, shallow export, script failure), the footer SHALL render the existing `"?"` placeholder.
 
-#### Scenario: Dirty tree reports base commit
-- **WHEN** a build is produced from a dirty tree based on commit `a1b2c3d...`
-- **THEN** the Profile footer still reads `v0.1.3 (a1b2c3d)` with no suffix, marker, or alteration
+#### Scenario: Internal build shows its channel
+- **WHEN** an internal-channel build is produced from commit `a1b2c3d...` with marketing version `0.2.7`
+- **THEN** the Profile footer reads `v0.2.7 (a1b2c3d) • Internal`
+
+#### Scenario: Public build shows no channel
+- **WHEN** a Release build is produced from commit `a1b2c3d...` with marketing version `0.3.0`
+- **THEN** the Profile footer reads `v0.3.0 (a1b2c3d)`
 
 #### Scenario: Missing SHA falls back to placeholder
 - **WHEN** the SHA cannot be determined at build time
-- **THEN** the Profile footer reads `v0.1.3 (?)`
+- **THEN** the Profile footer reads `v0.2.7 (?)` (plus channel/debug suffixes as applicable)
+
+### Requirement: Revert-forward rollback
+
+A bad release SHALL be recovered by reverting the offending commit(s) on `main` and cutting a new tag through the internal channel first — never by moving or deleting a pushed tag. Rollback of an installed public build is a new version containing old code, verified internally before re-release.
+
+#### Scenario: Bad public release recovered
+- **WHEN** `release/v0.3.0` is found bad after shipping
+- **THEN** the fix is a `git revert` on `main`, a new `internal/v0.3.1` tag verified in TestFlight Internal, followed by `release/v0.3.1` — the `release/v0.3.0` tag stays where it points
+
+#### Scenario: Pushed tag is never moved
+- **WHEN** any tag matching `internal/*`, `release/*`, or `backend/*` has been pushed
+- **THEN** it SHALL NOT be force-moved or deleted to "reuse" the name; a new tag name carries the correction

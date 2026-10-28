@@ -1,38 +1,10 @@
 name: ios
 
 # Requirements S6: linters + tests run on every pull request as a mandatory check.
+# GH-owned iOS PR gate (see docs/ci.md): pull_request + push triggers below.
+# dSYMs for shipped builds come from Xcode Cloud's signed tag archives
+# (ci_post_xcodebuild.sh) — there is intentionally no GH-side archive job.
 on:
-  # Also callable as release verification: GITHUB_TOKEN pushes trigger no
-  # workflows, so the release workflow invokes this explicitly on the bump.
-  workflow_call:
-    # Release-path flag: release.yml verify passes upload_dsyms=true so the
-    # post-bump head gets its dSYMs. PR/push runs keep the default false —
-    # one macos-15 job per PR. (A plain event_name check cannot do this:
-    # inside a called workflow the github context belongs to the caller,
-    # so event_name reports the caller's trigger, never workflow_call.)
-    inputs:
-      upload_dsyms:
-        description: "Run the sentry-dsym job (unsigned Release archive + Sentry upload)"
-        required: false
-        default: false
-        type: boolean
-    # Sentry symbolication wiring (observability Stage 0, task 3.3). All
-    # optional: when any are absent the upload step skips with a warning
-    # instead of failing. release.yml passes them via `secrets: inherit`.
-    secrets:
-      SENTRY_AUTH_TOKEN:
-        required: false
-      SENTRY_ORG:
-        required: false
-      SENTRY_PROJECT_STAGING:
-        required: false
-      SENTRY_PROJECT_RELEASE:
-        required: false
-      # iOS DSN threaded into the archive build as SENTRY_DSN (empty =
-      # SDK disabled). Absent = the archived binary simply has no DSN;
-      # dSYM upload still proceeds if its own secrets exist.
-      SENTRY_IOS_DSN:
-        required: false
   pull_request:
     # No path filter: the ios-gate job must run and report on EVERY PR —
     # path-skipped workflows leave required checks Pending forever and block
@@ -46,9 +18,8 @@ permissions:
   contents: read
 
 # Rapid PR pushes cancel superseded runs instead of queueing redundant
-# macos-15 jobs. The group is keyed on event as well as ref: a push to main
-# and the release-verify call (both ref main, different events) must never
-# cancel each other mid-flight.
+# macos-15 jobs. The group is keyed on event as well as ref so a push to
+# main and a PR run never cancel each other mid-flight.
 concurrency:
   group: ios-${{ github.ref }}-${{ github.event_name }}
   cancel-in-progress: true
@@ -99,10 +70,71 @@ jobs:
     runs-on: macos-15
     timeout-minutes: 30
     steps:
+      # Full history + tags: the stamp harness asserts history-aware banding
+      # (ancestor re-upload case needs HEAD~1) and enumerates tags per
+      # marketing line — a shallow checkout would SKIP the former and run
+      # the latter empty, both silently.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-      - name: Install xcodegen + swiftlint
-        run: brew install xcodegen swiftlint
+      - name: Install pinned xcodegen + swiftlint
+        # Both tools are fail-closed pinned in the Cloud scripts; an unpinned
+        # brew install would let the PR gate drift from the release gate the
+        # day Homebrew moves on. Pins are read from the scripts themselves
+        # (single source of truth) and validated before use so a reformatted
+        # pin line fails loudly instead of installing from a `//` URL
+        # (grep -m1 + cut: no `| head` pipe, so no SIGPIPE hazard under
+        # `set -e` — same reason BIN below uses find -print -quit).
+        run: |
+          XCODEGEN_PIN="$(grep -m1 '^XCODEGEN_PIN="' ios/TimeOfLife/ci_scripts/ci_post_clone.sh | cut -d'"' -f2 || true)"
+          [ -n "$XCODEGEN_PIN" ] || { echo "::error::cannot read XCODEGEN_PIN from ci_post_clone.sh — refusing to install an unpinned xcodegen"; exit 1; }
+          SWIFTLINT_PIN="$(grep -m1 '^SWIFTLINT_PIN="' ios/TimeOfLife/ci_scripts/ci_pre_xcodebuild.sh | cut -d'"' -f2 || true)"
+          [ -n "$SWIFTLINT_PIN" ] || { echo "::error::cannot read SWIFTLINT_PIN from ci_pre_xcodebuild.sh — refusing to install an unpinned swiftlint"; exit 1; }
+          # Recorded digests: upstream release assets can be replaced in
+          # place, and the SwiftLint pkg is unsigned (verified: `pkgutil
+          # --check-signature` reports "no signature"), so the digest is the
+          # only integrity control — a replaced artifact fails here instead
+          # of being sudo-installed. Bump with the pin.
+          XCODEGEN_ZIP_SHA256="4d9e34b62172d645eed6457cac13fc222569974098ef4ee9c3368bedf0196806"
+          SWIFTLINT_PKG_SHA256="3fb0202842701762880cc2cf04fc394398bab3f16a04dd76e000e02d07e32486"
+          # -f fails on HTTP errors (no error pages written to disk);
+          # --retry rides out transient CDN 5xx instead of red-laning the PR.
+          curl -fsSL --retry 5 --retry-delay 2 --retry-all-errors "https://github.com/yonaskolb/XcodeGen/releases/download/${XCODEGEN_PIN}/xcodegen.zip" -o "${RUNNER_TEMP}/xcodegen.zip"
+          echo "${XCODEGEN_ZIP_SHA256}  ${RUNNER_TEMP}/xcodegen.zip" | shasum -a 256 -c - || \
+            { echo "::error::xcodegen.zip digest mismatch for pin ${XCODEGEN_PIN} — if the pin was bumped, update XCODEGEN_ZIP_SHA256 (see docs/ci.md pin table)"; exit 1; }
+          rm -rf "${RUNNER_TEMP}/xcodegen" && mkdir -p "${RUNNER_TEMP}/xcodegen"
+          unzip -o -q "${RUNNER_TEMP}/xcodegen.zip" -d "${RUNNER_TEMP}/xcodegen"
+          # The zip is a prefix tree (bin/xcodegen + share/xcodegen presets),
+          # not a flat binary — and the wrapper layout is not contractual, so
+          # locate it. The presets must travel with the binary: XcodeGen
+          # resolves SettingPresets relative to its prefix, and a lone
+          # binary fails generate on a clean runner. Assert the exact
+          # share/xcodegen subdir BEFORE installing so a bad archive leaves
+          # no half-installed state.
+          BIN="$(find "${RUNNER_TEMP}/xcodegen" -path '*/bin/xcodegen' -type f -print -quit)"
+          [ -n "$BIN" ] || { echo "::error::xcodegen binary not found in release archive"; exit 1; }
+          XG_ROOT="$(dirname "$(dirname "$BIN")")"
+          [ -d "$XG_ROOT/share/xcodegen" ] || { echo "::error::xcodegen share/xcodegen presets missing from release archive"; exit 1; }
+          sudo install -m 755 "$BIN" /usr/local/bin/xcodegen
+          # rm -rf first: cp -R nests (share/xcodegen/xcodegen/...) when the
+          # destination already exists (reused/self-hosted runners), silently
+          # mixing stale presets with the new binary.
+          sudo rm -rf /usr/local/share/xcodegen
+          sudo mkdir -p /usr/local/share && sudo cp -R "$XG_ROOT/share/xcodegen" /usr/local/share/
+          curl -fsSL --retry 5 --retry-delay 2 --retry-all-errors "https://github.com/realm/SwiftLint/releases/download/${SWIFTLINT_PIN}/SwiftLint.pkg" -o "${RUNNER_TEMP}/swiftlint.pkg"
+          echo "${SWIFTLINT_PKG_SHA256}  ${RUNNER_TEMP}/swiftlint.pkg" | shasum -a 256 -c - || \
+            { echo "::error::SwiftLint.pkg digest mismatch for pin ${SWIFTLINT_PIN} — if the pin was bumped, update SWIFTLINT_PKG_SHA256 (see docs/ci.md pin table)"; exit 1; }
+          sudo installer -pkg "${RUNNER_TEMP}/swiftlint.pkg" -target /
+          # Prove the pins against the installed paths (not PATH: the
+          # macos-15 image ships its own swiftlint earlier in PATH, which
+          # would false-fail — or worse, false-pass — a PATH-resolved
+          # check), then put the pinned prefix first for later steps.
+          test "$(/usr/local/bin/xcodegen --version | grep -m1 -o '[0-9][0-9.]*' | head -n1)" = "$XCODEGEN_PIN" || \
+            { echo "::error::xcodegen drift: got $(/usr/local/bin/xcodegen --version), want $XCODEGEN_PIN"; exit 1; }
+          test "$(/usr/local/bin/swiftlint version)" = "$SWIFTLINT_PIN" || \
+            { echo "::error::swiftlint drift: got $(/usr/local/bin/swiftlint version), want $SWIFTLINT_PIN"; exit 1; }
+          echo "/usr/local/bin" >> "$GITHUB_PATH"
 
       - name: Generate Xcode project
         working-directory: ios/TimeOfLife
@@ -111,6 +143,15 @@ jobs:
       - name: SwiftLint
         working-directory: ios/TimeOfLife
         run: swiftlint lint --strict
+
+      - name: Release stamp harness
+        # Regression gate for ci_post_clone.sh (banding math, sequence
+        # parsing, tag/pair disambiguation): a wrong build number surfaces
+        # only at App Store Connect, so this runs before the long build.
+        # Self-restoring (project files + tags + origin URL); leaves a clean
+        # tree for the steps below.
+        working-directory: ios/TimeOfLife
+        run: sh ci_scripts/tests/stamp_test.sh
 
       - name: Build with warnings as errors
         # SWIFT_TREAT_WARNINGS_AS_ERRORS/GCC_TREAT_WARNINGS_AS_ERRORS are set
@@ -159,62 +200,3 @@ jobs:
             success|skipped) echo "lint-build-test ${{ needs.lint-build-test.result }} — gate green";;
             *) echo "::error::lint-build-test ${{ needs.lint-build-test.result }}"; exit 1;;
           esac
-
-  # Symbolication for shipped crashes (observability Stage 0, task 3.3):
-  # archives Release unsigned (no signing identity on CI runners) purely to
-  # produce dSYMs, then uploads them with sentry-cli. dSYMs match by debug
-  # ID, so one archive covers both environments — the upload loops over the
-  # staging and release projects, skipping each whose secrets are absent.
-  # Runs only after lint-build-test is green (no symbols for unverified code).
-  # Release-path only (see the upload_dsyms input above): PR/push runs
-  # skip it — one macos-15 job per PR — while release.yml verify still gets
-  # its dSYMs. Runs only after lint-build-test is green (the default
-  # success() gate still applies: a bare expression if adds no status
-  # check, so needs stays success-gated) — no symbols for unverified code.
-  sentry-dsym:
-    if: ${{ inputs.upload_dsyms }}
-    needs: lint-build-test
-    runs-on: macos-15
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install xcodegen + sentry-cli
-        run: brew install xcodegen getsentry/tools/sentry-cli
-
-      - name: Generate Xcode project
-        working-directory: ios/TimeOfLife
-        run: xcodegen generate
-
-      - name: Archive Release (unsigned) for dSYMs
-        working-directory: ios/TimeOfLife
-        env:
-          SENTRY_IOS_DSN: ${{ secrets.SENTRY_IOS_DSN }}
-        run: |
-          set -o pipefail
-          xcodebuild archive -scheme TimeOfLife \
-            -destination 'generic/platform=iOS' \
-            -archivePath build/TimeOfLife.xcarchive \
-            CODE_SIGNING_ALLOWED=NO \
-            DEBUG_INFORMATION_FORMAT=dwarf-with-dsym \
-            SENTRY_DSN="$SENTRY_IOS_DSN" | xcpretty
-
-      - name: Upload dSYMs to Sentry (staging + release)
-        working-directory: ios/TimeOfLife
-        env:
-          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
-          SENTRY_ORG: ${{ secrets.SENTRY_ORG }}
-          SENTRY_PROJECT_STAGING: ${{ secrets.SENTRY_PROJECT_STAGING }}
-          SENTRY_PROJECT_RELEASE: ${{ secrets.SENTRY_PROJECT_RELEASE }}
-        run: |
-          upload_project() {
-            name="$1"; project="$2"; secret_name="$3"
-            if [ -z "$SENTRY_AUTH_TOKEN" ] || [ -z "$SENTRY_ORG" ] || [ -z "$project" ]; then
-              echo "::warning::Sentry secrets absent — skipping dSYM upload ($name). Needs SENTRY_AUTH_TOKEN, SENTRY_ORG, $secret_name."
-              return 0
-            fi
-            sentry-cli debug-files upload --org "$SENTRY_ORG" --project "$project" \
-              build/TimeOfLife.xcarchive/dSYMs
-          }
-          upload_project staging "$SENTRY_PROJECT_STAGING" SENTRY_PROJECT_STAGING
-          upload_project release "$SENTRY_PROJECT_RELEASE" SENTRY_PROJECT_RELEASE

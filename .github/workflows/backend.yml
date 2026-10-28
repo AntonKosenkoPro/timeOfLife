@@ -13,9 +13,9 @@ on:
   workflow_dispatch:
     inputs:
       environment:
-        description: "Target environment to deploy to"
+        description: "Target environment to deploy to (backend-prod carries the wait timer + main-only policy)"
         type: choice
-        options: [stage, prod]
+        options: [stage, backend-prod]
         default: stage
         required: true
       skip_checks:
@@ -23,24 +23,36 @@ on:
         type: boolean
         default: false
         required: false
+      image_tag:
+        description: "Pinned backend image tag for rollback redeploys (e.g. backend-v2.4.0); empty builds :latest from source. Rollbacks also need skip_checks: true, or lint-and-test still gates the deploy."
+        type: string
+        default: ""
+        required: false
 
 permissions:
   contents: read
   packages: write  # needed to push to GHCR
 
 # Concurrency model: PR runs get one group per PR (cancel superseded
-# pushes); every deploy path — push-to-main and any workflow_dispatch
-# target — shares a single backend-deploy group with no cancellation of a
-# RUNNING deploy. Trade-off (accepted): GitHub keeps one pending slot per
-# group, so a queued deploy can be evicted by a later deploy intent and
-# needs re-dispatch (visible in the UI, recoverable). This is preferred
-# over per-target groups, under which stage/prod/push deploys overlap on
-# the same VM (repo-level VM_HOST, hardcoded /opt/timeoflife) and can
-# interleave the .env rewrite — a silent bad deploy beats a stalled one
-# on harm. Hard mutual exclusion (e.g. flock on the VM) belongs to
-# deploy ownership, not this change.
+# pushes); runs that genuinely PUBLISH `:latest` from main share one
+# non-cancelling group — push-to-main plus main-ref dispatches with an empty
+# image_tag (those rebuild from source and push `:latest` too), so two such
+# runs can never interleave their push (flock starts inside the SSH step,
+# i.e. after the image push, so it cannot order pushes). Membership is gated
+# on main: a mis-ref dispatch can never publish (deploy `if:` + guard job),
+# so letting it join would only let it evict a queued genuine publisher.
+# Rollback dispatches (image_tag set — no publish, pinned pull only) keep
+# their own per-run_id group so an emergency rollback is never cancelled.
+# Residual trade-off (accepted, visible): GitHub keeps one pending run per
+# group, so a queued publisher can still be evicted by a newer publisher of
+# the other event type (push vs dispatch) — the evicted run shows
+# "cancelled" in the UI and must be manually re-dispatched. That is strictly
+# better than the alternative (a stale `:latest` silently deployed), which
+# per-run groups for publishers would reintroduce.
+# Mutual exclusion on the single VM directory itself is enforced by flock
+# in the deploy script (a contender waits 600s, then fails loudly).
 concurrency:
-  group: ${{ github.event_name == 'pull_request' && format('backend-{0}', github.ref) || 'backend-deploy' }}
+  group: ${{ github.event_name == 'pull_request' && format('backend-{0}', github.ref) || format('backend-publish-{0}', (github.ref == 'refs/heads/main' && (github.event_name == 'push' || inputs.image_tag == '')) && 'latest' || github.run_id) }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
@@ -86,8 +98,10 @@ jobs:
     needs: [changes]
     # Push (path-filtered) and manual dispatches always run the lane; PRs
     # only when the diff touches it. Skipped (not failed) otherwise —
-    # backend-gate still reports.
-    if: github.event_name != 'pull_request' || needs.changes.outputs.backend == 'true'
+    # backend-gate still reports. skip_checks (re-deploy/rollback only)
+    # bypasses the lane too; the deploy job's guard still requires an
+    # explicit opt-in per run.
+    if: ${{ !inputs.skip_checks && (github.event_name != 'pull_request' || needs.changes.outputs.backend == 'true') }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -161,22 +175,59 @@ jobs:
             *) echo "::error::lint-and-test ${{ needs.lint-and-test.result }}"; exit 1;;
           esac
 
+  # Fail-closed ref guard: the deploy job's `if:` silently SKIPS on a
+  # non-main dispatch (green workflow, no deploy, no annotation) — an
+  # operator picking the wrong ref in the dispatch UI would walk away
+  # believing prod was deployed. This job always runs and fails loudly
+  # instead. Push events can only ever be main (branch filter above).
+  dispatch-ref-guard:
+    if: github.event_name == 'workflow_dispatch' && github.ref != 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {} # least privilege: only echoes and exits
+    steps:
+      - run: |
+          echo "::error::refusing to deploy from '$REF' — dispatches (including rollbacks) must run from 'refs/heads/main'; re-dispatch from main"
+          exit 1
+        env:
+          # Never interpolate github.ref into script text: ref names may
+          # legally contain $, backticks, and parens (only space ~^:?*[ and
+          # controls are forbidden) — pass through env only.
+          REF: ${{ github.ref }}
+
   deploy:
-    # push to main auto-deploys to prod; workflow_dispatch deploys the chosen
-    # environment (default stage). Per-environment branch + reviewer gating is
-    # enforced in GitHub's Environment settings, not here.
+    # Push to main auto-deploys to the backend-prod environment (created with
+    # a wait timer + main-only branch policy — see docs/ci.md runbook);
+    # workflow_dispatch deploys the chosen environment (default stage).
+    # backend/* tag pushes are built (but never deployed) by
+    # backend-release.yml, which has no `paths:` filter so tag-only pushes
+    # always trigger it. Per-environment branch + reviewer gating is enforced
+    # in GitHub's Environment settings, not here.
+    # Deploys run only from main: without the ref guard a manual dispatch on
+    # a feature branch (or an old tag) would publish `:latest` from an
+    # unreviewed tree and deploy it — the stale-`:latest` class of bug
+    # through a different door. Rollback dispatches (image_tag) also run
+    # from main; the tag only selects the image.
     if: >
-      github.event_name == 'push' ||
-      github.event_name == 'workflow_dispatch'
+      always() && !cancelled() &&
+      (needs.lint-and-test.result == 'success' || inputs.skip_checks) &&
+      (github.event_name == 'push' ||
+      github.event_name == 'workflow_dispatch') &&
+      github.ref == 'refs/heads/main'
     needs: [lint-and-test]
     runs-on: ubuntu-latest
-    timeout-minutes: 30
-    environment: ${{ github.event.inputs.environment || 'stage' }}
+    # Must strictly exceed the SSH command_timeout below (30m): the job
+    # budget also covers checkout, GHCR login, image build+push, and SCP —
+    # otherwise the runner kills a flock contender mid-deploy instead of
+    # letting it fail loudly.
+    timeout-minutes: 60
+    # No job-level group: publishers already share the workflow-level
+    # backend-publish-latest group (rollbacks are per-run), and the VM
+    # itself is serialized by flock below. A second group here would only
+    # reintroduce silent cancellation of queued runs.
+    environment: ${{ github.event_name == 'push' && 'backend-prod' || github.event.inputs.environment || 'stage' }}
     steps:
       - uses: actions/checkout@v4
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
 
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@v3
@@ -185,18 +236,71 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Set image tag
+      - name: Validate rollback image tag
+        # Rollback dispatches carry operator-typed input straight toward the
+        # VM: validate on the runner, before anything is written into `.env`
+        # or sourced there. Skipped when empty (normal deploys).
+        # Truthiness, not `!= ''`: on push events the input is null, and
+        # `null != ''` evaluates true.
+        if: inputs.image_tag
+        env:
+          # Never interpolate the input into shell text (ref names may carry
+          # metacharacters): pass through env only.
+          IMAGE_TAG: ${{ inputs.image_tag }}
+        run: |
+          # grep anchors per line, so a multi-line value matches on line one
+          # and sails through — reject any newline first (fail-closed).
+          if [ "$(printf '%s' "$IMAGE_TAG" | wc -l)" -ne 0 ]; then
+            echo "::error::image_tag contains a newline — refusing to publish. Nothing deployed."
+            exit 1
+          fi
+          if ! printf '%s' "$IMAGE_TAG" | grep -Eq '^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$'; then
+            echo "::error::image_tag '$IMAGE_TAG' is not a valid Docker tag suffix (allowed: A-Za-z0-9_.-, max 128 chars, no leading ./-). Nothing deployed."
+            exit 1
+          fi
+          # Fail closed before the VM is touched: a syntactically valid but
+          # never-published tag must not rewrite VM configs mid-incident.
+          # stderr is kept: a transient GHCR failure looks identical to a
+          # missing tag without it, and mid-incident the operator must see
+          # which one happened.
+          if ! _manifest_out="$(docker manifest inspect "ghcr.io/${GITHUB_REPOSITORY,,}/backend:${IMAGE_TAG}" 2>&1)"; then
+            echo "::error::image_tag '$IMAGE_TAG' does not resolve to a published backend image: ${_manifest_out}"
+            exit 1
+          fi
+          echo "Rollback image tag '$IMAGE_TAG' valid and published."
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Set image tags and version
         id: image
         run: |
           REPO="${{ github.repository }}"
-          echo "tag=ghcr.io/${REPO,,}/backend:latest" >> "$GITHUB_OUTPUT"
+          REPO_LC="${REPO,,}"
+          SHA_SHORT="$(git rev-parse --short HEAD)"
+          echo "sha=${SHA_SHORT}" >> "$GITHUB_OUTPUT"
+          echo "version=main-${SHA_SHORT}" >> "$GITHUB_OUTPUT"
+          echo "tags=ghcr.io/${REPO_LC}/backend:latest" >> "$GITHUB_OUTPUT"
+
+      - name: Record skipped gate (audit)
+        # A skipped lint-and-test looks identical to a green one in history —
+        # leave an explicit marker so a bypassed gate is auditable later.
+        if: inputs.skip_checks
+        run: echo "::warning::lint-and-test gate bypassed (skip_checks=true) — deploy proceeds without lint/test"
 
       - name: Build and push Docker image
+        # Rollback dispatches (image_tag set) deploy the pinned image as-is:
+        # rebuilding current main here would block the rollback on a broken
+        # head and re-push a `:latest` the rollback exists to avoid.
+        if: ${{ !inputs.image_tag }}
         uses: docker/build-push-action@v6
         with:
           context: backend
           push: true
-          tags: ${{ steps.image.outputs.tag }}
+          tags: ${{ steps.image.outputs.tags }}
+          build-args: |
+            VERSION=${{ steps.image.outputs.version }}
+            SHA=${{ steps.image.outputs.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -212,13 +316,51 @@ jobs:
 
       - name: Deploy to VM
         uses: appleboy/ssh-action@v1.2.0
+        env:
+          # Rollback image tag travels via env (never interpolated into the
+          # script text — ref names may carry shell metacharacters). Empty on
+          # normal deploys; validated GH-side before this step runs.
+          # DEPLOY_ENVIRONMENT lets the script enforce prod-only invariants
+          # (e.g. DATABASE_URL required in backend-prod, where the VM-local
+          # fallback would silently repoint prod at an orphan volume).
+          BACKEND_IMAGE_TAG: ${{ inputs.image_tag }}
+          DEPLOY_ENVIRONMENT: ${{ github.event_name == 'push' && 'backend-prod' || github.event.inputs.environment || 'stage' }}
+          # Presence bit for the pre-rewrite prod guard below: the script
+          # must refuse a backend-prod deploy before regenerating .env, or a
+          # failed run leaves an emptied DATABASE_URL on disk for the next
+          # manual compose-up to silently boot onto VM-local Postgres.
+          DATABASE_URL_PRESENT: ${{ secrets.DATABASE_URL != '' }}
         with:
           host: ${{ secrets.VM_HOST }}
           username: ${{ secrets.VM_USER }}
           key: ${{ secrets.VM_SSH_KEY }}
+          # Must exceed flock's 600s wait plus deploy minutes: appleboy's
+          # default 10m would kill a lock contender before its loud failure.
+          # (Single `with:` mapping — a duplicate key here silently
+          # last-wins in some parsers, dropping command_timeout/envs.)
+          command_timeout: 30m
+          envs: BACKEND_IMAGE_TAG,DEPLOY_ENVIRONMENT,DATABASE_URL_PRESENT
           script: |
             set -euo pipefail
             cd /opt/timeoflife
+
+            # Mutual exclusion FIRST: everything below mutates shared state
+            # (.env backup/rewrite, image pull, service recreate). A second
+            # run overlapping here could read a half-written .env or pull a
+            # tag the other run is mid-publish. The lock is held to script
+            # exit; a contender waits 600s then fails LOUDLY (never silently
+            # dropped, never interleaved).
+            exec 9>/opt/timeoflife/.deploy.lock
+            flock -w 600 9 || { echo "another deploy holds /opt/timeoflife/.deploy.lock — refusing to interleave; re-dispatch after it finishes"; exit 1; }
+
+            # Prod pre-rewrite guard (first layer): backend-prod must never
+            # run on the VM-local fallback DB. Checked here — before the
+            # heredoc rewrite — so a refused deploy leaves the on-disk .env
+            # untouched for the next manual recovery. (The post-source
+            # check below remains as the second layer.)
+            if [ "${DEPLOY_ENVIRONMENT:-}" = "backend-prod" ] && [ "${DATABASE_URL_PRESENT:-}" != "true" ]; then
+              echo "DATABASE_URL is empty in backend-prod — populate the backend-prod environment secrets (see docs/ci.md) instead of deploying prod onto VM-local Postgres"; exit 1
+            fi
 
             # Back up the current .env before regenerating (recoverable, not authoritative).
             [ -f .env ] && cp .env ".env.bak.$(date +%Y%m%d-%H%M%S)" || true
@@ -231,6 +373,18 @@ jobs:
             cat > .env <<'ENVEOF'
             DB_PASSWORD=${{ secrets.DB_PASSWORD }}
             JWT_SECRET=${{ secrets.JWT_SECRET }}
+            # Pinned-image rollback (manual-tag-releases): the value travels
+            # in $BACKEND_IMAGE_TAG through the action's `envs` (never
+            # interpolated — ref names may carry shell metacharacters and a
+            # newline/ENVEOF value would otherwise break out of the heredoc).
+            # It is appended AFTER the ENVEOF terminator below, never inside
+            # this quoted heredoc (literal text there would be sourced as
+            # shell while reading the file it appends to). Empty (normal
+            # deploys) resolves to :latest in compose; a rollback dispatch
+            # sets e.g. backend-v2.4.0 and the pull below fetches the pinned
+            # image instead. A bad tag fails loudly at `docker compose pull`
+            # (set -euo pipefail aborts before `up`), leaving .env written —
+            # re-dispatch with an empty/correct tag to recover.
             EMAIL_BACKEND=${{ vars.EMAIL_BACKEND }}
             AWS_ACCESS_KEY_ID=${{ secrets.AWS_ACCESS_KEY_ID }}
             AWS_SECRET_ACCESS_KEY=${{ secrets.AWS_SECRET_ACCESS_KEY }}
@@ -294,6 +448,26 @@ jobs:
             APPLE_TOKEN_KEYS=${{ secrets.APPLE_TOKEN_KEYS }}
             ENVEOF
             chmod 600 .env
+            # Rollback input guard FIRST of the write path (fail-closed layer
+            # 2 — layer 1 is the GH-side validate step): the value is checked
+            # BEFORE it is written into .env, because the file is sourced
+            # below and sourcing is the injection point. grep ERE with ^…$
+            # matches when ANY line matches, so an embedded newline would
+            # pass the charset check and land verbatim in the sourced file —
+            # reject newlines explicitly first (GH-side already does; this
+            # keeps layer 2 independently fail-closed). grep, not shell
+            # brackets: adjacent `[..][..]` classes misbehave on some shells
+            # (observed: `a;b` passing), while grep ERE is stable.
+            # Empty = normal :latest deploy.
+            if [ -n "${BACKEND_IMAGE_TAG:-}" ] && { [ "$(printf '%s' "$BACKEND_IMAGE_TAG" | wc -l)" -ne 0 ] || ! printf '%s' "$BACKEND_IMAGE_TAG" | grep -Eq '^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$'; }; then
+              echo "BACKEND_IMAGE_TAG '$BACKEND_IMAGE_TAG' is not a valid Docker tag suffix (allowed: A-Za-z0-9_.-, max 128 chars, no leading ./-, no newline)"; exit 1
+            fi
+            # Rollback tag lands here — after the terminator, never inside the
+            # quoted heredoc above (literal text there would execute while the
+            # file is sourced below). printf %s writes it byte-safe; the value
+            # was already charset+newline validated GH-side before SSH and
+            # re-checked by the guard above.
+            printf 'BACKEND_IMAGE_TAG=%s\n' "${BACKEND_IMAGE_TAG:-}" >> .env
 
             # Validate before bringing services up — fail loudly in CI instead of
             # crashlooping on the VM with empty/missing config.
@@ -301,6 +475,14 @@ jobs:
             : "${DB_PASSWORD:?secret DB_PASSWORD is empty}"
             : "${JWT_SECRET:?secret JWT_SECRET is empty}"
             [ "${#JWT_SECRET}" -ge 32 ] || { echo "JWT_SECRET must be at least 32 bytes"; exit 1; }
+            # backend-prod must never run on the VM-local fallback DB: an
+            # empty DATABASE_URL there means the environment's secrets were
+            # never populated (see docs/ci.md), and the compose fallback would
+            # silently repoint prod at an orphan volume. Stage keeps the
+            # fallback for local-parity deploys.
+            if [ "${DEPLOY_ENVIRONMENT:-}" = "backend-prod" ] && [ -z "${DATABASE_URL:-}" ]; then
+              echo "DATABASE_URL is empty in backend-prod — populate the backend-prod environment secrets (see docs/ci.md) instead of deploying prod onto VM-local Postgres"; exit 1
+            fi
             # Format check mirrors ParseRecoveryKeys + isZeroKey (config.go):
             # comma-separated, edge-trimmed, empties ignored, every entry 64
             # hex chars (32 bytes) and non-zero. A malformed or placeholder

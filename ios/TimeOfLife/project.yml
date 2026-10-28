@@ -70,8 +70,12 @@ targets:
       path: TimeOfLife/Configuration/Info.plist
       properties:
         CFBundleDisplayName: Lifio
-        CFBundleShortVersionString: "0.2.6"
-        CFBundleVersion: "11"
+        # Dev-dummy versions (manual-tag-releases): checked-in values never
+        # ship — tag-triggered Cloud builds rewrite these via
+        # ci_scripts/ci_post_clone.sh before generating. Local/simulator
+        # builds read the dummy below.
+        CFBundleShortVersionString: "0.0.0-dev"
+        CFBundleVersion: "0"
         LSRequiresIPhoneOS: true
         UIApplicationSupportsIndirectInputEvents: true
         UILaunchScreen:
@@ -117,6 +121,11 @@ targets:
         # on every build, so a build that skips the script still reads a
         # defined key.
         GIT_COMMIT_SHA: "?"
+        # Release channel stamped at build time by ci_post_clone.sh
+        # (manual-tag-releases): "" locally, "internal" for internal/*
+        # tags, "public" for release/* tags. The Profile footer reads this
+        # key to badge internal builds (` • Internal`).
+        RELEASE_CHANNEL: ""
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.antonkosenko.timeoflifeapp
@@ -126,7 +135,7 @@ targets:
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentPrimary
         ENABLE_PREVIEWS: YES
         SWIFT_EMIT_LOC_STRINGS: NO
-        CURRENT_PROJECT_VERSION: "11"
+        CURRENT_PROJECT_VERSION: "0"
         GENERATE_INFOPLIST_FILE: NO
         # Warnings-as-errors live here (target-scoped), not on the CLI: a
         # global SWIFT_TREAT_WARNINGS_AS_ERRORS=YES conflicts with the
@@ -216,11 +225,12 @@ targets:
         GENERATE_INFOPLIST_FILE: YES
         # Version keys for the generated Info.plist (ITMS-90057): Xcode fills
         # CFBundleShortVersionString from MARKETING_VERSION and CFBundleVersion
-        # from CURRENT_PROJECT_VERSION. Both ride the release workflow's
-        # lockstep bump with the app/appex versions (see RELEASE_PLISTS guard
-        # in release.yml) — a new target MUST wire its versions in there.
-        MARKETING_VERSION: "0.2.6"
-        CURRENT_PROJECT_VERSION: "11"
+        # from CURRENT_PROJECT_VERSION. Checked-in values are the dev dummy
+        # (manual-tag-releases) — tag-triggered Cloud builds stamp the real
+        # versions via ci_scripts/ci_post_clone.sh, which asserts unanimity
+        # across all targets or fails the archive.
+        MARKETING_VERSION: "0.0.0-dev"
+        CURRENT_PROJECT_VERSION: "0"
         # Linked by the widget extension: only extension-safe APIs allowed
         # (no UIApplication etc.) — enforced at compile time.
         APPLICATION_EXTENSION_API_ONLY: YES
@@ -306,13 +316,15 @@ targets:
         # (without it sim installs fail with "extensionDictionary must
         # be set in placeholder attributes").
         CFBundleDisplayName: Lifio
-        # Release versions: must match the containing app's Release plist
-        # (0.2.3/8) — build warning now, App Store rejection later. Debug
-        # uses the unmanaged Info-Debug.plist below (0.1.3/4); keep both
-        # in sync with TimeOfLife/Configuration/Info*.plist under the
-        # release-versioning spec when bumping.
-        CFBundleShortVersionString: "0.2.6"
-        CFBundleVersion: "11"
+        # Release versions: must match the containing app's Release plist —
+        # build warning now, App Store rejection later. Checked-in values
+        # are the dev dummy (manual-tag-releases): tag-triggered Cloud
+        # builds stamp the real versions via ci_scripts/ci_post_clone.sh.
+        # Debug uses the unmanaged Info-Debug.plist below (dummy-pinned);
+        # keep both in sync with TimeOfLife/Configuration/Info*.plist
+        # under the release-versioning spec when stamping.
+        CFBundleShortVersionString: "0.0.0-dev"
+        CFBundleVersion: "0"
         NSExtension:
           NSExtensionPointIdentifier: com.apple.widgetkit-extension
     settings:
@@ -332,13 +344,12 @@ targets:
         # aids in the extension).
         Debug:
           SWIFT_ACTIVE_COMPILATION_CONDITIONS: DEBUG
-          # Debug uses the unmanaged Info-Debug.plist (Debug versions
-          # 0.1.3/4, matching the app's Debug plist); Release uses the
-          # generated base plist above (0.2.3/8). Same split as the app
-          # target — the release workflow bumps the Release pair only and
-          # mirrors both Release Info.plists (see RELEASE_PLISTS in
-          # release.yml); Debug stays pinned, and a new target MUST be wired
-          # in there or the unanimity guard fails the next release.
+          # Debug uses the unmanaged Info-Debug.plist (dummy-pinned,
+          # matching the app's Debug plist); Release uses the generated
+          # base plist above. Same split as the app target — Cloud stamps
+          # the Release pair at build time (ci_post_clone.sh) and asserts
+          # unanimity; Debug stays pinned, and a new target MUST be wired
+          # into that script or the unanimity assertion fails the archive.
           INFOPLIST_FILE: LifioLiveActivities/Info-Debug.plist
         Release:
           DEVELOPMENT_TEAM: 7923U48U87
