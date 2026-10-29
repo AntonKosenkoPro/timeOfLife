@@ -286,11 +286,20 @@ jobs:
           GRAFANA_KEY_PRESENT: ${{ secrets.GRAFANA_CLOUD_OTLP_KEY != '' }}
         run: |
           v="$(printf '%s' "$OTEL_ENABLED" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+          # The VM writes this var unquoted into the sourced .env: leading
+          # whitespace would turn the line into a prefix-assignment + command
+          # (variable never set) or fail sourcing after the rewrite — so the
+          # raw form must already equal the trimmed form. Reject, don't
+          # silently rewrite: an operator typo should fail loudly here.
+          if [ "$v" != "$OTEL_ENABLED" ]; then
+            echo "::error::OTEL_ENABLED must not carry surrounding whitespace (it is written unquoted into the sourced VM .env). Nothing deployed."; exit 1
+          fi
           case "$v" in ''|1|t|T|TRUE|True|true|0|f|F|FALSE|False|false) ;;
             *) echo "::error::OTEL_ENABLED must be empty or a boolean (strconv.ParseBool vocabulary) — got '${OTEL_ENABLED}'. Nothing deployed."; exit 1 ;;
           esac
-          if [ -n "$GRAFANA_ENDPOINT" ] || [ "$GRAFANA_KEY_PRESENT" = 'true' ]; then
-            [ -n "$GRAFANA_ENDPOINT" ] && [ "$GRAFANA_KEY_PRESENT" = 'true' ] || { echo "::error::GRAFANA_CLOUD_OTLP_ENDPOINT and GRAFANA_CLOUD_OTLP_KEY must be set together (or both empty). Nothing deployed."; exit 1; }
+          e="$(printf '%s' "$GRAFANA_ENDPOINT" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+          if [ -n "$e" ] || [ "$GRAFANA_KEY_PRESENT" = 'true' ]; then
+            [ -n "$e" ] && [ "$GRAFANA_KEY_PRESENT" = 'true' ] || { echo "::error::GRAFANA_CLOUD_OTLP_ENDPOINT and GRAFANA_CLOUD_OTLP_KEY must be set together (or both empty). Nothing deployed."; exit 1; }
           fi
           echo "OTel/SaaS seam valid (OTEL_ENABLED='${OTEL_ENABLED:-<empty>}')."
 
@@ -386,6 +395,19 @@ jobs:
             if [ "${DEPLOY_ENVIRONMENT:-}" = "backend-prod" ] && [ "${DATABASE_URL_PRESENT:-}" != "true" ]; then
               echo "DATABASE_URL is empty in backend-prod — populate the backend-prod environment secrets (see docs/ci.md) instead of deploying prod onto VM-local Postgres"; exit 1
             fi
+            # Telemetry environment label, validated BEFORE the heredoc
+            # rewrite (same fail-closed-before-mutation rule as the prod
+            # guard above): a refusal must never leave a half-rewritten
+            # .env behind for the next manual `docker compose up -d`
+            # (which would fall back to ${ENVIRONMENT:-production} and
+            # mislabel stage telemetry). backend-prod -> production,
+            # stage -> stage, so every path — push, dispatch, rollback —
+            # labels identically.
+            case "${DEPLOY_ENVIRONMENT:-stage}" in
+              backend-prod) ENVIRONMENT_LABEL=production ;;
+              stage) ENVIRONMENT_LABEL=stage ;;
+              *) echo "refusing unknown DEPLOY_ENVIRONMENT '${DEPLOY_ENVIRONMENT}'"; exit 1 ;;
+            esac
 
             # Back up the current .env before regenerating (recoverable, not authoritative).
             [ -f .env ] && cp .env ".env.bak.$(date +%Y%m%d-%H%M%S)" || true
@@ -507,17 +529,10 @@ jobs:
             # was already charset+newline validated GH-side before SSH and
             # re-checked by the guard above.
             printf 'BACKEND_IMAGE_TAG=%s\n' "${BACKEND_IMAGE_TAG:-}" >> .env
-            # Telemetry environment label (observability-stage-1): normalized
-            # from DEPLOY_ENVIRONMENT (already validated, safely transported
-            # via envs) so every path — push, dispatch, rollback — labels
-            # identically (backend-prod -> production, stage -> stage). Never
-            # interpolated from inputs: input text must not reach a sourced
-            # file. Unknown values fail closed before the rewrite is used.
-            case "${DEPLOY_ENVIRONMENT:-stage}" in
-              backend-prod) printf 'ENVIRONMENT=production\n' >> .env ;;
-              stage) printf 'ENVIRONMENT=stage\n' >> .env ;;
-              *) echo "refusing unknown DEPLOY_ENVIRONMENT '${DEPLOY_ENVIRONMENT}'"; exit 1 ;;
-            esac
+            # Telemetry environment label (observability-stage-1): appended
+            # from the pre-validated $ENVIRONMENT_LABEL computed above (never
+            # interpolated: input text must not reach a sourced file).
+            printf 'ENVIRONMENT=%s\n' "$ENVIRONMENT_LABEL" >> .env
 
             # Validate before bringing services up — fail loudly in CI instead of
             # crashlooping on the VM with empty/missing config.

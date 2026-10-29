@@ -198,11 +198,6 @@ func ShutdownOTel(ctx context.Context) error {
 	return otelShutdownFn(ctx)
 }
 
-// initTelemetry installs already-built providers and creates the
-// instruments. Production passes OTLP-backed providers via InitOTel; tests
-// pass in-memory ones. It returns an error only for invalid instrument
-// definitions (a programming bug, not a runtime condition).
-
 // traceEndpointOpts accepts a bare host:port (compose default) or a URL
 // (the shape operators copy from OTel docs): a scheme selects WithEndpointURL,
 // otherwise WithEndpoint. Plain-HTTP URLs stay insecure (the Collector serves

@@ -38,7 +38,9 @@ struct SyncTelemetryConfig: Sendable, Equatable {
     static func parsedOverride(_ raw: String?) -> URL? {
         guard let raw,
               let url = URL(string: raw),
-              url.scheme != nil, url.host != nil
+              let scheme = url.scheme?.lowercased(),
+              scheme == "http" || scheme == "https",
+              url.host != nil
         else { return nil }
         return url
     }
@@ -102,10 +104,13 @@ struct URLSessionOTLPTransport: OTLPTransport {
         switch http.statusCode {
         case 200 ... 299:
             return
-        case 400, 413, 415, 422:
-            // Permanent payload rejections: re-POSTing the same batch can
-            // never succeed. 408/425/429 stay transient (timeouts and
-            // back-pressure under load must retry, not discard telemetry).
+        case 400, 401, 403, 404, 405, 413, 415, 422:
+            // Permanent payload/config rejections: re-POSTing the same batch
+            // can never succeed (wrong path, rejected credential, oversize or
+            // unprocessable body). Without these, a 404/401 wedges the buffer
+            // forever and the counted loss can never be reported, since
+            // reporting itself requires a successful flush. 408/425/429 stay
+            // transient: timeouts and back-pressure must retry, not discard.
             throw SyncExportError.permanent(status: http.statusCode)
         default:
             throw SyncExportError.rejected

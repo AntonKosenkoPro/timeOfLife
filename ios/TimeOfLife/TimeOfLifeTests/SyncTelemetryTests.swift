@@ -158,6 +158,37 @@ struct SyncTelemetryTests {
         #expect(stub.posts == 1)
     }
 
+    @Test("overlapping flushes serialize: one in flight at a time")
+    func overlappingFlushesSerialize() async throws {
+        let transport = GatedTransport()
+        defer { transport.open() }
+        let endpoint = try #require(URL(string: "http://127.0.0.1:4318/v1/traces"))
+        let buffer = SyncSpanBuffer(directory: temporaryDirectory())
+        let telemetry = SyncTelemetry(
+            buffer: buffer,
+            exporter: SyncSpanExporter(
+                config: SyncTelemetryConfig(isEnabled: true, endpoint: endpoint),
+                transport: transport
+            )
+        )
+        // First span starts a flush that blocks inside post; the second span
+        // must not start another POST while it is in flight (re-POSTing the
+        // same head prefix would let the tails drop each other's spans).
+        await telemetry.recordSpan(makeSpan(outcome: .success, pushed: 0, pulled: 0, conflicts: 0))
+        await telemetry.recordSpan(makeSpan(outcome: .success, pushed: 1, pulled: 0, conflicts: 0))
+        // Poll for the single in-flight POST (detached flush runs
+        // concurrently with the test task).
+        let deadline = Date().addingTimeInterval(5)
+        while transport.posts < 1, Date() < deadline {
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+        #expect(transport.posts == 1)
+        // A failed flush keeps both spans; opening the gate lets a later
+        // cycle drain them normally.
+        transport.open()
+        #expect(await buffer.bufferedCount == 2)
+    }
+
     @Test("offline soak: failures keep order, recovery forwards, growth bounded")
     func offlineSoak() async throws {
         let stub = StubTransport()
@@ -344,42 +375,4 @@ struct SyncTelemetryTests {
             buffer: buffer, telemetry: telemetry, recorder: recorder
         )
     }
-
-    private func makeSpan(outcome: SyncSessionOutcome, pushed: Int, pulled: Int, conflicts: Int) -> SyncSessionSpan {
-        SyncSessionSpan.build(
-            start: Date(), end: Date(), outcome: outcome,
-            counts: SyncSessionSpanCounts(pushed: pushed, pulled: pulled, conflicts: conflicts)
-        )
-    }
-
-    private func temporaryDirectory() -> URL {
-        FileManager.default.temporaryDirectory
-            .appendingPathComponent(UUID().uuidString, isDirectory: true)
-    }
-
-    private func temporaryStoreURL() -> URL {
-        FileManager.default.temporaryDirectory
-            .appendingPathComponent(UUID().uuidString, isDirectory: true)
-            .appendingPathComponent(LocalStore.databaseFileName(userID: "u1"))
-    }
-
-    private func waitForCycle(_ controller: SyncController) async {
-        // Poll the cycle TAIL, not the status: status leaves `.syncing`
-        // before span appends / the tail clears the single-flight handle,
-        // so status-based polling lets the next syncNow join a dying cycle
-        // instead of starting a new one. isCycleLive clears only in
-        // finishCycleTail, after the whole body (including span recording)
-        // completes. Generous deadline: CI runners are heavily loaded;
-        // failure here is loud by design.
-        let deadline = Date().addingTimeInterval(15)
-        while Date() < deadline {
-            if controller.isCycleLive {
-                try? await Task.sleep(nanoseconds: 10_000_000)
-            } else {
-                return
-            }
-        }
-        Issue.record("waitForCycle timed out waiting for the cycle to settle")
-    }
-
 }

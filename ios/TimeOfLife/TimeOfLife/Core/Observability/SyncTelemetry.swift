@@ -69,14 +69,22 @@ final class SyncTelemetry {
         guard !flushing, let exporter, exporter.isEnabled else { return }
         flushing = true
         Task.detached { [exporter, buffer] in
+            let before = await buffer.bufferedCount
             let ok = await exporter.flush(buffer: buffer)
-            await self.didFinishFlush(flushed: ok, buffer: buffer)
+            await self.didFinishFlush(flushed: ok, drainedFrom: before, buffer: buffer)
         }
     }
 
-    private func didFinishFlush(flushed: Bool, buffer: SyncSpanBuffer) async {
+    private func didFinishFlush(flushed: Bool, drainedFrom before: Int, buffer: SyncSpanBuffer) async {
         flushing = false
-        guard flushed, await buffer.bufferedCount > 0 else { return }
+        // Re-kick only on proven drain progress: if the buffer did not shrink
+        // (e.g. the write behind dropFirst failed while the POST succeeded),
+        // re-kicking would re-POST the same prefix forever with no delay,
+        // cap, or backoff. Spans appended mid-flush are picked up either here
+        // or by the next recordSpan call.
+        guard flushed else { return }
+        let after = await buffer.bufferedCount
+        guard after > 0, after < before else { return }
         flushSoon()
     }
 
@@ -96,14 +104,5 @@ final class SyncTelemetry {
         if consecutiveFailures == Self.distressThreshold {
             onDistress()
         }
-    }
-
-    /// Flushes the buffer when export is on (serialized: one flush at a
-    /// time; a skipped flush is safe because the buffer persists).
-    func flushIfEnabled() async {
-        guard let exporter, exporter.isEnabled, !flushing else { return }
-        flushing = true
-        defer { flushing = false }
-        _ = await exporter.flush(buffer: buffer)
     }
 }

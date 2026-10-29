@@ -77,3 +77,74 @@ final class DistressRecorder: @unchecked Sendable {
         lock.withLock { storedCount += 1 }
     }
 }
+
+/// Transport whose posts block until the test opens the gate, so overlapping
+/// flushes can be observed deterministically: while the first flush is held
+/// inside `post`, a second `recordSpan` must not start another POST.
+final class GatedTransport: OTLPTransport, @unchecked Sendable {
+    private let lock = NSLock()
+    private var storedPosts = 0
+    private var storedOpen = false
+
+    var posts: Int {
+        lock.withLock { storedPosts }
+    }
+
+    func open() {
+        lock.withLock { storedOpen = true }
+    }
+
+    private var isOpen: Bool {
+        lock.withLock { storedOpen }
+    }
+
+    func post(url _: URL, body _: Data) async throws {
+        lock.withLock { storedPosts += 1 }
+        var spins = 0
+        while !isOpen, spins < 2_000 {
+            try? await Task.sleep(nanoseconds: 5_000_000)
+            spins += 1
+        }
+        throw SyncExportError.rejected
+    }
+}
+
+// MARK: - SyncTelemetry test helpers
+
+func makeSpan(outcome: SyncSessionOutcome, pushed: Int, pulled: Int, conflicts: Int) -> SyncSessionSpan {
+    SyncSessionSpan.build(
+        start: Date(), end: Date(), outcome: outcome,
+        counts: SyncSessionSpanCounts(pushed: pushed, pulled: pulled, conflicts: conflicts)
+    )
+}
+
+func temporaryDirectory() -> URL {
+    FileManager.default.temporaryDirectory
+        .appendingPathComponent(UUID().uuidString, isDirectory: true)
+}
+
+func temporaryStoreURL() -> URL {
+    FileManager.default.temporaryDirectory
+        .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        .appendingPathComponent(LocalStore.databaseFileName(userID: "u1"))
+}
+
+@MainActor
+func waitForCycle(_ controller: SyncController) async {
+    // Poll the cycle TAIL, not the status: status leaves `.syncing`
+    // before span appends / the tail clears the single-flight handle,
+    // so status-based polling lets the next syncNow join a dying cycle
+    // instead of starting a new one. isCycleLive clears only in
+    // finishCycleTail, after the whole body (including span recording)
+    // completes. Generous deadline: CI runners are heavily loaded;
+    // failure here is loud by design.
+    let deadline = Date().addingTimeInterval(15)
+    while Date() < deadline {
+        if controller.isCycleLive {
+            try? await Task.sleep(nanoseconds: 10_000_000)
+        } else {
+            return
+        }
+    }
+    Issue.record("waitForCycle timed out waiting for the cycle to settle")
+}
