@@ -21,34 +21,43 @@ struct SyncTelemetryConfig: Sendable, Equatable {
 
     static func resolved(apiBaseURL: URL = AppConfig.baseURL) -> SyncTelemetryConfig {
         let raw = Bundle.main.object(forInfoDictionaryKey: "OTEL_ENABLED") as? String
-        let override = Bundle.main.object(forInfoDictionaryKey: "OTEL_EXPORTER_OTLP_ENDPOINT") as? String
+        let overrideRaw = Bundle.main.object(forInfoDictionaryKey: "OTEL_EXPORTER_OTLP_ENDPOINT") as? String
+        let override = Self.parsedOverride(overrideRaw)
         #if DEBUG
-        let isEnabled = enabled(raw: raw, overridePresent: override != nil, debug: true)
+        let isEnabled = enabled(raw: raw, override: override, debug: true)
         #else
-        let isEnabled = enabled(raw: raw, overridePresent: override != nil, debug: false)
+        let isEnabled = enabled(raw: raw, override: override, debug: false)
         #endif
-        return SyncTelemetryConfig(isEnabled: isEnabled, endpoint: endpoint(apiBaseURL: apiBaseURL))
+        return SyncTelemetryConfig(isEnabled: isEnabled, endpoint: override ?? derivedEndpoint(apiBaseURL: apiBaseURL))
+    }
+
+    /// Parses the `OTEL_EXPORTER_OTLP_ENDPOINT` override the same way the
+    /// endpoint derivation does — nil unless it is a usable http(s) URL
+    /// with a host. Single source of truth for "usable override", shared by
+    /// derivation and the enablement rule below.
+    static func parsedOverride(_ raw: String?) -> URL? {
+        guard let raw,
+              let url = URL(string: raw),
+              url.scheme != nil, url.host != nil
+        else { return nil }
+        return url
     }
 
     /// Pure enablement rule (testable without a bundle): Debug defaults on
     /// (simulator shares the host network); Release requires an explicit
     /// endpoint — deriving `https://<relay-host>:4318` would emit an
     /// unusable URL (the Collector only exposes plaintext 4318 on the
-    /// compose network; TLS terminates at nginx on 443), so without an
-    /// override Release stays off rather than failing every flush silently.
-    static func enabled(raw: String?, overridePresent: Bool, debug: Bool) -> Bool {
+    /// compose network; TLS terminates at nginx on 443), so without a
+    /// parseable override Release stays off rather than failing every
+    /// flush silently.
+    static func enabled(raw: String?, override: URL?, debug: Bool) -> Bool {
         if debug {
             return raw != "0"
         }
-        return raw == "1" && overridePresent
+        return raw == "1" && override != nil
     }
 
-    private static func endpoint(apiBaseURL: URL) -> URL {
-        if let overrideRaw = Bundle.main.object(forInfoDictionaryKey: "OTEL_EXPORTER_OTLP_ENDPOINT") as? String,
-           let overrideURL = URL(string: overrideRaw),
-           overrideURL.scheme != nil, overrideURL.host != nil {
-            return overrideURL
-        }
+    private static func derivedEndpoint(apiBaseURL: URL) -> URL {
         var components = URLComponents()
         components.scheme = apiBaseURL.scheme
         components.host = apiBaseURL.host
@@ -93,8 +102,10 @@ struct URLSessionOTLPTransport: OTLPTransport {
         switch http.statusCode {
         case 200 ... 299:
             return
-        case 400 ... 499:
-            // Permanent: re-POSTing the same batch can never succeed.
+        case 400, 413, 415, 422:
+            // Permanent payload rejections: re-POSTing the same batch can
+            // never succeed. 408/425/429 stay transient (timeouts and
+            // back-pressure under load must retry, not discard telemetry).
             throw SyncExportError.permanent(status: http.statusCode)
         default:
             throw SyncExportError.rejected
@@ -153,7 +164,11 @@ final class SyncSpanExporter: Sendable {
         } catch let SyncExportError.permanent(status) {
             logger.error("sync span export permanently rejected (status \(status)); dropping batch")
             await buffer.dropFirst(spans.count)
-            await buffer.acknowledgeDropped(dropped)
+            // Count the dropped batch as loss: it was never observed by the
+            // backend, so the next successful flush must still report it.
+            // (Acknowledging here would erase the only loss signal for data
+            // the SaaS never saw.)
+            await buffer.addDropped(spans.count)
             return false
         } catch {
             logger.error("sync span export failed; spans stay buffered")

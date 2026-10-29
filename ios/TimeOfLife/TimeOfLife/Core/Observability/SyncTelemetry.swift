@@ -56,10 +56,28 @@ final class SyncTelemetry {
         await buffer.append(span)
         // Detached: a slow/blackholed Collector must never hold the sync
         // cycle's single-flight flag or delay the user-visible status.
+        flushSoon()
+    }
+
+    /// Best-effort forward with a single-flush guarantee: overlapping
+    /// flushes would re-POST the same head prefix and then drop spans
+    /// appended after the slower read — silent, unreported loss. At most
+    /// one flush runs at a time; a completed flush that left spans behind
+    /// (appended mid-flight) re-kicks while the buffer is non-empty, and a
+    /// failed flush waits for the next cycle.
+    private func flushSoon() {
+        guard !flushing, let exporter, exporter.isEnabled else { return }
+        flushing = true
         Task.detached { [exporter, buffer] in
-            guard let exporter, exporter.isEnabled else { return }
-            _ = await exporter.flush(buffer: buffer)
+            let ok = await exporter.flush(buffer: buffer)
+            await self.didFinishFlush(flushed: ok, buffer: buffer)
         }
+    }
+
+    private func didFinishFlush(flushed: Bool, buffer: SyncSpanBuffer) async {
+        flushing = false
+        guard flushed, await buffer.bufferedCount > 0 else { return }
+        flushSoon()
     }
 
     /// A cycle succeeded: the distress streak resets.

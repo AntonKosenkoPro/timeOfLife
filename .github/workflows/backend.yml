@@ -269,6 +269,31 @@ jobs:
           fi
           echo "Rollback image tag '$IMAGE_TAG' valid and published."
 
+      - name: Validate OTel/SaaS seam
+        # OTel vars + SaaS presence bits are admin-controlled (vars/secrets),
+        # never operator-typed inputs: safe to read via env. Validates on the
+        # runner BEFORE anything is written into the VM `.env` (a refused
+        # deploy must leave the on-disk `.env` untouched for manual recovery).
+        # Vocabulary mirrors config.Load exactly: TrimSpace + strconv.ParseBool
+        # (1,t,T,TRUE,True,true,0,f,F,FALSE,False,false). Endpoint/key must be
+        # set together or both empty (half-provisioned = silently degraded
+        # Collector); empty/empty = Stage-0 posture, the valid default.
+        # Secrets travel as presence bits only (`!= ''` → 'true'/'false'):
+        # values are never interpolated, echoed, or logged.
+        env:
+          OTEL_ENABLED: ${{ vars.OTEL_ENABLED }}
+          GRAFANA_ENDPOINT: ${{ vars.GRAFANA_CLOUD_OTLP_ENDPOINT }}
+          GRAFANA_KEY_PRESENT: ${{ secrets.GRAFANA_CLOUD_OTLP_KEY != '' }}
+        run: |
+          v="$(printf '%s' "$OTEL_ENABLED" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+          case "$v" in ''|1|t|T|TRUE|True|true|0|f|F|FALSE|False|false) ;;
+            *) echo "::error::OTEL_ENABLED must be empty or a boolean (strconv.ParseBool vocabulary) — got '${OTEL_ENABLED}'. Nothing deployed."; exit 1 ;;
+          esac
+          if [ -n "$GRAFANA_ENDPOINT" ] || [ "$GRAFANA_KEY_PRESENT" = 'true' ]; then
+            [ -n "$GRAFANA_ENDPOINT" ] && [ "$GRAFANA_KEY_PRESENT" = 'true' ] || { echo "::error::GRAFANA_CLOUD_OTLP_ENDPOINT and GRAFANA_CLOUD_OTLP_KEY must be set together (or both empty). Nothing deployed."; exit 1; }
+          fi
+          echo "OTel/SaaS seam valid (OTEL_ENABLED='${OTEL_ENABLED:-<empty>}')."
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -417,10 +442,11 @@ jobs:
             # backend from emitting. Base64 alphabet only (no $/quotes/newlines)
             # — safe unquoted like SENTRY_DSN above. Endpoint is not sensitive
             # (gateway URL) so it rides in vars; the Basic credential is secret.
-            # ENVIRONMENT feeds the Collector resource processor
-            # (deployment.environment.name) — same expression as
-            # DEPLOY_ENVIRONMENT so stage telemetry never labels as production.
-            ENVIRONMENT=${{ github.event_name == 'push' && 'production' || github.event.inputs.environment || 'stage' }}
+            # ENVIRONMENT is NOT rendered here: it is derived from the safely
+            # transported $DEPLOY_ENVIRONMENT after ENVEOF (normalized
+            # backend-prod -> production, stage -> stage) so operator-typed
+            # input can never reach the sourced file and every path labels
+            # telemetry identically, including the rollback path.
             OTEL_ENABLED=${{ vars.OTEL_ENABLED }}
             OTEL_EXPORTER_OTLP_ENDPOINT=${{ vars.OTEL_EXPORTER_OTLP_ENDPOINT }}
             GRAFANA_CLOUD_OTLP_ENDPOINT=${{ vars.GRAFANA_CLOUD_OTLP_ENDPOINT }}
@@ -481,6 +507,17 @@ jobs:
             # was already charset+newline validated GH-side before SSH and
             # re-checked by the guard above.
             printf 'BACKEND_IMAGE_TAG=%s\n' "${BACKEND_IMAGE_TAG:-}" >> .env
+            # Telemetry environment label (observability-stage-1): normalized
+            # from DEPLOY_ENVIRONMENT (already validated, safely transported
+            # via envs) so every path — push, dispatch, rollback — labels
+            # identically (backend-prod -> production, stage -> stage). Never
+            # interpolated from inputs: input text must not reach a sourced
+            # file. Unknown values fail closed before the rewrite is used.
+            case "${DEPLOY_ENVIRONMENT:-stage}" in
+              backend-prod) printf 'ENVIRONMENT=production\n' >> .env ;;
+              stage) printf 'ENVIRONMENT=stage\n' >> .env ;;
+              *) echo "refusing unknown DEPLOY_ENVIRONMENT '${DEPLOY_ENVIRONMENT}'"; exit 1 ;;
+            esac
 
             # Validate before bringing services up — fail loudly in CI instead of
             # crashlooping on the VM with empty/missing config.
@@ -496,16 +533,12 @@ jobs:
             if [ "${DEPLOY_ENVIRONMENT:-}" = "backend-prod" ] && [ -z "${DATABASE_URL:-}" ]; then
               echo "DATABASE_URL is empty in backend-prod — populate the backend-prod environment secrets (see docs/ci.md) instead of deploying prod onto VM-local Postgres"; exit 1
             fi
-            # OTel/SaaS seam (observability-stage-1): OTEL_ENABLED outside the
-            # ParseBool vocabulary would fail config.Load and exit the whole
-            # backend at boot (not just telemetry) — reject it here instead.
-            # An endpoint without its key (or vice versa) would boot a silently
-            # degraded Collector (Basic disabled + retry off), so require the
-            # pair together. Empty/empty = Stage-0 posture, the valid default.
-            case "${OTEL_ENABLED:-}" in ''|0|1|true|false|TRUE|FALSE) ;; *) echo "OTEL_ENABLED must be empty, 0/1, or true/false (got '${OTEL_ENABLED}')"; exit 1 ;; esac
-            if [ -n "${GRAFANA_CLOUD_OTLP_ENDPOINT:-}" ] || [ -n "${GRAFANA_CLOUD_OTLP_KEY:-}" ]; then
-              [ -n "${GRAFANA_CLOUD_OTLP_ENDPOINT:-}" ] && [ -n "${GRAFANA_CLOUD_OTLP_KEY:-}" ] || { echo "GRAFANA_CLOUD_OTLP_ENDPOINT and GRAFANA_CLOUD_OTLP_KEY must be set together (or both empty)"; exit 1; }
-            fi
+            # OTel/SaaS seam shape is validated GH-side before SSH (see the
+            # Validate OTel/SaaS seam step): OTEL_ENABLED vocabulary matches
+            # config.Load's TrimSpace + ParseBool, and endpoint/key must pair
+            # together or both stay empty. No VM-side re-check here by design:
+            # values are only readable post-source, and any refusal must land
+            # before the heredoc rewrite above mutates the on-disk .env.
             # Format check mirrors ParseRecoveryKeys + isZeroKey (config.go):
             # comma-separated, edge-trimmed, empties ignored, every entry 64
             # hex chars (32 bytes) and non-zero. A malformed or placeholder
@@ -631,6 +664,13 @@ jobs:
 
             # Recreate all services
             docker compose up -d
+
+            # Collector config pickup (observability-stage-1): otelcol-config.yaml
+            # is bind-mounted, and bind-mount content is not part of the container
+            # spec hash — so a config-only edit would otherwise leave the old
+            # config running. Force-recreate the forwarder (seconds of buffer
+            # lost, by design) so the on-disk config is always the live one.
+            docker compose up -d --force-recreate otel-collector
 
             # Dead-man's-switch pinger (observability-stage-0): every minute,
             # curl /health through nginx and ping Healthchecks.io only on 200.

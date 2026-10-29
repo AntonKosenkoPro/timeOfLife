@@ -202,7 +202,8 @@ func ShutdownOTel(ctx context.Context) error {
 // instruments. Production passes OTLP-backed providers via InitOTel; tests
 // pass in-memory ones. It returns an error only for invalid instrument
 // definitions (a programming bug, not a runtime condition).
-// grpcEndpointOpts accepts a bare host:port (compose default) or a URL
+
+// traceEndpointOpts accepts a bare host:port (compose default) or a URL
 // (the shape operators copy from OTel docs): a scheme selects WithEndpointURL,
 // otherwise WithEndpoint. Plain-HTTP URLs stay insecure (the Collector serves
 // plaintext OTLP; TLS terminates at nginx on 443).

@@ -371,7 +371,7 @@ final class SyncController: ObservableObject {
         // Snapshot the outbox depth and note the gap since the last success
         // (the offline-duration signal for offline-skipped cycles).
         let spanStart = Date()
-        let depthBefore = await outboxDepthForTelemetry()
+        let depthBefore = await outboxDepthForTelemetry(fallback: 0)
         let gapSinceLastCycle = lastCycleEndAt.map { max(0, Int(spanStart.timeIntervalSince($0) * 1_000)) } ?? 0
         guard let userID = boundUserID else {
             Self.logger.error("sync cycle skipped: no bound account")
@@ -401,7 +401,7 @@ final class SyncController: ObservableObject {
             try await runCycleStages(firstSync: firstSync, userID: userID)
             status = .idle(Date())
             telemetry?.recordSuccess()
-            let depthAfter = await outboxDepthForTelemetry()
+            let depthAfter = await outboxDepthForTelemetry(fallback: depthBefore)
             await recordSpan(outcome: .success, start: spanStart, offlineDurationMs: 0, depthBefore: depthBefore, depthAfter: depthAfter)
             lastCycleEndAt = Date()
             Self.logger.info("sync cycle finished")
@@ -482,10 +482,11 @@ final class SyncController: ObservableObject {
     /// Outbox depth for telemetry only. Skipped (0, no store read) when
     /// telemetry is unwired, so the offline / no-account / fenced paths do
     /// no extra store work; a read failure degrades to the passed-in depth
-    /// via the caller's `??` fallback.
-    private func outboxDepthForTelemetry() async -> Int {
+    /// so the span/SLI depths stay coherent instead of reporting a spurious
+    /// "outbox drained" 0.
+    private func outboxDepthForTelemetry(fallback: Int) async -> Int {
         guard telemetry != nil else { return 0 }
-        return (try? await store.outboxRowCount()) ?? 0
+        return (try? await store.outboxRowCount()) ?? fallback
     }
 
     /// Tail of a finished cycle: releases the single-flight handle, the
@@ -534,16 +535,15 @@ final class SyncController: ObservableObject {
         }
         // Sync-distress breadcrumb (observability Stage 0): fixed string
         // only — error details can echo user content, so they stay out.
-        SentryReporter.addSyncDistressBreadcrumb("sync cycle failed")
-        // Same ownership gate as status: a cancelled predecessor (e.g. a
-        // mid-flight request surfacing as APIError.transport after a
-        // sign-out) must neither fire Sentry distress nor skew the SLI.
+        // Same ownership gate as status and streak below: a cancelled
+        // predecessor must never touch Sentry, even as a breadcrumb.
         if ownsCycle {
+            SentryReporter.addSyncDistressBreadcrumb("sync cycle failed")
             telemetry?.recordFailure()
         }
         // Skip the extra store read when telemetry is unwired.
         guard telemetry != nil else { return }
-        let depthAfter = await outboxDepthForTelemetry()
+        let depthAfter = await outboxDepthForTelemetry(fallback: depthBefore)
         await recordSpan(outcome: .failed, start: spanStart, offlineDurationMs: 0, depthBefore: depthBefore, depthAfter: depthAfter)
     }
 

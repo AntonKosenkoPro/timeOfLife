@@ -3,7 +3,9 @@
 # *** SLO THRESHOLDS UNSET — DO NOT ALERT ON THESE ***
 # Recording rules only (no alert rules). SLO numbers land after >= 2 weeks of
 # stable traffic sets a baseline; the SLO-gate task stays OPEN until then.
-# The weekly digest reads these SLIs. Vendor-neutral Prometheus recording-rule
+# The weekly digest reads the LIVE rule(s) below; the weekly-group rules are
+# placeholders until their signals exist (probe gauge, spanmetrics) — the
+# digest reads raw series for those SLIs in the meantime. Vendor-neutral
 # shape. LOAD-TIME CHECK: confirm the OTLP→Prometheus name mapping
 # (dots→underscores + `_total` on counters) against Explore before loading;
 # adjust, never add identifier labels.
@@ -35,9 +37,11 @@ groups:
             }[5m])
           )
 
-  - name: lifio-sli-weekly
-    interval: 1h
-    rules:
+  # PLACEHOLDER group — re-enable together with the rules below; an empty
+  # `rules:` key resolves to YAML null and registers a dead group.
+  # - name: lifio-sli-weekly
+  #   interval: 1h
+  #   rules:
       # PLACEHOLDER — uptime needs a probe gauge (no `*_up` series exists
       # today; `lifio_health_checks_total` is a count, not a gauge, and
       # `* 100` on it is meaningless). Uncomment when the probe lands;

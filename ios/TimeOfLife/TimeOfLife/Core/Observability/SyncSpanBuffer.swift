@@ -77,6 +77,14 @@ actor SyncSpanBuffer {
         writeLines(remaining)
     }
 
+    /// Records spans lost without ever being reported (e.g. a permanently
+    /// rejected batch): they join the dropped total the next successful
+    /// flush reports, so loss stays visible instead of silent.
+    func addDropped(_ count: Int) {
+        guard count > 0 else { return }
+        setDroppedSpans(droppedSpans + count)
+    }
+
     /// Delta-acknowledges exported loss: call after a flush reported
     /// `count` dropped spans to the Collector. Drops that happened
     /// concurrently with the flush survive (they were never reported).

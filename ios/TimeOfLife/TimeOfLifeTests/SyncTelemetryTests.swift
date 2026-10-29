@@ -19,16 +19,21 @@ struct SyncTelemetryTests {
 
     @Test("enablement rule: Debug on, Release needs an explicit endpoint")
     func enablementRule() {
+        let usable = URL(string: "http://127.0.0.1:4318/v1/traces")
         // Debug defaults on (simulator shares the host network).
-        #expect(SyncTelemetryConfig.enabled(raw: nil, overridePresent: false, debug: true))
-        #expect(SyncTelemetryConfig.enabled(raw: "0", overridePresent: false, debug: true) == false)
-        // Release requires OTEL_ENABLED=1 AND an explicit endpoint: deriving
+        #expect(SyncTelemetryConfig.enabled(raw: nil, override: nil, debug: true))
+        #expect(SyncTelemetryConfig.enabled(raw: "0", override: nil, debug: true) == false)
+        // Release requires OTEL_ENABLED=1 AND a parseable override: deriving
         // https://<relay-host>:4318 would emit an unusable URL (plaintext
         // Collector behind an nginx TLS terminator), so Release stays off.
-        #expect(SyncTelemetryConfig.enabled(raw: nil, overridePresent: false, debug: false) == false)
-        #expect(SyncTelemetryConfig.enabled(raw: "1", overridePresent: false, debug: false) == false)
-        #expect(SyncTelemetryConfig.enabled(raw: "0", overridePresent: true, debug: false) == false)
-        #expect(SyncTelemetryConfig.enabled(raw: "1", overridePresent: true, debug: false))
+        // A present-but-unparseable value counts as absent (same parse gate
+        // the endpoint derivation uses).
+        #expect(SyncTelemetryConfig.enabled(raw: nil, override: nil, debug: false) == false)
+        #expect(SyncTelemetryConfig.enabled(raw: "1", override: nil, debug: false) == false)
+        #expect(SyncTelemetryConfig.enabled(raw: "0", override: usable, debug: false) == false)
+        #expect(SyncTelemetryConfig.enabled(raw: "1", override: usable, debug: false))
+        #expect(SyncTelemetryConfig.parsedOverride("not a url :::") == nil)
+        #expect(SyncTelemetryConfig.parsedOverride("http://127.0.0.1:4318/v1/traces") == usable)
     }
 
     @Test("endpoint derives from the relay host")
@@ -145,8 +150,11 @@ struct SyncTelemetryTests {
         await buffer.append(makeSpan(outcome: .success, pushed: 1, pulled: 0, conflicts: 0))
         #expect(await exporter.flush(buffer: buffer) == false)
         // Poison batch quarantined (dropped with a log), not retried: the
-        // buffer is empty so later spans are not wedged behind it.
+        // buffer is empty so later spans are not wedged behind it — and the
+        // dropped span is counted, so the next successful flush still
+        // reports the loss instead of erasing it.
         #expect(await buffer.bufferedCount == 0)
+        #expect(await buffer.droppedSpans == 1)
         #expect(stub.posts == 1)
     }
 
@@ -356,12 +364,16 @@ struct SyncTelemetryTests {
     }
 
     private func waitForCycle(_ controller: SyncController) async {
-        // Generous deadline: CI runners are heavily loaded (parallel suites)
-        // and a slow cycle must not surface as a confusing count/streak
-        // mismatch later. Failure here is loud by design.
+        // Poll the cycle TAIL, not the status: status leaves `.syncing`
+        // before span appends / the tail clears the single-flight handle,
+        // so status-based polling lets the next syncNow join a dying cycle
+        // instead of starting a new one. isCycleLive clears only in
+        // finishCycleTail, after the whole body (including span recording)
+        // completes. Generous deadline: CI runners are heavily loaded;
+        // failure here is loud by design.
         let deadline = Date().addingTimeInterval(15)
         while Date() < deadline {
-            if case .syncing = controller.status {
+            if controller.isCycleLive {
                 try? await Task.sleep(nanoseconds: 10_000_000)
             } else {
                 return
@@ -369,4 +381,5 @@ struct SyncTelemetryTests {
         }
         Issue.record("waitForCycle timed out waiting for the cycle to settle")
     }
+
 }

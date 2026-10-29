@@ -22,13 +22,18 @@ alert:
       "retention 30->7d, drop DEBUG"); stdout drops to ERROR-only after the
       migration overlap window closes (D7-risk mitigation)
   dashboard: lifio-quotas
-  # Loki stream intent — boring labels ONLY
-  # ({service, environment, level} + `operation` on the error stream only).
+  # Loki stream intent — boring labels ONLY (service_name, environment;
+  # `level` is structured metadata filtered post-selector, never a label).
   # trace_id / span_id ride as structured fields, never as labels.
   query_intent: >
-    sum by (service, environment, level)
-    (rate({service_name="lifio-backend"} | level="error" [1h]))
-    — volume accounting per stream; no high-cardinality keys.
+    sum by (service_name, environment)
+    (bytes_over_time({service_name="lifio-backend"}[1h]))
+    — total ingest BYTES per stream (this alert guards a GB quota;
+    rate() counts lines/sec, bytes_over_time matches the signal);
+    no high-cardinality keys. Error-stream volume rides alongside,
+    not in place of the total:
+    sum by (service_name, environment)
+    (bytes_over_time({service_name="lifio-backend"} | level="error" [1h]))
   notes: >
     /health emits nothing per-request in both paths, so health checks never
     contribute to ingest. Time-boxed stdout+OTLP overlap (one release) is the
