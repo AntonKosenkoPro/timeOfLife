@@ -41,10 +41,14 @@
       "model": "opencode-go/muse-spark-1.3-contributor#high"
     },
     "plan": {
-      "model": "opencode-go/muse-spark-1.3-contributor#max",
-      "permission": {
-        "argent*": "deny"
-      }
+      "model": "opencode-go/muse-spark-1.3-contributor#xhigh",
+      "permissions": [
+        {
+          "action": "argent*",
+          "resource": "*",
+          "effect": "deny"
+        }
+      ]
     }
   },
   "experimental": {

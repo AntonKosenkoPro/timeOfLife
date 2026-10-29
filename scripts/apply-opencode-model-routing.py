@@ -17,6 +17,14 @@ Files NOT managed here (pinned directly, survive `openspec update`):
     (a skill body note cannot switch models — the pin takes effect only
     when invoked via `/opsx-pr`, whose command frontmatter sets the model)
 
+Waiver (explicit user request): repo AGENTS.md forbids editing generated
+`.opencode/commands/opsx-*` files. Investigated alternatives — config-object
+`commands` override (no documented precedence beats generated files; JSON
+entries require duplicating full bodies as `template`) and renamed thin
+wrappers (changes the requested /opsx names) — none preserve /opsx names
+without generated edits, so this manual reapply script is retained as the
+narrowly-scoped exception. See docs/project-context.md model-routing bullet.
+
 Usage: python3 scripts/apply-opencode-model-routing.py
 Idempotent: safe to run any time; reports what changed.
 Exit code: 0 when all routed files end up correct, 1 on any I/O error.
