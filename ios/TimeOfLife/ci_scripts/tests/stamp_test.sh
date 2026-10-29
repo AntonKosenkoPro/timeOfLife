@@ -33,12 +33,16 @@ for f in $tracked; do
   cp "$f" "$BACKUP_DIR/$f"
 done
 CREATED_TAGS=""
+CREATED_BRANCHES=""
 # Hermetic origin for the real-tag cases below: the script under test runs
 # `git fetch --tags origin`, which otherwise needs the network and writes
 # remote tags into the developer's repo. Point origin at a throwaway local
 # bare clone instead (restored by restore()).
 ORIGIN_MODE=""
 ORIGIN_URL=""
+# Recorded independently (set right after snapshotting, BEFORE mutating):
+# a signal aborting the mutation itself must still see the URL restored.
+ORIGIN_URL_RECORDED=""
 ORIGIN_MAIN_SYMREF=""
 ORIGIN_MAIN_VALUE=""
 # Set to 1 as the LAST line of setup_test_origin: "absent before" must never
@@ -50,6 +54,14 @@ ANCHOR_NONE=""
 ANCHOR_BAD=""
 setup_test_origin() {
   TEST_ORIGIN="$BACKUP_DIR/origin.git"
+  # Capability probe: every ref removal below uses --no-deref (plain -d on a
+  # symref destroys its TARGET branch). An unsupported flag must fail here
+  # loudly — never silently skip into a dereferencing fallback mid-run.
+  git update-ref refs/stamp-test/probe HEAD 2>/dev/null || { echo "FAIL: cannot write scratch ref"; exit 1; }
+  if ! git update-ref --no-deref -d refs/stamp-test/probe 2>/dev/null; then
+    git update-ref -d refs/stamp-test/probe 2>/dev/null || true
+    echo "FAIL: git update-ref --no-deref unsupported — ref-safety handling must never silently skip"; exit 1
+  fi
   git clone --quiet --bare "$REPO_ROOT" "$TEST_ORIGIN" || { echo "FAIL: cannot clone throwaway origin"; exit 1; }
   # The script under test fetches refs/heads/main explicitly (non-forced):
   # seed the throwaway main from the existing tracking ref when it resolves
@@ -59,27 +71,33 @@ setup_test_origin() {
     SEED_MAIN="$(git rev-parse --verify --quiet refs/remotes/origin/main || git rev-parse --verify HEAD)"
     git --git-dir="$TEST_ORIGIN" update-ref refs/heads/main "$SEED_MAIN" || { echo "FAIL: cannot seed throwaway origin main"; exit 1; }
   fi
+  # Snapshot the remote URL/mode BEFORE mutating, and record immediately:
+  # a signal aborting the mutation command itself must still see the URL
+  # restored (the mutation is what the flag protects, not its success).
   if ORIGIN_URL="$(git remote get-url origin 2>/dev/null)"; then
     ORIGIN_MODE="set-url"
-    git remote set-url origin "$TEST_ORIGIN"
   else
     ORIGIN_MODE="add"
-    git remote add origin "$TEST_ORIGIN"
+    ORIGIN_URL=""
   fi
+  ORIGIN_URL_RECORDED=1
+  case "$ORIGIN_MODE" in
+    set-url) git remote set-url origin "$TEST_ORIGIN" ;;
+    add) git remote add origin "$TEST_ORIGIN" ;;
+  esac
   # Proven pollution record: the script under test fetches refs/heads/main
   # explicitly, overwriting refs/remotes/origin/main HERE on every
   # non-override run. Snapshot this one ref (symref/value/absent) for
   # restore() — plumbing only, no network, no other refs touched.
   ORIGIN_MAIN_SYMREF="$(git symbolic-ref -q refs/remotes/origin/main 2>/dev/null || true)"
   ORIGIN_MAIN_VALUE="$(git rev-parse --verify --quiet refs/remotes/origin/main 2>/dev/null || true)"
-  # Point the local tracking ref at the seeded commit (recorded above,
-  # restored by restore()): later fetches are no-ops, never non-FF rejects.
-  # Direct refs only — a symbolic tracking ref keeps its shape (the fetch
-  # then fails closed loudly instead of corrupting shape). Never breaks a
-  # working run: failure here only costs the no-op optimization.
-  if [ -z "$ORIGIN_MAIN_SYMREF" ]; then
-    git update-ref refs/remotes/origin/main "$(git --git-dir="$TEST_ORIGIN" rev-parse --verify refs/heads/main)" 2>/dev/null || true
-  fi
+  # Drop the local tracking ref without ever following it (recorded above,
+  # restored by restore()): later fetches re-create it direct, so no fetch
+  # can mutate a caller referent through a symbolic link, and the non-forced
+  # refspec can never hit a non-fast-forward reject. Plain `update-ref -d`
+  # on a symref destroys its TARGET branch — hence --no-deref (fail-closed
+  # inside the helper, absent-tolerant).
+  drop_origin_main
   ORIGIN_MAIN_RECORDED=1
 }
 restore() {
@@ -90,21 +108,32 @@ restore() {
   for t in $CREATED_TAGS; do
     git tag -d "$t" >/dev/null 2>&1 || true
   done
-  # Undo recorded origin side effects: restore the remote URL and the prior
-  # shape of refs/remotes/origin/main (symbolic/direct/absent) — this one
-  # ref only. Guarded by ORIGIN_MAIN_RECORDED so early exits (preflight,
-  # clone failure) never restore — i.e. delete — unrecorded caller state.
-  if [ "$ORIGIN_MAIN_RECORDED" = "1" ]; then
+  for b in $CREATED_BRANCHES; do
+    git branch -D "$b" >/dev/null 2>&1 || true
+  done
+  # Undo recorded origin side effects. URL and tracking have SEPARATE
+  # flags: the URL is snapshotted before its mutation (a signal aborting the
+  # mutation itself must still see it restored), while the tracking ref is
+  # recorded only once setup completes its own mutations.
+  if [ "$ORIGIN_URL_RECORDED" = "1" ]; then
     case "$ORIGIN_MODE" in
       add) git remote remove origin 2>/dev/null || true ;;
       set-url) git remote set-url origin "$ORIGIN_URL" 2>/dev/null || true ;;
     esac
+  fi
+  if [ "$ORIGIN_MAIN_RECORDED" = "1" ]; then
+    # Clear through --no-deref first so a leftover symbolic link can never
+    # route this restore into a caller referent; then rebuild the recorded
+    # shape (symbolic/direct/absent) — this one ref only.
+    if ! git update-ref --no-deref -d refs/remotes/origin/main 2>/dev/null; then
+      if git rev-parse --verify --quiet refs/remotes/origin/main >/dev/null 2>&1; then
+        echo "WARN: cannot clear refs/remotes/origin/main without dereferencing — leaving for the next fetch"
+      fi
+    fi
     if [ -n "$ORIGIN_MAIN_SYMREF" ]; then
       git symbolic-ref refs/remotes/origin/main "$ORIGIN_MAIN_SYMREF" 2>/dev/null || true
     elif [ -n "$ORIGIN_MAIN_VALUE" ]; then
       git update-ref refs/remotes/origin/main "$ORIGIN_MAIN_VALUE" 2>/dev/null || true
-    elif git rev-parse --verify --quiet refs/remotes/origin/main >/dev/null 2>&1; then
-      git update-ref -d refs/remotes/origin/main 2>/dev/null || true
     fi
   fi
   if [ "$HARNESS_GNUPGHOME_WAS_SET" = "x" ]; then
@@ -153,7 +182,20 @@ reset_origin_main() { # reset_origin_main <commit>: rotate the throwaway
   # non-fast-forward). Order-proof where a linear chain would not be. The
   # recorded original is restored by restore() at exit.
   git --git-dir="$TEST_ORIGIN" update-ref refs/heads/main "$1" || { echo "FAIL: cannot rotate throwaway origin main"; exit 1; }
-  git update-ref -d refs/remotes/origin/main 2>/dev/null || true
+  drop_origin_main
+}
+# Drop a tracking ref without ever following it: plain `update-ref -d` on a
+# symbolic ref destroys its TARGET branch, and a later fetch through a
+# surviving symref would rewrite the caller referent. --no-deref removes the
+# link itself in every shape. Absent is fine; any other failure is fatal —
+# an unsupported --no-deref must never silently skip (the fetch would then
+# dereference into caller state).
+drop_origin_main() {
+  if ! git update-ref --no-deref -d refs/remotes/origin/main 2>/dev/null; then
+    if git rev-parse --verify --quiet refs/remotes/origin/main >/dev/null 2>&1; then
+      echo "FAIL: cannot drop refs/remotes/origin/main without dereferencing"; exit 1
+    fi
+  fi
 }
 
 # Throwaway signing key for the real-tag cases (never the developer's),
@@ -257,12 +299,24 @@ setup_anchor_fixtures() {
   SEED_TIP="$(git --git-dir="$TEST_ORIGIN" rev-parse --verify refs/heads/main)" || { echo "FAIL: cannot read throwaway origin main"; exit 1; }
   ANCHOR_GOOD_BLOB="$(git --git-dir="$TEST_ORIGIN" hash-object -w "$STAMP_SIGNING_KEY")" || { echo "FAIL: cannot hash ephemeral public key"; exit 1; }
   printf 'not a key at all\n' > "$BACKUP_DIR/garbage-key.txt"
-  ANCHOR_BAD_BLOB="$(git --git-dir="$TEST_ORIGIN" hash-object -w "$BACKUP_DIR/garbage-key.txt")" || { echo "FAIL: cannot hash garbage key"; exit 1; }
+  # BAD-anchor content is armor-header-first + garbage rest: it passes the
+  # first-line armor contract and fails deterministically at gpg import
+  # (covering the import-failure branch — a fully-garbage anchor would stop
+  # one gate earlier at the armor check).
+  printf '%s\n%s\n%s\n' "-----BEGIN PGP PUBLIC KEY BLOCK-----" "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" "(not a real key)" > "$BACKUP_DIR/bad-anchor-key.txt"
+  ANCHOR_BAD_BLOB="$(git --git-dir="$TEST_ORIGIN" hash-object -w "$BACKUP_DIR/bad-anchor-key.txt")" || { echo "FAIL: cannot hash bad-anchor key"; exit 1; }
+  # Binary export of the same key: gpg imports it fine standalone (proven in
+  # isolation), so the harness refusal below pins the armor gate, not import.
   if ! gpg --batch --export harness@local.invalid > "$BACKUP_DIR/harness-signing.bin" 2>"$BACKUP_DIR/export-bin.err"; then
     echo "FAIL: cannot export binary throwaway public key"
     sed 's/^/  /' "$BACKUP_DIR/export-bin.err" 2>/dev/null || true
     exit 1
   fi
+  # Deterministic non-armor key texts (no randomness, no NUL dependence):
+  # garbage-key.txt (above) doubles as the plain non-armor STAMP fixture;
+  # nonfirst-armor.txt embeds a valid marker past line one, pinning the
+  # first-line-exact armor contract against a contains-check regression.
+  printf 'junk line, not armor\n%s\n%s\n' "-----BEGIN PGP PUBLIC KEY BLOCK-----" "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" > "$BACKUP_DIR/nonfirst-armor.txt"
   ANCHOR_GOOD_SUB="$(printf '100644 blob %s\trelease-signing-key.pub\n' "$ANCHOR_GOOD_BLOB" | git --git-dir="$TEST_ORIGIN" mktree)" || { echo "FAIL: cannot build anchor subtree"; exit 1; }
   ANCHOR_GOOD_TREE="$(printf '040000 tree %s\t.github\n' "$ANCHOR_GOOD_SUB" | git --git-dir="$TEST_ORIGIN" mktree)" || { echo "FAIL: cannot build anchor tree"; exit 1; }
   ANCHOR_NONE_TREE="$(git --git-dir="$TEST_ORIGIN" mktree </dev/null)" || { echo "FAIL: cannot build keyless tree"; exit 1; }
@@ -565,8 +619,22 @@ expect 1 "empty STAMP refused" "is set but empty" \
   env -u TAG_OVERRIDE STAMP_SIGNING_KEY= CI_BUILD_NUMBER=5 CI_WORKFLOW="iOS Internal Release" sh "$SCRIPT"
 assert_unstamped "empty-STAMP refusal stamps nothing"
 for t in $CREATED_TAGS; do git tag -d "$t" >/dev/null 2>&1 || true; done; CREATED_TAGS=""
+# Non-armor STAMP inputs stop at the explicit first-line armor contract
+# (deterministic — never at import side effects): plain garbage, a valid
+# marker past line one (pins first-line-exactness against a contains-check
+# regression), and a binary export that gpg would import fine standalone.
 mktag internal/v9.9.0
-expect 1 "binary STAMP refused" "cannot import the release signing key" \
+expect 1 "garbage STAMP refused" "is not ASCII-armored OpenPGP" \
+  env -u TAG_OVERRIDE STAMP_SIGNING_KEY="$BACKUP_DIR/garbage-key.txt" CI_BUILD_NUMBER=5 CI_WORKFLOW="iOS Internal Release" sh "$SCRIPT"
+assert_unstamped "garbage-STAMP refusal stamps nothing"
+for t in $CREATED_TAGS; do git tag -d "$t" >/dev/null 2>&1 || true; done; CREATED_TAGS=""
+mktag internal/v9.9.0
+expect 1 "non-first-line marker STAMP refused" "is not ASCII-armored OpenPGP" \
+  env -u TAG_OVERRIDE STAMP_SIGNING_KEY="$BACKUP_DIR/nonfirst-armor.txt" CI_BUILD_NUMBER=5 CI_WORKFLOW="iOS Internal Release" sh "$SCRIPT"
+assert_unstamped "nonfirst-marker refusal stamps nothing"
+for t in $CREATED_TAGS; do git tag -d "$t" >/dev/null 2>&1 || true; done; CREATED_TAGS=""
+mktag internal/v9.9.0
+expect 1 "binary STAMP refused" "is not ASCII-armored OpenPGP" \
   env -u TAG_OVERRIDE STAMP_SIGNING_KEY="$BACKUP_DIR/harness-signing.bin" CI_BUILD_NUMBER=5 CI_WORKFLOW="iOS Internal Release" sh "$SCRIPT"
 assert_unstamped "binary-STAMP refusal stamps nothing"
 for t in $CREATED_TAGS; do git tag -d "$t" >/dev/null 2>&1 || true; done; CREATED_TAGS=""
@@ -575,6 +643,31 @@ expect 1 "missing anchor file refused" "release signing key not found" \
   env -u TAG_OVERRIDE STAMP_SIGNING_KEY="$BACKUP_DIR/does-not-exist.pub" CI_BUILD_NUMBER=5 CI_WORKFLOW="iOS Internal Release" sh "$SCRIPT"
 assert_unstamped "missing-file refusal stamps nothing"
 for t in $CREATED_TAGS; do git tag -d "$t" >/dev/null 2>&1 || true; done; CREATED_TAGS=""
+# 5k. Symbolic tracking-ref safety: reset/fetch must never dereference a
+# symref tracking ref into a caller referent (plain `update-ref -d` on a
+# symref destroys its TARGET branch, and a fetch through it rewrites the
+# referent). Fixture symrefs tracking to a scratch branch — guarded like
+# tags (never overwrite a real branch; tracked for restore) — and the
+# unsigned-tag run below exercises reset + the script fetch + refusal.
+if git rev-parse -q --verify "refs/heads/stamp-test/sentinel" >/dev/null 2>&1; then
+  echo "FAIL: branch 'stamp-test/sentinel' already exists locally — refusing to overwrite it"; exit 1
+fi
+git branch stamp-test/sentinel HEAD || { echo "FAIL: cannot create sentinel branch"; exit 1; }
+CREATED_BRANCHES="$CREATED_BRANCHES stamp-test/sentinel"
+git symbolic-ref refs/remotes/origin/main refs/heads/stamp-test/sentinel || { echo "FAIL: cannot symref tracking ref"; exit 1; }
+SENTINEL_TIP="$(git rev-parse --verify refs/heads/stamp-test/sentinel)"
+reset_origin_main "$ANCHOR_GOOD"
+mktag_unsigned internal/v9.9.0
+expect 1 "symref tracking: unsigned refused" "does not carry an OpenPGP signature" \
+  env -u TAG_OVERRIDE CI_BUILD_NUMBER=5 CI_WORKFLOW="iOS Internal Release" sh "$SCRIPT"
+assert_unstamped "symref refusal stamps nothing"
+if [ "$(git rev-parse --verify refs/heads/stamp-test/sentinel)" != "$SENTINEL_TIP" ]; then
+  echo "FAIL: symref tracking let a caller referent move"; FAIL=$((FAIL + 1))
+else
+  echo "ok: symref referent intact"; PASS=$((PASS + 1))
+fi
+for t in $CREATED_TAGS; do git tag -d "$t" >/dev/null 2>&1 || true; done; CREATED_TAGS=""
+git branch -D stamp-test/sentinel >/dev/null 2>&1 || true; CREATED_BRANCHES=""
 
 # 6. Ordering across a realistic sequence (dogfood → public → re-upload).
 # Each run is asserted like the cases above (exit + unanimity line): a

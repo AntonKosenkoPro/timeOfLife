@@ -142,11 +142,17 @@ jobs:
           rm -f "$KEY_TMP"
           # verify-tag output is captured (not discarded) so the failure
           # carries the verifier's own diagnosis — e.g. "No public key"
-          # vs a corrupt packet — sanitized to one bounded line so the
-          # annotation stays intact. Key IDs in-repo are public; nothing
-          # secret flows here.
+          # vs a corrupt packet. It is untrusted bytes inside a `::error`
+          # annotation, so sanitize for the workflow-command channel
+          # (runner decodes %XX in command data: a literal %0A would forge
+          # a newline + a second ::command line such as ::stop-commands::;
+          # raw CR/ESC would inject terminal escapes): fold CR/LF to `;`,
+          # drop C0 controls + DEL under LC_ALL=C (tab and UTF-8 pass
+          # through), bound to 240 bytes, then escape every `%` to `%25`
+          # AFTER the cut so an escape is never split. Key IDs in-repo are
+          # public; nothing secret flows here.
           if ! VERIFY_OUT="$(git -c gpg.program=gpg -c gpg.openpgp.program=gpg -c gpg.ssh.program=/usr/bin/false -c gpg.x509.program=/usr/bin/false verify-tag "$TAG_NAME" 2>&1)"; then
-            echo "::error::tag '$TAG_NAME' has no valid release signature — cut it with 'git tag -s' (docs/ci.md). Verifier said: $(printf '%s' "$VERIFY_OUT" | head -n 3 | tr '\n' ';' | head -c 300). Publishing nothing."
+            echo "::error::tag '$TAG_NAME' has no valid release signature — cut it with 'git tag -s' (docs/ci.md). Verifier said: $(printf '%s' "$VERIFY_OUT" | LC_ALL=C tr '\r\n' ';;' | LC_ALL=C tr -d '\000-\010\013\014\016-\037\177' | head -c 240 | sed 's/%/%25/g'). Publishing nothing."
             exit 1
           fi
           # Bind the verified tag object to the event: the ancestor check

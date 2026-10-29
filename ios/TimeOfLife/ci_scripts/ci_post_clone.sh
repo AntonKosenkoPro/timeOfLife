@@ -271,7 +271,8 @@ fi
 # freshly-fetched origin/main — never the tag checkout under verification
 # (parity with backend-release.yml; rotated-out keys fail closed).
 # Verification runs in an ephemeral GNUPGHOME (saved/restored, trapped;
-# INT/TERM exit 130 so a signal never resumes into stamping). The guarantee
+# INT exits 130 and TERM exits 143 so a signal never resumes into
+# stamping). The guarantee
 # is backend lockdown, not the armor pre-filter: verify-tag routes by
 # signature blob, so inherited config (e.g. gpg.ssh allowedSigners) could
 # otherwise verify an SSH-signed tag — hence ssh/x509 programs are pinned to
@@ -290,8 +291,8 @@ if [ "${TAG_OVERRIDE+x}" != "x" ]; then
   fi
   # KEY_ARMOR travels through a shell variable: safe by construction —
   # OpenPGP ASCII armor is ASCII-only (radix-64 + headers), so command
-  # substitution cannot lose NUL bytes that never exist; non-armor input
-  # (e.g. binary via STAMP) fails closed at import below.
+  # substitution cannot lose NUL bytes that never exist. Non-armor input is
+  # refused by the explicit first-line guard below — it never reaches import.
   if [ -n "${STAMP_SIGNING_KEY:-}" ]; then
     if [ ! -f "$STAMP_SIGNING_KEY" ]; then
       echo "error: release signing key not found at '$STAMP_SIGNING_KEY' — cannot verify tag '$TAG'. Archiving nothing."
@@ -307,6 +308,17 @@ if [ "${TAG_OVERRIDE+x}" != "x" ]; then
       echo "error: cannot read the release signing key from origin/main — cannot verify tag '$TAG'. Archiving nothing."
       exit 1
     fi
+  fi
+  # Armor contract (both anchors): only ASCII-armored public keys are
+  # accepted — enforced here by requiring the exact first line, for local
+  # files and origin blobs alike. A contains-check would accept binary or
+  # garbage embedding the marker anywhere; first-line-exact (LF only, no CR
+  # support — the repo export standard) is the minimal deterministic
+  # contract. gpg validates the remainder; binary key material is never
+  # broadened into support.
+  if [ "$(printf '%s' "$KEY_ARMOR" | head -n 1)" != "-----BEGIN PGP PUBLIC KEY BLOCK-----" ]; then
+    echo "error: release signing key is not ASCII-armored OpenPGP — cannot verify tag '$TAG'. Archiving nothing."
+    exit 1
   fi
   # Last-armor pre-filter (diagnostic only, NOT the security guarantee): the
   # tag object's LAST '^-----BEGIN ' line must open the PGP block, so plain
@@ -352,10 +364,14 @@ if [ "${TAG_OVERRIDE+x}" != "x" ]; then
   trap 'cleanup_verify_home; exit 143' TERM
   trap cleanup_verify_home EXIT
   VERIFY_GNUPGHOME="$(mktemp -d "${TMPDIR:-/tmp}/gnupg-verify.XXXXXX")"
+  # Armed immediately after a successful mktemp — before chmod/export — so a
+  # chmod failure still cleans the fresh dir; the caller's GNUPGHOME is
+  # untouched this early, so the restore below re-applies the identical
+  # value instead of clobbering anything.
+  VERIFY_HOME_ACTIVE=1
   chmod 700 "$VERIFY_GNUPGHOME"
   GNUPGHOME="$VERIFY_GNUPGHOME"
   export GNUPGHOME
-  VERIFY_HOME_ACTIVE=1
   if ! IMPORT_DIAG="$(printf '%s\n' "$KEY_ARMOR" | gpg --batch --import 2>&1)"; then
     echo "error: cannot import the release signing key — cannot verify tag '$TAG'. Archiving nothing."
     if [ -n "$IMPORT_DIAG" ]; then
