@@ -34,6 +34,12 @@ struct SyncTelemetryTests {
         #expect(SyncTelemetryConfig.enabled(raw: "1", override: usable, debug: false))
         #expect(SyncTelemetryConfig.parsedOverride("not a url :::") == nil)
         #expect(SyncTelemetryConfig.parsedOverride("http://127.0.0.1:4318/v1/traces") == usable)
+        // Scheme gate: only http(s) counts as usable (ftp/file would wedge
+        // Release in a permanently-failing flush loop). The scheme check is
+        // case-insensitive; compare structurally (URL value equality is
+        // case-sensitive on the original string).
+        #expect(SyncTelemetryConfig.parsedOverride("ftp://collector/v1/traces") == nil)
+        #expect(SyncTelemetryConfig.parsedOverride("HTTP://127.0.0.1:4318/v1/traces")?.host == "127.0.0.1")
     }
 
     @Test("endpoint derives from the relay host")
@@ -53,7 +59,7 @@ struct SyncTelemetryTests {
         )
         let buffer = SyncSpanBuffer(directory: temporaryDirectory())
         await buffer.append(makeSpan(outcome: .success, pushed: 2, pulled: 9, conflicts: 1))
-        #expect(await exporter.flush(buffer: buffer))
+        #expect(await exporter.flush(buffer: buffer) == 1)
         #expect(await buffer.bufferedCount == 0)
         let body = try #require(stub.bodies.first)
         let text = String(data: body, encoding: .utf8) ?? ""
@@ -89,7 +95,7 @@ struct SyncTelemetryTests {
             config: SyncTelemetryConfig(isEnabled: true, endpoint: endpoint),
             transport: stub
         )
-        #expect(await exporter.flush(buffer: SyncSpanBuffer(directory: temporaryDirectory())))
+        #expect(await exporter.flush(buffer: SyncSpanBuffer(directory: temporaryDirectory())) == 0)
         #expect(stub.bodies.isEmpty)
     }
 
@@ -124,7 +130,7 @@ struct SyncTelemetryTests {
         await buffer.append(makeSpan(outcome: .success, pushed: 0, pulled: 0, conflicts: 0))
         await buffer.append(makeSpan(outcome: .success, pushed: 1, pulled: 0, conflicts: 0))
         #expect(await buffer.droppedSpans == 1)
-        #expect(await exporter.flush(buffer: buffer))
+        #expect(await exporter.flush(buffer: buffer) == 1)
         #expect(await buffer.bufferedCount == 0)
         #expect(await buffer.droppedSpans == 0)
         let body = try #require(stub.bodies.first)
@@ -148,7 +154,7 @@ struct SyncTelemetryTests {
         )
         let buffer = SyncSpanBuffer(directory: temporaryDirectory())
         await buffer.append(makeSpan(outcome: .success, pushed: 1, pulled: 0, conflicts: 0))
-        #expect(await exporter.flush(buffer: buffer) == false)
+        #expect(await exporter.flush(buffer: buffer) == 1)
         // Poison batch quarantined (dropped with a log), not retried: the
         // buffer is empty so later spans are not wedged behind it — and the
         // dropped span is counted, so the next successful flush still
@@ -156,37 +162,6 @@ struct SyncTelemetryTests {
         #expect(await buffer.bufferedCount == 0)
         #expect(await buffer.droppedSpans == 1)
         #expect(stub.posts == 1)
-    }
-
-    @Test("overlapping flushes serialize: one in flight at a time")
-    func overlappingFlushesSerialize() async throws {
-        let transport = GatedTransport()
-        defer { transport.open() }
-        let endpoint = try #require(URL(string: "http://127.0.0.1:4318/v1/traces"))
-        let buffer = SyncSpanBuffer(directory: temporaryDirectory())
-        let telemetry = SyncTelemetry(
-            buffer: buffer,
-            exporter: SyncSpanExporter(
-                config: SyncTelemetryConfig(isEnabled: true, endpoint: endpoint),
-                transport: transport
-            )
-        )
-        // First span starts a flush that blocks inside post; the second span
-        // must not start another POST while it is in flight (re-POSTing the
-        // same head prefix would let the tails drop each other's spans).
-        await telemetry.recordSpan(makeSpan(outcome: .success, pushed: 0, pulled: 0, conflicts: 0))
-        await telemetry.recordSpan(makeSpan(outcome: .success, pushed: 1, pulled: 0, conflicts: 0))
-        // Poll for the single in-flight POST (detached flush runs
-        // concurrently with the test task).
-        let deadline = Date().addingTimeInterval(5)
-        while transport.posts < 1, Date() < deadline {
-            try await Task.sleep(nanoseconds: 10_000_000)
-        }
-        #expect(transport.posts == 1)
-        // A failed flush keeps both spans; opening the gate lets a later
-        // cycle drain them normally.
-        transport.open()
-        #expect(await buffer.bufferedCount == 2)
     }
 
     @Test("offline soak: failures keep order, recovery forwards, growth bounded")
@@ -202,12 +177,12 @@ struct SyncTelemetryTests {
         for index in 0 ..< 3 {
             await buffer.append(makeSpan(outcome: .failed, pushed: index, pulled: 0, conflicts: 0))
         }
-        #expect(await exporter.flush(buffer: buffer) == false)
+        #expect(await exporter.flush(buffer: buffer) == 0)
         #expect(stub.bodies.count == 1)
         #expect(stub.urls == [endpoint])
         #expect(await buffer.bufferedCount == 3)
         stub.shouldThrow = false
-        #expect(await exporter.flush(buffer: buffer))
+        #expect(await exporter.flush(buffer: buffer) == 3)
         #expect(await buffer.bufferedCount == 0)
         #expect(stub.urls == [endpoint, endpoint])
         let body = try #require(stub.bodies.first)

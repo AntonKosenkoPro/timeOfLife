@@ -298,6 +298,12 @@ jobs:
             *) echo "::error::OTEL_ENABLED must be empty or a boolean (strconv.ParseBool vocabulary) — got '${OTEL_ENABLED}'. Nothing deployed."; exit 1 ;;
           esac
           e="$(printf '%s' "$GRAFANA_ENDPOINT" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+          # Same unquoted-.env rule as OTEL_ENABLED above: a padded endpoint
+          # would pass the pairing check yet source as `VAR=` + command
+          # (silently unset → discard sentinel). Reject, don't trim.
+          if [ "$e" != "$GRAFANA_ENDPOINT" ]; then
+            echo "::error::GRAFANA_CLOUD_OTLP_ENDPOINT must not carry surrounding whitespace (it is written unquoted into the sourced VM .env). Nothing deployed."; exit 1
+          fi
           if [ -n "$e" ] || [ "$GRAFANA_KEY_PRESENT" = 'true' ]; then
             [ -n "$e" ] && [ "$GRAFANA_KEY_PRESENT" = 'true' ] || { echo "::error::GRAFANA_CLOUD_OTLP_ENDPOINT and GRAFANA_CLOUD_OTLP_KEY must be set together (or both empty). Nothing deployed."; exit 1; }
           fi

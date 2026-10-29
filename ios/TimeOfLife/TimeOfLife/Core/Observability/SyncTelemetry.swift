@@ -69,22 +69,21 @@ final class SyncTelemetry {
         guard !flushing, let exporter, exporter.isEnabled else { return }
         flushing = true
         Task.detached { [exporter, buffer] in
-            let before = await buffer.bufferedCount
-            let ok = await exporter.flush(buffer: buffer)
-            await self.didFinishFlush(flushed: ok, drainedFrom: before, buffer: buffer)
+            let drained = await exporter.flush(buffer: buffer)
+            await self.didFinishFlush(drained: drained, buffer: buffer)
         }
     }
 
-    private func didFinishFlush(flushed: Bool, drainedFrom before: Int, buffer: SyncSpanBuffer) async {
+    private func didFinishFlush(drained: Int, buffer: SyncSpanBuffer) async {
         flushing = false
-        // Re-kick only on proven drain progress: if the buffer did not shrink
-        // (e.g. the write behind dropFirst failed while the POST succeeded),
-        // re-kicking would re-POST the same prefix forever with no delay,
-        // cap, or backoff. Spans appended mid-flush are picked up either here
-        // or by the next recordSpan call.
-        guard flushed else { return }
-        let after = await buffer.bufferedCount
-        guard after > 0, after < before else { return }
+        // Re-kick only on proven removal with work remaining. `drained` is
+        // the prefix the flush actually removed (not the net delta), so a
+        // span appended mid-flight re-kicks promptly while a flush that
+        // removed nothing — transient failure or failed file write — never
+        // spins an immediate re-POST loop with no delay, cap, or backoff.
+        // Each re-kick follows a completed network round-trip and drains
+        // what the previous read missed; the chain ends on an empty buffer.
+        guard drained > 0, await buffer.bufferedCount > 0 else { return }
         flushSoon()
     }
 

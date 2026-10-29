@@ -81,13 +81,35 @@ final class DistressRecorder: @unchecked Sendable {
 /// Transport whose posts block until the test opens the gate, so overlapping
 /// flushes can be observed deterministically: while the first flush is held
 /// inside `post`, a second `recordSpan` must not start another POST.
+/// `shouldThrow` (default true, like `StubTransport`) selects the outcome
+/// once the gate opens, so the success/drain path is testable through the
+/// same double. The hold is bounded (~1s, well under the 5s test deadline):
+/// an unopened gate fails the test fast instead of hanging the runner.
 final class GatedTransport: OTLPTransport, @unchecked Sendable {
     private let lock = NSLock()
     private var storedPosts = 0
+    private var storedCompleted = 0
     private var storedOpen = false
+    private var storedShouldThrow = true
 
+    /// Posts started (proves the flush began).
     var posts: Int {
         lock.withLock { storedPosts }
+    }
+
+    /// Posts returned (success or failure). Settle on this, not `posts`: a
+    /// started POST may still be blocked in the gate while the test asserts.
+    var completedPosts: Int {
+        lock.withLock { storedCompleted }
+    }
+
+    var shouldThrow: Bool {
+        get {
+            lock.withLock { storedShouldThrow }
+        }
+        set {
+            lock.withLock { storedShouldThrow = newValue }
+        }
     }
 
     func open() {
@@ -100,12 +122,45 @@ final class GatedTransport: OTLPTransport, @unchecked Sendable {
 
     func post(url _: URL, body _: Data) async throws {
         lock.withLock { storedPosts += 1 }
+        defer { lock.withLock { storedCompleted += 1 } }
         var spins = 0
-        while !isOpen, spins < 2_000 {
+        while !isOpen, spins < 200 {
             try? await Task.sleep(nanoseconds: 5_000_000)
             spins += 1
         }
-        throw SyncExportError.rejected
+        if lock.withLock({ storedShouldThrow }) {
+            throw SyncExportError.rejected
+        }
+    }
+}
+
+/// Transport that appends one span mid-POST on its first call (simulating a
+/// next-cycle span landing during a slow Collector round-trip), then
+/// succeeds. Proves the re-kick: the remainder must forward without another
+/// `recordSpan`, with exactly one follow-up flush.
+final class MidFlushAppendTransport: OTLPTransport, @unchecked Sendable {
+    private let lock = NSLock()
+    private var storedPosts = 0
+    private let buffer: SyncSpanBuffer
+    private let extra: SyncSessionSpan
+
+    var posts: Int {
+        lock.withLock { storedPosts }
+    }
+
+    init(buffer: SyncSpanBuffer, extra: SyncSessionSpan) {
+        self.buffer = buffer
+        self.extra = extra
+    }
+
+    func post(url _: URL, body _: Data) async throws {
+        let number = lock.withLock {
+            storedPosts += 1
+            return storedPosts
+        }
+        if number == 1 {
+            await buffer.append(extra)
+        }
     }
 }
 

@@ -97,23 +97,31 @@ struct URLSessionOTLPTransport: OTLPTransport {
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = body
-        let (_, response) = try await session.data(for: request)
-        guard let http = response as? HTTPURLResponse else {
-            throw SyncExportError.rejected
-        }
-        switch http.statusCode {
-        case 200 ... 299:
-            return
-        case 400, 401, 403, 404, 405, 413, 415, 422:
-            // Permanent payload/config rejections: re-POSTing the same batch
-            // can never succeed (wrong path, rejected credential, oversize or
-            // unprocessable body). Without these, a 404/401 wedges the buffer
-            // forever and the counted loss can never be reported, since
-            // reporting itself requires a successful flush. 408/425/429 stay
-            // transient: timeouts and back-pressure must retry, not discard.
-            throw SyncExportError.permanent(status: http.statusCode)
-        default:
-            throw SyncExportError.rejected
+        do {
+            let (_, response) = try await session.data(for: request)
+            guard let http = response as? HTTPURLResponse else {
+                throw SyncExportError.rejected
+            }
+            switch http.statusCode {
+            case 200 ... 299:
+                return
+            case 400, 401, 403, 404, 405, 413, 415, 422:
+                // Permanent payload/config rejections: re-POSTing the same batch
+                // can never succeed (wrong path, rejected credential, oversize or
+                // unprocessable body). Without these, a 404/401 wedges the buffer
+                // forever and the counted loss can never be reported, since
+                // reporting itself requires a successful flush. 408/425/429 stay
+                // transient: timeouts and back-pressure must retry, not discard.
+                throw SyncExportError.permanent(status: http.statusCode)
+            default:
+                throw SyncExportError.rejected
+            }
+        } catch {
+            // Total contract: every failure out of this transport is a
+            // `SyncExportError`. Session-thrown errors (offline, timeouts,
+            // TLS) mean the batch was never evaluated — transient by
+            // definition, so they must retry, never quarantine.
+            throw (error as? SyncExportError) ?? SyncExportError.rejected
         }
     }
 }
@@ -153,37 +161,54 @@ final class SyncSpanExporter: Sendable {
         config.endpoint
     }
 
-    /// Sends everything buffered, in order. Returns true when there is
-    /// nothing left to send (empty buffer counts as success and posts
-    /// nothing). On transient failure the buffer is untouched for the next
-    /// attempt. On permanent rejection the batch is dropped with a log line:
-    /// re-POSTing poison forever would wedge the buffer at the cap and hide
-    /// every later span behind an un-exportable `dropped_spans` count.
+    /// Sends everything buffered, in order. On transient failure the buffer is
+    /// untouched for the next attempt. On permanent rejection the batch is
+    /// quarantined with a log line: re-POSTing poison forever would wedge
+    /// the buffer at the cap and hide every later span behind an
+    /// un-exportable `dropped_spans` count.
     /// At-least-once: only the prefix read for this flush is removed.
-    func flush(buffer: SyncSpanBuffer) async -> Bool {
+    ///
+    /// Returns how many buffered spans this flush removed. The re-kick
+    /// decision keys off *proven removal* (removed > 0): spans appended
+    /// mid-flight are picked up by the re-kick instead of waiting for the
+    /// next cycle, while a POST that removed nothing (transient failure, or
+    /// a failed file write behind the drop) never triggers an immediate
+    /// re-POST loop. An append landing exactly between the pre-drop and
+    /// post-drop reads undercounts by one; that span waits for the next
+    /// recordSpan (bounded staleness, never loss).
+    func flush(buffer: SyncSpanBuffer) async -> Int {
         let spans = await buffer.spans()
-        guard !spans.isEmpty else { return true }
+        guard !spans.isEmpty else { return 0 }
         let dropped = await buffer.droppedSpans
+        var quarantined = 0
         do {
             try await transport.post(url: config.endpoint, body: Self.otlpPayload(spans: spans, droppedSpans: dropped))
         } catch let SyncExportError.permanent(status) {
-            logger.error("sync span export permanently rejected (status \(status)); dropping batch")
-            await buffer.dropFirst(spans.count)
+            logger.error("sync span export permanently rejected (status \(status)); quarantining batch")
+            quarantined = spans.count
+        } catch {
+            logger.error("sync span export failed; spans stay buffered")
+            return 0
+        }
+        // Count AFTER the POST: appends that landed mid-flight are part of
+        // the file now, so `beforeDrop - after` measures proven removal —
+        // unlike `spans.count - after`, which reads 0 when an append exactly
+        // offsets the drained prefix and would strand that span.
+        let beforeDrop = await buffer.bufferedCount
+        await buffer.dropFirst(spans.count)
+        if quarantined > 0 {
             // Count the dropped batch as loss: it was never observed by the
             // backend, so the next successful flush must still report it.
             // (Acknowledging here would erase the only loss signal for data
             // the SaaS never saw.)
-            await buffer.addDropped(spans.count)
-            return false
-        } catch {
-            logger.error("sync span export failed; spans stay buffered")
-            return false
+            await buffer.addDropped(quarantined)
+        } else {
+            // Delta semantics: only loss the SaaS never saw stays counted.
+            // Drops concurrent with this flush (appended while POSTing) survive.
+            await buffer.acknowledgeDropped(dropped)
         }
-        await buffer.dropFirst(spans.count)
-        // Delta semantics: only loss the SaaS never saw stays counted.
-        // Drops concurrent with this flush (appended while POSTing) survive.
-        await buffer.acknowledgeDropped(dropped)
-        return true
+        let after = await buffer.bufferedCount
+        return max(0, beforeDrop - after)
     }
 
     /// Builds the OTLP/HTTP JSON body. Attribute keys are a fixed allowlist
