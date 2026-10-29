@@ -39,9 +39,17 @@ CREATED_TAGS=""
 # bare clone instead (restored by restore()).
 ORIGIN_MODE=""
 ORIGIN_URL=""
+ORIGIN_MAIN_SYMREF=""
+ORIGIN_MAIN_VALUE=""
 setup_test_origin() {
   TEST_ORIGIN="$BACKUP_DIR/origin.git"
   git clone --quiet --bare "$REPO_ROOT" "$TEST_ORIGIN" || { echo "FAIL: cannot clone throwaway origin"; exit 1; }
+  # The script under test fetches refs/heads/main explicitly: a bare clone
+  # of a single-branch checkout may lack it (fetch would fail 3x), so seed
+  # it at HEAD when absent. Throwaway origin only — never the developer's.
+  if ! git --git-dir="$TEST_ORIGIN" show-ref --verify --quiet refs/heads/main; then
+    git --git-dir="$TEST_ORIGIN" update-ref refs/heads/main "$(git rev-parse --verify HEAD)" || { echo "FAIL: cannot seed throwaway origin main"; exit 1; }
+  fi
   if ORIGIN_URL="$(git remote get-url origin 2>/dev/null)"; then
     ORIGIN_MODE="set-url"
     git remote set-url origin "$TEST_ORIGIN"
@@ -49,6 +57,12 @@ setup_test_origin() {
     ORIGIN_MODE="add"
     git remote add origin "$TEST_ORIGIN"
   fi
+  # Proven pollution record: the script under test fetches refs/heads/main
+  # explicitly, overwriting refs/remotes/origin/main HERE on every
+  # non-override run. Snapshot this one ref (symref/value/absent) for
+  # restore() — plumbing only, no network, no other refs touched.
+  ORIGIN_MAIN_SYMREF="$(git symbolic-ref -q refs/remotes/origin/main 2>/dev/null || true)"
+  ORIGIN_MAIN_VALUE="$(git rev-parse --verify --quiet refs/remotes/origin/main 2>/dev/null || true)"
 }
 restore() {
   for f in $tracked; do
@@ -62,10 +76,24 @@ restore() {
     add) git remote remove origin 2>/dev/null || true ;;
     set-url) git remote set-url origin "$ORIGIN_URL" 2>/dev/null || true ;;
   esac
+  # Undo the recorded fetch pollution: restore the prior shape of
+  # refs/remotes/origin/main (symbolic/direct/absent) — this one ref only.
+  if [ -n "$ORIGIN_MAIN_SYMREF" ]; then
+    git symbolic-ref refs/remotes/origin/main "$ORIGIN_MAIN_SYMREF" 2>/dev/null || true
+  elif [ -n "$ORIGIN_MAIN_VALUE" ]; then
+    git update-ref refs/remotes/origin/main "$ORIGIN_MAIN_VALUE" 2>/dev/null || true
+  elif git rev-parse --verify --quiet refs/remotes/origin/main >/dev/null 2>&1; then
+    git update-ref -d refs/remotes/origin/main 2>/dev/null || true
+  fi
   if [ "$HARNESS_GNUPGHOME_WAS_SET" = "x" ]; then
     GNUPGHOME="$HARNESS_GNUPGHOME_SAVED"; export GNUPGHOME
   else
     unset GNUPGHOME
+  fi
+  # The throwaway key spawns a gpg-agent on GNUPGHOME inside BACKUP_DIR:
+  # kill it (throwaway home only, never the caller's) before deleting.
+  if [ -d "$BACKUP_DIR/gnupg" ]; then
+    GNUPGHOME="$BACKUP_DIR/gnupg" gpgconf --kill all >/dev/null 2>&1 || true
   fi
   rm -rf "$BACKUP_DIR"
 }
@@ -84,12 +112,21 @@ expect() { # expect <want-exit> <desc> [want-grep] -- cmd...
   echo "ok: $desc"; PASS=$((PASS + 1))
 }
 
-# Throwaway signing key for the real-tag cases: the script under test now
-# verifies tag signatures, so harness-created tags must be signed — with a
-# throwaway key (never the developer's), selected via STAMP_SIGNING_KEY.
-# gpg is brew-installed when missing and its absence is a hard FAIL, never
-# a skip: the signature cases gate releases and must always run.
-HAVE_GPG=0
+# Refusal-ordering guard: the signature cases below must fail BEFORE
+# anything is stamped. snapshot_files hashes every file the script stamps;
+# assert_unstamped fails the harness if a refusal mutated them.
+snapshot_files() {
+  git hash-object project.yml TimeOfLife/Configuration/Info.plist LifioLiveActivities/Info.plist 2>/dev/null | tr '\n' ' '
+}
+assert_unstamped() { # assert_unstamped <desc>
+  if [ "$(snapshot_files)" != "$SNAP_BEFORE" ]; then
+    echo "FAIL: $1 — files changed despite refusal"; FAIL=$((FAIL + 1)); return 0
+  fi
+  echo "ok: $1"; PASS=$((PASS + 1))
+}
+
+# Throwaway signing key for the real-tag cases (never the developer's),
+# selected via STAMP_SIGNING_KEY. gpg absence is a hard FAIL, never a skip.
 HARNESS_KEYID=""
 setup_signing() {
   if ! command -v gpg >/dev/null 2>&1; then
@@ -103,7 +140,10 @@ setup_signing() {
   export GNUPGHOME="$BACKUP_DIR/gnupg"
   mkdir -p -m 700 "$GNUPGHOME"
   chmod 700 "$GNUPGHOME"
-  gpg --batch --gen-key <<'EOF' 2>/dev/null || { echo "FAIL: cannot generate throwaway signing key"; exit 1; }
+  # gpg diagnostics print with the FAIL line (success stays quiet); params
+  # go via a file (a heredoc would swallow the multi-line if-branch).
+  GENKEY_PARAMS="$BACKUP_DIR/genkey.params"
+  cat >"$GENKEY_PARAMS" <<'EOF'
 %no-protection
 Key-Type: eddsa
 Key-Curve: ed25519
@@ -111,12 +151,55 @@ Name-Email: harness@local.invalid
 Expire-Date: 1d
 %commit
 EOF
+  GENKEY_LOG="$BACKUP_DIR/genkey.err"
+  if ! gpg --batch --gen-key "$GENKEY_PARAMS" 2>"$GENKEY_LOG"; then
+    echo "FAIL: cannot generate throwaway signing key"
+    sed 's/^/  /' "$GENKEY_LOG" 2>/dev/null || true
+    exit 1
+  fi
   HARNESS_KEYID="$(gpg --batch --with-colons --list-secret-keys harness@local.invalid 2>/dev/null | awk -F: '/^fpr:/{print $10; exit}')"
   [ -n "$HARNESS_KEYID" ] || { echo "FAIL: throwaway key has no fingerprint"; exit 1; }
   STAMP_SIGNING_KEY="$BACKUP_DIR/harness-signing.pub"
   export STAMP_SIGNING_KEY
-  gpg --batch --armor --export harness@local.invalid > "$STAMP_SIGNING_KEY" 2>/dev/null || { echo "FAIL: cannot export throwaway public key"; exit 1; }
-  HAVE_GPG=1
+  if ! gpg --batch --armor --export harness@local.invalid > "$STAMP_SIGNING_KEY" 2>"$BACKUP_DIR/export.err"; then
+    echo "FAIL: cannot export throwaway public key"
+    sed 's/^/  /' "$BACKUP_DIR/export.err" 2>/dev/null || true
+    exit 1
+  fi
+}
+# Extra format-gate fixtures: a second throwaway OpenPGP key (wrong
+# anchor), an SSH keypair (non-OpenPGP tags), and an attacker gitconfig
+# trusting it. All ephemeral, no passphrases/prompts (stdin /dev/null).
+setup_format_fixtures() {
+  WRONG_PARAMS="$BACKUP_DIR/genkey-wrong.params"
+  cat >"$WRONG_PARAMS" <<'EOF'
+%no-protection
+Key-Type: eddsa
+Key-Curve: ed25519
+Name-Email: wrong@local.invalid
+Expire-Date: 1d
+%commit
+EOF
+  if ! gpg --batch --gen-key "$WRONG_PARAMS" 2>"$BACKUP_DIR/genkey-wrong.err"; then
+    echo "FAIL: cannot generate wrong-anchor key"
+    sed 's/^/  /' "$BACKUP_DIR/genkey-wrong.err" 2>/dev/null || true
+    exit 1
+  fi
+  if ! gpg --batch --armor --export wrong@local.invalid > "$BACKUP_DIR/wrong-anchor.pub" 2>"$BACKUP_DIR/export-wrong.err"; then
+    echo "FAIL: cannot export wrong-anchor public key"
+    sed 's/^/  /' "$BACKUP_DIR/export-wrong.err" 2>/dev/null || true
+    exit 1
+  fi
+  command -v ssh-keygen >/dev/null 2>&1 || { echo "FAIL: ssh-keygen not on PATH — SSH cases gate the format check and must never skip"; exit 1; }
+  if ! ssh-keygen -t ed25519 -N '' -C 'harness@local.invalid' -f "$BACKUP_DIR/ssh-key" </dev/null >"$BACKUP_DIR/ssh-keygen.log" 2>&1; then
+    echo "FAIL: cannot generate ephemeral SSH key"
+    sed 's/^/  /' "$BACKUP_DIR/ssh-keygen.log" 2>/dev/null || true
+    exit 1
+  fi
+  # `*` principal: the harness only needs *some* verifiable trust for the
+  # attacker config (a real attacker would name the victim's email).
+  printf '%s %s\n' "*" "$(cut -d' ' -f1-2 "$BACKUP_DIR/ssh-key.pub")" > "$BACKUP_DIR/allowed-signers"
+  printf '[gpg "ssh"]\n\tprogram = ssh-keygen\n\tallowedSignersFile = %s/allowed-signers\n' "$BACKUP_DIR" > "$BACKUP_DIR/attacker.gitconfig"
 }
 mktag() {
   # Never touch a pre-existing tag: devs reuse names like internal/v9.9.1,
@@ -124,19 +207,23 @@ mktag() {
   if git rev-parse -q --verify "refs/tags/$1" >/dev/null 2>&1; then
     echo "FAIL: tag '$1' already exists locally — refusing to overwrite/delete a real tag (delete it yourself if it is scratch)"; exit 1
   fi
-  # Signed with the throwaway key (explicit -c: never the developer's key,
-  # regardless of their tag.gpgsign/user.signingkey settings; gpg.format is
-  # forced to OpenPGP so an inherited gpg.format=ssh cannot divert signing).
-  git -c tag.gpgsign=false -c gpg.format=openpgp -c user.signingkey="$HARNESS_KEYID" tag -s -m "harness $1" "$1" HEAD 2>/dev/null || { echo "FAIL: cannot create tag '$1'"; exit 1; }
+  # Throwaway key via explicit -c (never the developer's; gpg.format forced
+  # to OpenPGP); tagger identity pinned for runners without user.name/email.
+  git -c tag.gpgsign=false -c gpg.format=openpgp -c user.signingkey="$HARNESS_KEYID" \
+    -c user.name="stamp-test harness" -c user.email="harness@local.invalid" \
+    tag -s -m "harness $1" "$1" HEAD || { echo "FAIL: cannot create tag '$1'"; exit 1; }
   CREATED_TAGS="$CREATED_TAGS $1"
 }
 mktag_unsigned() {
   if git rev-parse -q --verify "refs/tags/$1" >/dev/null 2>&1; then
     echo "FAIL: tag '$1' already exists locally — refusing to overwrite it"; exit 1
   fi
-  # Explicitly unsigned (tag.gpgsign=false defeats a developer-global
-  # tag.gpgsign=true, which would otherwise sign with their real key).
-  git -c tag.gpgsign=false tag -a -m "harness unsigned $1" "$1" HEAD 2>/dev/null || { echo "FAIL: cannot create tag '$1'"; exit 1; }
+  # Explicitly unsigned (gpgsign=false defeats a global tag.gpgsign=true;
+  # forcesignannotated=false pins the annotated-but-unsigned shape).
+  # Identity pinned like mktag.
+  git -c tag.gpgsign=false -c tag.forcesignannotated=false \
+    -c user.name="stamp-test harness" -c user.email="harness@local.invalid" \
+    tag -a -m "harness unsigned $1" "$1" HEAD || { echo "FAIL: cannot create tag '$1'"; exit 1; }
   CREATED_TAGS="$CREATED_TAGS $1"
 }
 mktag_lightweight() {
@@ -152,7 +239,19 @@ mktag_at() { # mktag_at <tag> <commit>: throwaway-signed at an ancestor commit
   if git rev-parse -q --verify "refs/tags/$1" >/dev/null 2>&1; then
     echo "FAIL: tag '$1' already exists locally — refusing to overwrite it"; exit 1
   fi
-  git -c tag.gpgsign=false -c gpg.format=openpgp -c user.signingkey="$HARNESS_KEYID" tag -s -m "harness $1" "$1" "$2" 2>/dev/null || { echo "FAIL: cannot create tag '$1'"; exit 1; }
+  git -c tag.gpgsign=false -c gpg.format=openpgp -c user.signingkey="$HARNESS_KEYID" \
+    -c user.name="stamp-test harness" -c user.email="harness@local.invalid" \
+    tag -s -m "harness $1" "$1" "$2" || { echo "FAIL: cannot create tag '$1'"; exit 1; }
+  CREATED_TAGS="$CREATED_TAGS $1"
+}
+mktag_ssh() { # mktag_ssh <tag> <message>: SSH-signed (non-OpenPGP) fixture
+  if git rev-parse -q --verify "refs/tags/$1" >/dev/null 2>&1; then
+    echo "FAIL: tag '$1' already exists locally — refusing to overwrite it"; exit 1
+  fi
+  # gpg.format=ssh + ephemeral key; </dev/null proves no signing prompt.
+  git -c gpg.format=ssh -c user.signingkey="$BACKUP_DIR/ssh-key.pub" \
+    -c user.name="stamp-test harness" -c user.email="harness@local.invalid" \
+    tag -s -m "$2" "$1" HEAD </dev/null || { echo "FAIL: cannot create tag '$1'"; exit 1; }
   CREATED_TAGS="$CREATED_TAGS $1"
 }
 
@@ -211,6 +310,17 @@ expect 1 "missing run refused" "CI_BUILD_NUMBER is missing" \
   env -u CI_BUILD_NUMBER TAG_OVERRIDE="internal/v9.9.7" CI_WORKFLOW="" sh "$SCRIPT"
 expect 1 "non-numeric run refused" "CI_BUILD_NUMBER is missing or not numeric" \
   env TAG_OVERRIDE="internal/v9.9.7" CI_BUILD_NUMBER=42x CI_WORKFLOW="" sh "$SCRIPT"
+
+# 4d. Cloud fail-closed guards: overrides never skip verification on Cloud,
+# even set-but-empty (both sides presence-checked; fires pre-discovery).
+expect 1 "override on Cloud refused" "local simulation only" \
+  env CI_XCODE_CLOUD=1 TAG_OVERRIDE="internal/v9.9.7" CI_BUILD_NUMBER=42 CI_WORKFLOW="" sh "$SCRIPT"
+expect 1 "empty override on Cloud refused" "local simulation only" \
+  env CI_XCODE_CLOUD=1 TAG_OVERRIDE="" CI_BUILD_NUMBER=42 CI_WORKFLOW="" sh "$SCRIPT"
+expect 1 "override with empty Cloud marker refused" "local simulation only" \
+  env CI_XCODE_CLOUD= TAG_OVERRIDE="internal/v9.9.7" CI_BUILD_NUMBER=42 CI_WORKFLOW="" sh "$SCRIPT"
+expect 1 "empty override with empty Cloud marker refused" "local simulation only" \
+  env CI_XCODE_CLOUD= TAG_OVERRIDE="" CI_BUILD_NUMBER=42 CI_WORKFLOW="" sh "$SCRIPT"
 
 # 5. Real-tag paths (hermetic: origin points at the throwaway bare clone,
 # so no network and no writes to the developer's remote refs): same-namespace
@@ -276,22 +386,28 @@ expect 1 "unrecognized workflow fails closed" "not a pinned release workflow" \
 for t in $CREATED_TAGS; do git tag -d "$t" >/dev/null 2>&1 || true; done; CREATED_TAGS=""
 # 5c. Signature gate: an unsigned tag that is otherwise perfect (right
 # namespace, valid grammar) must be refused before anything is stamped.
+# SNAP_BEFORE pins stamped files: refusal must precede stamping, not follow.
+SNAP_BEFORE="$(snapshot_files)"
 mktag_unsigned internal/v9.9.0
-expect 1 "unsigned tag refused" "no valid release signature" \
+expect 1 "unsigned tag refused" "does not carry an OpenPGP signature" \
   env -u TAG_OVERRIDE CI_BUILD_NUMBER=5 CI_WORKFLOW="iOS Internal Release" sh "$SCRIPT"
+assert_unstamped "unsigned refusal stamps nothing"
 for t in $CREATED_TAGS; do git tag -d "$t" >/dev/null 2>&1 || true; done; CREATED_TAGS=""
 # 5d. Lightweight tags are bare refs (no tag object, no signature) and must
 # be refused like unsigned ones.
 mktag_lightweight internal/v9.9.0
-expect 1 "lightweight tag refused" "no valid release signature" \
+expect 1 "lightweight tag refused" "does not carry an OpenPGP signature" \
   env -u TAG_OVERRIDE CI_BUILD_NUMBER=5 CI_WORKFLOW="iOS Internal Release" sh "$SCRIPT"
+assert_unstamped "lightweight refusal stamps nothing"
 for t in $CREATED_TAGS; do git tag -d "$t" >/dev/null 2>&1 || true; done; CREATED_TAGS=""
-# 5e. Wrong-key tags must be refused: the scratch tag is signed by the
-# throwaway key but verified against the repo release key (STAMP_SIGNING_KEY
-# unset selects the default anchor).
+# 5e. Wrong-anchor refusal: tag signed by the throwaway key, verified
+# against a SECOND ephemeral anchor (never unset — the premerge default
+# anchor lacks the key file and would only prove the missing-key path).
+setup_format_fixtures
 mktag internal/v9.9.0
 expect 1 "wrong-key tag refused" "no valid release signature" \
-  env -u TAG_OVERRIDE -u STAMP_SIGNING_KEY CI_BUILD_NUMBER=5 CI_WORKFLOW="iOS Internal Release" sh "$SCRIPT"
+  env -u TAG_OVERRIDE STAMP_SIGNING_KEY="$BACKUP_DIR/wrong-anchor.pub" CI_BUILD_NUMBER=5 CI_WORKFLOW="iOS Internal Release" sh "$SCRIPT"
+assert_unstamped "wrong-key refusal stamps nothing"
 for t in $CREATED_TAGS; do git tag -d "$t" >/dev/null 2>&1 || true; done; CREATED_TAGS=""
 # 5f. Tag-to-HEAD binding: a validly signed tag that is NOT at HEAD must not
 # stamp — the build keeps the dev dummy. Needs a parent commit; skipped
@@ -304,6 +420,42 @@ if PARENT_BIND="$(git rev-parse --verify HEAD~1 2>/dev/null)"; then
 else
   echo "SKIP: tag-to-HEAD binding case needs a parent commit (shallow checkout?)"
 fi
+# 5g. Cloud trust-anchor guard: a signed tag at HEAD verified against an
+# alternate key (the harness's STAMP_SIGNING_KEY, still exported from
+# setup_signing) must be refused on Cloud before any verification or
+# stamping — the repo key is the sole Cloud anchor.
+mktag internal/v9.9.0
+expect 1 "alternate key on Cloud refused" "sole Cloud trust anchor" \
+  env -u TAG_OVERRIDE CI_BUILD_NUMBER=5 CI_WORKFLOW="iOS Internal Release" CI_XCODE_CLOUD=1 sh "$SCRIPT"
+for t in $CREATED_TAGS; do git tag -d "$t" >/dev/null 2>&1 || true; done; CREATED_TAGS=""
+mktag internal/v9.9.0
+expect 1 "alternate key with empty Cloud marker refused" "sole Cloud trust anchor" \
+  env -u TAG_OVERRIDE CI_BUILD_NUMBER=5 CI_WORKFLOW="iOS Internal Release" CI_XCODE_CLOUD= sh "$SCRIPT"
+for t in $CREATED_TAGS; do git tag -d "$t" >/dev/null 2>&1 || true; done; CREATED_TAGS=""
+# 5h. SSH-signed tags are non-OpenPGP and must be refused at the format
+# gate — even when the runner's git config would verify them (attacker
+# allowedSigners trusting the ephemeral key): the gate inspects the tag
+# object before any backend is invoked.
+mktag_ssh internal/v9.9.0 "harness ssh internal/v9.9.0"
+expect 1 "ssh-signed tag refused" "does not carry an OpenPGP signature" \
+  env -u TAG_OVERRIDE CI_BUILD_NUMBER=5 CI_WORKFLOW="iOS Internal Release" sh "$SCRIPT"
+assert_unstamped "ssh refusal stamps nothing"
+for t in $CREATED_TAGS; do git tag -d "$t" >/dev/null 2>&1 || true; done; CREATED_TAGS=""
+mktag_ssh internal/v9.9.0 "harness ssh internal/v9.9.0"
+expect 1 "ssh-signed tag refused despite allowedSigners" "does not carry an OpenPGP signature" \
+  env -u TAG_OVERRIDE CI_BUILD_NUMBER=5 CI_WORKFLOW="iOS Internal Release" GIT_CONFIG_GLOBAL="$BACKUP_DIR/attacker.gitconfig" GIT_CONFIG_SYSTEM=/dev/null sh "$SCRIPT"
+assert_unstamped "ssh allowedSigners refusal stamps nothing"
+for t in $CREATED_TAGS; do git tag -d "$t" >/dev/null 2>&1 || true; done; CREATED_TAGS=""
+# 5i. Armor-spoof pin (LAST-BEGIN rule): a fake PGP BEGIN marker embedded in
+# the annotation of an SSH-signed tag must NOT pass the format gate — the
+# real (SSH) block is always appended last. Under the old anywhere-grep this
+# tag verified cleanly via the attacker's allowedSigners and stamped.
+SPOOF_MSG="$(printf '%s\n%s\n%s\n%s' "harness spoof internal/v9.9.0" "-----BEGIN PGP SIGNATURE-----" "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" "(not a real signature)")"
+mktag_ssh internal/v9.9.0 "$SPOOF_MSG"
+expect 1 "armor-spoof ssh tag refused" "does not carry an OpenPGP signature" \
+  env -u TAG_OVERRIDE CI_BUILD_NUMBER=5 CI_WORKFLOW="iOS Internal Release" GIT_CONFIG_GLOBAL="$BACKUP_DIR/attacker.gitconfig" GIT_CONFIG_SYSTEM=/dev/null sh "$SCRIPT"
+assert_unstamped "armor-spoof refusal stamps nothing"
+for t in $CREATED_TAGS; do git tag -d "$t" >/dev/null 2>&1 || true; done; CREATED_TAGS=""
 
 # 6. Ordering across a realistic sequence (dogfood → public → re-upload).
 # Each run is asserted like the cases above (exit + unanimity line): a

@@ -106,12 +106,32 @@ jobs:
           # object against the release key before anything is built or
           # pushed. Unsigned, lightweight, or wrong-key tags fail closed
           # here — GitHub has no native tag-signature rule, so this is the
-          # enforcement. Key lives in-repo (.github/release-signing-key.pub):
-          # swapping it requires a main push, which is already fully trusted.
+          # enforcement. The release key is OpenPGP (spec: `git tag -s`).
+          # Armor pre-filter (diagnostic only, not the guarantee): the last
+          # `-----BEGIN ` line must open the PGP block. A trailing fake
+          # marker passes it, so verify-tag below structurally disables the
+          # SSH/X.509 backends and pins the OpenPGP program instead
+          # (`gpg.format` ignored — git routes by signature block).
+          if [ "$(git cat-file tag "$TAG_NAME" 2>/dev/null | grep '^-----BEGIN ' | tail -n 1)" != "-----BEGIN PGP SIGNATURE-----" ]; then
+            echo "::error::tag '$TAG_NAME' is not OpenPGP-signed — cut it with 'git tag -s' (docs/ci.md). Publishing nothing."
+            exit 1
+          fi
+          # Anchor read from origin/main, never the tag checkout (it cannot
+          # vouch for its own key; retired keys fail closed after rotation).
+          # fetch-depth: 0 provides origin/main, as the ancestor guard does.
+          KEY_TMP="${RUNNER_TEMP}/release-signing-key.pub"
+          if ! git show "origin/main:.github/release-signing-key.pub" > "$KEY_TMP" 2>/dev/null; then
+            echo "::error::could not read .github/release-signing-key.pub from origin/main — refusing to publish. Publishing nothing."
+            exit 1
+          fi
           export GNUPGHOME="${RUNNER_TEMP}/gnupg-verify"
           mkdir -p -m 700 "$GNUPGHOME"
-          gpg --batch --import .github/release-signing-key.pub
-          if ! git verify-tag "$TAG_NAME" >/dev/null 2>&1; then
+          if ! gpg --batch --import "$KEY_TMP"; then
+            echo "::error::could not import the release signing key from origin/main — refusing to publish. Publishing nothing."
+            exit 1
+          fi
+          rm -f "$KEY_TMP"
+          if ! git -c gpg.program=gpg -c gpg.openpgp.program=gpg -c gpg.ssh.program=/usr/bin/false -c gpg.x509.program=/usr/bin/false verify-tag "$TAG_NAME" >/dev/null 2>&1; then
             echo "::error::tag '$TAG_NAME' has no valid release signature — cut it with 'git tag -s' (docs/ci.md). Publishing nothing."
             exit 1
           fi

@@ -115,8 +115,9 @@ if [ "${TAG_OVERRIDE+x}" = "x" ]; then
   # override skips signature verification below — a Cloud build carrying
   # one would stamp an unverified version, so fail closed instead.
   # (CI_XCODE_CLOUD: Apple environment-variable reference, always present
-  # on Cloud; presence-checked so no value format is assumed.)
-  if [ -n "${CI_XCODE_CLOUD:-}" ]; then
+  # on Cloud; presence-checked (`${var+x}`) so a set-but-empty value cannot
+  # bypass the guard.)
+  if [ "${CI_XCODE_CLOUD+x}" = "x" ]; then
     echo "error: \$TAG_OVERRIDE is set in an Xcode Cloud build — local simulation only, refusing to stamp an unverified tag. Archiving nothing."
     exit 1
   fi
@@ -129,7 +130,11 @@ else
   # blip; a genuinely unreachable remote still aborts.
   FETCH_OK=0
   for _ in 1 2 3; do
-    if git fetch --tags origin >/dev/null 2>&1; then
+    # Explicit full refspec: Cloud clones are shallow with an unknown
+    # clone-time refspec, so even `origin main` may not refresh the tracking
+    # ref the signature gate reads its anchor from. Never forced: tags are
+    # never force-updated.
+    if git fetch --tags origin refs/heads/main:refs/remotes/origin/main >/dev/null 2>&1; then
       FETCH_OK=1
       break
     fi
@@ -251,55 +256,92 @@ if ! printf '%s' "$VERSION" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+(\.[0-9]+)?$'; t
 fi
 
 # Signature gate (spec: release tags are `-s` signed). GitHub has no native
-# tag-signature rule, so this is the enforcement on the iOS path: an
-# unsigned, lightweight, or wrong-key tag fails the archive here, before
+# tag-signature rule, so this is the enforcement on the iOS path: unsigned,
+# lightweight, wrong-key, or non-OpenPGP tags fail the archive before
 # anything is stamped. Skipped only for TAG_OVERRIDE (local simulation /
-# harness — a Cloud build carrying it fails closed instead).
-# STAMP_SIGNING_KEY overrides the key path for the harness's throwaway keys,
-# honored only off-Cloud (a Cloud build carrying it fails closed — the repo
-# key is the sole Cloud anchor); default is the repo-stored release key
-# (swapping it requires a main push, which is already fully trusted).
-# Verification runs in an ephemeral GNUPGHOME holding only the anchor
-# (GnuPG "ephemeral home directories": saved/restored, trapped so every exit
-# path deletes the temp dir) with the OpenPGP program pinned against
-# caller-inherited git config (gpg.format selects the backend only at
-# signing time; the program pin covers the verify path).
+# harness — fails closed on Cloud instead). STAMP_SIGNING_KEY selects the
+# harness throwaway key off-Cloud only (fails closed on Cloud — the repo key
+# is the sole Cloud anchor). Otherwise the anchor is read from
+# freshly-fetched origin/main — never the tag checkout under verification
+# (parity with backend-release.yml; rotated-out keys fail closed).
+# Verification runs in an ephemeral GNUPGHOME (saved/restored, trapped;
+# INT/TERM exit 130 so a signal never resumes into stamping). The guarantee
+# is backend lockdown, not the armor pre-filter: verify-tag routes by
+# signature blob, so inherited config (e.g. gpg.ssh allowedSigners) could
+# otherwise verify an SSH-signed tag — hence ssh/x509 programs are pinned to
+# /usr/bin/false and OpenPGP to gpg. gpg/verify stderr prints on failure.
 if [ "${TAG_OVERRIDE+x}" != "x" ]; then
-  if [ -n "${CI_XCODE_CLOUD:-}" ] && [ "${STAMP_SIGNING_KEY+x}" = "x" ]; then
+  if [ "${CI_XCODE_CLOUD+x}" = "x" ] && [ "${STAMP_SIGNING_KEY+x}" = "x" ]; then
     echo "error: \$STAMP_SIGNING_KEY is set in an Xcode Cloud build — the repo release key is the sole Cloud trust anchor. Archiving nothing."
     exit 1
   fi
-  SIGNING_KEY="${STAMP_SIGNING_KEY:-$(git rev-parse --show-toplevel 2>/dev/null)/.github/release-signing-key.pub}"
-  if [ -z "$SIGNING_KEY" ] || [ ! -f "$SIGNING_KEY" ]; then
-    echo "error: release signing key not found at '$SIGNING_KEY' — cannot verify tag '$TAG'. Archiving nothing."
+  if [ -n "${STAMP_SIGNING_KEY:-}" ]; then
+    if [ ! -f "$STAMP_SIGNING_KEY" ]; then
+      echo "error: release signing key not found at '$STAMP_SIGNING_KEY' — cannot verify tag '$TAG'. Archiving nothing."
+      exit 1
+    fi
+    if ! KEY_ARMOR="$(cat "$STAMP_SIGNING_KEY" 2>/dev/null)" || [ -z "$KEY_ARMOR" ]; then
+      echo "error: cannot read release signing key from '$STAMP_SIGNING_KEY' — cannot verify tag '$TAG'. Archiving nothing."
+      exit 1
+    fi
+  else
+    # A missing ref or file fails closed — never fall back to the checkout.
+    if ! KEY_ARMOR="$(git show "origin/main:.github/release-signing-key.pub" 2>/dev/null)" || [ -z "$KEY_ARMOR" ]; then
+      echo "error: cannot read the release signing key from origin/main — cannot verify tag '$TAG'. Archiving nothing."
+      exit 1
+    fi
+  fi
+  # Last-armor pre-filter (diagnostic only, NOT the security guarantee): the
+  # tag object's LAST '^-----BEGIN ' line must open the PGP block, so plain
+  # unsigned / lightweight / SSH-signed tags are refused here with a precise
+  # message before any backend is invoked. It must not be relied on: no armor
+  # heuristic can prove how every git version routes a hostile object.
+  if [ "$(git cat-file tag "$TAG" 2>/dev/null | grep '^-----BEGIN ' | tail -n 1)" != "-----BEGIN PGP SIGNATURE-----" ]; then
+    echo "error: tag '$TAG' does not carry an OpenPGP signature — cut it with 'git tag -s' under the default OpenPGP backend (docs/ci.md). Archiving nothing."
     exit 1
   fi
   if ! command -v gpg >/dev/null 2>&1; then
     echo "gpg not found — installing via Homebrew..."
     brew install gnupg
+    if ! command -v gpg >/dev/null 2>&1; then
+      echo "error: gpg is still not on PATH after 'brew install gnupg' — cannot verify tag '$TAG'. Archiving nothing."
+      exit 1
+    fi
   fi
   VERIFY_SAVED_GNUPGHOME="${GNUPGHOME:-}"
   VERIFY_GNUPGHOME_WAS_SET="${GNUPGHOME+x}"
+  VERIFY_HOME_ACTIVE=""
   VERIFY_GNUPGHOME="$(mktemp -d "${TMPDIR:-/tmp}/gnupg-verify.XXXXXX")"
   chmod 700 "$VERIFY_GNUPGHOME"
   cleanup_verify_home() {
-    rm -rf "$VERIFY_GNUPGHOME"
-    if [ "$VERIFY_GNUPGHOME_WAS_SET" = "x" ]; then
-      GNUPGHOME="$VERIFY_SAVED_GNUPGHOME"
-      export GNUPGHOME
-    else
-      unset GNUPGHOME
+    if [ "${VERIFY_HOME_ACTIVE:-}" = "1" ]; then
+      VERIFY_HOME_ACTIVE=0
+      rm -rf "$VERIFY_GNUPGHOME"
+      if [ "$VERIFY_GNUPGHOME_WAS_SET" = "x" ]; then
+        GNUPGHOME="$VERIFY_SAVED_GNUPGHOME"
+        export GNUPGHOME
+      else
+        unset GNUPGHOME
+      fi
     fi
   }
-  trap cleanup_verify_home EXIT INT TERM
+  trap 'cleanup_verify_home; exit 130' INT TERM
+  trap cleanup_verify_home EXIT
   GNUPGHOME="$VERIFY_GNUPGHOME"
   export GNUPGHOME
-  if ! gpg --batch --import "$SIGNING_KEY" >/dev/null 2>&1; then
-    echo "error: cannot import release signing key from '$SIGNING_KEY' — cannot verify tag '$TAG'. Archiving nothing."
+  VERIFY_HOME_ACTIVE=1
+  if ! IMPORT_DIAG="$(printf '%s\n' "$KEY_ARMOR" | gpg --batch --import 2>&1)"; then
+    echo "error: cannot import the release signing key — cannot verify tag '$TAG'. Archiving nothing."
+    if [ -n "$IMPORT_DIAG" ]; then
+      printf '%s\n' "$IMPORT_DIAG" | sed 's/^/  import: /'
+    fi
     exit 1
   fi
-  if ! git -c gpg.program=gpg -c gpg.openpgp.program=gpg verify-tag "$TAG" >/dev/null 2>&1; then
+  if ! VERIFY_DIAG="$(git -c gpg.program=gpg -c gpg.openpgp.program=gpg -c gpg.ssh.program=/usr/bin/false -c gpg.x509.program=/usr/bin/false verify-tag "$TAG" 2>&1)"; then
     echo "error: tag '$TAG' has no valid release signature — cut it with 'git tag -s' (docs/ci.md). Archiving nothing."
+    if [ -n "$VERIFY_DIAG" ]; then
+      printf '%s\n' "$VERIFY_DIAG" | sed 's/^/  verify: /'
+    fi
     exit 1
   fi
   cleanup_verify_home
