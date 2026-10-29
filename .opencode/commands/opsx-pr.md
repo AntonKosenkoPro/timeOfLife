@@ -1,6 +1,12 @@
 ---
+model: openai/gpt-6.1-sol#medium
 description: "Process a PR after implementation — template PR, green CI, AI-review loop, human handoff (never merge)"
 ---
+
+> Model routing: orchestrator runs on `openai/gpt-6.1-sol#medium`.
+> Delegate ALL code edits, repros, and test/verify runs to the
+> `lifio-implementer` subagent (`opencode-go/muse-spark-1.3-contributor#xhigh`)
+> via the subagent tool. Do not implement or run tests in the orchestrator session.
 
 Take an implemented branch to **human-review-ready**. You open/fill the PR,
 green the mandatory checks, sweep AI review (fixing only proven findings),
