@@ -124,15 +124,29 @@ jobs:
             echo "::error::could not read .github/release-signing-key.pub from origin/main — refusing to publish. Publishing nothing."
             exit 1
           fi
+          # A missing gpg binary must not masquerade as a key problem in
+          # the import error below: assert it is executable first (no
+          # version pin — any gpg speaking OpenPGP batch import is fine).
+          if ! command -v gpg >/dev/null 2>&1; then
+            echo "::error::gpg is not available on the runner — refusing to publish. Publishing nothing."
+            rm -f "$KEY_TMP"
+            exit 1
+          fi
           export GNUPGHOME="${RUNNER_TEMP}/gnupg-verify"
           mkdir -p -m 700 "$GNUPGHOME"
           if ! gpg --batch --import "$KEY_TMP"; then
             echo "::error::could not import the release signing key from origin/main — refusing to publish. Publishing nothing."
+            rm -f "$KEY_TMP"
             exit 1
           fi
           rm -f "$KEY_TMP"
-          if ! git -c gpg.program=gpg -c gpg.openpgp.program=gpg -c gpg.ssh.program=/usr/bin/false -c gpg.x509.program=/usr/bin/false verify-tag "$TAG_NAME" >/dev/null 2>&1; then
-            echo "::error::tag '$TAG_NAME' has no valid release signature — cut it with 'git tag -s' (docs/ci.md). Publishing nothing."
+          # verify-tag output is captured (not discarded) so the failure
+          # carries the verifier's own diagnosis — e.g. "No public key"
+          # vs a corrupt packet — sanitized to one bounded line so the
+          # annotation stays intact. Key IDs in-repo are public; nothing
+          # secret flows here.
+          if ! VERIFY_OUT="$(git -c gpg.program=gpg -c gpg.openpgp.program=gpg -c gpg.ssh.program=/usr/bin/false -c gpg.x509.program=/usr/bin/false verify-tag "$TAG_NAME" 2>&1)"; then
+            echo "::error::tag '$TAG_NAME' has no valid release signature — cut it with 'git tag -s' (docs/ci.md). Verifier said: $(printf '%s' "$VERIFY_OUT" | head -n 3 | tr '\n' ';' | head -c 300). Publishing nothing."
             exit 1
           fi
           # Bind the verified tag object to the event: the ancestor check

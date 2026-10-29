@@ -41,14 +41,23 @@ ORIGIN_MODE=""
 ORIGIN_URL=""
 ORIGIN_MAIN_SYMREF=""
 ORIGIN_MAIN_VALUE=""
+# Set to 1 as the LAST line of setup_test_origin: "absent before" must never
+# be confused with "recorded absent", or restore() would delete unrecorded
+# caller state on early exits (preflight, clone failure).
+ORIGIN_MAIN_RECORDED=""
+ANCHOR_GOOD=""
+ANCHOR_NONE=""
+ANCHOR_BAD=""
 setup_test_origin() {
   TEST_ORIGIN="$BACKUP_DIR/origin.git"
   git clone --quiet --bare "$REPO_ROOT" "$TEST_ORIGIN" || { echo "FAIL: cannot clone throwaway origin"; exit 1; }
-  # The script under test fetches refs/heads/main explicitly: a bare clone
-  # of a single-branch checkout may lack it (fetch would fail 3x), so seed
-  # it at HEAD when absent. Throwaway origin only — never the developer's.
+  # The script under test fetches refs/heads/main explicitly (non-forced):
+  # seed the throwaway main from the existing tracking ref when it resolves
+  # (a HEAD seed breaks whenever origin/main is ahead of HEAD — the refspec
+  # then rejects as non-fast-forward and the fetch fails 3x), else HEAD.
   if ! git --git-dir="$TEST_ORIGIN" show-ref --verify --quiet refs/heads/main; then
-    git --git-dir="$TEST_ORIGIN" update-ref refs/heads/main "$(git rev-parse --verify HEAD)" || { echo "FAIL: cannot seed throwaway origin main"; exit 1; }
+    SEED_MAIN="$(git rev-parse --verify --quiet refs/remotes/origin/main || git rev-parse --verify HEAD)"
+    git --git-dir="$TEST_ORIGIN" update-ref refs/heads/main "$SEED_MAIN" || { echo "FAIL: cannot seed throwaway origin main"; exit 1; }
   fi
   if ORIGIN_URL="$(git remote get-url origin 2>/dev/null)"; then
     ORIGIN_MODE="set-url"
@@ -63,6 +72,15 @@ setup_test_origin() {
   # restore() — plumbing only, no network, no other refs touched.
   ORIGIN_MAIN_SYMREF="$(git symbolic-ref -q refs/remotes/origin/main 2>/dev/null || true)"
   ORIGIN_MAIN_VALUE="$(git rev-parse --verify --quiet refs/remotes/origin/main 2>/dev/null || true)"
+  # Point the local tracking ref at the seeded commit (recorded above,
+  # restored by restore()): later fetches are no-ops, never non-FF rejects.
+  # Direct refs only — a symbolic tracking ref keeps its shape (the fetch
+  # then fails closed loudly instead of corrupting shape). Never breaks a
+  # working run: failure here only costs the no-op optimization.
+  if [ -z "$ORIGIN_MAIN_SYMREF" ]; then
+    git update-ref refs/remotes/origin/main "$(git --git-dir="$TEST_ORIGIN" rev-parse --verify refs/heads/main)" 2>/dev/null || true
+  fi
+  ORIGIN_MAIN_RECORDED=1
 }
 restore() {
   for f in $tracked; do
@@ -72,18 +90,22 @@ restore() {
   for t in $CREATED_TAGS; do
     git tag -d "$t" >/dev/null 2>&1 || true
   done
-  case "$ORIGIN_MODE" in
-    add) git remote remove origin 2>/dev/null || true ;;
-    set-url) git remote set-url origin "$ORIGIN_URL" 2>/dev/null || true ;;
-  esac
-  # Undo the recorded fetch pollution: restore the prior shape of
-  # refs/remotes/origin/main (symbolic/direct/absent) — this one ref only.
-  if [ -n "$ORIGIN_MAIN_SYMREF" ]; then
-    git symbolic-ref refs/remotes/origin/main "$ORIGIN_MAIN_SYMREF" 2>/dev/null || true
-  elif [ -n "$ORIGIN_MAIN_VALUE" ]; then
-    git update-ref refs/remotes/origin/main "$ORIGIN_MAIN_VALUE" 2>/dev/null || true
-  elif git rev-parse --verify --quiet refs/remotes/origin/main >/dev/null 2>&1; then
-    git update-ref -d refs/remotes/origin/main 2>/dev/null || true
+  # Undo recorded origin side effects: restore the remote URL and the prior
+  # shape of refs/remotes/origin/main (symbolic/direct/absent) — this one
+  # ref only. Guarded by ORIGIN_MAIN_RECORDED so early exits (preflight,
+  # clone failure) never restore — i.e. delete — unrecorded caller state.
+  if [ "$ORIGIN_MAIN_RECORDED" = "1" ]; then
+    case "$ORIGIN_MODE" in
+      add) git remote remove origin 2>/dev/null || true ;;
+      set-url) git remote set-url origin "$ORIGIN_URL" 2>/dev/null || true ;;
+    esac
+    if [ -n "$ORIGIN_MAIN_SYMREF" ]; then
+      git symbolic-ref refs/remotes/origin/main "$ORIGIN_MAIN_SYMREF" 2>/dev/null || true
+    elif [ -n "$ORIGIN_MAIN_VALUE" ]; then
+      git update-ref refs/remotes/origin/main "$ORIGIN_MAIN_VALUE" 2>/dev/null || true
+    elif git rev-parse --verify --quiet refs/remotes/origin/main >/dev/null 2>&1; then
+      git update-ref -d refs/remotes/origin/main 2>/dev/null || true
+    fi
   fi
   if [ "$HARNESS_GNUPGHOME_WAS_SET" = "x" ]; then
     GNUPGHOME="$HARNESS_GNUPGHOME_SAVED"; export GNUPGHOME
@@ -116,13 +138,22 @@ expect() { # expect <want-exit> <desc> [want-grep] -- cmd...
 # anything is stamped. snapshot_files hashes every file the script stamps;
 # assert_unstamped fails the harness if a refusal mutated them.
 snapshot_files() {
-  git hash-object project.yml TimeOfLife/Configuration/Info.plist LifioLiveActivities/Info.plist 2>/dev/null | tr '\n' ' '
+  # Reuses $tracked (single source of truth for the files the script stamps).
+  git hash-object $tracked 2>/dev/null | tr '\n' ' '
 }
 assert_unstamped() { # assert_unstamped <desc>
   if [ "$(snapshot_files)" != "$SNAP_BEFORE" ]; then
     echo "FAIL: $1 — files changed despite refusal"; FAIL=$((FAIL + 1)); return 0
   fi
   echo "ok: $1"; PASS=$((PASS + 1))
+}
+reset_origin_main() { # reset_origin_main <commit>: rotate the throwaway
+  # main and drop the local tip so the next script fetch re-reads it (the
+  # non-forced refspec would otherwise reject sibling rotations as
+  # non-fast-forward). Order-proof where a linear chain would not be. The
+  # recorded original is restored by restore() at exit.
+  git --git-dir="$TEST_ORIGIN" update-ref refs/heads/main "$1" || { echo "FAIL: cannot rotate throwaway origin main"; exit 1; }
+  git update-ref -d refs/remotes/origin/main 2>/dev/null || true
 }
 
 # Throwaway signing key for the real-tag cases (never the developer's),
@@ -191,6 +222,20 @@ EOF
     exit 1
   fi
   command -v ssh-keygen >/dev/null 2>&1 || { echo "FAIL: ssh-keygen not on PATH — SSH cases gate the format check and must never skip"; exit 1; }
+  # SSH fixtures need git >= 2.34 (gpg.format=ssh signing; GIT_CONFIG_* also
+  # needs >= 2.32, covered by the same floor). Hard FAIL, never skip: on an
+  # older git the tag creation below would die opaquely, and an ignored
+  # GIT_CONFIG_GLOBAL would let the allowedSigners cases pass vacuously.
+  # (Compare parts, not a packed number: "%d%02d" formats 2.54 as 254 and
+  # misfires the gate on every modern git.)
+  GIT_VER="$(git --version | awk '{print $3}')"
+  GIT_MAJOR="$(printf '%s' "$GIT_VER" | cut -d. -f1)"
+  GIT_MINOR="$(printf '%s' "$GIT_VER" | cut -d. -f2)"
+  if [ "$GIT_MAJOR" -gt 2 ] || { [ "$GIT_MAJOR" -eq 2 ] && [ "${GIT_MINOR:-0}" -ge 34 ]; }; then
+    :
+  else
+    echo "FAIL: git $GIT_VER cannot sign with gpg.format=ssh and ignores GIT_CONFIG_GLOBAL (needs >= 2.34) — SSH cases gate the format check and must never skip"; exit 1
+  fi
   if ! ssh-keygen -t ed25519 -N '' -C 'harness@local.invalid' -f "$BACKUP_DIR/ssh-key" </dev/null >"$BACKUP_DIR/ssh-keygen.log" 2>&1; then
     echo "FAIL: cannot generate ephemeral SSH key"
     sed 's/^/  /' "$BACKUP_DIR/ssh-keygen.log" 2>/dev/null || true
@@ -200,6 +245,33 @@ EOF
   # attacker config (a real attacker would name the victim's email).
   printf '%s %s\n' "*" "$(cut -d' ' -f1-2 "$BACKUP_DIR/ssh-key.pub")" > "$BACKUP_DIR/allowed-signers"
   printf '[gpg "ssh"]\n\tprogram = ssh-keygen\n\tallowedSignersFile = %s/allowed-signers\n' "$BACKUP_DIR" > "$BACKUP_DIR/attacker.gitconfig"
+}
+# Default-anchor fixtures for the production origin/main path: GOOD (tree
+# carries the ephemeral PUBLIC key), NONE (keyless tree), BAD (garbage).
+# Built with plumbing (mktree needs nested trees one level at a time —
+# slash paths are rejected flat), descending from the seeded tip. No private
+# keys involved — only the PUBLIC armor is embedded; the HEAD tag is still
+# signed by the throwaway key. Bare main starts at GOOD; per-test rotation
+# goes through reset_origin_main.
+setup_anchor_fixtures() {
+  SEED_TIP="$(git --git-dir="$TEST_ORIGIN" rev-parse --verify refs/heads/main)" || { echo "FAIL: cannot read throwaway origin main"; exit 1; }
+  ANCHOR_GOOD_BLOB="$(git --git-dir="$TEST_ORIGIN" hash-object -w "$STAMP_SIGNING_KEY")" || { echo "FAIL: cannot hash ephemeral public key"; exit 1; }
+  printf 'not a key at all\n' > "$BACKUP_DIR/garbage-key.txt"
+  ANCHOR_BAD_BLOB="$(git --git-dir="$TEST_ORIGIN" hash-object -w "$BACKUP_DIR/garbage-key.txt")" || { echo "FAIL: cannot hash garbage key"; exit 1; }
+  if ! gpg --batch --export harness@local.invalid > "$BACKUP_DIR/harness-signing.bin" 2>"$BACKUP_DIR/export-bin.err"; then
+    echo "FAIL: cannot export binary throwaway public key"
+    sed 's/^/  /' "$BACKUP_DIR/export-bin.err" 2>/dev/null || true
+    exit 1
+  fi
+  ANCHOR_GOOD_SUB="$(printf '100644 blob %s\trelease-signing-key.pub\n' "$ANCHOR_GOOD_BLOB" | git --git-dir="$TEST_ORIGIN" mktree)" || { echo "FAIL: cannot build anchor subtree"; exit 1; }
+  ANCHOR_GOOD_TREE="$(printf '040000 tree %s\t.github\n' "$ANCHOR_GOOD_SUB" | git --git-dir="$TEST_ORIGIN" mktree)" || { echo "FAIL: cannot build anchor tree"; exit 1; }
+  ANCHOR_NONE_TREE="$(git --git-dir="$TEST_ORIGIN" mktree </dev/null)" || { echo "FAIL: cannot build keyless tree"; exit 1; }
+  ANCHOR_BAD_SUB="$(printf '100644 blob %s\trelease-signing-key.pub\n' "$ANCHOR_BAD_BLOB" | git --git-dir="$TEST_ORIGIN" mktree)" || { echo "FAIL: cannot build garbage subtree"; exit 1; }
+  ANCHOR_BAD_TREE="$(printf '040000 tree %s\t.github\n' "$ANCHOR_BAD_SUB" | git --git-dir="$TEST_ORIGIN" mktree)" || { echo "FAIL: cannot build garbage tree"; exit 1; }
+  ANCHOR_GOOD="$(printf '%s\n' "synthetic anchor with ephemeral pub" | git --git-dir="$TEST_ORIGIN" -c user.name="stamp-test harness" -c user.email="harness@local.invalid" commit-tree "$ANCHOR_GOOD_TREE" -p "$SEED_TIP")" || { echo "FAIL: cannot commit good anchor"; exit 1; }
+  ANCHOR_NONE="$(printf '%s\n' "synthetic anchor without key" | git --git-dir="$TEST_ORIGIN" -c user.name="stamp-test harness" -c user.email="harness@local.invalid" commit-tree "$ANCHOR_NONE_TREE" -p "$SEED_TIP")" || { echo "FAIL: cannot commit keyless anchor"; exit 1; }
+  ANCHOR_BAD="$(printf '%s\n' "synthetic anchor with garbage key" | git --git-dir="$TEST_ORIGIN" -c user.name="stamp-test harness" -c user.email="harness@local.invalid" commit-tree "$ANCHOR_BAD_TREE" -p "$SEED_TIP")" || { echo "FAIL: cannot commit garbage anchor"; exit 1; }
+  git --git-dir="$TEST_ORIGIN" update-ref refs/heads/main "$ANCHOR_GOOD" || { echo "FAIL: cannot point throwaway origin main"; exit 1; }
 }
 mktag() {
   # Never touch a pre-existing tag: devs reuse names like internal/v9.9.1,
@@ -404,6 +476,7 @@ for t in $CREATED_TAGS; do git tag -d "$t" >/dev/null 2>&1 || true; done; CREATE
 # against a SECOND ephemeral anchor (never unset — the premerge default
 # anchor lacks the key file and would only prove the missing-key path).
 setup_format_fixtures
+setup_anchor_fixtures
 mktag internal/v9.9.0
 expect 1 "wrong-key tag refused" "no valid release signature" \
   env -u TAG_OVERRIDE STAMP_SIGNING_KEY="$BACKUP_DIR/wrong-anchor.pub" CI_BUILD_NUMBER=5 CI_WORKFLOW="iOS Internal Release" sh "$SCRIPT"
@@ -427,10 +500,12 @@ fi
 mktag internal/v9.9.0
 expect 1 "alternate key on Cloud refused" "sole Cloud trust anchor" \
   env -u TAG_OVERRIDE CI_BUILD_NUMBER=5 CI_WORKFLOW="iOS Internal Release" CI_XCODE_CLOUD=1 sh "$SCRIPT"
+assert_unstamped "Cloud alternate-key refusal stamps nothing"
 for t in $CREATED_TAGS; do git tag -d "$t" >/dev/null 2>&1 || true; done; CREATED_TAGS=""
 mktag internal/v9.9.0
 expect 1 "alternate key with empty Cloud marker refused" "sole Cloud trust anchor" \
   env -u TAG_OVERRIDE CI_BUILD_NUMBER=5 CI_WORKFLOW="iOS Internal Release" CI_XCODE_CLOUD= sh "$SCRIPT"
+assert_unstamped "Cloud empty-marker refusal stamps nothing"
 for t in $CREATED_TAGS; do git tag -d "$t" >/dev/null 2>&1 || true; done; CREATED_TAGS=""
 # 5h. SSH-signed tags are non-OpenPGP and must be refused at the format
 # gate — even when the runner's git config would verify them (attacker
@@ -455,6 +530,50 @@ mktag_ssh internal/v9.9.0 "$SPOOF_MSG"
 expect 1 "armor-spoof ssh tag refused" "does not carry an OpenPGP signature" \
   env -u TAG_OVERRIDE CI_BUILD_NUMBER=5 CI_WORKFLOW="iOS Internal Release" GIT_CONFIG_GLOBAL="$BACKUP_DIR/attacker.gitconfig" GIT_CONFIG_SYSTEM=/dev/null sh "$SCRIPT"
 assert_unstamped "armor-spoof refusal stamps nothing"
+for t in $CREATED_TAGS; do git tag -d "$t" >/dev/null 2>&1 || true; done; CREATED_TAGS=""
+# 5j. Default production anchor (origin/main): the hermetic main carries the
+# ephemeral PUBLIC key (synthesized by setup_anchor_fixtures — no private
+# keys, no waiting for a merge), so the absent-STAMP control verifies and
+# stamps. Rotations + reset_origin_main pin the fail-closed branches with
+# precise messages (merge-independent: the hermetic main is synthesized, so
+# unlike the real origin these do not vary pre/post-merge). The SUCCESS case
+# stamps, so the tracked trio is restored right after for later asserts.
+reset_origin_main "$ANCHOR_GOOD"
+mktag internal/v9.9.0
+expect 0 "default anchor verifies and stamps" "Version unanimity OK: marketing=9.9.0 build=5 channel=internal" \
+  env -u TAG_OVERRIDE -u STAMP_SIGNING_KEY CI_BUILD_NUMBER=5 CI_WORKFLOW="iOS Internal Release" sh "$SCRIPT"
+for t in $CREATED_TAGS; do git tag -d "$t" >/dev/null 2>&1 || true; done; CREATED_TAGS=""
+for f in $tracked; do cp "$BACKUP_DIR/$f" "$f"; done
+# SUCCESS stamped: re-pin the baseline to the restored pristine files so the
+# refusal asserts below compare against the true pre-stamp state.
+SNAP_BEFORE="$(snapshot_files)"
+reset_origin_main "$ANCHOR_NONE"
+mktag internal/v9.9.0
+expect 1 "missing origin/main anchor refused" "cannot read the release signing key from origin/main" \
+  env -u TAG_OVERRIDE -u STAMP_SIGNING_KEY CI_BUILD_NUMBER=5 CI_WORKFLOW="iOS Internal Release" sh "$SCRIPT"
+assert_unstamped "missing-anchor refusal stamps nothing"
+for t in $CREATED_TAGS; do git tag -d "$t" >/dev/null 2>&1 || true; done; CREATED_TAGS=""
+reset_origin_main "$ANCHOR_BAD"
+mktag internal/v9.9.0
+expect 1 "garbage origin/main anchor refused" "cannot import the release signing key" \
+  env -u TAG_OVERRIDE -u STAMP_SIGNING_KEY CI_BUILD_NUMBER=5 CI_WORKFLOW="iOS Internal Release" sh "$SCRIPT"
+assert_unstamped "garbage-anchor refusal stamps nothing"
+for t in $CREATED_TAGS; do git tag -d "$t" >/dev/null 2>&1 || true; done; CREATED_TAGS=""
+# Anchor-selection refusals (fail before any read/verify/stamp).
+mktag internal/v9.9.0
+expect 1 "empty STAMP refused" "is set but empty" \
+  env -u TAG_OVERRIDE STAMP_SIGNING_KEY= CI_BUILD_NUMBER=5 CI_WORKFLOW="iOS Internal Release" sh "$SCRIPT"
+assert_unstamped "empty-STAMP refusal stamps nothing"
+for t in $CREATED_TAGS; do git tag -d "$t" >/dev/null 2>&1 || true; done; CREATED_TAGS=""
+mktag internal/v9.9.0
+expect 1 "binary STAMP refused" "cannot import the release signing key" \
+  env -u TAG_OVERRIDE STAMP_SIGNING_KEY="$BACKUP_DIR/harness-signing.bin" CI_BUILD_NUMBER=5 CI_WORKFLOW="iOS Internal Release" sh "$SCRIPT"
+assert_unstamped "binary-STAMP refusal stamps nothing"
+for t in $CREATED_TAGS; do git tag -d "$t" >/dev/null 2>&1 || true; done; CREATED_TAGS=""
+mktag internal/v9.9.0
+expect 1 "missing anchor file refused" "release signing key not found" \
+  env -u TAG_OVERRIDE STAMP_SIGNING_KEY="$BACKUP_DIR/does-not-exist.pub" CI_BUILD_NUMBER=5 CI_WORKFLOW="iOS Internal Release" sh "$SCRIPT"
+assert_unstamped "missing-file refusal stamps nothing"
 for t in $CREATED_TAGS; do git tag -d "$t" >/dev/null 2>&1 || true; done; CREATED_TAGS=""
 
 # 6. Ordering across a realistic sequence (dogfood → public → re-upload).

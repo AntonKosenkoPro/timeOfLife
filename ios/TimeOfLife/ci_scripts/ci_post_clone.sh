@@ -133,7 +133,13 @@ else
     # Explicit full refspec: Cloud clones are shallow with an unknown
     # clone-time refspec, so even `origin main` may not refresh the tracking
     # ref the signature gate reads its anchor from. Never forced: tags are
-    # never force-updated.
+    # never force-updated, and a rewound upstream main is rejected, never
+    # applied (the tracking ref keeps its value; rejection exits nonzero,
+    # so the loop retries, then fails closed after 3 attempts — the valid
+    # outcome). That staleness needs an upstream force-push, which branch
+    # protection forbids (docs/ci.md), and fresh Cloud clones cannot be
+    # stale; forcing (`+`) would permit anchor downgrade — so this stays as
+    # is, intentional fail-closed, not a gap.
     if git fetch --tags origin refs/heads/main:refs/remotes/origin/main >/dev/null 2>&1; then
       FETCH_OK=1
       break
@@ -275,6 +281,17 @@ if [ "${TAG_OVERRIDE+x}" != "x" ]; then
     echo "error: \$STAMP_SIGNING_KEY is set in an Xcode Cloud build — the repo release key is the sole Cloud trust anchor. Archiving nothing."
     exit 1
   fi
+  # A set-but-empty STAMP_SIGNING_KEY must not silently fall through to the
+  # default anchor — refuse explicitly. (The Cloud guard above already
+  # rejects any set STAMP in Cloud, empty or not.)
+  if [ "${STAMP_SIGNING_KEY+x}" = "x" ] && [ -z "$STAMP_SIGNING_KEY" ]; then
+    echo "error: \$STAMP_SIGNING_KEY is set but empty — refusing to guess the trust anchor. Archiving nothing."
+    exit 1
+  fi
+  # KEY_ARMOR travels through a shell variable: safe by construction —
+  # OpenPGP ASCII armor is ASCII-only (radix-64 + headers), so command
+  # substitution cannot lose NUL bytes that never exist; non-armor input
+  # (e.g. binary via STAMP) fails closed at import below.
   if [ -n "${STAMP_SIGNING_KEY:-}" ]; then
     if [ ! -f "$STAMP_SIGNING_KEY" ]; then
       echo "error: release signing key not found at '$STAMP_SIGNING_KEY' — cannot verify tag '$TAG'. Archiving nothing."
@@ -311,11 +328,14 @@ if [ "${TAG_OVERRIDE+x}" != "x" ]; then
   VERIFY_SAVED_GNUPGHOME="${GNUPGHOME:-}"
   VERIFY_GNUPGHOME_WAS_SET="${GNUPGHOME+x}"
   VERIFY_HOME_ACTIVE=""
-  VERIFY_GNUPGHOME="$(mktemp -d "${TMPDIR:-/tmp}/gnupg-verify.XXXXXX")"
-  chmod 700 "$VERIFY_GNUPGHOME"
+  VERIFY_GNUPGHOME=""
   cleanup_verify_home() {
-    if [ "${VERIFY_HOME_ACTIVE:-}" = "1" ]; then
+    if [ "${VERIFY_HOME_ACTIVE:-}" = "1" ] && [ -n "${VERIFY_GNUPGHOME:-}" ]; then
       VERIFY_HOME_ACTIVE=0
+      # Scoped agent kill: gpg spawns gpg-agent even for public-only
+      # import/verify, and it outlives the rm below — kill only this home's
+      # agent via --homedir (never the caller's). Failures ignored.
+      gpgconf --homedir "$VERIFY_GNUPGHOME" --kill gpg-agent >/dev/null 2>&1 || true
       rm -rf "$VERIFY_GNUPGHOME"
       if [ "$VERIFY_GNUPGHOME_WAS_SET" = "x" ]; then
         GNUPGHOME="$VERIFY_SAVED_GNUPGHOME"
@@ -325,8 +345,14 @@ if [ "${TAG_OVERRIDE+x}" != "x" ]; then
       fi
     fi
   }
-  trap 'cleanup_verify_home; exit 130' INT TERM
+  # Traps armed BEFORE the home exists (closes the mktemp/chmod window;
+  # pre-creation fire is a guarded no-op). Conventional codes: 130 on INT,
+  # 143 on TERM.
+  trap 'cleanup_verify_home; exit 130' INT
+  trap 'cleanup_verify_home; exit 143' TERM
   trap cleanup_verify_home EXIT
+  VERIFY_GNUPGHOME="$(mktemp -d "${TMPDIR:-/tmp}/gnupg-verify.XXXXXX")"
+  chmod 700 "$VERIFY_GNUPGHOME"
   GNUPGHOME="$VERIFY_GNUPGHOME"
   export GNUPGHOME
   VERIFY_HOME_ACTIVE=1
