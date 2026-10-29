@@ -13,9 +13,9 @@ green the mandatory checks, sweep AI review (fixing only proven findings),
 then STOP for a human. You never merge.
 
 > Model routing: orchestrator runs on `openai/gpt-6.1-sol#medium`
-> (set by the `/opsx-pr` command frontmatter, not by this skill —
+> (set by the `/lifio-pr` wrapper command frontmatter, not by this skill —
 > invoking this skill directly does not switch models; invoke via
-> `/opsx-pr` or set the model manually). Delegate ALL code edits,
+> `/lifio-pr` or set the model manually). Delegate ALL code edits,
 > repros, and test/verify runs to the `lifio-implementer` subagent
 > (`opencode-go/muse-spark-1.3-contributor#xhigh`) via the subagent tool.
 > Do not implement or run tests in the orchestrator session.

@@ -1,5 +1,4 @@
 ---
-model: openai/gpt-6.1-sol#medium
 description: "Archive a completed change in the experimental workflow"
 ---
 

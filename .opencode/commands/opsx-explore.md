@@ -1,5 +1,4 @@
 ---
-model: openai/gpt-6.1-sol#high
 description: "Enter explore mode - think through ideas, investigate problems, clarify requirements"
 ---
 
