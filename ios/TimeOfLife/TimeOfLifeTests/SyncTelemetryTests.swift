@@ -8,6 +8,7 @@ import Testing
 @MainActor
 @Suite("SyncTelemetry")
 struct SyncTelemetryTests {
+#if DEBUG
     @Test("Debug defaults: enabled with a localhost Collector endpoint")
     func debugDefaults() {
         let config = SyncTelemetryConfig.resolved()
@@ -16,6 +17,7 @@ struct SyncTelemetryTests {
         #expect(config.endpoint.port == 4_318)
         #expect(config.endpoint.path == "/v1/traces")
     }
+#endif
 
     @Test("enablement rule: Debug on, Release needs an explicit endpoint")
     func enablementRule() {
