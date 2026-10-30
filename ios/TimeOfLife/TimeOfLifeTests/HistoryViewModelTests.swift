@@ -481,6 +481,50 @@ struct HistoryViewModelTests {
 
     // MARK: - Helpers
 
+    @Test("concurrent day labels and time texts stay correct")
+    func concurrentFormatting() async {
+        // Live TestFlight crash (icu::UnicodeString ctor via
+        // -[NSDateFormatter _regenerateFormatter] on the dayLabel path):
+        // these helpers are nonisolated and reachable from any thread.
+        // Both formatters are exercised concurrently inside one task group
+        // so dayLabel+timeText actually contend rather than running in two
+        // sequential waves. Independent structural oracle (no calls to the
+        // functions under test for expectations): the fixed old date is
+        // always absolute-form, pinned against a locally built reference
+        // formatter mirroring the production config. This guards
+        // hangs/torn results under contention, not the ICU first-use race
+        // itself (unobservable from tests — it lives inside uninstrumented
+        // Foundation). The reference below is intentionally built after the
+        // wave so it cannot warm up ICU first-use.
+        let calendar = Calendar(identifier: .gregorian)
+        let day = Self.date("2026-08-31 10:00", calendar: calendar)
+        let now = Self.date("2026-09-03 15:00", calendar: calendar)
+        let pairs = await withTaskGroup(of: (String, String).self, returning: [(String, String)].self) { group in
+            for _ in 0 ..< 64 {
+                group.addTask {
+                    (HistoryViewModel.dayLabel(for: day, now: now, calendar: calendar),
+                     HistoryViewModel.timeText(for: day))
+                }
+            }
+            var out: [(String, String)] = []
+            for await pair in group { out.append(pair) }
+            return out
+        }
+        let expected: String = {
+            let reference = DateFormatter()
+            reference.dateStyle = .medium
+            reference.timeStyle = .none
+            reference.calendar = calendar
+            return reference.string(from: day)
+        }()
+        for (label, time) in pairs {
+            #expect(label == expected)
+            #expect(!time.isEmpty)
+        }
+        #expect(Set(pairs.map(\.0)).count == 1)
+        #expect(Set(pairs.map(\.1)).count == 1)
+    }
+
     private static func date(_ iso: String, calendar: Calendar) -> Date {
         let parts = iso.split(separator: " ")
         let dateParts = parts[0].split(separator: "-").compactMap { Int($0) }
