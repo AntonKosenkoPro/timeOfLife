@@ -34,8 +34,7 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-    environment:
-      # Hosted-DB split (migrate-db-to-supabase-free): a set DATABASE_URL
+    environment:      # Hosted-DB split (migrate-db-to-supabase-free): a set DATABASE_URL
       # repoints the backend at hosted Postgres (Supabase); empty keeps the
       # VM-local Postgres composed from DB_PASSWORD. Local postgres keeps
       # running either way so rollback is instant (retention: see change).
@@ -76,11 +75,43 @@ services:
       # Sentry error reporting (observability Stage 0). Empty = disabled,
       # the server runs exactly as without Sentry.
       SENTRY_DSN: ${SENTRY_DSN:-}
+      # OTel pipeline (observability Stage 1). OTEL_ENABLED=0 (default) =
+      # Stage-0 posture: the SDK stays off and the backend emits nothing.
+      # The endpoint is the VM-local Collector (same compose network); local
+      # dev outside compose uses localhost:4317 instead.
+      OTEL_ENABLED: ${OTEL_ENABLED:-0}
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-otel-collector:4317}
       # Comma-separated IPs/CIDRs of reverse proxies allowed to set forwarded
       # IP headers for rate limiting. Empty = trust nobody.
       TRUSTED_PROXIES: ${TRUSTED_PROXIES:-}
     expose:
       - "8080"
+
+  # OTel Collector (Stage 1, VM forwarding only): receives OTLP from the
+  # backend (and later iOS spans) and forwards to Grafana Cloud. Buffers
+  # seconds, stores nothing. Same log rotation as the other services. Stopping
+  # this service (or OTEL_ENABLED=0) restores the exact Stage-0 posture.
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.135.0
+    restart: always
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    volumes:
+      - ./otelcol-config.yaml:/etc/otelcol-contrib/config.yaml:ro
+    environment:
+      # SaaS seam (D1): endpoint + key arrive via the VM .env / CI secrets,
+      # never the repo. Empty (default) = exporters idle against the discard
+      # sentinel in otelcol-config.yaml; the service stays healthy, zero series.
+      GRAFANA_CLOUD_OTLP_ENDPOINT: ${GRAFANA_CLOUD_OTLP_ENDPOINT:-}
+      GRAFANA_CLOUD_OTLP_KEY: ${GRAFANA_CLOUD_OTLP_KEY:-}
+      ENVIRONMENT: ${ENVIRONMENT:-production}
+    expose:
+      - "4317"
+      - "4318"
+    command: ["--config=/etc/otelcol-contrib/config.yaml"]
 
   nginx:
     image: nginx:alpine

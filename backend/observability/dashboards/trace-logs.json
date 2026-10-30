@@ -1,0 +1,64 @@
+{
+  "__comment": "lifio dashboard 4/5: trace-linked logs. INTENT FILE (\u00a74.2 SaaS half at deploy). Loki labels stay ~5 boring keys (level + error-stream operation; service/environment as resource attrs). trace_id/span_id ride on every record with a live span \u2014 paste one into Tempo for the jump. LOAD-TIME CHECK: confirm the OTLP resource->Loki label mapping in Explore; adjust label names, never add identifier labels.",
+  "schemaVersion": 39,
+  "templating": {
+    "list": [
+      {
+        "name": "DS_LOKI",
+        "type": "datasource",
+        "query": "loki",
+        "current": {},
+        "hide": 0,
+        "label": "DS_LOKI"
+      }
+    ]
+  },
+  "timezone": "browser",
+  "title": "Lifio 4 \u2014 Logs (trace-linked)",
+  "uid": "lifio-logs",
+  "version": 1,
+  "panels": [
+    {
+      "datasource": "${DS_LOKI}",
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "id": 1,
+      "options": {
+        "showLabels": true
+      },
+      "targets": [
+        {
+          "expr": "{service_name=\"lifio-backend\"} | level=\"error\"",
+          "refId": "A"
+        }
+      ],
+      "title": "Errors (operation label on this stream only)",
+      "type": "logs"
+    },
+    {
+      "datasource": "${DS_LOKI}",
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 8
+      },
+      "id": 2,
+      "options": {
+        "showLabels": false
+      },
+      "targets": [
+        {
+          "expr": "{service_name=\"lifio-backend\"}",
+          "refId": "A"
+        }
+      ],
+      "title": "All app logs (/health never logs here)",
+      "type": "logs"
+    }
+  ]
+}

@@ -120,7 +120,7 @@ func NewDefaultDependencies(ctx context.Context, cfg *config.Config, store db.St
 		// the misconfiguration is surfaced here instead of inside the
 		// factory. Fail fast (return error) is the follow-up once
 		// EMAIL_BACKEND=ses misconfigurations are proven loud enough.
-		logger.Error("email sender misconfigured, using console fallback", "error", err)
+		logger.ErrorContext(ctx, "email sender misconfigured, using console fallback", "error", err)
 	}
 
 	rateLimiter := &handlers.RateLimiterGroup{
@@ -138,7 +138,7 @@ func NewDefaultDependencies(ctx context.Context, cfg *config.Config, store db.St
 		// Explicit continue with the safe default (trust nobody): forwarded
 		// headers are ignored, so a typo here fails closed for rate
 		// limiting rather than open. The raw value is not secret.
-		logger.Error("invalid TRUSTED_PROXIES, ignoring forwarded headers",
+		logger.ErrorContext(ctx, "invalid TRUSTED_PROXIES, ignoring forwarded headers",
 			"error", err, "value", cfg.TrustedProxies)
 	}
 
@@ -162,7 +162,7 @@ func NewDefaultDependencies(ctx context.Context, cfg *config.Config, store db.St
 	if cfg.AppleClientID != "" {
 		kf, kerr := apple.NewSharedKeyfunc(ctx, cfg.AppleJWKSURL)
 		if kerr != nil {
-			logger.Error("failed to create apple JWKS keyfunc; feature disabled", "error", kerr)
+			logger.ErrorContext(ctx, "failed to create apple JWKS keyfunc; feature disabled", "error", kerr)
 		} else {
 			appleVerifier = apple.NewIdentityVerifier(cfg.AppleClientID, kf)
 			appleNotifs = apple.NewNotificationVerifier(cfg.AppleClientID, kf)
@@ -173,7 +173,7 @@ func NewDefaultDependencies(ctx context.Context, cfg *config.Config, store db.St
 			// Config preflight validates this; a runtime mismatch fails
 			// closed to revocation-unavailable (explicit 503s, never silent
 			// skips) instead of crashing the relay.
-			logger.Error("failed to parse apple private key; revocation unavailable", "error", perr)
+			logger.ErrorContext(ctx, "failed to parse apple private key; revocation unavailable", "error", perr)
 		} else {
 			appleClient = apple.NewRESTClient(cfg.AppleClientID, cfg.AppleTeamID, cfg.AppleKeyID,
 				privKey, "", cfg.AppleRedirectURI, nil)
@@ -346,7 +346,7 @@ func requestLogger(next http.Handler) http.Handler {
 				healthCheckCount.Add(1)
 				return
 			}
-			slog.Info("request",
+			slog.InfoContext(r.Context(), "request",
 				"method", r.Method,
 				"path", r.URL.Path,
 				"status", ww.Status(),
@@ -400,7 +400,7 @@ func corsMiddlewareWithAllowlist(allowedOrigins []string) func(http.Handler) htt
 	}
 }
 
-func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
+func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	if err := json.NewEncoder(w).Encode(healthResponse{
@@ -408,7 +408,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 		Version: s.version,
 		SHA:     s.sha,
 	}); err != nil {
-		slog.Error("failed to encode health response", "error", err)
+		slog.ErrorContext(r.Context(), "failed to encode health response", "error", err)
 	}
 }
 

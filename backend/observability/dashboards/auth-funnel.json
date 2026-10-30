@@ -1,0 +1,74 @@
+{
+  "__comment": "lifio dashboard 3/5: auth funnel. INTENT FILE (\u00a74.2 SaaS half at deploy). operation values: otp_request, otp_verify, token_refresh, apple_signin, logout (Stage-0 allowlist, mirrored by OTel middleware). 4xx = user/rate-limit outcomes, not pages.",
+  "schemaVersion": 39,
+  "templating": {
+    "list": [
+      {
+        "name": "DS_PROMETHEUS",
+        "type": "datasource",
+        "query": "prometheus",
+        "current": {},
+        "hide": 0,
+        "label": "DS_PROMETHEUS"
+      }
+    ]
+  },
+  "timezone": "browser",
+  "title": "Lifio 3 \u2014 Auth funnel",
+  "uid": "lifio-auth-funnel",
+  "version": 1,
+  "panels": [
+    {
+      "datasource": "${DS_PROMETHEUS}",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 0
+      },
+      "id": 1,
+      "options": {
+        "legend": {
+          "showLegend": true
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum by (operation) (rate(http_server_requests_total{service_name=\"lifio-backend\",operation=~\"otp_request|otp_verify|token_refresh|apple_signin|logout\"}[5m]))",
+          "refId": "A"
+        }
+      ],
+      "title": "Auth op rate",
+      "type": "timeseries"
+    },
+    {
+      "datasource": "${DS_PROMETHEUS}",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 0
+      },
+      "id": 2,
+      "options": {
+        "legend": {
+          "showLegend": true
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum by (operation) (rate(http_server_requests_total{service_name=\"lifio-backend\",http_status_class=\"4xx\",operation=~\"otp_request|otp_verify|token_refresh|apple_signin\"}[5m])) / sum by (operation) (rate(http_server_requests_total{service_name=\"lifio-backend\",operation=~\"otp_request|otp_verify|token_refresh|apple_signin\"}[5m]))",
+          "refId": "A"
+        }
+      ],
+      "title": "4xx share by auth op (rejections + rate limits)",
+      "type": "timeseries"
+    }
+  ]
+}

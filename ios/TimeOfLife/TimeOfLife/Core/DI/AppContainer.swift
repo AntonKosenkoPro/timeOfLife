@@ -175,6 +175,9 @@ final class AppContainer: ObservableObject {
     /// `closeLocalStore()` on sign-out — account-bound-store spec.
     static func production() -> AppContainer {
         let baseURL = AppConfig.baseURL
+        // Debug-only MetricKit spike harness (Stage 1, task 7.1): logs
+        // payload classes/sizes/frequency, never uploads.
+        MetricKitHarness.shared.start()
         let keychain = KeychainStore()
         // The cache must write the session id to the App Group defaults —
         // the same store `ActiveAccountFileResolver` reads (lock-screen-
@@ -208,7 +211,8 @@ final class AppContainer: ObservableObject {
         let syncController = SyncController(
             store: localStore,
             remote: catalog,
-            connectivity: connectivity
+            connectivity: connectivity,
+            telemetry: SyncTelemetry()
         ) { [weak sessionStore] in
             // The same-account guard reads the session user at guard time:
             // the session's `userId` must match the account `activate()`

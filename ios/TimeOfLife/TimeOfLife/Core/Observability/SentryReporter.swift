@@ -81,6 +81,18 @@ enum SentryReporter {
         #endif
     }
 
+    /// Captures a sync-distress event (repeated sync failures) on the Sentry
+    /// channel — which does not depend on the relay — so distress still
+    /// arrives when sync volume fails 100% (distress separation, Stage 1).
+    /// Static string only, same rule as the breadcrumb above.
+    static func captureSyncDistress() {
+        #if canImport(Sentry)
+        let event = Event(level: .warning)
+        event.message = SentryMessage(formatted: "sync distress: repeated sync failures")
+        SentrySDK.capture(event: event)
+        #endif
+    }
+
     /// Normalizes a raw DSN plist value. Returns nil (disabled) for missing,
     /// empty, or unsubstituted `$(SENTRY_DSN)` values. Internal so tests can
     /// exercise it without a bundle.

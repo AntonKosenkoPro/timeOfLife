@@ -1,0 +1,112 @@
+{
+  "__comment": "lifio dashboard 1/5: relay health. INTENT FILE \u2014 load via Grafana API/file provisioning at deploy (\u00a74.2 SaaS half). All queries use allowlisted attributes only (service.name, http.method/route templated, http.status_class, operation). LOAD-TIME CHECK: verify OTLP attribute/metric naming (dots vs underscores) against Explore and adjust; latency panels wait on histograms (deferred per D7).",
+  "schemaVersion": 39,
+  "templating": {
+    "list": [
+      {
+        "name": "DS_PROMETHEUS",
+        "type": "datasource",
+        "query": "prometheus",
+        "current": {},
+        "hide": 0,
+        "label": "DS_PROMETHEUS"
+      }
+    ]
+  },
+  "timezone": "browser",
+  "title": "Lifio 1 \u2014 Relay health",
+  "uid": "lifio-relay-health",
+  "version": 1,
+  "panels": [
+    {
+      "datasource": "${DS_PROMETHEUS}",
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 0
+      },
+      "id": 1,
+      "options": {
+        "legend": {
+          "showLegend": true
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum by (http_route) (rate(http_server_requests_total{service_name=\"lifio-backend\"}[5m]))",
+          "refId": "A"
+        }
+      ],
+      "title": "RPS by templated route",
+      "type": "timeseries"
+    },
+    {
+      "datasource": "${DS_PROMETHEUS}",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 0
+      },
+      "id": 2,
+      "options": {
+        "legend": {
+          "showLegend": true
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum by (operation) (rate(http_server_requests_total{service_name=\"lifio-backend\",http_status_class=\"5xx\"}[5m])) / sum by (operation) (rate(http_server_requests_total{service_name=\"lifio-backend\"}[5m]))",
+          "refId": "A"
+        }
+      ],
+      "title": "5xx share by operation (SLI: http_5xx_rate)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": "${DS_PROMETHEUS}",
+      "gridPos": {
+        "h": 4,
+        "w": 12,
+        "x": 0,
+        "y": 8
+      },
+      "id": 3,
+      "options": {},
+      "targets": [
+        {
+          "expr": "lifio_health_checks_total",
+          "refId": "A"
+        }
+      ],
+      "title": "/health check count (single series, no labels)",
+      "type": "stat"
+    },
+    {
+      "gridPos": {
+        "h": 4,
+        "w": 12,
+        "x": 12,
+        "y": 8
+      },
+      "id": 4,
+      "options": {
+        "content": "No latency panels yet: histograms deferred until the series-budget check (\u00a74.1) clears. Counters + traces first (D7).",
+        "mode": "markdown"
+      },
+      "title": "Note",
+      "type": "text"
+    }
+  ]
+}

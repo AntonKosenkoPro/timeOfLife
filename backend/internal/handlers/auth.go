@@ -164,7 +164,7 @@ func (h *Handler) AppleSignIn(w http.ResponseWriter, r *http.Request) {
 
 	var req appleSignInReq
 	if err := decodeJSON(r, &req); err != nil {
-		h.logger.Warn("invalid apple sign-in body", "error", err)
+		h.logger.WarnContext(r.Context(), "invalid apple sign-in body", "error", err)
 		writeError(w, http.StatusBadRequest, "invalid_body", "Invalid request body", nil)
 		return
 	}
@@ -177,7 +177,7 @@ func (h *Handler) AppleSignIn(w http.ResponseWriter, r *http.Request) {
 	// Rate limit per IP.
 	ip := h.clientIP(r)
 	if h.rateLimiter.Apple != nil && !h.rateLimiter.Apple.Allow(ip) {
-		h.logger.Warn("apple sign-in rate limited", "ip", ip)
+		h.logger.WarnContext(r.Context(), "apple sign-in rate limited", "ip", ip)
 		writeError(w, http.StatusTooManyRequests, "rate_limited",
 			"Too many requests. Please try again later.", nil)
 		return
@@ -185,7 +185,7 @@ func (h *Handler) AppleSignIn(w http.ResponseWriter, r *http.Request) {
 
 	claims, err := h.appleVerifier.Verify(ctx, req.IdentityToken)
 	if err != nil {
-		h.logger.Warn("apple identity token verification failed", "error", err)
+		h.logger.WarnContext(r.Context(), "apple identity token verification failed", "error", err)
 		writeError(w, http.StatusUnauthorized, "invalid_apple_token",
 			"Invalid Apple identity token", nil)
 		return
@@ -197,13 +197,13 @@ func (h *Handler) AppleSignIn(w http.ResponseWriter, r *http.Request) {
 	user, err := h.store.UpsertAppleUser(ctx, claims.Sub, claims.Email, h.subjectDigest(claims.Sub), time.Now())
 	if err != nil {
 		if errors.Is(err, db.ErrAppleRevocationPending) {
-			h.logger.Warn("apple signup fenced by pending revocation", "sub", redactSubject(claims.Sub))
+			h.logger.WarnContext(r.Context(), "apple signup fenced by pending revocation", "sub", redactSubject(claims.Sub))
 			writeError(w, http.StatusServiceUnavailable, "apple_revocation_pending",
 				"Apple unlinking is still in progress. Please retry shortly.", nil)
 			return
 		}
 		if errors.Is(err, db.ErrAppleEmailInUse) {
-			h.logger.Warn("apple signup email already registered", "sub", redactSubject(claims.Sub))
+			h.logger.WarnContext(r.Context(), "apple signup email already registered", "sub", redactSubject(claims.Sub))
 			writeError(w, http.StatusConflict, "apple_email_in_use",
 				"This email is already registered. Sign in with email instead.", nil)
 			return
@@ -224,15 +224,15 @@ func (h *Handler) AppleSignIn(w http.ResponseWriter, r *http.Request) {
 	var exchanged *apple.TokenResponse
 	if req.AuthorizationCode != "" {
 		if h.appleClient == nil {
-			h.logger.Warn("apple authorization code presented but revocation is unconfigured")
+			h.logger.WarnContext(r.Context(), "apple authorization code presented but revocation is unconfigured")
 		} else if tr, xerr := h.appleClient.ExchangeCode(ctx, req.AuthorizationCode); xerr != nil {
 			if errors.Is(xerr, apple.ErrInvalidGrant) {
-				h.logger.Warn("apple authorization code rejected", "userID", user.ID)
+				h.logger.WarnContext(r.Context(), "apple authorization code rejected", "userID", user.ID)
 				writeError(w, http.StatusUnauthorized, "invalid_apple_token",
 					"Invalid Apple authorization code", nil)
 				return
 			}
-			h.logger.Warn("apple token exchange unavailable; continuing without stored credential",
+			h.logger.WarnContext(r.Context(), "apple token exchange unavailable; continuing without stored credential",
 				"userID", user.ID, "error", xerr)
 		} else {
 			// Bind the token response to the verified identity: the
@@ -240,7 +240,7 @@ func (h *Handler) AppleSignIn(w http.ResponseWriter, r *http.Request) {
 			// the credential is attached to nothing.
 			if idClaims, verr := h.appleVerifier.Verify(ctx, tr.IDToken); verr != nil ||
 				idClaims.Sub != claims.Sub {
-				h.logger.Warn("apple exchange identity mismatch", "userID", user.ID)
+				h.logger.WarnContext(r.Context(), "apple exchange identity mismatch", "userID", user.ID)
 				writeError(w, http.StatusUnauthorized, "invalid_apple_token",
 					"Invalid Apple authorization code", nil)
 				return
@@ -272,7 +272,7 @@ func (h *Handler) AppleSignIn(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case user.AppleConsentCutoff != nil:
 		if _, ferr := h.appleAuthorizationFresh(claims, exchanged != nil, *user.AppleConsentCutoff); ferr != nil {
-			h.logger.Warn("stale apple authorization past cutoff", "userID", user.ID)
+			h.logger.WarnContext(r.Context(), "stale apple authorization past cutoff", "userID", user.ID)
 			writeError(w, http.StatusUnauthorized, "invalid_apple_token",
 				"This Apple authorization predates revocation. Re-authorize with Apple.", nil)
 			return
@@ -300,10 +300,10 @@ func (h *Handler) AppleSignIn(w http.ResponseWriter, r *http.Request) {
 	// no-stored-credential rather than a failed login.
 	if exchanged != nil && exchanged.RefreshToken != "" {
 		if h.appleTokenKeys == nil {
-			h.logger.Warn("apple token keyring unconfigured; credential not stored", "userID", user.ID)
+			h.logger.WarnContext(r.Context(), "apple token keyring unconfigured; credential not stored", "userID", user.ID)
 		} else if sealed, serr := h.appleTokenKeys.Seal([]byte(exchanged.RefreshToken),
 			apple.VaultAAD(lineage, authTime)); serr != nil {
-			h.logger.Error("failed to seal apple credential", "error", serr)
+			h.logger.ErrorContext(r.Context(), "failed to seal apple credential", "error", serr)
 		} else if serr := h.store.SaveAppleCredential(ctx, db.AppleCredential{
 			UserID: user.ID, SealedRefresh: sealed, AuthTime: authTime, LineageID: lineage,
 		}); serr != nil {
@@ -315,7 +315,7 @@ func (h *Handler) AppleSignIn(w http.ResponseWriter, r *http.Request) {
 	// Issue tokens (same path as VerifyOTP). Apple users are email-verified.
 	user.AppleAuthLineage = &lineage
 	h.issueTokens(ctx, w, r, user, deviceID, authTime, lineage)
-	h.logger.Info("apple user signed in", "userID", user.ID)
+	h.logger.InfoContext(r.Context(), "apple user signed in", "userID", user.ID)
 }
 
 // verifiedAuthTime reports the authorization time this sign-in proves: a
@@ -444,7 +444,7 @@ func writeError(w http.ResponseWriter, status int, code, message string, details
 // fingerprint), so keep it a short constant — never user data.
 func (h *Handler) writeInternalError(w http.ResponseWriter, r *http.Request, msg string, err error) {
 	observe.ReportError(r, msg, err)
-	h.logger.Error(msg, "error", err)
+	h.logger.ErrorContext(r.Context(), msg, "error", err)
 	writeError(w, http.StatusInternalServerError, "internal_error", "An internal error occurred", nil)
 }
 
@@ -556,7 +556,7 @@ func (h *Handler) deletionReadiness(ctx context.Context, user db.User) (hasApple
 		if errors.Is(err, db.ErrNotFound) {
 			return true, true
 		}
-		h.logger.Warn("apple credential vault read failed; reporting required", "error", err, "userID", user.ID)
+		h.logger.WarnContext(ctx, "apple credential vault read failed; reporting required", "error", err, "userID", user.ID)
 		return true, true
 	}
 	return true, false
@@ -597,13 +597,13 @@ func (h *Handler) RequestOTP(w http.ResponseWriter, r *http.Request) {
 
 	var req otpRequestReq
 	if err := decodeJSON(r, &req); err != nil {
-		h.logger.Warn("invalid OTP request body", "error", err)
+		h.logger.WarnContext(r.Context(), "invalid OTP request body", "error", err)
 		writeError(w, http.StatusBadRequest, "invalid_body", "Invalid request body", nil)
 		return
 	}
 
 	if !validateEmail(req.Email) {
-		h.logger.Warn("invalid email in OTP request", "email", maskEmail(req.Email))
+		h.logger.WarnContext(r.Context(), "invalid email in OTP request", "email", maskEmail(req.Email))
 		writeError(w, http.StatusBadRequest, "invalid_body", "Invalid email address", nil)
 		return
 	}
@@ -612,7 +612,7 @@ func (h *Handler) RequestOTP(w http.ResponseWriter, r *http.Request) {
 	ip := h.clientIP(r)
 	rateKey := fmt.Sprintf("%s:%s", ip, req.Email)
 	if h.rateLimiter.OTPRequest != nil && !h.rateLimiter.OTPRequest.Allow(rateKey) {
-		h.logger.Warn("OTP request rate limited", "ip", ip, "email", maskEmail(req.Email))
+		h.logger.WarnContext(r.Context(), "OTP request rate limited", "ip", ip, "email", maskEmail(req.Email))
 		writeError(w, http.StatusTooManyRequests, "rate_limited", "Too many requests. Please try again later.", nil)
 		return
 	}
@@ -621,28 +621,28 @@ func (h *Handler) RequestOTP(w http.ResponseWriter, r *http.Request) {
 	// Upsert user, generate OTP, send email — all best-effort.
 	user, err := h.store.UpsertUser(ctx, req.Email)
 	if err != nil {
-		h.logger.Error("failed to upsert user", "error", err)
+		h.logger.ErrorContext(r.Context(), "failed to upsert user", "error", err)
 		writeAccepted(w)
 		return
 	}
 
 	code, hash, err := h.otpService.GenerateOTP()
 	if err != nil {
-		h.logger.Error("failed to generate OTP", "error", err)
+		h.logger.ErrorContext(r.Context(), "failed to generate OTP", "error", err)
 		writeAccepted(w)
 		return
 	}
 
 	expiresAt := time.Now().Add(h.otpService.Expiry)
 	if err := h.store.SaveOTP(ctx, user.ID, hash, expiresAt, h.otpService.MaxAttempts); err != nil {
-		h.logger.Error("failed to save OTP", "error", err)
+		h.logger.ErrorContext(r.Context(), "failed to save OTP", "error", err)
 		writeAccepted(w)
 		return
 	}
 
 	msg := email.NewOTPMessage(req.Email, code)
 	if err := h.emailSender.Send(ctx, msg); err != nil {
-		h.logger.Error("failed to send OTP email", "error", err)
+		h.logger.ErrorContext(r.Context(), "failed to send OTP email", "error", err)
 	}
 
 	writeAccepted(w)
@@ -661,13 +661,13 @@ func (h *Handler) VerifyOTP(w http.ResponseWriter, r *http.Request) {
 
 	var req otpVerifyReq
 	if err := decodeJSON(r, &req); err != nil {
-		h.logger.Warn("invalid OTP verify body", "error", err)
+		h.logger.WarnContext(r.Context(), "invalid OTP verify body", "error", err)
 		writeError(w, http.StatusBadRequest, "invalid_body", "Invalid request body", nil)
 		return
 	}
 
 	if !validateEmail(req.Email) || !validateCode(req.Code) {
-		h.logger.Warn("invalid email or code in OTP verify", "email", maskEmail(req.Email))
+		h.logger.WarnContext(r.Context(), "invalid email or code in OTP verify", "email", maskEmail(req.Email))
 		writeError(w, http.StatusBadRequest, "invalid_body", "Invalid email or code", nil)
 		return
 	}
@@ -676,14 +676,14 @@ func (h *Handler) VerifyOTP(w http.ResponseWriter, r *http.Request) {
 	ip := h.clientIP(r)
 	rateKey := fmt.Sprintf("%s:%s", ip, req.Email)
 	if h.rateLimiter.OTPVerify != nil && !h.rateLimiter.OTPVerify.Allow(rateKey) {
-		h.logger.Warn("OTP verify rate limited", "ip", ip, "email", maskEmail(req.Email))
+		h.logger.WarnContext(r.Context(), "OTP verify rate limited", "ip", ip, "email", maskEmail(req.Email))
 		writeError(w, http.StatusTooManyRequests, "rate_limited", "Too many attempts. Please try again later.", nil)
 		return
 	}
 
 	user, err := h.store.GetUserByEmail(ctx, req.Email)
 	if err != nil {
-		h.logger.Warn("user not found for OTP verify", "email", maskEmail(req.Email))
+		h.logger.WarnContext(r.Context(), "user not found for OTP verify", "email", maskEmail(req.Email))
 		writeError(w, http.StatusUnauthorized, "invalid_otp", "Invalid or expired code", nil)
 		return
 	}
@@ -695,7 +695,7 @@ func (h *Handler) VerifyOTP(w http.ResponseWriter, r *http.Request) {
 	// credentials that can never be used.
 	if user.AppleSubject != nil && *user.AppleSubject != "" &&
 		h.sessionCutByRevocation(nil, nil, user) {
-		h.logger.Warn("otp sign-in fenced by apple consent cutoff", "userID", user.ID)
+		h.logger.WarnContext(r.Context(), "otp sign-in fenced by apple consent cutoff", "userID", user.ID)
 		writeError(w, http.StatusUnauthorized, "invalid_apple_token",
 			"This Apple authorization predates revocation. Re-authorize with Apple.", nil)
 		return
@@ -703,32 +703,32 @@ func (h *Handler) VerifyOTP(w http.ResponseWriter, r *http.Request) {
 
 	otp, err := h.store.GetValidOTP(ctx, user.ID)
 	if err != nil {
-		h.logger.Warn("no valid OTP found for user", "userID", user.ID)
+		h.logger.WarnContext(r.Context(), "no valid OTP found for user", "userID", user.ID)
 		writeError(w, http.StatusUnauthorized, "invalid_otp", "Invalid or expired code", nil)
 		return
 	}
 
 	if time.Now().After(otp.ExpiresAt) {
-		h.logger.Warn("OTP expired", "userID", user.ID)
+		h.logger.WarnContext(r.Context(), "OTP expired", "userID", user.ID)
 		writeError(w, http.StatusUnauthorized, "otp_expired", "Code has expired. Request a new one.", nil)
 		return
 	}
 
 	if otp.Attempts >= otp.MaxAttempts {
-		h.logger.Warn("OTP attempts exhausted", "userID", user.ID)
+		h.logger.WarnContext(r.Context(), "OTP attempts exhausted", "userID", user.ID)
 		writeError(w, http.StatusUnauthorized, "otp_attempts_exceeded", "Too many incorrect attempts. Request a new code.", nil)
 		return
 	}
 
 	// Verify code using constant-time comparison.
 	if !h.otpService.VerifyCode(req.Code, otp.CodeHash) {
-		h.logger.Warn("invalid OTP code", "userID", user.ID)
+		h.logger.WarnContext(r.Context(), "invalid OTP code", "userID", user.ID)
 		if err := h.store.IncrementOTPAttempts(ctx, otp.ID); err != nil {
-			h.logger.Error("failed to increment OTP attempts", "error", err)
+			h.logger.ErrorContext(r.Context(), "failed to increment OTP attempts", "error", err)
 		}
 		if otp.Attempts+1 >= otp.MaxAttempts {
 			if err := h.store.MarkOTPExhausted(ctx, otp.ID); err != nil {
-				h.logger.Error("failed to mark OTP exhausted", "error", err)
+				h.logger.ErrorContext(r.Context(), "failed to mark OTP exhausted", "error", err)
 			}
 		}
 		writeError(w, http.StatusUnauthorized, "invalid_otp", "Invalid or expired code", nil)
@@ -768,20 +768,20 @@ func (h *Handler) RefreshToken(w http.ResponseWriter, r *http.Request) {
 
 	var req refreshReq
 	if err := decodeJSON(r, &req); err != nil {
-		h.logger.Warn("invalid refresh body", "error", err)
+		h.logger.WarnContext(r.Context(), "invalid refresh body", "error", err)
 		writeError(w, http.StatusBadRequest, "invalid_body", "Invalid request body", nil)
 		return
 	}
 
 	if req.RefreshToken == "" {
-		h.logger.Warn("empty refresh token")
+		h.logger.WarnContext(r.Context(), "empty refresh token")
 		writeError(w, http.StatusBadRequest, "invalid_body", "Refresh token is required", nil)
 		return
 	}
 
 	attempt, ok := normalizeRefreshAttempt(req.RefreshAttemptID)
 	if !ok {
-		h.logger.Warn("invalid refresh attempt id")
+		h.logger.WarnContext(r.Context(), "invalid refresh attempt id")
 		writeError(w, http.StatusBadRequest, "invalid_body", "Invalid refresh attempt", nil)
 		return
 	}
@@ -797,7 +797,7 @@ func (h *Handler) RefreshToken(w http.ResponseWriter, r *http.Request) {
 		// A failed lookup is a service failure, never proof the token does
 		// not exist: report 5xx and preserve the family.
 		if errors.Is(err, db.ErrNotFound) {
-			h.logger.Warn("refresh token not found")
+			h.logger.WarnContext(r.Context(), "refresh token not found")
 			writeError(w, http.StatusUnauthorized, "invalid_refresh", "Invalid refresh token", nil)
 			return
 		}
@@ -809,7 +809,7 @@ func (h *Handler) RefreshToken(w http.ResponseWriter, r *http.Request) {
 	// different device is rejected without revoking anything and without
 	// recovery, so the real family's tokens stay intact.
 	if deviceID != storedToken.DeviceID {
-		h.logger.Warn("refresh token device mismatch", "userID", storedToken.UserID,
+		h.logger.WarnContext(r.Context(), "refresh token device mismatch", "userID", storedToken.UserID,
 			"deviceID", deviceID, "tokenDeviceID", storedToken.DeviceID)
 		writeError(w, http.StatusUnauthorized, "invalid_refresh", "Invalid refresh token", nil)
 		return
@@ -821,7 +821,7 @@ func (h *Handler) RefreshToken(w http.ResponseWriter, r *http.Request) {
 	user, err := h.store.GetUserByID(ctx, storedToken.UserID)
 	if err != nil {
 		if errors.Is(err, db.ErrNotFound) {
-			h.logger.Warn("refresh for purged account", "userID", storedToken.UserID)
+			h.logger.WarnContext(r.Context(), "refresh for purged account", "userID", storedToken.UserID)
 			writeError(w, http.StatusUnauthorized, "invalid_refresh", "Invalid refresh token", nil)
 			return
 		}
@@ -834,7 +834,7 @@ func (h *Handler) RefreshToken(w http.ResponseWriter, r *http.Request) {
 	// passes; pre-lineage tokens cannot bypass. Ordinary failure, no
 	// revocation, no recovery — the family is already dead.
 	if h.sessionCutByRevocation(storedToken.AuthTime, storedToken.AuthLineage, user) {
-		h.logger.Warn("refresh cut off by apple consent revocation", "userID", storedToken.UserID,
+		h.logger.WarnContext(r.Context(), "refresh cut off by apple consent revocation", "userID", storedToken.UserID,
 			"deviceID", storedToken.DeviceID)
 		writeError(w, http.StatusUnauthorized, "invalid_refresh", "Invalid refresh token", nil)
 		return
@@ -857,7 +857,7 @@ func (h *Handler) RefreshToken(w http.ResponseWriter, r *http.Request) {
 	// Enforce the refresh TTL against created_at: an expired family is
 	// rejected (lock-not-wipe — the client keeps local files and re-auths).
 	if time.Since(storedToken.CreatedAt) > h.tokenService.RefreshTokenTTL {
-		h.logger.Warn("refresh token expired", "userID", storedToken.UserID,
+		h.logger.WarnContext(r.Context(), "refresh token expired", "userID", storedToken.UserID,
 			"deviceID", storedToken.DeviceID, "createdAt", storedToken.CreatedAt)
 		writeError(w, http.StatusUnauthorized, "refresh_expired", "Refresh token has expired. Please sign in again.", nil)
 		return
@@ -931,9 +931,9 @@ func (h *Handler) sessionCutByRevocation(tokenAuthTime *time.Time, tokenLineage 
 // revokeOnReuse burns the offending device's family after genuine reuse.
 // Revocation failure is logged, never fatal: the rejection stands.
 func (h *Handler) revokeOnReuse(ctx context.Context, storedToken db.RefreshToken) {
-	h.logger.Warn("refresh token reuse detected", "userID", storedToken.UserID, "deviceID", storedToken.DeviceID)
+	h.logger.WarnContext(ctx, "refresh token reuse detected", "userID", storedToken.UserID, "deviceID", storedToken.DeviceID)
 	if err := h.store.RevokeUserDeviceSessions(ctx, storedToken.UserID, storedToken.DeviceID); err != nil {
-		h.logger.Error("failed to revoke device tokens after reuse", "error", err)
+		h.logger.ErrorContext(ctx, "failed to revoke device tokens after reuse", "error", err)
 	}
 }
 
@@ -1000,7 +1000,7 @@ func (h *Handler) recoverRefresh(
 		// The attempt identifier was rebound to a different predecessor:
 		// a conflict, not theft. Reject without credentials, without
 		// overwriting the original receipt, and without revocation.
-		h.logger.Warn("refresh attempt rebound to another predecessor",
+		h.logger.WarnContext(r.Context(), "refresh attempt rebound to another predecessor",
 			"userID", storedToken.UserID, "deviceID", storedToken.DeviceID)
 		writeError(w, http.StatusConflict, "refresh_attempt_conflict",
 			"Refresh attempt does not match this token. Retry with the attempt bound to this token.", nil)
@@ -1020,7 +1020,7 @@ func (h *Handler) serveRecovery(
 	receipt db.RecoveryReceipt, storedToken db.RefreshToken,
 ) {
 	if receipt.Consumed {
-		h.logger.Warn("refresh attempt already completed",
+		h.logger.WarnContext(r.Context(), "refresh attempt already completed",
 			"userID", storedToken.UserID, "deviceID", storedToken.DeviceID)
 		writeError(w, http.StatusConflict, "refresh_attempt_completed",
 			"Refresh attempt already completed. Use the current session token.", nil)
@@ -1031,10 +1031,10 @@ func (h *Handler) serveRecovery(
 	// opportunistic sweep reclaims the row once it is long past expiry.
 	// The verdict stays refresh_expired; only retention changes.
 	if time.Now().After(receipt.ExpiresAt) {
-		h.logger.Warn("refresh recovery expired",
+		h.logger.WarnContext(r.Context(), "refresh recovery expired",
 			"userID", storedToken.UserID, "deviceID", storedToken.DeviceID)
 		if err := h.store.ConsumeRecoveryReceipt(ctx, receipt.AttemptHash); err != nil {
-			h.logger.Error("failed to close expired recovery receipt", "error", err)
+			h.logger.ErrorContext(r.Context(), "failed to close expired recovery receipt", "error", err)
 		}
 		writeError(w, http.StatusUnauthorized, "refresh_expired", "Refresh token has expired. Please sign in again.", nil)
 		return
@@ -1043,7 +1043,7 @@ func (h *Handler) serveRecovery(
 	successor, err := h.store.GetRefreshToken(ctx, receipt.SuccessorHash)
 	if err != nil {
 		if errors.Is(err, db.ErrNotFound) {
-			h.logger.Warn("refresh recovery successor unknown",
+			h.logger.WarnContext(r.Context(), "refresh recovery successor unknown",
 				"userID", storedToken.UserID, "deviceID", storedToken.DeviceID)
 			writeError(w, http.StatusConflict, "refresh_attempt_completed",
 				"Refresh attempt already completed. Use the current session token.", nil)
@@ -1055,17 +1055,17 @@ func (h *Handler) serveRecovery(
 	if successor.Revoked {
 		// Logout or genuine reuse ended the session after the receipt was
 		// recorded: replaying the attempt cannot recreate or unlock it.
-		h.logger.Warn("refresh recovery successor revoked",
+		h.logger.WarnContext(r.Context(), "refresh recovery successor revoked",
 			"userID", storedToken.UserID, "deviceID", storedToken.DeviceID)
 		writeError(w, http.StatusConflict, "refresh_attempt_completed",
 			"Refresh attempt already completed. Use the current session token.", nil)
 		return
 	}
 	if time.Since(successor.CreatedAt) > h.tokenService.RefreshTokenTTL {
-		h.logger.Warn("refresh recovery successor expired",
+		h.logger.WarnContext(r.Context(), "refresh recovery successor expired",
 			"userID", storedToken.UserID, "deviceID", storedToken.DeviceID)
 		if err := h.store.ConsumeRecoveryReceipt(ctx, receipt.AttemptHash); err != nil {
-			h.logger.Error("failed to close expired recovery receipt", "error", err)
+			h.logger.ErrorContext(r.Context(), "failed to close expired recovery receipt", "error", err)
 		}
 		writeError(w, http.StatusUnauthorized, "refresh_expired", "Refresh token has expired. Please sign in again.", nil)
 		return
@@ -1112,7 +1112,7 @@ func (h *Handler) serveRecovery(
 		return
 	}
 
-	h.logger.Info("refresh attempt recovered", "userID", storedToken.UserID, "deviceID", storedToken.DeviceID)
+	h.logger.InfoContext(r.Context(), "refresh attempt recovered", "userID", storedToken.UserID, "deviceID", storedToken.DeviceID)
 	h.writeAuthResponse(w, r, user, accessToken, string(rawSuccessor))
 }
 
@@ -1146,7 +1146,7 @@ func (h *Handler) rotateWithRecovery(
 			h.serveRecovery(ctx, w, r, receipt, storedToken)
 			return
 		}
-		h.logger.Warn("refresh attempt rebound to another predecessor",
+		h.logger.WarnContext(r.Context(), "refresh attempt rebound to another predecessor",
 			"userID", storedToken.UserID, "deviceID", storedToken.DeviceID)
 		writeError(w, http.StatusConflict, "refresh_attempt_conflict",
 			"Refresh attempt does not match this token. Retry with the attempt bound to this token.", nil)
@@ -1207,7 +1207,7 @@ func (h *Handler) rotateWithRecovery(
 				return
 			}
 			if receipt.PredecessorHash != tokenHash {
-				h.logger.Warn("refresh attempt rebound to another predecessor",
+				h.logger.WarnContext(r.Context(), "refresh attempt rebound to another predecessor",
 					"userID", storedToken.UserID, "deviceID", storedToken.DeviceID)
 				writeError(w, http.StatusConflict, "refresh_attempt_conflict",
 					"Refresh attempt does not match this token. Retry with the attempt bound to this token.", nil)
@@ -1236,7 +1236,7 @@ func (h *Handler) rotateWithRecovery(
 				return
 			}
 			if receipt.PredecessorHash != tokenHash {
-				h.logger.Warn("refresh attempt rebound to another predecessor",
+				h.logger.WarnContext(r.Context(), "refresh attempt rebound to another predecessor",
 					"userID", storedToken.UserID, "deviceID", storedToken.DeviceID)
 				writeError(w, http.StatusConflict, "refresh_attempt_conflict",
 					"Refresh attempt does not match this token. Retry with the attempt bound to this token.", nil)
@@ -1322,7 +1322,7 @@ func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.logger.Info("user logged out", "userID", userID, "deviceID", deviceID)
+	h.logger.InfoContext(r.Context(), "user logged out", "userID", userID, "deviceID", deviceID)
 	w.WriteHeader(http.StatusNoContent)
 }
 

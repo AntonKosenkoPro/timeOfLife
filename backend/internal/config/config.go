@@ -58,6 +58,16 @@ type Config struct {
 	// SentryDSN enables Sentry error reporting (observability Stage 0).
 	// Empty (default) = fully disabled, zero behavior change.
 	SentryDSN string
+	// OTELEnabled gates the OTel SDK (observability Stage 1).
+	// OTEL_ENABLED=0/false/unset (default) = Stage-0 posture: no spans,
+	// metrics, or OTLP log export. Set OTEL_ENABLED=1 with a collector
+	// endpoint to enable.
+	OTELEnabled bool
+	// OTELExporterOTLPEndpoint is the OTLP/gRPC endpoint of the VM-local
+	// Collector (e.g. otel-collector:4317 in compose, localhost:4317 for
+	// local dev). Empty (default) = OTel fully disabled, mirroring the
+	// SENTRY_DSN empty-means-off contract — even with OTEL_ENABLED=1.
+	OTELExporterOTLPEndpoint string
 	// RecoveryKeys holds the parsed REFRESH_RECOVERY_KEYS keyring: AES-256
 	// keys sealing pending refresh successors for response-loss recovery.
 	// Keys[0] is the primary sealing key; the rest are retired keys kept
@@ -232,6 +242,21 @@ func Load() (*Config, error) {
 
 	// Optional: SENTRY_DSN — Sentry error reporting. Empty = disabled.
 	cfg.SentryDSN = os.Getenv("SENTRY_DSN")
+
+	// Optional: OTel pipeline (observability Stage 1). OTEL_ENABLED=0 /
+	// unset (default) = Stage-0 posture; empty
+	// OTEL_EXPORTER_OTLP_ENDPOINT = fully disabled even when enabled (mirrors
+	// the SENTRY_DSN empty-means-off contract). GRAFANA_CLOUD_* are consumed
+	// by the Collector config, never by app code; empty defaults, never
+	// logged or committed.
+	if raw := strings.TrimSpace(os.Getenv("OTEL_ENABLED")); raw != "" {
+		enabled, err := strconv.ParseBool(raw)
+		if err != nil {
+			return nil, invalidFieldError("OTEL_ENABLED", "boolean (0/1, true/false)")
+		}
+		cfg.OTELEnabled = enabled
+	}
+	cfg.OTELExporterOTLPEndpoint = os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
 
 	// Required: REFRESH_RECOVERY_KEYS — the stable server-side keyring
 	// sealing pending refresh successors (fix-refresh-response-loss).

@@ -26,14 +26,14 @@ func (h *Handler) AuthMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		authHeader := r.Header.Get("Authorization")
 		if authHeader == "" {
-			h.logger.Warn("missing authorization header")
+			h.logger.WarnContext(r.Context(), "missing authorization header")
 			writeError(w, http.StatusUnauthorized, "unauthorized", "Missing authorization header", nil)
 			return
 		}
 
 		parts := strings.SplitN(authHeader, " ", 2)
 		if len(parts) != 2 || !strings.EqualFold(parts[0], "bearer") {
-			h.logger.Warn("malformed authorization header")
+			h.logger.WarnContext(r.Context(), "malformed authorization header")
 			writeError(w, http.StatusUnauthorized, "unauthorized", "Invalid authorization header format", nil)
 			return
 		}
@@ -41,7 +41,7 @@ func (h *Handler) AuthMiddleware(next http.Handler) http.Handler {
 		tokenStr := parts[1]
 		claims, err := h.tokenService.ValidateAccessTokenDetailed(tokenStr)
 		if err != nil {
-			h.logger.Warn("invalid access token", "error", err)
+			h.logger.WarnContext(r.Context(), "invalid access token", "error", err)
 			writeError(w, http.StatusUnauthorized, "unauthorized", "Invalid or expired access token", nil)
 			return
 		}
@@ -53,7 +53,7 @@ func (h *Handler) AuthMiddleware(next http.Handler) http.Handler {
 		user, err := h.store.GetUserByID(r.Context(), claims.Subject)
 		if err != nil {
 			if isNotFound(err) {
-				h.logger.Warn("access token for purged account")
+				h.logger.WarnContext(r.Context(), "access token for purged account")
 				writeError(w, http.StatusUnauthorized, "unauthorized", "Invalid or expired access token", nil)
 				return
 			}
@@ -67,7 +67,7 @@ func (h *Handler) AuthMiddleware(next http.Handler) http.Handler {
 		// never kills the first. Lineageless claims (email, pre-lineage)
 		// fail closed once a cutoff exists.
 		if h.sessionCutByRevocation(accessAuthTime(claims), lineagePtr(claims.AuthLineage), user) {
-			h.logger.Warn("access cut off by apple consent revocation", "userID", user.ID)
+			h.logger.WarnContext(r.Context(), "access cut off by apple consent revocation", "userID", user.ID)
 			writeError(w, http.StatusUnauthorized, "unauthorized", "Invalid or expired access token", nil)
 			return
 		}

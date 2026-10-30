@@ -1,0 +1,36 @@
+# Tripwire: Grafana Cloud active-series quota burn (free tier: 10k series)
+# schema: lifio.alert/v1 (schema_version: 1) — repo-kept intent; SaaS rules converge FROM this file.
+# Apply is MANUAL: plan-only CI (terraform-provider-grafana later); never console-edited.
+schema_version: 1
+alert:
+  name: grafana-series-70pct
+  signal: grafana_cloud_active_series
+  tier: grafana-metrics
+  # 70% of 10k = 7,000 active series. Sustained, not instantaneous — a deploy
+  # that adds a label spikes briefly; only a held plateau pages.
+  threshold:
+    active_series: 7000
+    fraction_of_quota: 0.7
+  evaluation:
+    window: 1h         # sustained plateau over 1h
+    for: 30m
+  route: telegram      # 70% crossings route to the existing Telegram channel
+  shed_load_at_90pct:
+    active_series: 9000
+    fraction_of_quota: 0.9
+    action: >
+      cut the `operation` label, coarsen `http.status_class`
+      (Stage-0/Stage-1 tripwire table: "cut `operation`, coarsen status")
+  dashboard: lifio-quotas
+  # Illustrative query intent — allowlisted attributes ONLY
+  # (service.name, service.version, environment, http.method,
+  #  http.route templated, http.status_class, operation).
+  # No user_id / device_id / raw UUIDs / category names / entry text, ever.
+  query_intent: >
+    count(http_server_requests_total)
+    by (service_name, service_version, environment, http_method,
+        http_route, http_status_class, operation)
+    — series count derived from the group cardinality, not from a new label.
+  notes: >
+    Counters + traces ship first; histograms stay behind the series-budget
+    math task (D7-risk). This file is the budget tripwire that gates that math.

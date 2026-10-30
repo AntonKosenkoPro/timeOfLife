@@ -1,0 +1,31 @@
+# Tripwire: Supabase Postgres database size (free tier flips read-only above 500 MB)
+# schema: lifio.alert/v1 (schema_version: 1) — repo-kept intent; SaaS rules converge FROM this file.
+# Apply is MANUAL: plan-only CI (terraform-provider-grafana later); never console-edited.
+schema_version: 1
+alert:
+  name: supabase-db-size-70pct
+  signal: supabase_database_size_mb
+  tier: supabase
+  # 70% of 500 MB = ~350 MB. Measured by backend/scripts/supabase-size-check.sh
+  # (Sunday 04:00 UTC VM cron; backup floor is Sunday 03:00 UTC).
+  threshold:
+    db_size_mb: 350
+    fraction_of_quota: 0.7
+  evaluation:
+    window: 7d         # weekly cron cadence — alert on the weekly reading
+    for: 0m            # single over-line reading fires (size never drops on its own)
+  route: telegram      # already specced in Stage 0 (project-context "Backup floor")
+  shed_load_at_90pct:
+    db_size_mb: 450
+    fraction_of_quota: 0.9
+    action: already specced — paid-tier upgrade BEFORE any repoint above the
+      line; the deployment is not repointed above 500 MB without the upgrade
+      first (Supabase convention from migrate-db-to-supabase-free, unchanged)
+  dashboard: lifio-quotas
+  query_intent: >
+    Weekly point-in-time gauge from supabase-size-check.sh output
+    (db_size_mb by environment) — no per-user/per-row labels; the DB is the
+    system of record, telemetry only reads its size.
+  notes: >
+    Paid-tier trigger armed, not tripped (11 MB measured 2026-10-14).
+    Upgrade at sustained >70% or at launch.

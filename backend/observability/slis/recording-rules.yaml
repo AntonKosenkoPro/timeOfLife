@@ -1,0 +1,81 @@
+# SLI recording rules (draft) — schema: lifio.sli/v1 (schema_version: 1).
+#
+# *** SLO THRESHOLDS UNSET — DO NOT ALERT ON THESE ***
+# Recording rules only (no alert rules). SLO numbers land after >= 2 weeks of
+# stable traffic sets a baseline; the SLO-gate task stays OPEN until then.
+# The weekly digest reads the LIVE rule(s) below; the weekly-group rules are
+# placeholders until their signals exist (probe gauge, spanmetrics) — the
+# digest reads raw series for those SLIs in the meantime. Vendor-neutral
+# shape. LOAD-TIME CHECK: confirm the OTLP→Prometheus name mapping
+# (dots→underscores + `_total` on counters) against Explore before loading;
+# adjust, never add identifier labels.
+#
+# Label discipline: group/filter by allowlisted attributes ONLY —
+# service.name, service.version, environment, http.method, http.route
+# (templated, never raw UUIDs), http.status_class, operation.
+schema_version: 1
+groups:
+  - name: lifio-sli
+    interval: 1m
+    rules:
+      # 5xx share per operation (otp_verify, token_refresh, ...). Uses the
+      # templated http.route + operation labels — never raw paths or user
+      # identifiers. Canonical names: instrument `http.server.requests`
+      # (otel.go) → `http_server_requests_total`; service `lifio-backend`.
+      - record: lifio:http_5xx_rate_by_operation
+        expr: >
+          sum by (operation) (
+            rate(http_server_requests_total{
+              service_name="lifio-backend",
+              http_status_class="5xx"
+            }[5m])
+          )
+          /
+          sum by (operation) (
+            rate(http_server_requests_total{
+              service_name="lifio-backend"
+            }[5m])
+          )
+
+  # PLACEHOLDER group — re-enable together with the rules below; an empty
+  # `rules:` key resolves to YAML null and registers a dead group.
+  # - name: lifio-sli-weekly
+  #   interval: 1h
+  #   rules:
+      # PLACEHOLDER — uptime needs a probe gauge (no `*_up` series exists
+      # today; `lifio_health_checks_total` is a count, not a gauge, and
+      # `* 100` on it is meaningless). Uncomment when the probe lands;
+      # until then the weekly digest reads raw series, not this rule.
+      # - record: lifio:uptime_pct
+      #   expr: >
+      #     100 * avg_over_time(probe_success{service_name="lifio-backend"}[7d])
+
+      # PLACEHOLDER — sync SLIs need spanmetrics (the Collector pipeline has
+      # no spanmetrics connector: spans become Tempo traces only, so
+      # `lifio_sync_session_total` and `*_bucket` series do not exist; the
+      # span attribute is `sync.outcome`, not `outcome`). Uncomment once
+      # spanmetrics (or equivalent exemplars) ship — see the sync-life
+      # dashboard note.
+      # - record: lifio:sync_success_rate
+      #   expr: >
+      #     sum (
+      #       rate(sync_session_total{
+      #         service_name="lifio-ios",
+      #         sync_outcome="success"
+      #       }[7d])
+      #     )
+      #     /
+      #     sum (
+      #       rate(sync_session_total{
+      #         service_name="lifio-ios"
+      #       }[7d])
+      #     )
+      # - record: lifio:sync_cycle_p95_seconds
+      #   expr: >
+      #     histogram_quantile(0.95,
+      #       sum by (le) (
+      #         rate(sync_cycle_duration_seconds_bucket{
+      #           service_name="lifio-ios"
+      #         }[7d])
+      #       )
+      #     )

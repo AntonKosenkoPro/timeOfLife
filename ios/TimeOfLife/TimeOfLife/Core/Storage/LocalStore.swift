@@ -1395,6 +1395,15 @@ actor LocalStore {
         }
     }
 
+    /// Number of pending outbox rows (telemetry depth gauge). Prefer this
+    /// over `outboxRows().count` when payloads are not needed: it avoids
+    /// materializing every row (payloads included) on hot paths.
+    func outboxRowCount() throws -> Int {
+        try queue.read { db in
+            try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM outbox") ?? 0
+        }
+    }
+
     /// Removes an outbox row after it has been pushed (or resolved).
     func removeOutboxRow(id: String) throws {
         try queue.write { db in
