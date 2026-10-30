@@ -481,6 +481,35 @@ struct HistoryViewModelTests {
 
     // MARK: - Helpers
 
+    @Test("concurrent day labels and time texts stay correct")
+    func concurrentFormatting() async {
+        // Live TestFlight crash (icu::UnicodeString ctor via
+        // -[NSDateFormatter _regenerateFormatter] on the dayLabel path):
+        // these helpers are nonisolated and reachable from any thread, so
+        // hammer both the per-call formatter (dayLabel) and the shared one
+        // (timeText) concurrently — every result must equal the
+        // single-threaded one. Note: the crash itself is an ICU first-use
+        // race inside uninstrumented Foundation, so Thread Sanitizer cannot
+        // observe it; this test guards post-fix behavior (no hangs, no
+        // wrong labels), while the lock below removes our side of the race.
+        let calendar = Calendar(identifier: .gregorian)
+        let day = Self.date("2026-08-31 10:00", calendar: calendar)
+        let now = Self.date("2026-09-03 15:00", calendar: calendar)
+        let expectedLabel = HistoryViewModel.dayLabel(for: day, now: now, calendar: calendar)
+        let expectedTime = HistoryViewModel.timeText(for: day)
+        await withTaskGroup(of: Bool.self) { group in
+            for _ in 0 ..< 64 {
+                group.addTask {
+                    HistoryViewModel.dayLabel(for: day, now: now, calendar: calendar) == expectedLabel
+                        && HistoryViewModel.timeText(for: day) == expectedTime
+                }
+            }
+            for await ok in group {
+                #expect(ok)
+            }
+        }
+    }
+
     private static func date(_ iso: String, calendar: Calendar) -> Date {
         let parts = iso.split(separator: " ")
         let dateParts = parts[0].split(separator: "-").compactMap { Int($0) }

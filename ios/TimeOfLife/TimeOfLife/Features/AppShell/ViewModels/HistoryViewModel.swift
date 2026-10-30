@@ -247,11 +247,18 @@ final class HistoryViewModel: ObservableObject {
         case 0: return L10n.historyDayToday.text
         case 1: return L10n.historyDayYesterday.text
         default:
-            let formatter = DateFormatter()
-            formatter.dateStyle = .medium
-            formatter.timeStyle = .none
-            formatter.calendar = calendar
-            return formatter.string(from: day)
+            // Serialized (see formatLock): NSDateFormatter — including the
+            // ICU data loading behind first use — is not thread-safe, and
+            // these helpers are reachable from any thread. Live TestFlight
+            // crash: icu::UnicodeString ctor via -[NSDateFormatter
+            // _regenerateFormatter] on exactly this path.
+            return formatLock.withLock {
+                let formatter = DateFormatter()
+                formatter.dateStyle = .medium
+                formatter.timeStyle = .none
+                formatter.calendar = calendar
+                return formatter.string(from: day)
+            }
         }
     }
 
@@ -267,8 +274,12 @@ final class HistoryViewModel: ObservableObject {
 
     /// Short-time caption ("14:00").
     nonisolated static func timeText(for date: Date) -> String {
-        timeFormatter.string(from: date)
+        formatLock.withLock { timeFormatter.string(from: date) }
     }
+
+    /// Serializes every NSDateFormatter touch in this type (see dayLabel).
+    /// Never held across awaits.
+    nonisolated private static let formatLock = NSLock()
 
     private static func clampedSeconds(start: Date, end: Date?) -> Int {
         guard let end else { return 0 }
