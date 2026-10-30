@@ -494,17 +494,11 @@ struct HistoryViewModelTests {
         // formatter mirroring the production config. This guards
         // hangs/torn results under contention, not the ICU first-use race
         // itself (unobservable from tests — it lives inside uninstrumented
-        // Foundation).
+        // Foundation). The reference below is intentionally built after the
+        // wave so it cannot warm up ICU first-use.
         let calendar = Calendar(identifier: .gregorian)
         let day = Self.date("2026-08-31 10:00", calendar: calendar)
         let now = Self.date("2026-09-03 15:00", calendar: calendar)
-        let expected: String = {
-            let reference = DateFormatter()
-            reference.dateStyle = .medium
-            reference.timeStyle = .none
-            reference.calendar = calendar
-            return reference.string(from: day)
-        }()
         let pairs = await withTaskGroup(of: (String, String).self, returning: [(String, String)].self) { group in
             for _ in 0 ..< 64 {
                 group.addTask {
@@ -516,6 +510,13 @@ struct HistoryViewModelTests {
             for await pair in group { out.append(pair) }
             return out
         }
+        let expected: String = {
+            let reference = DateFormatter()
+            reference.dateStyle = .medium
+            reference.timeStyle = .none
+            reference.calendar = calendar
+            return reference.string(from: day)
+        }()
         for (label, time) in pairs {
             #expect(label == expected)
             #expect(!time.isEmpty)
