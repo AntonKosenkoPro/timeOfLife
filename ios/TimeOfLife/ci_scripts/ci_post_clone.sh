@@ -111,6 +111,16 @@ tag_seq() {
 STRIDE=100000
 MAX_SEQ="$(( (2147483647 - 2 * STRIDE + 1) / (2 * STRIDE) ))"
 if [ "${TAG_OVERRIDE+x}" = "x" ]; then
+  # Local simulation only: Xcode Cloud never sets TAG_OVERRIDE, and an
+  # override skips signature verification below — a Cloud build carrying
+  # one would stamp an unverified version, so fail closed instead.
+  # (CI_XCODE_CLOUD: Apple environment-variable reference, always present
+  # on Cloud; presence-checked (`${var+x}`) so a set-but-empty value cannot
+  # bypass the guard.)
+  if [ "${CI_XCODE_CLOUD+x}" = "x" ]; then
+    echo "error: \$TAG_OVERRIDE is set in an Xcode Cloud build — local simulation only, refusing to stamp an unverified tag. Archiving nothing."
+    exit 1
+  fi
   TAG="$TAG_OVERRIDE"
 else
   # The fetch is retried-then-fatal on purpose: without tag refs a
@@ -120,7 +130,17 @@ else
   # blip; a genuinely unreachable remote still aborts.
   FETCH_OK=0
   for _ in 1 2 3; do
-    if git fetch --tags origin >/dev/null 2>&1; then
+    # Explicit full refspec: Cloud clones are shallow with an unknown
+    # clone-time refspec, so even `origin main` may not refresh the tracking
+    # ref the signature gate reads its anchor from. Never forced: tags are
+    # never force-updated, and a rewound upstream main is rejected, never
+    # applied (the tracking ref keeps its value; rejection exits nonzero,
+    # so the loop retries, then fails closed after 3 attempts — the valid
+    # outcome). That staleness needs an upstream force-push, which branch
+    # protection forbids (docs/ci.md), and fresh Cloud clones cannot be
+    # stale; forcing (`+`) would permit anchor downgrade — so this stays as
+    # is, intentional fail-closed, not a gap.
+    if git fetch --tags origin refs/heads/main:refs/remotes/origin/main >/dev/null 2>&1; then
       FETCH_OK=1
       break
     fi
@@ -239,6 +259,135 @@ fi
 if ! printf '%s' "$VERSION" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+(\.[0-9]+)?$'; then
   echo "error: tag '$TAG' is not <namespace>/vM.m.p[.n] with numeric semver (e.g. internal/v0.2.7, release/v0.3.0.2). Never move a pushed tag — cut a new one with a fixed name. Archiving nothing."
   exit 1
+fi
+
+# Signature gate (spec: release tags are `-s` signed). GitHub has no native
+# tag-signature rule, so this is the enforcement on the iOS path: unsigned,
+# lightweight, wrong-key, or non-OpenPGP tags fail the archive before
+# anything is stamped. Skipped only for TAG_OVERRIDE (local simulation /
+# harness — fails closed on Cloud instead). STAMP_SIGNING_KEY selects the
+# harness throwaway key off-Cloud only (fails closed on Cloud — the repo key
+# is the sole Cloud anchor). Otherwise the anchor is read from
+# freshly-fetched origin/main — never the tag checkout under verification
+# (parity with backend-release.yml; rotated-out keys fail closed).
+# Verification runs in an ephemeral GNUPGHOME (saved/restored, trapped;
+# INT exits 130 and TERM exits 143 so a signal never resumes into
+# stamping). The guarantee
+# is backend lockdown, not the armor pre-filter: verify-tag routes by
+# signature blob, so inherited config (e.g. gpg.ssh allowedSigners) could
+# otherwise verify an SSH-signed tag — hence ssh/x509 programs are pinned to
+# /usr/bin/false and OpenPGP to gpg. gpg/verify stderr prints on failure.
+if [ "${TAG_OVERRIDE+x}" != "x" ]; then
+  if [ "${CI_XCODE_CLOUD+x}" = "x" ] && [ "${STAMP_SIGNING_KEY+x}" = "x" ]; then
+    echo "error: \$STAMP_SIGNING_KEY is set in an Xcode Cloud build — the repo release key is the sole Cloud trust anchor. Archiving nothing."
+    exit 1
+  fi
+  # A set-but-empty STAMP_SIGNING_KEY must not silently fall through to the
+  # default anchor — refuse explicitly. (The Cloud guard above already
+  # rejects any set STAMP in Cloud, empty or not.)
+  if [ "${STAMP_SIGNING_KEY+x}" = "x" ] && [ -z "$STAMP_SIGNING_KEY" ]; then
+    echo "error: \$STAMP_SIGNING_KEY is set but empty — refusing to guess the trust anchor. Archiving nothing."
+    exit 1
+  fi
+  # KEY_ARMOR travels through a shell variable: safe by construction —
+  # OpenPGP ASCII armor is ASCII-only (radix-64 + headers), so command
+  # substitution cannot lose NUL bytes that never exist. Non-armor input is
+  # refused by the explicit first-line guard below — it never reaches import.
+  if [ -n "${STAMP_SIGNING_KEY:-}" ]; then
+    if [ ! -f "$STAMP_SIGNING_KEY" ]; then
+      echo "error: release signing key not found at '$STAMP_SIGNING_KEY' — cannot verify tag '$TAG'. Archiving nothing."
+      exit 1
+    fi
+    if ! KEY_ARMOR="$(cat "$STAMP_SIGNING_KEY" 2>/dev/null)" || [ -z "$KEY_ARMOR" ]; then
+      echo "error: cannot read release signing key from '$STAMP_SIGNING_KEY' — cannot verify tag '$TAG'. Archiving nothing."
+      exit 1
+    fi
+  else
+    # A missing ref or file fails closed — never fall back to the checkout.
+    if ! KEY_ARMOR="$(git show "origin/main:.github/release-signing-key.pub" 2>/dev/null)" || [ -z "$KEY_ARMOR" ]; then
+      echo "error: cannot read the release signing key from origin/main — cannot verify tag '$TAG'. Archiving nothing."
+      exit 1
+    fi
+  fi
+  # Armor contract (both anchors): only ASCII-armored public keys are
+  # accepted — enforced here by requiring the exact first line, for local
+  # files and origin blobs alike. A contains-check would accept binary or
+  # garbage embedding the marker anywhere; first-line-exact (LF only, no CR
+  # support — the repo export standard) is the minimal deterministic
+  # contract. gpg validates the remainder; binary key material is never
+  # broadened into support.
+  if [ "$(printf '%s' "$KEY_ARMOR" | head -n 1)" != "-----BEGIN PGP PUBLIC KEY BLOCK-----" ]; then
+    echo "error: release signing key is not ASCII-armored OpenPGP — cannot verify tag '$TAG'. Archiving nothing."
+    exit 1
+  fi
+  # Last-armor pre-filter (diagnostic only, NOT the security guarantee): the
+  # tag object's LAST '^-----BEGIN ' line must open the PGP block, so plain
+  # unsigned / lightweight / SSH-signed tags are refused here with a precise
+  # message before any backend is invoked. It must not be relied on: no armor
+  # heuristic can prove how every git version routes a hostile object.
+  if [ "$(git cat-file tag "$TAG" 2>/dev/null | grep '^-----BEGIN ' | tail -n 1)" != "-----BEGIN PGP SIGNATURE-----" ]; then
+    echo "error: tag '$TAG' does not carry an OpenPGP signature — cut it with 'git tag -s' under the default OpenPGP backend (docs/ci.md). Archiving nothing."
+    exit 1
+  fi
+  if ! command -v gpg >/dev/null 2>&1; then
+    echo "gpg not found — installing via Homebrew..."
+    brew install gnupg
+    if ! command -v gpg >/dev/null 2>&1; then
+      echo "error: gpg is still not on PATH after 'brew install gnupg' — cannot verify tag '$TAG'. Archiving nothing."
+      exit 1
+    fi
+  fi
+  VERIFY_SAVED_GNUPGHOME="${GNUPGHOME:-}"
+  VERIFY_GNUPGHOME_WAS_SET="${GNUPGHOME+x}"
+  VERIFY_HOME_ACTIVE=""
+  VERIFY_GNUPGHOME=""
+  cleanup_verify_home() {
+    if [ "${VERIFY_HOME_ACTIVE:-}" = "1" ] && [ -n "${VERIFY_GNUPGHOME:-}" ]; then
+      VERIFY_HOME_ACTIVE=0
+      # Scoped agent kill: gpg spawns gpg-agent even for public-only
+      # import/verify, and it outlives the rm below — kill only this home's
+      # agent via --homedir (never the caller's). Failures ignored.
+      gpgconf --homedir "$VERIFY_GNUPGHOME" --kill gpg-agent >/dev/null 2>&1 || true
+      rm -rf "$VERIFY_GNUPGHOME"
+      if [ "$VERIFY_GNUPGHOME_WAS_SET" = "x" ]; then
+        GNUPGHOME="$VERIFY_SAVED_GNUPGHOME"
+        export GNUPGHOME
+      else
+        unset GNUPGHOME
+      fi
+    fi
+  }
+  # Traps armed BEFORE the home exists (closes the mktemp/chmod window;
+  # pre-creation fire is a guarded no-op). Conventional codes: 130 on INT,
+  # 143 on TERM.
+  trap 'cleanup_verify_home; exit 130' INT
+  trap 'cleanup_verify_home; exit 143' TERM
+  trap cleanup_verify_home EXIT
+  VERIFY_GNUPGHOME="$(mktemp -d "${TMPDIR:-/tmp}/gnupg-verify.XXXXXX")"
+  # Armed immediately after a successful mktemp — before chmod/export — so a
+  # chmod failure still cleans the fresh dir; the caller's GNUPGHOME is
+  # untouched this early, so the restore below re-applies the identical
+  # value instead of clobbering anything.
+  VERIFY_HOME_ACTIVE=1
+  chmod 700 "$VERIFY_GNUPGHOME"
+  GNUPGHOME="$VERIFY_GNUPGHOME"
+  export GNUPGHOME
+  if ! IMPORT_DIAG="$(printf '%s\n' "$KEY_ARMOR" | gpg --batch --import 2>&1)"; then
+    echo "error: cannot import the release signing key — cannot verify tag '$TAG'. Archiving nothing."
+    if [ -n "$IMPORT_DIAG" ]; then
+      printf '%s\n' "$IMPORT_DIAG" | sed 's/^/  import: /'
+    fi
+    exit 1
+  fi
+  if ! VERIFY_DIAG="$(git -c gpg.program=gpg -c gpg.openpgp.program=gpg -c gpg.ssh.program=/usr/bin/false -c gpg.x509.program=/usr/bin/false verify-tag "$TAG" 2>&1)"; then
+    echo "error: tag '$TAG' has no valid release signature — cut it with 'git tag -s' (docs/ci.md). Archiving nothing."
+    if [ -n "$VERIFY_DIAG" ]; then
+      printf '%s\n' "$VERIFY_DIAG" | sed 's/^/  verify: /'
+    fi
+    exit 1
+  fi
+  cleanup_verify_home
+  trap - EXIT INT TERM
 fi
 
 MARKETING="$(printf '%s' "${VERSION#v}" | cut -d. -f1-3)"

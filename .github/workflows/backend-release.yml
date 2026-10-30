@@ -89,15 +89,84 @@ jobs:
           # already provides a current origin/main; compare against it
           # directly (a masked `git fetch` + stale FETCH_HEAD would pass
           # trivially and publish an unreviewed tree). Dereference first:
-          # for annotated tags (all releases are signed) github.sha is the
-          # tag object, and merge-base on it errors — dereference to the
-          # commit so signed releases don't all fail this guard.
+          # for push events github.sha is the tip commit (not the tag
+          # object), so `^{commit}` is normally a no-op — kept defensively
+          # so this resolves to a commit either way (merge-base on a tag
+          # object errors). The tag-to-event binding check below depends on
+          # COMMIT being exactly the pushed commit.
           if ! COMMIT="$(git rev-parse --verify "${TAG_SHA}^{commit}" 2>/dev/null)"; then
             echo "::error::tag '$TAG_NAME' ($TAG_SHA) does not resolve to a commit — refusing to publish. Publishing nothing."
             exit 1
           fi
           if ! git merge-base --is-ancestor "$COMMIT" origin/main; then
             echo "::error::tag '$TAG_NAME' ($COMMIT) does not point at a commit on main — refusing to publish an unreviewed tree. Publishing nothing."
+            exit 1
+          fi
+          # Signature gate (spec: tags are `-s` signed): verify the tag
+          # object against the release key before anything is built or
+          # pushed. Unsigned, lightweight, or wrong-key tags fail closed
+          # here — GitHub has no native tag-signature rule, so this is the
+          # enforcement. The release key is OpenPGP (spec: `git tag -s`).
+          # Armor pre-filter (diagnostic only, not the guarantee): the last
+          # `-----BEGIN ` line must open the PGP block. A trailing fake
+          # marker passes it, so verify-tag below structurally disables the
+          # SSH/X.509 backends and pins the OpenPGP program instead
+          # (`gpg.format` ignored — git routes by signature block).
+          if [ "$(git cat-file tag "$TAG_NAME" 2>/dev/null | grep '^-----BEGIN ' | tail -n 1)" != "-----BEGIN PGP SIGNATURE-----" ]; then
+            echo "::error::tag '$TAG_NAME' is not OpenPGP-signed — cut it with 'git tag -s' (docs/ci.md). Publishing nothing."
+            exit 1
+          fi
+          # Anchor read from origin/main, never the tag checkout (it cannot
+          # vouch for its own key; retired keys fail closed after rotation).
+          # fetch-depth: 0 provides origin/main, as the ancestor guard does.
+          KEY_TMP="${RUNNER_TEMP}/release-signing-key.pub"
+          if ! git show "origin/main:.github/release-signing-key.pub" > "$KEY_TMP" 2>/dev/null; then
+            echo "::error::could not read .github/release-signing-key.pub from origin/main — refusing to publish. Publishing nothing."
+            exit 1
+          fi
+          # A missing gpg binary must not masquerade as a key problem in
+          # the import error below: assert it is executable first (no
+          # version pin — any gpg speaking OpenPGP batch import is fine).
+          if ! command -v gpg >/dev/null 2>&1; then
+            echo "::error::gpg is not available on the runner — refusing to publish. Publishing nothing."
+            rm -f "$KEY_TMP"
+            exit 1
+          fi
+          export GNUPGHOME="${RUNNER_TEMP}/gnupg-verify"
+          mkdir -p -m 700 "$GNUPGHOME"
+          if ! gpg --batch --import "$KEY_TMP"; then
+            echo "::error::could not import the release signing key from origin/main — refusing to publish. Publishing nothing."
+            rm -f "$KEY_TMP"
+            exit 1
+          fi
+          rm -f "$KEY_TMP"
+          # verify-tag output is captured (not discarded) so the failure
+          # carries the verifier's own diagnosis — e.g. "No public key"
+          # vs a corrupt packet. It is untrusted bytes inside a `::error`
+          # annotation, so sanitize for the workflow-command channel
+          # (runner decodes %XX in command data: a literal %0A would forge
+          # a newline + a second ::command line such as ::stop-commands::;
+          # raw CR/ESC would inject terminal escapes): fold CR/LF to `;`,
+          # drop C0 controls + DEL under LC_ALL=C (tab and UTF-8 pass
+          # through), bound to 240 bytes, then escape every `%` to `%25`
+          # AFTER the cut so an escape is never split. Key IDs in-repo are
+          # public; nothing secret flows here.
+          if ! VERIFY_OUT="$(git -c gpg.program=gpg -c gpg.openpgp.program=gpg -c gpg.ssh.program=/usr/bin/false -c gpg.x509.program=/usr/bin/false verify-tag "$TAG_NAME" 2>&1)"; then
+            echo "::error::tag '$TAG_NAME' has no valid release signature — cut it with 'git tag -s' (docs/ci.md). Verifier said: $(printf '%s' "$VERIFY_OUT" | LC_ALL=C tr '\r\n' ';;' | LC_ALL=C tr -d '\000-\010\013\014\016-\037\177' | head -c 240 | sed 's/%/%25/g'). Publishing nothing."
+            exit 1
+          fi
+          # Bind the verified tag object to the event: the ancestor check
+          # above resolved the event SHA while verify-tag resolved the ref
+          # name, so without this a deleted + re-created tag (same name,
+          # new object) could pair a valid signature with an unrelated
+          # on-main commit. Dereference the tag itself and require the
+          # exact event commit — anything else fails closed.
+          if ! TAG_COMMIT="$(git rev-parse --verify "${TAG_NAME}^{commit}" 2>/dev/null)"; then
+            echo "::error::tag '$TAG_NAME' does not resolve to a commit — refusing to publish. Publishing nothing."
+            exit 1
+          fi
+          if [ "$TAG_COMMIT" != "$COMMIT" ]; then
+            echo "::error::tag '$TAG_NAME' resolves to $TAG_COMMIT, not the pushed commit $COMMIT — refusing to publish a moved tag. Cut a new version; never move a pushed tag."
             exit 1
           fi
           # Pinned means pinned: if this tag's image already exists, someone
