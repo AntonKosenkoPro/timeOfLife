@@ -486,44 +486,42 @@ struct HistoryViewModelTests {
         // Live TestFlight crash (icu::UnicodeString ctor via
         // -[NSDateFormatter _regenerateFormatter] on the dayLabel path):
         // these helpers are nonisolated and reachable from any thread.
-        // Independent structural oracle (no calls to the functions under
-        // test for expectations): every label is non-empty absolute-form
-        // (never the today/yesterday sentinels for this fixed old date),
-        // every time is non-empty, and all 64 concurrent results agree.
-        // This guards hangs/torn results under contention, not the ICU
-        // first-use race itself (unobservable from tests — it lives inside
-        // uninstrumented Foundation).
+        // Both formatters are exercised concurrently inside one task group
+        // so dayLabel+timeText actually contend rather than running in two
+        // sequential waves. Independent structural oracle (no calls to the
+        // functions under test for expectations): the fixed old date is
+        // always absolute-form, pinned against a locally built reference
+        // formatter mirroring the production config. This guards
+        // hangs/torn results under contention, not the ICU first-use race
+        // itself (unobservable from tests — it lives inside uninstrumented
+        // Foundation).
         let calendar = Calendar(identifier: .gregorian)
         let day = Self.date("2026-08-31 10:00", calendar: calendar)
         let now = Self.date("2026-09-03 15:00", calendar: calendar)
-        let labels = await withTaskGroup(of: String.self, returning: [String].self) { group in
+        let expected: String = {
+            let reference = DateFormatter()
+            reference.dateStyle = .medium
+            reference.timeStyle = .none
+            reference.calendar = calendar
+            return reference.string(from: day)
+        }()
+        let pairs = await withTaskGroup(of: (String, String).self, returning: [(String, String)].self) { group in
             for _ in 0 ..< 64 {
-                group.addTask { HistoryViewModel.dayLabel(for: day, now: now, calendar: calendar) }
+                group.addTask {
+                    (HistoryViewModel.dayLabel(for: day, now: now, calendar: calendar),
+                     HistoryViewModel.timeText(for: day))
+                }
             }
-            var out: [String] = []
-            for await label in group { out.append(label) }
+            var out: [(String, String)] = []
+            for await pair in group { out.append(pair) }
             return out
         }
-        let times = await withTaskGroup(of: String.self, returning: [String].self) { group in
-            for _ in 0 ..< 64 {
-                group.addTask { HistoryViewModel.timeText(for: day) }
-            }
-            var out: [String] = []
-            for await time in group { out.append(time) }
-            return out
-        }
-        #expect(labels.count == 64)
-        #expect(times.count == 64)
-        for label in labels {
-            #expect(!label.isEmpty)
-            #expect(label != L10n.historyDayToday.text)
-            #expect(label != L10n.historyDayYesterday.text)
-        }
-        for time in times {
+        for (label, time) in pairs {
+            #expect(label == expected)
             #expect(!time.isEmpty)
         }
-        #expect(Set(labels).count == 1)
-        #expect(Set(times).count == 1)
+        #expect(Set(pairs.map(\.0)).count == 1)
+        #expect(Set(pairs.map(\.1)).count == 1)
     }
 
     private static func date(_ iso: String, calendar: Calendar) -> Date {
