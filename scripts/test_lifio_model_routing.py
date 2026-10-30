@@ -21,9 +21,9 @@ COMMANDS = REPO / ".opencode" / "commands"
 WRAPPERS = {
     "lifio-explore": ("openai/gpt-6.1-sol#high", "openspec-explore"),
     "lifio-propose": ("openai/gpt-6.1-sol#high", "openspec-propose"),
-    "lifio-apply": ("openai/gpt-6.1-sol#medium", "openspec-apply-change"),
-    "lifio-archive": ("openai/gpt-6.1-sol#medium", "openspec-archive-change"),
-    "lifio-pr": ("openai/gpt-6.1-sol#medium", "process-pr"),
+    "lifio-apply": ("opencode-go/muse-spark-1.3-contributor#high", "openspec-apply-change"),
+    "lifio-archive": ("opencode-go/muse-spark-1.3-contributor#medium", "openspec-archive-change"),
+    "lifio-pr": ("opencode-go/muse-spark-1.3-contributor#high", "process-pr"),
 }
 
 # generated files that must stay upstream/unpinned
