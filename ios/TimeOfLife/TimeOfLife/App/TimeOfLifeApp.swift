@@ -13,12 +13,32 @@ struct TimeOfLifeApp: App {
     @StateObject private var container: AppContainer
     @StateObject private var session: SessionStore
     @StateObject private var navigation: AppNavigationStack
+    #if SCREENSHOT_CAPTURE
+    @StateObject private var captureModel: ScreenshotCaptureModel
+    #endif
 
     init() {
         // Crash reporting (observability Stage 0): starts only when a DSN
         // is configured; otherwise a no-op. First so early-launch crashes
         // are captured.
         SentryReporter.startIfConfigured()
+        #if SCREENSHOT_CAPTURE
+        // Simulator-only gate (design §1): physical-device Screenshot builds
+        // fail explicitly here; device-destination archives already fail via
+        // SUPPORTED_PLATFORMS in project.yml.
+        #if !targetEnvironment(simulator)
+        fatalError("Screenshot capture builds require the iOS Simulator.")
+        #endif
+        // The capture graph is built asynchronously in the model (isolated
+        // store, ephemeral credentials, sync never activated). This
+        // placeholder only satisfies the production-path objects and touches
+        // no real state: unbound store, signed-out session, inert sync.
+        let container = ScreenshotApp.makePlaceholderContainer()
+        self._container = StateObject(wrappedValue: container)
+        self._session = StateObject(wrappedValue: container.sessionStore)
+        self._navigation = StateObject(wrappedValue: container.navigation)
+        self._captureModel = StateObject(wrappedValue: ScreenshotCaptureModel())
+        #else
         // UI-feedback loop: when launched with `UITEST_SCREEN=<screen>` (or
         // `SIMCTL_CHILD_UITEST_SCREEN=<screen>`, which `simctl launch` preserves)
         // in DEBUG, build a deterministic, stub-backed graph seeded to that
@@ -38,6 +58,7 @@ struct TimeOfLifeApp: App {
         self._container = StateObject(wrappedValue: container)
         self._session = StateObject(wrappedValue: container.sessionStore)
         self._navigation = StateObject(wrappedValue: container.navigation)
+        #endif
     }
 
     /// Resolves the UI-feedback screen from the environment or launch
@@ -74,7 +95,22 @@ struct TimeOfLifeApp: App {
 
     var body: some Scene {
         WindowGroup {
+            #if SCREENSHOT_CAPTURE
+            if let cleanup = ScreenshotLaunch.detectCleanup(
+                argv: CommandLine.arguments,
+                environment: ProcessInfo.processInfo.environment
+            ) {
+                // Session reset (cleanup hook): verified against the last
+                // capture state, acked via capture-cleanup.json. Checked
+                // before the capture path; never a captured frame.
+                ScreenshotCleanupRootView(invocation: cleanup)
+            } else {
+                ScreenshotCaptureRootView(model: captureModel)
+                    .task { await captureModel.runOnce() }
+            }
+            #else
             appRoot
+            #endif
         }
     }
 

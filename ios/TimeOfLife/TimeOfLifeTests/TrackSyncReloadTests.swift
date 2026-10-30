@@ -152,6 +152,9 @@ struct TrackSyncReloadTests {
     /// `.running` over `.saving`, restarting a ticker nothing ever stopped —
     /// the digits kept climbing through `.saved` into `.ready`. The save is
     /// held open with the VM's `stopGate` so the interleave is deterministic.
+    /// DEBUG-only (`stopGate` is a DEBUG test hook, absent from the
+    /// Screenshot configuration).
+#if DEBUG
     @Test("a load landing mid-save neither revives running nor leaks the ticker")
     func midSaveLoadNeitherRevivesNorLeaksTicker() async throws {
         let store = try LocalStore(url: temporaryStoreURL())
@@ -197,10 +200,12 @@ struct TrackSyncReloadTests {
             #expect(vm.elapsed == 0, "elapsed must be zeroed after the saved reset — the ticker leaked")
         }
     }
+#endif
 
     /// Same family: `select()` never excluded `.saving`, so a recents-chip
     /// tap mid-save flipped to `.ready` and the completing `stop()` no-op'd —
-    /// the run was never saved.
+    /// the run was never saved. DEBUG-only (same `stopGate` reason).
+#if DEBUG
     @Test("a recents-chip tap mid-save is ignored and the save completes")
     func chipTapMidSaveIsIgnored() async throws {
         let store = try LocalStore(url: temporaryStoreURL())
@@ -232,6 +237,7 @@ struct TrackSyncReloadTests {
         let entries = try await store.entries()
         #expect(entries.map(\.activityText) == ["Gym"])
     }
+#endif
 
     /// Regression for the sticky release: a `go()` landing before `wait()`
     /// (slow stop under load) must still release the waiter. Bounded poll —
@@ -289,6 +295,8 @@ struct TrackSyncReloadTests {
 
     /// Polls for the transient `.saving` state (the save is gate-held, so
     /// this always resolves; the cap only bounds a broken-seam hang).
+    /// DEBUG-only companion to the gated mid-save tests above.
+#if DEBUG
     private func waitUntilSaving(_ vm: TrackViewModel) async -> Bool {
         for _ in 0..<400 {
             if vm.state.isSaving { return true }
@@ -296,6 +304,7 @@ struct TrackSyncReloadTests {
         }
         return false
     }
+#endif
 
     private func temporaryStoreURL() -> URL {
         URL(fileURLWithPath: NSTemporaryDirectory())

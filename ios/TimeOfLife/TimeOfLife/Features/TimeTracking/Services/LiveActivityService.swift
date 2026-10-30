@@ -79,6 +79,22 @@ final class LiveActivityService: LiveActivityControlling {
         self.isForeground = isForeground
     }
 
+    /// Request locale for the next Live Activity payload (`.lproj` name).
+    /// Capture builds return the in-process request override
+    /// (`ScreenshotLocale`, set from the request before the shell mounts);
+    /// every other build returns the host's preferred localization so the
+    /// widget matches the system language. The widget MUST render from
+    /// the payload locale — its process never sees the app's override and
+    /// may cache a prior run's language.
+    nonisolated static func requestLocaleIdentifier() -> String {
+        #if SCREENSHOT_CAPTURE
+        if let override = ScreenshotLocale.overrideIdentifier {
+            return override
+        }
+        #endif
+        return Bundle.main.preferredLocalizations.first ?? "en"
+    }
+
     func runStarted(text: String, iconSymbol: String, startedAt: Date, categoryChips: [LiveCategoryChip] = []) async {
         let liveCount = Activity<TimerActivityAttributes>.activities.count
         guard ActivityAuthorizationInfo().areActivitiesEnabled else {
@@ -91,30 +107,39 @@ final class LiveActivityService: LiveActivityControlling {
         }
         let live = Activity<TimerActivityAttributes>.activities
         Self.logger.info("LiveActivityService: type is \(String(describing: TimerActivityAttributes.self), privacy: .public), liveCount=\(live.count)")
+        let requestLocale = Self.requestLocaleIdentifier()
         if let same = live.first(where: {
             $0.attributes.entryText == text && $0.activityState == .active
         }) {
-            // Same-text singleton: converge chips AND the start anchor in
-            // place (mid-run retag refreshes chips; a missed start re-anchor
-            // — persisted but never pushed, e.g. crash between the store
-            // write and `update()` — heals on the next re-mirror instead of
-            // ticking stale for the rest of the run). Identical state skips
-            // the update (no flicker).
-            let current = same.content.state
-            if current.categoryChips != categoryChips || current.startedAt != startedAt {
-                let refreshed = TimerActivityAttributes.ContentState(
-                    startedAt: startedAt,
-                    categoryChips: categoryChips
-                )
-                await same.update(.init(state: refreshed, staleDate: nil))
-                Self.logger.info("LiveActivityService: singleton converged ok")
+            // Attributes are immutable: a locale change needs a fresh
+            // request (the widget renders from the payload locale, never
+            // the appex system language). Fall through to end + re-request
+            // below instead of converging in place.
+            if same.attributes.localeIdentifier != requestLocale {
+                Self.logger.info("LiveActivityService: locale changed, re-requesting")
+            } else {
+                // Same-text singleton: converge chips AND the start anchor in
+                // place (mid-run retag refreshes chips; a missed start re-anchor
+                // — persisted but never pushed, e.g. crash between the store
+                // write and `update()` — heals on the next re-mirror instead of
+                // ticking stale for the rest of the run). Identical state skips
+                // the update (no flicker).
+                let current = same.content.state
+                if current.categoryChips != categoryChips || current.startedAt != startedAt {
+                    let refreshed = TimerActivityAttributes.ContentState(
+                        startedAt: startedAt,
+                        categoryChips: categoryChips
+                    )
+                    await same.update(.init(state: refreshed, staleDate: nil))
+                    Self.logger.info("LiveActivityService: singleton converged ok")
+                }
+                return
             }
-            return
         }
         for activity in live {
             await activity.end(nil, dismissalPolicy: .immediate)
         }
-        let attributes = TimerActivityAttributes(entryText: text, iconSymbol: iconSymbol)
+        let attributes = TimerActivityAttributes(entryText: text, iconSymbol: iconSymbol, localeIdentifier: requestLocale)
         let state = TimerActivityAttributes.ContentState(startedAt: startedAt, categoryChips: categoryChips)
         do {
             let activity = try Activity.request(

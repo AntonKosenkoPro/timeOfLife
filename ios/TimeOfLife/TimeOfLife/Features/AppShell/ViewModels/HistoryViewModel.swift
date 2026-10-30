@@ -50,6 +50,9 @@ final class HistoryViewModel: ObservableObject {
     private let store: LocalStore
     private let undoBuffer: UndoBufferStore
     private let nowProvider: () -> Date
+    /// Calendar (with locale/time zone) for grouping and labels
+    /// (screenshot-capture seam; production keeps `.current`).
+    let calendar: Calendar
     /// Notification surface for the event-driven reload subscriptions.
     /// Production uses `.default`; tests inject a private center so global
     /// posts from parallel suites cannot reload this VM out from under
@@ -101,11 +104,13 @@ final class HistoryViewModel: ObservableObject {
         store: LocalStore,
         undoBuffer: UndoBufferStore,
         now: @escaping () -> Date = Date.init,
+        calendar: Calendar = .current,
         notifications: NotificationCenter = .default
     ) {
         self.store = store
         self.undoBuffer = undoBuffer
         self.nowProvider = now
+        self.calendar = calendar
         self.notifications = notifications
         observeExternalReload()
     }
@@ -214,12 +219,15 @@ final class HistoryViewModel: ObservableObject {
     }
 
     /// Parses once per query and derives once per entry/snapshot.
+    /// Grouping resolves in the injected calendar against the injected now
+    /// (screenshot-capture seam; production passes `.current`/`Date.init`,
+    /// identical to the previous wall-clock behavior).
     private func applySearch() {
         guard !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             searchDiagnostic = nil
             isSearchFiltering = false
             searchPresentations = [:]
-            dayGroups = Self.makeDayGroups(entries: allEntries, now: Date())
+            dayGroups = Self.makeDayGroups(entries: allEntries, now: nowProvider(), calendar: calendar)
             return
         }
         switch HistorySearchParser.parse(searchText) {
@@ -227,7 +235,7 @@ final class HistoryViewModel: ObservableObject {
             searchDiagnostic = nil
             isSearchFiltering = false
             searchPresentations = [:]
-            dayGroups = Self.makeDayGroups(entries: allEntries, now: Date())
+            dayGroups = Self.makeDayGroups(entries: allEntries, now: nowProvider(), calendar: calendar)
         case .invalid(let diagnostic):
             searchDiagnostic = diagnostic.message
             isSearchFiltering = false
@@ -252,7 +260,7 @@ final class HistoryViewModel: ObservableObject {
                 query: query
             )
             searchPresentations = derived.presentations
-            dayGroups = Self.makeDayGroups(entries: derived.matched, now: Date())
+            dayGroups = Self.makeDayGroups(entries: derived.matched, now: nowProvider(), calendar: calendar)
         }
     }
 

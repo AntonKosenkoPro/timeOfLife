@@ -26,4 +26,5 @@ Start here: [`CONTRIBUTING.md`](CONTRIBUTING.md) (quickstart, environment, drivi
 | [`docs/manual-testing.md`](docs/manual-testing.md) | Device smoke checklists |
 | [`Requirements/FURPS/`](Requirements/FURPS/) | Requirements (FURPS+ table + use cases) |
 | [`Design/`](Design/) | Text-based design system (colors, components, screens) |
+| [`docs/screenshot-capture.md`](docs/screenshot-capture.md) | App Store screenshot capture runbook (draft pre-release tooling; see also `Design/SCREENSHOTS.md`) |
 | [`backend/api/openapi.yaml`](backend/api/openapi.yaml) | Authoritative API contract (OpenAPI 3.0, S10) |

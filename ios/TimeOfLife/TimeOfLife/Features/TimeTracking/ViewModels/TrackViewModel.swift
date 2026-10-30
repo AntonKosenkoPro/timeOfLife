@@ -36,6 +36,9 @@ final class TrackViewModel: ObservableObject {
     let service: TimerService
     private let connectivity: Connectivity
     private let nowProvider: () -> Date
+    /// Calendar (with locale/time zone) for the Started caption and the start
+    /// editor (screenshot-capture seam; production keeps `.current`).
+    let calendar: Calendar
     private var ticker: AnyCancellable?
     private var savedResetTask: Task<Void, Never>?
     /// Serializes reloads (fix-track-empty-after-reinstall): the tab-return
@@ -64,11 +67,31 @@ final class TrackViewModel: ObservableObject {
     init(
         service: TimerService,
         connectivity: Connectivity,
-        now: @escaping () -> Date = Date.init
+        now: @escaping () -> Date = Date.init,
+        calendar: Calendar = .current
     ) {
         self.service = service
         self.connectivity = connectivity
         self.nowProvider = now
+        self.calendar = calendar
+    }
+
+    /// App-owned now for views (the Started caption, the start editor): the
+    /// capture composition pins this; production reads the wall clock.
+    var now: Date { nowProvider() }
+
+    /// Short-time caption in the view model's calendar/locale (capture pins
+    /// both; production follows the process locale like the static helper).
+    func timeText(for date: Date) -> String {
+        timeFormatter.string(from: date)
+    }
+
+    private var timeFormatter: DateFormatter {
+        let formatter = DateFormatter()
+        formatter.timeStyle = .short
+        formatter.locale = calendar.locale ?? .current
+        formatter.timeZone = calendar.timeZone
+        return formatter
     }
 
     // MARK: - Recents model
@@ -112,7 +135,7 @@ final class TrackViewModel: ObservableObject {
                 await service.refreshLiveActivity(
                     text: draft.activityText,
                     categoryIDs: draft.categoryIDs,
-                    startedAt: draft.startedAt ?? Date()
+                    startedAt: draft.startedAt ?? nowProvider()
                 )
             } else if case let .running(draft, _) = state {
                 await reconcileExternalStop(draft: draft)
@@ -142,7 +165,7 @@ final class TrackViewModel: ObservableObject {
                 await self.service.refreshLiveActivity(
                     text: draft.activityText,
                     categoryIDs: draft.categoryIDs,
-                    startedAt: draft.startedAt ?? Date()
+                    startedAt: draft.startedAt ?? self.nowProvider()
                 )
             }
         }
@@ -172,7 +195,7 @@ final class TrackViewModel: ObservableObject {
             // later transition stops (ticking digits on an idle screen).
             // Lists above still apply; only the state transition is held.
             if !state.isSaving {
-                let startedAt = draft.startedAt ?? Date()
+                let startedAt = draft.startedAt ?? nowProvider()
                 state = .running(
                     TrackState.Draft(
                         text: draft.activityText,
@@ -331,7 +354,7 @@ final class TrackViewModel: ObservableObject {
         }
         guard case let .ready(draft) = state, canStart else { return }
         Haptics.selection()
-        beginRunning(draft: draft, startedAt: Date())
+        beginRunning(draft: draft, startedAt: nowProvider())
     }
 
     private func beginRunning(draft: TrackState.Draft, startedAt: Date) {        state = .running(draft, startedAt: startedAt)
@@ -459,7 +482,7 @@ final class TrackViewModel: ObservableObject {
     /// until the next successful load converges from the store.
     func updateDraftStartedAt(_ picked: Date) {
         let now = nowProvider()
-        let resolved = RunningStartTimeResolver.resolve(picked: picked, now: now)
+        let resolved = RunningStartTimeResolver.resolve(picked: picked, now: now, calendar: calendar)
         switch state {
         case let .running(draft, _):
             state = .running(draft, startedAt: resolved)
@@ -494,14 +517,14 @@ final class TrackViewModel: ObservableObject {
                 text: draft.text,
                 categoryIDs: draft.categoryIDs,
                 startedAt: startedAt,
-                endedAt: Date(),
+                endedAt: nowProvider(),
                 notes: draft.notes
             )
             // A concurrent revive may have restarted the ticker mid-save
             // (pre-revive-guard histories); it owns nothing now — kill it so
             // the saved confirmation (and the ready state after it) freezes.
             stopTicker()
-            let duration = max(0, Date().timeIntervalSince(startedAt))
+            let duration = max(0, nowProvider().timeIntervalSince(startedAt))
             state = .saved(draft, duration: duration)
             elapsed = duration
             UIApplication.shared.isIdleTimerDisabled = false
@@ -533,9 +556,10 @@ final class TrackViewModel: ObservableObject {
         // paint — a restored minutes-old run shows its true elapsed, never
         // 00:00 until the first tick fires (steady-track-launch elapsed
         // seeding; the tick closure below only keeps it fresh).
-        elapsed = max(0, Date().timeIntervalSince(startedAt))
+        elapsed = max(0, nowProvider().timeIntervalSince(startedAt))
         ticker = Ticker.everySecond { [weak self] in
-            self?.elapsed = max(0, Date().timeIntervalSince(startedAt))
+            guard let self else { return }
+            self.elapsed = max(0, self.nowProvider().timeIntervalSince(startedAt))
         }
     }
 

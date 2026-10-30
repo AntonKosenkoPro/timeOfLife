@@ -65,16 +65,32 @@ struct LogTimeView: View {
         service: TimerService,
         initialText: String = "",
         initialCategoryIDs: [String] = [],
+        initialNotes: String = "",
+        initialInterval: (start: Date, end: Date)? = nil,
         editing entry: TimeEntry? = nil,
         embeddedInNavigationStack: Bool = false,
         onSaved: (() -> Void)? = nil
     ) {
-        _vm = StateObject(wrappedValue: LogTimeViewModel(
+        // CREATE prefill through the public draft API (no ViewModel init
+        // change): notes assign directly, times go through the picker
+        // setters — Start first (it shifts End), then End. Minute-exact
+        // prefills like the capture sample pass through unchanged.
+        let vm = LogTimeViewModel(
             service: service,
             initialText: initialText,
             initialCategoryIDs: initialCategoryIDs,
             editing: entry
-        ))
+        )
+        if entry == nil {
+            if !initialNotes.isEmpty {
+                vm.notes = initialNotes
+            }
+            if let interval = initialInterval {
+                vm.setStartsAt(interval.start)
+                vm.setEndsAt(interval.end)
+            }
+        }
+        _vm = StateObject(wrappedValue: vm)
         self.embeddedInNavigationStack = embeddedInNavigationStack
         self.onSaved = onSaved
     }

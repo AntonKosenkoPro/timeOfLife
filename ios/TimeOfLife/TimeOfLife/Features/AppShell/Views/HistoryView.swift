@@ -49,6 +49,8 @@ struct HistoryView: View {
     /// (fix-tab-bar-return-jump: a stack-level declaration wins over an
     /// inner one unconditionally, so this view must not declare its own).
     @Binding var searchHidesTabBar: Bool
+    /// App-owned clock (screenshot-capture seam; production `.live`).
+    private let clock: AppClock
 
     init(
         store: LocalStore,
@@ -57,9 +59,15 @@ struct HistoryView: View {
         sync: SyncController,
         connectivity: Connectivity,
         logTimeActive: Binding<Bool> = .constant(false),
-        searchHidesTabBar: Binding<Bool> = .constant(false)
+        searchHidesTabBar: Binding<Bool> = .constant(false),
+        clock: AppClock = .live
     ) {
-        _vm = StateObject(wrappedValue: HistoryViewModel(store: store, undoBuffer: undoBuffer))
+        _vm = StateObject(wrappedValue: HistoryViewModel(
+            store: store,
+            undoBuffer: undoBuffer,
+            now: clock.now,
+            calendar: clock.calendar
+        ))
         _pull = StateObject(wrappedValue: HistoryPullModel(
             sync: sync,
             connectivity: connectivity
@@ -67,6 +75,7 @@ struct HistoryView: View {
             guard case let .signedIn(session) = sessionStore?.state else { return nil }
             return session.id
         })
+        self.clock = clock
         _isLogTimeActive = logTimeActive
         _searchHidesTabBar = searchHidesTabBar
     }

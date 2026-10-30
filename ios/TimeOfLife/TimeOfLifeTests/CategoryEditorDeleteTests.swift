@@ -85,7 +85,16 @@ struct CategoryEditorDeleteTests {
     @Test("delete refuses while a save is in flight and leaves the category intact")
     func deleteRefusesWhileSaveInFlight() async throws {
         let store = try makeStore()
-        try await store.createCategory(draft: CategoryDraft(name: "Work", icon: .briefcase), id: "c1", now: Date())
+        // Backdated creation stamp: the save below stamps wall-clock now, so
+        // the LWW write is strictly newer on every optimization level.
+        // Same-instant create/save pairs can go stale under -O timing (the
+        // rename then never persists); the 5 s offset removes the timestamp
+        // race without changing what the test proves (refusal + intact row).
+        try await store.createCategory(
+            draft: CategoryDraft(name: "Work", icon: .briefcase),
+            id: "c1",
+            now: Date().addingTimeInterval(-5)
+        )
         let category = try #require(await store.category(id: "c1"))
         let vm = CategoryEditorViewModel(store: store, category: category, onSaved: { _ in }, onDuplicate: { _ in })
         vm.name = "Renamed"

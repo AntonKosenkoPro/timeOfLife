@@ -17,9 +17,12 @@ struct InsightsView: View {
     @StateObject private var vm: InsightsViewModel
     @State private var period: InsightsPeriod = .week
     @State private var lens: InsightsLens = .category
+    /// App-owned clock (screenshot-capture seam; production `.live`).
+    private let clock: AppClock
 
-    init(store: LocalStore) {
-        _vm = StateObject(wrappedValue: InsightsViewModel(store: store))
+    init(store: LocalStore, clock: AppClock = .live) {
+        _vm = StateObject(wrappedValue: InsightsViewModel(store: store, now: clock.now))
+        self.clock = clock
     }
 
     var body: some View {
@@ -70,7 +73,7 @@ struct InsightsView: View {
     }
 
     private var breakdownContent: some View {
-        let breakdown = vm.breakdown(period: period, lens: lens)
+        let breakdown = vm.breakdown(period: period, lens: lens, calendar: clock.calendar)
         return ScrollView {
             VStack(spacing: Theme.spacingMedium) {
                 periodPicker

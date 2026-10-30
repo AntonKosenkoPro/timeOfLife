@@ -33,13 +33,18 @@ struct AppShellView: View {
     /// Read only by the History stack's stack-owned tab-bar visibility
     /// below; no other tab reads it.
     @State private var historySearchHidesTabBar = false
+    /// App-owned clock (screenshot-capture seam; production `.live`).
+    private let clock: AppClock
 
-    init(vm: AppShellViewModel, container: AppContainer, trackSnapshot: TrackSnapshot? = nil) {
+    init(vm: AppShellViewModel, container: AppContainer, trackSnapshot: TrackSnapshot? = nil, clock: AppClock = .live) {
         _vm = StateObject(wrappedValue: vm)
+        self.clock = clock
         _trackVM = StateObject(wrappedValue: {
             let trackVM = TrackViewModel(
                 service: container.timerService,
-                connectivity: container.connectivity
+                connectivity: container.connectivity,
+                now: clock.now,
+                calendar: clock.calendar
             )
             // A gate-preloaded snapshot paints complete on the first commit
             // instead of re-querying (steady-track-launch). Previews and
@@ -237,7 +242,8 @@ struct AppShellView: View {
                 sync: container.syncController,
                 connectivity: container.connectivity,
                 logTimeActive: $isHistoryLogTimeActive,
-                searchHidesTabBar: $historySearchHidesTabBar
+                searchHidesTabBar: $historySearchHidesTabBar,
+                clock: clock
             )
             .environmentObject(vm)
             .navigationTitle(L10n.tabHistory.text)
@@ -269,7 +275,8 @@ struct AppShellView: View {
     private var insightsStack: some View {
         NavigationStack(path: $vm.insightsPath) {
             InsightsView(
-                store: container.localStore
+                store: container.localStore,
+                clock: clock
             )
             .navigationTitle(L10n.tabInsights.text)
             .navigationBarTitleDisplayMode(.inline)

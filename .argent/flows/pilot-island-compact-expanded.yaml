@@ -1,0 +1,17 @@
+executionPrerequisite: "Capture-only iPhone 16 Pro Max on iOS 27 with the screenshots build installed; a live-activity-realtime frame (la-compact or la-expanded) prepared to ready with a running Live Activity; device starts unlocked on Home. Island compact requires the Home screen (app foreground hides the pill in simctl); expanded requires touch-and-hold on the island."
+steps:
+  - echo: "From Home, expect the genuine Dynamic Island compact pill (running icon + live timer). The Home tree exposes no stable island selector, so the full-res screenshot is the human evidence. Timer digits and prompt handling are proven per run in the run records and capture QA evidence."
+  - tool: screenshot
+    args:
+      scale: 1
+      includeImageInContext: false
+  - echo: "Touch-and-hold the island pill to reach the genuine expanded presentation (big timer + name + category chips + Stop). Point targets the pill center; no stable AX id exists for the collapsed pill on Home, so this is a documented coordinate fallback (see capture QA evidence). Expanded presence is proven by the follow-up tree (regular.view + Stop) and the full-res screenshot."
+  - tool: gesture-custom
+    args:
+      events:
+        - {type: Down, x: 0.5, y: 0.035}
+        - {type: Up, x: 0.5, y: 0.035, delayMs: 800}
+  - tool: screenshot
+    args:
+      scale: 1
+      includeImageInContext: false
