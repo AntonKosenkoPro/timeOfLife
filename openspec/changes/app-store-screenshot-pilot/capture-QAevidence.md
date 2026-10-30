@@ -1,9 +1,16 @@
-# Capture QA evidence — English iPhone pilot (tasks 5.2/5.3)
+# Capture QA evidence — screenshot pilot (tasks 5.2/5.3 + expansion addendum 6.3/6.5)
 
-QA worker record, 2026-10-30. Two consecutive full pilot runs on the
-capture-only simulator. This file reports CAPTURED and REVIEWED state only.
-It is not owner approval: task 5.4 still requires explicit owner approval of
-content, composition, and treatment before any section 6/7 work.
+QA worker record, 2026-10-30. The body below (§§ Provenance through the 11:53
+addendum) reports the SUPERSEDED iOS 18.6 5-frame draft runs on the
+capture-only DC79 simulator (picker frame, History notes-viewport) — captured
+and reviewed, explicitly NOT approved, preserved for the record only. The PM
+expansion addendum (contact sheets + clipping review for the 7-frame story)
+reports DELIVERED + REVIEWED state only — likewise not approval. Approved
+reality: the 7-frame iOS 27 English pilot `runs/pilot27-r2` (Track running →
+Insights → History top → Add entry → LA Lock/compact/expanded) is APPROVED
+per task 5.4 (frame hashes pinned there); final fifteen-set acceptance (6.6)
+still pending; montage deferred. `tasks.md` is authoritative for the 5.4/6.x
+state; this file's draft-run detail must never be quoted as the approved set.
 
 ## Provenance (identical for both runs)
 
