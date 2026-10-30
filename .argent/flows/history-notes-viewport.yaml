@@ -1,0 +1,26 @@
+steps:
+  - echo: History top shows Today-Oct 17, no notes glyph. Scroll down to Oct 12 Deep
+      work notes entry; expect day total plus blue notes glyph.
+  - tool: gesture-swipe
+    args:
+      fromX: 0.5
+      fromY: 0.7
+      toX: 0.5
+      toY: 0.3
+  - tool: gesture-swipe
+    args:
+      fromX: 0.5
+      fromY: 0.7
+      toX: 0.5
+      toY: 0.3
+  - tool: gesture-swipe
+    args:
+      fromX: 0.5
+      fromY: 0.35
+      toX: 0.5
+      toY: 0.55
+  - tool: await-ui-element
+    args:
+      condition: visible
+      selector:
+        text: Oct 12, 2026

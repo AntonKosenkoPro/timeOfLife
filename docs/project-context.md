@@ -59,6 +59,24 @@ Do not claim these are done. The following remain open (leftovers live in `docs/
 - **Kafka** — deferred (S1 names it but auth MVP doesn't need an MQ). **Rate-limit store** is in-memory; swap for Redis before multi-instance deploy.
 - **SwiftUI snapshot / on-device keychain tests** — manual smoke checklist in `README.md`.
 
+### Screenshot capture (active change — ACTIVE UNVERIFIED, not shipped)
+
+The `app-store-screenshot-pilot` change adds a Release-optimized, simulator-only
+`Screenshot` configuration (`SCREENSHOT_CAPTURE` condition; distinct bundle
+identities + capture-only storage namespace; physical-device/archive use fails
+explicitly) with normal Debug/Release/archive routing untouched. **Clock-injection
+boundary:** only app-owned time (Track/History/Insights labels, elapsed, totals)
+is pinned to the manifest's reference Tuesday; system-owned surfaces (Live
+Activity timers, status-bar chrome) stay real and are validated numerically,
+never frozen or retouched. All fixture writes go through `LocalStore`; capture
+never touches production accounts, Keychain, or network (fail-closed). Inputs
+and totals are pinned in `scripts/screenshots/pilot_manifest.json` +
+`expected_totals.json`; the English-pilot 5.4 owner gate still blocks all
+expansion/montage work. Storyboard: `Design/SCREENSHOTS.md`; operator runbook:
+`docs/screenshot-capture.md`. Do not present capture tooling as a production
+feature, and do not claim any screenshot exists until retained frames + hashes
+pass 5.4 review.
+
 ## OpenSpec routing
 
 The repo is **spec-driven** (`openspec/config.yaml`, `schema: spec-driven`). Baseline specs, active deltas, and archives play different roles — know which one you are reading:

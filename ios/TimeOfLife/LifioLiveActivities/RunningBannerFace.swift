@@ -17,6 +17,9 @@ struct RunningBannerFace: View {
     let startedAt: Date
     let trackURL: URL?
     let trackStopURL: URL?
+    /// Payload request locale (`.lproj` name): every string on this face
+    /// resolves from it explicitly — never the appex system language.
+    let localeIdentifier: String
 
     var body: some View {
         // iOS 26+ renders its default Liquid Glass card for `.clear`;
@@ -64,7 +67,7 @@ struct RunningBannerFace: View {
             }
             .widgetURL(trackURL)
             .accessibilityElement(children: .combine)
-            .accessibilityLabel(LiveActivityStrings.runningAccessibilityLabel(text: text))
+            .accessibilityLabel(LiveActivityStrings.runningAccessibilityLabel(text: text, localeIdentifier: localeIdentifier))
             Spacer()
             // A stop-URL link, not the intent button — tapping it
             // opens the app and the app stops itself (same mechanism as the
@@ -73,9 +76,9 @@ struct RunningBannerFace: View {
             // contract), but the intent button stays as the fail-safe so
             // Stop never vanishes.
             if let stopURL = trackStopURL {
-                LiveActivityStopCircleLink(destination: stopURL)
+                LiveActivityStopCircleLink(destination: stopURL, localeIdentifier: localeIdentifier)
             } else {
-                LiveActivityStopButton()
+                LiveActivityStopButton(localeIdentifier: localeIdentifier)
             }
         }
         // Banner breathing room, verified on-device: 8pt vertical (flush

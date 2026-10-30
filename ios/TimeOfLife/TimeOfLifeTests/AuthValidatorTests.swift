@@ -109,14 +109,17 @@ struct AuthValidatorTests {
     func unifiedEmptyEmail() {
         let msg = AuthValidator.unifiedEmailMessage([.emailEmpty])
         #expect(msg != nil)
-        #expect(msg == NSLocalizedString("validation.emailEmpty", comment: ""))
+        // Same-resolver comparison: `AuthValidator` reads `L10n.text`, so
+        // the expectation must too — a main-bundle `NSLocalizedString`
+        // would diverge under an active Screenshot capture override.
+        #expect(msg == L10n.validationEmailEmpty.text)
     }
 
     @Test("unified error message for empty OTP")
     func unifiedEmptyOTP() {
         let msg = AuthValidator.unifiedOtpMessage([.otpEmpty])
         #expect(msg != nil)
-        #expect(msg == NSLocalizedString("validation.otpEmpty", comment: ""))
+        #expect(msg == L10n.validationOtpEmpty.text)
     }
 
     @Test("unified error message combines invalid and too long for email")
@@ -128,20 +131,20 @@ struct AuthValidatorTests {
 
         let msg = AuthValidator.unifiedEmailMessage(errors)
         let message = try #require(msg)
-        #expect(message.contains(NSLocalizedString("validation.email.rule.invalid", comment: "")))
-        #expect(message.contains(NSLocalizedString("validation.email.rule.tooLong", comment: "")))
+        #expect(message.contains(L10n.validationEmailRuleInvalid.text))
+        #expect(message.contains(L10n.validationEmailRuleTooLong.text))
     }
 
     @Test("unified OTP message for invalid code")
     func unifiedInvalidOTP() {
-        let expected = NSLocalizedString("validation.otp.prefix", comment: "") + " "
-            + NSLocalizedString("validation.otp.rule.invalid", comment: "") + "."
+        let expected = L10n.validationOtpPrefix.text + " "
+            + L10n.validationOtpRuleInvalid.text + "."
         #expect(AuthValidator.unifiedOtpMessage([.otpInvalid]) == expected)
     }
 
     @Test("joinFragments grammar handles single, double, and triple items")
     func joinFragments() {
-        let and = NSLocalizedString("common.and", comment: "")
+        let and = L10n.commonAnd.text
         #expect(AuthValidator.joinFragments(["A"]) == "A")
         #expect(AuthValidator.joinFragments(["A", "B"]) == "A \(and) B")
         #expect(AuthValidator.joinFragments(["A", "B", "C"]) == "A, B \(and) C")

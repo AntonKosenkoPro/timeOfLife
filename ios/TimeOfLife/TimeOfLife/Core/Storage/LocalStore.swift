@@ -28,7 +28,14 @@ import GRDB
 /// once since boot.
 actor LocalStore {
     /// The App Group shared container identifier (local-first-store spec).
+    /// The Screenshot configuration uses a SEPARATE capture-only group, so
+    /// capture processes (app + extension + intents) can never resolve
+    /// production account files or markers (screenshot-capture isolation).
+    #if SCREENSHOT_CAPTURE
+    static let appGroupID = "group.com.antonkosenko.timeoflifeapp.screenshots"
+    #else
     static let appGroupID = "group.com.antonkosenko.timeoflifeapp"
+    #endif
 
     /// The local-metadata key holding the user id a database file is bound
     /// to (account-bound-store spec). Written on the first open of a per-user

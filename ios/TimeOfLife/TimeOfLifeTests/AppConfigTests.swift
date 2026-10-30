@@ -44,8 +44,17 @@ struct AppConfigTests {
     @Test("runtime baseURL has a valid scheme and host")
     func runtimeBaseURLIsValid() {
         let url = AppConfig.baseURL
+#if SCREENSHOT_CAPTURE
+        // Capture builds point at the unroutable discard port by design
+        // (fail-closed: an accidental request dies locally, never touches
+        // production). This asserts that isolation (tasks 2.5).
+        #expect(url.scheme == "http")
+        #expect(url.host == "127.0.0.1")
+        #expect(url.port == 9)
+#else
         #expect(url.scheme == "http")
         #expect(url.host == "127.0.0.1")
         #expect(url.port == 8080)
+#endif
     }
 }

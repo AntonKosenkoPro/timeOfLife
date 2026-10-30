@@ -20,10 +20,20 @@ public struct TimerActivityAttributes: ActivityAttributes, Equatable {
     /// when the run has no categories (the recents-chip rule: icon or
     /// nothing — never names).
     public var iconSymbol: String
+    /// Request locale identifier (`.lproj` name: "en", "ru", "zh-Hans",
+    /// "es-419", "pt-BR"). Carried in the payload because the widget
+    /// extension renders in its own process: it never sees the app's
+    /// in-process `ScreenshotLocale` override and its `AppleLanguages`
+    /// may lag or cache a prior run's language (pt-BR showed es-419
+    /// "Detener" instead of "Parar"). Faces resolve copy from this
+    /// locale's `.lproj` explicitly, falling back to system resolution
+    /// when unresolvable.
+    public var localeIdentifier: String
 
-    public init(entryText: String, iconSymbol: String) {
+    public init(entryText: String, iconSymbol: String, localeIdentifier: String) {
         self.entryText = entryText
         self.iconSymbol = iconSymbol
+        self.localeIdentifier = localeIdentifier
     }
 
     /// The live slice. Faces tick from `startedAt` via the system's

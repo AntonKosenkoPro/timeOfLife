@@ -1,0 +1,12 @@
+// Configuration settings file for Lifio — Screenshot capture.
+// Release-optimized, simulator-only capture composition (screenshot-capture
+// change, design §1). Same optimization class as Release, but isolated:
+// - API base URL is deliberately UNROUTABLE (discard port): capture disables
+//   all network services, and any accidental request fails fast locally
+//   instead of ever contacting production.
+// - Crash reporting stays disabled (empty DSN).
+
+// xcconfig treats `//` as a comment, so we break it with an empty variable.
+EMPTY =
+API_BASE_URL = http:/$(EMPTY)/127.0.0.1:9
+SENTRY_DSN =

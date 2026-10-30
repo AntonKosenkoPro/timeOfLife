@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "deck_version": "en-austin-1",
+  "locale": "en",
+  "region": "US",
+  "timezone": "America/Chicago",
+  "calendar": "gregorian",
+  "week_rule": "locale-native",
+  "reference_local_iso": "2026-10-20T09:41:00",
+  "app_elapsed_s": 754,
+  "appearance": "light",
+  "dynamic_type": "large",
+  "keyboard": {
+    "language": "en-US",
+    "software_visible": true,
+    "presentation": "docked"
+  },
+  "status_bar": {
+    "time": "9:41",
+    "battery": 100,
+    "network": "wifi"
+  },
+  "treatment": "light-v1",
+  "frames": ["track-running", "insights", "history", "add-entry", "la-lock", "la-compact", "la-expanded"],
+  "geometry": {"width": 1320, "height": 2868},
+  "configuration": "Screenshot",
+  "bundle_id": "com.antonkosenko.timeoflifeapp.screenshots",
+  "expected_totals": {"all_seconds": 198600, "today_seconds": 4500, "week_seconds": 23100, "category_seconds": {"shot-cat-education": 8700, "shot-cat-entertainment": 38700, "shot-cat-food": 41400, "shot-cat-hobby": 20100, "shot-cat-relax": 11700, "shot-cat-sport": 42300, "shot-cat-work": 51000}, "text_seconds": {"ACL festival": 5400, "BBQ": 3600, "Barton Springs swim": 8700, "Breakfast tacos": 2700, "Brunch": 2700, "Code review": 14100, "Coffee": 3900, "Deep work": 27000, "Design sync": 2700, "Evening walk": 11700, "Farmers market": 6300, "Football night": 9900, "Grocery run": 7200, "Gym": 6900, "Inbox zero": 1800, "Live music": 18000, "Lunch break": 8400, "Morning run": 7500, "Movie night": 5400, "Quarterly planning workshop with the platform team": 5400, "Reading": 8700, "Side project": 8400, "Tacos": 6000, "Team lunch": 3600, "Trail run": 3900, "Yoga": 5400, "coffee": 3300}},
+  "totals_source": "ios/TimeOfLife/TimeOfLife/Core/Capture/ScreenshotFixture.swift (en-austin-1, independently reviewed: 55 entries, 27 texts; runner verified shape, 27 texts, text-sum == all_seconds; app must still compute+compare at runtime, no capture claimed)",
+  "notes": "Owner-selected Release-optimized simulator-only Screenshot configuration (tasks 1.4). #198 literal Release-build wording reconciliation deferred to 8.4 handoff. Final visual acceptance remains 5.4; this manifest is an input pin, not an approval."
+}

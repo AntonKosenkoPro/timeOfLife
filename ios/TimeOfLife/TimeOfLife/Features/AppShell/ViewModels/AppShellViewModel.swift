@@ -56,10 +56,12 @@ final class AppShellViewModel: ObservableObject {
     @Published var insightsPath: [ShellRoute] = []
 
     let service: TimerService
+    private let nowProvider: () -> Date
     private var ticker: AnyCancellable?
 
-    init(service: TimerService) {
+    init(service: TimerService, now: @escaping () -> Date = Date.init) {
         self.service = service
+        self.nowProvider = now
     }
 
     /// Pushes Profile onto the selected tab's own path. A no-op when Profile
@@ -118,7 +120,7 @@ final class AppShellViewModel: ObservableObject {
                 text: running.activityText,
                 categoryIDs: running.categoryIDs,
                 startedAt: startedAt,
-                endedAt: Date(),
+                endedAt: nowProvider(),
                 notes: running.notes
             )
             runningTimer = nil
@@ -126,6 +128,10 @@ final class AppShellViewModel: ObservableObject {
             // Recoverable: keep the compact timer so the user can retry.
         }
     }
+
+    /// App-owned now for the compact timer surface (screenshot-capture seam;
+    /// production reads the wall clock).
+    var now: Date { nowProvider() }
 
     private func startTicker() {
         ticker?.cancel()

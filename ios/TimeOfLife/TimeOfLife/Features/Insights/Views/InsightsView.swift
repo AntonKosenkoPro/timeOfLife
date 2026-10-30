@@ -21,10 +21,13 @@ struct InsightsView: View {
     /// stop). Lets Insights reload an entry saved from the compact timer
     /// without leaving the tab.
     private let refreshSignal: String
+    /// App-owned clock (screenshot-capture seam; production `.live`).
+    private let clock: AppClock
 
-    init(store: LocalStore, refreshSignal: String = "") {
-        _vm = StateObject(wrappedValue: InsightsViewModel(store: store))
+    init(store: LocalStore, refreshSignal: String = "", clock: AppClock = .live) {
+        _vm = StateObject(wrappedValue: InsightsViewModel(store: store, now: clock.now))
         self.refreshSignal = refreshSignal
+        self.clock = clock
     }
 
     var body: some View {
@@ -68,7 +71,7 @@ struct InsightsView: View {
     }
 
     private var breakdownContent: some View {
-        let breakdown = vm.breakdown(period: period, lens: lens)
+        let breakdown = vm.breakdown(period: period, lens: lens, calendar: clock.calendar)
         return ScrollView {
             VStack(spacing: Theme.spacingMedium) {
                 periodPicker

@@ -6,11 +6,17 @@ import SwiftUI
 struct CompactTimer: View {
     let entryText: String
     let startedAt: Date
+    /// App-owned tick date (screenshot-capture seam: the capture composition
+    /// pins this to the logical reference; production reads the wall clock).
+    /// The TimelineView still drives the 1 Hz cadence in both cases.
+    /// (`var`: a defaulted `let` closure is omitted from the memberwise
+    /// initializer on this toolchain, so the seam would be unsettable.)
+    var now: () -> Date = Date.init
     let openTrack: () -> Void
     let stop: () -> Void
 
     var body: some View {
-        TimelineView(.periodic(from: .now, by: 1)) { context in
+        TimelineView(.periodic(from: .now, by: 1)) { _ in
             HStack(spacing: Theme.spacingSmall) {
                 Button(action: openTrack) {
                     HStack(spacing: Theme.spacingSmall) {
@@ -26,7 +32,7 @@ struct CompactTimer: View {
                                 .font(.subheadline.weight(.semibold))
                                 .foregroundStyle(Theme.textPrimary)
                                 .lineLimit(1)
-                            Text(TimeFormatter.formattedDuration(context.date.timeIntervalSince(startedAt)))
+                            Text(TimeFormatter.formattedDuration(now().timeIntervalSince(startedAt)))
                                 .font(.caption.monospacedDigit())
                                 .foregroundStyle(Theme.textSecondary)
                         }

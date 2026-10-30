@@ -27,13 +27,18 @@ struct AppShellView: View {
     /// button; the sheet itself stays in `HistoryView`, which owns the
     /// refresh.
     @State private var isHistoryLogTimeActive = false
+    /// App-owned clock (screenshot-capture seam; production `.live`).
+    private let clock: AppClock
 
-    init(vm: AppShellViewModel, container: AppContainer, trackSnapshot: TrackSnapshot? = nil) {
+    init(vm: AppShellViewModel, container: AppContainer, trackSnapshot: TrackSnapshot? = nil, clock: AppClock = .live) {
         _vm = StateObject(wrappedValue: vm)
+        self.clock = clock
         _trackVM = StateObject(wrappedValue: {
             let trackVM = TrackViewModel(
                 service: container.timerService,
-                connectivity: container.connectivity
+                connectivity: container.connectivity,
+                now: clock.now,
+                calendar: clock.calendar
             )
             // A gate-preloaded snapshot paints complete on the first commit
             // instead of re-querying (steady-track-launch). Previews and
@@ -233,7 +238,8 @@ struct AppShellView: View {
                 sync: container.syncController,
                 connectivity: container.connectivity,
                 refreshSignal: vm.runningTimer?.activityText ?? "",
-                logTimeActive: $isHistoryLogTimeActive
+                logTimeActive: $isHistoryLogTimeActive,
+                clock: clock
             )
             .environmentObject(vm)
             .safeAreaInset(edge: .bottom) { compactTimerIfNeeded }
@@ -259,7 +265,8 @@ struct AppShellView: View {
         NavigationStack(path: $vm.insightsPath) {
             InsightsView(
                 store: container.localStore,
-                refreshSignal: vm.runningTimer?.activityText ?? ""
+                refreshSignal: vm.runningTimer?.activityText ?? "",
+                clock: clock
             )
             .safeAreaInset(edge: .bottom) { compactTimerIfNeeded }
             .navigationTitle(L10n.tabInsights.text)
@@ -308,6 +315,7 @@ struct AppShellView: View {
             CompactTimer(
                 entryText: running.activityText,
                 startedAt: startedAt,
+                now: { vm.now },
                 openTrack: {
                     vm.selectedTab = .track
                 },

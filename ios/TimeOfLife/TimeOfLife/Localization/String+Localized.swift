@@ -265,17 +265,32 @@ enum L10n: String, CaseIterable {
     case accountCleanupRetryConfirm = "account.cleanupRetryConfirm"
 
     /// Resolves the key via `NSLocalizedString` against `Localizable.strings`.
+    /// In Screenshot builds an active capture override (`ScreenshotLocale`,
+    /// set from the request before the shell mounts) resolves first so
+    /// chrome matches the request in the same launch; otherwise identical
+    /// to shipping behavior. Explicit-bundle helpers below are unchanged.
     var text: String {
-        NSLocalizedString(rawValue, comment: "")
+        #if SCREENSHOT_CAPTURE
+        if let override = ScreenshotLocale.localizedString(key: rawValue) {
+            return override
+        }
+        #endif
+        return NSLocalizedString(rawValue, comment: "")
     }
 
 }
 
 extension String {
     /// Convenience for ad-hoc keys not enumerated in `L10n` (e.g. server error
-    /// codes). Falls back to the key itself if missing.
+    /// codes). Falls back to the key itself if missing. Same capture
+    /// override as `L10n.text` (see above).
     static func localized(_ key: String) -> String {
-        NSLocalizedString(key, comment: "")
+        #if SCREENSHOT_CAPTURE
+        if let override = ScreenshotLocale.localizedString(key: key) {
+            return override
+        }
+        #endif
+        return NSLocalizedString(key, comment: "")
     }
 
     /// The seven localized starter category names in creation order (the

@@ -29,14 +29,15 @@ struct TimerLiveActivityWidget: Widget {
     var body: some WidgetConfiguration {
         ActivityConfiguration(for: TimerActivityAttributes.self) { context in
             if let saved = context.state.savedDurationSeconds {
-                savedBanner(duration: TimerClock.formatted(saved))
+                savedBanner(duration: TimerClock.formatted(saved), localeIdentifier: context.attributes.localeIdentifier)
             } else {
                 RunningBannerFace(
                     text: context.attributes.entryText,
                     iconSymbol: context.state.liveIconSymbol,
                     startedAt: context.state.startedAt,
                     trackURL: trackURL,
-                    trackStopURL: trackStopURL
+                    trackStopURL: trackStopURL,
+                    localeIdentifier: context.attributes.localeIdentifier
                 )
             }
         } dynamicIsland: { context in
@@ -61,9 +62,9 @@ struct TimerLiveActivityWidget: Widget {
                             // the intent pill stays as the fail-safe so Stop
                             // never vanishes.
                             if let stopURL = trackStopURL {
-                                LiveActivityStopLink(destination: stopURL)
+                                LiveActivityStopLink(destination: stopURL, localeIdentifier: context.attributes.localeIdentifier)
                             } else {
-                                LiveActivityStopPill()
+                                LiveActivityStopPill(localeIdentifier: context.attributes.localeIdentifier)
                             }
                         } else {
                             Image(systemName: "checkmark")
@@ -88,7 +89,7 @@ struct TimerLiveActivityWidget: Widget {
                     // keeps long names clear of the island's curve.
                     .padding(.horizontal, 8)
                     .padding(.top, 8)
-                    .accessibilityLabel(LiveActivityStrings.runningAccessibilityLabel(text: context.attributes.entryText))
+                    .accessibilityLabel(LiveActivityStrings.runningAccessibilityLabel(text: context.attributes.entryText, localeIdentifier: context.attributes.localeIdentifier))
                     .widgetURL(trackURL)
                 }
             } compactLeading: {
@@ -113,11 +114,11 @@ struct TimerLiveActivityWidget: Widget {
 
     // MARK: - Lock Screen banner
 
-    private func savedBanner(duration: String) -> some View {
+    private func savedBanner(duration: String, localeIdentifier: String) -> some View {
         HStack(spacing: 8) {
             Image(systemName: "checkmark")
                 .font(.headline)
-            Text(LiveActivityStrings.savedCardTitle(duration: duration))
+            Text(LiveActivityStrings.savedCardTitle(duration: duration, localeIdentifier: localeIdentifier))
                 .font(.headline)
         }
         .widgetURL(trackURL)
@@ -140,7 +141,7 @@ struct TimerLiveActivityWidget: Widget {
         // the glyph run inside the (filled) text box — without it the
         // digits sit leading despite the trailing frame.
         .multilineTextAlignment(.trailing)
-        .accessibilityLabel(LiveActivityStrings.runningAccessibilityLabel(text: context.attributes.entryText))
+        .accessibilityLabel(LiveActivityStrings.runningAccessibilityLabel(text: context.attributes.entryText, localeIdentifier: context.attributes.localeIdentifier))
     }
     
     /// Expanded leading timer, big and borderless: the hero
@@ -184,7 +185,7 @@ struct TimerLiveActivityWidget: Widget {
         .font(.title.monospacedDigit())
         .lineLimit(1)
         .minimumScaleFactor(0.8)
-        .accessibilityLabel(LiveActivityStrings.runningAccessibilityLabel(text: context.attributes.entryText))
+        .accessibilityLabel(LiveActivityStrings.runningAccessibilityLabel(text: context.attributes.entryText, localeIdentifier: context.attributes.localeIdentifier))
     }
 
     /// Category chip row for the expanded bottom region: validated SF
@@ -227,6 +228,10 @@ struct LiveActivityStopButton: View {
     @Environment(\.isLuminanceReduced)
     private var isLuminanceReduced
 
+    /// Payload request locale: the accessibility label resolves from it
+    /// explicitly — never the appex system language.
+    let localeIdentifier: String
+
     var body: some View {
         Button(intent: StopTimerIntent()) {
             LiveActivityStopCircleLabel()
@@ -236,7 +241,7 @@ struct LiveActivityStopButton: View {
         // covers the woken-locked case, this covers the dimmed case).
         .disabled(isLuminanceReduced)
         .opacity(isLuminanceReduced ? 0.4 : 1.0)
-        .accessibilityLabel(LiveActivityStrings.stopAccessibilityLabel)
+        .accessibilityLabel(LiveActivityStrings.stopAccessibilityLabel(localeIdentifier: localeIdentifier))
     }
 }
 
@@ -266,6 +271,8 @@ struct LiveActivityStopCircleLink: View {
     private var isLuminanceReduced
 
     let destination: URL
+    /// Payload request locale (see `LiveActivityStopButton`).
+    let localeIdentifier: String
 
     var body: some View {
         Link(destination: destination) {
@@ -273,7 +280,7 @@ struct LiveActivityStopCircleLink: View {
         }
         .disabled(isLuminanceReduced)
         .opacity(isLuminanceReduced ? 0.4 : 1.0)
-        .accessibilityLabel(LiveActivityStrings.stopAccessibilityLabel)
+        .accessibilityLabel(LiveActivityStrings.stopAccessibilityLabel(localeIdentifier: localeIdentifier))
     }
 }
 
@@ -284,23 +291,31 @@ struct LiveActivityStopPill: View {
     @Environment(\.isLuminanceReduced)
     private var isLuminanceReduced
 
+    /// Payload request locale (see `LiveActivityStopButton`).
+    let localeIdentifier: String
+
     var body: some View {
         Button(intent: StopTimerIntent()) {
-            LiveActivityStopPillLabel()
+            LiveActivityStopPillLabel(localeIdentifier: localeIdentifier)
         }
         .buttonStyle(.plain)
         // Same AoD-dimmed/inert rule as `LiveActivityStopButton`.
         .disabled(isLuminanceReduced)
         .opacity(isLuminanceReduced ? 0.4 : 1.0)
-        .accessibilityLabel(LiveActivityStrings.stopAccessibilityLabel)
+        .accessibilityLabel(LiveActivityStrings.stopAccessibilityLabel(localeIdentifier: localeIdentifier))
     }
 }
 
 /// The pill's visuals, shared by the intent button (Link fallback) and the
 /// stop `Link` (Spike D) — one shape, never two.
 struct LiveActivityStopPillLabel: View {
+    /// Payload request locale: the pill title resolves from it explicitly —
+    /// this is the pt-BR "Parar" vs es-419 "Detener" fix (the appex process
+    /// never sees the app's request-locale override).
+    let localeIdentifier: String
+
     var body: some View {
-        Label(LiveActivityStrings.stopTitle, systemImage: "stop.fill")
+        Label(LiveActivityStrings.stopTitle(localeIdentifier: localeIdentifier), systemImage: "stop.fill")
             .font(.subheadline)
             .foregroundStyle(LiveActivityTheme.stopForeground)
             .padding(.horizontal, 10)
@@ -321,22 +336,24 @@ struct LiveActivityStopLink: View {
     private var isLuminanceReduced
 
     let destination: URL
+    /// Payload request locale (see `LiveActivityStopPillLabel`).
+    let localeIdentifier: String
 
     var body: some View {
         Link(destination: destination) {
-            LiveActivityStopPillLabel()
+            LiveActivityStopPillLabel(localeIdentifier: localeIdentifier)
         }
         // Same AoD-dimmed/inert rule as the intent controls.
         .disabled(isLuminanceReduced)
         .opacity(isLuminanceReduced ? 0.4 : 1.0)
-        .accessibilityLabel(LiveActivityStrings.stopAccessibilityLabel)
+        .accessibilityLabel(LiveActivityStrings.stopAccessibilityLabel(localeIdentifier: localeIdentifier))
     }
 }
 
 // Widget-extension previews must go through the Widget (plain View previews
 // are "unsupported preview type" in an appex). Pick the Lock Screen banner
 // variant in the canvas to see the banner face.
-#Preview("Glass banner", as: .content, using: TimerActivityAttributes(entryText: "Glass prototype", iconSymbol: "briefcase.fill")) {
+#Preview("Glass banner", as: .content, using: TimerActivityAttributes(entryText: "Glass prototype", iconSymbol: "briefcase.fill", localeIdentifier: "en")) {
     TimerLiveActivityWidget()
 } contentStates: {
     TimerActivityAttributes.ContentState(startedAt: Date().addingTimeInterval(-24))

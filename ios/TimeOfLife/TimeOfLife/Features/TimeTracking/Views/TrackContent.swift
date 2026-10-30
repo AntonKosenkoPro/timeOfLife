@@ -155,7 +155,7 @@ struct TrackContent: View {
     @ViewBuilder private var runningStartSlot: some View {
         Group {
             if let startedAt = vm.state.startedAt, vm.state.isRunning {
-                RunningStartEditor(startedAt: startedAt, now: Date()) {
+                RunningStartEditor(startedAt: startedAt, now: vm.now, calendar: vm.calendar, timeText: vm.timeText(for:)) {
                     vm.updateDraftStartedAt($0)
                 }
             } else {

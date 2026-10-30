@@ -43,6 +43,7 @@ Keep design under version control as plain Markdown so:
 | `SCREENS/EntryForm.md` | Unified entry form (`LogTimeView`) — CREATE sheet (Log Time), EDIT/LOCKED push from History. |
 | `SCREENS/ManageCategories.md` | Manage Categories screen — category CRUD, seeding, undo. |
 | `SCREENS/CategoryEditor.md` | Shared sheet to create/edit a category. |
+| `SCREENSHOTS.md` | App Store capture storyboard (active change, unverified): 5-frame story order, pilot defaults, locale/device matrix, Live Activity rules, montage scope, review gate. Capture tooling only — not a production feature. |
 | `DECISIONS.md` | Design precedents and rationale. |
 | `icon/ios/` | Authoritative iOS app-icon artwork and asset-catalog metadata. |
 

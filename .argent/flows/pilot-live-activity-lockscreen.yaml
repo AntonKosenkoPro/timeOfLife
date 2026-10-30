@@ -1,0 +1,13 @@
+executionPrerequisite: "Capture-only iPhone with the screenshots build installed; a live-activity-realtime frame prepared to ready with a running Live Activity; device starts unlocked."
+steps:
+  - echo: "Lock the device to reach the genuine Lock Screen and expect the running-activity card. The Lock Screen serves no runner tree (SpringBoard is not injectable), so this flow is deliberately procedural. The full-res screenshot is the human evidence. Live Activity presence, timer, and prompt handling are proven live per run in the run records and capture QA evidence."
+  - tool: button
+    args:
+      button: power
+  - tool: button
+    args:
+      button: power
+  - tool: screenshot
+    args:
+      scale: 1
+      includeImageInContext: false

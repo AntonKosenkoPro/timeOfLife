@@ -43,6 +43,8 @@ struct HistoryView: View {
     /// stop). Lets History reload an entry saved from the compact timer
     /// without leaving the tab.
     private let refreshSignal: String
+    /// App-owned clock (screenshot-capture seam; production `.live`).
+    private let clock: AppClock
 
     init(
         store: LocalStore,
@@ -51,9 +53,15 @@ struct HistoryView: View {
         sync: SyncController,
         connectivity: Connectivity,
         refreshSignal: String = "",
-        logTimeActive: Binding<Bool> = .constant(false)
+        logTimeActive: Binding<Bool> = .constant(false),
+        clock: AppClock = .live
     ) {
-        _vm = StateObject(wrappedValue: HistoryViewModel(store: store, undoBuffer: undoBuffer))
+        _vm = StateObject(wrappedValue: HistoryViewModel(
+            store: store,
+            undoBuffer: undoBuffer,
+            now: clock.now,
+            calendar: clock.calendar
+        ))
         _pull = StateObject(wrappedValue: HistoryPullModel(
             sync: sync,
             connectivity: connectivity
@@ -62,6 +70,7 @@ struct HistoryView: View {
             return session.id
         })
         self.refreshSignal = refreshSignal
+        self.clock = clock
         _isLogTimeActive = logTimeActive
     }
 

@@ -29,9 +29,15 @@ settings:
 configs:
   Debug: debug
   Release: release
+  # Release-optimized, simulator-only capture composition (screenshot-capture
+  # change, design §1): Release-class defaults, but does NOT inherit
+  # exact-name `Release` overrides — every Screenshot-specific setting below
+  # is explicit (research 2026-10-30).
+  Screenshot: release
 configFiles:
   Debug: TimeOfLife/Configuration/Config.Debug.xcconfig
   Release: TimeOfLife/Configuration/Config.Release.xcconfig
+  Screenshot: TimeOfLife/Configuration/Config.Screenshot.xcconfig
 targets:
   TimeOfLife:
     type: application
@@ -41,16 +47,24 @@ targets:
         excludes:
           - "Configuration/Config.Debug.xcconfig"
           - "Configuration/Config.Release.xcconfig"
+          - "Configuration/Config.Screenshot.xcconfig"
           - "Configuration/Info.plist"
           - "Configuration/Info-Debug.plist"
           - "Configuration/TimeOfLife.entitlements"
+          - "Configuration/TimeOfLife.Screenshots.entitlements"
       - path: TimeOfLife/Configuration/Config.Debug.xcconfig
         type: file
         buildPhase: none
       - path: TimeOfLife/Configuration/Config.Release.xcconfig
         type: file
         buildPhase: none
+      - path: TimeOfLife/Configuration/Config.Screenshot.xcconfig
+        type: file
+        buildPhase: none
       - path: TimeOfLife/Configuration/TimeOfLife.entitlements
+        type: file
+        buildPhase: none
+      - path: TimeOfLife/Configuration/TimeOfLife.Screenshots.entitlements
         type: file
         buildPhase: none
       - path: TimeOfLife/Localization/en.lproj
@@ -156,6 +170,21 @@ targets:
           # signing, device builds need the development identity; archives
           # still pick the distribution identity automatically.
           CODE_SIGN_IDENTITY: Apple Development
+        # Screenshot capture (screenshot-capture design §1): separate
+        # simulator-only identity + compile gate. Unsigned (simulator needs
+        # no signing); SUPPORTED_PLATFORMS rejects physical-device builds
+        # and device-destination archives at build time. Normal Debug/Release
+        # routing is untouched.
+        Screenshot:
+          PRODUCT_BUNDLE_IDENTIFIER: com.antonkosenko.timeoflifeapp.screenshots
+          CODE_SIGN_ENTITLEMENTS: TimeOfLife/Configuration/TimeOfLife.Screenshots.entitlements
+          SWIFT_ACTIVE_COMPILATION_CONDITIONS: SCREENSHOT_CAPTURE
+          SUPPORTED_PLATFORMS: iphonesimulator
+          # Release-type configs disable testability by default; the
+          # Screenshot scheme runs the test bundle against this build, and
+          # `@testable import` requires it (optimization stays Release-class
+          # — only internal-symbol visibility changes, no rendering impact).
+          ENABLE_TESTABILITY: YES
     # Capabilities MUST be declared here: Xcode writes them to
     # TargetAttributes.SystemCapabilities in the (gitignored) .pbxproj,
     # so anything added only via the Xcode UI is wiped by the next
@@ -198,6 +227,19 @@ targets:
       # widget extension stays dependency-light by design (see above).
       - package: Sentry
         product: Sentry
+    # Leading guard (screenshot-capture tasks 2.1): denies install-type
+    # actions (`xcodebuild archive`/`install`, which run phases with
+    # ACTION=install) for the Screenshot configuration only, so a
+    # simulator-destination archive can never be mistaken for a
+    # distributable artifact. Normal build/test actions and every
+    # Debug/Release action stay allowed (see the script + its matrix test).
+    preBuildScripts:
+      - name: Deny Screenshot install/archive
+        path: scripts/deny-screenshot-install.sh
+        # Always runs by design (a gate that could be skipped by dependency
+        # analysis is no gate): same declaration as the Stamp phase below,
+        # silencing Xcode's "will be run during every build" warning.
+        basedOnDependencyAnalysis: false
     # Trailing stamp (profile-version-sha): writes the built commit's 7-char
     # SHA into the *built* Info.plist as GIT_COMMIT_SHA for the Profile
     # version footer. Trailing on purpose — the built plist only exists after
@@ -255,6 +297,7 @@ targets:
         excludes:
           - "Info.plist"
           - "LifioLiveActivities.entitlements"
+          - "LifioLiveActivities.Screenshots.entitlements"
       # Shared app sources compiled into the extension (live-activities
       # change). Each is dependency-light by design (Foundation/GRDB/UIKit
       # only) — do NOT add feature files here without checking their
@@ -307,6 +350,9 @@ targets:
       - path: LifioLiveActivities/LifioLiveActivities.entitlements
         type: file
         buildPhase: none
+      - path: LifioLiveActivities/LifioLiveActivities.Screenshots.entitlements
+        type: file
+        buildPhase: none
     info:
       path: LifioLiveActivities/Info.plist
       properties:
@@ -355,6 +401,13 @@ targets:
           DEVELOPMENT_TEAM: 7923U48U87
           CODE_SIGNING_REQUIRED: YES
           CODE_SIGN_IDENTITY: Apple Development
+        # Screenshot capture (same contract as the app target above):
+        # separate simulator-only identity + compile gate, unsigned.
+        Screenshot:
+          PRODUCT_BUNDLE_IDENTIFIER: com.antonkosenko.timeoflifeapp.screenshots.liveactivities
+          CODE_SIGN_ENTITLEMENTS: LifioLiveActivities/LifioLiveActivities.Screenshots.entitlements
+          SWIFT_ACTIVE_COMPILATION_CONDITIONS: SCREENSHOT_CAPTURE
+          SUPPORTED_PLATFORMS: iphonesimulator
     # Same regen rule as the app target (see above): capabilities declared
     # here, options.postGenCommand normalizes them back to a native PBX
     # dict on every generate.
@@ -392,6 +445,14 @@ targets:
         GENERATE_INFOPLIST_FILE: YES
         SWIFT_TREAT_WARNINGS_AS_ERRORS: YES
         GCC_TREAT_WARNINGS_AS_ERRORS: YES
+      configs:
+        # Gated capture tests (`#if SCREENSHOT_CAPTURE`) execute ONLY under
+        # the TimeOfLife-Screenshot scheme: without this flag they compile
+        # empty and a screenshot test run would vacuously succeed (review
+        # finding 2026-10-30). DEBUG deliberately has NO capture flag, so
+        # the gate-absence tests keep verifying shipping behavior there.
+        Screenshot:
+          SWIFT_ACTIVE_COMPILATION_CONDITIONS: SCREENSHOT_CAPTURE
 schemes:
   TimeOfLife:
     build:
@@ -412,6 +473,30 @@ schemes:
       config: Debug
     archive:
       config: Release
+  # Screenshot capture (screenshot-capture design §1): non-distribution
+  # scheme for the simulator-only Screenshot configuration. Never archived
+  # to Cloud (no Archive-to-TestFlight wiring); a device-destination archive
+  # fails via SUPPORTED_PLATFORMS. Tests run the Screenshot build so the
+  # gated capture code paths execute under test.
+  TimeOfLife-Screenshot:
+    build:
+      targets:
+        TimeOfLife: all
+        LifioLiveActivityCore: all
+        LifioLiveActivities: all
+        TimeOfLifeTests: [test]
+    run:
+      config: Screenshot
+    test:
+      config: Screenshot
+      targets:
+        - TimeOfLifeTests
+    profile:
+      config: Screenshot
+    analyze:
+      config: Screenshot
+    archive:
+      config: Screenshot
 packages:
   GRDB:
     url: https://github.com/groue/GRDB.swift

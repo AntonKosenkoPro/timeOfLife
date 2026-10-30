@@ -91,6 +91,10 @@ private struct PressablePillStyle: ButtonStyle {
 struct RunningStartEditor: View {
     let startedAt: Date
     let now: Date
+    /// Calendar for day math (screenshot-capture seam; production `.current`).
+    let calendar: Calendar
+    /// Short-time text in the owning view model's locale (capture-pinned).
+    let timeText: (Date) -> String
     let onPick: (Date) -> Void
 
     @State private var isPresented = false
@@ -113,8 +117,8 @@ struct RunningStartEditor: View {
             // The wheel is time-only: seed the day from the current start so
             // a reopened sheet reflects where the run actually began, and
             // freeze the reference clock for this editing session.
-            picksYesterday = RunningStartTimeResolver.isYesterday(startedAt, now: now)
-            referenceNow = Date()
+            picksYesterday = RunningStartTimeResolver.isYesterday(startedAt, now: now, calendar: calendar)
+            referenceNow = now
             isPresented = true
         } label: {
             Text(startCaption)
@@ -131,6 +135,7 @@ struct RunningStartEditor: View {
             RunningStartSheetContent(
                 startedAt: startedAt,
                 referenceNow: referenceNow,
+                calendar: calendar,
                 draft: $draft,
                 picksYesterday: $picksYesterday,
                 confirmed: $confirmedSelection
@@ -156,6 +161,7 @@ struct RunningStartEditor: View {
 private struct RunningStartSheetContent: View {
     let startedAt: Date
     let referenceNow: Date
+    let calendar: Calendar
     @Binding var draft: Date?
     @Binding var picksYesterday: Bool
     @Binding var confirmed: Date?
@@ -174,10 +180,11 @@ private struct RunningStartSheetContent: View {
                         // segment never disagree.
                         let base = min(draft ?? startedAt, referenceNow)
                         let target = RunningStartTimeResolver.floorToMinute(
-                            min(base.addingTimeInterval(Double(minutes * 60)), referenceNow)
+                            min(base.addingTimeInterval(Double(minutes * 60)), referenceNow),
+                            calendar: calendar
                         )
                         draft = target
-                        picksYesterday = RunningStartTimeResolver.isYesterday(target, now: referenceNow)
+                        picksYesterday = RunningStartTimeResolver.isYesterday(target, now: referenceNow, calendar: calendar)
                     }
                     .accessibilityIdentifier("RunningStartPresets")
                     // Explicit day instead of a silent fold: Today rejects
@@ -217,7 +224,8 @@ private struct RunningStartSheetContent: View {
                         if let valid = RunningStartTimeResolver.resolveForDay(
                             picked: candidate,
                             yesterday: newYesterday,
-                            now: referenceNow
+                            now: referenceNow,
+                            calendar: calendar
                         ) {
                             draft = valid
                         }
@@ -266,7 +274,6 @@ private struct RunningStartSheetContent: View {
     /// same-day selection stranded by the clock crossing midnight while the
     /// sheet is open), never a clamp.
     private var wheelRange: ClosedRange<Date> {
-        let calendar = Calendar.current
         if picksYesterday {
             let day = calendar.date(byAdding: .day, value: -1, to: referenceNow) ?? referenceNow
             let start = calendar.startOfDay(for: day)
@@ -288,7 +295,8 @@ private struct RunningStartSheetContent: View {
         RunningStartTimeResolver.resolveForDay(
             picked: draft ?? startedAt,
             yesterday: picksYesterday,
-            now: referenceNow
+            now: referenceNow,
+            calendar: calendar
         )
     }
 }
@@ -299,7 +307,8 @@ private extension RunningStartEditor {
         RunningStartTimeResolver.caption(
             for: startedAt,
             now: now,
-            timeText: HistoryViewModel.timeText(for:)
+            calendar: calendar,
+            timeText: timeText
         )
     }
 }

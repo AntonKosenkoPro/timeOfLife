@@ -28,6 +28,9 @@ final class HistoryViewModel: ObservableObject {
     private let store: LocalStore
     private let undoBuffer: UndoBufferStore
     private let nowProvider: () -> Date
+    /// Calendar (with locale/time zone) for grouping and labels
+    /// (screenshot-capture seam; production keeps `.current`).
+    let calendar: Calendar
     private var needsReload = true
     private var categoriesByID: [String: Category] = [:]
     /// The UndoManager the current registration belongs to, held weakly so
@@ -38,11 +41,13 @@ final class HistoryViewModel: ObservableObject {
     init(
         store: LocalStore,
         undoBuffer: UndoBufferStore,
-        now: @escaping () -> Date = Date.init
+        now: @escaping () -> Date = Date.init,
+        calendar: Calendar = .current
     ) {
         self.store = store
         self.undoBuffer = undoBuffer
         self.nowProvider = now
+        self.calendar = calendar
     }
 
     /// Reloads entries and categories and rebuilds the day groups. Called on
@@ -55,7 +60,12 @@ final class HistoryViewModel: ObservableObject {
             let categories = try await store.categories()
             categoriesByID = Dictionary(uniqueKeysWithValues: categories.map { ($0.id, $0) })
 
-            dayGroups = Self.makeDayGroups(entries: entries, now: Date())
+            dayGroups = Self.makeDayGroups(
+                entries: entries,
+                now: nowProvider(),
+                calendar: calendar,
+                locale: calendar.locale ?? .current
+            )
         } catch {
             dayGroups = []
         }
@@ -167,14 +177,14 @@ final class HistoryViewModel: ObservableObject {
     /// The start–end timeframe caption ("14:00 – 15:20"); an in-progress
     /// entry shows the start time followed by the in-progress indicator (D5).
     func timeframeText(for entry: TimeEntry) -> String {
-        let start = Self.timeText(for: entry.startedAt)
+        let start = timeText(for: entry.startedAt)
         if isInProgress(entry) {
             return "\(start) – \(L10n.historyInProgress.text)"
         }
         guard let endedAt = entry.endedAt else {
             return start
         }
-        return "\(start) – \(Self.timeText(for: endedAt))"
+        return "\(start) – \(timeText(for: endedAt))"
     }
 
     /// The entry's natural-language duration in the given locale; an
@@ -182,7 +192,10 @@ final class HistoryViewModel: ObservableObject {
     /// instead (D5).
     /// - Note: the in-progress indicator intentionally follows the app
     ///   language (`L10n`), not `locale`.
-    func durationText(for entry: TimeEntry, locale: Locale = .current) -> String {
+    /// - Note: a nil locale follows the capture request locale while a
+    ///   capture override is active (screenshot-capture chrome fix), else
+    ///   the process locale. Explicit locales always win.
+    func durationText(for entry: TimeEntry, locale: Locale? = nil) -> String {
         if isInProgress(entry) {
             return L10n.historyInProgress.text
         }
@@ -190,7 +203,7 @@ final class HistoryViewModel: ObservableObject {
             start: entry.startedAt,
             end: entry.endedAt
         )
-        return Self.naturalDuration(seconds, locale: locale)
+        return Self.naturalDuration(seconds, locale: Self.defaultUnitLocale(locale))
     }
 
     /// The entry's own ordered categories, position-preserved, unknown ids
@@ -238,7 +251,10 @@ final class HistoryViewModel: ObservableObject {
     }
 
     /// "Today" / "Yesterday" for the two most recent calendar days, then the
-    /// device-locale regional date for older days (D3).
+    /// device-locale regional date for older days (D3). The absolute
+    /// formatter follows the grouping calendar's locale/time zone
+    /// (screenshot-capture seam; identical to process defaults in
+    /// production, where the calendar is `.current`).
     nonisolated static func dayLabel(for day: Date, now: Date, calendar: Calendar = .current) -> String {
         let today = calendar.startOfDay(for: now)
         let dayStart = calendar.startOfDay(for: day)
@@ -251,6 +267,8 @@ final class HistoryViewModel: ObservableObject {
             formatter.dateStyle = .medium
             formatter.timeStyle = .none
             formatter.calendar = calendar
+            formatter.locale = calendar.locale ?? .current
+            formatter.timeZone = calendar.timeZone
             return formatter.string(from: day)
         }
     }
@@ -260,15 +278,58 @@ final class HistoryViewModel: ObservableObject {
     /// plurals elsewhere, e.g. `1 ч 12 мин` in Russian) (D5). The grammar —
     /// which tiers appear — is fixed here; Foundation owns the unit words.
     /// Implementation lives in `DurationFormatting`; this forwards so
-    /// existing call sites keep compiling unchanged.
-    nonisolated static func naturalDuration(_ seconds: Int, locale: Locale = .current) -> String {
-        DurationFormatting.natural(seconds, locale: locale)
+    /// existing call sites keep compiling unchanged. A nil locale follows
+    /// the capture request locale while a capture override is active
+    /// (screenshot-capture chrome fix), else the process locale.
+    nonisolated static func naturalDuration(_ seconds: Int, locale: Locale? = nil) -> String {
+        DurationFormatting.natural(seconds, locale: defaultUnitLocale(locale))
     }
 
-    /// Short-time caption ("14:00").
-    nonisolated static func timeText(for date: Date) -> String {
-        timeFormatter.string(from: date)
+    /// Default locale for unit chrome: the capture request locale while a
+    /// capture override is active, else the process locale. Explicit
+    /// parameters always win (unit tests pass explicit values).
+    nonisolated private static func defaultUnitLocale(_ locale: Locale?) -> Locale {
+        #if SCREENSHOT_CAPTURE
+        if let locale {
+            return locale
+        }
+        return ScreenshotLocale.appLocale ?? .current
+        #else
+        return locale ?? .current
+        #endif
     }
+
+    /// Short-time caption ("14:00") in the process locale (unchanged
+    /// production path; the capture-pinned variant is `timeText(for:)`).
+    nonisolated static func timeText(for date: Date) -> String {
+        #if SCREENSHOT_CAPTURE
+        // The Add-entry frame's pills render through this static helper,
+        // which otherwise keeps the stale launch locale/time zone.
+        if let locale = ScreenshotLocale.appLocale, let timeZone = ScreenshotLocale.appTimeZone {
+            let formatter = DateFormatter()
+            formatter.timeStyle = .short
+            formatter.locale = locale
+            formatter.timeZone = timeZone
+            return formatter.string(from: date)
+        }
+        #endif
+        return timeFormatter.string(from: date)
+    }
+
+    /// Short-time caption in the view model's calendar locale/time zone
+    /// (screenshot-capture seam; production matches the static helper via
+    /// the process locale). Built once: `timeframeText` runs per row.
+    func timeText(for date: Date) -> String {
+        instanceTimeFormatter.string(from: date)
+    }
+
+    private lazy var instanceTimeFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.timeStyle = .short
+        formatter.locale = self.calendar.locale ?? .current
+        formatter.timeZone = self.calendar.timeZone
+        return formatter
+    }()
 
     private static func clampedSeconds(start: Date, end: Date?) -> Int {
         guard let end else { return 0 }
