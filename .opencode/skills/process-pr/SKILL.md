@@ -12,7 +12,7 @@ Take an implemented branch to **human-review-ready**. You open/fill the PR,
 green the mandatory checks, sweep AI review (fixing only proven findings),
 then STOP for a human. You never merge.
 
-> Model routing: orchestrator runs on `opencode-go/muse-spark-1.3-contributor#high`
+> Model routing: orchestrator runs on `opencode-go/muse-spark-1.3-contributor#xhigh`
 > (set by the `/lifio-pr` wrapper command frontmatter, not by this skill —
 > invoking this skill directly does not switch models; invoke via
 > `/lifio-pr` or set the model manually). Delegate ALL code edits,
