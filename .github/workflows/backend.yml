@@ -344,13 +344,13 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: Copy compose and nginx configs to VM
+      - name: Copy compose, nginx, Collector, and scripts to VM
         uses: appleboy/scp-action@v0.1.7
         with:
           host: ${{ secrets.VM_HOST }}
           username: ${{ secrets.VM_USER }}
           key: ${{ secrets.VM_SSH_KEY }}
-          source: "backend/docker-compose.prod.yml,backend/nginx,backend/otelcol-config.yaml"
+          source: "backend/docker-compose.prod.yml,backend/nginx,backend/otelcol-config.yaml,backend/scripts"
           target: "/opt/timeoflife"
           strip_components: 1
 
@@ -702,6 +702,18 @@ jobs:
               echo "healthchecks pinger installed"
             else
               echo "::warning::HC_PING_URL secret is empty — skipping healthchecks pinger install"
+            fi
+
+            # Weekly Supabase size guard (observability §4.3): 350 MB line,
+            # exit 2 on breach. Deploy-managed (survives redeploys and fresh
+            # VMs — the script ships via the SCP step above). Breach pings
+            # the Healthchecks fail endpoint (same URL + /fail); OK weeks
+            # stay silent. Empty secret = skipped with a warning.
+            if [ -n "${{ secrets.HC_PING_URL }}" ]; then
+              (crontab -l 2>/dev/null | grep -v 'supabase-size-check' || true; echo "0 9 * * 1 set -a; . /opt/timeoflife/.env; PSQL_BIN='docker run --rm postgres:15-alpine psql' sh /opt/timeoflife/scripts/supabase-size-check.sh >/dev/null 2>&1 || curl -sm 10 \"${{ secrets.HC_PING_URL }}/fail\" >/dev/null 2>&1") | crontab -
+              echo "supabase size-check cron installed"
+            else
+              echo "::warning::HC_PING_URL secret is empty — skipping supabase size-check cron install"
             fi
 
             # Clean up old images
