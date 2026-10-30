@@ -24,6 +24,10 @@
 # exact shape when provisioning (§4) before enabling.
 
 receivers:
+  # NOTE: env vars here MUST use the explicit `${env:VAR:-default}` form.
+  # Bare `${VAR:-default}` crash-loops Collector >= 0.135 (confmap parses
+  # the braces as a config URI — "invalid uri", proven by `validate` runs
+  # against the pinned 0.135.0 image). Never drop the `env:` scheme.
   otlp:
     protocols:
       grpc:
@@ -46,7 +50,7 @@ processors:
     # including the rollback path; compose default covers manual runs).
     attributes:
       - key: environment
-        value: ${ENVIRONMENT:-production}
+        value: ${env:ENVIRONMENT:-production}
         action: upsert
   batch: {}
 
@@ -59,9 +63,9 @@ exporters:
   # identifiers (user_id, device_id), tokens, and entry text ride in payloads
   # only, never as labels (R1).
   otlphttp/grafana:
-    endpoint: ${GRAFANA_CLOUD_OTLP_ENDPOINT:-http://127.0.0.1:9}
+    endpoint: ${env:GRAFANA_CLOUD_OTLP_ENDPOINT:-http://127.0.0.1:9}
     headers:
-      Authorization: Basic ${GRAFANA_CLOUD_OTLP_KEY:-disabled}
+      Authorization: Basic ${env:GRAFANA_CLOUD_OTLP_KEY:-disabled}
     sending_queue:
       enabled: false
     retry_on_failure:
