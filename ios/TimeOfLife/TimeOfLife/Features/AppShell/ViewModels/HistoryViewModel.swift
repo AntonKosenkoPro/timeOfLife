@@ -1,18 +1,5 @@
 import Foundation
 
-/// Day-grouped view data for the History list (history-entry-list spec).
-struct DayGroup: Identifiable, Equatable {
-    /// Stable identifier for the calendar day (e.g. "2026-09-03").
-    let id: String
-    /// Relative ("Today" / "Yesterday") or absolute regional day label.
-    let label: String
-    /// The day's entries, newest first.
-    let entries: [TimeEntry]
-    /// Natural-language sum of the day's known durations (e.g. "2h 35m").
-    /// Entries with no duration (in-progress) contribute zero (D8).
-    let total: String
-}
-
 /// Loads committed time entries from the local store and groups them by
 /// calendar day for the History list (history-entry-list spec, design D2/D6).
 /// Read-only: owns data only — scroll/chrome state lives in `HistoryView`.
@@ -24,12 +11,47 @@ final class HistoryViewModel: ObservableObject {
     @Published private(set) var dayGroups: [DayGroup] = []
     @Published private(set) var isLoading = false
     @Published private(set) var undoError: String?
+    /// The live History search text, bound to the native search field
+    /// (history-search spec). In-memory only: never persisted, logged, or
+    /// sent anywhere (design D7). Editing it re-derives from the cached
+    /// snapshot; reloads re-apply the latest query (latest-query-wins).
+    @Published var searchText = "" {
+        didSet {
+            guard searchText != oldValue else { return }
+            applySearch()
+        }
+    }
+    /// Localized syntax diagnostic for the current query, or nil when the
+    /// query is blank or valid. Invalid queries show no rows at all.
+    @Published private(set) var searchDiagnostic: String?
+    /// True for valid non-empty queries (including date-only/scope-only):
+    /// groups show matching (not tracked) totals.
+    @Published private(set) var isSearchFiltering = false
+    /// Scrolling result summary for valid non-empty queries with at least
+    /// one match (history-search spec): localized plural count plus the
+    /// combined known-duration total. Derived from the published groups,
+    /// so it needs no stored state and stays consistent with the rows:
+    /// nil for blank queries, invalid queries, and zero matches.
+    var searchSummary: String? {
+        guard isSearchFiltering else { return nil }
+        let matched = dayGroups.flatMap(\.entries)
+        return HistorySearchSummary.text(
+            count: matched.count,
+            totalSeconds: HistorySearchSummary.totalSeconds(matched)
+        )
+    }
 
     private let store: LocalStore
     private let undoBuffer: UndoBufferStore
     private let nowProvider: () -> Date
     private var needsReload = true
     private var categoriesByID: [String: Category] = [:]
+    /// Cached ungrouped snapshot feeding both blank History and search
+    /// derivation (design D1). Replaced on every load; never mutated.
+    private var allEntries: [TimeEntry] = []
+    /// Per-entry search presentation for the current query, keyed by
+    /// entry id. Rebuilt with every derivation, never in row bodies.
+    private var searchPresentations: [String: HistorySearchRowPresentation] = [:]
     /// The UndoManager the current registration belongs to, held weakly so
     /// the re-registration after an undo targets the same manager without
     /// capturing a non-Sendable value in the undo handler closure.
@@ -54,10 +76,15 @@ final class HistoryViewModel: ObservableObject {
             let entries = try await store.entries()
             let categories = try await store.categories()
             categoriesByID = Dictionary(uniqueKeysWithValues: categories.map { ($0.id, $0) })
-
-            dayGroups = Self.makeDayGroups(entries: entries, now: Date())
+            allEntries = entries
+            // Derive from the CURRENT query, not a captured one: typing may
+            // have advanced while the fetch was in flight, and the newest
+            // text must win over this load (design D1).
+            applySearch()
         } catch {
+            allEntries = []
             dayGroups = []
+            searchPresentations = [:]
         }
     }
 
@@ -74,6 +101,66 @@ final class HistoryViewModel: ObservableObject {
     /// Marks the data stale so the next History appear reloads it.
     func invalidate() {
         needsReload = true
+    }
+
+    // MARK: - History search (history-search spec, design D1/D7)
+
+    /// Re-derives groups and match presentation from the cached snapshot
+    /// and the current query/calendar context. Called on query edits and
+    /// on significant time/timezone changes while History stays visible.
+    /// Pure rendering control: never touches the outbox or sync.
+    func refreshTimeContext() {
+        applySearch()
+    }
+
+    /// Whether a History search query hides the bottom tab bar
+    /// (history-search spec, design D4): any non-blank text hides it —
+    /// results, no-matches, and syntax-diagnostic states alike. A blank
+    /// query (empty or whitespace-only, including a merely focused empty
+    /// field) keeps the tab bar. `nonisolated`: pure text check, callable
+    /// from synchronous test contexts without a host app.
+    nonisolated static func hidesTabBar(for query: String) -> Bool {
+        !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    /// Search presentation for a row, or nil on the blank path (the row
+    /// then renders exactly as unfiltered History).
+    func searchPresentation(for entry: TimeEntry) -> HistorySearchRowPresentation? {
+        guard isSearchFiltering else { return nil }
+        return searchPresentations[entry.id]
+    }
+
+    /// Parses once per query and derives once per entry/snapshot.
+    private func applySearch() {
+        guard !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            searchDiagnostic = nil
+            isSearchFiltering = false
+            searchPresentations = [:]
+            dayGroups = Self.makeDayGroups(entries: allEntries, now: Date())
+            return
+        }
+        switch HistorySearchParser.parse(searchText) {
+        case .blank:
+            searchDiagnostic = nil
+            isSearchFiltering = false
+            searchPresentations = [:]
+            dayGroups = Self.makeDayGroups(entries: allEntries, now: Date())
+        case .invalid(let diagnostic):
+            searchDiagnostic = diagnostic.message
+            isSearchFiltering = false
+            searchPresentations = [:]
+            dayGroups = []
+        case .valid(let query):
+            searchDiagnostic = nil
+            isSearchFiltering = true
+            let derived = HistorySearchEvaluator.derive(
+                entries: allEntries,
+                categoriesByID: categoriesByID,
+                query: query
+            )
+            searchPresentations = derived.presentations
+            dayGroups = Self.makeDayGroups(entries: derived.matched, now: Date())
+        }
     }
 
     // MARK: - Entry shake-to-undo (history-entry-list, fix-87)

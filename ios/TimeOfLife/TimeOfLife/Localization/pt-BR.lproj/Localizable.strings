@@ -158,6 +158,25 @@
 // Notes indicator (history-entry-list)
 "history.hasNotes" = "tem notas";
 
+// History search (history-search)
+"history.matching" = "encontrado";
+"history.search.prompt" = "Pesquisar registros por nome e categoria";
+"history.search.noResults" = "Nenhum resultado";
+"history.search.noResults.subtitle" = "Tente outras palavras ou datas.";
+"history.search.clear" = "Limpar pesquisa";
+"history.search.hint" = "Exemplo: morning gym in:name,notes started:2026-10-01..2026-10-31 OR swim has:notes";
+"history.search.notesLabel" = "Notas:";
+"history.search.error.unknown" = "Qualificador desconhecido: \"%@\". Use in:, started:, ended:, duration: ou has:.";
+"history.search.error.scope" = "Campo desconhecido: \"%@\". Use name, categories ou notes.";
+"history.search.error.empty" = "Falta o valor após \"%@\".";
+"history.search.error.quote" = "Aspas sem fechar. Feche cada \" e use \\\" ou \\\\ dentro das frases.";
+"history.search.error.date" = "Verifique a data após \"%@\". Use YYYY-MM-DD, YYYY-MM-DDTHH:MM:SSZ ou HH:MM.";
+"history.search.error.range" = "Verifique o intervalo \"%@\". Use A..B, A..* ou *..B com o menor limite primeiro.";
+"history.search.error.operator" = "Verifique \"%@\". Use AND/OR entre grupos; parênteses e qualificadores negados não são aceitos (exceto -has:notes e -has:category).";
+"history.search.error.has" = "Verifique has:\"%@\". Use has:notes ou has:category (negação com -has:).";
+"history.search.error.time" = "Verifique a hora em \"%@\". Use HH:MM ou HH:MM:SS (00:00–23:59).";
+"history.search.error.duration" = "Verifique a duração em \"%@\". Use unidades d/h/m/s, ex. 1h, 90m, 2d5h (da maior para a menor).";
+
 // History pull-to-refresh (history-pull-to-sync)
 "history.pull.offline" = "Você está offline. Conecte-se e tente de novo.";
 "history.syncError.title" = "Falha na sincronização";

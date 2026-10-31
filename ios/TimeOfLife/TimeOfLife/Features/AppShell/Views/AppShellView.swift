@@ -27,6 +27,12 @@ struct AppShellView: View {
     /// button; the sheet itself stays in `HistoryView`, which owns the
     /// refresh.
     @State private var isHistoryLogTimeActive = false
+    /// Whether the History search query currently hides the bottom tab
+    /// bar (history-search spec, design D4): mirrored up from
+    /// `HistoryView` as the blank vs non-blank query state changes.
+    /// Read only by the History stack's stack-owned tab-bar visibility
+    /// below; no other tab reads it.
+    @State private var historySearchHidesTabBar = false
 
     init(vm: AppShellViewModel, container: AppContainer, trackSnapshot: TrackSnapshot? = nil) {
         _vm = StateObject(wrappedValue: vm)
@@ -233,7 +239,9 @@ struct AppShellView: View {
                 sync: container.syncController,
                 connectivity: container.connectivity,
                 refreshSignal: vm.runningTimer?.activityText ?? "",
-                logTimeActive: $isHistoryLogTimeActive
+                logTimeActive: $isHistoryLogTimeActive,
+                showsCompactTimer: isCompactTimerVisible,
+                searchHidesTabBar: $historySearchHidesTabBar
             )
             .environmentObject(vm)
             .safeAreaInset(edge: .bottom) { compactTimerIfNeeded }
@@ -247,8 +255,16 @@ struct AppShellView: View {
         }
         // Stack-owned tab-bar visibility (fix-tab-bar-return-jump): same
         // contract as the Track stack — the bar shows iff this tab sits at
-        // its root. The pushed entry form declares nothing itself.
-        .toolbar(AppShellViewModel.isTabBarHidden(path: vm.historyPath) ? .hidden : .automatic, for: .tabBar)
+        // its root — plus History search (history-search spec, design D4):
+        // a non-blank query hides the bar with an animated transition and
+        // clearing back to blank restores it. A blank query (including a
+        // focused empty field) never hides it. The pushed entry form
+        // declares nothing itself.
+        .toolbar(
+            (AppShellViewModel.isTabBarHidden(path: vm.historyPath) || historySearchHidesTabBar)
+                ? .hidden : .automatic,
+            for: .tabBar
+        )
         .onChange(of: vm.historyPath) { old, new in
             profilePoppedReload(old: old, new: new)
         }
@@ -301,9 +317,18 @@ struct AppShellView: View {
         }
     }
 
+    /// Whether the compact timer surface is currently shown (mirrors the
+    /// `compactTimerIfNeeded` condition): History's no-results state uses
+    /// it to reserve matching bottom clearance only when the timer is
+    /// absent (history-search spec).
+    private var isCompactTimerVisible: Bool {
+        guard let running = vm.runningTimer else { return false }
+        return !running.activityText.isEmpty && running.startedAt != nil
+    }
+
     @ViewBuilder private var compactTimerIfNeeded: some View {
-        if let running = vm.runningTimer,
-           !running.activityText.isEmpty,
+        if isCompactTimerVisible,
+           let running = vm.runningTimer,
            let startedAt = running.startedAt {
             CompactTimer(
                 entryText: running.activityText,

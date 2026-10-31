@@ -88,6 +88,7 @@ extension AppContainer {
     ) {
         seed(screen: screen, sessionStore: sessionStore, navigation: navigation)
         seedHistoryIfNeeded(screen: screen, localStore: localStore)
+        seedHistorySearchIfNeeded(screen: screen, localStore: localStore)
         seedTrackCategoriesIfNeeded(screen: screen, localStore: localStore)
         seedZhFitIfNeeded(screen: screen, localStore: localStore)
         seedDeletionEvidence(keychain: keychain)
@@ -140,6 +141,18 @@ extension AppContainer {
             // Track and the loop taps the History tab. Entries carry no
             // categories (fallback icon rows) — the headers, totals, and
             // scroll behavior are what is inspected.
+            sessionStore.setSignedIn(CachedSession(
+                id: "ui-test", email: "user@example.com", emailVerified: true
+            ))
+            navigation.path = []
+        case "historySearch":
+            // History search polish harness (add-history-search section 11):
+            // three committed entries across two days with categories and
+            // notes, so the result summary and notes-excerpt treatment can
+            // be inspected deterministically. `gym in:name,notes` matches
+            // all three (30m + 45m + in-progress zero) with excerpts on the
+            // first two; `sport in:categories` matches the first two with
+            // caption highlights and no excerpts.
             sessionStore.setSignedIn(CachedSession(
                 id: "ui-test", email: "user@example.com", emailVerified: true
             ))
@@ -204,6 +217,59 @@ extension AppContainer {
     private static func seedHistoryIfNeeded(screen: String, localStore: LocalStore) {
         guard screen == "history" else { return }
         Task { await seedHistoryEntries(into: localStore) }
+    }
+
+    /// Kicks off the three-entry History search fixture for the
+    /// `"historySearch"` screen (section 11 verification only): two
+    /// same-day entries plus yesterday's in-progress one, with categories
+    /// and notes. Idempotent on `id`, same degrade-to-empty policy as the
+    /// History harness above.
+    private static func seedHistorySearchIfNeeded(screen: String, localStore: LocalStore) {
+        guard screen == "historySearch" else { return }
+        Task { await seedHistorySearchEntries(into: localStore) }
+    }
+
+    private static func seedHistorySearchEntries(into store: LocalStore) async {
+        do {
+            try await store.createCategory(Category(
+                id: "uitest-hs-sport", name: "Sport", icon: "figure.run"
+            ))
+        } catch {
+            seedLogger.error("UITest seed: historySearch category failed")
+        }
+        let calendar = Calendar(identifier: .gregorian)
+        let todayStart = calendar.startOfDay(for: Date())
+        let yesterdayStart = calendar.date(byAdding: .day, value: -1, to: todayStart)!
+        let fixtures: [TimeEntry] = [
+            TimeEntry(
+                id: "uitest-hs-a",
+                activityText: "Morning Gym",
+                startedAt: calendar.date(byAdding: .minute, value: 605, to: todayStart)!,
+                endedAt: calendar.date(byAdding: .minute, value: 635, to: todayStart)!,
+                durationSeconds: 1800,
+                categoryIDs: ["uitest-hs-sport"],
+                notes: "remember the HR belt"
+            ),
+            TimeEntry(
+                id: "uitest-hs-b",
+                activityText: "Evening Stretch",
+                startedAt: calendar.date(byAdding: .minute, value: 1085, to: todayStart)!,
+                endedAt: calendar.date(byAdding: .minute, value: 1130, to: todayStart)!,
+                durationSeconds: 2700,
+                categoryIDs: ["uitest-hs-sport"],
+                notes: "gym bag checklist with squats guide and plenty of extra padding words to fill the note"
+            ),
+            TimeEntry(
+                id: "uitest-hs-c",
+                activityText: "Gym Induction",
+                startedAt: calendar.date(byAdding: .minute, value: 545, to: yesterdayStart)!,
+                endedAt: nil,
+                durationSeconds: nil
+            ),
+        ]
+        for entry in fixtures {
+            _ = try? await store.createEntry(entry)
+        }
     }
 
     /// Kicks off the deterministic running-track fixture for the
