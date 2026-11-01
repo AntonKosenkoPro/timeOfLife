@@ -1,4 +1,10 @@
+// swiftlint:disable file_length
+// (hosts the guarded reload contract, the search derivation, and the
+// event-driven subscriptions; splitting the VM is future work, not this
+// change — TrackViewModel precedent.)
+import Combine
 import Foundation
+import UIKit
 
 /// Loads committed time entries from the local store and groups them by
 /// calendar day for the History list (history-entry-list spec, design D2/D6).
@@ -44,7 +50,21 @@ final class HistoryViewModel: ObservableObject {
     private let store: LocalStore
     private let undoBuffer: UndoBufferStore
     private let nowProvider: () -> Date
+    /// Serializes reloads (TrackViewModel precedent): the appear reload and an
+    /// event-driven reload (`.timerStoppedExternally` / foreground /
+    /// sync-cycle exit) race on every visible-tab save. `needsReload` starts
+    /// true so the first appear loads; `invalidate()` marks the snapshot
+    /// stale and the next `loadIfNeeded()` reloads it. A call arriving
+    /// mid-load awaits `inFlightLoad` (see `loadIfNeeded`).
+    private var inFlightLoad: Task<Void, Never>?
     private var needsReload = true
+#if DEBUG
+    /// Test hook (nil in production): awaited after the snapshot read, before
+    /// publishing — lets tests hold a load open and interleave an invalidate
+    /// + reload deterministically (TrackViewModel.stopGate precedent).
+    /// Debug-only so no Release caller can suspend a load.
+    var loadGate: (@Sendable () async -> Void)?
+#endif
     private var categoriesByID: [String: Category] = [:]
     /// Cached ungrouped snapshot feeding both blank History and search
     /// derivation (design D1). Replaced on every load; never mutated.
@@ -73,6 +93,7 @@ final class HistoryViewModel: ObservableObject {
         self.store = store
         self.undoBuffer = undoBuffer
         self.nowProvider = now
+        observeExternalReload()
     }
 
     /// Reloads entries and categories and rebuilds the day groups. Called on
@@ -84,6 +105,9 @@ final class HistoryViewModel: ObservableObject {
             let entries = try await store.entries()
             let categories = try await store.categories()
             categoriesByID = Dictionary(uniqueKeysWithValues: categories.map { ($0.id, $0) })
+            #if DEBUG
+            if let loadGate { await loadGate() }
+            #endif
             allEntries = entries
             isSnapshotUnavailable = false
             // Derive from the CURRENT query, not a captured one: typing may
@@ -104,14 +128,31 @@ final class HistoryViewModel: ObservableObject {
         }
     }
 
-    /// Reloads only when the data has not been loaded yet or the tab was
-    /// left and re-entered (an entry may have been saved on Track in
-    /// between). Re-entrancy safe: never runs two loads concurrently; a call
-    /// arriving mid-load keeps `needsReload` set so the next appear retries.
+    /// Reloads only when the data is stale (never loaded, tab left and
+    /// re-entered, or an event-driven invalidate while visible). Re-entrancy
+    /// safe: never runs two loads concurrently. A call arriving mid-load
+    /// awaits the in-flight load's task value instead of returning with a
+    /// stale snapshot — callers awaiting this expect fresh state afterwards
+    /// (remove-compact-timer: the Island-Stop commit lands while History is
+    /// visible; an early return leaves the pre-commit snapshot on screen
+    /// with no later appear to retry). Awaiting `Task<Void, Never>.value` is
+    /// precise (no polling), never throws, and does not inherit caller
+    /// cancellation. Deliberately NOT clearing `inFlightLoad` on completion
+    /// (TrackViewModel precedent): resumption order after `load.value` is
+    /// unspecified, and nulling here can discard a NEWER in-flight load
+    /// installed by another waiter's mid-load resumption — breaking the
+    /// single-load invariant. Awaiting a completed task's `.value` returns
+    /// immediately, so a stale handle is harmless and is overwritten at the
+    /// next claim.
     func loadIfNeeded() async {
-        guard needsReload, !isLoading else { return }
+        if let inFlightLoad {
+            await inFlightLoad.value
+        }
+        guard needsReload else { return }
         needsReload = false
-        await load()
+        let load = Task { await self.load() }
+        inFlightLoad = load
+        await load.value
     }
 
     /// Marks the data stale so the next History appear reloads it.
@@ -187,6 +228,40 @@ final class HistoryViewModel: ObservableObject {
             searchPresentations = derived.presentations
             dayGroups = Self.makeDayGroups(entries: derived.matched, now: Date())
         }
+    }
+
+    /// Event-driven reloads that must land with no tab switch
+    /// (remove-compact-timer): an external stop (Island Stop intent,
+    /// widget/control stop) commits behind a visible tab, and a backgrounded
+    /// save is picked up on foreground return. Subscribed here — not in the
+    /// view — so the real notification path is unit-testable: tests post to
+    /// NotificationCenter and assert the reload (deleting a subscription
+    /// fails those tests). Lifetime matches the view: the owning
+    /// `@StateObject` holds this VM, whose cancellables die with it.
+    private var reloadCancellables = Set<AnyCancellable>()
+
+    private func observeExternalReload() {
+        NotificationCenter.default.publisher(for: .timerStoppedExternally)
+            .sink { [weak self] _ in
+                Task { @MainActor [weak self] in await self?.handleExternalReload() }
+            }
+            .store(in: &reloadCancellables)
+        NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)
+            .sink { [weak self] _ in
+                Task { @MainActor [weak self] in await self?.handleExternalReload() }
+            }
+            .store(in: &reloadCancellables)
+    }
+
+    /// Shared event-driven reload (remove-compact-timer): the exact
+    /// invalidate + guarded-reload sequence the views and the VM-owned
+    /// notification subscriptions run on `.timerStoppedExternally`,
+    /// foreground return, and sync-cycle exit. Production code under test —
+    /// the refresh tests drive this helper and the notification tests drive
+    /// the real posted-notification path.
+    func handleExternalReload() async {
+        invalidate()
+        await loadIfNeeded()
     }
 
     // MARK: - Entry shake-to-undo (history-entry-list, fix-87)

@@ -19,7 +19,14 @@ struct TimerFreeShellCompositionTests {
     }
 
     private func storedLabels(of view: Any) -> [String] {
-        Mirror(reflecting: view).children.compactMap(\.label)
+        Mirror(reflecting: view).children.compactMap(\.label).map { label in
+            // Property-wrapper storage reflects with a leading underscore
+            // (`@Binding var refreshSignal` → `_refreshSignal`, `@Published
+            // var runningTimer` → `_runningTimer`): strip it so the guards
+            // below catch a reintroduction in any wrapped shape, not just the
+            // plain stored-property shape the removal left behind.
+            label.hasPrefix("_") ? String(label.dropFirst()) : label
+        }
     }
 
     @Test("History carries no running-timer signal")

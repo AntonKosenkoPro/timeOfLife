@@ -38,6 +38,10 @@ struct HistoryView: View {
     /// Presents the Log Time sheet (manual-entry spec). Owned by the shell
     /// so the [+] shares the nav-bar toolbar scope; the sheet and its
     /// refresh stay here.
+    /// Presents the Log Time sheet (manual-entry spec). Owned by the shell
+    /// so the [+] shares the nav-bar toolbar scope; the sheet and its
+    /// refresh stay here.
+    @Binding var isLogTimeActive: Bool
     /// Mirrors whether the current search query hides the bottom tab bar
     /// (history-search spec, design D4): non-blank text hides it, blank
     /// keeps it. Owned by the shell — the History stack's single
@@ -153,21 +157,12 @@ struct HistoryView: View {
             vm.invalidate()
             pull.cancelNotice()
         }
-        // A save that lands while History stays visible (external stop,
-        // foreground return after a backgrounded save, sync exit) reloads
-        // through the observers below — never through a tab switch.
-        // An external stop (Island Stop intent, widget/control stop) can
-        // commit while History is visible: reload without leaving the tab,
-        // through the same invalidate/reload chain as the sync-exit path.
-        .onReceive(NotificationCenter.default.publisher(for: .timerStoppedExternally)) { _ in
-            Task { await invalidateReloadAndRegister() }
-        }
-        // Foreground return after a save while suspended: the tab never
-        // re-appears, so reload here. Guarded: never blanks, and undo
-        // re-registers through the shared helper.
-        .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
-            Task { await invalidateReloadAndRegister() }
-        }
+        // A save that lands while History stays visible (external stop) or
+        // while suspended (foreground return) reloads inside the view model,
+        // which owns those two subscriptions so the real notification path
+        // is unit-testable — never through a tab switch, and never through
+        // observers here. Only the sync-cycle exit below still observes from
+        // the view (it reads the view-owned sync status).
         // A sync cycle merges relay state into LocalStore behind this view:
         // the Profile sheet covers History without firing onDisappear, so the
         // guarded reload above never runs. Observe the cycle directly and
@@ -282,8 +277,8 @@ struct HistoryView: View {
     }
 
     private func invalidateReloadAndRegister() async {
-        vm.invalidate()
-        await reloadAndRegister()
+        await vm.handleExternalReload()
+        await vm.registerSystemUndo(with: undoManager)
     }
 
     /// Native day-grouped list (D8): bare two-line headers pin under the

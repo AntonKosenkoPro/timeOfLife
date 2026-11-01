@@ -28,6 +28,11 @@ The History destination SHALL display committed `TimeEntry` records as a chronol
 - **WHEN** an existing external-stop path saves the running timer while History remains visible, or finishes while the app is backgrounded and History becomes visible again
 - **THEN** History shows the committed entry and recomputed day total without requiring a tab switch or manual refresh after it becomes visible
 
+#### Scenario: Search narrows existing day groups
+- **WHEN** a valid non-empty query matches committed entries from some days
+- **THEN** only those entries appear, once each, in their original start-day groups and newest-first ordering
+- **AND** days with no matches have no header
+
 ### Requirement: List content passes under the glass tab bar
 On iOS 26 and later, the History list SHALL extend its scroll content beneath the bottom tab bar so rows blur behind the glass mid-scroll. On iOS 18 the tab bar SHALL render opaque so no scrolled content shows through it. On every OS the bottom content inset SHALL keep the final row fully reachable above the tab bar without a compact-timer inset or placeholder.
 

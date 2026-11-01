@@ -43,24 +43,12 @@ struct InsightsView: View {
         .task { await vm.loadIfNeeded() }
         .onAppear { Task { await vm.loadIfNeeded() } }
         .onDisappear { vm.invalidate() }
-        // A save that lands while Insights stays visible (external stop,
-        // foreground return after a backgrounded save) reloads here —
-        // never through a tab switch. Period/lens selection is view
-        // state and is untouched.
-        // An external stop (Island Stop intent, widget/control stop) can
-        // commit while Insights is visible: reload without leaving the tab.
-        // Period/lens selection is view state and is untouched.
-        .onReceive(NotificationCenter.default.publisher(for: .timerStoppedExternally)) { _ in
-            vm.invalidate()
-            Task { await vm.loadIfNeeded() }
-        }
-        // Foreground return after a save while suspended: the tab never
-        // re-appears, so reload here. Guarded: keeps the last good
-        // snapshot on failure, never blanks.
-        .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
-            vm.invalidate()
-            Task { await vm.loadIfNeeded() }
-        }
+        // A save that lands while Insights stays visible (external stop) or
+        // while suspended (foreground return) reloads inside the view model,
+        // which owns those two subscriptions so the real notification path
+        // is unit-testable (HistoryView mirror). Period/lens selection is
+        // view state and is untouched. Only the sync-cycle exit below still
+        // observes from the view (it reads the view-owned sync status).
         // Same staleness as HistoryView: a sync cycle merges relay state
         // behind this view while the Profile sheet covers it, so reload on
         // exit from `.syncing` (idle or error — a failed cycle may have
@@ -68,8 +56,7 @@ struct InsightsView: View {
         .onChange(of: sync.status) { _, status in
             switch status {
             case .idle, .error:
-                vm.invalidate()
-                Task { await vm.loadIfNeeded() }
+                Task { await vm.handleExternalReload() }
             case .inactive, .syncing:
                 break
             }

@@ -1,17 +1,27 @@
+// swiftlint:disable file_length
 import Testing
 import Foundation
+import UIKit
 @testable import TimeOfLife
 
 /// Regression coverage for the event-driven refresh contract that replaces
 /// the compact timer's `refreshSignal` (remove-compact-timer, group 2).
 ///
-/// History/Insights must surface committed saves through the existing
-/// invalidate + guarded-reload flow alone — no tab switch (no
-/// onDisappear/onAppear cycle) required — whether the save lands while the
-/// tab is visible (existing external-stop path) or while the app is
-/// suspended (picked up on foreground return). Covers empty-to-populated
+/// History/Insights must surface committed saves through the shared
+/// invalidate + guarded-reload helper (`handleExternalReload`) — no tab
+/// switch (no onDisappear/onAppear cycle) required — whether the save lands
+/// while the tab is visible (existing external-stop path) or while the app
+/// is suspended (picked up on foreground return). Covers empty-to-populated
 /// and already-populated snapshots; repeated events must not blank content
 /// or disturb Insights period/lens derivation.
+///
+/// Two layers: the contract tests below drive the production helper the
+/// views call, and the notification tests at the bottom post REAL
+/// notifications to REAL view models — the VMs own the
+/// `.timerStoppedExternally` + foreground subscriptions, so deleting a
+/// subscription fails those tests.
+/// The mid-load tests pin the dropped-reload race the serialized
+/// `loadIfNeeded` closes.
 @MainActor
 @Suite("Entry Refresh Wiring (remove-compact-timer)")
 struct EntryRefreshWiringTests {
@@ -20,6 +30,29 @@ struct EntryRefreshWiringTests {
         try LocalStore(url: URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent(UUID().uuidString)
             .appendingPathComponent(LocalStore.databaseFileName(userID: "u1")))
+    }
+
+    /// Fixed clock so period assertions never depend on wall-clock midnight
+    /// or the device firstWeekday (InsightsViewModelTests precedent):
+    /// Thursday 2026-09-03 15:00 on a Monday-start Gregorian calendar.
+    private func mondayCalendar() -> Calendar {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.firstWeekday = 2
+        return calendar
+    }
+
+    private static func date(_ iso: String, calendar: Calendar) -> Date {
+        let parts = iso.split(separator: " ")
+        let dateParts = parts[0].split(separator: "-").compactMap { Int($0) }
+        let timeParts = parts[1].split(separator: ":").compactMap { Int($0) }
+        var comps = DateComponents()
+        comps.year = dateParts[0]
+        comps.month = dateParts[1]
+        comps.day = dateParts[2]
+        comps.hour = timeParts[0]
+        comps.minute = timeParts[1]
+        comps.calendar = calendar
+        return comps.date!
     }
 
     /// A committed save through the real stop path (the same
@@ -40,30 +73,36 @@ struct EntryRefreshWiringTests {
         )
     }
 
-    // MARK: - History: external-stop save while visible
-
-    @Test("external-stop save appears on visible History without a tab switch")
-    func historyExternalStopWhileVisible() async throws {
-        let store = try makeStore()
-        let service = TimerService(store: store)
-        let start = Date(timeIntervalSinceNow: -3600)
+    /// Seeds the one baseline entry every notification test starts from.
+    private func seedEarlier(_ store: LocalStore, now: Date) async throws {
+        let start = now.addingTimeInterval(-3600)
         try await store.createEntry(TimeEntry(
             id: "e1", activityText: "Earlier",
             startedAt: start, endedAt: start.addingTimeInterval(60),
             durationSeconds: 60, categoryIDs: []
         ))
+    }
 
-        let vm = HistoryViewModel(store: store, undoBuffer: UndoBufferStore(store: store))
+    // MARK: - History: external-stop save while visible
+
+    @Test("external-stop save appears on visible History without a tab switch")
+    func historyExternalStopWhileVisible() async throws {
+        let calendar = mondayCalendar()
+        let now = Self.date("2026-09-03 15:00", calendar: calendar)
+        let store = try makeStore()
+        let service = TimerService(store: store)
+        try await seedEarlier(store, now: now)
+
+        let vm = HistoryViewModel(store: store, undoBuffer: UndoBufferStore(store: store)) { now }
         await vm.loadIfNeeded()
         #expect(vm.dayGroups.flatMap(\.entries).map(\.id) == ["e1"])
 
         // External-stop path commits while History stays visible: no
-        // onDisappear/onAppear fires, only the event-driven invalidate +
-        // guarded reload the view runs on `.timerStoppedExternally`.
-        let runStart = Date(timeIntervalSinceNow: -120)
+        // onDisappear/onAppear fires, only the event-driven helper the view
+        // runs on `.timerStoppedExternally`.
+        let runStart = now.addingTimeInterval(-120)
         try await commitStop(service: service, text: "Deep work", startedAt: runStart, duration: 120)
-        vm.invalidate()
-        await vm.loadIfNeeded()
+        await vm.handleExternalReload()
 
         let ids = vm.dayGroups.flatMap(\.entries).map(\.id)
         #expect(ids.count == 2)
@@ -72,16 +111,17 @@ struct EntryRefreshWiringTests {
 
     @Test("external-stop save populates empty History without a tab switch")
     func historyEmptyToPopulated() async throws {
+        let calendar = mondayCalendar()
+        let now = Self.date("2026-09-03 15:00", calendar: calendar)
         let store = try makeStore()
         let service = TimerService(store: store)
-        let vm = HistoryViewModel(store: store, undoBuffer: UndoBufferStore(store: store))
+        let vm = HistoryViewModel(store: store, undoBuffer: UndoBufferStore(store: store)) { now }
         await vm.loadIfNeeded()
         #expect(vm.dayGroups.isEmpty)
 
-        let runStart = Date(timeIntervalSinceNow: -90)
+        let runStart = now.addingTimeInterval(-90)
         try await commitStop(service: service, text: "First run", startedAt: runStart, duration: 90)
-        vm.invalidate()
-        await vm.loadIfNeeded()
+        await vm.handleExternalReload()
 
         #expect(vm.dayGroups.count == 1)
         #expect(vm.dayGroups.first?.entries.first?.activityText == "First run")
@@ -89,134 +129,334 @@ struct EntryRefreshWiringTests {
 
     @Test("repeated refresh events never blank populated History")
     func historyRepeatedEventsKeepContent() async throws {
+        let calendar = mondayCalendar()
+        let now = Self.date("2026-09-03 15:00", calendar: calendar)
         let store = try makeStore()
         let service = TimerService(store: store)
-        let start = Date(timeIntervalSinceNow: -3600)
-        try await store.createEntry(TimeEntry(
-            id: "e1", activityText: "Earlier",
-            startedAt: start, endedAt: start.addingTimeInterval(60),
-            durationSeconds: 60, categoryIDs: []
-        ))
-        let vm = HistoryViewModel(store: store, undoBuffer: UndoBufferStore(store: store))
+        try await seedEarlier(store, now: now)
+        let vm = HistoryViewModel(store: store, undoBuffer: UndoBufferStore(store: store)) { now }
         await vm.loadIfNeeded()
 
         // Foreground return, sync exit, and external stop can fire back to
         // back; each is an invalidate + guarded reload with no save between.
         for _ in 0..<3 {
-            vm.invalidate()
-            await vm.loadIfNeeded()
+            await vm.handleExternalReload()
         }
         #expect(vm.dayGroups.flatMap(\.entries).map(\.id) == ["e1"])
 
-        let runStart = Date(timeIntervalSinceNow: -30)
+        let runStart = now.addingTimeInterval(-30)
         try await commitStop(service: service, text: "Later", startedAt: runStart, duration: 30)
         for _ in 0..<3 {
-            vm.invalidate()
-            await vm.loadIfNeeded()
+            await vm.handleExternalReload()
         }
         #expect(vm.dayGroups.flatMap(\.entries).count == 2)
     }
 
     @Test("save while suspended appears on History after foreground refresh")
     func historyBackgroundedSaveOnForeground() async throws {
+        let calendar = mondayCalendar()
+        let now = Self.date("2026-09-03 15:00", calendar: calendar)
         let store = try makeStore()
         let service = TimerService(store: store)
-        let vm = HistoryViewModel(store: store, undoBuffer: UndoBufferStore(store: store))
+        let vm = HistoryViewModel(store: store, undoBuffer: UndoBufferStore(store: store)) { now }
         await vm.loadIfNeeded()
         #expect(vm.dayGroups.isEmpty)
 
         // The stop commits while the app is suspended (no observer runs);
-        // the foreground return invalidates and reloads once.
-        let runStart = Date(timeIntervalSinceNow: -600)
+        // the foreground return reloads once through the same helper.
+        let runStart = now.addingTimeInterval(-600)
         try await commitStop(service: service, text: "Background run", startedAt: runStart, duration: 600)
-        vm.invalidate()
-        await vm.loadIfNeeded()
+        await vm.handleExternalReload()
 
         #expect(vm.dayGroups.flatMap(\.entries).first?.activityText == "Background run")
+    }
+
+    @Test("History invalidate during an in-flight load retries instead of serving stale data")
+    func historyInvalidateMidLoadRetries() async throws {
+        let calendar = mondayCalendar()
+        let now = Self.date("2026-09-03 15:00", calendar: calendar)
+        let store = try makeStore()
+        let service = TimerService(store: store)
+        try await seedEarlier(store, now: now)
+        let vm = HistoryViewModel(store: store, undoBuffer: UndoBufferStore(store: store)) { now }
+        await vm.loadIfNeeded()
+        #expect(vm.dayGroups.flatMap(\.entries).map(\.id) == ["e1"])
+
+        // Hold the next load open between its snapshot read and its publish:
+        // a commit landing there must still surface. The old
+        // `guard needsReload, !isLoading` early-return dropped it — the
+        // stale list survived with no later appear to retry.
+        let gate = LoadGate()
+        vm.loadGate = { await gate.wait() }
+        vm.invalidate()
+        let first = Task { await vm.loadIfNeeded() }
+        var loading = false
+        for _ in 0..<400 {
+            if vm.isLoading { loading = true; break }
+            try? await Task.sleep(nanoseconds: 5_000_000)
+        }
+        guard loading else {
+            Issue.record("held History load never started")
+            await gate.go()
+            await first.value
+            vm.loadGate = nil
+            return
+        }
+        let runStart = now.addingTimeInterval(-120)
+        try await commitStop(service: service, text: "Deep work", startedAt: runStart, duration: 120)
+        let second = Task { await vm.handleExternalReload() }
+        // Let the second task reach the in-flight await (old code returned
+        // early here); the held load cannot complete before `go()`.
+        try? await Task.sleep(nanoseconds: 100_000_000)
+        await gate.go()
+        await first.value
+        await second.value
+        vm.loadGate = nil
+
+        #expect(vm.dayGroups.flatMap(\.entries).map(\.activityText) == ["Deep work", "Earlier"])
     }
 
     // MARK: - Insights: external-stop save while visible
 
     @Test("external-stop save contributes to visible Insights without a tab switch")
     func insightsExternalStopWhileVisible() async throws {
+        let calendar = mondayCalendar()
+        let now = Self.date("2026-09-03 15:00", calendar: calendar)
         let store = try makeStore()
         let service = TimerService(store: store)
-        let start = Date(timeIntervalSinceNow: -3600)
-        try await store.createEntry(TimeEntry(
-            id: "e1", activityText: "Earlier",
-            startedAt: start, endedAt: start.addingTimeInterval(60),
-            durationSeconds: 60, categoryIDs: []
-        ))
-        let vm = InsightsViewModel(store: store)
+        try await seedEarlier(store, now: now)
+        let vm = InsightsViewModel(store: store) { now }
         await vm.loadIfNeeded()
-        #expect(vm.breakdown(period: .all, lens: .activity).totalSeconds == 60)
+        #expect(vm.breakdown(period: .all, lens: .activity, calendar: calendar).totalSeconds == 60)
 
-        let runStart = Date(timeIntervalSinceNow: -120)
+        let runStart = now.addingTimeInterval(-120)
         try await commitStop(service: service, text: "Deep work", startedAt: runStart, duration: 120)
-        vm.invalidate()
-        await vm.loadIfNeeded()
+        await vm.handleExternalReload()
 
         #expect(vm.hasCommittedAllTime)
-        #expect(vm.breakdown(period: .all, lens: .activity).totalSeconds == 180)
+        #expect(vm.breakdown(period: .all, lens: .activity, calendar: calendar).totalSeconds == 180)
     }
 
     @Test("external-stop save populates empty Insights without a tab switch")
     func insightsEmptyToPopulated() async throws {
+        let calendar = mondayCalendar()
+        let now = Self.date("2026-09-03 15:00", calendar: calendar)
         let store = try makeStore()
         let service = TimerService(store: store)
-        let vm = InsightsViewModel(store: store)
+        let vm = InsightsViewModel(store: store) { now }
         await vm.loadIfNeeded()
         #expect(!vm.hasCommittedAllTime)
-        #expect(vm.breakdown(period: .all, lens: .activity).totalSeconds == 0)
+        #expect(vm.breakdown(period: .all, lens: .activity, calendar: calendar).totalSeconds == 0)
 
-        let runStart = Date(timeIntervalSinceNow: -90)
+        let runStart = now.addingTimeInterval(-90)
         try await commitStop(service: service, text: "First run", startedAt: runStart, duration: 90)
-        vm.invalidate()
-        await vm.loadIfNeeded()
+        await vm.handleExternalReload()
 
         #expect(vm.hasCommittedAllTime)
-        let breakdown = vm.breakdown(period: .all, lens: .activity)
+        let breakdown = vm.breakdown(period: .all, lens: .activity, calendar: calendar)
         #expect(breakdown.totalSeconds == 90)
         #expect(breakdown.rows.map(\.name) == ["First run"])
     }
 
     @Test("repeated refresh events keep Insights totals and breakdown shape")
     func insightsRepeatedEventsKeepTotals() async throws {
+        let calendar = mondayCalendar()
+        let now = Self.date("2026-09-03 15:00", calendar: calendar)
         let store = try makeStore()
         let service = TimerService(store: store)
-        let start = Date(timeIntervalSinceNow: -3600)
-        try await store.createEntry(TimeEntry(
-            id: "e1", activityText: "Earlier",
-            startedAt: start, endedAt: start.addingTimeInterval(60),
-            durationSeconds: 60, categoryIDs: []
-        ))
-        let vm = InsightsViewModel(store: store)
+        try await seedEarlier(store, now: now)
+        let vm = InsightsViewModel(store: store) { now }
         await vm.loadIfNeeded()
 
         // Period/lens selection lives in the view; the view-model contract
         // is that repeated invalidate + reload cycles keep every
-        // period/lens derivation stable and non-blank.
+        // period/lens derivation stable and non-blank. The fixed clock and
+        // explicit Monday-start calendar keep `.today`/`.week` exact.
         for _ in 0..<3 {
-            vm.invalidate()
-            await vm.loadIfNeeded()
+            await vm.handleExternalReload()
         }
         for period in [InsightsPeriod.today, .week, .all] {
             for lens in [InsightsLens.category, .activity] {
-                #expect(vm.breakdown(period: period, lens: lens).totalSeconds == 60)
+                #expect(vm.breakdown(period: period, lens: lens, calendar: calendar).totalSeconds == 60)
             }
         }
 
-        let runStart = Date(timeIntervalSinceNow: -30)
+        let runStart = now.addingTimeInterval(-30)
         try await commitStop(service: service, text: "Later", startedAt: runStart, duration: 30)
         for _ in 0..<3 {
-            vm.invalidate()
-            await vm.loadIfNeeded()
+            await vm.handleExternalReload()
         }
         for period in [InsightsPeriod.today, .week, .all] {
             for lens in [InsightsLens.category, .activity] {
-                #expect(vm.breakdown(period: period, lens: lens).totalSeconds == 90)
+                #expect(vm.breakdown(period: period, lens: lens, calendar: calendar).totalSeconds == 90)
             }
         }
-        #expect(vm.breakdown(period: .all, lens: .activity).rows.count == 2)
+        #expect(vm.breakdown(period: .all, lens: .activity, calendar: calendar).rows.count == 2)
+    }
+
+    @Test("Insights invalidate during an in-flight load retries instead of serving stale data")
+    func insightsInvalidateMidLoadRetries() async throws {
+        let calendar = mondayCalendar()
+        let now = Self.date("2026-09-03 15:00", calendar: calendar)
+        let store = try makeStore()
+        let service = TimerService(store: store)
+        try await seedEarlier(store, now: now)
+        let vm = InsightsViewModel(store: store) { now }
+        await vm.loadIfNeeded()
+        #expect(vm.breakdown(period: .all, lens: .activity, calendar: calendar).totalSeconds == 60)
+
+        // Same dropped-reload race as History: the gate sits between the
+        // snapshot read and the publish, so the commit below lands strictly
+        // inside the held load.
+        let gate = LoadGate()
+        vm.loadGate = { await gate.wait() }
+        vm.invalidate()
+        let first = Task { await vm.loadIfNeeded() }
+        var loading = false
+        for _ in 0..<400 {
+            if vm.isLoading { loading = true; break }
+            try? await Task.sleep(nanoseconds: 5_000_000)
+        }
+        guard loading else {
+            Issue.record("held Insights load never started")
+            await gate.go()
+            await first.value
+            vm.loadGate = nil
+            return
+        }
+        let runStart = now.addingTimeInterval(-120)
+        try await commitStop(service: service, text: "Deep work", startedAt: runStart, duration: 120)
+        let second = Task { await vm.handleExternalReload() }
+        try? await Task.sleep(nanoseconds: 100_000_000)
+        await gate.go()
+        await first.value
+        await second.value
+        vm.loadGate = nil
+
+        #expect(vm.breakdown(period: .all, lens: .activity, calendar: calendar).totalSeconds == 180)
+        #expect(vm.breakdown(period: .all, lens: .activity, calendar: calendar).rows.count == 2)
+    }
+
+    // MARK: - Real notification path (VM subscriptions)
+
+    /// The view models own the `.timerStoppedExternally` + foreground
+    /// subscriptions, so these tests post REAL notifications to REAL view
+    /// models and assert the reload — the ONLY trigger is the post (no
+    /// direct invalidate/loadIfNeeded calls). Deleting a subscription fails
+    /// here: nothing else reloads the VM. Bounded polls only, never an
+    /// unbounded suspend.
+
+    @Test("History reloads on the posted external-stop notification")
+    func historyPostedExternalStopReloads() async throws {
+        let calendar = mondayCalendar()
+        let now = Self.date("2026-09-03 15:00", calendar: calendar)
+        let store = try makeStore()
+        let service = TimerService(store: store)
+        try await seedEarlier(store, now: now)
+        let vm = HistoryViewModel(store: store, undoBuffer: UndoBufferStore(store: store)) { now }
+        await vm.loadIfNeeded()
+        #expect(vm.dayGroups.flatMap(\.entries).map(\.activityText) == ["Earlier"])
+
+        let runStart = now.addingTimeInterval(-120)
+        try await commitStop(service: service, text: "Deep work", startedAt: runStart, duration: 120)
+        NotificationCenter.default.post(name: .timerStoppedExternally, object: nil)
+
+        #expect(await waitForHistoryTexts(vm, ["Deep work", "Earlier"]))
+    }
+
+    @Test("History reloads on foreground return after a backgrounded save")
+    func historyPostedForegroundReloads() async throws {
+        let calendar = mondayCalendar()
+        let now = Self.date("2026-09-03 15:00", calendar: calendar)
+        let store = try makeStore()
+        let service = TimerService(store: store)
+        try await seedEarlier(store, now: now)
+        let vm = HistoryViewModel(store: store, undoBuffer: UndoBufferStore(store: store)) { now }
+        await vm.loadIfNeeded()
+
+        // The stop commits while the app is suspended (no delivery); the
+        // foreground return delivers and reloads.
+        let runStart = now.addingTimeInterval(-600)
+        try await commitStop(service: service, text: "Background run", startedAt: runStart, duration: 600)
+        NotificationCenter.default.post(name: UIApplication.willEnterForegroundNotification, object: nil)
+
+        #expect(await waitForHistoryTexts(vm, ["Background run", "Earlier"]))
+    }
+
+    @Test("Insights reloads on the posted external-stop notification")
+    func insightsPostedExternalStopReloads() async throws {
+        let calendar = mondayCalendar()
+        let now = Self.date("2026-09-03 15:00", calendar: calendar)
+        let store = try makeStore()
+        let service = TimerService(store: store)
+        try await seedEarlier(store, now: now)
+        let vm = InsightsViewModel(store: store) { now }
+        await vm.loadIfNeeded()
+        #expect(vm.breakdown(period: .all, lens: .activity, calendar: calendar).totalSeconds == 60)
+
+        let runStart = now.addingTimeInterval(-120)
+        try await commitStop(service: service, text: "Deep work", startedAt: runStart, duration: 120)
+        NotificationCenter.default.post(name: .timerStoppedExternally, object: nil)
+
+        #expect(await waitForInsightsTotal(vm, 180, calendar: calendar))
+    }
+
+    @Test("Insights reloads on foreground return after a backgrounded save")
+    func insightsPostedForegroundReloads() async throws {
+        let calendar = mondayCalendar()
+        let now = Self.date("2026-09-03 15:00", calendar: calendar)
+        let store = try makeStore()
+        let service = TimerService(store: store)
+        try await seedEarlier(store, now: now)
+        let vm = InsightsViewModel(store: store) { now }
+        await vm.loadIfNeeded()
+
+        let runStart = now.addingTimeInterval(-600)
+        try await commitStop(service: service, text: "Background run", startedAt: runStart, duration: 600)
+        NotificationCenter.default.post(name: UIApplication.willEnterForegroundNotification, object: nil)
+
+        #expect(await waitForInsightsTotal(vm, 660, calendar: calendar))
+    }
+
+    // MARK: - Helpers
+
+    /// Sticky one-shot gate (TrackSyncReloadTests.Gate precedent): `go()`
+    /// before `wait()` still releases, so no scheduling interleave can
+    /// strand a waiter — and every wait site here is additionally bounded by
+    /// a polling cap, never an unbounded suspend.
+    private actor LoadGate {
+        private var continuation: CheckedContinuation<Void, Never>?
+        private var released = false
+
+        func wait() async {
+            if released { return }
+            await withCheckedContinuation { self.continuation = $0 }
+        }
+
+        func go() {
+            released = true
+            continuation?.resume()
+            continuation = nil
+        }
+    }
+
+    /// Bounded poll for the view model's published entries after a posted
+    /// notification (the subscription reloads asynchronously).
+    private func waitForHistoryTexts(_ vm: HistoryViewModel, _ texts: [String]) async -> Bool {
+        for _ in 0..<100 {
+            if vm.dayGroups.flatMap(\.entries).map(\.activityText) == texts { return true }
+            try? await Task.sleep(nanoseconds: 20_000_000)
+        }
+        return vm.dayGroups.flatMap(\.entries).map(\.activityText) == texts
+    }
+
+    /// Bounded poll for the view model's derived total after a posted
+    /// notification. `.all` is clock-independent by construction.
+    private func waitForInsightsTotal(_ vm: InsightsViewModel, _ total: Int, calendar: Calendar) async -> Bool {
+        for _ in 0..<100 {
+            if vm.breakdown(period: .all, lens: .activity, calendar: calendar).totalSeconds == total { return true }
+            try? await Task.sleep(nanoseconds: 20_000_000)
+        }
+        return vm.breakdown(period: .all, lens: .activity, calendar: calendar).totalSeconds == total
     }
 }
