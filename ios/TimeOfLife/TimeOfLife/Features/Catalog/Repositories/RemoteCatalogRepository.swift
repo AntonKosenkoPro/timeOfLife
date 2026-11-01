@@ -170,8 +170,6 @@ final class RemoteCatalogRepository: CatalogSending {
             startedAt: dto.startedAt,
             endedAt: dto.endedAt,
             durationSeconds: dto.durationSeconds,
-            source: dto.source,
-            sourceRef: dto.sourceRef,
             categoryIDs: dto.categoryIDs,
             notes: dto.notes,
             createdAt: dto.createdAt,
@@ -335,8 +333,6 @@ struct EntryWireDTO: Decodable, Sendable {
     let startedAt: Date
     let endedAt: Date?
     let durationSeconds: Int?
-    let source: String
-    let sourceRef: String?
     let createdAt: Date
     let updatedAt: Date
 
@@ -348,8 +344,6 @@ struct EntryWireDTO: Decodable, Sendable {
         case startedAt = "started_at"
         case endedAt = "ended_at"
         case durationSeconds = "duration_seconds"
-        case source
-        case sourceRef = "source_ref"
         case createdAt = "created_at"
         case updatedAt = "updated_at"
     }
@@ -370,11 +364,9 @@ struct EntryWireDTO: Decodable, Sendable {
         startedAt = try WireDate.decode(container, forKey: .startedAt)
         endedAt = try WireDate.decodeIfPresent(container, forKey: .endedAt)
         durationSeconds = try container.decodeIfPresent(Int.self, forKey: .durationSeconds)
-        // Older relays predate entry provenance and omit `source`; the
-        // backend itself defaults those to "manual" (back-compat), so do the
-        // same instead of failing the whole pull on keyNotFound.
-        source = try container.decodeIfPresent(String.self, forKey: .source) ?? "manual"
-        sourceRef = try container.decodeIfPresent(String.self, forKey: .sourceRef)
+        // Retired producer keys (`source`, `source_ref`) sent by older
+        // relays are ignored by keyed decoding: unknown keys never fail a
+        // keyed container, so old rows decode to the same source-free entry.
         createdAt = try WireDate.decode(container, forKey: .createdAt)
         updatedAt = try WireDate.decode(container, forKey: .updatedAt)
     }
@@ -437,8 +429,6 @@ struct EntryCreateBody: Encodable, Sendable {
     let notes: String
     let startedAt: String
     let endedAt: String?
-    let source: String
-    let sourceRef: String?
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -447,8 +437,6 @@ struct EntryCreateBody: Encodable, Sendable {
         case notes
         case startedAt = "started_at"
         case endedAt = "ended_at"
-        case source
-        case sourceRef = "source_ref"
     }
 
     init(entry: TimeEntry) {
@@ -458,8 +446,6 @@ struct EntryCreateBody: Encodable, Sendable {
         self.notes = entry.notes
         self.startedAt = WireDate.format(entry.startedAt)
         self.endedAt = entry.endedAt.map(WireDate.format)
-        self.source = entry.source
-        self.sourceRef = entry.sourceRef
     }
 }
 

@@ -24,10 +24,10 @@ The History destination answers "what did I spend time on and when?" — a chron
 
 ### Behaviors
 
-- On appear, load entries (`LocalStore.entries()`) and categories (`LocalStore.categories()`); rebuild day groups. Rows are read-only — the screen's mutation paths are the entry-form push (EDIT/LOCKED), the Log Time sheet (`[+]` in the toolbar, CREATE mode), pull-to-refresh sync (`HistoryPullModel` verdict flow with the inline offline notice and OK-only failure dialog), and shake-to-undo (`ShakeFirstResponderHost`).
-- Entry rows show the localized "via <Source>" provenance label on line 2 for non-`manual` sources (`EntryRow.viaText`); `manual` shows nothing.
+- On appear, load entries (`LocalStore.entries()`) and categories (`LocalStore.categories()`); rebuild day groups. Rows are read-only — the screen's mutation paths are the entry-form push (EDIT), the Log Time sheet (`[+]` in the toolbar, CREATE mode), pull-to-refresh sync (`HistoryPullModel` verdict flow with the inline offline notice and OK-only failure dialog), and shake-to-undo (`ShakeFirstResponderHost`).
+- Entry rows show the entry’s own categories and timing only — no provenance labels.
 - Entry rows with non-empty notes show the small blue notes indicator on line 2, immediately left of the timeframe (`EntryRow.hasNotes`, resolved by `HistoryViewModel.hasNotes(for:)` — whitespace-only counts as empty); the glyph is presentational and VoiceOver folds the localized `historyHasNotes` segment into the row label.
-- Tapping a row pushes the unified entry form onto the History navigation stack (EDIT for `manual`, LOCKED read-only for imported with delete only) — the push provides the system back button and edge-back gesture; there is no intermediate detail surface.
+- Tapping a row pushes the unified entry form onto the History navigation stack (EDIT for every saved entry) — the push provides the system back button and edge-back gesture; there is no intermediate detail surface.
 
 ### Search
 

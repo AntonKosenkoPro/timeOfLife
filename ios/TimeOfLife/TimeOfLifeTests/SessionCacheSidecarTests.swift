@@ -38,15 +38,9 @@ struct SessionCacheSidecarTests {
         #expect(!FileManager.default.fileExists(atPath: fileURL.path))
     }
 
-    @Test("cache save plus resolver read round-trips to ready (production wiring)")
+    @Test("cache save plus resolver read round-trips the marker (production wiring)")
     func saveThenResolveIsReady() throws {
         let dir = try temporaryDirectory()
-        // swiftlint:disable:next force_try
-        let store = try! LocalStore(
-            url: dir.appendingPathComponent(LocalStore.databaseFileName(userID: "u1")),
-            userID: "u1"
-        )
-        _ = store
         let cache = SessionCache(
             defaults: UserDefaults(suiteName: UUID().uuidString)!,
             sessionFileURL: dir.appendingPathComponent(ActiveAccountFileResolver.sessionFileName)
@@ -56,11 +50,7 @@ struct SessionCacheSidecarTests {
         let resolver = ActiveAccountFileResolver(
             sessionDefaults: UserDefaults(suiteName: UUID().uuidString)!
         )
-        guard case let .ready(url) = resolver.resolve(base: dir) else {
-            Issue.record("expected ready, got \(resolver.resolve(base: dir))")
-            return
-        }
-        #expect(url == dir.appendingPathComponent(LocalStore.databaseFileName(userID: "u1")))
+        #expect(resolver.readSessionUserID(base: dir) == "u1")
     }
 
     private func temporaryDirectory() throws -> URL {

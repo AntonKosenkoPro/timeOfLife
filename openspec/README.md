@@ -9,7 +9,7 @@ but the CLI stays the source of truth.
 
 | Layer | Location | Meaning |
 |---|---|---|
-| **Baseline specs** | `openspec/specs/<capability>/spec.md` | The current merged contract. Today (25 baselines): `account-bound-store`, `account-deletion`, `app-icon`, `app-identity`, `app-shell`, `apple-signin`, `backend-database`, `category-management`, `device-sessions`, `editor-sheet-ux`, `email-otp-auth`, `entry-editor`, `entry-provenance`, `history-entry-list`, `insights-breakdown`, `live-activities`, `local-first-store`, `lock-screen-controls`, `manual-entry`, `name-picker`, `observability`, `relay-cors`, `release-versioning`, `sync-client`, and `timer-capture-experience`. **Never edit directly** — behavior changes go through a change. |
+| **Baseline specs** | `openspec/specs/<capability>/spec.md` | The current merged contract. Today (27 active plus `entry-provenance` and `lock-screen-controls`, being retired by the active `remove-entry-integrations` change): `account-bound-store`, `account-deletion`, `app-icon`, `app-identity`, `app-shell`, `apple-signin`, `backend-database`, `backend-release-identity`, `category-management`, `device-sessions`, `editor-sheet-ux`, `email-otp-auth`, `entry-editor`, `history-entry-list`, `history-search`, `insights-breakdown`, `live-activities`, `local-first-store`, `localization`, `manual-entry`, `name-picker`, `observability`, `relay-cors`, `release-versioning`, `sync-client`, and `timer-capture-experience`. **Never edit directly** — behavior changes go through a change. |
 | **Active change (deltas)** | `openspec/changes/<change>/` | A proposal in flight. Its `specs/<capability>/spec.md` files are delta specs (ADDED/MODIFIED requirements) not yet in the baseline. Active changes live under `openspec/changes/` — check `openspec list`. |
 | **Archives** | `openspec/changes/archive/<change>/` | Completed changes; their deltas were already folded into the baselines by `openspec archive`. Read them only for history. See `openspec/changes/archive/` for the full list. |
 
@@ -48,9 +48,9 @@ archived `changes/`. The CLI generates or updates workflow adapters on demand.
 ## Repo conventions that affect changes
 
 - **Baselines never edited directly**; every behavior change adds a delta to a change.
-- **Incomplete UI surfaces must not be claimed done**: shake-to-undo polish + bulk-delete cap,
-  and the iOS 18 lock-screen ControlWidget itself (a widget
-  extension target exists for Live Activities; the Control toggle is still deferred) remain deferred.
+- **Incomplete UI surfaces must not be claimed done**: shake-to-undo polish + bulk-delete cap
+  remain deferred. (Lock-screen Controls are retired, not deferred: no `ControlWidget`,
+  no background intent, no extension writer.)
   Entry and category deletions undo through the DEFAULT system Undo confirmation
   (archived `unify-catalog-deletion`) and do not close the app-wide undo work.
 - **OpenAPI is the authoritative API contract** (`backend/api/openapi.yaml`, S10): endpoint

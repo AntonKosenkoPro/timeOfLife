@@ -29,7 +29,6 @@ struct TimerServiceTests {
         #expect(entries.first?.categoryIDs == ["c1"])
         #expect(entries.first?.notes == "evening session")
         #expect(entries.first?.durationSeconds == 600)
-        #expect(entries.first?.source == "manual")
         #expect(try await store.outboxRows().filter { $0.resource == "entry" }.count == 1)
         #expect(try await service.runningTimerDraft() == nil)
     }

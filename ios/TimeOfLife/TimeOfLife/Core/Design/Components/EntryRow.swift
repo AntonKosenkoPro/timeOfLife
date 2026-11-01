@@ -1,42 +1,10 @@
 import SwiftUI
 
-/// Maps an entry's `source` (entry-provenance spec D10) to the localized
-/// "via <Source>" row label; `manual` shows nothing. Shared by the History
-/// view model and the activity-detail view model.
-enum EntryProvenance {
-    static func viaText(for source: String) -> String {
-        switch source {
-        case "widget": return L10n.provenanceViaWidget.text
-        case "siri": return L10n.provenanceViaSiri.text
-        case "control": return L10n.provenanceViaControl.text
-        case "screentime": return L10n.provenanceViaScreentime.text
-        case "garmin": return L10n.provenanceViaGarmin.text
-        case "calendar": return L10n.provenanceViaCalendar.text
-        case "healthkit": return L10n.provenanceViaHealthkit.text
-        default: return ""
-        }
-    }
-
-    /// Bare localized source name for the detail sheet's entry rows, shown
-    /// next to the shared sync icon ("Garmin", not "via Garmin"); `manual`
-    /// and unknown sources show nothing.
-    static func name(for source: String) -> String {
-        switch source {
-        case "widget": return L10n.provenanceNameWidget.text
-        case "siri": return L10n.provenanceNameSiri.text
-        case "control": return L10n.provenanceNameControl.text
-        case "screentime": return L10n.provenanceNameScreentime.text
-        case "garmin": return L10n.provenanceNameGarmin.text
-        case "calendar": return L10n.provenanceNameCalendar.text
-        case "healthkit": return L10n.provenanceNameHealthkit.text
-        default: return ""
-        }
-    }
-}
-
 /// Read-only History row for a committed time entry (Design/COMPONENTS.md,
 /// history-entry-list Variant H layout). Purely presentational — grouping,
 /// category resolution, and duration formatting are owned by the caller.
+/// Rows carry no provenance: only the entry's own categories and timing
+/// are shown.
 struct EntryRow: View {
     /// Width of the leading icon column, shared with the History day-group
     /// header's column alignment (design D10).
@@ -54,9 +22,6 @@ struct EntryRow: View {
     let timeframeText: String
     let durationText: String
     let isInProgress: Bool
-    /// Localized "via <Source>" provenance label; empty for `manual`
-    /// entries and unknown sources (entry-provenance D7).
-    var viaText: String = ""
     /// Whether the entry carries non-empty notes. When true, a small blue
     /// notes icon renders on line 2, immediately left of the timeframe
     /// (history-entry-list notes indicator). Caller-computed so the row
@@ -67,12 +32,10 @@ struct EntryRow: View {
     /// notes excerpt. `nil` renders exactly the blank-query row.
     var searchPresentation: HistorySearchRowPresentation?
 
-    /// The caption metadata line: category names, then the provenance
-    /// label. Both are caller-computed so the row stays presentational.
+    /// The caption metadata line: the entry's own category names.
+    /// Caller-computed so the row stays presentational.
     private var captionText: String {
-        [categoryNames, viaText]
-            .filter { !$0.isEmpty }
-            .joined(separator: ", ")
+        categoryNames
     }
 
     @Environment(\.dynamicTypeSize)
@@ -152,7 +115,6 @@ struct EntryRow: View {
                 timeframeText: timeframeText,
                 durationText: durationText,
                 isInProgress: isInProgress,
-                viaText: viaText,
                 hasNotes: hasNotes,
                 excerptText: searchPresentation?.excerpt?.text ?? ""
             )
@@ -160,21 +122,19 @@ struct EntryRow: View {
         .accessibilityIdentifier("EntryRow(\(entry.id))")
     }
 
-    /// The row is a single element whose label folds in the category names,
-    /// provenance, and timing (history-entry-list a11y requirement).
+    /// The row is a single element whose label folds in the category names
+    /// and timing (history-entry-list a11y requirement).
     nonisolated static func accessibilityLabel(
         entryText: String,
         categoryNames: String,
         timeframeText: String,
         durationText: String,
         isInProgress: Bool,
-        viaText: String = "",
         hasNotes: Bool = false,
         excerptText: String = ""
     ) -> String {
         var parts = [entryText, durationText]
         if !categoryNames.isEmpty { parts.append(categoryNames) }
-        if !viaText.isEmpty { parts.append(viaText) }
         parts.append(timeframeText)
         if isInProgress { parts.append(L10n.historyInProgress.text) }
         if hasNotes { parts.append(L10n.historyHasNotes.text) }
@@ -199,8 +159,7 @@ struct EntryRow: View {
         categoryNames: "Health, Morning",
         timeframeText: "14:00 – 15:20",
         durationText: "1h 20m",
-        isInProgress: false,
-        viaText: EntryProvenance.viaText(for: "screentime")
+        isInProgress: false
     )
     .padding(.horizontal, Theme.spacingMedium)
     .background(Theme.backgroundPrimary)

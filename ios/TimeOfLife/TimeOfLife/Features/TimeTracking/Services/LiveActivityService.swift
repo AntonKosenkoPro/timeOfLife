@@ -161,12 +161,12 @@ final class LiveActivityService: LiveActivityControlling {
         }
     }
 
-    /// Ends activities whose draft is gone — stopped from the Island (the
-    /// intent posts `LiveActivitySignal` instead of ending: `ActivityKit`
-    /// enumeration is scoped by calling process, device-proven). Runs in
-    /// the app process, where this module's type matches its own requests.
+    /// Ends activities whose draft is gone — stopped from the Island link
+    /// (the app stops itself on open: `ActivityKit` enumeration is scoped
+    /// by calling process, device-proven). Runs in the app process, where
+    /// this module's type matches its own requests.
     ///
-    /// - With a known duration (Darwin signal): Saved card with the true
+    /// - With a known duration: Saved card with the true
     ///   value, timed dismissal (D6).
     /// - Without one (foreground/load catch-up): dismiss immediately with
     ///   the last content — no invented duration on the card.

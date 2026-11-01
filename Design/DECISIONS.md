@@ -116,7 +116,7 @@ Resolved design precedents for Lifio. Add a new entry here when a visual or inte
 
 - `ActivityEditor` and `CategoryEditor` are presented as sheets, each with create + edit modes, reused by the timer (quick-add, F7) and the Manage screens (F8). Keyboard placement follows D13.
 - Reason: one editor component per entity avoids duplicate surfaces; sheets keep the user in context (timer / manage list) without a full navigation push.
-- **Partially superseded by `remove-activities-layer`**: `ActivityEditor` is deleted with the activities layer. `CategoryEditor` remains a create/edit sheet; the entry form (`LogTimeView`) is a sheet for CREATE and a navigation push for EDIT/LOCKED (pushed by `fix-entry-form-gestures` so the edge-back gesture works — a full-screen cover has no back stack).
+- **Partially superseded by `remove-activities-layer`**: `ActivityEditor` is deleted with the activities layer. `CategoryEditor` remains a create/edit sheet; the entry form (`LogTimeView`) is a sheet for CREATE and a navigation push for EDIT (pushed by `fix-entry-form-gestures` so the edge-back gesture works — a full-screen cover has no back stack).
 
 ## D22 — Categories have catalog icons
 
@@ -180,7 +180,7 @@ Resolved design precedents for Lifio. Add a new entry here when a visual or inte
 
 ## D33 — Editor sheets use one native collapsing-header scaffold
 
-- Category and future editor sheets use `EditorSheetScaffold` (`ActivityEditor` was deleted with the activities layer): a native large navigation title with Cancel floating at rest, collapsing into the material navigation bar beside Cancel on scroll and expanding again at the top edge. The scaffold also owns the standard scroll container and keyboard-safe pinned action bar. The unified entry form (`LogTimeView`) is a full-height sheet for CREATE and a navigation push for EDIT/LOCKED (see `SCREENS/EntryForm.md`).
+- Category and future editor sheets use `EditorSheetScaffold` (`ActivityEditor` was deleted with the activities layer): a native large navigation title with Cancel floating at rest, collapsing into the material navigation bar beside Cancel on scroll and expanding again at the top edge. The scaffold also owns the standard scroll container and keyboard-safe pinned action bar. The unified entry form (`LogTimeView`) is a full-height sheet for CREATE and a navigation push for EDIT (see `SCREENS/EntryForm.md`).
 - Reason: the previous custom title scrolled under an otherwise empty Cancel bar. The system large-title mechanism removes that overlap without custom header geometry or appearance code, while one scaffold keeps all present and future editors consistent. See `openspec/changes/archive/2026-08-13-collapsing-editor-sheet-headers/design.md`.
 
 ## D34 — Track uses a dual-flow adaptive layout with a 48 pt spacer cap and no editing affordance

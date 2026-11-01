@@ -2,10 +2,11 @@ import BackgroundTasks
 import Foundation
 import OSLog
 
-/// Schedules and registers the widget-stop reap check (live-activities):
-/// a `BGAppRefreshTask` that wakes the app in the background so a banner
-/// orphaned by a widget Stop (entry saved by `StopTimerIntent`, activity
-/// un-endable from the extension) clears without the user opening the app.
+/// Schedules and registers the background reap check (live-activities):
+/// a `BGAppRefreshTask` that wakes the app in the background so an
+/// activity orphaned by a link Stop (entry saved through the normal in-app
+/// path, activity endable only from the app process) clears without the
+/// user opening the app.
 ///
 /// Best-effort throughout: every scheduler call is `try?`/non-throwing,
 /// so a background launch never crashes on scheduler errors. No unit

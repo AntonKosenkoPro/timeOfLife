@@ -192,23 +192,7 @@
 "insights.empty.today" = "今天还没有记录。";
 "insights.empty.week" = "本周还没有记录。";
 
-// Entry provenance (entry-provenance spec, activity-detail-sheet)
-"provenance.via.widget" = "通过小组件";
-"provenance.via.siri" = "通过 Siri";
-"provenance.via.control" = "通过控制中心";
-"provenance.via.screentime" = "通过屏幕使用时间";
-"provenance.via.garmin" = "通过 Garmin";
-"provenance.via.calendar" = "通过日历";
-"provenance.via.healthkit" = "通过“健康”";
 
-// Entry source names (activity-detail-sheet entry rows: sync icon + name)
-"provenance.name.widget" = "小组件";
-"provenance.name.siri" = "Siri";
-"provenance.name.control" = "控制中心";
-"provenance.name.screentime" = "屏幕使用时间";
-"provenance.name.garmin" = "Garmin";
-"provenance.name.calendar" = "日历";
-"provenance.name.healthkit" = "健康";
 
 // Log Time sheet (manual-entry spec)
 "logTime.title" = "补记时间";
@@ -216,9 +200,8 @@
 "logTime.starts" = "开始";
 "logTime.ends" = "结束";
 
-// Unified entry form (entry-editor spec: EDIT + LOCKED modes)
+// Unified entry form (entry-editor spec: EDIT modes)
 "entry.editTitle" = "编辑条目";
-"entry.lockedTitle" = "导入的条目";
 "entry.dismissLabel" = "关闭";
 "entry.confirmAddLabel" = "添加条目";
 "entry.confirmSaveLabel" = "存储条目";
@@ -227,7 +210,6 @@
 "entry.deleteMessage" = "该条目将被删除，可摇动设备撤销。";
 "entry.deleteConfirm" = "删除";
 "entry.staleError" = "该条目已在别处更改，请关闭后重新打开再试。";
-"entry.lockedNote" = "通过 %@ 导入——为避免与来源冲突，已禁用编辑。";
 "entry.nameLabel" = "名称";
 "entry.namePlaceholder" = "例如：健身房";
 "entry.duration" = "时长：%@";

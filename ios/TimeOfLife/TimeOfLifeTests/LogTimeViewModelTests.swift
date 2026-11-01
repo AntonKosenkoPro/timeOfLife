@@ -173,8 +173,6 @@ struct LogTimeViewModelTests {
         #expect(entries[0].startedAt == vm.startsAt)
         #expect(entries[0].endedAt == vm.endsAt)
         #expect(entries[0].durationSeconds == 3_600)
-        #expect(entries[0].source == "manual")
-        #expect(entries[0].sourceRef == nil)
     }
 
     @Test("save on an invalid form returns false without an error")
@@ -200,12 +198,10 @@ struct LogTimeViewModelTests {
 
     // MARK: - Modes
 
-    @Test("mode routing: none is create, manual is edit, imported is locked")
+    @Test("mode routing: no entry is create, any saved entry is edit")
     func modeRouting() {
         #expect(LogTimeViewModel.mode(for: nil) == .create)
-        #expect(LogTimeViewModel.mode(for: storedEntry(source: "manual")) == .edit)
-        #expect(LogTimeViewModel.mode(for: storedEntry(source: "garmin")) == .locked)
-        #expect(LogTimeViewModel.mode(for: storedEntry(source: "healthkit")) == .locked)
+        #expect(LogTimeViewModel.mode(for: storedEntry()) == .edit)
     }
 
     @Test("EDIT prefills name, categories, notes, and interval from the entry")
@@ -214,7 +210,6 @@ struct LogTimeViewModelTests {
         let vm = makeViewModel(editing: entry)
 
         #expect(vm.mode == .edit)
-        #expect(!vm.isLocked)
         #expect(vm.name == "Reading")
         #expect(vm.categoryIDs == ["c1", "c2"])
         #expect(vm.notes == "Some notes")
@@ -223,18 +218,22 @@ struct LogTimeViewModelTests {
         #expect(vm.isAddEnabled)
     }
 
-    @Test("LOCKED exposes values read-only with no confirm path")
-    func lockedHasNoConfirmPath() async throws {
-        let entry = storedEntry(source: "garmin")
-        let vm = makeViewModel(editing: entry)
+    @Test("EDIT allows every saved entry to be edited and saved")
+    func editAllowsSave() async throws {
+        let entry = storedEntry()
+        // swiftlint:disable:next force_try
+        let store = try! LocalStore(url: temporaryStoreURL())
+        _ = try await store.createEntry(entry)
+        let vm = makeViewModel(store: store, editing: entry)
 
-        #expect(vm.mode == .locked)
-        #expect(vm.isLocked)
+        #expect(vm.mode == .edit)
         #expect(vm.name == "Reading")
         #expect(vm.startsAt == entry.startedAt)
 
-        #expect(await vm.save() == false)
-        #expect(vm.errorMessage == nil)
+        vm.name = "Running"
+        #expect(await vm.save() == true)
+        let entries = try await store.entries()
+        #expect(entries.first?.activityText == "Running")
     }
 
     // MARK: - EDIT gate and duration
@@ -406,7 +405,7 @@ struct LogTimeViewModelTests {
             try await store.createEntry(TimeEntry(
                 id: "e\(index)", activityText: "Text\(index)",
                 startedAt: start, endedAt: start.addingTimeInterval(600),
-                durationSeconds: 600, source: "manual",
+                durationSeconds: 600,
                 categoryIDs: [], notes: "",
                 createdAt: start, updatedAt: start
             ))
@@ -488,7 +487,7 @@ struct LogTimeViewModelTests {
         try await store.createEntry(TimeEntry(
             id: "e9", activityText: "Gym",
             startedAt: start, endedAt: start.addingTimeInterval(600),
-            durationSeconds: 600, source: "manual",
+            durationSeconds: 600,
             categoryIDs: [], notes: "",
             createdAt: start, updatedAt: start
         ))
@@ -759,7 +758,6 @@ struct LogTimeViewModelTests {
 
     private func storedEntry(
         id: String = "e1",
-        source: String = "manual",
         categoryIDs: [String] = [],
         notes: String = "",
         start: Date = Date(timeIntervalSinceReferenceDate: 10_000),
@@ -769,7 +767,7 @@ struct LogTimeViewModelTests {
         return TimeEntry(
             id: id, activityText: "Reading",
             startedAt: start, endedAt: end,
-            durationSeconds: Int(duration), source: source,
+            durationSeconds: Int(duration),
             categoryIDs: categoryIDs, notes: notes,
             createdAt: start, updatedAt: start
         )

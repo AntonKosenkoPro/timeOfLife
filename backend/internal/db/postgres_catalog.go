@@ -19,17 +19,18 @@ type pgxScanner interface {
 }
 
 // pgScanEntry scans one entry row (without user_id) into an Entry. Postgres
-// scans nullable columns directly into pointers (NULL → nil).
+// scans nullable columns directly into pointers (NULL → nil). Retired
+// provenance columns are not projected: their physical defaults apply on
+// write and old rows keep their values unread.
 func pgScanEntry(sc pgxScanner, userID string) (Entry, error) {
 	var (
 		e         Entry
 		startedAt time.Time
 		endedAt   *time.Time
 		dur       *int
-		sourceRef *string
 		notes     *string
 	)
-	if err := sc.Scan(&e.ID, &e.ActivityText, &notes, &startedAt, &endedAt, &dur, &sourceRef, &e.Source, &e.CreatedAt, &e.UpdatedAt); err != nil {
+	if err := sc.Scan(&e.ID, &e.ActivityText, &notes, &startedAt, &endedAt, &dur, &e.CreatedAt, &e.UpdatedAt); err != nil {
 		return Entry{}, err
 	}
 	e.UserID = userID
@@ -39,11 +40,10 @@ func pgScanEntry(sc pgxScanner, userID string) (Entry, error) {
 	e.StartedAt = startedAt
 	e.EndedAt = endedAt
 	e.DurationSeconds = dur
-	e.SourceRef = sourceRef
 	return e, nil
 }
 
-const pgEntryColumns = `id, activity_text, notes, started_at, ended_at, duration_seconds, source_ref, source, created_at, updated_at`
+const pgEntryColumns = `id, activity_text, notes, started_at, ended_at, duration_seconds, created_at, updated_at`
 
 // pgListEntryTagsBatch returns category tags keyed by entry_id, position
 // order preserved (the entry's own snapshot — no query-time resolution).
@@ -435,11 +435,6 @@ func (s *PostgresStore) CreateEntry(ctx context.Context, e Entry) (Entry, bool, 
 		d := int(e.EndedAt.Sub(e.StartedAt).Seconds())
 		dur = &d
 	}
-	// Back-compat: entries created without provenance default to manual/null.
-	source := e.Source
-	if source == "" {
-		source = "manual"
-	}
 
 	now := time.Now().UTC()
 	tx, err := s.pool.Begin(ctx)
@@ -448,16 +443,13 @@ func (s *PostgresStore) CreateEntry(ctx context.Context, e Entry) (Entry, bool, 
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
+	// Retired provenance columns are omitted: their physical defaults
+	// (source='manual', source_ref=NULL) apply. No provenance is read or
+	// written by this release; the columns/index remain only for rollback.
 	if _, err := tx.Exec(ctx, `
-		INSERT INTO entries (id, user_id, activity_text, notes, started_at, ended_at, duration_seconds, source, source_ref, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $10)
-	`, e.ID, e.UserID, e.ActivityText, e.Notes, e.StartedAt, e.EndedAt, dur, source, e.SourceRef, now); err != nil {
-		// A duplicate import (same user_id, source, source_ref) surfaces as a
-		// UNIQUE-constraint failure on the partial index; map it to a clear
-		// error rather than a raw 500.
-		if pgIsUniqueViolation(err) {
-			return Entry{}, false, fmt.Errorf("create entry: %w", ErrDuplicateImport)
-		}
+		INSERT INTO entries (id, user_id, activity_text, notes, started_at, ended_at, duration_seconds, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $8)
+	`, e.ID, e.UserID, e.ActivityText, e.Notes, e.StartedAt, e.EndedAt, dur, now); err != nil {
 		return Entry{}, false, fmt.Errorf("create entry: %w", err)
 	}
 	if err := s.pgStrictEntryCategoriesTx(ctx, tx, e.UserID, e.Categories); err != nil {

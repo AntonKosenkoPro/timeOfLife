@@ -20,11 +20,10 @@ import (
 // constants to keep the string literals in one place.
 
 const (
-	codeValidation      = "validation_error"
-	codeNotFound        = "not_found"
-	codeConflict        = "conflict"
-	codeCategoryExists  = "category_exists"
-	codeDuplicateImport = "duplicate_import"
+	codeValidation     = "validation_error"
+	codeNotFound       = "not_found"
+	codeConflict       = "conflict"
+	codeCategoryExists = "category_exists"
 )
 
 // validIcons is the allowed SF Symbol set for catalog icons. This must match
@@ -71,14 +70,6 @@ const (
 	maxNameLen  = 60
 	maxNotesLen = 2000
 )
-
-// validEntrySources is the allowed provenance set for entries (entry-provenance
-// spec). The backend is the authoritative validator; the client keeps the
-// union. Future sources (e.g. a new integration) extend this list.
-var validEntrySources = map[string]bool{
-	"manual": true, "widget": true, "siri": true, "control": true,
-	"screentime": true, "garmin": true, "calendar": true, "healthkit": true,
-}
 
 var uuidV7Regex = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`)
 
@@ -181,8 +172,9 @@ type entryCreateReq struct {
 	CategoryIDs  []string `json:"category_ids"`
 	StartedAt    string   `json:"started_at"`
 	EndedAt      *string  `json:"ended_at"`
-	Source       string   `json:"source"`
-	SourceRef    *string  `json:"source_ref"`
+	// Note: retired producer keys (source, source_ref) are intentionally
+	// absent. The shared decodeJSON decoder ignores unknown request keys, so
+	// older clients sending them are accepted and the keys ignored.
 }
 
 type entryUpdateReq struct {

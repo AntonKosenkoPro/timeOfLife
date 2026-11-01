@@ -40,7 +40,7 @@ Keep design under version control as plain Markdown so:
 | `SCREENS/History.md` | History screen — day-grouped list of committed time entries (EntryRow, day totals, persistent nav bar; entry-form push, Log Time sheet, pull-to-refresh, shake-to-undo). |
 | `SCREENS/Insights.md` | Insights screen — read-only mirror-only breakdown (period switch, hero total, lens toggle, proportional rows). |
 | `SCREENS/NamePicker.md` | Shared dedicated name-picking page pushed from Track and the entry form. |
-| `SCREENS/EntryForm.md` | Unified entry form (`LogTimeView`) — CREATE sheet (Log Time), EDIT/LOCKED push from History. |
+| `SCREENS/EntryForm.md` | Unified entry form (`LogTimeView`) — CREATE sheet (Log Time), EDIT push from History. |
 | `SCREENS/ManageCategories.md` | Manage Categories screen — category CRUD, seeding, undo. |
 | `SCREENS/CategoryEditor.md` | Shared sheet to create/edit a category. |
 | `DECISIONS.md` | Design precedents and rationale. |

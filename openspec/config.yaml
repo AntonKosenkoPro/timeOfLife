@@ -19,15 +19,15 @@ context: |
   `device-sessions`, `apple-signin`, `live-activities`, `backend-database`,
   `email-otp-auth`, `observability`, and `relay-cors`). Behavior changes go through a change: delta specs
   under `openspec/changes/<change>/specs/`. The local-first architecture now lives in the
-  `local-first-store`, `sync-client`, `entry-provenance`, and `lock-screen-controls` baselines.
+  `local-first-store` and `sync-client` baselines (`entry-provenance` and
+  `lock-screen-controls` are retired by the active `remove-entry-integrations` change).
   Archives (`openspec/changes/archive/`) are history already folded into the baselines. Active
   changes live under `openspec/changes/` — check `openspec list` before starting new behavior work.
 
   Non-negotiables: LocalStore is the single mutation chokepoint (GRDB, App Group
   `group.com.antonkosenko.timeoflifeapp`) — no raw GRDB writes outside it. Several local-first UI
   surfaces are INCOMPLETE (see docs/project-context.md → "Incomplete / deferred"): shake-to-undo
-  polish + bulk-delete cap, and the iOS 18 lock-screen ControlWidget itself (a
-  widget extension target exists for Live Activities; the Control toggle is still deferred). OpenAPI (`backend/api/openapi.yaml`) is the authoritative API
+  polish + bulk-delete cap (lock-screen Controls are retired, not deferred — no `ControlWidget`). OpenAPI (`backend/api/openapi.yaml`) is the authoritative API
   contract (S10). No backward compat for on-disk formats (pre-release). No passwords, no
   plaintext secrets (R1). iOS strings go to all five locales (`en`, `ru`, `zh-Hans`, `es-419`, `pt-BR`) + `L10n` (U4).
   XcodeGen-managed: edit `project.yml`, run `xcodegen generate`, never hand-edit the `.pbxproj`.
@@ -58,7 +58,7 @@ operations:
       - 'External docs first: for every feature/bugfix, run the ctx7 research bundle (`library` → `docs`, one concept per query, max 5: topic + applicable HIG + Apple API + best practice) before coding and cite IDs + queries + pins; waive an inapplicable item only with reason + evidence; on quota error ask for `npx ctx7@latest login` / `CONTEXT7_API_KEY`, never silently fall back.'
       - Worktree isolation: do ALL change-scoped work (planning artifacts, code, tests) in a separated git worktree (`timeOfLife.wt/<change-name>`, one branch `opsx/<change-name>` per worktree, created from fresh `origin/main`); the main checkout stays clean (reads only, plus trivial docs-typo fixes). Read-only explore stays worktree-free. Worktrees do not lift the one-`xcodebuild` / one-simulator / single-writer-file serialization.
       - 'Double rebase on `origin/main`: `git fetch origin` + rebase before implementing (fresh base) and again before opening the PR (mergeable head); re-run affected linters/tests after each rebase; pushed branches move via `push --force-with-lease`; never `merge main` into the branch.'
-      - Deferred local-first UI surfaces (shake-to-undo polish + bulk-delete cap, lock-screen ControlWidget) must not be claimed done; update `docs/project-context.md` → "Incomplete / deferred" and any owning change artifacts accordingly.
+      - Deferred local-first UI surfaces (shake-to-undo polish + bulk-delete cap) must not be claimed done; update `docs/project-context.md` → "Incomplete / deferred" and any owning change artifacts accordingly. (Lock-screen Controls are retired, not deferred.)
       - If the OpenAPI contract changes, update `backend/api/openapi.yaml` and both client/server sides (S10); run the backend contract gate (`go test ./...` includes `internal/contract`).
       - Run linters + warning-as-error build + both test suites per `docs/project-context.md` → "Per-iteration revising process (S5)".
   archive:

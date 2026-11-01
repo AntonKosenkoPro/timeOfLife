@@ -90,19 +90,20 @@ func nullIntArg(n *int) any {
 	return *n
 }
 
-// scanEntry scans one entry row (without user_id) into an Entry.
+// scanEntry scans one entry row (without user_id) into an Entry. Retired
+// provenance columns are not projected: their physical defaults apply on
+// write and old rows keep their values unread.
 func scanEntry(sc rowScanner, userID string) (Entry, error) {
 	var (
 		e         Entry
 		startedAt string
 		endedAt   sql.NullString
 		dur       sql.NullInt64
-		sourceRef sql.NullString
 		notes     sql.NullString
 		createdAt string
 		updatedAt string
 	)
-	if err := sc.Scan(&e.ID, &e.ActivityText, &notes, &startedAt, &endedAt, &dur, &sourceRef, &e.Source, &createdAt, &updatedAt); err != nil {
+	if err := sc.Scan(&e.ID, &e.ActivityText, &notes, &startedAt, &endedAt, &dur, &createdAt, &updatedAt); err != nil {
 		return Entry{}, err
 	}
 	e.UserID = userID
@@ -110,15 +111,12 @@ func scanEntry(sc rowScanner, userID string) (Entry, error) {
 	e.StartedAt = parseTime(startedAt)
 	e.EndedAt = nullTimePtr(endedAt)
 	e.DurationSeconds = nullIntPtr(dur)
-	if sourceRef.Valid {
-		e.SourceRef = &sourceRef.String
-	}
 	e.CreatedAt = parseTime(createdAt)
 	e.UpdatedAt = parseTime(updatedAt)
 	return e, nil
 }
 
-const entryColumns = `id, activity_text, notes, started_at, ended_at, duration_seconds, source_ref, source, created_at, updated_at`
+const entryColumns = `id, activity_text, notes, started_at, ended_at, duration_seconds, created_at, updated_at`
 
 // listEntryTagsBatch returns category tags keyed by entry_id, position order
 // preserved (the entry's own snapshot — no query-time resolution).
@@ -559,11 +557,6 @@ func (s *SQLiteStore) CreateEntry(ctx context.Context, e Entry) (Entry, bool, er
 		d := int(e.EndedAt.Sub(e.StartedAt).Seconds())
 		dur = &d
 	}
-	// Back-compat: entries created without provenance default to manual/null.
-	source := e.Source
-	if source == "" {
-		source = "manual"
-	}
 
 	now := time.Now().UTC()
 	tx, err := s.db.BeginTx(ctx, nil)
@@ -572,16 +565,13 @@ func (s *SQLiteStore) CreateEntry(ctx context.Context, e Entry) (Entry, bool, er
 	}
 	defer func() { _ = tx.Rollback() }()
 
+	// Retired provenance columns are omitted: their physical defaults
+	// (source='manual', source_ref=NULL) apply. No provenance is read or
+	// written by this release; the columns/index remain only for rollback.
 	if _, err := tx.ExecContext(ctx, `
-		INSERT INTO entries (id, user_id, activity_text, notes, started_at, ended_at, duration_seconds, source, source_ref, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`, e.ID, e.UserID, e.ActivityText, e.Notes, fmtTime(e.StartedAt), fmtTimeArg(e.EndedAt), nullIntArg(dur), source, strPtrArg(e.SourceRef), fmtTime(now), fmtTime(now)); err != nil {
-		// A duplicate import (same user_id, source, source_ref) surfaces as a
-		// UNIQUE-constraint failure on the partial index; map it to a clear
-		// error rather than a raw 500.
-		if isUniqueViolation(err) {
-			return Entry{}, false, fmt.Errorf("create entry: %w", ErrDuplicateImport)
-		}
+		INSERT INTO entries (id, user_id, activity_text, notes, started_at, ended_at, duration_seconds, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, e.ID, e.UserID, e.ActivityText, e.Notes, fmtTime(e.StartedAt), fmtTimeArg(e.EndedAt), nullIntArg(dur), fmtTime(now), fmtTime(now)); err != nil {
 		return Entry{}, false, fmt.Errorf("create entry: %w", err)
 	}
 	if err := s.strictEntryCategoriesTx(ctx, tx, e.UserID, e.Categories); err != nil {
@@ -604,14 +594,6 @@ func (s *SQLiteStore) CreateEntry(ctx context.Context, e Entry) (Entry, bool, er
 		return Entry{}, false, err
 	}
 	return created, true, nil
-}
-
-// strPtrArg dereferences a *string for a placeholder (nil → NULL).
-func strPtrArg(s *string) any {
-	if s == nil {
-		return nil
-	}
-	return *s
 }
 
 // UpdateEntry applies a partial LWW update and recomputes duration_seconds.

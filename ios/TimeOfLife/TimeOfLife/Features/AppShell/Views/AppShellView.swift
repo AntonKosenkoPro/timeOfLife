@@ -77,7 +77,7 @@ struct AppShellView: View {
             Task { await reloadTrack() }
         }
         // Foreground return never re-appears the visible tab: reconcile here
-        // too, or a widget-side stop leaves the Track timer ticking until
+        // too, or a background save leaves the Track timer ticking until
         // the next tab switch (device finding — draft gone, in-memory run
         // stale). Serialized reload, same as the tab-return path.
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in

@@ -85,7 +85,7 @@ struct HistoryPullModelTests {
             id: "e1", activityText: "Gym",
             startedAt: Date(timeIntervalSinceReferenceDate: 1_000),
             endedAt: Date(timeIntervalSinceReferenceDate: 1_600),
-            durationSeconds: 600, source: "manual"
+            durationSeconds: 600
         ))
         mock.createEntryHandler = { _ in
             try await Task.sleep(nanoseconds: 300_000_000)

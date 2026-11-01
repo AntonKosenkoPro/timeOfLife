@@ -380,7 +380,6 @@ struct HistorySearchEvaluationTests {
             timeframeText: "14:00 – 15:20",
             durationText: "1h 20m",
             isInProgress: false,
-            viaText: "",
             hasNotes: true,
             excerptText: "… around squats …"
         )

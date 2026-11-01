@@ -40,12 +40,11 @@ final class SessionCache: @unchecked Sendable {
 
     /// Writes (sign-in) or removes (sign-out) the resolver sidecar.
     /// Best-effort: a failed write must never fail the sign-in itself.
-    /// The sidecar is read by lock-screen extension surfaces with a locked
-    /// keybag, so it carries the same after-first-unlock class as the db.
+    /// The sidecar is read file-first when the keybag is locked, so it
+    /// carries the same after-first-unlock class as the db.
     /// A failed sign-out removal falls back to blanking the file: a stale
-    /// id would otherwise keep resolving the logged-out account (and a
-    /// lock-screen intent could write into it), while a blank file
-    /// resolves `.locked` — the safe direction.
+    /// id would otherwise keep naming the logged-out account, while a
+    /// blank file reads nil — the safe direction.
     private func mirrorSessionFile(userID: String?) {
         guard let url = sessionFileURL else { return }
         if let userID {

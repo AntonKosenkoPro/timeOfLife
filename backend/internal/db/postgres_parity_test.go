@@ -308,47 +308,38 @@ func TestPostgres_ListEntries_ModifiedSince(t *testing.T) {
 	}
 }
 
-// Parity: provenance persistence + duplicate-import rejection.
-func TestPostgres_CreateEntry_ProvenanceAndDuplicateImport(t *testing.T) {
+// Parity: source-free creates round-trip supported values and same-ID replay
+// stays idempotent.
+func TestPostgres_CreateEntry_SourceFreeRoundTripAndReplay(t *testing.T) {
 	store := newParityStore(t)
-	uid := parityUser(t, store, "pg-provenance@example.com")
+	uid := parityUser(t, store, "pg-sourcefree@example.com")
 	base := time.Date(2026, 7, 27, 9, 0, 0, 0, time.UTC)
-	ref := "interval-42"
+	ended := base.Add(time.Hour)
 
-	// Default provenance on entries created without it.
-	e1, _, err := store.CreateEntry(context.Background(), Entry{
-		ID: uuidV7(), UserID: uid, ActivityText: "Gym", StartedAt: base,
+	e, isNew, err := store.CreateEntry(context.Background(), Entry{
+		ID: uuidV7(), UserID: uid, ActivityText: "Gym", Notes: "leg day",
+		StartedAt: base, EndedAt: &ended,
 	})
-	if err != nil {
-		t.Fatalf("CreateEntry: %v", err)
+	if err != nil || !isNew {
+		t.Fatalf("CreateEntry: isNew=%v err=%v", isNew, err)
 	}
-	if e1.Source != "manual" || e1.SourceRef != nil {
-		t.Errorf("expected manual/nil provenance, got %q/%v", e1.Source, e1.SourceRef)
-	}
-
-	// Explicit provenance persists and round-trips.
-	e2, _, err := store.CreateEntry(context.Background(), Entry{
-		ID: uuidV7(), UserID: uid, ActivityText: "Read", StartedAt: base.Add(time.Hour),
-		Source: "screentime", SourceRef: &ref,
-	})
-	if err != nil {
-		t.Fatalf("CreateEntry: %v", err)
-	}
-	got, err := store.GetEntry(context.Background(), uid, e2.ID)
+	got, err := store.GetEntry(context.Background(), uid, e.ID)
 	if err != nil {
 		t.Fatalf("GetEntry: %v", err)
 	}
-	if got.Source != "screentime" || got.SourceRef == nil || *got.SourceRef != ref {
-		t.Errorf("round-trip: expected screentime/%s, got %q/%v", ref, got.Source, got.SourceRef)
+	if got.ActivityText != "Gym" || got.Notes != "leg day" {
+		t.Errorf("round-trip text/notes mismatch: %+v", got)
+	}
+	if got.DurationSeconds == nil || *got.DurationSeconds != 3600 {
+		t.Errorf("expected duration 3600, got %+v", got.DurationSeconds)
 	}
 
-	// Duplicate (source, source_ref) is rejected.
-	_, _, err = store.CreateEntry(context.Background(), Entry{
-		ID: uuidV7(), UserID: uid, ActivityText: "Gym", StartedAt: base.Add(2 * time.Hour),
-		Source: "screentime", SourceRef: &ref,
-	})
-	if !errors.Is(err, ErrDuplicateImport) {
-		t.Fatalf("expected ErrDuplicateImport, got %v", err)
+	replayed, isNew, err := store.CreateEntry(context.Background(), e)
+	if err != nil {
+		t.Fatalf("replay: %v", err)
+	}
+	if isNew || replayed.ID != e.ID {
+		t.Errorf("replay must return the same record without duplicating, got isNew=%v id=%q", isNew, replayed.ID)
 	}
 }
 

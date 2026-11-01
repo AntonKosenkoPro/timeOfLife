@@ -568,99 +568,50 @@ func TestStore_ListEntries_CategoryFilter(t *testing.T) {
 	}
 }
 
-// Provenance: entries created without source/source_ref default to
-// manual/null (back-compat); entries created with them persist them.
-func TestStore_CreateEntry_ProvenanceDefaultsAndPersistence(t *testing.T) {
+// Source-free entries: creates persist only the supported values and round
+// trip identically through GetEntry (no producer metadata is read back).
+func TestStore_CreateEntry_SourceFreeRoundTrip(t *testing.T) {
 	store := setupTestStore(t)
-	uid := newTestUser(t, store, "provenance@example.com")
+	uid := newTestUser(t, store, "sourcefree@example.com")
 	base := time.Date(2026, 7, 27, 9, 0, 0, 0, time.UTC)
+	ended := base.Add(90 * time.Minute)
+	notes := "leg day"
 
-	// No provenance → manual/null.
-	e1, _, err := store.CreateEntry(context.Background(), Entry{
-		ID: uuidV7(), UserID: uid, ActivityText: "Gym", StartedAt: base,
+	e, created, err := store.CreateEntry(context.Background(), Entry{
+		ID: uuidV7(), UserID: uid, ActivityText: "Gym", Notes: notes,
+		StartedAt: base, EndedAt: &ended,
 	})
 	if err != nil {
 		t.Fatalf("CreateEntry: %v", err)
 	}
-	if e1.Source != "manual" {
-		t.Errorf("expected default source manual, got %q", e1.Source)
-	}
-	if e1.SourceRef != nil {
-		t.Errorf("expected nil source_ref, got %q", *e1.SourceRef)
+	if !created {
+		t.Fatal("CreateEntry: expected created=true")
 	}
 
-	// Explicit provenance persists.
-	ref := "callback-123"
-	e2, _, err := store.CreateEntry(context.Background(), Entry{
-		ID: uuidV7(), UserID: uid, ActivityText: "Read", StartedAt: base.Add(time.Hour),
-		Source: "screentime", SourceRef: &ref,
-	})
-	if err != nil {
-		t.Fatalf("CreateEntry: %v", err)
-	}
-	if e2.Source != "screentime" || e2.SourceRef == nil || *e2.SourceRef != ref {
-		t.Errorf("expected screentime/%s, got %q/%v", ref, e2.Source, e2.SourceRef)
-	}
-
-	// Round-trip through GetEntry.
-	got, err := store.GetEntry(context.Background(), uid, e2.ID)
+	got, err := store.GetEntry(context.Background(), uid, e.ID)
 	if err != nil {
 		t.Fatalf("GetEntry: %v", err)
 	}
-	if got.Source != "screentime" || got.SourceRef == nil || *got.SourceRef != ref {
-		t.Errorf("round-trip: expected screentime/%s, got %q/%v", ref, got.Source, got.SourceRef)
+	if got.ActivityText != "Gym" || got.Notes != notes {
+		t.Errorf("round-trip text/notes mismatch: %+v", got)
+	}
+	if !got.StartedAt.Equal(base) || got.EndedAt == nil || !got.EndedAt.Equal(ended) {
+		t.Errorf("round-trip timestamps mismatch: %+v", got)
+	}
+	if got.DurationSeconds == nil || *got.DurationSeconds != 90*60 {
+		t.Errorf("expected duration 5400, got %+v", got.DurationSeconds)
 	}
 }
 
-// Duplicate import prevention: a second create with the same
-// (user_id, source, source_ref) is rejected by the partial unique index.
-func TestStore_CreateEntry_DuplicateImportRejected(t *testing.T) {
+// Same-ID replay stays idempotent: replaying the same id returns the
+// existing record and does not create a duplicate.
+func TestStore_CreateEntry_IdempotentReplay(t *testing.T) {
 	store := setupTestStore(t)
-	uid := newTestUser(t, store, "dup-import@example.com")
+	uid := newTestUser(t, store, "replay@example.com")
 	base := time.Date(2026, 7, 27, 9, 0, 0, 0, time.UTC)
-	ref := "interval-42"
-
-	if _, _, err := store.CreateEntry(context.Background(), Entry{
-		ID: uuidV7(), UserID: uid, ActivityText: "Gym", StartedAt: base,
-		Source: "screentime", SourceRef: &ref,
-	}); err != nil {
-		t.Fatalf("first create: %v", err)
-	}
-	_, _, err := store.CreateEntry(context.Background(), Entry{
-		ID: uuidV7(), UserID: uid, ActivityText: "Gym", StartedAt: base.Add(time.Hour),
-		Source: "screentime", SourceRef: &ref,
-	})
-	if !errors.Is(err, ErrDuplicateImport) {
-		t.Fatalf("expected ErrDuplicateImport, got %v", err)
-	}
-
-	// Same source_ref with a different source is allowed (distinct provenance).
-	if _, _, err := store.CreateEntry(context.Background(), Entry{
-		ID: uuidV7(), UserID: uid, ActivityText: "Gym", StartedAt: base.Add(2 * time.Hour),
-		Source: "garmin", SourceRef: &ref,
-	}); err != nil {
-		t.Fatalf("different source, same ref must be allowed: %v", err)
-	}
-
-	// Null source_ref rows are exempt from the constraint (manual entries).
-	if _, _, err := store.CreateEntry(context.Background(), Entry{
-		ID: uuidV7(), UserID: uid, ActivityText: "Gym", StartedAt: base.Add(3 * time.Hour),
-	}); err != nil {
-		t.Fatalf("manual entry must not collide: %v", err)
-	}
-}
-
-// Idempotent replay with provenance: replaying the same id returns the
-// existing record (with its provenance) and does not create a duplicate.
-func TestStore_CreateEntry_IdempotentReplayWithProvenance(t *testing.T) {
-	store := setupTestStore(t)
-	uid := newTestUser(t, store, "replay-provenance@example.com")
-	base := time.Date(2026, 7, 27, 9, 0, 0, 0, time.UTC)
-	ref := "garmin-activity-7"
 
 	e := Entry{
 		ID: uuidV7(), UserID: uid, ActivityText: "Gym", StartedAt: base,
-		Source: "garmin", SourceRef: &ref,
 	}
 	created, isNew, err := store.CreateEntry(context.Background(), e)
 	if err != nil || !isNew {
@@ -673,11 +624,59 @@ func TestStore_CreateEntry_IdempotentReplayWithProvenance(t *testing.T) {
 	if isNew {
 		t.Fatal("replay must return created=false")
 	}
-	if replayed.Source != "garmin" || replayed.SourceRef == nil || *replayed.SourceRef != ref {
-		t.Errorf("replay must return the stored provenance, got %q/%v", replayed.Source, replayed.SourceRef)
-	}
 	if replayed.ID != created.ID {
 		t.Errorf("replay must return the same record, got %q vs %q", replayed.ID, created.ID)
+	}
+	items, _, err := store.ListEntries(context.Background(), uid, EntryFilter{})
+	if err != nil {
+		t.Fatalf("ListEntries: %v", err)
+	}
+	if len(items) != 1 {
+		t.Errorf("replay must not duplicate the entry, got %d rows", len(items))
+	}
+}
+
+// Legacy-shaped rows keep working: a row seeded with retired non-manual
+// provenance reads and updates with all supported values intact, and the
+// retired metadata is never surfaced.
+func TestStore_LegacyProvenanceRow_PreservedWithoutExposure(t *testing.T) {
+	store := setupTestStore(t)
+	uid := newTestUser(t, store, "legacy@example.com")
+	base := time.Date(2026, 7, 27, 9, 0, 0, 0, time.UTC)
+	ended := base.Add(time.Hour)
+	id := uuidV7()
+	if _, err := store.db.Exec(
+		`INSERT INTO entries (id, user_id, activity_text, notes, started_at, ended_at, duration_seconds, source, source_ref, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		id, uid, "Gym", "old notes", fmtTime(base), fmtTime(ended), 3600,
+		"garmin", "activity-7", fmtTime(base), fmtTime(base),
+	); err != nil {
+		t.Fatalf("seed legacy row: %v", err)
+	}
+
+	got, err := store.GetEntry(context.Background(), uid, id)
+	if err != nil {
+		t.Fatalf("GetEntry: %v", err)
+	}
+	if got.ID != id || got.ActivityText != "Gym" || got.Notes != "old notes" {
+		t.Errorf("legacy row values not preserved: %+v", got)
+	}
+	if !got.StartedAt.Equal(base) || got.EndedAt == nil || !got.EndedAt.Equal(ended) {
+		t.Errorf("legacy row timestamps not preserved: %+v", got)
+	}
+	if got.DurationSeconds == nil || *got.DurationSeconds != 3600 {
+		t.Errorf("legacy row duration not preserved: %+v", got.DurationSeconds)
+	}
+
+	updatedAt := base.Add(2 * time.Hour)
+	updated, err := store.UpdateEntry(context.Background(), uid, id, EntryPatch{
+		Notes: ptr("new notes"), UpdatedAt: updatedAt,
+	})
+	if err != nil {
+		t.Fatalf("UpdateEntry: %v", err)
+	}
+	if updated.Notes != "new notes" || updated.ActivityText != "Gym" {
+		t.Errorf("legacy row update must preserve values: %+v", updated)
 	}
 }
 

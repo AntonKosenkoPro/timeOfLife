@@ -243,12 +243,12 @@ final class TrackViewModel: ObservableObject {
         elapsed = 0
         // Same grammar as scheduleSavedReset: a restart must not inherit
         // the previous run's notes (e.g. mid-run notes preserved in memory
-        // while the persisted draft was stopped elsewhere).
+        // while the persisted draft was stopped through the app).
         state = draft.text.isEmpty
             ? .idle
             : .ready(TrackState.Draft(text: draft.text, categoryIDs: draft.categoryIDs))
         // The draft is gone so no run is active, but an Island may still be
-        // live (terminated app missed the Darwin signal): reap — the
+        // live (a terminated app missed the foreground sweep): reap — the
         // entry-recency heuristic resolves Saved-vs-silent from the saved
         // entry itself (live-activities D8).
         await service.endOrphanedActivities()

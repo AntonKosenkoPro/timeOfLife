@@ -315,7 +315,6 @@ struct TrackSyncReloadTests {
             startedAt: now,
             endedAt: now.addingTimeInterval(60),
             durationSeconds: 60,
-            source: "manual",
             categoryIDs: categoryIDs
         )
     }

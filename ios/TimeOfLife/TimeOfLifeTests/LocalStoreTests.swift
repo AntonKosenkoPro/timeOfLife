@@ -60,8 +60,6 @@ struct LocalStoreTests {
         id: String = "entry-1",
         activityText: String = "Coding",
         startedAt: Date = Date(timeIntervalSinceReferenceDate: 2_500),
-        source: String = "manual",
-        sourceRef: String? = nil,
         notes: String = "",
         categoryIDs: [String] = [],
         updatedAt: Date = Date(timeIntervalSinceReferenceDate: 3_000)
@@ -72,8 +70,6 @@ struct LocalStoreTests {
             startedAt: startedAt,
             endedAt: startedAt.addingTimeInterval(600),
             durationSeconds: 600,
-            source: source,
-            sourceRef: sourceRef,
             categoryIDs: categoryIDs,
             notes: notes,
             createdAt: Date(timeIntervalSinceReferenceDate: 2_000),
@@ -287,40 +283,47 @@ struct LocalStoreTests {
         #expect(deleteRow.payload == nil)
     }
 
-    // MARK: - Provenance
+    // MARK: - Source-free entries
 
-    @Test("entry provenance round-trips through entry(id:)")
-    func provenanceRoundTrips() async throws {
+    @Test("entries round-trip all supported values through entry(id:)")
+    func entriesRoundTripSupportedValues() async throws {
         let store = try makeStore()
-        let entry = makeEntry(source: "screentime", sourceRef: "st-callback-42")
+        let entry = makeEntry(notes: "evening session", categoryIDs: [])
         _ = try await store.createEntry(entry)
 
         let fetched = try await store.entry(id: entry.id)
         #expect(fetched == entry)
-        #expect(fetched?.source == "screentime")
-        #expect(fetched?.sourceRef == "st-callback-42")
+        #expect(fetched?.activityText == "Coding")
+        #expect(fetched?.notes == "evening session")
+        #expect(fetched?.durationSeconds == 600)
     }
 
-    @Test("a second entry with the same (source, sourceRef) is rejected")
-    func duplicateProvenanceIsRejected() async throws {
+    @Test("entries with distinct ids are independent (no external-reference dedup)")
+    func distinctIDsAreIndependent() async throws {
         let store = try makeStore()
-        _ = try await store.createEntry(makeEntry(source: "screentime", sourceRef: "x"))
+        _ = try await store.createEntry(makeEntry(id: "entry-1"))
+        _ = try await store.createEntry(makeEntry(id: "entry-2"))
 
-        let duplicate = makeEntry(id: "entry-2", source: "screentime", sourceRef: "x")
-        let outcome = try await store.createEntry(duplicate)
-        guard case .failure = outcome else {
-            Issue.record("expected a failure outcome, got \(outcome)")
+        #expect(try await store.entries().count == 2)
+        let payloads = try await store.outboxRows()
+        for row in payloads where row.resource == "entry" {
+            let payload = try #require(row.payload)
+            #expect(!payload.contains("source"))
+        }
+    }
+
+    @Test("same-id replay returns the existing entry without duplicating")
+    func sameIDReplayIsIdempotent() async throws {
+        let store = try makeStore()
+        let entry = makeEntry()
+        _ = try await store.createEntry(entry)
+        let outcome = try await store.createEntry(entry)
+
+        guard case .created = outcome else {
+            Issue.record("expected created outcome, got \(outcome)")
             return
         }
         #expect(try await store.entries().count == 1)
-    }
-
-    @Test("manual entries with nil sourceRef may duplicate")
-    func manualEntriesWithoutSourceRefCanDuplicate() async throws {
-        let store = try makeStore()
-        _ = try await store.createEntry(makeEntry(id: "entry-1", source: "manual", sourceRef: nil))
-        _ = try await store.createEntry(makeEntry(id: "entry-2", source: "manual", sourceRef: nil))
-        #expect(try await store.entries().count == 2)
     }
 
     // MARK: - Recents (timer-capture-experience D5)
@@ -1601,7 +1604,6 @@ struct LocalStoreEntryUndoTests {
 
     private func makeEntry(
         id: String = "entry-1",
-        source: String = "manual",
         categoryIDs: [String] = [],
         notes: String = ""
     ) -> TimeEntry {
@@ -1609,7 +1611,7 @@ struct LocalStoreEntryUndoTests {
             id: id, activityText: "Running",
             startedAt: Date(timeIntervalSinceReferenceDate: 1_000),
             endedAt: Date(timeIntervalSinceReferenceDate: 1_600), durationSeconds: 600,
-            source: source, categoryIDs: categoryIDs, notes: notes
+            categoryIDs: categoryIDs, notes: notes
         )
     }
 
@@ -1644,7 +1646,7 @@ struct LocalStoreEntryUndoTests {
     func undoRestoresEntryWithoutSync() async throws {
         let store = try makeStore()
         try await store.createCategory(Category(id: "cat-1", name: "Work", icon: "briefcase"))
-        _ = try await store.createEntry(makeEntry(source: "garmin", categoryIDs: ["cat-1"], notes: "kept"))
+        _ = try await store.createEntry(makeEntry(categoryIDs: ["cat-1"], notes: "kept"))
         _ = try await store.deleteEntryUndoable(id: "entry-1", deletedAt: Date())
 
         let buffer = try #require(try await store.undoBufferMostRecent())
@@ -1653,7 +1655,7 @@ struct LocalStoreEntryUndoTests {
         #expect(restored?.id == "entry-1")
         #expect(restored?.activityText == "Running")
         #expect(restored?.durationSeconds == 600)
-        #expect(restored?.source == "garmin")
+        #expect(restored?.notes == "kept")
         #expect(restored?.categoryIDs == ["cat-1"])
         #expect(restored?.notes == "kept")
         let stored = try await store.entry(id: "entry-1")

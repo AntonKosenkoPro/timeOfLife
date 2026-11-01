@@ -265,8 +265,6 @@ struct TimeEntry: Identifiable, Codable, Sendable {
     let startedAt: Date
     let endedAt: Date?
     var duration: TimeInterval { endedAt.map { $0.timeIntervalSince(startedAt) } ?? 0 }
-    var source: String
-    var sourceRef: String?
 }
 ```
 

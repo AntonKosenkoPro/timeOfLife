@@ -296,8 +296,7 @@ struct ManageCategoriesViewModelTests {
         try await store.createEntry(TimeEntry(
             id: "e1", activityText: "Running",
             startedAt: Date(timeIntervalSinceReferenceDate: 1_000),
-            endedAt: Date(timeIntervalSinceReferenceDate: 1_600), durationSeconds: 600,
-            source: "manual"
+            endedAt: Date(timeIntervalSinceReferenceDate: 1_600), durationSeconds: 600
         ))
         _ = try await store.deleteEntryUndoable(id: "e1", deletedAt: Date())
         let vm = ManageCategoriesViewModel(store: store, undoBuffer: UndoBufferStore(store: store))

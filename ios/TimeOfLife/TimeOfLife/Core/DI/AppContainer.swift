@@ -98,24 +98,6 @@ final class AppContainer: ObservableObject {
             authService: authService
         )
         registerReapCheck()
-        observeExternalStopSignal()
-    }
-
-    /// Handles an Island Stop: reaps activities orphaned by the intent and
-    /// tells tracker surfaces to reload (the intent already saved the entry
-    /// and cleared the draft — Track would otherwise keep ticking
-    /// stale in-memory state). The run is definitively over, so the
-    /// background reap chain is cancelled — unless a new run started in
-    /// the meantime (its Start re-armed the chain; cancelling here would
-    /// strand it), so the cancel is draft-gated.
-    func handleExternalStop() {
-        Task {
-            await timerService.endOrphanedActivities()
-            if (try? await timerService.runningTimerDraft()) == nil {
-                BackgroundReapScheduler.cancelReapCheck()
-            }
-            NotificationCenter.default.post(name: .timerStoppedExternally, object: nil)
-        }
     }
 
     /// Registers the background reap check (live-activities BG chain): a
@@ -141,34 +123,6 @@ final class AppContainer: ObservableObject {
         }
     }
 
-    /// Observes the Darwin signal posted by the Stop intent (live-activities
-    /// D8). The C callback hops to the actor; the box lives as long as the
-    /// container (app lifetime) by design.
-    private func observeExternalStopSignal() {
-        final class HandlerBox: Sendable {
-            let onSignal: @Sendable () -> Void
-            init(_ onSignal: @escaping @Sendable () -> Void) {
-                self.onSignal = onSignal
-            }
-        }
-        let box = HandlerBox { [weak self] in
-            Task { await self?.handleExternalStop() }
-        }
-        let context = Unmanaged.passRetained(box).toOpaque()
-        CFNotificationCenterAddObserver(
-            CFNotificationCenterGetDarwinNotifyCenter(),
-            context,
-            { _, observer, _, _, _ in
-                guard let observer else { return }
-                let box = Unmanaged<HandlerBox>.fromOpaque(observer).takeUnretainedValue()
-                box.onSignal()
-            } as CFNotificationCallback,
-            LiveActivitySignal.name as CFString,
-            nil,
-            .deliverImmediately
-        )
-    }
-
     /// Default production graph wired against `AppConfig.baseURL`. The local
     /// store is built unbound; call `openLocalStore(userID:)` once the
     /// session resolves (restore on launch, verify/apple on login) and
@@ -180,11 +134,11 @@ final class AppContainer: ObservableObject {
         MetricKitHarness.shared.start()
         let keychain = KeychainStore()
         // The cache must write the session id to the App Group defaults —
-        // the same store `ActiveAccountFileResolver` reads (lock-screen-
-        // controls delta 4.2), or resolve() sees `.locked` for real sessions.
-        // The id is additionally mirrored to the group-container sidecar
-        // file, which is what extension processes actually read (suite
-        // UserDefaults detach from cfprefsd in extensions).
+        // the same store `ActiveAccountFileResolver` reads for the shared
+        // session marker. The id is additionally mirrored to the
+        // group-container sidecar file, which is what extension processes
+        // actually read (suite UserDefaults detach from cfprefsd in
+        // extensions).
         let sessionCache = SessionCache(
             defaults: UserDefaults(suiteName: LocalStore.appGroupID) ?? .standard,
             sessionFileURL: ActiveAccountFileResolver.sessionFileURL()
@@ -365,10 +319,4 @@ final class AppContainer: ObservableObject {
 final class APIClientHolder {
     weak var service: AuthService?
     init() {}
-}
-
-extension Notification.Name {
-    /// Posted (in-process) after an Island Stop is handled: tracker surfaces
-    /// reload so no stale running state survives (live-activities D8).
-    static let timerStoppedExternally = Notification.Name("timerStoppedExternally")
 }

@@ -99,14 +99,14 @@ final class TimerService: ObservableObject {
         )
     }
 
-    /// Stops the running timer: saves the completed entry (with
-    /// `source='manual'` and the draft's final notes) in one transaction
+    /// Stops the running timer: saves the completed entry (with the draft's
+    /// final notes) in one transaction
     /// with its single outbox row and clears the persisted running draft.
     /// Category ids that vanished mid-run (deleted elsewhere while timing)
     /// are pruned with the remainder kept — a stop never fails on a dead tag.
     ///
     /// Also ends the Live Activity with the Saved card (live-activities
-    /// spec) — every Stop path (Track, retry, Island intent) flows through
+    /// spec) — every Stop path (Track, retry, Island link) flows through
     /// here, so this is the single end call site.
     func stopTimerDraft(text: String, categoryIDs: [String], startedAt: Date, endedAt: Date = Date(), notes: String = "") async throws {
         let existing = Set(try await store.categories().map(\.id))
@@ -118,7 +118,6 @@ final class TimerService: ObservableObject {
             startedAt: startedAt,
             endedAt: endedAt,
             durationSeconds: durationSeconds,
-            source: "manual",
             categoryIDs: pruned,
             notes: notes
         )

@@ -41,7 +41,6 @@ var canonicalErrorCodes = []string{
 	"not_found",
 	"conflict",
 	"category_exists",
-	"duplicate_import",
 	"validation_error",
 }
 
@@ -312,26 +311,25 @@ func TestSpec_ModifiedSinceDocumentedOnListEndpoints(t *testing.T) {
 	}
 }
 
-// Provenance (v1.2.0): the Entry schema must document source + source_ref and
-// the EntryCreate schema must accept them.
-func TestSpec_EntryProvenanceDocumented(t *testing.T) {
+// Source-free entries: neither the Entry nor the EntryCreate schema documents
+// the retired source/source_ref fields, and duplicate_import is gone from the
+// documented error codes (pinned by TestSpec_DocumentsExactlyCanonicalErrorCodes).
+func TestSpec_EntriesAreSourceFree(t *testing.T) {
 	s := loadSpec(t)
-	entry, ok := s.Components.Schemas["Entry"]
-	if !ok {
-		t.Fatal("expected Entry schema")
-	}
-	for _, field := range []string{"source", "source_ref"} {
-		if _, ok := entry.Properties[field]; !ok {
-			t.Errorf("Entry schema must document %q", field)
+	for _, name := range []string{"Entry", "EntryCreate"} {
+		schema, ok := s.Components.Schemas[name]
+		if !ok {
+			t.Fatalf("expected %s schema", name)
 		}
-	}
-	create, ok := s.Components.Schemas["EntryCreate"]
-	if !ok {
-		t.Fatal("expected EntryCreate schema")
-	}
-	for _, field := range []string{"source", "source_ref"} {
-		if _, ok := create.Properties[field]; !ok {
-			t.Errorf("EntryCreate schema must document %q", field)
+		for _, field := range []string{"source", "source_ref"} {
+			if _, ok := schema.Properties[field]; ok {
+				t.Errorf("%s schema must not document retired field %q", name, field)
+			}
+		}
+		for _, field := range schema.Required {
+			if field == "source" || field == "source_ref" {
+				t.Errorf("%s schema must not require retired field %q", name, field)
+			}
 		}
 	}
 }

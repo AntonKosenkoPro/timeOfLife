@@ -72,38 +72,16 @@ struct EntryRowAccessibilityTests {
         #expect(!label.contains(L10n.historyHasNotes.text))
     }
 
-    @Test("rows with provenance fold the via label into the a11y label")
-    func viaTextLabel() {
+    @Test("rows carry no provenance in the label")
+    func noProvenanceLabel() {
         let label = EntryRow.accessibilityLabel(
             entryText: "Running",
             categoryNames: "Health",
             timeframeText: "14:00 – 15:20",
             durationText: "1h 20m",
-            isInProgress: false,
-            viaText: L10n.provenanceViaScreentime.text
+            isInProgress: false
         )
-        #expect(label.contains(L10n.provenanceViaScreentime.text))
-    }
-
-    @Test("provenance mapping: non-manual sources localize, manual and unknown are empty")
-    func provenanceMapping() {
-        #expect(EntryProvenance.viaText(for: "manual").isEmpty)
-        #expect(EntryProvenance.viaText(for: "unknown-source").isEmpty)
-        #expect(EntryProvenance.viaText(for: "widget") == L10n.provenanceViaWidget.text)
-        #expect(EntryProvenance.viaText(for: "siri") == L10n.provenanceViaSiri.text)
-        #expect(EntryProvenance.viaText(for: "control") == L10n.provenanceViaControl.text)
-        #expect(EntryProvenance.viaText(for: "screentime") == L10n.provenanceViaScreentime.text)
-        #expect(EntryProvenance.viaText(for: "garmin") == L10n.provenanceViaGarmin.text)
-        #expect(EntryProvenance.viaText(for: "calendar") == L10n.provenanceViaCalendar.text)
-        #expect(EntryProvenance.viaText(for: "healthkit") == L10n.provenanceViaHealthkit.text)
-    }
-
-    @Test("bare source names localize without the via prefix, manual is empty")
-    func provenanceNameMapping() {
-        #expect(EntryProvenance.name(for: "manual").isEmpty)
-        #expect(EntryProvenance.name(for: "unknown-source").isEmpty)
-        #expect(EntryProvenance.name(for: "garmin") == L10n.provenanceNameGarmin.text)
-        #expect(!EntryProvenance.name(for: "screentime").contains("via"))
-        #expect(!EntryProvenance.name(for: "screentime").contains("через"))
+        #expect(!label.contains("via"))
+        #expect(!label.contains("через"))
     }
 }
