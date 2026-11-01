@@ -91,8 +91,7 @@ struct HistoryView: View {
                     ProgressView()
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else if vm.isSearchFiltering && vm.dayGroups.isEmpty {
-                    // No compact timer exists (remove-compact-timer): the
-                    // reserved-slot clearance always applies.
+                    // The reserved-slot clearance always applies.
                     NoMatchingEntriesState {
                         vm.searchText = ""
                     }

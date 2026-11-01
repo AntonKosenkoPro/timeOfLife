@@ -4,8 +4,8 @@ import Foundation
 import UIKit
 @testable import TimeOfLife
 
-/// Regression coverage for the event-driven refresh contract that replaces
-/// the compact timer's `refreshSignal` (remove-compact-timer, group 2).
+/// Regression coverage for the event-driven refresh contract
+/// (remove-compact-timer, group 2).
 ///
 /// History/Insights must surface committed saves through the shared
 /// invalidate + guarded-reload helper (`handleExternalReload`) — no tab

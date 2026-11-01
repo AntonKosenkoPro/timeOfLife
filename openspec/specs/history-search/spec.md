@@ -3,9 +3,7 @@
 ## Purpose
 
 Lets users find committed entries locally through a compact History search field with scoped text terms and precise start-date constraints, while retaining familiar day groups and explaining text matches.
-
 ## Requirements
-
 ### Requirement: History offers an inline local search field
 History SHALL offer one always-visible search field pinned with its list, using the native navigation-bar drawer that hides on scroll and returns on scroll-up. There SHALL be no activation button, modes, or separate filter panel: the field is simply there, and a blank query shows normal History. Search SHALL refine the active account's locally available committed entries as the query changes, without requiring submission, connectivity, or a server request. It SHALL NOT offer autocomplete, qualifier or value suggestions, recent searches, automatic date insertion, token chips, or a scope bar. The field SHALL remain usable when the query has no matches or invalid syntax. Search SHALL NOT mutate stored entries or include running drafts.
 
@@ -272,7 +270,7 @@ Qualifier keys and field identifiers SHALL be stable lowercase English syntax in
 - **THEN** that text is searched as a literal phrase in the selected fields
 
 ### Requirement: Search composes with History lifecycle and account isolation
-The query SHALL survive same-account tab switches, entry/Profile navigation, local reloads, sync completion, and undo. Updated entries and category names SHALL be re-evaluated; results, highlights, excerpts, groups, and matching totals SHALL reflect the current snapshot. Search state and derived data SHALL reset on account change/sign-out and SHALL NOT be persisted across app launches or sent to logging/analytics. Row taps SHALL keep the existing editable-manual/read-only-imported form behavior. Log Time, provenance labels, compact timer, nav-bar access, existing undo eligibility, and sync-only pull behavior SHALL remain intact; sync SHALL never be narrowed by the user query. No-match and invalid-query states SHALL offer no pull gesture.
+The query SHALL survive same-account tab switches, entry/Profile navigation, local reloads, sync completion, and undo. Updated entries and category names SHALL be re-evaluated; results, highlights, excerpts, groups, and matching totals SHALL reflect the current snapshot. Search state and derived data SHALL reset on account change/sign-out and SHALL NOT be persisted across app launches or sent to logging/analytics. Row taps SHALL keep the existing form behavior. Log Time, nav-bar access, existing undo eligibility, and sync-only pull behavior SHALL remain intact; sync SHALL never be narrowed by the user query. No-match and invalid-query states SHALL offer no pull gesture.
 
 #### Scenario: Editing removes a match
 - **WHEN** the user edits a matching entry so it no longer satisfies the query and returns to History
@@ -285,3 +283,4 @@ The query SHALL survive same-account tab switches, entry/Profile navigation, loc
 #### Scenario: Account isolation
 - **WHEN** the user signs out or switches accounts after searching sensitive notes
 - **THEN** no prior query, result, or excerpt is carried into the next account's History
+

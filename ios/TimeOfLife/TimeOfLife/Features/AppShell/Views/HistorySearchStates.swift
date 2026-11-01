@@ -30,22 +30,22 @@ struct InvalidSearchState: View {
 /// Valid query, zero matches: distinct from both the empty-History state
 /// and the syntax state, with a clear-query action. No pull gesture.
 ///
-/// The clear action keeps the retired compact-timer slot as bottom
-/// keyboard clearance (remove-compact-timer deleted the view; the slot
-/// reservation stays so the search chrome keeps its pinned clearance).
+/// The clear action keeps bottom keyboard clearance for the empty state
+/// (the slot reservation stays so the search chrome keeps its pinned
+/// clearance).
 struct NoMatchingEntriesState: View {
     let clear: () -> Void
 
-    /// The retired compact timer's surface height. A named constant — not
+    /// The empty-state slot height. A named constant — not
     /// an inline literal — so the clearance below and its test pin the same
     /// value instead of restating independent `62`s that could drift apart.
-    static let retiredCompactTimerSurface: CGFloat = 62
-    /// Bottom padding reserving the compact-timer slot above the keyboard:
-    /// the timer surface plus its top/bottom inset gaps. A single shared
+    static let emptyStateSurface: CGFloat = 62
+    /// Bottom padding reserving the empty-state slot above the keyboard:
+    /// the slot surface plus its top/bottom inset gaps. A single shared
     /// constant (not inline arithmetic) so tests pin the invariant — the
-    /// clear action reserves the compact-timer slot — instead of restating
+    /// clear action keeps the empty-state clearance — instead of restating
     /// the formula.
-    static let timerAbsentClearance: CGFloat = retiredCompactTimerSurface + Theme.spacingExtraSmall * 2
+    static let emptyStateClearance: CGFloat = emptyStateSurface + Theme.spacingExtraSmall * 2
 
     var body: some View {
         VStack(spacing: 0) {
@@ -59,7 +59,7 @@ struct NoMatchingEntriesState: View {
                 .padding(.top, Theme.spacingSmall)
                 .accessibilityIdentifier("HistorySearchClear")
         }
-        .padding(.bottom, Self.timerAbsentClearance)
+        .padding(.bottom, Self.emptyStateClearance)
     }
 }
 
