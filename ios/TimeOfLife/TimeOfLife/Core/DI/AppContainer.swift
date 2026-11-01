@@ -320,3 +320,10 @@ final class APIClientHolder {
     weak var service: AuthService?
     init() {}
 }
+
+extension Notification.Name {
+    /// Posted (in-process) after an Island Stop link is handled by the app:
+    /// tracker surfaces reload so no stale running state survives
+    /// (live-activities D8; event-driven reload owned by remove-compact-timer).
+    static let timerStoppedExternally = Notification.Name("timerStoppedExternally")
+}

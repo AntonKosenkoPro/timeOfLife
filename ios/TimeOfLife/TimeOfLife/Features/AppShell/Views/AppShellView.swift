@@ -107,6 +107,10 @@ struct AppShellView: View {
             Task {
                 await reloadTrack()
                 await trackVM.stop()
+                // The stop committed behind possibly-visible tabs: tell
+                // History/Insights to reload (same event the retired intent
+                // flow posted; the link flow is the only external stop now).
+                NotificationCenter.default.post(name: .timerStoppedExternally, object: nil)
             }
         }
         // A sync cycle merges relay state into LocalStore behind Track: the
