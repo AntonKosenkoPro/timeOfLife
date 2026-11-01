@@ -215,8 +215,8 @@ struct TimerLiveActivityWidget: Widget {
     }
 }
 
-/// Circular Stop control shared by the banner and the expanded card (the
-/// `CompactTimer` language: white glyph on a danger-red circle).
+/// Circular Stop control shared by the banner and the expanded card (white
+/// glyph on a danger-red circle).
 ///
 /// Always rendered, including dimmed faces: the button lives in the same
 /// HStack row as the timer, so it cannot change the banner height, and

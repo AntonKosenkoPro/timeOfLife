@@ -17,14 +17,14 @@ Implements the `insights-breakdown` capability: a read-only, mirror-only breakdo
 - Proportional rows with max-scaled bars (`Theme.backgroundSecondary` track, `Theme.accentPrimary` fill).
 - Footnote naming the category double-count rule (one line, `.caption`, `Theme.textSecondary`).
 - Empty periods show a one-line sentence; the true-zero state keeps the honest placeholder (`EmptyState` with `chart.line.uptrend.xyaxis`, `insightsEmptyTitle` / `insightsEmptySubtitle`).
-- Compact cross-tab running timer stays visible via `.safeAreaInset(edge: .bottom)`.
+- Insights shows committed entries only: the running timer is excluded from all numbers and no in-app running-timer surface is shown. Newly saved entries contribute through the existing reload flows (tab re-entry, external-stop and foreground events, sync-cycle exit).
 
 ### Behaviors
 
 - Text lens groups by exact entry text (`Gym` ≠ `GYM`); each entry's full duration attributes to its text row.
 - Category rows attribute the full duration to every attached category (rows may sum above the hero).
 - Rows are not tappable.
-- Lifecycle mirrors History: guarded reload on appear, stale on leave, refresh-signal reload so compact-timer saves appear without leaving the tab; reload on sync-cycle exit.
+- Lifecycle mirrors History: guarded reload on appear, stale on leave, event-driven reload on external stop and foreground return so committed saves appear without leaving the tab; reload on sync-cycle exit.
 
 ### Implementation checklist
 
@@ -32,5 +32,5 @@ Implements the `insights-breakdown` capability: a read-only, mirror-only breakdo
 - [ ] All strings use `L10n.*` keys (EN + RU).
 - [ ] Period/lens pickers have stable identifiers.
 - [ ] Rows non-tappable, no percentages/targets/comparisons.
-- [ ] Compact timer `safeAreaInset` preserved.
+- [ ] No in-app running-timer surface is rendered; no timer-only space is reserved.
 - [ ] Previews exist (breakdown + empty).

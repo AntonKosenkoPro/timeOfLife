@@ -38,11 +38,6 @@ struct HistoryView: View {
     /// Presents the Log Time sheet (manual-entry spec). Owned by the shell
     /// so the [+] shares the nav-bar toolbar scope; the sheet and its
     /// refresh stay here.
-    @Binding var isLogTimeActive: Bool
-    /// Whether the compact timer is currently shown above this tab's
-    /// content. The no-results clear action reserves the same bottom
-    /// keyboard clearance only when the timer is absent.
-    private let showsCompactTimer: Bool
     /// Mirrors whether the current search query hides the bottom tab bar
     /// (history-search spec, design D4): non-blank text hides it, blank
     /// keeps it. Owned by the shell — the History stack's single
@@ -50,10 +45,6 @@ struct HistoryView: View {
     /// (fix-tab-bar-return-jump: a stack-level declaration wins over an
     /// inner one unconditionally, so this view must not declare its own).
     @Binding var searchHidesTabBar: Bool
-    /// Changes whenever the shell's running timer starts or stops (nil on
-    /// stop). Lets History reload an entry saved from the compact timer
-    /// without leaving the tab.
-    private let refreshSignal: String
 
     init(
         store: LocalStore,
@@ -61,9 +52,7 @@ struct HistoryView: View {
         sessionStore: SessionStore,
         sync: SyncController,
         connectivity: Connectivity,
-        refreshSignal: String = "",
         logTimeActive: Binding<Bool> = .constant(false),
-        showsCompactTimer: Bool = false,
         searchHidesTabBar: Binding<Bool> = .constant(false)
     ) {
         _vm = StateObject(wrappedValue: HistoryViewModel(store: store, undoBuffer: undoBuffer))
@@ -74,9 +63,7 @@ struct HistoryView: View {
             guard case let .signedIn(session) = sessionStore?.state else { return nil }
             return session.id
         })
-        self.refreshSignal = refreshSignal
         _isLogTimeActive = logTimeActive
-        self.showsCompactTimer = showsCompactTimer
         _searchHidesTabBar = searchHidesTabBar
     }
 
@@ -100,7 +87,9 @@ struct HistoryView: View {
                     ProgressView()
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else if vm.isSearchFiltering && vm.dayGroups.isEmpty {
-                    NoMatchingEntriesState(hasCompactTimer: showsCompactTimer) {
+                    // The timer never shows (remove-compact-timer): the
+                    // absent-timer clearance always applies.
+                    NoMatchingEntriesState(hasCompactTimer: false) {
                         vm.searchText = ""
                     }
                 } else if vm.dayGroups.isEmpty {
@@ -156,15 +145,27 @@ struct HistoryView: View {
         // The load is guarded by `needsReload` inside the VM.
         .task { await reloadAndRegister() }
         .onAppear { Task { await reloadAndRegister() } }
-        // Entries can be saved on Track (or from the compact timer) while
-        // History is off-screen; mark stale on leave so the next appear
-        // reloads. Without this the `needsReload` guard serves the first
-        // snapshot forever. Leaving also clears the transient pull notice.
+        // Entries can be saved on Track while History is off-screen; mark
+        // stale on leave so the next appear reloads. Without this the
+        // `needsReload` guard serves the first snapshot forever. Leaving
+        // also clears the transient pull notice.
         .onDisappear {
             vm.invalidate()
             pull.cancelNotice()
         }
-        .onChange(of: refreshSignal) {
+        // A save that lands while History stays visible (external stop,
+        // foreground return after a backgrounded save, sync exit) reloads
+        // through the observers below — never through a tab switch.
+        // An external stop (Island Stop intent, widget/control stop) can
+        // commit while History is visible: reload without leaving the tab,
+        // through the same invalidate/reload chain as the sync-exit path.
+        .onReceive(NotificationCenter.default.publisher(for: .timerStoppedExternally)) { _ in
+            Task { await invalidateReloadAndRegister() }
+        }
+        // Foreground return after a save while suspended: the tab never
+        // re-appears, so reload here. Guarded: never blanks, and undo
+        // re-registers through the shared helper.
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
             Task { await invalidateReloadAndRegister() }
         }
         // A sync cycle merges relay state into LocalStore behind this view:
@@ -375,7 +376,7 @@ struct HistoryView: View {
     }
     .environmentObject(container)
     .environmentObject(container.syncController)
-    .environmentObject(AppShellViewModel(service: container.timerService))
+    .environmentObject(AppShellViewModel())
 }
 
 #Preview("History empty") {
@@ -391,6 +392,6 @@ struct HistoryView: View {
     }
     .environmentObject(container)
     .environmentObject(container.syncController)
-    .environmentObject(AppShellViewModel(service: container.timerService))
+    .environmentObject(AppShellViewModel())
 }
 #endif

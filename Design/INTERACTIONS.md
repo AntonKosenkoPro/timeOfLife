@@ -131,7 +131,7 @@ D1 (OpenSpec change `redesign-track-experience`). The root is a three-tab shell,
 - **Profile is a pushed page, not a tab.** A consistent top-trailing person control on every tab pushes it (back navigation, no Done). Profile owns account/sync, category management, integrations, export, appearance, and destructive data controls.
 - **Switching destinations never changes timer state** and never discards the previous destination's state.
 - **The app launches into the auth flow when signed out and into Track when signed in**; sign-in is mandatory before any Track/History/Insights use. There is no anonymous use and no optional "Enable Sync" action — the launch gate owns authentication.
-- **A running timer stays globally accessible.** While running, History and Insights show the compact timer immediately above the tab bar (`.safeAreaInset(edge: .bottom)`). Its main area returns to Track; its Stop button saves in place and keeps the current destination selected. Track does not duplicate it.
+- **No in-app running timer off Track.** History and Insights show no compact timer, strip, badge, or toolbar timer, and reserve no space for one. To inspect or stop a running timer, select Track. (Supersedes D29.)
 - **Sign Out is owned by Account**, not the Track toolbar or Profile root. Tapping Sign Out asks once, then signs the user out (account files are kept). Sign Out must work offline by clearing the local session.
 - The hierarchy maps to a future macOS sidebar without changing meaning (Track/History/Insights primary; profile-owned features secondary).
 

@@ -108,7 +108,7 @@ struct InsightsViewModelTests {
         await vm.loadIfNeeded()
         #expect(vm.breakdown(period: .all, lens: .activity).totalSeconds == 60)
 
-        // Entry saved elsewhere (Track tab, compact timer) while Insights is
+        // Entry saved elsewhere (Track tab or an external stop) while Insights is
         // off-screen must not leak into the cached snapshot…
         try await store.createEntry(entry(
             id: "e2", startedAt: Date(timeIntervalSinceNow: -600),

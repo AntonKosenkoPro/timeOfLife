@@ -689,44 +689,6 @@ struct RunningStartEditor: View {
 
 ---
 
-## `CompactTimer`
-
-The persistent running-timer surface shown above the tab bar on History and Insights (D5). Track does not render it — the full numeric readout is already visible there.
-
-### Signature
-
-```swift
-struct CompactTimer: View {
-    let entryText: String
-    let startedAt: Date
-    let openTrack: () -> Void
-    let stop: () -> Void
-}
-```
-
-### Visual
-
-- Inset above the tab bar via `.safeAreaInset(edge: .bottom)` on History/Insights roots.
-- `HStack`: a non-destructive main area (entry text + live elapsed duration, `.monospacedDigit()`) that returns to Track, and a separate 44 pt circular Stop button (`stop.fill`, `Theme.danger` or accent tint).
-- Surface: `Theme.backgroundSecondary` fill, `Theme.cornerRadius` continuous corners, `Theme.hairline` 1 pt stroke.
-- `accessibilityIdentifier("CompactTimer")`; Stop button `accessibilityIdentifier("CompactTimerStopButton")`.
-
-### States
-
-| State | Visual |
-|---|---|
-| Running | Entry text + live elapsed duration + Stop |
-| Stopped | Removed from the shell (entry saved in place) |
-
-### Accessibility
-
-- Main area: `.accessibilityLabel("<entry text>, timer running")`, `.accessibilityHint("Returns to Track")`.
-- Stop button: `.accessibilityLabel("Stop and save timer")`.
-- VoiceOver announces entry text, elapsed duration, running state, and available actions.
-- The Stop target is a distinct 44 pt target separated from the navigation area (D5 risk mitigation).
-
----
-
 ## `RunningBannerFace`
 
 The Lock Screen Live Activity banner face for a running timer (lives in the `LifioLiveActivities` widget target, not the app). Icon + exact entry name + live ticking elapsed + circular Stop link, rendered as transparent content over the system card (Liquid Glass on iOS 26+, solid card below). Full behavior contract: `live-activities` spec.

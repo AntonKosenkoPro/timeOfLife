@@ -264,7 +264,7 @@ struct HistoryViewModelTests {
         await vm.loadIfNeeded()
         #expect(vm.dayGroups.flatMap(\.entries).map(\.id) == ["e1"])
 
-        // Entry saved elsewhere (Track tab, compact timer) while History is
+        // Entry saved elsewhere (Track tab or an external stop) while History is
         // off-screen must not leak into the cached snapshot…
         try await store.createEntry(entry(
             id: "e2",

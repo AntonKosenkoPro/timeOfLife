@@ -1,6 +1,6 @@
 # App Shell â€” Track / History / Insights / Profile
 
-Implements the `app-shell` capability (OpenSpec change `redesign-track-experience`): a stable product hierarchy for frequent capture, retrospective review, and analysis, with account and configuration tasks kept secondary and a running timer kept globally accessible.
+Implements the `app-shell` capability (OpenSpec change `redesign-track-experience`): a stable product hierarchy for frequent capture, retrospective review, and analysis, with account and configuration tasks kept secondary. Track is the timer surface; History and Insights render no in-app running-timer surface.
 
 ## Hierarchy
 
@@ -25,7 +25,7 @@ Profile (pushed page, top-trailing person control on every tab; signed-in only â
 
 - **File**: `ios/TimeOfLife/TimeOfLife/Features/AppShell/Views/AppShellView.swift`
 - **Route**: root of `RootView` (replaces the timer-only root)
-- **State**: `AppShellViewModel` (selected tab, running-timer observation)
+- **State**: `AppShellViewModel` (selected tab, per-tab navigation paths)
 
 ### Layout
 
@@ -34,7 +34,7 @@ Profile (pushed page, top-trailing person control on every tab; signed-in only â
    - History â€” `Label(L10n.tabHistory, systemImage: "clock.arrow.circlepath")`, `accessibilityIdentifier("TabHistory")`.
    - Insights â€” `Label(L10n.tabInsights, systemImage: "chart.line.uptrend.xyaxis")`, `accessibilityIdentifier("TabInsights")`.
 2. Each tab root carries the top-trailing person control (`ProfileButton`) pushing the Profile page.
-3. While a timer is running, History and Insights render the compact timer immediately above the tab bar via `.safeAreaInset(edge: .bottom)` (see `CompactTimer` in `COMPONENTS.md`). Track does not duplicate it â€” the full numeric timer is already visible.
+3. History and Insights render no in-app running-timer surface and reserve no space for one: while a timer runs, its only in-app surface is Track's full numeric timer. Select Track to inspect or stop the run. Tab navigation never stops, restarts, or alters the running timer.
 4. There is no global offline banner. Offline surfaces via the History pull-to-refresh inline notice and the Profile sync status.
 
 ### Behaviors
@@ -43,20 +43,20 @@ Profile (pushed page, top-trailing person control on every tab; signed-in only â
 - The app launches into the auth flow when signed out (the auth flow is the root until sign-in completes) and into Track when signed in; there is no unsigned use and no "Enable Sync" action.
 - Insights shows a mirror-only breakdown of committed time (full spec: `SCREENS/Insights.md`): a `Today | This week | All time` period switch (default `This week`), a hero period total, a `By category | By text` lens toggle (default `By category`), and proportional rows with max-scaled bars. Category rows attribute the full duration to every attached category (rows may sum above the hero) with a one-line footnote naming the rule; rows are not tappable; empty periods show a one-line sentence, and the true-zero state keeps the honest placeholder.
 - Profile is signed-in-only and shows sync state plus navigation. Dismissing Profile restores the previously selected destination and its state. Profile owns NO destructive actions directly: Sign out, Delete local data (renamed from "Erase local data"), and Delete account and local data live only in Account â€” no duplicates on Profile, no placeholder rows (full spec: `SCREENS/Account.md`).
-- The compact timer's main area returns to Track; its Stop button saves in place and keeps the current destination selected.
+- To inspect or stop a running timer, select Track: it shows the same run with its original start anchor and the existing Stop action. History and Insights offer no return-to-Track target, Stop action, running badge, or preference to restore one.
 
 ### Accessibility
 
 - Tab items expose stable identifiers (`TabTrack`, `TabHistory`, `TabInsights`) and localized labels.
-- The compact timer is a single accessible element announcing entry text, elapsed duration, running state, and available actions (see `COMPONENTS.md`).
-- Navigation labels and compact timer content remain readable at accessibility Dynamic Type sizes without hiding Start/Stop actions.
+- Track's timer controls expose stable accessibility labels; removing the in-app timer surface from History/Insights removes no accessibility support for Track's timer or the Live Activity surfaces.
+- Navigation labels remain readable at accessibility Dynamic Type sizes without hiding Start/Stop actions.
 
 ### Implementation checklist
 
 - [ ] All colors use `Theme.*` tokens.
 - [ ] All strings use `L10n.*` keys in English and Russian.
 - [ ] Tab items and Profile button have stable identifiers.
-- [ ] Compact timer appears only on History/Insights and only while running.
+- [ ] History and Insights render no in-app running-timer surface and reserve no timer-only space.
 - [ ] Profile is a pushed page, not a tab.
 - [ ] VoiceOver, Dynamic Type, Reduce Motion, light/dark, and iOS 18 are tested.
 - [ ] SwiftLint and warning-as-error builds pass.

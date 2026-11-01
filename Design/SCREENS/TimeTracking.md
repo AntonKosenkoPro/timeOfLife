@@ -287,7 +287,7 @@ per-record state).
 - [ ] Start follows explicit selection and persists running state.
 - [ ] Running `Started HH:MM` caption opens the start editor; applying rewrites the draft start, restarts the ticker, and re-anchors the Live Activity (chips/icon unchanged).
 - [ ] Stop saves locally and preserves recoverable state on failure.
-- [ ] Compact timer is available above History and Insights navigation.
+- [ ] Return to Track to stop: History and Insights render no in-app running-timer surface and no replacement indicator; the saved entry appears after Stop through the normal reload flows.
 - [x] VoiceOver, Dynamic Type, Reduce Motion, light/dark, and iOS 18 are tested.
 - [ ] SwiftLint and warning-as-error builds pass.
 

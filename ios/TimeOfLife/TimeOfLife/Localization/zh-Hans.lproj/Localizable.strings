@@ -100,7 +100,6 @@
 "timer.recentsEmptyHint" = "记录的活动将显示在这里。";
 "timer.selectActivity" = "选择 %@";
 "timer.compactStop" = "停止并保存计时";
-"timer.compactReturnHint" = "返回“记录”";
 "timer.compactRunning" = "%@，计时进行中";
 "timer.startedAt" = "开始于 %@";
 "timer.startedYesterday" = "昨天开始于 %@";

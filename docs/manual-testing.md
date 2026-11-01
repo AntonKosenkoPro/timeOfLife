@@ -21,7 +21,7 @@ Prerequisites: Release build installed on the device (`Product → Destination �
 
 ## Live Activities
 
-Live Activities need a real device with Dynamic Island (the simulator shows the Lock Screen banner only) and a signed-in account with at least one category.
+Live Activities need a real device with Dynamic Island (the simulator shows the Lock Screen banner only) and a signed-in account with at least one category. The "compact"/"minimal" faces below are system Live Activity presentations — unrelated to the removed in-app compact timer (History/Insights render no in-app timer surface since `remove-compact-timer`).
 
 1. [ ] **Island appears** — start a timer on Track; the Dynamic Island shows the compact face (first-category icon + ticking elapsed).
 2. [ ] **Expanded card** — long-press the Island; the expanded card shows the exact name, icon, elapsed, Stop, and Go-to-Track.

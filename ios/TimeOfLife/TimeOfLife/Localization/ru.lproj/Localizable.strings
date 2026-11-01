@@ -100,7 +100,6 @@
 "timer.recentsEmptyHint" = "Здесь появятся последние сохранённые активности.";
 "timer.selectActivity" = "Выбрать %@";
 "timer.compactStop" = "Остановить таймер и сохранить запись";
-"timer.compactReturnHint" = "Вернуться в Трек";
 "timer.compactRunning" = "%@, идёт запись";
 "timer.startedAt" = "Начало %@";
 "timer.startedYesterday" = "Начало вчера %@";

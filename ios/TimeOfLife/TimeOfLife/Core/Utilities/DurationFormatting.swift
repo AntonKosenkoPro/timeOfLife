@@ -6,7 +6,7 @@ import Foundation
 /// change — the legacy entry points forward to these).
 enum DurationFormatting {
     /// Clock duration: `HH:MM:SS` past the hour, else `MM:SS`, zero-padded.
-    /// (Timer readout, compact timer.)
+    /// (Track numeric readout and Live Activity timers.)
     static func clock(_ interval: TimeInterval) -> String {
         let totalSeconds = max(0, Int(interval.rounded()))
         let hours = totalSeconds / 3600

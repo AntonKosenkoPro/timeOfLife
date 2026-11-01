@@ -43,8 +43,10 @@ struct NoMatchingEntriesState: View {
     /// the timer surface plus its top/bottom inset gaps. A single shared
     /// constant (not inline arithmetic) so tests pin the invariant — the
     /// clear action reserves the compact-timer slot — instead of restating
-    /// the formula.
-    static let timerAbsentClearance: CGFloat = CompactTimer.surfaceHeight + Theme.spacingExtraSmall * 2
+    /// the formula. The 62pt surface is the retired compact timer's height
+    /// (remove-compact-timer deleted the view; the slot reservation stays so
+    /// the search chrome keeps its pinned clearance).
+    static let timerAbsentClearance: CGFloat = 62 + Theme.spacingExtraSmall * 2
 
     static func bottomClearance(hasCompactTimer: Bool) -> CGFloat {
         hasCompactTimer ? 0 : Self.timerAbsentClearance

@@ -63,8 +63,11 @@ where it was opened from (History row or ActivityDetail entries list).
 - A running timer has a `timer_state` row but no `entries` row until stop
   (`createEntry` fires on stop). So History shows only committed sessions.
 - Open question: should a running session appear at the top of History as
-  read-only "in progress"? Currently it's only visible via the compact timer.
-  Probably defer — the compact timer already covers cross-tab awareness.
+  read-only "in progress"? There is no in-app running surface outside Track
+  since `remove-compact-timer` (supersedes Design D29) — only Track and the
+  optional Live Activities show the run.
+  Probably defer — Track plus the optional Live Activities already cover
+  cross-tab awareness.
 
 ### 3. Entry delete/undo from History — remainder
 

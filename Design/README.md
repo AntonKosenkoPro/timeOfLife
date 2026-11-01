@@ -34,7 +34,7 @@ Keep design under version control as plain Markdown so:
 | `COMPONENTS.md` | Reusable SwiftUI components: signature, states, accessibility IDs, usage. |
 | `INTERACTIONS.md` | Shared patterns: loading, errors, offline, empty states, haptics, focus. |
 | `SCREENS/Auth.md` | Auth flow screens (Welcome, EmailEntry, OtpEntry). |
-| `SCREENS/AppShell.md` | App shell: Track/History/Insights tabs, Profile destination, compact timer placement. |
+| `SCREENS/AppShell.md` | App shell: Track/History/Insights tabs, Profile destination; Track is the only in-app timer surface. |
 | `SCREENS/Account.md` | Profile-owned Account page: read-only email, sign-out, local-only deletion, and permanent account/local-data deletion. |
 | `SCREENS/TimeTracking.md` | Track screen — the capture destination; covers the numeric timer state machine + name push row, Recents chips, and running tag selector. |
 | `SCREENS/History.md` | History screen — day-grouped list of committed time entries (EntryRow, day totals, persistent nav bar; entry-form push, Log Time sheet, pull-to-refresh, shake-to-undo). |

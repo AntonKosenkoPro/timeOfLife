@@ -3,8 +3,8 @@ import SwiftUI
 
 /// The app shell (app-shell spec): Track, History, and Insights as primary
 /// destinations, with Profile opened from a consistent top-trailing person
-/// control. A running timer stays visible and stoppable on History and
-/// Insights through the compact timer.
+/// control. History and Insights render no in-app running-timer surface;
+/// Track is the timer surface.
 struct AppShellView: View {
     /// StateObject, not ObservedObject: `RootView` builds this view (and a
     /// fresh `AppShellViewModel`) on every one of its own re-renders — e.g.
@@ -69,7 +69,6 @@ struct AppShellView: View {
                 .accessibilityIdentifier("TabInsights")
         }
         .tint(Theme.accentPrimary)
-        .task { await vm.load() }
         // TabView keeps mounted tabs alive, so Track's own `.task` runs only
         // on first appear: refresh recents + categories on every return, so
         // History edits are inherited and chip icons stay current.
@@ -83,11 +82,6 @@ struct AppShellView: View {
         // stale). Serialized reload, same as the tab-return path.
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
             Task { await reloadTrack() }
-        }
-        // Island Stop while the compact timer is up: the draft is gone —
-        // reload clears the stale running surface (live-activities D8).
-        .onReceive(NotificationCenter.default.publisher(for: .timerStoppedExternally)) { _ in
-            Task { await vm.load() }
         }
         // Live Activity tap: a bumped counter selects Track without
         // disturbing per-tab push state. `filter { $0 > 0 }` (not
@@ -238,13 +232,10 @@ struct AppShellView: View {
                 sessionStore: container.sessionStore,
                 sync: container.syncController,
                 connectivity: container.connectivity,
-                refreshSignal: vm.runningTimer?.activityText ?? "",
                 logTimeActive: $isHistoryLogTimeActive,
-                showsCompactTimer: isCompactTimerVisible,
                 searchHidesTabBar: $historySearchHidesTabBar
             )
             .environmentObject(vm)
-            .safeAreaInset(edge: .bottom) { compactTimerIfNeeded }
             .navigationTitle(L10n.tabHistory.text)
             .navigationBarTitleDisplayMode(.inline)
             .modifier(ShellToolbar(
@@ -274,10 +265,8 @@ struct AppShellView: View {
     private var insightsStack: some View {
         NavigationStack(path: $vm.insightsPath) {
             InsightsView(
-                store: container.localStore,
-                refreshSignal: vm.runningTimer?.activityText ?? ""
+                store: container.localStore
             )
-            .safeAreaInset(edge: .bottom) { compactTimerIfNeeded }
             .navigationTitle(L10n.tabInsights.text)
             .navigationBarTitleDisplayMode(.inline)
             .modifier(ShellToolbar(
@@ -316,33 +305,6 @@ struct AppShellView: View {
             Task { await reloadTrack() }
         }
     }
-
-    /// Whether the compact timer surface is currently shown (mirrors the
-    /// `compactTimerIfNeeded` condition): History's no-results state uses
-    /// it to reserve matching bottom clearance only when the timer is
-    /// absent (history-search spec).
-    private var isCompactTimerVisible: Bool {
-        guard let running = vm.runningTimer else { return false }
-        return !running.activityText.isEmpty && running.startedAt != nil
-    }
-
-    @ViewBuilder private var compactTimerIfNeeded: some View {
-        if isCompactTimerVisible,
-           let running = vm.runningTimer,
-           let startedAt = running.startedAt {
-            CompactTimer(
-                entryText: running.activityText,
-                startedAt: startedAt,
-                openTrack: {
-                    vm.selectedTab = .track
-                },
-                stop: {
-                    Task { await vm.stopFromCompact() }
-                }
-            )
-            .accessibilityIdentifier("CompactTimer")
-        }
-    }
 }
 
 /// The shell's navigation-bar scope (app-shell spec + manual-entry spec):
@@ -377,7 +339,7 @@ private struct ShellToolbar: ViewModifier {
 #if DEBUG
 #Preview("App Shell") {
     let container = AppContainer.production()
-    AppShellView(vm: AppShellViewModel(service: container.timerService), container: container)
+    AppShellView(vm: AppShellViewModel(), container: container)
         .environmentObject(container)
         .environmentObject(AppNavigationStack())
         .environmentObject(container.syncController)

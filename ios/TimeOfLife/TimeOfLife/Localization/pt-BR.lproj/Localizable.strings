@@ -100,7 +100,6 @@
 "timer.recentsEmptyHint" = "As atividades registradas aparecem aqui.";
 "timer.selectActivity" = "Selecionar %@";
 "timer.compactStop" = "Parar e salvar o cronômetro";
-"timer.compactReturnHint" = "Volta para Registrar";
 "timer.compactRunning" = "%@, cronômetro rodando";
 "timer.startedAt" = "Começou %@";
 "timer.startedYesterday" = "Começou ontem %@";
