@@ -17,7 +17,7 @@ Implements the `insights-breakdown` capability: a read-only, mirror-only breakdo
 - Proportional rows with max-scaled bars (`Theme.backgroundSecondary` track, `Theme.accentPrimary` fill).
 - Footnote naming the category double-count rule (one line, `.caption`, `Theme.textSecondary`).
 - Empty periods show a one-line sentence; the true-zero state keeps the honest placeholder (`EmptyState` with `chart.line.uptrend.xyaxis`, `insightsEmptyTitle` / `insightsEmptySubtitle`).
-- Insights shows committed entries only: the running timer is excluded from all numbers and no in-app running-timer surface is shown. Newly saved entries contribute through the existing reload flows (tab re-entry, external-stop and foreground events, sync-cycle exit).
+- Insights shows committed entries only: the running timer is excluded from all numbers. Newly saved entries contribute through the existing reload flows (tab re-entry, external-stop and foreground events, sync-cycle exit).
 
 ### Behaviors
 
@@ -32,5 +32,5 @@ Implements the `insights-breakdown` capability: a read-only, mirror-only breakdo
 - [ ] All strings use `L10n.*` keys (EN + RU).
 - [ ] Period/lens pickers have stable identifiers.
 - [ ] Rows non-tappable, no percentages/targets/comparisons.
-- [ ] No in-app running-timer surface is rendered; no timer-only space is reserved.
+- [ ] Insights content stays fully available while a timer runs; stopping happens on Track.
 - [ ] Previews exist (breakdown + empty).

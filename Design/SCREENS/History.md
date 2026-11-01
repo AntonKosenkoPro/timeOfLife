@@ -20,7 +20,7 @@ The History destination answers "what did I spend time on and when?" — a chron
 - Inline navigation title: "History" (`L10n.tabHistory`), shown at rest.
 - Navigation bar (inline title + Profile button) permanently visible at every scroll position (the scroll-driven collapse from the original change was reverted — see the `revert-history-nav-collapse` change). Profile is reachable at all times on History.
 - Empty state: when no committed entries exist show `EmptyState(icon: "clock.arrow.circlepath", title: L10n.historyEmptyTitle, subtitle: L10n.historyEmptySubtitle)` — the pre-existing shell empty state is preserved.
-- History shows committed entries only: the running session does NOT appear as a History entry until stopped and saved, and no in-app running-timer surface is shown. Newly saved entries appear through the existing reload flows (tab re-entry, external-stop and foreground events, sync-cycle exit).
+- History shows committed entries only: the running session does NOT appear as a History entry until stopped and saved. Newly saved entries appear through the existing reload flows (tab re-entry, external-stop and foreground events, sync-cycle exit).
 
 ### Behaviors
 
@@ -79,13 +79,13 @@ final class HistoryViewModel: ObservableObject {
 - [ ] Rows with non-empty notes show the line-2 notes indicator left of the timeframe; empty/whitespace-only notes show none.
 - [ ] Day-group headers use two-line `SectionHeader(title:subtitle:)` inside `HistoryListTable` header hosting (opaque page-color band, no `.bar`); label + subline never overlap at accessibility sizes.
 - [ ] Empty state preserved (`historyEmptyTitle` / `historyEmptySubtitle`).
-- [ ] No in-app running-timer surface is rendered; no timer-only space is reserved.
-- [ ] List content passes under the glass tab bar with no hard cut; final row reachable above the tab bar with no timer chrome.
+- [ ] History content and navigation stay fully available while a timer runs; stopping happens on Track.
+- [ ] List content passes under the glass tab bar with no hard cut; final row clears the tab bar (fully reachable above the chrome).
 - [ ] iOS 18 keeps the default tab bar (no content beneath it); iOS 26+ blurs rows beneath the glass bar.
 - [ ] Nav bar visible at every scroll position (no collapse).
 - [ ] Search field renders inline on the History root only (drawer, always visible, hides on scroll); never on pushed entry/Profile views; no suggestions, chips, scope bar, or filter panel.
-- [ ] The tab bar stays visible for a blank query (focusing the empty field changes nothing) and hides with an animated transition for any non-blank query — first keystroke hides, clearing restores; last row stays reachable with compact-timer clearance with and without a running timer.
-- [ ] No-results Clear search keeps compact-timer-equivalent bottom keyboard clearance with and without a running timer.
+- [ ] The tab bar stays visible for a blank query (focusing the empty field changes nothing) and hides with an animated transition for any non-blank query — first keystroke hides, clearing restores; last row stays reachable with the empty-state clearance with and without a running timer.
+- [ ] No-results Clear search keeps the empty-state bottom keyboard clearance with and without a running timer.
 - [ ] Blank/whitespace-only query is pixel-identical to unfiltered History (groups, "tracked" totals, rows, empty state); no highlights or excerpts.
 - [ ] Valid non-empty queries show a scrolling summary (pluralized count + known-duration total; none for blank/invalid/zero matches), "matching" totals, one row per match, scoped highlights, and `Notes:` excerpts only for in-scope notes hits with the distinct notes treatment (glyph + italic); invalid queries show the diagnostic, no-results shows Clear search.
 - [ ] Preview exists (entries + empty).
