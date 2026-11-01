@@ -636,6 +636,53 @@ func TestStore_CreateEntry_IdempotentReplay(t *testing.T) {
 	}
 }
 
+// F11 (entries): same race contract as categories. Concurrent creates with
+// the same id — past the replay pre-check — replay the winner instead of
+// surfacing a raw unique-violation 500.
+func TestStore_CreateEntry_ConcurrentSameID(t *testing.T) {
+	store := setupTestStore(t)
+	uid := newTestUser(t, store, "entryrace@example.com")
+	base := time.Date(2026, 7, 27, 9, 0, 0, 0, time.UTC)
+	id := uuidV7()
+	const n = 32
+	var wg sync.WaitGroup
+	errs := make([]error, n)
+	created := make([]bool, n)
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			_, isNew, err := store.CreateEntry(context.Background(), Entry{
+				ID: id, UserID: uid,
+				ActivityText: "Gym racer",
+				StartedAt:    base,
+			})
+			errs[i] = err
+			created[i] = isNew
+		}(i)
+	}
+	wg.Wait()
+	createdCount := 0
+	for i := 0; i < n; i++ {
+		if errs[i] != nil {
+			t.Errorf("goroutine %d: concurrent same-id create must replay, got %v", i, errs[i])
+		}
+		if created[i] {
+			createdCount++
+		}
+	}
+	if createdCount != 1 {
+		t.Errorf("expected exactly 1 created entry, got %d", createdCount)
+	}
+	items, _, err := store.ListEntries(context.Background(), uid, EntryFilter{})
+	if err != nil {
+		t.Fatalf("ListEntries: %v", err)
+	}
+	if len(items) != 1 || items[0].ID != id {
+		t.Errorf("concurrent same-id creates must converge on one row, got %d rows", len(items))
+	}
+}
+
 // Legacy-shaped rows keep working: a row seeded with retired non-manual
 // provenance reads and updates with all supported values intact, and the
 // retired metadata is never surfaced.

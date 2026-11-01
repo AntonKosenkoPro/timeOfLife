@@ -305,11 +305,12 @@ struct LocalStoreTests {
         _ = try await store.createEntry(makeEntry(id: "entry-2"))
 
         #expect(try await store.entries().count == 2)
-        let payloads = try await store.outboxRows()
-        for row in payloads where row.resource == "entry" {
-            let payload = try #require(row.payload)
-            #expect(!payload.contains("source"))
-        }
+        // Independence means two distinct decodable entries — not the
+        // absence of a key substring (entry text itself may contain it).
+        let decoded = try await store.outboxRows()
+            .filter { $0.resource == "entry" }
+            .map { try JSONDecoder().decode(TimeEntry.self, from: Data(try #require($0.payload).utf8)) }
+        #expect(Set(decoded.map(\.id)) == ["entry-1", "entry-2"])
     }
 
     @Test("same-id replay returns the existing entry without duplicating")
@@ -1655,9 +1656,10 @@ struct LocalStoreEntryUndoTests {
         #expect(restored?.id == "entry-1")
         #expect(restored?.activityText == "Running")
         #expect(restored?.durationSeconds == 600)
+        #expect(restored?.startedAt == Date(timeIntervalSinceReferenceDate: 1_000))
+        #expect(restored?.endedAt == Date(timeIntervalSinceReferenceDate: 1_600))
         #expect(restored?.notes == "kept")
         #expect(restored?.categoryIDs == ["cat-1"])
-        #expect(restored?.notes == "kept")
         let stored = try await store.entry(id: "entry-1")
         #expect(stored?.activityText == "Running")
         // Buffer row is gone; no outbox delete was ever created.

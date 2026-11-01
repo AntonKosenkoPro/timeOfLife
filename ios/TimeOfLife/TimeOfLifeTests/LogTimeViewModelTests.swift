@@ -221,8 +221,7 @@ struct LogTimeViewModelTests {
     @Test("EDIT allows every saved entry to be edited and saved")
     func editAllowsSave() async throws {
         let entry = storedEntry()
-        // swiftlint:disable:next force_try
-        let store = try! LocalStore(url: temporaryStoreURL())
+        let store = try await makeStore()
         _ = try await store.createEntry(entry)
         let vm = makeViewModel(store: store, editing: entry)
 
@@ -232,8 +231,18 @@ struct LogTimeViewModelTests {
 
         vm.name = "Running"
         #expect(await vm.save() == true)
-        let entries = try await store.entries()
-        #expect(entries.first?.activityText == "Running")
+        let stored = try #require(try await store.entry(id: entry.id))
+        #expect(stored.activityText == "Running")
+        // The EDIT write path preserves the untouched interval, notes,
+        // categories, and creation time via a full-entry update.
+        #expect(stored.startedAt == entry.startedAt)
+        #expect(stored.endedAt == entry.endedAt)
+        #expect(stored.durationSeconds == entry.durationSeconds)
+        #expect(stored.notes == entry.notes)
+        #expect(stored.categoryIDs == entry.categoryIDs)
+        #expect(stored.createdAt == entry.createdAt)
+        let updates = try await store.outboxRows().filter { $0.op == "update" && $0.recordID == entry.id }
+        #expect(updates.count == 1)
     }
 
     // MARK: - EDIT gate and duration

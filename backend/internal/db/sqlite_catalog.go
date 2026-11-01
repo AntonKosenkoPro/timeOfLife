@@ -572,6 +572,21 @@ func (s *SQLiteStore) CreateEntry(ctx context.Context, e Entry) (Entry, bool, er
 		INSERT INTO entries (id, user_id, activity_text, notes, started_at, ended_at, duration_seconds, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`, e.ID, e.UserID, e.ActivityText, e.Notes, fmtTime(e.StartedAt), fmtTimeArg(e.EndedAt), nullIntArg(dur), fmtTime(now), fmtTime(now)); err != nil {
+		// A concurrent create of the same id raced past the replay
+		// pre-check: roll back first so the single pool connection is
+		// released before re-reading via the pool (MaxOpenConns=1), then
+		// replay the winner instead of surfacing a raw 500.
+		if isUniqueViolation(err) {
+			if rbErr := tx.Rollback(); rbErr != nil && !errors.Is(rbErr, sql.ErrTxDone) {
+				return Entry{}, false, fmt.Errorf("create entry rollback: %w", rbErr)
+			}
+			if existing, getErr := s.getEntryRow(ctx, e.UserID, e.ID); getErr == nil {
+				items := []Entry{existing}
+				if tagErr := s.attachEntryTags(ctx, e.UserID, items); tagErr == nil {
+					return items[0], false, nil
+				}
+			}
+		}
 		return Entry{}, false, fmt.Errorf("create entry: %w", err)
 	}
 	if err := s.strictEntryCategoriesTx(ctx, tx, e.UserID, e.Categories); err != nil {

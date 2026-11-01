@@ -81,7 +81,8 @@ struct EntryRowAccessibilityTests {
             durationText: "1h 20m",
             isInProgress: false
         )
-        #expect(!label.contains("via"))
-        #expect(!label.contains("через"))
+        // Exact equality: any reintroduced segment (provenance or
+        // otherwise) fails loudly instead of passing silently.
+        #expect(label == "Running, 1h 20m, Health, 14:00 – 15:20")
     }
 }

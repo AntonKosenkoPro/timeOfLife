@@ -29,11 +29,11 @@ protocol LiveActivityControlling: Sendable {
     /// activities whose anchor already matches.
     func runStartChanged(startedAt: Date) async
     /// Ends every live timer activity with the Saved card. No-op when
-    /// none is live (idempotent — covers app/intent double stops).
+    /// none is live (idempotent — covers repeated Stop links).
     func runEnded(startedAt: Date, durationSeconds: Int) async
-    /// Ends activities whose draft is gone (app-side reaping — the Stop
-    /// intent saves + signals but cannot end: `ActivityKit` enumeration is
-    /// scoped by calling process, device-proven).
+    /// Ends activities whose draft is gone (app-side reaping — the app
+    /// stops itself on open: `ActivityKit` enumeration is scoped by
+    /// calling process, device-proven).
     func endOrphanedActivities(knownDurationSeconds: Int?) async
 }
 
@@ -55,7 +55,7 @@ final class NoopLiveActivityController: LiveActivityControlling {
 ///   ended first (the draft survives crashes, so a relaunch must not
 ///   duplicate the Island).
 /// - End is allowed from any state (foreground or background — the Stop
-///   intent fires while locked) with the Saved card and the tuned
+///   link opens the app while locked) with the Saved card and the tuned
 ///   `.after` dismissal (D6).
 /// - `staleDate` is nil: faces tick on-system via `Text(timerInterval:)`
 ///   with zero `update()` calls, so there is nothing to go stale.

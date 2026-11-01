@@ -1185,8 +1185,6 @@ paths:
           $ref: "#/components/responses/InvalidBody"
         "401":
           $ref: "#/components/responses/Unauthorized"
-        "409":
-          $ref: "#/components/responses/Conflict"
         "422":
           $ref: "#/components/responses/ValidationError"
         "500":
@@ -1959,7 +1957,8 @@ components:
         `GYM`); `category_ids` are stored on the entry (order preserved);
         unknown ids are rejected with 422. `ended_at` omitted/null means a
         running timer. `notes` defaults to empty. Creates are idempotent on
-        `id`: replaying the same `id` returns the existing entry unchanged.
+        `id`: replaying the same `id` returns the existing entry unchanged,
+        including when a concurrent create wins the race.
         Retired producer keys (`source`, `source_ref`) sent by older clients
         are accepted and ignored.
       required:

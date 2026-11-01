@@ -450,6 +450,19 @@ func (s *PostgresStore) CreateEntry(ctx context.Context, e Entry) (Entry, bool, 
 		INSERT INTO entries (id, user_id, activity_text, notes, started_at, ended_at, duration_seconds, created_at, updated_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $8)
 	`, e.ID, e.UserID, e.ActivityText, e.Notes, e.StartedAt, e.EndedAt, dur, now); err != nil {
+		// A concurrent create of the same id raced past the replay
+		// pre-check: the failed statement aborts the transaction, so roll
+		// back before re-reading, then replay the winner instead of
+		// surfacing a raw 500.
+		if pgIsUniqueViolation(err) {
+			_ = tx.Rollback(ctx)
+			if existing, getErr := s.pgGetEntryRow(ctx, e.UserID, e.ID); getErr == nil {
+				items := []Entry{existing}
+				if tagErr := s.pgAttachEntryTags(ctx, e.UserID, items); tagErr == nil {
+					return items[0], false, nil
+				}
+			}
+		}
 		return Entry{}, false, fmt.Errorf("create entry: %w", err)
 	}
 	if err := s.pgStrictEntryCategoriesTx(ctx, tx, e.UserID, e.Categories); err != nil {
