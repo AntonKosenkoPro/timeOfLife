@@ -100,6 +100,26 @@ enum L10n: String, CaseIterable {
     case historyInProgress = "history.inProgress"
     case historyTracked = "history.tracked"
     case historyHasNotes = "history.hasNotes"
+    case historyMatching = "history.matching"
+
+    // History search (history-search spec)
+    case historySearchPrompt = "history.search.prompt"
+    case historySearchNoResults = "history.search.noResults"
+    case historySearchNoResultsSubtitle = "history.search.noResults.subtitle"
+    case historySearchClear = "history.search.clear"
+    case historySearchHint = "history.search.hint"
+    case historySearchNotesLabel = "history.search.notesLabel"
+    case historySearchSummary = "history.search.summary"
+    case historySearchErrorUnknown = "history.search.error.unknown"
+    case historySearchErrorScope = "history.search.error.scope"
+    case historySearchErrorEmpty = "history.search.error.empty"
+    case historySearchErrorQuote = "history.search.error.quote"
+    case historySearchErrorDate = "history.search.error.date"
+    case historySearchErrorRange = "history.search.error.range"
+    case historySearchErrorOperator = "history.search.error.operator"
+    case historySearchErrorHas = "history.search.error.has"
+    case historySearchErrorTime = "history.search.error.time"
+    case historySearchErrorDuration = "history.search.error.duration"
 
     // History pull-to-refresh (history-pull-to-sync change)
     case historyPullOffline = "history.pull.offline"

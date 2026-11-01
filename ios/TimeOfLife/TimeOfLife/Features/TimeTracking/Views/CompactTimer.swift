@@ -9,6 +9,11 @@ struct CompactTimer: View {
     let openTrack: () -> Void
     let stop: () -> Void
 
+    /// The fixed surface height. `HistorySearchStates` reuses it so the
+    /// no-results clear action keeps the same bottom keyboard clearance
+    /// whether or not this timer is shown (history-search spec).
+    static let surfaceHeight: CGFloat = 62
+
     var body: some View {
         TimelineView(.periodic(from: .now, by: 1)) { context in
             HStack(spacing: Theme.spacingSmall) {
@@ -50,7 +55,7 @@ struct CompactTimer: View {
             }
             .padding(.leading, Theme.spacingSmall)
             .padding(.trailing, Theme.spacingExtraSmall)
-            .frame(height: 62)
+            .frame(height: Self.surfaceHeight)
             .background(Theme.backgroundSecondary)
             .clipShape(RoundedRectangle(cornerRadius: Theme.cornerRadius, style: .continuous))
             .overlay {
