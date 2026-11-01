@@ -45,17 +45,22 @@ extension HistoryViewModel {
         case 0: return L10n.historyDayToday.text
         case 1: return L10n.historyDayYesterday.text
         default:
-            let dateFormatter: DateFormatter = formatter ?? formatLock.withLock {
-                let fresh = DateFormatter()
-                fresh.dateStyle = .medium
-                fresh.timeStyle = .none
-                fresh.calendar = calendar
-                // First use (ICU regeneration) stays serialized like `timeText`.
-                _ = fresh.string(from: day)
-                return fresh
+            let dateFormatter: DateFormatter
+            if let reuse = formatter {
+                reuse.calendar = calendar
+                dateFormatter = reuse
+            } else {
+                dateFormatter = formatLock.withLock {
+                    let fresh = DateFormatter()
+                    fresh.dateStyle = .medium
+                    fresh.timeStyle = .none
+                    fresh.calendar = calendar
+                    // First use (ICU regeneration) stays serialized like `timeText`.
+                    _ = fresh.string(from: day)
+                    return fresh
+                }
             }
             formatter = dateFormatter
-            dateFormatter.calendar = calendar
             return dateFormatter.string(from: day)
         }
     }

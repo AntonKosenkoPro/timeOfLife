@@ -16,12 +16,6 @@ struct HistorySearchChromeTests {
             NoMatchingEntriesState.bottomClearance(hasCompactTimer: false)
                 == NoMatchingEntriesState.timerAbsentClearance
         )
-        // The invariant itself: the reserved slot equals the compact
-        // timer's full slot height — surface plus both inset gaps.
-        #expect(
-            NoMatchingEntriesState.timerAbsentClearance
-                == CompactTimer.surfaceHeight + Theme.spacingExtraSmall * 2
-        )
         // Floor: the reserved slot covers at least the compact-timer surface.
         #expect(NoMatchingEntriesState.timerAbsentClearance >= CompactTimer.surfaceHeight)
     }

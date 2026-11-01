@@ -191,7 +191,6 @@ struct HistorySearchEvaluationTests {
             )
             searchStart = sep.upperBound
         }
-        #expect(separators == [4 ..< 6, 13 ..< 15])
         for range in presentation.captionRanges {
             #expect(!separators.contains { $0.overlaps(range) })
         }

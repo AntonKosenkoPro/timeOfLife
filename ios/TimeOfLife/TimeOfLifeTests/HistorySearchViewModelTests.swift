@@ -292,21 +292,26 @@ struct HistorySearchViewModelTests {
         try await seedTwoDays(store)
         let vm = makeVM(store: store)
         await vm.load()
-        // Unique token so unrelated defaults traffic cannot false-positive.
-        let query = "belt in:notes \(UUID().uuidString)"
-        func hits(_ dict: [String: Any]) -> [String] {
-            dict.compactMap { key, value in
-                (key + " " + String(describing: value))
-                    .localizedCaseInsensitiveContains(query) ? key : nil
+        let query = "belt in:notes \(UUID().uuidString)" // unique token: any hit is a leak
+        func leaks(_ value: Any) -> Bool { // Data: UTF-8-decode + raw-byte-scan; containers recursed
+            if let data = value as? Data {
+                return String(data: data, encoding: .utf8)?.localizedCaseInsensitiveContains(query) == true
+                    || data.range(of: Data(query.utf8)) != nil
             }
+            if let dict = value as? [String: Any] { return dict.contains { leaks($0.key) || leaks($0.value) } }
+            if let array = value as? [Any] { return array.contains(where: leaks) }
+            return ((value as? String) ?? String(describing: value)).localizedCaseInsensitiveContains(query)
         }
-        let before = UserDefaults.standard.dictionaryRepresentation()
-        #expect(hits(before).isEmpty)
+        func scan() -> [String] { // `.standard` + the App Group suite the app uses; read-only
+            var dict = UserDefaults.standard.dictionaryRepresentation()
+            if let extra = UserDefaults(suiteName: LocalStore.appGroupID)?.dictionaryRepresentation() {
+                dict.merge(extra) { kept, _ in kept }
+            }
+            return dict.compactMap { leaks($0.key) || leaks($0.value) ? $0.key : nil }
+        }
         vm.searchText = query
-        // Scoped diff: only keys that newly contain the query count —
-        // pre-existing entries are untouched by the assertion.
-        let leaked = hits(UserDefaults.standard.dictionaryRepresentation())
-            .filter { !hits(before).contains($0) }
+        let leaked = scan() // fresh-UUID token: any hit is a leak, no before-snapshot needed
+        #expect(leaked.isEmpty, "search query leaked into UserDefaults: \(leaked)")
         #expect(leaked.isEmpty, "search query leaked into UserDefaults: \(leaked)")
     }
 
