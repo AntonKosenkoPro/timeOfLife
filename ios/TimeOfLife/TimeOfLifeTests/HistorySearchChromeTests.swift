@@ -14,8 +14,11 @@ struct HistorySearchChromeTests {
         #expect(NoMatchingEntriesState.bottomClearance(hasCompactTimer: true) == 0)
         #expect(
             NoMatchingEntriesState.bottomClearance(hasCompactTimer: false)
-                == CompactTimer.surfaceHeight + Theme.spacingExtraSmall * 2
+                == NoMatchingEntriesState.timerAbsentClearance
         )
+        // The invariant itself: the reserved slot covers at least the
+        // compact-timer surface.
+        #expect(NoMatchingEntriesState.timerAbsentClearance >= CompactTimer.surfaceHeight)
     }
 
     @Test("blank queries keep the tab bar, including a focused-but-empty field")

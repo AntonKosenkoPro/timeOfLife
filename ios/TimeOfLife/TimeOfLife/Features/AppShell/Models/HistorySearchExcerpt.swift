@@ -35,7 +35,7 @@ enum HistorySearchExcerptBuilder {
         }
         return HistorySearchExcerpt(
             text: text,
-            highlights: HistorySearchEvaluator.merged(shifted)
+            highlights: TextRanges.merged(shifted)
         )
     }
 

@@ -40,9 +40,14 @@ struct NoMatchingEntriesState: View {
 
     /// Bottom padding applied when no compact timer is shown, so the clear
     /// action sits the same distance above the keyboard in both states:
-    /// the timer surface plus its top/bottom inset gaps.
+    /// the timer surface plus its top/bottom inset gaps. A single shared
+    /// constant (not inline arithmetic) so tests pin the invariant — the
+    /// clear action reserves the compact-timer slot — instead of restating
+    /// the formula.
+    static let timerAbsentClearance: CGFloat = CompactTimer.surfaceHeight + Theme.spacingExtraSmall * 2
+
     static func bottomClearance(hasCompactTimer: Bool) -> CGFloat {
-        hasCompactTimer ? 0 : CompactTimer.surfaceHeight + Theme.spacingExtraSmall * 2
+        hasCompactTimer ? 0 : Self.timerAbsentClearance
     }
 
     var body: some View {

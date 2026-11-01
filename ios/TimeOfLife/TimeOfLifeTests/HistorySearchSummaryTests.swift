@@ -53,6 +53,18 @@ struct HistorySearchSummaryTests {
         return comps.date!
     }
 
+    /// Noon on a device-local day: a seed no timezone can push onto the
+    /// neighbouring day, so date-only queries over it stay TZ-proof.
+    private static func localNoon(year: Int, month: Int, day: Int) -> Date {
+        var comps = DateComponents()
+        comps.year = year
+        comps.month = month
+        comps.day = day
+        comps.hour = 12
+        comps.minute = 0
+        return Calendar.current.date(from: comps)!
+    }
+
     private func bundle(for locale: String) throws -> Bundle {
         let path = try #require(Bundle.main.path(forResource: locale, ofType: "lproj"),
                                 "Missing \(locale).lproj in main bundle")
@@ -67,9 +79,16 @@ struct HistorySearchSummaryTests {
         let entries = [
             entry(id: "e1", startedAt: base, text: "Gym", durationSeconds: 1800),
             entry(id: "e2", startedAt: base, text: "Run", durationSeconds: 2700),
-            // In-progress: no known duration.
-            entry(id: "e3", startedAt: base, text: "Swim", durationSeconds: nil, endedAt: nil),
+            // In-progress: genuinely open — no end, no known duration.
+            TimeEntry(
+                id: "e3",
+                activityText: "Swim",
+                startedAt: base,
+                endedAt: nil,
+                durationSeconds: nil
+            ),
         ]
+        #expect(entries[2].endedAt == nil)
         #expect(HistorySearchSummary.totalSeconds(entries) == 4500)
         #expect(HistorySearchSummary.totalSeconds([]) == 0)
     }
@@ -184,7 +203,7 @@ struct HistorySearchSummaryTests {
         let store = try makeStore()
         try await store.createEntry(entry(
             id: "e1",
-            startedAt: Self.utc("2026-10-05T10:00:00"),
+            startedAt: Self.localNoon(year: 2026, month: 10, day: 5),
             text: "Morning Gym",
             durationSeconds: 1800
         ))

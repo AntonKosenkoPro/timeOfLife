@@ -281,6 +281,28 @@ struct HistorySearchParserTests {
         } else {
             Issue.record("expected invalid query")
         }
+        // Reversed by exactly one day: the date upper endpoint is exclusive
+        // (`N(d)`), so `lower == upper` without the one-day check would slip
+        // through as a valid empty predicate instead of a diagnostic.
+        for query in ["started:2026-10-02..2026-10-01", "ended:2026-10-02..2026-10-01"] {
+            guard case .invalid(let diagnostic) = HistorySearchParser.parse(query) else {
+                Issue.record("expected invalid query for \(query)")
+                continue
+            }
+            let operand = String(query.split(separator: ":")[1])
+            #expect(diagnostic == .badRange(operand), "diagnostic for \(query)")
+        }
+        // Inclusive (timestamp) equality stays valid: a zero-width instant
+        // range, not a reversal.
+        if case .valid = HistorySearchParser.parse("started:2026-10-02T00:00:00Z..2026-10-02T00:00:00Z") {
+        } else {
+            Issue.record("expected valid query for the zero-width instant range")
+        }
+        // The same calendar day twice is one valid whole-day range.
+        if case .valid = HistorySearchParser.parse("started:2026-10-02..2026-10-02") {
+        } else {
+            Issue.record("expected valid query for the same-day range")
+        }
     }
 
     @Test("contradictory but individually valid predicates stay valid")

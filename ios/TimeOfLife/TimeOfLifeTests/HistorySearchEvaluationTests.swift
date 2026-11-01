@@ -181,8 +181,11 @@ struct HistorySearchEvaluationTests {
         #expect(presentation.nameRanges.isEmpty)
         let slices = presentation.captionRanges.map { slice(text, $0) }
         #expect(slices == ["or", "or", "or"])
-        // Provenance text is never part of the caption ranges input.
-        #expect(presentation.captionRanges.allSatisfy { $0.upperBound <= text.count })
+        // Real invariant (clamping alone cannot guarantee it): ranges land
+        // inside category names, never on the ", " separators at 4..<6 / 14..<16.
+        for range in presentation.captionRanges {
+            #expect(![4 ..< 6, 14 ..< 16].contains { $0.overlaps(range) })
+        }
     }
 
     @Test("out-of-scope fields receive no ranges")
@@ -225,6 +228,8 @@ struct HistorySearchEvaluationTests {
         let presentation = HistorySearchEvaluator.presentation(
             entry: record, categories: [], caption: "", query: query
         )
+        // A lost ß→ss fold must fail loudly, not pass with zero ranges.
+        #expect(!presentation.nameRanges.isEmpty, "case-mapped match must still yield a range")
         for range in presentation.nameRanges {
             let piece = slice(record.activityText, range)
             #expect(!piece.isEmpty)

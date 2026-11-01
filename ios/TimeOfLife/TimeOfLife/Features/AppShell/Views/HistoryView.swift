@@ -96,13 +96,13 @@ struct HistoryView: View {
             ZStack {
                 if let diagnostic = vm.searchDiagnostic {
                     InvalidSearchState(diagnostic: diagnostic)
+                } else if vm.isLoading && vm.dayGroups.isEmpty {
+                    ProgressView()
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else if vm.isSearchFiltering && vm.dayGroups.isEmpty {
                     NoMatchingEntriesState(hasCompactTimer: showsCompactTimer) {
                         vm.searchText = ""
                     }
-                } else if vm.isLoading && vm.dayGroups.isEmpty {
-                    ProgressView()
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else if vm.dayGroups.isEmpty {
                     EmptyState(
                         icon: "clock.arrow.circlepath",

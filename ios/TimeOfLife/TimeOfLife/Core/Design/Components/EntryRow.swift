@@ -131,9 +131,14 @@ struct EntryRow: View {
                         )
                         .font(.caption.italic())
                         .foregroundStyle(Theme.textSecondary)
-                        .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2)
+                        // The excerpt builder keeps ~48 characters of leading
+                        // context before the focal match; at large Dynamic
+                        // Type sizes the caption line holds far fewer
+                        // characters, so a 2-line cap could hide the focal
+                        // match entirely — relax the cap from .xxLarge up so
+                        // the match stays visible.
+                        .lineLimit(dynamicTypeSize >= .xxLarge ? nil : 2)
                     }
-                    .accessibilityIdentifier("EntryRowExcerpt(\(entry.id))")
                 }
             }
         }

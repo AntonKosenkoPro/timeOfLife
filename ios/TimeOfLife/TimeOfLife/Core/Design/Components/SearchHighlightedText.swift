@@ -34,14 +34,11 @@ struct SearchHighlightedText: View {
     let highlights: [Range<Int>]
 
     var body: some View {
-        let clamped = HistorySearchEvaluator.merged(
-            highlights.compactMap { range in
-                let lower = max(0, min(range.lowerBound, text.count))
-                let upper = max(0, min(range.upperBound, text.count))
-                guard lower < upper else { return nil }
-                return lower ..< upper
-            }
-        )
+        // Clamp/merge via the Core helper, not the feature-layer evaluator:
+        // this component must stay usable without the search feature, and
+        // the presentation derivation already merges once per query — this
+        // pass only guards directly supplied ranges.
+        let clamped = TextRanges.merged(TextRanges.clamped(highlights, count: text.count))
         if clamped.isEmpty {
             Text(text)
         } else {

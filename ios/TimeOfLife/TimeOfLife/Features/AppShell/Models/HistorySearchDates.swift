@@ -94,7 +94,12 @@ enum HistorySearchDates {
             upper = bound.inclusiveUpper.date
             upperInclusive = bound.inclusiveUpper.inclusive
         }
-        if let lower, let upper, lower > upper {
+        if let lower, let upper,
+           lower > upper || (!upperInclusive && lower == upper) {
+            // A date-derived upper endpoint is exclusive (`N(d)`), so
+            // equality against it is also a reversal: `2026-10-02..2026-10-01`
+            // yields `lower == S(Oct 2) == N(Oct 1)`. Inclusive (timestamp)
+            // equality stays valid — a zero-width instant range.
             return .invalid(.badRange(operand))
         }
         let predicate = HistorySearchStartPredicate(

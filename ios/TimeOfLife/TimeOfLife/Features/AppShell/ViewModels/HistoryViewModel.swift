@@ -85,6 +85,10 @@ final class HistoryViewModel: ObservableObject {
             allEntries = []
             dayGroups = []
             searchPresentations = [:]
+            // A storage failure must not present as a zero-match query:
+            // without this the view renders the no-results state with a
+            // Clear-search action for a failed fetch.
+            isSearchFiltering = false
         }
     }
 
@@ -309,43 +313,23 @@ final class HistoryViewModel: ObservableObject {
             buckets[key, default: []].append(entry)
         }
 
+        // One reusable day-label formatter per derivation (not per group):
+        // building a DateFormatter costs an ICU data load, and this runs on
+        // every keystroke while searching (history-search perf). The box is
+        // thread-confined to this call — no sharing, no per-group locking.
+        var dayFormatter: DateFormatter?
         return order.map { key in
             let dayEntries = buckets[key] ?? []
             let day = dayFromKey(key, calendar: calendar)
             return DayGroup(
                 id: key,
-                label: dayLabel(for: day, now: now, calendar: calendar),
+                label: dayLabel(for: day, now: now, calendar: calendar, formatter: &dayFormatter),
                 entries: dayEntries,
                 total: naturalDuration(
                     dayEntries.reduce(0) { $0 + ($1.durationSeconds ?? 0) },
                     locale: locale
                 )
             )
-        }
-    }
-
-    /// "Today" / "Yesterday" for the two most recent calendar days, then the
-    /// device-locale regional date for older days (D3).
-    nonisolated static func dayLabel(for day: Date, now: Date, calendar: Calendar = .current) -> String {
-        let today = calendar.startOfDay(for: now)
-        let dayStart = calendar.startOfDay(for: day)
-        let days = calendar.dateComponents([.day], from: dayStart, to: today).day ?? 0
-        switch days {
-        case 0: return L10n.historyDayToday.text
-        case 1: return L10n.historyDayYesterday.text
-        default:
-            // Serialized (see formatLock): NSDateFormatter — including the
-            // ICU data loading behind first use — is not thread-safe, and
-            // these helpers are reachable from any thread. Live TestFlight
-            // crash: icu::UnicodeString ctor via -[NSDateFormatter
-            // _regenerateFormatter] on exactly this path.
-            return formatLock.withLock {
-                let formatter = DateFormatter()
-                formatter.dateStyle = .medium
-                formatter.timeStyle = .none
-                formatter.calendar = calendar
-                return formatter.string(from: day)
-            }
         }
     }
 
@@ -358,15 +342,6 @@ final class HistoryViewModel: ObservableObject {
     nonisolated static func naturalDuration(_ seconds: Int, locale: Locale = .current) -> String {
         DurationFormatting.natural(seconds, locale: locale)
     }
-
-    /// Short-time caption ("14:00").
-    nonisolated static func timeText(for date: Date) -> String {
-        formatLock.withLock { timeFormatter.string(from: date) }
-    }
-
-    /// Serializes every NSDateFormatter touch in this type (see dayLabel).
-    /// Never held across awaits.
-    nonisolated private static let formatLock = NSLock()
 
     private static func clampedSeconds(start: Date, end: Date?) -> Int {
         guard let end else { return 0 }
@@ -391,10 +366,4 @@ final class HistoryViewModel: ObservableObject {
         comps.day = parts.count > 2 ? parts[2] : 0
         return calendar.date(from: comps) ?? Date()
     }
-
-    nonisolated private static let timeFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.timeStyle = .short
-        return formatter
-    }()
 }

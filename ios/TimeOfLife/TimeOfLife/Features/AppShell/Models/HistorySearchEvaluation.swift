@@ -188,19 +188,11 @@ enum HistorySearchEvaluator {
     }
 
     /// Sorts by lower bound and merges overlapping or adjacent ranges.
+    /// Forwards to the Core helper so feature code and the shared
+    /// highlight component merge identically; kept so existing call sites
+    /// read at the evaluator level.
     static func merged(_ ranges: [Range<Int>]) -> [Range<Int>] {
-        let sorted = ranges.sorted {
-            $0.lowerBound < $1.lowerBound || ($0.lowerBound == $1.lowerBound && $0.upperBound < $1.upperBound)
-        }
-        var out: [Range<Int>] = []
-        for range in sorted {
-            if let last = out.last, range.lowerBound <= last.upperBound {
-                out[out.count - 1] = last.lowerBound ..< max(last.upperBound, range.upperBound)
-            } else {
-                out.append(range)
-            }
-        }
-        return out
+        TextRanges.merged(ranges)
     }
 
     // MARK: - Snapshot derivation
@@ -333,11 +325,6 @@ enum HistorySearchEvaluator {
     }
 
     private static func clamped(_ ranges: [Range<Int>], count: Int) -> [Range<Int>] {
-        ranges.compactMap { range in
-            let lower = max(0, min(range.lowerBound, count))
-            let upper = max(0, min(range.upperBound, count))
-            guard lower < upper else { return nil }
-            return lower ..< upper
-        }
+        TextRanges.clamped(ranges, count: count)
     }
 }

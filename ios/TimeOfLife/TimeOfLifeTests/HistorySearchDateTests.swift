@@ -232,10 +232,32 @@ struct HistorySearchDateTests {
     @Test("start constraints use the entry start, never interval overlap")
     func startNotOverlap() throws {
         let calendar = gmtCalendar()
-        let predicate = try predicate("started:2026-10-02", calendar: calendar)
-        // Starts Oct 1, ends Oct 2: the start day decides.
-        #expect(!predicate.matches(instant("2026-10-01T23:00:00", calendar: calendar)))
-        #expect(predicate.matches(instant("2026-10-02T00:30:00", calendar: calendar)))
+        let result = HistorySearchParser.parse("started:2026-10-02", calendar: calendar)
+        guard case .valid(let query) = result else {
+            throw TestError.expectedValid("started:2026-10-02")
+        }
+        // Starts Oct 1, ends Oct 2: the start day decides — an
+        // overlap-based implementation would wrongly include it.
+        let spanning = TimeEntry(
+            id: "span",
+            activityText: "Overnight Walk",
+            startedAt: instant("2026-10-01T23:00:00", calendar: calendar),
+            endedAt: instant("2026-10-02T01:00:00", calendar: calendar),
+            durationSeconds: 7200
+        )
+        #expect(!HistorySearchEvaluator.matches(
+            entry: spanning, categories: [], query: query, calendar: calendar
+        ))
+        let inside = TimeEntry(
+            id: "inside",
+            activityText: "Early Walk",
+            startedAt: instant("2026-10-02T00:30:00", calendar: calendar),
+            endedAt: instant("2026-10-02T01:00:00", calendar: calendar),
+            durationSeconds: 1800
+        )
+        #expect(HistorySearchEvaluator.matches(
+            entry: inside, categories: [], query: query, calendar: calendar
+        ))
     }
 
     // MARK: - Wall-clock operands (task 12.2, section 12)

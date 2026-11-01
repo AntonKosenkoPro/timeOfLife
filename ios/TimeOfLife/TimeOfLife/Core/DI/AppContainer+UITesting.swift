@@ -230,13 +230,7 @@ extension AppContainer {
     }
 
     private static func seedHistorySearchEntries(into store: LocalStore) async {
-        do {
-            try await store.createCategory(Category(
-                id: "uitest-hs-sport", name: "Sport", icon: "figure.run"
-            ))
-        } catch {
-            seedLogger.error("UITest seed: historySearch category failed")
-        }
+        let sportID = await resolveHistorySearchSportID(into: store)
         let calendar = Calendar(identifier: .gregorian)
         let todayStart = calendar.startOfDay(for: Date())
         let yesterdayStart = calendar.date(byAdding: .day, value: -1, to: todayStart)!
@@ -247,8 +241,8 @@ extension AppContainer {
                 startedAt: calendar.date(byAdding: .minute, value: 605, to: todayStart)!,
                 endedAt: calendar.date(byAdding: .minute, value: 635, to: todayStart)!,
                 durationSeconds: 1800,
-                categoryIDs: ["uitest-hs-sport"],
-                notes: "remember the HR belt"
+                categoryIDs: [sportID],
+                notes: "remember the HR belt and gym lockers"
             ),
             TimeEntry(
                 id: "uitest-hs-b",
@@ -256,7 +250,7 @@ extension AppContainer {
                 startedAt: calendar.date(byAdding: .minute, value: 1085, to: todayStart)!,
                 endedAt: calendar.date(byAdding: .minute, value: 1130, to: todayStart)!,
                 durationSeconds: 2700,
-                categoryIDs: ["uitest-hs-sport"],
+                categoryIDs: [sportID],
                 notes: "gym bag checklist with squats guide and plenty of extra padding words to fill the note"
             ),
             TimeEntry(
@@ -268,8 +262,36 @@ extension AppContainer {
             ),
         ]
         for entry in fixtures {
-            _ = try? await store.createEntry(entry)
+            do {
+                let result = try await store.createEntry(entry)
+                if case .failure = result {
+                    seedLogger.error("UITest seed: historySearch entry failed id=\(entry.id, privacy: .public)")
+                }
+            } catch {
+                seedLogger.error("UITest seed: historySearch entry threw id=\(entry.id, privacy: .public): \(error.localizedDescription, privacy: .public)")
+            }
         }
+    }
+
+    /// Resolves the History search fixture's Sport category by name: the
+    /// launch gate seeds the starter set (including "Sport") before the
+    /// shell reveals, racing this task — whichever side wins a contested
+    /// name, the lookup lands on the same name+icon row either way, so the
+    /// entries below never fail on the normalized-name unique index
+    /// (same shape as `seedTrackCategories`' documented race).
+    private static func resolveHistorySearchSportID(into store: LocalStore) async -> String {
+        if let existingID = try? await store.category(named: "Sport")?.id {
+            return existingID
+        }
+        let category = Category(
+            id: "uitest-hs-sport", name: "Sport", icon: "figure.run"
+        )
+        do {
+            try await store.createCategory(category)
+        } catch {
+            seedLogger.error("UITest seed: historySearch category failed: \(error.localizedDescription, privacy: .public)")
+        }
+        return (try? await store.category(named: "Sport")?.id) ?? category.id
     }
 
     /// Kicks off the deterministic running-track fixture for the

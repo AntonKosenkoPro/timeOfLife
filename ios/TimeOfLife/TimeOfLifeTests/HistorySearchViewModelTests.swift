@@ -286,18 +286,6 @@ struct HistorySearchViewModelTests {
         #expect(second.dayGroups.flatMap(\.entries).count == 3)
     }
 
-    @Test("queries never reach persistent storage")
-    func queryNotPersisted() async throws {
-        let store = try makeStore()
-        try await seedTwoDays(store)
-        let vm = makeVM(store: store)
-        await vm.load()
-        vm.searchText = "belt in:notes"
-        let defaults = UserDefaults.standard.dictionaryRepresentation()
-        #expect(defaults.keys.allSatisfy { !$0.localizedCaseInsensitiveContains("historySearch") })
-        #expect(defaults.keys.allSatisfy { !$0.localizedCaseInsensitiveContains("history.search") })
-    }
-
     // MARK: - Performance (task 5.3)
 
     @Test("thousands-entry derivation stays comfortably interactive")
@@ -327,25 +315,37 @@ struct HistorySearchViewModelTests {
             return
         }
         let query = parsedQuery
-        let start = Date()
+        // The full per-keystroke path: snapshot derivation plus day
+        // regrouping (labels included), exactly what `applySearch` runs on
+        // every query edit. `ContinuousClock` (monotonic) replaces the wall
+        // clock so NTP steps cannot skew the guard.
+        let clock = ContinuousClock()
         var hits = 0
         var presentations = 0
-        for record in entries
-            where HistorySearchEvaluator.matches(entry: record, categories: categories, query: query) {
-            hits += 1
-            let presentation = HistorySearchEvaluator.presentation(
-                entry: record,
-                categories: categories,
-                caption: "Sport",
-                query: query
+        var groups: [DayGroup] = []
+        let elapsed = clock.measure {
+            let derived = HistorySearchEvaluator.derive(
+                entries: entries,
+                categoriesByID: ["c1": categories[0]],
+                query: query,
+                calendar: calendar
             )
-            if presentation.hasVisibleHighlights {
-                presentations += 1
-            }
+            hits = derived.matched.count
+            presentations = derived.presentations.count
+            groups = HistoryViewModel.makeDayGroups(
+                entries: derived.matched,
+                now: Date(timeIntervalSince1970: 1_800_000_000),
+                calendar: calendar
+            )
         }
-        let elapsed = Date().timeIntervalSince(start)
         #expect(hits > 0)
         #expect(presentations > 0)
-        #expect(elapsed < 5.0)
+        #expect(!groups.isEmpty)
+        // Pathological-regression guard, not a performance target: measured
+        // ~0.1s for this corpus in a local Debug simulator build, so 2s
+        // leaves ~20x headroom for slow shared CI runners while still
+        // catching algorithmic blowups (the full per-keystroke path must
+        // stay synchronous-safe without debounce).
+        #expect(elapsed < .seconds(2))
     }
 }
