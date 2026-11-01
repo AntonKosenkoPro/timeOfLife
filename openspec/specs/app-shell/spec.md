@@ -4,7 +4,6 @@
 
 Defines a stable product hierarchy for frequent capture, retrospective review, and analysis while keeping account and configuration tasks secondary and preserving access to a running timer.
 ## Requirements
-
 ### Requirement: Three primary destinations
 The app SHALL provide Track, History, and Insights as its primary destinations, and SHALL identify Track as the destination for starting and controlling a timer. The History destination SHALL present committed time entries as a day-grouped, read-only list (see `history-entry-list` capability). The Insights destination SHALL present a period-scoped breakdown of committed tracked time with a hero total (see `insights-breakdown` capability), replacing the empty-state placeholder whenever committed entries exist. The History destination SHALL show the navigation bar (inline title and Profile button) at rest and collapse it on scroll; the Profile button remains present on Track and Insights. The app SHALL require authentication before presenting any primary destination: when the user is signed out, the app SHALL render the auth flow full-screen in place of the shell and MUST NOT render Track, History, Insights, or the tab bar; primary destinations become reachable only after sign-in. When a cached session exists at launch, the app SHALL optimistically prepare that account's shell — bind the local store, commit buffered deletions, seed starter categories, and load the full Track snapshot (recents, names, categories, persisted running draft) — and mount the shell with the snapshot already in hand, so the first visible Track paint is complete with no splash, skeleton, spinner, or fade; session restore (`/me`) verifies concurrently in the background and is invisible on success, while an authentication failure cuts to the auth flow. Normal authentication failure SHALL preserve local account files; only independently confirmed account deletion SHALL schedule the separate account-scoped cleanup defined by `account-deletion`. When no cached session exists, the app SHALL render the auth flow immediately with no waiting UI. The shell SHALL mount only after the signed-in account's local store is bound, buffered deletions are committed, starter categories are seeded, and the first Track snapshot is loaded; the first-sync network pull stays background and MUST NOT block the reveal.
 
@@ -43,6 +42,7 @@ The app SHALL provide Track, History, and Insights as its primary destinations, 
 #### Scenario: Shell mounts after local ready
 - **WHEN** fresh, restored, or repeated sign-in binds an account file needing buffered-deletion commit or starter seeding
 - **THEN** the shell appears only after bind, commit, seed, and first snapshot load so its first Track paint is complete
+
 ### Requirement: Profile owns secondary destinations
 The app SHALL expose account, sync, category management, and destructive data controls from a profile destination rather than as a primary tab. The profile destination SHALL open as a pushed page on the current tab's own navigation path with the system back button, and SHALL NOT present as a sheet or offer a Done/dismiss control. Each tab (Track, History, Insights) SHALL own an independent navigation path: opening Profile on one tab SHALL NOT push Profile on any other tab, and switching tabs SHALL NOT carry Profile state across. Account and Manage Categories SHALL push from Profile on the same tab path, and the category editor SHALL remain a sheet. The profile destination SHALL be signed-in-only: it SHALL NOT present an Enable Sync row or auth-flow sheet, and the auth flow SHALL NOT be presented from Profile as a sheet. Because the launch auth gate guarantees a signed-in user, account identity and sync state SHALL reflect the active signed-in account at all times. Profile SHALL retain Account navigation, sync status/Sync now, Categories navigation, and version; Sign out and Delete local data SHALL move into Account alongside Delete account and local data and SHALL NOT be duplicated directly on Profile. The profile destination SHALL NOT expose integrations, export, appearance, or data-and-privacy placeholder rows, and no activity catalog exists. Destructive rows in Account SHALL share one list-row visual contract: the shared list row geometry with a leading icon and the danger tint.
 
@@ -85,6 +85,7 @@ The app SHALL expose account, sync, category management, and destructive data co
 #### Scenario: Profile retains convenient sync
 - **WHEN** the user opens Profile after account actions move
 - **THEN** sync status and Sync now remain directly accessible without entering Account and no direct Sign out or local-deletion action remains on Profile
+
 ### Requirement: Profile is a pushed page
 The profile destination SHALL open as a pushed page on the current tab's navigation stack with the system back button, and SHALL NOT present as a sheet or offer a Done/dismiss control. Manage Categories SHALL keep pushing from Profile, and the category editor SHALL remain a sheet. Exiting Profile back to a tab SHALL restore the tab's prior state and reload Track data (recents + categories), so categories created in Profile are immediately usable.
 
@@ -227,3 +228,15 @@ The permanent-deletion row and its destructive confirmation button SHALL explici
 #### Scenario: Confirm only once
 - **WHEN** the user confirms permanent deletion
 - **THEN** the operation proceeds without another deletion-confirmation alert and duplicate submission is prevented
+
+### Requirement: Minimum supported iOS version
+The app and its Live Activity targets SHALL require iOS 18 or later. Removing Controls SHALL NOT lower the deployment floor or introduce runtime support branches for iOS 15–17. Availability branches for features introduced after iOS 18 remain permitted.
+
+#### Scenario: iOS 18 or later
+- **WHEN** a user runs the app on iOS 18 or later
+- **THEN** the app runs with its native supported feature set without an iOS-18 availability fallback; the abandoned Control is not offered
+
+#### Scenario: Older iOS device
+- **WHEN** a device runs iOS 15, 16, or 17
+- **THEN** the app cannot be installed because its minimum deployment target remains iOS 18
+

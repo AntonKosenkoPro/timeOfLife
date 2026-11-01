@@ -15,39 +15,6 @@ The system SHALL treat the active signed-in account's local SQLite database in t
 - **WHEN** the user is signed in but offline, or is not signed in
 - **THEN** a signed-in user retains full local function (timer, categories, history) against the active account's database with no network connectivity, while a signed-out user has no tracker function and remains at the auth gate
 
-### Requirement: App Group shared container
-The system SHALL store the local database in an App Group shared container (`group.com.antonkosenko.timeoflifeapp`) so that the main app, widget extensions, Screen Time extension, and lock-screen Control intents can read and write the same data cross-process.
-
-#### Scenario: Widget reads catalog
-- **WHEN** a home-screen widget renders and reads the activities table from the shared container
-- **THEN** it sees the same records the main app wrote, without a separate copy or IPC handshake
-
-#### Scenario: Extension writes entry
-- **WHEN** the Screen Time extension writes an entry to the shared container database
-- **THEN** the main app observes that entry on its next foreground, without an explicit IPC call
-
-### Requirement: Data protection level
-The system SHALL store the local database with iOS data protection `.completeUntilFirstUserAuthentication` (the App Group container default), so that the database is accessible to lock-screen Control intents after the device has been unlocked at least once since boot.
-
-#### Scenario: Lock-screen Control after first unlock
-- **WHEN** the device was unlocked at least once since boot and is now locked, and a lock-screen Control intent runs with `alwaysAllowed` authentication policy
-- **THEN** the intent can open and write to the shared container database successfully
-
-#### Scenario: Database inaccessible after cold boot
-- **WHEN** the device was just rebooted and has never been unlocked since boot, and a lock-screen Control intent runs
-- **THEN** the intent fails gracefully (catches the database-open error), returns a "please unlock" state to the Control, and does not crash or leave the data in an inconsistent state
-
-### Requirement: Running timer state persistence
-The system SHALL persist the running timer's draft state (entry text, ordered category ids, notes, started_at, status) in the local database, not solely in app memory, so that the timer survives app crashes and is readable by widgets and lock-screen Controls. Widgets and Controls SHALL continue to read only text/status/elapsed and SHALL ignore the notes column.
-
-#### Scenario: Timer survives app crash
-- **WHEN** a timer is running and the app crashes or is killed by the OS
-- **THEN** on next launch the app reads the draft from the database and resumes the running-timer UI (shows the elapsed time, the locked text, the tags as left, and the draft notes as left)
-
-#### Scenario: Control displays running timer
-- **WHEN** a lock-screen Control or widget renders while a timer is running
-- **THEN** it reads the draft from the shared container database and displays the running status and elapsed time
-
 ### Requirement: Transactional outbox
 The system SHALL record every local mutation (create, update, delete) as a row in a transactional `outbox` table, written in the same database transaction as the state change. The outbox is the durable queue of operations to propagate to the backend relay when sync is active.
 
@@ -116,6 +83,7 @@ The system SHALL NOT wipe any per-account local database, outbox, or undo buffer
 #### Scenario: Local erase fails
 - **WHEN** removing the account-local file fails before local-only erase completes
 - **THEN** the app reports a retryable error instead of claiming success or silently signing out as though cleanup succeeded
+
 ### Requirement: Local deletion tombstone reads
 
 The local store SHALL expose read-only tombstone queries over the existing outbox and undo-buffer tables (no schema change): whether `(resource, record_id)` has a pending outbox DELETE, whether it sits in a buffered deletion snapshot (activity snapshots cover their entries' ids), and the combined exclusion used by the sync client.
@@ -142,7 +110,7 @@ The local store SHALL apply a relay tombstone `(resource, record_id, deleted_at)
 - **THEN** the DELETE row remains queued (it converges via 404-as-success on drain)
 
 ### Requirement: Entries own text, categories, and notes
-Each entry SHALL own its `activity_text` (trimmed, non-empty, max 60 chars; case-sensitive identity), its ordered `category_ids` (zero or more, position-preserved via `entry_categories`), and its `notes` (max 2000 trimmed runes, default empty). No entry SHALL reference any other record for its display name or classification.
+Each entry SHALL own its `activity_text` (trimmed, non-empty, max 60 chars; case-sensitive identity), its ordered `category_ids` (zero or more, position-preserved via `entry_categories`), and its `notes` (max 2000 trimmed runes, default empty). No entry SHALL reference any other record for its display name or classification. The current local entry shape, undo snapshots, and outbox payloads SHALL NOT carry producer provenance or external import identifiers (`source` or `source_ref`). Retired relay provenance SHALL NOT affect the entry's identity, values, or editability.
 
 #### Scenario: Entry saved with all fields
 - **WHEN** a valid entry is saved with text, two ordered categories, and notes
@@ -155,6 +123,10 @@ Each entry SHALL own its `activity_text` (trimmed, non-empty, max 60 chars; case
 #### Scenario: Notes past the bound are rejected
 - **WHEN** an entry holds more than 2000 trimmed runes of notes
 - **THEN** the relay rejects the create/update with a notes `validation_error` and the local entry is unchanged
+
+#### Scenario: Source-free local mutation
+- **WHEN** an entry is created, edited, buffered for deletion, or restored
+- **THEN** the local entry, outbox payload, and undo snapshot contain the supported entry values without producer provenance; transactional and undo behavior remain unchanged
 
 ### Requirement: Timer draft holds text and live categories
 The `timer_state` singleton SHALL hold `(activity_text, ordered category_ids, notes, started_at, status)` for the running draft. Toggles SHALL rewrite the snapshot in the same chokepoint transaction. Notes saves SHALL rewrite only the notes field in the same chokepoint transaction. Start-time edits SHALL rewrite only the `started_at` field in the same chokepoint transaction (text, categories, and notes untouched). Stop SHALL create the entry from the draft (text + final categories + final notes + final start) and clear it.
@@ -200,4 +172,37 @@ The system SHALL seed starter categories into a per-account database file the fi
 #### Scenario: Seeding is scoped to the opened account
 - **WHEN** an account's file is opened and seeded
 - **THEN** no other account's dormant file is created, modified, or seeded as a side effect
+
+### Requirement: Account database remains in the App Group
+The system SHALL continue to store each account's local database in the App Group shared container (`group.com.antonkosenko.timeoflifeapp`). Retiring entry integrations and the fallback extension writer SHALL NOT relocate account files or create a second copy of tracker data. The main app SHALL own entry mutations; the Live Activity extension SHALL render app-published activity content rather than independently opening or mutating the tracker database. No Home Screen capture widget, Screen Time extension, or lock-screen Control writer is required.
+
+#### Scenario: Account database retains its location
+- **WHEN** the app binds a signed-in account
+- **THEN** its local database uses that account's App Group file, not a new private-container duplicate
+
+#### Scenario: Live Activity renders without database access
+- **WHEN** a Live Activity face renders
+- **THEN** it shows the content published by the app without independently reading, opening, or writing an account database
+
+### Requirement: Account database data protection
+The system SHALL keep the local database's iOS data protection `.completeUntilFirstUserAuthentication`. Storage access after first unlock and graceful no-write behavior before first unlock SHALL remain independent of the retired Control/intent paths. An inaccessible database SHALL NOT cause anonymous file creation or partial entry writes.
+
+#### Scenario: App storage after first unlock
+- **WHEN** the device has been unlocked at least once since boot and an authorized app operation accesses its bound account store
+- **THEN** the database retains the existing data-protection accessibility without a Control-specific requirement
+
+#### Scenario: Database inaccessible after cold boot
+- **WHEN** the database is unavailable before first unlock and an app operation cannot open it
+- **THEN** no entry, partial mutation, or anonymous database is created and the failure is handled without corrupting local data
+
+### Requirement: Durable running draft and Live Activity mirroring
+The system SHALL persist the running timer's draft state (entry text, ordered category ids, notes, started_at, status) in the local database, not solely in app memory, so the timer survives app crashes. The main app SHALL publish the current name, categories, and elapsed anchor to the Live Activity; the extension SHALL NOT require a database reader. Notes remain in the draft and SHALL NOT be displayed on Live Activity faces.
+
+#### Scenario: Timer survives app crash
+- **WHEN** a timer is running and the app crashes or is killed by the OS
+- **THEN** on next launch the app reads the draft from the database and resumes the running-timer UI (shows the elapsed time, the locked text, the tags as left, and the draft notes as left)
+
+#### Scenario: Live Activity reflects the published run
+- **WHEN** a timer is running and a Live Activity renders
+- **THEN** it shows the app-published running content and system-ticked elapsed time without reading the timer draft itself
 

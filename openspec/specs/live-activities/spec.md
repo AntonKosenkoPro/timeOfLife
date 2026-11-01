@@ -5,7 +5,7 @@
 A Live Activity mirrors the running timer outside the app — in the Dynamic Island, on the Lock Screen, and (via the system) on the user's Mac — with Stop and return-to-Track actions, so a run stays glanceable and stoppable without opening the app.
 ## Requirements
 ### Requirement: Live Activity follows the running timer
-The system SHALL start a Live Activity when a timer starts and end it when the timer stops. The activity SHALL be requested only while the app is in the foreground and only when Live Activities are enabled; at most one activity SHALL exist at a time (the `timer_state` singleton). Starting SHALL NOT create an entry and stopping via the activity SHALL save the entry exactly as an in-app Stop (same `source='manual'` path, same outbox row). The activity content SHALL refresh the visible category chips when the running draft is retagged mid-run (same text keeps the singleton; chips update in place); the live icon SHALL follow the draft's first ordered category (timer fallback when the draft has no categories) without restart or time reset. The activity content SHALL re-anchor the system timer when the running draft's start time is edited mid-run (same singleton; `ContentState.startedAt` updates to the draft's new start, chips and icon unchanged); the elapsed readout SHALL tick from the new anchor on all faces with no restart and no Saved card.
+The system SHALL start a Live Activity when a timer starts and end it when the timer stops. The activity SHALL be requested only while the app is in the foreground and only when Live Activities are enabled; at most one activity SHALL exist at a time (the `timer_state` singleton). Starting SHALL NOT create an entry and stopping via the activity SHALL open the app and save through the same in-app Stop path (entry state and outbox row in the same transaction), without producer provenance or an independent extension writer. The activity content SHALL refresh the visible category chips when the running draft is retagged mid-run (same text keeps the singleton; chips update in place); the live icon SHALL follow the draft's first ordered category (timer fallback when the draft has no categories) without restart or time reset. The activity content SHALL re-anchor the system timer when the running draft's start time is edited mid-run (same singleton; the content's start anchor updates to the draft's new start, chips and icon unchanged); the elapsed readout SHALL tick from the new anchor on all faces with no restart and no Saved card.
 
 #### Scenario: Start shows the activity
 - **WHEN** the user starts a timer in the app while Live Activities are enabled
@@ -40,11 +40,11 @@ The system SHALL start a Live Activity when a timer starts and end it when the t
 - **THEN** the live icon falls back to `timer` with `startedAt` unchanged (no restart, no elapsed reset)
 
 #### Scenario: Mid-run start change re-anchors elapsed without restart
-- **WHEN** the user confirms a new running start time while the timer runs
+- **WHEN** the user confirms a new start time while the timer runs
 - **THEN** the Live Activity keeps its singleton identity and its system timer re-anchors to the new start (elapsed jumps on all faces, chips and icon unchanged, no Saved card, no duplicate activity)
 
 ### Requirement: Island and banner presentations
-The activity SHALL provide compact (icon + elapsed), minimal (icon only), expanded (big borderless elapsed top-left + Stop top-right + full-width name with category chips along the bottom), and Lock Screen banner (icon + exact name + elapsed + Stop as transparent content over the system card) presentations. Elapsed time SHALL tick via the system timer view (no per-second updates). The expanded face SHALL show the exact entry text verbatim (`Gym` ≠ `GYM`, one line) and the draft's ordered categories as icon chips (validated SF Symbol + name, cap 2 chips + `+n` overflow, never a half-clipped third chip); the expanded timer readout SHALL NOT truncate at width phase crossings (`9:59`→`10:00`, `59:59`→`1:00:00`). The Lock Screen banner SHALL render no custom container — on iOS 26+ the system Liquid Glass card (via a clear background tint), on older systems the default solid card. The Lock Screen banner content row SHALL be inset 12pt from the leading system-card edge (icon side) and 8pt from the trailing edge and vertically. Faces SHALL show only the exact entry text, the first-position category icon, chips, and the elapsed readout — never provenance labels, notes, or started-at lines. All faces SHALL expose localized accessibility labels naming the text and running state.
+The activity SHALL provide compact (icon + elapsed), minimal (icon only), expanded (big borderless elapsed top-left + Stop top-right + full-width name with category chips along the bottom), and Lock Screen banner (icon + exact name + elapsed + Stop as transparent content over the system card) presentations. Elapsed time SHALL tick via the system timer view (no per-second updates). The expanded face SHALL show the exact entry text verbatim (`Gym` ≠ `GYM`, one line) and the draft's ordered categories as icon chips (validated SF Symbol + name, cap 2 chips + `+n` overflow, never a half-clipped third chip); the expanded timer readout SHALL NOT truncate at width phase crossings (`9:59`→`10:00`, `59:59`→`1:00:00`). The Lock Screen banner SHALL render no custom container — on iOS 26+ the system Liquid Glass card (via a clear background tint), on older systems the default solid card. The Lock Screen banner content row SHALL be inset 12pt from the leading system-card edge (icon side) and 8pt from the trailing edge and vertically. Faces SHALL show only the exact entry text, the first-position category icon, chips, and the elapsed readout — never notes or started-at lines. All faces SHALL expose localized accessibility labels naming the text and running state.
 
 #### Scenario: Single activity owns the pill
 - **WHEN** this is the only active activity
@@ -75,7 +75,7 @@ The activity SHALL provide compact (icon + elapsed), minimal (icon only), expand
 - **THEN** the expanded face shows them as icon chips in draft order; drafts with no categories show no chip row
 
 ### Requirement: Stop and return actions
-Tapping any face SHALL deep-link to Track (`lifio://track`). The expanded Island face SHALL offer Stop as a `Link` to the stop URL (`lifio://track?stop=1`): tapping it opens the app, which stops and saves the entry through the exact in-app path (`LocalStore`, `source='manual'`, outbox row in the same transaction) and ends the activity with the Saved card — including when the app process was dead (cold open performs reload-then-stop; no draft → graceful no-op). The banner SHALL offer Stop as a `Link` to the same stop URL with identical open-and-stop semantics — the intent button remains only as the nil-URL fail-safe and the AoD-dimmed/inert rule is unchanged. Compact and minimal faces SHALL offer no buttons (tap navigates only).
+Tapping any face outside Stop SHALL deep-link to Track (`lifio://track`). The expanded Island and banner SHALL each offer Stop as a link to `lifio://track?stop=1`: tapping opens the app, which reloads its bound account's draft, stops and saves through the ordinary in-app path, and ends the activity with the Saved card. This SHALL work on the first tap after a terminated-app cold open; no draft means a graceful no-op. The normal Stop URL SHALL be available for shipped controls; there SHALL be no nil-URL intent fallback, independent extension entry writer, or external-stop signal needed to complete Stop. Compact and minimal faces SHALL offer no buttons (tap navigates only). Existing dimmed/inert rendering is unchanged.
 
 #### Scenario: Tap returns to Track
 - **WHEN** the user taps the compact, minimal, expanded, or banner surface (outside Stop)
@@ -87,7 +87,7 @@ Tapping any face SHALL deep-link to Track (`lifio://track`). The expanded Island
 
 #### Scenario: Stop from the expanded Island with a terminated app opens and stops
 - **WHEN** the user activates Stop in the expanded Island while the app process is dead (swiped away or jetsammed) and a run is active
-- **THEN** the entry is saved exactly as an in-app Stop AND the app opens, where the cold-open reload-then-stop ends the activity with the `✓ Saved <duration>` card and the tuned dismissal — no ticking orphan survives first contact, and no second tap is needed
+- **THEN** the app opens and reloads before stopping, saves one entry through the normal path, and shows `✓ Saved <duration>` with the tuned dismissal — no ticking orphan survives first contact and no second tap is needed
 
 #### Scenario: Island Stop with nothing running is a no-op
 - **WHEN** the stop link opens the app with no active run (double tap, stale face)
@@ -95,11 +95,11 @@ Tapping any face SHALL deep-link to Track (`lifio://track`). The expanded Island
 
 #### Scenario: Banner Stop with a terminated app opens and stops
 - **WHEN** the user activates Stop in the banner while the app process is dead and a run is active
-- **THEN** the entry is saved exactly as an in-app Stop AND the app opens, where the cold-open reload-then-stop ends the activity — no ticking orphan survives first contact, and no second tap is needed
+- **THEN** the app opens, reloads, and saves through the same in-app path — no ticking orphan survives first contact and no second tap is needed
 
 #### Scenario: Stop fails gracefully
 - **WHEN** Stop is activated with no active account file or an inaccessible database (e.g. cold boot before first unlock)
-- **THEN** nothing is written, no anonymous file is created, and the activity keeps its current face
+- **THEN** nothing is written, no anonymous file is created, and the failed stop does not fabricate a Saved card; the ordinary auth/account lifecycle remains authoritative
 
 #### Scenario: Dimmed rendering hides the Stop control
 - **WHEN** the activity renders outside full color (Always-on dim, StandBy accent modes)
@@ -109,11 +109,15 @@ Tapping any face SHALL deep-link to Track (`lifio://track`). The expanded Island
 - **WHEN** the banner renders outside full color
 - **THEN** the elapsed readout keeps ticking via the system timer view, which the dimmed renderer sustains itself (no coarse static masking)
 
+#### Scenario: Stop is link-only
+- **WHEN** either shipped Stop control is activated
+- **THEN** it follows the valid stop deep link; no fallback intent executes or writes an entry outside the app
+
 ### Requirement: Saved card then dismissal
-Ending the activity SHALL show a final `✓ Saved <duration>` banner and then remove it via a timed dismissal (`.after`, seconds tuned during testing) whenever the true duration is known; the Island SHALL collapse at once. The system default linger (hours) SHALL NOT be used. A terminated-app Island Stop SHALL reach the same Saved card by opening the app into the in-app stop path. Silent immediate dismissal is reserved for reaps with no known save.
+Ending the activity SHALL show a final `✓ Saved <duration>` banner and then remove it via a timed dismissal (`.after`, seconds tuned during testing) whenever the true duration is known; the Island SHALL collapse at once. The system default linger (hours) SHALL NOT be used. A terminated-app Stop SHALL reach the same Saved card by opening the app into the in-app stop path. Silent immediate dismissal is reserved for reaps with no known save. Recovery from a crash between save and activity end SHALL remain available without depending on the retired extension signal.
 
 #### Scenario: Stop shows Saved then removes
-- **WHEN** the timer stops from any surface while the app is live (in-app Stop, or Island Stop reaped with the signaled duration)
+- **WHEN** the timer stops from the app or from a Live Activity Stop link that opens the app
 - **THEN** the banner shows the Saved card with the final duration and is removed after the tuned delay
 
 #### Scenario: Terminated-app Island Stop shows Saved after opening
@@ -125,7 +129,7 @@ Ending the activity SHALL show a final `✓ Saved <duration>` banner and then re
 - **THEN** the activity ends through the normal end path — no lingering running face
 
 #### Scenario: Stop with a terminated app dismisses silently
-- **WHEN** an orphaned Island is reaped without a known duration (terminated app, missed signal)
+- **WHEN** an orphaned activity is reaped without a known saved duration after app interruption
 - **THEN** it is dismissed immediately with its last content and no card — no duration is ever invented
 
 #### Scenario: No hour-long linger
@@ -133,11 +137,11 @@ Ending the activity SHALL show a final `✓ Saved <duration>` banner and then re
 - **THEN** it is gone within seconds, never lingering for hours
 
 ### Requirement: Active-account only, no extension auth or sync
-The activity and its Stop intent SHALL operate only on the active account's file in the App Group, SHALL perform no authentication of their own (device unlock is the authorization), SHALL NOT create anonymous files, and SHALL NOT attempt sync (the app's `SyncController` drains the outbox on next foreground).
+The Live Activity extension SHALL only render app-published content and open the supported links; it SHALL NOT open/write tracker databases, authenticate a user, refresh credentials, or run sync. A Stop link SHALL be handled through the main app's existing auth/account gate and bound-store mutation path, never by an extension writer or by opening a dormant account file. Signed-out or unavailable-account handling SHALL NOT create anonymous data. Normal foreground sync remains app-owned and unchanged.
 
 #### Scenario: Dormant account never surfaces
 - **WHEN** another account's file is dormant and this account's file is active
-- **THEN** every face and every Stop reads and writes only the active file
+- **THEN** the app publishes only the active account's timer and Stop operates only through its bound store; the extension never opens either database
 
 #### Scenario: Signed out shows nothing
 - **WHEN** no active account file exists

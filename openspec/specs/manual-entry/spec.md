@@ -3,10 +3,7 @@
 ## Purpose
 
 Lets users log past time without the live timer: pick an activity, set a start and end, and save a committed manual entry — the recovery path for forgotten sessions.
-
 ## Requirements
-
-
 ### Requirement: Starts and Ends use inline expanding pickers
 
 Tapping a date pill SHALL expand an inline graphical month picker below the pills; tapping a time pill SHALL expand an inline hour/minute/period wheel picker below the pills. Only one picker SHALL be open at a time — opening one collapses the other. The active pill SHALL show a selected tint. Pickers SHALL use the device locale and calendar. Tapping a visible day in the expanded month picker SHALL update the draft date for that Start/End. Month steppers and swipe paging SHALL change the visible month and the browsed month SHALL persist (no snap-back to the selection month) until the user picks a day or collapses the picker. Expanding a picker SHALL NOT flash an empty card: the month grid SHALL appear together with the expansion. The Start pickers SHALL be unbounded. The End date picker SHALL NOT offer any day before the Start's calendar day. The End time picker SHALL NOT offer times before Start plus one minute when the End day equals the Start day (Start 1:00 PM → earliest End 1:01 PM); on later End days the time wheel SHALL be unbounded.
@@ -64,6 +61,7 @@ The Add action SHALL be enabled only when the trimmed name is non-empty AND the 
 #### Scenario: Valid form
 - **WHEN** a non-empty name is entered and the end is at least one minute after the start
 - **THEN** Add is enabled
+
 ### Requirement: Sheet opens with sensible defaults
 The sheet SHALL open with Name empty (or the exact recent's text when opened with a text context), Categories empty (or that text's inherited ordered set when a text context is supplied), Notes empty, Start set to the current time floored to 5 minutes and End set to Start plus one hour.
 
@@ -74,6 +72,7 @@ The sheet SHALL open with Name empty (or the exact recent's text when opened wit
 #### Scenario: Pre-filled activity
 - **WHEN** the sheet opens from any entry point (History or otherwise)
 - **THEN** no activity is pre-filled: the Name row is empty and categories and notes start empty, with only the time defaults applied
+
 ### Requirement: Moving Start preserves duration Calendar-style
 
 When the user moves Start, the End SHALL shift by the same delta (`end += newStart − oldStart`) so the duration stays constant — whether Start moves earlier or later, and whether the move comes from the date or the time picker. Moving End SHALL never move Start.
@@ -89,17 +88,18 @@ When the user moves Start, the End SHALL shift by the same delta (`end += newSta
 - **THEN** End shifts by the same delta to 2:00 PM (duration stays 1h)
 
 ### Requirement: Saving creates a committed manual entry
-Activating Add SHALL persist a committed entry via `LocalStore.createEntry` with `source:"manual"` and null `source_ref` (client-generated UUID v7 id, trimmed `activity_text`, ordered `category_ids`, `notes`, `duration_seconds` derived from end minus start), enqueueing the sync outbox row in the same transaction. The sheet SHALL dismiss and the underlying list SHALL refresh to include the entry in its day group. Overlapping entries and future end-times SHALL be allowed.
+Activating Add SHALL persist a committed entry via the local mutation chokepoint with a client-generated UUID v7 id, trimmed `activity_text`, ordered `category_ids`, `notes`, and `duration_seconds` derived from end minus start, enqueueing the sync outbox row in the same transaction. It SHALL NOT assign producer provenance or an external import reference. The sheet SHALL dismiss and the underlying list SHALL refresh to include the entry in its day group. Overlapping entries and future end-times SHALL be allowed. “Manual entry” names the Log Time interaction, not a distinct stored entry kind.
 
 #### Scenario: Successful save
 - **WHEN** the user activates Add on a valid form
-- **THEN** a committed manual entry exists with the entered text, categories, notes, start, end, and derived duration, and the sheet dismisses
+- **THEN** a committed entry exists with the entered text, categories, notes, start, end, and derived duration, without provenance fields, and the sheet dismisses
 
 #### Scenario: Overlap is allowed
 - **WHEN** the chosen interval overlaps an existing entry or a running timer session
 - **THEN** Add stays enabled and saving succeeds
+
 ### Requirement: Log Time sheet captures name, start, end, categories, and notes
-The app SHALL provide the Log Time sheet as the CREATE mode of the unified entry form (see entry-editor capability): cards in exactly this order — Name (plain-text entry-text field, never an activity picker), Start (date pill + time pill with inline single-open picker), End (date pill + time pill with inline single-open picker), Categories (ordered TagSelector), Notes (plain-text field, empty by default). An empty name SHALL mean no text is chosen and no entry text is pre-filled. CREATE mode SHALL keep the "Log time" title (localized) with an X dismiss action (`LogTimeDismissButton`) and a ✓ confirm action (`LogTimeAddButton`, localized VoiceOver labels, system-default toolbar tint) in the navigation bar, presented as a sheet from the existing entry points with unchanged defaults, gates, pickers, and save behavior. EDIT and LOCKED modes are defined by the entry-editor capability; no title, location, all-day, repeat, or alert fields SHALL be present in any mode. The all-native-gestures-must-work rule (entry-editor capability) SHALL apply to CREATE mode as well as EDIT/LOCKED.
+The app SHALL provide the Log Time sheet as the CREATE mode of the unified entry form (see entry-editor capability): cards in exactly this order — Name (plain-text entry-text field, never an activity picker), Start (date pill + time pill with inline single-open picker), End (date pill + time pill with inline single-open picker), Categories (ordered TagSelector), Notes (plain-text field, empty by default). An empty name SHALL mean no text is chosen and no entry text is pre-filled. CREATE mode SHALL keep the "Log time" title (localized) with an X dismiss action (`LogTimeDismissButton`) and a ✓ confirm action (`LogTimeAddButton`, localized VoiceOver labels, system-default toolbar tint) in the navigation bar, presented as a sheet from the existing entry points with unchanged defaults, gates, pickers, and save behavior. EDIT mode is defined by the entry-editor capability; no LOCKED mode SHALL exist, and no extra title, location, all-day, repeat, or alert input fields SHALL be present. The all-native-gestures-must-work rule (entry-editor capability) SHALL apply to CREATE and EDIT.
 
 #### Scenario: Sheet contents
 - **WHEN** the Log Time sheet is open
@@ -111,4 +111,5 @@ The app SHALL provide the Log Time sheet as the CREATE mode of the unified entry
 
 #### Scenario: Create mode keeps its presentation
 - **WHEN** the sheet opens from History for logging new time
-- **THEN** it presents as a sheet (not a full-screen cover) with the "Log time" title and Cancel/Add actions
+- **THEN** it presents as a sheet (not a full-screen cover) with the localized Log time title and X/✓ actions
+
