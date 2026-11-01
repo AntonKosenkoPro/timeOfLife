@@ -185,7 +185,6 @@ enum LocalizationSnapshot {
         "tab.insights",
         "tab.track",
         "timer.chooserRecent",
-        "timer.compactReturnHint",
         "timer.compactRunning",
         "timer.compactStop",
         "timer.idlePrompt",

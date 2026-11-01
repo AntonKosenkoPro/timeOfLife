@@ -103,7 +103,7 @@ final class AppContainer: ObservableObject {
 
     /// Handles an Island Stop: reaps activities orphaned by the intent and
     /// tells tracker surfaces to reload (the intent already saved the entry
-    /// and cleared the draft — Track/compact would otherwise keep ticking
+    /// and cleared the draft — Track would otherwise keep ticking
     /// stale in-memory state). The run is definitively over, so the
     /// background reap chain is cancelled — unless a new run started in
     /// the meantime (its Start re-armed the chain; cancelling here would

@@ -114,7 +114,7 @@ struct RootView: View {
         case .signedIn(let current):
             if boundUserID == current.id {
                 AppShellView(
-                    vm: AppShellViewModel(service: container.timerService),
+                    vm: AppShellViewModel(),
                     container: container,
                     trackSnapshot: launchSnapshot
                 )

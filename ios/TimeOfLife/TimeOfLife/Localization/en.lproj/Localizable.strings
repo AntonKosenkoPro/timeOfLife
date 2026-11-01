@@ -100,7 +100,6 @@
 "timer.recentsEmptyHint" = "Activities you track will appear here.";
 "timer.selectActivity" = "Select %@";
 "timer.compactStop" = "Stop and save timer";
-"timer.compactReturnHint" = "Returns to Track";
 "timer.compactRunning" = "%@, timer running";
 "timer.startedAt" = "Started %@";
 "timer.startedYesterday" = "Started yesterday %@";

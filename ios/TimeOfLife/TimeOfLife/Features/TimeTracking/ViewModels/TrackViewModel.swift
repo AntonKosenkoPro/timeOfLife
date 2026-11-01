@@ -78,9 +78,9 @@ final class TrackViewModel: ObservableObject {
     /// Loads the recents and categories and restores a persisted running
     /// draft (R2: the running draft survives app crashes). Reconciles an
     /// externally stopped timer: a `.running` state with no persisted draft
-    /// (stopped from the compact timer on another destination) returns to
-    /// `.ready`/`.idle` instead of counting elapsed time forever. Call on
-    /// appear.
+    /// (stopped through another existing path, e.g. an Island Stop while
+    /// Track was suspended) returns to `.ready`/`.idle` instead of counting
+    /// elapsed time forever. Call on appear.
     ///
     /// A failed load keeps the last good snapshot (mirror-only convergence):
     /// only the recoverable error surfaces, never blanked recents.
@@ -231,9 +231,9 @@ final class TrackViewModel: ObservableObject {
         try await service.store.allActivityNames().map(ExactName.init(storeRecent:))
     }
 
-    /// Leaves a `.running` state whose persisted draft is gone (stopped from
-    /// the compact timer): stops the elapsed ticker, re-enables the idle
-    /// timer, resets elapsed to zero, and returns to `.ready` for the same
+    /// Leaves a `.running` state whose persisted draft is gone (stopped
+    /// through another existing path, e.g. an Island Stop): stops the
+    /// elapsed ticker, re-enables the idle timer, resets elapsed to zero, and returns to `.ready` for the same
     /// text — or `.idle` when nothing was entered.
     /// `.saving`/`.error` are deliberately untouched: mid-flight own-stop
     /// states that self-resolve through their async paths.
@@ -423,7 +423,7 @@ final class TrackViewModel: ObservableObject {
     /// both recording states (running + error), preserving whichever holds.
     /// A persistence failure surfaces the recoverable error (the
     /// beginRunning grammar) with the in-memory notes intact — never a
-    /// silent success, or a kill/compact-stop could lose the edit.
+    /// silent success, or a kill/external stop could lose the edit.
     func updateDraftNotes(_ notes: String) async {
         switch state {
         case let .running(draft, startedAt):

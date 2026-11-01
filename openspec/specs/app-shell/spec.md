@@ -100,38 +100,39 @@ The profile destination SHALL open as a pushed page on the current tab's navigat
 - **WHEN** the user opens Manage Categories from Profile
 - **THEN** it pushes as before, and the category editor still opens as a sheet
 
-### Requirement: Running timer remains globally accessible
-The app SHALL keep an active timer visible and directly stoppable while History or Insights is selected. The compact timer SHALL float above the tab bar with a visible gap — never overlapping or touching it.
+### Requirement: History and Insights have no in-app running-timer surface
+While History or Insights is selected, the app SHALL NOT render an in-app compact timer, replacement timer strip, running badge or indicator, toolbar timer, or off-Track Stop action. It SHALL NOT reserve space for the removed timer or offer a preference to restore it. Selecting Track SHALL present the current persisted run through the existing Track experience. Tab navigation SHALL NOT stop, restart, or alter the running timer.
 
-#### Scenario: Browse while timing
-- **WHEN** a timer is running and the user switches from Track to History or Insights
-- **THEN** a compact timer displays the entry text and live elapsed duration without obscuring primary navigation
+#### Scenario: Browse while timing without extra chrome
+- **WHEN** a timer is running and the user selects History or Insights
+- **THEN** that destination has no in-app running-timer surface or timer-only reserved space, while its ordinary content and navigation remain available
 
-#### Scenario: Stop outside Track
-- **WHEN** the user activates Stop on the compact timer
-- **THEN** the app saves the entry with the draft's final categories, removes the compact timer, and keeps the current destination selected
+#### Scenario: Return to Track to stop
+- **WHEN** the user selects Track after browsing History or Insights during a run
+- **THEN** Track shows the same running timer with its original start anchor and current draft values, and its existing Stop action remains available
 
-#### Scenario: Return to full timer
-- **WHEN** the user activates the non-destructive area of the compact timer
-- **THEN** the app selects Track and presents the running numeric timer
+#### Scenario: No dependence on system timer visibility
+- **WHEN** Live Activities are disabled or the device has no Dynamic Island and the user browses History or Insights during a run
+- **THEN** the same timer-free in-app layout is used and selecting Track still provides the running timer and Stop action
 
-#### Scenario: Compact timer clears the tab bar
-- **WHEN** a timer is running and the user views History or Insights
-- **THEN** the compact timer renders fully above the tab bar with daylight between them on every supported screen size
+#### Scenario: No restoration setting
+- **WHEN** the user opens Profile or its settings destinations
+- **THEN** no preference to restore the removed compact timer or enable a replacement running indicator is offered
 
-#### Scenario: Track settles after an external stop
-- **WHEN** the user returns to Track after stopping the timer from the compact timer
-- **THEN** Track shows the settled post-stop state for the same text — never a running timer counting from the stopped start time
 ### Requirement: Navigation is accessible and stateful
-Primary navigation and the compact timer SHALL expose stable accessibility labels, values, hints, and identifiers, and SHALL remain operable with VoiceOver and Dynamic Type.
+Primary navigation SHALL expose stable accessibility labels, values, hints, and identifiers, and SHALL remain operable with VoiceOver and Dynamic Type. Removing the compact timer SHALL NOT remove accessibility support for Track's timer or the existing Live Activity surfaces.
+
+#### Scenario: VoiceOver navigates to Track
+- **WHEN** VoiceOver focuses the Track tab from History or Insights
+- **THEN** it announces the localized tab label and selection state, and activating the tab opens Track with its existing accessible timer controls
 
 #### Scenario: VoiceOver reads active timer
-- **WHEN** VoiceOver focuses the compact timer
-- **THEN** it announces the activity name, elapsed duration, running state, and available actions
+- **WHEN** the user returns to Track from History or Insights and VoiceOver focuses the active timer
+- **THEN** Track's existing accessible timer exposes its name, elapsed duration, running state, and available controls without requiring a compact timer on the previous destination
 
 #### Scenario: Large text
 - **WHEN** the user selects an accessibility Dynamic Type size
-- **THEN** navigation labels and compact timer content remain readable without hiding Start or Stop actions
+- **THEN** primary navigation remains readable and operable, and Track's existing Start and Stop actions remain accessible
 
 ### Requirement: Product hierarchy transfers to macOS
 The product SHALL preserve Track, History, Insights, and profile-owned secondary destinations when represented in a macOS navigation container.

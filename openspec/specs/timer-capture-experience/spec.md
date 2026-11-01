@@ -210,7 +210,7 @@ When no committed entries exist, Recents SHALL present dedicated localized copy 
 - **THEN** the empty hint is replaced by Recents chips containing that exact text
 
 ### Requirement: Stop saves with stable feedback
-Stopping a running timer SHALL save the completed entry locally, communicate success without a blocking loader, and retain the entered text in the ready state for an optional later restart. While the saved confirmation is showing, the Start button SHALL render disabled (dimmed, non-interactive) since starting is not possible until the state settles back to ready; it SHALL re-enable with the return to ready. Editing the name while the saved confirmation is showing SHALL return to ready for the new text at once, ending the confirmation early. When the persisted running draft is gone but Track still holds a `.running` state (the timer was stopped from the compact timer on another destination), Track SHALL reconcile on next load: stop the elapsed ticker, re-enable the idle timer, reset elapsed to zero, and return to `.ready` for the same text — or `.idle` when nothing was entered — instead of counting elapsed time forever.
+Stopping a running timer SHALL save the completed entry locally, communicate success without a blocking loader, and retain the entered text in the ready state for an optional later restart. While the saved confirmation is showing, the Start button SHALL render disabled (dimmed, non-interactive) since starting is not possible until the state settles back to ready; it SHALL re-enable with the return to ready. Editing the name while the saved confirmation is showing SHALL return to ready for the new text at once, ending the confirmation early. When the persisted running draft is gone but Track still holds a `.running` state (the timer ended through another existing path, including an external stop), Track SHALL reconcile on next load: stop the elapsed ticker, re-enable the idle timer, reset elapsed to zero, and return to `.ready` for the same text — or `.idle` when nothing was entered — instead of counting elapsed time forever.
 
 #### Scenario: Successful stop
 - **WHEN** the user activates Stop on a running timer
@@ -221,7 +221,7 @@ Stopping a running timer SHALL save the completed entry locally, communicate suc
 - **THEN** the app preserves recoverable running state and presents a localized non-field error without silently losing elapsed time
 
 #### Scenario: External stop reconciles Track
-- **WHEN** Track holds a running state whose persisted draft no longer exists (stopped from the compact timer elsewhere)
+- **WHEN** Track holds a running state whose persisted draft no longer exists because the timer ended through another existing path
 - **THEN** Track leaves the running state on next load: the ticker stops, elapsed resets to zero, and the screen shows the ready timer for the same text (or idle when empty)
 
 #### Scenario: Stop after the activity was deleted elsewhere

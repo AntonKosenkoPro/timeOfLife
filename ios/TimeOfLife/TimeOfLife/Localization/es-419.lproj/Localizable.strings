@@ -100,7 +100,6 @@
 "timer.recentsEmptyHint" = "Las actividades registradas aparecerán aquí.";
 "timer.selectActivity" = "Seleccionar %@";
 "timer.compactStop" = "Detener temporizador y guardar";
-"timer.compactReturnHint" = "Volver a Registrar";
 "timer.compactRunning" = "%@, temporizador en curso";
 "timer.startedAt" = "Inicio %@";
 "timer.startedYesterday" = "Inicio ayer %@";

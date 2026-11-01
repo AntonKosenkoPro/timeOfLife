@@ -58,10 +58,9 @@ final class TimerService: ObservableObject {
     /// succeeds, so the Island matches the in-memory elapsed the Track
     /// screen shows (Track's own Stop derives from that same in-memory
     /// start). Two caveats, both confined to the failed-write path: the
-    /// compact timer on other tabs and the Island Stop intent derive their
-    /// entry from the persisted draft, so after a failed write they keep
-    /// ticking from — and would save — the stale anchor until the next
-    /// successful persist converges everything. No outbox row is written
+    /// Island Stop intent derives its entry from the persisted draft, so
+    /// after a failed write it keeps ticking from — and would save — the
+    /// stale anchor until the next successful persist converges everything. No outbox row is written
     /// (Stop enqueues the single entry create).
     func updateTimerDraftStartedAt(_ startedAt: Date) async throws {
         do {
@@ -107,8 +106,8 @@ final class TimerService: ObservableObject {
     /// are pruned with the remainder kept — a stop never fails on a dead tag.
     ///
     /// Also ends the Live Activity with the Saved card (live-activities
-    /// spec) — every Stop path (Track, compact timer, retry, Island intent)
-    /// flows through here, so this is the single end call site.
+    /// spec) — every Stop path (Track, retry, Island intent) flows through
+    /// here, so this is the single end call site.
     func stopTimerDraft(text: String, categoryIDs: [String], startedAt: Date, endedAt: Date = Date(), notes: String = "") async throws {
         let existing = Set(try await store.categories().map(\.id))
         let pruned = categoryIDs.filter { existing.contains($0) }

@@ -172,8 +172,8 @@ final class LiveActivityService: LiveActivityControlling {
     ///   the last content — no invented duration on the card.
     func endOrphanedActivities(knownDurationSeconds: Int?) async {
         // Only `.active` ones: an `.ended` activity showing its Saved card
-        // keeps its own dismissal (e.g. compact-stop card cut short by a
-        // Track return would otherwise vanish early).
+        // keeps its own dismissal (e.g. an orphaned Saved card cut short
+        // by a Track return would otherwise vanish early).
         for activity in Activity<TimerActivityAttributes>.activities where activity.activityState == .active {
             if let duration = knownDurationSeconds {
                 let start = Date().addingTimeInterval(-Double(max(0, duration)))

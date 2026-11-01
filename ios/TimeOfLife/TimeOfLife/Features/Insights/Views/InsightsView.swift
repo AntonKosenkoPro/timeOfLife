@@ -6,8 +6,8 @@ import SwiftUI
 /// the screen never judges (no percentages, targets, or comparisons).
 ///
 /// Lifecycle mirrors `HistoryView`: guarded reload on appear, stale on leave,
-/// and a refresh-signal reload so entries saved from the compact timer appear
-/// without leaving the tab.
+/// event-driven reload on external stop and foreground return so committed
+/// saves appear without leaving the tab; reload on sync-cycle exit.
 struct InsightsView: View {
     /// Observed directly (not via `container`): `AppContainer` publishes
     /// nothing, so nested reads like `container.syncController.status` never
@@ -17,14 +17,9 @@ struct InsightsView: View {
     @StateObject private var vm: InsightsViewModel
     @State private var period: InsightsPeriod = .week
     @State private var lens: InsightsLens = .category
-    /// Changes whenever the shell's running timer starts or stops (nil on
-    /// stop). Lets Insights reload an entry saved from the compact timer
-    /// without leaving the tab.
-    private let refreshSignal: String
 
-    init(store: LocalStore, refreshSignal: String = "") {
+    init(store: LocalStore) {
         _vm = StateObject(wrappedValue: InsightsViewModel(store: store))
-        self.refreshSignal = refreshSignal
     }
 
     var body: some View {
@@ -46,12 +41,20 @@ struct InsightsView: View {
         }
         .background(Theme.backgroundPrimary.ignoresSafeArea())
         .task { await vm.loadIfNeeded() }
-        .onAppear { Task { await vm.loadIfNeeded() } }
-        .onDisappear { vm.invalidate() }
-        .onChange(of: refreshSignal) {
-            vm.invalidate()
+        .onAppear {
+            vm.setVisible(true)
             Task { await vm.loadIfNeeded() }
         }
+        .onDisappear {
+            vm.setVisible(false)
+            vm.invalidate()
+        }
+        // A save that lands while Insights stays visible (external stop) or
+        // while suspended (foreground return) reloads inside the view model,
+        // which owns those two subscriptions so the real notification path
+        // is unit-testable (HistoryView mirror). Period/lens selection is
+        // view state and is untouched. Only the sync-cycle exit below still
+        // observes from the view (it reads the view-owned sync status).
         // Same staleness as HistoryView: a sync cycle merges relay state
         // behind this view while the Profile sheet covers it, so reload on
         // exit from `.syncing` (idle or error — a failed cycle may have
@@ -59,8 +62,7 @@ struct InsightsView: View {
         .onChange(of: sync.status) { _, status in
             switch status {
             case .idle, .error:
-                vm.invalidate()
-                Task { await vm.loadIfNeeded() }
+                Task { await vm.handleExternalReload() }
             case .inactive, .syncing:
                 break
             }

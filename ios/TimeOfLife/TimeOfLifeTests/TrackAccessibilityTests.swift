@@ -48,13 +48,6 @@ struct TrackAccessibilityTests {
         #expect(state.elapsed(at: startedAt.addingTimeInterval(60)) >= 60)
     }
 
-    @Test("compact label announces name and running state")
-    func compactLabel() {
-        let state = TrackState.running(draft, startedAt: Date())
-        #expect(state.compactAccessibilityLabel == String(format: L10n.timerCompactRunning.text, draft.text))
-        #expect(state.compactAccessibilityLabel.contains(draft.text))
-    }
-
     @Test("saving state is not running and reports saving")
     func savingState() {
         let state = TrackState.saving(draft, startedAt: Date())

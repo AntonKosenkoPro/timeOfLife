@@ -344,8 +344,8 @@ struct TrackViewModelTests {
 
     @Test("load with no persisted draft reconciles a running state back to ready")
     func loadReconcilesExternallyStoppedTimer() async {
-        // The external-stop path (compact-timer stop on another
-        // destination): a `.running` state with no persisted draft must
+        // The external-stop path (e.g. an Island Stop while Track was
+        // suspended): a `.running` state with no persisted draft must
         // leave running instead of counting forever — and must not carry
         // the previous run's notes into the next Start.
         let vm = makeViewModel()

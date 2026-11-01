@@ -99,10 +99,4 @@ extension TrackState {
             return "\(draft.text), \(L10n.timerSaved.text)"
         }
     }
-
-    /// VoiceOver label for the compact timer (app-shell spec).
-    var compactAccessibilityLabel: String {
-        guard let draft = draft else { return L10n.timerCompactStop.text }
-        return String(format: L10n.timerCompactRunning.text, draft.text)
-    }
 }

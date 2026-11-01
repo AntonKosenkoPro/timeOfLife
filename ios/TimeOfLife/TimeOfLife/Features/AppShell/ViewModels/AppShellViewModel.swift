@@ -36,8 +36,7 @@ enum ShellRoute: Hashable {
 }
 
 /// View model for the app shell (app-shell spec): owns the selected
-/// destination and observes the persisted running draft so History and
-/// Insights can show the compact timer.
+/// destination and one independent navigation path per tab.
 @MainActor
 final class AppShellViewModel: ObservableObject {
     enum Tab: Hashable {
@@ -47,20 +46,12 @@ final class AppShellViewModel: ObservableObject {
     }
 
     @Published var selectedTab: Tab = .track
-    @Published private(set) var runningTimer: RunningTimerDraft?
     /// One independent push state per tab (per-tab-navigation-paths): opening
     /// Profile (or a History entry) on one tab never pre-pushes it on the
     /// others. Each tab's `NavigationStack(path:)` binds to its own path.
     @Published var trackPath: [ShellRoute] = []
     @Published var historyPath: [ShellRoute] = []
     @Published var insightsPath: [ShellRoute] = []
-
-    let service: TimerService
-    private var ticker: AnyCancellable?
-
-    init(service: TimerService) {
-        self.service = service
-    }
 
     /// Pushes Profile onto the selected tab's own path. A no-op when Profile
     /// is already on that path (the toolbar button is unreachable while
@@ -93,58 +84,5 @@ final class AppShellViewModel: ObservableObject {
     /// unit-tested, no view state involved.
     static func isTabBarHidden(path: [ShellRoute]) -> Bool {
         !path.isEmpty
-    }
-
-    /// Loads the persisted running draft (R2) and starts a periodic refresh so
-    /// the compact timer stays live. Call on appear.
-    func load() async {
-        do {
-            runningTimer = try await service.runningTimerDraft()
-        } catch {
-            runningTimer = nil
-        }
-        startTicker()
-    }
-
-    /// Stops the running timer from the compact surface, saving the entry
-    /// with the draft's final categories and final notes in place
-    /// (app-shell spec: keeps the current destination selected).
-    func stopFromCompact() async {
-        guard let running = runningTimer,
-              !running.activityText.isEmpty,
-              let startedAt = running.startedAt else { return }
-        do {
-            try await service.stopTimerDraft(
-                text: running.activityText,
-                categoryIDs: running.categoryIDs,
-                startedAt: startedAt,
-                endedAt: Date(),
-                notes: running.notes
-            )
-            runningTimer = nil
-        } catch {
-            // Recoverable: keep the compact timer so the user can retry.
-        }
-    }
-
-    private func startTicker() {
-        ticker?.cancel()
-        ticker = Timer.publish(every: 1.0, on: .main, in: .common)
-            .autoconnect()
-            .sink { [weak self] _ in
-                Task { @MainActor in
-                    guard let self else { return }
-                    let draft = try? await self.service.runningTimerDraft()
-                    // Publish on real change only: @Published fires on every
-                    // set, and a 1 Hz whole-shell re-render resets the
-                    // entry-form calendar's browsed month back to the
-                    // selection (month steppers snap back within a second).
-                    // The compact timer ticks via its own TimelineView, so
-                    // it never depended on this republish.
-                    if draft != self.runningTimer {
-                        self.runningTimer = draft
-                    }
-                }
-            }
     }
 }

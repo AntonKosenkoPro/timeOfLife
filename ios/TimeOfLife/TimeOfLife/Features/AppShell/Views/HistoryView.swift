@@ -38,11 +38,10 @@ struct HistoryView: View {
     /// Presents the Log Time sheet (manual-entry spec). Owned by the shell
     /// so the [+] shares the nav-bar toolbar scope; the sheet and its
     /// refresh stay here.
+    /// Presents the Log Time sheet (manual-entry spec). Owned by the shell
+    /// so the [+] shares the nav-bar toolbar scope; the sheet and its
+    /// refresh stay here.
     @Binding var isLogTimeActive: Bool
-    /// Whether the compact timer is currently shown above this tab's
-    /// content. The no-results clear action reserves the same bottom
-    /// keyboard clearance only when the timer is absent.
-    private let showsCompactTimer: Bool
     /// Mirrors whether the current search query hides the bottom tab bar
     /// (history-search spec, design D4): non-blank text hides it, blank
     /// keeps it. Owned by the shell — the History stack's single
@@ -50,10 +49,6 @@ struct HistoryView: View {
     /// (fix-tab-bar-return-jump: a stack-level declaration wins over an
     /// inner one unconditionally, so this view must not declare its own).
     @Binding var searchHidesTabBar: Bool
-    /// Changes whenever the shell's running timer starts or stops (nil on
-    /// stop). Lets History reload an entry saved from the compact timer
-    /// without leaving the tab.
-    private let refreshSignal: String
 
     init(
         store: LocalStore,
@@ -61,9 +56,7 @@ struct HistoryView: View {
         sessionStore: SessionStore,
         sync: SyncController,
         connectivity: Connectivity,
-        refreshSignal: String = "",
         logTimeActive: Binding<Bool> = .constant(false),
-        showsCompactTimer: Bool = false,
         searchHidesTabBar: Binding<Bool> = .constant(false)
     ) {
         _vm = StateObject(wrappedValue: HistoryViewModel(store: store, undoBuffer: undoBuffer))
@@ -74,9 +67,7 @@ struct HistoryView: View {
             guard case let .signedIn(session) = sessionStore?.state else { return nil }
             return session.id
         })
-        self.refreshSignal = refreshSignal
         _isLogTimeActive = logTimeActive
-        self.showsCompactTimer = showsCompactTimer
         _searchHidesTabBar = searchHidesTabBar
     }
 
@@ -100,7 +91,9 @@ struct HistoryView: View {
                     ProgressView()
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else if vm.isSearchFiltering && vm.dayGroups.isEmpty {
-                    NoMatchingEntriesState(hasCompactTimer: showsCompactTimer) {
+                    // No compact timer exists (remove-compact-timer): the
+                    // reserved-slot clearance always applies.
+                    NoMatchingEntriesState {
                         vm.searchText = ""
                     }
                 } else if vm.dayGroups.isEmpty {
@@ -155,18 +148,25 @@ struct HistoryView: View {
         // plain `onAppear` reload would re-fire on every inner re-render.
         // The load is guarded by `needsReload` inside the VM.
         .task { await reloadAndRegister() }
-        .onAppear { Task { await reloadAndRegister() } }
-        // Entries can be saved on Track (or from the compact timer) while
-        // History is off-screen; mark stale on leave so the next appear
-        // reloads. Without this the `needsReload` guard serves the first
-        // snapshot forever. Leaving also clears the transient pull notice.
+        .onAppear {
+            vm.setVisible(true)
+            Task { await reloadAndRegister() }
+        }
+        // Entries can be saved on Track while History is off-screen; mark
+        // stale on leave so the next appear reloads. Without this the
+        // `needsReload` guard serves the first snapshot forever. Leaving
+        // also clears the transient pull notice.
         .onDisappear {
+            vm.setVisible(false)
             vm.invalidate()
             pull.cancelNotice()
         }
-        .onChange(of: refreshSignal) {
-            Task { await invalidateReloadAndRegister() }
-        }
+        // A save that lands while History stays visible (external stop) or
+        // while suspended (foreground return) reloads inside the view model,
+        // which owns those two subscriptions so the real notification path
+        // is unit-testable — never through a tab switch, and never through
+        // observers here. Only the sync-cycle exit below still observes from
+        // the view (it reads the view-owned sync status).
         // A sync cycle merges relay state into LocalStore behind this view:
         // the Profile sheet covers History without firing onDisappear, so the
         // guarded reload above never runs. Observe the cycle directly and
@@ -281,8 +281,8 @@ struct HistoryView: View {
     }
 
     private func invalidateReloadAndRegister() async {
-        vm.invalidate()
-        await reloadAndRegister()
+        await vm.handleExternalReload()
+        await vm.registerSystemUndo(with: undoManager)
     }
 
     /// Native day-grouped list (D8): bare two-line headers pin under the
@@ -375,7 +375,7 @@ struct HistoryView: View {
     }
     .environmentObject(container)
     .environmentObject(container.syncController)
-    .environmentObject(AppShellViewModel(service: container.timerService))
+    .environmentObject(AppShellViewModel())
 }
 
 #Preview("History empty") {
@@ -391,6 +391,6 @@ struct HistoryView: View {
     }
     .environmentObject(container)
     .environmentObject(container.syncController)
-    .environmentObject(AppShellViewModel(service: container.timerService))
+    .environmentObject(AppShellViewModel())
 }
 #endif

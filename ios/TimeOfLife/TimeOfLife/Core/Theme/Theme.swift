@@ -39,8 +39,6 @@ enum Theme {
     static let opacityDisabledFill: Double = 0.5
     /// Soft accent wash for active pills.
     static let opacityAccentSoft: Double = 0.15
-    /// Faint accent wash for the compact-timer icon disc.
-    static let opacityAccentFaint: Double = 0.13
     /// Dimmed trailing clear glyph.
     static let opacityClearGlyph: Double = 0.55
     /// Locked (read-only) form cards.

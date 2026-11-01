@@ -156,10 +156,11 @@ Resolved design precedents for Lifio. Add a new entry here when a visual or inte
 - Reason: explicit Start is predictable across recents, search, and creation; stable geometry supports muscle memory; retaining selection makes repeated sessions quick while still requiring explicit confirmation.
 - Note (`remove-activities-layer`): "Activity" now means the prepared exact text. After Stop the same text stays prepared; running locks the name while the shared tag selector stays live (select-only).
 
-## D29 — A compact timer is inset above non-Track tabs
+## D29 — ~~A compact timer is inset above non-Track tabs~~ SUPERSEDED by `remove-compact-timer`
 
-- While running, History and Insights show a compact timer immediately above the tab bar. Its main area returns to Track; a separate Stop button saves in place. Track does not duplicate it.
-- Reason: a running timer is global app state and must not disappear on navigation; a bottom safe-area inset stays close to primary navigation, avoids covering content, and creates a visual grammar reusable by widgets and Live Activities.
+- ~~While running, History and Insights show a compact timer immediately above the tab bar. Its main area returns to Track; a separate Stop button saves in place. Track does not duplicate it.~~
+- ~~Reason: a running timer is global app state and must not disappear on navigation; a bottom safe-area inset stays close to primary navigation, avoids covering content, and creates a visual grammar reusable by widgets and Live Activities.~~
+- Superseding rationale: focused browsing is prioritized over in-app off-Track glanceability — global state need not occupy every tab. History and Insights render no in-app running-timer surface and no replacement indicator; Track remains the dedicated in-app timer surface and Live Activities remain the optional system surfaces.
 
 ## D30 — Profile is signed-in-only
 

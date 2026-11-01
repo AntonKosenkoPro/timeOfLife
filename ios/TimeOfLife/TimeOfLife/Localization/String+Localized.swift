@@ -48,7 +48,6 @@ enum L10n: String, CaseIterable {
     case timerRecentsEmptyHint = "timer.recentsEmptyHint"
     case timerSelectActivity = "timer.selectActivity"
     case timerCompactStop = "timer.compactStop"
-    case timerCompactReturnHint = "timer.compactReturnHint"
     case timerCompactRunning = "timer.compactRunning"
     case timerStartedAt = "timer.startedAt"
     case timerStartedYesterday = "timer.startedYesterday"

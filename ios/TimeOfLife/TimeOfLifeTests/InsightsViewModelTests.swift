@@ -104,11 +104,14 @@ struct InsightsViewModelTests {
             id: "e1", startedAt: start,
             durationSeconds: 60, endedAt: start.addingTimeInterval(60)))
 
-        let vm = InsightsViewModel(store: store)
+        // Private center: a global post from a parallel suite's
+        // notification tests must not reload this VM between the store
+        // write below and the stale-snapshot assertion.
+        let vm = InsightsViewModel(store: store, notifications: NotificationCenter())
         await vm.loadIfNeeded()
         #expect(vm.breakdown(period: .all, lens: .activity).totalSeconds == 60)
 
-        // Entry saved elsewhere (Track tab, compact timer) while Insights is
+        // Entry saved elsewhere (Track tab or an external stop) while Insights is
         // off-screen must not leak into the cached snapshot…
         try await store.createEntry(entry(
             id: "e2", startedAt: Date(timeIntervalSinceNow: -600),
@@ -147,7 +150,10 @@ struct InsightsViewModelTests {
             id: "local", startedAt: start,
             durationSeconds: 60, endedAt: start.addingTimeInterval(60)))
 
-        let vm = InsightsViewModel(store: store)
+        // Private center, same rationale as `reloadAfterInvalidate` above:
+        // the stale-breakdown assertion between the merge and the reload is
+        // only hermetic when no global post can intervene.
+        let vm = InsightsViewModel(store: store, notifications: NotificationCenter())
         await vm.loadIfNeeded()
         #expect(vm.breakdown(period: .all, lens: .activity).totalSeconds == 60)
 
