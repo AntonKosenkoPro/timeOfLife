@@ -846,6 +846,98 @@ EntryRow(
 - `accessibilityIdentifier("EntryRow(\(entry.id))")`.
 - The whole row is a single element: category names, timeframe, and duration are `.accessibilityHidden(true)` and folded into the row label, so VoiceOver reads one line per entry. When `hasNotes` is true the label appends the localized `historyHasNotes` segment ("has notes").
 
+### Search presentation (history-search)
+
+- Optional immutable input `searchPresentation: HistorySearchRowPresentation?` (default `nil`). `nil` — or any query state that derives no highlights/excerpt — renders exactly the blank-query row above: no new strings, no layout shift.
+- When non-`nil`, the name line and the category/provenance caption render through `SearchHighlightedText` (below) with the presentation's original-string ranges; only in-scope positive text matches highlight, with the semantic accent wash plus bold emphasis. Provenance text never carries ranges.
+- When the presentation holds an excerpt, a localized `Notes:` caption line sits below the two normal lines: a `note.text` glyph + `Text(historySearchNotesLabel)` + the excerpt text (collapsed display whitespace, `…` only at omitted ends), `.lineLimit(2)` below `.xxLarge` and unlimited at `.xxLarge` and up (`.xxLarge`/`.xxxLarge` hold far fewer characters per line, so a 2-line cap could hide the focal match entirely). The excerpt treatment is deliberately distinct from the category caption at a glance: the glyph mirrors the notes-indicator vocabulary, the excerpt text is italic, and everything is `Theme`-only (glyph and label in `Theme.textSecondary`, excerpt in italic `Theme.textSecondary`) — a notes match never reads as a category match (non-italic, glyph-free, inline on line 2 with accent-wash + bold highlights only). No fixed row height, no shrink-to-fit. The existing line-2 notes icon stays; whole-row tap behavior is unchanged.
+- The single row label appends `Notes: <excerpt>` (the localized `historySearchNotesLabel` plus the displayed excerpt text, never the full hidden note) via `accessibilityLabel(…, excerptText:)`; highlight formatting adds no elements or spoken markers. A category-only match carries no notes label in its row label, so VoiceOver identifies excerpts as notes content.
+
+```swift
+EntryRow(
+    entry: entry,
+    icon: vm.icon(for: entry),
+    categoryNames: vm.categoryNames(for: entry),
+    timeframeText: vm.timeframeText(for: entry),
+    durationText: vm.durationText(for: entry),
+    isInProgress: vm.isInProgress(entry),
+    viaText: vm.viaText(for: entry),
+    hasNotes: vm.hasNotes(for: entry),
+    searchPresentation: vm.searchPresentation(for: entry)
+)
+```
+
+---
+
+## `SearchHighlightedText`
+
+Small reusable helper that renders plain text with emphasized match runs (history-search spec, design D5). Used by `EntryRow` for name/caption highlights and notes excerpts; derivation (`HistorySearchEvaluator`) runs once per query/snapshot, never in row bodies.
+
+### Signature
+
+```swift
+struct SearchHighlightedText: View {
+    let text: String
+    let highlights: [Range<Int>] // Character offsets in `text`
+}
+```
+
+### Visual
+
+- Matched runs: bold plus `Theme.accentPrimary` at `Theme.opacityAccentSoft` wash, painted by `SearchMatchRenderer` (a `TextRenderer` reading a custom `SearchMatchAttribute` off the matched `Text` runs). No new color token: the existing semantic accent wash plus emphasis must stay legible in light/dark and Increased Contrast — it is drawn explicitly, not a material, so Reduce Transparency changes nothing.
+- Unmatched text renders as plain `Text`; with no effective highlights the view is plain `Text`. Caller-supplied `.font`/`.foregroundStyle` apply to the whole.
+- Out-of-range offsets are clamped, empty ranges dropped, overlapping ranges merged. Offsets count Characters (graphemes), so CJK/emoji/composed text never splits.
+
+### Requirements
+
+- `Theme` colors only; styling resolves at render time (no reparse on appearance change).
+- Adds no accessibility element: rows keep one label via `children: .ignore`.
+- Native `Text` layout/accessibility/Dynamic Type throughout: no HTML, no rasterized text, no per-character stacks.
+
+### Usage
+
+```swift
+SearchHighlightedText(text: entry.activityText, highlights: presentation.nameRanges)
+    .font(.headline)
+    .foregroundStyle(Theme.textPrimary)
+```
+
+---
+
+## `SearchResultSummary`
+
+Scrolling result-summary line above the first History result group (history-search spec). Rendered only for valid non-empty queries with at least one match; blank queries, invalid queries, and valid queries with zero matches render nothing.
+
+### Signature
+
+```swift
+struct SearchResultSummary: View {
+    let text: String
+}
+```
+
+### Visual
+
+- `Text(text)`, `.subheadline`, `Theme.textSecondary`, `.monospacedDigit()`, leading-aligned.
+- A plain list row (never a pinned header), so it scrolls with the results below the search field.
+- `accessibilityIdentifier("HistorySearchSummary")`; read as static text.
+
+### Requirements
+
+- Text comes from `HistoryViewModel.searchSummaryText(count:totalSeconds:)` — localized plural count plus the combined known-duration total with the same known-duration-only rule and device-locale formatting as day totals.
+- `Theme` colors only; no new strings beyond `history.search.summary`.
+
+### Usage
+
+```swift
+if let summary = vm.searchSummary {
+    SearchResultSummary(text: summary)
+        .listRowInsets(EdgeInsets(top: 0, leading: Theme.spacingMedium, bottom: 0, trailing: Theme.spacingMedium))
+        .listRowBackground(Color.clear)
+        .listRowSeparator(.hidden)
+}
+```
+
 ---
 
 ## `CategoryRow`

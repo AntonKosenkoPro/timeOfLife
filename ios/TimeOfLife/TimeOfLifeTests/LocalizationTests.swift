@@ -189,6 +189,69 @@ struct LocalizationTests {
         }
     }
 
+    // MARK: - History search copy (add-history-search 8.4)
+
+    /// The syntax-hint example prefix is localized in every locale while
+    /// the qualifier keywords and field identifiers stay English.
+    @Test("history search hint is localized with English syntax")
+    func historySearchHint() throws {
+        let expectedPrefixes = [
+            "en": "Example:",
+            "ru": "Пример:",
+            "zh-Hans": "示例：",
+            "es-419": "Ejemplo:",
+            "pt-BR": "Exemplo:",
+        ]
+        for locale in Self.allLocales {
+            let bundle = try bundle(for: locale)
+            let hint = NSLocalizedString("history.search.hint", bundle: bundle, comment: "")
+            #expect(
+                hint.hasPrefix(expectedPrefixes[locale] ?? "MISSING-LOCALE"),
+                "hint prefix in \(locale): \(hint)"
+            )
+            #expect(hint.contains("in:name,notes"), "scope keywords stay English in \(locale)")
+            #expect(
+                hint.contains("started:2026-10-01..2026-10-31"),
+                "started range stays English in \(locale)"
+            )
+        }
+    }
+
+    /// Search diagnostics keep the English qualifier keywords and field
+    /// identifiers in every locale; only the surrounding copy translates.
+    @Test("history search diagnostics keep English qualifier keywords")
+    func historySearchDiagnosticKeywords() throws {
+        for locale in Self.allLocales {
+            let bundle = try bundle(for: locale)
+            let unknown = NSLocalizedString("history.search.error.unknown", bundle: bundle, comment: "")
+            #expect(
+                unknown.contains("in:") && unknown.contains("started:")
+                    && unknown.contains("ended:") && unknown.contains("has:"),
+                "qualifier keywords in \(locale): \(unknown)"
+            )
+            let scope = NSLocalizedString("history.search.error.scope", bundle: bundle, comment: "")
+            #expect(
+                scope.contains("name") && scope.contains("categories") && scope.contains("notes"),
+                "field identifiers in \(locale): \(scope)"
+            )
+            let operators = NSLocalizedString("history.search.error.operator", bundle: bundle, comment: "")
+            #expect(
+                operators.contains("AND") && operators.contains("OR") && operators.contains("-has:"),
+                "boolean keywords in \(locale): \(operators)"
+            )
+            let has = NSLocalizedString("history.search.error.has", bundle: bundle, comment: "")
+            #expect(
+                has.contains("has:notes") && has.contains("has:category") && has.contains("-has:"),
+                "has keywords in \(locale): \(has)"
+            )
+            let time = NSLocalizedString("history.search.error.time", bundle: bundle, comment: "")
+            #expect(
+                time.contains("HH:MM") && time.contains("HH:MM:SS"),
+                "clock keywords in \(locale): \(time)"
+            )
+        }
+    }
+
     // MARK: - L10n enum allCases matches strings files
 
     /// Sorted-keys snapshot of the `L10n` contract (values live in

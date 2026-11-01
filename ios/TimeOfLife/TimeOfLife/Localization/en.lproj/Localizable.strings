@@ -161,6 +161,25 @@
 // Notes indicator (history-entry-list)
 "history.hasNotes" = "has notes";
 
+// History search (history-search)
+"history.matching" = "matching";
+"history.search.prompt" = "Search entries by name and category";
+"history.search.noResults" = "No matching entries";
+"history.search.noResults.subtitle" = "Try different words or dates.";
+"history.search.clear" = "Clear search";
+"history.search.hint" = "Example: morning gym in:name,notes started:2026-10-01..2026-10-31 OR swim has:notes";
+"history.search.notesLabel" = "Notes:";
+"history.search.error.unknown" = "Unknown qualifier \"%@\". Use in:, started:, ended:, duration:, or has:.";
+"history.search.error.scope" = "Unknown field \"%@\". Use name, categories, or notes.";
+"history.search.error.empty" = "Missing value after \"%@\".";
+"history.search.error.quote" = "Unfinished quote. Close every \" and use \\\" or \\\\ inside phrases.";
+"history.search.error.date" = "Check the date after \"%@\". Use YYYY-MM-DD, YYYY-MM-DDTHH:MM:SSZ, or HH:MM.";
+"history.search.error.range" = "Check the range \"%@\". Use A..B, A..*, or *..B with the earlier bound first.";
+"history.search.error.operator" = "Check \"%@\". Use AND/OR between groups; parentheses and negated qualifiers (except -has:notes and -has:category) are not supported.";
+"history.search.error.has" = "Check has:\"%@\". Use has:notes or has:category (negate with -has:).";
+"history.search.error.time" = "Check the time in \"%@\". Use HH:MM or HH:MM:SS (00:00–23:59).";
+"history.search.error.duration" = "Check the duration in \"%@\". Use d/h/m/s units, e.g. 1h, 90m, 2d5h (largest unit first).";
+
 // History pull-to-refresh (history-pull-to-sync)
 "history.pull.offline" = "You're offline. Connect and try again.";
 "history.syncError.title" = "Sync failed";

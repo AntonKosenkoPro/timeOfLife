@@ -62,6 +62,10 @@ struct EntryRow: View {
     /// (history-entry-list notes indicator). Caller-computed so the row
     /// stays presentational.
     var hasNotes: Bool = false
+    /// Optional History search presentation (history-search spec,
+    /// Design/COMPONENTS.md): in-scope highlight ranges plus a conditional
+    /// notes excerpt. `nil` renders exactly the blank-query row.
+    var searchPresentation: HistorySearchRowPresentation?
 
     /// The caption metadata line: category names, then the provenance
     /// label. Both are caller-computed so the row stays presentational.
@@ -70,6 +74,9 @@ struct EntryRow: View {
             .filter { !$0.isEmpty }
             .joined(separator: ", ")
     }
+
+    @Environment(\.dynamicTypeSize)
+    private var dynamicTypeSize
 
     var body: some View {
         HStack(alignment: .top, spacing: Self.columnSpacing) {
@@ -80,9 +87,12 @@ struct EntryRow: View {
                 .padding(.top, Self.iconTopAdjustment)
             VStack(alignment: .leading, spacing: 2) {
                 HStack(alignment: .firstTextBaseline) {
-                    Text(entry.activityText)
-                        .font(.headline)
-                        .foregroundStyle(Theme.textPrimary)
+                    SearchHighlightedText(
+                        text: entry.activityText,
+                        highlights: searchPresentation?.nameRanges ?? []
+                    )
+                    .font(.headline)
+                    .foregroundStyle(Theme.textPrimary)
                     Spacer(minLength: Theme.spacingSmall)
                     Text(durationText)
                         .font(.headline)
@@ -90,9 +100,12 @@ struct EntryRow: View {
                         .monospacedDigit()
                 }
                 HStack(alignment: .firstTextBaseline) {
-                    Text(captionText)
-                        .font(.caption)
-                        .foregroundStyle(Theme.textSecondary)
+                    SearchHighlightedText(
+                        text: captionText,
+                        highlights: searchPresentation?.captionRanges ?? []
+                    )
+                    .font(.caption)
+                    .foregroundStyle(Theme.textSecondary)
                     Spacer(minLength: Theme.spacingSmall)
                     if hasNotes {
                         Image(systemName: "note.text")
@@ -103,6 +116,29 @@ struct EntryRow: View {
                         .font(.caption)
                         .foregroundStyle(Theme.textSecondary)
                         .monospacedDigit()
+                }
+                if let excerpt = searchPresentation?.excerpt {
+                    HStack(alignment: .firstTextBaseline, spacing: Theme.spacingExtraSmall) {
+                        Image(systemName: "note.text")
+                            .font(.caption)
+                            .foregroundStyle(Theme.textSecondary)
+                        Text(L10n.historySearchNotesLabel.text)
+                            .font(.caption)
+                            .foregroundStyle(Theme.textSecondary)
+                        SearchHighlightedText(
+                            text: excerpt.text,
+                            highlights: excerpt.highlights
+                        )
+                        .font(.caption.italic())
+                        .foregroundStyle(Theme.textSecondary)
+                        // The excerpt builder keeps ~48 characters of leading
+                        // context before the focal match; at large Dynamic
+                        // Type sizes the caption line holds far fewer
+                        // characters, so a 2-line cap could hide the focal
+                        // match entirely — relax the cap from .xxLarge up so
+                        // the match stays visible.
+                        .lineLimit(dynamicTypeSize >= .xxLarge ? nil : 2)
+                    }
                 }
             }
         }
@@ -117,7 +153,8 @@ struct EntryRow: View {
                 durationText: durationText,
                 isInProgress: isInProgress,
                 viaText: viaText,
-                hasNotes: hasNotes
+                hasNotes: hasNotes,
+                excerptText: searchPresentation?.excerpt?.text ?? ""
             )
         )
         .accessibilityIdentifier("EntryRow(\(entry.id))")
@@ -132,7 +169,8 @@ struct EntryRow: View {
         durationText: String,
         isInProgress: Bool,
         viaText: String = "",
-        hasNotes: Bool = false
+        hasNotes: Bool = false,
+        excerptText: String = ""
     ) -> String {
         var parts = [entryText, durationText]
         if !categoryNames.isEmpty { parts.append(categoryNames) }
@@ -140,6 +178,9 @@ struct EntryRow: View {
         parts.append(timeframeText)
         if isInProgress { parts.append(L10n.historyInProgress.text) }
         if hasNotes { parts.append(L10n.historyHasNotes.text) }
+        if !excerptText.isEmpty {
+            parts.append("\(L10n.historySearchNotesLabel.text) \(excerptText)")
+        }
         return parts.joined(separator: ", ")
     }
 }

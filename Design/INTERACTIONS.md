@@ -135,6 +135,15 @@ D1 (OpenSpec change `redesign-track-experience`). The root is a three-tab shell,
 - **Sign Out is owned by Account**, not the Track toolbar or Profile root. Tapping Sign Out asks once, then signs the user out (account files are kept). Sign Out must work offline by clearing the local session.
 - The hierarchy maps to a future macOS sidebar without changing meaning (Track/History/Insights primary; profile-owned features secondary).
 
+### History search (history-search)
+
+History has one always-visible inline native search field on its root (drawer, pinned with the list, hiding on scroll-down and returning on scroll-up). No activation button, no modes: the field is simply there, and the tab bar follows the query — visible for a blank query (focusing the empty field changes nothing), hidden with an animated transition for any non-blank query (first keystroke hides, clearing restores). It filters committed entries locally as the query changes — offline, no submission, no network request:
+
+- **Plain text searches names and categories by default** (`gym` ≡ `gym in:name,categories`); `in:name,categories,notes` unions replace the default globally; uppercase `AND`/`OR` combine groups (`AND` binds tighter, no parentheses); `has:notes`/`has:category` with `-has:` negation only; quoted phrases, `started:`/`ended:` comparisons/ranges over local days, absolute timestamps, or wall-clock times (`HH:MM`/`HH:MM:SS`; `ended:` needs an entry end), and group-bound `duration:` comparisons/ranges over `d`/`h`/`m`/`s` lengths (bare means exact seconds; unresolvable matches nothing; no highlights). No autocomplete, suggestions, recent searches, chips, scope bar, or filter panel.
+- **Blank stays History**: empty/whitespace-only queries render the exact unfiltered list (tracked totals, rows, empty state). Invalid syntax shows a correctable diagnostic with a static example (no rows); valid-but-empty shows a distinct no-results state with Clear search.
+- **Results keep the History shape**: a scrolling summary above the first group (pluralized match count plus the combined known-duration total, same formatting as day totals), then the same day groups newest-first with matching-only totals under the "matching" label, scoped highlights plus one conditional `Notes:` excerpt per row (notes glyph + italic, Theme-only, never confusable with category highlights); rows stay a single accessibility element reading the excerpt as notes content.
+- **Lifecycle**: the query survives same-account reloads, navigation, tab switches, edits, sync, and undo; it resets on account change/launch and is never persisted, logged, or synced. Sync-only pull lives on populated results only.
+
 ## Accessibility identifiers
 
 - Every interactive element has a stable `accessibilityIdentifier`.

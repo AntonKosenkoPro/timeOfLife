@@ -39,6 +39,17 @@ struct HistoryView: View {
     /// so the [+] shares the nav-bar toolbar scope; the sheet and its
     /// refresh stay here.
     @Binding var isLogTimeActive: Bool
+    /// Whether the compact timer is currently shown above this tab's
+    /// content. The no-results clear action reserves the same bottom
+    /// keyboard clearance only when the timer is absent.
+    private let showsCompactTimer: Bool
+    /// Mirrors whether the current search query hides the bottom tab bar
+    /// (history-search spec, design D4): non-blank text hides it, blank
+    /// keeps it. Owned by the shell — the History stack's single
+    /// stack-owned `.toolbar(for: .tabBar)` reads it alongside the path
+    /// (fix-tab-bar-return-jump: a stack-level declaration wins over an
+    /// inner one unconditionally, so this view must not declare its own).
+    @Binding var searchHidesTabBar: Bool
     /// Changes whenever the shell's running timer starts or stops (nil on
     /// stop). Lets History reload an entry saved from the compact timer
     /// without leaving the tab.
@@ -51,7 +62,9 @@ struct HistoryView: View {
         sync: SyncController,
         connectivity: Connectivity,
         refreshSignal: String = "",
-        logTimeActive: Binding<Bool> = .constant(false)
+        logTimeActive: Binding<Bool> = .constant(false),
+        showsCompactTimer: Bool = false,
+        searchHidesTabBar: Binding<Bool> = .constant(false)
     ) {
         _vm = StateObject(wrappedValue: HistoryViewModel(store: store, undoBuffer: undoBuffer))
         _pull = StateObject(wrappedValue: HistoryPullModel(
@@ -63,6 +76,8 @@ struct HistoryView: View {
         })
         self.refreshSignal = refreshSignal
         _isLogTimeActive = logTimeActive
+        self.showsCompactTimer = showsCompactTimer
+        _searchHidesTabBar = searchHidesTabBar
     }
 
     var body: some View {
@@ -79,9 +94,15 @@ struct HistoryView: View {
             // ZStack, not Group (same stability rule as above, one level
             // down): the conditional content must not own the modifiers.
             ZStack {
-                if vm.isLoading && vm.dayGroups.isEmpty {
+                if let diagnostic = vm.searchDiagnostic {
+                    InvalidSearchState(diagnostic: diagnostic)
+                } else if vm.isLoading && vm.dayGroups.isEmpty {
                     ProgressView()
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else if vm.isSearchFiltering && vm.dayGroups.isEmpty {
+                    NoMatchingEntriesState(hasCompactTimer: showsCompactTimer) {
+                        vm.searchText = ""
+                    }
                 } else if vm.dayGroups.isEmpty {
                     EmptyState(
                         icon: "clock.arrow.circlepath",
@@ -93,6 +114,35 @@ struct HistoryView: View {
                 }
             }
         }
+        // Always-visible inline search field (history-search spec,
+        // design D4): the native navigation-bar drawer, pinned with the
+        // list, hiding on scroll-down and returning on scroll-up. The
+        // modifier is never added or removed, so typing/clearing performs
+        // no structural layout change. The bottom tab bar follows the
+        // blank vs non-blank query state instead: blank (even a focused
+        // empty field) keeps it, any non-blank text (results, no-matches,
+        // syntax diagnostics) hides it with an animated transition — see
+        // the `searchHidesTabBar` mirror below. Live filtering, no
+        // autocomplete, never on pushed destinations; syntax-safe input.
+        .searchable(
+            text: $vm.searchText,
+            placement: .navigationBarDrawer(displayMode: .automatic),
+            prompt: L10n.historySearchPrompt.text
+        )
+        // Mirrors the blank vs non-blank query state up to the shell's
+        // stack-owned tab-bar visibility (design D4): the first keystroke
+        // hides the bar, clearing back to blank restores it. Animated so
+        // the transition slides rather than jumps; the equality guard
+        // keeps per-keystroke edits from re-firing it. `initial: true`
+        // covers the blank start without a separate appear sync.
+        .onChange(of: vm.searchText, initial: true) { _, query in
+            let hidden = HistoryViewModel.hidesTabBar(for: query)
+            if hidden != searchHidesTabBar {
+                withAnimation { searchHidesTabBar = hidden }
+            }
+        }
+        .autocorrectionDisabled()
+        .textInputAutocapitalization(.never)
         // Opaque tab bar on iOS 18, glass on iOS 26+ (D8): the bar itself
         // is the only thing gated — list content always flows under it.
         .toolbarBackground(usesGlassTabBar ? .automatic : .visible, for: .tabBar)
@@ -129,6 +179,20 @@ struct HistoryView: View {
             case .inactive, .syncing:
                 break
             }
+        }
+        // Date-only search bounds and day grouping follow the local
+        // calendar: re-derive the current query when History becomes
+        // current again or the clock/zone changes (history-search spec).
+        // Absolute timestamp predicates keep their meaning.
+        .onReceive(NotificationCenter.default.publisher(
+            for: UIApplication.willEnterForegroundNotification
+        )) { _ in
+            vm.refreshTimeContext()
+        }
+        .onReceive(NotificationCenter.default.publisher(
+            for: UIApplication.significantTimeChangeNotification
+        )) { _ in
+            vm.refreshTimeContext()
         }
         .sheet(isPresented: $isLogTimeActive) {
             LogTimeView(service: container.timerService) {
@@ -225,8 +289,23 @@ struct HistoryView: View {
     /// navigation bar; pinned bleed (row text crossing beneath headers) is
     /// accepted on every OS. Chrome stripped to the page; the pull verdict
     /// flow, tap parity, and identifiers are unchanged from the bridge.
+    ///
+    /// A filtered query with matches additionally leads with the scrolling
+    /// result summary (history-search spec): a plain row above the first
+    /// group, never a pinned header, so no layout jump accompanies it.
     private var historyList: some View {
         List {
+            if let summary = vm.searchSummary {
+                SearchResultSummary(text: summary)
+                    .listRowInsets(EdgeInsets(
+                        top: 0,
+                        leading: Theme.spacingMedium,
+                        bottom: 0,
+                        trailing: Theme.spacingMedium
+                    ))
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
+            }
             ForEach(vm.dayGroups) { group in
                 Section {
                     ForEach(group.entries) { entry in
@@ -238,7 +317,8 @@ struct HistoryView: View {
                             durationText: vm.durationText(for: entry),
                             isInProgress: vm.isInProgress(entry),
                             viaText: vm.viaText(for: entry),
-                            hasNotes: vm.hasNotes(for: entry)
+                            hasNotes: vm.hasNotes(for: entry),
+                            searchPresentation: vm.searchPresentation(for: entry)
                         )
                         .listRowInsets(EdgeInsets(
                             top: 0,
@@ -257,13 +337,15 @@ struct HistoryView: View {
                 } header: {
                     SectionHeader(
                         title: group.label,
-                        subtitle: "\(group.total) \(L10n.historyTracked.text)"
+                        subtitle: "\(group.total) \(vm.isSearchFiltering ? L10n.historyMatching.text : L10n.historyTracked.text)"
                     )
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
         }
         .listStyle(.plain)
+        .listSectionSpacing(Theme.spacingExtraSmall)
+        .environment(\.defaultMinListHeaderHeight, 0)
         .scrollContentBackground(.hidden)
         .refreshable {
             await pull.refresh()
@@ -276,25 +358,6 @@ struct HistoryView: View {
     private var usesGlassTabBar: Bool {
         if #available(iOS 26, *) { return true }
         return false
-    }
-}
-
-// MARK: - Pull notice (history-pull-to-sync)
-
-/// Inline verdict below the navigation bar for offline pulls (one at a
-/// time; newest pull wins). The signed-out notice is gone with the launch
-/// gate — the only reachable signed-out surface is the auth gate itself.
-/// `Theme` colors only.
-private struct PullNoticeBanner: View {
-    var body: some View {
-        Text(L10n.historyPullOffline.text)
-            .font(.footnote)
-            .foregroundStyle(Theme.textPrimary)
-            .padding(.vertical, Theme.spacingSmall)
-            .padding(.horizontal, Theme.spacingMedium)
-            .frame(maxWidth: .infinity)
-            .background(Theme.backgroundSecondary)
-            .accessibilityIdentifier("HistoryOfflineNotice")
     }
 }
 

@@ -161,6 +161,25 @@
 // Notes indicator (history-entry-list)
 "history.hasNotes" = "есть заметки";
 
+// History search (history-search)
+"history.matching" = "найдено";
+"history.search.prompt" = "Поиск записей по названию и категории";
+"history.search.noResults" = "Совпадений нет";
+"history.search.noResults.subtitle" = "Попробуйте другие слова или даты.";
+"history.search.clear" = "Очистить поиск";
+"history.search.hint" = "Пример: morning gym in:name,notes started:2026-10-01..2026-10-31 OR swim has:notes";
+"history.search.notesLabel" = "Заметки:";
+"history.search.error.unknown" = "Неизвестный квалификатор «%@». Используйте in:, started:, ended:, duration: или has:.";
+"history.search.error.scope" = "Неизвестное поле «%@». Используйте name, categories или notes.";
+"history.search.error.empty" = "После «%@» нет значения.";
+"history.search.error.quote" = "Незакрытая кавычка. Закройте каждую \" и используйте \\\" или \\\\ внутри фраз.";
+"history.search.error.date" = "Проверьте дату после «%@». Формат: YYYY-MM-DD, YYYY-MM-DDTHH:MM:SSZ или HH:MM.";
+"history.search.error.range" = "Проверьте диапазон «%@». Формат: A..B, A..* или *..B, сначала ранняя граница.";
+"history.search.error.operator" = "Проверьте «%@». Используйте AND/OR между группами; скобки и квалификаторы с отрицанием (кроме -has:notes и -has:category) не поддерживаются.";
+"history.search.error.has" = "Проверьте has:«%@». Используйте has:notes или has:category (отрицание — -has:).";
+"history.search.error.time" = "Проверьте время в «%@». Формат: HH:MM или HH:MM:SS (00:00–23:59).";
+"history.search.error.duration" = "Проверьте длительность в «%@». Единицы d/h/m/s, например 1h, 90m, 2d5h (от большей к меньшей).";
+
 // History pull-to-refresh (history-pull-to-sync)
 "history.pull.offline" = "Нет подключения к сети. Подключитесь и попробуйте снова.";
 "history.syncError.title" = "Не удалось синхронизировать";
