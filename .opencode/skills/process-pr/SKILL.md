@@ -200,9 +200,12 @@ Run ONLY as a follow-up when the human replies that everything is OK
    (skip with a one-line note when the PR was docs/tooling-only with no
    change). Announce `Using change: <name>`; on incomplete-artifact/task
    warnings surface them and wait for confirmation per that skill.
-2. Reply with the closing line (chat + PR comment):
+2. Push the archive commit to the PR branch in the same pass — never stop
+   after archiving locally. (Commit + push go through the normal
+   attribution/footer rules; CI re-runs on the new head.)
+3. Reply with the closing line (chat + PR comment):
    `Archived <change> to <path>. Green + approved — please merge when ready: <url>.`
-3. Stop. The human presses merge.
+4. Stop. The human presses merge.
 
 ### Agent attribution (issue #161, forward-only from 2026-10-15)
 
