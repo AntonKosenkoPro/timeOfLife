@@ -118,9 +118,8 @@ type Category struct {
 // `GYM`), Categories are the entry's own ordered tags (stored via
 // entry_categories), and Notes belong to the entry. Nothing is resolved from
 // another record at read time, so history never mutates retroactively.
-// Source/SourceRef record entry provenance (where the entry came from:
-// manual, widget, siri, control, screentime, garmin, ...); Source defaults
-// to "manual" and SourceRef is null for entries created without them.
+// Entries carry no producer provenance: every saved entry is editable and
+// syncs by entry ID (see sync-client).
 type Entry struct {
 	ID              string        `json:"id"`
 	UserID          string        `json:"-"`
@@ -129,8 +128,6 @@ type Entry struct {
 	StartedAt       time.Time     `json:"started_at"`
 	EndedAt         *time.Time    `json:"ended_at"`
 	DurationSeconds *int          `json:"duration_seconds"`
-	Source          string        `json:"source"`
-	SourceRef       *string       `json:"source_ref"`
 	Categories      []CategoryTag `json:"categories"`
 	CreatedAt       time.Time     `json:"created_at"`
 	UpdatedAt       time.Time     `json:"updated_at"`

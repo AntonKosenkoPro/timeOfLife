@@ -2121,7 +2121,6 @@ struct SyncControllerTests {
             startedAt: startedAt,
             endedAt: startedAt.addingTimeInterval(600),
             durationSeconds: 600,
-            source: "manual",
             categoryIDs: categoryIDs,
             notes: notes,
             createdAt: createdAt ?? startedAt,

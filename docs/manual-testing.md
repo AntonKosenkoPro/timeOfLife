@@ -26,7 +26,7 @@ Live Activities need a real device with Dynamic Island (the simulator shows the 
 1. [ ] **Island appears** — start a timer on Track; the Dynamic Island shows the compact face (first-category icon + ticking elapsed).
 2. [ ] **Expanded card** — long-press the Island; the expanded card shows the exact name, icon, elapsed, Stop, and Go-to-Track.
 3. [ ] **Go to Track** — tap the compact face (or the Go row); the app opens on the Track tab with the timer running.
-4. [ ] **Stop from the Island** — stop from the expanded card or the Lock Screen banner; the entry saves as `manual` (no "via" label), the banner shows the Saved card with the final duration, then dismisses within seconds and the Island collapses.
+4. [ ] **Stop from the Island** — stop from the expanded card or the Lock Screen banner; the entry saves with no "via" label, the banner shows the Saved card with the final duration, then dismisses within seconds and the Island collapses.
 5. [ ] **Minimal face** — with music (or another Live Activity) active, the timer collapses to the icon-only minimal face without layout breakage.
 6. [ ] **Lock Screen banner** — lock the device while running; the banner shows icon + name + ticking elapsed + Stop.
 7. [ ] **Dismissal delay** — confirm the Saved card lingers long enough to read but never minutes; record the final seconds in the change's spec delta (task 5.1).

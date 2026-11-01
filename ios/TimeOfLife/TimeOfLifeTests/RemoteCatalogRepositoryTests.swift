@@ -97,8 +97,6 @@ struct RemoteCatalogRepositoryTests {
               "started_at": "2026-07-27T09:00:00Z",
               "ended_at": "2026-07-27T10:00:00Z",
               "duration_seconds": 3600,
-              "source": "manual",
-              "source_ref": null,
               "created_at": "2026-07-27T10:00:00Z",
               "updated_at": "2026-07-27T10:00:00Z"
             },
@@ -110,8 +108,6 @@ struct RemoteCatalogRepositoryTests {
               "started_at": "2026-07-28T09:00:00.500Z",
               "ended_at": null,
               "duration_seconds": null,
-              "source": "manual",
-              "source_ref": null,
               "created_at": "2026-07-28T09:00:00.500Z",
               "updated_at": "2026-07-28T09:00:00.500Z"
             }
@@ -148,8 +144,6 @@ struct RemoteCatalogRepositoryTests {
           "started_at": "2026-07-27T09:00:00Z",
           "ended_at": "2026-07-27T10:00:00Z",
           "duration_seconds": 3600,
-          "source": "manual",
-          "source_ref": null,
           "created_at": "2026-07-27T10:00:00Z",
           "updated_at": "2026-07-27T10:00:00Z"
         }
@@ -215,6 +209,8 @@ struct RemoteCatalogRepositoryTests {
         #expect(json["category_ids"] as? [String] == ["cat-1", "cat-2"])
         #expect(json["notes"] as? String == "Focused")
         #expect(json["activity_id"] == nil)
+        #expect(json["source"] == nil)
+        #expect(json["source_ref"] == nil)
     }
 
     @Test("updateEntry encodes the full ordered category set and text")
@@ -250,8 +246,8 @@ struct RemoteCatalogRepositoryTests {
         #expect(json["activity_text"] as? String == "Reading")
     }
 
-    @Test("fetchEntries defaults a missing source to manual (pre-provenance relays)")
-    func fetchEntriesDefaultsMissingSource() async throws {
+    @Test("fetchEntries ignores retired producer keys from older relays")
+    func fetchEntriesIgnoresRetiredProducerKeys() async throws {
         stubJSON("""
         {
           "items": [
@@ -261,6 +257,8 @@ struct RemoteCatalogRepositoryTests {
               "started_at": "2026-07-27T09:00:00Z",
               "ended_at": "2026-07-27T10:00:00Z",
               "duration_seconds": 3600,
+              "source": "garmin",
+              "source_ref": "activity-7",
               "created_at": "2026-07-27T10:00:00Z",
               "updated_at": "2026-07-27T10:00:00Z"
             }
@@ -273,8 +271,8 @@ struct RemoteCatalogRepositoryTests {
         let entries = try await repository.fetchEntries(modifiedSince: nil)
 
         #expect(entries.count == 1)
-        #expect(entries.first?.source == "manual")
-        #expect(entries.first?.sourceRef == nil)
+        #expect(entries.first?.activityText == "Gym")
+        #expect(entries.first?.durationSeconds == 3600)
         // Missing optional entry-owned fields default instead of failing.
         #expect(entries.first?.categoryIDs.isEmpty == true)
         #expect(entries.first?.notes.isEmpty == true)
@@ -290,8 +288,6 @@ struct RemoteCatalogRepositoryTests {
           "started_at": "\(startedAt)",
           "ended_at": "\(startedAt)",
           "duration_seconds": 60,
-          "source": "manual",
-          "source_ref": null,
           "created_at": "\(startedAt)",
           "updated_at": "\(startedAt)"
         }

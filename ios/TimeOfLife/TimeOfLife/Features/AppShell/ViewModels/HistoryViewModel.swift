@@ -373,12 +373,6 @@ final class HistoryViewModel: ObservableObject {
         entry.endedAt == nil
     }
 
-    /// Localized "via <Source>" provenance label; empty for manual entries
-    /// (entry-provenance D7).
-    func viaText(for entry: TimeEntry) -> String {
-        EntryProvenance.viaText(for: entry.source)
-    }
-
     /// Whether the entry's row shows the notes indicator: true when notes
     /// are non-empty. Whitespace-only notes count as empty
     /// (history-entry-list notes indicator).

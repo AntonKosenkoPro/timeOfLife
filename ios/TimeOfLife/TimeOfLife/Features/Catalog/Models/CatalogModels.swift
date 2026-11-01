@@ -43,11 +43,8 @@ struct Category: Identifiable, Codable, Equatable, Sendable, FetchableRecord, Pe
 /// defaults to empty. History never mutates retroactively: editing one entry
 /// changes no other entry.
 ///
-/// `source` records provenance (where the entry came from: manual, widget,
-/// siri, control, screentime, garmin, ...); `sourceRef` holds the external
-/// identifier for that source and is null for manual entries. The backend
-/// enforces uniqueness on (user_id, source, source_ref) for non-null
-/// source_ref, preventing duplicate imports.
+/// Entries carry no producer provenance: every saved entry is editable and
+/// syncs by entry id (sync-client).
 ///
 /// Not a GRDB record: `category_ids` is a join-derived value, not a column.
 /// `LocalStore` maps rows manually.
@@ -59,8 +56,6 @@ struct TimeEntry: Identifiable, Codable, Equatable, Hashable, Sendable {
     var startedAt: Date
     var endedAt: Date?
     var durationSeconds: Int?
-    var source: String
-    var sourceRef: String?
     var createdAt: Date
     var updatedAt: Date
 
@@ -70,8 +65,6 @@ struct TimeEntry: Identifiable, Codable, Equatable, Hashable, Sendable {
         startedAt: Date,
         endedAt: Date? = nil,
         durationSeconds: Int? = nil,
-        source: String = "manual",
-        sourceRef: String? = nil,
         categoryIDs: [String] = [],
         notes: String = "",
         createdAt: Date = Date(),
@@ -84,8 +77,6 @@ struct TimeEntry: Identifiable, Codable, Equatable, Hashable, Sendable {
         self.startedAt = startedAt
         self.endedAt = endedAt
         self.durationSeconds = durationSeconds
-        self.source = source
-        self.sourceRef = sourceRef
         self.createdAt = createdAt
         self.updatedAt = updatedAt
     }
@@ -98,8 +89,6 @@ struct TimeEntry: Identifiable, Codable, Equatable, Hashable, Sendable {
         case startedAt = "started_at"
         case endedAt = "ended_at"
         case durationSeconds = "duration_seconds"
-        case source
-        case sourceRef = "source_ref"
         case createdAt = "created_at"
         case updatedAt = "updated_at"
     }

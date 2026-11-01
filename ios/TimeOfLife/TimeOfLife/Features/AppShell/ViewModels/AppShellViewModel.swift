@@ -5,8 +5,7 @@ import Combine
 ///
 /// `profile` opens the Profile page on the tab that pushed it; `entry`
 /// carries the tapped History entry snapshot for the pushed unified entry
-/// form (EDIT for `manual`, LOCKED for imported — resolved at the
-/// destination, so the snapshot never changes spec behavior); `namePicker`
+/// form (every saved entry opens EDIT); `namePicker`
 /// carries the Track draft snapshot for the pushed shared picker and
 /// `notesEditor` the running draft's notes snapshot for the pushed notes
 /// page (completion closures resolve at the destination from the owning

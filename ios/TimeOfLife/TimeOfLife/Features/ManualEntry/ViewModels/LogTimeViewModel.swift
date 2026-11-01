@@ -3,20 +3,17 @@ import Foundation
 import SwiftUI
 
 /// Presentation mode of the unified entry form (entry-editor spec): CREATE
-/// logs new time (manual-entry behavior, unchanged); EDIT corrects an
-/// existing `manual` entry; LOCKED shows an imported entry read-only with
-/// delete as the only mutation.
+/// logs new time (manual-entry behavior, unchanged); EDIT corrects any
+/// existing saved entry. Every saved entry is editable.
 enum EntryFormMode: Equatable, Sendable {
     case create
     case edit
-    case locked
 }
 
 /// View model for the Log Time sheet (manual-entry spec) grown into the
 /// unified entry form (entry-editor spec): a validated name + categories +
-/// notes + start/end draft that saves a committed manual entry in CREATE
-/// mode, updates an existing `manual` entry in EDIT mode, or exposes an
-/// imported entry read-only in LOCKED mode.
+/// notes + start/end draft that saves a committed entry in CREATE
+/// mode or updates any existing saved entry in EDIT mode.
 ///
 /// The draft is fully local: Start defaults to now floored to 5 minutes,
 /// End to Start + 1h. Moving Start shifts End by the same delta so the
@@ -57,8 +54,7 @@ final class LogTimeViewModel: ObservableObject {
     @Published private(set) var startsAt: Date
     @Published private(set) var endsAt: Date
     @Published var errorMessage: String?
-    /// The entry being corrected in EDIT mode or shown in LOCKED mode
-    /// (nil in CREATE mode).
+    /// The entry being corrected in EDIT mode (nil in CREATE mode).
     @Published private(set) var editingEntry: TimeEntry?
 
     /// True once the user has written through any Start/End picker. Flips
@@ -69,20 +65,16 @@ final class LogTimeViewModel: ObservableObject {
 
     let service: TimerService
 
-    /// The form mode, derived from the edited entry: no entry is CREATE, a
-    /// `manual` entry is EDIT, any other source is LOCKED (entry-editor
-    /// spec). Pure so the mode routing is unit-testable.
+    /// The form mode, derived from the edited entry: no entry is CREATE,
+    /// any saved entry is EDIT (entry-editor spec). Pure so the mode
+    /// routing is unit-testable.
     static func mode(for entry: TimeEntry?) -> EntryFormMode {
-        guard let entry else { return .create }
-        return entry.source == "manual" ? .edit : .locked
+        guard entry != nil else { return .create }
+        return .edit
     }
 
     /// The mode of this form instance.
     var mode: EntryFormMode { Self.mode(for: editingEntry) }
-
-    /// True in LOCKED mode: all inputs are disabled and no confirm action
-    /// exists (delete stays available).
-    var isLocked: Bool { mode == .locked }
 
     init(
         service: TimerService,
@@ -94,7 +86,7 @@ final class LogTimeViewModel: ObservableObject {
         self.service = service
         self.editingEntry = entry
         if let entry {
-            // EDIT/LOCKED prefill straight from the entry's own fields —
+            // EDIT prefills straight from the entry's own fields —
             // there is no activity to re-resolve. The form never receives an
             // in-progress entry (no entry point lists one); a nil end falls
             // back to the default duration defensively.
@@ -247,13 +239,12 @@ final class LogTimeViewModel: ObservableObject {
         endsAt = Self.floored(newEnd, toMinutes: 1)
     }
 
-    /// Saves the draft: a committed manual entry in CREATE mode, a
+    /// Saves the draft: a committed entry in CREATE mode, a
     /// last-write-wins update in EDIT mode. Returns false (with
     /// `errorMessage` set and the draft intact) when the form is invalid,
     /// persistence fails, or (EDIT) the record changed underneath (stale
-    /// write). LOCKED mode has no confirm path and always returns false.
+    /// write).
     func save() async -> Bool {
-        guard mode != .locked else { return false }
         guard !trimmedName.isEmpty, isIntervalValid else { return false }
         do {
             if let editing = editingEntry, mode == .edit {
@@ -263,8 +254,6 @@ final class LogTimeViewModel: ObservableObject {
                     startedAt: startsAt,
                     endedAt: endsAt,
                     durationSeconds: max(0, Int(endsAt.timeIntervalSince(startsAt))),
-                    source: editing.source,
-                    sourceRef: editing.sourceRef,
                     categoryIDs: categoryIDs,
                     notes: notes,
                     createdAt: editing.createdAt,
@@ -284,7 +273,6 @@ final class LogTimeViewModel: ObservableObject {
                 startedAt: startsAt,
                 endedAt: endsAt,
                 durationSeconds: max(0, Int(endsAt.timeIntervalSince(startsAt))),
-                source: "manual",
                 categoryIDs: categoryIDs,
                 notes: notes
             )
@@ -296,7 +284,7 @@ final class LogTimeViewModel: ObservableObject {
         }
     }
 
-    /// Deletes the edited entry (EDIT + LOCKED modes) into the durable undo
+    /// Deletes the edited entry (EDIT mode) into the durable undo
     /// buffer (no outbox row yet — shake-to-undo restores it; expiry commits
     /// on foreground). Returns true when the caller should dismiss the form
     /// (deleted, or already gone elsewhere); false keeps the form open with

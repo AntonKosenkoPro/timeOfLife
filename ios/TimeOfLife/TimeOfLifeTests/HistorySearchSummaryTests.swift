@@ -274,7 +274,6 @@ struct HistorySearchSummaryTests {
             timeframeText: "14:00 – 15:20",
             durationText: "1h 20m",
             isInProgress: false,
-            viaText: "",
             hasNotes: true,
             excerptText: "… around squats …"
         )
@@ -287,7 +286,6 @@ struct HistorySearchSummaryTests {
             timeframeText: "14:00 – 15:20",
             durationText: "30m",
             isInProgress: false,
-            viaText: "",
             hasNotes: false,
             excerptText: ""
         )
@@ -303,7 +301,6 @@ struct HistorySearchSummaryTests {
             timeframeText: "14:00 – 15:20",
             durationText: "1h 20m",
             isInProgress: false,
-            viaText: "",
             hasNotes: true,
             excerptText: "… around squats …"
         )

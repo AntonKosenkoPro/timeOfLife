@@ -25,9 +25,6 @@ func (h *Handler) writeCatalogStoreErr(w http.ResponseWriter, r *http.Request, e
 	case errors.Is(err, db.ErrCategoryExists):
 		writeError(w, http.StatusConflict, codeCategoryExists,
 			"A category with this name already exists.", existsDetails)
-	case errors.Is(err, db.ErrDuplicateImport):
-		writeError(w, http.StatusConflict, codeDuplicateImport,
-			"An entry with this source and source_ref already exists.", nil)
 	case errors.Is(err, db.ErrEndBeforeStart):
 		writeValidation(w, validationErrs{"ended_at": "ended_at must be after started_at"})
 	case errors.Is(err, db.ErrInvalidCategoryID):

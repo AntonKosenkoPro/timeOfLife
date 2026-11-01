@@ -38,6 +38,41 @@ struct LocalStoreTests {
         }
     }
 
+    /// Restores the retired provenance residue to simulate a pre-removal
+    /// install (edited-in-place v1/v2 creations): upgraded files keep
+    /// `source`/`source_ref` plus their unique index while fresh installs
+    /// never get them.
+    /// Fixture-only: app mutation paths stay behind LocalStore.
+    private func regressEntriesToLegacyProvenanceShape(at url: URL) throws {
+        let queue = try DatabaseQueue(path: url.path)
+        try queue.write { db in
+            try db.execute(sql: "ALTER TABLE entries ADD COLUMN source TEXT NOT NULL DEFAULT 'manual'")
+            try db.execute(sql: "ALTER TABLE entries ADD COLUMN source_ref TEXT")
+            try db.execute(sql: "CREATE UNIQUE INDEX index_entries_on_source_source_ref ON entries (source, source_ref)")
+        }
+    }
+
+    /// Non-async readers so GRDB resolves the synchronous `fetchAll`/`read`
+    /// overloads (an async context would infer the async variants, which
+    /// `DatabaseQueue.read` cannot take). Fixture-only.
+    private func entryColumnNames(at url: URL) throws -> [String] {
+        let queue = try DatabaseQueue(path: url.path)
+        return try queue.read { db in
+            try String.fetchAll(db, sql: "SELECT name FROM pragma_table_info('entries')")
+        }
+    }
+
+    private func entrySourceIndexNames(at url: URL) throws -> [String] {
+        let queue = try DatabaseQueue(path: url.path)
+        return try queue.read { db in
+            try String.fetchAll(db, sql: """
+                SELECT name FROM sqlite_master
+                WHERE type = 'index' AND tbl_name = 'entries'
+                  AND name = 'index_entries_on_source_source_ref'
+                """)
+        }
+    }
+
     private func temporaryStoreURL() -> URL {
         temporaryStoreURL(userID: "u1")
     }
@@ -60,8 +95,6 @@ struct LocalStoreTests {
         id: String = "entry-1",
         activityText: String = "Coding",
         startedAt: Date = Date(timeIntervalSinceReferenceDate: 2_500),
-        source: String = "manual",
-        sourceRef: String? = nil,
         notes: String = "",
         categoryIDs: [String] = [],
         updatedAt: Date = Date(timeIntervalSinceReferenceDate: 3_000)
@@ -72,8 +105,6 @@ struct LocalStoreTests {
             startedAt: startedAt,
             endedAt: startedAt.addingTimeInterval(600),
             durationSeconds: 600,
-            source: source,
-            sourceRef: sourceRef,
             categoryIDs: categoryIDs,
             notes: notes,
             createdAt: Date(timeIntervalSinceReferenceDate: 2_000),
@@ -287,40 +318,52 @@ struct LocalStoreTests {
         #expect(deleteRow.payload == nil)
     }
 
-    // MARK: - Provenance
+    // MARK: - Source-free entries
 
-    @Test("entry provenance round-trips through entry(id:)")
-    func provenanceRoundTrips() async throws {
+    @Test("entries round-trip all supported values through entry(id:)")
+    func entriesRoundTripSupportedValues() async throws {
         let store = try makeStore()
-        let entry = makeEntry(source: "screentime", sourceRef: "st-callback-42")
+        let entry = makeEntry(notes: "evening session", categoryIDs: [])
         _ = try await store.createEntry(entry)
 
         let fetched = try await store.entry(id: entry.id)
         #expect(fetched == entry)
-        #expect(fetched?.source == "screentime")
-        #expect(fetched?.sourceRef == "st-callback-42")
+        #expect(fetched?.activityText == "Coding")
+        #expect(fetched?.notes == "evening session")
+        #expect(fetched?.durationSeconds == 600)
     }
 
-    @Test("a second entry with the same (source, sourceRef) is rejected")
-    func duplicateProvenanceIsRejected() async throws {
+    @Test("entries with distinct ids are independent (no external-reference dedup)")
+    func distinctIDsAreIndependent() async throws {
         let store = try makeStore()
-        _ = try await store.createEntry(makeEntry(source: "screentime", sourceRef: "x"))
+        _ = try await store.createEntry(makeEntry(id: "entry-1"))
+        _ = try await store.createEntry(makeEntry(id: "entry-2"))
 
-        let duplicate = makeEntry(id: "entry-2", source: "screentime", sourceRef: "x")
-        let outcome = try await store.createEntry(duplicate)
-        guard case .failure = outcome else {
-            Issue.record("expected a failure outcome, got \(outcome)")
+        #expect(try await store.entries().count == 2)
+        // Independence means two distinct decodable entries — not the
+        // absence of a key substring (entry text itself may contain it).
+        let decoded = try await store.outboxRows()
+            .filter { $0.resource == "entry" }
+            .map { try JSONDecoder().decode(TimeEntry.self, from: Data(try #require($0.payload).utf8)) }
+        #expect(Set(decoded.map(\.id)) == ["entry-1", "entry-2"])
+    }
+
+    @Test("same-id replay returns the existing entry without duplicating")
+    func sameIDReplayIsIdempotent() async throws {
+        let store = try makeStore()
+        let entry = makeEntry()
+        _ = try await store.createEntry(entry)
+        let outcome = try await store.createEntry(entry)
+
+        guard case .created = outcome else {
+            Issue.record("expected created outcome, got \(outcome)")
             return
         }
         #expect(try await store.entries().count == 1)
-    }
-
-    @Test("manual entries with nil sourceRef may duplicate")
-    func manualEntriesWithoutSourceRefCanDuplicate() async throws {
-        let store = try makeStore()
-        _ = try await store.createEntry(makeEntry(id: "entry-1", source: "manual", sourceRef: nil))
-        _ = try await store.createEntry(makeEntry(id: "entry-2", source: "manual", sourceRef: nil))
-        #expect(try await store.entries().count == 2)
+        // A replay enqueues no second create row: no duplicate push.
+        // (Entry-scoped, so stricter than the global one-row check in
+        // createEntryIsIdempotent.)
+        #expect(try await store.outboxRows().filter { $0.resource == "entry" && $0.op == "create" }.count == 1)
     }
 
     // MARK: - Recents (timer-capture-experience D5)
@@ -548,6 +591,39 @@ struct LocalStoreTests {
         let draft = try await store.timerDraft()
         #expect(draft?.notes == "healed")
         #expect(draft?.activityText == "Gym")
+    }
+
+    @Test("open drops the retired provenance residue and keeps entries working")
+    func openHealsLegacyProvenanceResidue() async throws {
+        // Simulate an install migrated before the provenance removal:
+        // regress the table to the old shape inside the store's own file
+        // (raw GRDB here is a legacy-schema fixture only — app mutation
+        // paths stay behind the LocalStore chokepoint), reopen, and verify
+        // the heal converges it to the fresh-install shape. Without the
+        // heal, upgraded and fresh installs diverge permanently.
+        let url = temporaryStoreURL()
+        let seeded = try LocalStore(url: url, userID: "u1")
+        try await seeded.createCategory(makeCategory())
+        _ = try await seeded.createEntry(makeEntry(categoryIDs: ["cat-1"]))
+        try regressEntriesToLegacyProvenanceShape(at: url)
+        _ = try LocalStore(url: url, userID: "u1")
+
+        let columns = try entryColumnNames(at: url)
+        #expect(!columns.contains("source"))
+        #expect(!columns.contains("source_ref"))
+        let indexes = try entrySourceIndexNames(at: url)
+        #expect(indexes.isEmpty)
+
+        // Entries (and their category links) written before and after the
+        // heal keep working: dropping a parent column must not shred the
+        // cascading join rows.
+        let reopened = try LocalStore(url: url, userID: "u1")
+        let entries = try await reopened.entries()
+        #expect(entries.count == 1)
+        #expect(entries.first?.activityText == "Coding")
+        #expect(entries.first?.categoryIDs == ["cat-1"])
+        _ = try await reopened.createEntry(makeEntry(id: "entry-2"))
+        #expect(try await reopened.entries().count == 2)
     }
 
     @Test("clearTimerDraft clears the singleton")
@@ -1601,7 +1677,6 @@ struct LocalStoreEntryUndoTests {
 
     private func makeEntry(
         id: String = "entry-1",
-        source: String = "manual",
         categoryIDs: [String] = [],
         notes: String = ""
     ) -> TimeEntry {
@@ -1609,7 +1684,7 @@ struct LocalStoreEntryUndoTests {
             id: id, activityText: "Running",
             startedAt: Date(timeIntervalSinceReferenceDate: 1_000),
             endedAt: Date(timeIntervalSinceReferenceDate: 1_600), durationSeconds: 600,
-            source: source, categoryIDs: categoryIDs, notes: notes
+            categoryIDs: categoryIDs, notes: notes
         )
     }
 
@@ -1644,7 +1719,7 @@ struct LocalStoreEntryUndoTests {
     func undoRestoresEntryWithoutSync() async throws {
         let store = try makeStore()
         try await store.createCategory(Category(id: "cat-1", name: "Work", icon: "briefcase"))
-        _ = try await store.createEntry(makeEntry(source: "garmin", categoryIDs: ["cat-1"], notes: "kept"))
+        _ = try await store.createEntry(makeEntry(categoryIDs: ["cat-1"], notes: "kept"))
         _ = try await store.deleteEntryUndoable(id: "entry-1", deletedAt: Date())
 
         let buffer = try #require(try await store.undoBufferMostRecent())
@@ -1653,9 +1728,10 @@ struct LocalStoreEntryUndoTests {
         #expect(restored?.id == "entry-1")
         #expect(restored?.activityText == "Running")
         #expect(restored?.durationSeconds == 600)
-        #expect(restored?.source == "garmin")
-        #expect(restored?.categoryIDs == ["cat-1"])
+        #expect(restored?.startedAt == Date(timeIntervalSinceReferenceDate: 1_000))
+        #expect(restored?.endedAt == Date(timeIntervalSinceReferenceDate: 1_600))
         #expect(restored?.notes == "kept")
+        #expect(restored?.categoryIDs == ["cat-1"])
         let stored = try await store.entry(id: "entry-1")
         #expect(stored?.activityText == "Running")
         // Buffer row is gone; no outbox delete was ever created.

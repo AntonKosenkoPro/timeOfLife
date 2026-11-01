@@ -41,8 +41,6 @@ enum Theme {
     static let opacityAccentSoft: Double = 0.15
     /// Dimmed trailing clear glyph.
     static let opacityClearGlyph: Double = 0.55
-    /// Locked (read-only) form cards.
-    static let opacityLockedForm: Double = 0.6
     /// Fully transparent hidden capture field.
     static let opacityHiddenField: Double = 0
 

@@ -98,7 +98,6 @@ struct TrackViewModelTests {
 
         let entries = try? await vm.service.store.entries()
         #expect(entries?.count == 1)
-        #expect(entries?.first?.source == "manual")
         #expect(entries?.first?.activityText == "Reading")
         #expect(entries?.first?.categoryIDs == ["c9"])
         #expect(entries?.first?.notes.isEmpty == true)
@@ -670,7 +669,6 @@ struct TrackViewModelTests {
             startedAt: startedAt,
             endedAt: startedAt.addingTimeInterval(TimeInterval(duration)),
             durationSeconds: duration,
-            source: "manual",
             categoryIDs: categoryIDs
         )
     }

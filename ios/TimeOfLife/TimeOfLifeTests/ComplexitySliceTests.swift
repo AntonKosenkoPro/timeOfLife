@@ -332,7 +332,6 @@ struct ComplexitySliceTests {
             startedAt: startedAt,
             endedAt: startedAt.addingTimeInterval(TimeInterval(duration)),
             durationSeconds: duration,
-            source: "manual",
             categoryIDs: categoryIDs
         )
     }

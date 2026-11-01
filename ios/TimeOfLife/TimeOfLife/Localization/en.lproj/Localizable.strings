@@ -195,23 +195,7 @@
 "insights.empty.today" = "Nothing tracked today yet.";
 "insights.empty.week" = "Nothing tracked this week yet.";
 
-// Entry provenance (entry-provenance spec, activity-detail-sheet)
-"provenance.via.widget" = "via Widget";
-"provenance.via.siri" = "via Siri";
-"provenance.via.control" = "via Control";
-"provenance.via.screentime" = "via Screen Time";
-"provenance.via.garmin" = "via Garmin";
-"provenance.via.calendar" = "via Calendar";
-"provenance.via.healthkit" = "via HealthKit";
 
-// Entry source names (activity-detail-sheet entry rows: sync icon + name)
-"provenance.name.widget" = "Widget";
-"provenance.name.siri" = "Siri";
-"provenance.name.control" = "Control";
-"provenance.name.screentime" = "Screen Time";
-"provenance.name.garmin" = "Garmin";
-"provenance.name.calendar" = "Calendar";
-"provenance.name.healthkit" = "HealthKit";
 
 // Log Time sheet (manual-entry spec)
 "logTime.title" = "Log Time";
@@ -219,9 +203,8 @@
 "logTime.starts" = "Starts";
 "logTime.ends" = "Ends";
 
-// Unified entry form (entry-editor spec: EDIT + LOCKED modes)
+// Unified entry form (entry-editor spec: EDIT modes)
 "entry.editTitle" = "Edit entry";
-"entry.lockedTitle" = "Imported entry";
 "entry.dismissLabel" = "Close";
 "entry.confirmAddLabel" = "Add entry";
 "entry.confirmSaveLabel" = "Save entry";
@@ -230,7 +213,6 @@
 "entry.deleteMessage" = "This entry will be deleted. You can shake to undo.";
 "entry.deleteConfirm" = "Delete";
 "entry.staleError" = "This entry changed elsewhere. Dismiss and reopen it, then try again.";
-"entry.lockedNote" = "Imported via %@ — editing is disabled to avoid conflicts with the source.";
 "entry.nameLabel" = "Name";
 "entry.namePlaceholder" = "e.g. Gym";
 "entry.duration" = "Duration: %@";

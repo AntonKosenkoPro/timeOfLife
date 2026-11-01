@@ -15,11 +15,19 @@ public enum LiveActivityDeepLink {
     public static let stopQueryKey = "stop"
     public static let stopQueryValue = "1"
 
-    public static var trackURL: URL? {
-        URL(string: "\(trackScheme)://\(trackHost)")
+    /// Checked construction: these literals are fixed, so a nil here is a
+    /// programmer error, not a runtime fallback case.
+    public static var trackURL: URL {
+        guard let url = URL(string: "\(trackScheme)://\(trackHost)") else {
+            preconditionFailure("LiveActivityDeepLink.trackURL is not a valid URL")
+        }
+        return url
     }
 
-    public static var stopURL: URL? {
-        URL(string: "\(trackScheme)://\(trackHost)?\(stopQueryKey)=\(stopQueryValue)")
+    public static var stopURL: URL {
+        guard let url = URL(string: "\(trackScheme)://\(trackHost)?\(stopQueryKey)=\(stopQueryValue)") else {
+            preconditionFailure("LiveActivityDeepLink.stopURL is not a valid URL")
+        }
+        return url
     }
 }

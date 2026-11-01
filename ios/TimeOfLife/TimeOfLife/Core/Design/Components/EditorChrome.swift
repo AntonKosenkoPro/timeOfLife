@@ -34,7 +34,7 @@ struct FieldCard<Content: View>: View {
     }
 }
 
-/// Bottom-of-page destructive Delete (EDIT + LOCKED entry form, Category
+/// Bottom-of-page destructive Delete (EDIT entry form, Category
 /// Editor edit mode): headline danger label, full-width `minTapArea` tap
 /// target, secondary background, `cornerRadius`. Identical to both former
 /// per-screen delete sections.

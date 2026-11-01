@@ -148,31 +148,14 @@ enum L10n: String, CaseIterable {
     case insightsEmptyToday = "insights.empty.today"
     case insightsEmptyWeek = "insights.empty.week"
 
-    // Entry provenance (entry-provenance spec)
-    case provenanceViaWidget = "provenance.via.widget"
-    case provenanceViaSiri = "provenance.via.siri"
-    case provenanceViaControl = "provenance.via.control"
-    case provenanceViaScreentime = "provenance.via.screentime"
-    case provenanceViaGarmin = "provenance.via.garmin"
-    case provenanceViaCalendar = "provenance.via.calendar"
-    case provenanceViaHealthkit = "provenance.via.healthkit"
-    case provenanceNameWidget = "provenance.name.widget"
-    case provenanceNameSiri = "provenance.name.siri"
-    case provenanceNameControl = "provenance.name.control"
-    case provenanceNameScreentime = "provenance.name.screentime"
-    case provenanceNameGarmin = "provenance.name.garmin"
-    case provenanceNameCalendar = "provenance.name.calendar"
-    case provenanceNameHealthkit = "provenance.name.healthkit"
-
     // Log Time sheet (manual-entry spec)
     case logTimeTitle = "logTime.title"
     case logTimeCancel = "logTime.cancel"
     case logTimeStarts = "logTime.starts"
     case logTimeEnds = "logTime.ends"
 
-    // Unified entry form (entry-editor spec: CREATE + EDIT + LOCKED modes)
+    // Unified entry form (entry-editor spec: CREATE + EDIT modes)
     case entryEditTitle = "entry.editTitle"
-    case entryLockedTitle = "entry.lockedTitle"
     // Calendar-grammar icon buttons (fix-50-nav-buttons): VoiceOver labels
     // for the X dismiss (CREATE sheet) and the checkmark confirms.
     case entryDismissLabel = "entry.dismissLabel"
@@ -183,7 +166,6 @@ enum L10n: String, CaseIterable {
     case entryDeleteMessage = "entry.deleteMessage"
     case entryDeleteConfirm = "entry.deleteConfirm"
     case entryStaleError = "entry.staleError"
-    case entryLockedNote = "entry.lockedNote"
     case entryNameLabel = "entry.nameLabel"
     case entryNamePlaceholder = "entry.namePlaceholder"
     case entryDuration = "entry.duration"

@@ -255,25 +255,11 @@ targets:
         excludes:
           - "Info.plist"
           - "LifioLiveActivities.entitlements"
-      # Shared app sources compiled into the extension (live-activities
-      # change). Each is dependency-light by design (Foundation/GRDB/UIKit
-      # only) — do NOT add feature files here without checking their
-      # transitive imports, or the extension target bloats.
-      - path: TimeOfLife/Core/Storage/LocalStore.swift
-      - path: TimeOfLife/Core/Utilities/RecordIDGenerator.swift
-      # AnyEncodable only (LocalStore outbox payloads live in Utilities,
-      # not in the networking layer).
-      - path: TimeOfLife/Core/Utilities/AnyEncodable.swift
-      - path: TimeOfLife/Features/Catalog/Models/CatalogModels.swift
-      - path: TimeOfLife/Features/Catalog/Models/CatalogIcon.swift
-      - path: TimeOfLife/Features/Catalog/Models/ActivityName.swift
-      - path: TimeOfLife/Features/Catalog/Models/CategoryDraft.swift
-      - path: TimeOfLife/Features/Catalog/Models/CategoryName.swift
-      - path: TimeOfLife/Features/Catalog/Models/ExactName.swift
-      - path: TimeOfLife/Features/Sync/ActiveAccountFileResolver.swift
-      # NOTE: LiveActivityService.swift is deliberately NOT here: the Stop
-      # intent ends the activity directly via ActivityKit (shared
-      # `LifioLiveActivityCore` type, linked below) — no Darwin reap.
+      # The widget renders app-published ActivityKit content only: it never
+      # opens or mutates tracker databases, so no app storage/model sources
+      # are compiled into the extension. Do NOT add feature files here
+      # without checking their transitive imports, or the extension target
+      # bloats.
       # The shared user-facing strings (single source with the app): the
       # extension reads them from its own bundle at runtime. Declared as
       # explicit resource files HERE (not a separate `resources:` block):
@@ -367,8 +353,6 @@ targets:
       # embedded (only app targets embed) — loads from the containing app's
       # Frameworks at runtime.
       - target: LifioLiveActivityCore
-      - package: GRDB
-        product: GRDB
   TimeOfLifeTests:
     type: bundle.unit-test
     platform: iOS

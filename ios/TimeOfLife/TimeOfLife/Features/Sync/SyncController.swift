@@ -1005,7 +1005,7 @@ final class SyncController: ObservableObject {
     /// the drain may continue; false rethrows the original error loudly.
     private func resolvePushError(_ row: OutboxRow, error: APIError) async throws -> Bool {
         switch error.code {
-        case "conflict", "category_exists", "duplicate_import":
+        case "conflict", "category_exists":
             try await resolveConflict(row, code: error.code ?? "", details: error.details)
             return true
         case "not_found":
@@ -1200,8 +1200,8 @@ final class SyncController: ObservableObject {
             do {
                 try await remote.createEntry(entry)
             } catch let error as APIError {
-                guard error.code == "duplicate_import" else { return false }
-                try await resolveConflict(row, code: "duplicate_import", details: error.details)
+                guard error.code == "conflict" else { return false }
+                try await resolveConflict(row, code: "conflict", details: error.details)
             }
         case "category":
             guard let category = try await store.category(id: row.recordID) else {
@@ -1226,7 +1226,6 @@ final class SyncController: ObservableObject {
     /// - 409 `conflict` → adopt the server's version (keep-latest) + clear the row.
     /// - 409 `category_exists` → remap local entry joins to the winning id
     ///   + clear the row.
-    /// - 409 `duplicate_import` → the relay already has the record; clear the row.
     private func resolveConflict(_ row: OutboxRow, code: String, details: [String: String]) async throws {
         Self.currentSpanCounts?.conflicts += 1
         switch code {
@@ -1236,8 +1235,6 @@ final class SyncController: ObservableObject {
             if let winningID = details["id"] {
                 try await remapCategoryReferences(from: row.recordID, to: winningID)
             }
-        case "duplicate_import":
-            break // relay already has the record; nothing to do
         default:
             break
         }

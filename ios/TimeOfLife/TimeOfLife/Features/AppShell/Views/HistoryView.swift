@@ -11,8 +11,8 @@ import SwiftUI
 ///
 /// Tapping an entry row pushes the unified entry form onto this tab's
 /// NavigationStack (remove-activities-layer D6 as amended by
-/// fix-entry-form-gestures; entry-editor spec): editable for `manual`
-/// entries, read-only for imported ones. The push (not a full-screen cover)
+/// fix-entry-form-gestures; entry-editor spec): every saved entry opens
+/// EDIT. The push (not a full-screen cover)
 /// is what provides the leading-edge back gesture — a modal cover has no
 /// back stack to pop. There is no activity detail sheet. Signed-out History
 /// does not exist — the launch gate precedes every tab — so there is no
@@ -229,8 +229,8 @@ struct HistoryView: View {
             Button(L10n.commonOk.text, role: .cancel) { vm.clearUndoError() }
         }
         // The unified entry form pushes onto this tab's path
-        // (per-tab-navigation-paths): EDIT for manual entries, LOCKED for
-        // imported ones. The push provides the system back button and the
+        // (per-tab-navigation-paths): every saved entry opens EDIT.
+        // The push provides the system back button and the
         // leading-edge pop gesture (a full-screen cover has no back stack,
         // which is why #50's gesture never recognized). Profile pushes on
         // this same path from the shell toolbar — one value destination
@@ -316,7 +316,6 @@ struct HistoryView: View {
                             timeframeText: vm.timeframeText(for: entry),
                             durationText: vm.durationText(for: entry),
                             isInProgress: vm.isInProgress(entry),
-                            viaText: vm.viaText(for: entry),
                             hasNotes: vm.hasNotes(for: entry),
                             searchPresentation: vm.searchPresentation(for: entry)
                         )

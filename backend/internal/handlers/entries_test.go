@@ -458,68 +458,92 @@ func TestListEntries_ModifiedSince(t *testing.T) {
 	}
 }
 
-// Provenance: POST /entries accepts source/source_ref, defaults to manual,
-// and rejects an unknown source with 422.
-func TestCreateEntry_Provenance(t *testing.T) {
+// Source-free relay: POST /entries round-trips supported values with no
+// provenance fields, accepts-and-ignores obsolete source/source_ref keys,
+// and never emits duplicate_import.
+func TestCreateEntry_SourceFree(t *testing.T) {
 	h, _, _, tok := newCatalogHandler(t)
 
-	// Explicit provenance round-trips.
-	ref := "callback-42"
+	// Ordinary source-free create round-trips.
 	w := serve(h, jsonReq(t, "POST", "/api/v1/entries", tok, map[string]any{
 		"id": v7(), "activity_text": "Gym", "started_at": "2026-07-27T09:00:00Z",
-		"source": "screentime", "source_ref": ref,
+		"ended_at": "2026-07-27T10:30:00Z", "notes": "leg day",
 	}))
 	if w.Code != http.StatusCreated {
 		t.Fatalf("expected 201, got %d (body=%s)", w.Code, w.Body.String())
 	}
-	var e entryMetaResp
-	decodeBody(t, w, &e)
-	if e.Source != "screentime" || e.SourceRef == nil || *e.SourceRef != ref {
-		t.Errorf("expected screentime/%s, got %q/%v", ref, e.Source, e.SourceRef)
+	var raw map[string]any
+	decodeBody(t, w, &raw)
+	for _, key := range []string{"source", "source_ref"} {
+		if _, ok := raw[key]; ok {
+			t.Errorf("response must not expose retired key %q (body=%s)", key, w.Body.String())
+		}
+	}
+	dur, _ := raw["duration_seconds"].(float64)
+	if dur != 5400 {
+		t.Errorf("expected duration 5400, got %v (body=%s)", raw["duration_seconds"], w.Body.String())
 	}
 
-	// Omitted provenance defaults to manual/null.
+	// Obsolete retired keys are accepted and ignored — even an unknown value.
 	w2 := serve(h, jsonReq(t, "POST", "/api/v1/entries", tok, map[string]any{
-		"id": v7(), "activity_text": "Read", "started_at": "2026-07-27T10:00:00Z",
+		"id": v7(), "activity_text": "Read", "started_at": "2026-07-27T11:00:00Z",
+		"source": "time-machine", "source_ref": "callback-42",
 	}))
-	var e2 entryMetaResp
-	decodeBody(t, w2, &e2)
-	if e2.Source != "manual" || e2.SourceRef != nil {
-		t.Errorf("expected manual/nil, got %q/%v", e2.Source, e2.SourceRef)
-	}
-
-	// Unknown source → 422.
-	w3 := serve(h, jsonReq(t, "POST", "/api/v1/entries", tok, map[string]any{
-		"id": v7(), "activity_text": "Walk", "started_at": "2026-07-27T11:00:00Z",
-		"source": "time-machine",
-	}))
-	if w3.Code != http.StatusUnprocessableEntity {
-		t.Errorf("expected 422 for unknown source, got %d (body=%s)", w3.Code, w3.Body.String())
+	if w2.Code != http.StatusCreated {
+		t.Errorf("obsolete keys must be accepted-and-ignored, got %d (body=%s)", w2.Code, w2.Body.String())
 	}
 }
 
-// Duplicate import: a second POST with the same (source, source_ref) is
-// rejected with 409 duplicate_import.
-func TestCreateEntry_DuplicateImportRejected(t *testing.T) {
+// Obsolete external references never merge entries: two creates with
+// different IDs but identical retired source_ref keys stay independent.
+func TestCreateEntry_ObsoleteRefDoesNotMerge(t *testing.T) {
 	h, _, _, tok := newCatalogHandler(t)
-	ref := "interval-7"
 
+	ids := []string{v7(), v7()}
+	for i, id := range ids {
+		w := serve(h, jsonReq(t, "POST", "/api/v1/entries", tok, map[string]any{
+			"id": id, "activity_text": "Gym",
+			"started_at": "2026-07-27T09:00:00Z",
+			"source":     "screentime", "source_ref": "interval-7",
+		}))
+		if w.Code != http.StatusCreated {
+			t.Fatalf("create %d: expected 201, got %d (body=%s)", i, w.Code, w.Body.String())
+		}
+	}
+
+	w := serve(h, jsonReq(t, "GET", "/api/v1/entries", tok, nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	var resp struct {
+		Items []entryResp `json:"items"`
+	}
+	decodeBody(t, w, &resp)
+	if len(resp.Items) != 2 {
+		t.Errorf("expected 2 independent entries, got %d", len(resp.Items))
+	}
+}
+
+// Same-ID replay stays idempotent: replaying the same id returns the
+// existing entry with 200 and never duplicates it.
+func TestCreateEntry_SameIDReplay(t *testing.T) {
+	h, _, _, tok := newCatalogHandler(t)
+	id := v7()
 	body := map[string]any{
-		"id": v7(), "activity_text": "Gym", "started_at": "2026-07-27T09:00:00Z",
-		"source": "screentime", "source_ref": ref,
+		"id": id, "activity_text": "Gym", "started_at": "2026-07-27T09:00:00Z",
 	}
 	w1 := serve(h, jsonReq(t, "POST", "/api/v1/entries", tok, body))
 	if w1.Code != http.StatusCreated {
 		t.Fatalf("first create: expected 201, got %d (body=%s)", w1.Code, w1.Body.String())
 	}
 
-	body["id"] = v7()
-	body["started_at"] = "2026-07-27T10:00:00Z"
 	w2 := serve(h, jsonReq(t, "POST", "/api/v1/entries", tok, body))
-	if w2.Code != http.StatusConflict {
-		t.Fatalf("expected 409, got %d (body=%s)", w2.Code, w2.Body.String())
+	if w2.Code != http.StatusOK {
+		t.Fatalf("replay: expected 200, got %d (body=%s)", w2.Code, w2.Body.String())
 	}
-	if code := errCode(t, w2); code != "duplicate_import" {
-		t.Errorf("expected code duplicate_import, got %q", code)
+	var replayRaw map[string]any
+	decodeBody(t, w2, &replayRaw)
+	if _, ok := replayRaw["error"]; ok {
+		t.Errorf("replay must not return an error envelope (body=%s)", w2.Body.String())
 	}
 }

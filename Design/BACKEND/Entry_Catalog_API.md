@@ -44,14 +44,12 @@ Deleting a category removes the tag from all entries (cascade on the join) but d
 | `started_at` | TIMESTAMPTZ NOT NULL | |
 | `ended_at` | TIMESTAMPTZ | set at Stop; entries are Stop-only (no running rows) |
 | `duration_seconds` | INT | `ended_at - started_at`; stored for query/filter convenience |
-| `source` | TEXT NOT NULL DEFAULT 'manual' | provenance enum: `manual`, `widget`, `siri`, `control`, `screentime`, `garmin`, `calendar`, `healthkit` |
-| `source_ref` | TEXT | external identifier for the source (e.g. Screen Time callback uuid, Garmin activity id); NULL for `manual` |
 | `created_at` | TIMESTAMPTZ NOT NULL DEFAULT NOW() | |
 | `updated_at` | TIMESTAMPTZ NOT NULL DEFAULT NOW() | LWW sync version |
 
 - `INDEX (user_id, started_at DESC)` — history list / date-range queries (History feature).
 - `INDEX (user_id, activity_text, started_at DESC)` — Recents grouping (`GROUP BY activity_text`, newest wins).
-- `UNIQUE (user_id, source, source_ref)` — for non-null `source_ref`; prevents duplicate imports (e.g. a Screen Time callback firing twice for the same interval). A duplicate insert is rejected with **409 `duplicate_import`**.
+- Transitional residue (remove-entry-integrations): the physical `source`/`source_ref` columns, their default, and the partial unique index remain deployed for backend rollback only. They are not read or written by any supported path and are not part of the current contract; a separately gated later release owns their destructive removal.
 - The entry's **text**, **ordered tags** (via `entry_categories` ⨝ `categories`), and **notes** are stored on the entry. Editing one entry never affects another (per-entry isolation); nothing is resolved at query time.
 
 ---
@@ -66,7 +64,7 @@ Deleting a category removes the tag from all entries (cascade on the join) but d
 - **Cross-device name collision** (two devices create "Sport" offline with different ids): the `UNIQUE (user_id, lower(name))` constraint rejects the second `POST` with **409 `category_exists`** (carrying the winning category in `details`). The client re-maps its local entry references to the surviving id. Noted as the one LWW edge case the client must handle.
 - **Delta pull-sync**: `GET /entries` accepts an optional `modified_since` (RFC 3339) that filters to records with `updated_at` **strictly greater** than the timestamp; absent/empty = full pull. `GET /categories` is a full pull ordered by name (the handler ignores `modified_since`; adding it is a backend follow-up). The client advances the entries cursor to the max `updated_at` received, so integrations (hundreds/thousands of entries) don't force full re-pulls.
 - **Prune-unknown-category**: entry payloads merged from elsewhere may reference category ids unknown to the receiver (deleted elsewhere). The receiver keeps the remainder and drops the unknown ids — never rejects the entry. On **create** (`POST /entries`) unknown ids are instead rejected with **422** (`ErrInvalidCategoryID`); the client's prune-and-retry heal (drop unknown ids, rewrite the outbox payload, retry once) is the last resort for dangling/delete-wins ids.
-- **Entry provenance**: entries carry `source` (default `manual`) and nullable `source_ref`. The `UNIQUE (user_id, source, source_ref)` constraint rejects a duplicate import with **409 `duplicate_import`** — a source re-sending the same record (Screen Time firing twice, Garmin re-sync) cannot create a duplicate. Deleting an imported entry is a hard delete; a later re-import of the same `(source, source_ref)` does not resurrect it.
+- **Entry provenance**: retired — entries carry no `source`/`source_ref`; there is no `duplicate_import`. Same-id creates replay idempotently; distinct ids stay independent.
 
 ---
 
@@ -90,7 +88,7 @@ All `401 unauthorized` on missing/invalid token (existing `AuthMiddleware`). All
 | GET | `/entries` | — | 200 `{items:[…], next_cursor?}` ordered by `started_at DESC`; filters `?from=&to=&category_id=&limit=&cursor=&modified_since=` (delta pull) | (401) |
 | GET | `/entries/recents` | — | 200 `[{entry…}]` — newest entry per exact text, `started_at DESC`, capped at 6 (default; `?limit=` 1–20) | (401) |
 | GET | `/entries/{id}` | — | 200 `{entry…}` with owned `activity_text`, ordered `categories[]`, and `notes` | 404, (401) |
-| POST | `/entries` | `{id, activity_text, category_ids?, notes?, started_at, ended_at?, source?, source_ref?}` | 201 `{entry…}`; unknown category ids are rejected with 422 (the client heals with prune-and-retry); `source` defaults to `manual`; duplicate `(source, source_ref)` → 409 `duplicate_import` | 400, 422, 409 `conflict`/`duplicate_import`, (401) |
+| POST | `/entries` | `{id, activity_text, category_ids?, notes?, started_at, ended_at?}` | 201 `{entry…}`; unknown category ids are rejected with 422 (the client heals with prune-and-retry); retired `source`/`source_ref` keys are accepted and ignored | 400, 422, 409 `conflict`, (401) |
 | PATCH | `/entries/{id}` | `{activity_text?, category_ids?, notes?, started_at?, ended_at?, updated_at}` | 200 `{entry…}` (full `category_ids` = replace-all tags) | 400, 404, 409 `conflict`, 422, (401) |
 | DELETE | `/entries/{id}` | — | 204 (hard delete + entry tombstone) | 404, (401) |
 
@@ -123,12 +121,11 @@ No dedicated endpoint. Seeds are created client-side on first run (7 localized c
   "id": "…", "activity_text": "Gym",
   "started_at": "…", "ended_at": "…", "duration_seconds": 3600,
   "notes": "Leg day",
-  "source": "manual", "source_ref": null,
   "created_at": "…", "updated_at": "…",
   "categories": [ { "id": "…", "name": "Sport", "icon": "figure.run" } ]
 }
 ```
-`activity_text`, ordered `categories`, and `notes` are owned by the entry (written at creation, changed only by editing that entry). `source` records provenance (default `manual`); `source_ref` holds the external identifier for non-`manual` sources (e.g. Screen Time callback uuid, Garmin activity id) and is null for `manual`.
+`activity_text`, ordered `categories`, and `notes` are owned by the entry (written at creation, changed only by editing that entry). Entries carry no producer provenance: retired `source`/`source_ref` request keys are accepted and ignored, and identical obsolete references with distinct ids stay independent.
 
 ---
 
@@ -159,7 +156,6 @@ All flow through the existing `ErrorResponse` envelope.
 | `not_found` | 404 | resource doesn't exist or belongs to another user |
 | `conflict` | 409 | LWW stale write (`updated_at` older than server); `details` carries the server's current version |
 | `category_exists` | 409 | case-insensitive name collision on create; `details` carries the existing record |
-| `duplicate_import` | 409 | `POST /entries` with a `(source, source_ref)` that already exists for the user (uniqueness constraint); the existing entry is kept as-is |
 | `internal_error` | 500 | existing; never leaks cause |
 | `invalid_body` / `unauthorized` / `rate_limited` | 400/401/429 | existing semantics |
 

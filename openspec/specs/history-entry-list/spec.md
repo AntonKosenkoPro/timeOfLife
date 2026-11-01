@@ -37,7 +37,7 @@ The History destination SHALL display committed `TimeEntry` records as a chronol
 - **AND** days with no matches have no header
 
 ### Requirement: Each History row shows entry identity and timing
-Each History row SHALL display the entry's own text (headline — the entry's identity; there is no activity identity), the entry's start–end timeframe and natural-language duration (right-aligned), the entry's own comma-separated category names (left-aligned caption), and the first category's SF Symbol icon (leading, spanning both identity/timing text lines, top-aligned with the name's cap-height top, not the text frame top). The duration SHALL render in the device locale's natural language with locale-correct unit abbreviations and plurals (e.g. English `1h 20m`; Russian uses Russian abbreviations). Rows with no categories SHALL render a `questionmark` fallback icon. Blank-query rows SHALL retain their existing presentation. During a non-empty search, rows SHALL add only the scoped text highlights and conditional notes excerpt defined by `history-search`; any excerpt SHALL sit below the identity/timing content without replacing its fields or adding separate row actions.
+Each History row SHALL display the entry's own text (headline — the entry's identity; there is no activity identity), the entry's start–end timeframe and natural-language duration (right-aligned), the entry's own comma-separated category names (left-aligned caption), and the first category's SF Symbol icon (leading, spanning both text lines, top-aligned with the name's cap-height top, not the text frame top). The duration SHALL render in the device locale's natural language with locale-correct unit abbreviations and plurals (e.g. English `1h 20m`; Russian uses Russian abbreviations). Rows with no categories SHALL render a `questionmark` fallback icon. Rows and their accessibility labels SHALL NOT display producer/source labels; notes indication and existing category/timing geometry are unchanged.
 
 #### Scenario: Row with categories
 - **WHEN** an entry has one or more categories
@@ -57,8 +57,12 @@ Each History row SHALL display the entry's own text (headline — the entry's id
 
 #### Scenario: Notes search adds context below the normal row
 - **WHEN** notes are in scope and contain a matching text term
-- **THEN** the row retains its identity, categories, provenance, timing, duration, and icon and adds the contextual excerpt beneath them
+- **THEN** the row retains its identity, categories, timing, duration, and icon and adds the contextual excerpt beneath them
 - **AND** tapping either highlighted text or the excerpt performs the existing whole-row action
+
+#### Scenario: Retired provenance is not displayed
+- **WHEN** an entry is shown after syncing a row that previously carried provider metadata
+- **THEN** neither the row nor its VoiceOver label contains a source suffix or imported-entry designation
 
 ### Requirement: History rows indicate entries with notes
 Each History row SHALL show a small blue notes icon when the entry's notes are non-empty and SHALL show no icon otherwise. Whitespace-only notes count as empty. The icon is purely presentational: it changes no tap, swipe, long-press, or navigation behavior, and the row's VoiceOver label folds in a localized "has notes" affordance when the icon is shown. This indicator SHALL remain present under search even when a matching notes excerpt is shown; it SHALL NOT by itself reveal note contents. A search excerpt SHALL follow `history-search` scope and match rules and its displayed plain text SHALL be included in the existing single-element row label.
@@ -187,6 +191,7 @@ The History destination SHALL offer a `[+]` action in the navigation bar that op
 - **WHEN** the user saves an entry that does not match the active query
 - **THEN** the sheet dismisses and the query remains unchanged without displaying the new entry
 - **AND** clearing the query reveals it in normal History
+
 ### Requirement: History reflects entry edits and deletes
 Edits saved in the entry form SHALL appear in the History list with updated values in the correct day group when the user returns to it. Entries deleted via the entry form SHALL disappear from the History list (removing the day group when it becomes empty, recomputing the day total) via the existing invalidate/reload chain.
 
@@ -199,11 +204,15 @@ Edits saved in the entry form SHALL appear in the History list with updated valu
 - **THEN** the entry is gone and its day group is removed when empty
 
 ### Requirement: Tapping a History entry row opens the entry form
-The History list SHALL respond to a tap on an entry row by opening the unified entry form (see entry-editor capability) as a full-screen cover for that entry — editable for `manual` entries, read-only (delete-only) for imported entries. History SHALL NOT offer swipe actions, long-press actions, or any other edit/delete of entries.
+The History list SHALL respond to a tap on any saved entry row by opening the unified entry form in EDIT mode on the History navigation stack (see entry-editor capability). Every saved entry SHALL be editable, regardless of its creation surface or retired provenance. History SHALL NOT offer swipe actions, long-press actions, or any other row-level edit/delete actions.
 
 #### Scenario: Tap opens the form
 - **WHEN** the user taps a History entry row
-- **THEN** the unified entry form opens for that entry — editable for `manual` entries, read-only (delete-only) for imported entries
+- **THEN** the unified entry form opens in EDIT mode with the entry's values prefilled and the normal validity-gated confirm action
+
+#### Scenario: Live Activity saved entry is editable
+- **WHEN** the user taps an entry saved through the app after a Live Activity Stop link
+- **THEN** the same editable form opens with no imported/read-only mode
 
 #### Scenario: No other row actions
 - **WHEN** the user swipes or long-presses a History entry row

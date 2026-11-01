@@ -15,8 +15,8 @@ struct RunningBannerFace: View {
     let text: String
     let iconSymbol: String
     let startedAt: Date
-    let trackURL: URL?
-    let trackStopURL: URL?
+    let trackURL: URL
+    let trackStopURL: URL
 
     var body: some View {
         // iOS 26+ renders its default Liquid Glass card for `.clear`;
@@ -40,8 +40,8 @@ struct RunningBannerFace: View {
         HStack(spacing: 12) {
             // Deep-link zone scoped to the label: the root must NOT carry
             // widgetURL — a root URL also engages on Stop taps and demands
-            // unlock on a locked phone (device finding), fighting the
-            // alwaysAllowed intent. Body taps still go to Track.
+            // unlock on a locked phone (device finding). Body taps still go
+            // to Track.
             // NOTE (log-proven): the outer stack must NOT combine
             // accessibility children — `.accessibilityElement(children:
             // .combine)` collapses both widgetURLs into one element and the
@@ -66,17 +66,11 @@ struct RunningBannerFace: View {
             .accessibilityElement(children: .combine)
             .accessibilityLabel(LiveActivityStrings.runningAccessibilityLabel(text: text))
             Spacer()
-            // A stop-URL link, not the intent button — tapping it
-            // opens the app and the app stops itself (same mechanism as the
-            // Island pill). Sibling widgetURL scoping (no root URL, no outer
-            // combine — see above). Nil URL is impossible (literal
-            // contract), but the intent button stays as the fail-safe so
-            // Stop never vanishes.
-            if let stopURL = trackStopURL {
-                LiveActivityStopCircleLink(destination: stopURL)
-            } else {
-                LiveActivityStopButton()
-            }
+            // A stop-URL link — tapping it opens the app and the app stops
+            // itself (same mechanism as the Island pill). Stop is link-only:
+            // sibling widgetURL scoping (no root URL, no outer combine —
+            // see above).
+            LiveActivityStopCircleLink(destination: trackStopURL)
         }
         // Banner breathing room, verified on-device: 8pt vertical (flush
         // edges otherwise) + 12pt leading (icon side) + 8pt trailing.

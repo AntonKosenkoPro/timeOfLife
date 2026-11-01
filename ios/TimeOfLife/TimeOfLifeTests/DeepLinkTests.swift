@@ -20,7 +20,17 @@ struct DeepLinkTests {
 
     @Test("the shared stop URL parses to stopTimer")
     func stopURLParses() {
-        #expect(DeepLink.parse(LiveActivityDeepLink.stopURL!) == .stopTimer)
+        #expect(DeepLink.parse(LiveActivityDeepLink.stopURL) == .stopTimer)
+    }
+
+    @Test("the shared Track/Stop URLs are the fixed lifio contract")
+    func sharedURLsAreFixed() {
+        #expect(LiveActivityDeepLink.trackURL.absoluteString == "lifio://track")
+        #expect(LiveActivityDeepLink.stopURL.absoluteString == "lifio://track?stop=1")
+        // Both builders round-trip through the parser: construction and
+        // parsing cannot drift (a mismatch silently kills taps).
+        #expect(DeepLink.parse(LiveActivityDeepLink.trackURL) == .track)
+        #expect(DeepLink.parse(LiveActivityDeepLink.stopURL) == .stopTimer)
     }
 
     @Test("track with other query items stays track")

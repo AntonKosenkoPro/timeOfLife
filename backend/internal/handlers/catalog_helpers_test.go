@@ -128,15 +128,6 @@ type entryResp struct {
 	} `json:"categories"`
 }
 
-// entryMetaResp mirrors the timing/provenance part of the Entry response.
-type entryMetaResp struct {
-	ID              string  `json:"id"`
-	StartedAt       string  `json:"started_at"`
-	DurationSeconds *int    `json:"duration_seconds"`
-	Source          string  `json:"source"`
-	SourceRef       *string `json:"source_ref"`
-}
-
 func newCatalogHandler(t *testing.T) (*Handler, db.Store, string, string) {
 	t.Helper()
 	store := newTestStore(t)

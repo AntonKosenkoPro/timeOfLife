@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"sync"
 	"testing"
 	"time"
 
@@ -308,47 +309,149 @@ func TestPostgres_ListEntries_ModifiedSince(t *testing.T) {
 	}
 }
 
-// Parity: provenance persistence + duplicate-import rejection.
-func TestPostgres_CreateEntry_ProvenanceAndDuplicateImport(t *testing.T) {
+// Parity: source-free creates round-trip supported values and same-ID replay
+// stays idempotent.
+func TestPostgres_CreateEntry_SourceFreeRoundTripAndReplay(t *testing.T) {
 	store := newParityStore(t)
-	uid := parityUser(t, store, "pg-provenance@example.com")
+	uid := parityUser(t, store, "pg-sourcefree@example.com")
 	base := time.Date(2026, 7, 27, 9, 0, 0, 0, time.UTC)
-	ref := "interval-42"
+	ended := base.Add(time.Hour)
 
-	// Default provenance on entries created without it.
-	e1, _, err := store.CreateEntry(context.Background(), Entry{
-		ID: uuidV7(), UserID: uid, ActivityText: "Gym", StartedAt: base,
+	e, isNew, err := store.CreateEntry(context.Background(), Entry{
+		ID: uuidV7(), UserID: uid, ActivityText: "Gym", Notes: "leg day",
+		StartedAt: base, EndedAt: &ended,
 	})
-	if err != nil {
-		t.Fatalf("CreateEntry: %v", err)
+	if err != nil || !isNew {
+		t.Fatalf("CreateEntry: isNew=%v err=%v", isNew, err)
 	}
-	if e1.Source != "manual" || e1.SourceRef != nil {
-		t.Errorf("expected manual/nil provenance, got %q/%v", e1.Source, e1.SourceRef)
-	}
-
-	// Explicit provenance persists and round-trips.
-	e2, _, err := store.CreateEntry(context.Background(), Entry{
-		ID: uuidV7(), UserID: uid, ActivityText: "Read", StartedAt: base.Add(time.Hour),
-		Source: "screentime", SourceRef: &ref,
-	})
-	if err != nil {
-		t.Fatalf("CreateEntry: %v", err)
-	}
-	got, err := store.GetEntry(context.Background(), uid, e2.ID)
+	got, err := store.GetEntry(context.Background(), uid, e.ID)
 	if err != nil {
 		t.Fatalf("GetEntry: %v", err)
 	}
-	if got.Source != "screentime" || got.SourceRef == nil || *got.SourceRef != ref {
-		t.Errorf("round-trip: expected screentime/%s, got %q/%v", ref, got.Source, got.SourceRef)
+	if got.ActivityText != "Gym" || got.Notes != "leg day" {
+		t.Errorf("round-trip text/notes mismatch: %+v", got)
+	}
+	if got.DurationSeconds == nil || *got.DurationSeconds != 3600 {
+		t.Errorf("expected duration 3600, got %+v", got.DurationSeconds)
 	}
 
-	// Duplicate (source, source_ref) is rejected.
-	_, _, err = store.CreateEntry(context.Background(), Entry{
-		ID: uuidV7(), UserID: uid, ActivityText: "Gym", StartedAt: base.Add(2 * time.Hour),
-		Source: "screentime", SourceRef: &ref,
+	replayed, isNew, err := store.CreateEntry(context.Background(), e)
+	if err != nil {
+		t.Fatalf("replay: %v", err)
+	}
+	if isNew || replayed.ID != e.ID {
+		t.Errorf("replay must return the same record without duplicating, got isNew=%v id=%q", isNew, replayed.ID)
+	}
+}
+
+// Parity (F11): concurrent same-id creates converge on one row — the loser
+// replays the winner instead of surfacing a raw unique-violation 500.
+// Gated on TEST_PG_DSN like the rest of this file.
+func TestPostgres_CreateEntry_ConcurrentSameID(t *testing.T) {
+	store := newParityStore(t)
+	uid := parityUser(t, store, "pg-entryrace@example.com")
+	base := time.Date(2026, 7, 27, 9, 0, 0, 0, time.UTC)
+	id := uuidV7()
+	const n = 32
+	var wg sync.WaitGroup
+	errs := make([]error, n)
+	created := make([]bool, n)
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			_, isNew, err := store.CreateEntry(context.Background(), Entry{
+				ID: id, UserID: uid, ActivityText: "Gym racer", StartedAt: base,
+			})
+			errs[i] = err
+			created[i] = isNew
+		}(i)
+	}
+	wg.Wait()
+	createdCount := 0
+	for i := 0; i < n; i++ {
+		if errs[i] != nil {
+			t.Errorf("goroutine %d: concurrent same-id create must replay, got %v", i, errs[i])
+		}
+		if created[i] {
+			createdCount++
+		}
+	}
+	if createdCount != 1 {
+		t.Errorf("expected exactly 1 created entry, got %d", createdCount)
+	}
+}
+
+// Parity: a same-id create colliding with another user's entry falls back
+// to the original constraint error — never an ErrNotFound that would map
+// to a 404 existence oracle for another account's ids.
+func TestPostgres_CreateEntry_CrossUserIDCollision(t *testing.T) {
+	store := newParityStore(t)
+	uidA := parityUser(t, store, "pg-a@example.com")
+	uidB := parityUser(t, store, "pg-b@example.com")
+	base := time.Date(2026, 7, 27, 9, 0, 0, 0, time.UTC)
+	id := uuidV7()
+	if _, _, err := store.CreateEntry(context.Background(), Entry{
+		ID: id, UserID: uidA, ActivityText: "A's entry", StartedAt: base,
+	}); err != nil {
+		t.Fatalf("seed user A entry: %v", err)
+	}
+	_, _, err := store.CreateEntry(context.Background(), Entry{
+		ID: id, UserID: uidB, ActivityText: "B's entry", StartedAt: base,
 	})
-	if !errors.Is(err, ErrDuplicateImport) {
-		t.Fatalf("expected ErrDuplicateImport, got %v", err)
+	if err == nil {
+		t.Fatal("expected an error for a cross-user id collision, got nil")
+	}
+	if errors.Is(err, ErrNotFound) {
+		t.Errorf("cross-user collision must not map to ErrNotFound (404 oracle), got %v", err)
+	}
+}
+
+// Parity: legacy rows keep their retired provenance values unread, and a
+// supported-field update preserves them.
+func TestPostgres_LegacyProvenanceRow_PreservedWithoutExposure(t *testing.T) {
+	store := newParityStore(t)
+	uid := parityUser(t, store, "pg-legacy@example.com")
+	base := time.Date(2026, 7, 27, 9, 0, 0, 0, time.UTC)
+	ended := base.Add(time.Hour)
+	id := uuidV7()
+	ctx := context.Background()
+	if _, err := store.DB().Exec(ctx,
+		`INSERT INTO entries (id, user_id, activity_text, notes, started_at, ended_at, duration_seconds, source, source_ref, created_at, updated_at)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $10)`,
+		id, uid, "Gym", "old notes", base, ended, 3600, "garmin", "activity-7", base,
+	); err != nil {
+		t.Fatalf("seed legacy row: %v", err)
+	}
+
+	got, err := store.GetEntry(ctx, uid, id)
+	if err != nil {
+		t.Fatalf("GetEntry: %v", err)
+	}
+	if got.ID != id || got.ActivityText != "Gym" || got.Notes != "old notes" {
+		t.Errorf("legacy row values not preserved: %+v", got)
+	}
+
+	updatedAt := base.Add(2 * time.Hour)
+	updated, err := store.UpdateEntry(ctx, uid, id, EntryPatch{
+		Notes: ptr("new notes"), UpdatedAt: updatedAt,
+	})
+	if err != nil {
+		t.Fatalf("UpdateEntry: %v", err)
+	}
+	if updated.Notes != "new notes" || updated.ActivityText != "Gym" {
+		t.Errorf("legacy row update must preserve values: %+v", updated)
+	}
+
+	var source string
+	var sourceRef *string
+	if err := store.DB().QueryRow(ctx,
+		`SELECT source, source_ref FROM entries WHERE id = $1 AND user_id = $2`, id, uid,
+	).Scan(&source, &sourceRef); err != nil {
+		t.Fatalf("read legacy provenance: %v", err)
+	}
+	if source != "garmin" || sourceRef == nil || *sourceRef != "activity-7" {
+		t.Errorf("legacy provenance must be preserved on update, got %q/%v", source, sourceRef)
 	}
 }
 

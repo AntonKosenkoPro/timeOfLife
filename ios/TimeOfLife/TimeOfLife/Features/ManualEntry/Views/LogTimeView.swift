@@ -12,15 +12,15 @@ import SwiftUI
 /// X/checkmark (CREATE sheet) or Back/checkmark (pushed EDIT, fix-50-nav-buttons
 /// Calendar grammar) live in the navigation bar; the
 /// confirm action is a validity gate — disabled until the trimmed name is
-/// non-empty and End is strictly after Start. LOCKED mode shows the values
-/// read-only with Back only (no dismiss text button, no confirm); EDIT and LOCKED
-/// Delete. A save failure surfaces as a non-field error with the draft
-/// intact and the form open.
+/// non-empty and End is strictly after Start. Every saved entry opens EDIT
+/// with the same cards; Delete is offered for any saved entry. A save
+/// failure surfaces as a non-field error with the draft intact and the
+/// form open.
 ///
 /// Gesture rule (fix-entry-form-gestures): no system gesture is ever
 /// disabled here — the wheel pickers keep non-picker grab area around them
 /// so pull-down-to-scroll always reaches the outer ScrollView, and the
-/// pushed (EDIT/LOCKED) presentation provides the edge-back gesture.
+/// pushed (EDIT) presentation provides the edge-back gesture.
 /// Tap-away keyboard dismissal stays wired through the shared `FormCard`
 /// container as a plain tap, but no inline text field remains on this form
 /// (name is a push row; notes editing lives on the pushed `NotesEditorPage`
@@ -44,7 +44,7 @@ struct LogTimeView: View {
     @State private var isShowingCategoryEditor = false
     /// The text field holding focus, if any (tap-away/scroll-away resigns it).
     @FocusState private var focusedField: FormField?
-    /// True when pushed onto the presenter's NavigationStack (EDIT/LOCKED
+    /// True when pushed onto the presenter's NavigationStack (EDIT
     /// via History) instead of presented as a sheet (CREATE): the outer
     /// stack owns the navigation chrome AND the back stack (edge-back
     /// gesture), so the internal NavigationStack is skipped — never nested.
@@ -95,23 +95,10 @@ struct LogTimeView: View {
         ScrollView {
             VStack(spacing: Theme.spacingMedium) {
                 nameCard
-                    .disabled(vm.isLocked)
-                    .opacity(vm.isLocked ? Theme.opacityLockedForm : 1)
                 startCard
-                    .disabled(vm.isLocked)
-                    .opacity(vm.isLocked ? Theme.opacityLockedForm : 1)
                 endCard
-                    .disabled(vm.isLocked)
-                    .opacity(vm.isLocked ? Theme.opacityLockedForm : 1)
                 categoriesCard
-                    .disabled(vm.isLocked)
-                    .opacity(vm.isLocked ? Theme.opacityLockedForm : 1)
                 notesCard
-                    .disabled(vm.isLocked)
-                    .opacity(vm.isLocked ? Theme.opacityLockedForm : 1)
-                if vm.isLocked {
-                    lockedNote
-                }
                 if vm.errorMessage != nil {
                     errorSection
                 }
@@ -143,7 +130,7 @@ struct LogTimeView: View {
                     titleSubtitle
                 }
                 // Calendar grammar (fix-50-nav-buttons): the pushed form
-                // (EDIT/LOCKED) dismisses via the system Back button, so no
+                // (EDIT) dismisses via the system Back button, so no
                 // leading dismiss item is shown there; the CREATE sheet (no
                 // back stack) dismisses via an X button with the same action.
                 EditorToolbar(
@@ -152,7 +139,7 @@ struct LogTimeView: View {
                     dismissAccessibilityId: "LogTimeDismissButton",
                     isDismissDisabled: false,
                     onDismiss: dismiss(),
-                    showsConfirm: !vm.isLocked,
+                    showsConfirm: true,
                     confirmAccessibilityLabel: vm.mode == .edit
                         ? L10n.entryConfirmSaveLabel.text
                         : L10n.entryConfirmAddLabel.text,
@@ -230,7 +217,6 @@ struct LogTimeView: View {
         switch vm.mode {
         case .create: L10n.logTimeTitle.text
         case .edit: L10n.entryEditTitle.text
-        case .locked: L10n.entryLockedTitle.text
         }
     }
 
@@ -253,41 +239,24 @@ struct LogTimeView: View {
     // MARK: - Name row
 
     @ViewBuilder private var nameCard: some View {
-        if vm.isLocked {
-            FormCard(accessibilityID: "EntryNameRow", resignFocus: focusedField = nil) {
-                VStack(alignment: .leading, spacing: Theme.spacingExtraSmall) {
-                    HStack(spacing: Theme.spacingSmall) {
-                        Text(L10n.entryNameLabel.text)
-                            .font(.caption)
-                            .foregroundStyle(Theme.textSecondary)
-                        Spacer()
-                    }
-                    Text(vm.name)
-                        .font(.body)
-                        .foregroundStyle(Theme.textPrimary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .frame(minHeight: Theme.minTapArea)
-                }
-            }
-        } else {
-            // Full-card push: the link owns the padded chrome (mirrors
-            // FormCard) so caption, chevron, value, blank, and padding
-            // all push. No tap-away here — it would consume those taps.
-            // No resign (issue #67): focus transfers to the picker with
-            // no keyboard flicker. LOCKED uses the FormCard branch (inert).
-            NavigationLink {
-                NamePicker(
-                    initialText: vm.name,
-                    recents: vm.nameRecents,
-                    categories: Dictionary(uniqueKeysWithValues: vm.availableCategories.map { ($0.id, $0) }),
-                    placeholder: L10n.entryNamePlaceholder.text,
-                    emptyHint: L10n.timerRecentsEmptyHint.text,
-                    onCompleteSuggestion: {
-                        vm.applySuggestion(text: $0.text, categoryIDs: $0.categoryIDs)
-                    },
-                    onCompleteText: { vm.completeTypedName($0) }
-                )
-            } label: {
+        // Full-card push: the link owns the padded chrome (mirrors
+        // FormCard) so caption, chevron, value, blank, and padding
+        // all push. No tap-away here — it would consume those taps.
+        // No resign (issue #67): focus transfers to the picker with
+        // no keyboard flicker.
+        NavigationLink {
+            NamePicker(
+                initialText: vm.name,
+                recents: vm.nameRecents,
+                categories: Dictionary(uniqueKeysWithValues: vm.availableCategories.map { ($0.id, $0) }),
+                placeholder: L10n.entryNamePlaceholder.text,
+                emptyHint: L10n.timerRecentsEmptyHint.text,
+                onCompleteSuggestion: {
+                    vm.applySuggestion(text: $0.text, categoryIDs: $0.categoryIDs)
+                },
+                onCompleteText: { vm.completeTypedName($0) }
+            )
+        } label: {
                 VStack(alignment: .leading, spacing: Theme.spacingExtraSmall) {
                     HStack(spacing: Theme.spacingSmall) {
                         Text(L10n.entryNameLabel.text)
@@ -312,12 +281,11 @@ struct LogTimeView: View {
                 .background(Theme.backgroundSecondary)
                 .clipShape(RoundedRectangle(cornerRadius: Theme.cornerRadius))
                 .contentShape(RoundedRectangle(cornerRadius: Theme.cornerRadius))
-            }
-            .buttonStyle(.plain)
+        }
+        .buttonStyle(.plain)
             .accessibilityLabel(L10n.entryNameLabel.text)
             .accessibilityValue(vm.name)
             .accessibilityIdentifier("EntryNameRow")
-        }
     }
 
     // MARK: - Categories row
@@ -350,34 +318,19 @@ struct LogTimeView: View {
 
     // MARK: - Notes row (presenter + pushed editor, separate-notes-editor)
 
-    /// Read-only Notes presenter (approved spike variant B): a caption row
+    /// Notes presenter (approved spike variant B): a caption row
     /// with a corner-balanced trailing chevron plus full-width 1–5 line
     /// text with truncation, placeholder when empty. Tapping pushes the
     /// shared `NotesEditorPage` (copy-on-open: X discards, ✓ writes
-    /// `vm.notes` only and the validity gate re-evaluates). LOCKED mode
-    /// renders the same presenter read-only with no navigation.
+    /// `vm.notes` only and the validity gate re-evaluates).
     @ViewBuilder private var notesCard: some View {
-        if vm.isLocked {
-            FormCard(accessibilityID: "EntryNotesRow", resignFocus: focusedField = nil) {
-                VStack(alignment: .leading, spacing: Theme.spacingExtraSmall) {
-                    Text(L10n.entryNotesLabel.text)
-                        .font(.caption)
-                        .foregroundStyle(Theme.textSecondary)
-                    Text(vm.notes.isEmpty ? L10n.entryNotesPlaceholder.text : vm.notes)
-                        .font(.body)
-                        .lineLimit(1...5)
-                        .foregroundStyle(vm.notes.isEmpty ? Theme.textSecondary : Theme.textPrimary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-            }
-        } else {
-            // Full-card push, mirrors the Name card: the link owns the
-            // padded chrome so caption, chevron, preview, blank, and
-            // padding all push. No tap-away here — it would consume those
-            // taps. LOCKED uses the FormCard branch (inert).
-            NavigationLink {
-                NotesEditorPage(initialText: vm.notes, entryName: vm.name) { vm.notes = $0 }
-            } label: {
+        // Full-card push, mirrors the Name card: the link owns the
+        // padded chrome so caption, chevron, preview, blank, and
+        // padding all push. No tap-away here — it would consume those
+        // taps.
+        NavigationLink {
+            NotesEditorPage(initialText: vm.notes, entryName: vm.name) { vm.notes = $0 }
+        } label: {
                 VStack(alignment: .leading, spacing: Theme.spacingExtraSmall) {
                     HStack(spacing: Theme.spacingSmall) {
                         Text(L10n.entryNotesLabel.text)
@@ -400,39 +353,16 @@ struct LogTimeView: View {
                 .background(Theme.backgroundSecondary)
                 .clipShape(RoundedRectangle(cornerRadius: Theme.cornerRadius))
                 .contentShape(RoundedRectangle(cornerRadius: Theme.cornerRadius))
-            }
-            .buttonStyle(.plain)
+        }
+        .buttonStyle(.plain)
             .accessibilityLabel(L10n.entryNotesLabel.text)
             .accessibilityValue(vm.notes.isEmpty ? L10n.entryNotesPlaceholder.text : vm.notes)
             .accessibilityIdentifier("EntryNotesRow")
-        }
-    }
-
-    // MARK: - Locked provenance note
-
-    /// Read-only note for imported entries (LOCKED mode): bare source name
-    /// plus why editing is disabled.
-    private var lockedNote: some View {
-        HStack(spacing: Theme.spacingExtraSmall) {
-            Image(systemName: "arrow.triangle.2.circlepath")
-            Text(String(
-                format: L10n.entryLockedNote.text,
-                locale: .current,
-                EntryProvenance.name(for: vm.editingEntry?.source ?? "manual")
-            ))
-        }
-        .font(.caption)
-        .foregroundStyle(Theme.textSecondary)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(Theme.spacingMedium)
-        .background(Theme.backgroundSecondary)
-        .clipShape(RoundedRectangle(cornerRadius: Theme.cornerRadius))
-        .accessibilityIdentifier("EntryLockedNote")
     }
 
     // MARK: - Delete
 
-    /// Bottom-of-page destructive Delete (EDIT + LOCKED modes only).
+    /// Bottom-of-page destructive Delete (EDIT mode only).
     private var deleteSection: some View {
         DestructiveBottomButton(
             title: L10n.entryDelete.text,

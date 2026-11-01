@@ -195,23 +195,7 @@
 "insights.empty.today" = "Сегодня пока ничего не учтено.";
 "insights.empty.week" = "На этой неделе пока ничего не учтено.";
 
-// Entry provenance (entry-provenance spec, activity-detail-sheet)
-"provenance.via.widget" = "через Виджет";
-"provenance.via.siri" = "через Siri";
-"provenance.via.control" = "через Элемент управления";
-"provenance.via.screentime" = "через Экранное время";
-"provenance.via.garmin" = "через Garmin";
-"provenance.via.calendar" = "через Календарь";
-"provenance.via.healthkit" = "через Здоровье";
 
-// Entry source names (activity-detail-sheet entry rows: sync icon + name)
-"provenance.name.widget" = "Виджет";
-"provenance.name.siri" = "Siri";
-"provenance.name.control" = "Элемент управления";
-"provenance.name.screentime" = "Экранное время";
-"provenance.name.garmin" = "Garmin";
-"provenance.name.calendar" = "Календарь";
-"provenance.name.healthkit" = "Здоровье";
 
 // Log Time sheet (manual-entry spec)
 "logTime.title" = "Записать время";
@@ -219,9 +203,8 @@
 "logTime.starts" = "Начало";
 "logTime.ends" = "Конец";
 
-// Unified entry form (entry-editor spec: EDIT + LOCKED modes)
+// Unified entry form (entry-editor spec: EDIT modes)
 "entry.editTitle" = "Редактировать запись";
-"entry.lockedTitle" = "Импортированная запись";
 "entry.dismissLabel" = "Закрыть";
 "entry.confirmAddLabel" = "Добавить запись";
 "entry.confirmSaveLabel" = "Сохранить запись";
@@ -230,7 +213,6 @@
 "entry.deleteMessage" = "Запись будет удалена. Отменить можно встряской.";
 "entry.deleteConfirm" = "Удалить";
 "entry.staleError" = "Запись изменилась. Закройте и откройте её заново, затем повторите.";
-"entry.lockedNote" = "Импортировано через %@: редактирование отключено, чтобы избежать конфликтов с источником.";
 "entry.nameLabel" = "Название";
 "entry.namePlaceholder" = "напр. Спортзал";
 "entry.duration" = "Длительность: %@";

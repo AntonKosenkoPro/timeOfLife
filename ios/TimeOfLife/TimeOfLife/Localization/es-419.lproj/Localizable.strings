@@ -192,23 +192,7 @@
 "insights.empty.today" = "Hoy aún no hay nada registrado.";
 "insights.empty.week" = "Esta semana aún no hay nada registrado.";
 
-// Entry provenance (entry-provenance spec, activity-detail-sheet)
-"provenance.via.widget" = "vía Widget";
-"provenance.via.siri" = "vía Siri";
-"provenance.via.control" = "vía Control";
-"provenance.via.screentime" = "vía Screen Time";
-"provenance.via.garmin" = "vía Garmin";
-"provenance.via.calendar" = "vía Calendario";
-"provenance.via.healthkit" = "vía HealthKit";
 
-// Entry source names (activity-detail-sheet entry rows: sync icon + name)
-"provenance.name.widget" = "Widget";
-"provenance.name.siri" = "Siri";
-"provenance.name.control" = "Control";
-"provenance.name.screentime" = "Screen Time";
-"provenance.name.garmin" = "Garmin";
-"provenance.name.calendar" = "Calendario";
-"provenance.name.healthkit" = "HealthKit";
 
 // Log Time sheet (manual-entry spec)
 "logTime.title" = "Registrar tiempo";
@@ -216,9 +200,8 @@
 "logTime.starts" = "Inicio";
 "logTime.ends" = "Fin";
 
-// Unified entry form (entry-editor spec: EDIT + LOCKED modes)
+// Unified entry form (entry-editor spec: EDIT modes)
 "entry.editTitle" = "Editar entrada";
-"entry.lockedTitle" = "Entrada importada";
 "entry.dismissLabel" = "Cerrar";
 "entry.confirmAddLabel" = "Añadir entrada";
 "entry.confirmSaveLabel" = "Guardar entrada";
@@ -227,7 +210,6 @@
 "entry.deleteMessage" = "Esta entrada será eliminada. Agitar para deshacer.";
 "entry.deleteConfirm" = "Eliminar";
 "entry.staleError" = "Esta entrada cambió en otro lugar. Descartar y volver a abrirla e intentar de nuevo.";
-"entry.lockedNote" = "Importado vía %@ — la edición está desactivada para evitar conflictos con la fuente.";
 "entry.nameLabel" = "Nombre";
 "entry.namePlaceholder" = "p. ej., Gimnasio";
 "entry.duration" = "Duración: %@";

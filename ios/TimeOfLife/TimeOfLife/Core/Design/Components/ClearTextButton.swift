@@ -2,12 +2,11 @@ import SwiftUI
 
 /// Testable visibility rule for every clear (`×`) button (issue #42
 /// follow-ups): shown only when the field is focused AND holds non-empty
-/// text, never when locked/read-only. Call sites pass their existing
-/// `@FocusState` plus the draft text plus the lock state. Whitespace-only
-/// text counts as non-empty (one tap clears it to truly empty).
+/// text. Whitespace-only text counts as non-empty (one tap clears it to
+/// truly empty).
 enum ClearButtonVisibility {
-    static func shouldShow(isFocused: Bool, text: String, isLocked: Bool = false) -> Bool {
-        isFocused && !text.isEmpty && !isLocked
+    static func shouldShow(isFocused: Bool, text: String) -> Bool {
+        isFocused && !text.isEmpty
     }
 }
 

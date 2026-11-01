@@ -23,9 +23,8 @@ import GRDB
 /// active account's, on the explicit per-account Erase action.
 ///
 /// The database is opened with `.completeUntilFirstUserAuthentication` (the
-/// App Group container default), so it is accessible to `alwaysAllowed`
-/// lock-screen Control intents after the device has been unlocked at least
-/// once since boot.
+/// App Group container default), so it is accessible after the device has
+/// been unlocked at least once since boot.
 actor LocalStore {
     /// The App Group shared container identifier (local-first-store spec).
     static let appGroupID = "group.com.antonkosenko.timeoflifeapp"
@@ -220,6 +219,7 @@ actor LocalStore {
         guard let userID else {
             try migrator().migrate(queue)
             try healTimerStateNotesColumn(in: queue)
+            try healDropRetiredProvenanceColumns(in: queue)
             return (queue, nil)
         }
         let sanitized = try sanitizedUserID(userID)
@@ -230,6 +230,7 @@ actor LocalStore {
         }
         try migrator().migrate(queue)
         try healTimerStateNotesColumn(in: queue)
+        try healDropRetiredProvenanceColumns(in: queue)
         if let existing = try boundUserMarker(in: queue), existing != sanitized {
             throw LocalStoreError.accountMismatch
         }
@@ -248,6 +249,33 @@ actor LocalStore {
                 WHERE type = 'table' AND name = 'local_metadata'
                 """) ?? 0
             return count > 0
+        }
+    }
+
+    /// Drops the retired entry-provenance residue (`source`/`source_ref`
+    /// columns and their unique index) left by the edited-in-place v1/v2
+    /// creations: installs migrated before the removal keep those columns
+    /// (and their unique index) forever while fresh installs never get
+    /// them. Nothing reads or writes them, so the residue is inert — but
+    /// the split means any future SQL touching those columns would fail
+    /// only on upgraded devices. Dropping converges both shapes to the
+    /// fresh-install form; each statement is a no-op where the residue is
+    /// absent. The index goes first: SQLite refuses to drop a column that
+    /// backs a UNIQUE constraint. Checks run inside the write block so a
+    /// concurrent first-open cannot act on a stale read.
+    private static func healDropRetiredProvenanceColumns(in queue: DatabaseQueue) throws {
+        try queue.write { db in
+            // Exact legacy name (GRDB defaultIndexName); no-op when absent.
+            // A substring match would risk a future index that merely
+            // mentions these columns.
+            try db.execute(sql: "DROP INDEX IF EXISTS \"index_entries_on_source_source_ref\"")
+            let columnNames = try String.fetchAll(db, sql: "SELECT name FROM pragma_table_info('entries')")
+            if columnNames.contains("source_ref") {
+                try db.execute(sql: "ALTER TABLE entries DROP COLUMN source_ref")
+            }
+            if columnNames.contains("source") {
+                try db.execute(sql: "ALTER TABLE entries DROP COLUMN source")
+            }
         }
     }
 
@@ -392,12 +420,9 @@ actor LocalStore {
                 t.column("started_at", .datetime).notNull()
                 t.column("ended_at", .datetime)
                 t.column("duration_seconds", .integer)
-                t.column("source", .text).notNull().defaults(to: "manual")
-                t.column("source_ref", .text)
                 t.column("created_at", .datetime).notNull()
                 t.column("updated_at", .datetime).notNull()
             }
-            try db.create(indexOn: "entries", columns: ["source", "source_ref"], options: [.unique])
             try db.create(indexOn: "entries", columns: ["activity_id"])
             try db.create(table: "timer_state") { t in
                 t.column("id", .text).primaryKey()
@@ -431,6 +456,7 @@ actor LocalStore {
             try db.rename(table: "entries", to: "entries_old")
             // New entries shape: text, notes, and timing only — the display
             // name moves onto the entry (D1). `notes` defaults to ''.
+            // Entries carry no producer provenance.
             try db.create(table: "entries_new") { t in
                 t.column("id", .text).primaryKey()
                 t.column("activity_text", .text).notNull()
@@ -438,8 +464,6 @@ actor LocalStore {
                 t.column("started_at", .datetime).notNull()
                 t.column("ended_at", .datetime)
                 t.column("duration_seconds", .integer)
-                t.column("source", .text).notNull().defaults(to: "manual")
-                t.column("source_ref", .text)
                 t.column("created_at", .datetime).notNull()
                 t.column("updated_at", .datetime).notNull()
             }
@@ -448,10 +472,10 @@ actor LocalStore {
             try db.execute(sql: """
                 INSERT INTO entries_new
                     (id, activity_text, notes, started_at, ended_at, duration_seconds,
-                     source, source_ref, created_at, updated_at)
+                     created_at, updated_at)
                 SELECT e.id, COALESCE(a.name, ''), COALESCE(a.notes, ''),
                        e.started_at, e.ended_at, e.duration_seconds,
-                       e.source, e.source_ref, e.created_at, e.updated_at
+                       e.created_at, e.updated_at
                 FROM entries_old e
                 LEFT JOIN activities a ON a.id = e.activity_id
                 """)
@@ -482,7 +506,6 @@ actor LocalStore {
                 """)
             try db.drop(table: "entries_old")
             try db.rename(table: "entries_new", to: "entries")
-            try db.create(indexOn: "entries", columns: ["source", "source_ref"], options: [.unique])
             // Ordered per-entry categories (D2): the old
             // activity_categories(position) shape, re-anchored to entries —
             // now with the live cascade to the final `entries` table.
@@ -1025,8 +1048,6 @@ actor LocalStore {
             startedAt: row["started_at"],
             endedAt: row["ended_at"],
             durationSeconds: row["duration_seconds"],
-            source: row["source"],
-            sourceRef: row["source_ref"],
             categoryIDs: categoryIDs,
             notes: row["notes"],
             createdAt: row["created_at"],
@@ -1072,12 +1093,12 @@ actor LocalStore {
                 try db.execute(
                     sql: """
                         INSERT INTO entries (id, activity_text, notes, started_at, ended_at, duration_seconds,
-                                             source, source_ref, created_at, updated_at)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                             created_at, updated_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                         """,
                     arguments: [
                         entry.id, trimmed, entry.notes, entry.startedAt, entry.endedAt,
-                        entry.durationSeconds, entry.source, entry.sourceRef,
+                        entry.durationSeconds,
                         entry.createdAt, entry.updatedAt,
                     ]
                 )
@@ -1147,21 +1168,19 @@ actor LocalStore {
             try db.execute(
                 sql: """
                     INSERT INTO entries (id, activity_text, notes, started_at, ended_at, duration_seconds,
-                                         source, source_ref, created_at, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                         created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(id) DO UPDATE SET
                         activity_text = excluded.activity_text,
                         notes = excluded.notes,
                         started_at = excluded.started_at,
                         ended_at = excluded.ended_at,
                         duration_seconds = excluded.duration_seconds,
-                        source = excluded.source,
-                        source_ref = excluded.source_ref,
                         updated_at = excluded.updated_at
                     """,
                 arguments: [
                     entry.id, entry.activityText, entry.notes, entry.startedAt,
-                    entry.endedAt, entry.durationSeconds, entry.source, entry.sourceRef,
+                    entry.endedAt, entry.durationSeconds,
                     entry.createdAt, entry.updatedAt,
                 ]
             )
@@ -1195,8 +1214,6 @@ actor LocalStore {
             startedAt: row["started_at"],
             endedAt: row["ended_at"],
             durationSeconds: row["duration_seconds"],
-            source: row["source"],
-            sourceRef: row["source_ref"],
             categoryIDs: categoryIDs,
             notes: row["notes"],
             createdAt: row["created_at"],
@@ -1720,13 +1737,12 @@ actor LocalStore {
                 try db.execute(
                     sql: """
                         INSERT OR IGNORE INTO entries (id, activity_text, notes, started_at, ended_at, duration_seconds,
-                                                       source, source_ref, created_at, updated_at)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                                       created_at, updated_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                         """,
                     arguments: [
                         entry.id, entry.activityText, entry.notes, entry.startedAt,
-                        entry.endedAt, entry.durationSeconds, entry.source,
-                        entry.sourceRef, entry.createdAt, entry.updatedAt,
+                        entry.endedAt, entry.durationSeconds, entry.createdAt, entry.updatedAt,
                     ]
                 )
                 for (index, categoryID) in entry.categoryIDs.enumerated() {
@@ -2003,13 +2019,12 @@ actor LocalStore {
             try db.execute(
                 sql: """
                     INSERT OR IGNORE INTO entries (id, activity_text, notes, started_at, ended_at, duration_seconds,
-                                                   source, source_ref, created_at, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                                   created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                 arguments: [
                     entry.id, entry.activityText, entry.notes, entry.startedAt,
-                    entry.endedAt, entry.durationSeconds, entry.source,
-                    entry.sourceRef, entry.createdAt, entry.updatedAt,
+                    entry.endedAt, entry.durationSeconds, entry.createdAt, entry.updatedAt,
                 ]
             )
             for (index, categoryID) in entry.categoryIDs.enumerated() {
