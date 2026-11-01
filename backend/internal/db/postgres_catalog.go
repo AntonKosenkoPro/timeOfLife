@@ -455,13 +455,18 @@ func (s *PostgresStore) CreateEntry(ctx context.Context, e Entry) (Entry, bool, 
 		// back before re-reading, then replay the winner instead of
 		// surfacing a raw 500.
 		if pgIsUniqueViolation(err) {
-			_ = tx.Rollback(ctx)
-			if existing, getErr := s.pgGetEntryRow(ctx, e.UserID, e.ID); getErr == nil {
-				items := []Entry{existing}
-				if tagErr := s.pgAttachEntryTags(ctx, e.UserID, items); tagErr == nil {
-					return items[0], false, nil
-				}
+			if rbErr := tx.Rollback(ctx); rbErr != nil && !errors.Is(rbErr, pgx.ErrTxClosed) {
+				return Entry{}, false, fmt.Errorf("create entry rollback: %w", rbErr)
 			}
+			existing, getErr := s.pgGetEntryRow(ctx, e.UserID, e.ID)
+			if getErr != nil {
+				return Entry{}, false, fmt.Errorf("create entry replay read: %w", getErr)
+			}
+			items := []Entry{existing}
+			if tagErr := s.pgAttachEntryTags(ctx, e.UserID, items); tagErr != nil {
+				return Entry{}, false, fmt.Errorf("create entry replay tags: %w", tagErr)
+			}
+			return items[0], false, nil
 		}
 		return Entry{}, false, fmt.Errorf("create entry: %w", err)
 	}

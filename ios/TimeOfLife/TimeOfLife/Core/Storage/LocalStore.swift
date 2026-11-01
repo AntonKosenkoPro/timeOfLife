@@ -219,6 +219,7 @@ actor LocalStore {
         guard let userID else {
             try migrator().migrate(queue)
             try healTimerStateNotesColumn(in: queue)
+            try healDropRetiredProvenanceColumns(in: queue)
             return (queue, nil)
         }
         let sanitized = try sanitizedUserID(userID)
@@ -229,6 +230,7 @@ actor LocalStore {
         }
         try migrator().migrate(queue)
         try healTimerStateNotesColumn(in: queue)
+        try healDropRetiredProvenanceColumns(in: queue)
         if let existing = try boundUserMarker(in: queue), existing != sanitized {
             throw LocalStoreError.accountMismatch
         }
@@ -247,6 +249,52 @@ actor LocalStore {
                 WHERE type = 'table' AND name = 'local_metadata'
                 """) ?? 0
             return count > 0
+        }
+    }
+
+    /// Forward-heals pre-notes `timer_state` tables (separate-notes-editor):
+    /// installs migrated before the `notes` column shipped carry the old
+    /// shape, and the edited-in-place v2 creation never re-runs for them —
+    /// without this, every timer write throws ("no such column"), Start
+    /// fails to persist, and a later pop reconciles the in-memory run away
+    /// (error banner plus lost tracking). `ALTER TABLE ... ADD COLUMN`
+    /// converges the table to the new shape while preserving any in-flight
+    /// draft; no legacy read path exists anywhere — after the heal only
+    /// the new shape is ever read or written. Fresh installs already carry
+    /// the column, so the check is a no-op there. A missing table (never
+    /// the case post-migrate) fails loudly at the ALTER instead of
+    /// running silently against the wrong shape.
+    /// Drops the retired entry-provenance residue (`source`/`source_ref`
+    /// columns and any index over them) left by the edited-in-place v1/v2
+    /// creations: installs migrated before the removal keep those columns
+    /// (and their unique index) forever while fresh installs never get
+    /// them. Nothing reads or writes them, so the residue is inert — but
+    /// the split means any future SQL touching those columns would fail
+    /// only on upgraded devices. Dropping converges both shapes to the
+    /// fresh-install form; each statement is a no-op where the residue is
+    /// absent. The index goes first: SQLite refuses to drop a column that
+    /// backs a UNIQUE constraint.
+    private static func healDropRetiredProvenanceColumns(in queue: DatabaseQueue) throws {
+        let columnNames = try queue.read { db in
+            try String.fetchAll(db, sql: "SELECT name FROM pragma_table_info('entries')")
+        }
+        let indexNames = try queue.read { db in
+            try String.fetchAll(db, sql: """
+                SELECT name FROM sqlite_master
+                WHERE type = 'index' AND tbl_name = 'entries' AND sql LIKE '%source%'
+                """)
+        }
+        guard columnNames.contains("source") || columnNames.contains("source_ref") || !indexNames.isEmpty else { return }
+        try queue.write { db in
+            for name in indexNames {
+                try db.execute(sql: "DROP INDEX IF EXISTS \"\(name)\"")
+            }
+            if columnNames.contains("source_ref") {
+                try db.execute(sql: "ALTER TABLE entries DROP COLUMN source_ref")
+            }
+            if columnNames.contains("source") {
+                try db.execute(sql: "ALTER TABLE entries DROP COLUMN source")
+            }
         }
     }
 

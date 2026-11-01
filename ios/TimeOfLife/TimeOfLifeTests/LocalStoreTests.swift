@@ -38,6 +38,40 @@ struct LocalStoreTests {
         }
     }
 
+    /// Restores the retired provenance residue to simulate a pre-removal
+    /// install (edited-in-place v1/v2 creations): upgraded files keep
+    /// `source`/`source_ref` plus their unique index while fresh installs
+    /// never get them.
+    /// Fixture-only: app mutation paths stay behind LocalStore.
+    private func regressEntriesToLegacyProvenanceShape(at url: URL) throws {
+        let queue = try DatabaseQueue(path: url.path)
+        try queue.write { db in
+            try db.execute(sql: "ALTER TABLE entries ADD COLUMN source TEXT NOT NULL DEFAULT 'manual'")
+            try db.execute(sql: "ALTER TABLE entries ADD COLUMN source_ref TEXT")
+            try db.execute(sql: "CREATE UNIQUE INDEX index_entries_on_source_source_ref ON entries (source, source_ref)")
+        }
+    }
+
+    /// Non-async readers so GRDB resolves the synchronous `fetchAll`/`read`
+    /// overloads (an async context would infer the async variants, which
+    /// `DatabaseQueue.read` cannot take). Fixture-only.
+    private func entryColumnNames(at url: URL) throws -> [String] {
+        let queue = try DatabaseQueue(path: url.path)
+        return try queue.read { db in
+            try String.fetchAll(db, sql: "SELECT name FROM pragma_table_info('entries')")
+        }
+    }
+
+    private func entrySourceIndexNames(at url: URL) throws -> [String] {
+        let queue = try DatabaseQueue(path: url.path)
+        return try queue.read { db in
+            try String.fetchAll(db, sql: """
+                SELECT name FROM sqlite_master
+                WHERE type = 'index' AND tbl_name = 'entries' AND sql LIKE '%source%'
+                """)
+        }
+    }
+
     private func temporaryStoreURL() -> URL {
         temporaryStoreURL(userID: "u1")
     }
@@ -325,6 +359,10 @@ struct LocalStoreTests {
             return
         }
         #expect(try await store.entries().count == 1)
+        // A replay enqueues no second create row: no duplicate push.
+        // (Entry-scoped, so stricter than the global one-row check in
+        // createEntryIsIdempotent.)
+        #expect(try await store.outboxRows().filter { $0.resource == "entry" && $0.op == "create" }.count == 1)
     }
 
     // MARK: - Recents (timer-capture-experience D5)
@@ -552,6 +590,35 @@ struct LocalStoreTests {
         let draft = try await store.timerDraft()
         #expect(draft?.notes == "healed")
         #expect(draft?.activityText == "Gym")
+    }
+
+    @Test("open drops the retired provenance residue and keeps entries working")
+    func openHealsLegacyProvenanceResidue() async throws {
+        // Simulate an install migrated before the provenance removal:
+        // regress the table to the old shape inside the store's own file
+        // (raw GRDB here is a legacy-schema fixture only — app mutation
+        // paths stay behind the LocalStore chokepoint), reopen, and verify
+        // the heal converges it to the fresh-install shape. Without the
+        // heal, upgraded and fresh installs diverge permanently.
+        let url = temporaryStoreURL()
+        let seeded = try LocalStore(url: url, userID: "u1")
+        _ = try await seeded.createEntry(makeEntry())
+        try regressEntriesToLegacyProvenanceShape(at: url)
+        _ = try LocalStore(url: url, userID: "u1")
+
+        let columns = try entryColumnNames(at: url)
+        #expect(!columns.contains("source"))
+        #expect(!columns.contains("source_ref"))
+        let indexes = try entrySourceIndexNames(at: url)
+        #expect(indexes.isEmpty)
+
+        // Entries written before and after the heal keep working.
+        let reopened = try LocalStore(url: url, userID: "u1")
+        let entries = try await reopened.entries()
+        #expect(entries.count == 1)
+        #expect(entries.first?.activityText == "Coding")
+        _ = try await reopened.createEntry(makeEntry(id: "entry-2"))
+        #expect(try await reopened.entries().count == 2)
     }
 
     @Test("clearTimerDraft clears the singleton")

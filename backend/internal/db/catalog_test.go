@@ -2,6 +2,7 @@ package db
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"sync"
 	"testing"
@@ -724,6 +725,19 @@ func TestStore_LegacyProvenanceRow_PreservedWithoutExposure(t *testing.T) {
 	}
 	if updated.Notes != "new notes" || updated.ActivityText != "Gym" {
 		t.Errorf("legacy row update must preserve values: %+v", updated)
+	}
+
+	// The retired columns are retained for rollback: a supported-field
+	// update must not reset them to their physical defaults.
+	var source string
+	var sourceRef sql.NullString
+	if err := store.db.QueryRow(
+		`SELECT source, source_ref FROM entries WHERE id = ? AND user_id = ?`, id, uid,
+	).Scan(&source, &sourceRef); err != nil {
+		t.Fatalf("read legacy provenance: %v", err)
+	}
+	if source != "garmin" || !sourceRef.Valid || sourceRef.String != "activity-7" {
+		t.Errorf("legacy provenance must be preserved on update, got %q/%v", source, sourceRef)
 	}
 }
 

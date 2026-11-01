@@ -700,10 +700,12 @@ struct RunningBannerFace: View {
     let text: String
     let iconSymbol: String
     let startedAt: Date
-    let trackURL: URL?
-    let trackStopURL: URL?
+    let trackURL: URL
+    let trackStopURL: URL
 }
 ```
+
+Stop is link-only (no intent-button fallback): both URLs are non-optional — the banner always has somewhere to go.
 
 ### Visual
 
