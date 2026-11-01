@@ -580,15 +580,17 @@ func (s *SQLiteStore) CreateEntry(ctx context.Context, e Entry) (Entry, bool, er
 			if rbErr := tx.Rollback(); rbErr != nil && !errors.Is(rbErr, sql.ErrTxDone) {
 				return Entry{}, false, fmt.Errorf("create entry rollback: %w", rbErr)
 			}
-			existing, getErr := s.getEntryRow(ctx, e.UserID, e.ID)
-			if getErr != nil {
-				return Entry{}, false, fmt.Errorf("create entry replay read: %w", getErr)
+			// Replay the winner. When the re-read or tag attach fails the
+			// row is cross-user (a client can pick any id) or vanished in
+			// the window: fall back to the original constraint error
+			// (500), never a scoped re-read that maps to 404 and would
+			// oracle another account's ids.
+			if existing, getErr := s.getEntryRow(ctx, e.UserID, e.ID); getErr == nil {
+				items := []Entry{existing}
+				if tagErr := s.attachEntryTags(ctx, e.UserID, items); tagErr == nil {
+					return items[0], false, nil
+				}
 			}
-			items := []Entry{existing}
-			if tagErr := s.attachEntryTags(ctx, e.UserID, items); tagErr != nil {
-				return Entry{}, false, fmt.Errorf("create entry replay tags: %w", tagErr)
-			}
-			return items[0], false, nil
 		}
 		return Entry{}, false, fmt.Errorf("create entry: %w", err)
 	}

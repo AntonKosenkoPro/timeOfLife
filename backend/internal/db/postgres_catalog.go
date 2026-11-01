@@ -458,15 +458,17 @@ func (s *PostgresStore) CreateEntry(ctx context.Context, e Entry) (Entry, bool, 
 			if rbErr := tx.Rollback(ctx); rbErr != nil && !errors.Is(rbErr, pgx.ErrTxClosed) {
 				return Entry{}, false, fmt.Errorf("create entry rollback: %w", rbErr)
 			}
-			existing, getErr := s.pgGetEntryRow(ctx, e.UserID, e.ID)
-			if getErr != nil {
-				return Entry{}, false, fmt.Errorf("create entry replay read: %w", getErr)
+			// Replay the winner. When the re-read or tag attach fails the
+			// row is cross-user (a client can pick any id) or vanished in
+			// the window: fall back to the original constraint error
+			// (500), never a scoped re-read that maps to 404 and would
+			// oracle another account's ids.
+			if existing, getErr := s.pgGetEntryRow(ctx, e.UserID, e.ID); getErr == nil {
+				items := []Entry{existing}
+				if tagErr := s.pgAttachEntryTags(ctx, e.UserID, items); tagErr == nil {
+					return items[0], false, nil
+				}
 			}
-			items := []Entry{existing}
-			if tagErr := s.pgAttachEntryTags(ctx, e.UserID, items); tagErr != nil {
-				return Entry{}, false, fmt.Errorf("create entry replay tags: %w", tagErr)
-			}
-			return items[0], false, nil
 		}
 		return Entry{}, false, fmt.Errorf("create entry: %w", err)
 	}

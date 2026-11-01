@@ -684,6 +684,32 @@ func TestStore_CreateEntry_ConcurrentSameID(t *testing.T) {
 	}
 }
 
+// A same-id create colliding with ANOTHER user's entry must not surface
+// that entry: the scoped replay re-read misses, so the original
+// constraint error (500-class) is returned — never an ErrNotFound that
+// would map to a 404 existence oracle for another account's ids.
+func TestStore_CreateEntry_CrossUserIDCollision(t *testing.T) {
+	store := setupTestStore(t)
+	uidA := newTestUser(t, store, "a@example.com")
+	uidB := newTestUser(t, store, "b@example.com")
+	base := time.Date(2026, 7, 27, 9, 0, 0, 0, time.UTC)
+	id := uuidV7()
+	if _, _, err := store.CreateEntry(context.Background(), Entry{
+		ID: id, UserID: uidA, ActivityText: "A's entry", StartedAt: base,
+	}); err != nil {
+		t.Fatalf("seed user A entry: %v", err)
+	}
+	_, _, err := store.CreateEntry(context.Background(), Entry{
+		ID: id, UserID: uidB, ActivityText: "B's entry", StartedAt: base,
+	})
+	if err == nil {
+		t.Fatal("expected an error for a cross-user id collision, got nil")
+	}
+	if errors.Is(err, ErrNotFound) {
+		t.Errorf("cross-user collision must not map to ErrNotFound (404 oracle), got %v", err)
+	}
+}
+
 // Legacy-shaped rows keep working: a row seeded with retired non-manual
 // provenance reads and updates with all supported values intact, and the
 // retired metadata is never surfaced.

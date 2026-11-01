@@ -1958,9 +1958,8 @@ components:
         unknown ids are rejected with 422. `ended_at` omitted/null means a
         running timer. `notes` defaults to empty. Creates are idempotent on
         `id`: replaying the same `id` returns the existing entry unchanged,
-        including when a concurrent create wins the race.
-        Retired producer keys (`source`, `source_ref`) sent by older clients
-        are accepted and ignored.
+        including when a concurrent create wins the race. Unknown request
+        keys are ignored.
       required:
         - id
         - activity_text

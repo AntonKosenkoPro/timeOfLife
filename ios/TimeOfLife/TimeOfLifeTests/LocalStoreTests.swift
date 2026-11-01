@@ -67,7 +67,8 @@ struct LocalStoreTests {
         return try queue.read { db in
             try String.fetchAll(db, sql: """
                 SELECT name FROM sqlite_master
-                WHERE type = 'index' AND tbl_name = 'entries' AND sql LIKE '%source%'
+                WHERE type = 'index' AND tbl_name = 'entries'
+                  AND name = 'index_entries_on_source_source_ref'
                 """)
         }
     }
@@ -602,7 +603,8 @@ struct LocalStoreTests {
         // heal, upgraded and fresh installs diverge permanently.
         let url = temporaryStoreURL()
         let seeded = try LocalStore(url: url, userID: "u1")
-        _ = try await seeded.createEntry(makeEntry())
+        try await seeded.createCategory(makeCategory())
+        _ = try await seeded.createEntry(makeEntry(categoryIDs: ["cat-1"]))
         try regressEntriesToLegacyProvenanceShape(at: url)
         _ = try LocalStore(url: url, userID: "u1")
 
@@ -612,11 +614,14 @@ struct LocalStoreTests {
         let indexes = try entrySourceIndexNames(at: url)
         #expect(indexes.isEmpty)
 
-        // Entries written before and after the heal keep working.
+        // Entries (and their category links) written before and after the
+        // heal keep working: dropping a parent column must not shred the
+        // cascading join rows.
         let reopened = try LocalStore(url: url, userID: "u1")
         let entries = try await reopened.entries()
         #expect(entries.count == 1)
         #expect(entries.first?.activityText == "Coding")
+        #expect(entries.first?.categoryIDs == ["cat-1"])
         _ = try await reopened.createEntry(makeEntry(id: "entry-2"))
         #expect(try await reopened.entries().count == 2)
     }

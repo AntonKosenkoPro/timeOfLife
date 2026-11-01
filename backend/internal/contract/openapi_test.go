@@ -312,8 +312,10 @@ func TestSpec_ModifiedSinceDocumentedOnListEndpoints(t *testing.T) {
 }
 
 // Source-free entries: neither the Entry nor the EntryCreate schema documents
-// the retired source/source_ref fields, and duplicate_import is gone from the
-// documented error codes (pinned by TestSpec_DocumentsExactlyCanonicalErrorCodes).
+// the retired source/source_ref fields, duplicate_import is gone from the
+// documented error codes (pinned by TestSpec_DocumentsExactlyCanonicalErrorCodes),
+// and POST /entries documents no 409 (409 conflict/category_exists belong to
+// PATCH paths only).
 func TestSpec_EntriesAreSourceFree(t *testing.T) {
 	s := loadSpec(t)
 	for _, name := range []string{"Entry", "EntryCreate"} {
@@ -331,6 +333,13 @@ func TestSpec_EntriesAreSourceFree(t *testing.T) {
 				t.Errorf("%s schema must not require retired field %q", name, field)
 			}
 		}
+	}
+	post, ok := s.Paths["/api/v1/entries"]["post"]
+	if !ok {
+		t.Fatal("expected POST /api/v1/entries")
+	}
+	if _, ok := post.Responses["409"]; ok {
+		t.Error("POST /api/v1/entries must not document a 409 response")
 	}
 }
 
