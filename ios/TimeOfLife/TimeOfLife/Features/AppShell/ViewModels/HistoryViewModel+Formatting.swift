@@ -8,10 +8,7 @@ extension HistoryViewModel {
     /// "Today" / "Yesterday" for the two most recent calendar days, then the
     /// device-locale regional date for older days (D3).
     nonisolated static func dayLabel(for day: Date, now: Date, calendar: Calendar = .current) -> String {
-        let today = calendar.startOfDay(for: now)
-        let dayStart = calendar.startOfDay(for: day)
-        let days = calendar.dateComponents([.day], from: dayStart, to: today).day ?? 0
-        switch days {
+        switch dayDistance(from: day, to: now, calendar: calendar) {
         case 0: return L10n.historyDayToday.text
         case 1: return L10n.historyDayYesterday.text
         default:
@@ -33,8 +30,9 @@ extension HistoryViewModel {
     /// Grouped-derivation overload of `dayLabel` with a caller-owned
     /// reusable formatter: `makeDayGroups` passes one box per call instead
     /// of building a `DateFormatter` (ICU data load) per non-recent group
-    /// on every keystroke (history-search perf). Creation stays under the
-    /// shared lock (ICU first-use, see above); all subsequent use is
+    /// on every keystroke (history-search perf). Configuration plus the
+    /// first use (ICU build) stay under the shared lock, like `timeText`;
+    /// all subsequent use is
     /// thread-confined to the caller's derivation, so groups need no
     /// per-label locking. Direct callers keep the one-shot overload above.
     nonisolated static func dayLabel(
@@ -43,10 +41,7 @@ extension HistoryViewModel {
         calendar: Calendar,
         formatter: inout DateFormatter?
     ) -> String {
-        let today = calendar.startOfDay(for: now)
-        let dayStart = calendar.startOfDay(for: day)
-        let days = calendar.dateComponents([.day], from: dayStart, to: today).day ?? 0
-        switch days {
+        switch dayDistance(from: day, to: now, calendar: calendar) {
         case 0: return L10n.historyDayToday.text
         case 1: return L10n.historyDayYesterday.text
         default:
@@ -54,12 +49,26 @@ extension HistoryViewModel {
                 let fresh = DateFormatter()
                 fresh.dateStyle = .medium
                 fresh.timeStyle = .none
+                fresh.calendar = calendar
+                // First use (ICU regeneration) stays serialized like `timeText`.
+                _ = fresh.string(from: day)
                 return fresh
             }
             formatter = dateFormatter
             dateFormatter.calendar = calendar
             return dateFormatter.string(from: day)
         }
+    }
+
+    /// Whole-day distance from `day` to `now` (0 = today, 1 = yesterday).
+    /// Single branch point for both `dayLabel` overloads, so a future
+    /// day-boundary fix (future dates, DST edges, locale-specific
+    /// "today") cannot make direct callers and `makeDayGroups` disagree
+    /// on labels.
+    nonisolated private static func dayDistance(from day: Date, to now: Date, calendar: Calendar) -> Int {
+        let today = calendar.startOfDay(for: now)
+        let dayStart = calendar.startOfDay(for: day)
+        return calendar.dateComponents([.day], from: dayStart, to: today).day ?? 0
     }
 
     /// Short-time caption ("14:00").

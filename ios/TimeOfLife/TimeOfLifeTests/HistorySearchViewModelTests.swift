@@ -286,6 +286,50 @@ struct HistorySearchViewModelTests {
         #expect(second.dayGroups.flatMap(\.entries).count == 3)
     }
 
+    @Test("queries never reach persistent storage")
+    func queryNotPersisted() async throws {
+        let store = try makeStore()
+        try await seedTwoDays(store)
+        let vm = makeVM(store: store)
+        await vm.load()
+        // Unique token so unrelated defaults traffic cannot false-positive.
+        let query = "belt in:notes \(UUID().uuidString)"
+        func hits(_ dict: [String: Any]) -> [String] {
+            dict.compactMap { key, value in
+                (key + " " + String(describing: value))
+                    .localizedCaseInsensitiveContains(query) ? key : nil
+            }
+        }
+        let before = UserDefaults.standard.dictionaryRepresentation()
+        #expect(hits(before).isEmpty)
+        vm.searchText = query
+        // Scoped diff: only keys that newly contain the query count —
+        // pre-existing entries are untouched by the assertion.
+        let leaked = hits(UserDefaults.standard.dictionaryRepresentation())
+            .filter { !hits(before).contains($0) }
+        #expect(leaked.isEmpty, "search query leaked into UserDefaults: \(leaked)")
+    }
+
+    @Test("a failed fetch never presents as a zero-match query, even on later keystrokes")
+    func failedFetchNeverFilters() async {
+        // Unbound store: every read throws `notBound`, so the fetch fails.
+        let vm = makeVM(store: LocalStore())
+        await vm.load()
+        #expect(!vm.isSearchFiltering)
+        #expect(vm.dayGroups.isEmpty)
+        // The regression: the next applySearch — any keystroke, or the
+        // foreground time-context refresh — re-entered the filtering
+        // branch on the never-loaded empty snapshot, resurrecting the
+        // no-results + Clear-search state the failure path removed.
+        vm.searchText = "gym"
+        #expect(!vm.isSearchFiltering, "keystroke after a failed fetch must not filter")
+        #expect(vm.dayGroups.isEmpty)
+        #expect(vm.searchSummary == nil)
+        vm.refreshTimeContext()
+        #expect(!vm.isSearchFiltering, "foreground refresh after a failed fetch must not filter")
+        #expect(vm.dayGroups.isEmpty)
+    }
+
     // MARK: - Performance (task 5.3)
 
     @Test("thousands-entry derivation stays comfortably interactive")

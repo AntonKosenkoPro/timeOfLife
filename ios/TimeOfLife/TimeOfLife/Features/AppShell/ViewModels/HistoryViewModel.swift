@@ -49,6 +49,14 @@ final class HistoryViewModel: ObservableObject {
     /// Cached ungrouped snapshot feeding both blank History and search
     /// derivation (design D1). Replaced on every load; never mutated.
     private var allEntries: [TimeEntry] = []
+    /// True while the cached snapshot is missing because the last fetch
+    /// failed — not because History is legitimately empty. `allEntries`
+    /// is empty in both cases, but only the failure must keep
+    /// `applySearch()` out of the filtering branch: otherwise the next
+    /// keystroke or foreground time-context refresh would resurrect the
+    /// no-results + Clear-search state on a snapshot that was never
+    /// loaded. Set by `load()`; cleared by the next successful load.
+    private var isSnapshotUnavailable = false
     /// Per-entry search presentation for the current query, keyed by
     /// entry id. Rebuilt with every derivation, never in row bodies.
     private var searchPresentations: [String: HistorySearchRowPresentation] = [:]
@@ -77,6 +85,7 @@ final class HistoryViewModel: ObservableObject {
             let categories = try await store.categories()
             categoriesByID = Dictionary(uniqueKeysWithValues: categories.map { ($0.id, $0) })
             allEntries = entries
+            isSnapshotUnavailable = false
             // Derive from the CURRENT query, not a captured one: typing may
             // have advanced while the fetch was in flight, and the newest
             // text must win over this load (design D1).
@@ -87,7 +96,10 @@ final class HistoryViewModel: ObservableObject {
             searchPresentations = [:]
             // A storage failure must not present as a zero-match query:
             // without this the view renders the no-results state with a
-            // Clear-search action for a failed fetch.
+            // Clear-search action for a failed fetch. The flag below keeps
+            // later keystrokes and foreground refreshes out of the
+            // filtering branch until a load succeeds.
+            isSnapshotUnavailable = true
             isSearchFiltering = false
         }
     }
@@ -155,6 +167,16 @@ final class HistoryViewModel: ObservableObject {
             searchPresentations = [:]
             dayGroups = []
         case .valid(let query):
+            guard !isSnapshotUnavailable else {
+                // The snapshot was never loaded (storage failure): stay
+                // out of the filtering branch so the view never renders
+                // the no-results + Clear-search state for a failed fetch.
+                searchDiagnostic = nil
+                isSearchFiltering = false
+                searchPresentations = [:]
+                dayGroups = []
+                return
+            }
             searchDiagnostic = nil
             isSearchFiltering = true
             let derived = HistorySearchEvaluator.derive(

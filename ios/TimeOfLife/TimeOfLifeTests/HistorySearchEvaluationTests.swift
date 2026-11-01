@@ -146,9 +146,7 @@ struct HistorySearchEvaluationTests {
     func nameRanges() throws {
         let query = try parseQuery("gym")
         let (record, _) = entry(name: "Gym and gym")
-        let presentation = HistorySearchEvaluator.presentation(
-            entry: record, categories: [], caption: "", query: query
-        )
+        let presentation = HistorySearchEvaluator.presentation(entry: record, categories: [], caption: "", query: query)
         #expect(presentation.nameRanges.count == 2)
         #expect(presentation.nameRanges.map { slice(record.activityText, $0) } == ["Gym", "gym"])
         #expect(presentation.captionRanges.isEmpty)
@@ -182,9 +180,20 @@ struct HistorySearchEvaluationTests {
         let slices = presentation.captionRanges.map { slice(text, $0) }
         #expect(slices == ["or", "or", "or"])
         // Real invariant (clamping alone cannot guarantee it): ranges land
-        // inside category names, never on the ", " separators at 4..<6 / 14..<16.
+        // inside category names, never on a ", " separator. Separators are
+        // derived from the fixture so the guard cannot drift.
+        var separators: [Range<Int>] = []
+        var searchStart = text.startIndex
+        while let sep = text.range(of: ", ", range: searchStart ..< text.endIndex) {
+            separators.append(
+                text.distance(from: text.startIndex, to: sep.lowerBound)
+                    ..< text.distance(from: text.startIndex, to: sep.upperBound)
+            )
+            searchStart = sep.upperBound
+        }
+        #expect(separators == [4 ..< 6, 13 ..< 15])
         for range in presentation.captionRanges {
-            #expect(![4 ..< 6, 14 ..< 16].contains { $0.overlaps(range) })
+            #expect(!separators.contains { $0.overlaps(range) })
         }
     }
 
@@ -225,9 +234,7 @@ struct HistorySearchEvaluationTests {
     func trickyCaseMapping() throws {
         let query = try parseQuery("ss")
         let (record, _) = entry(name: "Straße")
-        let presentation = HistorySearchEvaluator.presentation(
-            entry: record, categories: [], caption: "", query: query
-        )
+        let presentation = HistorySearchEvaluator.presentation(entry: record, categories: [], caption: "", query: query)
         // A lost ß→ss fold must fail loudly, not pass with zero ranges.
         #expect(!presentation.nameRanges.isEmpty, "case-mapped match must still yield a range")
         for range in presentation.nameRanges {
@@ -242,9 +249,7 @@ struct HistorySearchEvaluationTests {
         let query = try parseQuery(composed)
         let (record, _) = entry(name: composed)
         #expect(HistorySearchEvaluator.matches(entry: record, categories: [], query: query))
-        let presentation = HistorySearchEvaluator.presentation(
-            entry: record, categories: [], caption: "", query: query
-        )
+        let presentation = HistorySearchEvaluator.presentation(entry: record, categories: [], caption: "", query: query)
         #expect(presentation.nameRanges.map { slice(composed, $0) } == [composed])
     }
 
@@ -257,9 +262,7 @@ struct HistorySearchEvaluationTests {
             + "squats "
             + String(repeating: "cooldown routine text filler ", count: 8)
         let (record, _) = entry(name: "Gym", notes: notes)
-        let presentation = HistorySearchEvaluator.presentation(
-            entry: record, categories: [], caption: "", query: query
-        )
+        let presentation = HistorySearchEvaluator.presentation(entry: record, categories: [], caption: "", query: query)
         let excerpt = try #require(presentation.excerpt)
         #expect(excerpt.text.hasPrefix("…"))
         #expect(excerpt.text.hasSuffix("…"))
@@ -291,9 +294,7 @@ struct HistorySearchEvaluationTests {
     func shortNotesWhole() throws {
         let query = try parseQuery("belt in:notes")
         let (record, _) = entry(name: "Gym", notes: "remember the HR belt")
-        let excerpt = try #require(HistorySearchEvaluator.presentation(
-            entry: record, categories: [], caption: "", query: query
-        ).excerpt)
+        let excerpt = try #require(HistorySearchEvaluator.presentation(entry: record, categories: [], caption: "", query: query).excerpt)
         #expect(excerpt.text == "remember the HR belt")
         #expect(excerpt.highlights.map { slice(excerpt.text, $0) } == ["belt"])
     }
@@ -302,9 +303,7 @@ struct HistorySearchEvaluationTests {
     func multilineMarkdownExcerpt() throws {
         let query = try parseQuery("squats in:notes")
         let (record, _) = entry(name: "Gym", notes: "**Sets**\n\n- pullups\n- squats x10\n\ndone 🎉")
-        let excerpt = try #require(HistorySearchEvaluator.presentation(
-            entry: record, categories: [], caption: "", query: query
-        ).excerpt)
+        let excerpt = try #require(HistorySearchEvaluator.presentation(entry: record, categories: [], caption: "", query: query).excerpt)
         #expect(!excerpt.text.contains("\n"))
         #expect(excerpt.text.contains("squats"))
         #expect(excerpt.text.contains("**Sets**"))
@@ -319,9 +318,7 @@ struct HistorySearchEvaluationTests {
             + "深蹲十次"
             + String(repeating: "放松整理活动内容填充", count: 10)
         let (record, _) = entry(name: "Gym", notes: notes)
-        let excerpt = try #require(HistorySearchEvaluator.presentation(
-            entry: record, categories: [], caption: "", query: query
-        ).excerpt)
+        let excerpt = try #require(HistorySearchEvaluator.presentation(entry: record, categories: [], caption: "", query: query).excerpt)
         #expect(excerpt.text.contains("深蹲"))
         let hits = excerpt.highlights.map { slice(excerpt.text, $0) }
         #expect(hits.contains("深蹲"))
@@ -334,9 +331,7 @@ struct HistorySearchEvaluationTests {
             name: "Gym",
             notes: String(repeating: "🏃 warmup filler text here ", count: 10) + "belt 🎉"
         )
-        let excerpt = try #require(HistorySearchEvaluator.presentation(
-            entry: record, categories: [], caption: "", query: query
-        ).excerpt)
+        let excerpt = try #require(HistorySearchEvaluator.presentation(entry: record, categories: [], caption: "", query: query).excerpt)
         #expect(excerpt.text.contains("belt"))
         for range in excerpt.highlights {
             #expect(!slice(excerpt.text, range).isEmpty)
@@ -348,9 +343,7 @@ struct HistorySearchEvaluationTests {
         let query = try parseQuery("run in:notes")
         let notes = "run start " + String(repeating: "filler text here ", count: 30) + "run end"
         let (record, _) = entry(name: "Gym", notes: notes)
-        let excerpt = try #require(HistorySearchEvaluator.presentation(
-            entry: record, categories: [], caption: "", query: query
-        ).excerpt)
+        let excerpt = try #require(HistorySearchEvaluator.presentation(entry: record, categories: [], caption: "", query: query).excerpt)
         #expect(!excerpt.text.hasPrefix("…"))
         #expect(excerpt.text.hasSuffix("…"))
         #expect(excerpt.text.contains("run start"))
@@ -361,9 +354,7 @@ struct HistorySearchEvaluationTests {
         let term = String(repeating: "a", count: 200)
         let query = try parseQuery("\(term) in:notes")
         let (record, _) = entry(name: "Gym", notes: "prefix \(term) suffix")
-        let excerpt = try #require(HistorySearchEvaluator.presentation(
-            entry: record, categories: [], caption: "", query: query
-        ).excerpt)
+        let excerpt = try #require(HistorySearchEvaluator.presentation(entry: record, categories: [], caption: "", query: query).excerpt)
         #expect(excerpt.text.contains(term))
     }
 
