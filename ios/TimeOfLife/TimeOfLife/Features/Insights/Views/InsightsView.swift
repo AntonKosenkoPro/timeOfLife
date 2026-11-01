@@ -41,8 +41,14 @@ struct InsightsView: View {
         }
         .background(Theme.backgroundPrimary.ignoresSafeArea())
         .task { await vm.loadIfNeeded() }
-        .onAppear { Task { await vm.loadIfNeeded() } }
-        .onDisappear { vm.invalidate() }
+        .onAppear {
+            vm.setVisible(true)
+            Task { await vm.loadIfNeeded() }
+        }
+        .onDisappear {
+            vm.setVisible(false)
+            vm.invalidate()
+        }
         // A save that lands while Insights stays visible (external stop) or
         // while suspended (foreground return) reloads inside the view model,
         // which owns those two subscriptions so the real notification path

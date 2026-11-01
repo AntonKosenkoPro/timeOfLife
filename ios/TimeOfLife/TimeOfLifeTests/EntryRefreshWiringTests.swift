@@ -83,6 +83,36 @@ struct EntryRefreshWiringTests {
         ))
     }
 
+    /// History VM modelling a visible tab on an isolated notification
+    /// center: the event-driven reload gate requires visibility, and the
+    /// private center keeps global posts from parallel suites from
+    /// reloading this VM mid-test.
+    private func visibleHistoryVM(
+        store: LocalStore,
+        now: Date,
+        center: NotificationCenter
+    ) -> HistoryViewModel {
+        let vm = HistoryViewModel(
+            store: store,
+            undoBuffer: UndoBufferStore(store: store),
+            now: { now },
+            notifications: center
+        )
+        vm.setVisible(true)
+        return vm
+    }
+
+    /// Insights counterpart of `visibleHistoryVM`.
+    private func visibleInsightsVM(
+        store: LocalStore,
+        now: Date,
+        center: NotificationCenter
+    ) -> InsightsViewModel {
+        let vm = InsightsViewModel(store: store, now: { now }, notifications: center)
+        vm.setVisible(true)
+        return vm
+    }
+
     // MARK: - History: external-stop save while visible
 
     @Test("external-stop save appears on visible History without a tab switch")
@@ -93,7 +123,8 @@ struct EntryRefreshWiringTests {
         let service = TimerService(store: store)
         try await seedEarlier(store, now: now)
 
-        let vm = HistoryViewModel(store: store, undoBuffer: UndoBufferStore(store: store)) { now }
+        let center = NotificationCenter()
+        let vm = visibleHistoryVM(store: store, now: now, center: center)
         await vm.loadIfNeeded()
         #expect(vm.dayGroups.flatMap(\.entries).map(\.id) == ["e1"])
 
@@ -115,7 +146,8 @@ struct EntryRefreshWiringTests {
         let now = Self.date("2026-09-03 15:00", calendar: calendar)
         let store = try makeStore()
         let service = TimerService(store: store)
-        let vm = HistoryViewModel(store: store, undoBuffer: UndoBufferStore(store: store)) { now }
+        let center = NotificationCenter()
+        let vm = visibleHistoryVM(store: store, now: now, center: center)
         await vm.loadIfNeeded()
         #expect(vm.dayGroups.isEmpty)
 
@@ -134,7 +166,8 @@ struct EntryRefreshWiringTests {
         let store = try makeStore()
         let service = TimerService(store: store)
         try await seedEarlier(store, now: now)
-        let vm = HistoryViewModel(store: store, undoBuffer: UndoBufferStore(store: store)) { now }
+        let center = NotificationCenter()
+        let vm = visibleHistoryVM(store: store, now: now, center: center)
         await vm.loadIfNeeded()
 
         // Foreground return, sync exit, and external stop can fire back to
@@ -158,17 +191,20 @@ struct EntryRefreshWiringTests {
         let now = Self.date("2026-09-03 15:00", calendar: calendar)
         let store = try makeStore()
         let service = TimerService(store: store)
-        let vm = HistoryViewModel(store: store, undoBuffer: UndoBufferStore(store: store)) { now }
+        let center = NotificationCenter()
+        let vm = visibleHistoryVM(store: store, now: now, center: center)
         await vm.loadIfNeeded()
         #expect(vm.dayGroups.isEmpty)
 
         // The stop commits while the app is suspended (no observer runs);
-        // the foreground return reloads once through the same helper.
+        // the foreground return delivers on the private center and reloads
+        // through the real subscription path (this test's empty-state
+        // counterpart to historyPostedForegroundReloads below).
         let runStart = now.addingTimeInterval(-600)
         try await commitStop(service: service, text: "Background run", startedAt: runStart, duration: 600)
-        await vm.handleExternalReload()
+        center.post(name: UIApplication.willEnterForegroundNotification, object: nil)
 
-        #expect(vm.dayGroups.flatMap(\.entries).first?.activityText == "Background run")
+        #expect(await waitForHistoryTexts(vm, ["Background run"]))
     }
 
     @Test("History invalidate during an in-flight load retries instead of serving stale data")
@@ -178,25 +214,29 @@ struct EntryRefreshWiringTests {
         let store = try makeStore()
         let service = TimerService(store: store)
         try await seedEarlier(store, now: now)
-        let vm = HistoryViewModel(store: store, undoBuffer: UndoBufferStore(store: store)) { now }
+        let center = NotificationCenter()
+        let vm = visibleHistoryVM(store: store, now: now, center: center)
         await vm.loadIfNeeded()
         #expect(vm.dayGroups.flatMap(\.entries).map(\.id) == ["e1"])
 
         // Hold the next load open between its snapshot read and its publish:
-        // a commit landing there must still surface. The old
-        // `guard needsReload, !isLoading` early-return dropped it — the
-        // stale list survived with no later appear to retry.
+        // a commit landing there must still surface. `entered` proves the
+        // first load is parked at the gate (past its read) — polling
+        // `isLoading` alone cannot: it flips before the read, so the commit
+        // could land inside the first load's own fetch and the old
+        // `guard needsReload, !isLoading` early-return would still produce
+        // the expected result, pinning nothing.
         let gate = LoadGate()
         vm.loadGate = { await gate.wait() }
         vm.invalidate()
         let first = Task { await vm.loadIfNeeded() }
-        var loading = false
+        var parked = false
         for _ in 0..<400 {
-            if vm.isLoading { loading = true; break }
+            if await gate.entered >= 1 { parked = true; break }
             try? await Task.sleep(nanoseconds: 5_000_000)
         }
-        guard loading else {
-            Issue.record("held History load never started")
+        guard parked else {
+            Issue.record("held History load never reached the gate")
             await gate.go()
             await first.value
             vm.loadGate = nil
@@ -205,10 +245,23 @@ struct EntryRefreshWiringTests {
         let runStart = now.addingTimeInterval(-120)
         try await commitStop(service: service, text: "Deep work", startedAt: runStart, duration: 120)
         let second = Task { await vm.handleExternalReload() }
-        // Let the second task reach the in-flight await (old code returned
-        // early here); the held load cannot complete before `go()`.
-        try? await Task.sleep(nanoseconds: 100_000_000)
         await gate.go()
+        // The retry must actually start: after the first load publishes its
+        // stale snapshot, exactly one waiter claims a second load through
+        // the gate. A dropped-reload regression leaves `entered` at 1, so
+        // the final assertion below would pass without proving anything.
+        var retried = false
+        for _ in 0..<400 {
+            if await gate.entered >= 2 { retried = true; break }
+            try? await Task.sleep(nanoseconds: 5_000_000)
+        }
+        guard retried else {
+            Issue.record("History retry load never started")
+            await first.value
+            await second.value
+            vm.loadGate = nil
+            return
+        }
         await first.value
         await second.value
         vm.loadGate = nil
@@ -225,7 +278,8 @@ struct EntryRefreshWiringTests {
         let store = try makeStore()
         let service = TimerService(store: store)
         try await seedEarlier(store, now: now)
-        let vm = InsightsViewModel(store: store) { now }
+        let center = NotificationCenter()
+        let vm = visibleInsightsVM(store: store, now: now, center: center)
         await vm.loadIfNeeded()
         #expect(vm.breakdown(period: .all, lens: .activity, calendar: calendar).totalSeconds == 60)
 
@@ -233,7 +287,7 @@ struct EntryRefreshWiringTests {
         try await commitStop(service: service, text: "Deep work", startedAt: runStart, duration: 120)
         await vm.handleExternalReload()
 
-        #expect(vm.hasCommittedAllTime)
+        #expect(vm.breakdown(period: .all, lens: .activity, calendar: calendar).rows.map(\.name) == ["Deep work", "Earlier"])
         #expect(vm.breakdown(period: .all, lens: .activity, calendar: calendar).totalSeconds == 180)
     }
 
@@ -243,7 +297,8 @@ struct EntryRefreshWiringTests {
         let now = Self.date("2026-09-03 15:00", calendar: calendar)
         let store = try makeStore()
         let service = TimerService(store: store)
-        let vm = InsightsViewModel(store: store) { now }
+        let center = NotificationCenter()
+        let vm = visibleInsightsVM(store: store, now: now, center: center)
         await vm.loadIfNeeded()
         #expect(!vm.hasCommittedAllTime)
         #expect(vm.breakdown(period: .all, lens: .activity, calendar: calendar).totalSeconds == 0)
@@ -265,7 +320,8 @@ struct EntryRefreshWiringTests {
         let store = try makeStore()
         let service = TimerService(store: store)
         try await seedEarlier(store, now: now)
-        let vm = InsightsViewModel(store: store) { now }
+        let center = NotificationCenter()
+        let vm = visibleInsightsVM(store: store, now: now, center: center)
         await vm.loadIfNeeded()
 
         // Period/lens selection lives in the view; the view-model contract
@@ -301,24 +357,26 @@ struct EntryRefreshWiringTests {
         let store = try makeStore()
         let service = TimerService(store: store)
         try await seedEarlier(store, now: now)
-        let vm = InsightsViewModel(store: store) { now }
+        let center = NotificationCenter()
+        let vm = visibleInsightsVM(store: store, now: now, center: center)
         await vm.loadIfNeeded()
         #expect(vm.breakdown(period: .all, lens: .activity, calendar: calendar).totalSeconds == 60)
 
         // Same dropped-reload race as History: the gate sits between the
         // snapshot read and the publish, so the commit below lands strictly
-        // inside the held load.
+        // inside the held load. `entered` proves the park point (see the
+        // History counterpart) — `isLoading` alone cannot.
         let gate = LoadGate()
         vm.loadGate = { await gate.wait() }
         vm.invalidate()
         let first = Task { await vm.loadIfNeeded() }
-        var loading = false
+        var parked = false
         for _ in 0..<400 {
-            if vm.isLoading { loading = true; break }
+            if await gate.entered >= 1 { parked = true; break }
             try? await Task.sleep(nanoseconds: 5_000_000)
         }
-        guard loading else {
-            Issue.record("held Insights load never started")
+        guard parked else {
+            Issue.record("held Insights load never reached the gate")
             await gate.go()
             await first.value
             vm.loadGate = nil
@@ -327,8 +385,21 @@ struct EntryRefreshWiringTests {
         let runStart = now.addingTimeInterval(-120)
         try await commitStop(service: service, text: "Deep work", startedAt: runStart, duration: 120)
         let second = Task { await vm.handleExternalReload() }
-        try? await Task.sleep(nanoseconds: 100_000_000)
         await gate.go()
+        // The retry must actually start (see the History counterpart): a
+        // dropped-reload regression leaves `entered` at 1.
+        var retried = false
+        for _ in 0..<400 {
+            if await gate.entered >= 2 { retried = true; break }
+            try? await Task.sleep(nanoseconds: 5_000_000)
+        }
+        guard retried else {
+            Issue.record("Insights retry load never started")
+            await first.value
+            await second.value
+            vm.loadGate = nil
+            return
+        }
         await first.value
         await second.value
         vm.loadGate = nil
@@ -343,7 +414,9 @@ struct EntryRefreshWiringTests {
     /// subscriptions, so these tests post REAL notifications to REAL view
     /// models and assert the reload — the ONLY trigger is the post (no
     /// direct invalidate/loadIfNeeded calls). Deleting a subscription fails
-    /// here: nothing else reloads the VM. Bounded polls only, never an
+    /// here: nothing else reloads the VM. Posts go to each test's private
+    /// center (never `.default`), so parallel suites cannot observe or
+    /// disturb each other. Bounded polls only, never an
     /// unbounded suspend.
 
     @Test("History reloads on the posted external-stop notification")
@@ -353,13 +426,14 @@ struct EntryRefreshWiringTests {
         let store = try makeStore()
         let service = TimerService(store: store)
         try await seedEarlier(store, now: now)
-        let vm = HistoryViewModel(store: store, undoBuffer: UndoBufferStore(store: store)) { now }
+        let center = NotificationCenter()
+        let vm = visibleHistoryVM(store: store, now: now, center: center)
         await vm.loadIfNeeded()
         #expect(vm.dayGroups.flatMap(\.entries).map(\.activityText) == ["Earlier"])
 
         let runStart = now.addingTimeInterval(-120)
         try await commitStop(service: service, text: "Deep work", startedAt: runStart, duration: 120)
-        NotificationCenter.default.post(name: .timerStoppedExternally, object: nil)
+        center.post(name: .timerStoppedExternally, object: nil)
 
         #expect(await waitForHistoryTexts(vm, ["Deep work", "Earlier"]))
     }
@@ -371,14 +445,15 @@ struct EntryRefreshWiringTests {
         let store = try makeStore()
         let service = TimerService(store: store)
         try await seedEarlier(store, now: now)
-        let vm = HistoryViewModel(store: store, undoBuffer: UndoBufferStore(store: store)) { now }
+        let center = NotificationCenter()
+        let vm = visibleHistoryVM(store: store, now: now, center: center)
         await vm.loadIfNeeded()
 
         // The stop commits while the app is suspended (no delivery); the
         // foreground return delivers and reloads.
         let runStart = now.addingTimeInterval(-600)
         try await commitStop(service: service, text: "Background run", startedAt: runStart, duration: 600)
-        NotificationCenter.default.post(name: UIApplication.willEnterForegroundNotification, object: nil)
+        center.post(name: UIApplication.willEnterForegroundNotification, object: nil)
 
         #expect(await waitForHistoryTexts(vm, ["Background run", "Earlier"]))
     }
@@ -390,13 +465,14 @@ struct EntryRefreshWiringTests {
         let store = try makeStore()
         let service = TimerService(store: store)
         try await seedEarlier(store, now: now)
-        let vm = InsightsViewModel(store: store) { now }
+        let center = NotificationCenter()
+        let vm = visibleInsightsVM(store: store, now: now, center: center)
         await vm.loadIfNeeded()
         #expect(vm.breakdown(period: .all, lens: .activity, calendar: calendar).totalSeconds == 60)
 
         let runStart = now.addingTimeInterval(-120)
         try await commitStop(service: service, text: "Deep work", startedAt: runStart, duration: 120)
-        NotificationCenter.default.post(name: .timerStoppedExternally, object: nil)
+        center.post(name: .timerStoppedExternally, object: nil)
 
         #expect(await waitForInsightsTotal(vm, 180, calendar: calendar))
     }
@@ -408,12 +484,13 @@ struct EntryRefreshWiringTests {
         let store = try makeStore()
         let service = TimerService(store: store)
         try await seedEarlier(store, now: now)
-        let vm = InsightsViewModel(store: store) { now }
+        let center = NotificationCenter()
+        let vm = visibleInsightsVM(store: store, now: now, center: center)
         await vm.loadIfNeeded()
 
         let runStart = now.addingTimeInterval(-600)
         try await commitStop(service: service, text: "Background run", startedAt: runStart, duration: 600)
-        NotificationCenter.default.post(name: UIApplication.willEnterForegroundNotification, object: nil)
+        center.post(name: UIApplication.willEnterForegroundNotification, object: nil)
 
         #expect(await waitForInsightsTotal(vm, 660, calendar: calendar))
     }
@@ -423,12 +500,17 @@ struct EntryRefreshWiringTests {
     /// Sticky one-shot gate (TrackSyncReloadTests.Gate precedent): `go()`
     /// before `wait()` still releases, so no scheduling interleave can
     /// strand a waiter — and every wait site here is additionally bounded by
-    /// a polling cap, never an unbounded suspend.
+    /// a polling cap, never an unbounded suspend. `entered` counts gate
+    /// arrivals so tests can prove a load is parked at the gate (after its
+    /// snapshot read) instead of merely observing `isLoading`, which flips
+    /// before the read.
     private actor LoadGate {
         private var continuation: CheckedContinuation<Void, Never>?
         private var released = false
+        private(set) var entered = 0
 
         func wait() async {
+            entered += 1
             if released { return }
             await withCheckedContinuation { self.continuation = $0 }
         }

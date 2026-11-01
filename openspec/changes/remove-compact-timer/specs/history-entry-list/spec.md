@@ -28,6 +28,10 @@ The History destination SHALL display committed `TimeEntry` records as a chronol
 - **WHEN** an existing external-stop path saves the running timer while History remains visible, or finishes while the app is backgrounded and History becomes visible again
 - **THEN** History shows the committed entry and recomputed day total without requiring a tab switch or manual refresh after it becomes visible
 
+#### Scenario: Off-screen event does not consume staleness
+- **WHEN** History is off-screen and an external-stop or foreground event fires, and a notification-less save lands afterwards
+- **THEN** the off-screen event marks History stale without reloading, and the next appear still reloads so the later save appears in its day group
+
 #### Scenario: Search narrows existing day groups
 - **WHEN** a valid non-empty query matches committed entries from some days
 - **THEN** only those entries appear, once each, in their original start-day groups and newest-first ordering

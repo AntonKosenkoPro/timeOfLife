@@ -260,7 +260,10 @@ struct HistoryViewModelTests {
             endedAt: Date(timeIntervalSinceNow: -3540)
         ))
 
-        let vm = HistoryViewModel(store: store, undoBuffer: UndoBufferStore(store: store))
+        // Private center: a global post from a parallel suite's
+        // notification tests must not reload this VM between the store
+        // write below and the stale-snapshot assertion.
+        let vm = HistoryViewModel(store: store, undoBuffer: UndoBufferStore(store: store), notifications: NotificationCenter())
         await vm.loadIfNeeded()
         #expect(vm.dayGroups.flatMap(\.entries).map(\.id) == ["e1"])
 

@@ -26,3 +26,7 @@ The Insights destination SHALL present a hero total of committed tracked time fo
 #### Scenario: Save through an existing external-stop path
 - **WHEN** an existing external-stop path saves the running timer while Insights remains visible, or finishes while the app is backgrounded and Insights becomes visible again
 - **THEN** the applicable selected period's hero total and rows reflect the committed entry without requiring a tab switch or manual refresh after it becomes visible, while period and lens selection remain unchanged
+
+#### Scenario: Off-screen event does not consume staleness
+- **WHEN** Insights is off-screen and an external-stop or foreground event fires, and a notification-less save lands afterwards
+- **THEN** the off-screen event marks Insights stale without reloading, and the next appear still reloads so the later save appears in the breakdown

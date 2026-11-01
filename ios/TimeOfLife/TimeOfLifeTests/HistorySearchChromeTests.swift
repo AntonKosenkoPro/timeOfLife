@@ -4,21 +4,22 @@ import Foundation
 
 /// Pins the on-device corrections for History search chrome
 /// (`add-history-search` change, section 8): the no-results clear action
-/// keeps compact-timer-equivalent bottom keyboard clearance with and
-/// without a running timer.
+/// keeps the retired compact-timer slot as bottom keyboard clearance.
 @Suite("HistorySearchChrome")
 struct HistorySearchChromeTests {
-    @Test("clear action reserves the compact-timer slot only when the timer is absent")
+    @Test("clear action keeps the retired compact-timer slot clearance")
     @MainActor
     func clearActionClearanceMatchesCompactTimer() {
-        #expect(NoMatchingEntriesState.bottomClearance(hasCompactTimer: true) == 0)
+        // The clearance composes the named surface with the theme gaps —
+        // not an independent restatement of the formula — so production and
+        // test cannot drift apart through duplicated literals.
         #expect(
-            NoMatchingEntriesState.bottomClearance(hasCompactTimer: false)
-                == NoMatchingEntriesState.timerAbsentClearance
+            NoMatchingEntriesState.timerAbsentClearance
+                == NoMatchingEntriesState.retiredCompactTimerSurface + Theme.spacingExtraSmall * 2
         )
-        // Floor: the reserved slot covers at least the retired compact-timer
-        // surface (62pt; remove-compact-timer deleted the view).
-        #expect(NoMatchingEntriesState.timerAbsentClearance >= 62)
+        // The retired surface is pinned explicitly: 62pt, two 4pt gaps.
+        #expect(NoMatchingEntriesState.retiredCompactTimerSurface == 62)
+        #expect(NoMatchingEntriesState.timerAbsentClearance == 70)
     }
 
     @Test("blank queries keep the tab bar, including a focused-but-empty field")

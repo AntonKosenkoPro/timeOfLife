@@ -91,9 +91,9 @@ struct HistoryView: View {
                     ProgressView()
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else if vm.isSearchFiltering && vm.dayGroups.isEmpty {
-                    // The timer never shows (remove-compact-timer): the
-                    // absent-timer clearance always applies.
-                    NoMatchingEntriesState(hasCompactTimer: false) {
+                    // No compact timer exists (remove-compact-timer): the
+                    // reserved-slot clearance always applies.
+                    NoMatchingEntriesState {
                         vm.searchText = ""
                     }
                 } else if vm.dayGroups.isEmpty {
@@ -148,12 +148,16 @@ struct HistoryView: View {
         // plain `onAppear` reload would re-fire on every inner re-render.
         // The load is guarded by `needsReload` inside the VM.
         .task { await reloadAndRegister() }
-        .onAppear { Task { await reloadAndRegister() } }
+        .onAppear {
+            vm.setVisible(true)
+            Task { await reloadAndRegister() }
+        }
         // Entries can be saved on Track while History is off-screen; mark
         // stale on leave so the next appear reloads. Without this the
         // `needsReload` guard serves the first snapshot forever. Leaving
         // also clears the transient pull notice.
         .onDisappear {
+            vm.setVisible(false)
             vm.invalidate()
             pull.cancelNotice()
         }

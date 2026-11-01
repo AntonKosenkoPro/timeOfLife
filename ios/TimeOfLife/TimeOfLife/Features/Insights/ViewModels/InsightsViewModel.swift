@@ -15,6 +15,11 @@ final class InsightsViewModel: ObservableObject {
 
     private let store: LocalStore
     private let nowProvider: () -> Date
+    /// Notification surface for the event-driven reload subscriptions.
+    /// Production uses `.default`; tests inject a private center so global
+    /// posts from parallel suites cannot reload this VM out from under
+    /// stale-snapshot assertions.
+    private let notifications: NotificationCenter
     /// Serializes reloads (TrackViewModel precedent, HistoryViewModel mirror):
     /// the appear reload and an event-driven reload (`.timerStoppedExternally`
     /// / foreground / sync-cycle exit) race on every visible-tab save. A call
@@ -22,6 +27,13 @@ final class InsightsViewModel: ObservableObject {
     /// of returning with a stale snapshot no later appear retries.
     private var inFlightLoad: Task<Void, Never>?
     private var needsReload = true
+    /// Whether the owning tab is currently on screen. Event-driven reloads
+    /// only fetch while visible: an off-screen event invalidates (so the
+    /// next appear reloads) but must not clear `needsReload`, or a later
+    /// save that posts no notification (History Log Time, an in-app Track
+    /// stop) would leave the next appear serving a stale breakdown. Starts
+    /// false — the view sets it on appear/disappear.
+    private var isVisible = false
 #if DEBUG
     /// Test hook (nil in production): awaited after the snapshot read, before
     /// publishing — lets tests hold a load open and interleave an invalidate
@@ -36,9 +48,10 @@ final class InsightsViewModel: ObservableObject {
         var categories: [Category] = []
     }
 
-    init(store: LocalStore, now: @escaping () -> Date = Date.init) {
+    init(store: LocalStore, now: @escaping () -> Date = Date.init, notifications: NotificationCenter = .default) {
         self.store = store
         self.nowProvider = now
+        self.notifications = notifications
         observeExternalReload()
     }
 
@@ -71,23 +84,34 @@ final class InsightsViewModel: ObservableObject {
     /// stale snapshot — callers awaiting this expect fresh state afterwards
     /// (remove-compact-timer: the Island-Stop commit lands while Insights is
     /// visible; an early return leaves the pre-commit breakdown on screen
-    /// with no later appear to retry). Deliberately NOT clearing
+    /// with no later appear to retry). The loop re-awaits the newest claim
+    /// before returning: two waiters resuming from the same in-flight load
+    /// must not let the second return while the first's retry still runs.
+    /// Deliberately NOT clearing
     /// `inFlightLoad` on completion (TrackViewModel precedent — see
     /// HistoryViewModel for the full rationale).
     func loadIfNeeded() async {
-        if let inFlightLoad {
-            await inFlightLoad.value
+        while true {
+            if let inFlightLoad {
+                await inFlightLoad.value
+            }
+            guard needsReload else { return }
+            needsReload = false
+            let load = Task { await self.load() }
+            inFlightLoad = load
+            await load.value
         }
-        guard needsReload else { return }
-        needsReload = false
-        let load = Task { await self.load() }
-        inFlightLoad = load
-        await load.value
     }
 
     /// Marks the data stale so the next Insights appear reloads it.
     func invalidate() {
         needsReload = true
+    }
+
+    /// Tracks tab visibility for the event-driven reload gate. Called from
+    /// the view's `onAppear`/`onDisappear`.
+    func setVisible(_ visible: Bool) {
+        isVisible = visible
     }
 
     /// Event-driven reloads that must land with no tab switch
@@ -97,12 +121,12 @@ final class InsightsViewModel: ObservableObject {
     private var reloadCancellables = Set<AnyCancellable>()
 
     private func observeExternalReload() {
-        NotificationCenter.default.publisher(for: .timerStoppedExternally)
+        notifications.publisher(for: .timerStoppedExternally)
             .sink { [weak self] _ in
                 Task { @MainActor [weak self] in await self?.handleExternalReload() }
             }
             .store(in: &reloadCancellables)
-        NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)
+        notifications.publisher(for: UIApplication.willEnterForegroundNotification)
             .sink { [weak self] _ in
                 Task { @MainActor [weak self] in await self?.handleExternalReload() }
             }
@@ -112,11 +136,15 @@ final class InsightsViewModel: ObservableObject {
     /// Shared event-driven reload (remove-compact-timer): the exact
     /// invalidate + guarded-reload sequence the views and the VM-owned
     /// notification subscriptions run on `.timerStoppedExternally`,
-    /// foreground return, and sync-cycle exit. Production code under test —
+    /// foreground return, and sync-cycle exit. Off-screen events invalidate
+    /// only — the appear reload still sees the stale flag (without this the
+    /// off-screen reload would consume it and a later notification-less
+    /// save would never surface). Production code under test —
     /// the refresh tests drive this helper and the notification tests drive
     /// the real posted-notification path.
     func handleExternalReload() async {
         invalidate()
+        guard isVisible else { return }
         await loadIfNeeded()
     }
 
