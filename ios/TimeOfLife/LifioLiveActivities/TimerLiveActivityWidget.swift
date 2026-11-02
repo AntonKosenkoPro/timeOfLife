@@ -279,7 +279,7 @@ struct LiveActivityStopLink: View {
 // Widget-extension previews must go through the Widget (plain View previews
 // are "unsupported preview type" in an appex). Pick the Lock Screen banner
 // variant in the canvas to see the banner face.
-#Preview("Glass banner", as: .content, using: TimerActivityAttributes(entryText: "Glass prototype", iconSymbol: "briefcase.fill")) {
+#Preview("Glass banner", as: .content, using: TimerActivityAttributes(entryText: "Glass prototype", iconSymbol: "briefcase.fill", localeIdentifier: "en")) {
     TimerLiveActivityWidget()
 } contentStates: {
     TimerActivityAttributes.ContentState(startedAt: Date().addingTimeInterval(-24))

@@ -76,9 +76,23 @@ extension HistoryViewModel {
         return calendar.dateComponents([.day], from: dayStart, to: today).day ?? 0
     }
 
-    /// Short-time caption ("14:00").
+    /// Short-time caption ("14:00"). Under a capture override the request
+    /// locale/time zone win (same-launch chrome fix — the shared formatter
+    /// below is pinned to the launch locale); otherwise the shared
+    /// process-locale formatter.
     nonisolated static func timeText(for date: Date) -> String {
-        formatLock.withLock { timeFormatter.string(from: date) }
+        #if SCREENSHOT_CAPTURE
+        // The Add-entry frame's pills render through this static helper,
+        // which otherwise keeps the stale launch locale/time zone.
+        if let locale = ScreenshotLocale.appLocale, let timeZone = ScreenshotLocale.appTimeZone {
+            let formatter = DateFormatter()
+            formatter.timeStyle = .short
+            formatter.locale = locale
+            formatter.timeZone = timeZone
+            return formatter.string(from: date)
+        }
+        #endif
+        return formatLock.withLock { timeFormatter.string(from: date) }
     }
 
     /// Serializes every NSDateFormatter touch in this type (see dayLabel).

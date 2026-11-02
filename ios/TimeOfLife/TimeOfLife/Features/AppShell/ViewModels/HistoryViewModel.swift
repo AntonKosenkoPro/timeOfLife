@@ -227,7 +227,7 @@ final class HistoryViewModel: ObservableObject {
             searchDiagnostic = nil
             isSearchFiltering = false
             searchPresentations = [:]
-            dayGroups = Self.makeDayGroups(entries: allEntries, now: nowProvider(), calendar: calendar)
+            dayGroups = Self.makeDayGroups(entries: allEntries, now: nowProvider(), calendar: calendar, locale: calendar.locale ?? .current)
             return
         }
         switch HistorySearchParser.parse(searchText) {
@@ -235,7 +235,7 @@ final class HistoryViewModel: ObservableObject {
             searchDiagnostic = nil
             isSearchFiltering = false
             searchPresentations = [:]
-            dayGroups = Self.makeDayGroups(entries: allEntries, now: nowProvider(), calendar: calendar)
+            dayGroups = Self.makeDayGroups(entries: allEntries, now: nowProvider(), calendar: calendar, locale: calendar.locale ?? .current)
         case .invalid(let diagnostic):
             searchDiagnostic = diagnostic.message
             isSearchFiltering = false
@@ -260,7 +260,7 @@ final class HistoryViewModel: ObservableObject {
                 query: query
             )
             searchPresentations = derived.presentations
-            dayGroups = Self.makeDayGroups(entries: derived.matched, now: nowProvider(), calendar: calendar)
+            dayGroups = Self.makeDayGroups(entries: derived.matched, now: nowProvider(), calendar: calendar, locale: calendar.locale ?? .current)
         }
     }
 
@@ -406,7 +406,10 @@ final class HistoryViewModel: ObservableObject {
     /// instead (D5).
     /// - Note: the in-progress indicator intentionally follows the app
     ///   language (`L10n`), not `locale`.
-    func durationText(for entry: TimeEntry, locale: Locale = .current) -> String {
+    /// - Note: a nil locale follows the capture request locale while a
+    ///   capture override is active (screenshot-capture chrome fix), else
+    ///   the process locale. Explicit locales always win.
+    func durationText(for entry: TimeEntry, locale: Locale? = nil) -> String {
         if isInProgress(entry) {
             return L10n.historyInProgress.text
         }
@@ -471,9 +474,25 @@ final class HistoryViewModel: ObservableObject {
     /// plurals elsewhere, e.g. `1 ч 12 мин` in Russian) (D5). The grammar —
     /// which tiers appear — is fixed here; Foundation owns the unit words.
     /// Implementation lives in `DurationFormatting`; this forwards so
-    /// existing call sites keep compiling unchanged.
-    nonisolated static func naturalDuration(_ seconds: Int, locale: Locale = .current) -> String {
-        DurationFormatting.natural(seconds, locale: locale)
+    /// existing call sites keep compiling unchanged. A nil locale follows
+    /// the capture request locale while a capture override is active
+    /// (screenshot-capture chrome fix), else the process locale.
+    nonisolated static func naturalDuration(_ seconds: Int, locale: Locale? = nil) -> String {
+        DurationFormatting.natural(seconds, locale: defaultUnitLocale(locale))
+    }
+
+    /// Default locale for unit chrome: the capture request locale while a
+    /// capture override is active, else the process locale. Explicit
+    /// parameters always win (unit tests pass explicit values).
+    nonisolated private static func defaultUnitLocale(_ locale: Locale?) -> Locale {
+        #if SCREENSHOT_CAPTURE
+        if let locale {
+            return locale
+        }
+        return ScreenshotLocale.appLocale ?? .current
+        #else
+        return locale ?? .current
+        #endif
     }
 
     private static func clampedSeconds(start: Date, end: Date?) -> Int {

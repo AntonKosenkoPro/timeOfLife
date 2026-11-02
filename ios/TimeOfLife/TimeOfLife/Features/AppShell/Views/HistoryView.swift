@@ -1,3 +1,6 @@
+// swiftlint:disable file_length
+// (owns the list, search wiring, pull-to-sync, sheets, and destinations;
+// splitting the view is future work, not this change.)
 import SwiftUI
 
 /// Read-only, day-grouped list of committed time entries (history-entry-list
