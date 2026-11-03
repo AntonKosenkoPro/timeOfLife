@@ -132,6 +132,20 @@ def make_bezel_69_bytes() -> bytes:
     return buf.getvalue()
 
 
+def make_bezel_63_bytes() -> bytes:
+    """Synthetic 6.3 bezel passing verify_bezel_63 (sharp slot + pill)."""
+    bw, bh, sw, sh, ax, ay = 880, 1800, 804, 1748, 38, 26
+    im = Image.new("RGBA", (bw, bh), (20, 20, 20, 255))
+    d = ImageDraw.Draw(im)
+    d.rectangle([ax, ay, ax + sw, ay + sh], fill=(0, 0, 0, 0))
+    d.rounded_rectangle([ax + sw // 2 - 90, ay + 30,
+                         ax + sw // 2 + 90, ay + 30 + 64],
+                        radius=32, fill=(20, 20, 20, 255))
+    buf = io.BytesIO()
+    im.save(buf, format="PNG")
+    return buf.getvalue()
+
+
 def make_bezel_ipad_bytes() -> bytes:
     im = Image.new("RGBA", (2300, 3000), (200, 200, 200, 255))
     ImageDraw.Draw(im).rectangle([118, 124, 118 + 2064, 124 + 2752],
@@ -145,6 +159,8 @@ def write_bezels(bezels: Path) -> None:
     bezels.mkdir(parents=True, exist_ok=True)
     (bezels / panels_builder.BEZEL_FILES["6.9"]).write_bytes(
         make_bezel_69_bytes())
+    (bezels / panels_builder.BEZEL_FILES["6.3"]).write_bytes(
+        make_bezel_63_bytes())
     (bezels / panels_builder.BEZEL_FILES["ipad13"]).write_bytes(
         make_bezel_ipad_bytes())
 
@@ -268,6 +284,88 @@ class RenderMatrixTests(unittest.TestCase):
             manifest = json.loads(
                 (out / "matrix-manifest.json").read_text(encoding="utf-8"))
             self.assertEqual(manifest["status"], "incomplete")
+            self.assertEqual(manifest["cells"][0]["status"], "blocked")
+
+    def test_matrix_63_en_green(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            shots = root / "shots"
+            make_run(shots, "iphone63", "en", "iphone63-en-r1",
+                     (1206, 2622), FRAME_COLORS_69)
+            bezels = root / "bezels"
+            write_bezels(bezels)
+            out = root / "out"
+            proc = run_panels(
+                "--render-matrix", "--shots-dir", str(shots),
+                "--bezels-dir", str(bezels), "--out", str(out),
+                "--devices", '["iphone63"]',
+                "--languages", '["en"]')
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertIn("status=complete", proc.stdout)
+            built = list((out / "iphone63" / "en").glob(
+                "panel-*-en-1206x2622.png"))
+            self.assertEqual(len(built), 5)
+            for png in built:
+                with Image.open(png) as im:
+                    self.assertEqual(im.size, (1206, 2622))
+            manifest = json.loads(
+                (out / "matrix-manifest.json").read_text(encoding="utf-8"))
+            self.assertEqual(manifest["status"], "complete")
+            self.assertEqual(manifest["counts"],
+                             {"blocked": 0, "cells": 1, "rendered": 1})
+            cell = manifest["cells"][0]
+            self.assertEqual(cell["status"], "rendered")
+            self.assertEqual(cell["size"], "6.3")
+            self.assertEqual(cell["run_id"], "iphone63-en-r1")
+            self.assertEqual(cell["template_version"],
+                             panels_builder.TEMPLATE_69)
+            self.assertEqual(len(cell["selftest"]), 5)
+            recipe_path = Path(cell["recipe_file"])
+            recipe = json.loads(recipe_path.read_text(encoding="utf-8"))
+            self.assertEqual(recipe.get("template_variant"), "v13-scaled-63")
+            self.assertEqual(recipe["canvas"], {"width": 1206,
+                                                "height": 2622})
+
+    def test_matrix_63_r2_fallback(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            shots = root / "shots"
+            make_run(shots, "iphone63", "en", "iphone63-en-r2",
+                     (1206, 2622), FRAME_COLORS_69)
+            bezels = root / "bezels"
+            write_bezels(bezels)
+            out = root / "out"
+            proc = run_panels(
+                "--render-matrix", "--shots-dir", str(shots),
+                "--bezels-dir", str(bezels), "--out", str(out),
+                "--devices", '["iphone63"]',
+                "--languages", '["en"]')
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            manifest = json.loads(
+                (out / "matrix-manifest.json").read_text(encoding="utf-8"))
+            self.assertEqual(manifest["cells"][0]["run_id"],
+                             "iphone63-en-r2")
+
+    def test_matrix_63_missing_bezel_blocked(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            shots = root / "shots"
+            make_run(shots, "iphone63", "en", "iphone63-en-r1",
+                     (1206, 2622), FRAME_COLORS_69)
+            bezels = root / "bezels"
+            bezels.mkdir()
+            (bezels / panels_builder.BEZEL_FILES["6.9"]).write_bytes(
+                make_bezel_69_bytes())
+            out = root / "out"
+            proc = run_panels(
+                "--render-matrix", "--shots-dir", str(shots),
+                "--bezels-dir", str(bezels), "--out", str(out),
+                "--devices", '["iphone63"]',
+                "--languages", '["en"]')
+            self.assertEqual(proc.returncode, 2)
+            self.assertIn("missing bezel asset", proc.stderr)
+            manifest = json.loads(
+                (out / "matrix-manifest.json").read_text(encoding="utf-8"))
             self.assertEqual(manifest["cells"][0]["status"], "blocked")
 
     def test_matrix_missing_run_blocked(self):
@@ -422,12 +520,25 @@ class FetchBezelTests(unittest.TestCase):
             self.assertEqual(proc.returncode, 2)
             self.assertIn("unpinned", proc.stderr)
 
+    def test_partial_pin_names_iphone63(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            proc = run_fetch("--out", str(Path(tmp) / "bezels"),
+                             "--file-key", "F",
+                             "--iphone-node", "1:1",
+                             "--ipad-node", "2:2",
+                             extra_env={"FIGMA_API_KEY": "tok"})
+            self.assertEqual(proc.returncode, 2)
+            self.assertIn("unpinned", proc.stderr)
+            self.assertIn("FIGMA_IPHONE63_NODE_ID", proc.stderr)
+
     def test_figma_error_fails_closed(self):
         with tempfile.TemporaryDirectory() as tmp:
             base = self.start_fake_figma({"err": "Not found"}, {})
             proc = run_fetch("--out", str(Path(tmp) / "bezels"),
                              "--file-key", "F",
-                             "--iphone-node", "1:1", "--ipad-node", "2:2",
+                             "--iphone-node", "1:1",
+                             "--iphone63-node", "3:3",
+                             "--ipad-node", "2:2",
                              extra_env=self.fake_env(base))
             self.assertEqual(proc.returncode, 2)
             self.assertIn("figma images error", proc.stderr)
@@ -438,10 +549,29 @@ class FetchBezelTests(unittest.TestCase):
                 {"err": "", "images": {"1:1": None}}, {})
             proc = run_fetch("--out", str(Path(tmp) / "bezels"),
                              "--file-key", "F",
-                             "--iphone-node", "1:1", "--ipad-node", "2:2",
+                             "--iphone-node", "1:1",
+                             "--iphone63-node", "3:3",
+                             "--ipad-node", "2:2",
                              extra_env=self.fake_env(base))
             self.assertEqual(proc.returncode, 2)
             self.assertIn("rendered no image", proc.stderr)
+
+    def test_missing_63_node_image_fails_closed(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            holder: dict = {}
+            base = self.start_fake_figma(holder, {
+                "/v1/img/iphone.png": make_bezel_69_bytes()})
+            holder.update({"err": "", "images": {
+                "1:1": f"{base}/img/iphone.png", "3:3": None}})
+            proc = run_fetch("--out", str(Path(tmp) / "bezels"),
+                             "--file-key", "F",
+                             "--iphone-node", "1:1",
+                             "--iphone63-node", "3:3",
+                             "--ipad-node", "2:2",
+                             extra_env=self.fake_env(base))
+            self.assertEqual(proc.returncode, 2)
+            self.assertIn("rendered no image", proc.stderr)
+            self.assertIn("3:3", proc.stderr)
 
     def test_network_error_fails_closed(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -449,7 +579,9 @@ class FetchBezelTests(unittest.TestCase):
                    "FIGMA_API_BASE": "http://127.0.0.1:1/v1"}
             proc = run_fetch("--out", str(Path(tmp) / "bezels"),
                              "--file-key", "F",
-                             "--iphone-node", "1:1", "--ipad-node", "2:2",
+                             "--iphone-node", "1:1",
+                             "--iphone63-node", "3:3",
+                             "--ipad-node", "2:2",
                              extra_env=env)
             self.assertEqual(proc.returncode, 2)
             self.assertIn("figma request failed", proc.stderr)
@@ -459,21 +591,30 @@ class FetchBezelTests(unittest.TestCase):
             holder: dict = {}
             base = self.start_fake_figma(holder, {
                 "/v1/img/iphone.png": make_bezel_69_bytes(),
+                "/v1/img/iphone63.png": make_bezel_63_bytes(),
                 "/v1/img/ipad.png": make_bezel_ipad_bytes()})
             holder.update({"err": "", "images": {
                 "1:1": f"{base}/img/iphone.png",
+                "3:3": f"{base}/img/iphone63.png",
                 "2:2": f"{base}/img/ipad.png"}})
             out = Path(tmp) / "bezels"
             proc = run_fetch("--out", str(out),
                              "--file-key", "F",
-                             "--iphone-node", "1:1", "--ipad-node", "2:2",
+                             "--iphone-node", "1:1",
+                             "--iphone63-node", "3:3",
+                             "--ipad-node", "2:2",
                              extra_env=self.fake_env(base))
             self.assertEqual(proc.returncode, 0, proc.stderr)
             iphone = out / panels_builder.BEZEL_FILES["6.9"]
+            iphone63 = out / panels_builder.BEZEL_FILES["6.3"]
             ipad = out / panels_builder.BEZEL_FILES["ipad13"]
             self.assertTrue(iphone.is_file())
+            self.assertTrue(iphone63.is_file())
             self.assertTrue(ipad.is_file())
             panels_builder.verify_bezel_69(iphone)
+            info63 = panels_builder.verify_bezel_63(iphone63)
+            self.assertEqual(info63["screen_slot_px"], [805, 1749])
+            self.assertEqual(info63["screen_at_px"], [38, 26])
             panels_builder.verify_bezel_ipad(ipad)
 
     def test_size_drift_fails_closed_without_partial(self):
@@ -483,14 +624,18 @@ class FetchBezelTests(unittest.TestCase):
             holder = {}
             base = self.start_fake_figma(holder, {
                 "/v1/img/iphone.png": bad.getvalue(),
+                "/v1/img/iphone63.png": bad.getvalue(),
                 "/v1/img/ipad.png": bad.getvalue()})
             holder.update({"err": "", "images": {
                 "1:1": f"{base}/img/iphone.png",
+                "3:3": f"{base}/img/iphone63.png",
                 "2:2": f"{base}/img/ipad.png"}})
             out = Path(tmp) / "bezels"
             proc = run_fetch("--out", str(out),
                              "--file-key", "F",
-                             "--iphone-node", "1:1", "--ipad-node", "2:2",
+                             "--iphone-node", "1:1",
+                             "--iphone63-node", "3:3",
+                             "--ipad-node", "2:2",
                              extra_env=self.fake_env(base))
             self.assertEqual(proc.returncode, 2)
             self.assertIn("bezel verification failed", proc.stderr)

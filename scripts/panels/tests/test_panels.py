@@ -122,6 +122,19 @@ def make_bezel_69(path: Path) -> None:
     im.save(path)
 
 
+def make_bezel_63(path: Path) -> None:
+    """Synthetic 6.3 bezel passing verify_bezel_63 (sharp slot + pill)."""
+    from PIL import Image, ImageDraw
+    bw, bh, sw, sh, ax, ay = 880, 1800, 804, 1748, 38, 26
+    im = Image.new("RGBA", (bw, bh), (20, 20, 20, 255))
+    d = ImageDraw.Draw(im)
+    d.rectangle([ax, ay, ax + sw, ay + sh], fill=(0, 0, 0, 0))
+    d.rounded_rectangle([ax + sw // 2 - 90, ay + 30,
+                         ax + sw // 2 + 90, ay + 30 + 64],
+                        radius=32, fill=(20, 20, 20, 255))
+    im.save(path)
+
+
 def make_bezel_ipad(path: Path) -> None:
     from PIL import Image, ImageDraw
     im = Image.new("RGBA", (2300, 3000), (200, 200, 200, 255))
@@ -156,6 +169,23 @@ def make_kit_ipad(tmp: str) -> dict:
     make_manifest(manifest, frames_dir, "test-ipad-r1", (2064, 2752), needed)
     bezel = root / "bezel-ipad.png"
     make_bezel_ipad(bezel)
+    captions = make_captions(tmp, "en")
+    out = root / "out"
+    out.mkdir()
+    return {"frames": str(frames_dir), "manifest": str(manifest),
+            "bezel": str(bezel), "captions": captions, "out": str(out)}
+
+
+def make_kit_63(tmp: str) -> dict:
+    """Synthetic EN 6.3 fixture kit (hermetic)."""
+    root = Path(tmp)
+    frames_dir = root / "frames"
+    make_frames(frames_dir, (1206, 2622), panels_builder.NEEDED_FRAMES_69)
+    manifest = root / "run-manifest.json"
+    make_manifest(manifest, frames_dir, "test-63-r1", (1206, 2622),
+                  panels_builder.NEEDED_FRAMES_69)
+    bezel = root / "bezel-63.png"
+    make_bezel_63(bezel)
     captions = make_captions(tmp, "en")
     out = root / "out"
     out.mkdir()
@@ -230,6 +260,87 @@ class BuilderUnitTests(unittest.TestCase):
         self.assertEqual(set(panels_builder.EXPECTED_EN_IPAD),
                          {"track", "insights", "history", "add-entry"})
 
+    def test_63_scale_factors_pinned(self):
+        self.assertAlmostEqual(panels_builder.SX63, 1206 / 1320)
+        self.assertAlmostEqual(panels_builder.SY63, 2622 / 2868)
+        self.assertEqual(panels_builder.CANVAS_63, (1206, 2622))
+        self.assertEqual(panels_builder.SIZES["6.3"]["template"],
+                         panels_builder.TEMPLATE_69)
+        self.assertEqual(panels_builder.MATRIX_DEVICES["iphone63"],
+                         {"size": "6.3", "canvas": (1206, 2622),
+                          "island": True})
+
+    def test_build_en63_synthetic_deterministic(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            kit = make_kit_63(tmp)
+            caps_obj = panels_builder.load_captions(Path(kit["captions"]))
+            caps = panels_builder.validate_captions_for_locale(caps_obj, "en")
+            out1 = Path(kit["out"]) / "a"
+            out2 = Path(kit["out"]) / "b"
+            r1 = panels_builder.build_63(
+                "en", caps, "captions-v1", Path(kit["frames"]),
+                Path(kit["manifest"]), Path(kit["bezel"]), out1)
+            r2 = panels_builder.build_63(
+                "en", caps, "captions-v1", Path(kit["frames"]),
+                Path(kit["manifest"]), Path(kit["bezel"]), out2)
+            self.assertEqual(r1["template_version"], 13)
+            self.assertEqual(r1["template_variant"], "v13-scaled-63")
+            self.assertEqual(len(r1["panels"]), 5)
+            for name in r1["panels"]:
+                b1 = (out1 / name).read_bytes()
+                b2 = (out2 / name).read_bytes()
+                self.assertEqual(b1, b2, f"non-deterministic {name}")
+                with Image.open(out1 / name) as probed:
+                    self.assertEqual(probed.size, (1206, 2622))
+
+    def test_selftest_63_green_on_synthetic(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            kit = make_kit_63(tmp)
+            caps_obj = panels_builder.load_captions(Path(kit["captions"]))
+            caps = panels_builder.validate_captions_for_locale(caps_obj, "en")
+            out = Path(kit["out"]) / "a"
+            recipe = panels_builder.build_63(
+                "en", caps, "captions-v1", Path(kit["frames"]),
+                Path(kit["manifest"]), Path(kit["bezel"]), out)
+            lines = panels_builder.selftest_63(out, recipe)
+            self.assertEqual(len(lines), 5)
+
+    def test_detect_slot_matches_drawn_rect(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            bezel = Path(tmp) / "b63.png"
+            make_bezel_63(bezel)
+            # PIL rectangles are endpoint-inclusive: 804x1748 draw -> 805x1749.
+            self.assertEqual(panels_builder.detect_bezel_slot(bezel),
+                             ((805, 1749), (38, 26)))
+
+    def test_verify_63_rejects_wrong_aspect(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            bezel = Path(tmp) / "bad.png"
+            make_bezel_ipad(bezel)
+            with self.assertRaises(panels_builder.BuilderError) as ctx:
+                panels_builder.verify_bezel_63(bezel)
+            self.assertIn("aspect drift", str(ctx.exception))
+
+    def test_verify_63_rejects_opaque(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            bezel = Path(tmp) / "opaque.png"
+            Image.new("RGB", (900, 1900), (10, 10, 10)).save(bezel)
+            with self.assertRaises(panels_builder.BuilderError):
+                panels_builder.verify_bezel_63(bezel)
+
+    def test_device_shot_63_rejects_cross_size(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            kit = make_kit_63(tmp)
+            bezel = panels_builder.load_bezel(Path(kit["bezel"]))
+            info = panels_builder.verify_bezel_63(Path(kit["bezel"]))
+            slot = tuple(info["screen_slot_px"])
+            at = tuple(info["screen_at_px"])
+            big = Image.new("RGB", (1320, 2868), (1, 2, 3))
+            with self.assertRaises(panels_builder.BuilderError) as ctx:
+                panels_builder.device_shot_63(big, bezel, slot, at,
+                                              tuple(bezel.size))
+            self.assertIn("cross-size art rejected", str(ctx.exception))
+
 
 @unittest.skipUnless(HAS_PILLOW, "Pillow required")
 class CliTests(unittest.TestCase):
@@ -276,6 +387,59 @@ class CliTests(unittest.TestCase):
                 len(list(Path(kit["out"]).glob("panel-*-en-2064x2752.png"))), 4)
             self.assertEqual(
                 len(list(Path(kit["out"]).glob("panel-live-activities-*.png"))), 0)
+
+    def test_cli_63_build_selftest(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            kit = make_kit_63(tmp)
+            proc = run("--locale", "en", "--size", "6.3",
+                       "--panels-dir", kit["out"], "--captions", kit["captions"],
+                       "--frames-dir", kit["frames"],
+                       "--run-manifest", kit["manifest"],
+                       "--bezel", kit["bezel"], "--selftest")
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertIn("selftest green", proc.stdout)
+            self.assertEqual(
+                len(list(Path(kit["out"]).glob("panel-*-en-1206x2622.png"))), 5)
+            self.assertEqual(
+                len(list(Path(kit["out"]).glob("panels-en-1206x2622.recipe.json"))), 1)
+            recipe = json.loads(
+                next(Path(kit["out"]).glob("panels-en-1206x2622.recipe.json")
+                     ).read_text(encoding="utf-8"))
+            self.assertEqual(recipe.get("template_variant"), "v13-scaled-63")
+
+    def test_cli_63_check_template_refused(self):
+        # No owner-approved 6.3 hashes exist: the byte-identical gate
+        # refuses 6.3 loudly instead of passing it.
+        with tempfile.TemporaryDirectory() as tmp:
+            kit = make_kit_63(tmp)
+            proc = run("--locale", "en", "--size", "6.3",
+                       "--panels-dir", kit["out"], "--captions", kit["captions"],
+                       "--frames-dir", kit["frames"],
+                       "--run-manifest", kit["manifest"],
+                       "--bezel", kit["bezel"], "--check-template")
+            self.assertEqual(proc.returncode, 2)
+            self.assertIn("no approved template hashes", proc.stderr)
+
+    def test_cli_63_cross_size_art_blocked(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            kit = make_kit_63(tmp)
+            from PIL import Image
+            frames_dir = Path(kit["frames"])
+            Image.new("RGB", (1320, 2868), (1, 2, 3)).save(frames_dir / "history.png")
+            manifest_path = Path(kit["manifest"])
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            for rec in manifest["frames"]:
+                if rec["frame"] == "history":
+                    rec["screenshot_sha256"] = hashlib.sha256(
+                        (frames_dir / "history.png").read_bytes()).hexdigest()
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+            proc = run("--locale", "en", "--size", "6.3",
+                       "--panels-dir", kit["out"], "--captions", kit["captions"],
+                       "--frames-dir", kit["frames"],
+                       "--run-manifest", kit["manifest"],
+                       "--bezel", kit["bezel"])
+            self.assertEqual(proc.returncode, 2)
+            self.assertIn("cross-size art rejected", proc.stderr)
 
     def test_cli_zh_hans_renders(self):
         # Short CJK captions fit the fixed template; exercises the

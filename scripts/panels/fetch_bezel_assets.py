@@ -3,17 +3,23 @@
 
 Usage:
   FIGMA_API_KEY=<token> fetch_bezel_assets.py --out <external-bezels-dir>
-      [--file-key <key>] [--iphone-node <id>] [--ipad-node <id>]
-      [--scale <float>]
+      [--file-key <key>] [--iphone-node <id>] [--iphone63-node <id>]
+      [--ipad-node <id>] [--scale <float>]
 
 The bezel source is NOT pinned in git: pass --file-key (or FIGMA_FILE_KEY)
-with the owner-approved Apple community Figma file plus the iPhone/iPad
-bezel node IDs (--iphone-node/--ipad-node or FIGMA_IPHONE_NODE_ID /
-FIGMA_IPAD_NODE_ID). Without a pinned source the fetch fails closed and
-names the missing pin — no default file is guessed, no art is fabricated.
+with the owner-approved Apple community Figma file plus the bezel node IDs
+(--iphone-node/--iphone63-node/--ipad-node or FIGMA_IPHONE_NODE_ID /
+FIGMA_IPHONE63_NODE_ID / FIGMA_IPAD_NODE_ID). Without a pinned source the
+fetch fails closed and names the missing pin — no default file is guessed,
+no art is fabricated. Known pins: iPhone 6.9 FIGMA_IPHONE_NODE_ID
+12887:20855, iPhone 6.3 (iPhone 17 Black) FIGMA_IPHONE63_NODE_ID
+6316:14199, iPad FIGMA_IPAD_NODE_ID 5456:18569.
 
 Outputs (canonical names shared with panels.py --render-matrix):
   <out>/iphone-69-bezel.png   (980x2000, transparent screen slot)
+  <out>/iphone-63-bezel.png   (measured at fetch time: portrait alpha PNG
+                               with a dominant transparent slot agreeing
+                               with the 1206x2622 canvas aspect)
   <out>/ipad-13-bezel.png     (2300x3000, silver, transparent cavity)
 
 Every download is geometry/alpha-verified with the panel builder before it
@@ -102,6 +108,8 @@ def fetch_bezel(*, node_id: str, file_key: str, images: dict,
     try:
         if size == "6.9":
             info = panels_builder.verify_bezel_69(tmp)
+        elif size == "6.3":
+            info = panels_builder.verify_bezel_63(tmp)
         else:
             info = panels_builder.verify_bezel_ipad(tmp)
     except panels_builder.BuilderError as exc:
@@ -122,7 +130,10 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--file-key", default=None,
                     help="Figma file key (default: $FIGMA_FILE_KEY)")
     ap.add_argument("--iphone-node", default=None,
-                    help="iPhone bezel node id (default: $FIGMA_IPHONE_NODE_ID)")
+                    help="iPhone 6.9 bezel node id (default: $FIGMA_IPHONE_NODE_ID)")
+    ap.add_argument("--iphone63-node", default=None,
+                    help="iPhone 6.3 bezel node id "
+                         "(default: $FIGMA_IPHONE63_NODE_ID)")
     ap.add_argument("--ipad-node", default=None,
                     help="iPad bezel node id (default: $FIGMA_IPAD_NODE_ID)")
     ap.add_argument("--scale", default="1",
@@ -141,10 +152,14 @@ def main(argv: list[str] | None = None) -> int:
     file_key = args.file_key or os.environ.get("FIGMA_FILE_KEY", "")
     iphone_node = args.iphone_node or os.environ.get("FIGMA_IPHONE_NODE_ID",
                                                      "")
+    iphone63_node = args.iphone63_node or os.environ.get(
+        "FIGMA_IPHONE63_NODE_ID", "")
     ipad_node = args.ipad_node or os.environ.get("FIGMA_IPAD_NODE_ID", "")
     missing = [n for n, v in (("--file-key/FIGMA_FILE_KEY", file_key),
                               ("--iphone-node/FIGMA_IPHONE_NODE_ID",
                                iphone_node),
+                              ("--iphone63-node/FIGMA_IPHONE63_NODE_ID",
+                               iphone63_node),
                               ("--ipad-node/FIGMA_IPAD_NODE_ID", ipad_node))
                if not v]
     if missing:
@@ -172,7 +187,7 @@ def main(argv: list[str] | None = None) -> int:
     out_dir.mkdir(parents=True, exist_ok=True)
 
     ids = ",".join(urllib.parse.quote(n, safe="") for n in
-                   (iphone_node, ipad_node))
+                   (iphone_node, iphone63_node, ipad_node))
     try:
         meta = _get_json(
             f"{api_base()}/images/{urllib.parse.quote(file_key, safe='')}"
@@ -192,12 +207,14 @@ def main(argv: list[str] | None = None) -> int:
     try:
         iphone = fetch_bezel(node_id=iphone_node, file_key=file_key,
                              images=images, size="6.9", out_dir=out_dir)
+        iphone63 = fetch_bezel(node_id=iphone63_node, file_key=file_key,
+                               images=images, size="6.3", out_dir=out_dir)
         ipad = fetch_bezel(node_id=ipad_node, file_key=file_key,
                            images=images, size="ipad13", out_dir=out_dir)
     except (FetchError, panels_builder.BuilderError) as exc:
         print(f"invalid: {exc}", file=sys.stderr)
         return EXIT_INVALID
-    for got in (iphone, ipad):
+    for got in (iphone, iphone63, ipad):
         print(f"wrote {got['file']} {got['sha256'][:12]}")
     return EXIT_OK
 

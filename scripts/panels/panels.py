@@ -19,7 +19,7 @@ Matrix layout in (capture-runner layout: <device>/<language>/runs/<run-id>/):
 Matrix layout out: <out>/<device>/<language>/panel-*.png + recipe, plus
   <out>/matrix-manifest.json (rendered/blocked per cell, never fabricated).
 
-Devices are CI catalog keys (iphone69/iphone63/iphone65/ipad13); languages
+Devices are CI catalog keys (iphone69/iphone63/ipad13); languages
 are JSON lists. Bezels come from fetch_bezel_assets.py (canonical names).
 Non-en captions resolve to <captions-dir>/<locale>.json (en falls back to
 the in-git captions_en.json); without a captions dir, non-en cells are
@@ -27,8 +27,11 @@ BLOCKED (captions pending 9.2), never rendered with substituted copy.
 
 Required headline flags (the panel contract):
   --locale      en | ru | zh-Hans | es-419 | pt-BR
-  --size        6.9 | 6.5 | ipad13
+  --size        6.9 | 6.3 | 6.5 | ipad13
                 6.9    -> approved v13 composition (5 panels, LA-combined)
+                6.3    -> v13 composition scaled to the 1206x2622 canvas
+                          (5 panels, LA-combined; review sets only — no
+                          separate 6.3 approval, 9.3 hold still applies)
                 ipad13 -> approved ipad-v1 composition (4 panels, no LA)
                 6.5    -> recognized but REFUSED: no owner-approved 6.5
                           composition exists; the workflow stops at the
@@ -130,7 +133,7 @@ def cmd_single(args: argparse.Namespace) -> int:
               "(en | ru | zh-Hans | es-419 | pt-BR)", file=sys.stderr)
         return EXIT_INVALID
     if args.size is None:
-        print("invalid: --size is required (6.9 | 6.5 | ipad13)",
+        print("invalid: --size is required (6.9 | 6.3 | 6.5 | ipad13)",
               file=sys.stderr)
         return EXIT_INVALID
     if args.panels_dir is None:
@@ -145,8 +148,9 @@ def cmd_single(args: argparse.Namespace) -> int:
     size_info = panels_builder.SIZES[args.size]
     if size_info["template"] is None:
         print(f"blocked: no owner-approved {args.size}-inch panel composition; "
-              "only 6.9 (template v13) and ipad13 (template ipad-v1) are "
-              "approved — the 6.5 template decision is pending, matrix render "
+              "only 6.9 (template v13), 6.3 (template v13 scaled), and "
+              "ipad13 (template ipad-v1) are rendered — "
+              "the 6.5 template decision is pending, matrix render "
               "stays HELD per 9.3", file=sys.stderr)
         return EXIT_INVALID
 
@@ -188,6 +192,10 @@ def cmd_single(args: argparse.Namespace) -> int:
             recipe = panels_builder.build_69(
                 args.locale, caps, captions_version,
                 frames_dir, manifest_path, bezel_path, out_dir)
+        elif args.size == "6.3":
+            recipe = panels_builder.build_63(
+                args.locale, caps, captions_version,
+                frames_dir, manifest_path, bezel_path, out_dir)
         else:
             recipe = panels_builder.build_ipad(
                 args.locale, caps, captions_version,
@@ -204,6 +212,8 @@ def cmd_single(args: argparse.Namespace) -> int:
         try:
             if args.size == "6.9":
                 lines = panels_builder.selftest_69(out_dir, recipe)
+            elif args.size == "6.3":
+                lines = panels_builder.selftest_63(out_dir, recipe)
             else:
                 lines = panels_builder.selftest_ipad(out_dir, recipe)
         except panels_builder.BuilderError as exc:
@@ -288,7 +298,8 @@ def render_matrix_cell(*, device: str, language: str, size: str,
     if not size_info or size_info["template"] is None:
         raise panels_builder.BuilderError(
             f"no owner-approved {size} panel composition; only 6.9 "
-            "(template v13) and ipad13 (template ipad-v1) are approved — "
+            "(template v13), 6.3 (template v13 scaled), and ipad13 "
+            "(template ipad-v1) render — "
             f"matrix cell {device}/{language} stays HELD")
     run_id, manifest_path = find_matrix_run(
         shots_dir / device / language, device, language)
@@ -313,6 +324,11 @@ def render_matrix_cell(*, device: str, language: str, size: str,
             language, caps, captions_version,
             frames_dir, manifest_path, bezel_path, out_cell)
         probe_lines = panels_builder.selftest_69(out_cell, recipe)
+    elif size == "6.3":
+        recipe = panels_builder.build_63(
+            language, caps, captions_version,
+            frames_dir, manifest_path, bezel_path, out_cell)
+        probe_lines = panels_builder.selftest_63(out_cell, recipe)
     else:
         recipe = panels_builder.build_ipad(
             language, caps, captions_version,
@@ -411,6 +427,7 @@ def cmd_render_matrix(args: argparse.Namespace) -> int:
             timespec="seconds").replace("+00:00", "Z"),
         "review_status": panels_builder.REVIEW_STATUS,
         "template_versions": {"6.9": panels_builder.TEMPLATE_69,
+                              "6.3": panels_builder.TEMPLATE_69,
                               "ipad13": panels_builder.TEMPLATE_IPAD},
         "devices": devices, "languages": languages,
         "counts": {"cells": len(cells), "rendered": rendered,

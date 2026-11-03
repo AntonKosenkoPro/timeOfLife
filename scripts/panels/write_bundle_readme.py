@@ -199,6 +199,7 @@ def main(argv: list[str] | None = None) -> int:
         f"- ios_runtime: {args.ios_runtime}",
         f"- renderer: Pillow {pillow}",
         f"- templates: 6.9 v{panels_builder.TEMPLATE_69}, "
+        f"6.3 v{panels_builder.TEMPLATE_69} (scaled), "
         f"ipad {panels_builder.TEMPLATE_IPAD}",
         "",
         "## Devices",

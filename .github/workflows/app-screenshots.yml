@@ -28,7 +28,7 @@ on:
       devices:
         description: 'JSON device keys (catalog in the capture step).'
         required: false
-        default: '["iphone69","iphone63","iphone65","ipad13"]'
+        default: '["iphone69","iphone63","ipad13"]'
       languages:
         description: 'JSON locale list.'
         required: false
@@ -72,9 +72,8 @@ jobs:
           python3 - <<'PY'
           import os
           catalog = {
-            "iphone69": {"sim": "iPhone 16 Pro Max",   "geometry": "1320x2868", "island": True},
-            "iphone63": {"sim": "iPhone 16 Pro",       "geometry": "1206x2622", "island": True},
-            "iphone65": {"sim": "iPhone 11 Pro Max",   "geometry": "1242x2688", "island": False},
+            "iphone69": {"sim": "iPhone 18 Pro Max",   "geometry": "1320x2868", "island": True},
+            "iphone63": {"sim": "iPhone 17",           "geometry": "1206x2622", "island": True},
             "ipad13":   {"sim": "iPad Pro 13-inch (M4)", "geometry": "2064x2752", "island": False},
           }
           key = "${{ matrix.device }}"
@@ -186,6 +185,7 @@ jobs:
           FIGMA_API_KEY: ${{ secrets.FIGMA_API_KEY }}
           FIGMA_FILE_KEY: w8VjkUTV7f8AGiI7HXzKda
           FIGMA_IPHONE_NODE_ID: "12887:20855"
+          FIGMA_IPHONE63_NODE_ID: "6316:14199"
           FIGMA_IPAD_NODE_ID: "5456:18569"
         run: |
           [ -n "$FIGMA_API_KEY" ] || { echo "::error::FIGMA_API_KEY secret missing"; exit 2; }
