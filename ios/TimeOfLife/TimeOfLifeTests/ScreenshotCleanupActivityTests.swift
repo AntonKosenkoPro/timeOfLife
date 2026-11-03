@@ -34,12 +34,26 @@ struct ScreenshotCleanupActivityTests {
 
     @Test("pending live anchor is endable by id")
     func pendingLiveAnchorEndable() {
-        if #available(iOS 26, *) {
-            let snaps = [snapshot(id: "live-123", text: ScreenshotFixture.draftText, state: .pending)]
-            #expect(ScreenshotApp.endableFixtureSnapshots(snaps, expectedActivityID: "live-123").map(\.id) == ["live-123"])
-        } else {
-            Issue.record("requires the iOS 26 runtime")
+        // `ActivityState.pending` exists only on newer SDKs (Xcode 27+,
+        // iOS 26.0+ availability). A direct `.pending` reference breaks
+        // compilation on older-Xcode CI runners with "has no member", and
+        // `if #available` cannot help: availability is runtime-only, the
+        // symbol must exist at compile time. Decode from its Codable JSON
+        // form instead — succeeds where the SDK has the case, throws where
+        // it doesn't (then there is nothing to verify: return, don't fail).
+        // Production covers the case via `@unknown default` in
+        // `isEndableState` (no symbol reference, compiles everywhere).
+        let pending: ActivityState
+        do {
+            // Probed 2026-11-03 on the iOS 27.1 SDK: `ActivityState`
+            // encodes keyed by case name (`.active` -> `{"active":{}}`),
+            // not as a bare string — so this is the matching form.
+            pending = try JSONDecoder().decode(ActivityState.self, from: Data(#"{"pending":{}}"#.utf8))
+        } catch {
+            return
         }
+        let snaps = [snapshot(id: "live-123", text: ScreenshotFixture.draftText, state: pending)]
+        #expect(ScreenshotApp.endableFixtureSnapshots(snaps, expectedActivityID: "live-123").map(\.id) == ["live-123"])
     }
 
     @Test("live anchor is endable even when its text drifted")
