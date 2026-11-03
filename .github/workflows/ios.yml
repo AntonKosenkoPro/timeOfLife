@@ -35,6 +35,7 @@ jobs:
     outputs:
       ios: ${{ steps.filter.outputs.ios }}
       screenshot: ${{ steps.filter.outputs.screenshot }}
+      tooling: ${{ steps.filter.outputs.tooling }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -55,6 +56,7 @@ jobs:
           if [ "$EVENT" != "pull_request" ]; then
             echo "ios=true" >> "$GITHUB_OUTPUT"  # push path-filters already matched
             echo "screenshot=true" >> "$GITHUB_OUTPUT"
+            echo "tooling=true" >> "$GITHUB_OUTPUT"
           elif { git cat-file -e "$BASE^{commit}" 2>/dev/null || git fetch origin "$BASE" 2>/dev/null; } \
             && files="$(git -c core.quotePath=false diff --name-only "$BASE...HEAD")"; then
             if printf '%s\n' "$files" | grep -Eq '^(ios/|\.github/workflows/ios\.yml)'; then
@@ -73,9 +75,21 @@ jobs:
             else
               echo "screenshot=false" >> "$GITHUB_OUTPUT"
             fi
+            # The stdlib Python/shell tooling (scripts/screenshots/,
+            # scripts/panels/, the deny-screenshot guard) has no other CI
+            # entry point — app-screenshots.yml is workflow_dispatch-only —
+            # so a PR touching only the runner skips every lane without
+            # this. Lowercase paths never match the CamelCase patterns
+            # above, hence the explicit scripts/ alternative.
+            if printf '%s\n' "$files" | grep -Eq '^(ios/|\.github/workflows/ios\.yml)|scripts/(screenshots|panels)/'; then
+              echo "tooling=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "tooling=false" >> "$GITHUB_OUTPUT"
+            fi
           else
             echo "ios=true" >> "$GITHUB_OUTPUT"
             echo "screenshot=true" >> "$GITHUB_OUTPUT"
+            echo "tooling=true" >> "$GITHUB_OUTPUT"
           fi
 
   lint-build-test:
@@ -238,9 +252,36 @@ jobs:
   # Required check (ruleset): always reports, even when the lane is skipped
   # on non-ios PRs. Passes only if detection succeeded AND the lane is
   # success-or-skip; a changes failure fails the gate (never green-unverified).
+  tooling-tests:
+    needs: [changes]
+    # Push (path-filtered) always runs; PRs only when the diff touches
+    # ios/ or the scripts tooling. Ubuntu is enough: the Python suites are
+    # stdlib-only except the panels builder (pinned Pillow install below),
+    # and the guard test is POSIX sh.
+    if: github.event_name != 'pull_request' || needs.changes.outputs.tooling == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Screenshot runner Python suites
+        run: |
+          for t in scripts/screenshots/tests/test_*.py; do python3 "$t" || exit 1; done
+
+      - name: Panels Python suites
+        run: |
+          pip install "Pillow==13.0.0"
+          for t in scripts/panels/tests/test_*.py; do python3 "$t" || exit 1; done
+
+      - name: Screenshot install guard matrix
+        run: sh ios/TimeOfLife/scripts/deny-screenshot-install.test.sh
+
+  # Required check (ruleset): always reports, even when the lane is skipped
+  # on non-ios PRs. Passes only if detection succeeded AND the lanes are
+  # success-or-skip; a changes failure fails the gate (never green-unverified).
   ios-gate:
     if: always()
-    needs: [changes, lint-build-test]
+    needs: [changes, lint-build-test, tooling-tests]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -251,4 +292,8 @@ jobs:
           case "${{ needs.lint-build-test.result }}" in
             success|skipped) echo "lint-build-test ${{ needs.lint-build-test.result }} — gate green";;
             *) echo "::error::lint-build-test ${{ needs.lint-build-test.result }}"; exit 1;;
+          esac
+          case "${{ needs.tooling-tests.result }}" in
+            success|skipped) echo "tooling-tests ${{ needs.tooling-tests.result }} — gate green";;
+            *) echo "::error::tooling-tests ${{ needs.tooling-tests.result }}"; exit 1;;
           esac

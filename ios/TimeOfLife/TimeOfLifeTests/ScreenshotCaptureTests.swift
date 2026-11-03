@@ -100,7 +100,7 @@ struct ScreenshotCaptureTests {
         let base = ScreenshotFixture.entries
         #expect(base.count == 55)
         for locale in ["ru", "zh-Hans", "es-419", "pt-BR"] {
-            let localized = ScreenshotFixture.entries(for: locale)
+            let localized = try ScreenshotFixture.entries(for: locale)
             #expect(localized.count == 55, "count \(locale)")
             #expect(Set(localized.map { $0.text }).count == 27, "distinct \(locale)")
             for (index, spec) in localized.enumerated() {
@@ -122,7 +122,7 @@ struct ScreenshotCaptureTests {
         // ru/zh decks carry no Latin characters in user copy (risks reports).
         let latin = try NSRegularExpression(pattern: "[A-Za-z]")
         for locale in ["ru", "zh-Hans"] {
-            for spec in ScreenshotFixture.entries(for: locale) {
+            for spec in try ScreenshotFixture.entries(for: locale) {
                 for value in [spec.text, spec.notes] where !value.isEmpty {
                     let range = NSRange(value.startIndex..<value.endIndex, in: value)
                     #expect(latin.firstMatch(in: value, range: range) == nil, "\(locale) leakage: \(value)")
@@ -474,6 +474,99 @@ struct ScreenshotCaptureTests {
             return formatter.string(from: date)
         }()
         #expect(HistoryViewModel.timeText(for: date) == fresh)
+    }
+
+    @Test("capture snapshot round-trips the prior process defaults")
+    func priorDefaultsRoundTrip() throws {
+        // Regression (round-3): applyProcessLocale wrote AppleLanguages/
+        // AppleLocale into the shared standard domain and cleanup never
+        // restored them, so the container kept the last capture locale.
+        // Isolated suites: never touches the real standard domain, so no
+        // cross-talk with the chrome tests running in parallel.
+        let tag = UUID().uuidString
+        let standard = try #require(UserDefaults(suiteName: "test-prior-standard-\(tag)"))
+        let suite = try #require(UserDefaults(suiteName: "test-prior-suite-\(tag)"))
+        defer {
+            standard.removePersistentDomain(forName: "test-prior-standard-\(tag)")
+            suite.removePersistentDomain(forName: "test-prior-suite-\(tag)")
+        }
+        standard.set(["en"], forKey: "AppleLanguages")
+        standard.set("en_US", forKey: "AppleLocale")
+        ScreenshotCleanup.recordPriorDefaultsIfNeeded(suite: suite, standard: standard)
+        // Simulate the capture run's override.
+        standard.set(["ru"], forKey: "AppleLanguages")
+        standard.set("ru_RU", forKey: "AppleLocale")
+        ScreenshotCleanup.restorePriorDefaults(suite: suite, standard: standard)
+        #expect((standard.object(forKey: "AppleLanguages") as? [String]) == ["en"])
+        #expect((standard.object(forKey: "AppleLocale") as? String) == "en_US")
+    }
+
+    @Test("the first snapshot wins and later records never overwrite it")
+    func priorDefaultsFirstSnapshotWins() throws {
+        // A crashed run whose cleanup never restores leaves its snapshot
+        // behind, and that snapshot still holds the true pre-capture
+        // values — re-snapshotting over it would preserve capture state
+        // as "prior". Isolated suites: no cross-talk with parallel tests.
+        let tag = UUID().uuidString
+        let standard = try #require(UserDefaults(suiteName: "test-prior-standard-\(tag)"))
+        let suite = try #require(UserDefaults(suiteName: "test-prior-suite-\(tag)"))
+        defer {
+            standard.removePersistentDomain(forName: "test-prior-standard-\(tag)")
+            suite.removePersistentDomain(forName: "test-prior-suite-\(tag)")
+        }
+        standard.set(["en"], forKey: "AppleLanguages")
+        standard.set("en_US", forKey: "AppleLocale")
+        ScreenshotCleanup.recordPriorDefaultsIfNeeded(suite: suite, standard: standard)
+        // A later run's pre-state (previous capture values) must not win.
+        standard.set(["ru"], forKey: "AppleLanguages")
+        standard.set("ru_RU", forKey: "AppleLocale")
+        ScreenshotCleanup.recordPriorDefaultsIfNeeded(suite: suite, standard: standard)
+        ScreenshotCleanup.restorePriorDefaults(suite: suite, standard: standard)
+        #expect((standard.object(forKey: "AppleLanguages") as? [String]) == ["en"])
+        #expect((standard.object(forKey: "AppleLocale") as? String) == "en_US")
+    }
+
+    @Test("restore with an empty snapshot removes the override")
+    func priorDefaultsEmptySnapshotRemovesOverride() throws {
+        // When nothing was snapshotted, restore must remove the capture
+        // keys (falling back to ambient) — never leave the capture values
+        // behind. Seeded directly: the real standard domain always falls
+        // through to ambient AppleLanguages/AppleLocale, so an empty
+        // snapshot is otherwise unconstructible (see the key docs).
+        let tag = UUID().uuidString
+        let standard = try #require(UserDefaults(suiteName: "test-prior-standard-\(tag)"))
+        let suite = try #require(UserDefaults(suiteName: "test-prior-suite-\(tag)"))
+        defer {
+            standard.removePersistentDomain(forName: "test-prior-standard-\(tag)")
+            suite.removePersistentDomain(forName: "test-prior-suite-\(tag)")
+        }
+        suite.set(true, forKey: ScreenshotCleanup.priorSnapshotFlagKey)
+        standard.set(["xx-capture-probe"], forKey: "AppleLanguages")
+        standard.set("xx-capture-probe", forKey: "AppleLocale")
+        ScreenshotCleanup.restorePriorDefaults(suite: suite, standard: standard)
+        #expect((standard.object(forKey: "AppleLanguages") as? [String]) != ["xx-capture-probe"])
+        #expect((standard.object(forKey: "AppleLocale") as? String) != "xx-capture-probe")
+    }
+
+    @Test("override bundle memoizes per request and invalidates on apply/reset")
+    func overrideBundleMemoized() throws {
+        // Regression (round-3): every L10n.text render rebuilt the .lproj
+        // bundle from the filesystem (lock + path lookup + allocation per
+        // key, per frame). Repeated lookups must return the same instance.
+        defer { ScreenshotLocale.reset() }
+        let ru = try parsedRequest(locale: "ru", region: "RU", timezone: "Europe/Moscow")
+        ScreenshotLocale.apply(request: ru)
+        let first = try #require(ScreenshotLocale.overrideBundle())
+        let second = try #require(ScreenshotLocale.overrideBundle())
+        #expect(first === second)
+        #expect(first.bundlePath.contains("ru.lproj"))
+        // Re-applying with another locale resolves the new bundle …
+        let zh = try parsedRequest(locale: "zh-Hans", region: "CN", timezone: "Asia/Shanghai")
+        ScreenshotLocale.apply(request: zh)
+        #expect(ScreenshotLocale.overrideBundle()?.bundlePath.contains("zh-Hans.lproj") == true)
+        // … and reset clears back to nil (callers fall back to shipping).
+        ScreenshotLocale.reset()
+        #expect(ScreenshotLocale.overrideBundle() == nil)
     }
 
     private func priorState(runID: String, sha256: String) -> CaptureState {

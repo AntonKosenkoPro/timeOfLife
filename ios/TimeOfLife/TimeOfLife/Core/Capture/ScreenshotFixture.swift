@@ -495,13 +495,22 @@ enum ScreenshotFixture {
 
     /// Localized specs: shared durations/ordering/links from `entries`
     /// with deck text/notes applied. English (and unknown) locales return
-    /// the base English specs unchanged.
-    static func entries(for localeIdentifier: String) -> [EntrySpec] {
+    /// the base English specs unchanged. Throws (never traps): a drifted
+    /// localized deck must fail the run closed through the state file like
+    /// every other fixture derivation, never crash the process with no
+    /// evidence. The sole call site (`buildEntries`, itself throwing)
+    /// already carries the `try`.
+    static func entries(for localeIdentifier: String) throws -> [EntrySpec] {
         guard let texts = localizedEntryTexts(for: localeIdentifier) else {
             return entries
         }
         let notesValue = addEntryNotes(for: localeIdentifier)
-        precondition(texts.count == entries.count, "Localized deck length mismatch for \(localeIdentifier)")
+        guard texts.count == entries.count else {
+            throw ScreenshotRequestError(
+                code: "deck-length-mismatch",
+                detail: "Localized deck for \(localeIdentifier) has \(texts.count) texts, expected \(entries.count)."
+            )
+        }
         return entries.enumerated().map { index, spec in
             EntrySpec(
                 daysAgo: spec.daysAgo,

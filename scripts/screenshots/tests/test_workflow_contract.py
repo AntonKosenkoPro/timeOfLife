@@ -198,6 +198,59 @@ class WorkflowContractTests(unittest.TestCase):
         )
         self.assertIn("--untracked-files=no", body)
 
+    def test_capture_leg_needs_no_pillow(self):
+        # performance/low round-3: scripts/screenshots/ is stdlib-only, so
+        # the capture-leg Pillow install only added a failure mode to all
+        # 15 matrix legs. Pillow installs live only in the panels job.
+        body = text()
+        toolchain = body.split("Fail fast on toolchain")[1].split("Install pinned xcodegen")[0]
+        self.assertNotIn("pip install", toolchain)
+        self.assertNotIn("import PIL", toolchain)
+        panels = body.split("panels:")[1]
+        self.assertIn('pip install "Pillow==13.0.0"', panels)
+
+    def test_xcodegen_digest_points_at_pin_table(self):
+        # maintainability/low round-3: the digest is copied from ios.yml, so
+        # a pin bump needs both edits; the error must point at the table.
+        body = text()
+        seg = body.split("Install pinned xcodegen")[1].split("Resolve device catalog")[0]
+        self.assertIn("docs/ci.md pin table", seg)
+
+    def test_island_flag_is_explicit_token(self):
+        # maintainability/low round-3: a Python bool writes "True", and the
+        # shell spelling silently flips on any catalog refactor. 1/0 only.
+        body = text()
+        self.assertIn('"island": 1', body)
+        self.assertIn('"island": 0', body)
+        self.assertNotIn('"island": True', body)
+        self.assertNotIn('"island": False', body)
+        self.assertIn('[ "$IS_ISLAND" = "1" ]', body)
+        self.assertNotIn('= "True"', body)
+
+    def test_provenance_heredoc_quoted(self):
+        # maintainability/low round-3: an unquoted heredoc lets the shell
+        # expand $/backticks inside the Python body before it runs.
+        body = text()
+        self.assertIn("python3 - <<'PY'", body)
+        self.assertNotIn("python3 - <<PY", body.replace("python3 - <<'PY'", ""))
+
+    def test_dirty_scopes_out_regeneration(self):
+        # bug/low round-3: the dirty flag was read after xcodegen generate
+        # + build, so rewritten tracked schemes marked every run dirty:true
+        # while the panels job (no xcodegen) said dirty:false.
+        self.assertIn(":(exclude)ios/TimeOfLife/TimeOfLife.xcodeproj", text())
+
+    def test_panels_tolerates_incomplete_matrix(self):
+        # bug/high round-3: every CI la frame is needs-inspection until the
+        # human handoff, so verify_sources refuses them, every cell renders
+        # blocked, --render-matrix exits 2, and the zip/upload steps never
+        # ran — no bundle at all. An incomplete matrix must still zip.
+        body = text()
+        seg = body.split("Render panels")[1].split("Write README and zip")[0]
+        self.assertIn("matrix-manifest.json", seg)
+        self.assertIn("::warning::panels matrix incomplete", seg)
+        self.assertNotIn("continue-on-error", seg)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -5,12 +5,15 @@ steps:
     args:
       scale: 1
       includeImageInContext: false
-  - echo: "Touch-and-hold the island pill to reach the genuine expanded presentation (big timer + name + category chips + Stop). Point targets the pill center; no stable AX id exists for the collapsed pill on Home, so this is a documented coordinate fallback (see capture QA evidence). Expanded presence is proven by the follow-up tree (regular.view + Stop) and the full-res screenshot."
+  - echo: "Touch-and-hold the island pill to reach the genuine expanded presentation (big timer + name + category chips + Stop). Point targets the pill center; no stable AX id exists for the collapsed pill on Home, so this is a documented coordinate fallback (see capture QA evidence). The follow-up full-res screenshot is the human evidence for the expanded state — no runner-tree gate exists for it."
   - tool: gesture-custom
     args:
       events:
         - {type: Down, x: 0.5, y: 0.035}
         - {type: Up, x: 0.5, y: 0.035, delayMs: 800}
+  # Settle: raw tool steps take no settle, so the capture below could land
+  # mid-animation as a half-expanded pill. Matches the lockscreen flow waits.
+  - wait: 1500
   - tool: screenshot
     args:
       scale: 1

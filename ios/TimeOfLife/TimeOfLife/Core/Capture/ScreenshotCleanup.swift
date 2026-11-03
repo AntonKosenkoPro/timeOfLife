@@ -15,6 +15,57 @@ import SwiftUI
 /// shipping builds; no production path changes.
 @MainActor
 enum ScreenshotCleanup {
+    /// Suite keys for the pre-capture process-default snapshot. The
+    /// snapshot must persist (the cleanup that restores it runs in a
+    /// separate process), so it lives in the capture suite — never in
+    /// memory, never in the state file. Internal (not private) so tests
+    /// can seed an empty snapshot: the real standard domain always falls
+    /// through to ambient AppleLanguages/AppleLocale, so "no prior value"
+    /// is otherwise unconstructible.
+    static let priorSnapshotFlagKey = "screenshot.priorLocaleSnapshotted"
+    static let priorLanguagesKey = "screenshot.priorAppleLanguages"
+    static let priorLocaleKey = "screenshot.priorAppleLocale"
+
+    /// Snapshots the current `AppleLanguages`/`AppleLocale` standard values
+    /// into the capture suite before the first override. First call per
+    /// suite wins: a crashed run whose cleanup never restores leaves its
+    /// snapshot behind, and that snapshot still holds the true pre-capture
+    /// values (every later run only ever wrote capture locales), so
+    /// re-snapshotting over it would preserve capture state as "prior".
+    /// Domains are injectable so tests never touch the real standard suite.
+    static func recordPriorDefaultsIfNeeded(
+        suite: UserDefaults = ScreenshotApp.captureSuite(),
+        standard: UserDefaults = .standard
+    ) {
+        guard (suite.object(forKey: priorSnapshotFlagKey) as? Bool) != true else { return }
+        if let languages = standard.object(forKey: "AppleLanguages") {
+            suite.set(languages, forKey: priorLanguagesKey)
+        }
+        if let locale = standard.object(forKey: "AppleLocale") {
+            suite.set(locale, forKey: priorLocaleKey)
+        }
+        suite.set(true, forKey: priorSnapshotFlagKey)
+    }
+
+    /// Restores the snapshotted process defaults (keys absent before capture
+    /// are removed, not zeroed). No-op when nothing was snapshotted.
+    static func restorePriorDefaults(
+        suite: UserDefaults = ScreenshotApp.captureSuite(),
+        standard: UserDefaults = .standard
+    ) {
+        guard (suite.object(forKey: priorSnapshotFlagKey) as? Bool) == true else { return }
+        if let languages = suite.object(forKey: priorLanguagesKey) {
+            standard.set(languages, forKey: "AppleLanguages")
+        } else {
+            standard.removeObject(forKey: "AppleLanguages")
+        }
+        if let locale = suite.object(forKey: priorLocaleKey) {
+            standard.set(locale, forKey: "AppleLocale")
+        } else {
+            standard.removeObject(forKey: "AppleLocale")
+        }
+    }
+
     /// Runs the verified reset against an explicit documents directory
     /// (parameterized so tests use a temp dir; the app passes Documents).
     /// The acknowledgement is written in every outcome where the directory
@@ -64,6 +115,11 @@ enum ScreenshotCleanup {
             try? FileManager.default.removeItem(at: sessionDir)
             removedSession = !FileManager.default.fileExists(atPath: sessionDir.path)
         }
+        // Restore the pre-capture process defaults BEFORE dropping the
+        // suite that holds the snapshot: without this the container keeps
+        // the last capture locale and later launches of the screenshots
+        // build start in it.
+        ScreenshotCleanup.restorePriorDefaults()
         if let suite = UserDefaults(suiteName: ScreenshotApp.captureSuiteName) {
             suite.removePersistentDomain(forName: ScreenshotApp.captureSuiteName)
         }

@@ -171,6 +171,25 @@ final class LogTimeViewModel: ObservableObject {
         isGrandfathered ? displayStartsAt.addingTimeInterval(Self.minimumDuration) : Self.floored(endsAt, toMinutes: 1)
     }
 
+    /// Date pill caption ("Oct 12, 2026") in the form's calendar
+    /// (TrackViewModel.timeText precedent): the request locale/time zone
+    /// are applied post-launch in capture, so the old process-default
+    /// static formatter rendered the previous run's language/zone while
+    /// the time pill next to it was already pinned. One formatter for the
+    /// view-model lifetime (`calendar` is a `let`).
+    func dateText(for date: Date) -> String {
+        dateFormatter.string(from: date)
+    }
+
+    private lazy var dateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .none
+        formatter.locale = calendar.locale ?? .current
+        formatter.timeZone = calendar.timeZone
+        return formatter
+    }()
+
     /// Loads the category catalog for the TagSelector (idempotent). Called
     /// on open by the view.
     func loadCategoriesIfNeeded(store: LocalStore) async {

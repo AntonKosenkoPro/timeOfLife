@@ -76,8 +76,9 @@ extension HistoryViewModel {
         return calendar.dateComponents([.day], from: dayStart, to: today).day ?? 0
     }
 
-    /// Short-time caption ("14:00"). Under a capture override the request
-    /// locale/time zone win (same-launch chrome fix); otherwise the shared
+    /// Short-time caption ("14:00") for callers without a view model (the
+    /// Log Time pills). Under a capture override the request locale/time
+    /// zone win (same-launch chrome fix); otherwise the shared
     /// process-locale formatter.
     ///
     /// The override branch uses a per-call formatter: the shared static
@@ -102,9 +103,13 @@ extension HistoryViewModel {
         return formatLock.withLock {
             // Restore process defaults first: a prior capture override (or
             // any future caller that pins this shared formatter) must not
-            // leak its locale/time zone into later labels.
-            timeFormatter.locale = nil
-            timeFormatter.timeZone = nil
+            // leak its locale/time zone into later labels. Conditional so
+            // the steady-state path never dirties the formatter: assigning
+            // these properties forces an ICU regeneration, and `timeText`
+            // runs per History row (55 in the capture fixture) plus per
+            // ticker tick on the main thread.
+            if timeFormatter.locale != nil { timeFormatter.locale = nil }
+            if timeFormatter.timeZone != nil { timeFormatter.timeZone = nil }
             return timeFormatter.string(from: date)
         }
     }

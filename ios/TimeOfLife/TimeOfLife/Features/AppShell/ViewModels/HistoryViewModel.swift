@@ -388,17 +388,36 @@ final class HistoryViewModel: ObservableObject {
         !entry.notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
+    /// Short-time caption ("14:00") in the view model's calendar
+    /// (TrackViewModel precedent): capture pins locale/time zone through
+    /// the injected calendar; production keeps `.current`, identical to
+    /// the static helper. One formatter for the view-model lifetime
+    /// (`calendar` is a `let`): `timeframeText` runs per History row, and
+    /// a fresh `DateFormatter` per call pays an ICU locale load on the
+    /// main thread.
+    private func timeText(for date: Date) -> String {
+        timeFormatter.string(from: date)
+    }
+
+    private lazy var timeFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.timeStyle = .short
+        formatter.locale = calendar.locale ?? .current
+        formatter.timeZone = calendar.timeZone
+        return formatter
+    }()
+
     /// The start–end timeframe caption ("14:00 – 15:20"); an in-progress
     /// entry shows the start time followed by the in-progress indicator (D5).
     func timeframeText(for entry: TimeEntry) -> String {
-        let start = Self.timeText(for: entry.startedAt)
+        let start = timeText(for: entry.startedAt)
         if isInProgress(entry) {
             return "\(start) – \(L10n.historyInProgress.text)"
         }
         guard let endedAt = entry.endedAt else {
             return start
         }
-        return "\(start) – \(Self.timeText(for: endedAt))"
+        return "\(start) – \(timeText(for: endedAt))"
     }
 
     /// The entry's natural-language duration in the given locale; an

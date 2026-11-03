@@ -382,6 +382,30 @@ struct LogTimeViewModelTests {
         #expect(vm.durationSubtitleSeconds == nil)
     }
 
+    @Test("date pill follows the injected calendar, not the launch process state")
+    func datePillFollowsInjectedCalendar() {
+        // Regression (round-3): the date pill formatted through a static
+        // process-default formatter, so under a post-launch capture locale
+        // it rendered the previous run's language/zone while the time pill
+        // next to it was already pinned.
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "Pacific/Kiritimati")!
+        calendar.locale = Locale(identifier: "ru_RU")
+        // swiftlint:disable:next force_try
+        let store = try! LocalStore(url: temporaryStoreURL())
+        let vm = LogTimeViewModel(service: TimerService(store: store), calendar: calendar)
+        let date = Date(timeIntervalSinceReferenceDate: 100_000)
+        let reference = {
+            let formatter = DateFormatter()
+            formatter.dateStyle = .medium
+            formatter.timeStyle = .none
+            formatter.locale = calendar.locale
+            formatter.timeZone = calendar.timeZone
+            return formatter.string(from: date)
+        }()
+        #expect(vm.dateText(for: date) == reference)
+    }
+
     @Test("touched sub-minute interval disables the gate with no subtitle")
     func durationSubtitleTouchedSubMinute() {
         let vm = makeViewModel()

@@ -846,11 +846,12 @@ actor LocalStore {
             guard candidate >= stored else {
                 return .stale
             }
-            // Bump past the stored version instead of accepting a tie: the
-            // relay's PATCH guard stays strict (`updated_at < ?`), so a
-            // same-instant row would pass locally and be rejected (409) on
-            // push.
-            let stamp = max(candidate, stored.addingTimeInterval(1))
+            // Bump past the stored version by exactly one storage quantum
+            // (1 ms) instead of a full second: strictly newer at the DB's
+            // millisecond precision (what the relay's `updated_at < ?`
+            // compares), but without future-dating the row far enough for
+            // the next genuine edit to be misclassified as stale.
+            let stamp = max(candidate, stored.addingTimeInterval(0.001))
             let updated = Category(
                 id: original.id,
                 name: trimmed,

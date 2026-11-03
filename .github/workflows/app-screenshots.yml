@@ -75,11 +75,14 @@ jobs:
         env:
           IOS_RUNTIME: ${{ inputs.ios_runtime }}
         run: |
+          # Capture-only leg: scripts/screenshots/ is stdlib-only (no PIL
+          # import anywhere there), so Pillow is installed only in the
+          # panels job that renders. Installing it here added a failure
+          # mode (e.g. externally-managed Python) and a download to all
+          # 15 matrix legs for nothing.
           xcodebuild -version || { echo "::error::Xcode missing"; exit 2; }
           xcrun simctl list runtimes | grep -F "$IOS_RUNTIME" \
             || { echo "::error::runtime '$IOS_RUNTIME' not installed"; exit 2; }
-          python3 -c "import PIL; assert PIL.__version__.startswith('13.'), PIL.__version__" 2>/dev/null \
-            || pip install "Pillow==13.0.0"
 
       - name: Install pinned xcodegen
         # Same pins + digest checks as ios.yml (tasks 10.1): a clean runner
@@ -91,7 +94,7 @@ jobs:
           XCODEGEN_ZIP_SHA256="4d9e34b62172d645eed6457cac13fc222569974098ef4ee9c3368bedf0196806"
           curl -fsSL --retry 5 --retry-delay 2 --retry-all-errors "https://github.com/yonaskolb/XcodeGen/releases/download/${XCODEGEN_PIN}/xcodegen.zip" -o "${RUNNER_TEMP}/xcodegen.zip"
           echo "${XCODEGEN_ZIP_SHA256}  ${RUNNER_TEMP}/xcodegen.zip" | shasum -a 256 -c - || \
-            { echo "::error::xcodegen.zip digest mismatch for pin ${XCODEGEN_PIN}"; exit 1; }
+            { echo "::error::xcodegen.zip digest mismatch for pin ${XCODEGEN_PIN} — if the pin was bumped, update XCODEGEN_ZIP_SHA256 here and in ios.yml (see docs/ci.md pin table)"; exit 1; }
           rm -rf "${RUNNER_TEMP}/xcodegen" && mkdir -p "${RUNNER_TEMP}/xcodegen"
           unzip -o -q "${RUNNER_TEMP}/xcodegen.zip" -d "${RUNNER_TEMP}/xcodegen"
           BIN="$(find "${RUNNER_TEMP}/xcodegen" -path '*/bin/xcodegen' -type f -print -quit)"
@@ -116,9 +119,12 @@ jobs:
           python3 - <<'PY'
           import os
           catalog = {
-            "iphone69": {"sim": "iPhone 18 Pro Max",   "geometry": "1320x2868", "island": True},
-            "iphone63": {"sim": "iPhone 17",           "geometry": "1206x2622", "island": True},
-            "ipad13":   {"sim": "iPad Pro 13-inch (M4)", "geometry": "2064x2752", "island": False},
+            # The island flag is an explicit 1/0 token (not a Python bool):
+            # the handoff step tests it in shell, where a "True"/"true"
+            # spelling flip would silently mislabel the reason string.
+            "iphone69": {"sim": "iPhone 18 Pro Max",   "geometry": "1320x2868", "island": 1},
+            "iphone63": {"sim": "iPhone 17",           "geometry": "1206x2622", "island": 1},
+            "ipad13":   {"sim": "iPad Pro 13-inch (M4)", "geometry": "2064x2752", "island": 0},
           }
           key = os.environ["DEVICE_KEY"]
           if key not in catalog:
@@ -225,7 +231,7 @@ jobs:
               # island flag only tunes the reason string: finalize requires
               # every PILOT_FRAMES record, so island frames cannot be skipped
               # on the iPad leg either.
-              if [ "$frame" = "la-lock" ] || [ "$IS_ISLAND" = "True" ]; then
+              if [ "$frame" = "la-lock" ] || [ "$IS_ISLAND" = "1" ]; then
                 HANDOFF_NOTE="CI simctl cannot produce genuine Lock Screen/island pixels"
               else
                 HANDOFF_NOTE="no Dynamic Island on this device; CI simctl pixels are a placeholder"
@@ -245,11 +251,21 @@ jobs:
                 --out "$OUT" --run-id "$RID" --frame "$frame" \
                 || echo "::warning::$frame: teardown reported failure; finalize will pend it"
             done
-            python3 - <<PY
+            python3 - <<'PY'
           import json, os, subprocess
           from pathlib import Path
           base = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
-          dirty = bool(subprocess.check_output(["git", "status", "--porcelain"], text=True).strip())
+          # Scoped to real sources: the generated project is gitignored,
+          # but the tracked shared schemes under the xcodeproj are
+          # rewritten by the regeneration above, so an unscoped query
+          # would mark every CI run dirty:true while the panels job
+          # (where xcodegen never ran) reports dirty:false for the same
+          # bundle. Only the schemes live under the xcodeproj, so the
+          # exclusion drops regeneration noise and nothing else.
+          dirty = bool(subprocess.check_output(
+              ["git", "status", "--porcelain", "--", ".",
+               ":(exclude)ios/TimeOfLife/TimeOfLife.xcodeproj"],
+              text=True).strip())
           out = Path(os.environ["OUT_DIR"])
           rid = os.environ["RUN_RID"]
           out.joinpath(f"provenance-{rid}.json").write_text(json.dumps({"commit_base": base, "dirty": dirty}) + "\n")
@@ -285,7 +301,10 @@ jobs:
     needs: screenshots
     # One red matrix leg must not discard the whole bundle: fail-fast is
     # false, every leg uploads its artifacts, and panels.py records
-    # incomplete cells as blocked in the matrix manifest.
+    # incomplete cells as blocked in the matrix manifest. The Render step
+    # below tolerates that incomplete matrix (warns, still zips+uploads)
+    # because CI la frames are needs-inspection by design until the human
+    # handoff — only a missing manifest fails the job.
     if: "!cancelled()"
     runs-on: macos-15
     timeout-minutes: 30
@@ -361,11 +380,20 @@ jobs:
           LANGUAGES: ${{ inputs.languages }}
         run: |
           pip install "Pillow==13.0.0"
+          rc=0
           python3 scripts/panels/panels.py --render-matrix \
             --shots-dir shots --bezels-dir "$RUNNER_TEMP/bezels" \
             --out "$RUNNER_TEMP/panels" --devices "$DEVICES" \
             --languages "$LANGUAGES" \
-            --captions-dir openspec/changes/app-store-screenshot-pilot/captions
+            --captions-dir openspec/changes/app-store-screenshot-pilot/captions || rc=$?
+          # An incomplete matrix (exit 2) still uploads: every CI la frame
+          # is needs-inspection until the human record-external-frame
+          # handoff, so verify_sources refuses them and the matrix is
+          # incomplete BY DESIGN here — the manifest records each blocked
+          # cell and stays downloadable. Fail only when no manifest was
+          # written at all (a hard invocation error, not blocked cells).
+          if [ "$rc" -ne 0 ] && [ ! -f "$RUNNER_TEMP/panels/matrix-manifest.json" ]; then exit "$rc"; fi
+          if [ "$rc" -ne 0 ]; then echo "::warning::panels matrix incomplete (exit $rc) — blocked cells recorded in matrix-manifest.json; uploading partial bundle"; fi
 
       - name: Write README and zip
         env:

@@ -77,11 +77,13 @@ struct LogTimeView: View {
         // direct assignment keeps `timesTouched == false`, so the
         // grandfathered `interval > 0` rule applies and minute-exact
         // prefills like the capture sample pass through unchanged.
-        // Constructed once into the StateObject — no published writes on a
-        // discarded instance. Contract: callers pass minute-exact intervals
-        // ≥1 min for picker-setter parity; sub-minute intervals stay savable
-        // here but would collapse under the setters' minute floor.
-        let vm = LogTimeViewModel(
+        // Built lazily inside the StateObject autoclosure: the eager form
+        // (`let vm = ...` + `wrappedValue: vm`) constructed a view model
+        // on every view init and discarded it. Contract: callers pass
+        // minute-exact intervals ≥1 min for picker-setter parity;
+        // sub-minute intervals stay savable here but would collapse under
+        // the setters' minute floor.
+        _vm = StateObject(wrappedValue: LogTimeViewModel(
             service: service,
             initialText: initialText,
             initialCategoryIDs: initialCategoryIDs,
@@ -90,8 +92,7 @@ struct LogTimeView: View {
             editing: entry,
             now: now,
             calendar: calendar
-        )
-        _vm = StateObject(wrappedValue: vm)
+        ))
         self.embeddedInNavigationStack = embeddedInNavigationStack
         self.onSaved = onSaved
     }
@@ -439,7 +440,7 @@ struct LogTimeView: View {
                 .foregroundStyle(Theme.textSecondary)
             Spacer()
             HStack(spacing: Theme.spacingSmall) {
-                pill(Self.dateText(for: date), active: expandedPicker == datePicker, id: dateId) {
+                pill(vm.dateText(for: date), active: expandedPicker == datePicker, id: dateId) {
                     toggle(datePicker)
                 }
                 pill(HistoryViewModel.timeText(for: date), active: expandedPicker == timePicker, id: timeId) {
@@ -610,17 +611,6 @@ struct LogTimeView: View {
     /// Fixed calendar-picker height: large enough for six-week months
     /// without clipping.
     private static let graphicalPickerHeight: CGFloat = 360
-
-    private static let dateFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.dateStyle = .medium
-        formatter.timeStyle = .none
-        return formatter
-    }()
-
-    private static func dateText(for date: Date) -> String {
-        dateFormatter.string(from: date)
-    }
 }
 
 #if DEBUG
