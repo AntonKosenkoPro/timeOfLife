@@ -53,7 +53,7 @@ concurrency:
 jobs:
   screenshots:
     name: capture (${{ matrix.device }}, ${{ matrix.language }})
-    runs-on: macos-26
+    runs-on: xcode-27
     timeout-minutes: 180
     strategy:
       fail-fast: false
@@ -81,8 +81,12 @@ jobs:
           # mode (e.g. externally-managed Python) and a download to all
           # 15 matrix legs for nothing.
           xcodebuild -version || { echo "::error::Xcode missing"; exit 2; }
-          xcrun simctl list runtimes | grep -F "$IOS_RUNTIME" \
-            || { echo "::error::runtime '$IOS_RUNTIME' not installed"; exit 2; }
+          if ! xcrun simctl list runtimes | grep -F "$IOS_RUNTIME"; then
+            echo "::warning::runtime '$IOS_RUNTIME' not installed — downloading iOS platform"
+            sudo xcodebuild -downloadPlatform iOS
+            xcrun simctl list runtimes | grep -F "$IOS_RUNTIME" \
+              || { echo "::error::runtime '$IOS_RUNTIME' still missing after 'xcodebuild -downloadPlatform iOS'"; exit 2; }
+          fi
 
       - name: Install pinned xcodegen
         # Same pins + digest checks as ios.yml (tasks 10.1): a clean runner
