@@ -663,13 +663,16 @@ def capture_app_frame(
     expected_geometry: tuple[int, int] = req.PILOT_GEOMETRY,
     auto_teardown: bool = False,
     bid: str = req.SCREENSHOT_BID,
+    mask: str | None = None,
 ) -> dict[str, Any]:
     """Native export for app-clock frames after live revalidation.
 
     Refuses la-* frames (use record-external-frame), cross-device calls,
     and stale sessions: the live capture-state.json must match the session
     right now. Screenshot/geometry failures restore chrome too. With
-    auto_teardown, teardown runs on success as well.
+    auto_teardown, teardown runs on success as well. `mask` resolves via
+    preflight (None = per-frame default; app frames use the simctl
+    default, island frames would use --mask=black).
     """
     if frame in req.LA_FRAMES:
         raise FrameError(
@@ -691,7 +694,11 @@ def capture_app_frame(
     dest = frame_png_path(run_dir, frame)
     dest.parent.mkdir(parents=True, exist_ok=True)
     try:
-        argv = pf.screenshot_argv(udid, str(dest))
+        resolved_mask = pf.resolve_screenshot_mask(frame, mask)
+    except ValueError as exc:
+        raise FrameError(str(exc))
+    try:
+        argv = pf.screenshot_argv(udid, str(dest), resolved_mask)
         _check(run(argv), argv, "io screenshot")
         try:
             dims = insp.png_dimensions(str(dest))
@@ -724,6 +731,7 @@ def capture_app_frame(
         "expected_totals": session.get("expected_totals"),
         "capture": "native-simctl",
     }
+    record["screenshot_mask"] = resolved_mask or "default"
     if isinstance(session.get("app_provenance"), dict):
         record["app_provenance"] = session["app_provenance"]
     frame_record_path(run_dir, frame).write_text(
@@ -747,12 +755,16 @@ def record_external_frame(
     pinned_totals: dict | None = None,
     expected_geometry: tuple[int, int] = req.PILOT_GEOMETRY,
     device_udid: str = "unknown",
+    mask: str | None = None,
 ) -> dict[str, Any]:
     """Register an externally produced PNG (genuine Lock Screen / Island capture).
 
     No device I/O. Fails unless the PNG has native geometry, the state is
     ready (with pin), and the human observation binds to the actual file
-    hash with wall time inside ±2s.
+    hash with wall time inside ±2s. `mask` documents the capture policy
+    the external producer must have used (None = per-frame default:
+    --mask=black for la-compact/la-expanded, simctl default otherwise)
+    and is recorded for audit, never inferred from pixels.
     """
     if frame not in req.LA_FRAMES:
         raise FrameError(
@@ -778,6 +790,10 @@ def record_external_frame(
     errs = insp.verify_la_observation(la, str(src), captured_at_iso, observation)
     if errs:
         raise FrameError("; ".join(errs))
+    try:
+        resolved_mask = pf.resolve_screenshot_mask(frame, mask)
+    except ValueError as exc:
+        raise FrameError(str(exc))
     dest = frame_png_path(run_dir, frame)
     dest.parent.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(src, dest)
@@ -808,6 +824,7 @@ def record_external_frame(
             "observed_elapsed_s": observation.get("observed_elapsed_s"),
         },
         "observation_sha256": insp.sha256_file(observation_path),
+        "screenshot_mask": resolved_mask or "default",
     }
     if isinstance(session_provenance, dict):
         record["app_provenance"] = session_provenance

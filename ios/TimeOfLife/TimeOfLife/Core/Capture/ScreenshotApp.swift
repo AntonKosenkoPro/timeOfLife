@@ -178,21 +178,94 @@ enum ScreenshotApp {
         )
     }
 
+    /// Testable snapshot of a timer activity for the fixture-ownership rule
+    /// below (the test host never has live ActivityKit activities, so the
+    /// predicate is verified against snapshots instead).
+    struct FixtureActivitySnapshot: Equatable {
+        var id: String
+        var entryText: String
+        var state: ActivityState
+    }
+
+    /// Whether a capture-owned activity still needs an explicit end: a
+    /// just-requested live anchor reads as `.pending` in a fresh process
+    /// (iOS 26+: request accepted, not yet presented) and a visible banner
+    /// can read as `.stale`. Both are still on screen — only an explicit
+    /// end clears them (a reboot never does). `.ended`/`.dismissed` are
+    /// already gone; `@unknown default` ends rather than leaks (still
+    /// scoped to capture-owned activities by the caller).
+    static func isEndableState(_ state: ActivityState) -> Bool {
+        switch state {
+        case .active, .stale:
+            return true
+        case .ended, .dismissed:
+            return false
+        @unknown default:
+            return true
+        }
+    }
+
+    /// Capture-owned matching rule (fixture text only — never another
+    /// account's): an activity is capture-owned when its id is the known
+    /// live anchor from capture-state.json (provenance beats content — a
+    /// renamed/drifted text still ends) or when its entry text is any
+    /// supported deck's draft text (stale banners from a previous run,
+    /// locale changes included).
+    static func endableFixtureSnapshots(
+        _ snapshots: [FixtureActivitySnapshot],
+        expectedActivityID: String?
+    ) -> [FixtureActivitySnapshot] {
+        let draftTexts = Set(ScreenshotFixture.allDraftTexts)
+        return snapshots.filter { snapshot in
+            let owned: Bool
+            if let expected = expectedActivityID, snapshot.id == expected {
+                owned = true
+            } else {
+                owned = draftTexts.contains(snapshot.entryText)
+            }
+            return owned && isEndableState(snapshot.state)
+        }
+    }
+
     /// Ends capture-owned live activities (fixture text only — never another
     /// account's): stale banners from a previous run must not leak into the
     /// next run's status chrome (two consecutive pilot runs). Matches any
     /// supported deck's draft text so a locale change still cleans the
     /// previous run. Returns the ended activity ids for the cleanup
     /// acknowledgement.
-    static func endFixtureActivities() async -> [String] {
-        let draftTexts = Set(ScreenshotFixture.allDraftTexts)
-        let stale = Activity<TimerActivityAttributes>.activities.filter {
-            $0.activityState == .active && draftTexts.contains($0.attributes.entryText)
-        }
+    ///
+    /// When the known live anchor is supplied (cleanup path,
+    /// `capture-state.json`'s `live_activity.activity_id`), the enumeration
+    /// polls up to `timeout`: a fresh launch can read a just-requested
+    /// anchor as `.pending` (or miss it entirely until the system delivers
+    /// it), while older strays are already `.active` — a single shot ended
+    /// the strays and missed exactly the currently-live one. Stray sweeps
+    /// (capture start, no anchor) stay single-pass.
+    static func endFixtureActivities(
+        expectedActivityID: String? = nil,
+        timeout: TimeInterval = 0
+    ) async -> [String] {
         var ended: [String] = []
-        for activity in stale {
-            await activity.end(nil, dismissalPolicy: .immediate)
-            ended.append(activity.id)
+        var endedIDs = Set<String>()
+        let deadline = Date().addingTimeInterval(timeout)
+        while true {
+            let live = Activity<TimerActivityAttributes>.activities
+            let snapshots = live.map {
+                FixtureActivitySnapshot(id: $0.id, entryText: $0.attributes.entryText, state: $0.activityState)
+            }
+            let targets = endableFixtureSnapshots(snapshots, expectedActivityID: expectedActivityID)
+                .filter { !endedIDs.contains($0.id) }
+            for target in targets {
+                if let activity = live.first(where: { $0.id == target.id }) {
+                    await activity.end(nil, dismissalPolicy: .immediate)
+                    endedIDs.insert(target.id)
+                    ended.append(target.id)
+                }
+            }
+            if expectedActivityID == nil { break }
+            if let expected = expectedActivityID, endedIDs.contains(expected) { break }
+            if Date() >= deadline { break }
+            try? await Task.sleep(nanoseconds: 50_000_000)
         }
         return ended
     }

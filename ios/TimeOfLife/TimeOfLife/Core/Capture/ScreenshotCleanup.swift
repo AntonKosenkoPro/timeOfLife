@@ -20,7 +20,11 @@ enum ScreenshotCleanup {
     /// The acknowledgement is written in every outcome where the directory
     /// is known — including `mismatch`/`failure`, so the runner never waits
     /// on silence.
-    static func perform(documents: URL, invocation: ScreenshotCleanupInvocation) async -> CaptureCleanupState {
+    static func perform(
+        documents: URL,
+        invocation: ScreenshotCleanupInvocation,
+        activityPollTimeout: TimeInterval = 5
+    ) async -> CaptureCleanupState {
         guard let prior = try? CaptureStateWriter.read(from: documents) else {
             let ack = CaptureCleanupState(
                 status: "failure",
@@ -45,7 +49,15 @@ enum ScreenshotCleanup {
             try? CaptureCleanupWriter.write(ack, to: documents)
             return ack
         }
-        let ended = await ScreenshotApp.endFixtureActivities()
+        // The known live anchor (realtime frames) is targeted by id, not
+        // just by draft text: a just-requested anchor can read as `.pending`
+        // in this fresh process while older strays are already `.active` —
+        // ending by text alone missed exactly the currently-live one
+        // (runner stayed `partial`, reboot never clears the banner).
+        let ended = await ScreenshotApp.endFixtureActivities(
+            expectedActivityID: prior.liveActivity?.activityID,
+            timeout: activityPollTimeout
+        )
         var removedSession = false
         let sessionDir = try? ScreenshotPreparation.sessionDirectory(runID: invocation.runID)
         if let sessionDir, FileManager.default.fileExists(atPath: sessionDir.path) {

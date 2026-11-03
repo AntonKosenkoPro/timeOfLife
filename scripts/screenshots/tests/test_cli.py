@@ -18,6 +18,7 @@ def run(*argv: str, env_extra: dict | None = None):
     import os
     env = dict(os.environ)
     env.pop("LIFIO_CAPTURE_LEASE", None)
+    env.pop("LIFIO_CAPTURE_CI", None)
     if env_extra:
         env.update(env_extra)
     return subprocess.run([sys.executable, CLI, *argv],
@@ -366,6 +367,89 @@ class CliTests(unittest.TestCase):
                            "--approval", ap_path, "--retained-dir", retained)
                 self.assertEqual(proc.returncode, 2)
 
+    def test_plan_run_ci_bypass_opens_gates_without_approval(self):
+        import request_schema as rs
+        with tempfile.TemporaryDirectory() as tmp:
+            base = json.loads((HERE / "pilot_manifest.json").read_text(encoding="utf-8"))
+            base = {k: v for k, v in base.items() if k not in ("frame", "mode")}
+            base["locale"] = "ru"
+            base["region"] = "RU"
+            base["timezone"] = "Europe/Moscow"
+            base["keyboard"] = {"language": "ru-RU", "software_visible": True,
+                                "presentation": "docked"}
+            bp = str(Path(tmp) / "base-ru.json")
+            Path(bp).write_text(json.dumps(base), encoding="utf-8")
+            # blocked without approval and without the CI flag
+            proc = run("plan-run", "--request", bp,
+                       "--device", "AAAA1111-2222-3333-4444-555566667777",
+                       "--out", tmp, "--run-id", "pilot-ru", "--runs", "2",
+                       "--geometry", "2064x2752")
+            self.assertEqual(proc.returncode, 2)
+            self.assertIn("blocked", proc.stderr)
+            # CI harness passes with the bypass and logs it in the plan
+            proc = run("plan-run", "--request", bp,
+                       "--device", "AAAA1111-2222-3333-4444-555566667777",
+                       "--out", tmp, "--run-id", "pilot-ru", "--runs", "2",
+                       "--geometry", "2064x2752",
+                       env_extra={"LIFIO_CAPTURE_CI": "1"})
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            plan = json.loads(proc.stdout)
+            self.assertTrue(plan["runs"][0]["ci_approval_bypass"])
+            # check-approval itself is never bypassed: still needs a file
+            proc = run("check-approval", "--kind", "ipad",
+                       env_extra={"LIFIO_CAPTURE_CI": "1"})
+            self.assertEqual(proc.returncode, 2)
+
+    def test_record_external_frame_mask_recorded(self):
+        import hashlib
+        import struct
+        import zlib
+        with tempfile.TemporaryDirectory() as tmp:
+            req = write_frame_request(tmp, "la-compact")
+            pin = write_pin(tmp)
+            digest = hashlib.sha256(Path(req).read_bytes()).hexdigest()
+            state = {
+                "status": "ready", "request_sha256": digest,
+                "deck_version": "en-austin-1", "frame": "la-compact",
+                "counts": {"entries": 55},
+                "expected_totals": dict(PINNED_TOTALS),
+                "build": {"configuration": "Screenshot",
+                          "bundle_id": "com.antonkosenko.timeoflifeapp.screenshots"},
+                "live_activity": {
+                    "activity_id": "a",
+                    "started_at": "2026-10-30T10:00:00+00:00",
+                    "request_acknowledged_at": "2026-10-30T10:00:01+00:00"},
+            }
+            sp = str(Path(tmp) / "state.json")
+            Path(sp).write_text(json.dumps(state), encoding="utf-8")
+            png = Path(tmp) / "island.png"
+            ihdr = struct.pack(">IIBBBBB", 1320, 2868, 8, 2, 0, 0, 0)
+            png.write_bytes(b"\x89PNG\r\n\x1a\n" + struct.pack(">I", 13)
+                            + b"IHDR" + ihdr
+                            + struct.pack(">I", zlib.crc32(b"IHDR" + ihdr) & 0xFFFFFFFF))
+            sha = hashlib.sha256(png.read_bytes()).hexdigest()
+            op = str(Path(tmp) / "obs.json")
+            Path(op).write_text(json.dumps(
+                {"observed_elapsed_s": 754, "screenshot_sha256": sha}),
+                encoding="utf-8")
+            # island default is --mask=black
+            proc = run("record-external-frame", "--out", tmp, "--run-id", "r1",
+                       "--frame", "la-compact", "--png", str(png),
+                       "--captured-at", "2026-10-30T10:12:34+00:00",
+                       "--observation", op, "--state", sp, "--request", req,
+                       "--pinned-totals", pin, "--device", "UDID-X")
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertEqual(json.loads(proc.stdout)["screenshot_mask"], "black")
+            # explicit --mask default overrides back to the simctl default
+            proc = run("record-external-frame", "--out", tmp, "--run-id", "r1",
+                       "--frame", "la-compact", "--png", str(png),
+                       "--captured-at", "2026-10-30T10:12:34+00:00",
+                       "--observation", op, "--state", sp, "--request", req,
+                       "--pinned-totals", pin, "--device", "UDID-X",
+                       "--mask", "default")
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertEqual(json.loads(proc.stdout)["screenshot_mask"], "default")
+
     def test_locale_totals_verb(self):
         import request_schema as rs
         with tempfile.TemporaryDirectory() as tmp:
@@ -378,6 +462,83 @@ class CliTests(unittest.TestCase):
                 self.assertEqual(totals["week_seconds"], week, locale)
                 self.assertEqual(totals, rs.load_pinned_totals_for_locale(locale))
             proc = run("locale-totals", "--locale", "xx")
+            self.assertEqual(proc.returncode, 2)
+
+    def test_make_request_en_pilot_roundtrip(self):
+        import request_schema as rs
+        with tempfile.TemporaryDirectory() as tmp:
+            out = str(Path(tmp) / "base-en.json")
+            proc = run("make-request", "--locale", "en",
+                       "--geometry", "1320x2868", "--out", out)
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertRegex(proc.stdout.strip(), r"^[0-9a-f]{64}$")
+            raw = Path(out).read_bytes()
+            self.assertEqual(raw, rs.canonical_bytes(json.loads(raw.decode())))
+            self.assertEqual(
+                proc.stdout.strip(), rs.request_sha256_of_bytes(raw))
+            base = json.loads(raw.decode())
+            self.assertNotIn("frame", base)
+            self.assertNotIn("mode", base)
+            self.assertEqual(base["locale"], "en")
+            self.assertEqual((base["region"], base["timezone"]),
+                             rs.LOCALE_PAIRING["en"])
+            self.assertEqual(base["keyboard"]["language"], "en-US")
+            self.assertEqual(base["geometry"], {"width": 1320, "height": 2868})
+            self.assertEqual(base["deck_version"], "en-austin-1")
+            self.assertEqual(base["expected_totals"],
+                             rs.load_pinned_totals_for_locale("en"))
+            for frame in rs.PILOT_FRAMES:
+                errs = rs.validate_request_dict(
+                    rs.build_frame_request(base, frame))
+                self.assertEqual(errs, [], f"{frame}: {errs}")
+
+    def test_make_request_all_locales_and_geometries(self):
+        import request_schema as rs
+        with tempfile.TemporaryDirectory() as tmp:
+            for locale in rs.KNOWN_LOCALES:
+                for (w, h) in rs.MATRIX_GEOMETRIES:
+                    with self.subTest(locale=locale, geometry=(w, h)):
+                        out = str(Path(tmp) / f"base-{locale}-{w}x{h}.json")
+                        proc = run("make-request", "--locale", locale,
+                                   "--geometry", f"{w}x{h}", "--out", out)
+                        self.assertEqual(proc.returncode, 0, proc.stderr)
+                        base = json.loads(Path(out).read_text(encoding="utf-8"))
+                        region, timezone = rs.LOCALE_PAIRING[locale]
+                        self.assertEqual(base["region"], region)
+                        self.assertEqual(base["timezone"], timezone)
+                        self.assertEqual(
+                            base["keyboard"]["language"],
+                            rs.KEYBOARD_FOR_LOCALE[locale])
+                        self.assertEqual(
+                            base["geometry"], {"width": w, "height": h})
+                        probe = rs.build_frame_request(base, "track-running")
+                        self.assertEqual(rs.validate_request_dict(probe), [])
+
+    def test_make_request_deterministic(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            outs = [str(Path(tmp) / f"base-{i}.json") for i in range(2)]
+            shas = []
+            for out in outs:
+                proc = run("make-request", "--locale", "pt-BR",
+                           "--geometry", "2064x2752", "--out", out)
+                self.assertEqual(proc.returncode, 0, proc.stderr)
+                shas.append(proc.stdout.strip())
+            self.assertEqual(shas[0], shas[1])
+            self.assertEqual(Path(outs[0]).read_bytes(),
+                             Path(outs[1]).read_bytes())
+
+    def test_make_request_rejects_bad_inputs(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = str(Path(tmp) / "base.json")
+            proc = run("make-request", "--locale", "xx",
+                       "--geometry", "1320x2868", "--out", out)
+            self.assertEqual(proc.returncode, 2)
+            proc = run("make-request", "--locale", "en",
+                       "--geometry", "100x100", "--out", out)
+            self.assertEqual(proc.returncode, 2)
+            self.assertIn("invalid", proc.stderr)
+            proc = run("make-request", "--locale", "en",
+                       "--geometry", "not-a-geometry", "--out", out)
             self.assertEqual(proc.returncode, 2)
 
     def test_record_external_frame_and_finalize(self):

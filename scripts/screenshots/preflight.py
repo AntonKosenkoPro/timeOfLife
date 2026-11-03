@@ -2,13 +2,21 @@
 """Preflight command planning (argv lists only; no device I/O here).
 
 Supported commands are limited to what installed ``simctl help`` confirms
-(read 2026-10-30, no ctx7, no device touched):
+(read 2026-10-30, re-verified 2026-11-02, no ctx7, no device touched):
 - ``status_bar <device> [list|clear|override ...]`` with --time,
-  --dataNetwork, --wifiMode, --wifiBars, --batteryState, --batteryLevel.
-- ``io <device> screenshot [--type png]`` native-resolution PNG export.
+  --dataNetwork, --wifiMode, --wifiBars, --cellularMode, --cellularBars,
+  --batteryState, --batteryLevel.
+- ``io <device> screenshot [--type png]`` native-resolution PNG export
+  (plus ``--mask=black`` for the island frames only, see below).
 - ``ui <device> appearance|content_size`` with no-arg query form.
 - ``get_app_container <device> <bid> data`` for the Documents drop.
 - ``launch --terminate-running-process <device> <bid> [argv...]``.
+
+Screenshot mask policy (probe-proven on this toolchain): the Dynamic
+Island compact/expanded presentations need ``--mask=black`` so the
+island cutout renders its true pixels; every other frame uses the
+simctl default (no ``--mask`` flag). ``screenshot_argv`` is the only
+place a mask flag is ever emitted, and only ``black`` is allowed.
 
 Deliberately NOT emitted: any global locale/timezone/keyboard preference
 commands (no confirmed simctl surface). Locale/timezone/keyboard travel
@@ -28,7 +36,12 @@ STATE_FILENAME = "capture-state.json"
 CLEANUP_FILENAME = "capture-cleanup.json"
 LAUNCH_ARGV = ["SCREENSHOT_REQUEST", REQUEST_FILENAME]
 
-# status_bar override pinned to pilot chrome (flag names from help text).
+# status_bar override pinned to pilot chrome (flag names from help text,
+# re-verified 2026-11-02 via `xcrun simctl help status_bar`: --cellularMode
+# active + --cellularBars 0-4, --batteryState charging|charged|discharging).
+# discharging + full cellular/wifi renders the required 9:41 + full cellular
+# + full wifi + 100% non-charging battery (charged showed a charging bolt,
+# missing cellular flags left empty dots — 9.3 matrix held until fixed).
 STATUS_BAR_OVERRIDE_ARGV = [
     "xcrun",
     "simctl",
@@ -38,13 +51,17 @@ STATUS_BAR_OVERRIDE_ARGV = [
     "--time",
     "9:41",
     "--batteryState",
-    "charged",
+    "discharging",
     "--batteryLevel",
     "100",
     "--wifiMode",
     "active",
     "--wifiBars",
     "3",
+    "--cellularMode",
+    "active",
+    "--cellularBars",
+    "4",
     "--dataNetwork",
     "wifi",
 ]
@@ -128,8 +145,48 @@ def cleanup_launch_argv(udid: str, bid: str, run_id: str, sha: str) -> list[str]
     ]
 
 
-def screenshot_argv(udid: str, dest_png: str) -> list[str]:
-    return ["xcrun", "simctl", "io", udid, "screenshot", "--type=png", dest_png]
+def screenshot_argv(
+    udid: str, dest_png: str, mask: str | None = None
+) -> list[str]:
+    """Native screenshot export; mask is None (simctl default) or 'black'.
+
+    Only 'black' is emitted, and only for the island frames resolved by
+    mask_for_frame(). Anything else fails closed: the mask policy is
+    probe-proven, never guessed per invocation.
+    """
+    if mask is None:
+        return ["xcrun", "simctl", "io", udid, "screenshot", "--type=png", dest_png]
+    if mask != "black":
+        raise ValueError(
+            f"unsupported screenshot mask {mask!r}; only 'black' is probe-proven"
+        )
+    return [
+        "xcrun", "simctl", "io", udid, "screenshot",
+        "--type=png", "--mask=black", dest_png,
+    ]
+
+
+def mask_for_frame(frame: str) -> str | None:
+    """Probe-proven mask per frame: 'black' for island frames, else None."""
+    return "black" if frame in ("la-compact", "la-expanded") else None
+
+
+def resolve_screenshot_mask(frame: str, mask: str | None = None) -> str | None:
+    """Resolve an explicit mask override ('black'/'default'/None) per frame.
+
+    None means the per-frame default from mask_for_frame(); 'default'
+    forces the simctl default even for island frames. Anything else
+    fails closed.
+    """
+    if mask is None:
+        return mask_for_frame(frame)
+    if mask == "default":
+        return None
+    if mask == "black":
+        return "black"
+    raise ValueError(
+        f"unsupported screenshot mask {mask!r}; want 'black', 'default', or omit"
+    )
 
 
 def plan_run(
@@ -156,6 +213,7 @@ def plan_run(
     run_dir = str(Path(out_root) / "runs" / run_id)
     steps = []
     for frame in frames:
+        mask = mask_for_frame(frame)
         steps.append(
             {
                 "frame": frame,
@@ -164,16 +222,20 @@ def plan_run(
                 "launch_argv": launch_argv(udid),
                 "state_file": f"<container-data>/Documents/{STATE_FILENAME}",
                 "screenshot_argv": screenshot_argv(
-                    udid, f"{run_dir}/frames/{frame}.png"
+                    udid, f"{run_dir}/frames/{frame}.png", mask,
                 ),
+                "screenshot_mask": mask or "default",
                 "frame_request": build_frame_request(base_request, frame),
             }
         )
+    from approval import ci_bypass_active
+
     return {
         "run_id": run_id,
         "device_udid": udid,
         "out_root": out_root,
         "run_dir": run_dir,
+        "ci_approval_bypass": ci_bypass_active(),
         "geometry": {"width": geometry[0], "height": geometry[1]},
         "snapshot_commands": snapshot_commands(udid),
         "apply_commands": apply_commands(udid),

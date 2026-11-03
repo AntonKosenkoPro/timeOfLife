@@ -7,12 +7,14 @@ refuse final status until real evidence is supplied.
 """
 
 import json
+import os
 import struct
 import sys
 import tempfile
 import unittest
 import zlib
 from pathlib import Path
+from unittest import mock
 
 HERE = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(HERE))
@@ -59,8 +61,17 @@ class PreflightSurfaceTests(unittest.TestCase):
         apply = pf.apply_commands("U")
         override = [c for c in apply if "status_bar" in c][0]
         for flag in ("--time", "--batteryState", "--batteryLevel",
-                     "--wifiMode", "--wifiBars", "--dataNetwork"):
+                     "--wifiMode", "--wifiBars", "--cellularMode",
+                     "--cellularBars", "--dataNetwork"):
             self.assertIn(flag, override)
+        # chrome fix 2026-11-02: non-charging battery + full cellular
+        # (charged rendered a bolt; missing cellular left empty dots).
+        self.assertEqual(
+            override[override.index("--batteryState") + 1], "discharging")
+        self.assertEqual(
+            override[override.index("--cellularMode") + 1], "active")
+        self.assertEqual(
+            override[override.index("--cellularBars") + 1], "4")
 
     def test_restore_exact_or_nothing(self):
         # session-owned override on clean snapshot -> clear emitted
@@ -91,9 +102,62 @@ class PreflightSurfaceTests(unittest.TestCase):
         ipad = pf.plan_run(base_request(), list(rs.PILOT_FRAMES), "A" * 8,
                            "/tmp", "r1", geometry=(2064, 2752))
         self.assertEqual(ipad["geometry"], {"width": 2064, "height": 2752})
+        medium = pf.plan_run(base_request(), list(rs.PILOT_FRAMES), "A" * 8,
+                             "/tmp", "r1", geometry=(1206, 2622))
+        self.assertEqual(medium["geometry"], {"width": 1206, "height": 2622})
         with self.assertRaises(ValueError):
             pf.plan_run(base_request(), list(rs.PILOT_FRAMES), "A" * 8,
-                        "/tmp", "r1", geometry=(100, 100))
+                         "/tmp", "r1", geometry=(100, 100))
+
+    def test_screenshot_mask_per_frame(self):
+        # island frames render true pixels with --mask=black; app frames
+        # and the lock banner use the simctl default (no flag).
+        for frame in ("la-compact", "la-expanded"):
+            self.assertEqual(pf.mask_for_frame(frame), "black")
+            argv = pf.screenshot_argv("U", "/tmp/x.png", pf.mask_for_frame(frame))
+            self.assertIn("--mask=black", argv)
+            self.assertEqual(argv[-1], "/tmp/x.png")
+        for frame in ("track-running", "insights", "history",
+                      "add-entry", "la-lock"):
+            self.assertIsNone(pf.mask_for_frame(frame))
+            argv = pf.screenshot_argv("U", "/tmp/x.png", pf.mask_for_frame(frame))
+            self.assertNotIn("--mask=black", argv)
+            self.assertNotIn("--mask", " ".join(argv))
+        # default call emits no mask flag at all
+        self.assertNotIn("--mask", " ".join(pf.screenshot_argv("U", "/tmp/x.png")))
+
+    def test_screenshot_mask_rejects_unproven_policies(self):
+        with self.assertRaises(ValueError):
+            pf.screenshot_argv("U", "/tmp/x.png", "alpha")
+        with self.assertRaises(ValueError):
+            pf.resolve_screenshot_mask("la-compact", "ignored")
+        self.assertEqual(pf.resolve_screenshot_mask("la-compact"), "black")
+        self.assertIsNone(pf.resolve_screenshot_mask("track-running"))
+        self.assertIsNone(pf.resolve_screenshot_mask("la-compact", "default"))
+        self.assertEqual(
+            pf.resolve_screenshot_mask("track-running", "black"), "black")
+
+    def test_plan_run_steps_carry_per_frame_mask(self):
+        plan = pf.plan_run(base_request(), list(rs.PILOT_FRAMES), "A" * 8,
+                           "/tmp", "r1")
+        by_frame = {s["frame"]: s for s in plan["steps"]}
+        for frame in ("la-compact", "la-expanded"):
+            self.assertEqual(by_frame[frame]["screenshot_mask"], "black")
+            self.assertIn("--mask=black", by_frame[frame]["screenshot_argv"])
+        for frame in ("track-running", "insights", "history",
+                      "add-entry", "la-lock"):
+            self.assertEqual(by_frame[frame]["screenshot_mask"], "default")
+            self.assertNotIn("--mask",
+                             " ".join(by_frame[frame]["screenshot_argv"]))
+
+    def test_plan_run_logs_ci_bypass(self):
+        plan = pf.plan_run(base_request(), list(rs.PILOT_FRAMES), "A" * 8,
+                           "/tmp", "r1")
+        self.assertFalse(plan["ci_approval_bypass"])
+        with mock.patch.dict(os.environ, {"LIFIO_CAPTURE_CI": "1"}):
+            plan = pf.plan_run(base_request(), list(rs.PILOT_FRAMES), "A" * 8,
+                               "/tmp", "r1")
+            self.assertTrue(plan["ci_approval_bypass"])
 
 
 class ManifestStabilityTests(unittest.TestCase):
@@ -139,6 +203,33 @@ class ManifestStabilityTests(unittest.TestCase):
                                       (1320, 2868), recs3)
         res3 = rm.compare_runs(m1, m3)
         self.assertTrue(any("insights" in e for e in res3["errors"]))
+
+    def test_manifest_logs_ci_bypass(self):
+        recs = [self._rec(f) for f in rs.PILOT_FRAMES]
+        m = rm.assemble_run_manifest("r1", "U", "en-austin-1", "light-v1",
+                                     (1320, 2868), recs)
+        self.assertFalse(m["ci_approval_bypass"])
+        with mock.patch.dict(os.environ, {"LIFIO_CAPTURE_CI": "1"}):
+            m = rm.assemble_run_manifest("r1", "U", "en-austin-1", "light-v1",
+                                         (1320, 2868), [dict(r) for r in recs])
+            self.assertTrue(m["ci_approval_bypass"])
+        # explicit flag wins over the environment either way
+        with mock.patch.dict(os.environ, {"LIFIO_CAPTURE_CI": "1"}):
+            m = rm.assemble_run_manifest("r1", "U", "en-austin-1", "light-v1",
+                                         (1320, 2868), [dict(r) for r in recs],
+                                         ci_approval_bypass=False)
+            self.assertFalse(m["ci_approval_bypass"])
+
+    def test_ci_flag_is_provenance_not_content(self):
+        recs = [self._rec(f) for f in rs.PILOT_FRAMES]
+        m1 = rm.assemble_run_manifest("r1", "U", "en-austin-1", "light-v1",
+                                      (1320, 2868), recs,
+                                      ci_approval_bypass=False)
+        m2 = rm.assemble_run_manifest("r2", "U", "en-austin-1", "light-v1",
+                                      (1320, 2868), [dict(r) for r in recs],
+                                      ci_approval_bypass=True)
+        res = rm.compare_runs(m1, m2)
+        self.assertEqual(res, {"errors": [], "unreviewed_variance": []})
 
 
 class InspectionGateTests(unittest.TestCase):

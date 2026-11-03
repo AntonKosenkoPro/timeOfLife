@@ -334,6 +334,25 @@ class CaptureAppFrameTests(unittest.TestCase):
                 ex.capture_app_frame(fake, "UDID-1", run_dir, "insights",
                                      expected_geometry=(1320, 2868))
 
+    def test_app_frame_uses_default_mask(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            fake, run_dir = self._prepared(tmp)
+            record = ex.capture_app_frame(fake, "UDID-1", run_dir, "track-running")
+            self.assertEqual(record["screenshot_mask"], "default")
+            io_calls = [c for c in fake.calls if c[2] == "io"]
+            self.assertEqual(len(io_calls), 1)
+            self.assertNotIn("--mask=black", io_calls[0])
+            self.assertNotIn("--mask", " ".join(io_calls[0]))
+
+    def test_app_frame_explicit_black_mask_override(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            fake, run_dir = self._prepared(tmp)
+            record = ex.capture_app_frame(fake, "UDID-1", run_dir,
+                                          "track-running", mask="black")
+            self.assertEqual(record["screenshot_mask"], "black")
+            io_calls = [c for c in fake.calls if c[2] == "io"]
+            self.assertIn("--mask=black", io_calls[-1])
+
 
 class RecordExternalFrameTests(unittest.TestCase):
     def _la_inputs(self, tmp: str, frame: str = "la-lock"):
@@ -373,6 +392,34 @@ class RecordExternalFrameTests(unittest.TestCase):
                 self.assertEqual(record["capture"], "external-lock-screen")
                 self.assertEqual(record["capture_window"]["observed_elapsed_s"], 754)
                 self.assertTrue((run_dir / "frames" / f"{la_frame}.png").is_file())
+
+    def test_external_mask_defaults_per_frame(self):
+        # island frames require --mask=black; the lock banner uses default.
+        for la_frame, want in (("la-lock", "default"),
+                               ("la-compact", "black"),
+                               ("la-expanded", "black")):
+            with tempfile.TemporaryDirectory() as tmp:
+                request, digest, state, png, op = self._la_inputs(tmp, la_frame)
+                record = ex.record_external_frame(
+                    run_dir=Path(tmp) / "runs" / "r1", frame=la_frame,
+                    png_src=str(png),
+                    captured_at_iso="2026-10-30T10:12:34+00:00",
+                    observation_path=str(op), state=state, request=request,
+                    request_sha256=digest, pinned_totals=dict(PINNED),
+                    device_udid="UDID-1")
+                self.assertEqual(record["screenshot_mask"], want, la_frame)
+
+    def test_external_mask_explicit_override(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            request, digest, state, png, op = self._la_inputs(tmp, "la-compact")
+            record = ex.record_external_frame(
+                run_dir=Path(tmp) / "runs" / "r1", frame="la-compact",
+                png_src=str(png),
+                captured_at_iso="2026-10-30T10:12:34+00:00",
+                observation_path=str(op), state=state, request=request,
+                request_sha256=digest, pinned_totals=dict(PINNED),
+                device_udid="UDID-1", mask="default")
+            self.assertEqual(record["screenshot_mask"], "default")
 
     def test_wrong_frame_or_unbound_observation_rejected(self):
         with tempfile.TemporaryDirectory() as tmp:

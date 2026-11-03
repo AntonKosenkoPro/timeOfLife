@@ -1,0 +1,223 @@
+# App Store screenshots pipeline (OpenSpec change app-store-screenshot-pilot, §10).
+#
+# Matrix capture on macOS (long task, parallel per device x language),
+# fast panels + zip on a separate job. Binaries never enter git — the only
+# downloadable is the `lifio-screenshots` artifact attached to the run.
+#
+# Honest constraints (see tasks §10 + evidence-runner.md):
+# - Panel rendering needs macOS Helvetica for byte-identical headlines, so the
+#   panels job also runs on macOS (fast: checkout + Pillow only, no Xcode build).
+# - CI sets run under LIFIO_CAPTURE_CI=1 (logged in every manifest as
+#   ci_approval_bypass:true): technically gated, NOT owner eyeball-approved.
+# - Island frames capture with --mask=black (probe-proven island pixels).
+# - Apple bezel PNGs are NOT in git (no-binaries rule): the panels job fetches
+#   them from the Apple community Figma file with FIGMA_API_KEY (repo secret).
+#   Without the secret the panels job fails closed.
+# - iOS 27 runtime + Xcode 27 on the runner are assumed; fail-fast checks stop
+#   the run with a clear message otherwise.
+
+name: app-screenshots
+
+on:
+  workflow_dispatch:
+    inputs:
+      ios_runtime:
+        description: "iOS simulator runtime (e.g. iOS 27.0)"
+        required: false
+        default: "iOS 27.0"
+      devices:
+        description: 'JSON device keys (catalog in the capture step).'
+        required: false
+        default: '["iphone69","iphone63","iphone65","ipad13"]'
+      languages:
+        description: 'JSON locale list.'
+        required: false
+        default: '["en","ru","zh-Hans","es-419","pt-BR"]'
+      runs_per_set:
+        description: "Full runs per device x language set."
+        required: false
+        default: "2"
+
+concurrency:
+  group: app-screenshots-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  screenshots:
+    name: capture (${{ matrix.device }}, ${{ matrix.language }})
+    runs-on: macos-26
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix:
+        device: ${{ fromJSON(inputs.devices) }}
+        language: ${{ fromJSON(inputs.languages) }}
+    env:
+      LIFIO_CAPTURE_LEASE: "1"
+      LIFIO_CAPTURE_CI: "1"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fail fast on toolchain
+        run: |
+          xcodebuild -version || { echo "::error::Xcode missing"; exit 2; }
+          xcrun simctl list runtimes | grep -F "${{ inputs.ios_runtime }}" \
+            || { echo "::error::runtime '${{ inputs.ios_runtime }}' not installed"; exit 2; }
+          python3 -c "import PIL; assert PIL.__version__.startswith('13.'), PIL.__version__" 2>/dev/null \
+            || pip install "Pillow==13.0.0"
+
+      - name: Resolve device catalog
+        id: dev
+        run: |
+          python3 - <<'PY'
+          import os
+          catalog = {
+            "iphone69": {"sim": "iPhone 16 Pro Max",   "geometry": "1320x2868", "island": True},
+            "iphone63": {"sim": "iPhone 16 Pro",       "geometry": "1206x2622", "island": True},
+            "iphone65": {"sim": "iPhone 11 Pro Max",   "geometry": "1242x2688", "island": False},
+            "ipad13":   {"sim": "iPad Pro 13-inch (M4)", "geometry": "2064x2752", "island": False},
+          }
+          key = "${{ matrix.device }}"
+          if key not in catalog:
+              raise SystemExit(f"unknown device '{key}', catalog: {sorted(catalog)}")
+          with open(os.environ["GITHUB_OUTPUT"], "a") as fh:
+              for k, v in catalog[key].items():
+                  fh.write(f"{k}={v}\n")
+          PY
+
+      - name: Create and boot simulator
+        id: sim
+        run: |
+          UDID=$(xcrun simctl create "shot-ci-${{ matrix.device }}" \
+            "${{ steps.dev.outputs.sim }}" "com.apple.CoreSimulator.SimRuntime.iOS-27-0")
+          echo "udid=$UDID" >> "$GITHUB_OUTPUT"
+          xcrun simctl boot "$UDID"
+          xcrun simctl bootstatus "$UDID" -b
+
+      - name: Build Screenshot configuration
+        run: |
+          cd ios/TimeOfLife
+          xcodegen generate
+          xcodebuild build -scheme TimeOfLife -configuration Screenshot \
+            -destination "platform=iOS Simulator,id=${{ steps.sim.outputs.udid }}"
+
+      - name: Capture runs
+        run: |
+          OUT="$RUNNER_TEMP/shots/${{ matrix.device }}/${{ matrix.language }}"
+          mkdir -p "$OUT"
+          python3 scripts/screenshots/capture.py make-request \
+            --locale "${{ matrix.language }}" \
+            --geometry "${{ steps.dev.outputs.geometry }}" \
+            --out "$OUT/base-request.json"
+          python3 scripts/screenshots/capture.py locale-totals \
+            --locale "${{ matrix.language }}" --out "$OUT/pinned-totals.json"
+          for i in $(seq 1 "${{ inputs.runs_per_set }}"); do
+            RID="${{ matrix.device }}-${{ matrix.language }}-r$i"
+            for frame in track-running insights history add-entry; do
+              python3 scripts/screenshots/capture.py run-frame \
+                --device "${{ steps.sim.outputs.udid }}" \
+                --request "$OUT/base-request.json" \
+                --frame "$frame" --out "$OUT" \
+                --run-id "$RID" \
+                --pinned-totals "$OUT/pinned-totals.json"
+            done
+            for frame in la-lock la-compact la-expanded; do
+              python3 scripts/screenshots/capture.py prepare-frame \
+                --device "${{ steps.sim.outputs.udid }}" \
+                --request "$OUT/base-request.json" \
+                --frame "$frame" --out "$OUT" \
+                --run-id "$RID" \
+                --pinned-totals "$OUT/pinned-totals.json"
+              if [ "$frame" = "la-lock" ]; then MASK="default"; else MASK="black"; fi
+              STAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+              xcrun simctl io "${{ steps.sim.outputs.udid }}" screenshot \
+                --mask=$MASK "$OUT/$RID-$frame.png"
+              python3 scripts/screenshots/read_timer.py \
+                --frame "$frame" --png "$OUT/$RID-$frame.png" \
+                --captured-at "$STAMP" \
+                --out "$OUT/$RID-$frame.obs.json"
+              python3 scripts/screenshots/capture.py record-external-frame \
+                --out "$OUT" --run-id "$RID" \
+                --frame "$frame" --png "$OUT/$RID-$frame.png" \
+                --captured-at "$STAMP" \
+                --observation "$OUT/$RID-$frame.obs.json" \
+                --state "$OUT/$RID-$frame.state.json" \
+                --request "$OUT/$RID-$frame.request.json" \
+                --pinned-totals "$OUT/pinned-totals.json" \
+                --device "${{ steps.sim.outputs.udid }}"
+              python3 scripts/screenshots/capture.py teardown-frame \
+                --device "${{ steps.sim.outputs.udid }}" \
+                --out "$OUT" --run-id "$RID" --frame "$frame"
+            done
+            python3 scripts/screenshots/capture.py finalize-run \
+              --out "$OUT" --run-id "$RID"
+          done
+          python3 scripts/screenshots/capture.py finalize-two-runs \
+            --out "$OUT" \
+            --run-id-base "${{ matrix.device }}-${{ matrix.language }}"
+
+      - name: Upload capture artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: shots-${{ matrix.device }}-${{ matrix.language }}
+          path: ${{ runner.temp }}/shots/${{ matrix.device }}/${{ matrix.language }}
+          retention-days: 14
+
+      - name: Scoped simulator cleanup
+        if: always()
+        run: xcrun simctl delete "${{ steps.sim.outputs.udid }}" || true
+
+  panels:
+    name: panels + zip
+    needs: screenshots
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download capture artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: shots-*
+          path: shots
+
+      - name: Fetch Apple bezel assets
+        env:
+          FIGMA_API_KEY: ${{ secrets.FIGMA_API_KEY }}
+          FIGMA_FILE_KEY: w8VjkUTV7f8AGiI7HXzKda
+          FIGMA_IPHONE_NODE_ID: "12887:20855"
+          FIGMA_IPAD_NODE_ID: "5456:18569"
+        run: |
+          [ -n "$FIGMA_API_KEY" ] || { echo "::error::FIGMA_API_KEY secret missing"; exit 2; }
+          python3 scripts/panels/fetch_bezel_assets.py --out "$RUNNER_TEMP/bezels"
+
+      - name: Render panels
+        run: |
+          pip install "Pillow==13.0.0"
+          python3 scripts/panels/panels.py --render-matrix \
+            --shots-dir shots --bezels-dir "$RUNNER_TEMP/bezels" \
+            --out "$RUNNER_TEMP/panels" --devices '${{ inputs.devices }}' \
+            --languages '${{ inputs.languages }}' \
+            --captions-dir openspec/changes/app-store-screenshot-pilot/captions
+
+      - name: Write README and zip
+        run: |
+          python3 scripts/panels/write_bundle_readme.py \
+            --panels-dir "$RUNNER_TEMP/panels" --shots-dir shots \
+            --ios-runtime "${{ inputs.ios_runtime }}" \
+            --devices '${{ inputs.devices }}' \
+            --languages '${{ inputs.languages }}' \
+            --out bundle-readme.md
+          cp bundle-readme.md README.md
+          (cd "$RUNNER_TEMP" && zip -qr "$GITHUB_WORKSPACE/lifio-screenshots-${{ github.sha }}.zip" panels)
+          zip "lifio-screenshots-${{ github.sha }}.zip" README.md
+
+      - name: No binaries in git check
+        run: git status --porcelain | grep -E "\.(png|jpg|zip)$" && exit 2 || echo "tree clean of binaries"
+
+      - name: Upload bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: lifio-screenshots-${{ github.sha }}
+          path: lifio-screenshots-${{ github.sha }}.zip
+          retention-days: 30

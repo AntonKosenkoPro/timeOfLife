@@ -28,7 +28,7 @@ Five-language localization has landed, but the existing UI-fit fixtures are not 
 
 ### Modified Capabilities
 
-None. This implements the existing `localization` culture-adapted-deck contract and exercises `timer-capture-experience`, `name-picker`, `history-entry-list`, `insights-breakdown`, and `live-activities` without changing their product requirements. Baseline specs are not edited directly.
+None. This implements the existing `localization` culture-adapted-deck contract and exercises `timer-capture-experience`, `history-entry-list` (with `history-search` blank-query presentation: always-visible search field present, tab bar visible), `insights-breakdown`, and `live-activities` (Stop link-only per #231) without changing their product requirements. The in-app compact timer is retired (#227) — History/Insights carry no running-timer surface — and the name-picker frame is already replaced by Add-entry (2026-10-30 owner correction). Baseline specs are not edited directly.
 
 ## Impact
 

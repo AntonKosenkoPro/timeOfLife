@@ -379,3 +379,106 @@ pt-BR-r2, ru-65-r2 (§4); zh-65 lock-wallpaper change + ru/zh lock top-state
 differences (§4); add-entry sub-perceptual jitter everywhere (§4). No
 blockers reproduced by QA beyond these recorded findings; no fix applied
 (QA scope: no code, no recapture, no commits).
+
+## Addendum 2026-11-02 — contact-sheet LANCZOS rebuild (QA owner, review-only)
+
+QA worker record, no captures, no device, no `xcodebuild`, no source
+edits, no commits. All 62 `contact-*.png` sheets + 62 `-review.jpg`
+derivatives at the retained root were rebuilt in place from the current
+raw PNGs (`runs/*/frames`), replacing the NEAREST point-sampled tiles
+(visibly pixelated at review scale) with LANCZOS-resampled tiles.
+
+**Contacts are review-only; raws are public truth.** Nothing in this
+rebuild touches review standing: the raw frames under `runs/*/frames`
+are the sole source of truth for any approval or public use; contact
+sheets and review JPEGs are readability derivatives only and must never
+be quoted as evidence of pixel content, hashes, or approval state.
+
+- Method (Pillow 13.0.0): each raw `convert(mode).resize(tile, LANCZOS)`,
+  pasted at the file's existing tile coordinates — story order and
+  layout preserved exactly per file, including the g2 6.9 8px outer
+  border (3144x972) vs the older borderless 6.9 template (3128x956).
+  Tiles stay aspect-exact integer divisions (6.9: 1320x2868→440x956 ÷3;
+  6.5: 1242x2688→414x896 ÷3; iPad: 2064x2752→516x688 ÷4), 8px #EEEEEE
+  gutters, pilot sheets RGBA / all others RGB. Review JPEGs rebuilt via
+  PIL LANCZOS from the rebuilt sheet to width 2000 (heights preserved:
+  856/611/618/852/526), quality 90 — replacing `sips -Z 2000`. Note:
+  sips truncates the scaled height (`int`, not round: 2102x896→852 not
+  853); the rebuild keeps the truncated dims, so every JPEG keeps its
+  prior dimensions.
+- Verify: raw PNGs untouched — 382/382 sha256 identical before/after.
+  Determinism spot checks (independent LANCZOS re-downscale of the raw
+  → 0 diff on all 34 tiles across 6 sheets covering all 5 layouts:
+  pilot-r2, pilot27-r2, es-419-r1, ru-g2-r1, zh-Hans-65-r2,
+  pt-BR-ipad13-g2-r1); every spot tile differs from the superseded
+  NEAREST tile (expected — the filter changed). 124/124 rebuilt files
+  decode clean (PIL + read-tool render of `contact-ru-g2-r1-review.jpg`
+  and `contact-pt-BR-ipad13-g2-r1-review.jpg`: smooth text, story order
+  intact, no garbage). Raws never touched, no sim/device/xcodebuild.
+- New hashes (sha256 `first8…last8`; dims are sheet PNG size, JPEGs at
+  width 2000 as above):
+
+| sheet | dims | png sha | jpg sha |
+|---|---|---|---|
+| contact-en-65-g2-r1.png | 2102x896 | `84af6708…1d2fcafc` | `56cc4dd0…25a54100` |
+| contact-en-65-g2-r2.png | 2102x896 | `a3e2f2cf…3d156512` | `b50f33d0…40a345a6` |
+| contact-en-65-r1.png | 2102x896 | `3acfb126…6bd9d37e` | `c8b3d4df…1e16a58d` |
+| contact-en-65-r2.png | 2102x896 | `4c0e6852…f02961a1` | `1b026a76…72e3b3ff` |
+| contact-en-ipad13-g2-r1.png | 2612x688 | `3952513d…89414daf` | `3db3117c…2b9d1f7e` |
+| contact-en-ipad13-g2-r2.png | 2612x688 | `4e5c7ea9…e92f9679` | `27732bdf…36f53737` |
+| contact-en-ipad13-r1.png | 2612x688 | `4426fa42…21d74211` | `f77aa78a…4963c884` |
+| contact-en-ipad13-r2.png | 2612x688 | `5ce62425…0c7f8dcf` | `01adac16…c4006691` |
+| contact-es-419-65-g2-r1.png | 2102x896 | `b37359d3…6145d160` | `5e1d2c76…813eb4fb` |
+| contact-es-419-65-g2-r2.png | 2102x896 | `099a9c08…216c61e2` | `6f2a02a3…adf6943b` |
+| contact-es-419-65-r1.png | 2102x896 | `67af60b8…cd5126d5` | `369bd2f9…2dadb35d` |
+| contact-es-419-65-r2.png | 2102x896 | `7428758f…65025164` | `06a1f67d…d8b49344` |
+| contact-es-419-g2-r1.png | 3144x972 | `866c8a4f…feff4683` | `421c5305…56d55b7c` |
+| contact-es-419-g2-r2.png | 3144x972 | `16bc2bbf…eeb0138a` | `ea666c2e…fce12469` |
+| contact-es-419-ipad13-g2-r1.png | 2612x688 | `32be50fd…44597399` | `215cf63a…ff7b6257` |
+| contact-es-419-ipad13-g2-r2.png | 2612x688 | `500e72f9…cd400cf3` | `48bc68ae…4c876a5c` |
+| contact-es-419-ipad13-r1.png | 2612x688 | `68f77b6f…59f5a261` | `d78a649c…3dbdbafe` |
+| contact-es-419-ipad13-r2.png | 2612x688 | `d4c65cba…066825cb` | `ff50ad30…a121c707` |
+| contact-es-419-r1.png | 3128x956 | `02a9f9b1…307abb17` | `898eb255…db004735` |
+| contact-es-419-r2.png | 3128x956 | `83681cd9…fc859479` | `5fea8082…aa88d6e0` |
+| contact-pilot-r1.png | 2232x956 | `05fdd1c6…8bda9f3f` | `7fd789b0…f8883dbe` |
+| contact-pilot-r2.png | 2232x956 | `e0ab8865…0bfc93df` | `db62c326…195fa8a9` |
+| contact-pilot27-g2-r1.png | 3144x972 | `d9272dc2…5cff111a` | `89d550eb…2ec6198e` |
+| contact-pilot27-g2-r2.png | 3144x972 | `ea59e7b0…e87c104b` | `4be2a101…5710e1fb` |
+| contact-pilot27-r1.png | 3128x956 | `a64ffe7f…753607d5` | `7518c6ee…8fdcbb38` |
+| contact-pilot27-r2.png | 3128x956 | `6b98e848…b3d46f67` | `4e5d6a39…004c364f` |
+| contact-pt-BR-65-g2-r1.png | 2102x896 | `ea4c38b3…ce8a088b` | `a22b67ba…489f3c8d` |
+| contact-pt-BR-65-g2-r2.png | 2102x896 | `74e2d2c4…f11e11ea` | `94d23171…53a12313` |
+| contact-pt-BR-65-r1.png | 2102x896 | `eab26d74…385d380d` | `546151c4…cad6820f` |
+| contact-pt-BR-65-r2.png | 2102x896 | `1d358e03…8d315dcd` | `99bb34e8…47031966` |
+| contact-pt-BR-g2-r1.png | 3144x972 | `61a91574…a8c455e8` | `c9138b71…2e866285` |
+| contact-pt-BR-g2-r2.png | 3144x972 | `87f945dc…b4d696ab` | `44381d99…823678e2` |
+| contact-pt-BR-ipad13-g2-r1.png | 2612x688 | `14abe269…7abe5c41` | `e9792ebe…de6ffc6c` |
+| contact-pt-BR-ipad13-g2-r2.png | 2612x688 | `beb47090…1d021fa9` | `aef37c51…03d7656e` |
+| contact-pt-BR-ipad13-r1.png | 2612x688 | `cae44b3a…ca8297b9` | `0d9858b2…b9b1db99` |
+| contact-pt-BR-ipad13-r2.png | 2612x688 | `2a342066…d9689818` | `21b15f19…7fd33c78` |
+| contact-pt-BR-r1.png | 3128x956 | `a2f35f77…65e0045e` | `59efa970…4e50d6b6` |
+| contact-pt-BR-r2.png | 3128x956 | `a9a86ee5…576a65ae` | `5bd3b3e1…37695c79` |
+| contact-ru-65-g2-r1.png | 2102x896 | `58c2dfdb…fe6185ce` | `19220431…ddbb3476` |
+| contact-ru-65-g2-r2.png | 2102x896 | `f23e62de…f601078d` | `bb7453fa…68745d9b` |
+| contact-ru-65-r1.png | 2102x896 | `41825796…6713e4c9` | `3be2ecad…4fb22f87` |
+| contact-ru-65-r2.png | 2102x896 | `abc1cc80…befb61c9` | `2960b7c3…e643bbe7` |
+| contact-ru-g2-r1.png | 3144x972 | `fbef7d8d…12e88b6e` | `fa0ff803…63068c4b` |
+| contact-ru-g2-r2.png | 3144x972 | `df6ac7b9…c9451071` | `b1334e36…d9c4d80e` |
+| contact-ru-ipad13-g2-r1.png | 2612x688 | `92dd6584…0b68b802` | `beb88458…3979f1ff` |
+| contact-ru-ipad13-g2-r2.png | 2612x688 | `4d6ccf99…fb820b10` | `a417b7b4…28fe7f45` |
+| contact-ru-ipad13-r1.png | 2612x688 | `ec05ee53…a78742c3` | `3bced0f4…47730207` |
+| contact-ru-ipad13-r2.png | 2612x688 | `49e3fc1f…0eab0660` | `ac3cdb1e…4d33a103` |
+| contact-ru-r1.png | 3128x956 | `24a99973…da5fd6ba` | `568a30e9…0cce965e` |
+| contact-ru-r2.png | 3128x956 | `026f3a36…fb9979dd` | `d9449d18…bb663131` |
+| contact-zh-Hans-65-g2-r1.png | 2102x896 | `681fb475…9afaf165` | `38568725…3f554296` |
+| contact-zh-Hans-65-g2-r2.png | 2102x896 | `aa3a0a40…03fac04e` | `354ae1cc…cb1c2c03` |
+| contact-zh-Hans-65-r1.png | 2102x896 | `d987b2e4…495a4991` | `2d4d89df…616e9013` |
+| contact-zh-Hans-65-r2.png | 2102x896 | `2d5edc4d…3d3e3131` | `02d10e5b…95ec96cf` |
+| contact-zh-Hans-g2-r1.png | 3144x972 | `228b6f46…cdd4a84d` | `29ba435a…f56a3869` |
+| contact-zh-Hans-g2-r2.png | 3144x972 | `89567e6f…421a119c` | `91680fb0…35c0396f` |
+| contact-zh-Hans-ipad13-g2-r1.png | 2612x688 | `5c39677f…edcf345b` | `7313e29b…ec7ed9f6` |
+| contact-zh-Hans-ipad13-g2-r2.png | 2612x688 | `5bc67145…2b123804` | `c4003b07…8e43f83b` |
+| contact-zh-Hans-ipad13-r1.png | 2612x688 | `8cdc1aca…fcbb83b0` | `e902d365…5a740f78` |
+| contact-zh-Hans-ipad13-r2.png | 2612x688 | `a4cc335d…5cd1d221` | `4f9daf79…fc0378cf` |
+| contact-zh-Hans-r1.png | 3128x956 | `a9d2dcea…c35f6e41` | `df7fc929…d98218b3` |
+| contact-zh-Hans-r2.png | 3128x956 | `767df702…44af2d5b` | `192e4fc6…72645856` |

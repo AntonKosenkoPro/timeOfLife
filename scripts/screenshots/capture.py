@@ -4,6 +4,7 @@
 Subcommands (validation/gate/execution CLI; nothing auto-approves):
   validate-request  fail-closed request check (exit 0 valid, 2 invalid)
   write-request     derive per-frame request file (deterministic bytes+sha)
+  make-request      emit a base request file from pins (--locale/--geometry)
   preflight         plan simctl argv + guards (dry-run default; --execute
                     requires LIFIO_CAPTURE_LEASE=1 and touches one device)
   check-state       validate app capture-state.json against the request
@@ -99,6 +100,26 @@ def cmd_write_request(args: argparse.Namespace) -> int:
             print(f"invalid: {e}", file=sys.stderr)
         return EXIT_INVALID
     raw = req.canonical_bytes(derived)
+    Path(args.out).write_bytes(raw)
+    print(req.request_sha256_of_bytes(raw))
+    return EXIT_OK
+
+
+def cmd_make_request(args: argparse.Namespace) -> int:
+    try:
+        geometry = req.parse_geometry(args.geometry)
+        base = req.build_base_request(args.locale, geometry)
+    except req.RequestError as exc:
+        print(f"invalid: {exc}", file=sys.stderr)
+        return EXIT_INVALID
+    # Probe-validate: every derived per-frame request must pass schema.
+    probe = dict(base, frame="track-running", mode=req.MODE_PINNED)
+    errs = req.validate_request_dict(probe)
+    if errs:
+        for e in errs:
+            print(f"invalid: {e}", file=sys.stderr)
+        return EXIT_INVALID
+    raw = req.canonical_bytes(base)
     Path(args.out).write_bytes(raw)
     print(req.request_sha256_of_bytes(raw))
     return EXIT_OK
@@ -455,6 +476,7 @@ def cmd_capture_app_frame(args: argparse.Namespace) -> int:
             exec_mod.default_run, args.device,
             exec_mod.run_dir_for(str(out_root), args.run_id),
             args.frame, expected_geometry=geometry,
+            mask=getattr(args, "mask", None),
         )
     except exec_mod.FrameError as exc:
         print(f"failed: {exc}", file=sys.stderr)
@@ -503,6 +525,7 @@ def cmd_record_external_frame(args: argparse.Namespace) -> int:
             request_sha256=req.request_sha256_of_bytes(raw),
             pinned_totals=pin, expected_geometry=geometry,
             device_udid=args.device,
+            mask=getattr(args, "mask", None),
         )
     except exec_mod.FrameError as exc:
         print(f"failed: {exc}", file=sys.stderr)
@@ -682,6 +705,7 @@ def cmd_run_frame(args: argparse.Namespace) -> int:
         record = exec_mod.capture_app_frame(
             exec_mod.default_run, args.device, run_dir, args.frame,
             expected_geometry=geometry, auto_teardown=True, bid=args.bid,
+            mask=getattr(args, "mask", None),
         )
     except exec_mod.FrameError as exc:
         print(f"failed: {exc}", file=sys.stderr)
@@ -726,6 +750,14 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--frame", required=True)
     p.add_argument("--out", required=True)
     p.set_defaults(fn=cmd_write_request)
+
+    p = sub.add_parser("make-request")
+    p.add_argument("--locale", required=True,
+                   choices=list(req.KNOWN_LOCALES))
+    p.add_argument("--geometry", required=False, default="1320x2868",
+                   help="WxH; must be a supported matrix size")
+    p.add_argument("--out", required=True)
+    p.set_defaults(fn=cmd_make_request)
 
     p = sub.add_parser("preflight")
     p.add_argument("--device", required=True)
@@ -797,6 +829,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--run-id", required=True)
     p.add_argument("--frame", required=True)
     p.add_argument("--geometry", required=False, default="1320x2868")
+    p.add_argument("--mask", required=False, default=None,
+                   choices=["default", "black"],
+                   help="screenshot mask override (default: per-frame; "
+                        "island frames use --mask=black)")
     p.add_argument("--approval", required=False, default=None,
                    help="5.4 approval file (required for non-pilot geometries)")
     p.add_argument("--retained-dir", required=False, default=None)
@@ -814,6 +850,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--pinned-totals", required=False, default=None)
     p.add_argument("--geometry", required=False, default="1320x2868")
     p.add_argument("--device", required=False, default="unknown")
+    p.add_argument("--mask", required=False, default=None,
+                   choices=["default", "black"],
+                   help="external capture mask policy (default: per-frame; "
+                        "la-compact/la-expanded require --mask=black)")
     p.add_argument("--approval", required=False, default=None,
                    help="5.4 approval file (required for non-English/iPad frames)")
     p.add_argument("--retained-dir", required=False, default=None)
@@ -852,6 +892,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--approval", required=False, default=None,
                    help="5.4 approval file (required for non-English/iPad frames)")
     p.add_argument("--retained-dir", required=False, default=None)
+    p.add_argument("--mask", required=False, default=None,
+                   choices=["default", "black"],
+                   help="screenshot mask override (default: per-frame)")
     p.add_argument("--timeout", type=float, default=exec_mod.POLL_TIMEOUT_S)
     p.add_argument("--interval", type=float, default=exec_mod.POLL_INTERVAL_S)
     p.set_defaults(fn=cmd_run_frame)

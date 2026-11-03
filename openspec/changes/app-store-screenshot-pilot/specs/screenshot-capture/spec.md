@@ -82,11 +82,11 @@ A Live Activity frame SHALL show an actual running activity using the shipped pr
 
 ### Requirement: History frame shows the top of the timeline
 
-The History frame SHALL show the top viewport: Today and Yesterday day groups with their day totals, newest entries first. The multi-category entry, long name, exact-text pair, and notes-bearing entry remain in the dataset (and stay covered by fixture tests) but are NOT required to be visible in this viewport.
+The History frame SHALL show the top viewport: Today and Yesterday day groups with their day totals, newest entries first, on a blank query with the always-visible search field present and the tab bar visible (per `history-search`). The multi-category entry, long name, exact-text pair, and notes-bearing entry remain in the dataset (and stay covered by fixture tests) but are NOT required to be visible in this viewport. History and Insights SHALL show no compact running-timer surface (retired per #227) — captures MUST reflect the current product, never the removed timer.
 
 #### Scenario: History top viewport captured
 - **WHEN** the History frame is prepared and captured
-- **THEN** Today and Yesterday labels with day totals and the newest entries are visible, and no scrolled substitute viewport is passed off as the top
+- **THEN** Today and Yesterday labels with day totals and the newest entries are visible, the search field is present with a blank query and the tab bar is visible, no scrolled substitute viewport is passed off as the top, and no compact timer is shown or expected
 
 ### Requirement: Add-entry frame shows the Log Time sheet
 
@@ -98,11 +98,11 @@ The story SHALL include an Add-entry frame showing the real Log Time (manual ent
 
 ### Requirement: Live Activity captured in three genuine states
 
-The Live Activity story SHALL cover three genuine system presentations of the same running activity: Lock Screen banner, Dynamic Island compact, and Dynamic Island expanded. Each MUST be a real ActivityKit presentation on a supported device — no composites, no mocks. System-owned timers in each state are validated numerically within the declared tolerance, never pixel-compared.
+The Live Activity story SHALL cover three genuine system presentations of the same running activity: Lock Screen banner, Dynamic Island compact, and Dynamic Island expanded. Each MUST be a real ActivityKit presentation on a supported device — no composites, no mocks. System-owned timers in each state are validated numerically within the declared tolerance, never pixel-compared. Stop on the banner and expanded faces is link-only per #231 (`lifio://track?stop=1` through the ordinary in-app path): captures MUST show only the shipped link controls, never an intent-button fallback or an extension writer.
 
 #### Scenario: Three Live Activity states captured
 - **WHEN** the three Live Activity frames are prepared and captured on a Dynamic-Island device
-- **THEN** the Lock Screen banner, the Island compact presentation, and the Island expanded presentation are each genuine, text and categories match the approved deck, and each timer is consistent with the recorded real-time anchor within tolerance
+- **THEN** the Lock Screen banner, the Island compact presentation, and the Island expanded presentation are each genuine, text and categories match the approved deck, each timer is consistent with the recorded real-time anchor within tolerance, and Stop is offered only as the shipped link control
 
 #### Scenario: A state is unavailable
 - **WHEN** the system cannot present one of the three states on the capture target
@@ -118,7 +118,7 @@ All captures SHALL run on the pinned iOS 27 simulator runtime on a 6.9-inch-clas
 
 ### Requirement: Final frames pass visual and language review
 
-Every final set SHALL be inspected for clipping, truncation, text overlap, incorrect language, transient loading states, and inconsistent data. The fixed-height Recents area, History headers, and Insights footnote MUST be checked in each locale, with explicit Spanish and Portuguese review. Blocking findings MUST remain unresolved capture blockers rather than being hidden by image editing or unapproved changes to product layouts.
+Every final set SHALL be inspected for clipping, truncation, text overlap, incorrect language, transient loading states, and inconsistent data. The fixed-height Recents area, History headers (including the present-but-blank search field), and Insights footnote MUST be checked in each locale, with explicit Spanish and Portuguese review. No frame SHALL be expected to show the retired compact timer. Blocking findings MUST remain unresolved capture blockers rather than being hidden by image editing or unapproved changes to product layouts.
 
 #### Scenario: A translated frame clips text
 - **WHEN** review finds required content clipped or overlapping in a translated screenshot

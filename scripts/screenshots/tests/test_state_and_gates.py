@@ -3,10 +3,12 @@
 
 import hashlib
 import json
+import os
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 HERE = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(HERE))
@@ -217,6 +219,17 @@ class ApprovalGateTests(unittest.TestCase):
                 approval_mod.gates_for_request("en", (2064, 2752),
                                                ap_path, tmp), [])
 
+    def test_request_gates_medium_blocked_without_approval(self):
+        errs = approval_mod.gates_for_request("en", (1206, 2622), None, None)
+        self.assertTrue(errs and any("ipad" in e for e in errs))
+
+    def test_request_gates_medium_allowed_with_approval(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            ap_path = self._approval_file(tmp)
+            self.assertEqual(
+                approval_mod.gates_for_request("en", (1206, 2622),
+                                               ap_path, tmp), [])
+
     def test_request_gates_both_apply_at_once(self):
         with tempfile.TemporaryDirectory() as tmp:
             # ru + iPad without approval reports both gates
@@ -226,6 +239,33 @@ class ApprovalGateTests(unittest.TestCase):
             self.assertEqual(
                 approval_mod.gates_for_request("ru", (2064, 2752),
                                                ap_path, tmp), [])
+
+    def test_ci_bypass_satisfies_request_gates(self):
+        with mock.patch.dict(os.environ, {approval_mod.CI_BYPASS_ENV: "1"}):
+            self.assertTrue(approval_mod.ci_bypass_active())
+            # ru + non-pilot geometry without any approval file: open in CI
+            self.assertEqual(
+                approval_mod.gates_for_request("ru", (2064, 2752), None, None),
+                [])
+            self.assertEqual(
+                approval_mod.gates_for_request("en", (1206, 2622), None, None),
+                [])
+
+    def test_ci_bypass_needs_exact_opt_in(self):
+        for value in ("0", "true", "yes", ""):
+            with mock.patch.dict(os.environ, {approval_mod.CI_BYPASS_ENV: value}):
+                self.assertFalse(approval_mod.ci_bypass_active())
+                self.assertTrue(
+                    approval_mod.gates_for_request("ru", (1320, 2868), None, None))
+
+    def test_ci_bypass_does_not_forge_approval(self):
+        # gate_kind/verify_approval stay strict: CI bypass only opens
+        # gates_for_request, never mints an owner approval.
+        with mock.patch.dict(os.environ, {approval_mod.CI_BYPASS_ENV: "1"}):
+            self.assertTrue(approval_mod.gate_kind("ipad", None, None))
+            with tempfile.TemporaryDirectory() as tmp:
+                ap = self._retained(tmp, n_frames=4)
+                self.assertTrue(approval_mod.verify_approval(ap, tmp))
 
 
 if __name__ == "__main__":

@@ -196,13 +196,98 @@ class LocalePinTests(unittest.TestCase):
     def test_geometry_allowlist(self):
         self.assertEqual(rs.parse_geometry("1320x2868"), (1320, 2868))
         self.assertEqual(rs.parse_geometry("1242x2688"), (1242, 2688))
+        self.assertEqual(rs.parse_geometry("1206x2622"), (1206, 2622))
         self.assertEqual(rs.parse_geometry("2064x2752"), (2064, 2752))
+        self.assertEqual(rs.MATRIX_GEOMETRIES[(1206, 2622)], "iphone-6.3")
         self.assertTrue(rs.is_pilot_geometry((1320, 2868)))
+        self.assertFalse(rs.is_pilot_geometry((1206, 2622)))
         self.assertFalse(rs.is_pilot_geometry((2064, 2752)))
         with self.assertRaises(rs.RequestError):
             rs.parse_geometry("100x100")
         with self.assertRaises(rs.RequestError):
             rs.parse_geometry("not-a-geometry")
+
+
+class MakeRequestBuilderTests(unittest.TestCase):
+    def test_base_has_no_frame_or_mode(self):
+        base = rs.build_base_request("en", (1320, 2868))
+        self.assertNotIn("frame", base)
+        self.assertNotIn("mode", base)
+
+    def test_en_pilot_base_matches_pins(self):
+        import json as _json
+        base = rs.build_base_request("en", (1320, 2868))
+        self.assertEqual(base["schema_version"], rs.SCHEMA_VERSION)
+        self.assertEqual(base["deck_version"], rs.PILOT_DECK_VERSION)
+        self.assertEqual(
+            (base["locale"], base["region"], base["timezone"]),
+            ("en", *rs.LOCALE_PAIRING["en"]),
+        )
+        self.assertEqual(base["calendar"], "gregorian")
+        self.assertEqual(base["week_rule"], "locale-native")
+        self.assertEqual(
+            base["reference_local_iso"], rs.PILOT_REFERENCE_LOCAL_ISO)
+        self.assertEqual(base["app_elapsed_s"], rs.PILOT_APP_ELAPSED_S)
+        self.assertEqual(base["appearance"], rs.PILOT_APPEARANCE)
+        self.assertEqual(base["dynamic_type"], rs.PILOT_DYNAMIC_TYPE)
+        self.assertEqual(
+            base["keyboard"],
+            {"language": "en-US", "software_visible": True,
+             "presentation": "docked"},
+        )
+        self.assertEqual(
+            base["status_bar"],
+            {"time": "9:41", "battery": 100, "network": "wifi"},
+        )
+        self.assertEqual(base["treatment"], rs.PILOT_TREATMENT)
+        self.assertEqual(base["frames"], list(rs.PILOT_FRAMES))
+        self.assertEqual(
+            base["geometry"], {"width": 1320, "height": 2868})
+        self.assertEqual(base["configuration"], rs.SCREENSHOT_CONFIGURATION)
+        self.assertEqual(base["bundle_id"], rs.SCREENSHOT_BID)
+        expected = _json.loads(
+            (HERE / "expected_totals.json").read_text(encoding="utf-8"))
+        self.assertEqual(
+            _json.dumps(base["expected_totals"], sort_keys=True),
+            _json.dumps(expected, sort_keys=True),
+        )
+
+    def test_all_locales_pairing_keyboard_totals_and_frames_validate(self):
+        for locale in rs.KNOWN_LOCALES:
+            with self.subTest(locale=locale):
+                base = rs.build_base_request(locale, (1320, 2868))
+                region, timezone = rs.LOCALE_PAIRING[locale]
+                self.assertEqual(base["region"], region)
+                self.assertEqual(base["timezone"], timezone)
+                self.assertEqual(
+                    base["keyboard"]["language"],
+                    rs.KEYBOARD_FOR_LOCALE[locale],
+                )
+                self.assertEqual(
+                    base["expected_totals"],
+                    rs.load_pinned_totals_for_locale(locale),
+                )
+                for frame in rs.PILOT_FRAMES:
+                    errs = rs.validate_request_dict(
+                        rs.build_frame_request(base, frame))
+                    self.assertEqual(errs, [], f"{locale}/{frame}: {errs}")
+
+    def test_all_matrix_geometries_recorded(self):
+        for geometry in rs.MATRIX_GEOMETRIES:
+            with self.subTest(geometry=geometry):
+                base = rs.build_base_request("en", geometry)
+                self.assertEqual(
+                    base["geometry"],
+                    {"width": geometry[0], "height": geometry[1]},
+                )
+
+    def test_unknown_locale_rejected(self):
+        with self.assertRaises(rs.RequestError):
+            rs.build_base_request("xx", (1320, 2868))
+
+    def test_unsupported_geometry_rejected(self):
+        with self.assertRaises(rs.RequestError):
+            rs.build_base_request("en", (100, 100))
 
 
 if __name__ == "__main__":

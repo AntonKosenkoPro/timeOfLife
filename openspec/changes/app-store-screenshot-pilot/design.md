@@ -2,7 +2,7 @@
 
 See `proposal.md` for motivation and scope, and the two delta specs for acceptance behavior. The owner selected the separate Screenshot configuration during proposal planning; that choice resolves the Release-versus-DEBUG question rather than deferring an architectural decision to apply.
 
-Current integration points:
+Current integration points (product baseline 2026-11-02: compact timer retired from History/Insights per #227, History search field present per #226, Live Activity Stop link-only per #231 — all prior captured sets are SUPERSEDED and a full retake is in flight; recaptured frames MUST show the current product, never the retired surfaces):
 - `TimeOfLifeApp.swift` admits `UITEST_SCREEN` only under DEBUG; `AppContainer+UITesting.swift` provides useful stubs but seeds asynchronously and tolerates partial failure. These are inspection tools, not a production-quality capture protocol.
 - `HistoryViewModel` and `InsightsViewModel` already accept `now` providers; History's `load()` still uses `Date()` directly. Track accepts a provider but its ticker/start/stop contain direct wall-clock reads. Forwarding coherent time through actual views is necessary; changing strings or drawing mock screens is not.
 - Gate-seeded starter categories can race fixture categories. The screenshot path must use one awaited preparation pipeline before revealing the shell, not layer another best-effort task onto the existing gate.
@@ -59,7 +59,7 @@ Proposed pilot defaults, recorded in the manifest and subject to visual approval
 
 All dated fixture entries are anchored to the same *local* Tuesday in each declared timezone. Locale-native week rules can legitimately yield different weekly membership; compute and record expected totals per locale rather than forcing a hidden non-native week convention. App Store metadata maps the es-419 app captures to Spanish (Mexico); app-bundle language and Store metadata identifiers are distinct.
 
-Forward the capture context through existing composition/view-model initialization with real time as the unchanged production default. Replace bypasses of an injected `now` only after a recorded failing test demonstrates the seam problem; cover History labels, Insights intervals, Track elapsed/started caption, compact timer, and relevant formatters/calendar/timezone reads together. This is a bounded capture seam, not a new global clock service. Avoid cached ambient formatters initialized before the locale is configured.
+Forward the capture context through existing composition/view-model initialization with real time as the unchanged production default. Replace bypasses of an injected `now` only after a recorded failing test demonstrates the seam problem; cover History labels, Insights intervals, Track elapsed/started caption, and relevant formatters/calendar/timezone reads together (the in-app compact timer is retired per #227 — History/Insights carry no running-timer surface, so there is no compact-timer seam to cover). This is a bounded capture seam, not a new global clock service. Avoid cached ambient formatters initialized before the locale is configured.
 
 Run app-owned frames with a constant logical `now`; the ticker can continue requesting renders but observes that constant. Suppress real Live Activity creation for these historical-reference fixtures to avoid nonsensical system elapsed values. Ready markers are capture-build-only and not visible overlays in exported images.
 
@@ -67,7 +67,7 @@ Run app-owned frames with a constant logical `now`; the ticker can continue requ
 
 ### 4. Real Live Activity frames use a separate real-time anchor (three states)
 
-For the story's Live Activity beat, prepare the same approved text/category/duration *intent* in separate capture runs, but anchor the real running draft to current wall time minus the desired elapsed offset. Start through the real TimerService/ActivityKit path while foregrounded. Do not pass the historical reference timestamp to the system timer and do not replace the timer view.
+For the story's Live Activity beat, prepare the same approved text/category/duration *intent* in separate capture runs, but anchor the real running draft to current wall time minus the desired elapsed offset. Start through the real TimerService/ActivityKit path while foregrounded. Do not pass the historical reference timestamp to the system timer and do not replace the timer view. Stop is link-only per #231 (`lifio://track?stop=1` through the ordinary in-app path — no intent-button fallback, no extension writer); captures MUST NOT claim or show an in-app Stop affordance on the Live Activity faces beyond the shipped link controls.
 
 Capture all three genuine presentations: Lock Screen banner, Dynamic Island compact, and Dynamic Island expanded (touch-and-hold). The compact and expanded states require a Dynamic-Island device (the 6.9-inch iPhone class qualifies).
 
@@ -83,7 +83,7 @@ The local workflow has explicit stages: prepare English pilot → capture seven 
 
 The matrix is five locales × (1320 × 2868 iPhone, 1242 × 2688 iPhone, 2064 × 2752 iPad), retaining the existing optional-to-Apple 6.5-inch deliverable until the owner changes scope. Capture iPad rendering directly; a wide layout or compatibility presentation that actually exists is not advertised as a new reflow. Seven ordered frames per set gives 105 required raw frames; the pilot's seven are reused if still current. Do not pre-produce all translated decks/captures before the English content gate; implement the English template and validation first.
 
-Frame preparation uses real product actions/state: running Track with selected categories; default-week Insights over committed data; History at the top viewport with day totals; Add-entry Log Time sheet with sample content including a notes value; real running Live Activity in three genuine states. The Add-entry frame shows the real sheet, not an image-edited variant. Navigation can be recorded as a reusable Argent flow at apply time; use stable accessibility targets from the current tree. `simctl` handles device preparation and native-resolution export. No fastlane service or new screenshot framework is required.
+Frame preparation uses real product actions/state: running Track with selected categories; default-week Insights over committed data (no compact timer — retired per #227); History at the top viewport with day totals on a blank query — the always-visible search field present, tab bar visible (per #226); Add-entry Log Time sheet with sample content including a notes value; real running Live Activity in three genuine states with link-only Stop (per #231). The Add-entry frame shows the real sheet, not an image-edited variant. Navigation can be recorded as a reusable Argent flow at apply time; use stable accessibility targets from the current tree. `simctl` handles device preparation and native-resolution export. No fastlane service or new screenshot framework is required.
 
 ### 6. Output package and visual checks
 
@@ -91,7 +91,7 @@ The runner takes explicit device IDs and an external output root, defaults to th
 
 Export named PNGs plus a machine-readable manifest with actual dimensions, SHA-256 hashes, expected totals, logical/system clock domains, build/configuration, dataset version, treatment, approval references, and failures. Preserve unmodified raw captures. Contact sheets are external binaries too; commit only text recipes/runbook/manifests that contain no secrets or real account data. Temporary storage is not durable asset hosting: before the pilot approval gate, agree an externally retained destination with the owner, copy the complete pilot package there, and verify hashes. Refer to those retained files during review and handoff; never delete the only evidence during session cleanup or rely on a temporary-directory lifetime.
 
-Check pixels/dimensions and visible language/content, then inspect Recents, History headers, Insights footnote, Add-entry cards, compact timer, and Live Activity. English pilot needs two consecutive complete runs; after approval each matrix set needs two successful runs with stable app content and validated system-clock variance. Also perform the existing 13 mini/SE3 XXXL fit checks, prioritizing Spanish and Portuguese; those are QA evidence, not extra Store-size deliverables. Existing test parity does not prove visual fit.
+Check pixels/dimensions and visible language/content, then inspect Recents, History headers (plus the present-but-blank search field and visible tab bar), Insights footnote, Add-entry cards, and Live Activity. The retired compact timer MUST NOT be expected in any frame. English pilot needs two consecutive complete runs; after approval each matrix set needs two successful runs with stable app content and validated system-clock variance. Also perform the existing 13 mini/SE3 XXXL fit checks, prioritizing Spanish and Portuguese; those are QA evidence, not extra Store-size deliverables. Existing test parity does not prove visual fit.
 
 ### 7. English montage is a derived asset, not a website implementation
 
@@ -105,7 +105,7 @@ Choose a local deterministic compositor at apply time after checking its documen
 
 - [Capture config widens authentication or storage access] → compile/simulator gates, separate identities/namespace, no live services, fail-closed preparation, Release-negative tests, unchanged signed archive scheme.
 - [Third config breaks generation/stamping] → inspect generated build settings and all-target version/config assumptions; verify normal Debug and Release paths before producing assets. Do not hand-edit pbxproj.
-- [Injected now is only partly honored] → reproduce direct-Date leaks with failing tests before edits; assert all frame labels, intervals, draft exclusions, and compact timer agree.
+- [Injected now is only partly honored] → reproduce direct-Date leaks with failing tests before edits; assert all frame labels, intervals, and draft exclusions agree (no compact-timer assertion — retired per #227).
 - [Historical fixture causes expired/incorrect system activity] → separate real-time Live Activity run, explicit timestamps/tolerance, no pixel-identical promise.
 - [iPad layout or translation needs a product fix] → reject affected frame, retain truthful evidence, file/reproduce a scoped issue, and stop acceptance until resolution; do not hide it by cropping or stretching.
 - [OS chrome, keyboard, or glass changes] → pin runtime and treatment, store provenance, and review genuine output rather than claiming cross-OS pixel stability.

@@ -7,10 +7,10 @@ globally (research.md: 3/3) — no further ctx7 calls made.
 
 ## Files
 
-- `capture.py` — CLI (validate-request, write-request, preflight,
-  check-state, verify-la, verify-picker, check-approval, plan-run,
+- `capture.py` — CLI (validate-request, write-request, make-request,
+  preflight, check-state, verify-la, verify-picker, check-approval, plan-run,
   prepare-frame, capture-app-frame, record-external-frame, finalize-run,
-  finalize-two-runs, teardown-frame, run-frame).
+  finalize-two-runs, teardown-frame, run-frame, locale-totals).
 - `executor.py` — lease-gated verbs with injectable subprocess/sleeper
   (fake-tested; production wires subprocess.run).
 - `request_schema.py` — pilot pins + fail-closed validation (arbitrary JSON
@@ -40,17 +40,27 @@ globally (research.md: 3/3) — no further ctx7 calls made.
   locale-native week total differs: ru/Moscow 12300 s, every other deck
   23100 s. `capture.py locale-totals --locale <loc>` prints the canonical
   pin; `request_schema.load_pinned_totals_for_locale()` resolves it.
+  `capture.py make-request --locale <loc> --geometry <WxH> --out <file>`
+  emits the matching base request from those pins (locale pairing,
+  keyboard language, deck totals, reference inputs; geometry must be a
+  matrix size); the file is probe-validated before it is written.
 - Schema validation is locale-aware but approval-neutral: keyboard language
   must match the request locale (`en-US`, `ru-RU`, `zh-Hans-CN`, `es-MX`,
   `pt-BR`), geometry must be a matrix size (1320x2868, 1242x2688,
-  2064x2752). Passing validation never authorizes expansion.
+  1206x2622, 2064x2752). Passing validation never authorizes expansion.
 - Expansion authorization lives at the CLI via `approval.gates_for_request`:
   non-English locale → `non-english` gate, non-pilot geometry → `ipad`
-  device-matrix gate (covers 6.5-inch iPhone + 13-inch iPad). Wired into
+  device-matrix gate (covers 6.5-inch + 6.3-inch iPhones + 13-inch iPad;
+  owner-ordered medium 1206x2622 runs under the same expansion approval). Wired into
   `plan-run`, `prepare-frame`, `run-frame`, `check-state`,
   `capture-app-frame` (geometry only), and `record-external-frame` as
   `--approval/--retained-dir`; without a valid 5.4 approval file they exit
   2 with `blocked:`. `validate-request` stays pure schema (no gate).
+  CI bypass (automation only): with `LIFIO_CAPTURE_CI=1` the request gates
+  pass without an approval file so matrix captures run unattended; every
+  bypassed run logs `ci_approval_bypass: true` in `run-manifest.json`
+  (and in `plan-run` output), and `check-approval` still validates real
+  owner approvals — the bypass never mints one.
 - Executor/planner accept all matrix geometries truthfully (`finalize-run`
   records native size, never stretches); the approval gate decides whether
   a non-pilot size may be captured.
@@ -123,13 +133,20 @@ timezone-aware (naive refused, never assumed UTC).
 
 ## Preflight: supported commands + waiver
 
-Read-only discovery 2026-10-30 (no device touched): `simctl help
+Read-only discovery 2026-10-30 (no device touched; flags re-verified
+2026-11-02 via `xcrun simctl help status_bar`): `simctl help
 status_bar|io|ui|get_app_container|launch|list|spawn`.
-Emitted: `status_bar list|override --time 9:41 --batteryState charged
---batteryLevel 100 --wifiMode active --wifiBars 3 --dataNetwork wifi`
+Emitted: `status_bar list|override --time 9:41 --batteryState discharging
+--batteryLevel 100 --wifiMode active --wifiBars 3 --cellularMode active
+--cellularBars 4 --dataNetwork wifi`
 (+ `clear` only for session-owned override on a clean snapshot),
-`ui appearance|content_size` query + set, `io screenshot --type=png`,
+`ui appearance|content_size` query + set, `io screenshot --type=png`
+(plus `--mask=black` for la-compact/la-expanded only — probe-proven
+island pixels; every other frame uses the simctl default, no flag),
 `get_app_container`, `launch --terminate-running-process`, `terminate`.
+Per-frame mask is planned in `plan-run` steps (`screenshot_mask`), used
+by `capture-app-frame`/`run-frame` (`--mask` override), and recorded in
+frame records (`screenshot_mask`) including `record-external-frame`.
 WAIVER (no ctx7 left, no guessing): no locale/timezone/keyboard simctl
 commands exist in confirmed help — none are emitted. Those travel app-side
 in the request; picker proof is inspection evidence, not intent flags.

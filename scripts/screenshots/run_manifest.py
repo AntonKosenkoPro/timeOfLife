@@ -15,6 +15,8 @@ from typing import Any
 
 from request_schema import PILOT_FRAMES
 
+from approval import ci_bypass_active
+
 
 class ManifestError(ValueError):
     pass
@@ -27,10 +29,13 @@ def assemble_run_manifest(
     treatment: str,
     geometry: tuple[int, int],
     frame_records: list[dict],
+    ci_approval_bypass: bool | None = None,
 ) -> dict[str, Any]:
     frames = [r.get("frame") for r in frame_records]
     if frames != list(PILOT_FRAMES):
         raise ManifestError(f"run manifest requires frames {list(PILOT_FRAMES)!r} in order")
+    if ci_approval_bypass is None:
+        ci_approval_bypass = ci_bypass_active()
     return {
         "schema_version": 1,
         "run_id": run_id,
@@ -40,6 +45,10 @@ def assemble_run_manifest(
         "geometry": {"width": geometry[0], "height": geometry[1]},
         "frames": frame_records,
         "status": "needs-inspection",
+        # CI audit trail: true when this run's expansion gates were
+        # satisfied by LIFIO_CAPTURE_CI=1 instead of a 5.4 approval file.
+        # Provenance, never content: compare_runs ignores it.
+        "ci_approval_bypass": bool(ci_approval_bypass),
     }
 
 

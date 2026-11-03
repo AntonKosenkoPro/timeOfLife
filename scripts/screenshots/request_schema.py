@@ -50,12 +50,15 @@ PILOT_KEYBOARD_LANGUAGE = "en-US"
 PILOT_TREATMENT = "light-v1"
 PILOT_GEOMETRY = (1320, 2868)
 
-# Capture-matrix geometries (design §5): pilot 6.9-inch iPhone plus the two
-# expansion targets. Non-pilot geometries require 5.4 approval via the
-# "ipad" device-matrix gate (covers 6.5-inch iPhone + 13-inch iPad).
+# Capture-matrix geometries (design §5): pilot 6.9-inch iPhone plus the three
+# expansion targets (6.5-inch + 6.3-inch iPhones, 13-inch iPad).
+# Non-pilot geometries require 5.4 approval via the "ipad" device-matrix
+# gate (covers 6.5-inch + 6.3-inch iPhones + 13-inch iPad; owner-ordered
+# medium captures 2026-11-02 run under the same expansion approval).
 MATRIX_GEOMETRIES = {
     (1320, 2868): "iphone-6.9",
     (1242, 2688): "iphone-6.5",
+    (1206, 2622): "iphone-6.3",
     (2064, 2752): "ipad-13",
 }
 
@@ -212,6 +215,59 @@ def build_frame_request(base: dict, frame: str) -> dict:
     derived["frame"] = frame
     derived["mode"] = mode_for_frame(frame)
     return derived
+
+
+def build_base_request(locale: str, geometry: tuple[int, int]) -> dict:
+    """Build a base (frame-less) capture request from pinned inputs.
+
+    Locale pairing (region/timezone), keyboard language, and the pinned
+    totals deck come from the locale; geometry must be a matrix size.
+    Fail-closed: unknown locale or unsupported geometry raises
+    RequestError. The base carries no ``frame``/``mode`` keys; per-frame
+    files are derived via :func:`build_frame_request`.
+    """
+    if locale not in KNOWN_LOCALES:
+        raise RequestError(f"unknown locale {locale!r}")
+    if tuple(geometry) not in MATRIX_GEOMETRIES:
+        raise RequestError(
+            f"unsupported geometry {tuple(geometry)}; "
+            f"supported: {sorted(MATRIX_GEOMETRIES)}"
+        )
+    region, timezone = LOCALE_PAIRING[locale]
+    width, height = tuple(geometry)
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "deck_version": PILOT_DECK_VERSION,
+        "locale": locale,
+        "region": region,
+        "timezone": timezone,
+        "calendar": "gregorian",
+        "week_rule": "locale-native",
+        "reference_local_iso": PILOT_REFERENCE_LOCAL_ISO,
+        "app_elapsed_s": PILOT_APP_ELAPSED_S,
+        "appearance": PILOT_APPEARANCE,
+        "dynamic_type": PILOT_DYNAMIC_TYPE,
+        "keyboard": {
+            "language": KEYBOARD_FOR_LOCALE[locale],
+            "software_visible": True,
+            "presentation": "docked",
+        },
+        "status_bar": {"time": "9:41", "battery": 100, "network": "wifi"},
+        "treatment": PILOT_TREATMENT,
+        "frames": list(PILOT_FRAMES),
+        "geometry": {"width": width, "height": height},
+        "configuration": SCREENSHOT_CONFIGURATION,
+        "bundle_id": SCREENSHOT_BID,
+        "expected_totals": load_pinned_totals_for_locale(locale),
+        "totals_source": (
+            f"openspec/changes/app-store-screenshot-pilot/decks/"
+            f"totals-{locale}.json (deck {PILOT_DECK_VERSION})"
+        ),
+        "notes": (
+            "Generated base request (capture.py make-request); input pin "
+            "only, final visual acceptance remains 5.4 owner approval."
+        ),
+    }
 
 
 def canonical_bytes(req: dict) -> bytes:

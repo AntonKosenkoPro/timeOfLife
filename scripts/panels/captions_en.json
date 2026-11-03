@@ -1,0 +1,32 @@
+{
+  "captions": {
+    "add_entry": {
+      "en": "All details you need.",
+      "text": "All details you need."
+    },
+    "history_primary": {
+      "en": "Every minute, at a glance.",
+      "text": "Every minute, at a glance."
+    },
+    "history_secondary": {
+      "en": "For your eyes only.",
+      "text": "For your eyes only."
+    },
+    "insights": {
+      "en": "See where your time goes.",
+      "text": "See where your time goes."
+    },
+    "live_activity": {
+      "en": "Your timer, always in view.",
+      "text": "Your timer, always in view."
+    },
+    "track": {
+      "en": "Time tracking at your fingertips.",
+      "text": "Time tracking at your fingertips."
+    }
+  },
+  "locale": "en",
+  "status": "approved — owner-fixed EN copy per 9.1 (v13 + ipad-v1 compositions); verbatim, MUST NOT be altered without renewed owner approval",
+  "tone": "Owner-fixed App Store marketing register (matches the approved v13/ipad-v1 headline treatment).",
+  "version": "captions-v1"
+}
