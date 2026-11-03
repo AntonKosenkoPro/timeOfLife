@@ -141,6 +141,52 @@ struct CategoryEditorDeleteTests {
         #expect(try await store.category(id: "c1")?.name == "Renamed")
     }
 
+    @Test("same-instant rename with a round-up sub-millisecond fraction persists")
+    func sameInstantRenameRoundUpFractionPersists() async throws {
+        // GRDB stores dates as "yyyy-MM-dd HH:mm:ss.SSS", rounding (not
+        // truncating) to milliseconds: a stamp like ...000.0006s round-trips
+        // to a value ~0.4ms GREATER than the in-memory Date. Comparing the raw
+        // `now` against the stored version therefore reports a same-instant
+        // write as stale whenever the fraction rounds up (~50% of wall-clock
+        // Dates — the CI flake of sameInstantRenamePersists). The store
+        // quantizes `now` to storage precision first, so the tie is detected
+        // deterministically and the stamp bumps past it.
+        let store = try makeStore()
+        let stamp = Date(timeIntervalSinceReferenceDate: 5_000.0006)
+        try await store.createCategory(draft: CategoryDraft(name: "Work", icon: .briefcase), id: "c1", now: stamp)
+        let result = try await store.updateCategory(id: "c1", draft: CategoryDraft(name: "Renamed", icon: .briefcase), now: stamp)
+        guard case .saved(let updated) = result else {
+            Issue.record("round-up-fraction rename must save, got \(result)")
+            return
+        }
+        #expect(updated.name == "Renamed")
+        #expect(updated.updatedAt > stamp)
+        #expect(try await store.category(id: "c1")?.name == "Renamed")
+    }
+
+    @Test("genuinely older rename stays stale (quantization never resurrects it)")
+    func olderRenameStaysStale() async throws {
+        // The quantization fix must only collapse sub-millisecond storage
+        // noise: a write a full second older than the stored version is
+        // genuinely stale and must stay `.stale` under the strict LWW guard.
+        let store = try makeStore()
+        try await store.createCategory(
+            draft: CategoryDraft(name: "Work", icon: .briefcase),
+            id: "c1",
+            now: Date(timeIntervalSinceReferenceDate: 6_000)
+        )
+        let result = try await store.updateCategory(
+            id: "c1",
+            draft: CategoryDraft(name: "Renamed", icon: .briefcase),
+            now: Date(timeIntervalSinceReferenceDate: 5_999)
+        )
+        guard case .stale = result else {
+            Issue.record("older rename must stay stale, got \(result)")
+            return
+        }
+        #expect(try await store.category(id: "c1")?.name == "Work")
+    }
+
     // MARK: - Helpers
 
     private func makeStore() throws -> LocalStore {
