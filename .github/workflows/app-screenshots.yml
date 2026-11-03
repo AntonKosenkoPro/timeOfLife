@@ -371,7 +371,7 @@ jobs:
           FIGMA_IPAD_NODE_ID: "5456:18569"
         run: |
           [ -n "$FIGMA_API_KEY" ] || { echo "::error::FIGMA_API_KEY secret missing"; exit 2; }
-          pip install "Pillow==13.0.0"
+          python3 -m pip install "Pillow==13.0.0"
           python3 scripts/panels/fetch_bezel_assets.py --out "$RUNNER_TEMP/bezels"
 
       - name: Render panels
@@ -379,7 +379,7 @@ jobs:
           DEVICES: ${{ inputs.devices }}
           LANGUAGES: ${{ inputs.languages }}
         run: |
-          pip install "Pillow==13.0.0"
+          python3 -m pip install "Pillow==13.0.0"
           rc=0
           python3 scripts/panels/panels.py --render-matrix \
             --shots-dir shots --bezels-dir "$RUNNER_TEMP/bezels" \

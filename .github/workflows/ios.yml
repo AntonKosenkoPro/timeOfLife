@@ -293,7 +293,7 @@ jobs:
 
       - name: Panels Python suites
         run: |
-          pip install "Pillow==13.0.0"
+          python3 -m pip install "Pillow==13.0.0"
           for t in scripts/panels/tests/test_*.py; do python3 "$t" || exit 1; done
 
   # Required check (ruleset): always reports, even when the lane is skipped
