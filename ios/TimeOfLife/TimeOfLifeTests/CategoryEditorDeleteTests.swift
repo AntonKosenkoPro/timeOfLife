@@ -85,11 +85,12 @@ struct CategoryEditorDeleteTests {
     @Test("delete refuses while a save is in flight and leaves the category intact")
     func deleteRefusesWhileSaveInFlight() async throws {
         let store = try makeStore()
-        // Same-instant create/save pair (no backdate): the LWW tie-break is
-        // `<=`, so a save stamping the same instant as creation persists the
-        // rename instead of going stale. This is the regression pin for the
-        // same-tick data-loss path (timestamps truncate below process
-        // precision; a quick create+rename must not silently drop the rename).
+        // Same-instant create/save pair (no backdate): the store bumps the
+        // stamp past the stored version under a strict LWW guard, so a save
+        // stamping the same instant as creation persists the rename instead
+        // of going stale. This is the regression pin for the same-tick
+        // data-loss path (timestamps truncate below process precision; a
+        // quick create+rename must not silently drop the rename).
         let now = Date()
         try await store.createCategory(
             draft: CategoryDraft(name: "Work", icon: .briefcase),
@@ -128,12 +129,15 @@ struct CategoryEditorDeleteTests {
         try await store.createCategory(draft: CategoryDraft(name: "Work", icon: .briefcase), id: "c1", now: stamp)
         // Identical stamp: timestamps truncate below process precision, so a
         // create+save pair in the same instant must persist, never go stale.
+        // The stamp bumps strictly past the stored version (relay parity:
+        // the relay's PATCH guard is strict, so a tie would 409 on push).
         let result = try await store.updateCategory(id: "c1", draft: CategoryDraft(name: "Renamed", icon: .briefcase), now: stamp)
         guard case .saved(let updated) = result else {
             Issue.record("same-instant rename must save, got \(result)")
             return
         }
         #expect(updated.name == "Renamed")
+        #expect(updated.updatedAt > stamp)
         #expect(try await store.category(id: "c1")?.name == "Renamed")
     }
 

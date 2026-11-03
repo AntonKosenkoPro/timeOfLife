@@ -236,6 +236,26 @@ struct LocalStoreTests {
         #expect(rows.first?.op == "create")
     }
 
+    @Test("same-stamp updateEntry is an idempotent no-op, never a duplicate outbox row")
+    func sameStampEntryUpdateIsNoOp() async throws {
+        // Relay parity: the relay's PATCH guard is strictly newer
+        // (`updated_at < ?`, pinned by SameSecondConflictsWithoutHang), so a
+        // tie must not report success locally only to 409 on push — it is
+        // rejected here and enqueues nothing.
+        let store = try makeStore()
+        _ = try await store.createEntry(makeEntry(updatedAt: Date(timeIntervalSinceReferenceDate: 4_000)))
+
+        let replay = makeEntry(activityText: "Replay", updatedAt: Date(timeIntervalSinceReferenceDate: 4_000))
+        let applied = try await store.updateEntry(replay)
+        #expect(!applied)
+
+        let stored = try await store.entry(id: "entry-1")
+        #expect(stored?.activityText == "Coding")
+        let rows = try await store.outboxRows()
+        #expect(rows.count == 1)
+        #expect(rows.first?.op == "create")
+    }
+
     @Test("newer updateEntry updates text, notes, categories, and enqueues an update row")
     func newerEntryUpdateApplies() async throws {
         let store = try makeStore()

@@ -589,6 +589,44 @@ class CliTests(unittest.TestCase):
                        "--pinned-totals", pin)
             self.assertEqual(proc.returncode, 2)
 
+    def test_record_pending_frame_cli(self):
+        import hashlib
+        import struct
+        import zlib
+        with tempfile.TemporaryDirectory() as tmp:
+            req = write_frame_request(tmp, "la-lock")
+            pin = write_pin(tmp)
+            png = Path(tmp) / "lock.png"
+            ihdr = struct.pack(">IIBBBBB", 1320, 2868, 8, 2, 0, 0, 0)
+            png.write_bytes(b"\x89PNG\r\n\x1a\n" + struct.pack(">I", 13)
+                            + b"IHDR" + ihdr
+                            + struct.pack(">I", zlib.crc32(b"IHDR" + ihdr) & 0xFFFFFFFF))
+            proc = run("record-pending-frame", "--out", tmp, "--run-id", "r1",
+                       "--frame", "la-lock", "--png", str(png),
+                       "--captured-at", "2026-10-30T10:12:34+00:00",
+                       "--request", req, "--pinned-totals", pin,
+                       "--device", "UDID-X",
+                       "--reason", "CI simctl pixels; human handoff")
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            record = json.loads(proc.stdout)
+            self.assertEqual(record["capture"], "external-lock-screen-pending")
+            self.assertEqual(record["pending_reason"], "CI simctl pixels; human handoff")
+            self.assertNotIn("capture_window", record)
+            # empty reason refused: the handoff is never silent
+            proc = run("record-pending-frame", "--out", tmp, "--run-id", "r1",
+                       "--frame", "la-lock", "--png", str(png),
+                       "--captured-at", "2026-10-30T10:12:34+00:00",
+                       "--request", req, "--pinned-totals", pin,
+                       "--reason", "  ")
+            self.assertEqual(proc.returncode, 2)
+            # app frames refused
+            proc = run("record-pending-frame", "--out", tmp, "--run-id", "r1",
+                       "--frame", "insights", "--png", str(png),
+                       "--captured-at", "2026-10-30T10:12:34+00:00",
+                       "--request", req, "--pinned-totals", pin,
+                       "--reason", "x")
+            self.assertEqual(proc.returncode, 2)
+
     def test_finalize_run_provenance_flag(self):
         with tempfile.TemporaryDirectory() as tmp:
             bad = str(Path(tmp) / "prov.json")

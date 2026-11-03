@@ -51,17 +51,21 @@ struct LiveActivityStringsLocaleTests {
         #expect(LiveActivityLocale.localizedString("timer.stop", localeIdentifier: "pt-BR") == "Parar")
     }
 
-    @Test("attributes without a locale key decode leniently to en")
+    @Test("attributes without a locale key decode leniently to the undetermined sentinel")
     func attributesDecodeWithoutLocale() throws {
         // Payloads archived before `localeIdentifier` shipped (an in-flight
         // Live Activity surviving an app update) carry no locale key — the
-        // widget must fall back to system resolution, never fail decoding.
+        // widget must fall back to system resolution, never fail decoding
+        // and never pin English (no `und.lproj` ships, so the accessors'
+        // documented nil-bundle fallback is what actually happens).
         let legacy = Data("""
         {"entryText":"Gym","iconSymbol":"timer"}
         """.utf8)
         let decoded = try JSONDecoder().decode(TimerActivityAttributes.self, from: legacy)
         #expect(decoded.entryText == "Gym")
-        #expect(decoded.localeIdentifier == "en")
+        #expect(decoded.localeIdentifier == "und")
+        #expect(LiveActivityLocale.localizedString("timer.stop", localeIdentifier: decoded.localeIdentifier) == nil)
+        #expect(LiveActivityStrings.stopTitle(localeIdentifier: decoded.localeIdentifier) == LiveActivityStrings.stopTitle)
         let modern = try JSONEncoder().encode(TimerActivityAttributes(entryText: "Gym", iconSymbol: "timer", localeIdentifier: "pt-BR"))
         let roundTripped = try JSONDecoder().decode(TimerActivityAttributes.self, from: modern)
         #expect(roundTripped.localeIdentifier == "pt-BR")

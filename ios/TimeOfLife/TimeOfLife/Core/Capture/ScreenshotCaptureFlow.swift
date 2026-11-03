@@ -1,3 +1,4 @@
+// swiftlint:disable file_length
 #if SCREENSHOT_CAPTURE
 import Foundation
 import SwiftUI
@@ -103,7 +104,9 @@ final class ScreenshotCaptureModel: ObservableObject {
         }
         let parsed = try ScreenshotRequestLoader.parse(data: data)
         request = parsed
-        writeState(status: "preparing", totals: nil, liveActivity: nil, error: nil)
+        guard writeState(status: "preparing", totals: nil, liveActivity: nil, error: nil) else {
+            throw ScreenshotRequestError(code: "write-failed", detail: "State directory refused the preparing write; the runner cannot observe this run.")
+        }
         return parsed
     }
 
@@ -200,7 +203,12 @@ final class ScreenshotCaptureModel: ObservableObject {
         }
         let grace = min(3, max(1, validationElapsed * 3))
         try? await Task.sleep(nanoseconds: UInt64(grace * 1_000_000_000))
-        writeState(status: "ready", totals: totals, liveActivity: liveActivity, error: nil)
+        guard writeState(status: "ready", totals: totals, liveActivity: liveActivity, error: nil) else {
+            let error = ScreenshotRequestError(code: "write-failed", detail: "State directory refused the ready write; the run validated but the runner cannot observe it.")
+            writeTerminalState(status: "failure", error: error)
+            phase = .failed(message: error.detail)
+            return
+        }
     }
 
     /// Realtime frame (tasks 4.3): same approved content, but the draft is
@@ -275,8 +283,8 @@ final class ScreenshotCaptureModel: ObservableObject {
         totals: CaptureExpectedTotals?,
         liveActivity: CaptureStateLiveActivity?,
         error: ScreenshotRequestError?
-    ) {
-        guard let directory = stateDirectory, let request else { return }
+    ) -> Bool {
+        guard let directory = stateDirectory, let request else { return false }
         let state = CaptureState(
             status: status,
             requestSHA256: request.sha256,
@@ -299,7 +307,17 @@ final class ScreenshotCaptureModel: ObservableObject {
             liveActivity: liveActivity,
             error: error.map { CaptureStateFailure(code: $0.code, detail: $0.detail) }
         )
-        try? CaptureStateWriter.write(state, to: directory)
+        do {
+            try CaptureStateWriter.write(state, to: directory)
+            return true
+        } catch {
+            // The state file is the runner's ONLY readiness/terminal signal:
+            // a discarded write would report "app never signalled" with no
+            // cause, indistinguishable from a hang. Log here and let the
+            // caller fail through the same evidence channel.
+            NSLog("screenshot-capture: state write failed (status=%@): %@", status, "\(error)")
+            return false
+        }
     }
 
     private func writeTerminalState(status: String, error: ScreenshotRequestError) {
@@ -328,10 +346,14 @@ final class ScreenshotCaptureModel: ObservableObject {
                 liveActivity: nil,
                 error: CaptureStateFailure(code: error.code, detail: error.detail)
             )
-            try? CaptureStateWriter.write(state, to: directory)
+            do {
+                try CaptureStateWriter.write(state, to: directory)
+            } catch {
+                NSLog("screenshot-capture: terminal state write failed: %@", "\(error)")
+            }
             return
         }
-        writeState(status: status, totals: nil, liveActivity: nil, error: error)
+        _ = writeState(status: status, totals: nil, liveActivity: nil, error: error)
     }
 }
 

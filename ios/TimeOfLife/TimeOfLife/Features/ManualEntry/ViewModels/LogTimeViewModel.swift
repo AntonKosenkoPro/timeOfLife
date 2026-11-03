@@ -1,3 +1,4 @@
+// swiftlint:disable file_length
 import Combine
 import Foundation
 import SwiftUI
@@ -65,6 +66,10 @@ final class LogTimeViewModel: ObservableObject {
 
     let service: TimerService
 
+    /// Calendar for the picker bounds below (injected so a pinned capture
+    /// clock's time zone governs, never the device zone).
+    private let calendar: Calendar
+
     /// The form mode, derived from the edited entry: no entry is CREATE,
     /// any saved entry is EDIT (entry-editor spec). Pure so the mode
     /// routing is unit-testable.
@@ -83,9 +88,11 @@ final class LogTimeViewModel: ObservableObject {
         initialNotes: String = "",
         initialInterval: (start: Date, end: Date)? = nil,
         editing entry: TimeEntry? = nil,
-        now: Date = Date()
+        now: Date = Date(),
+        calendar: Calendar = .current
     ) {
         self.service = service
+        self.calendar = calendar
         self.editingEntry = entry
         if let entry {
             // EDIT prefills straight from the entry's own fields —
@@ -354,7 +361,7 @@ final class LogTimeViewModel: ObservableObject {
     /// with a corrupt end-before-start prefill) — an unbounded picker plus
     /// the disabled gate beats a clamped selection there.
     var endDateRange: ClosedRange<Date>? {
-        let lower = Calendar.current.startOfDay(for: displayStartsAt)
+        let lower = calendar.startOfDay(for: displayStartsAt)
         guard displayEndsAt >= lower else { return nil }
         return lower...Date.distantFuture
     }
@@ -368,7 +375,6 @@ final class LogTimeViewModel: ObservableObject {
     /// with the gate as enforcer, instead of risking an inverted range or
     /// an out-of-range selection.
     var endTimeRange: ClosedRange<Date> {
-        let calendar = Calendar.current
         let endDay = calendar.startOfDay(for: displayEndsAt)
         let endDayEnd = (calendar.date(byAdding: .day, value: 1, to: endDay) ?? endDay.addingTimeInterval(86_400))
             .addingTimeInterval(-1)

@@ -534,6 +534,52 @@ def cmd_record_external_frame(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
+def cmd_record_pending_frame(args: argparse.Namespace) -> int:
+    try:
+        out_root = guard.ensure_out_root(args.out)
+    except guard.GuardError as exc:
+        print(f"invalid: {exc}", file=sys.stderr)
+        return EXIT_INVALID
+    try:
+        request = req.load_request_file(args.request)
+        raw = Path(args.request).read_bytes()
+    except req.RequestError as exc:
+        print(f"invalid: {exc}", file=sys.stderr)
+        return EXIT_INVALID
+    try:
+        pin = _load_pin(args.pinned_totals)
+    except _Exit as e:
+        return e.code
+    try:
+        geometry = req.parse_geometry(args.geometry)
+    except req.RequestError as exc:
+        print(f"invalid: {exc}", file=sys.stderr)
+        return EXIT_INVALID
+    blocked = _gate_or_block(
+        request.get("locale"), geometry,
+        getattr(args, "approval", None), getattr(args, "retained_dir", None),
+    )
+    if blocked is not None:
+        return blocked
+    try:
+        record = exec_mod.record_pending_frame(
+            run_dir=exec_mod.run_dir_for(str(out_root), args.run_id),
+            frame=args.frame, png_src=args.png,
+            captured_at_iso=args.captured_at,
+            request=request,
+            request_sha256=req.request_sha256_of_bytes(raw),
+            reason=args.reason,
+            pinned_totals=pin, expected_geometry=geometry,
+            device_udid=args.device,
+            mask=getattr(args, "mask", None),
+        )
+    except exec_mod.FrameError as exc:
+        print(f"failed: {exc}", file=sys.stderr)
+        return EXIT_INVALID
+    print(json.dumps(record, indent=2, sort_keys=True))
+    return EXIT_OK
+
+
 def cmd_finalize_run(args: argparse.Namespace) -> int:
     try:
         out_root = guard.ensure_out_root(args.out)
@@ -663,7 +709,8 @@ def cmd_run_frame(args: argparse.Namespace) -> int:
         return EXIT_INVALID
     if args.frame in req.LA_FRAMES:
         print("invalid: run-frame serves app-clock frames only; "
-              "la-* frames use prepare-frame + record-external-frame + "
+              "la-* frames use prepare-frame + record-external-frame (or "
+              "record-pending-frame for the CI human handoff) + "
               "teardown-frame", file=sys.stderr)
         return EXIT_INVALID
     try:
@@ -858,6 +905,28 @@ def build_parser() -> argparse.ArgumentParser:
                    help="5.4 approval file (required for non-English/iPad frames)")
     p.add_argument("--retained-dir", required=False, default=None)
     p.set_defaults(fn=cmd_record_external_frame)
+
+    p = sub.add_parser("record-pending-frame")
+    p.add_argument("--out", required=True)
+    p.add_argument("--run-id", required=True)
+    p.add_argument("--frame", required=True)
+    p.add_argument("--png", required=True)
+    p.add_argument("--captured-at", required=True)
+    p.add_argument("--request", required=True)
+    p.add_argument("--pinned-totals", required=False, default=None)
+    p.add_argument("--geometry", required=False, default="1320x2868")
+    p.add_argument("--device", required=False, default="unknown")
+    p.add_argument("--reason", required=True,
+                   help="why genuine pixels are a human handoff "
+                        "(recorded on the stub, never silent)")
+    p.add_argument("--mask", required=False, default=None,
+                   choices=["default", "black"],
+                   help="external capture mask policy (default: per-frame; "
+                        "la-compact/la-expanded require --mask=black)")
+    p.add_argument("--approval", required=False, default=None,
+                   help="5.4 approval file (required for non-English/iPad frames)")
+    p.add_argument("--retained-dir", required=False, default=None)
+    p.set_defaults(fn=cmd_record_pending_frame)
 
     p = sub.add_parser("finalize-run")
     p.add_argument("--out", required=True)

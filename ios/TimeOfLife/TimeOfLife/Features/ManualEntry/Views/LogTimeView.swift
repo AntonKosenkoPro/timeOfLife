@@ -69,6 +69,8 @@ struct LogTimeView: View {
         initialInterval: (start: Date, end: Date)? = nil,
         editing entry: TimeEntry? = nil,
         embeddedInNavigationStack: Bool = false,
+        now: Date = Date(),
+        calendar: Calendar = .current,
         onSaved: (() -> Void)? = nil
     ) {
         // CREATE prefill through the initializer (no setter side effects:
@@ -85,7 +87,9 @@ struct LogTimeView: View {
             initialCategoryIDs: initialCategoryIDs,
             initialNotes: initialNotes,
             initialInterval: initialInterval,
-            editing: entry
+            editing: entry,
+            now: now,
+            calendar: calendar
         )
         _vm = StateObject(wrappedValue: vm)
         self.embeddedInNavigationStack = embeddedInNavigationStack

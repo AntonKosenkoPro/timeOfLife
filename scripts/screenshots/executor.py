@@ -834,6 +834,79 @@ def record_external_frame(
     return record
 
 
+def record_pending_frame(
+    *,
+    run_dir: Path,
+    frame: str,
+    png_src: str,
+    captured_at_iso: str,
+    request: dict,
+    request_sha256: str,
+    reason: str,
+    pinned_totals: dict | None = None,
+    expected_geometry: tuple[int, int] = req.PILOT_GEOMETRY,
+    device_udid: str = "unknown",
+    mask: str | None = None,
+) -> dict[str, Any]:
+    """Register a simctl export as a deterministic human handoff (no OCR).
+
+    CI simctl cannot produce genuine Lock Screen / island pixels
+    (prepare leaves the capture app foregrounded; the island pill hides
+    when the app is foreground), so `read_timer.py` would fail closed and
+    abort the leg. This verb binds the exported PNG (hash + geometry,
+    like every other record) but carries NO `capture_window` /
+    `observation_sha256`, so `finalize_run` reports the frame as
+    needs-inspection ("human timer observation not registered") instead
+    of failing. The genuine pixels arrive later via
+    `record-external-frame`, which overwrites this stub record. `reason`
+    is required so the handoff is never silent.
+    """
+    if frame not in req.LA_FRAMES:
+        raise FrameError(
+            f"record-pending-frame serves {list(req.LA_FRAMES)!r} only"
+        )
+    if not isinstance(reason, str) or not reason.strip():
+        raise FrameError("record-pending-frame requires a non-empty --reason")
+    src = Path(png_src)
+    if not src.is_file():
+        raise FrameError(f"pending PNG not found: {png_src}")
+    try:
+        dims = insp.png_dimensions(str(src))
+    except insp.InspectionError as exc:
+        raise FrameError(str(exc))
+    if dims != (expected_geometry[0], expected_geometry[1]):
+        raise FrameError(f"pending PNG geometry {dims} != {expected_geometry}")
+    try:
+        resolved_mask = pf.resolve_screenshot_mask(frame, mask)
+    except ValueError as exc:
+        raise FrameError(str(exc))
+    dest = frame_png_path(run_dir, frame)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(src, dest)
+    record = {
+        "schema_version": 1,
+        "frame": frame,
+        "mode": req.MODE_REALTIME,
+        "device_udid": device_udid,
+        "run_id": request.get("run_id"),
+        "deck_version": request.get("deck_version"),
+        "treatment": request.get("treatment"),
+        "request_sha256": request_sha256,
+        "request_semantic_sha256": req.semantic_sha256(request),
+        "screenshot_sha256": insp.sha256_file(str(dest)),
+        "geometry": {"width": dims[0], "height": dims[1]},
+        "expected_totals": pinned_totals,
+        "capture": "external-lock-screen-pending",
+        "captured_at_iso": captured_at_iso,
+        "pending_reason": reason.strip(),
+        "screenshot_mask": resolved_mask or "default",
+    }
+    frame_record_path(run_dir, frame).write_text(
+        json.dumps(record, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
+    return record
+
+
 def load_frame_record(run_dir: Path, frame: str) -> dict:
     try:
         obj = json.loads(frame_record_path(run_dir, frame).read_text(encoding="utf-8"))

@@ -17,7 +17,9 @@ struct RunningBannerFace: View {
     let startedAt: Date
     /// Request-locale identifier for face copy (payload locale, never the
     /// appex system language which may cache a prior run's language).
-    var localeIdentifier: String = "en"
+    /// Required: no default, so a call site that forgets the payload locale
+    /// fails to compile instead of silently rendering English.
+    let localeIdentifier: String
     let trackURL: URL
     let trackStopURL: URL
 

@@ -700,6 +700,25 @@ struct LogTimeViewModelTests {
         #expect(vm.durationSubtitleSeconds == nil)
     }
 
+    @Test("end ranges follow the injected calendar, not the device calendar")
+    func rangesFollowInjectedCalendar() {
+        // Round-2 (PR #225): the form resolved picker bounds through the
+        // wall clock and process calendar while History renders under a
+        // pinned capture clock — under a pinned zone the Add-entry bounds
+        // were computed against the device day. The form now takes the
+        // caller's calendar.
+        guard let tz = TimeZone(identifier: "Pacific/Kiritimati") else {
+            Issue.record("missing test time zone")
+            return
+        }
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = tz
+        let start = Date(timeIntervalSince1970: 1_780_000_000)
+        let vm = makeViewModel(editing: storedEntry(start: start, duration: 3_600), calendar: calendar)
+        #expect(vm.endDateRange?.lowerBound == calendar.startOfDay(for: vm.displayStartsAt))
+        #expect(vm.endTimeRange.lowerBound >= calendar.startOfDay(for: vm.displayEndsAt))
+    }
+
     @Test("corrupt cross-day end-before-start leaves the date picker unbounded")
     func rangeCorruptCrossDayUnboundedDate() {
         let day = Calendar.current.startOfDay(for: Date())
@@ -803,11 +822,11 @@ struct LogTimeViewModelTests {
         return LogTimeViewModel(service: service, editing: entry)
     }
 
-    private func makeViewModel(editing entry: TimeEntry) -> LogTimeViewModel {
+    private func makeViewModel(editing entry: TimeEntry, calendar: Calendar = .current) -> LogTimeViewModel {
         // swiftlint:disable:next force_try
         let store = try! LocalStore(url: temporaryStoreURL())
         let service = TimerService(store: store)
-        return LogTimeViewModel(service: service, editing: entry)
+        return LogTimeViewModel(service: service, editing: entry, calendar: calendar)
     }
 
     private func temporaryStoreURL() -> URL {

@@ -216,7 +216,7 @@ struct ScreenshotCaptureTests {
             liveActivities: NoopLiveActivityController()
         )
         try ScreenshotAddEntry.validate(request: request, container: container)
-        let form = ScreenshotAddEntry.makeForm(service: container.timerService, request: request)
+        let form = try ScreenshotAddEntry.makeForm(service: container.timerService, request: request)
         #expect(form.trimmedName == ScreenshotFixture.addEntryText(for: expected.locale), "add text \(expected.locale)")
         #expect(form.notes == ScreenshotFixture.addEntryNotes(for: expected.locale), "add notes \(expected.locale)")
         #expect(form.isAddEnabled, "add gate \(expected.locale)")
@@ -275,7 +275,7 @@ struct ScreenshotCaptureTests {
     func addEntrySample() async throws {
         let request = try parsedRequest()
         let context = try await ScreenshotPreparation.prepare(request: request)
-        let interval = ScreenshotFixture.addEntryInterval(
+        let interval = try ScreenshotFixture.addEntryInterval(
             calendar: request.calendar,
             referenceDate: request.referenceDate
         )
@@ -287,7 +287,7 @@ struct ScreenshotCaptureTests {
         )
         // The real validation path (same factory the sheet uses).
         try ScreenshotAddEntry.validate(request: request, container: container)
-        let form = ScreenshotAddEntry.makeForm(service: container.timerService, request: request)
+        let form = try ScreenshotAddEntry.makeForm(service: container.timerService, request: request)
         #expect(form.trimmedName == ScreenshotFixture.addEntryText)
         #expect(form.categoryIDs == ScreenshotFixture.addEntryCategoryIDs)
         #expect(form.notes == ScreenshotFixture.addEntryNotes)
@@ -428,6 +428,52 @@ struct ScreenshotCaptureTests {
         ScreenshotApp.applyProcessLocale(pt)
         #expect(LiveActivityService.requestLocaleIdentifier() == "pt-BR")
         #expect(LiveActivityStrings.stopTitle(localeIdentifier: LiveActivityService.requestLocaleIdentifier()) == "Parar")
+    }
+
+    @Test("time labels do not leak the capture locale after reset")
+    func timeTextDoesNotLeakCaptureLocale() throws {
+        // Regression: timeText pinned the SHARED static formatter to the
+        // request locale/time zone and never restored it, so after
+        // ScreenshotLocale.reset() every later label still rendered with
+        // the last request's locale — a capture locale leaking into
+        // production labels. The override now uses a per-call formatter
+        // and the fallback restores process defaults first.
+        let savedLanguages = UserDefaults.standard.object(forKey: "AppleLanguages")
+        let savedLocale = UserDefaults.standard.object(forKey: "AppleLocale")
+        defer {
+            if let value = savedLanguages {
+                UserDefaults.standard.set(value, forKey: "AppleLanguages")
+            } else {
+                UserDefaults.standard.removeObject(forKey: "AppleLanguages")
+            }
+            if let value = savedLocale {
+                UserDefaults.standard.set(value, forKey: "AppleLocale")
+            } else {
+                UserDefaults.standard.removeObject(forKey: "AppleLocale")
+            }
+            ScreenshotLocale.reset()
+        }
+        let request = try parsedRequest(locale: "ru", region: "RU", timezone: "Europe/Moscow")
+        ScreenshotApp.applyProcessLocale(request)
+        let date = Date(timeIntervalSinceReferenceDate: 100_000)
+        // The override still applies while set (guards against "fixing"
+        // the leak by deleting the override branch).
+        let expected = {
+            let formatter = DateFormatter()
+            formatter.timeStyle = .short
+            formatter.locale = ScreenshotLocale.appLocale
+            formatter.timeZone = ScreenshotLocale.appTimeZone
+            return formatter.string(from: date)
+        }()
+        #expect(HistoryViewModel.timeText(for: date) == expected)
+        // After reset the label matches a fresh process-default formatter.
+        ScreenshotLocale.reset()
+        let fresh = {
+            let formatter = DateFormatter()
+            formatter.timeStyle = .short
+            return formatter.string(from: date)
+        }()
+        #expect(HistoryViewModel.timeText(for: date) == fresh)
     }
 
     private func priorState(runID: String, sha256: String) -> CaptureState {

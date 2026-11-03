@@ -232,7 +232,9 @@ struct LiveActivityStopCircleLink: View {
     let destination: URL
     /// Request-locale identifier for the Stop accessibility label (the appex
     /// never sees the app's in-process override; the payload locale wins).
-    var localeIdentifier: String = "en"
+    /// Required: no default, so a missing locale fails to compile instead
+    /// of silently rendering English.
+    let localeIdentifier: String
 
     var body: some View {
         Link(destination: destination) {
@@ -246,8 +248,9 @@ struct LiveActivityStopCircleLink: View {
 
 /// The pill's visuals for the stop `Link` (Spike D) — one shape, never two.
 struct LiveActivityStopPillLabel: View {
-    /// Request-locale identifier for the Stop title.
-    var localeIdentifier: String = "en"
+    /// Request-locale identifier for the Stop title. Required: no default,
+    /// so a missing locale fails to compile instead of silently English.
+    let localeIdentifier: String
 
     var body: some View {
         Label(LiveActivityStrings.stopTitle(localeIdentifier: localeIdentifier), systemImage: "stop.fill")
@@ -272,7 +275,9 @@ struct LiveActivityStopLink: View {
 
     let destination: URL
     /// Request-locale identifier for the Stop title + accessibility label.
-    var localeIdentifier: String = "en"
+    /// Required: no default, so a missing locale fails to compile instead
+    /// of silently rendering English.
+    let localeIdentifier: String
 
     var body: some View {
         Link(destination: destination) {

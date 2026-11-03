@@ -85,7 +85,10 @@ jobs:
     # still reports.
     if: github.event_name != 'pull_request' || needs.changes.outputs.ios == 'true'
     runs-on: macos-15
-    timeout-minutes: 30
+    # Sized for TWO full simulator test invocations (Debug + Screenshot
+    # configurations): a single-test budget red-lines the lane on timeout
+    # rather than on a test failure.
+    timeout-minutes: 45
     steps:
       # Full history + tags: the stamp harness asserts history-aware banding
       # (ancestor re-upload case needs HEAD~1) and enumerates tags per

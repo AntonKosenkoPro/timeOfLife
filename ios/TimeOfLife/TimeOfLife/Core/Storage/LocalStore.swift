@@ -780,11 +780,16 @@ actor LocalStore {
 
     /// Atomically updates a category's name/icon and enqueues an update
     /// outbox row. Returns `.duplicate` on a normalized-name collision,
-    /// `.stale` when `updatedAt` is older than the stored version,
-    /// `.missing` when the category no longer exists. Same-instant writes
-    /// win (`<=`): timestamps truncate below process precision, so a
-    /// create+save pair landing in the same instant must persist the rename
-    /// instead of reporting stale (category-editor-delete regression).
+    /// `.stale` when `now` predates the stored version, `.missing` when
+    /// the category no longer exists. The guard stays strictly newer (`<`,
+    /// matching the relay's `updated_at < ?`): timestamps truncate below
+    /// process precision, so a create+save pair landing in the same instant
+    /// bumps the stamp past the stored version instead of accepting the tie
+    /// locally — a tie would report `.saved` here and then be rejected with
+    /// 409 `conflict` on push, silently reverting the rename via conflict
+    /// recovery (category-editor-delete regression). A genuinely older
+    /// `now` (e.g. the row moved on elsewhere) stays `.stale` — the bump
+    /// never force-saves over a newer version.
     @discardableResult
     func updateCategory(
         id: String,
@@ -807,16 +812,24 @@ actor LocalStore {
                     return .duplicate(other)
                 }
             }
+            guard now >= original.updatedAt else {
+                return .stale
+            }
+            // Bump past the stored version instead of accepting a tie: the
+            // relay's PATCH guard stays strict (`updated_at < ?`), so a
+            // same-instant row would pass locally and be rejected (409) on
+            // push.
+            let stamp = max(now, original.updatedAt.addingTimeInterval(1))
             let updated = Category(
                 id: original.id,
                 name: trimmed,
                 icon: draft.icon.rawValue,
                 createdAt: original.createdAt,
-                updatedAt: now
+                updatedAt: stamp
             )
             do {
                 try db.execute(
-                    sql: "UPDATE categories SET name = ?, icon = ?, updated_at = ? WHERE id = ? AND updated_at <= ?",
+                    sql: "UPDATE categories SET name = ?, icon = ?, updated_at = ? WHERE id = ? AND updated_at < ?",
                     arguments: [updated.name, updated.icon, updated.updatedAt, updated.id, updated.updatedAt]
                 )
             } catch {
@@ -848,13 +861,16 @@ actor LocalStore {
     }
 
     /// Applies a last-write-wins update. Returns false when stale.
+    /// Strictly newer only (`<`, matching the relay): a replay carrying an
+    /// unchanged `updatedAt` is an idempotent no-op, never a duplicate
+    /// outbox update.
     @discardableResult
     func updateCategory(_ category: Category) throws -> Bool {
         try queue.write { db in
             try db.execute(
                 sql: """
                     UPDATE categories SET name = ?, icon = ?, updated_at = ?
-                    WHERE id = ? AND updated_at <= ?
+                    WHERE id = ? AND updated_at < ?
                     """,
                 arguments: [category.name, category.icon, category.updatedAt, category.id, category.updatedAt]
             )
@@ -1128,7 +1144,10 @@ actor LocalStore {
     }
 
     /// Applies a last-write-wins update to every entry-owned field (text,
-    /// ordered categories, notes, timing). Returns false when stale. Referenced
+    /// ordered categories, notes, timing). Returns false when stale.
+    /// Strictly newer only (`<`, matching the relay): a replay carrying an
+    /// unchanged `updatedAt` is an idempotent no-op, never a duplicate
+    /// outbox update. Referenced
     /// categories must exist locally; an unknown id throws
     /// `AssociationError.invalidCategory` and rolls the whole write back.
     @discardableResult
@@ -1141,7 +1160,7 @@ actor LocalStore {
                     UPDATE entries
                     SET activity_text = ?, notes = ?, started_at = ?, ended_at = ?,
                         duration_seconds = ?, updated_at = ?
-                    WHERE id = ? AND updated_at <= ?
+                    WHERE id = ? AND updated_at < ?
                     """,
                 arguments: [
                     trimmed, entry.notes, entry.startedAt, entry.endedAt,

@@ -206,7 +206,11 @@ struct HistoryView: View {
             vm.refreshTimeContext()
         }
         .sheet(isPresented: $isLogTimeActive) {
-            LogTimeView(service: container.timerService) {
+            LogTimeView(
+                service: container.timerService,
+                now: clock.now(),
+                calendar: clock.calendar
+            ) {
                 Task { await invalidateReloadAndRegister() }
             }
         }
@@ -271,7 +275,9 @@ struct HistoryView: View {
                 LogTimeView(
                     service: container.timerService,
                     editing: entry,
-                    embeddedInNavigationStack: true
+                    embeddedInNavigationStack: true,
+                    now: clock.now(),
+                    calendar: clock.calendar
                 ) {
                     Task { await invalidateReloadAndRegister() }
                 }

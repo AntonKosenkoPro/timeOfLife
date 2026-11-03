@@ -158,13 +158,18 @@ enum ScreenshotFixture {
     static let addEntryDurationMinutes = 60
 
     /// Sample Start/End on the reference day in the request calendar.
-    static func addEntryInterval(calendar: Calendar, referenceDate: Date) -> (start: Date, end: Date) {
+    /// Throws instead of trapping: a future deck/timezone change must fail
+    /// the run closed through the state file, never crash the process with
+    /// no evidence.
+    static func addEntryInterval(calendar: Calendar, referenceDate: Date) throws -> (start: Date, end: Date) {
         let day = calendar.startOfDay(for: referenceDate)
         var comps = calendar.dateComponents([.year, .month, .day], from: day)
         comps.hour = addEntryStartHour
         comps.minute = addEntryStartMinute
         comps.second = 0
-        let start = calendar.date(from: comps)!
+        guard let start = calendar.date(from: comps) else {
+            throw ScreenshotRequestError(code: "add-entry-invalid", detail: "Add-entry sample wall time unresolvable in the request calendar.")
+        }
         return (start, start.addingTimeInterval(TimeInterval(addEntryDurationMinutes * 60)))
     }
 
@@ -512,24 +517,34 @@ enum ScreenshotFixture {
 
     /// Materializes stable-ID committed entries anchored to the reference
     /// Tuesday in the request calendar. `stamp` dates record metadata.
-    static func buildEntries(calendar: Calendar, stamp: Date) -> [TimeEntry] {
-        buildEntries(calendar: calendar, stamp: stamp, localeIdentifier: "en")
+    /// Throws instead of trapping: a future deck/timezone change must fail
+    /// the run closed through the state file, never crash the process with
+    /// no evidence.
+    static func buildEntries(calendar: Calendar, stamp: Date) throws -> [TimeEntry] {
+        try buildEntries(calendar: calendar, stamp: stamp, localeIdentifier: "en")
     }
 
     /// Localized materialization: same stable IDs, durations, ordering,
     /// and ordered category links — only text/notes vary by deck.
-    static func buildEntries(calendar: Calendar, stamp: Date, localeIdentifier: String) -> [TimeEntry] {
-        let referenceDay = calendar.startOfDay(for: ScreenshotRequestLoader.referenceDate(
+    static func buildEntries(calendar: Calendar, stamp: Date, localeIdentifier: String) throws -> [TimeEntry] {
+        guard let reference = ScreenshotRequestLoader.referenceDate(
             iso: ScreenshotCaptureRequest.pinnedReferenceISO,
             timeZone: calendar.timeZone
-        )!)
-        return entries(for: localeIdentifier).enumerated().map { index, spec in
-            let day = calendar.date(byAdding: .day, value: -spec.daysAgo, to: referenceDay)!
+        ) else {
+            throw ScreenshotRequestError(code: "unsupported-reference", detail: "Pinned reference unresolvable in the request time zone.")
+        }
+        let referenceDay = calendar.startOfDay(for: reference)
+        return try entries(for: localeIdentifier).enumerated().map { index, spec in
+            guard let day = calendar.date(byAdding: .day, value: -spec.daysAgo, to: referenceDay) else {
+                throw ScreenshotRequestError(code: "fixture-date-unresolvable", detail: "Entry \(index) day unresolvable in the request calendar.")
+            }
             var comps = calendar.dateComponents([.year, .month, .day], from: day)
             comps.hour = spec.hour
             comps.minute = spec.minute
             comps.second = 0
-            let start = calendar.date(from: comps)!
+            guard let start = calendar.date(from: comps) else {
+                throw ScreenshotRequestError(code: "fixture-date-unresolvable", detail: "Entry \(index) wall time unresolvable in the request calendar.")
+            }
             let end = start.addingTimeInterval(TimeInterval(spec.durationMinutes * 60))
             return TimeEntry(
                 id: String(format: "shot-e%02d", index + 1),

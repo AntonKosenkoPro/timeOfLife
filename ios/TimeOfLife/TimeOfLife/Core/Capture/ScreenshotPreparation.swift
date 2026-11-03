@@ -97,7 +97,7 @@ enum ScreenshotPreparation {
     /// Committed entries only: every `.invalid`/`.failure`/association error
     /// is fatal (design §2 — never a silent partial dataset).
     private static func seedEntries(store: LocalStore, calendar: Calendar, stamp: Date, localeIdentifier: String) async throws {
-        for entry in ScreenshotFixture.buildEntries(calendar: calendar, stamp: stamp, localeIdentifier: localeIdentifier) {
+        for entry in try ScreenshotFixture.buildEntries(calendar: calendar, stamp: stamp, localeIdentifier: localeIdentifier) {
             let mutation: LocalStore.EntryMutation
             do {
                 mutation = try await store.createEntry(entry)

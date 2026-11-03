@@ -442,6 +442,92 @@ class RecordExternalFrameTests(unittest.TestCase):
                     request_sha256=digest, pinned_totals=dict(PINNED))
 
 
+class RecordPendingFrameTests(unittest.TestCase):
+    def _frame_request(self, tmp: str, frame: str = "la-lock"):
+        base = base_request()
+        request = rs.build_frame_request(base, frame)
+        raw = rs.canonical_bytes(request)
+        req_path = Path(tmp) / f"{frame}.request.json"
+        req_path.write_bytes(raw)
+        digest = rs.request_sha256_of_bytes(raw)
+        png = Path(tmp) / f"{frame}.png"
+        write_png(png)
+        return request, digest, png
+
+    def test_pending_stub_finalizes_as_needs_inspection(self):
+        # Round-2 (PR #225): CI simctl cannot produce genuine Lock
+        # Screen / island pixels, so la frames register deterministic
+        # human-handoff stubs instead of failing closed in read_timer.
+        # The leg stays green and finalize reports needs-inspection.
+        with tempfile.TemporaryDirectory() as tmp:
+            container = Path(tmp) / "container"
+            container.mkdir()
+            fake = FakeSimctl(container, la_block=dict(LA_BLOCK),
+                              ended_activity_ids=["act-1"])
+            run_dir = Path(tmp) / "runs" / "r1"
+            base = base_request()
+            for frame in ("track-running", "insights", "history", "add-entry"):
+                ex.prepare_frame(fake, "UDID-1", base, frame, run_dir,
+                                 pinned_totals=dict(PINNED), sleeper=ex.no_sleep)
+                ex.capture_app_frame(fake, "UDID-1", run_dir, frame)
+                ex.teardown_frame(fake, "UDID-1", run_dir, frame)
+            for la_frame in ("la-lock", "la-compact", "la-expanded"):
+                request, digest, png = self._frame_request(tmp, la_frame)
+                req_path = run_dir / "requests" / f"{la_frame}.capture-request.json"
+                req_path.parent.mkdir(parents=True, exist_ok=True)
+                req_path.write_bytes(rs.canonical_bytes(request))
+                ex.prepare_frame(fake, "UDID-1", base, la_frame, run_dir,
+                                 pinned_totals=dict(PINNED), sleeper=ex.no_sleep)
+                record = ex.record_pending_frame(
+                    run_dir=run_dir, frame=la_frame, png_src=str(png),
+                    captured_at_iso="2026-10-30T10:12:34+00:00",
+                    request=request, request_sha256=digest,
+                    reason="CI simctl pixels; human handoff",
+                    pinned_totals=dict(PINNED), device_udid="UDID-1")
+                self.assertEqual(record["capture"], "external-lock-screen-pending")
+                self.assertNotIn("capture_window", record)
+                self.assertNotIn("observation_sha256", record)
+                ex.teardown_frame(fake, "UDID-1", run_dir, la_frame)
+            manifest, pending = ex.finalize_run(run_dir, provenance=dict(PROV))
+            self.assertEqual(manifest["status"], "needs-inspection")
+            for la_frame in ("la-lock", "la-compact", "la-expanded"):
+                self.assertTrue(
+                    any(la_frame in p and "human timer observation" in p
+                        for p in pending), pending)
+
+    def test_pending_stub_rejects_app_frames_and_empty_reason(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            request, digest, png = self._frame_request(tmp)
+            run_dir = Path(tmp) / "runs" / "r1"
+            with self.assertRaises(ex.FrameError):
+                ex.record_pending_frame(
+                    run_dir=run_dir, frame="insights", png_src=str(png),
+                    captured_at_iso="2026-10-30T10:12:34+00:00",
+                    request=request, request_sha256=digest,
+                    reason="x", pinned_totals=dict(PINNED))
+            with self.assertRaises(ex.FrameError):
+                ex.record_pending_frame(
+                    run_dir=run_dir, frame="la-lock", png_src=str(png),
+                    captured_at_iso="2026-10-30T10:12:34+00:00",
+                    request=request, request_sha256=digest,
+                    reason="  ", pinned_totals=dict(PINNED))
+
+    def test_pending_stub_overwritten_by_genuine_record(self):
+        # The human handoff replaces the stub with full evidence and the
+        # run can still reach complete.
+        with tempfile.TemporaryDirectory() as tmp:
+            request, digest, png = self._frame_request(tmp)
+            run_dir = Path(tmp) / "runs" / "r1"
+            stub = ex.record_pending_frame(
+                run_dir=run_dir, frame="la-lock", png_src=str(png),
+                captured_at_iso="2026-10-30T10:12:34+00:00",
+                request=request, request_sha256=digest,
+                reason="CI simctl pixels; human handoff",
+                pinned_totals=dict(PINNED), device_udid="UDID-1")
+            self.assertEqual(stub["capture"], "external-lock-screen-pending")
+            self.assertTrue((run_dir / "frames" / "la-lock.png").is_file())
+
+
 PROV = {"commit_base": "c3e5911-test", "dirty": True}
 
 

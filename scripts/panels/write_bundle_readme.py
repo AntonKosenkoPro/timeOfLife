@@ -84,17 +84,19 @@ def harvest_deck(shots_dir: Path, device: str,
         except (OSError, json.JSONDecodeError, UnicodeDecodeError):
             return {"run_id": run_id, "deck_version": "unreadable manifest",
                     "treatment": "unreadable manifest", "status":
-                    "unreadable manifest"}
+                    "unreadable manifest", "ci_approval_bypass": "unreadable manifest"}
         if not isinstance(obj, dict):
             return {"run_id": run_id, "deck_version": "unreadable manifest",
                     "treatment": "unreadable manifest", "status":
-                    "unreadable manifest"}
+                    "unreadable manifest", "ci_approval_bypass": "unreadable manifest"}
         return {"run_id": run_id,
                 "deck_version": str(obj.get("deck_version", "unknown")),
                 "treatment": str(obj.get("treatment", "unknown")),
-                "status": str(obj.get("status", "unknown"))}
+                "status": str(obj.get("status", "unknown")),
+                "ci_approval_bypass": str(obj.get("ci_approval_bypass", "unknown"))}
     return {"run_id": "none", "deck_version": "unverified",
-            "treatment": "unverified", "status": "unverified"}
+            "treatment": "unverified", "status": "unverified",
+            "ci_approval_bypass": "unverified"}
 
 
 def parse_str_list(raw: str, name: str) -> list[str]:
@@ -191,6 +193,36 @@ def main(argv: list[str] | None = None) -> int:
         "",
         f"> {panels_builder.REVIEW_STATUS}",
         "",
+        "## Approval status",
+        "",
+    ]
+    bypass_values = {deck["ci_approval_bypass"] for deck in decks.values()}
+    if "True" in bypass_values:
+        lines += [
+            "> CI CAPTURE — NOT OWNER-APPROVED: at least one set in this "
+            "bundle ran under `LIFIO_CAPTURE_CI=1` "
+            "(`ci_approval_bypass:true`), which satisfies the 5.4 expansion "
+            "gates without a human approval file. Owner gates 5.4/6.6/9.4 "
+            "still require explicit human approval of the retained frames "
+            "before any upload or publication.",
+            "",
+        ]
+    elif bypass_values == {"False"}:
+        lines += [
+            "- All harvested run manifests ran under explicit 5.4 approval "
+            "(`ci_approval_bypass:false`); owner gates 5.4/6.6/9.4 still "
+            "require explicit human approval before any upload or publication.",
+            "",
+        ]
+    else:
+        lines += [
+            "- Approval provenance unverified: no harvested run manifest "
+            "declares `ci_approval_bypass` (sets unverified or manifests "
+            "unreadable). Treat this bundle as NOT owner-approved until a "
+            "human verifies the run manifests.",
+            "",
+        ]
+    lines += [
         "## Bundle",
         "",
         f"- generated_utc: {stamp}",
@@ -221,15 +253,15 @@ def main(argv: list[str] | None = None) -> int:
         "",
         "## Decks (from shots-dir run manifests)",
         "",
-        "| device | language | run_id | deck_version | treatment | status |",
-        "| --- | --- | --- | --- | --- | --- |",
+        "| device | language | run_id | deck_version | treatment | status | ci_approval_bypass |",
+        "| --- | --- | --- | --- | --- | --- | --- |",
     ]
     for d in devices:
         for lang in languages:
             deck = decks[(d, lang)]
             lines.append(f"| {d} | {lang} | {deck['run_id']} | "
                          f"{deck['deck_version']} | {deck['treatment']} | "
-                         f"{deck['status']} |")
+                         f"{deck['status']} | {deck['ci_approval_bypass']} |")
     lines += ["", "## Panels"]
     if isinstance(matrix, dict) and isinstance(matrix.get("cells"), list):
         counts = json.dumps(matrix.get("counts", {}), sort_keys=True)

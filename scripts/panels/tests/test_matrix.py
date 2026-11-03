@@ -97,7 +97,8 @@ def run_readme(*argv: str):
 
 
 def write_manifest(path: Path, frames_dir: Path, run_id: str,
-                   canvas: tuple[int, int], frames: tuple[str, ...]) -> None:
+                   canvas: tuple[int, int], frames: tuple[str, ...],
+                   ci_approval_bypass: bool | None = None) -> None:
     recs = []
     for frame in frames:
         png = frames_dir / f"{frame}.png"
@@ -105,22 +106,27 @@ def write_manifest(path: Path, frames_dir: Path, run_id: str,
                      "screenshot_sha256": hashlib.sha256(
                          png.read_bytes()).hexdigest(),
                      "geometry": {"width": canvas[0], "height": canvas[1]}})
-    path.write_text(json.dumps({
+    manifest: dict = {
         "schema_version": 1, "run_id": run_id, "status": "complete",
         "deck_version": "en-austin-1", "treatment": "light-v1",
         "geometry": {"width": canvas[0], "height": canvas[1]},
-        "frames": recs}), encoding="utf-8")
+        "frames": recs}
+    if ci_approval_bypass is not None:
+        manifest["ci_approval_bypass"] = ci_approval_bypass
+    path.write_text(json.dumps(manifest), encoding="utf-8")
 
 
 def make_run(shots: Path, device: str, language: str, run_id: str,
-             canvas: tuple[int, int], colors: dict) -> None:
+             canvas: tuple[int, int], colors: dict,
+             ci_approval_bypass: bool | None = None) -> None:
     run_dir = shots / device / language / "runs" / run_id
     frames_dir = run_dir / "frames"
     frames_dir.mkdir(parents=True, exist_ok=True)
     for frame, color in colors.items():
         Image.new("RGB", canvas, color).save(frames_dir / f"{frame}.png")
     write_manifest(run_dir / "run-manifest.json", frames_dir, run_id,
-                   canvas, tuple(colors))
+                   canvas, tuple(colors),
+                   ci_approval_bypass=ci_approval_bypass)
 
 
 def make_bezel_69_bytes() -> bytes:
@@ -710,6 +716,52 @@ class BundleReadmeTests(unittest.TestCase):
                 "--out", str(root / "readme.md"))
             self.assertEqual(proc.returncode, 2)
             self.assertIn("panels dir not found", proc.stderr)
+
+    def test_readme_ci_bypass_surfaces(self):
+        # Round-2 (PR #225): a CI bundle (gates satisfied by
+        # LIFIO_CAPTURE_CI=1, ci_approval_bypass:true) must never read as
+        # owner-approved at handoff — the README carries the bypass flag.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            shots = root / "shots"
+            make_run(shots, "iphone69", "en", "iphone69-en-r1",
+                     (1320, 2868), FRAME_COLORS_69, ci_approval_bypass=True)
+            panels_dir = root / "panels"
+            panels_dir.mkdir()
+            out = root / "readme.md"
+            proc = run_readme(
+                "--panels-dir", str(panels_dir),
+                "--shots-dir", str(shots),
+                "--ios-runtime", "iOS 27.0",
+                "--devices", '["iphone69"]', "--languages", '["en"]',
+                "--out", str(out),
+                "--commit", "x", "--dirty", "false")
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            text = out.read_text(encoding="utf-8")
+            self.assertIn("NOT OWNER-APPROVED", text)
+            self.assertIn("ci_approval_bypass", text)
+            self.assertIn("True", text)
+
+    def test_readme_explicit_approval_clears_bypass(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            shots = root / "shots"
+            make_run(shots, "iphone69", "en", "iphone69-en-r1",
+                     (1320, 2868), FRAME_COLORS_69, ci_approval_bypass=False)
+            panels_dir = root / "panels"
+            panels_dir.mkdir()
+            out = root / "readme.md"
+            proc = run_readme(
+                "--panels-dir", str(panels_dir),
+                "--shots-dir", str(shots),
+                "--ios-runtime", "iOS 27.0",
+                "--devices", '["iphone69"]', "--languages", '["en"]',
+                "--out", str(out),
+                "--commit", "x", "--dirty", "false")
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            text = out.read_text(encoding="utf-8")
+            self.assertNotIn("NOT OWNER-APPROVED", text)
+            self.assertIn("ci_approval_bypass:false", text)
 
     def test_readme_unknown_device_invalid(self):
         with tempfile.TemporaryDirectory() as tmp:
