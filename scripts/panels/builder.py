@@ -20,8 +20,10 @@ binaries). Three compositions are encoded here:
   the owner scoped LA out of the iPad set). Approved 2026-11-02
   (composition only).
 
-A 6.5-inch composition was never owner-approved: `--size 6.5` is
-recognized but refused loudly at the template gate (see panels.py).
+Owner lineup 2026-11-03: iPhone 6.9 (18 Pro Max), iPhone 6.3 (iPhone 17),
+iPad 13. The 6.5-inch device was DROPPED (Air pixels are 6.9-class; Apple
+auto-scales), so `--size 6.5` / device `iphone65` are unknown inputs and
+fail closed at the CLI catalog gate — no 6.5 composition ever existed.
 
 Rendering core is a behavior-preserving port of the retained
 `build_final_v13.py` (6.9) and `ipad/build_ipad_panels_v1.py` (iPad)
@@ -85,7 +87,6 @@ CANVAS_IPAD = (2064, 2752)
 SIZES = {
     "6.9": {"canvas": CANVAS_69, "template": TEMPLATE_69},
     "6.3": {"canvas": CANVAS_63, "template": TEMPLATE_69},  # v13 scaled
-    "6.5": {"canvas": (1242, 2688), "template": None},  # gated: never approved
     "ipad13": {"canvas": CANVAS_IPAD, "template": TEMPLATE_IPAD},
 }
 
@@ -120,14 +121,13 @@ BEZEL_FILES = {"6.9": BEZEL_FILE_69, "6.3": BEZEL_FILE_63,
                "ipad13": BEZEL_FILE_IPAD}
 
 # CI device keys (see the app-screenshots workflow device catalog) mapped
-# to the panel size contract. iphone63 renders the approved v13
-# composition scaled to its 1206x2622 canvas; any catalog size without an
-# approved composition stays BLOCKED at the template gate (recorded,
+# to the panel size contract. Owner lineup 2026-11-03: iphone69, iphone63,
+# ipad13 — iphone65 was dropped, so the catalog holds exactly these three.
+# Unknown keys stay BLOCKED at the catalog gate in panels.py (recorded,
 # never rendered, never stretched).
 MATRIX_DEVICES = {
     "iphone69": {"size": "6.9", "canvas": (1320, 2868), "island": True},
     "iphone63": {"size": "6.3", "canvas": (1206, 2622), "island": True},
-    "iphone65": {"size": "6.5", "canvas": (1242, 2688), "island": False},
     "ipad13": {"size": "ipad13", "canvas": (2064, 2752), "island": False},
 }
 

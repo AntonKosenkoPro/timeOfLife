@@ -58,7 +58,7 @@ The workflow SHALL first produce an English large-iPhone pilot in this order: Tr
 
 ### Requirement: Capture matrix includes actual iPad layouts
 
-The final matrix SHALL cover all five locales on portrait iPhone 1320 × 2868, portrait iPhone 1242 × 2688, and portrait 13-inch iPad 2064 × 2752. Each set SHALL contain the seven approved story frames (Track running, Insights, History top, Add entry, Live Activity × 3 states). App frames MUST be captured at the target device's native screenshot dimensions rather than stretched from another device. Frame dimensions and the actual runtime presentation SHALL be validated; an unavailable required frame MUST leave that set incomplete.
+The final matrix SHALL cover all five locales on portrait iPhone 1320 × 2868, portrait iPhone 1206 × 2622, and portrait 13-inch iPad 2064 × 2752 (owner lineup 2026-11-03: the 1242 × 2688 6.5-inch set was dropped). Each set SHALL contain the seven approved story frames (Track running, Insights, History top, Add entry, Live Activity × 3 states). App frames MUST be captured at the target device's native screenshot dimensions rather than stretched from another device. Frame dimensions and the actual runtime presentation SHALL be validated; an unavailable required frame MUST leave that set incomplete.
 
 #### Scenario: iPad set is produced
 - **WHEN** the operator captures an iPad set

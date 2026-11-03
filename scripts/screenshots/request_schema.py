@@ -50,8 +50,11 @@ PILOT_KEYBOARD_LANGUAGE = "en-US"
 PILOT_TREATMENT = "light-v1"
 PILOT_GEOMETRY = (1320, 2868)
 
-# Capture-matrix geometries (design §5): pilot 6.9-inch iPhone plus the three
+# Capture-matrix geometries (design §5): pilot 6.9-inch iPhone plus the
 # expansion targets (6.5-inch + 6.3-inch iPhones, 13-inch iPad).
+# The 1242x2688 entry is RETAINED for validating historical 6.5-inch runs
+# (captured pre-2026-11-03); CI dispatch lineup 2026-11-03 is 6.9/6.3/iPad
+# only and never emits 6.5 geometry.
 # Non-pilot geometries require 5.4 approval via the "ipad" device-matrix
 # gate (covers 6.5-inch + 6.3-inch iPhones + 13-inch iPad; owner-ordered
 # medium captures 2026-11-02 run under the same expansion approval).

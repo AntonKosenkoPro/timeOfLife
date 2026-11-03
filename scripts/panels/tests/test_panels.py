@@ -270,6 +270,14 @@ class BuilderUnitTests(unittest.TestCase):
                          {"size": "6.3", "canvas": (1206, 2622),
                           "island": True})
 
+    def test_matrix_catalog_matches_owner_lineup(self):
+        # Owner lineup 2026-11-03: iphone69/iphone63/ipad13 only —
+        # iphone65 was dropped, so the catalog must not list it.
+        self.assertEqual(set(panels_builder.MATRIX_DEVICES),
+                         {"iphone69", "iphone63", "ipad13"})
+        self.assertEqual(set(panels_builder.SIZES),
+                         {"6.9", "6.3", "ipad13"})
+
     def test_build_en63_synthetic_deterministic(self):
         with tempfile.TemporaryDirectory() as tmp:
             kit = make_kit_63(tmp)
@@ -512,7 +520,9 @@ class CliTests(unittest.TestCase):
             self.assertEqual(proc.returncode, 2)
             self.assertIn("cross-locale", proc.stderr)
 
-    def test_cli_size_65_gated(self):
+    def test_cli_size_65_rejected(self):
+        # Owner lineup 2026-11-03 dropped the 6.5-inch device: --size 6.5
+        # is no longer a choice and fails closed at argparse (exit 2).
         with tempfile.TemporaryDirectory() as tmp:
             kit = make_kit_69(tmp)
             proc = run("--locale", "en", "--size", "6.5",
@@ -521,7 +531,7 @@ class CliTests(unittest.TestCase):
                        "--run-manifest", kit["manifest"],
                        "--bezel", kit["bezel"])
             self.assertEqual(proc.returncode, 2)
-            self.assertIn("no owner-approved 6.5", proc.stderr)
+            self.assertIn("invalid choice", proc.stderr)
 
     def test_cli_unknown_locale_rejected(self):
         with tempfile.TemporaryDirectory() as tmp:

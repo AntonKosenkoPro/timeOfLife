@@ -43,7 +43,7 @@ The five English captions SHALL be localized to `ru`, `zh-Hans`, `es-419`, and `
 
 ### Requirement: Render matrix covers iPhone and iPad panel sets across five locales
 
-The final matrix SHALL be 5 iPhone panels × 5 locales (`en`, `ru`, `zh-Hans`, `es-419`, `pt-BR`) × 2 iPhone sizes (portrait iPhone 1320 × 2868, portrait iPhone 1242 × 2688) plus 4 iPad panels (Track, Insights, History, Add-entry — NO LA-combined panel on iPad) × 5 locales × 1 iPad size (portrait 13-inch iPad 2064 × 2752) = 50 + 20 = 70 images. App art MUST come from the matching locale/size capture set at native dimensions — never stretched from another size. The LA-combined panel MUST use only genuine Live Activity presentations valid for that size (Island states only where the target genuinely presents them; otherwise Lock-banner-led composition, recorded never fabricated).
+The final matrix SHALL be 5 iPhone panels × 5 locales (`en`, `ru`, `zh-Hans`, `es-419`, `pt-BR`) × 2 iPhone sizes (portrait iPhone 1320 × 2868, portrait iPhone 1206 × 2622 — owner lineup 2026-11-03: the 1242 × 2688 6.5-inch set was dropped) plus 4 iPad panels (Track, Insights, History, Add-entry — NO LA-combined panel on iPad) × 5 locales × 1 iPad size (portrait 13-inch iPad 2064 × 2752) = 50 + 20 = 70 images. App art MUST come from the matching locale/size capture set at native dimensions — never stretched from another size. The LA-combined panel MUST use only genuine Live Activity presentations valid for that size (Island states only where the target genuinely presents them; otherwise Lock-banner-led composition, recorded never fabricated).
 
 #### Scenario: Full matrix rendered
 

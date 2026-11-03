@@ -27,15 +27,15 @@ BLOCKED (captions pending 9.2), never rendered with substituted copy.
 
 Required headline flags (the panel contract):
   --locale      en | ru | zh-Hans | es-419 | pt-BR
-  --size        6.9 | 6.3 | 6.5 | ipad13
+  --size        6.9 | 6.3 | ipad13
                 6.9    -> approved v13 composition (5 panels, LA-combined)
                 6.3    -> v13 composition scaled to the 1206x2622 canvas
                           (5 panels, LA-combined; review sets only — no
                           separate 6.3 approval, 9.3 hold still applies)
                 ipad13 -> approved ipad-v1 composition (4 panels, no LA)
-                6.5    -> recognized but REFUSED: no owner-approved 6.5
-                          composition exists; the workflow stops at the
-                          template gate and names the pending decision.
+                (owner lineup 2026-11-03: 6.9/6.3/iPad only; 6.5 dropped,
+                any other --size is an invalid choice, devices outside the
+                matrix catalog stay blocked, never rendered)
   --panels-dir  external output directory (must already exist; repository
                 paths are rejected — panel binaries stay outside git).
   --captions    captions JSON file (captions-v1 schema: locale, version,
@@ -133,7 +133,7 @@ def cmd_single(args: argparse.Namespace) -> int:
               "(en | ru | zh-Hans | es-419 | pt-BR)", file=sys.stderr)
         return EXIT_INVALID
     if args.size is None:
-        print("invalid: --size is required (6.9 | 6.3 | 6.5 | ipad13)",
+        print("invalid: --size is required (6.9 | 6.3 | ipad13)",
               file=sys.stderr)
         return EXIT_INVALID
     if args.panels_dir is None:
@@ -145,15 +145,8 @@ def cmd_single(args: argparse.Namespace) -> int:
               file=sys.stderr)
         return EXIT_INVALID
 
-    size_info = panels_builder.SIZES[args.size]
-    if size_info["template"] is None:
-        print(f"blocked: no owner-approved {args.size}-inch panel composition; "
-              "only 6.9 (template v13), 6.3 (template v13 scaled), and "
-              "ipad13 (template ipad-v1) are rendered — "
-              "the 6.5 template decision is pending, matrix render "
-              "stays HELD per 9.3", file=sys.stderr)
-        return EXIT_INVALID
-
+    # NB: --size membership is enforced by argparse choices=SIZES keys;
+    # every cataloged size carries a template (no template-None entries).
     try:
         out_dir = guard.ensure_out_root(args.panels_dir)
     except guard.GuardError as exc:

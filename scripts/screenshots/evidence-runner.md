@@ -47,7 +47,8 @@ globally (research.md: 3/3) — no further ctx7 calls made.
 - Schema validation is locale-aware but approval-neutral: keyboard language
   must match the request locale (`en-US`, `ru-RU`, `zh-Hans-CN`, `es-MX`,
   `pt-BR`), geometry must be a matrix size (1320x2868, 1242x2688,
-  1206x2622, 2064x2752). Passing validation never authorizes expansion.
+  1206x2622, 2064x2752 — 1242x2688 retained for historical-run validation;
+  CI dispatch lineup 2026-11-03 is 6.9/6.3/iPad only). Passing validation never authorizes expansion.
 - Expansion authorization lives at the CLI via `approval.gates_for_request`:
   non-English locale → `non-english` gate, non-pilot geometry → `ipad`
   device-matrix gate (covers 6.5-inch + 6.3-inch iPhones + 13-inch iPad;

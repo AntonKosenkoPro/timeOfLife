@@ -267,7 +267,10 @@ class RenderMatrixTests(unittest.TestCase):
             self.assertEqual(by_lang["en"]["status"], "rendered")
             self.assertEqual(by_lang["ru"]["status"], "blocked")
 
-    def test_matrix_65_cell_blocked_at_template_gate(self):
+    def test_matrix_dropped_device_rejected_at_catalog_gate(self):
+        # Owner lineup 2026-11-03 dropped iphone65: the matrix catalog no
+        # longer lists it, so a stale dispatch key fails closed as an
+        # unknown device (exit 2) before any cell renders — never stretched.
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             shots = root / "shots"
@@ -280,11 +283,8 @@ class RenderMatrixTests(unittest.TestCase):
                 "--bezels-dir", str(bezels), "--out", str(out),
                 "--devices", '["iphone65"]', "--languages", '["en"]')
             self.assertEqual(proc.returncode, 2)
-            self.assertIn("no owner-approved 6.5", proc.stderr)
-            manifest = json.loads(
-                (out / "matrix-manifest.json").read_text(encoding="utf-8"))
-            self.assertEqual(manifest["status"], "incomplete")
-            self.assertEqual(manifest["cells"][0]["status"], "blocked")
+            self.assertIn("unknown device", proc.stderr)
+            self.assertFalse((out / "matrix-manifest.json").exists())
 
     def test_matrix_63_en_green(self):
         with tempfile.TemporaryDirectory() as tmp:

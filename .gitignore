@@ -69,3 +69,7 @@ Packages/
 
 ### Change worktrees (local-only; one branch per worktree, created from origin/main)
 timeOfLife.wt/
+
+### Python (runner scripts under scripts/)
+__pycache__/
+*.py[cod]
