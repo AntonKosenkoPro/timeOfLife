@@ -780,8 +780,11 @@ actor LocalStore {
 
     /// Atomically updates a category's name/icon and enqueues an update
     /// outbox row. Returns `.duplicate` on a normalized-name collision,
-    /// `.stale` when `updatedAt` is not newer than the stored version,
-    /// `.missing` when the category no longer exists.
+    /// `.stale` when `updatedAt` is older than the stored version,
+    /// `.missing` when the category no longer exists. Same-instant writes
+    /// win (`<=`): timestamps truncate below process precision, so a
+    /// create+save pair landing in the same instant must persist the rename
+    /// instead of reporting stale (category-editor-delete regression).
     @discardableResult
     func updateCategory(
         id: String,
@@ -813,7 +816,7 @@ actor LocalStore {
             )
             do {
                 try db.execute(
-                    sql: "UPDATE categories SET name = ?, icon = ?, updated_at = ? WHERE id = ? AND updated_at < ?",
+                    sql: "UPDATE categories SET name = ?, icon = ?, updated_at = ? WHERE id = ? AND updated_at <= ?",
                     arguments: [updated.name, updated.icon, updated.updatedAt, updated.id, updated.updatedAt]
                 )
             } catch {
@@ -851,7 +854,7 @@ actor LocalStore {
             try db.execute(
                 sql: """
                     UPDATE categories SET name = ?, icon = ?, updated_at = ?
-                    WHERE id = ? AND updated_at < ?
+                    WHERE id = ? AND updated_at <= ?
                     """,
                 arguments: [category.name, category.icon, category.updatedAt, category.id, category.updatedAt]
             )
@@ -1138,7 +1141,7 @@ actor LocalStore {
                     UPDATE entries
                     SET activity_text = ?, notes = ?, started_at = ?, ended_at = ?,
                         duration_seconds = ?, updated_at = ?
-                    WHERE id = ? AND updated_at < ?
+                    WHERE id = ? AND updated_at <= ?
                     """,
                 arguments: [
                     trimmed, entry.notes, entry.startedAt, entry.endedAt,

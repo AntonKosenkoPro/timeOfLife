@@ -85,15 +85,16 @@ struct CategoryEditorDeleteTests {
     @Test("delete refuses while a save is in flight and leaves the category intact")
     func deleteRefusesWhileSaveInFlight() async throws {
         let store = try makeStore()
-        // Backdated creation stamp: the save below stamps wall-clock now, so
-        // the LWW write is strictly newer on every optimization level.
-        // Same-instant create/save pairs can go stale under -O timing (the
-        // rename then never persists); the 5 s offset removes the timestamp
-        // race without changing what the test proves (refusal + intact row).
+        // Same-instant create/save pair (no backdate): the LWW tie-break is
+        // `<=`, so a save stamping the same instant as creation persists the
+        // rename instead of going stale. This is the regression pin for the
+        // same-tick data-loss path (timestamps truncate below process
+        // precision; a quick create+rename must not silently drop the rename).
+        let now = Date()
         try await store.createCategory(
             draft: CategoryDraft(name: "Work", icon: .briefcase),
             id: "c1",
-            now: Date().addingTimeInterval(-5)
+            now: now
         )
         let category = try #require(await store.category(id: "c1"))
         let vm = CategoryEditorViewModel(store: store, category: category, onSaved: { _ in }, onDuplicate: { _ in })
@@ -117,6 +118,22 @@ struct CategoryEditorDeleteTests {
         }
         #expect(settled, "save must settle within the bounded wait")
         #expect(try await store.category(id: "c1") != nil, "refused delete must not remove the category")
+        #expect(try await store.category(id: "c1")?.name == "Renamed")
+    }
+
+    @Test("same-instant category rename wins the last-write-wins tie-break")
+    func sameInstantRenamePersists() async throws {
+        let store = try makeStore()
+        let stamp = Date()
+        try await store.createCategory(draft: CategoryDraft(name: "Work", icon: .briefcase), id: "c1", now: stamp)
+        // Identical stamp: timestamps truncate below process precision, so a
+        // create+save pair in the same instant must persist, never go stale.
+        let result = try await store.updateCategory(id: "c1", draft: CategoryDraft(name: "Renamed", icon: .briefcase), now: stamp)
+        guard case .saved(let updated) = result else {
+            Issue.record("same-instant rename must save, got \(result)")
+            return
+        }
+        #expect(updated.name == "Renamed")
         #expect(try await store.category(id: "c1")?.name == "Renamed")
     }
 

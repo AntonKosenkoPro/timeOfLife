@@ -60,7 +60,7 @@ final class TrackViewModel: ObservableObject {
     /// save — lets tests hold the save window open and interleave a `load()`
     /// or a chip tap deterministically. Debug-only so no Release caller can
     /// ever suspend a stop mid-save; never set outside tests.
-#if DEBUG
+#if DEBUG || SCREENSHOT_CAPTURE
     var stopGate: (@Sendable () async -> Void)?
 #endif
 
@@ -82,17 +82,20 @@ final class TrackViewModel: ObservableObject {
 
     /// Short-time caption in the view model's calendar/locale (capture pins
     /// both; production follows the process locale like the static helper).
+    /// One formatter for the view-model lifetime (`calendar` is a `let`):
+    /// `timeText` runs per entry row and per ticker tick, and a fresh
+    /// `DateFormatter` per call pays an ICU locale load on the main thread.
     func timeText(for date: Date) -> String {
         timeFormatter.string(from: date)
     }
 
-    private var timeFormatter: DateFormatter {
+    private lazy var timeFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.timeStyle = .short
         formatter.locale = calendar.locale ?? .current
         formatter.timeZone = calendar.timeZone
         return formatter
-    }
+    }()
 
     // MARK: - Recents model
 
@@ -509,7 +512,7 @@ final class TrackViewModel: ObservableObject {
         guard case let .running(draft, startedAt) = state else { return }
         state = .saving(draft, startedAt: startedAt)
         stopTicker()
-#if DEBUG
+#if DEBUG || SCREENSHOT_CAPTURE
         if let stopGate { await stopGate() }
 #endif
         do {

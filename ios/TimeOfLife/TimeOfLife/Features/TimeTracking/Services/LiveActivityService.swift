@@ -117,6 +117,8 @@ final class LiveActivityService: LiveActivityControlling {
             // below instead of converging in place.
             if same.attributes.localeIdentifier != requestLocale {
                 Self.logger.info("LiveActivityService: locale changed, re-requesting")
+                await reRequestForLocaleChange(live: live, text: text, iconSymbol: iconSymbol, startedAt: startedAt, categoryChips: categoryChips, requestLocale: requestLocale)
+                return
             } else {
                 // Same-text singleton: converge chips AND the start anchor in
                 // place (mid-run retag refreshes chips; a missed start re-anchor
@@ -151,6 +153,27 @@ final class LiveActivityService: LiveActivityControlling {
         } catch {
             // Never fail the timer: starting succeeds with no activity.
             Self.logger.error("LiveActivityService: request threw \(String(describing: error)) liveBefore=\(liveCount)")
+        }
+    }
+
+    /// Re-requests the activity for a locale change: request first, end the
+    /// stale one only on success. A throwing request keeps the prior activity
+    /// running instead of leaving the run with none.
+    private func reRequestForLocaleChange(live: [Activity<TimerActivityAttributes>], text: String, iconSymbol: String, startedAt: Date, categoryChips: [LiveCategoryChip], requestLocale: String) async {
+        let attributes = TimerActivityAttributes(entryText: text, iconSymbol: iconSymbol, localeIdentifier: requestLocale)
+        let state = TimerActivityAttributes.ContentState(startedAt: startedAt, categoryChips: categoryChips)
+        do {
+            let activity = try Activity.request(
+                attributes: attributes,
+                content: .init(state: state, staleDate: nil),
+                pushType: nil
+            )
+            for stale in live where stale.id != activity.id {
+                await stale.end(nil, dismissalPolicy: .immediate)
+            }
+            Self.logger.info("LiveActivityService: locale re-request ok id=\(activity.id)")
+        } catch {
+            Self.logger.error("LiveActivityService: locale re-request threw \(String(describing: error)) — keeping prior activity")
         }
     }
 

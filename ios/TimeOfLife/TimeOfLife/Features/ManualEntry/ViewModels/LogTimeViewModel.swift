@@ -80,6 +80,8 @@ final class LogTimeViewModel: ObservableObject {
         service: TimerService,
         initialText: String = "",
         initialCategoryIDs: [String] = [],
+        initialNotes: String = "",
+        initialInterval: (start: Date, end: Date)? = nil,
         editing entry: TimeEntry? = nil,
         now: Date = Date()
     ) {
@@ -99,9 +101,20 @@ final class LogTimeViewModel: ObservableObject {
             let start = Self.floored(now)
             self.name = initialText
             self.categoryIDs = initialCategoryIDs
-            self.notes = ""
-            self.startsAt = start
-            self.endsAt = start.addingTimeInterval(Self.defaultDuration)
+            // Prefill contract: minute-exact values assigned directly —
+            // never through the picker setters (which floor to the minute,
+            // flip `timesTouched` to the ≥60 s rule, and publish on a
+            // potentially discarded instance). Untouched drafts keep the
+            // grandfathered `interval > 0` rule, so sub-minute prefills stay
+            // savable; callers needing floor enforcement use the setters.
+            self.notes = initialNotes
+            if let interval = initialInterval {
+                self.startsAt = interval.start
+                self.endsAt = interval.end
+            } else {
+                self.startsAt = start
+                self.endsAt = start.addingTimeInterval(Self.defaultDuration)
+            }
         }
     }
 

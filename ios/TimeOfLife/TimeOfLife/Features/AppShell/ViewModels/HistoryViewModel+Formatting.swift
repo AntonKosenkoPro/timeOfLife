@@ -85,11 +85,11 @@ extension HistoryViewModel {
         // The Add-entry frame's pills render through this static helper,
         // which otherwise keeps the stale launch locale/time zone.
         if let locale = ScreenshotLocale.appLocale, let timeZone = ScreenshotLocale.appTimeZone {
-            let formatter = DateFormatter()
-            formatter.timeStyle = .short
-            formatter.locale = locale
-            formatter.timeZone = timeZone
-            return formatter.string(from: date)
+            return formatLock.withLock {
+                timeFormatter.locale = locale
+                timeFormatter.timeZone = timeZone
+                return timeFormatter.string(from: date)
+            }
         }
         #endif
         return formatLock.withLock { timeFormatter.string(from: date) }

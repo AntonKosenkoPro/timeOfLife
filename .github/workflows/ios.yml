@@ -183,6 +183,19 @@ jobs:
             -destination "platform=iOS Simulator,name=${{ steps.sim.outputs.name }},OS=latest" \
             test | xcpretty
 
+      - name: Test Screenshot configuration
+        # The TimeOfLife-Screenshot scheme exists so the ~900 lines of
+        # #if SCREENSHOT_CAPTURE tests (CaptureClockSeamTests,
+        # ScreenshotCaptureTests, ScreenshotCleanupActivityTests, …) compile
+        # to something and actually execute — under Debug they compile to
+        # nothing and never run anywhere.
+        working-directory: ios/TimeOfLife
+        run: |
+          set -o pipefail
+          xcodebuild -scheme TimeOfLife-Screenshot \
+            -destination "platform=iOS Simulator,name=${{ steps.sim.outputs.name }},OS=latest" \
+            test | xcpretty
+
   # Required check (ruleset): always reports, even when the lane is skipped
   # on non-ios PRs. Passes only if detection succeeded AND the lane is
   # success-or-skip; a changes failure fails the gate (never green-unverified).

@@ -37,8 +37,7 @@ final class ScreenshotCaptureModel: ObservableObject {
     private var stateDirectory: URL?
     private var request: ScreenshotCaptureRequest?
 
-    /// Idempotent entry (the root `.task` may re-fire on identity change;
-    /// a second run would only re-prepare the same request).
+    /// Idempotent entry (the root `.task` may re-fire; a rerun only re-prepares).
     func runOnce() async {
         guard !didRun else { return }
         didRun = true
@@ -52,16 +51,13 @@ final class ScreenshotCaptureModel: ObservableObject {
             writeTerminalState(status: Self.terminalStatus(for: error.code), error: error)
             phase = .failed(message: error.detail)
         } catch {
-            writeTerminalState(
-                status: "failure",
-                error: ScreenshotRequestError(code: "unexpected", detail: "\(error)")
-            )
+            let error = ScreenshotRequestError(code: "unexpected", detail: "\(error)")
+            writeTerminalState(status: "failure", error: error)
             phase = .failed(message: "\(error)")
         }
     }
 
-    /// Request problems are `invalid`; runtime/environment problems are
-    /// `failure` (spec: evidence requirement).
+    /// Request problems are `invalid`; runtime/environment ones `failure`.
     private static func terminalStatus(for code: String) -> String {
         let invalidCodes: Set<String> = [
             "missing-file", "invalid-json", "missing-field", "unsupported-schema",
@@ -81,17 +77,8 @@ final class ScreenshotCaptureModel: ObservableObject {
         ScreenshotApp.applyProcessLocale(parsed)
         let context = try await ScreenshotPreparation.prepare(request: parsed)
         let session = try await makeSession(parsed: parsed, context: context)
-        let validationElapsed = try await validateAndMount(
-            parsed: parsed,
-            context: context,
-            clock: session.clock,
-            container: session.container
-        )
-        await settleAndSignal(
-            totals: context.totals,
-            liveActivity: session.liveActivity,
-            validationElapsed: validationElapsed
-        )
+        let validationElapsed = try await validateAndMount(parsed: parsed, context: context, clock: session.clock, container: session.container)
+        await settleAndSignal(totals: context.totals, liveActivity: session.liveActivity, validationElapsed: validationElapsed)
     }
 
     /// Detection → filename gate → read → validate. Fail-closed at every
@@ -194,9 +181,8 @@ final class ScreenshotCaptureModel: ObservableObject {
         return validationElapsed
     }
 
-    /// Mounted native view + validated state + runloop settle (bounded grace
-    /// scaled from the measured validation): `ready` means the requested
-    /// frame is loaded, not just that seeding finished.
+    /// Mounted native view + validated state + bounded runloop settle.
+    /// Mount timeout fails closed to `failure` (never `ready` on blank).
     private func settleAndSignal(
         totals: CaptureExpectedTotals,
         liveActivity: CaptureStateLiveActivity?,
@@ -204,7 +190,13 @@ final class ScreenshotCaptureModel: ObservableObject {
     ) async {
         let deadline = Date().addingTimeInterval(10)
         while !mounted, Date() < deadline {
-            await Task.yield()
+            try? await Task.sleep(nanoseconds: 50_000_000)
+        }
+        guard mounted else {
+            let error = ScreenshotRequestError(code: "mount-timeout", detail: "Capture shell did not mount within tolerance.")
+            writeTerminalState(status: "failure", error: error)
+            phase = .failed(message: error.detail)
+            return
         }
         let grace = min(3, max(1, validationElapsed * 3))
         try? await Task.sleep(nanoseconds: UInt64(grace * 1_000_000_000))
@@ -312,10 +304,12 @@ final class ScreenshotCaptureModel: ObservableObject {
 
     private func writeTerminalState(status: String, error: ScreenshotRequestError) {
         if request == nil {
-            // No parsed request (bad token / missing file / invalid JSON):
-            // emit a minimal state without request-bound fields so the runner
-            // still observes a terminal status instead of silence.
+            // No parsed request: minimal terminal state, but never clobber
+            // an existing file (a lone cleanup token must not destroy prior
+            // run evidence).
             guard let directory = stateDirectory else { return }
+            let existing = directory.appendingPathComponent(CaptureStateWriter.filename)
+            if FileManager.default.fileExists(atPath: existing.path) { return }
             let state = CaptureState(
                 status: status,
                 requestSHA256: nil,
@@ -382,6 +376,7 @@ struct ScreenshotCaptureRootView: View {
                     .environmentObject(context.container)
             }
         case let .failed(message):
+            // Dev-only diagnostic (never ships): intentional English, no L10n.
             VStack(spacing: 12) {
                 Text("Screenshot capture unavailable")
                     .font(.headline)

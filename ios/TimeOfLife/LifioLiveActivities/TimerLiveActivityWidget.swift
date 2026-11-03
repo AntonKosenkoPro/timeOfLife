@@ -29,12 +29,13 @@ struct TimerLiveActivityWidget: Widget {
     var body: some WidgetConfiguration {
         ActivityConfiguration(for: TimerActivityAttributes.self) { context in
             if let saved = context.state.savedDurationSeconds {
-                savedBanner(duration: TimerClock.formatted(saved))
+                savedBanner(duration: TimerClock.formatted(saved), localeIdentifier: context.attributes.localeIdentifier)
             } else {
                 RunningBannerFace(
                     text: context.attributes.entryText,
                     iconSymbol: context.state.liveIconSymbol,
                     startedAt: context.state.startedAt,
+                    localeIdentifier: context.attributes.localeIdentifier,
                     trackURL: trackURL,
                     trackStopURL: trackStopURL
                 )
@@ -57,7 +58,7 @@ struct TimerLiveActivityWidget: Widget {
                             // Spike D: a Link, not an intent button — the
                             // widget cannot stop anything with the app dead
                             // (Spikes A–C), so opening the app IS the stop.
-                            LiveActivityStopLink(destination: trackStopURL)
+                            LiveActivityStopLink(destination: trackStopURL, localeIdentifier: context.attributes.localeIdentifier)
                         } else {
                             Image(systemName: "checkmark")
                                 .font(.title2)
@@ -81,7 +82,7 @@ struct TimerLiveActivityWidget: Widget {
                     // keeps long names clear of the island's curve.
                     .padding(.horizontal, 8)
                     .padding(.top, 8)
-                    .accessibilityLabel(LiveActivityStrings.runningAccessibilityLabel(text: context.attributes.entryText))
+                    .accessibilityLabel(LiveActivityStrings.runningAccessibilityLabel(text: context.attributes.entryText, localeIdentifier: context.attributes.localeIdentifier))
                     .widgetURL(trackURL)
                 }
             } compactLeading: {
@@ -106,11 +107,11 @@ struct TimerLiveActivityWidget: Widget {
 
     // MARK: - Lock Screen banner
 
-    private func savedBanner(duration: String) -> some View {
+    private func savedBanner(duration: String, localeIdentifier: String) -> some View {
         HStack(spacing: 8) {
             Image(systemName: "checkmark")
                 .font(.headline)
-            Text(LiveActivityStrings.savedCardTitle(duration: duration))
+            Text(LiveActivityStrings.savedCardTitle(duration: duration, localeIdentifier: localeIdentifier))
                 .font(.headline)
         }
         .widgetURL(trackURL)
@@ -133,7 +134,7 @@ struct TimerLiveActivityWidget: Widget {
         // the glyph run inside the (filled) text box — without it the
         // digits sit leading despite the trailing frame.
         .multilineTextAlignment(.trailing)
-        .accessibilityLabel(LiveActivityStrings.runningAccessibilityLabel(text: context.attributes.entryText))
+        .accessibilityLabel(LiveActivityStrings.runningAccessibilityLabel(text: context.attributes.entryText, localeIdentifier: context.attributes.localeIdentifier))
     }
     
     /// Expanded leading timer, big and borderless: the hero
@@ -177,7 +178,7 @@ struct TimerLiveActivityWidget: Widget {
         .font(.title.monospacedDigit())
         .lineLimit(1)
         .minimumScaleFactor(0.8)
-        .accessibilityLabel(LiveActivityStrings.runningAccessibilityLabel(text: context.attributes.entryText))
+        .accessibilityLabel(LiveActivityStrings.runningAccessibilityLabel(text: context.attributes.entryText, localeIdentifier: context.attributes.localeIdentifier))
     }
 
     /// Category chip row for the expanded bottom region: validated SF
@@ -229,6 +230,9 @@ struct LiveActivityStopCircleLink: View {
     private var isLuminanceReduced
 
     let destination: URL
+    /// Request-locale identifier for the Stop accessibility label (the appex
+    /// never sees the app's in-process override; the payload locale wins).
+    var localeIdentifier: String = "en"
 
     var body: some View {
         Link(destination: destination) {
@@ -236,14 +240,17 @@ struct LiveActivityStopCircleLink: View {
         }
         .disabled(isLuminanceReduced)
         .opacity(isLuminanceReduced ? 0.4 : 1.0)
-        .accessibilityLabel(LiveActivityStrings.stopAccessibilityLabel)
+        .accessibilityLabel(LiveActivityStrings.stopAccessibilityLabel(localeIdentifier: localeIdentifier))
     }
 }
 
 /// The pill's visuals for the stop `Link` (Spike D) — one shape, never two.
 struct LiveActivityStopPillLabel: View {
+    /// Request-locale identifier for the Stop title.
+    var localeIdentifier: String = "en"
+
     var body: some View {
-        Label(LiveActivityStrings.stopTitle, systemImage: "stop.fill")
+        Label(LiveActivityStrings.stopTitle(localeIdentifier: localeIdentifier), systemImage: "stop.fill")
             .font(.subheadline)
             .foregroundStyle(LiveActivityTheme.stopForeground)
             .padding(.horizontal, 10)
@@ -264,15 +271,17 @@ struct LiveActivityStopLink: View {
     private var isLuminanceReduced
 
     let destination: URL
+    /// Request-locale identifier for the Stop title + accessibility label.
+    var localeIdentifier: String = "en"
 
     var body: some View {
         Link(destination: destination) {
-            LiveActivityStopPillLabel()
+            LiveActivityStopPillLabel(localeIdentifier: localeIdentifier)
         }
         // Same AoD-dimmed/inert rule as the intent controls.
         .disabled(isLuminanceReduced)
         .opacity(isLuminanceReduced ? 0.4 : 1.0)
-        .accessibilityLabel(LiveActivityStrings.stopAccessibilityLabel)
+        .accessibilityLabel(LiveActivityStrings.stopAccessibilityLabel(localeIdentifier: localeIdentifier))
     }
 }
 

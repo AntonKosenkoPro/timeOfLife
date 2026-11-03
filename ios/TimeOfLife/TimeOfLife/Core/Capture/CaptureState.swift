@@ -167,16 +167,14 @@ struct CaptureCleanupState: Codable, Equatable {
 }
 
 enum CaptureAtomicFile {
-    /// Atomic write (temp file + rename in the same directory): readers never
-    /// observe a half-written file.
+    /// Atomic write: `Data.write(options: .atomic)` writes to a temp file
+    /// and renames it onto the destination — readers never observe a
+    /// half-written file, and there is no window where the destination is
+    /// absent (unlike a remove-then-move sequence, which also destroys the
+    /// previous valid state when the move fails).
     static func write(_ data: Data, filename: String, to directory: URL) throws {
         let final = directory.appendingPathComponent(filename)
-        let tmp = directory.appendingPathComponent("\(filename).tmp.\(UUID().uuidString)")
-        try data.write(to: tmp, options: .atomic)
-        if FileManager.default.fileExists(atPath: final.path) {
-            try FileManager.default.removeItem(at: final)
-        }
-        try FileManager.default.moveItem(at: tmp, to: final)
+        try data.write(to: final, options: .atomic)
     }
 }
 

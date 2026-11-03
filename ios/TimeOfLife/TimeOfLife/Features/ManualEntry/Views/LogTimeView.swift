@@ -71,25 +71,22 @@ struct LogTimeView: View {
         embeddedInNavigationStack: Bool = false,
         onSaved: (() -> Void)? = nil
     ) {
-        // CREATE prefill through the public draft API (no ViewModel init
-        // change): notes assign directly, times go through the picker
-        // setters — Start first (it shifts End), then End. Minute-exact
+        // CREATE prefill through the initializer (no setter side effects:
+        // direct assignment keeps `timesTouched == false`, so the
+        // grandfathered `interval > 0` rule applies and minute-exact
         // prefills like the capture sample pass through unchanged.
+        // Constructed once into the StateObject — no published writes on a
+        // discarded instance. Contract: callers pass minute-exact intervals
+        // ≥1 min for picker-setter parity; sub-minute intervals stay savable
+        // here but would collapse under the setters' minute floor.
         let vm = LogTimeViewModel(
             service: service,
             initialText: initialText,
             initialCategoryIDs: initialCategoryIDs,
+            initialNotes: initialNotes,
+            initialInterval: initialInterval,
             editing: entry
         )
-        if entry == nil {
-            if !initialNotes.isEmpty {
-                vm.notes = initialNotes
-            }
-            if let interval = initialInterval {
-                vm.setStartsAt(interval.start)
-                vm.setEndsAt(interval.end)
-            }
-        }
         _vm = StateObject(wrappedValue: vm)
         self.embeddedInNavigationStack = embeddedInNavigationStack
         self.onSaved = onSaved

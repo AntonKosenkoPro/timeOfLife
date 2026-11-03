@@ -8,24 +8,22 @@ import SwiftUI
 /// Gated: absent from shipping builds.
 @MainActor
 enum ScreenshotAddEntry {
-    /// Builds the sheet's form through the public draft API — the same path
-    /// the UI uses (notes assign directly, times through the picker
-    /// setters: Start first since it shifts End, then End). Minute-exact
-    /// fixture values pass through unchanged.
+    /// Builds the sheet's form through the initializer — the same direct
+    /// assignment the UI uses (no picker setters: no minute floor, no
+    /// `timesTouched` flip). Minute-exact fixture values pass through
+    /// unchanged.
     static func makeForm(service: TimerService, request: ScreenshotCaptureRequest) -> LogTimeViewModel {
         let interval = ScreenshotFixture.addEntryInterval(
             calendar: request.calendar,
             referenceDate: request.referenceDate
         )
-        let form = LogTimeViewModel(
+        return LogTimeViewModel(
             service: service,
             initialText: ScreenshotFixture.addEntryText(for: request.localeIdentifier),
-            initialCategoryIDs: ScreenshotFixture.addEntryCategoryIDs(for: request.localeIdentifier)
+            initialCategoryIDs: ScreenshotFixture.addEntryCategoryIDs(for: request.localeIdentifier),
+            initialNotes: ScreenshotFixture.addEntryNotes(for: request.localeIdentifier),
+            initialInterval: (start: interval.start, end: interval.end)
         )
-        form.notes = ScreenshotFixture.addEntryNotes(for: request.localeIdentifier)
-        form.setStartsAt(interval.start)
-        form.setEndsAt(interval.end)
-        return form
     }
 
     /// Fails closed unless the sample satisfies the form's own validity

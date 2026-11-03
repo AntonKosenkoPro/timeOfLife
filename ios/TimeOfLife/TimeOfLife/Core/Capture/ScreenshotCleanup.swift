@@ -82,6 +82,8 @@ enum ScreenshotCleanup {
 
 /// Cleanup run driver: resolves Documents, performs the verified reset,
 /// and renders the inert acknowledgement (never a captured frame).
+/// Dev-only diagnostics (SCREENSHOT_CAPTURE builds never ship): hardcoded
+/// English is intentional — no .lproj/L10n entries.
 @MainActor
 final class ScreenshotCleanupModel: ObservableObject {
     @Published private(set) var message = "Cleaning capture session…"

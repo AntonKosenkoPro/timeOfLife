@@ -36,6 +36,28 @@ public struct TimerActivityAttributes: ActivityAttributes, Equatable {
         self.localeIdentifier = localeIdentifier
     }
 
+    private enum CodingKeys: String, CodingKey {
+        case entryText, iconSymbol, localeIdentifier
+    }
+
+    /// Lenient decode: payloads archived before `localeIdentifier` shipped
+    /// (an in-flight Live Activity surviving an app update) carry no locale
+    /// key — default to "en" (system resolution) instead of failing with
+    /// `keyNotFound` and rendering nothing.
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        entryText = try container.decode(String.self, forKey: .entryText)
+        iconSymbol = try container.decode(String.self, forKey: .iconSymbol)
+        localeIdentifier = try container.decodeIfPresent(String.self, forKey: .localeIdentifier) ?? "en"
+    }
+
+    public func encode(to encoder: any Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(entryText, forKey: .entryText)
+        try container.encode(iconSymbol, forKey: .iconSymbol)
+        try container.encode(localeIdentifier, forKey: .localeIdentifier)
+    }
+
     /// The live slice. Faces tick from `startedAt` via the system's
     /// `Text(timerInterval:)` — no per-second `update()` calls (D1).
     /// Category chips refresh on mid-run retag via a targeted `update()`

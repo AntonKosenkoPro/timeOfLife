@@ -13,8 +13,13 @@
 # - Apple bezel PNGs are NOT in git (no-binaries rule): the panels job fetches
 #   them from the Apple community Figma file with FIGMA_API_KEY (repo secret).
 #   Without the secret the panels job fails closed.
-# - iOS 27 runtime + Xcode 27 on the runner are assumed; fail-fast checks stop
+# - iOS runtime + Xcode on the runner are assumed; fail-fast checks stop
 #   the run with a clear message otherwise.
+# - Live Activity lock-screen/island frames have no simctl equivalent for the
+#   power-button/lock path (Argent flows do it with a hardware press): CI
+#   prepares the realtime session and records whatever simctl exports, but
+#   genuine Lock Screen / Island pixels remain a documented human handoff via
+#   `record-external-frame` (read_timer.py fails closed on non-timer pixels).
 
 name: app-screenshots
 
@@ -38,6 +43,9 @@ on:
         required: false
         default: "2"
 
+permissions:
+  contents: read
+
 concurrency:
   group: app-screenshots-${{ github.ref }}
   cancel-in-progress: false
@@ -55,16 +63,48 @@ jobs:
     env:
       LIFIO_CAPTURE_LEASE: "1"
       LIFIO_CAPTURE_CI: "1"
+      IOS_RUNTIME: ${{ inputs.ios_runtime }}
+      RUNS_PER_SET: ${{ inputs.runs_per_set }}
     steps:
       - uses: actions/checkout@v4
 
       - name: Fail fast on toolchain
+        env:
+          IOS_RUNTIME: ${{ inputs.ios_runtime }}
+          RUNS_PER_SET: ${{ inputs.runs_per_set }}
         run: |
           xcodebuild -version || { echo "::error::Xcode missing"; exit 2; }
-          xcrun simctl list runtimes | grep -F "${{ inputs.ios_runtime }}" \
-            || { echo "::error::runtime '${{ inputs.ios_runtime }}' not installed"; exit 2; }
+          xcrun simctl list runtimes | grep -F "$IOS_RUNTIME" \
+            || { echo "::error::runtime '$IOS_RUNTIME' not installed"; exit 2; }
+          if [ "$RUNS_PER_SET" != "2" ]; then
+            echo "::error::runs_per_set must be 2 (finalize-two-runs reads -r1/-r2 only)"; exit 2
+          fi
           python3 -c "import PIL; assert PIL.__version__.startswith('13.'), PIL.__version__" 2>/dev/null \
             || pip install "Pillow==13.0.0"
+
+      - name: Install pinned xcodegen
+        # Same pins + digest checks as ios.yml (tasks 10.1): a clean runner
+        # has no xcodegen, and an unpinned install would let the generated
+        # project drift from the release gate.
+        run: |
+          XCODEGEN_PIN="$(grep -m1 '^XCODEGEN_PIN="' ios/TimeOfLife/ci_scripts/ci_post_clone.sh | cut -d'"' -f2 || true)"
+          [ -n "$XCODEGEN_PIN" ] || { echo "::error::cannot read XCODEGEN_PIN from ci_post_clone.sh — refusing to install an unpinned xcodegen"; exit 1; }
+          XCODEGEN_ZIP_SHA256="4d9e34b62172d645eed6457cac13fc222569974098ef4ee9c3368bedf0196806"
+          curl -fsSL --retry 5 --retry-delay 2 --retry-all-errors "https://github.com/yonaskolb/XcodeGen/releases/download/${XCODEGEN_PIN}/xcodegen.zip" -o "${RUNNER_TEMP}/xcodegen.zip"
+          echo "${XCODEGEN_ZIP_SHA256}  ${RUNNER_TEMP}/xcodegen.zip" | shasum -a 256 -c - || \
+            { echo "::error::xcodegen.zip digest mismatch for pin ${XCODEGEN_PIN}"; exit 1; }
+          rm -rf "${RUNNER_TEMP}/xcodegen" && mkdir -p "${RUNNER_TEMP}/xcodegen"
+          unzip -o -q "${RUNNER_TEMP}/xcodegen.zip" -d "${RUNNER_TEMP}/xcodegen"
+          BIN="$(find "${RUNNER_TEMP}/xcodegen" -path '*/bin/xcodegen' -type f -print -quit)"
+          [ -n "$BIN" ] || { echo "::error::xcodegen binary not found in release archive"; exit 1; }
+          XG_ROOT="$(dirname "$(dirname "$BIN")")"
+          [ -d "$XG_ROOT/share/xcodegen" ] || { echo "::error::xcodegen share/xcodegen presets missing"; exit 1; }
+          sudo install -m 755 "$BIN" /usr/local/bin/xcodegen
+          sudo rm -rf /usr/local/share/xcodegen
+          sudo mkdir -p /usr/local/share && sudo cp -R "$XG_ROOT/share/xcodegen" /usr/local/share/
+          test "$(/usr/local/bin/xcodegen --version | grep -m1 -o '[0-9][0-9.]*' | head -n1)" = "$XCODEGEN_PIN" || \
+            { echo "::error::xcodegen drift: got $(/usr/local/bin/xcodegen --version), want $XCODEGEN_PIN"; exit 1; }
+          echo "/usr/local/bin" >> "$GITHUB_PATH"
 
       - name: Resolve device catalog
         id: dev
@@ -86,9 +126,12 @@ jobs:
 
       - name: Create and boot simulator
         id: sim
+        env:
+          IOS_RUNTIME: ${{ inputs.ios_runtime }}
         run: |
+          RT="${IOS_RUNTIME// /-}"; RT="${RT//./-}"
           UDID=$(xcrun simctl create "shot-ci-${{ matrix.device }}" \
-            "${{ steps.dev.outputs.sim }}" "com.apple.CoreSimulator.SimRuntime.iOS-27-0")
+            "${{ steps.dev.outputs.sim }}" "com.apple.CoreSimulator.SimRuntime.$RT")
           echo "udid=$UDID" >> "$GITHUB_OUTPUT"
           xcrun simctl boot "$UDID"
           xcrun simctl bootstatus "$UDID" -b
@@ -96,21 +139,28 @@ jobs:
       - name: Build Screenshot configuration
         run: |
           cd ios/TimeOfLife
-          xcodegen generate
+          /usr/local/bin/xcodegen generate
           xcodebuild build -scheme TimeOfLife -configuration Screenshot \
-            -destination "platform=iOS Simulator,id=${{ steps.sim.outputs.udid }}"
+            -destination "platform=iOS Simulator,id=${{ steps.sim.outputs.udid }}" \
+            -derivedDataPath "$RUNNER_TEMP/dd"
+          APP="$RUNNER_TEMP/dd/Build/Products/Screenshot-iphonesimulator/TimeOfLife.app"
+          [ -d "$APP" ] || { echo "::error::built app not found at $APP"; exit 2; }
+          xcrun simctl install "${{ steps.sim.outputs.udid }}" "$APP"
 
       - name: Capture runs
+        env:
+          RUNS_PER_SET: ${{ inputs.runs_per_set }}
         run: |
           OUT="$RUNNER_TEMP/shots/${{ matrix.device }}/${{ matrix.language }}"
           mkdir -p "$OUT"
+          GEO="${{ steps.dev.outputs.geometry }}"
           python3 scripts/screenshots/capture.py make-request \
             --locale "${{ matrix.language }}" \
-            --geometry "${{ steps.dev.outputs.geometry }}" \
+            --geometry "$GEO" \
             --out "$OUT/base-request.json"
           python3 scripts/screenshots/capture.py locale-totals \
             --locale "${{ matrix.language }}" --out "$OUT/pinned-totals.json"
-          for i in $(seq 1 "${{ inputs.runs_per_set }}"); do
+          for i in $(seq 1 "$RUNS_PER_SET"); do
             RID="${{ matrix.device }}-${{ matrix.language }}-r$i"
             for frame in track-running insights history add-entry; do
               python3 scripts/screenshots/capture.py run-frame \
@@ -118,6 +168,7 @@ jobs:
                 --request "$OUT/base-request.json" \
                 --frame "$frame" --out "$OUT" \
                 --run-id "$RID" \
+                --geometry "$GEO" \
                 --pinned-totals "$OUT/pinned-totals.json"
             done
             for frame in la-lock la-compact la-expanded; do
@@ -127,35 +178,62 @@ jobs:
                 --frame "$frame" --out "$OUT" \
                 --run-id "$RID" \
                 --pinned-totals "$OUT/pinned-totals.json"
-              if [ "$frame" = "la-lock" ]; then MASK="default"; else MASK="black"; fi
+              # Mask policy (preflight.probe-proven): simctl default (no flag)
+              # for la-lock, --mask=black for the island frames. Never emit a
+              # literal --mask=default — simctl rejects it and it diverges
+              # from preflight.screenshot_argv.
+              if [ "$frame" = "la-lock" ]; then MASK_ARGS=""; else MASK_ARGS="--mask=black"; fi
               STAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+              # shellcheck disable=SC2086: MASK_ARGS is intentionally word-split (empty or one flag)
               xcrun simctl io "${{ steps.sim.outputs.udid }}" screenshot \
-                --mask=$MASK "$OUT/$RID-$frame.png"
+                --type=png $MASK_ARGS "$OUT/$RID-$frame.png"
               python3 scripts/screenshots/read_timer.py \
                 --frame "$frame" --png "$OUT/$RID-$frame.png" \
                 --captured-at "$STAMP" \
                 --out "$OUT/$RID-$frame.obs.json"
+              # State lives in the simulator container's Documents; the per-frame
+              # request lives under runs/<run-id>/requests/. Copy the state out
+              # first — record-external-frame reads files, never the device.
+              CONTAINER=$(xcrun simctl get_app_container "${{ steps.sim.outputs.udid }}" com.antonkosenko.timeoflifeapp.screenshots data)
+              cp "$CONTAINER/Documents/capture-state.json" "$OUT/runs/$RID/state-$frame.json"
+              if [ "$frame" = "la-lock" ]; then REC_MASK="--mask=default"; else REC_MASK="--mask=black"; fi
               python3 scripts/screenshots/capture.py record-external-frame \
                 --out "$OUT" --run-id "$RID" \
                 --frame "$frame" --png "$OUT/$RID-$frame.png" \
                 --captured-at "$STAMP" \
                 --observation "$OUT/$RID-$frame.obs.json" \
-                --state "$OUT/$RID-$frame.state.json" \
-                --request "$OUT/$RID-$frame.request.json" \
+                --state "$OUT/runs/$RID/state-$frame.json" \
+                --request "$OUT/runs/$RID/requests/$frame.capture-request.json" \
+                --geometry "$GEO" $REC_MASK \
                 --pinned-totals "$OUT/pinned-totals.json" \
                 --device "${{ steps.sim.outputs.udid }}"
               python3 scripts/screenshots/capture.py teardown-frame \
                 --device "${{ steps.sim.outputs.udid }}" \
                 --out "$OUT" --run-id "$RID" --frame "$frame"
             done
+            python3 - <<PY
+          import json, subprocess
+          from pathlib import Path
+          base = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
+          dirty = bool(subprocess.check_output(["git", "status", "--porcelain"], text=True).strip())
+          Path("$OUT").joinpath(f"provenance-$RID.json").write_text(json.dumps({"commit_base": base, "dirty": dirty}) + "\n")
+          PY
+            rc=0
             python3 scripts/screenshots/capture.py finalize-run \
-              --out "$OUT" --run-id "$RID"
+              --out "$OUT" --run-id "$RID" \
+              --provenance "$OUT/provenance-$RID.json" || rc=$?; \
+            if [ "$rc" -ne 0 ] && [ "$rc" -ne 3 ]; then exit "$rc"; fi
           done
+          set +e
           python3 scripts/screenshots/capture.py finalize-two-runs \
             --out "$OUT" \
             --run-id-base "${{ matrix.device }}-${{ matrix.language }}"
+          rc=$?
+          set -e
+          if [ "$rc" -ne 0 ] && [ "$rc" -ne 3 ]; then exit "$rc"; fi
 
       - name: Upload capture artifact
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: shots-${{ matrix.device }}-${{ matrix.language }}
@@ -171,14 +249,41 @@ jobs:
     needs: screenshots
     runs-on: macos-15
     timeout-minutes: 30
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
+
+      - name: No binaries in git check
+        # Before creating any artifact: tracked paths only, so untracked build
+        # outputs (the zip below) never trip the guard.
+        run: |
+          if git status --porcelain --untracked-files=no | grep -Eq '^ *[MADRC].*\.(png|jpg|jpeg|zip)$'; then
+            echo "::error::binaries staged or modified in tracked files"; exit 2
+          fi
+          echo "tracked tree clean of binaries"
 
       - name: Download capture artifacts
         uses: actions/download-artifact@v4
         with:
           pattern: shots-*
           path: shots
+
+      - name: Flatten artifact layout
+        # download-artifact extracts each artifact into shots/<artifact-name>/,
+        # but panels expects shots/<device>/<language>/runs/<run-id>/. Re-shard.
+        run: |
+          set -e
+          mkdir -p flat
+          for d in shots/shots-*-*; do
+            [ -d "$d" ] || continue
+            base=$(basename "$d"); rest=${base#shots-}
+            lang=${rest##*-}; dev=${rest%-*}
+            mkdir -p "flat/$dev/$lang"
+            cp -R "$d/." "flat/$dev/$lang/"
+          done
+          rm -rf shots && mv flat shots
+          python3 -c "from pathlib import Path; ms=list(Path('shots').rglob('run-manifest.json')); print(f'resharded manifests: {len(ms)}'); assert ms, 'no run manifests after reshard'"
 
       - name: Fetch Apple bezel assets
         env:
@@ -192,28 +297,33 @@ jobs:
           python3 scripts/panels/fetch_bezel_assets.py --out "$RUNNER_TEMP/bezels"
 
       - name: Render panels
+        env:
+          DEVICES: ${{ inputs.devices }}
+          LANGUAGES: ${{ inputs.languages }}
         run: |
           pip install "Pillow==13.0.0"
           python3 scripts/panels/panels.py --render-matrix \
             --shots-dir shots --bezels-dir "$RUNNER_TEMP/bezels" \
-            --out "$RUNNER_TEMP/panels" --devices '${{ inputs.devices }}' \
-            --languages '${{ inputs.languages }}' \
+            --out "$RUNNER_TEMP/panels" --devices "$DEVICES" \
+            --languages "$LANGUAGES" \
             --captions-dir openspec/changes/app-store-screenshot-pilot/captions
 
       - name: Write README and zip
+        env:
+          IOS_RUNTIME: ${{ inputs.ios_runtime }}
+          DEVICES: ${{ inputs.devices }}
+          LANGUAGES: ${{ inputs.languages }}
         run: |
           python3 scripts/panels/write_bundle_readme.py \
             --panels-dir "$RUNNER_TEMP/panels" --shots-dir shots \
-            --ios-runtime "${{ inputs.ios_runtime }}" \
-            --devices '${{ inputs.devices }}' \
-            --languages '${{ inputs.languages }}' \
+            --ios-runtime "$IOS_RUNTIME" \
+            --devices "$DEVICES" \
+            --languages "$LANGUAGES" \
             --out bundle-readme.md
-          cp bundle-readme.md README.md
+          # Keep the repo README untouched: the bundle carries its own file.
+          cp bundle-readme.md "$RUNNER_TEMP/panels/BUNDLE-README.md"
           (cd "$RUNNER_TEMP" && zip -qr "$GITHUB_WORKSPACE/lifio-screenshots-${{ github.sha }}.zip" panels)
-          zip "lifio-screenshots-${{ github.sha }}.zip" README.md
-
-      - name: No binaries in git check
-        run: git status --porcelain | grep -E "\.(png|jpg|zip)$" && exit 2 || echo "tree clean of binaries"
+          rm bundle-readme.md
 
       - name: Upload bundle
         uses: actions/upload-artifact@v4

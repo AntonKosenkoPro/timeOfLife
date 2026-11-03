@@ -207,7 +207,7 @@ struct EntryRefreshWiringTests {
         #expect(await waitForHistoryTexts(vm, ["Background run"]))
     }
 
-#if DEBUG
+#if DEBUG || SCREENSHOT_CAPTURE
     @Test("History invalidate during an in-flight load retries instead of serving stale data")
     func historyInvalidateMidLoadRetries() async throws {
         let calendar = mondayCalendar()
@@ -352,7 +352,7 @@ struct EntryRefreshWiringTests {
         #expect(vm.breakdown(period: .all, lens: .activity, calendar: calendar).rows.count == 2)
     }
 
-#if DEBUG
+#if DEBUG || SCREENSHOT_CAPTURE
     @Test("Insights invalidate during an in-flight load retries instead of serving stale data")
     func insightsInvalidateMidLoadRetries() async throws {
         let calendar = mondayCalendar()
