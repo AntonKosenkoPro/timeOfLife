@@ -45,10 +45,20 @@ class OutputGuardTests(unittest.TestCase):
             self.assertEqual(guard.ensure_out_root(tmp), Path(tmp).resolve())
 
     def test_owner_dir_resolves_outside_repo(self):
+        # Owner path shape must resolve outside the repo (pure path logic;
+        # no existence requirement — hermetic on Linux CI and macOS).
         owner = "/Users/antonkosenko/Pictures/LifioScreenshots/app-store-screenshot-pilot"
         resolved = guard.resolve_out_root(owner)
-        self.assertTrue(resolved.is_dir())
         self.assertNotIn(guard.repo_root().resolve(), [resolved, *resolved.parents])
+        # Hermetic twin: a real external tmp dir must exist and resolve
+        # outside the repo.
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_resolved = guard.ensure_out_root(tmp)
+            self.assertTrue(tmp_resolved.is_dir())
+            self.assertNotIn(
+                guard.repo_root().resolve(),
+                [tmp_resolved, *tmp_resolved.parents],
+            )
 
     def test_lock_acquire_release_cycle(self):
         udid = f"UDID-cycle-{os.getpid()}"
