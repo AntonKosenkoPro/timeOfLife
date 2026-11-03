@@ -381,11 +381,18 @@ jobs:
         run: |
           python3 -m pip install --break-system-packages "Pillow==13.0.0"
           rc=0
+          # Captions live with the change: active dir first, dated archive
+          # fallback (archived 2026-11-03 — the bare active path alone
+          # fails closed on every post-archive run).
+          CAPTIONS_DIR="openspec/changes/app-store-screenshot-pilot/captions"
+          if [ ! -d "$CAPTIONS_DIR" ]; then
+            CAPTIONS_DIR="openspec/changes/archive/2026-11-03-app-store-screenshot-pilot/captions"
+          fi
           python3 scripts/panels/panels.py --render-matrix \
             --shots-dir shots --bezels-dir "$RUNNER_TEMP/bezels" \
             --out "$RUNNER_TEMP/panels" --devices "$DEVICES" \
             --languages "$LANGUAGES" \
-            --captions-dir openspec/changes/app-store-screenshot-pilot/captions || rc=$?
+            --captions-dir "$CAPTIONS_DIR" || rc=$?
           # An incomplete matrix (exit 2) still uploads: every CI la frame
           # is needs-inspection until the human record-external-frame
           # handoff, so verify_sources refuses them and the matrix is

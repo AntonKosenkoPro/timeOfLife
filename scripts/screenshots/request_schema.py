@@ -17,6 +17,12 @@ import json
 import re
 from typing import Any
 
+CHANGE_NAME = "app-store-screenshot-pilot"
+# Dated archive location after `openspec archive` (2026-11-03): the active
+# change dir no longer exists, but the pinned decks live on under archive.
+# Resolution is active-first with archive fallback (never the reverse), so
+# a re-activated change shadows the archive.
+ARCHIVED_CHANGE = "archive/2026-11-03-app-store-screenshot-pilot"
 SCHEMA_VERSION = 1
 PILOT_DECK_VERSION = "en-austin-1"
 SCREENSHOT_BID = "com.antonkosenko.timeoflifeapp.screenshots"
@@ -238,6 +244,13 @@ def build_base_request(locale: str, geometry: tuple[int, int]) -> dict:
         )
     region, timezone = LOCALE_PAIRING[locale]
     width, height = tuple(geometry)
+    totals_path = totals_path_for_locale(locale)
+    try:
+        from pathlib import Path as _Path
+
+        totals_rel = str(_Path(totals_path).relative_to(_Path(_repo_root())))
+    except ValueError:
+        totals_rel = totals_path
     return {
         "schema_version": SCHEMA_VERSION,
         "deck_version": PILOT_DECK_VERSION,
@@ -262,10 +275,7 @@ def build_base_request(locale: str, geometry: tuple[int, int]) -> dict:
         "configuration": SCREENSHOT_CONFIGURATION,
         "bundle_id": SCREENSHOT_BID,
         "expected_totals": load_pinned_totals_for_locale(locale),
-        "totals_source": (
-            f"openspec/changes/app-store-screenshot-pilot/decks/"
-            f"totals-{locale}.json (deck {PILOT_DECK_VERSION})"
-        ),
+        "totals_source": f"{totals_rel} (deck {PILOT_DECK_VERSION})",
         "notes": (
             "Generated base request (capture.py make-request); input pin "
             "only, final visual acceptance remains 5.4 owner approval."
@@ -306,31 +316,78 @@ def load_request_file(path: str) -> dict:
     return obj
 
 
-def decks_dir() -> str:
-    """Absolute path of the versioned deck directory (5 totals files)."""
+def _repo_root() -> str:
     from pathlib import Path as _Path
 
     here = _Path(__file__).resolve().parent
-    root = here.parent.parent
-    return str(root / "openspec" / "changes" / "app-store-screenshot-pilot" / "decks")
+    return str(here.parent.parent)
 
 
-def totals_path_for_locale(locale: str) -> str:
-    """Canonical pinned-totals file for a locale; fail-closed on unknown."""
+def candidate_decks_dirs(root: str | None = None) -> list[str]:
+    """Ordered deck-dir candidates: active change first, archive fallback.
+
+    ``root`` overrides the repo root (tests); ``None`` resolves from this
+    file's location. Order is the contract: a re-activated change shadows
+    the archive.
+    """
+    from pathlib import Path as _Path
+
+    base = _Path(root) if root is not None else _Path(_repo_root())
+    changes = base / "openspec" / "changes"
+    return [
+        str(changes / CHANGE_NAME / "decks"),
+        str(changes / ARCHIVED_CHANGE / "decks"),
+    ]
+
+
+def decks_dir() -> str:
+    """Absolute path of the versioned deck directory (5 totals files).
+
+    Returns the first candidate that holds ``totals-en.json`` (active
+    first); falls back to the first existing candidate dir; if neither
+    exists, returns the active path so downstream errors point at the
+    canonical location.
+    """
+    from pathlib import Path as _Path
+
+    cands = candidate_decks_dirs()
+    for cand in cands:
+        if (_Path(cand) / "totals-en.json").is_file():
+            return cand
+    for cand in cands:
+        if _Path(cand).is_dir():
+            return cand
+    return cands[0]
+
+
+def totals_path_for_locale(locale: str, root: str | None = None) -> str:
+    """Canonical pinned-totals file for a locale; fail-closed on unknown.
+
+    Per-file active-first/archive-fallback: the active file wins when
+    present, otherwise the archived copy. When neither exists the active
+    path is returned so the load error names the canonical location.
+    """
     from pathlib import Path as _Path
 
     if locale not in KNOWN_LOCALES:
         raise RequestError(f"unknown locale {locale!r}")
-    return str(_Path(decks_dir()) / f"totals-{locale}.json")
+    cands = candidate_decks_dirs(root)
+    for cand in cands:
+        path = str(_Path(cand) / f"totals-{locale}.json")
+        if _Path(path).is_file():
+            return path
+    return str(_Path(cands[0]) / f"totals-{locale}.json")
 
 
-def load_pinned_totals_for_locale(locale: str) -> dict:
+def load_pinned_totals_for_locale(locale: str, root: str | None = None) -> dict:
     """Load the independently pinned totals dictionary for a locale.
 
     Shape-checked lightly here (full numerics live in state_check);
     raises RequestError fail-closed on missing/malformed files.
+    ``root`` overrides the repo root (tests); ``None`` resolves from
+    this file's location.
     """
-    path = totals_path_for_locale(locale)
+    path = totals_path_for_locale(locale, root)
     try:
         with open(path, "r", encoding="utf-8") as fh:
             obj = json.load(fh)

@@ -35,6 +35,11 @@ globally (research.md: 3/3) — no further ctx7 calls made.
 
 - Canonical pinned totals live in
   `openspec/changes/app-store-screenshot-pilot/decks/totals-<locale>.json`
+  (active change; since the 2026-11-03 archive: `openspec/changes/archive/
+  2026-11-03-app-store-screenshot-pilot/decks/totals-<locale>.json` —
+  resolution is active-first with archive fallback, see `request_schema`
+  `candidate_decks_dirs()`; the CI panels step resolves `--captions-dir`
+  the same way)
   (5 locales; `totals-en.json` matches `expected_totals.json`). All five
   pin all 198600 s / today 4500 s / 27 texts / 7 categories; only the
   locale-native week total differs: ru/Moscow 12300 s, every other deck

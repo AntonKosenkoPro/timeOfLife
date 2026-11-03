@@ -290,5 +290,82 @@ class MakeRequestBuilderTests(unittest.TestCase):
             rs.build_base_request("en", (100, 100))
 
 
+class ArchiveToleranceTests(unittest.TestCase):
+    """Decks/totals resolution survives `openspec archive`.
+
+    Active change dir first, dated-archive fallback (never the reverse):
+    a re-activated change shadows the archive.
+    """
+
+    def _make_root(self, tmp: str, *, active: bool = True,
+                   archived: bool = True) -> str:
+        import json as _json
+
+        single = {"all_seconds": 1, "today_seconds": 1, "week_seconds": 1,
+                  "category_seconds": {}, "text_seconds": {}}
+        root = Path(tmp) / "repo"
+        if active:
+            d = (root / "openspec" / "changes" / rs.CHANGE_NAME / "decks")
+            d.mkdir(parents=True)
+            marked = dict(single, week_seconds=111)
+            (d / "totals-en.json").write_text(
+                _json.dumps(marked), encoding="utf-8")
+        if archived:
+            d = (root / "openspec" / "changes" / rs.ARCHIVED_CHANGE / "decks")
+            d.mkdir(parents=True)
+            marked = dict(single, week_seconds=222)
+            (d / "totals-en.json").write_text(
+                _json.dumps(marked), encoding="utf-8")
+        return str(root)
+
+    def test_candidate_order_active_first_archive_fallback(self):
+        cands = [Path(p) for p in rs.candidate_decks_dirs("ROOT")]
+        self.assertEqual(
+            cands[0],
+            Path("ROOT/openspec/changes/app-store-screenshot-pilot/decks"))
+        self.assertEqual(
+            cands[1],
+            Path("ROOT/openspec/changes/archive/"
+                 "2026-11-03-app-store-screenshot-pilot/decks"))
+
+    def test_active_shadows_archive(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self._make_root(tmp, active=True, archived=True)
+            path = rs.totals_path_for_locale("en", root)
+            self.assertNotIn("archive", path)
+            totals = rs.load_pinned_totals_for_locale("en", root)
+            self.assertEqual(totals["week_seconds"], 111)
+
+    def test_archive_fallback_when_active_missing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self._make_root(tmp, active=False, archived=True)
+            path = rs.totals_path_for_locale("en", root)
+            self.assertIn("archive", path)
+            totals = rs.load_pinned_totals_for_locale("en", root)
+            self.assertEqual(totals["week_seconds"], 222)
+
+    def test_neither_present_points_at_active_and_load_fails(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self._make_root(tmp, active=False, archived=False)
+            path = rs.totals_path_for_locale("en", root)
+            self.assertNotIn("archive", path)
+            self.assertTrue(path.endswith("totals-en.json"))
+            with self.assertRaises(rs.RequestError):
+                rs.load_pinned_totals_for_locale("en", root)
+
+    def test_real_repo_resolves_and_totals_source_names_resolved_file(self):
+        from pathlib import Path as _Path
+
+        path = rs.totals_path_for_locale("en")
+        self.assertTrue(_Path(path).is_file(), path)
+        decks = _Path(rs.decks_dir())
+        self.assertTrue((decks / "totals-en.json").is_file())
+        self.assertEqual(_Path(path).parent, decks)
+        base = rs.build_base_request("en", (1320, 2868))
+        rel = str(_Path(path).relative_to(_Path(rs._repo_root())))
+        self.assertEqual(
+            base["totals_source"], f"{rel} (deck {rs.PILOT_DECK_VERSION})")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

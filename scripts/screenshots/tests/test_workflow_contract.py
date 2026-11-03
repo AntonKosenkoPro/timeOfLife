@@ -251,6 +251,20 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertIn("::warning::panels matrix incomplete", seg)
         self.assertNotIn("continue-on-error", seg)
 
+    def test_captions_dir_archive_fallback(self):
+        # post-archive (2026-11-03): captions live under changes/archive,
+        # so the bare active path fails closed on every run. The Render
+        # step resolves active-first with dated-archive fallback.
+        body = text()
+        seg = body.split("Render panels")[1].split("Write README and zip")[0]
+        self.assertIn(
+            'CAPTIONS_DIR="openspec/changes/app-store-screenshot-pilot/captions"',
+            seg)
+        self.assertIn(
+            "openspec/changes/archive/2026-11-03-app-store-screenshot-pilot/captions",
+            seg)
+        self.assertIn('--captions-dir "$CAPTIONS_DIR"', seg)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
