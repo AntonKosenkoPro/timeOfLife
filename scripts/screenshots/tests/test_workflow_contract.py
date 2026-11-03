@@ -160,7 +160,7 @@ class WorkflowContractTests(unittest.TestCase):
         # ran only in the later Render step.
         body = text()
         fetch_seg = body.split("Fetch Apple bezel assets")[1].split("Render panels")[0]
-        self.assertIn('pip install "Pillow==13.0.0"', fetch_seg)
+        self.assertIn('python3 -m pip install --break-system-packages "Pillow==13.0.0"', fetch_seg)
 
     def test_finalize_tolerates_pending(self):
         # bug/high: variance across runs (caret blink/chrome) exits 3 by
@@ -207,7 +207,7 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertNotIn("pip install", toolchain)
         self.assertNotIn("import PIL", toolchain)
         panels = body.split("panels:")[1]
-        self.assertIn('pip install "Pillow==13.0.0"', panels)
+        self.assertIn('python3 -m pip install --break-system-packages "Pillow==13.0.0"', panels)
 
     def test_xcodegen_digest_points_at_pin_table(self):
         # maintainability/low round-3: the digest is copied from ios.yml, so
