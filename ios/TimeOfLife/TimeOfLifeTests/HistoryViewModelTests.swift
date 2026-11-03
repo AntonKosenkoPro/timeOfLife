@@ -248,6 +248,34 @@ struct HistoryViewModelTests {
         #expect(vm.timeframeText(for: running).contains(L10n.historyInProgress.text))
     }
 
+    @Test("timeframe text follows the injected calendar, not the process locale")
+    func timeframeFollowsInjectedCalendar() async throws {
+        // Regression (round-3): History time labels resolved from the
+        // process-global ScreenshotLocale instead of the injected
+        // calendar, so a pinned calendar could not pin the labels
+        // (TrackViewModel derives its timeText from its calendar).
+        let store = try makeStore()
+        let start = Date(timeIntervalSinceReferenceDate: 100_000)
+        let end = start.addingTimeInterval(4_800)
+        try await store.createEntry(entry(id: "e1", startedAt: start, durationSeconds: 4_800, endedAt: end))
+
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "Pacific/Kiritimati")!
+        calendar.locale = Locale(identifier: "en_US")
+        let vm = HistoryViewModel(store: store, undoBuffer: UndoBufferStore(store: store), calendar: calendar)
+        await vm.load()
+
+        let shown = try #require(vm.dayGroups.first?.entries.first)
+        let reference = {
+            let formatter = DateFormatter()
+            formatter.timeStyle = .short
+            formatter.locale = calendar.locale
+            formatter.timeZone = calendar.timeZone
+            return "\(formatter.string(from: start)) – \(formatter.string(from: end))"
+        }()
+        #expect(vm.timeframeText(for: shown) == reference)
+    }
+
     // MARK: - Reload contract (loadIfNeeded / invalidate)
 
     @Test("loadIfNeeded serves the cached snapshot until invalidate, then reloads")

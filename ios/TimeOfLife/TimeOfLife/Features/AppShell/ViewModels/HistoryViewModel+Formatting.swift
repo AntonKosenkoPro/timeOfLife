@@ -76,9 +76,42 @@ extension HistoryViewModel {
         return calendar.dateComponents([.day], from: dayStart, to: today).day ?? 0
     }
 
-    /// Short-time caption ("14:00").
+    /// Short-time caption ("14:00") for callers without a view model (the
+    /// Log Time pills). Under a capture override the request locale/time
+    /// zone win (same-launch chrome fix); otherwise the shared
+    /// process-locale formatter.
+    ///
+    /// The override branch uses a per-call formatter: the shared static
+    /// below is process-wide state, and pinning it to the request locale
+    /// without restoring would leak the capture locale into every later
+    /// label once the override clears (the fallback branch would keep
+    /// rendering with the last request's locale/time zone).
     nonisolated static func timeText(for date: Date) -> String {
-        formatLock.withLock { timeFormatter.string(from: date) }
+        #if SCREENSHOT_CAPTURE
+        // The Add-entry frame's pills render through this static helper,
+        // which otherwise keeps the stale launch locale/time zone.
+        if let locale = ScreenshotLocale.appLocale, let timeZone = ScreenshotLocale.appTimeZone {
+            return formatLock.withLock {
+                let formatter = DateFormatter()
+                formatter.timeStyle = .short
+                formatter.locale = locale
+                formatter.timeZone = timeZone
+                return formatter.string(from: date)
+            }
+        }
+        #endif
+        return formatLock.withLock {
+            // Restore process defaults first: a prior capture override (or
+            // any future caller that pins this shared formatter) must not
+            // leak its locale/time zone into later labels. Conditional so
+            // the steady-state path never dirties the formatter: assigning
+            // these properties forces an ICU regeneration, and `timeText`
+            // runs per History row (55 in the capture fixture) plus per
+            // ticker tick on the main thread.
+            if timeFormatter.locale != nil { timeFormatter.locale = nil }
+            if timeFormatter.timeZone != nil { timeFormatter.timeZone = nil }
+            return timeFormatter.string(from: date)
+        }
     }
 
     /// Serializes every NSDateFormatter touch in this type (see dayLabel).

@@ -8,7 +8,7 @@ struct TimerActivityAttributesTests {
 
     @Test("Attributes Codable round-trip preserves exact text verbatim")
     func attributesRoundTrip() throws {
-        let original = TimerActivityAttributes(entryText: "Gym", iconSymbol: "dumbbell")
+        let original = TimerActivityAttributes(entryText: "Gym", iconSymbol: "dumbbell", localeIdentifier: "en")
         let data = try JSONEncoder().encode(original)
         let decoded = try JSONDecoder().decode(TimerActivityAttributes.self, from: data)
         #expect(decoded == original)
@@ -17,9 +17,25 @@ struct TimerActivityAttributesTests {
 
     @Test("Case-distinct texts stay distinct through Codable")
     func caseSensitiveIdentity() throws {
-        let lower = TimerActivityAttributes(entryText: "gym", iconSymbol: "timer")
-        let upper = TimerActivityAttributes(entryText: "GYM", iconSymbol: "timer")
+        let lower = TimerActivityAttributes(entryText: "gym", iconSymbol: "timer", localeIdentifier: "en")
+        let upper = TimerActivityAttributes(entryText: "GYM", iconSymbol: "timer", localeIdentifier: "en")
         #expect(lower != upper)
+    }
+
+    @Test("Attributes round-trip preserves the request locale")
+    func attributesLocaleRoundTrip() throws {
+        let original = TimerActivityAttributes(entryText: "Corrida matinal", iconSymbol: "timer", localeIdentifier: "pt-BR")
+        let data = try JSONEncoder().encode(original)
+        let decoded = try JSONDecoder().decode(TimerActivityAttributes.self, from: data)
+        #expect(decoded == original)
+        #expect(decoded.localeIdentifier == "pt-BR")
+    }
+
+    @Test("Same text with different request locales stays distinct")
+    func attributesLocaleDistinguishes() {
+        let pt = TimerActivityAttributes(entryText: "Run", iconSymbol: "timer", localeIdentifier: "pt-BR")
+        let es = TimerActivityAttributes(entryText: "Run", iconSymbol: "timer", localeIdentifier: "es-419")
+        #expect(pt != es)
     }
 
     @Test("Running ContentState round-trips with nil saved duration")

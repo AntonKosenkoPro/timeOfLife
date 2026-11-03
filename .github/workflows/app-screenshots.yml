@@ -1,0 +1,427 @@
+# App Store screenshots pipeline (OpenSpec change app-store-screenshot-pilot, §10).
+#
+# Matrix capture on macOS (long task, parallel per device x language),
+# fast panels + zip on a separate job. Binaries never enter git — the only
+# downloadable is the `lifio-screenshots` artifact attached to the run.
+#
+# Honest constraints (see tasks §10 + evidence-runner.md):
+# - Panel rendering needs macOS Helvetica for byte-identical headlines, so the
+#   panels job also runs on macOS (fast: checkout + Pillow only, no Xcode build).
+# - CI sets run under LIFIO_CAPTURE_CI=1 (logged in every manifest as
+#   ci_approval_bypass:true): technically gated, NOT owner eyeball-approved.
+# - Island frames capture with --mask=black (probe-proven island pixels).
+# - Apple bezel PNGs are NOT in git (no-binaries rule): the panels job fetches
+#   them from the Apple community Figma file with FIGMA_API_KEY (repo secret).
+#   Without the secret the panels job fails closed.
+# - iOS runtime + Xcode on the runner are assumed; fail-fast checks stop
+#   the run with a clear message otherwise.
+# - Live Activity lock-screen/island frames have no simctl equivalent for the
+#   power-button/lock path (Argent flows do it with a hardware press): CI
+#   prepares the realtime session and records whatever simctl exports, but
+#   genuine Lock Screen / Island pixels remain a documented human handoff.
+#   Every CI la frame is therefore a deterministic `record-pending-frame`
+#   stub (hash-bound PNG, no OCR claim): the leg stays green and the run
+#   manifest records needs-inspection until a human registers the genuine
+#   pixels via `record-external-frame`. Never run `read_timer.py` OCR in
+#   this leg — it fails closed on simctl pixels and would abort the step.
+
+name: app-screenshots
+
+on:
+  workflow_dispatch:
+    inputs:
+      ios_runtime:
+        description: "iOS simulator runtime (e.g. iOS 27.0)"
+        required: false
+        default: "iOS 27.0"
+      devices:
+        description: 'JSON device keys (catalog in the capture step).'
+        required: false
+        default: '["iphone69","iphone63","ipad13"]'
+      languages:
+        description: 'JSON locale list.'
+        required: false
+        default: '["en","ru","zh-Hans","es-419","pt-BR"]'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: app-screenshots-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  screenshots:
+    name: capture (${{ matrix.device }}, ${{ matrix.language }})
+    runs-on: macos-26
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix:
+        device: ${{ fromJSON(inputs.devices) }}
+        language: ${{ fromJSON(inputs.languages) }}
+    env:
+      LIFIO_CAPTURE_LEASE: "1"
+      LIFIO_CAPTURE_CI: "1"
+      IOS_RUNTIME: ${{ inputs.ios_runtime }}
+      # finalize-two-runs only reads -r1/-r2: the run count is pinned at 2
+      # (a dispatch input here could only ever abort the leg, so there is
+      # no input — see the fail-fast step).
+      RUNS_PER_SET: "2"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fail fast on toolchain
+        env:
+          IOS_RUNTIME: ${{ inputs.ios_runtime }}
+        run: |
+          # Capture-only leg: scripts/screenshots/ is stdlib-only (no PIL
+          # import anywhere there), so Pillow is installed only in the
+          # panels job that renders. Installing it here added a failure
+          # mode (e.g. externally-managed Python) and a download to all
+          # 15 matrix legs for nothing.
+          xcodebuild -version || { echo "::error::Xcode missing"; exit 2; }
+          xcrun simctl list runtimes | grep -F "$IOS_RUNTIME" \
+            || { echo "::error::runtime '$IOS_RUNTIME' not installed"; exit 2; }
+
+      - name: Install pinned xcodegen
+        # Same pins + digest checks as ios.yml (tasks 10.1): a clean runner
+        # has no xcodegen, and an unpinned install would let the generated
+        # project drift from the release gate.
+        run: |
+          XCODEGEN_PIN="$(grep -m1 '^XCODEGEN_PIN="' ios/TimeOfLife/ci_scripts/ci_post_clone.sh | cut -d'"' -f2 || true)"
+          [ -n "$XCODEGEN_PIN" ] || { echo "::error::cannot read XCODEGEN_PIN from ci_post_clone.sh — refusing to install an unpinned xcodegen"; exit 1; }
+          XCODEGEN_ZIP_SHA256="4d9e34b62172d645eed6457cac13fc222569974098ef4ee9c3368bedf0196806"
+          curl -fsSL --retry 5 --retry-delay 2 --retry-all-errors "https://github.com/yonaskolb/XcodeGen/releases/download/${XCODEGEN_PIN}/xcodegen.zip" -o "${RUNNER_TEMP}/xcodegen.zip"
+          echo "${XCODEGEN_ZIP_SHA256}  ${RUNNER_TEMP}/xcodegen.zip" | shasum -a 256 -c - || \
+            { echo "::error::xcodegen.zip digest mismatch for pin ${XCODEGEN_PIN} — if the pin was bumped, update XCODEGEN_ZIP_SHA256 here and in ios.yml (see docs/ci.md pin table)"; exit 1; }
+          rm -rf "${RUNNER_TEMP}/xcodegen" && mkdir -p "${RUNNER_TEMP}/xcodegen"
+          unzip -o -q "${RUNNER_TEMP}/xcodegen.zip" -d "${RUNNER_TEMP}/xcodegen"
+          BIN="$(find "${RUNNER_TEMP}/xcodegen" -path '*/bin/xcodegen' -type f -print -quit)"
+          [ -n "$BIN" ] || { echo "::error::xcodegen binary not found in release archive"; exit 1; }
+          XG_ROOT="$(dirname "$(dirname "$BIN")")"
+          [ -d "$XG_ROOT/share/xcodegen" ] || { echo "::error::xcodegen share/xcodegen presets missing"; exit 1; }
+          sudo install -m 755 "$BIN" /usr/local/bin/xcodegen
+          sudo rm -rf /usr/local/share/xcodegen
+          sudo mkdir -p /usr/local/share && sudo cp -R "$XG_ROOT/share/xcodegen" /usr/local/share/
+          test "$(/usr/local/bin/xcodegen --version | grep -m1 -o '[0-9][0-9.]*' | head -n1)" = "$XCODEGEN_PIN" || \
+            { echo "::error::xcodegen drift: got $(/usr/local/bin/xcodegen --version), want $XCODEGEN_PIN"; exit 1; }
+          echo "/usr/local/bin" >> "$GITHUB_PATH"
+
+      - name: Resolve device catalog
+        id: dev
+        env:
+          # Matrix values come from workflow_dispatch inputs: never
+          # interpolate them into Python/shell source (injection). Read
+          # them from the environment; unknown keys fail closed here.
+          DEVICE_KEY: ${{ matrix.device }}
+        run: |
+          python3 - <<'PY'
+          import os
+          catalog = {
+            # The island flag is an explicit 1/0 token (not a Python bool):
+            # the handoff step tests it in shell, where a "True"/"true"
+            # spelling flip would silently mislabel the reason string.
+            "iphone69": {"sim": "iPhone 18 Pro Max",   "geometry": "1320x2868", "island": 1},
+            "iphone63": {"sim": "iPhone 17",           "geometry": "1206x2622", "island": 1},
+            "ipad13":   {"sim": "iPad Pro 13-inch (M4)", "geometry": "2064x2752", "island": 0},
+          }
+          key = os.environ["DEVICE_KEY"]
+          if key not in catalog:
+              raise SystemExit(f"unknown device '{key}', catalog: {sorted(catalog)}")
+          with open(os.environ["GITHUB_OUTPUT"], "a") as fh:
+              for k, v in catalog[key].items():
+                  fh.write(f"{k}={v}\n")
+          PY
+
+      - name: Create and boot simulator
+        id: sim
+        env:
+          IOS_RUNTIME: ${{ inputs.ios_runtime }}
+          DEVICE_KEY: ${{ matrix.device }}
+          SIM_NAME: ${{ steps.dev.outputs.sim }}
+        run: |
+          RT="${IOS_RUNTIME// /-}"; RT="${RT//./-}"
+          UDID=$(xcrun simctl create "shot-ci-$DEVICE_KEY" \
+            "$SIM_NAME" "com.apple.CoreSimulator.SimRuntime.$RT")
+          echo "udid=$UDID" >> "$GITHUB_OUTPUT"
+          xcrun simctl boot "$UDID"
+          xcrun simctl bootstatus "$UDID" -b
+
+      - name: Build Screenshot configuration
+        run: |
+          cd ios/TimeOfLife
+          /usr/local/bin/xcodegen generate
+          xcodebuild build -scheme TimeOfLife -configuration Screenshot \
+            -destination "platform=iOS Simulator,id=${{ steps.sim.outputs.udid }}" \
+            -derivedDataPath "$RUNNER_TEMP/dd"
+          APP="$RUNNER_TEMP/dd/Build/Products/Screenshot-iphonesimulator/TimeOfLife.app"
+          [ -d "$APP" ] || { echo "::error::built app not found at $APP"; exit 2; }
+          xcrun simctl install "${{ steps.sim.outputs.udid }}" "$APP"
+
+      - name: Capture runs
+        env:
+          # Matrix values come from workflow_dispatch inputs: read them
+          # from the environment, never interpolate into shell/Python
+          # source (injection). UDID/geometry/island arrive via step
+          # outputs, which the catalog step already validated.
+          DEVICE_KEY: ${{ matrix.device }}
+          LANG_KEY: ${{ matrix.language }}
+          RUNS_PER_SET: "2"
+          IS_ISLAND: ${{ steps.dev.outputs.island }}
+          SIM_UDID: ${{ steps.sim.outputs.udid }}
+        run: |
+          UDID="$SIM_UDID"
+          OUT="$RUNNER_TEMP/shots/$DEVICE_KEY/$LANG_KEY"
+          export OUT_DIR="$OUT"
+          mkdir -p "$OUT"
+          GEO="${{ steps.dev.outputs.geometry }}"
+          python3 scripts/screenshots/capture.py make-request \
+            --locale "$LANG_KEY" \
+            --geometry "$GEO" \
+            --out "$OUT/base-request.json"
+          python3 scripts/screenshots/capture.py locale-totals \
+            --locale "$LANG_KEY" --out "$OUT/pinned-totals.json"
+          for i in $(seq 1 "$RUNS_PER_SET"); do
+            RID="$DEVICE_KEY-$LANG_KEY-r$i"
+            export RUN_RID="$RID"
+            for frame in track-running insights history add-entry; do
+              python3 scripts/screenshots/capture.py run-frame \
+                --device "$UDID" \
+                --request "$OUT/base-request.json" \
+                --frame "$frame" --out "$OUT" \
+                --run-id "$RID" \
+                --geometry "$GEO" \
+                --pinned-totals "$OUT/pinned-totals.json"
+            done
+            for frame in la-lock la-compact la-expanded; do
+              python3 scripts/screenshots/capture.py prepare-frame \
+                --device "$UDID" \
+                --request "$OUT/base-request.json" \
+                --frame "$frame" --out "$OUT" \
+                --run-id "$RID" \
+                --pinned-totals "$OUT/pinned-totals.json"
+              # Mask policy (preflight.probe-proven): simctl default (no flag)
+              # for la-lock, --mask=black for the island frames. Never emit a
+              # literal --mask=default — simctl rejects it and it diverges
+              # from preflight.screenshot_argv.
+              if [ "$frame" = "la-lock" ]; then MASK_ARGS=""; else MASK_ARGS="--mask=black"; fi
+              STAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+              # shellcheck disable=SC2086: MASK_ARGS is intentionally word-split (empty or one flag)
+              xcrun simctl io "$UDID" screenshot \
+                --type=png $MASK_ARGS "$OUT/$RID-$frame.png"
+              # State lives in the simulator container's Documents; the per-frame
+              # request lives under runs/<run-id>/requests/. Copy the state out
+              # for debugging — the pending stub below reads files, never the
+              # device, and needs no state. Guarded: a missing/stale state
+              # file (or an empty container path) must pend the frame, never
+              # abort the leg under the runner's bash -e.
+              CONTAINER=$(xcrun simctl get_app_container "$UDID" com.antonkosenko.timeoflifeapp.screenshots data) || CONTAINER=""
+              if [ -n "$CONTAINER" ] && [ -f "$CONTAINER/Documents/capture-state.json" ]; then
+                cp "$CONTAINER/Documents/capture-state.json" "$OUT/runs/$RID/state-$frame.json"
+              else
+                echo "::warning::$frame: capture-state.json unavailable under '${CONTAINER:-unknown container}'; continuing to the human-handoff stub"
+              fi
+              if [ "$frame" = "la-lock" ]; then REC_MASK="--mask=default"; else REC_MASK="--mask=black"; fi
+              # Deterministic human handoff (see header): CI simctl pixels
+              # are never genuine Lock Screen / island pixels, so OCR would
+              # fail closed here and abort the leg. The stub binds the
+              # exported PNG and records needs-inspection; a human registers
+              # the genuine pixels later via record-external-frame. The
+              # island flag only tunes the reason string: finalize requires
+              # every PILOT_FRAMES record, so island frames cannot be skipped
+              # on the iPad leg either.
+              if [ "$frame" = "la-lock" ] || [ "$IS_ISLAND" = "1" ]; then
+                HANDOFF_NOTE="CI simctl cannot produce genuine Lock Screen/island pixels"
+              else
+                HANDOFF_NOTE="no Dynamic Island on this device; CI simctl pixels are a placeholder"
+              fi
+              # shellcheck disable=SC2086: REC_MASK is intentionally word-split (exactly one flag)
+              python3 scripts/screenshots/capture.py record-pending-frame \
+                --out "$OUT" --run-id "$RID" \
+                --frame "$frame" --png "$OUT/$RID-$frame.png" \
+                --captured-at "$STAMP" \
+                --request "$OUT/runs/$RID/requests/$frame.capture-request.json" \
+                --geometry "$GEO" $REC_MASK \
+                --pinned-totals "$OUT/pinned-totals.json" \
+                --device "$UDID" \
+                --reason "$HANDOFF_NOTE; human handoff via record-external-frame"
+              python3 scripts/screenshots/capture.py teardown-frame \
+                --device "$UDID" \
+                --out "$OUT" --run-id "$RID" --frame "$frame" \
+                || echo "::warning::$frame: teardown reported failure; finalize will pend it"
+            done
+            python3 - <<'PY'
+          import json, os, subprocess
+          from pathlib import Path
+          base = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
+          # Scoped to real sources: the generated project is gitignored,
+          # but the tracked shared schemes under the xcodeproj are
+          # rewritten by the regeneration above, so an unscoped query
+          # would mark every CI run dirty:true while the panels job
+          # (where xcodegen never ran) reports dirty:false for the same
+          # bundle. Only the schemes live under the xcodeproj, so the
+          # exclusion drops regeneration noise and nothing else.
+          dirty = bool(subprocess.check_output(
+              ["git", "status", "--porcelain", "--", ".",
+               ":(exclude)ios/TimeOfLife/TimeOfLife.xcodeproj"],
+              text=True).strip())
+          out = Path(os.environ["OUT_DIR"])
+          rid = os.environ["RUN_RID"]
+          out.joinpath(f"provenance-{rid}.json").write_text(json.dumps({"commit_base": base, "dirty": dirty}) + "\n")
+          PY
+            rc=0
+            python3 scripts/screenshots/capture.py finalize-run \
+              --out "$OUT" --run-id "$RID" \
+              --provenance "$OUT/provenance-$RID.json" || rc=$?
+            if [ "$rc" -ne 0 ] && [ "$rc" -ne 3 ]; then exit "$rc"; fi
+          done
+          set +e
+          python3 scripts/screenshots/capture.py finalize-two-runs \
+            --out "$OUT" \
+            --run-id-base "$DEVICE_KEY-$LANG_KEY"
+          rc=$?
+          set -e
+          if [ "$rc" -ne 0 ] && [ "$rc" -ne 3 ]; then exit "$rc"; fi
+
+      - name: Upload capture artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: shots-${{ matrix.device }}-${{ matrix.language }}
+          path: ${{ runner.temp }}/shots/${{ matrix.device }}/${{ matrix.language }}
+          retention-days: 14
+
+      - name: Scoped simulator cleanup
+        if: always()
+        run: xcrun simctl delete "${{ steps.sim.outputs.udid }}" || true
+
+  panels:
+    name: panels + zip
+    needs: screenshots
+    # One red matrix leg must not discard the whole bundle: fail-fast is
+    # false, every leg uploads its artifacts, and panels.py records
+    # incomplete cells as blocked in the matrix manifest. The Render step
+    # below tolerates that incomplete matrix (warns, still zips+uploads)
+    # because CI la frames are needs-inspection by design until the human
+    # handoff — only a missing manifest fails the job.
+    if: "!cancelled()"
+    runs-on: macos-15
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: No binaries in git check
+        # Before creating any artifact: inspects TRACKED content (a fresh
+        # checkout's index always matches its worktree, so `git status`
+        # alone can never see a binary committed in this PR) plus staged
+        # additions, so untracked build outputs (the zip below) never trip
+        # the guard. Scoped to pipeline outputs — Design/ artwork and the
+        # AppIcon set are owner-approved and explicitly out of scope.
+        run: |
+          if git ls-files -z | tr '\0' '\n' | grep -Eq '\.zip$|(^|/)(shots|panels)/.*\.(png|jpg|jpeg)$'; then
+            echo "::error::pipeline binaries tracked in git — see the no-binaries rule"; exit 2
+          fi
+          if git status --porcelain --untracked-files=no | grep -Eq '^ *[MADRC].*(\.zip$|(^|/)(shots|panels)/.*\.(png|jpg|jpeg)$)'; then
+            echo "::error::pipeline binaries staged or modified in tracked files"; exit 2
+          fi
+          echo "tracked tree clean of pipeline binaries"
+
+      - name: Download capture artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: shots-*
+          path: shots
+
+      - name: Flatten artifact layout
+        # download-artifact extracts each artifact into shots/<artifact-name>/,
+        # but panels expects shots/<device>/<language>/runs/<run-id>/. Re-shard.
+        # Artifact names are shots-<device>-<language>, but three of the five
+        # locales contain a hyphen (es-419, zh-Hans, pt-BR), so splitting on
+        # the LAST hyphen misroutes them (shots-iphone69-es-419 became
+        # dev=iphone69-es, lang=419). Derive the device by longest catalog
+        # prefix match and take the remainder as the language.
+        run: |
+          set -e
+          mkdir -p flat
+          for d in shots/shots-*-*; do
+            [ -d "$d" ] || continue
+            base=$(basename "$d"); rest=${base#shots-}
+            dev=""
+            for cand in iphone69 iphone63 ipad13; do
+              case "$rest" in "$cand"-*) dev="$cand"; break;; esac
+            done
+            [ -n "$dev" ] || { echo "::error::cannot derive device from artifact $base"; exit 2; }
+            lang=${rest#"$dev"-}
+            [ -n "$lang" ] || { echo "::error::cannot derive language from artifact $base"; exit 2; }
+            mkdir -p "flat/$dev/$lang"
+            cp -R "$d/." "flat/$dev/$lang/"
+          done
+          rm -rf shots && mv flat shots
+          python3 -c "from pathlib import Path; ms=list(Path('shots').rglob('run-manifest.json')); print(f'resharded manifests: {len(ms)}'); assert ms, 'no run manifests after reshard'"
+
+      - name: Fetch Apple bezel assets
+        env:
+          FIGMA_API_KEY: ${{ secrets.FIGMA_API_KEY }}
+          FIGMA_FILE_KEY: w8VjkUTV7f8AGiI7HXzKda
+          FIGMA_IPHONE_NODE_ID: "12887:20855"
+          FIGMA_IPHONE63_NODE_ID: "6316:14199"
+          FIGMA_IPAD_NODE_ID: "5456:18569"
+        run: |
+          [ -n "$FIGMA_API_KEY" ] || { echo "::error::FIGMA_API_KEY secret missing"; exit 2; }
+          python3 -m pip install --break-system-packages "Pillow==13.0.0"
+          python3 scripts/panels/fetch_bezel_assets.py --out "$RUNNER_TEMP/bezels"
+
+      - name: Render panels
+        env:
+          DEVICES: ${{ inputs.devices }}
+          LANGUAGES: ${{ inputs.languages }}
+        run: |
+          python3 -m pip install --break-system-packages "Pillow==13.0.0"
+          rc=0
+          # Captions live with the change: active dir first, dated archive
+          # fallback (archived 2026-11-03 — the bare active path alone
+          # fails closed on every post-archive run).
+          CAPTIONS_DIR="openspec/changes/app-store-screenshot-pilot/captions"
+          if [ ! -d "$CAPTIONS_DIR" ]; then
+            CAPTIONS_DIR="openspec/changes/archive/2026-11-03-app-store-screenshot-pilot/captions"
+          fi
+          python3 scripts/panels/panels.py --render-matrix \
+            --shots-dir shots --bezels-dir "$RUNNER_TEMP/bezels" \
+            --out "$RUNNER_TEMP/panels" --devices "$DEVICES" \
+            --languages "$LANGUAGES" \
+            --captions-dir "$CAPTIONS_DIR" || rc=$?
+          # An incomplete matrix (exit 2) still uploads: every CI la frame
+          # is needs-inspection until the human record-external-frame
+          # handoff, so verify_sources refuses them and the matrix is
+          # incomplete BY DESIGN here — the manifest records each blocked
+          # cell and stays downloadable. Fail only when no manifest was
+          # written at all (a hard invocation error, not blocked cells).
+          if [ "$rc" -ne 0 ] && [ ! -f "$RUNNER_TEMP/panels/matrix-manifest.json" ]; then exit "$rc"; fi
+          if [ "$rc" -ne 0 ]; then echo "::warning::panels matrix incomplete (exit $rc) — blocked cells recorded in matrix-manifest.json; uploading partial bundle"; fi
+
+      - name: Write README and zip
+        env:
+          IOS_RUNTIME: ${{ inputs.ios_runtime }}
+          DEVICES: ${{ inputs.devices }}
+          LANGUAGES: ${{ inputs.languages }}
+        run: |
+          python3 scripts/panels/write_bundle_readme.py \
+            --panels-dir "$RUNNER_TEMP/panels" --shots-dir shots \
+            --ios-runtime "$IOS_RUNTIME" \
+            --devices "$DEVICES" \
+            --languages "$LANGUAGES" \
+            --out bundle-readme.md
+          # Keep the repo README untouched: the bundle carries its own file.
+          cp bundle-readme.md "$RUNNER_TEMP/panels/BUNDLE-README.md"
+          (cd "$RUNNER_TEMP" && zip -qr "$GITHUB_WORKSPACE/lifio-screenshots-${{ github.sha }}.zip" panels)
+          rm bundle-readme.md
+
+      - name: Upload bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: lifio-screenshots-${{ github.sha }}
+          path: lifio-screenshots-${{ github.sha }}.zip
+          retention-days: 30

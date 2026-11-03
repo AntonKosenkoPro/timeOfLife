@@ -1,3 +1,4 @@
+// swiftlint:disable file_length
 import Combine
 import Foundation
 import SwiftUI
@@ -65,6 +66,10 @@ final class LogTimeViewModel: ObservableObject {
 
     let service: TimerService
 
+    /// Calendar for the picker bounds below (injected so a pinned capture
+    /// clock's time zone governs, never the device zone).
+    private let calendar: Calendar
+
     /// The form mode, derived from the edited entry: no entry is CREATE,
     /// any saved entry is EDIT (entry-editor spec). Pure so the mode
     /// routing is unit-testable.
@@ -80,10 +85,14 @@ final class LogTimeViewModel: ObservableObject {
         service: TimerService,
         initialText: String = "",
         initialCategoryIDs: [String] = [],
+        initialNotes: String = "",
+        initialInterval: (start: Date, end: Date)? = nil,
         editing entry: TimeEntry? = nil,
-        now: Date = Date()
+        now: Date = Date(),
+        calendar: Calendar = .current
     ) {
         self.service = service
+        self.calendar = calendar
         self.editingEntry = entry
         if let entry {
             // EDIT prefills straight from the entry's own fields —
@@ -99,9 +108,20 @@ final class LogTimeViewModel: ObservableObject {
             let start = Self.floored(now)
             self.name = initialText
             self.categoryIDs = initialCategoryIDs
-            self.notes = ""
-            self.startsAt = start
-            self.endsAt = start.addingTimeInterval(Self.defaultDuration)
+            // Prefill contract: minute-exact values assigned directly —
+            // never through the picker setters (which floor to the minute,
+            // flip `timesTouched` to the ≥60 s rule, and publish on a
+            // potentially discarded instance). Untouched drafts keep the
+            // grandfathered `interval > 0` rule, so sub-minute prefills stay
+            // savable; callers needing floor enforcement use the setters.
+            self.notes = initialNotes
+            if let interval = initialInterval {
+                self.startsAt = interval.start
+                self.endsAt = interval.end
+            } else {
+                self.startsAt = start
+                self.endsAt = start.addingTimeInterval(Self.defaultDuration)
+            }
         }
     }
 
@@ -150,6 +170,25 @@ final class LogTimeViewModel: ObservableObject {
     var displayEndsAt: Date {
         isGrandfathered ? displayStartsAt.addingTimeInterval(Self.minimumDuration) : Self.floored(endsAt, toMinutes: 1)
     }
+
+    /// Date pill caption ("Oct 12, 2026") in the form's calendar
+    /// (TrackViewModel.timeText precedent): the request locale/time zone
+    /// are applied post-launch in capture, so the old process-default
+    /// static formatter rendered the previous run's language/zone while
+    /// the time pill next to it was already pinned. One formatter for the
+    /// view-model lifetime (`calendar` is a `let`).
+    func dateText(for date: Date) -> String {
+        dateFormatter.string(from: date)
+    }
+
+    private lazy var dateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .none
+        formatter.locale = calendar.locale ?? .current
+        formatter.timeZone = calendar.timeZone
+        return formatter
+    }()
 
     /// Loads the category catalog for the TagSelector (idempotent). Called
     /// on open by the view.
@@ -341,7 +380,7 @@ final class LogTimeViewModel: ObservableObject {
     /// with a corrupt end-before-start prefill) — an unbounded picker plus
     /// the disabled gate beats a clamped selection there.
     var endDateRange: ClosedRange<Date>? {
-        let lower = Calendar.current.startOfDay(for: displayStartsAt)
+        let lower = calendar.startOfDay(for: displayStartsAt)
         guard displayEndsAt >= lower else { return nil }
         return lower...Date.distantFuture
     }
@@ -355,7 +394,6 @@ final class LogTimeViewModel: ObservableObject {
     /// with the gate as enforcer, instead of risking an inverted range or
     /// an out-of-range selection.
     var endTimeRange: ClosedRange<Date> {
-        let calendar = Calendar.current
         let endDay = calendar.startOfDay(for: displayEndsAt)
         let endDayEnd = (calendar.date(byAdding: .day, value: 1, to: endDay) ?? endDay.addingTimeInterval(86_400))
             .addingTimeInterval(-1)

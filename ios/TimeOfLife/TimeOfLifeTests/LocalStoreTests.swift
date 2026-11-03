@@ -236,6 +236,26 @@ struct LocalStoreTests {
         #expect(rows.first?.op == "create")
     }
 
+    @Test("same-stamp updateEntry is an idempotent no-op, never a duplicate outbox row")
+    func sameStampEntryUpdateIsNoOp() async throws {
+        // Relay parity: the relay's PATCH guard is strictly newer
+        // (`updated_at < ?`, pinned by SameSecondConflictsWithoutHang), so a
+        // tie must not report success locally only to 409 on push — it is
+        // rejected here and enqueues nothing.
+        let store = try makeStore()
+        _ = try await store.createEntry(makeEntry(updatedAt: Date(timeIntervalSinceReferenceDate: 4_000)))
+
+        let replay = makeEntry(activityText: "Replay", updatedAt: Date(timeIntervalSinceReferenceDate: 4_000))
+        let applied = try await store.updateEntry(replay)
+        #expect(!applied)
+
+        let stored = try await store.entry(id: "entry-1")
+        #expect(stored?.activityText == "Coding")
+        let rows = try await store.outboxRows()
+        #expect(rows.count == 1)
+        #expect(rows.first?.op == "create")
+    }
+
     @Test("newer updateEntry updates text, notes, categories, and enqueues an update row")
     func newerEntryUpdateApplies() async throws {
         let store = try makeStore()
@@ -1203,6 +1223,46 @@ struct LocalStoreCategoryMutationTests {
         }
         let stored = try await store.category(id: "cat-1")
         #expect(stored?.name == "WORK")
+    }
+
+    @Test("same-instant rename bumps one storage quantum and the next genuine edit still saves")
+    func tieBumpIsOneQuantum() async throws {
+        // Regression: the tie bump was a full second, so any genuine edit
+        // landing inside that window took the `candidate < stored` branch
+        // and returned `.stale` — CategoryEditorViewModel then discarded
+        // the typed rename via adoptLatestCategory + errorConflict, and a
+        // peer edit in the window 409'd on the relay's strict guard.
+        let store = try makeStore()
+        let instant = Date(timeIntervalSinceReferenceDate: 5_000)
+        _ = try await store.createCategory(
+            draft: CategoryDraft(name: "Work", icon: .briefcase),
+            id: "cat-1",
+            now: instant
+        )
+        let tied = try await store.updateCategory(
+            id: "cat-1",
+            draft: CategoryDraft(name: "Deep Work", icon: .briefcase),
+            now: instant
+        )
+        guard case let .saved(bumped) = tied else {
+            Issue.record("expected saved on the tie, got \(tied)")
+            return
+        }
+        #expect(bumped.updatedAt == instant.addingTimeInterval(0.001))
+
+        // A genuine edit half a second later: saved under the 1ms bump,
+        // stale under the old 1s bump.
+        let next = try await store.updateCategory(
+            id: "cat-1",
+            draft: CategoryDraft(name: "Deeper Work", icon: .briefcase),
+            now: instant.addingTimeInterval(0.5)
+        )
+        guard case let .saved(renamed) = next else {
+            Issue.record("expected saved on the later edit, got \(next)")
+            return
+        }
+        #expect(renamed.name == "Deeper Work")
+        #expect(renamed.updatedAt == instant.addingTimeInterval(0.5))
     }
 
     @Test("updateCategory on a missing category returns missing")

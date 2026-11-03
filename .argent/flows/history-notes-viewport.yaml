@@ -1,0 +1,20 @@
+executionPrerequisite: Screenshots build installed; app launched on the signed-in History tab scrolled to the top, fixture deck loaded (Oct 12 Deep work notes entry present).
+steps:
+  - echo: History top shows Today-Oct 17, no notes glyph. Scroll down to Oct 12 Deep
+      work notes entry; expect day total plus blue notes glyph.
+  - scroll-to:
+      target:
+        text: Oct 12, 2026
+  - tool: await-ui-element
+    args:
+      condition: visible
+      selector:
+        text: Oct 12, 2026
+  # The row's notes glyph is folded into the EntryRow accessibility label
+  # as L10n.historyHasNotes ("has notes"): without this gate the flow
+  # stays green when the glyph is missing (echo is intent, not verdict).
+  - tool: await-ui-element
+    args:
+      condition: visible
+      selector:
+        text: has notes

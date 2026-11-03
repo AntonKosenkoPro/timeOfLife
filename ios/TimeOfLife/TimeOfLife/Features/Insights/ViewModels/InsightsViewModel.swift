@@ -34,11 +34,11 @@ final class InsightsViewModel: ObservableObject {
     /// stop) would leave the next appear serving a stale breakdown. Starts
     /// false — the view sets it on appear/disappear.
     private var isVisible = false
-#if DEBUG
+#if DEBUG || SCREENSHOT_CAPTURE
     /// Test hook (nil in production): awaited after the snapshot read, before
     /// publishing — lets tests hold a load open and interleave an invalidate
     /// + reload deterministically (TrackViewModel.stopGate precedent).
-    /// Debug-only so no Release caller can suspend a load.
+    /// Debug/Screenshot-only so no Release caller can suspend a load.
     var loadGate: (@Sendable () async -> Void)?
 #endif
     private var snapshot = Snapshot()
@@ -67,7 +67,7 @@ final class InsightsViewModel: ObservableObject {
         do {
             let entries = try await store.entries()
             let categories = try await store.categories()
-            #if DEBUG
+            #if DEBUG || SCREENSHOT_CAPTURE
             if let loadGate { await loadGate() }
             #endif
             snapshot = Snapshot(entries: entries, categories: categories)

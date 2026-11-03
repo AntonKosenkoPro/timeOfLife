@@ -20,10 +20,48 @@ public struct TimerActivityAttributes: ActivityAttributes, Equatable {
     /// when the run has no categories (the recents-chip rule: icon or
     /// nothing — never names).
     public var iconSymbol: String
+    /// Request locale identifier (`.lproj` name: "en", "ru", "zh-Hans",
+    /// "es-419", "pt-BR"). Carried in the payload because the widget
+    /// extension renders in its own process: it never sees the app's
+    /// in-process `ScreenshotLocale` override and its `AppleLanguages`
+    /// may lag or cache a prior run's language (pt-BR showed es-419
+    /// "Detener" instead of "Parar"). Faces resolve copy from this
+    /// locale's `.lproj` explicitly, falling back to system resolution
+    /// when unresolvable.
+    public var localeIdentifier: String
 
-    public init(entryText: String, iconSymbol: String) {
+    public init(entryText: String, iconSymbol: String, localeIdentifier: String) {
         self.entryText = entryText
         self.iconSymbol = iconSymbol
+        self.localeIdentifier = localeIdentifier
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case entryText, iconSymbol, localeIdentifier
+    }
+
+    /// Lenient decode: payloads archived before `localeIdentifier` shipped
+    /// (an in-flight Live Activity surviving an app update) carry no locale
+    /// key — default to the `"und"` (undetermined) sentinel instead of
+    /// failing with `keyNotFound` and rendering nothing. No such `.lproj`
+    /// ships (the appex carries exactly the five request locales), so the
+    /// faces' documented fallback resolves the system language — the
+    /// pre-change behavior. Never `"en"` (`en.lproj` ships, so that default
+    /// would resolve English on every device language) and never `""`
+    /// (an empty lookup resolves the development-region bundle instead of
+    /// missing, so it behaves like `"en"`).
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        entryText = try container.decode(String.self, forKey: .entryText)
+        iconSymbol = try container.decode(String.self, forKey: .iconSymbol)
+        localeIdentifier = try container.decodeIfPresent(String.self, forKey: .localeIdentifier) ?? "und"
+    }
+
+    public func encode(to encoder: any Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(entryText, forKey: .entryText)
+        try container.encode(iconSymbol, forKey: .iconSymbol)
+        try container.encode(localeIdentifier, forKey: .localeIdentifier)
     }
 
     /// The live slice. Faces tick from `startedAt` via the system's

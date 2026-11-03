@@ -152,6 +152,9 @@ struct TrackSyncReloadTests {
     /// `.running` over `.saving`, restarting a ticker nothing ever stopped —
     /// the digits kept climbing through `.saved` into `.ready`. The save is
     /// held open with the VM's `stopGate` so the interleave is deterministic.
+    /// `stopGate` is compiled in DEBUG and SCREENSHOT_CAPTURE alike, so
+    /// these tests run in both (the Screenshot suite guards the same
+    /// mid-save race it ships).
     @Test("a load landing mid-save neither revives running nor leaks the ticker")
     func midSaveLoadNeitherRevivesNorLeaksTicker() async throws {
         let store = try LocalStore(url: temporaryStoreURL())
@@ -200,7 +203,7 @@ struct TrackSyncReloadTests {
 
     /// Same family: `select()` never excluded `.saving`, so a recents-chip
     /// tap mid-save flipped to `.ready` and the completing `stop()` no-op'd —
-    /// the run was never saved.
+    /// the run was never saved. Same `stopGate` footing as above.
     @Test("a recents-chip tap mid-save is ignored and the save completes")
     func chipTapMidSaveIsIgnored() async throws {
         let store = try LocalStore(url: temporaryStoreURL())
@@ -289,6 +292,7 @@ struct TrackSyncReloadTests {
 
     /// Polls for the transient `.saving` state (the save is gate-held, so
     /// this always resolves; the cap only bounds a broken-seam hang).
+    /// Companion to the gated mid-save tests above.
     private func waitUntilSaving(_ vm: TrackViewModel) async -> Bool {
         for _ in 0..<400 {
             if vm.state.isSaving { return true }

@@ -15,6 +15,11 @@ struct RunningBannerFace: View {
     let text: String
     let iconSymbol: String
     let startedAt: Date
+    /// Request-locale identifier for face copy (payload locale, never the
+    /// appex system language which may cache a prior run's language).
+    /// Required: no default, so a call site that forgets the payload locale
+    /// fails to compile instead of silently rendering English.
+    let localeIdentifier: String
     let trackURL: URL
     let trackStopURL: URL
 
@@ -64,13 +69,13 @@ struct RunningBannerFace: View {
             }
             .widgetURL(trackURL)
             .accessibilityElement(children: .combine)
-            .accessibilityLabel(LiveActivityStrings.runningAccessibilityLabel(text: text))
+            .accessibilityLabel(LiveActivityStrings.runningAccessibilityLabel(text: text, localeIdentifier: localeIdentifier))
             Spacer()
             // A stop-URL link — tapping it opens the app and the app stops
             // itself (same mechanism as the Island pill). Stop is link-only:
             // sibling widgetURL scoping (no root URL, no outer combine —
             // see above).
-            LiveActivityStopCircleLink(destination: trackStopURL)
+            LiveActivityStopCircleLink(destination: trackStopURL, localeIdentifier: localeIdentifier)
         }
         // Banner breathing room, verified on-device: 8pt vertical (flush
         // edges otherwise) + 12pt leading (icon side) + 8pt trailing.

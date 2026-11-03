@@ -34,6 +34,8 @@ jobs:
     timeout-minutes: 5
     outputs:
       ios: ${{ steps.filter.outputs.ios }}
+      screenshot: ${{ steps.filter.outputs.screenshot }}
+      tooling: ${{ steps.filter.outputs.tooling }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -53,12 +55,41 @@ jobs:
           # non-ASCII paths matchable.
           if [ "$EVENT" != "pull_request" ]; then
             echo "ios=true" >> "$GITHUB_OUTPUT"  # push path-filters already matched
+            echo "screenshot=true" >> "$GITHUB_OUTPUT"
+            echo "tooling=true" >> "$GITHUB_OUTPUT"
           elif { git cat-file -e "$BASE^{commit}" 2>/dev/null || git fetch origin "$BASE" 2>/dev/null; } \
-            && files="$(git -c core.quotePath=false diff --name-only "$BASE...HEAD")" \
-            && ! printf '%s\n' "$files" | grep -Eq '^(ios/|\.github/workflows/ios\.yml)'; then
-            echo "ios=false" >> "$GITHUB_OUTPUT"
+            && files="$(git -c core.quotePath=false diff --name-only "$BASE...HEAD")"; then
+            if printf '%s\n' "$files" | grep -Eq '^(ios/|\.github/workflows/ios\.yml)'; then
+              echo "ios=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "ios=false" >> "$GITHUB_OUTPUT"
+            fi
+            # The Screenshot test suite is slow (full run under a second
+            # build configuration), so PRs run it only when the diff
+            # touches capture/config/entitlement/xcconfig/LiveActivity
+            # paths. Detection failure falls to the outer else (both true
+            # — fail-open); the unconditional Screenshot BUILD in the lane
+            # still catches product breakage on every PR.
+            if printf '%s\n' "$files" | grep -Eq '(Screenshot|Capture|LiveActivit|TimeOfLife/Configuration/|ios/TimeOfLife/project\.yml$|scripts/deny-screenshot|\.xcconfig$|\.entitlements$)'; then
+              echo "screenshot=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "screenshot=false" >> "$GITHUB_OUTPUT"
+            fi
+            # The stdlib Python/shell tooling (scripts/screenshots/,
+            # scripts/panels/, the deny-screenshot guard) has no other CI
+            # entry point — app-screenshots.yml is workflow_dispatch-only —
+            # so a PR touching only the runner skips every lane without
+            # this. Lowercase paths never match the CamelCase patterns
+            # above, hence the explicit scripts/ alternative.
+            if printf '%s\n' "$files" | grep -Eq '^(ios/|\.github/workflows/ios\.yml)|scripts/(screenshots|panels)/'; then
+              echo "tooling=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "tooling=false" >> "$GITHUB_OUTPUT"
+            fi
           else
             echo "ios=true" >> "$GITHUB_OUTPUT"
+            echo "screenshot=true" >> "$GITHUB_OUTPUT"
+            echo "tooling=true" >> "$GITHUB_OUTPUT"
           fi
 
   lint-build-test:
@@ -68,7 +99,10 @@ jobs:
     # still reports.
     if: github.event_name != 'pull_request' || needs.changes.outputs.ios == 'true'
     runs-on: macos-15
-    timeout-minutes: 30
+    # Sized for TWO full simulator test invocations (Debug + Screenshot
+    # configurations): a single-test budget red-lines the lane on timeout
+    # rather than on a test failure.
+    timeout-minutes: 45
     steps:
       # Full history + tags: the stamp harness asserts history-aware banding
       # (ancestor re-upload case needs HEAD~1) and enumerates tags per
@@ -164,6 +198,19 @@ jobs:
             -destination 'generic/platform=iOS Simulator' \
             build | xcpretty
 
+      - name: Build Screenshot configuration
+        # Always built (generic destination, no simulator boot — seconds):
+        # the Screenshot config compiles product code with
+        # SCREENSHOT_CAPTURE, so product edits that break the capture
+        # composition (e.g. renamed view APIs referenced under the flag)
+        # fail here even on PRs that skip the slow suite below.
+        working-directory: ios/TimeOfLife
+        run: |
+          set -o pipefail
+          xcodebuild -scheme TimeOfLife-Screenshot \
+            -destination 'generic/platform=iOS Simulator' \
+            build | xcpretty
+
       - name: Resolve simulator destination
         id: sim
         working-directory: ios/TimeOfLife
@@ -183,12 +230,78 @@ jobs:
             -destination "platform=iOS Simulator,name=${{ steps.sim.outputs.name }},OS=latest" \
             test | xcpretty
 
+      - name: Test Screenshot configuration
+        # The TimeOfLife-Screenshot scheme exists so the ~900 lines of
+        # #if SCREENSHOT_CAPTURE tests (CaptureClockSeamTests,
+        # ScreenshotCaptureTests, ScreenshotCleanupActivityTests, …) compile
+        # to something and actually execute — under Debug they compile to
+        # nothing and never run anywhere.
+        # Slow (full simulator run under a second configuration), so PRs
+        # run it only when the diff touches capture/config/entitlement/
+        # xcconfig/LiveActivity paths (changes.screenshot); push to main
+        # always runs it. The Debug suite above stays unconditional, and
+        # the Screenshot BUILD above still guards product breakage.
+        if: github.event_name != 'pull_request' || needs.changes.outputs.screenshot == 'true'
+        working-directory: ios/TimeOfLife
+        run: |
+          set -o pipefail
+          xcodebuild -scheme TimeOfLife-Screenshot \
+            -destination "platform=iOS Simulator,name=${{ steps.sim.outputs.name }},OS=latest" \
+            test | xcpretty
+
   # Required check (ruleset): always reports, even when the lane is skipped
   # on non-ios PRs. Passes only if detection succeeded AND the lane is
   # success-or-skip; a changes failure fails the gate (never green-unverified).
+  tooling-tests:
+    needs: [changes]
+    # Push (path-filtered) always runs; PRs only when the diff touches
+    # ios/ or the scripts tooling. Ubuntu is enough: the screenshot runner
+    # suites are stdlib-only and the guard test is POSIX sh. The panels
+    # suites NEED macOS Helvetica (/System/Library/Fonts/Helvetica.ttc,
+    # absent on Linux) for byte-identical headlines, so they run in the
+    # macOS panels-tests job below (same split as app-screenshots.yml) —
+    # never here.
+    if: github.event_name != 'pull_request' || needs.changes.outputs.tooling == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Screenshot runner Python suites
+        run: |
+          for t in scripts/screenshots/tests/test_*.py; do python3 "$t" || exit 1; done
+
+      - name: Screenshot install guard matrix
+        run: sh ios/TimeOfLife/scripts/deny-screenshot-install.test.sh
+
+  # Required check (ruleset): always reports, even when the lane is skipped
+  # on non-ios PRs. Passes only if detection succeeded AND the lane is
+  # success-or-skip; a changes failure fails the gate (never green-unverified).
+  panels-tests:
+    needs: [changes]
+    # Push (path-filtered) always runs; PRs only when the diff touches
+    # ios/ or the scripts tooling (same gate as tooling-tests — the two
+    # jobs split that lane by OS). macOS is required: the panel builder
+    # renders headlines with /System/Library/Fonts/Helvetica.ttc, absent
+    # on Linux, and the byte-identical template proofs only mean
+    # something against that exact font.
+    if: github.event_name != 'pull_request' || needs.changes.outputs.tooling == 'true'
+    runs-on: macos-15
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Panels Python suites
+        run: |
+          python3 -m pip install --break-system-packages "Pillow==13.0.0"
+          for t in scripts/panels/tests/test_*.py; do python3 "$t" || exit 1; done
+
+  # Required check (ruleset): always reports, even when the lane is skipped
+  # on non-ios PRs. Passes only if detection succeeded AND the lanes are
+  # success-or-skip; a changes failure fails the gate (never green-unverified).
   ios-gate:
     if: always()
-    needs: [changes, lint-build-test]
+    needs: [changes, lint-build-test, tooling-tests, panels-tests]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -199,4 +312,12 @@ jobs:
           case "${{ needs.lint-build-test.result }}" in
             success|skipped) echo "lint-build-test ${{ needs.lint-build-test.result }} — gate green";;
             *) echo "::error::lint-build-test ${{ needs.lint-build-test.result }}"; exit 1;;
+          esac
+          case "${{ needs.tooling-tests.result }}" in
+            success|skipped) echo "tooling-tests ${{ needs.tooling-tests.result }} — gate green";;
+            *) echo "::error::tooling-tests ${{ needs.tooling-tests.result }}"; exit 1;;
+          esac
+          case "${{ needs.panels-tests.result }}" in
+            success|skipped) echo "panels-tests ${{ needs.panels-tests.result }} — gate green";;
+            *) echo "::error::panels-tests ${{ needs.panels-tests.result }}"; exit 1;;
           esac

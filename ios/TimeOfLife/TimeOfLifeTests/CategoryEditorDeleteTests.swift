@@ -85,7 +85,18 @@ struct CategoryEditorDeleteTests {
     @Test("delete refuses while a save is in flight and leaves the category intact")
     func deleteRefusesWhileSaveInFlight() async throws {
         let store = try makeStore()
-        try await store.createCategory(draft: CategoryDraft(name: "Work", icon: .briefcase), id: "c1", now: Date())
+        // Same-instant create/save pair (no backdate): the store bumps the
+        // stamp past the stored version under a strict LWW guard, so a save
+        // stamping the same instant as creation persists the rename instead
+        // of going stale. This is the regression pin for the same-tick
+        // data-loss path (timestamps truncate below process precision; a
+        // quick create+rename must not silently drop the rename).
+        let now = Date()
+        try await store.createCategory(
+            draft: CategoryDraft(name: "Work", icon: .briefcase),
+            id: "c1",
+            now: now
+        )
         let category = try #require(await store.category(id: "c1"))
         let vm = CategoryEditorViewModel(store: store, category: category, onSaved: { _ in }, onDuplicate: { _ in })
         vm.name = "Renamed"
@@ -109,6 +120,71 @@ struct CategoryEditorDeleteTests {
         #expect(settled, "save must settle within the bounded wait")
         #expect(try await store.category(id: "c1") != nil, "refused delete must not remove the category")
         #expect(try await store.category(id: "c1")?.name == "Renamed")
+    }
+
+    @Test("same-instant category rename wins the last-write-wins tie-break")
+    func sameInstantRenamePersists() async throws {
+        let store = try makeStore()
+        let stamp = Date()
+        try await store.createCategory(draft: CategoryDraft(name: "Work", icon: .briefcase), id: "c1", now: stamp)
+        // Identical stamp: timestamps truncate below process precision, so a
+        // create+save pair in the same instant must persist, never go stale.
+        // The stamp bumps strictly past the stored version (relay parity:
+        // the relay's PATCH guard is strict, so a tie would 409 on push).
+        let result = try await store.updateCategory(id: "c1", draft: CategoryDraft(name: "Renamed", icon: .briefcase), now: stamp)
+        guard case .saved(let updated) = result else {
+            Issue.record("same-instant rename must save, got \(result)")
+            return
+        }
+        #expect(updated.name == "Renamed")
+        #expect(updated.updatedAt > stamp)
+        #expect(try await store.category(id: "c1")?.name == "Renamed")
+    }
+
+    @Test("same-instant rename with a round-up sub-millisecond fraction persists")
+    func sameInstantRenameRoundUpFractionPersists() async throws {
+        // GRDB stores dates as "yyyy-MM-dd HH:mm:ss.SSS", rounding (not
+        // truncating) to milliseconds: a stamp like ...000.0006s round-trips
+        // to a value ~0.4ms GREATER than the in-memory Date. Comparing the raw
+        // `now` against the stored version therefore reports a same-instant
+        // write as stale whenever the fraction rounds up (~50% of wall-clock
+        // Dates — the CI flake of sameInstantRenamePersists). The store
+        // quantizes `now` to storage precision first, so the tie is detected
+        // deterministically and the stamp bumps past it.
+        let store = try makeStore()
+        let stamp = Date(timeIntervalSinceReferenceDate: 5_000.0006)
+        try await store.createCategory(draft: CategoryDraft(name: "Work", icon: .briefcase), id: "c1", now: stamp)
+        let result = try await store.updateCategory(id: "c1", draft: CategoryDraft(name: "Renamed", icon: .briefcase), now: stamp)
+        guard case .saved(let updated) = result else {
+            Issue.record("round-up-fraction rename must save, got \(result)")
+            return
+        }
+        #expect(updated.name == "Renamed")
+        #expect(updated.updatedAt > stamp)
+        #expect(try await store.category(id: "c1")?.name == "Renamed")
+    }
+
+    @Test("genuinely older rename stays stale (quantization never resurrects it)")
+    func olderRenameStaysStale() async throws {
+        // The quantization fix must only collapse sub-millisecond storage
+        // noise: a write a full second older than the stored version is
+        // genuinely stale and must stay `.stale` under the strict LWW guard.
+        let store = try makeStore()
+        try await store.createCategory(
+            draft: CategoryDraft(name: "Work", icon: .briefcase),
+            id: "c1",
+            now: Date(timeIntervalSinceReferenceDate: 6_000)
+        )
+        let result = try await store.updateCategory(
+            id: "c1",
+            draft: CategoryDraft(name: "Renamed", icon: .briefcase),
+            now: Date(timeIntervalSinceReferenceDate: 5_999)
+        )
+        guard case .stale = result else {
+            Issue.record("older rename must stay stale, got \(result)")
+            return
+        }
+        #expect(try await store.category(id: "c1")?.name == "Work")
     }
 
     // MARK: - Helpers

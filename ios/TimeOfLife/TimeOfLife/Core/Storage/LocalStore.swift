@@ -27,7 +27,14 @@ import GRDB
 /// been unlocked at least once since boot.
 actor LocalStore {
     /// The App Group shared container identifier (local-first-store spec).
+    /// The Screenshot configuration uses a SEPARATE capture-only group, so
+    /// capture processes (app + extension + intents) can never resolve
+    /// production account files or markers (screenshot-capture isolation).
+    #if SCREENSHOT_CAPTURE
+    static let appGroupID = "group.com.antonkosenko.timeoflifeapp.screenshots"
+    #else
     static let appGroupID = "group.com.antonkosenko.timeoflifeapp"
+    #endif
 
     /// The local-metadata key holding the user id a database file is bound
     /// to (account-bound-store spec). Written on the first open of a per-user
@@ -630,7 +637,9 @@ actor LocalStore {
     ///   - names: The seven localized starter names in the active supported
     ///     language, in `starterCategoryIcons` order. Materialized once at
     ///     creation; records are not renamed when the locale changes.
-    ///   - now: Creation timestamp (injectable for tests).
+    ///   - now: Creation timestamp (injectable for tests; quantized to
+    ///     storage precision like every other category write so a
+    ///     same-instant update compares equal, never stale-by-rounding).
     func seedStarterCategoriesIfNeeded(
         names: [String],
         now: Date = Date()
@@ -639,6 +648,7 @@ actor LocalStore {
             throw SeedError.invalidNameCount
         }
         let marker = Self.categoryStartersSeededKey
+        let stamped = Self.storageQuantized(now)
         return try queue.write { db in
             if try Self.metadataValue(db: db, key: marker) != nil {
                 return .alreadySeeded
@@ -652,8 +662,8 @@ actor LocalStore {
                     id: recordIDGenerator.newID(),
                     name: names[index],
                     icon: icon.rawValue,
-                    createdAt: now,
-                    updatedAt: now
+                    createdAt: stamped,
+                    updatedAt: stamped
                 )
                 try category.insert(db)
                 try Self.enqueueOutbox(db: db, resource: "category",
@@ -730,6 +740,20 @@ actor LocalStore {
         case failure
     }
 
+    /// Quantizes a timestamp to the database's storage precision (nearest
+    /// millisecond). GRDB persists `Date` as `"yyyy-MM-dd HH:mm:ss.SSS"`,
+    /// rounding — not truncating — to milliseconds, so an in-memory `Date`
+    /// with a sub-millisecond fraction can round-trip to a value up to 0.5ms
+    /// *greater* than itself. Comparing a raw `now` against a stored version
+    /// therefore misclassifies a same-instant write as stale whenever the
+    /// fraction rounds up (~50% of wall-clock Dates). Quantizing both sides
+    /// makes tie detection deterministic while preserving strict LWW: only
+    /// sub-millisecond storage noise collapses; anything ≥1ms apart keeps
+    /// its order (the relay wire format carries millisecond precision too).
+    static func storageQuantized(_ date: Date) -> Date {
+        Date(timeIntervalSince1970: (date.timeIntervalSince1970 * 1_000).rounded() / 1_000)
+    }
+
     /// Validates a draft and atomically creates a category plus its outbox
     /// create row. The normalized-name unique index is the final race guard:
     /// a concurrent insert is translated to `.duplicate`.
@@ -746,6 +770,10 @@ actor LocalStore {
         case .valid:
             break
         }
+        // Quantize to storage precision so the returned in-memory row matches
+        // the persisted one bit-for-bit (see storageQuantized): a later
+        // same-instant update must compare equal, not stale-by-rounding.
+        let stamped = Self.storageQuantized(now)
         return try queue.write { db in
             if let clash = try Self.fetchCategoryByName(db, name: trimmed) {
                 return .duplicate(clash)
@@ -754,8 +782,8 @@ actor LocalStore {
                 id: id,
                 name: trimmed,
                 icon: draft.icon.rawValue,
-                createdAt: now,
-                updatedAt: now
+                createdAt: stamped,
+                updatedAt: stamped
             )
             do {
                 try category.insert(db)
@@ -773,8 +801,19 @@ actor LocalStore {
 
     /// Atomically updates a category's name/icon and enqueues an update
     /// outbox row. Returns `.duplicate` on a normalized-name collision,
-    /// `.stale` when `updatedAt` is not newer than the stored version,
-    /// `.missing` when the category no longer exists.
+    /// `.stale` when `now` predates the stored version, `.missing` when
+    /// the category no longer exists. The guard stays strictly newer (`<`,
+    /// matching the relay's `updated_at < ?`): timestamps truncate below
+    /// process precision, so a create+save pair landing in the same instant
+    /// bumps the stamp past the stored version instead of accepting the tie
+    /// locally — a tie would report `.saved` here and then be rejected with
+    /// 409 `conflict` on push, silently reverting the rename via conflict
+    /// recovery (category-editor-delete regression). A genuinely older
+    /// `now` (e.g. the row moved on elsewhere) stays `.stale` — the bump
+    /// never force-saves over a newer version. `now` is quantized to storage
+    /// precision before the comparison (see storageQuantized): without it,
+    /// the storage formatter's millisecond rounding can push the stored
+    /// version above a same-instant `now`, misreporting the write as stale.
     @discardableResult
     func updateCategory(
         id: String,
@@ -788,6 +827,7 @@ actor LocalStore {
         case .valid:
             break
         }
+        let candidate = Self.storageQuantized(now)
         return try queue.write { db in
             guard let original = try Category.fetchOne(db, key: id) else {
                 return .missing
@@ -797,12 +837,27 @@ actor LocalStore {
                     return .duplicate(other)
                 }
             }
+            // Re-quantize the stored stamp: the calendar decode of the
+            // millisecond storage string can land ±1 ulp off the canonical
+            // quantized Double, which would misreport a tie as stale.
+            // Re-quantizing maps it back to the canonical value for its
+            // stored millisecond, so same-instants compare exactly equal.
+            let stored = Self.storageQuantized(original.updatedAt)
+            guard candidate >= stored else {
+                return .stale
+            }
+            // Bump past the stored version by exactly one storage quantum
+            // (1 ms) instead of a full second: strictly newer at the DB's
+            // millisecond precision (what the relay's `updated_at < ?`
+            // compares), but without future-dating the row far enough for
+            // the next genuine edit to be misclassified as stale.
+            let stamp = max(candidate, stored.addingTimeInterval(0.001))
             let updated = Category(
                 id: original.id,
                 name: trimmed,
                 icon: draft.icon.rawValue,
                 createdAt: original.createdAt,
-                updatedAt: now
+                updatedAt: stamp
             )
             do {
                 try db.execute(
@@ -838,6 +893,9 @@ actor LocalStore {
     }
 
     /// Applies a last-write-wins update. Returns false when stale.
+    /// Strictly newer only (`<`, matching the relay): a replay carrying an
+    /// unchanged `updatedAt` is an idempotent no-op, never a duplicate
+    /// outbox update.
     @discardableResult
     func updateCategory(_ category: Category) throws -> Bool {
         try queue.write { db in
@@ -1118,7 +1176,10 @@ actor LocalStore {
     }
 
     /// Applies a last-write-wins update to every entry-owned field (text,
-    /// ordered categories, notes, timing). Returns false when stale. Referenced
+    /// ordered categories, notes, timing). Returns false when stale.
+    /// Strictly newer only (`<`, matching the relay): a replay carrying an
+    /// unchanged `updatedAt` is an idempotent no-op, never a duplicate
+    /// outbox update. Referenced
     /// categories must exist locally; an unknown id throws
     /// `AssociationError.invalidCategory` and rolls the whole write back.
     @discardableResult
