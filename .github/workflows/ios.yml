@@ -255,9 +255,12 @@ jobs:
   tooling-tests:
     needs: [changes]
     # Push (path-filtered) always runs; PRs only when the diff touches
-    # ios/ or the scripts tooling. Ubuntu is enough: the Python suites are
-    # stdlib-only except the panels builder (pinned Pillow install below),
-    # and the guard test is POSIX sh.
+    # ios/ or the scripts tooling. Ubuntu is enough: the screenshot runner
+    # suites are stdlib-only and the guard test is POSIX sh. The panels
+    # suites NEED macOS Helvetica (/System/Library/Fonts/Helvetica.ttc,
+    # absent on Linux) for byte-identical headlines, so they run in the
+    # macOS panels-tests job below (same split as app-screenshots.yml) —
+    # never here.
     if: github.event_name != 'pull_request' || needs.changes.outputs.tooling == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -268,20 +271,37 @@ jobs:
         run: |
           for t in scripts/screenshots/tests/test_*.py; do python3 "$t" || exit 1; done
 
+      - name: Screenshot install guard matrix
+        run: sh ios/TimeOfLife/scripts/deny-screenshot-install.test.sh
+
+  # Required check (ruleset): always reports, even when the lane is skipped
+  # on non-ios PRs. Passes only if detection succeeded AND the lane is
+  # success-or-skip; a changes failure fails the gate (never green-unverified).
+  panels-tests:
+    needs: [changes]
+    # Push (path-filtered) always runs; PRs only when the diff touches
+    # ios/ or the scripts tooling (same gate as tooling-tests — the two
+    # jobs split that lane by OS). macOS is required: the panel builder
+    # renders headlines with /System/Library/Fonts/Helvetica.ttc, absent
+    # on Linux, and the byte-identical template proofs only mean
+    # something against that exact font.
+    if: github.event_name != 'pull_request' || needs.changes.outputs.tooling == 'true'
+    runs-on: macos-15
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
       - name: Panels Python suites
         run: |
           pip install "Pillow==13.0.0"
           for t in scripts/panels/tests/test_*.py; do python3 "$t" || exit 1; done
-
-      - name: Screenshot install guard matrix
-        run: sh ios/TimeOfLife/scripts/deny-screenshot-install.test.sh
 
   # Required check (ruleset): always reports, even when the lane is skipped
   # on non-ios PRs. Passes only if detection succeeded AND the lanes are
   # success-or-skip; a changes failure fails the gate (never green-unverified).
   ios-gate:
     if: always()
-    needs: [changes, lint-build-test, tooling-tests]
+    needs: [changes, lint-build-test, tooling-tests, panels-tests]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -296,4 +316,8 @@ jobs:
           case "${{ needs.tooling-tests.result }}" in
             success|skipped) echo "tooling-tests ${{ needs.tooling-tests.result }} — gate green";;
             *) echo "::error::tooling-tests ${{ needs.tooling-tests.result }}"; exit 1;;
+          esac
+          case "${{ needs.panels-tests.result }}" in
+            success|skipped) echo "panels-tests ${{ needs.panels-tests.result }} — gate green";;
+            *) echo "::error::panels-tests ${{ needs.panels-tests.result }}"; exit 1;;
           esac
