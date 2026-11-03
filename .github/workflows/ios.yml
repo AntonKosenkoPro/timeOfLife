@@ -34,6 +34,7 @@ jobs:
     timeout-minutes: 5
     outputs:
       ios: ${{ steps.filter.outputs.ios }}
+      screenshot: ${{ steps.filter.outputs.screenshot }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -53,12 +54,28 @@ jobs:
           # non-ASCII paths matchable.
           if [ "$EVENT" != "pull_request" ]; then
             echo "ios=true" >> "$GITHUB_OUTPUT"  # push path-filters already matched
+            echo "screenshot=true" >> "$GITHUB_OUTPUT"
           elif { git cat-file -e "$BASE^{commit}" 2>/dev/null || git fetch origin "$BASE" 2>/dev/null; } \
-            && files="$(git -c core.quotePath=false diff --name-only "$BASE...HEAD")" \
-            && ! printf '%s\n' "$files" | grep -Eq '^(ios/|\.github/workflows/ios\.yml)'; then
-            echo "ios=false" >> "$GITHUB_OUTPUT"
+            && files="$(git -c core.quotePath=false diff --name-only "$BASE...HEAD")"; then
+            if printf '%s\n' "$files" | grep -Eq '^(ios/|\.github/workflows/ios\.yml)'; then
+              echo "ios=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "ios=false" >> "$GITHUB_OUTPUT"
+            fi
+            # The Screenshot test suite is slow (full run under a second
+            # build configuration), so PRs run it only when the diff
+            # touches capture/config/entitlement/xcconfig/LiveActivity
+            # paths. Detection failure falls to the outer else (both true
+            # — fail-open); the unconditional Screenshot BUILD in the lane
+            # still catches product breakage on every PR.
+            if printf '%s\n' "$files" | grep -Eq '(Screenshot|Capture|LiveActivit|TimeOfLife/Configuration/|ios/TimeOfLife/project\.yml$|scripts/deny-screenshot|\.xcconfig$|\.entitlements$)'; then
+              echo "screenshot=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "screenshot=false" >> "$GITHUB_OUTPUT"
+            fi
           else
             echo "ios=true" >> "$GITHUB_OUTPUT"
+            echo "screenshot=true" >> "$GITHUB_OUTPUT"
           fi
 
   lint-build-test:
@@ -164,6 +181,19 @@ jobs:
             -destination 'generic/platform=iOS Simulator' \
             build | xcpretty
 
+      - name: Build Screenshot configuration
+        # Always built (generic destination, no simulator boot — seconds):
+        # the Screenshot config compiles product code with
+        # SCREENSHOT_CAPTURE, so product edits that break the capture
+        # composition (e.g. renamed view APIs referenced under the flag)
+        # fail here even on PRs that skip the slow suite below.
+        working-directory: ios/TimeOfLife
+        run: |
+          set -o pipefail
+          xcodebuild -scheme TimeOfLife-Screenshot \
+            -destination 'generic/platform=iOS Simulator' \
+            build | xcpretty
+
       - name: Resolve simulator destination
         id: sim
         working-directory: ios/TimeOfLife
@@ -189,6 +219,12 @@ jobs:
         # ScreenshotCaptureTests, ScreenshotCleanupActivityTests, …) compile
         # to something and actually execute — under Debug they compile to
         # nothing and never run anywhere.
+        # Slow (full simulator run under a second configuration), so PRs
+        # run it only when the diff touches capture/config/entitlement/
+        # xcconfig/LiveActivity paths (changes.screenshot); push to main
+        # always runs it. The Debug suite above stays unconditional, and
+        # the Screenshot BUILD above still guards product breakage.
+        if: github.event_name != 'pull_request' || needs.changes.outputs.screenshot == 'true'
         working-directory: ios/TimeOfLife
         run: |
           set -o pipefail
