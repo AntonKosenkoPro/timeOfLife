@@ -294,6 +294,69 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertIn("::warning::panels matrix incomplete", seg)
         self.assertNotIn("continue-on-error", seg)
 
+    def test_panels_steps_run_despite_bezel_failure(self):
+        # 41813403434/41776556435: the bezel fetch failed and the default
+        # success() gating skipped Render/Write/Upload, so no final ZIP
+        # existed despite downloadable partial panels. Each of the three
+        # packaging steps pins its own `if: "!cancelled()"` (the existing
+        # job-level gate alone does not run them after a step failure).
+        body = text()
+        render = body.split("- name: Render panels")[1].split(
+            "- name: Write README and zip")[0]
+        self.assertIn('if: "!cancelled()"', render)
+        write = body.split("- name: Write README and zip")[1].split(
+            "- name: Upload bundle")[0]
+        self.assertIn('if: "!cancelled()"', write)
+        upload = body.split("- name: Upload bundle")[1]
+        self.assertIn('if: "!cancelled()"', upload)
+
+    def test_bezel_fetch_failure_is_diagnosable(self):
+        # The fetch transcript must exist for EVERY failure mode and the
+        # step must preserve its exit code: the job stays red (no
+        # continue-on-error) while later steps still bundle the log.
+        # mkdir precedes the secret guard so even a missing secret lands
+        # its non-secret reason in bezel-fetch.log, never only console.
+        body = text()
+        fetch = body.split("Fetch Apple bezel assets")[1].split(
+            "Render panels")[0]
+        self.assertNotIn("continue-on-error", fetch)
+        self.assertIn('mkdir -p "$RUNNER_TEMP/bezels"', fetch)
+        self.assertLess(
+            fetch.index('mkdir -p "$RUNNER_TEMP/bezels"'),
+            fetch.index("FIGMA_API_KEY secret missing"),
+        )
+        self.assertIn('tee "$RUNNER_TEMP/bezels/bezel-fetch.log"', fetch)
+        self.assertIn('>"$RUNNER_TEMP/bezels/bezel-fetch.log" 2>&1', fetch)
+        self.assertIn('exit "$rc"', fetch)
+
+    def test_bezel_transcript_copied_loudly(self):
+        # The transcript copy into the bundle must never swallow failures:
+        # copy errors and missing log/dir warn explicitly; the bundle
+        # stays partial on evidence, never falsely complete, never
+        # silently short.
+        body = text()
+        render = body.split("Render panels")[1].split(
+            "Write README and zip")[0]
+        self.assertIn("bezel-fetch.log", render)
+        self.assertIn("could not copy bezel-fetch.log", render)
+        self.assertIn("no bezel-fetch.log to bundle", render)
+        self.assertIn("no panels dir to receive bezel-fetch.log", render)
+        self.assertNotIn("|| true", render)
+
+    def test_bezel_pins_and_scale_preserved(self):
+        # Owner-fixed Figma source: file key, all three node IDs, and
+        # --scale 2 (the pinned 980x2000/2300x3000 bezels verify at
+        # scale 2). A drifted source fails verification; pins are never
+        # edited to chase it, geometry never relaxed.
+        body = text()
+        fetch = body.split("Fetch Apple bezel assets")[1].split(
+            "Render panels")[0]
+        self.assertIn("FIGMA_FILE_KEY: w8VjkUTV7f8AGiI7HXzKda", fetch)
+        self.assertIn('FIGMA_IPHONE_NODE_ID: "12887:20855"', fetch)
+        self.assertIn('FIGMA_IPHONE63_NODE_ID: "6316:14199"', fetch)
+        self.assertIn('FIGMA_IPAD_NODE_ID: "5456:18569"', fetch)
+        self.assertIn("--scale 2", fetch)
+
     def test_captions_dir_archive_fallback(self):
         # post-archive (2026-11-03): captions live under changes/archive,
         # so the bare active path fails closed on every run.

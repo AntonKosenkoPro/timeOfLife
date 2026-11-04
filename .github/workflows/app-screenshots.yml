@@ -819,6 +819,7 @@ jobs:
           PY
 
       - name: Fetch Apple bezel assets
+        id: bezels
         env:
           FIGMA_API_KEY: ${{ secrets.FIGMA_API_KEY }}
           FIGMA_FILE_KEY: w8VjkUTV7f8AGiI7HXzKda
@@ -826,11 +827,35 @@ jobs:
           FIGMA_IPHONE63_NODE_ID: "6316:14199"
           FIGMA_IPAD_NODE_ID: "5456:18569"
         run: |
-          [ -n "$FIGMA_API_KEY" ] || { echo "::error::FIGMA_API_KEY secret missing"; exit 2; }
+          # The fetch transcript must exist for EVERY failure mode: later
+          # steps still run (see `if: "!cancelled()"` below) and the ZIP
+          # carries bezel-fetch.log, so even a missing secret records its
+          # non-secret reason here — never only in this step's console.
+          # Pins and --scale 2 are owner-fixed; a drifted source fails
+          # here, never by relaxing geometry downstream.
+          mkdir -p "$RUNNER_TEMP/bezels"
+          if [ -z "$FIGMA_API_KEY" ]; then
+            echo "invalid: FIGMA_API_KEY secret missing; bezel fetch refuses unauthenticated Figma access" | tee "$RUNNER_TEMP/bezels/bezel-fetch.log"
+            echo "::error::FIGMA_API_KEY secret missing"
+            exit 2
+          fi
           python3 -m pip install --break-system-packages "Pillow==13.0.0"
-          python3 scripts/panels/fetch_bezel_assets.py --out "$RUNNER_TEMP/bezels" --scale 2
+          set +e
+          python3 scripts/panels/fetch_bezel_assets.py --out "$RUNNER_TEMP/bezels" --scale 2 >"$RUNNER_TEMP/bezels/bezel-fetch.log" 2>&1
+          rc=$?
+          set -e
+          cat "$RUNNER_TEMP/bezels/bezel-fetch.log"
+          if [ "$rc" -ne 0 ]; then
+            echo "::warning::bezel fetch failed (exit $rc) — continuing to render with whatever bezels verified; missing cells stay blocked, no art fabricated"
+          fi
+          exit "$rc"
 
       - name: Render panels
+        # Runs even when the bezel fetch failed: successfully fetched bezels
+        # still render their cells while drifted/missing ones block per-cell
+        # in matrix-manifest.json (no fabricated panels). The job stays red
+        # via the failed fetch step; this step only governs the bundle.
+        if: "!cancelled()"
         env:
           DEVICES: ${{ needs.validate.outputs.devices }}
           LANGUAGES: ${{ needs.validate.outputs.languages }}
@@ -857,8 +882,30 @@ jobs:
           # written at all (a hard invocation error, not blocked cells).
           if [ "$rc" -ne 0 ] && [ ! -f "$RUNNER_TEMP/panels/matrix-manifest.json" ]; then exit "$rc"; fi
           if [ "$rc" -ne 0 ]; then echo "::warning::panels matrix incomplete (exit $rc) — blocked cells recorded in matrix-manifest.json; uploading partial bundle"; fi
+          # Carry the bezel-fetch transcript into the bundle so the ZIP
+          # preserves the exact drift/secret/network reason alongside the
+          # per-cell blocked reasons (evidence, never a substitute bezel).
+          # Best effort with loud warnings: a copy failure warns but never
+          # fails this step (the matrix manifest is the primary evidence),
+          # and a missing transcript or panels dir warns instead of passing
+          # silently — the bundle stays partial, never falsely complete.
+          if [ -f "$RUNNER_TEMP/bezels/bezel-fetch.log" ] && [ -d "$RUNNER_TEMP/panels" ]; then
+            if cp "$RUNNER_TEMP/bezels/bezel-fetch.log" "$RUNNER_TEMP/panels/bezel-fetch.log"; then
+              echo "bundled bezel-fetch.log"
+            else
+              echo "::warning::could not copy bezel-fetch.log into the panels bundle (rc $?) — transcript stays in the fetch step's console log only; bundle carries the matrix manifest"
+            fi
+          elif [ ! -f "$RUNNER_TEMP/bezels/bezel-fetch.log" ]; then
+            echo "::warning::no bezel-fetch.log to bundle (fetch step never wrote one) — bundle carries the matrix manifest only"
+          else
+            echo "::warning::no panels dir to receive bezel-fetch.log — bundle carries no rendered panels"
+          fi
 
       - name: Write README and zip
+        # Runs even when the bezel fetch failed so a handoff/debug bundle
+        # (partial panels + matrix manifest + fetch transcript + shots) is
+        # still downloadable; blocked cells stay blocked, never fabricated.
+        if: "!cancelled()"
         # The delivered ZIP is self-contained: rendered panels plus the
         # raw per-locale captures (both passes, frame records, receipts,
         # statuses) plus the verified build manifest. Blocked source
@@ -883,6 +930,11 @@ jobs:
           rm bundle-readme.md
 
       - name: Upload bundle
+        # Uploads even when the bezel fetch failed: without this the run
+        # ends with no final ZIP (proven 41813403434/41776556435) despite
+        # downloadable partial panels existing. The job conclusion stays
+        # failed via the fetch step — this never greens a red run.
+        if: "!cancelled()"
         uses: actions/upload-artifact@v4
         with:
           name: lifio-screenshots-${{ github.sha }}

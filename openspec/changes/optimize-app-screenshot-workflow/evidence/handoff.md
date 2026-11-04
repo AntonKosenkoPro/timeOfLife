@@ -1,5 +1,64 @@
 # Handoff — optimize-app-screenshot-workflow (compaction checkpoint)
 
+## Dry-run fixes checkpoint 2026-11-04 (verified, sole-writer commit next)
+
+- Cold dry run (~22min vs 70+; user explicitly accepts, no further speed
+  optimization requested) still produced NO successful final ZIP. Two root
+  causes, both fixed and verified; no source re-verification needed here
+  (unexpected source would require reruns — none found: exactly the 7
+  expected files, no unfamiliar work).
+- Root cause 1 — capture: host `simctl ui appearance` hung 60s past the
+  runner timeout (iphone63/ru-r1 mirror) while the receipt claimed
+  `complete` for a truncated 1-of-4 transcript with zero failures.
+  Fix (`scripts/screenshots/executor.py` `_counted`): spawn failures
+  (`TimeoutExpired`/`OSError`) raise fail-closed `FrameError`, so
+  `run_session` receipt accounting records partial + named failure;
+  cleanup/restore/lease still run. Tests: 2 new in `test_session_run.py`
+  (timeout-at-export-verify, oserror-at-snapshot).
+- Root cause 2 — packaging: pinned iPad Figma node renders landscape
+  3000x2300 vs owner-approved portrait 2300x3000 — REJECTED as drift;
+  no unapproved asset rotation/pin, no geometry relaxation downstream.
+  Fix (`app-screenshots.yml` + panels): fetch fails closed with the exact
+  drift message and keeps verified iPhone bezels; Render/Write/Upload each
+  pin their own `if: "!cancelled()"` so a red fetch still yields a
+  failure-path debug ZIP (partial panels + matrix manifest + bezel-fetch
+  log + shots) with loud copy/missing-transcript guards; README inventories
+  `bezel-fetch*` with sha256. Tests: 2 new in panels `test_matrix.py`
+  (landscape-drift partial bundle, readme log inventory) + 4 new in
+  `test_workflow_contract.py` (cancelled-gating, diagnosable fetch,
+  loud copy, pins/scale preserved).
+- Tests (main-verified dry run, reproduced before/after): screenshot suite
+  465 OK / 1 skip (459+2+4), panels 91 OK / 3 skip, contracts 45,
+  actionlint clean. No further tests run in this commit unit.
+- Tasks 8.1/8.2/8.3/8.6 stay OPEN; PR #235 stays draft (observed
+  non-draft at commit time — flagged for main; no state changed here).
+  No iOS edits, no secrets/binaries (`git diff --check` clean; only the
+  pre-existing `secrets.FIGMA_API_KEY` ref), no threshold changes.
+  Main schedules the clean retry; no screenshots/dispatch from this unit.
+
+## PR and failed cold-run checkpoint (supersedes precommit status below)
+
+- PR #235: https://github.com/AntonKosenkoPro/timeOfLife/pull/235 (draft).
+  Implementation commit 3594c8d3 rebased cleanly onto origin/main 009b0d25;
+  test-only tooling CI fix c5c7773c is pushed. Human author identity and agent
+  attribution preserved. No merge or archive.
+- Mandatory PR checks pass on c5c7773c: backend-gate, ios-gate, tooling-tests,
+  panels-tests, and OpenSpec. Final local post-rebase Debug1051/98,
+  Screenshot1132/103, Release simulator build, backend and tooling checks pass.
+- Cold full default run 41813403434 FAILED. Dispatch 10:19:27Z, final failure
+  10:41:23Z (~21m56s; NOT final-ZIP timing). Shared build, iphone69, ipad13
+  succeeded; iphone63 Capture locales failed, then panels Fetch Apple bezel
+  assets failed. No final ZIP. Tasks 8.1/8.2/8.3 remain open; no cold/warm
+  runtime acceptance. No warm dispatch before fixes.
+- Failure owners: Python capture ses_e59d50d17ffeXmzQ56N3ctmrK5;
+  panels/workflow ses_e59d50cecffeS7gT6NNBJFRfOZ;
+  iOS read-only diagnosis ses_e59d50cadffei0lnql8aNWy6I7.
+  Main owns checkpoint/tasks; no fix may relax deadlines, geometry, cleanup,
+  genuine-evidence, or approval gates to obtain green output.
+- Stage-1 AI review triggered by comment 6628698621; collector
+  ses_e59d6b4baffeaGfnCn3raMQQbr owns run-ID-based reconciliation. Do not
+  mark ready before mandatory checks and the reconciled review/thread gates.
+
 ## Precommit checkpoint 2026-11-04 (sole-writer commit + rebase; supersedes stale status prose below)
 
 - Checklist **37/41**; open **8.1/8.2/8.3/8.6** (8.6 held for post-rebase reruns/handoff — do not check it here).

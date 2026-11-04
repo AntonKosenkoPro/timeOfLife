@@ -783,6 +783,86 @@ class FetchBezelTests(unittest.TestCase):
                 (out / panels_builder.BEZEL_FILES["6.9"]).exists())
             self.assertFalse(list(out.glob("*.part")))
 
+    def test_ipad_landscape_drift_yields_partial_bundle(self):
+        """CI 41813403434/41776556435: Figma iPad node renders landscape.
+
+        The pinned iPad node renders 3000x2300 at scale 2 while the
+        owner-approved bezel is portrait 2300x3000. Fetch must fail
+        closed with the exact drift message, keep the two verified
+        iPhone bezels (no partial writes), and render-matrix over those
+        bezels must still render iPhone cells while blocking iPad cells
+        with an explicit reason — a partial handoff bundle, never
+        fabricated iPad panels and never a silent no-ZIP.
+        """
+
+        def landscape_ipad_bytes() -> bytes:
+            im = Image.new("RGBA", (3000, 2300), (200, 200, 200, 255))
+            ImageDraw.Draw(im).rectangle(
+                [118, 124, 118 + 2064, 124 + 2752], fill=(0, 0, 0, 0))
+            buf = io.BytesIO()
+            im.save(buf, format="PNG")
+            return buf.getvalue()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            holder: dict = {}
+            base = self.start_fake_figma(holder, {
+                "/v1/img/iphone.png": make_bezel_69_bytes(),
+                "/v1/img/iphone63.png": make_bezel_63_bytes(),
+                "/v1/img/ipad.png": landscape_ipad_bytes()})
+            holder.update({"err": "", "images": {
+                "1:1": f"{base}/img/iphone.png",
+                "3:3": f"{base}/img/iphone63.png",
+                "2:2": f"{base}/img/ipad.png"}})
+            bezels = root / "bezels"
+            fetch = run_fetch("--out", str(bezels),
+                              "--file-key", "F",
+                              "--iphone-node", "1:1",
+                              "--iphone63-node", "3:3",
+                              "--ipad-node", "2:2",
+                              extra_env=self.fake_env(base))
+            self.assertEqual(fetch.returncode, 2)
+            self.assertIn(
+                "bezel size drift (3000, 2300) != (2300, 3000)",
+                fetch.stderr)
+            self.assertIn("ipad13", fetch.stderr)
+            panels_builder.verify_bezel_69(
+                bezels / panels_builder.BEZEL_FILES["6.9"])
+            panels_builder.verify_bezel_63(
+                bezels / panels_builder.BEZEL_FILES["6.3"])
+            self.assertFalse(
+                (bezels / panels_builder.BEZEL_FILES["ipad13"]).exists())
+            self.assertFalse(list(bezels.glob("*.part")))
+
+            shots = root / "shots"
+            make_run(shots, "iphone69", "en", "iphone69-en-r1",
+                     (1320, 2868), FRAME_COLORS_69)
+            make_run(shots, "ipad13", "en", "ipad13-en-r1",
+                     (2064, 2752), FRAME_COLORS_IPAD)
+            out = root / "out"
+            rendered = run_panels(
+                "--render-matrix", "--shots-dir", str(shots),
+                "--bezels-dir", str(bezels), "--out", str(out),
+                "--devices", '["iphone69","ipad13"]',
+                "--languages", '["en"]')
+            self.assertEqual(rendered.returncode, 2)
+            manifest = json.loads(
+                (out / "matrix-manifest.json").read_text(encoding="utf-8"))
+            self.assertEqual(manifest["status"], "incomplete")
+            self.assertEqual(manifest["counts"],
+                             {"blocked": 1, "cells": 2, "rendered": 1})
+            by_device = {c["device"]: c for c in manifest["cells"]}
+            self.assertEqual(by_device["iphone69"]["status"], "rendered")
+            self.assertEqual(len(list(
+                (out / "iphone69" / "en").glob(
+                    "panel-*-en-1320x2868.png"))), 5)
+            self.assertEqual(by_device["ipad13"]["status"], "blocked")
+            self.assertIn("missing bezel asset",
+                          by_device["ipad13"]["reason"])
+            self.assertEqual(
+                list((out / "ipad13").rglob("panel-*.png"))
+                if (out / "ipad13").exists() else [], [])
+
 
 class BundleReadmeTests(unittest.TestCase):
     def test_readme_happy_path(self):
@@ -818,6 +898,51 @@ class BundleReadmeTests(unittest.TestCase):
                            "REVIEW SET ONLY", "panel-track-en-8x8.png",
                            "1320x2868"):
                 self.assertIn(needle, text)
+
+    def test_readme_inventories_bezel_fetch_log(self):
+        # Handoff/debug bundle: the bezel-fetch transcript travels in the
+        # ZIP, so the README file inventory must name it WITH its sha256
+        # (evidence present, not merely mentioned in a blocked reason).
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            shots = make_shots_matrix(root)
+            panels_dir = root / "panels"
+            (panels_dir / "iphone69" / "en").mkdir(parents=True)
+            (panels_dir / "matrix-manifest.json").write_text(
+                json.dumps({
+                    "schema_version": 1, "status": "incomplete",
+                    "counts": {"cells": 2, "rendered": 1, "blocked": 1},
+                    "cells": [{"device": "iphone69", "language": "en",
+                               "size": "6.9", "status": "rendered",
+                               "run_id": "iphone69-en-r1",
+                               "captions_version": "captions-v1",
+                               "panels": {"a.png": "abc"}},
+                              {"device": "ipad13", "language": "en",
+                               "size": "ipad13", "status": "blocked",
+                               "reason": "missing bezel asset X"}]}),
+                encoding="utf-8")
+            Image.new("RGB", (8, 8)).save(
+                panels_dir / "iphone69" / "en" / "panel-track-en-8x8.png")
+            fetch_log = panels_dir / "bezel-fetch.log"
+            fetch_log.write_text(
+                "invalid: bezel verification failed (ipad13, "
+                "node '5456:18569'): bezel size drift (3000, 2300) != "
+                "(2300, 3000)\n", encoding="utf-8")
+            digest = hashlib.sha256(
+                fetch_log.read_bytes()).hexdigest()
+            out = root / "bundle-readme.md"
+            proc = run_readme(
+                "--panels-dir", str(panels_dir),
+                "--shots-dir", str(shots),
+                "--ios-runtime", "iOS 27.0",
+                "--devices", '["iphone69","ipad13"]',
+                "--languages", '["en"]',
+                "--out", str(out),
+                "--commit", "deadbee", "--dirty", "false")
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            text = out.read_text(encoding="utf-8")
+            self.assertIn("HANDOFF", text)
+            self.assertIn(f"bezel-fetch.log {digest}", text)
 
     def test_readme_unverified_deck_marked(self):
         with tempfile.TemporaryDirectory() as tmp:

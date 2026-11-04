@@ -11,6 +11,7 @@ import json
 import os
 import shutil
 import struct
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -348,6 +349,34 @@ class SessionFakeSimctl:
         return [c for c in self.calls if len(c) > 2 and c[2] == "launch"]
 
 
+class _HangAppearanceFake(SessionFakeSimctl):
+    """Fail one `simctl ui <udid> appearance` query with a spawn error.
+
+    hang_at_query=1 drops the chrome-snapshot query; =2 drops the first
+    export's per-frame check (the cold-run iphone63/ru-r1 mirror:
+    snapshot succeeds, the seq-0 ack arrives, then the appearance query
+    hangs past the runner timeout). error_kind selects the injected
+    exception ("timeout" or "oserror").
+    """
+
+    def __init__(self, *args, hang_at_query=2, error_kind="timeout",
+                 **kwargs):
+        super().__init__(*args, **kwargs)
+        self._hang_at_query = hang_at_query
+        self._error_kind = error_kind
+        self._appearance_queries = 0
+
+    def __call__(self, argv):
+        if len(argv) == 5 and argv[1] == "simctl" and argv[2] == "ui" \
+                and argv[4] == "appearance":
+            self._appearance_queries += 1
+            if self._appearance_queries == self._hang_at_query:
+                if self._error_kind == "timeout":
+                    raise subprocess.TimeoutExpired(argv, 60)
+                raise OSError("injected missing simctl")
+        return super().__call__(argv)
+
+
 class PinnedSessionTests(unittest.TestCase):
     def _run(self, tmp, **kw):
         udid = f"UDID-pin-{os.getpid()}-{len(os.listdir(tmp))}"
@@ -469,6 +498,73 @@ class PinnedSessionTests(unittest.TestCase):
             receipt = json.loads(receipts[0].read_text(encoding="utf-8"))
             self.assertEqual(receipt["status"], "partial")
             self.assertTrue(receipt["failures"])
+
+    def test_simctl_timeout_at_export_verify_is_fail_closed(self):
+        # Cold-run iphone63/ru-r1 mirror: snapshot succeeds, the seq-0 ack
+        # arrives, then the first export's appearance query hangs past the
+        # runner timeout. Must raise FrameError (never a bare
+        # TimeoutExpired) with a partial receipt naming the spawn failure;
+        # cleanup/restore/lease still run, nothing is staged, and the
+        # receipt never claims complete for its truncated transcript.
+        with tempfile.TemporaryDirectory() as tmp:
+            udid = f"UDID-hang-{os.getpid()}"
+            container = Path(tmp) / "container"
+            container.mkdir()
+            fake = _HangAppearanceFake(container, hang_at_query=2,
+                                       list_model=IPHONE63_MODEL)
+            run_dir = Path(tmp) / "runs" / "iphone63-ru-r1"
+            with self.assertRaises(ex.FrameError) as ctx:
+                ex.run_session(
+                    fake, udid, base_request("iphone63-ru-r1"), "pinned",
+                    run_dir, device_key="iphone63",
+                    pinned_totals=dict(PINNED), geometry=(1206, 2622),
+                    session_nonce="a6b6b9af2a38bacfb2bb70334df09eb1",
+                    sleeper=ex.no_sleep, on_poll=fake.pump)
+            self.assertIn("simctl spawn failed", str(ctx.exception))
+            self.assertIn("appearance", str(ctx.exception))
+            self.assertIn("contaminated", str(ctx.exception))
+            frames_dir = run_dir / "frames"
+            self.assertFalse(frames_dir.is_dir()
+                             and list(frames_dir.glob("*.png")))
+            receipts = list((run_dir / "sessions").glob("*.receipt.json"))
+            self.assertEqual(len(receipts), 1)
+            receipt = json.loads(receipts[0].read_text(encoding="utf-8"))
+            self.assertEqual(receipt["status"], "partial")
+            self.assertTrue(receipt["failures"])
+            self.assertIn("simctl spawn failed", receipt["failures"][0])
+            self.assertEqual(len(receipt["transcript"]), 1)
+            self.assertTrue(receipt["runner_verified"]["chrome_restored"])
+            self.assertTrue(
+                receipt["runner_verified"]["process_terminated"])
+            self.assertTrue(receipt["runner_verified"]["lease_released"])
+
+    def test_simctl_oserror_at_snapshot_is_fail_closed(self):
+        # Spawn failure during chrome snapshot (missing binary shape):
+        # nothing is captured and the receipt stays partial with the
+        # failure named and an empty transcript.
+        with tempfile.TemporaryDirectory() as tmp:
+            udid = f"UDID-snap-{os.getpid()}"
+            container = Path(tmp) / "container"
+            container.mkdir()
+            fake = _HangAppearanceFake(container, hang_at_query=1,
+                                       error_kind="oserror",
+                                       list_model=IPHONE63_MODEL)
+            run_dir = Path(tmp) / "runs" / "iphone63-ru-r1"
+            with self.assertRaises(ex.FrameError) as ctx:
+                ex.run_session(
+                    fake, udid, base_request("iphone63-ru-r1"), "pinned",
+                    run_dir, device_key="iphone63",
+                    pinned_totals=dict(PINNED), geometry=(1206, 2622),
+                    session_nonce="b7c7c9ab3b49cbdbc3cc81445ea10fc2",
+                    sleeper=ex.no_sleep, on_poll=fake.pump)
+            self.assertIn("simctl spawn failed", str(ctx.exception))
+            receipts = list((run_dir / "sessions").glob("*.receipt.json"))
+            self.assertEqual(len(receipts), 1)
+            receipt = json.loads(receipts[0].read_text(encoding="utf-8"))
+            self.assertEqual(receipt["status"], "partial")
+            self.assertTrue(receipt["failures"])
+            self.assertIn("simctl spawn failed", receipt["failures"][0])
+            self.assertEqual(receipt["transcript"], [])
 
     def test_device_key_validation(self):
         with tempfile.TemporaryDirectory() as tmp:

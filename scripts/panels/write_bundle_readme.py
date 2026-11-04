@@ -179,7 +179,11 @@ def main(argv: list[str] | None = None) -> int:
     decks = {(d, lang): harvest_deck(shots_dir, d, lang)
              for d in devices for lang in languages}
     files: list[tuple[str, str]] = []
-    for pattern in ("panel-*.png", "*.recipe.json", "matrix-manifest.json"):
+    # bezel-fetch* carries the bezel-fetch transcript (success SHAs or the
+    # exact drift/secret/network failure) into the bundle inventory so a
+    # handoff/debug bundle names its bezel evidence next to the panels.
+    for pattern in ("panel-*.png", "*.recipe.json", "matrix-manifest.json",
+                    "bezel-fetch*"):
         for path in sorted(panels_dir.rglob(pattern)):
             try:
                 files.append((str(path.relative_to(panels_dir)),

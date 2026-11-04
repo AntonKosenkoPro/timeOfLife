@@ -812,8 +812,23 @@ SESSION_PENDING_REASON = (
 
 def _counted(run: Callable, argv: list[str],
              stats: sess.PhaseStats | None) -> Any:
-    """Run one simctl subprocess, counting it when stats are present."""
-    proc = run(argv)
+    """Run one simctl subprocess, counting it when stats are present.
+
+    Spawn failures (a hang past the runner timeout, a missing binary)
+    are fail-closed FrameErrors, never raw tracebacks: run_session's
+    receipt accounting only tracks FrameError, so a bare
+    TimeoutExpired/OSError would escape with a "complete" receipt for a
+    truncated transcript (cold-run iphone63/ru-r1: appearance query hung
+    60s, receipt claimed complete with 1 of 4 frames and no failures).
+    Same convention as run_device_worker.call and preflight --execute.
+    No timeout, deadline, or retry change here.
+    """
+    try:
+        proc = run(argv)
+    except (subprocess.TimeoutExpired, OSError) as exc:
+        raise FrameError(
+            f"simctl spawn failed: {' '.join(argv)} -> {exc!r:.300}"
+        )
     if stats is not None:
         stats.count("simctl_spawn")
     return proc
