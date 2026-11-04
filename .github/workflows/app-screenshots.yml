@@ -311,6 +311,7 @@ jobs:
     # handoff — only a missing manifest fails the job.
     if: "!cancelled()"
     runs-on: macos-15
+    environment: stage
     timeout-minutes: 30
     permissions:
       contents: read
