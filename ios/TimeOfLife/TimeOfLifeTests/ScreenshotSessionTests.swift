@@ -53,10 +53,18 @@ struct ScreenshotSessionTests {
         runID: String? = nil,
         locale: String = "en",
         region: String = "US",
-        timezone: String = "America/Chicago"
+        timezone: String = "America/Chicago",
+        payloadBytes: Data? = nil
     ) throws -> Data {
         try ScreenshotSessionEnvelopeLoader.makeOuter(
-            payload: payload(frame: frame, mode: mode, locale: locale, region: region, timezone: timezone, runID: runID),
+            payload: payloadBytes ?? payload(
+                frame: frame,
+                mode: mode,
+                locale: locale,
+                region: region,
+                timezone: timezone,
+                runID: runID
+            ),
             runID: runID ?? self.runID,
             nonce: nonce ?? self.nonce,
             domain: domain,
@@ -169,9 +177,15 @@ struct ScreenshotSessionTests {
 
     @Test("outer metadata alone never changes the payload hash")
     func outerMetadataDoesNotChangePayloadHash() throws {
-        let a = try ScreenshotSessionEnvelopeLoader.parse(data: envelope(seq: 0, nonce: nonce))
-        let b = try ScreenshotSessionEnvelopeLoader.parse(data: envelope(seq: 0, nonce: otherNonce))
+        // One payload, byte-identical under both nonces: the protocol
+        // hashes the exact transmitted bytes, so re-serializing here would
+        // test JSONSerialization's key order (unspecified without
+        // .sortedKeys) instead of outer-metadata independence.
+        let bytes = try payload()
+        let a = try ScreenshotSessionEnvelopeLoader.parse(data: envelope(seq: 0, nonce: nonce, payloadBytes: bytes))
+        let b = try ScreenshotSessionEnvelopeLoader.parse(data: envelope(seq: 0, nonce: otherNonce, payloadBytes: bytes))
         #expect(a.requestSHA256 == b.requestSHA256)
+        #expect(a.requestSHA256 == ScreenshotRequestLoader.sha256Hex(bytes))
         #expect(a.nonce != b.nonce)
     }
 
