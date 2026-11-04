@@ -2466,15 +2466,15 @@ class AckTranscriptTests(unittest.TestCase):
 
 
 class CrossLocaleCellBindingTests(unittest.TestCase):
-    """Audit cell-locale binding: end-to-end PROOF plus producer fix.
+    """Producer locale binding (stdlib-only; no panels imports here).
 
-    The hole (proven pre-fix: a complete EN run copied under the ru
-    cell with run identities rewritten passed consumer selection AND
-    the evidence gate) is closed in two layers: the producer binds an
-    envelope-derived unanimous run locale at finalization, and the
-    consumer requires every provenance claim to equal the cell
-    language (C owner, enforced — the standing negative below drives
-    the real consumer selection read-only and pins the refusal).
+    The consumer half of the audit finding — a complete EN run forged
+    under the ru cell refused through the full matrix renderer — lives
+    in the Pillow lane (panels/tests/test_matrix.py), since the CI
+    tooling-tests lane is stdlib-only and importing panels pulls
+    Pillow. These tests pin the producer side: envelope-derived
+    unanimous manifest locale plus fail-closed finalize rejection of
+    missing/tampered/divergent locale provenance.
     """
 
     def _complete_en_run(self, tmp: str):
@@ -2503,54 +2503,6 @@ class CrossLocaleCellBindingTests(unittest.TestCase):
         self.assertEqual(pending, [])
         self.assertEqual(manifest["status"], "complete")
         return run_dir
-
-    def _forge_ru_cell(self, tmp: str, run_dir: Path) -> Path:
-        cell = Path(tmp) / "shots" / "iphone69" / "ru"
-        dest = cell / "runs" / "sess-ru-r1"
-        shutil.copytree(run_dir, dest)
-
-        def _rewrite_run_id(obj):
-            # Every run_id FIELD at any depth (manifest frames included);
-            # request_json stays byte-intact (nothing rehashes it today).
-            if isinstance(obj, dict):
-                for key, val in obj.items():
-                    if key == "run_id" and val == "sess-en-r1":
-                        obj[key] = "sess-ru-r1"
-                    else:
-                        _rewrite_run_id(val)
-            elif isinstance(obj, list):
-                for val in obj:
-                    _rewrite_run_id(val)
-
-        for child in sorted(dest.rglob("*.json")):
-            try:
-                obj = json.loads(child.read_text(encoding="utf-8"))
-            except ValueError:
-                continue
-            before = json.dumps(obj, sort_keys=True)
-            _rewrite_run_id(obj)
-            if json.dumps(obj, sort_keys=True) != before:
-                child.write_text(json.dumps(obj, sort_keys=True) + "\n",
-                                 encoding="utf-8")
-        return cell
-
-    def test_cross_locale_copy_blocked_end_to_end(self):
-        # Standing cross-locale negative through the REAL consumer
-        # chain: a complete EN run copied under the ru cell with outer
-        # run identities rewritten. The consumer's strict locale
-        # binding (C owner) refuses it — the archived inner commands
-        # still bind the EN run identity, so provenance diverges and
-        # selection blocks before any pixel renders. EN pixels must
-        # never render under ru captions.
-        sys.path.insert(0, str(HERE.parent / "panels"))
-        import panels as panels_mod
-        import builder as panels_builder
-        with tempfile.TemporaryDirectory() as tmp:
-            run_dir = self._complete_en_run(tmp)
-            cell = self._forge_ru_cell(tmp, run_dir)
-            with self.assertRaises(panels_builder.BuilderError) as ctx:
-                panels_mod.find_matrix_run(cell, "iphone69", "ru")
-            self.assertIn("locale", str(ctx.exception).lower())
 
     def test_producer_binds_run_locale(self):
         # Producer integration proof: the manifest `locale` (exact

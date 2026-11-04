@@ -27,8 +27,16 @@ README_CLI = str(HERE / "write_bundle_readme.py")
 
 sys.path.insert(0, str(HERE))
 sys.path.insert(0, str(HERE.parent / "screenshots"))
+sys.path.insert(0, str(HERE.parent / "screenshots" / "tests"))
 
 import builder as panels_builder
+# Real-producer harness for the end-to-end cross-locale negative
+# below (stdlib-only imports: executor/session/capture; no Pillow).
+# Importing a screenshots test module is intentional — it owns the
+# fake-sim session harness (SessionFakeSimctl/two_domain_run), and
+# duplicating ~300 lines here would rot. No side effects at import
+# (defs + constants only; unittest.main is __main__-guarded there).
+import test_session_run as producer_harness
 
 try:
     from PIL import Image, ImageDraw  # noqa: E402
@@ -298,6 +306,40 @@ def make_run(shots: Path, device: str, language: str, run_id: str,
                    ci_approval_bypass=ci_approval_bypass,
                    device=device, la_capture=la_capture,
                    language=(provenance_locale or language))
+
+
+def forge_ru_cell_from_run(shots: Path, run_dir: Path,
+                             src_run_id: str = "sess-en-r1",
+                             dst_run_id: str = "sess-ru-r1") -> Path:
+    """Copy a REAL producer run under the ru cell with outer run
+    identities rewritten (inner hash-bound commands intact — the exact
+    inconsistency a copied run produces). Returns the cell dir."""
+    cell = shots / "iphone69" / "ru"
+    dest = cell / "runs" / dst_run_id
+    shutil.copytree(run_dir, dest)
+
+    def _rewrite(obj):
+        if isinstance(obj, dict):
+            for key, val in obj.items():
+                if key == "run_id" and val == src_run_id:
+                    obj[key] = dst_run_id
+                else:
+                    _rewrite(val)
+        elif isinstance(obj, list):
+            for val in obj:
+                _rewrite(val)
+
+    for child in sorted(dest.rglob("*.json")):
+        try:
+            obj = json.loads(child.read_text(encoding="utf-8"))
+        except ValueError:
+            continue
+        before = json.dumps(obj, sort_keys=True)
+        _rewrite(obj)
+        if json.dumps(obj, sort_keys=True) != before:
+            child.write_text(json.dumps(obj, sort_keys=True) + "\n",
+                             encoding="utf-8")
+    return cell
 
 
 def make_bezel_69_bytes() -> bytes:
@@ -802,6 +844,61 @@ class RenderMatrixTests(unittest.TestCase):
             self.assertEqual(manifest["cells"][0]["status"], "blocked")
             self.assertIn("locale",
                           manifest["cells"][0]["reason"].lower())
+
+    def test_matrix_cross_locale_real_producer_blocked(self):
+        # End-to-end cross-locale negative with REAL producer output
+        # (moved here from the stdlib-only screenshots lane, which must
+        # never import Pillow-dependent panels): a complete EN run
+        # built by run_session + genuine registration + finalize_run,
+        # copied under the ru cell with outer run identities rewritten.
+        # The full matrix renderer must block with a locale reason and
+        # emit no ru pixels — EN art must never render as ru.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            udid = f"UDID-xloc-{os.getpid()}"
+            run_id = "sess-en-r1"
+            _fake, run_dir, _p, realtime = \
+                producer_harness.two_domain_run(tmp, udid, run_id)
+            gen = producer_harness.PendingToGenuineE2ETests()
+            base = producer_harness.base_request(run_id)
+            for seq, frame in enumerate(("la-lock", "la-compact",
+                                         "la-expanded")):
+                request, digest, state, png, op, sha = \
+                    gen._genuine_inputs(tmp, base, frame, seq)
+                producer_harness.ex.record_external_frame(
+                    run_dir=run_dir, frame=frame, png_src=str(png),
+                    captured_at_iso="2026-10-30T10:12:34+00:00",
+                    observation_path=str(op), state=state,
+                    request=request, request_sha256=digest,
+                    pinned_totals=dict(producer_harness.PINNED),
+                    device_udid=udid,
+                    session_binding={
+                        "session_nonce": producer_harness.NONCE_RT,
+                        "session_domain": "realtime", "seq": seq})
+            manifest, pending = producer_harness.ex.finalize_run(
+                run_dir, provenance=dict(producer_harness.PROV))
+            self.assertEqual(pending, [])
+            self.assertEqual(manifest["status"], "complete")
+            self.assertEqual(manifest.get("locale"), "en")
+            shots = root / "shots"
+            forge_ru_cell_from_run(shots, run_dir)
+            bezels = root / "bezels"
+            write_bezels(bezels)
+            out = root / "out"
+            proc = run_panels(
+                "--render-matrix", "--shots-dir", str(shots),
+                "--bezels-dir", str(bezels), "--out", str(out),
+                "--devices", '["iphone69"]',
+                "--languages", '["ru"]')
+            self.assertEqual(proc.returncode, 2)
+            manifest = json.loads(
+                (out / "matrix-manifest.json").read_text(encoding="utf-8"))
+            self.assertEqual(manifest["cells"][0]["status"], "blocked")
+            self.assertIn("locale",
+                          manifest["cells"][0]["reason"].lower())
+            self.assertEqual(
+                list((out / "iphone69" / "ru").glob("panel-*.png"))
+                if (out / "iphone69" / "ru").exists() else [], [])
 
     def test_matrix_device_mismatch_blocked(self):
         # Declared device binding: a manifest whose frames declare a
