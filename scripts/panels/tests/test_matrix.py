@@ -43,6 +43,52 @@ OWNER_EN = {
     "add_entry": "All details you need.",
 }
 
+# Session-evidence fixture pins (mirror scripts/screenshots session contract;
+# consumed strictly via session_evidence.validate_run_evidence — never
+# reimplemented here). Two nonces per run: one pinned, one realtime.
+NONCE_PINNED = "0123456789abcdef0123456789abcdef"
+NONCE_REALTIME = "fedcba9876543210fedcba9876543210"
+APP_FRAMES = ("track-running", "insights", "history", "add-entry")
+LA_FRAMES = ("la-lock", "la-compact", "la-expanded")
+IPAD_LOCK_COLOR = (110, 110, 150)
+# Attested iPad model — REAL catalog identifier (8GB variant only, not
+# the unsuffixed family name): the shared validator requires an exact
+# cataloged model. Name is operator-assigned evidence (presence, not
+# value); udid must equal the run's unanimous frame device_udid.
+IPAD_MODEL_ID = ("com.apple.CoreSimulator.SimDeviceType."
+                 "iPad-Pro-13-inch-M4-8GB")
+IPAD_MODEL_NAME = "shot-ci-ipad13"
+
+
+def attested_probe(device: str, run_id: str,
+                   canvas: tuple[int, int]) -> dict:
+    """Producer-shaped attested island probe (simctl-list source)."""
+    return {
+        "schema_version": 1,
+        "device_key": device,
+        "island_available": False,
+        "reason": "capability probe: no Dynamic Island",
+        "run_id": run_id,
+        "session_nonce": NONCE_REALTIME,
+        "geometry": {"width": canvas[0], "height": canvas[1]},
+        "model": {"deviceTypeIdentifier": IPAD_MODEL_ID,
+                  "name": IPAD_MODEL_NAME,
+                  "udid": "UDID-1"},
+        "source": "simctl-list",
+    }
+
+
+def _req_sha(run_id: str, frame: str) -> str:
+    return hashlib.sha256(f"req-{run_id}-{frame}".encode()).hexdigest()
+
+
+def _domain_of(frame: str) -> str:
+    return "pinned" if frame in APP_FRAMES else "realtime"
+
+
+def _nonce_of(frame: str) -> str:
+    return NONCE_PINNED if frame in APP_FRAMES else NONCE_REALTIME
+
 FRAME_COLORS_69 = {
     "track-running": (70, 130, 180),
     "insights": (90, 160, 90),
@@ -98,19 +144,102 @@ def run_readme(*argv: str):
 
 def write_manifest(path: Path, frames_dir: Path, run_id: str,
                    canvas: tuple[int, int], frames: tuple[str, ...],
-                   ci_approval_bypass: bool | None = None) -> None:
+                   ci_approval_bypass: bool | None = None,
+                   device: str = "iphone69",
+                   la_capture: str = "genuine") -> None:
+    """Session-valid manifest + frame records + receipts (+ iPad probe).
+
+    la_capture: "genuine" (external-lock-screen with window/observation
+    binding) or "pending" (external-lock-screen-pending with reason).
+    PNG files must already exist in frames_dir; their hashes are bound.
+    Frame record JSONs and session receipts are written alongside so the
+    shared session_evidence validator passes strictly.
+    """
+    run_dir = path.parent
+    sessions_dir = run_dir / "sessions"
+    sessions_dir.mkdir(parents=True, exist_ok=True)
+    # Per-domain seq counters (pinned 0..n, realtime 0..m).
+    seq_counters = {"pinned": 0, "realtime": 0}
     recs = []
+    transcripts: dict[str, list[dict]] = {}
     for frame in frames:
         png = frames_dir / f"{frame}.png"
-        recs.append({"frame": frame,
-                     "screenshot_sha256": hashlib.sha256(
-                         png.read_bytes()).hexdigest(),
-                     "geometry": {"width": canvas[0], "height": canvas[1]}})
+        sha_png = hashlib.sha256(png.read_bytes()).hexdigest()
+        domain = _domain_of(frame)
+        seq = seq_counters[domain]
+        seq_counters[domain] += 1
+        sha_req = _req_sha(run_id, frame)
+        rec: dict = {
+            "schema_version": 1, "frame": frame,
+            "mode": ("app-clock-pinned" if domain == "pinned"
+                     else "live-activity-realtime"),
+            "device_udid": "UDID-1", "device_key": device,
+            "run_id": run_id,
+            "deck_version": "en-austin-1", "treatment": "light-v1",
+            "request_sha256": sha_req,
+            "request_semantic_sha256": "b" * 64,
+            "screenshot_sha256": sha_png,
+            "geometry": {"width": canvas[0], "height": canvas[1]},
+            "expected_totals": {"all_seconds": 1, "today_seconds": 1,
+                                "week_seconds": 1,
+                                "category_seconds": {"A": 1},
+                                "text_seconds": {"B": 1}},
+            "session_nonce": _nonce_of(frame),
+            "session_domain": domain, "seq": seq,
+        }
+        if domain == "pinned":
+            rec["capture"] = "native-simctl"
+        elif la_capture == "genuine":
+            rec["capture"] = "external-lock-screen"
+            rec["capture_window"] = {
+                "started_at": "2026-10-30T10:00:00+00:00",
+                "captured_at_iso": "2026-10-30T10:00:10+00:00",
+                "observed_elapsed_s": 10,
+            }
+            rec["observation_sha256"] = "d" * 64
+        else:
+            rec["capture"] = "external-lock-screen-pending"
+            rec["captured_at_iso"] = "2026-10-30T10:00:10+00:00"
+            rec["pending_reason"] = "CI simctl pixels; human handoff"
+        (frames_dir / f"{frame}.json").write_text(
+            json.dumps(rec, sort_keys=True), encoding="utf-8")
+        recs.append(rec)
+        nonce = rec["session_nonce"]
+        transcripts.setdefault(nonce, []).append(
+            {"seq": seq, "frame": frame, "request_sha256": sha_req,
+             "request_semantic_sha256": "b" * 64})
+    for nonce, transcript in transcripts.items():
+        domain = ("pinned" if nonce == NONCE_PINNED else "realtime")
+        receipt = {
+            "schema_version": 1, "session_nonce": nonce,
+            "run_id": run_id, "session_domain": domain,
+            "final_seq": max(r["seq"] for r in transcript),
+            "status": "complete", "failures": [],
+            "transcript": sorted(transcript, key=lambda r: r["seq"]),
+            "app_cleanup": {"status": "cleaned",
+                            "removed_session": True,
+                            "removed_session_queue": True,
+                            "ended_activity_ids": []},
+            "runner_verified": {"chrome_restored": True,
+                                "process_terminated": True,
+                                "lease_released": True},
+        }
+        (sessions_dir / f"{nonce}.receipt.json").write_text(
+            json.dumps(receipt, sort_keys=True), encoding="utf-8")
+    if device == "ipad13":
+        probe = attested_probe(device, run_id, canvas)
+        (sessions_dir / "island-probe.json").write_text(
+            json.dumps(probe, sort_keys=True), encoding="utf-8")
     manifest: dict = {
         "schema_version": 1, "run_id": run_id, "status": "complete",
         "deck_version": "en-austin-1", "treatment": "light-v1",
         "geometry": {"width": canvas[0], "height": canvas[1]},
         "frames": recs}
+    if device == "ipad13":
+        # Producer-faithful N/A metadata (run_manifest.assemble shape):
+        # explicit scope + embedded probe copy alongside the probe file.
+        manifest["na_frames"] = ["la-compact", "la-expanded"]
+        manifest["island_probe"] = probe
     if ci_approval_bypass is not None:
         manifest["ci_approval_bypass"] = ci_approval_bypass
     path.write_text(json.dumps(manifest), encoding="utf-8")
@@ -118,15 +247,20 @@ def write_manifest(path: Path, frames_dir: Path, run_id: str,
 
 def make_run(shots: Path, device: str, language: str, run_id: str,
              canvas: tuple[int, int], colors: dict,
-             ci_approval_bypass: bool | None = None) -> None:
+             ci_approval_bypass: bool | None = None,
+             la_capture: str = "genuine") -> None:
     run_dir = shots / device / language / "runs" / run_id
     frames_dir = run_dir / "frames"
     frames_dir.mkdir(parents=True, exist_ok=True)
-    for frame, color in colors.items():
+    frames = dict(colors)
+    if device == "ipad13" and "la-lock" not in frames:
+        frames["la-lock"] = IPAD_LOCK_COLOR
+    for frame, color in frames.items():
         Image.new("RGB", canvas, color).save(frames_dir / f"{frame}.png")
     write_manifest(run_dir / "run-manifest.json", frames_dir, run_id,
-                   canvas, tuple(colors),
-                   ci_approval_bypass=ci_approval_bypass)
+                   canvas, tuple(frames),
+                   ci_approval_bypass=ci_approval_bypass,
+                   device=device, la_capture=la_capture)
 
 
 def make_bezel_69_bytes() -> bytes:
@@ -777,6 +911,494 @@ class BundleReadmeTests(unittest.TestCase):
                 "--out", str(root / "readme.md"))
             self.assertEqual(proc.returncode, 2)
             self.assertIn("unknown device", proc.stderr)
+
+    def test_readme_handoff_vs_complete_labeling(self):
+        # Task 6.7: an incomplete matrix must read as a handoff/debug
+        # bundle, never as a complete approved set; a complete matrix
+        # still carries REVIEW SET ONLY (never owner-approved).
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            shots = make_shots_matrix(root)
+            panels_dir = root / "panels"
+            panels_dir.mkdir()
+            (panels_dir / "matrix-manifest.json").write_text(
+                json.dumps({
+                    "schema_version": 1, "status": "incomplete",
+                    "counts": {"cells": 2, "rendered": 1, "blocked": 1},
+                    "cells": [
+                        {"device": "iphone69", "language": "en",
+                         "size": "6.9", "status": "rendered",
+                         "run_id": "iphone69-en-r1",
+                         "captions_version": "captions-v1",
+                         "panels": {"a.png": "abc"}},
+                        {"device": "iphone69", "language": "ru",
+                         "size": "6.9", "status": "blocked",
+                         "reason": "session receipt missing"},
+                    ]}), encoding="utf-8")
+            out = root / "readme.md"
+            proc = run_readme(
+                "--panels-dir", str(panels_dir),
+                "--shots-dir", str(shots),
+                "--ios-runtime", "iOS 27.0",
+                "--devices", '["iphone69"]',
+                "--languages", '["en","ru"]',
+                "--out", str(out),
+                "--commit", "x", "--dirty", "false")
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            text = out.read_text(encoding="utf-8")
+            self.assertIn("HANDOFF", text)
+            self.assertIn("blocked", text)
+            self.assertIn("approves nothing", text)
+            self.assertNotIn("NOT OWNER-APPROVED", text.replace(
+                "CI CAPTURE — NOT OWNER-APPROVED", ""))
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            shots = make_shots_matrix(root)
+            panels_dir = root / "panels"
+            panels_dir.mkdir()
+            (panels_dir / "matrix-manifest.json").write_text(
+                json.dumps({
+                    "schema_version": 1, "status": "complete",
+                    "counts": {"cells": 1, "rendered": 1, "blocked": 0},
+                    "cells": [{"device": "iphone69", "language": "en",
+                               "size": "6.9", "status": "rendered",
+                               "run_id": "iphone69-en-r1",
+                               "captions_version": "captions-v1",
+                               "panels": {"a.png": "abc"}}]}),
+                encoding="utf-8")
+            out = root / "readme.md"
+            proc = run_readme(
+                "--panels-dir", str(panels_dir),
+                "--shots-dir", str(shots),
+                "--ios-runtime", "iOS 27.0",
+                "--devices", '["iphone69"]', "--languages", '["en"]',
+                "--out", str(out),
+                "--commit", "x", "--dirty", "false")
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            text = out.read_text(encoding="utf-8")
+            self.assertIn("COMPLETE", text)
+            self.assertIn("REVIEW SET ONLY", text)
+            self.assertIn("approves nothing", text)
+
+
+@unittest.skipUnless(HAS_PILLOW, "Pillow required")
+class SessionEvidenceConsumerTests(unittest.TestCase):
+    """Task 6.7 consumer gate: strict shared-helper evidence, no weaker
+    duplicate verification. Each test drives the real panels CLI matrix
+    path so blocked cells surface with explicit reasons."""
+
+    def _matrix(self, shots, bezels, out, devices, languages,
+                captions_dir=None):
+        argv = ["--render-matrix", "--shots-dir", str(shots),
+                "--bezels-dir", str(bezels), "--out", str(out),
+                "--devices", json.dumps(devices),
+                "--languages", json.dumps(languages)]
+        if captions_dir is not None:
+            argv += ["--captions-dir", str(captions_dir)]
+        return run_panels(*argv)
+
+    def _setup(self, tmp: str):
+        root = Path(tmp)
+        shots = root / "shots"
+        bezels = root / "bezels"
+        write_bezels(bezels)
+        return root, shots, bezels
+
+    def test_missing_receipt_blocks(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            _root, shots, bezels = self._setup(tmp)
+            make_run(shots, "iphone69", "en", "iphone69-en-r1",
+                     (1320, 2868), FRAME_COLORS_69)
+            run_dir = shots / "iphone69" / "en" / "runs" / "iphone69-en-r1"
+            for receipt in (run_dir / "sessions").glob("*.receipt.json"):
+                receipt.unlink()
+            out = Path(tmp) / "out"
+            proc = self._matrix(shots, bezels, out, ["iphone69"], ["en"])
+            self.assertEqual(proc.returncode, 2)
+            manifest = json.loads(
+                (out / "matrix-manifest.json").read_text(encoding="utf-8"))
+            self.assertEqual(manifest["cells"][0]["status"], "blocked")
+            self.assertIn("receipt",
+                          manifest["cells"][0]["reason"].lower())
+
+    def test_partial_receipt_blocks(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            _root, shots, bezels = self._setup(tmp)
+            make_run(shots, "iphone69", "en", "iphone69-en-r1",
+                     (1320, 2868), FRAME_COLORS_69)
+            run_dir = shots / "iphone69" / "en" / "runs" / "iphone69-en-r1"
+            receipt_path = run_dir / "sessions" / f"{NONCE_PINNED}.receipt.json"
+            receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+            receipt["status"] = "partial"
+            receipt["failures"] = ["cleanup failed"]
+            receipt_path.write_text(json.dumps(receipt), encoding="utf-8")
+            out = Path(tmp) / "out"
+            proc = self._matrix(shots, bezels, out, ["iphone69"], ["en"])
+            self.assertEqual(proc.returncode, 2)
+            manifest = json.loads(
+                (out / "matrix-manifest.json").read_text(encoding="utf-8"))
+            self.assertEqual(manifest["cells"][0]["status"], "blocked")
+            self.assertIn("partial",
+                          manifest["cells"][0]["reason"].lower())
+
+    def test_missing_queue_proof_blocks(self):
+        # Shared-validator queue proof: a complete receipt without
+        # app_cleanup.removed_session_queue:true must block (fixed old
+        # acks stay fixed). No local guard — helper-owned.
+        with tempfile.TemporaryDirectory() as tmp:
+            _root, shots, bezels = self._setup(tmp)
+            make_run(shots, "iphone69", "en", "iphone69-en-r1",
+                     (1320, 2868), FRAME_COLORS_69)
+            run_dir = shots / "iphone69" / "en" / "runs" / "iphone69-en-r1"
+            receipt_path = run_dir / "sessions" / f"{NONCE_PINNED}.receipt.json"
+            receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+            del receipt["app_cleanup"]["removed_session_queue"]
+            receipt_path.write_text(json.dumps(receipt), encoding="utf-8")
+            out = Path(tmp) / "out"
+            proc = self._matrix(shots, bezels, out, ["iphone69"], ["en"])
+            self.assertEqual(proc.returncode, 2)
+            manifest = json.loads(
+                (out / "matrix-manifest.json").read_text(encoding="utf-8"))
+            self.assertEqual(manifest["cells"][0]["status"], "blocked")
+            self.assertIn("removed_session_queue",
+                          manifest["cells"][0]["reason"])
+
+    def test_false_queue_proof_blocks(self):
+        # removed_session_queue:false (queue dir survived) must block.
+        with tempfile.TemporaryDirectory() as tmp:
+            _root, shots, bezels = self._setup(tmp)
+            make_run(shots, "iphone69", "en", "iphone69-en-r1",
+                     (1320, 2868), FRAME_COLORS_69)
+            run_dir = shots / "iphone69" / "en" / "runs" / "iphone69-en-r1"
+            receipt_path = run_dir / "sessions" / f"{NONCE_PINNED}.receipt.json"
+            receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+            receipt["app_cleanup"]["removed_session_queue"] = False
+            receipt_path.write_text(json.dumps(receipt), encoding="utf-8")
+            out = Path(tmp) / "out"
+            proc = self._matrix(shots, bezels, out, ["iphone69"], ["en"])
+            self.assertEqual(proc.returncode, 2)
+            manifest = json.loads(
+                (out / "matrix-manifest.json").read_text(encoding="utf-8"))
+            self.assertEqual(manifest["cells"][0]["status"], "blocked")
+            self.assertIn("removed_session_queue",
+                          manifest["cells"][0]["reason"])
+
+    def test_tampered_png_blocks(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            _root, shots, bezels = self._setup(tmp)
+            make_run(shots, "iphone69", "en", "iphone69-en-r1",
+                     (1320, 2868), FRAME_COLORS_69)
+            run_dir = shots / "iphone69" / "en" / "runs" / "iphone69-en-r1"
+            png = run_dir / "frames" / "history.png"
+            png.write_bytes(png.read_bytes() + b"\x00")
+            out = Path(tmp) / "out"
+            proc = self._matrix(shots, bezels, out, ["iphone69"], ["en"])
+            self.assertEqual(proc.returncode, 2)
+            manifest = json.loads(
+                (out / "matrix-manifest.json").read_text(encoding="utf-8"))
+            self.assertEqual(manifest["cells"][0]["status"], "blocked")
+
+    def test_foreign_receipt_blocks(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            _root, shots, bezels = self._setup(tmp)
+            make_run(shots, "iphone69", "en", "iphone69-en-r1",
+                     (1320, 2868), FRAME_COLORS_69)
+            run_dir = shots / "iphone69" / "en" / "runs" / "iphone69-en-r1"
+            src = run_dir / "sessions" / f"{NONCE_PINNED}.receipt.json"
+            receipt = json.loads(src.read_text(encoding="utf-8"))
+            src.unlink()
+            receipt["session_nonce"] = "f" * 32
+            (run_dir / "sessions" / ("f" * 32 + ".receipt.json")).write_text(
+                json.dumps(receipt), encoding="utf-8")
+            out = Path(tmp) / "out"
+            proc = self._matrix(shots, bezels, out, ["iphone69"], ["en"])
+            self.assertEqual(proc.returncode, 2)
+            manifest = json.loads(
+                (out / "matrix-manifest.json").read_text(encoding="utf-8"))
+            self.assertEqual(manifest["cells"][0]["status"], "blocked")
+            self.assertIn("nonce",
+                          manifest["cells"][0]["reason"].lower())
+
+    def test_pending_la_blocks_whole_cell(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            _root, shots, bezels = self._setup(tmp)
+            make_run(shots, "iphone69", "en", "iphone69-en-r1",
+                     (1320, 2868), FRAME_COLORS_69,
+                     la_capture="pending")
+            run_dir = shots / "iphone69" / "en" / "runs" / "iphone69-en-r1"
+            manifest_path = run_dir / "run-manifest.json"
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            manifest["status"] = "needs-inspection"
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+            out = Path(tmp) / "out"
+            proc = self._matrix(shots, bezels, out, ["iphone69"], ["en"])
+            self.assertEqual(proc.returncode, 2)
+            cell_manifest = json.loads(
+                (out / "matrix-manifest.json").read_text(encoding="utf-8"))
+            self.assertEqual(cell_manifest["cells"][0]["status"], "blocked")
+            self.assertEqual(cell_manifest["status"], "incomplete")
+
+    def _honest_pending_iphone(self, tmp: str):
+        """Honest pending session run: valid receipts, pending LA records,
+        manifest status needs-inspection (finalize shape); disk untouched
+        by callers except via the returned manifest object."""
+        _root, shots, bezels = self._setup(tmp)
+        make_run(shots, "iphone69", "en", "iphone69-en-r1",
+                 (1320, 2868), FRAME_COLORS_69, la_capture="pending")
+        run_dir = shots / "iphone69" / "en" / "runs" / "iphone69-en-r1"
+        manifest_path = run_dir / "run-manifest.json"
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        manifest["status"] = "needs-inspection"
+        manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+        return shots, bezels, run_dir, manifest_path
+
+    def test_manifest_status_flip_only_blocked(self):
+        # AUDIT R1a (bypass): honest pending run, manifest top status
+        # flipped to complete, disk records/PNGs/receipts untouched →
+        # must block. Currently RED: builder trusts status → renders.
+        # Fix is runner-owned (disk semantic/evidence agreement + status
+        # eligibility in the shared helper); no local guard here.
+        with tempfile.TemporaryDirectory() as tmp:
+            shots, bezels, _run_dir, manifest_path = \
+                self._honest_pending_iphone(tmp)
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            manifest["status"] = "complete"
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+            out = Path(tmp) / "out"
+            proc = self._matrix(shots, bezels, out, ["iphone69"], ["en"])
+            self.assertEqual(proc.returncode, 2)
+            cell_manifest = json.loads(
+                (out / "matrix-manifest.json").read_text(encoding="utf-8"))
+            self.assertEqual(cell_manifest["cells"][0]["status"], "blocked")
+
+    def test_manifest_genuine_invention_blocked(self):
+        # AUDIT R1b (bypass): honest pending run, manifest LA records
+        # rewritten to self-consistent genuine (capture_window +
+        # observation binding invented) + status complete, disk untouched
+        # → must block. Currently RED: helper does not compare manifest
+        # capture semantics against disk. Runner-owned fix; no local
+        # guard here.
+        with tempfile.TemporaryDirectory() as tmp:
+            shots, bezels, _run_dir, manifest_path = \
+                self._honest_pending_iphone(tmp)
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            for rec in manifest["frames"]:
+                if rec["frame"] in LA_FRAMES:
+                    rec["capture"] = "external-lock-screen"
+                    rec["capture_window"] = {
+                        "started_at": "2026-10-30T10:00:00+00:00",
+                        "captured_at_iso": "2026-10-30T10:00:10+00:00",
+                        "observed_elapsed_s": 10,
+                    }
+                    rec["observation_sha256"] = "e" * 64
+                    rec.pop("pending_reason", None)
+            manifest["status"] = "complete"
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+            out = Path(tmp) / "out"
+            proc = self._matrix(shots, bezels, out, ["iphone69"], ["en"])
+            self.assertEqual(proc.returncode, 2)
+            cell_manifest = json.loads(
+                (out / "matrix-manifest.json").read_text(encoding="utf-8"))
+            self.assertEqual(cell_manifest["cells"][0]["status"], "blocked")
+
+    def test_ipad_forged_probe_udid_blocked(self):
+        # Forged model UDID must fail (runner: strict model schema fix
+        # pending). Currently RED: helper ignores model.udid.
+        with tempfile.TemporaryDirectory() as tmp:
+            _root, shots, bezels = self._setup(tmp)
+            make_run(shots, "ipad13", "en", "ipad13-en-r1",
+                     (2064, 2752), FRAME_COLORS_IPAD)
+            run_dir = shots / "ipad13" / "en" / "runs" / "ipad13-en-r1"
+            probe_path = run_dir / "sessions" / "island-probe.json"
+            probe = json.loads(probe_path.read_text(encoding="utf-8"))
+            probe["model"] = dict(probe["model"], udid="UDID-FORGED")
+            probe_path.write_text(json.dumps(probe), encoding="utf-8")
+            out = Path(tmp) / "out"
+            proc = self._matrix(shots, bezels, out, ["ipad13"], ["en"])
+            self.assertEqual(proc.returncode, 2)
+            manifest = json.loads(
+                (out / "matrix-manifest.json").read_text(encoding="utf-8"))
+            self.assertEqual(manifest["cells"][0]["status"], "blocked")
+
+    def test_ipad_na_probe_correct_subset_renders(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            _root, shots, bezels = self._setup(tmp)
+            make_run(shots, "ipad13", "en", "ipad13-en-r1",
+                     (2064, 2752), FRAME_COLORS_IPAD)
+            out = Path(tmp) / "out"
+            proc = self._matrix(shots, bezels, out, ["ipad13"], ["en"])
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            manifest = json.loads(
+                (out / "matrix-manifest.json").read_text(encoding="utf-8"))
+            self.assertEqual(manifest["cells"][0]["status"], "rendered")
+
+    def test_ipad_missing_probe_blocked(self):
+        # MANDATORY negative (contract §6 / spec probed N/A): an iPad run
+        # with no island probe must block — N/A is never inferred from
+        # missing PNGs. Currently RED: the shared helper passes probeless
+        # runs when island frames aren't required; awaiting runner fix.
+        # No local duplicate guard — helper-owned.
+        with tempfile.TemporaryDirectory() as tmp:
+            _root, shots, bezels = self._setup(tmp)
+            make_run(shots, "ipad13", "en", "ipad13-en-r1",
+                     (2064, 2752), FRAME_COLORS_IPAD)
+            run_dir = shots / "ipad13" / "en" / "runs" / "ipad13-en-r1"
+            (run_dir / "sessions" / "island-probe.json").unlink()
+            out = Path(tmp) / "out"
+            proc = self._matrix(shots, bezels, out, ["ipad13"], ["en"])
+            self.assertEqual(proc.returncode, 2)
+            manifest = json.loads(
+                (out / "matrix-manifest.json").read_text(encoding="utf-8"))
+            self.assertEqual(manifest["cells"][0]["status"], "blocked")
+            self.assertIn("probe",
+                          manifest["cells"][0]["reason"].lower())
+
+    def test_ipad_na_metadata_removed_blocked(self):
+        # Downgrade guard: stripping the producer's N/A metadata
+        # (manifest na_frames/island_probe + probe file) must not sneak an
+        # unattested run through. Currently RED for the same helper gap as
+        # missing-probe; awaiting runner fix. No local duplicate guard.
+        with tempfile.TemporaryDirectory() as tmp:
+            _root, shots, bezels = self._setup(tmp)
+            make_run(shots, "ipad13", "en", "ipad13-en-r1",
+                     (2064, 2752), FRAME_COLORS_IPAD)
+            run_dir = shots / "ipad13" / "en" / "runs" / "ipad13-en-r1"
+            (run_dir / "sessions" / "island-probe.json").unlink()
+            manifest_path = run_dir / "run-manifest.json"
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            manifest.pop("na_frames", None)
+            manifest.pop("island_probe", None)
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+            out = Path(tmp) / "out"
+            proc = self._matrix(shots, bezels, out, ["ipad13"], ["en"])
+            self.assertEqual(proc.returncode, 2)
+            cell_manifest = json.loads(
+                (out / "matrix-manifest.json").read_text(encoding="utf-8"))
+            self.assertEqual(cell_manifest["cells"][0]["status"], "blocked")
+
+    def test_ipad_forged_probe_model_blocked(self):
+        # Helper-owned attestation: an island-reporting model refuses N/A.
+        with tempfile.TemporaryDirectory() as tmp:
+            _root, shots, bezels = self._setup(tmp)
+            make_run(shots, "ipad13", "en", "ipad13-en-r1",
+                     (2064, 2752), FRAME_COLORS_IPAD)
+            run_dir = shots / "ipad13" / "en" / "runs" / "ipad13-en-r1"
+            probe_path = run_dir / "sessions" / "island-probe.json"
+            probe = json.loads(probe_path.read_text(encoding="utf-8"))
+            probe["model"] = {
+                "deviceTypeIdentifier":
+                    "com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro-Max",
+                "name": "iPhone 17 Pro Max", "udid": "UDID-9"}
+            probe_path.write_text(json.dumps(probe), encoding="utf-8")
+            out = Path(tmp) / "out"
+            proc = self._matrix(shots, bezels, out, ["ipad13"], ["en"])
+            self.assertEqual(proc.returncode, 2)
+            manifest = json.loads(
+                (out / "matrix-manifest.json").read_text(encoding="utf-8"))
+            self.assertEqual(manifest["cells"][0]["status"], "blocked")
+            self.assertIn("probe",
+                          manifest["cells"][0]["reason"].lower())
+
+    def test_ipad_forged_probe_device_blocked(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            _root, shots, bezels = self._setup(tmp)
+            make_run(shots, "ipad13", "en", "ipad13-en-r1",
+                     (2064, 2752), FRAME_COLORS_IPAD)
+            run_dir = shots / "ipad13" / "en" / "runs" / "ipad13-en-r1"
+            probe_path = run_dir / "sessions" / "island-probe.json"
+            probe = json.loads(probe_path.read_text(encoding="utf-8"))
+            probe["device_key"] = "iphone69"
+            probe_path.write_text(json.dumps(probe), encoding="utf-8")
+            out = Path(tmp) / "out"
+            proc = self._matrix(shots, bezels, out, ["ipad13"], ["en"])
+            self.assertEqual(proc.returncode, 2)
+            manifest = json.loads(
+                (out / "matrix-manifest.json").read_text(encoding="utf-8"))
+            self.assertEqual(manifest["cells"][0]["status"], "blocked")
+            self.assertIn("probe",
+                          manifest["cells"][0]["reason"].lower())
+
+    def test_ipad_forged_probe_geometry_blocked(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            _root, shots, bezels = self._setup(tmp)
+            make_run(shots, "ipad13", "en", "ipad13-en-r1",
+                     (2064, 2752), FRAME_COLORS_IPAD)
+            run_dir = shots / "ipad13" / "en" / "runs" / "ipad13-en-r1"
+            probe_path = run_dir / "sessions" / "island-probe.json"
+            probe = json.loads(probe_path.read_text(encoding="utf-8"))
+            probe["geometry"] = {"width": 1320, "height": 2868}
+            probe_path.write_text(json.dumps(probe), encoding="utf-8")
+            out = Path(tmp) / "out"
+            proc = self._matrix(shots, bezels, out, ["ipad13"], ["en"])
+            self.assertEqual(proc.returncode, 2)
+            manifest = json.loads(
+                (out / "matrix-manifest.json").read_text(encoding="utf-8"))
+            self.assertEqual(manifest["cells"][0]["status"], "blocked")
+            self.assertIn("probe",
+                          manifest["cells"][0]["reason"].lower())
+
+    def test_ipad_forged_probe_nonce_blocked(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            _root, shots, bezels = self._setup(tmp)
+            make_run(shots, "ipad13", "en", "ipad13-en-r1",
+                     (2064, 2752), FRAME_COLORS_IPAD)
+            run_dir = shots / "ipad13" / "en" / "runs" / "ipad13-en-r1"
+            probe_path = run_dir / "sessions" / "island-probe.json"
+            probe = json.loads(probe_path.read_text(encoding="utf-8"))
+            probe["session_nonce"] = "f" * 32
+            probe_path.write_text(json.dumps(probe), encoding="utf-8")
+            out = Path(tmp) / "out"
+            proc = self._matrix(shots, bezels, out, ["ipad13"], ["en"])
+            self.assertEqual(proc.returncode, 2)
+            manifest = json.loads(
+                (out / "matrix-manifest.json").read_text(encoding="utf-8"))
+            self.assertEqual(manifest["cells"][0]["status"], "blocked")
+            self.assertIn("probe",
+                          manifest["cells"][0]["reason"].lower())
+
+    def test_ipad_fabricated_island_blocked(self):
+        # Helper-owned fabrication gate: island pixels+record filed beside
+        # an N/A probe are refused (manifest entry forces helper coverage).
+        with tempfile.TemporaryDirectory() as tmp:
+            _root, shots, bezels = self._setup(tmp)
+            make_run(shots, "ipad13", "en", "ipad13-en-r1",
+                     (2064, 2752), FRAME_COLORS_IPAD)
+            run_dir = shots / "ipad13" / "en" / "runs" / "ipad13-en-r1"
+            Image.new("RGB", (2064, 2752), (1, 2, 3)).save(
+                run_dir / "frames" / "la-compact.png")
+            manifest_path = run_dir / "run-manifest.json"
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            lock_rec = next(r for r in manifest["frames"]
+                            if r["frame"] == "la-lock")
+            forged = dict(lock_rec, frame="la-compact")
+            (run_dir / "frames" / "la-compact.json").write_text(
+                json.dumps(forged, sort_keys=True), encoding="utf-8")
+            manifest["frames"].append(forged)
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+            out = Path(tmp) / "out"
+            proc = self._matrix(shots, bezels, out, ["ipad13"], ["en"])
+            self.assertEqual(proc.returncode, 2)
+            cell_manifest = json.loads(
+                (out / "matrix-manifest.json").read_text(encoding="utf-8"))
+            self.assertEqual(cell_manifest["cells"][0]["status"], "blocked")
+            self.assertIn("fabricat",
+                          cell_manifest["cells"][0]["reason"].lower())
+
+    def test_ipad_missing_lock_blocked(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            _root, shots, bezels = self._setup(tmp)
+            make_run(shots, "ipad13", "en", "ipad13-en-r1",
+                     (2064, 2752), FRAME_COLORS_IPAD)
+            run_dir = shots / "ipad13" / "en" / "runs" / "ipad13-en-r1"
+            (run_dir / "frames" / "la-lock.png").unlink()
+            out = Path(tmp) / "out"
+            proc = self._matrix(shots, bezels, out, ["ipad13"], ["en"])
+            self.assertEqual(proc.returncode, 2)
+            manifest = json.loads(
+                (out / "matrix-manifest.json").read_text(encoding="utf-8"))
+            self.assertEqual(manifest["cells"][0]["status"], "blocked")
+            self.assertIn("la-lock",
+                          manifest["cells"][0]["reason"])
 
 
 if __name__ == "__main__":

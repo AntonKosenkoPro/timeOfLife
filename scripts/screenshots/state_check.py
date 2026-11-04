@@ -190,6 +190,69 @@ def validate_state_dict(
     return (OK, []) if not errs else (FAILED, errs)
 
 
+def validate_session_ack(
+    state: dict,
+    envelope: dict,
+    pinned_totals: dict | None = None,
+) -> tuple[str, list[str]]:
+    """Validate a frozen-v2 session ack against its command envelope.
+
+    Checks full identity binding (nonce/run/domain/seq/frame/mode/hash) plus
+    the accepted-command transcript, then delegates payload-level ready
+    checks to validate_state_dict with the inner payload. `preparing` stays
+    pending (identity still bound); v1 states without session identity are
+    rejected here (no legacy branch) — use validate_state_dict for those.
+    """
+    errs: list[str] = []
+    schema = state.get("schema_version") if isinstance(state, dict) else None
+    if type(schema) is not int or schema != 2:
+        # Unsupported shapes fail closed even when every binding matches:
+        # holding the right nonce/seq/hash is no exception to the schema.
+        return FAILED, ["ack schema_version must be integer 2 "
+                        "(unsupported shape rejected; no legacy branch)"]
+    if not isinstance(state, dict):
+        return FAILED, ["state must be a JSON object"]
+    if not isinstance(envelope, dict):
+        return FAILED, ["envelope must be a JSON object"]
+    import session as sess
+
+    env_errs = sess.validate_envelope(envelope)
+    if env_errs:
+        return FAILED, [f"envelope invalid: {env_errs[0]}"]
+    for key in ("session_nonce", "run_id", "session_domain", "seq",
+                "frame", "mode", "request_sha256"):
+        if state.get(key) != envelope.get(key):
+            return FAILED, [f"ack {key} {state.get(key)!r} != command "
+                            f"{envelope.get(key)!r}: stale or foreign ack"]
+    transcript = state.get("transcript")
+    if not isinstance(transcript, list) or not transcript:
+        return FAILED, ["ack carries no accepted-command transcript"]
+    covered = any(isinstance(row, dict)
+                  and row.get("seq") == envelope["seq"]
+                  and row.get("frame") == envelope["frame"]
+                  and row.get("request_sha256") == envelope["request_sha256"]
+                  for row in transcript)
+    if not covered:
+        return FAILED, ["ack transcript does not cover the active command"]
+    status = state.get("status")
+    if status == "preparing":
+        return PENDING, ["app reports preparing; keep polling, no screenshot yet"]
+    if status not in ("ready",):
+        # Session failures/invalid states surface here with identity bound;
+        # the runner treats them as terminal for the active command.
+        detail = ""
+        err = state.get("error")
+        if isinstance(err, dict) and err.get("code"):
+            detail = f": {err['code']}"
+        return FAILED, [f"session command {status}{detail}"]
+    try:
+        inner = sess.parse_envelope_payload(envelope)
+    except sess.SessionError as exc:
+        return FAILED, [str(exc)]
+    return validate_state_dict(state, inner, envelope["request_sha256"],
+                               pinned_totals)
+
+
 def load_state_file(path: str) -> dict:
     try:
         with open(path, "r", encoding="utf-8") as fh:

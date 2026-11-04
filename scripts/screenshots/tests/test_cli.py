@@ -151,28 +151,6 @@ class CliTests(unittest.TestCase):
                        "--pinned-totals", pin)
             self.assertEqual(proc.returncode, 3)
 
-    def test_lease_verbs_refused_without_lease(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            req = write_frame_request(tmp)
-            proc = run("prepare-frame", "--device", "UDID-X", "--request", req,
-                       "--frame", "track-running", "--out", tmp,
-                       "--run-id", "r1")
-            self.assertEqual(proc.returncode, 2)
-            self.assertIn("LIFIO_CAPTURE_LEASE", proc.stderr)
-            proc = run("capture-app-frame", "--device", "UDID-X", "--out", tmp,
-                       "--run-id", "r1", "--frame", "track-running")
-            self.assertEqual(proc.returncode, 2)
-            self.assertIn("LIFIO_CAPTURE_LEASE", proc.stderr)
-            proc = run("teardown-frame", "--device", "UDID-X", "--out", tmp,
-                       "--run-id", "r1", "--frame", "track-running")
-            self.assertEqual(proc.returncode, 2)
-            self.assertIn("LIFIO_CAPTURE_LEASE", proc.stderr)
-            proc = run("run-frame", "--device", "UDID-X", "--request", req,
-                       "--frame", "track-running", "--out", tmp,
-                       "--run-id", "r1")
-            self.assertEqual(proc.returncode, 2)
-            self.assertIn("LIFIO_CAPTURE_LEASE", proc.stderr)
-
     def test_verify_la_cli_binding(self):
         import struct
         import zlib
@@ -400,56 +378,6 @@ class CliTests(unittest.TestCase):
                        env_extra={"LIFIO_CAPTURE_CI": "1"})
             self.assertEqual(proc.returncode, 2)
 
-    def test_record_external_frame_mask_recorded(self):
-        import hashlib
-        import struct
-        import zlib
-        with tempfile.TemporaryDirectory() as tmp:
-            req = write_frame_request(tmp, "la-compact")
-            pin = write_pin(tmp)
-            digest = hashlib.sha256(Path(req).read_bytes()).hexdigest()
-            state = {
-                "status": "ready", "request_sha256": digest,
-                "deck_version": "en-austin-1", "frame": "la-compact",
-                "counts": {"entries": 55},
-                "expected_totals": dict(PINNED_TOTALS),
-                "build": {"configuration": "Screenshot",
-                          "bundle_id": "com.antonkosenko.timeoflifeapp.screenshots"},
-                "live_activity": {
-                    "activity_id": "a",
-                    "started_at": "2026-10-30T10:00:00+00:00",
-                    "request_acknowledged_at": "2026-10-30T10:00:01+00:00"},
-            }
-            sp = str(Path(tmp) / "state.json")
-            Path(sp).write_text(json.dumps(state), encoding="utf-8")
-            png = Path(tmp) / "island.png"
-            ihdr = struct.pack(">IIBBBBB", 1320, 2868, 8, 2, 0, 0, 0)
-            png.write_bytes(b"\x89PNG\r\n\x1a\n" + struct.pack(">I", 13)
-                            + b"IHDR" + ihdr
-                            + struct.pack(">I", zlib.crc32(b"IHDR" + ihdr) & 0xFFFFFFFF))
-            sha = hashlib.sha256(png.read_bytes()).hexdigest()
-            op = str(Path(tmp) / "obs.json")
-            Path(op).write_text(json.dumps(
-                {"observed_elapsed_s": 754, "screenshot_sha256": sha}),
-                encoding="utf-8")
-            # island default is --mask=black
-            proc = run("record-external-frame", "--out", tmp, "--run-id", "r1",
-                       "--frame", "la-compact", "--png", str(png),
-                       "--captured-at", "2026-10-30T10:12:34+00:00",
-                       "--observation", op, "--state", sp, "--request", req,
-                       "--pinned-totals", pin, "--device", "UDID-X")
-            self.assertEqual(proc.returncode, 0, proc.stderr)
-            self.assertEqual(json.loads(proc.stdout)["screenshot_mask"], "black")
-            # explicit --mask default overrides back to the simctl default
-            proc = run("record-external-frame", "--out", tmp, "--run-id", "r1",
-                       "--frame", "la-compact", "--png", str(png),
-                       "--captured-at", "2026-10-30T10:12:34+00:00",
-                       "--observation", op, "--state", sp, "--request", req,
-                       "--pinned-totals", pin, "--device", "UDID-X",
-                       "--mask", "default")
-            self.assertEqual(proc.returncode, 0, proc.stderr)
-            self.assertEqual(json.loads(proc.stdout)["screenshot_mask"], "default")
-
     def test_locale_totals_verb(self):
         import request_schema as rs
         with tempfile.TemporaryDirectory() as tmp:
@@ -541,92 +469,6 @@ class CliTests(unittest.TestCase):
                        "--geometry", "not-a-geometry", "--out", out)
             self.assertEqual(proc.returncode, 2)
 
-    def test_record_external_frame_and_finalize(self):
-        import hashlib
-        import struct
-        import zlib
-        with tempfile.TemporaryDirectory() as tmp:
-            req = write_frame_request(tmp, "la-lock")
-            pin = write_pin(tmp)
-            digest = hashlib.sha256(Path(req).read_bytes()).hexdigest()
-            state = {
-                "status": "ready", "request_sha256": digest,
-                "deck_version": "en-austin-1", "frame": "la-lock",
-                "counts": {"entries": 55},
-                "expected_totals": dict(PINNED_TOTALS),
-                "build": {"configuration": "Screenshot",
-                          "bundle_id": "com.antonkosenko.timeoflifeapp.screenshots"},
-                "live_activity": {
-                    "activity_id": "a",
-                    "started_at": "2026-10-30T10:00:00+00:00",
-                    "request_acknowledged_at": "2026-10-30T10:00:01+00:00"},
-            }
-            sp = str(Path(tmp) / "state.json")
-            Path(sp).write_text(json.dumps(state), encoding="utf-8")
-            png = Path(tmp) / "lock.png"
-            ihdr = struct.pack(">IIBBBBB", 1320, 2868, 8, 2, 0, 0, 0)
-            png.write_bytes(b"\x89PNG\r\n\x1a\n" + struct.pack(">I", 13)
-                            + b"IHDR" + ihdr
-                            + struct.pack(">I", zlib.crc32(b"IHDR" + ihdr) & 0xFFFFFFFF))
-            sha = hashlib.sha256(png.read_bytes()).hexdigest()
-            op = str(Path(tmp) / "obs.json")
-            Path(op).write_text(json.dumps(
-                {"observed_elapsed_s": 754, "screenshot_sha256": sha}),
-                encoding="utf-8")
-            proc = run("record-external-frame", "--out", tmp, "--run-id", "r1",
-                       "--frame", "la-lock", "--png", str(png),
-                       "--captured-at", "2026-10-30T10:12:34+00:00",
-                       "--observation", op, "--state", sp, "--request", req,
-                       "--pinned-totals", pin, "--device", "UDID-X")
-            self.assertEqual(proc.returncode, 0, proc.stderr)
-            record = json.loads(proc.stdout)
-            self.assertEqual(record["capture"], "external-lock-screen")
-            # wrong frame refused
-            proc = run("record-external-frame", "--out", tmp, "--run-id", "r1",
-                       "--frame", "insights", "--png", str(png),
-                       "--captured-at", "2026-10-30T10:12:34+00:00",
-                       "--observation", op, "--state", sp, "--request", req,
-                       "--pinned-totals", pin)
-            self.assertEqual(proc.returncode, 2)
-
-    def test_record_pending_frame_cli(self):
-        import hashlib
-        import struct
-        import zlib
-        with tempfile.TemporaryDirectory() as tmp:
-            req = write_frame_request(tmp, "la-lock")
-            pin = write_pin(tmp)
-            png = Path(tmp) / "lock.png"
-            ihdr = struct.pack(">IIBBBBB", 1320, 2868, 8, 2, 0, 0, 0)
-            png.write_bytes(b"\x89PNG\r\n\x1a\n" + struct.pack(">I", 13)
-                            + b"IHDR" + ihdr
-                            + struct.pack(">I", zlib.crc32(b"IHDR" + ihdr) & 0xFFFFFFFF))
-            proc = run("record-pending-frame", "--out", tmp, "--run-id", "r1",
-                       "--frame", "la-lock", "--png", str(png),
-                       "--captured-at", "2026-10-30T10:12:34+00:00",
-                       "--request", req, "--pinned-totals", pin,
-                       "--device", "UDID-X",
-                       "--reason", "CI simctl pixels; human handoff")
-            self.assertEqual(proc.returncode, 0, proc.stderr)
-            record = json.loads(proc.stdout)
-            self.assertEqual(record["capture"], "external-lock-screen-pending")
-            self.assertEqual(record["pending_reason"], "CI simctl pixels; human handoff")
-            self.assertNotIn("capture_window", record)
-            # empty reason refused: the handoff is never silent
-            proc = run("record-pending-frame", "--out", tmp, "--run-id", "r1",
-                       "--frame", "la-lock", "--png", str(png),
-                       "--captured-at", "2026-10-30T10:12:34+00:00",
-                       "--request", req, "--pinned-totals", pin,
-                       "--reason", "  ")
-            self.assertEqual(proc.returncode, 2)
-            # app frames refused
-            proc = run("record-pending-frame", "--out", tmp, "--run-id", "r1",
-                       "--frame", "insights", "--png", str(png),
-                       "--captured-at", "2026-10-30T10:12:34+00:00",
-                       "--request", req, "--pinned-totals", pin,
-                       "--reason", "x")
-            self.assertEqual(proc.returncode, 2)
-
     def test_finalize_run_provenance_flag(self):
         with tempfile.TemporaryDirectory() as tmp:
             bad = str(Path(tmp) / "prov.json")
@@ -680,6 +522,54 @@ class CliTests(unittest.TestCase):
             d2.write_text(json.dumps(m2), encoding="utf-8")
             proc = run("finalize-two-runs", "--out", tmp, "--run-id-base", "pilot")
             self.assertEqual(proc.returncode, 2)
+
+
+class RunSessionCliTests(unittest.TestCase):
+    def _base(self, tmp: str) -> str:
+        import shutil
+        bp = str(Path(tmp) / "base-en.json")
+        shutil.copy(str(HERE / "pilot_manifest.json"), bp)
+        return bp
+
+    def test_run_session_refused_without_lease(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            proc = run("run-session", "--device", "UDID-X",
+                       "--device-key", "iphone69",
+                       "--request", self._base(tmp), "--domain", "pinned",
+                       "--out", tmp, "--run-id", "r1",
+                       "--pinned-totals", write_pin(tmp))
+            self.assertEqual(proc.returncode, 2)
+            self.assertIn("LIFIO_CAPTURE_LEASE", proc.stderr)
+
+    def test_run_session_rejects_bad_domain_and_island(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = self._base(tmp)
+            pin = write_pin(tmp)
+            proc = run("run-session", "--device", "UDID-X",
+                       "--device-key", "iphone69",
+                       "--request", base, "--domain", "prime-time",
+                       "--out", tmp, "--run-id", "r1",
+                       "--pinned-totals", pin)
+            self.assertEqual(proc.returncode, 2)
+            proc = run("run-session", "--device", "UDID-X",
+                       "--device-key", "iphone69",
+                       "--request", base, "--domain", "pinned",
+                       "--out", tmp, "--run-id", "r1",
+                       "--pinned-totals", pin, "--island", "2")
+            self.assertEqual(proc.returncode, 2)
+
+    def test_run_session_rejects_unknown_device_key_before_device_io(self):
+        # Lease set but the key is rejected before any lock/simctl work:
+        # no device is touched (invalid key fails in pure validation).
+        with tempfile.TemporaryDirectory() as tmp:
+            proc = run("run-session", "--device", "UDID-NOPE",
+                       "--device-key", "gameboy",
+                       "--request", self._base(tmp), "--domain", "pinned",
+                       "--out", tmp, "--run-id", "r1",
+                       "--pinned-totals", write_pin(tmp),
+                       env_extra={"LIFIO_CAPTURE_LEASE": "1"})
+            self.assertEqual(proc.returncode, 2)
+            self.assertIn("device_key", proc.stderr)
 
 
 if __name__ == "__main__":

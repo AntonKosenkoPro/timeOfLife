@@ -1,29 +1,33 @@
-# App Store screenshots pipeline (OpenSpec change app-store-screenshot-pilot, §10).
+# App Store screenshots pipeline (OpenSpec change optimize-app-screenshot-workflow).
 #
-# Matrix capture on macOS (long task, parallel per device x language),
-# fast panels + zip on a separate job. Binaries never enter git — the only
-# downloadable is the `lifio-screenshots` artifact attached to the run.
+# Device-affine session capture on macOS: one validated Ubuntu selection
+# job, one explicit arm64 Screenshot build with a verified artifact, one
+# capture worker per selected device (sequential locales, r1/r2, pinned +
+# realtime sessions via run_device_worker.py), then fast panels + zip on a
+# separate job. Binaries never enter git — the only downloadables are the
+# `screenshot-build` and `shots-<device>-<locale>` artifacts attached to
+# the run, plus the final `lifio-screenshots` bundle.
 #
-# Honest constraints (see tasks §10 + evidence-runner.md):
-# - Panel rendering needs macOS Helvetica for byte-identical headlines, so the
-#   panels job also runs on macOS (fast: checkout + Pillow only, no Xcode build).
+# Honest constraints (see specs/screenshot-capture-workflow/spec.md):
+# - The device matrix varies by device ONLY (max five overlapping
+#   workers); locales run sequentially inside each worker. Queueing for a
+#   slot is reported, never subtracted from an end-to-end claim.
 # - CI sets run under LIFIO_CAPTURE_CI=1 (logged in every manifest as
 #   ci_approval_bypass:true): technically gated, NOT owner eyeball-approved.
-# - Island frames capture with --mask=black (probe-proven island pixels).
-# - Apple bezel PNGs are NOT in git (no-binaries rule): the panels job fetches
-#   them from the Apple community Figma file with FIGMA_API_KEY (repo secret).
-#   Without the secret the panels job fails closed.
+# - The shared build is verified (hashes, slices, provenance) BEFORE any
+#   worker installs it; a cache miss rebuilds, never substitutes.
+# - Panel rendering needs macOS Helvetica for byte-identical headlines, so
+#   the panels job also runs on macOS (fast: checkout + Pillow only).
+# - Apple bezel PNGs are NOT in git (no-binaries rule): the panels job
+#   fetches them from the Apple community Figma file with FIGMA_API_KEY
+#   (repo secret). Without the secret the panels job fails closed.
 # - iOS runtime + Xcode on the runner are assumed; fail-fast checks stop
-#   the run with a clear message otherwise.
-# - Live Activity lock-screen/island frames have no simctl equivalent for the
-#   power-button/lock path (Argent flows do it with a hardware press): CI
-#   prepares the realtime session and records whatever simctl exports, but
-#   genuine Lock Screen / Island pixels remain a documented human handoff.
-#   Every CI la frame is therefore a deterministic `record-pending-frame`
-#   stub (hash-bound PNG, no OCR claim): the leg stays green and the run
-#   manifest records needs-inspection until a human registers the genuine
-#   pixels via `record-external-frame`. Never run `read_timer.py` OCR in
-#   this leg — it fails closed on simctl pixels and would abort the step.
+#   the run with a clear message otherwise (the iOS 27 download fallback
+#   is retained).
+# - Live Activity lock-screen/island frames have no simctl equivalent for
+#   the power-button/lock path: the realtime session records hash-bound
+#   pending handoffs and the run manifest records needs-inspection until
+#   a human registers genuine pixels via record-external-frame.
 
 name: app-screenshots
 
@@ -35,7 +39,7 @@ on:
         required: false
         default: "iOS 27.0"
       devices:
-        description: 'JSON device keys (catalog in the capture step).'
+        description: 'JSON device keys (catalog in scripts/screenshots/workflow_inputs.py).'
         required: false
         default: '["iphone69","iphone63","ipad13"]'
       languages:
@@ -51,46 +55,112 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  screenshots:
-    name: capture (${{ matrix.device }}, ${{ matrix.language }})
-    runs-on: xcode-27
-    timeout-minutes: 180
-    strategy:
-      fail-fast: false
-      matrix:
-        device: ${{ fromJSON(inputs.devices) }}
-        language: ${{ fromJSON(inputs.languages) }}
-    env:
-      LIFIO_CAPTURE_LEASE: "1"
-      LIFIO_CAPTURE_CI: "1"
-      IOS_RUNTIME: ${{ inputs.ios_runtime }}
-      # finalize-two-runs only reads -r1/-r2: the run count is pinned at 2
-      # (a dispatch input here could only ever abort the leg, so there is
-      # no input — see the fail-fast step).
-      RUNS_PER_SET: "2"
+  validate:
+    name: validate selection
+    # 6.1: non-empty, unique, catalog-known device/locale/runtime
+    # selection, checked on cheap Ubuntu BEFORE any macOS work. Values
+    # are compared against fixed catalogs, never evaluated as source.
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      devices: ${{ steps.selection.outputs.devices }}
+      languages: ${{ steps.selection.outputs.languages }}
+      runtime: ${{ steps.selection.outputs.runtime }}
     steps:
       - uses: actions/checkout@v4
 
-      - name: Fail fast on toolchain
+      - name: Validate device/locale/runtime selection
+        id: selection
         env:
+          DEVICES: ${{ inputs.devices }}
+          LANGUAGES: ${{ inputs.languages }}
           IOS_RUNTIME: ${{ inputs.ios_runtime }}
         run: |
-          # Capture-only leg: scripts/screenshots/ is stdlib-only (no PIL
-          # import anywhere there), so Pillow is installed only in the
-          # panels job that renders. Installing it here added a failure
-          # mode (e.g. externally-managed Python) and a download to all
-          # 15 matrix legs for nothing.
-          xcodebuild -version || { echo "::error::Xcode missing"; exit 2; }
-          if ! xcrun simctl list runtimes | grep -F "$IOS_RUNTIME"; then
-            echo "::warning::runtime '$IOS_RUNTIME' not installed — downloading iOS platform"
-            sudo xcodebuild -downloadPlatform iOS
-            xcrun simctl list runtimes | grep -F "$IOS_RUNTIME" \
-              || { echo "::error::runtime '$IOS_RUNTIME' still missing after 'xcodebuild -downloadPlatform iOS'"; exit 2; }
-          fi
+          python3 - <<'PY'
+          import json
+          import os
+          import sys
+          sys.path.insert(0, "scripts/screenshots")
+          import workflow_inputs as wi
+          try:
+              summary = wi.validate_selection(
+                  os.environ["DEVICES"],
+                  os.environ["LANGUAGES"],
+                  os.environ["IOS_RUNTIME"],
+              )
+          except wi.InputError as exc:
+              print(f"::error::invalid selection: {exc}")
+              raise SystemExit(2)
+          with open(os.environ["GITHUB_OUTPUT"], "a") as fh:
+              fh.write(f"devices={json.dumps(summary['devices'])}\n")
+              fh.write(f"languages={json.dumps(summary['locales'])}\n")
+              fh.write(f"runtime={summary['runtime']}\n")
+          print(f"validated: {summary['worker_count']} device worker(s), "
+                f"{summary['pair_count']} pairs, "
+                f"{summary['pass_count']} passes on {summary['runtime']}")
+          PY
+
+  build:
+    name: build Screenshot (arm64)
+    # 6.2: exactly one build for the whole run — explicitly arm64-only,
+    # Release-optimized Screenshot configuration, pinned toolchain. App
+    # AND extension slices are inspected (ONLY_ACTIVE_ARCH on a generic
+    # destination proves nothing alone). 6.4: the complete app is packed
+    # into a permission-preserving tar with a build/digest manifest.
+    needs: validate
+    runs-on: xcode-27
+    timeout-minutes: 60
+    env:
+      IOS_RUNTIME: ${{ needs.validate.outputs.runtime }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select pinned Xcode 27.1
+        # Explicit toolchain selection (not just a check of whatever is
+        # active): only an installed Xcode 27.1 may build. No silent
+        # fallback to a wrong toolchain — absence fails closed here.
+        run: |
+          SELECTED=""
+          for app in /Applications/Xcode_27.1.app /Applications/Xcode.app; do
+            BIN="$app/Contents/Developer/usr/bin/xcodebuild"
+            [ -x "$BIN" ] || continue
+            VER="$("$BIN" -version | grep -m1 -o '[0-9][0-9.]*' | head -n1)"
+            if [ "$VER" = "27.1" ]; then
+              SELECTED="$app/Contents/Developer"
+              break
+            fi
+          done
+          [ -n "$SELECTED" ] || { echo "::error::no installed Xcode 27.1 found under /Applications"; exit 2; }
+          echo "DEVELOPER_DIR=$SELECTED" >> "$GITHUB_ENV"
+          echo "selected Xcode 27.1 at $SELECTED"
+
+      - name: Fail fast on toolchain
+        run: |
+          # scripts/screenshots/ is stdlib-only (no PIL import anywhere
+          # there), so Pillow is installed only in the panels job that
+          # renders. Installing it here added a failure mode to every
+          # macOS job for nothing.
+          # NOTE: no simulator-runtime check/download here — the generic
+          # Screenshot build needs only the SDK, never a booted runtime;
+          # downloading a platform would stall the critical path. The
+          # requested runtime fallback lives in the capture workers.
+          XV_OUT="$(xcodebuild -version)" || { echo "::error::Xcode missing"; exit 2; }
+          python3 - <<'PY'
+          import os
+          import subprocess
+          import sys
+          sys.path.insert(0, "scripts/screenshots")
+          import build_artifact as ba
+          out = subprocess.check_output(["xcodebuild", "-version"], text=True)
+          for err in ba.validate_xcode_pin(ba.parse_xcode_version(out), "27.1"):
+              print(f"::error::{err}")
+              raise SystemExit(2)
+          print("xcode_build=" + ba.parse_xcode_build(out))
+          PY
 
       - name: Install pinned xcodegen
-        # Same pins + digest checks as ios.yml (tasks 10.1): a clean runner
-        # has no xcodegen, and an unpinned install would let the generated
+        # Same pins + digest checks as ios.yml: a clean runner has no
+        # xcodegen, and an unpinned install would let the generated
         # project drift from the release gate.
         run: |
           XCODEGEN_PIN="$(grep -m1 '^XCODEGEN_PIN="' ios/TimeOfLife/ci_scripts/ci_post_clone.sh | cut -d'"' -f2 || true)"
@@ -112,188 +182,569 @@ jobs:
             { echo "::error::xcodegen drift: got $(/usr/local/bin/xcodegen --version), want $XCODEGEN_PIN"; exit 1; }
           echo "/usr/local/bin" >> "$GITHUB_PATH"
 
-      - name: Resolve device catalog
-        id: dev
+      - name: Compute dependency cache key
+        id: cache-key
         env:
-          # Matrix values come from workflow_dispatch inputs: never
-          # interpolate them into Python/shell source (injection). Read
-          # them from the environment; unknown keys fail closed here.
-          DEVICE_KEY: ${{ matrix.device }}
+          IOS_RUNTIME: ${{ needs.validate.outputs.runtime }}
         run: |
+          # 6.3: dependency cache key covers the SPM lockfile plus the
+          # EXACT Xcode/SDK build IDs (never marketing versions alone) +
+          # arch/configuration. A compatible hit only restores checkouts;
+          # the normal build below ALWAYS runs (cold miss resolves from
+          # the network and rebuilds correctly).
           python3 - <<'PY'
+          import hashlib
           import os
-          catalog = {
-            # The island flag is an explicit 1/0 token (not a Python bool):
-            # the handoff step tests it in shell, where a "True"/"true"
-            # spelling flip would silently mislabel the reason string.
-            "iphone69": {"sim": "iPhone 18 Pro Max",   "geometry": "1320x2868", "island": 1},
-            "iphone63": {"sim": "iPhone 17",           "geometry": "1206x2622", "island": 1},
-            "ipad13":   {"sim": "iPad Pro 13-inch (M4)", "geometry": "2064x2752", "island": 0},
-          }
-          key = os.environ["DEVICE_KEY"]
-          if key not in catalog:
-              raise SystemExit(f"unknown device '{key}', catalog: {sorted(catalog)}")
+          import subprocess
+          import sys
+          sys.path.insert(0, "scripts/screenshots")
+          import build_artifact as ba
+          lock = ("ios/TimeOfLife/TimeOfLife.xcodeproj/project.xcworkspace"
+                  "/xcshareddata/swiftpm/Package.resolved")
+          digest = hashlib.sha256(
+              open(lock, "rb").read()).hexdigest()
+          out = subprocess.check_output(["xcodebuild", "-version"], text=True)
+          sdk_version = subprocess.check_output(
+              ["xcrun", "--sdk", "iphonesimulator",
+               "--show-sdk-version"], text=True).strip()
+          sdk_build = subprocess.check_output(
+              ["xcrun", "--sdk", "iphonesimulator",
+               "--show-sdk-build-version"], text=True).strip()
+          if not sdk_version or not sdk_build:
+              print("::error::cannot read iphonesimulator SDK "
+                    "version/build via xcrun --sdk")
+              raise SystemExit(2)
+          key = ba.dependency_cache_key(
+              {"Package.resolved": digest},
+              ba.parse_xcode_version(out), ba.parse_xcode_build(out),
+              sdk_version, sdk_build, "arm64", "Screenshot")
           with open(os.environ["GITHUB_OUTPUT"], "a") as fh:
-              for k, v in catalog[key].items():
-                  fh.write(f"{k}={v}\n")
+              fh.write(f"cache_key={key}\n")
+          print(f"dependency cache key: {key}")
           PY
 
-      - name: Create and boot simulator
-        id: sim
-        env:
-          IOS_RUNTIME: ${{ inputs.ios_runtime }}
-          DEVICE_KEY: ${{ matrix.device }}
-          SIM_NAME: ${{ steps.dev.outputs.sim }}
-        run: |
-          RT="${IOS_RUNTIME// /-}"; RT="${RT//./-}"
-          UDID=$(xcrun simctl create "shot-ci-$DEVICE_KEY" \
-            "$SIM_NAME" "com.apple.CoreSimulator.SimRuntime.$RT")
-          echo "udid=$UDID" >> "$GITHUB_OUTPUT"
-          xcrun simctl boot "$UDID"
-          xcrun simctl bootstatus "$UDID" -b
+      - name: Restore dependency checkouts
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/spm-checkouts
+          key: screenshot-deps-${{ steps.cache-key.outputs.cache_key }}
+          # No restore-keys fallback: a partial hit could substitute
+          # incompatible checkouts, so only an exact hit restores.
 
       - name: Build Screenshot configuration
         run: |
           cd ios/TimeOfLife
           /usr/local/bin/xcodegen generate
           xcodebuild build -scheme TimeOfLife -configuration Screenshot \
-            -destination "platform=iOS Simulator,id=${{ steps.sim.outputs.udid }}" \
+            -destination "generic/platform=iOS Simulator" \
+            ARCHS=arm64 ONLY_ACTIVE_ARCH=NO \
+            -clonedSourcePackagesDirPath "$RUNNER_TEMP/spm-checkouts" \
             -derivedDataPath "$RUNNER_TEMP/dd"
           APP="$RUNNER_TEMP/dd/Build/Products/Screenshot-iphonesimulator/TimeOfLife.app"
           [ -d "$APP" ] || { echo "::error::built app not found at $APP"; exit 2; }
-          xcrun simctl install "${{ steps.sim.outputs.udid }}" "$APP"
 
-      - name: Capture runs
+      - name: Inspect slices and package build artifact
+        id: package
         env:
-          # Matrix values come from workflow_dispatch inputs: read them
-          # from the environment, never interpolate into shell/Python
-          # source (injection). UDID/geometry/island arrive via step
-          # outputs, which the catalog step already validated.
-          DEVICE_KEY: ${{ matrix.device }}
-          LANG_KEY: ${{ matrix.language }}
-          RUNS_PER_SET: "2"
-          IS_ISLAND: ${{ steps.dev.outputs.island }}
-          SIM_UDID: ${{ steps.sim.outputs.udid }}
+          IOS_RUNTIME: ${{ needs.validate.outputs.runtime }}
         run: |
-          UDID="$SIM_UDID"
-          OUT="$RUNNER_TEMP/shots/$DEVICE_KEY/$LANG_KEY"
-          export OUT_DIR="$OUT"
-          mkdir -p "$OUT"
-          GEO="${{ steps.dev.outputs.geometry }}"
-          python3 scripts/screenshots/capture.py make-request \
-            --locale "$LANG_KEY" \
-            --geometry "$GEO" \
-            --out "$OUT/base-request.json"
-          python3 scripts/screenshots/capture.py locale-totals \
-            --locale "$LANG_KEY" --out "$OUT/pinned-totals.json"
-          for i in $(seq 1 "$RUNS_PER_SET"); do
-            RID="$DEVICE_KEY-$LANG_KEY-r$i"
-            export RUN_RID="$RID"
-            for frame in track-running insights history add-entry; do
-              python3 scripts/screenshots/capture.py run-frame \
-                --device "$UDID" \
-                --request "$OUT/base-request.json" \
-                --frame "$frame" --out "$OUT" \
-                --run-id "$RID" \
-                --geometry "$GEO" \
-                --pinned-totals "$OUT/pinned-totals.json"
-            done
-            for frame in la-lock la-compact la-expanded; do
-              python3 scripts/screenshots/capture.py prepare-frame \
-                --device "$UDID" \
-                --request "$OUT/base-request.json" \
-                --frame "$frame" --out "$OUT" \
-                --run-id "$RID" \
-                --pinned-totals "$OUT/pinned-totals.json"
-              # Mask policy (preflight.probe-proven): simctl default (no flag)
-              # for la-lock, --mask=black for the island frames. Never emit a
-              # literal --mask=default — simctl rejects it and it diverges
-              # from preflight.screenshot_argv.
-              if [ "$frame" = "la-lock" ]; then MASK_ARGS=""; else MASK_ARGS="--mask=black"; fi
-              STAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-              # shellcheck disable=SC2086: MASK_ARGS is intentionally word-split (empty or one flag)
-              xcrun simctl io "$UDID" screenshot \
-                --type=png $MASK_ARGS "$OUT/$RID-$frame.png"
-              # State lives in the simulator container's Documents; the per-frame
-              # request lives under runs/<run-id>/requests/. Copy the state out
-              # for debugging — the pending stub below reads files, never the
-              # device, and needs no state. Guarded: a missing/stale state
-              # file (or an empty container path) must pend the frame, never
-              # abort the leg under the runner's bash -e.
-              CONTAINER=$(xcrun simctl get_app_container "$UDID" com.antonkosenko.timeoflifeapp.screenshots data) || CONTAINER=""
-              if [ -n "$CONTAINER" ] && [ -f "$CONTAINER/Documents/capture-state.json" ]; then
-                cp "$CONTAINER/Documents/capture-state.json" "$OUT/runs/$RID/state-$frame.json"
-              else
-                echo "::warning::$frame: capture-state.json unavailable under '${CONTAINER:-unknown container}'; continuing to the human-handoff stub"
-              fi
-              if [ "$frame" = "la-lock" ]; then REC_MASK="--mask=default"; else REC_MASK="--mask=black"; fi
-              # Deterministic human handoff (see header): CI simctl pixels
-              # are never genuine Lock Screen / island pixels, so OCR would
-              # fail closed here and abort the leg. The stub binds the
-              # exported PNG and records needs-inspection; a human registers
-              # the genuine pixels later via record-external-frame. The
-              # island flag only tunes the reason string: finalize requires
-              # every PILOT_FRAMES record, so island frames cannot be skipped
-              # on the iPad leg either.
-              if [ "$frame" = "la-lock" ] || [ "$IS_ISLAND" = "1" ]; then
-                HANDOFF_NOTE="CI simctl cannot produce genuine Lock Screen/island pixels"
-              else
-                HANDOFF_NOTE="no Dynamic Island on this device; CI simctl pixels are a placeholder"
-              fi
-              # shellcheck disable=SC2086: REC_MASK is intentionally word-split (exactly one flag)
-              python3 scripts/screenshots/capture.py record-pending-frame \
-                --out "$OUT" --run-id "$RID" \
-                --frame "$frame" --png "$OUT/$RID-$frame.png" \
-                --captured-at "$STAMP" \
-                --request "$OUT/runs/$RID/requests/$frame.capture-request.json" \
-                --geometry "$GEO" $REC_MASK \
-                --pinned-totals "$OUT/pinned-totals.json" \
-                --device "$UDID" \
-                --reason "$HANDOFF_NOTE; human handoff via record-external-frame"
-              python3 scripts/screenshots/capture.py teardown-frame \
-                --device "$UDID" \
-                --out "$OUT" --run-id "$RID" --frame "$frame" \
-                || echo "::warning::$frame: teardown reported failure; finalize will pend it"
-            done
-            python3 - <<'PY'
-          import json, os, subprocess
+          # App AND extension Mach-O slices must be exactly arm64-only;
+          # then the complete .app is packed permission-preserving with a
+          # build/digest manifest carrying the EXACT Xcode marketing
+          # version + build ID, the SDK version + build ID from
+          # `xcrun --sdk` (never the simulator runtime build), and the
+          # REQUESTED runtime version + build ID recorded separately
+          # (workers reject any artifact that cannot prove its toolchain).
+          python3 - <<'PY'
+          import json
+          import os
+          import plistlib
+          import subprocess
+          import sys
           from pathlib import Path
-          base = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
-          # Scoped to real sources: the generated project is gitignored,
-          # but the tracked shared schemes under the xcodeproj are
-          # rewritten by the regeneration above, so an unscoped query
-          # would mark every CI run dirty:true while the panels job
-          # (where xcodegen never ran) reports dirty:false for the same
-          # bundle. Only the schemes live under the xcodeproj, so the
-          # exclusion drops regeneration noise and nothing else.
+          sys.path.insert(0, "scripts/screenshots")
+          import build_artifact as ba
+
+          app = Path(os.environ["RUNNER_TEMP"]) / "dd" / "Build" / \
+              "Products" / "Screenshot-iphonesimulator" / "TimeOfLife.app"
+
+          def exe_of(bundle: Path) -> Path:
+              with open(bundle / "Info.plist", "rb") as fh:
+                  info = plistlib.load(fh)
+              exe = info.get("CFBundleExecutable")
+              if not exe or not isinstance(exe, str):
+                  print(f"::error::no CFBundleExecutable in {bundle}");
+                  raise SystemExit(2)
+              return bundle / exe if (bundle / exe).is_file() \
+                  else bundle / "Contents" / "MacOS" / exe
+
+          app_bin = exe_of(app)
+          appexes = sorted((app / "PlugIns").glob("*.appex"))
+          if not appexes:
+              print("::error::no .appex extension in the built app")
+              raise SystemExit(2)
+          ext_bin = exe_of(appexes[0])
+          app_archs = ba.parse_lipo_archs(subprocess.check_output(
+              ["lipo", "-archs", str(app_bin)], text=True))
+          ext_archs = ba.parse_lipo_archs(subprocess.check_output(
+              ["lipo", "-archs", str(ext_bin)], text=True))
+          errs = ba.validate_slices(app_archs, ext_archs)
+          if errs:
+              for e in errs:
+                  print(f"::error::{e}")
+              raise SystemExit(2)
+          print(f"slices arm64-only: app + {appexes[0].name}")
+
+          xcode_out = subprocess.check_output(["xcodebuild", "-version"],
+                                              text=True)
+          xcode_version = ba.parse_xcode_version(xcode_out)
+          xcode_build = ba.parse_xcode_build(xcode_out)
+          for err in ba.validate_xcode_pin(xcode_version, "27.1"):
+              print(f"::error::{err}")
+              raise SystemExit(2)
+          sdk_runtime = os.environ["IOS_RUNTIME"]
+          sdk_version = subprocess.check_output(
+              ["xcrun", "--sdk", "iphonesimulator",
+               "--show-sdk-version"], text=True).strip()
+          sdk_build = subprocess.check_output(
+              ["xcrun", "--sdk", "iphonesimulator",
+               "--show-sdk-build-version"], text=True).strip()
+          if not sdk_version or not sdk_build:
+              print("::error::cannot read iphonesimulator SDK "
+                    "version/build via xcrun --sdk")
+              raise SystemExit(2)
+          runtime_build = None
+          runtimes = json.loads(subprocess.check_output(
+              ["xcrun", "simctl", "list", "-j", "runtimes"], text=True))
+          for rt in runtimes.get("runtimes", []):
+              if rt.get("name") == sdk_runtime and rt.get("buildversion"):
+                  runtime_build = rt["buildversion"]
+                  break
+          if not runtime_build:
+              # No download here (generic build needs no simulator
+              # runtime): without an installed runtime its build ID is
+              # unknowable, and a manifest that cannot name it is
+              # incomplete — fail closed instead of guessing.
+              print(f"::error::runtime {sdk_runtime!r} not installed on "
+                    "the build runner, so its build ID is unknowable; "
+                    "install it or request an installed runtime")
+              raise SystemExit(2)
+          print(f"toolchain: Xcode {xcode_version} ({xcode_build}), "
+                f"SDK {sdk_version} ({sdk_build}), "
+                f"{sdk_runtime} ({runtime_build})")
+
+          struct_errs = ba.verify_app_structure(app)
+          if struct_errs:
+              for e in struct_errs:
+                  print(f"::error::{e}")
+              raise SystemExit(2)
+          meta = ba.pack_app(app, Path(os.environ["RUNNER_TEMP"])
+                             / "screenshot-app.tar.gz")
+          hashes = ba.resource_hashes(app)
           dirty = bool(subprocess.check_output(
               ["git", "status", "--porcelain", "--", ".",
                ":(exclude)ios/TimeOfLife/TimeOfLife.xcodeproj"],
               text=True).strip())
-          out = Path(os.environ["OUT_DIR"])
-          rid = os.environ["RUN_RID"]
-          out.joinpath(f"provenance-{rid}.json").write_text(json.dumps({"commit_base": base, "dirty": dirty}) + "\n")
+          manifest = ba.build_manifest(
+              commit=subprocess.check_output(
+                  ["git", "rev-parse", "HEAD"], text=True).strip(),
+              dirty=dirty,
+              configuration="Screenshot",
+              xcode_version=xcode_version, xcode_build=xcode_build,
+              sdk_version=sdk_version, sdk_build=sdk_build,
+              runtime_version=sdk_runtime, runtime_build=runtime_build,
+              arch="arm64",
+              app_sha256=ba.hash_file(app_bin),
+              extension_sha256=ba.hash_file(ext_bin),
+              archive_sha256=meta["archive_sha256"],
+              bundle_id=ba.SCREENSHOT_BUNDLE_ID,
+              extension_id=ba.SCREENSHOT_EXTENSION_ID,
+              resources={"files": hashes["files"],
+                         "symlinks": hashes["symlinks"]})
+          ba.write_manifest(Path(os.environ["RUNNER_TEMP"])
+                            / "build-manifest.json", manifest)
+          print(f"packed {len(meta['members'])} members, "
+                f"archive {meta['archive_sha256'][:12]}")
           PY
-            rc=0
-            python3 scripts/screenshots/capture.py finalize-run \
-              --out "$OUT" --run-id "$RID" \
-              --provenance "$OUT/provenance-$RID.json" || rc=$?
-            if [ "$rc" -ne 0 ] && [ "$rc" -ne 3 ]; then exit "$rc"; fi
-          done
-          set +e
-          python3 scripts/screenshots/capture.py finalize-two-runs \
-            --out "$OUT" \
-            --run-id-base "$DEVICE_KEY-$LANG_KEY"
-          rc=$?
-          set -e
-          if [ "$rc" -ne 0 ] && [ "$rc" -ne 3 ]; then exit "$rc"; fi
 
-      - name: Upload capture artifact
-        if: always()
+      - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
-          name: shots-${{ matrix.device }}-${{ matrix.language }}
-          path: ${{ runner.temp }}/shots/${{ matrix.device }}/${{ matrix.language }}
+          # Named to avoid the shots-* capture pattern below.
+          name: screenshot-build
+          path: |
+            ${{ runner.temp }}/screenshot-app.tar.gz
+            ${{ runner.temp }}/build-manifest.json
+          retention-days: 14
+
+  screenshots:
+    name: capture (${{ matrix.device }})
+    # 6.5: one worker per selected device (dynamic matrix from the
+    # validated selection), at most five overlapping; each worker owns
+    # ONE simulator/install and runs its locales sequentially with r1/r2
+    # and both session domains inside run_device_worker.py.
+    needs: [validate, build]
+    runs-on: xcode-27
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      max-parallel: 5
+      matrix:
+        device: ${{ fromJSON(needs.validate.outputs.devices) }}
+    env:
+      LIFIO_CAPTURE_LEASE: "1"
+      # CI automation bypass (auditable, existing semantics): expansion
+      # gates open without a human approval file and every manifest logs
+      # ci_approval_bypass:true — never mistaken for owner approval.
+      LIFIO_CAPTURE_CI: "1"
+      IOS_RUNTIME: ${{ needs.validate.outputs.runtime }}
+      LANGUAGES: ${{ needs.validate.outputs.languages }}
+      DEVICE_KEY: ${{ matrix.device }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select pinned Xcode 27.1
+        # Same explicit selection as the build job: the worker must run
+        # the identical toolchain it verifies against — never whatever
+        # happens to be active.
+        run: |
+          SELECTED=""
+          for app in /Applications/Xcode_27.1.app /Applications/Xcode.app; do
+            BIN="$app/Contents/Developer/usr/bin/xcodebuild"
+            [ -x "$BIN" ] || continue
+            VER="$("$BIN" -version | grep -m1 -o '[0-9][0-9.]*' | head -n1)"
+            if [ "$VER" = "27.1" ]; then
+              SELECTED="$app/Contents/Developer"
+              break
+            fi
+          done
+          [ -n "$SELECTED" ] || { echo "::error::no installed Xcode 27.1 found under /Applications"; exit 2; }
+          echo "DEVELOPER_DIR=$SELECTED" >> "$GITHUB_ENV"
+          echo "selected Xcode 27.1 at $SELECTED"
+
+      - name: Fail fast on toolchain
+        run: |
+          xcodebuild -version || { echo "::error::Xcode missing"; exit 2; }
+          if ! xcrun simctl list runtimes | grep -F "$IOS_RUNTIME"; then
+            echo "::warning::runtime '$IOS_RUNTIME' not installed — downloading iOS platform"
+            sudo xcodebuild -downloadPlatform iOS
+            xcrun simctl list runtimes | grep -F "$IOS_RUNTIME" \
+              || { echo "::error::runtime '$IOS_RUNTIME' still missing after 'xcodebuild -downloadPlatform iOS'"; exit 2; }
+          fi
+
+      - name: Download build artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: screenshot-build
+          path: ${{ runner.temp }}/build
+
+      - name: Verify build artifact
+        id: verify
+        # 6.4: the worker rejects incompatible/mismatched provenance
+        # BEFORE touching any simulator: same commit/config/arch/bundle
+        # identities, exact Xcode + SDK build IDs against this runner's
+        # toolchain, permission-preserving extraction, full
+        # binary/resource hashes. A cache miss upstream rebuilt; a stale
+        # artifact can never be substituted or silently skipped here.
+        env:
+          DEVICE_KEY: ${{ matrix.device }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import plistlib
+          import subprocess
+          import sys
+          from pathlib import Path
+          sys.path.insert(0, "scripts/screenshots")
+          import build_artifact as ba
+          import workflow_inputs as wi
+
+          tmp = Path(os.environ["RUNNER_TEMP"])
+          manifest = ba.load_manifest(tmp / "build" / "build-manifest.json")
+          xcode_out = subprocess.check_output(["xcodebuild", "-version"],
+                                              text=True)
+          ours_xcode = ba.parse_xcode_version(xcode_out)
+          ours_build = ba.parse_xcode_build(xcode_out)
+          ours_sdk_version = subprocess.check_output(
+              ["xcrun", "--sdk", "iphonesimulator",
+               "--show-sdk-version"], text=True).strip()
+          ours_sdk_build = subprocess.check_output(
+              ["xcrun", "--sdk", "iphonesimulator",
+               "--show-sdk-build-version"], text=True).strip()
+          if not ours_sdk_version or not ours_sdk_build:
+              print("::error::cannot read iphonesimulator SDK "
+                    "version/build via xcrun --sdk")
+              raise SystemExit(2)
+          want_runtime = os.environ["IOS_RUNTIME"]
+          want_rt_build = None
+          runtimes = json.loads(subprocess.check_output(
+              ["xcrun", "simctl", "list", "-j", "runtimes"], text=True))
+          for rt in runtimes.get("runtimes", []):
+              if rt.get("name") == want_runtime and rt.get("buildversion"):
+                  want_rt_build = rt["buildversion"]
+                  break
+          if not want_rt_build:
+              print(f"::error::no build ID for runtime {want_runtime!r}")
+              raise SystemExit(2)
+          head = subprocess.check_output(["git", "rev-parse", "HEAD"],
+                                         text=True).strip()
+          errs = ba.verify_manifest(
+              manifest, expected_commit=head,
+              expected_xcode=ours_xcode,
+              expected_xcode_build=ours_build,
+              expected_sdk_version=ours_sdk_version,
+              expected_sdk_build=ours_sdk_build,
+              expected_runtime_version=want_runtime,
+              expected_runtime_build=want_rt_build,
+              expected_arch="arm64",
+              expected_configuration="Screenshot",
+              expected_bundle_id=ba.SCREENSHOT_BUNDLE_ID,
+              expected_extension_id=ba.SCREENSHOT_EXTENSION_ID)
+          if errs:
+              for e in errs:
+                  print(f"::error::build provenance mismatch: {e}")
+              raise SystemExit(2)
+          tar = tmp / "build" / "screenshot-app.tar.gz"
+          if ba.hash_file(tar) != manifest["archive_sha256"]:
+              print("::error::archive digest mismatch against the manifest")
+              raise SystemExit(2)
+          dest = tmp / "verified-app"
+          extracted = ba.safe_extract(tar, dest)
+          apps = [p for p in dest.iterdir()
+                  if p.suffix == ".app" and p.is_dir()]
+          if len(apps) != 1:
+              print(f"::error::expected one .app, found {len(apps)}")
+              raise SystemExit(2)
+          struct_errs = ba.verify_app_structure(apps[0])
+          if struct_errs:
+              for e in struct_errs:
+                  print(f"::error::{e}")
+              raise SystemExit(2)
+          res = manifest.get("resources") or {}
+          hash_errs = ba.verify_hashes(
+              apps[0], res.get("files", {}), res.get("symlinks"))
+          if hash_errs:
+              for e in hash_errs:
+                  print(f"::error::{e}")
+              raise SystemExit(2)
+          mode_errs = ba.verify_extracted_modes(tar, dest)
+          if mode_errs:
+              for e in mode_errs:
+                  print(f"::error::{e}")
+              raise SystemExit(2)
+          # Re-hash both Mach-Os against the manifest: the tar digest
+          # above binds the archive, this binds the binaries it claims.
+          def exe_of(bundle: Path) -> Path:
+              with open(bundle / "Info.plist", "rb") as fh:
+                  exe = plistlib.load(fh).get("CFBundleExecutable")
+              if not exe or not isinstance(exe, str):
+                  print(f"::error::no CFBundleExecutable in {bundle}")
+                  raise SystemExit(2)
+              return bundle / exe if (bundle / exe).is_file() \
+                  else bundle / "Contents" / "MacOS" / exe
+          if ba.hash_file(exe_of(apps[0])) != manifest["app_sha256"]:
+              print("::error::app Mach-O hash mismatch against the manifest")
+              raise SystemExit(2)
+          appex = sorted((apps[0] / "PlugIns").glob("*.appex"))[0]
+          if ba.hash_file(exe_of(appex)) != manifest["extension_sha256"]:
+              print("::error::extension Mach-O hash mismatch "
+                    "against the manifest")
+              raise SystemExit(2)
+          with open(os.environ["GITHUB_OUTPUT"], "a") as fh:
+              fh.write(f"app={apps[0]}\n")
+          print(f"verified {apps[0].name}: {len(extracted)} members, "
+                f"archive {manifest['archive_sha256'][:12]}")
+          # Catalog sanity for this worker's key (geometry/island flow
+          # through run_device_worker; unknown keys fail closed here).
+          if os.environ["DEVICE_KEY"] not in wi.SUPPORTED_DEVICES:
+              print(f"::error::unknown device "
+                    f"{os.environ['DEVICE_KEY']!r}")
+              raise SystemExit(2)
+          PY
+
+      - name: Resolve device catalog
+        id: catalog
+        env:
+          # Matrix values come from validated workflow inputs: never
+          # interpolate them into Python/shell source (injection). The
+          # sim names come from the single workflow_inputs catalog, not
+          # a replicated YAML list that could drift as it grows.
+          DEVICE_KEY: ${{ matrix.device }}
+        run: |
+          python3 - <<'PY'
+          import os
+          import sys
+          sys.path.insert(0, "scripts/screenshots")
+          import workflow_inputs as wi
+          key = os.environ["DEVICE_KEY"]
+          try:
+              sim = wi.DEVICE_CATALOG[key]["sim"]
+          except KeyError:
+              print(f"::error::unknown device {key!r}; "
+                    f"catalog: {sorted(wi.DEVICE_CATALOG)}")
+              raise SystemExit(2)
+          with open(os.environ["GITHUB_OUTPUT"], "a") as fh:
+              fh.write(f"sim={sim}\n")
+          PY
+
+      - name: Create and boot simulator
+        id: sim
+        env:
+          IOS_RUNTIME: ${{ needs.validate.outputs.runtime }}
+          DEVICE_KEY: ${{ matrix.device }}
+        run: |
+          RT="${IOS_RUNTIME// /-}"; RT="${RT//./-}"
+          UDID=$(xcrun simctl create "shot-ci-$DEVICE_KEY" \
+            "${{ steps.catalog.outputs.sim }}" \
+            "com.apple.CoreSimulator.SimRuntime.$RT")
+          echo "udid=$UDID" >> "$GITHUB_OUTPUT"
+          xcrun simctl boot "$UDID"
+          xcrun simctl bootstatus "$UDID" -b
+
+      - name: Install verified app
+        run: |
+          xcrun simctl install "${{ steps.sim.outputs.udid }}" \
+            "${{ steps.verify.outputs.app }}"
+
+      - name: Write capture provenance
+        # capture.py provenance shape ({commit_base, dirty}) is made
+        # ONCE per worker run and forwarded to the device worker — it is
+        # NOT the build manifest (different shapes for different gates).
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import subprocess
+          base = subprocess.check_output(["git", "rev-parse", "HEAD"],
+                                         text=True).strip()
+          # Scoped like the build provenance: generated-project noise
+          # under the xcodeproj must not mark every run dirty.
+          dirty = bool(subprocess.check_output(
+              ["git", "status", "--porcelain", "--", ".",
+               ":(exclude)ios/TimeOfLife/TimeOfLife.xcodeproj"],
+              text=True).strip())
+          Path = __import__("pathlib").Path
+          Path(os.environ["RUNNER_TEMP"]).joinpath(
+              "capture-provenance.json").write_text(
+                  json.dumps({"commit_base": base, "dirty": dirty}) + "\n")
+          print(f"provenance: {base[:12]} dirty={dirty}")
+          PY
+
+      - name: Capture locales
+        run: |
+          # Sequential selected locales, r1/r2, pinned + realtime
+          # sessions inside one owned simulator/install. Per-locale
+          # artifacts (both passes, diagnostics, failed/unattempted
+          # statuses) land under shots/<device>/<locale>; the device
+          # summary lands at shots/<device>/worker-summary.json.
+          mkdir -p "${RUNNER_TEMP}/shots"
+          python3 scripts/screenshots/run_device_worker.py \
+            --device-key "$DEVICE_KEY" \
+            --device "${{ steps.sim.outputs.udid }}" \
+            --locales "$LANGUAGES" \
+            --out "${RUNNER_TEMP}/shots" \
+            --provenance "${RUNNER_TEMP}/capture-provenance.json"
+
+      - name: Backfill unreached pair statuses
+        # Pre-capture failures (verify/create/boot/install/provenance)
+        # never enter run_device_worker, so no status files exist for
+        # them. Derive the exact selected locales from the safe
+        # environment, preserve every finished record, and write
+        # explicit unattempted statuses for pairs never reached — never
+        # claim complete, never overwrite.
+        if: always()
+        env:
+          DEVICE_KEY: ${{ matrix.device }}
+          LANGUAGES: ${{ needs.validate.outputs.languages }}
+        run: |
+          python3 - <<'PY'
+          import os
+          import sys
+          sys.path.insert(0, "scripts/screenshots")
+          import workflow_artifacts as wa
+          import workflow_inputs as wi
+          from pathlib import Path
+          try:
+              locales = wi.parse_locale_selection(os.environ["LANGUAGES"])
+          except wi.InputError as exc:
+              print(f"::error::invalid languages: {exc}")
+              raise SystemExit(2)
+          created = wa.backfill_unattempted(
+              Path(os.environ["RUNNER_TEMP"]) / "shots",
+              os.environ["DEVICE_KEY"], locales,
+              "worker did not reach this pair (pre-capture failure, "
+              "cancel, or crash); no success claimed")
+          print(f"backfilled {len(created)} unattempted status(es)")
+          PY
+
+      - name: Stage pair uploads
+        # Each per-locale upload is a SINGLE pair directory: copy the
+        # device worker summary into the locale cell so downloaders get
+        # runs/, requests/, statuses, and the summary at one root —
+        # never a locale nested inside a locale.
+        if: always()
+        env:
+          DEVICE_KEY: ${{ matrix.device }}
+          LANGUAGES: ${{ needs.validate.outputs.languages }}
+        run: |
+          python3 - <<'PY'
+          import os
+          import sys
+          sys.path.insert(0, "scripts/screenshots")
+          import workflow_artifacts as wa
+          import workflow_inputs as wi
+          from pathlib import Path
+          try:
+              locales = wi.parse_locale_selection(os.environ["LANGUAGES"])
+          except wi.InputError as exc:
+              print(f"::error::invalid languages: {exc}")
+              raise SystemExit(2)
+          root = Path(os.environ["RUNNER_TEMP"]) / "shots"
+          for locale in locales:
+              staged = wa.stage_pair_upload(
+                  root, os.environ["DEVICE_KEY"], locale)
+              print(f"staged {staged}")
+          PY
+
+      - name: Upload en captures
+        if: always() && contains(needs.validate.outputs.languages, '"en"')
+        uses: actions/upload-artifact@v4
+        with:
+          name: shots-${{ matrix.device }}-en
+          path: ${{ runner.temp }}/shots/${{ matrix.device }}/en
+          retention-days: 14
+
+      - name: Upload ru captures
+        if: always() && contains(needs.validate.outputs.languages, '"ru"')
+        uses: actions/upload-artifact@v4
+        with:
+          name: shots-${{ matrix.device }}-ru
+          path: ${{ runner.temp }}/shots/${{ matrix.device }}/ru
+          retention-days: 14
+
+      - name: Upload zh-Hans captures
+        if: always() && contains(needs.validate.outputs.languages, '"zh-Hans"')
+        uses: actions/upload-artifact@v4
+        with:
+          name: shots-${{ matrix.device }}-zh-Hans
+          path: ${{ runner.temp }}/shots/${{ matrix.device }}/zh-Hans
+          retention-days: 14
+
+      - name: Upload es-419 captures
+        if: always() && contains(needs.validate.outputs.languages, '"es-419"')
+        uses: actions/upload-artifact@v4
+        with:
+          name: shots-${{ matrix.device }}-es-419
+          path: ${{ runner.temp }}/shots/${{ matrix.device }}/es-419
+          retention-days: 14
+
+      - name: Upload pt-BR captures
+        if: always() && contains(needs.validate.outputs.languages, '"pt-BR"')
+        uses: actions/upload-artifact@v4
+        with:
+          name: shots-${{ matrix.device }}-pt-BR
+          path: ${{ runner.temp }}/shots/${{ matrix.device }}/pt-BR
           retention-days: 14
 
       - name: Scoped simulator cleanup
@@ -302,13 +753,14 @@ jobs:
 
   panels:
     name: panels + zip
-    needs: screenshots
-    # One red matrix leg must not discard the whole bundle: fail-fast is
-    # false, every leg uploads its artifacts, and panels.py records
-    # incomplete cells as blocked in the matrix manifest. The Render step
-    # below tolerates that incomplete matrix (warns, still zips+uploads)
-    # because CI la frames are needs-inspection by design until the human
-    # handoff — only a missing manifest fails the job.
+    needs: [validate, screenshots]
+    # One red device worker must not discard the whole bundle:
+    # fail-fast is false, every worker uploads its artifacts, and
+    # panels.py records incomplete cells as blocked in the matrix
+    # manifest. The Render step below tolerates that incomplete matrix
+    # (warns, still zips+uploads) because CI la frames are
+    # needs-inspection by design until the human handoff — only a
+    # missing manifest fails the job.
     if: "!cancelled()"
     runs-on: macos-15
     timeout-minutes: 30
@@ -337,34 +789,34 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           pattern: shots-*
-          path: shots
+          path: shots/dl
+
+      - name: Download build manifest
+        uses: actions/download-artifact@v4
+        with:
+          name: screenshot-build
+          path: ${{ runner.temp }}/build
 
       - name: Flatten artifact layout
-        # download-artifact extracts each artifact into shots/<artifact-name>/,
-        # but panels expects shots/<device>/<language>/runs/<run-id>/. Re-shard.
-        # Artifact names are shots-<device>-<language>, but three of the five
-        # locales contain a hyphen (es-419, zh-Hans, pt-BR), so splitting on
-        # the LAST hyphen misroutes them (shots-iphone69-es-419 became
-        # dev=iphone69-es, lang=419). Derive the device by longest catalog
-        # prefix match and take the remainder as the language.
+        # download-artifact extracts each artifact into shots/dl/<artifact-name>/,
+        # but panels expects shots/<device>/<language>/runs/<run-id>/.
+        # Re-sharding runs through the single workflow_artifacts helper
+        # (unit-tested with fixtures): device keys come from longest
+        # catalog prefix match so hyphenated locales (es-419, zh-Hans,
+        # pt-BR) never misroute, and unknown names fail closed.
         run: |
-          set -e
-          mkdir -p flat
-          for d in shots/shots-*-*; do
-            [ -d "$d" ] || continue
-            base=$(basename "$d"); rest=${base#shots-}
-            dev=""
-            for cand in iphone69 iphone63 ipad13; do
-              case "$rest" in "$cand"-*) dev="$cand"; break;; esac
-            done
-            [ -n "$dev" ] || { echo "::error::cannot derive device from artifact $base"; exit 2; }
-            lang=${rest#"$dev"-}
-            [ -n "$lang" ] || { echo "::error::cannot derive language from artifact $base"; exit 2; }
-            mkdir -p "flat/$dev/$lang"
-            cp -R "$d/." "flat/$dev/$lang/"
-          done
-          rm -rf shots && mv flat shots
-          python3 -c "from pathlib import Path; ms=list(Path('shots').rglob('run-manifest.json')); print(f'resharded manifests: {len(ms)}'); assert ms, 'no run manifests after reshard'"
+          python3 - <<'PY'
+          import shutil
+          import sys
+          from pathlib import Path
+          sys.path.insert(0, "scripts/screenshots")
+          import workflow_artifacts as wa
+          report = wa.reshard_downloaded_artifacts(
+              Path("shots") / "dl", Path("shots"))
+          print(f"resharded cells: {report['cells']}, "
+                f"manifests: {report['manifests']}")
+          shutil.rmtree(Path("shots") / "dl")
+          PY
 
       - name: Fetch Apple bezel assets
         env:
@@ -380,8 +832,8 @@ jobs:
 
       - name: Render panels
         env:
-          DEVICES: ${{ inputs.devices }}
-          LANGUAGES: ${{ inputs.languages }}
+          DEVICES: ${{ needs.validate.outputs.devices }}
+          LANGUAGES: ${{ needs.validate.outputs.languages }}
         run: |
           python3 -m pip install --break-system-packages "Pillow==13.0.0"
           rc=0
@@ -407,10 +859,16 @@ jobs:
           if [ "$rc" -ne 0 ]; then echo "::warning::panels matrix incomplete (exit $rc) — blocked cells recorded in matrix-manifest.json; uploading partial bundle"; fi
 
       - name: Write README and zip
+        # The delivered ZIP is self-contained: rendered panels plus the
+        # raw per-locale captures (both passes, frame records, receipts,
+        # statuses) plus the verified build manifest. Blocked source
+        # cells stay blocked per the existing matrix policy (no new
+        # render behavior); the bundle README still reports handoff
+        # versus complete, never approval.
         env:
-          IOS_RUNTIME: ${{ inputs.ios_runtime }}
-          DEVICES: ${{ inputs.devices }}
-          LANGUAGES: ${{ inputs.languages }}
+          IOS_RUNTIME: ${{ needs.validate.outputs.runtime }}
+          DEVICES: ${{ needs.validate.outputs.devices }}
+          LANGUAGES: ${{ needs.validate.outputs.languages }}
         run: |
           python3 scripts/panels/write_bundle_readme.py \
             --panels-dir "$RUNNER_TEMP/panels" --shots-dir shots \
@@ -420,7 +878,8 @@ jobs:
             --out bundle-readme.md
           # Keep the repo README untouched: the bundle carries its own file.
           cp bundle-readme.md "$RUNNER_TEMP/panels/BUNDLE-README.md"
-          (cd "$RUNNER_TEMP" && zip -qr "$GITHUB_WORKSPACE/lifio-screenshots-${{ github.sha }}.zip" panels)
+          (cd "$RUNNER_TEMP" && zip -qr "$GITHUB_WORKSPACE/lifio-screenshots-${{ github.sha }}.zip" panels build/build-manifest.json)
+          (cd "$GITHUB_WORKSPACE" && zip -qr lifio-screenshots-${{ github.sha }}.zip shots)
           rm bundle-readme.md
 
       - name: Upload bundle

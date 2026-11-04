@@ -1,0 +1,45 @@
+## Why
+
+The default App Store screenshot run took 78 minutes to finish captures under a five-macOS-job limit, repeatedly building the same binary and recreating a fixture session for every frame. Even after removing duplicate builds, the current capture work totals 25–28 minutes per device, so reaching the owner's under-20-minute workflow goal requires session-based capture as well as device-affine scheduling.
+
+## What Changes
+
+- Build one Release-optimized, simulator-only Screenshot app for the arm64 capture fleet and distribute a permission-preserving artifact with verified build provenance; reuse dependency/build caches without depending on a cache hit for correctness.
+- Replace the device × locale job matrix with one capture worker per selected device, at most five workers concurrently. Each worker boots and installs once, then processes the selected locales sequentially with two fresh passes per locale.
+- Capture Track → Insights → History top → Add entry in one fresh pinned-clock process per locale/pass, seeding once and validating the native screen, totals, and frame-bound readiness before every export. Keep locale and clock-domain changes at process boundaries.
+- Group Live Activity work in a separate real-time session per locale/pass with one activity anchor. Preserve genuine-evidence requirements, explicit pending/blocked handoffs, and probed iPad Island N/A states; do not turn placeholder images into successful captures.
+- Move device locking, chrome snapshot/application/restoration, container lookup, and immutable binary provenance to owned-session scope. Retain per-frame request hashes, native geometry, screenshots, state checks, and fail-closed cleanup dependencies.
+- Add phase timing and command counters, a one-locale pilot benchmark before expansion, and cold/warm end-to-end acceptance against a 20-minute target. Report actual scheduling delays and missing evidence rather than hiding them.
+- **BREAKING (capture tooling only):** evolve capture request/state/session records in place for session identity, ordered frame commands, and session cleanup receipts; update the app, runner, finalizer, and tests together. No legacy on-disk protocol branches.
+
+### Non-goals
+
+- No shipping UI, timer/auth/sync behavior, fixtures' content/totals, locale list, or two-pass guarantee changes; no Debug reuse or weaker Screenshot/Release isolation.
+- No skipped database migrations, raw GRDB writes outside `LocalStore`, fake view-model validation, shorter system deadlines, relaxed Live Activity timer tolerance, or automatic visual approval.
+- No new simulator farm, larger paid runners, parallel simulators on a worker, landing montage, `web/` changes, App Store upload, or separate render-only dispatch feature.
+- No repair of unrelated archive/baseline drift and no claim that screenshot owner acceptances or genuine Live Activity automation are completed by this performance change.
+
+## Capabilities
+
+### New Capabilities
+
+- `screenshot-capture-workflow`: device-affine scheduling, shared build provenance, sequenced session capture, evidence-preserving cleanup, and measured runtime acceptance.
+
+### Modified Capabilities
+
+None. Existing `localization`, `live-activities`, `timer-capture-experience`, `history-entry-list`, `history-search`, `insights-breakdown`, `manual-entry`, and `app-shell` contracts are exercised but not changed. The earlier `screenshot-capture`, `store-marketing-panel`, and `landing-screenshot-asset` specs exist only under `openspec/changes/archive/2026-11-03-app-store-screenshot-pilot/` at this base; this proposal adds a distinct workflow capability rather than inventing a baseline to modify.
+
+## Impact
+
+- iOS: capture-only orchestration under `ios/TimeOfLife/TimeOfLife/Core/Capture/`, its app entry routing, and Screenshot-gated tests. Preserve `LocalStore` as the only mutation boundary and retain native rendering paths.
+- Tooling/CI: `scripts/screenshots/`, affected panel/finalizer consumers and tests, `.github/workflows/app-screenshots.yml`, and relevant workflow contract tests. `project.yml` changes, if required, stay Screenshot-scoped and use XcodeGen.
+- Documentation: `docs/screenshot-capture.md`, `docs/ci.md`, `docs/project-context.md`, `Design/SCREENSHOTS.md`, and applicable README instructions. No backend/OpenAPI changes or new production strings/dependencies are planned.
+- Requirements checked: `Common.md` U1/U2/U4/U5, S2/S5/S6, +2; `Timetracking.md` F4/F15/R2; entry-owned text/categories/notes and Recents in `Activity_Catalog_and_Categories.md`. Product behavior and all five localized decks remain unchanged.
+
+### Evidence and research
+
+- Baseline: [run 41718031322](https://github.com/AntonKosenkoPro/timeOfLife/actions/runs/41718031322), commit `bd12666465716b3ff5cf35c937312f5d1da266d5`, attempt 1 captures. Fifteen successful capture jobs consumed 203.4 build, 31.1 boot, and 78.4 capture runner-minutes; created-to-last-capture was 78.4 minutes. Panels failed before rendering; the later panels-only rerun is not an end-to-end baseline.
+- Research fetched 2026-11-04: `/websites/github_en_actions` — “Share a built application artifact between a build job and device matrix jobs with strategy.max-parallel and record cache misses”; exploration also fetched artifact sharing, matrix limits, and rerun semantics. Pins: current artifact actions v4 and `xcode-27` capture image; retain repository-pinned XcodeGen and Pillow versions.
+- Apple research: `/websites/developer_apple_xcode` — “Build settings ARCHS ONLY_ACTIVE_ARCH build only arm64 simulator while retaining release compiler optimization”; “Measure application launch performance with Instruments App Launch and signposts to separate database initialization from first rendered frame.” Pin the exact selected Xcode 27.x toolchain/runtime in provenance; the baseline used Xcode 27.1 with iOS 27.0. `ONLY_ACTIVE_ARCH` alone does not constrain a generic destination, so verify the produced slices explicitly.
+- Official artifact documentation confirms tar preserves executable permissions and cache misses must remain rebuildable: [upload-artifact](https://github.com/actions/upload-artifact#permission-loss), [dependency caching](https://docs.github.com/en/actions/concepts/workflows-and-actions/dependency-caching).
+- HIG research waived: no screen layout, interaction, or visual design is being redesigned; capture must still prove the existing native screens. New ActivityKit/GRDB API research waived for planning: reuse existing lifecycle and `LocalStore` methods, not new SDK/database APIs. Fetch applicable docs before any implementation that changes those calls. Reconfirm this research after the implementation rebase.

@@ -116,6 +116,9 @@ struct CaptureStateFailure: Codable, Equatable {
 struct CaptureState: Codable, Equatable {
     /// preparing | ready | invalid | failure
     var status: String
+    /// Session protocol version (runner `validate_session_ack` requires
+    /// integer 2; v1 shapes are rejected with no legacy branch).
+    var schemaVersion: Int = 2
     var requestSHA256: String?
     var deckVersion: String?
     var frame: String?
@@ -127,9 +130,22 @@ struct CaptureState: Codable, Equatable {
     var clocks: CaptureStateClocks?
     var liveActivity: CaptureStateLiveActivity?
     var error: CaptureStateFailure?
+    /// Session identity (protocol v2): present once an active session
+    /// exists, so every ack binds nonce/domain/seq and the accepted
+    /// command transcript. Absent only for no-context terminal states.
+    var sessionNonce: String?
+    var sessionDomain: String?
+    var seq: Int?
+    var transcript: [ScreenshotSessionTranscriptEntry]?
+    /// App-clock phase durations in ms, keyed by phase (seed, validation,
+    /// mount_wait, settle, anchor). Opaque to the runner, which records
+    /// them separately from its own monotonic phases — the two clocks are
+    /// never subtracted. Read by `run_session` for the phase breakdown.
+    var appDurationsMS: [String: Double]?
 
     enum CodingKeys: String, CodingKey {
         case status
+        case schemaVersion = "schema_version"
         case requestSHA256 = "request_sha256"
         case deckVersion = "deck_version"
         case frame, mode
@@ -139,6 +155,11 @@ struct CaptureState: Codable, Equatable {
         case build, clocks
         case liveActivity = "live_activity"
         case error
+        case sessionNonce = "session_nonce"
+        case sessionDomain = "session_domain"
+        case seq
+        case transcript
+        case appDurationsMS = "app_durations_ms"
     }
 }
 
@@ -155,6 +176,17 @@ struct CaptureCleanupState: Codable, Equatable {
     var endedActivityIDs: [String]
     var removedSession: Bool
     var error: CaptureStateFailure?
+    /// Transcript binding (protocol v2): the covered session identity,
+    /// final command, and accepted transcript. Runner host attestation
+    /// (chrome/process/lease) stays in the runner receipt, never here.
+    var sessionNonce: String?
+    var sessionDomain: String?
+    var finalSeq: Int?
+    var transcript: [ScreenshotSessionTranscriptEntry]?
+    /// Queue-evidence proof: the owned `capture-sessions/<nonce>` directory
+    /// (queue file, consumed records, end marker) was verified removed.
+    /// The fixed state/cleanup acks always survive for the runner read.
+    var removedSessionQueue: Bool
 
     enum CodingKeys: String, CodingKey {
         case status
@@ -163,6 +195,11 @@ struct CaptureCleanupState: Codable, Equatable {
         case endedActivityIDs = "ended_activity_ids"
         case removedSession = "removed_session"
         case error
+        case sessionNonce = "session_nonce"
+        case sessionDomain = "session_domain"
+        case finalSeq = "final_seq"
+        case transcript
+        case removedSessionQueue = "removed_session_queue"
     }
 }
 

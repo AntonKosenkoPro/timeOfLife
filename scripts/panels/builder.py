@@ -61,6 +61,15 @@ import platform
 from pathlib import Path
 
 try:
+    import session_evidence as _sev
+except ImportError:  # builder imported without the screenshots path first
+    import sys as _sys
+
+    _sys.path.insert(
+        0, str(Path(__file__).resolve().parent.parent / "screenshots"))
+    import session_evidence as _sev
+
+try:
     from PIL import Image, ImageDraw, ImageFilter, ImageFont
 except ImportError as exc:  # fail loudly, never silently degrade rendering
     raise SystemExit(f"panels builder requires Pillow: {exc}")
@@ -611,7 +620,9 @@ def draw_headline_centered_63(base: Image.Image, locale: str,
 
 def verify_sources(frames_dir: Path, manifest_path: Path,
                    needed: tuple[str, ...],
-                   canvas: tuple[int, int]) -> tuple[dict, dict]:
+                   canvas: tuple[int, int],
+                   evidence_frames: tuple[str, ...] | None = None
+                   ) -> tuple[dict, dict]:
     try:
         manifest = json.loads(manifest_path.read_bytes().decode("utf-8"))
     except OSError as exc:
@@ -620,6 +631,35 @@ def verify_sources(frames_dir: Path, manifest_path: Path,
         raise BuilderError(f"run manifest malformed {manifest_path}: {exc}")
     if not isinstance(manifest, dict) or not isinstance(manifest.get("frames"), list):
         raise BuilderError(f"run manifest {manifest_path} missing 'frames' list")
+    # Strict shared-helper evidence first (single chokepoint owned by the
+    # runner; never reimplemented here): session nonce/transcript coverage,
+    # combined app/host receipt, path/symlink guards, attested N/A probe
+    # binding (run/device/geometry/model/source/realtime-nonce),
+    # fabrication and required-lock handling. required_frames = filed
+    # manifest entries plus the evidence set, so fabricated island entries
+    # are validated (and refused) by the helper too; the complete-set gate
+    # below (status == complete) stays unchanged so pending LA still blocks
+    # the whole cell.
+    run_dir = manifest_path.parent
+    manifest_frames = [r.get("frame") for r in manifest.get("frames", [])
+                       if isinstance(r, dict)
+                       and isinstance(r.get("frame"), str)]
+    evidence = list(evidence_frames) if evidence_frames is not None \
+        else list(needed)
+    required = list(dict.fromkeys([*manifest_frames, *evidence]))
+    try:
+        evidence_errs = _sev.validate_run_evidence(
+            run_dir, manifest, required_frames=required)
+    except Exception as exc:
+        raise BuilderError(
+            f"session evidence unreadable for {manifest_path}: {exc}")
+    if evidence_errs:
+        first = evidence_errs[0]
+        extra = f" (+{len(evidence_errs) - 1} more)" if len(
+            evidence_errs) > 1 else ""
+        raise BuilderError(
+            f"session evidence refused for {manifest_path}: "
+            f"{first}{extra}")
     if manifest.get("status") != "complete":
         raise BuilderError(
             f"run {manifest.get('run_id')} status {manifest.get('status')!r} != "
@@ -1470,8 +1510,12 @@ def build_ipad(locale: str, caps: dict, captions_version: str,
                out_dir: Path) -> dict:
     out_dir.mkdir(parents=True, exist_ok=True)
     needed = tuple(PANEL_FRAMES_IPAD.values())
+    # Evidence covers the rendered app frames plus the required Lock
+    # Screen (Island stays N/A via probe, never filed).
     src_hashes, run_meta = verify_sources(frames_dir, manifest_path,
-                                          needed, CANVAS_IPAD)
+                                          needed, CANVAS_IPAD,
+                                          evidence_frames=(*needed,
+                                                            "la-lock"))
     bezel_info = verify_bezel_ipad(bezel_path)
     bezel = load_bezel(bezel_path)
     copy = copy_for_ipad(caps)

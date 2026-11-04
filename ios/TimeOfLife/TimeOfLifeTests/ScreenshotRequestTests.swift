@@ -22,7 +22,7 @@ struct ScreenshotRequestTests {
             "appearance": "light",
             "dynamic_type": "large",
             "treatment": "light-v1",
-            "frames": ["track-running", "insights", "history", "add-entry", "live-activity"],
+            "frames": ["track-running", "insights", "history", "add-entry", "la-lock", "la-compact", "la-expanded"],
             "frame": "track-running",
             "mode": "app-clock-pinned",
         ]
@@ -121,7 +121,7 @@ struct ScreenshotRequestTests {
         #expect(codeFor(validJSON(overrides: ["frame": "name-picker", "frames": ["track-running", "name-picker"]])) == "unknown-frame")
         #expect(codeFor(validJSON(overrides: ["frames": ["track-running"], "frame": "insights"])) == "frame-not-listed")
         #expect(codeFor(validJSON(overrides: ["frames": ["track-running", "nope"]])) == "unknown-frame")
-        #expect(codeFor(validJSON(overrides: ["frame": "live-activity", "mode": "app-clock-pinned"])) == "mode-mismatch")
+        #expect(codeFor(validJSON(overrides: ["frame": "la-lock", "mode": "app-clock-pinned"])) == "mode-mismatch")
         #expect(codeFor(validJSON(overrides: ["frame": "insights", "mode": "live-activity-realtime"])) == "mode-mismatch")
         #expect(codeFor(Data("not json".utf8)) == "invalid-json")
         var missing = validJSON()
@@ -138,14 +138,12 @@ struct ScreenshotRequestTests {
         #expect(codeFor(missing) == "missing-field")
     }
 
-    @Test("live-activity frame requires the realtime mode")
-    func liveActivityMode() throws {
-        let request = try ScreenshotRequestLoader.parse(data: validJSON(overrides: [
+    @Test("legacy single live-activity frame is rejected")
+    func legacyFrameRejected() {
+        #expect(codeFor(validJSON(overrides: [
             "frame": "live-activity",
             "mode": "live-activity-realtime",
-        ]))
-        #expect(request.frame == .liveActivity)
-        #expect(request.mode == .liveActivityRealtime)
+        ])) == "unknown-frame")
     }
 
     @Test("add-entry frame parses on the pinned app clock")
@@ -171,29 +169,59 @@ struct ScreenshotRequestTests {
             == .requested(filename: "capture-request.json"))
     }
 
-    @Test("cleanup invocation requires both run ID and request SHA")
+    @Test("cleanup invocation requires the full v2 session binding")
     func cleanupDetection() {
+        let nonce = "abcdef0123456789abcdef0123456789"
+        let argvFull = [
+            "SCREENSHOT_CLEANUP=my-run",
+            "SCREENSHOT_CLEANUP_SHA=abc123",
+            "SCREENSHOT_SESSION_NONCE=\(nonce)",
+            "SCREENSHOT_SESSION_DOMAIN=pinned",
+            "SCREENSHOT_FINAL_SEQ=2",
+        ]
+        let envFull: [String: String] = [
+            "SCREENSHOT_CLEANUP": "env-run",
+            "SCREENSHOT_CLEANUP_SHA": "def456",
+            "SCREENSHOT_SESSION_NONCE": nonce,
+            "SCREENSHOT_SESSION_DOMAIN": "realtime",
+            "SCREENSHOT_FINAL_SEQ": "0",
+        ]
+        let envForwarded: [String: String] = [
+            "SIMCTL_CHILD_SCREENSHOT_CLEANUP": "fwd-run",
+            "SIMCTL_CHILD_SCREENSHOT_CLEANUP_SHA": "789",
+            "SIMCTL_CHILD_SCREENSHOT_SESSION_NONCE": nonce,
+            "SIMCTL_CHILD_SCREENSHOT_SESSION_DOMAIN": "pinned",
+            "SIMCTL_CHILD_SCREENSHOT_FINAL_SEQ": "1",
+        ]
         #expect(ScreenshotLaunch.detectCleanup(argv: [], environment: [:]) == nil)
         #expect(ScreenshotLaunch.detectCleanup(
             argv: ["SCREENSHOT_CLEANUP=my-run"],
             environment: [:]
         ) == nil)
+        // Two legacy tokens no longer form an invocation.
         #expect(ScreenshotLaunch.detectCleanup(
             argv: ["SCREENSHOT_CLEANUP=my-run", "SCREENSHOT_CLEANUP_SHA=abc123"],
             environment: [:]
-        ) == ScreenshotCleanupInvocation(runID: "my-run", expectedSHA256: "abc123"))
+        ) == nil)
         #expect(ScreenshotLaunch.detectCleanup(
             argv: ["SCREENSHOT_CLEANUP=my-run", "SCREENSHOT_CLEANUP_SHA="],
             environment: [:]
         ) == nil)
         #expect(ScreenshotLaunch.detectCleanup(
-            argv: [],
-            environment: ["SCREENSHOT_CLEANUP": "env-run", "SCREENSHOT_CLEANUP_SHA": "def456"]
-        ) == ScreenshotCleanupInvocation(runID: "env-run", expectedSHA256: "def456"))
+            argv: argvFull,
+            environment: [:]
+        ) == ScreenshotCleanupInvocation(runID: "my-run", expectedSHA256: "abc123",
+                                         sessionNonce: nonce, sessionDomain: "pinned", finalSeq: 2))
         #expect(ScreenshotLaunch.detectCleanup(
             argv: [],
-            environment: ["SIMCTL_CHILD_SCREENSHOT_CLEANUP": "fwd-run", "SIMCTL_CHILD_SCREENSHOT_CLEANUP_SHA": "789"]
-        ) == ScreenshotCleanupInvocation(runID: "fwd-run", expectedSHA256: "789"))
+            environment: envFull
+        ) == ScreenshotCleanupInvocation(runID: "env-run", expectedSHA256: "def456",
+                                         sessionNonce: nonce, sessionDomain: "realtime", finalSeq: 0))
+        #expect(ScreenshotLaunch.detectCleanup(
+            argv: [],
+            environment: envForwarded
+        ) == ScreenshotCleanupInvocation(runID: "fwd-run", expectedSHA256: "789",
+                                         sessionNonce: nonce, sessionDomain: "pinned", finalSeq: 1))
     }
 
     @Test("non-capture builds always resolve the production route")

@@ -13,9 +13,6 @@ struct TimeOfLifeApp: App {
     @StateObject private var container: AppContainer
     @StateObject private var session: SessionStore
     @StateObject private var navigation: AppNavigationStack
-    #if SCREENSHOT_CAPTURE
-    @StateObject private var captureModel: ScreenshotCaptureModel
-    #endif
 
     init() {
         // Crash reporting (observability Stage 0): starts only when a DSN
@@ -37,7 +34,6 @@ struct TimeOfLifeApp: App {
         self._container = StateObject(wrappedValue: container)
         self._session = StateObject(wrappedValue: container.sessionStore)
         self._navigation = StateObject(wrappedValue: container.navigation)
-        self._captureModel = StateObject(wrappedValue: ScreenshotCaptureModel())
         #else
         // UI-feedback loop: when launched with `UITEST_SCREEN=<screen>` (or
         // `SIMCTL_CHILD_UITEST_SCREEN=<screen>`, which `simctl launch` preserves)
@@ -105,8 +101,10 @@ struct TimeOfLifeApp: App {
                 // before the capture path; never a captured frame.
                 ScreenshotCleanupRootView(invocation: cleanup)
             } else {
-                ScreenshotCaptureRootView(model: captureModel)
-                    .task { await captureModel.runOnce() }
+                // Session entry: a v2 envelope starts the batched session
+                // controller; anything else resolves to an explicit invalid
+                // state (fail-closed, no fallback path).
+                ScreenshotSessionEntryView()
             }
             #else
             appRoot

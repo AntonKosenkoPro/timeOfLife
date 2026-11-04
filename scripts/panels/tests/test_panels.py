@@ -16,6 +16,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 HERE = Path(__file__).resolve().parent.parent
 CLI = str(HERE / "panels.py")
@@ -66,6 +67,58 @@ FRAME_COLORS = {
     "la-expanded": (100, 140, 120),
 }
 
+# Session-evidence fixture pins (strict consumer of the shared runner
+# validator; never reimplemented here).
+NONCE_PINNED = "0123456789abcdef0123456789abcdef"
+NONCE_REALTIME = "fedcba9876543210fedcba9876543210"
+APP_FRAMES = ("track-running", "insights", "history", "add-entry")
+
+
+def _req_sha(run_id: str, frame: str) -> str:
+    return hashlib.sha256(f"req-{run_id}-{frame}".encode()).hexdigest()
+
+
+def _domain_of(frame: str) -> str:
+    return "pinned" if frame in APP_FRAMES else "realtime"
+
+
+def _nonce_of(frame: str) -> str:
+    return NONCE_PINNED if frame in APP_FRAMES else NONCE_REALTIME
+
+
+# Attested iPad model — REAL catalog identifier (8GB variant only, not
+# the unsuffixed family name): the shared validator requires an exact
+# cataloged model. Name is operator-assigned evidence (presence, not
+# value); udid must equal the run's unanimous frame device_udid.
+IPAD_MODEL_ID = ("com.apple.CoreSimulator.SimDeviceType."
+                 "iPad-Pro-13-inch-M4-8GB")
+IPAD_MODEL_NAME = "shot-ci-ipad13"
+
+
+def _attested_probe(device: str, run_id: str,
+                    canvas: tuple[int, int]) -> dict:
+    return {
+        "schema_version": 1,
+        "device_key": device,
+        "island_available": False,
+        "reason": "capability probe: no Dynamic Island",
+        "run_id": run_id,
+        "session_nonce": NONCE_REALTIME,
+        "geometry": {"width": canvas[0], "height": canvas[1]},
+        "model": {"deviceTypeIdentifier": IPAD_MODEL_ID,
+                  "name": IPAD_MODEL_NAME,
+                  "udid": "UDID-1"},
+        "source": "simctl-list",
+    }
+
+
+def _device_for_canvas(canvas: tuple[int, int]) -> str:
+    if tuple(canvas) == (2064, 2752):
+        return "ipad13"
+    if tuple(canvas) == (1206, 2622):
+        return "iphone63"
+    return "iphone69"
+
 
 def run(*argv: str):
     env = dict(os.environ)
@@ -101,17 +154,88 @@ def make_frames(frames_dir: Path, canvas: tuple[int, int],
 def make_manifest(path: Path, frames_dir: Path, run_id: str,
                   canvas: tuple[int, int], frames: tuple[str, ...],
                   status: str = "complete") -> None:
+    """Session-valid manifest + frame records + receipts (+ iPad probe)."""
+    run_dir = path.parent
+    sessions_dir = run_dir / "sessions"
+    sessions_dir.mkdir(parents=True, exist_ok=True)
+    device = _device_for_canvas(canvas)
+    seq_counters = {"pinned": 0, "realtime": 0}
     recs = []
+    transcripts: dict[str, list[dict]] = {}
     for frame in frames:
         png = frames_dir / f"{frame}.png"
-        recs.append({"frame": frame,
-                     "screenshot_sha256": hashlib.sha256(png.read_bytes()).hexdigest(),
-                     "geometry": {"width": canvas[0], "height": canvas[1]}})
-    path.write_text(json.dumps({
+        sha_png = hashlib.sha256(png.read_bytes()).hexdigest()
+        domain = _domain_of(frame)
+        seq = seq_counters[domain]
+        seq_counters[domain] += 1
+        sha_req = _req_sha(run_id, frame)
+        rec: dict = {
+            "schema_version": 1, "frame": frame,
+            "mode": ("app-clock-pinned" if domain == "pinned"
+                     else "live-activity-realtime"),
+            "device_udid": "UDID-1", "device_key": device,
+            "run_id": run_id,
+            "deck_version": "en-austin-1", "treatment": "light-v1",
+            "request_sha256": sha_req,
+            "request_semantic_sha256": "b" * 64,
+            "screenshot_sha256": sha_png,
+            "geometry": {"width": canvas[0], "height": canvas[1]},
+            "expected_totals": {"all_seconds": 1, "today_seconds": 1,
+                                "week_seconds": 1,
+                                "category_seconds": {"A": 1},
+                                "text_seconds": {"B": 1}},
+            "session_nonce": _nonce_of(frame),
+            "session_domain": domain, "seq": seq,
+        }
+        if domain == "pinned":
+            rec["capture"] = "native-simctl"
+        else:
+            rec["capture"] = "external-lock-screen"
+            rec["capture_window"] = {
+                "started_at": "2026-10-30T10:00:00+00:00",
+                "captured_at_iso": "2026-10-30T10:00:10+00:00",
+                "observed_elapsed_s": 10,
+            }
+            rec["observation_sha256"] = "d" * 64
+        (frames_dir / f"{frame}.json").write_text(
+            json.dumps(rec, sort_keys=True), encoding="utf-8")
+        recs.append(rec)
+        nonce = rec["session_nonce"]
+        transcripts.setdefault(nonce, []).append(
+            {"seq": seq, "frame": frame, "request_sha256": sha_req,
+             "request_semantic_sha256": "b" * 64})
+    for nonce, transcript in transcripts.items():
+        domain = "pinned" if nonce == NONCE_PINNED else "realtime"
+        receipt = {
+            "schema_version": 1, "session_nonce": nonce,
+            "run_id": run_id, "session_domain": domain,
+            "final_seq": max(r["seq"] for r in transcript),
+            "status": "complete", "failures": [],
+            "transcript": sorted(transcript, key=lambda r: r["seq"]),
+            "app_cleanup": {"status": "cleaned",
+                            "removed_session": True,
+                            "removed_session_queue": True,
+                            "ended_activity_ids": []},
+            "runner_verified": {"chrome_restored": True,
+                                "process_terminated": True,
+                                "lease_released": True},
+        }
+        (sessions_dir / f"{nonce}.receipt.json").write_text(
+            json.dumps(receipt, sort_keys=True), encoding="utf-8")
+    if device == "ipad13":
+        probe = _attested_probe(device, run_id, canvas)
+        (sessions_dir / "island-probe.json").write_text(
+            json.dumps(probe, sort_keys=True), encoding="utf-8")
+    manifest_obj: dict = {
         "schema_version": 1, "run_id": run_id, "status": status,
         "deck_version": "en-austin-1", "treatment": "light-v1",
         "geometry": {"width": canvas[0], "height": canvas[1]},
-        "frames": recs}), encoding="utf-8")
+        "frames": recs}
+    if device == "ipad13":
+        # Producer-faithful N/A metadata (run_manifest.assemble shape).
+        manifest_obj["na_frames"] = ["la-compact", "la-expanded"]
+        manifest_obj["island_probe"] = probe
+    path.write_text(json.dumps(manifest_obj), encoding="utf-8")
 
 
 def make_bezel_69(path: Path) -> None:
@@ -164,9 +288,13 @@ def make_kit_ipad(tmp: str) -> dict:
     root = Path(tmp)
     frames_dir = root / "frames"
     needed = tuple(panels_builder.PANEL_FRAMES_IPAD.values())
-    make_frames(frames_dir, (2064, 2752), needed)
+    # Evidence includes the required Lock Screen alongside the 4 rendered
+    # app frames (Island stays N/A via probe, never filed).
+    evidenced = (*needed, "la-lock")
+    make_frames(frames_dir, (2064, 2752), evidenced)
     manifest = root / "run-manifest.json"
-    make_manifest(manifest, frames_dir, "test-ipad-r1", (2064, 2752), needed)
+    make_manifest(manifest, frames_dir, "test-ipad-r1", (2064, 2752),
+                  evidenced)
     bezel = root / "bezel-ipad.png"
     make_bezel_ipad(bezel)
     captions = make_captions(tmp, "en")
@@ -191,6 +319,113 @@ def make_kit_63(tmp: str) -> dict:
     out.mkdir()
     return {"frames": str(frames_dir), "manifest": str(manifest),
             "bezel": str(bezel), "captions": captions, "out": str(out)}
+
+
+def stage_retained_with_session(src_frames: Path, src_manifest: Path,
+                                staged_run: Path, run_id: str,
+                                device: str) -> tuple[str, str]:
+    """Copy retained approved sources into a tmp run dir + session evidence.
+
+    Retained originals stay untouched: PNG bytes are copied verbatim (so
+    the byte-identical proof still binds the approved pixels) while the
+    staged manifest/frame records carry the session nonce/transcript
+    bindings the strict shared validator requires. Rendering inputs are
+    unchanged; only evidence bindings are added.
+    """
+    import shutil
+
+    frames_dir = staged_run / "frames"
+    frames_dir.mkdir(parents=True, exist_ok=True)
+    for png in Path(src_frames).glob("*.png"):
+        shutil.copy(png, frames_dir / png.name)
+    manifest = json.loads(Path(src_manifest).read_text(encoding="utf-8"))
+    recs = manifest.get("frames", [])
+    seq_counters = {"pinned": 0, "realtime": 0}
+    transcripts: dict[str, list[dict]] = {}
+    for rec in recs:
+        frame = rec.get("frame")
+        domain = _domain_of(frame)
+        seq = seq_counters[domain]
+        seq_counters[domain] += 1
+        sha_req = _req_sha(run_id, frame)
+        rec["run_id"] = run_id
+        rec.setdefault("device_udid", "UDID-retained")
+        rec["device_key"] = device
+        rec["request_sha256"] = sha_req
+        rec.setdefault("request_semantic_sha256", "b" * 64)
+        rec["session_nonce"] = _nonce_of(frame)
+        rec["session_domain"] = domain
+        rec["seq"] = seq
+        rec.setdefault(
+            "mode", "app-clock-pinned" if domain == "pinned"
+            else "live-activity-realtime")
+        if domain == "pinned":
+            rec.setdefault("capture", "native-simctl")
+        else:
+            rec.setdefault("capture", "external-lock-screen")
+            rec.setdefault("capture_window", {
+                "started_at": "2026-10-30T10:00:00+00:00",
+                "captured_at_iso": "2026-10-30T10:00:10+00:00",
+                "observed_elapsed_s": 10})
+            rec.setdefault("observation_sha256", "d" * 64)
+        (frames_dir / f"{frame}.json").write_text(
+            json.dumps(rec, sort_keys=True), encoding="utf-8")
+        nonce = rec["session_nonce"]
+        transcripts.setdefault(nonce, []).append(
+            {"seq": seq, "frame": frame, "request_sha256": sha_req,
+             "request_semantic_sha256": "b" * 64})
+    sessions_dir = staged_run / "sessions"
+    sessions_dir.mkdir(parents=True, exist_ok=True)
+    for nonce, transcript in transcripts.items():
+        domain = "pinned" if nonce == NONCE_PINNED else "realtime"
+        receipt = {
+            "schema_version": 1, "session_nonce": nonce,
+            "run_id": run_id, "session_domain": domain,
+            "final_seq": max(r["seq"] for r in transcript),
+            "status": "complete", "failures": [],
+            "transcript": sorted(transcript, key=lambda r: r["seq"]),
+            "app_cleanup": {"status": "cleaned",
+                            "removed_session": True,
+                            "removed_session_queue": True,
+                            "ended_activity_ids": []},
+            "runner_verified": {"chrome_restored": True,
+                                "process_terminated": True,
+                                "lease_released": True},
+        }
+        (sessions_dir / f"{nonce}.receipt.json").write_text(
+            json.dumps(receipt, sort_keys=True), encoding="utf-8")
+    if device == "ipad13":
+        udids = {r.get("device_udid") for r in recs
+                 if isinstance(r, dict)}
+        probe = {
+            "schema_version": 1,
+            "device_key": device,
+            "island_available": False,
+            "reason": "capability probe: no Dynamic Island",
+            "run_id": run_id,
+            "session_nonce": next(
+                (r["session_nonce"] for r in recs
+                 if r.get("session_domain") == "realtime"),
+                NONCE_REALTIME),
+            "geometry": {"width": 2064, "height": 2752},
+            "model": {
+                "deviceTypeIdentifier": IPAD_MODEL_ID,
+                "name": IPAD_MODEL_NAME,
+                # Producer shape: simctl-reported udid == the run's
+                # unanimous frame device_udid (retained recs keep theirs).
+                "udid": next(iter(udids)) if len(udids) == 1
+                else "UDID-retained",
+            },
+            "source": "simctl-list",
+        }
+        (sessions_dir / "island-probe.json").write_text(
+            json.dumps(probe, sort_keys=True),
+            encoding="utf-8")
+    manifest["status"] = "complete"
+    manifest["run_id"] = run_id
+    staged_manifest = staged_run / "run-manifest.json"
+    staged_manifest.write_text(json.dumps(manifest), encoding="utf-8")
+    return str(frames_dir), str(staged_manifest)
 
 
 @unittest.skipUnless(HAS_PILLOW, "Pillow required")
@@ -447,7 +682,14 @@ class CliTests(unittest.TestCase):
                        "--run-manifest", kit["manifest"],
                        "--bezel", kit["bezel"])
             self.assertEqual(proc.returncode, 2)
-            self.assertIn("cross-size art rejected", proc.stderr)
+            # Strict evidence fires before the legacy cross-size guard;
+            # either blocks fail-closed.
+            self.assertTrue(
+                "cross-size art rejected" in proc.stderr
+                or "disagrees with manifest" in proc.stderr
+                or "manifest disagrees with on-disk record" in proc.stderr
+                or "screenshot geometry" in proc.stderr,
+                proc.stderr)
 
     def test_cli_zh_hans_renders(self):
         # Short CJK captions fit the fixed template; exercises the
@@ -593,7 +835,13 @@ class CliTests(unittest.TestCase):
                        "--run-manifest", kit["manifest"],
                        "--bezel", kit["bezel"])
             self.assertEqual(proc.returncode, 2)
-            self.assertIn("missing source", proc.stderr)
+            # Strict session evidence fires first (missing PNG), then the
+            # legacy source gate; either blocks fail-closed.
+            self.assertTrue(
+                "missing source" in proc.stderr
+                or "screenshot file missing" in proc.stderr
+                or "missing from manifest" in proc.stderr,
+                proc.stderr)
 
     def test_cli_hash_drift_blocked(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -606,7 +854,13 @@ class CliTests(unittest.TestCase):
                        "--run-manifest", kit["manifest"],
                        "--bezel", kit["bezel"])
             self.assertEqual(proc.returncode, 2)
-            self.assertIn("hash drift", proc.stderr)
+            # Strict evidence (tampered/stale binding) fires before the
+            # legacy hash gate; either blocks fail-closed.
+            self.assertTrue(
+                "hash drift" in proc.stderr
+                or "changed after capture" in proc.stderr
+                or "disagrees with manifest" in proc.stderr,
+                proc.stderr)
 
     def test_cli_stretched_art_blocked(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -626,9 +880,15 @@ class CliTests(unittest.TestCase):
                        "--frames-dir", kit["frames"],
                        "--run-manifest", kit["manifest"],
                        "--bezel", kit["bezel"])
-            # File-level size guard fires (manifest still claims 1320x2868).
+            # Strict evidence (record/PNG drift) fires before the legacy
+            # file-level size guard; either blocks fail-closed.
             self.assertEqual(proc.returncode, 2)
-            self.assertIn("cross-size art rejected", proc.stderr)
+            self.assertTrue(
+                "cross-size art rejected" in proc.stderr
+                or "disagrees with manifest" in proc.stderr
+                or "manifest disagrees with on-disk record" in proc.stderr
+                or "screenshot geometry" in proc.stderr,
+                proc.stderr)
             # Manifest-level geometry guard fires when the manifest itself
             # claims the wrong size.
             for rec in manifest["frames"]:
@@ -641,7 +901,12 @@ class CliTests(unittest.TestCase):
                        "--run-manifest", kit["manifest"],
                        "--bezel", kit["bezel"])
             self.assertEqual(proc.returncode, 2)
-            self.assertIn("no cross-size stretching", proc.stderr)
+            self.assertTrue(
+                "no cross-size stretching" in proc.stderr
+                or "screenshot geometry" in proc.stderr
+                or "disagrees with manifest" in proc.stderr
+                or "manifest disagrees with on-disk record" in proc.stderr,
+                proc.stderr)
 
     def test_cli_incomplete_run_blocked(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -676,22 +941,70 @@ class CliTests(unittest.TestCase):
 @unittest.skipUnless(HAS_PILLOW and HAS_RETAINED_69,
                      "retained v13 sources required")
 class RetainedByteIdentical69Tests(unittest.TestCase):
-    """The promotion proof: in-git builder reproduces approved v13 PNGs."""
+    """Historical v13 pixels: strict rejection + renderer-only proof.
 
-    def test_retained_en69_byte_identical(self):
+    The retained 69 run predates sessions (three distinct real LA anchors)
+    and MUST be rejected by current production evidence. Its byte-identical
+    compositor proof is preserved separately as a renderer-only test with
+    the evidence boundary mocked at the smallest in-process scope — never
+    a CLI feature or env bypass, never an approval claim.
+    """
+
+    def test_retained_en69_rejected_by_current_evidence(self):
+        """Production verify_sources rejects the historical 3-anchor set.
+
+        Unmocked; asserts the one-anchor session rule fires. No
+        re-anchoring, no window edits, no carve-out.
+        """
         with tempfile.TemporaryDirectory() as tmp:
-            out = str(Path(tmp) / "out")
-            Path(out).mkdir()
-            proc = run("--locale", "en", "--size", "6.9",
-                       "--panels-dir", out,
-                       "--captions", str(HERE / "captions_en.json"),
-                       "--frames-dir", str(RETAINED_RUN_69 / "frames"),
-                       "--run-manifest",
-                       str(RETAINED_RUN_69 / "run-manifest.json"),
-                       "--bezel", str(RETAINED_BEZEL_69),
-                       "--selftest", "--check-template")
-            self.assertEqual(proc.returncode, 0, proc.stderr)
-            self.assertIn("template check green", proc.stdout)
+            staged = Path(tmp) / "staged-69"
+            frames_dir, manifest_path = stage_retained_with_session(
+                RETAINED_RUN_69 / "frames",
+                RETAINED_RUN_69 / "run-manifest.json",
+                staged, "retained-69-r1", "iphone69")
+            with self.assertRaises(panels_builder.BuilderError) as ctx:
+                panels_builder.verify_sources(
+                    Path(frames_dir), Path(manifest_path),
+                    panels_builder.NEEDED_FRAMES_69,
+                    panels_builder.CANVAS_69)
+            self.assertIn("anchor", str(ctx.exception).lower())
+
+    def test_retained_en69_renderer_only_byte_identical(self):
+        """Historical pixels rendering only; NOT current session
+        evidence/approval.
+
+        Calls builder.build_69 directly with the shared evidence validator
+        mocked to [] ONLY inside this test process (mock scope:
+        panels_builder._sev.validate_run_evidence). Source PNGs, manifest
+        hashes, geometry, and template assertions are all real and
+        unchanged; retained originals untouched.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "out"
+            out.mkdir()
+            staged = Path(tmp) / "staged-69"
+            frames_dir, manifest_path = stage_retained_with_session(
+                RETAINED_RUN_69 / "frames",
+                RETAINED_RUN_69 / "run-manifest.json",
+                staged, "retained-69-r1", "iphone69")
+            caps_obj = panels_builder.load_captions(
+                HERE / "captions_en.json")
+            caps = panels_builder.validate_captions_for_locale(
+                caps_obj, "en")
+            captions_version = str(caps_obj.get("version", "unknown"))
+            with mock.patch.object(
+                    panels_builder._sev, "validate_run_evidence",
+                    return_value=[]) as mocked:
+                recipe = panels_builder.build_69(
+                    "en", caps, captions_version,
+                    Path(frames_dir), Path(manifest_path),
+                    RETAINED_BEZEL_69, out)
+                lines = panels_builder.selftest_69(out, recipe)
+                mismatches = panels_builder.check_template(
+                    recipe, "en", "6.9")
+            mocked.assert_called_once()
+            self.assertEqual(mismatches, [])
+            self.assertEqual(len(lines), 5)
             key_to_retained = {
                 "track": "panel-track-en-1320x2868-v13.png",
                 "insights": "panel-insights-en-1320x2868-v13.png",
@@ -724,12 +1037,16 @@ class RetainedByteIdenticalIpadTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             out = str(Path(tmp) / "out")
             Path(out).mkdir()
+            staged = Path(tmp) / "staged-ipad"
+            frames_dir, manifest_path = stage_retained_with_session(
+                RETAINED_RUN_IPAD / "frames",
+                RETAINED_RUN_IPAD / "run-manifest.json",
+                staged, "retained-ipad-r1", "ipad13")
             proc = run("--locale", "en", "--size", "ipad13",
                        "--panels-dir", out,
                        "--captions", str(HERE / "captions_en.json"),
-                       "--frames-dir", str(RETAINED_RUN_IPAD / "frames"),
-                       "--run-manifest",
-                       str(RETAINED_RUN_IPAD / "run-manifest.json"),
+                       "--frames-dir", frames_dir,
+                       "--run-manifest", manifest_path,
                        "--bezel", str(RETAINED_BEZEL_IPAD),
                        "--selftest", "--check-template")
             self.assertEqual(proc.returncode, 0, proc.stderr)

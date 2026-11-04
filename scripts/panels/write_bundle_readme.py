@@ -269,6 +269,18 @@ def main(argv: list[str] | None = None) -> int:
                   "- matrix-manifest.json status: "
                   f"{matrix.get('status', 'unknown')} ({counts})",
                   ""]
+        if matrix.get("status") == "complete":
+            lines += ["> COMPLETE MATRIX (review set) — every cell rendered, "
+                      "but this README approves nothing; owner gates "
+                      "5.4/6.6/9.4 still require explicit human approval "
+                      "before any upload or publication.",
+                      ""]
+        else:
+            lines += ["> CI HANDOFF/DEBUG BUNDLE — incomplete matrix: "
+                      "blocked cells below are pending evidence, not approved "
+                      "panels. This README approves nothing; owner gates "
+                      "5.4/6.6/9.4 still require explicit human approval.",
+                      ""]
         lines += ["| device | language | size | status | detail |",
                   "| --- | --- | --- | --- | --- |"]
         for cell in matrix["cells"]:

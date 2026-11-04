@@ -108,6 +108,22 @@ make test:pg       # Optional PostgreSQL parity    (needs Docker; not currently 
 make test:cover    # coverage + per-function report
 ```
 
+## App Store screenshots (`app-screenshots.yml`, manual dispatch only)
+
+Session-based capture pipeline (change `optimize-app-screenshot-workflow`):
+early input validation → one verified arm64 Screenshot build (tar + digest
+manifest, Xcode 27.1 / iOS 27.0) → one worker per selected device
+(`max-parallel: 5`, `fail-fast: false`; boot/install once, locales sequential
+r1/r2 with pinned + real-time sessions) → per-locale `shots-<device>-<locale>`
+artifacts → panels + ZIP. Non-English/iPad runs require the paired
+`--approval` + `--retained-dir` flags (hash-bound against the retained
+`approval-pilot27-r2.json`; no bypass, no fabrication). `LIFIO_CAPTURE_CI=1`
+(`ci_approval_bypass:true`) is a technical gate, never owner approval — and no
+sub-20-minute claim stands until cold + warm full runs measure it (tasks
+8.1/8.2/8.3/8.6 open; 6.x, 7.x + 8.5 done at unit/structural scope — no CI
+runtime claim yet). Operator
+runbook: `docs/screenshot-capture.md`.
+
 ## Secrets checklist
 
 Required secrets — GitHub Actions secrets (repo Settings → Secrets and variables → Actions) plus Xcode Cloud shared secret env vars (App Store Connect; the Sentry rows below):
@@ -129,6 +145,7 @@ Required secrets — GitHub Actions secrets (repo Settings → Secrets and varia
 | `SENTRY_PROJECT_RELEASE` | Xcode Cloud shared secret env (release project slug) | only when Sentry wired; absent = release upload skips |
 | `SENTRY_DSN` | Xcode Cloud shared secret env, threaded into the Cloud archive (the former `SENTRY_IOS_DSN` GitHub secret died with the removed `workflow_call` block) + backend deploy (rendered into VM `.env`) | only when Sentry wired; absent = shipped binary ships with reporting off |
 | `HC_PING_URL` | backend deploy (installs the every-minute dead-man's-switch cron pinger) | only when Healthchecks wired; absent = install skips with a warning |
+| `FIGMA_API_KEY` | app-screenshots panels job (Apple bezel fetch; without it the job fails closed) | only when rendering panels |
 
 Non-secret variables: `EMAIL_BACKEND`, `AWS_REGION`, `SES_FROM` (set as repository variables).
 

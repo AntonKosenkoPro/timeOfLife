@@ -411,6 +411,13 @@ targets:
     platform: iOS
     sources:
       - TimeOfLifeTests
+    # Cross-language golden fixture mirror (task 2.3): byte-identical to
+    # scripts/screenshots/tests/fixtures/session_envelope_golden.json at
+    # build time (runner-owned source of truth; their suite guards equality).
+    # Kept at the target root: XcodeGen skips nested paths already covered
+    # by the sources directory glob.
+    resources:
+      - TimeOfLifeTests/session_envelope_golden.json
     dependencies:
       - target: TimeOfLife
       # Contract types under test (TimerActivityAttributes, TimerClock) now

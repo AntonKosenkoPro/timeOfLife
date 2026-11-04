@@ -298,5 +298,95 @@ class InspectionGateTests(unittest.TestCase):
             self.assertTrue(evidence["artifact_sha256"])
 
 
+class ManifestNATests(unittest.TestCase):
+    TOTALS = {"all_seconds": 1, "today_seconds": 1, "week_seconds": 1,
+              "category_seconds": {"A": 1}, "text_seconds": {"B": 1}}
+    PROBE = {"device_key": "ipad13", "island_available": False,
+             "reason": "capability probe: no Dynamic Island",
+             "run_id": "ipad13-en-r1", "session_nonce": "n" * 32,
+             "geometry": {"width": 2064, "height": 2752},
+             "model": {"deviceTypeIdentifier": "x", "name": "n",
+                       "udid": "u"},
+             "source": "simctl-list"}
+
+    def _rec(self, frame):
+        return {"frame": frame, "request_sha256": "a" * 64,
+                "request_semantic_sha256": "s" * 64,
+                "screenshot_sha256": "p" * 64,
+                "expected_totals": dict(self.TOTALS)}
+
+    def _five(self):
+        return [self._rec(f) for f in rs.PILOT_FRAMES
+                if f not in ("la-compact", "la-expanded")]
+
+    def test_v1_manifest_shape_unchanged(self):
+        recs = [self._rec(f) for f in rs.PILOT_FRAMES]
+        m = rm.assemble_run_manifest("r1", "U", "en-austin-1", "light-v1",
+                                     (1320, 2868), recs)
+        self.assertNotIn("na_frames", m)
+        self.assertNotIn("island_probe", m)
+
+    def test_na_manifest_requires_probe_and_island_only(self):
+        with self.assertRaises(rm.ManifestError):
+            rm.assemble_run_manifest("r1", "U", "en-austin-1", "light-v1",
+                                     (2064, 2752), self._five())
+        with self.assertRaises(rm.ManifestError):
+            rm.assemble_run_manifest("r1", "U", "en-austin-1", "light-v1",
+                                     (2064, 2752), self._five(),
+                                     na_frames=["history"],
+                                     island_probe=dict(self.PROBE))
+        m = rm.assemble_run_manifest(
+            "r1", "U", "en-austin-1", "light-v1", (2064, 2752), self._five(),
+            na_frames=["la-compact", "la-expanded"],
+            island_probe=dict(self.PROBE))
+        self.assertEqual(m["na_frames"], ["la-compact", "la-expanded"])
+        self.assertEqual(m["island_probe"]["source"], "simctl-list")
+
+    def test_compare_na_both_passes_explicit(self):
+        kw = dict(device_udid="U", deck_version="en-austin-1",
+                  treatment="light-v1", geometry=(2064, 2752))
+        m1 = rm.assemble_run_manifest("r1", **kw, frame_records=self._five(),
+                                      na_frames=["la-compact",
+                                                 "la-expanded"],
+                                      island_probe=dict(self.PROBE))
+        probe2 = dict(self.PROBE, run_id="ipad13-en-r2",
+                      session_nonce="m" * 32)
+        m2 = rm.assemble_run_manifest("r2", **kw, frame_records=self._five(),
+                                      na_frames=["la-expanded",
+                                                 "la-compact"],
+                                      island_probe=probe2)
+        res = rm.compare_runs(m1, m2)
+        self.assertEqual(res["errors"], [])
+        # N/A scope drift across passes is an error, never silent.
+        six = self._five() + [self._rec("la-expanded")]
+        m3 = rm.assemble_run_manifest("r3", **kw, frame_records=six,
+                                      na_frames=["la-compact"],
+                                      island_probe=dict(self.PROBE))
+        res3 = rm.compare_runs(m1, m3)
+        self.assertTrue(any("na_frames" in e for e in res3["errors"]))
+        # Attestation drift across passes is an error; volatile run_id and
+        # session_nonce are excluded.
+        probe4 = dict(self.PROBE, run_id="ipad13-en-r9",
+                      session_nonce="z" * 32)
+        m4 = rm.assemble_run_manifest("r4", **kw, frame_records=self._five(),
+                                      na_frames=["la-compact",
+                                                 "la-expanded"],
+                                      island_probe=probe4)
+        self.assertEqual(rm.compare_runs(m1, m4)["errors"], [])
+        probe5 = dict(self.PROBE, device_key="iphone69")
+        m5 = rm.assemble_run_manifest("r5", **kw, frame_records=self._five(),
+                                      na_frames=["la-compact",
+                                                 "la-expanded"],
+                                      island_probe=probe5)
+        res5 = rm.compare_runs(m1, m5)
+        self.assertTrue(any("island_probe" in e for e in res5["errors"]))
+        # Probe on exactly one side is a scope mismatch.
+        m6 = rm.assemble_run_manifest(
+            "r6", "U", "en-austin-1", "light-v1", (1320, 2868),
+            [self._rec(f) for f in rs.PILOT_FRAMES])
+        res6 = rm.compare_runs(m1, m6)
+        self.assertTrue(res6["errors"])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

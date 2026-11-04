@@ -89,6 +89,7 @@ struct ScreenshotCleanupActivityTests {
         let documents = try temporaryDocuments()
         let runID = "test-cleanup-anchor"
         let sha = String(repeating: "d", count: 64)
+        let nonce = "abcdef0123456789abcdef0123456789"
         try CaptureStateWriter.write(CaptureState(
             status: "ready",
             requestSHA256: sha,
@@ -105,7 +106,12 @@ struct ScreenshotCleanupActivityTests {
                 startedAt: "2026-10-20T09:41:00",
                 requestAcknowledgedAt: "2026-10-20T09:41:01"
             ),
-            error: nil
+            error: nil,
+            sessionNonce: nonce,
+            sessionDomain: "realtime",
+            seq: 0,
+            transcript: [ScreenshotSessionTranscriptEntry(seq: 0, frame: ScreenshotFrame.trackRunning.rawValue, requestSHA256: sha, requestSemanticSHA256: String(repeating: "e", count: 64))],
+            appDurationsMS: nil
         ), to: documents)
         // The test host has no live activities, so the ack records none
         // ended — but the verified anchor must flow through without failure
@@ -113,7 +119,13 @@ struct ScreenshotCleanupActivityTests {
         // for the anchor to hydrate).
         let ack = await ScreenshotCleanup.perform(
             documents: documents,
-            invocation: ScreenshotCleanupInvocation(runID: runID, expectedSHA256: sha),
+            invocation: ScreenshotCleanupInvocation(
+                runID: runID,
+                expectedSHA256: sha,
+                sessionNonce: nonce,
+                sessionDomain: "realtime",
+                finalSeq: 0
+            ),
             activityPollTimeout: 0
         )
         #expect(ack.status == "cleaned")

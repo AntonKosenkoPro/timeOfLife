@@ -1,15 +1,13 @@
 # App Store Screenshots — Capture Storyboard
 
-> Status: **English pilot APPROVED (task 5.4, 2026-10-30).** The 7-frame
-> iOS 27 set `runs/pilot27-r2` (deck `en-austin-1`, treatment `light-v1`,
-> 1320×2868, status `complete`) is owner-approved — Jan-1 Lock-Screen date
-> accepted as a disclosed artifact, device-local times accepted,
-> contact-sheet template approved. iPhone 6.9-inch expansion captured (4
-> non-en locales × 2 runs × 7 frames); 6.5-inch + iPad sets captured (5
-> frames each, Island states N/A by design — recorded, never fabricated).
-> Final fifteen-set acceptance (6.6) still pending — captured ≠ approved.
-> Montage deferred (built, retained externally, NOT approved). Nothing here
-> is a new production feature or a change to shipped UI.
+> Status (2026-11-04, change `optimize-app-screenshot-workflow`): session
+> pipeline WIRED (validate → one verified arm64 build → device workers max 5 →
+> panels + ZIP); English pilot still APPROVED (`pilot27-r2`); session re-capture
+> + 6-pair expansion audited with frozen hashes (18PM + iPhone 17 + M4 iPad,
+> native geometries, honest LA-pending). CI runtime acceptance NOT measured
+> (no sub-20-minute claim); owner approvals for new sets NOT granted (captured
+> never implies approved). Montage deferred (built, external, NOT approved).
+> Nothing here is a new production feature or a change to shipped UI.
 
 ## Story order (seven frames, native product views only)
 
@@ -90,7 +88,8 @@ approval. The final fifteen-set manifest + review reports still need owner
 acceptance (6.6) — captured never implies approved. Tests passing never
 implies approval.
 
-## Implementation checklist (see tasks.md for the authoritative per-task state)
+## Implementation checklist (authoritative state: `openspec/changes/optimize-app-screenshot-workflow/tasks.md` — 37/41, open 8.1/8.2/8.3/8.6;
+items below are the archived pilot scope, retained for history; updated 2026-11-04)
 
 - [x] Screenshot configuration/scheme + simulator/physical-device gates (2.2; 2.1 explicit archive guard still open)
 - [x] Awaited capture composition + isolation from production state (2.3–2.5)
