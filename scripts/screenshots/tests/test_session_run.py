@@ -24,6 +24,7 @@ sys.path.insert(0, str(HERE))
 
 import executor as ex
 import inspection as insp
+import output_guard as guard
 import request_schema as rs
 import session as sess
 import session_evidence as sev
@@ -377,6 +378,26 @@ class _HangAppearanceFake(SessionFakeSimctl):
         return super().__call__(argv)
 
 
+class _HangCleanupLaunchFake(SessionFakeSimctl):
+    """Hang the session-cleanup `simctl launch` spawn (run 41817895686
+    ipad13-en-r2 shape): frames ack/export normally, then the cleanup
+    launch exceeds the runner timeout. Extra SessionFakeSimctl kwargs
+    (e.g. fail_frame_seq) pass through for combined failure coverage."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._launches_seen = 0
+
+    def __call__(self, argv):
+        if len(argv) > 2 and argv[2] == "launch":
+            self._launches_seen += 1
+            if self._launches_seen == 2 and any(
+                    str(a).startswith("SCREENSHOT_CLEANUP=")
+                    for a in argv):
+                raise subprocess.TimeoutExpired(argv, 60)
+        return super().__call__(argv)
+
+
 class PinnedSessionTests(unittest.TestCase):
     def _run(self, tmp, **kw):
         udid = f"UDID-pin-{os.getpid()}-{len(os.listdir(tmp))}"
@@ -698,6 +719,94 @@ def two_domain_run(tmp: str, udid: str, run_id="sess-e2e-r1",
         pinned_totals=dict(PINNED), geometry=geometry,
         session_nonce=nonce_rt, sleeper=ex.no_sleep, on_poll=fake.pump)
     return fake, run_dir, pinned, realtime
+
+
+class SessionCleanupSpawnTests(unittest.TestCase):
+    def test_cleanup_launch_timeout_keeps_receipt_and_releases_lease(self):
+        # Run 41817895686 ipad13-en-r2 shape: the single no-island
+        # realtime frame completes, then the cleanup `simctl launch`
+        # hangs past the runner timeout. The spawn failure must be
+        # recorded (never escape bare), the partial receipt and session
+        # record must exist with the completed transcript, and the
+        # device lease must be released so a later session can acquire
+        # it. Fail-closed is preserved (fail + stop, no retry).
+        with tempfile.TemporaryDirectory() as tmp:
+            udid = f"UDID-cleanup-{os.getpid()}"
+            container = Path(tmp) / "container"
+            container.mkdir()
+            fake = _HangCleanupLaunchFake(
+                container, la_block=dict(LA_BLOCK), png_size=(2064, 2752),
+                list_model=IPAD_MODEL)
+            run_dir = Path(tmp) / "runs" / "ipad13-en-r2"
+            with self.assertRaises(ex.FrameError) as ctx:
+                ex.run_session(
+                    fake, udid, base_request("ipad13-en-r2"), "realtime",
+                    run_dir, device_key="ipad13",
+                    pinned_totals=dict(PINNED), geometry=(2064, 2752),
+                    session_nonce="58486dbd8377ef462054b6cc7b50413b",
+                    sleeper=ex.no_sleep, on_poll=fake.pump)
+            self.assertIn("contaminated", str(ctx.exception))
+            self.assertIn("simctl spawn failed", str(ctx.exception))
+            receipts = list((run_dir / "sessions").glob("*.receipt.json"))
+            self.assertEqual(len(receipts), 1)
+            receipt = json.loads(receipts[0].read_text(encoding="utf-8"))
+            self.assertEqual(receipt["status"], "partial")
+            self.assertTrue(receipt["failures"])
+            self.assertIn("simctl spawn failed", receipt["failures"][0])
+            self.assertEqual([r["seq"] for r in receipt["transcript"]],
+                             [0])
+            self.assertTrue(receipt["runner_verified"]["chrome_restored"])
+            self.assertTrue(
+                receipt["runner_verified"]["process_terminated"])
+            self.assertTrue(receipt["runner_verified"]["lease_released"])
+            session_records = list((run_dir / "sessions").glob(
+                "58486dbd8377ef462054b6cc7b50413b.json"))
+            self.assertEqual(len(session_records), 1)
+            self.assertEqual(
+                json.loads(session_records[0].read_text(
+                    encoding="utf-8"))["status"], "partial")
+            # The completed frame evidence is preserved, not rolled back.
+            self.assertTrue((run_dir / "frames" / "la-lock.json").is_file())
+            # Lease released: a later session for the same device can
+            # acquire it (previously leaked on this path).
+            lock_path = guard.acquire_lock(udid, "ipad13-en-r2-next")
+            guard.release_lock(lock_path, "ipad13-en-r2-next")
+
+    def test_cleanup_launch_timeout_preserves_prior_failure(self):
+        # Combined failure: seq-2 refuses, then the cleanup launch hangs.
+        # The original frame failure stays first (it names the pair's
+        # cause); the spawn failure is appended, never replacing it;
+        # earlier exports are preserved with a partial receipt.
+        with tempfile.TemporaryDirectory() as tmp:
+            udid = f"UDID-cleanup-prior-{os.getpid()}"
+            container = Path(tmp) / "container"
+            container.mkdir()
+            fake = _HangCleanupLaunchFake(
+                container, fail_frame_seq=2, png_size=(1206, 2622),
+                list_model=IPHONE63_MODEL)
+            run_dir = Path(tmp) / "runs" / "iphone63-ru-r1"
+            with self.assertRaises(ex.FrameError) as ctx:
+                ex.run_session(
+                    fake, udid, base_request("iphone63-ru-r1"), "pinned",
+                    run_dir, device_key="iphone63",
+                    pinned_totals=dict(PINNED), geometry=(1206, 2622),
+                    session_nonce="c9d9e0f1a2b3c4d5e6f708192a3b4c5d",
+                    sleeper=ex.no_sleep, on_poll=fake.pump)
+            self.assertIn("contaminated", str(ctx.exception))
+            self.assertIn("seed_failed", str(ctx.exception))
+            self.assertTrue((run_dir / "frames" / "track-running.png")
+                            .is_file())
+            self.assertTrue((run_dir / "frames" / "insights.png").is_file())
+            self.assertFalse((run_dir / "frames" / "history.png").exists())
+            receipts = list((run_dir / "sessions").glob("*.receipt.json"))
+            self.assertEqual(len(receipts), 1)
+            receipt = json.loads(receipts[0].read_text(encoding="utf-8"))
+            self.assertEqual(receipt["status"], "partial")
+            self.assertEqual([r["seq"] for r in receipt["transcript"]],
+                             [0, 1, 2])
+            self.assertIn("seed_failed", receipt["failures"][0])
+            self.assertIn("simctl spawn failed", receipt["failures"][1])
+            self.assertTrue(receipt["runner_verified"]["lease_released"])
 
 
 class SessionFinalizeGateTests(unittest.TestCase):

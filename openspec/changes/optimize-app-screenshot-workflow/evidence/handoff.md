@@ -1,5 +1,35 @@
 # Handoff — optimize-app-screenshot-workflow (compaction checkpoint)
 
+## Pending-3 fix checkpoint 2026-11-04 (approved for PR235, sole-writer commits)
+
+- Scope preserved: exactly the 3 approved files, no unfamiliar writes
+  (`git diff --check` clean): `ScreenshotSessionTests.swift`
+  (payload-once byte-identity fix) + `executor.py` /
+  `test_session_run.py` (cleanup-spawn protected exception accounting).
+  No behavior changes outside this reviewed diff; no test reruns here
+  (source unchanged since main-verified runs); no dispatch from this unit.
+- These fix OUR bugs, not the underlying simctl stalls. Latest retry
+  41817895686 still failed iphone63 appearance 60s and ipad cleanup 60s;
+  the previous overall-transient claim is WITHDRAWN. No complete-ZIP claim.
+- Swift: Foundation unsorted serialization differed 5/30 processes; test
+  re-serialized instead of hashing transmitted bytes. Fix passes one
+  payload through both nonces and asserts byte-identity hash. Main-verified:
+  full Screenshot 1132/103 + lint clean.
+- Python: cleanup `simctl launch` hang escaped bare (red: 0 receipt, lease
+  leaked — 41817895686 ipad13-en-r2 shape). Fix moves the spawn inside the
+  fail-closed region: appended failure, partial receipt + session record
+  with completed transcript, lease released, prior failure preserved first.
+  Main-verified: red→green on the new cases; full 467 OK / 1 skip; focused
+  28/24/38/24 + contracts 45.
+- Research: ctx7 `/websites/developer_apple_foundation` query
+  `JSONSerialization WritingOptions sortedKeys` (key order unspecified
+  without `.sortedKeys` — fix avoids relying on it); internal Python
+  exception-accounting waiver (spawn protection stays internal
+  fail-closed, no new external API).
+- Tasks 8.1/8.2/8.3/8.6 stay OPEN; ~22min performance accepted by user, no
+  further speed work; formal planning untouched. Main schedules a
+  diagnostics experiment next, not a blind retry.
+
 ## Dry-run fixes checkpoint 2026-11-04 (verified, sole-writer commit next)
 
 - Cold dry run (~22min vs 70+; user explicitly accepts, no further speed

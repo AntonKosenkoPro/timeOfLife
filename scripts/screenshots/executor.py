@@ -1465,8 +1465,14 @@ def run_session(
                     udid, bid, run_id, last["request_sha256"],
                     session_nonce=nonce, session_domain=domain,
                     final_seq=len(envelopes) - 1)
-                _counted(run, argv, stats)
                 try:
+                    # The cleanup spawn lives inside this fail-closed
+                    # region: a hang past the runner timeout (or missing
+                    # binary) becomes an appended failure with an
+                    # unverified cleanup ack, never a receipt-skipping
+                    # escape (run 41817895686 ipad13-en-r2 left no receipt
+                    # and leaked the lease). No retry, no timeout change.
+                    _counted(run, argv, stats)
                     ack, ack_attempts = poll_session_cleanup_ack(
                         Path(container) / "Documents", run_id=run_id,
                         request_sha=last["request_sha256"],
