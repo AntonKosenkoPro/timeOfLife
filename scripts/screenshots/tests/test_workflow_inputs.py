@@ -5,6 +5,7 @@ Fail-closed: empty/unknown/duplicate/malformed/injection-shaped inputs
 are rejected without evaluation. The default catalog is retained.
 """
 
+import ast
 import sys
 import unittest
 from pathlib import Path
@@ -13,6 +14,31 @@ HERE = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(HERE))
 
 import workflow_inputs as wi
+
+
+def _panels_catalog():
+    """Read MATRIX_DEVICES/LOCALES from scripts/panels/builder.py as data.
+
+    The panels builder requires Pillow at import time, which the
+    ubuntu tooling-tests job intentionally lacks (stdlib-only lane;
+    Pillow installs live only in the macOS panels job). Parsing the
+    two catalog literals via ast keeps this parity gate stdlib-only
+    without executing the builder.
+    """
+    src = (HERE.parent / "panels" / "builder.py").read_text(
+        encoding="utf-8")
+    found: dict = {}
+    for node in ast.walk(ast.parse(src)):
+        if not isinstance(node, ast.Assign):
+            continue
+        for target in node.targets:
+            if isinstance(target, ast.Name) and target.id in (
+                    "MATRIX_DEVICES", "LOCALES"):
+                found[target.id] = ast.literal_eval(node.value)
+    if set(found) != {"MATRIX_DEVICES", "LOCALES"}:
+        raise AssertionError(
+            "panels builder catalog literals not found (MATRIX_DEVICES/LOCALES)")
+    return found
 
 
 INJECTION_SHAPES = [
@@ -38,12 +64,11 @@ class DefaultCatalogTests(unittest.TestCase):
     def test_catalog_matches_single_sources(self):
         import request_schema as rs
         self.assertEqual(tuple(wi.SUPPORTED_LOCALES), tuple(rs.KNOWN_LOCALES))
-        sys.path.insert(0, str(HERE.parent / "panels"))
-        import builder as panels_builder
+        panels = _panels_catalog()
         self.assertEqual(set(wi.SUPPORTED_DEVICES),
-                         set(panels_builder.MATRIX_DEVICES))
+                         set(panels["MATRIX_DEVICES"]))
         self.assertEqual(tuple(wi.SUPPORTED_LOCALES),
-                         tuple(panels_builder.LOCALES))
+                         tuple(panels["LOCALES"]))
 
     def test_device_catalog_matches_workflow(self):
         self.assertEqual(wi.DEVICE_CATALOG["iphone69"]["geometry"], "1320x2868")
