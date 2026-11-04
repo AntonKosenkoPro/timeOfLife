@@ -136,9 +136,10 @@ def build_parser() -> argparse.ArgumentParser:
                          "(default: $FIGMA_IPHONE63_NODE_ID)")
     ap.add_argument("--ipad-node", default=None,
                     help="iPad bezel node id (default: $FIGMA_IPAD_NODE_ID)")
-    ap.add_argument("--scale", default="1",
-                    help="Figma image render scale (default 1; size drift "
-                         "still fails verification loudly)")
+    ap.add_argument("--scale", default="2",
+                    help="Figma image render scale (default 2: the pinned "
+                         "980x2000 / 2300x3000 bezels verify at scale 2; "
+                         "size drift still fails verification loudly)")
     return ap
 
 

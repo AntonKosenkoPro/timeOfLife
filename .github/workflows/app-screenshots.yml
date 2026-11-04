@@ -376,7 +376,7 @@ jobs:
         run: |
           [ -n "$FIGMA_API_KEY" ] || { echo "::error::FIGMA_API_KEY secret missing"; exit 2; }
           python3 -m pip install --break-system-packages "Pillow==13.0.0"
-          python3 scripts/panels/fetch_bezel_assets.py --out "$RUNNER_TEMP/bezels"
+          python3 scripts/panels/fetch_bezel_assets.py --out "$RUNNER_TEMP/bezels" --scale 2
 
       - name: Render panels
         env:
