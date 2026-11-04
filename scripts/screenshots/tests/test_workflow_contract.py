@@ -11,6 +11,7 @@ dependency — stdlib only). If a future edit reintroduces a fixed bug,
 the named test fails first.
 """
 
+import re
 import unittest
 from pathlib import Path
 
@@ -257,6 +258,19 @@ class WorkflowContractTests(unittest.TestCase):
         seg = body.split("\n  panels:\n")[1].split("runs-on:")[0]
         self.assertIn('if: "!cancelled()', seg)
         self.assertIn("needs: [validate, screenshots]", body)
+
+    def test_panels_runs_on_xcode27(self):
+        # Owner steering: the panels job runs on the same xcode-27
+        # macOS pool as build/capture (shared five-mac ceiling), not a
+        # GitHub-hosted macos-* pool. Fonts stay macOS-system with loud
+        # failure if unreadable; no byte-identical headline-pixel claim
+        # without a CI render proving it on this pool.
+        body = text()
+        panels = body.split("\n  panels:\n")[1]
+        match = re.search(r"^    runs-on: (.+)$", panels, re.M)
+        self.assertIsNotNone(match)
+        self.assertEqual(match.group(1).strip(), "xcode-27")
+        self.assertNotIn("macos-", body)
 
     def test_panels_skipped_when_upstream_skipped(self):
         # bug/low (review 3464): job-level `if: "!cancelled()"` alone

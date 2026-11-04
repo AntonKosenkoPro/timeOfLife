@@ -16,8 +16,11 @@
 #   ci_approval_bypass:true): technically gated, NOT owner eyeball-approved.
 # - The shared build is verified (hashes, slices, provenance) BEFORE any
 #   worker installs it; a cache miss rebuilds, never substitutes.
-# - Panel rendering needs macOS Helvetica for byte-identical headlines, so
-#   the panels job also runs on macOS (fast: checkout + Pillow only).
+# - Panel rendering needs macOS system fonts (Helvetica/Hiragino with
+#   loud failure if unreadable), so the panels job runs on the same
+#   xcode-27 macOS pool as build/capture (fast: checkout + Pillow only,
+#   shared five-mac ceiling). Headline pixel-identity across pools is
+#   NOT claimed until a CI render on this pool proves it.
 # - Apple bezel PNGs are NOT in git (no-binaries rule): the panels job
 #   downloads them from the PRIVATE lifio-design-assets release
 #   `apple-bezels-v1` with APPLE_BEZELS_TOKEN (repo secret, step-scoped
@@ -813,7 +816,9 @@ jobs:
     # steps instead of skipping cleanly. Red workers (result failure)
     # still package their partial bundle.
     if: "!cancelled() && needs.screenshots.result != 'skipped'"
-    runs-on: macos-15
+    # Same xcode-27 macOS pool as build/capture (shared five-mac
+    # ceiling; owner steering for shorter queues).
+    runs-on: xcode-27
     timeout-minutes: 30
     permissions:
       contents: read
