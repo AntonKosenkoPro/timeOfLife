@@ -114,13 +114,15 @@ Session-based capture pipeline (change `optimize-app-screenshot-workflow`):
 early input validation → one verified arm64 Screenshot build (tar + digest
 manifest, Xcode 27.1 / iOS 27.0) → one worker per selected device
 (`max-parallel: 5`, `fail-fast: false`; boot/install once, locales sequential
-r1/r2 with pinned + real-time sessions) → per-locale `shots-<device>-<locale>`
+single pass with pinned + real-time sessions) → per-locale `shots-<device>-<locale>`
 artifacts → panels + ZIP. Non-English/iPad runs require the paired
 `--approval` + `--retained-dir` flags (hash-bound against the retained
 `approval-pilot27-r2.json`; no bypass, no fabrication). `LIFIO_CAPTURE_CI=1`
-(`ci_approval_bypass:true`) is a technical gate, never owner approval — and no
-sub-20-minute claim stands until cold + warm full runs measure it (tasks
-8.1/8.2/8.3/8.6 open; 6.x, 7.x + 8.5 done at unit/structural scope — no CI
+(`ci_approval_bypass:true`) is a technical gate, never owner approval — and 20
+minutes is aspirational, not a hard gate (owner accepts ~22min vs 70+): acceptance
+requires successful downloadable output with truthful status (tasks
+8.3 + §9 open; 8.1/8.2 retired — cancelled, not run; old runs failed, no
+fabricated acceptance; 6.x, 7.x + 8.5 done at unit/structural scope — no CI
 runtime claim yet). Operator
 runbook: `docs/screenshot-capture.md`.
 

@@ -78,14 +78,21 @@ class StatusTests(unittest.TestCase):
     def test_write_load_round_trip(self):
         with tempfile.TemporaryDirectory() as tmp:
             rec = wa.status_record(device="ipad13", locale="ru",
-                                   pass_name="r2", status="failed",
+                                   pass_name="r1", status="failed",
                                    reason="simctl install refused")
             path = wa.write_status(Path(tmp), rec)
             self.assertTrue(path.is_file())
             self.assertEqual(wa.load_status(path), rec)
 
-    def test_expected_passes(self):
-        self.assertEqual(wa.expected_passes(), ("r1", "r2"))
+    def test_expected_passes_single(self):
+        # Single automated pass per pair (§9): exactly ("r1",), from the
+        # single workflow_inputs source (no duplicate constant).
+        import workflow_inputs as wi
+        self.assertEqual(wa.expected_passes(), ("r1",))
+        self.assertIs(wa.PASSES, wi.PASSES)
+        with self.assertRaises(wa.ArtifactError):
+            wa.status_record(device="iphone69", locale="en", pass_name="r2",
+                             status="ok")
 
 
 class StatusBoundaryTests(unittest.TestCase):
@@ -150,10 +157,10 @@ class StatusBoundaryTests(unittest.TestCase):
                                 "locale": "en", "pass": "r1", "status": "ok",
                                 "reason": "", "run_id": "x"})
         rec = wa.status_record(device="iphone69", locale="es-419",
-                               pass_name="r2", status="ok")
+                               pass_name="r1", status="ok")
         self.assertEqual(
             wa.status_path_for(Path("/tmp/out"), rec),
-            Path("/tmp/out/iphone69-es-419-r2.status.json"))
+            Path("/tmp/out/iphone69-es-419-r1.status.json"))
 
     def test_load_rejects_bad_shape(self):
         import json as _json
@@ -181,20 +188,15 @@ class SummaryTests(unittest.TestCase):
         return [
             wa.status_record(device="iphone69", locale="en", pass_name="r1",
                              status="ok"),
-            wa.status_record(device="iphone69", locale="en", pass_name="r2",
-                             status="ok"),
             wa.status_record(device="iphone69", locale="ru", pass_name="r1",
                              status="failed", reason="boot timed out"),
-            wa.status_record(device="iphone69", locale="ru", pass_name="r2",
-                             status="unattempted",
-                             reason="stopped after r1 contamination"),
         ]
 
     def test_summarize_counts(self):
         s = wa.summarize_statuses(self._recs())
-        self.assertEqual(s["counts"], {"ok": 2, "failed": 1, "unattempted": 1})
+        self.assertEqual(s["counts"], {"ok": 1, "failed": 1, "unattempted": 0})
         self.assertEqual(len(s["failed"]), 1)
-        self.assertEqual(len(s["unattempted"]), 1)
+        self.assertEqual(len(s["unattempted"]), 0)
 
     def test_worker_summary_pair_completeness(self):
         s = wa.worker_summary("iphone69", ["en", "ru"], self._recs())
@@ -207,6 +209,25 @@ class SummaryTests(unittest.TestCase):
         pt = [c for c in s2["pairs"] if c["locale"] == "pt-BR"][0]
         self.assertFalse(pt["complete"])
         self.assertEqual(pt["status"], "missing")
+
+    def test_worker_summary_rejects_conflicting_duplicate_status(self):
+        ok_r1 = wa.status_record(device="iphone69", locale="en",
+                                 pass_name="r1", status="ok")
+        failed_r1 = wa.status_record(
+            device="iphone69", locale="en", pass_name="r1",
+            status="failed", reason="boot timed out")
+        # Either order hides evidence under last-write-wins (failed
+        # then ok reads complete); conflicting duplicates fail closed.
+        with self.assertRaises(wa.ArtifactError):
+            wa.worker_summary("iphone69", ["en"], [failed_r1, ok_r1])
+        with self.assertRaises(wa.ArtifactError):
+            wa.worker_summary("iphone69", ["en"], [ok_r1, failed_r1])
+
+    def test_worker_summary_allows_identical_duplicate_status(self):
+        ok_r1 = wa.status_record(device="iphone69", locale="en",
+                                 pass_name="r1", status="ok")
+        s = wa.worker_summary("iphone69", ["en"], [ok_r1, ok_r1])
+        self.assertTrue(s["pairs"][0]["complete"])
 
 
 class StageUploadTests(unittest.TestCase):
@@ -311,20 +332,18 @@ class BackfillTests(unittest.TestCase):
             wa.write_status(loc, rec)
             created = wa.backfill_unattempted(
                 root, "iphone69", ["en", "ru"], "worker never reached pair")
-            # en-r1 preserved; en-r2 + ru-r1/r2 backfilled
+            # en-r1 preserved; only the single-pass ru-r1 backfilled
             self.assertEqual(
                 sorted((r["locale"], r["pass"]) for r in created),
-                [("en", "r2"), ("ru", "r1"), ("ru", "r2")])
+                [("ru", "r1")])
             for r in created:
                 self.assertEqual(r["status"], "unattempted")
                 self.assertEqual(r["reason"], "worker never reached pair")
             kept = wa.load_status(loc / "iphone69-en-r1.status.json")
             self.assertEqual(kept["status"], "ok")
-            for loc_name, p in (("en", "r2"), ("ru", "r1"), ("ru", "r2")):
-                got = wa.load_status(
-                    root / "iphone69" / loc_name
-                    / f"iphone69-{loc_name}-{p}.status.json")
-                self.assertEqual(got["status"], "unattempted")
+            got = wa.load_status(
+                root / "iphone69" / "ru" / "iphone69-ru-r1.status.json")
+            self.assertEqual(got["status"], "unattempted")
 
     def test_backfill_rejects_bad_inputs(self):
         with tempfile.TemporaryDirectory() as tmp:

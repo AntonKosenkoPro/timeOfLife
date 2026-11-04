@@ -12,7 +12,8 @@ What this is (read carefully before citing it anywhere):
   (deterministic overlap proof, NO sleeps, NO timing dependence).
   It is NOT real GitHub contention, NOT competitor visibility, and
   proves NOTHING about actual queue waiting time. Real queue capacity
-  is measured in 8.x on live runs.
+  is measured in 8.x on live runs. Single-pass scope (§9): six
+  devices × one locale × one pass × two domains = 12 sessions.
 - Every job invokes the REAL production `run_device_worker.execute`
   with an injected fake subprocess/env and the REAL capture.py CLI
   path (never executed — the fake answers). Statuses, run IDs, and
@@ -64,7 +65,10 @@ FUTURE_DEVICES = {
 SIX_DEVICES = ["iphone69", "iphone63", "ipad13", "iphone61", "iphone58",
                "ipad11"]
 LOCALES = ["en"]
-PASSES = ("r1", "r2")
+# Single automated pass per pair (§9): mirrors the production
+# workflow_inputs.PASSES single source (6 devices × 1 locale × 1 pass
+# × 2 domains = 12 sessions, not 24).
+PASSES = ("r1",)
 DOMAINS = ("pinned", "realtime")
 THREAD_TIMEOUT = 120.0
 
@@ -149,6 +153,26 @@ class FakeBackend:
                 out.append((run_id, domain, key))
         return out
 
+    def work_keys(self):
+        """(device, locale, pass, domain) per run-session invocation.
+
+        Run ids carry the worker's fresh invocation namespace
+        (<device>-<locale>-r1-<invocation>, §9), so exact-once is
+        compared on the structural key — while the raw run ids must
+        still be namespaced and distinct per device (see below).
+        """
+        keys = []
+        for run_id, domain, key in self.session_calls():
+            work_key, _inv = parse_work_call(run_id, domain, key)
+            assert work_key[1] in LOCALES, run_id
+            keys.append(work_key)
+        return sorted(keys)
+
+    def invocation_ids(self):
+        """Raw invocation namespace per run-session call (freshness)."""
+        return [parse_work_call(run_id, domain, key)[1]
+                for run_id, domain, key in self.session_calls()]
+
     def assert_no_sim_or_build(self, testcase):
         bad = [argv for argv in self.calls
                if any("simctl" in a or "xcodebuild" in a for a in argv)]
@@ -156,11 +180,28 @@ class FakeBackend:
 
 
 def expected_work(devices, locales=LOCALES):
-    """Every (run_id, domain, device) the real worker must invoke once."""
+    """Every (device, locale, pass, domain) the real worker must invoke
+    once (structural key: run ids additionally carry the fresh
+    invocation namespace, asserted separately)."""
     return sorted(
-        (f"{dev}-{loc}-{p}", dom, dev)
+        (dev, loc, p, dom)
         for dev in devices for loc in locales for p in PASSES
         for dom in DOMAINS)
+
+
+_RUN_ID_RE = re.compile(r"^([A-Za-z0-9]+)-(.+)-r1-([A-Za-z0-9_-]+)$")
+
+
+def parse_work_call(run_id: str, domain: str, key: str
+                    ) -> tuple[tuple[str, str, str, str], str]:
+    """Split a worker run-session call into ((device, locale, pass,
+    domain), invocation). Single-pass run ids are
+    <device>-<locale>-r1-<invocation>; anything else fails loudly."""
+    match = _RUN_ID_RE.match(run_id)
+    assert match, f"run id not in single-pass form: {run_id!r}"
+    dev, locale, inv = match.groups()
+    assert dev == key, (run_id, key)
+    return (dev, locale, "r1", domain), inv
 
 
 def verify_all_executed(selected: list[str], session_calls) -> list[str]:
@@ -317,9 +358,15 @@ class OversubscribedWorkflowTests(SixDeviceCatalog):
                 self.assertEqual(code, 0, (dev, summary.get("error")))
                 self.assertTrue(summary["effective_complete"], dev)
             # Exact-once work from the REAL worker path (not a scheduler
-            # echo): every pair/pass/domain invoked once, nothing else.
-            self.assertEqual(sorted(backend.session_calls()),
+            # echo): every pair/pass/domain invoked once, nothing else
+            # (single pass: 6 devices × 1 locale × 1 pass × 2 domains
+            # = 12 session calls).
+            self.assertEqual(backend.work_keys(),
                              expected_work(SIX_DEVICES))
+            self.assertEqual(len(backend.session_calls()), 12)
+            # Fresh run identity: every device worker minted its own
+            # invocation namespace (no shared/hardcoded run ids).
+            self.assertEqual(len(set(backend.invocation_ids())), 6)
             self.assertEqual(verify_all_executed(
                 SIX_DEVICES, backend.session_calls()), [])
             backend.assert_no_sim_or_build(self)
@@ -363,8 +410,10 @@ class OversubscribedWorkflowTests(SixDeviceCatalog):
                     continue
                 dev_calls = [c for c in backend.session_calls()
                              if c[2] == dev]
+                dev_keys = [parse_work_call(run_id, domain, key)[0]
+                            for run_id, domain, key in dev_calls]
                 self.assertEqual(
-                    sorted(dev_calls),
+                    sorted(dev_keys),
                     sorted(expected_work([dev])), dev)
             backend.assert_no_sim_or_build(self)
 

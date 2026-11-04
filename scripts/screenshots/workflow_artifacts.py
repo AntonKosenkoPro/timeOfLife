@@ -25,7 +25,11 @@ STATUS_SCHEMA_VERSION = 1
 _STATUS_KEYS = frozenset({"schema_version", "device", "locale", "pass",
                           "status", "reason", "run_id"})
 
-PASSES = ("r1", "r2")
+# Single automated pass per device-locale (owner decision 2026-11-04,
+# §9): defined once in workflow_inputs (the selection/catalog
+# authority) and re-exported here for status-shape validation,
+# backfill, and summaries — no second tuple.
+PASSES = inputs.PASSES
 
 ARTIFACT_PREFIX = "shots-"
 
@@ -79,8 +83,22 @@ def parse_artifact_name(name: str) -> tuple[str, str]:
     return device, locale
 
 
-def expected_passes() -> tuple[str, str]:
+def expected_passes() -> tuple[str, ...]:
     return PASSES
+
+
+def validate_run_id(run_id: str) -> str:
+    """Fail-closed shape gate for worker invocation/run identifiers.
+
+    Run identifiers flow into runs/<run-id> paths downstream, so an
+    operator-supplied invocation id must match the same strict shape
+    as capture run ids (never a path, never empty).
+    """
+    if not isinstance(run_id, str) or not _RUN_ID_RE.match(run_id):
+        raise ArtifactError(
+            f"run/invocation id {run_id!r} must match "
+            "[A-Za-z0-9_-]{1,64}")
+    return run_id
 
 
 def status_record(*, device: str, locale: str, pass_name: str,
@@ -256,7 +274,15 @@ def backfill_unattempted(shots_root: Path, device: str,
     reached (pre-capture failure, cancel). Existing records are never
     touched: finished ok/failed evidence is preserved and only missing
     files are created. Empty/blank reasons are rejected — silence must
-    never stand in for an explicit status."""
+    never stand in for an explicit status.
+
+    Backfilled records intentionally carry the bare default run id
+    (<device>-<locale>-<pass>, no invocation suffix): they exist ONLY
+    for pairs this invocation never reached, so no manifest and no
+    fresh worker identity exist to bind. This is fail-closed, not a
+    second identity scheme — exactly one status file still exists per
+    pair, unattempted with an explicit reason, and pairs with real
+    output always carry the worker's fresh run id."""
     if device not in inputs.SUPPORTED_DEVICES:
         raise ArtifactError(f"unknown device {device!r}")
     if not isinstance(locales, list) or not locales:
@@ -300,13 +326,19 @@ def summarize_statuses(records: list[dict]) -> dict:
 
 def worker_summary(device: str, locales: list[str],
                    records: list[dict]) -> dict:
-    """Per-pair completeness: both passes ok, else explicit failure or
-    missing (never invented as complete)."""
+    """Per-pair completeness: the single pass ok, else explicit failure
+    or missing (never invented as complete)."""
     by_pair: dict[tuple[str, str, str], dict] = {}
     for rec in records:
         if rec.get("device") != device:
             continue
-        by_pair[(rec.get("device"), rec.get("locale"), rec.get("pass"))] = rec
+        key = (rec.get("device"), rec.get("locale"), rec.get("pass"))
+        prev = by_pair.get(key)
+        if prev is not None and prev.get("status") != rec.get("status"):
+            raise ArtifactError(
+                f"conflicting statuses for {key}: "
+                f"{prev.get('status')!r} vs {rec.get('status')!r}")
+        by_pair[key] = rec
     pairs = []
     for locale in locales:
         passes = [by_pair.get((device, locale, p)) for p in PASSES]

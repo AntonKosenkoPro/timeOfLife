@@ -1,5 +1,79 @@
 # Handoff — optimize-app-screenshot-workflow (compaction checkpoint)
 
+## Current local PASS + pilot proof 2026-11-04 (cutover pending; NOT CI acceptance)
+
+- Checklist **41/45**, open **8.3/8.6/9.5/9.6** — remaining gates stay OPEN.
+  No merge/archive/human approval claimed; planned CI acceptance NOT accepted
+  from these local results.
+- Full independent local green (main-reported, unit/structural scope only):
+  screenshots **504 OK (1 retained-genuine-source skip)**, panels **107 OK
+  (3 retained-source skips)**, contracts **48**, actionlint clean, strict
+  `openspec validate` 4 changes pass. iOS **Screenshot 1134/103**
+  (`/tmp/ios_full_shot.log`), **Debug 1051/98** (`/tmp/ios_full_dbg.log`),
+  `swiftlint --strict` **0/255**; backend `gofmt`/`vet`/`build`/`test` +
+  `golangci-lint 0 issues` green
+  (`/private/var/folders/8c/pwh55jk140g1shxfnwm7zxf80000gn/T/opencode/backend-verify-pr235.log`).
+  No native/CI single-pass acceptance follows from those results.
+- Native English single-pass pilot proof (manual invocations, NOT CI):
+  `/tmp/ios95-A.log` (`EXIT=0 WALL=46s`, invocation `15d21735061a`) +
+  `/tmp/ios95-B.log` (`EXIT=0 WALL=30s`, invocation `faee97d6afc0`) with
+  `.done` markers; roots `/tmp/ios95-A/` + `/tmp/ios95-B/` (iphone69/en,
+  single r1-labelled pass each). Each run: 4 native app PNGs
+  (track-running/insights/history/add-entry, `native-simctl` + macho
+  `8625f5de…`) + 3 LA `external-lock-screen-pending` stubs, 2 session
+  receipts (pinned 4-frame + realtime 3-frame, distinct session nonces per
+  run, `complete` + `lease_released`). Statuses `ok` with honest
+  `needs-inspection` LA reason AND explicit **undeclared source-provenance
+  limitation** (`provenance not declared (commit base + dirty flag
+  required)` in `iphone69-en-r1.status.json`) — do NOT retrofit historical
+  receipts. Manual-rerun identity proof only (same inputs, new run identity,
+  no state carryover claimed at pilot scope); three-geometry + multilingual +
+  delivered-ZIP inspection remain 9.5/8.3 open.
+- This cutover commits the uncommitted single-pass + 31-finding review
+  hardening (24 addressed/7 waived ledger; 24 fixes must be pushed before
+  their threads resolve) as one atomic review+singlepass unit — review and
+  single-pass edits interleave in the same files (e.g. `executor.py` locale
+  binding + spawn/receipt hardening, `ScreenshotSessionController.swift`
+  single-pass wording + rejection-identity ack), so no clean two-commit split.
+  Base at commit time `origin/main 009b0d25`; rebase/push gated below.
+
+## Active single-pass revision checkpoint (supersedes earlier two-pass gates)
+
+- Owner explicitly approved removing automatic r2/comparison and accepts about
+  22 minutes versus 70+; 20 minutes is aspirational. Proposal/design/delta/tasks
+  and operator docs revised. Old hard cold/warm tasks 8.1/8.2 are retired plain
+  historical bullets, not fake passes. Current checklist **41/45**, open
+  8.3/8.6/9.5/9.6. Single-pass changes are still uncommitted/unpushed;
+  remote PR head remains 26b7c1e1 until publication.
+- Worker single-pass implementation and unchanged shared-build contract are
+  unit-verified (9.1/9.4 checked). Fresh invocation-bound run IDs, stable status
+  filenames carrying actual IDs, pre-side-effect composite-length validation,
+  refusal of any nonempty selected output cell; no overwrite or automatic r2.
+  Owned suites 138 tests pass, screenshot actionlint clean. No native/CI
+  single-pass acceptance follows from those results.
+- Comparison CLI/function removed, single-plan utility corrected, semantic
+  hashes retained for human comparisons. Malformed panel status pointers now
+  fail closed, README/panels use one selector, and locale binding is verified
+  against hash-bound archived envelopes. End-to-end cross-locale negative proof
+  confirmed the original defect and now blocks. Owner full suites: screenshots
+  504 OK (1 retained-genuine-source skip), panels 107 OK (3 retained-source
+  skips). Tasks 9.2/9.3 checked at unit scope; final independent integration
+  rerun belongs to ses_e597bc577ffe9NrRhY87Do51Uc, native English pilot/manual
+  rerun proof to ses_e59878b29ffeKtHBN3aIIyBnhR. Native/CI acceptance still open.
+- B owner ses_e5989c014ffeeoH5mSxXS9xvye owns executor/session/capture/finalizer
+  and tests; C owner ses_e5980f8ddffe4PcBC568RJYyB7 owns panel selection/README
+  and tests. A worker ses_e59878aeaffeg4e6sHHbip6KVS has finished. No other
+  writer may overlap these files. Main owns task/checkpoint writes.
+- Review run 41816179098: 31 findings reconciled against 31 threads; triage
+  ledger 24 addressed/7 waived (mixed findings counted once as addressed).
+  Seven waivers replied and resolved; 24 fixes must be pushed before their
+  threads resolve. iOS final verification 1134/103 Screenshot, 1051/98 Debug,
+  lint 0/255; backend fresh verification green. Source changes after these
+  results require affected reruns. No merge/archive/human approval claimed.
+- Independent pre-audit integration suites passed 494 screenshot tests
+  (1 genuine-source skip), 97 panel tests (3 retained-source skips), but exposed
+  gaps despite green tests. Do not cite those green counts as final acceptance.
+
 ## Pending-3 fix checkpoint 2026-11-04 (approved for PR235, sole-writer commits)
 
 - Scope preserved: exactly the 3 approved files, no unfamiliar writes

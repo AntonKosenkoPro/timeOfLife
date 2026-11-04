@@ -49,8 +49,8 @@ enum ScreenshotSessionDomain: String, Codable {
 /// One accepted command, echoed in every state ack and the cleanup receipt
 /// so a fresh process can re-verify the transcript (spec: session cleanup
 /// gates every dependent frame). The semantic hash excludes volatile
-/// payload fields (run_id) so r1/r2 comparison recognizes the same intended
-/// frame across fresh volatile identities.
+/// payload fields (run_id) so a human comparing manual reruns recognizes
+/// the same intended frame across fresh volatile identities.
 struct ScreenshotSessionTranscriptEntry: Codable, Equatable {
     var seq: Int
     var frame: String

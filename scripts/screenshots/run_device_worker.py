@@ -2,11 +2,14 @@
 """Device-worker outer loop (workflow side, stdlib only).
 
 Owns the outer loop + statuses for ONE device worker: selected locales
-in order, r1 then r2 per locale, pinned session then realtime session
-per pass via the frozen `capture.py run-session` CLI, then the existing
-`finalize-run` / `finalize-two-runs`. Per-locale request/totals files
-come from the existing `make-request` / `locale-totals` verbs, so deck
-and treatment policies stay with the runner CLI, not here.
+in order, a SINGLE automated pass per locale, pinned session then
+realtime session per pass via the frozen `capture.py run-session` CLI,
+then the existing `finalize-run`. Per-locale request/totals files come
+from the existing `make-request` / `locale-totals` verbs, so deck and
+treatment policies stay with the runner CLI, not here. There is no
+automatic second pass and no automatic pass comparison: a manual rerun
+re-invokes this same single-pass flow with a FRESH invocation identity
+(see below), and human inspection compares across reruns.
 
 Layout contract (`--out` is the shots ROOT): every session/finalize
 verb for a locale runs with `--out shots/<device>/<locale>` (via
@@ -32,12 +35,22 @@ Outcome contract: `finalize-run` rc 3 is honest needs-inspection
 (status ok with a note, work continues); any other nonzero child rc,
 or a launch OSError/timeout, is fatal session failure. A fatal
 failure contaminates the worker: the current pass is failed, every
-later pass/pair is unattempted, earlier artifacts are preserved
-(never deleted), and the worker stops. A `finalize-two-runs`
-mismatch is pure computation (no sim state), so it fails its pair
-(the explicit pair record + effective completion, never by rewriting
-pass statuses) but does not stop later locales. `--cancel-file`
-presence stops cleanly with unattempted statuses.
+later pair is unattempted, earlier artifacts are preserved (never
+deleted), and the worker stops. `--cancel-file` presence stops
+cleanly with unattempted statuses.
+
+Run identity: every execute() mints one fresh invocation identifier
+(`uuid4` hex, or an explicit `--invocation-id` that must match the
+strict run-id shape) and namespaces the locale run id as
+`<device>-<locale>-r1-<invocation>`. A hardcoded `device-locale-r1`
+alone cannot distinguish a manual rerun from the original, so status
+records and `runs/<run-id>/` manifests always carry the exact actual
+run id, and exactly one manifest lands per clean pair output for the
+packaging harvest to discover (never a hardcoded run id to guess).
+Reused output is refused: a locale cell holding ANY prior content
+(statuses, runs/, requests, diagnostics, foreign files, symlinks)
+belongs to a previous invocation and fails the worker closed instead
+of being silently overwritten or merged with history.
 
 Interruption boundary: KeyboardInterrupt is converted to
 failed/unattempted statuses plus a best-effort summary, then
@@ -59,6 +72,7 @@ import json
 import os
 import subprocess
 import sys
+import uuid
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -75,7 +89,9 @@ EXIT_CANCELLED = 4
 
 LEASE_ENV = "LIFIO_CAPTURE_LEASE"
 MAX_PARALLEL_DEFAULT = 5
-PASSES = ("r1", "r2")
+# Single automated pass per device-locale (owner decision 2026-11-04,
+# §9): the tuple lives in workflow_inputs (selection/catalog
+# authority); this module never defines its own.
 DOMAINS = ("pinned", "realtime")
 
 
@@ -142,12 +158,6 @@ def finalize_argv(capture_py: Path, out: Path, run_id: str,
     return argv
 
 
-def two_runs_argv(capture_py: Path, out: Path, run_id_base: str
-                  ) -> list[str]:
-    return [sys.executable, str(capture_py), "finalize-two-runs",
-            "--out", str(out), "--run-id-base", run_id_base]
-
-
 def default_run(argv: list[str], env: dict) -> object:
     return subprocess.run(argv, capture_output=True, text=True, env=env)
 
@@ -163,16 +173,35 @@ def execute(*, device_key: str, device_udid: str, locales: list[str],
             cancel_file: str | None = None,
             approval: str | None = None,
             retained_dir: str | None = None,
+            invocation_id: str | None = None,
             run=default_run, env: dict | None = None) -> tuple[int, dict]:
     """Run one device worker over a shots root. Returns (exit_code,
     summary). Pure subprocess-driven; inject `run`/`env` for
-    deterministic tests."""
+    deterministic tests.
+
+    `invocation_id` namespaces this run (manual reruns MUST arrive
+    with a fresh one — a bare device-locale-r1 cannot tell reruns
+    apart). When None, a fresh uuid4-hex id is minted per call, so
+    two execute() calls never share run identities by accident.
+    """
     child_env = dict(os.environ if env is None else env)
     shots_root = Path(out_dir)
     capture_py = Path(capture_py)
+    try:
+        invocation = (wa.validate_run_id(invocation_id)
+                      if invocation_id is not None
+                      else uuid.uuid4().hex[:12])
+    except wa.ArtifactError as exc:
+        return (EXIT_INVALID,
+                {"device": device_key, "locales": list(locales),
+                 "pairs": {}, "canonical_pairs": [],
+                 "effective_complete": False, "cancelled": False,
+                 "invocation_id": None,
+                 "error": f"invalid invocation id: {exc}"})
     summary: dict = {"device": device_key, "locales": list(locales),
                      "pairs": {}, "canonical_pairs": [],
                      "effective_complete": False, "cancelled": False,
+                     "invocation_id": invocation,
                      "error": ""}
     records: list[dict] = []
     done: set[tuple[str, str]] = set()
@@ -182,22 +211,27 @@ def execute(*, device_key: str, device_udid: str, locales: list[str],
     def locale_dir(locale: str) -> Path:
         return wa.locale_artifact_dir(shots_root, device_key, locale)
 
-    def emit(locale: str, pass_name: str, status: str, reason: str) -> dict:
+    def run_id_for(locale: str, pass_name: str) -> str:
+        return f"{device_key}-{locale}-{pass_name}-{invocation}"
+
+    def emit(locale: str, pass_name: str, status: str, reason: str,
+             run_id: str | None = None) -> dict:
         rec = wa.status_record(device=device_key, locale=locale,
                                pass_name=pass_name, status=status,
-                               reason=reason)
+                               reason=reason,
+                               run_id=run_id or run_id_for(locale,
+                                                           pass_name))
         wa.write_status(locale_dir(locale), rec)
         records.append(rec)
         done.add((locale, pass_name))
         pair = summary["pairs"].setdefault(
-            locale, {"r1": None, "r2": None, "two_runs_rc": None,
-                     "two_runs_note": "", "pair_failed": False})
+            locale, {p: None for p in wi.PASSES})
         pair[pass_name] = status
         return rec
 
     def stop_remaining(reason: str) -> None:
         for loc in locales:
-            for p in PASSES:
+            for p in wi.PASSES:
                 if (loc, p) not in done:
                     emit(loc, p, wa.STATUS_UNATTEMPTED, reason)
 
@@ -212,9 +246,7 @@ def execute(*, device_key: str, device_udid: str, locales: list[str],
         summary["effective_complete"] = (
             bool(summary["canonical_pairs"])
             and all(p.get("complete")
-                    for p in summary["canonical_pairs"])
-            and not any(pair.get("pair_failed")
-                        for pair in summary["pairs"].values()))
+                    for p in summary["canonical_pairs"]))
         try:
             device_dir.mkdir(parents=True, exist_ok=True)
             (device_dir / "worker-summary.json").write_text(
@@ -259,6 +291,23 @@ def execute(*, device_key: str, device_udid: str, locales: list[str],
                 EXIT_INVALID,
                 f"unknown language {loc!r}; "
                 f"locales: {list(wi.SUPPORTED_LOCALES)}")
+    # Audit hole 1: the invocation piece alone can satisfy
+    # [A-Za-z0-9_-]{1,64} while the composite actual run id
+    # <device>-<locale>-r1-<invocation> exceeds 64 (e.g. a 64-char
+    # invocation under iphone69-zh-Hans). Every selected actual run id
+    # pre-validates here — before ANY mkdir, spawn, or status write —
+    # so an overlong identity rejects cleanly (code 2, zero
+    # children/files) instead of failing late inside status_record
+    # after capture work already ran.
+    for loc in locales:
+        for p in wi.PASSES:
+            try:
+                wa.validate_run_id(f"{device_key}-{loc}-{p}-{invocation}")
+            except wa.ArtifactError as exc:
+                return fail_closed(
+                    EXIT_INVALID,
+                    f"run id for {device_key}/{loc}/{p} rejected: {exc}; "
+                    "rerun with a shorter --invocation-id")
     if not device_udid or device_udid == "booted":
         return fail_closed(
             EXIT_INVALID,
@@ -294,6 +343,28 @@ def execute(*, device_key: str, device_udid: str, locales: list[str],
     if retained_dir is not None and not Path(retained_dir).is_dir():
         return fail_closed(EXIT_INVALID,
                            f"retained dir not found: {retained_dir}")
+    # Audit hole 2: statuses/runs-only detection missed requests-only
+    # orphans (and foreign files/dangling symlinks), letting
+    # make-request overwrite the non-namespaced base request file.
+    # ANY nonempty selected pair cell is prior output from a previous
+    # invocation: refuse before mutation and preserve its bytes exactly
+    # (never delete, overwrite, or merge). A manual rerun must target
+    # a fresh output root instead.
+    for loc in locales:
+        cell = wa.locale_artifact_dir(shots_root, device_key, loc)
+        try:
+            nonempty = cell.is_dir() and any(cell.iterdir())
+        except OSError as exc:
+            return fail_closed(
+                EXIT_INVALID,
+                f"refused: locale cell {cell} unreadable ({exc}); "
+                "rerun into a fresh output root")
+        if nonempty:
+            return fail_closed(
+                EXIT_INVALID,
+                f"refused: locale cell {cell} already holds output from "
+                "a previous invocation; rerun into a fresh output root "
+                "(manual reruns always use a new run identity)")
 
     geometry = wi.DEVICE_CATALOG[device_key]["geometry"]
     island = str(wi.island_for_device(device_key))
@@ -353,12 +424,12 @@ def execute(*, device_key: str, device_udid: str, locales: list[str],
                 emit(locale, "r1", wa.STATUS_FAILED, reason)
                 stop_remaining(f"stopped after request failure: {reason}")
                 return finish(EXIT_FAILED)
-            for pass_name in PASSES:
+            for pass_name in wi.PASSES:
                 if cancelled():
                     stop_remaining(f"cancelled ({cancel_file} present)")
                     summary["cancelled"] = True
                     return finish(EXIT_CANCELLED)
-                rid = f"{device_key}-{locale}-{pass_name}"
+                rid = run_id_for(locale, pass_name)
                 inflight = [locale, pass_name]
                 for domain in DOMAINS:
                     if cancelled():
@@ -401,27 +472,6 @@ def execute(*, device_key: str, device_udid: str, locales: list[str],
                     stop_remaining(f"contaminated; stopped: {reason}")
                     return finish(EXIT_FAILED)
                 inflight = None
-            proc, note = call(two_runs_argv(
-                capture_py, ldir, f"{device_key}-{locale}"))
-            pair = summary["pairs"][locale]
-            if note:
-                pair["two_runs_rc"] = -1
-                pair["two_runs_note"] = (
-                    f"finalize-two-runs {note}").strip()
-                pair["pair_failed"] = True
-            else:
-                pair["two_runs_rc"] = proc.returncode
-                if proc.returncode == 0:
-                    pair["two_runs_note"] = ""
-                elif proc.returncode == 3:
-                    pair["two_runs_note"] = (
-                        "finalize-two-runs needs-inspection "
-                        f"{_stderr_tail(proc)}").strip()
-                else:
-                    pair["two_runs_note"] = (
-                        f"finalize-two-runs rc={proc.returncode} "
-                        f"{_stderr_tail(proc)}").strip()
-                    pair["pair_failed"] = True
     except KeyboardInterrupt:
         if inflight is not None and tuple(inflight) not in done:
             try:
@@ -442,9 +492,7 @@ def execute(*, device_key: str, device_udid: str, locales: list[str],
         raise
 
     failed = any(r == "failed" for pair in summary["pairs"].values()
-                 for r in (pair["r1"], pair["r2"]))
-    failed = failed or any(pair.get("pair_failed")
-                           for pair in summary["pairs"].values())
+                 for p in wi.PASSES for r in (pair[p],))
     return finish(EXIT_FAILED if failed else EXIT_OK)
 
 
@@ -452,7 +500,8 @@ def build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(
         prog="run_device_worker.py",
         description="Device-worker outer loop: one device, selected "
-                    "locales, r1/r2 with pinned+realtime sessions. --out is "
+                    "locales, a SINGLE automated pass each with "
+                    "pinned+realtime sessions. --out is "
                     "the shots root (per-locale dirs shots/<device>/<locale>, "
                     "device summary at shots/<device>/). The YAML worker "
                     "creates/boots/installs the simulator once; "
@@ -464,10 +513,17 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--locales", required=True,
                     help="JSON locale list, e.g. '[\"en\",\"ru\"]'")
     ap.add_argument("--out", required=True,
-                    help="shots root for this run")
+                    help="shots root for this run (must be fresh; reused "
+                         "locale cells from a previous invocation are "
+                         "refused, never overwritten)")
     ap.add_argument("--capture-py", required=False, default=None)
     ap.add_argument("--provenance", required=False, default=None)
     ap.add_argument("--cancel-file", required=False, default=None)
+    ap.add_argument("--invocation-id", required=False, default=None,
+                    help="explicit run-identity namespace "
+                         "(<device>-<locale>-r1-<invocation>); when omitted "
+                         "a fresh id is minted, so manual reruns never "
+                         "share run identities with the original")
     ap.add_argument("--approval", required=False, default=None,
                     help="5.4 approval file; must pair with --retained-dir")
     ap.add_argument("--retained-dir", required=False, default=None,
@@ -489,6 +545,7 @@ def main(argv: list[str] | None = None) -> int:
         locales=locales, out_dir=Path(args.out), capture_py=capture_py,
         provenance=args.provenance, cancel_file=args.cancel_file,
         approval=args.approval, retained_dir=args.retained_dir,
+        invocation_id=args.invocation_id,
         env=os.environ)
     if summary.get("error"):
         print(f"invalid: {summary['error']}", file=sys.stderr)

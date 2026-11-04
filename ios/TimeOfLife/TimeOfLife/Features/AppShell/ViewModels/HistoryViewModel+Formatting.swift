@@ -10,7 +10,9 @@ extension HistoryViewModel {
     ///
     /// The explicit `locale` is a test seam (default `nil` preserves every
     /// existing call): the runtime path always resolves through the capture
-    /// override below, matching `timeText`.
+    /// override below, matching `timeText`. It is honored only in
+    /// `SCREENSHOT_CAPTURE` builds; other configurations ignore it and
+    /// format with the ambient locale.
     nonisolated static func dayLabel(
         for day: Date,
         now: Date,

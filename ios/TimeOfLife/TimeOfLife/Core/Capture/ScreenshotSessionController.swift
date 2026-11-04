@@ -4,8 +4,10 @@ import Foundation
 import SwiftUI
 import UIKit
 
-/// Batched session controller (tasks 3.x): one fresh process per
-/// locale/pass/domain reuses a single seeded store across its story frames.
+/// Batched session controller (tasks 3.x): one pass per locale/pass/domain,
+/// each pass running in one fresh process that reuses a single seeded store
+/// across its story frames (a manual rerun simply launches a fresh process
+/// identity for its pass — sharing is never required across passes).
 /// Each command rebuilds the native root revision (fresh shell identity, so
 /// all view-local state resets), revalidates real view models + fixture
 /// fingerprint + pinned clock, and binds mount/settle readiness to the
@@ -284,7 +286,16 @@ final class ScreenshotSessionController: ObservableObject {
         }
         do {
             if envelope.seq != active.validator.initial.seq {
-                try active.validator.validate(envelope)
+                do {
+                    try active.validator.validate(envelope)
+                } catch let error as ScreenshotRequestError {
+                    // Rejection identity: the runner binds acks to the exact
+                    // command it is waiting for, so a terminal ack carrying
+                    // the last ACCEPTED identity would be ignored until the
+                    // poll deadline instead of surfacing this failure code.
+                    // The accepted transcript stays unchanged.
+                    return terminal(status: Self.terminalStatus(for: error.code), error: error, rejected: envelope)
+                }
             }
             transcript = active.validator.transcript
             writeState(status: "preparing", totals: nil, liveActivity: active.liveActivity, error: nil)
@@ -442,15 +453,16 @@ final class ScreenshotSessionController: ObservableObject {
         status: String,
         totals: CaptureExpectedTotals?,
         liveActivity: CaptureStateLiveActivity?,
-        error: ScreenshotRequestError?
+        error: ScreenshotRequestError?,
+        rejected: ScreenshotSessionEnvelope? = nil
     ) -> CaptureState {
         let envelope = session?.validator.initial
         let last = transcript.last
         let state = CaptureState(
             status: status,
-            requestSHA256: last?.requestSHA256,
+            requestSHA256: rejected?.requestSHA256 ?? last?.requestSHA256,
             deckVersion: envelope?.request.deckVersion,
-            frame: last.map { $0.frame } ?? envelope?.frame.rawValue,
+            frame: rejected?.frame.rawValue ?? (last.map { $0.frame } ?? envelope?.frame.rawValue),
             mode: envelope?.mode.rawValue,
             runID: envelope?.runID,
             counts: status == "ready" ? CaptureStateCounts(entries: ScreenshotFixture.entryCount) : nil,
@@ -469,9 +481,9 @@ final class ScreenshotSessionController: ObservableObject {
             },
             liveActivity: liveActivity,
             error: error.map { CaptureStateFailure(code: $0.code, detail: $0.detail) },
-            sessionNonce: envelope?.nonce,
-            sessionDomain: envelope?.domain.rawValue,
-            seq: last?.seq ?? envelope?.seq,
+            sessionNonce: rejected?.nonce ?? envelope?.nonce,
+            sessionDomain: rejected?.domain.rawValue ?? envelope?.domain.rawValue,
+            seq: rejected?.seq ?? (last?.seq ?? envelope?.seq),
             transcript: transcript.isEmpty ? nil : transcript,
             appDurationsMS: appDurations()
         )
@@ -496,7 +508,7 @@ final class ScreenshotSessionController: ObservableObject {
     }
 
     @discardableResult
-    private func terminal(status: String, error: ScreenshotRequestError) -> CaptureState {
+    private func terminal(status: String, error: ScreenshotRequestError, rejected: ScreenshotSessionEnvelope? = nil) -> CaptureState {
         terminalCode = error.code
         phase = .terminal(message: error.detail)
         writeSessionEndedMarker()
@@ -527,7 +539,7 @@ final class ScreenshotSessionController: ObservableObject {
             try? CaptureStateWriter.write(state, to: documents)
             return state
         }
-        return writeState(status: status, totals: nil, liveActivity: session?.liveActivity, error: error)
+        return writeState(status: status, totals: nil, liveActivity: session?.liveActivity, error: error, rejected: rejected)
     }
 
     private static func terminalStatus(for code: String) -> String {

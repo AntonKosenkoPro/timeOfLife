@@ -175,34 +175,49 @@ class ManifestStabilityTests(unittest.TestCase):
             rm.assemble_run_manifest("r", "U", "en-austin-1", "light-v1",
                                      (1320, 2868), [self._rec("track-running")])
 
-    def test_identical_runs_have_no_errors(self):
+    def test_single_manifests_carry_human_comparison_hashes(self):
+        # Single-pass decision: no automatic comparison gate. Two
+        # manifests assembled under distinct volatile run identities
+        # ("r1"/"r2" labels retained as volatile IDs only) carry equal
+        # per-frame semantic hashes while exact request hashes may
+        # differ — the data a HUMAN comparison needs, never auto-gated.
         recs = [self._rec(f) for f in rs.PILOT_FRAMES]
         m1 = rm.assemble_run_manifest("r1", "U", "en-austin-1", "light-v1",
                                       (1320, 2868), recs)
-        m2 = rm.assemble_run_manifest("r2", "U", "en-austin-1", "light-v1",
-                                      (1320, 2868), [dict(r) for r in recs])
-        res = rm.compare_runs(m1, m2)
-        self.assertEqual(res, {"errors": [], "unreviewed_variance": []})
-
-    def test_png_drift_is_variance_totals_drift_is_error(self):
-        recs = [self._rec(f) for f in rs.PILOT_FRAMES]
-        m1 = rm.assemble_run_manifest("r1", "U", "en-austin-1", "light-v1",
-                                      (1320, 2868), recs)
-        recs2 = [dict(r) for r in recs]
-        recs2[0] = dict(recs2[0])
-        recs2[0]["screenshot_sha256"] = "b" * 64  # caret/chrome drift
+        recs2 = [dict(r, request_sha256="b" * 64) for r in recs]
         m2 = rm.assemble_run_manifest("r2", "U", "en-austin-1", "light-v1",
                                       (1320, 2868), recs2)
-        res = rm.compare_runs(m1, m2)
-        self.assertEqual(res["errors"], [])
-        self.assertEqual(res["unreviewed_variance"], ["track-running"])
+        for a, b in zip(m1["frames"], m2["frames"]):
+            self.assertEqual(a["request_semantic_sha256"],
+                             b["request_semantic_sha256"])
+            self.assertNotEqual(a["request_sha256"], b["request_sha256"])
+        self.assertFalse(hasattr(rm, "compare_runs"))
+
+    def test_totals_drift_visible_per_frame_for_human_review(self):
+        # Totals drift stays detectable per record (never silently
+        # merged, never auto-adjudicated): the human-readable records
+        # differ exactly at the drifted frame.
+        recs = [self._rec(f) for f in rs.PILOT_FRAMES]
+        m1 = rm.assemble_run_manifest("r1", "U", "en-austin-1", "light-v1",
+                                      (1320, 2868), recs)
         recs3 = [dict(r) for r in recs]
         recs3[1] = dict(recs3[1])
         recs3[1]["expected_totals"] = dict(self.TOTALS, week_seconds=2)
         m3 = rm.assemble_run_manifest("r3", "U", "en-austin-1", "light-v1",
                                       (1320, 2868), recs3)
-        res3 = rm.compare_runs(m1, m3)
-        self.assertTrue(any("insights" in e for e in res3["errors"]))
+        self.assertEqual(m1["frames"][1]["frame"], "insights")
+        self.assertNotEqual(m1["frames"][1]["expected_totals"],
+                            m3["frames"][1]["expected_totals"])
+        # Screenshot bytes stay per-record hashes for reviewable
+        # variance (caret/chrome drift), never byte-compared here.
+        recs2 = [dict(r) for r in recs]
+        recs2[0] = dict(recs2[0], screenshot_sha256="b" * 64)
+        m2 = rm.assemble_run_manifest("r2", "U", "en-austin-1", "light-v1",
+                                      (1320, 2868), recs2)
+        self.assertNotEqual(m1["frames"][0]["screenshot_sha256"],
+                            m2["frames"][0]["screenshot_sha256"])
+        self.assertEqual(m1["frames"][0]["expected_totals"],
+                         m2["frames"][0]["expected_totals"])
 
     def test_manifest_logs_ci_bypass(self):
         recs = [self._rec(f) for f in rs.PILOT_FRAMES]
@@ -221,6 +236,9 @@ class ManifestStabilityTests(unittest.TestCase):
             self.assertFalse(m["ci_approval_bypass"])
 
     def test_ci_flag_is_provenance_not_content(self):
+        # The bypass flag changes provenance bookkeeping only: two
+        # single manifests assembled identically except the flag agree
+        # on every content field (no automatic gate involved).
         recs = [self._rec(f) for f in rs.PILOT_FRAMES]
         m1 = rm.assemble_run_manifest("r1", "U", "en-austin-1", "light-v1",
                                       (1320, 2868), recs,
@@ -228,8 +246,20 @@ class ManifestStabilityTests(unittest.TestCase):
         m2 = rm.assemble_run_manifest("r2", "U", "en-austin-1", "light-v1",
                                       (1320, 2868), [dict(r) for r in recs],
                                       ci_approval_bypass=True)
-        res = rm.compare_runs(m1, m2)
-        self.assertEqual(res, {"errors": [], "unreviewed_variance": []})
+        self.assertNotEqual(m1["ci_approval_bypass"],
+                            m2["ci_approval_bypass"])
+        for key in ("deck_version", "treatment", "geometry", "frames"):
+            self.assertEqual(m1[key], m2[key])
+
+    def test_assemble_carries_no_locale_claim(self):
+        # Assembly binds no locale: the manifest `locale` field is set
+        # at finalize_run from the validated unanimous session
+        # envelopes (exact coordinated key, envelope-derived) — never
+        # a free claim here and never inferred from paths.
+        recs = [self._rec(f) for f in rs.PILOT_FRAMES]
+        m = rm.assemble_run_manifest("r1", "U", "en-austin-1", "light-v1",
+                                     (1320, 2868), recs)
+        self.assertNotIn("locale", m)
 
 
 class InspectionGateTests(unittest.TestCase):
@@ -342,50 +372,47 @@ class ManifestNATests(unittest.TestCase):
         self.assertEqual(m["na_frames"], ["la-compact", "la-expanded"])
         self.assertEqual(m["island_probe"]["source"], "simctl-list")
 
-    def test_compare_na_both_passes_explicit(self):
+    def test_na_scope_and_probe_attestation_explicit(self):
+        # N/A coverage without the retired gate: a single manifest
+        # declares its N/A scope explicitly with probe evidence, and a
+        # manual rerun (new volatile run identity) carries agreeing
+        # attestation fields — human-comparable, never auto-approved.
         kw = dict(device_udid="U", deck_version="en-austin-1",
                   treatment="light-v1", geometry=(2064, 2752))
         m1 = rm.assemble_run_manifest("r1", **kw, frame_records=self._five(),
                                       na_frames=["la-compact",
                                                  "la-expanded"],
                                       island_probe=dict(self.PROBE))
+        self.assertEqual(m1["na_frames"], ["la-compact", "la-expanded"])
         probe2 = dict(self.PROBE, run_id="ipad13-en-r2",
                       session_nonce="m" * 32)
         m2 = rm.assemble_run_manifest("r2", **kw, frame_records=self._five(),
                                       na_frames=["la-expanded",
                                                  "la-compact"],
                                       island_probe=probe2)
-        res = rm.compare_runs(m1, m2)
-        self.assertEqual(res["errors"], [])
-        # N/A scope drift across passes is an error, never silent.
+        self.assertEqual(sorted(m2["na_frames"]),
+                         sorted(m1["na_frames"]))
+        for key in ("device_key", "island_available", "geometry",
+                    "source", "reason"):
+            self.assertEqual(m2["island_probe"][key],
+                             m1["island_probe"][key])
+        # N/A scope drift across reruns stays visible as data (never
+        # silently merged): a narrower scope assembles differently.
         six = self._five() + [self._rec("la-expanded")]
         m3 = rm.assemble_run_manifest("r3", **kw, frame_records=six,
                                       na_frames=["la-compact"],
                                       island_probe=dict(self.PROBE))
-        res3 = rm.compare_runs(m1, m3)
-        self.assertTrue(any("na_frames" in e for e in res3["errors"]))
-        # Attestation drift across passes is an error; volatile run_id and
-        # session_nonce are excluded.
-        probe4 = dict(self.PROBE, run_id="ipad13-en-r9",
-                      session_nonce="z" * 32)
-        m4 = rm.assemble_run_manifest("r4", **kw, frame_records=self._five(),
-                                      na_frames=["la-compact",
-                                                 "la-expanded"],
-                                      island_probe=probe4)
-        self.assertEqual(rm.compare_runs(m1, m4)["errors"], [])
+        self.assertNotEqual(sorted(m3["na_frames"]),
+                            sorted(m1["na_frames"]))
+        # Attestation drift stays visible: a different device_key is
+        # carried verbatim for human review, never normalized away.
         probe5 = dict(self.PROBE, device_key="iphone69")
         m5 = rm.assemble_run_manifest("r5", **kw, frame_records=self._five(),
                                       na_frames=["la-compact",
                                                  "la-expanded"],
                                       island_probe=probe5)
-        res5 = rm.compare_runs(m1, m5)
-        self.assertTrue(any("island_probe" in e for e in res5["errors"]))
-        # Probe on exactly one side is a scope mismatch.
-        m6 = rm.assemble_run_manifest(
-            "r6", "U", "en-austin-1", "light-v1", (1320, 2868),
-            [self._rec(f) for f in rs.PILOT_FRAMES])
-        res6 = rm.compare_runs(m1, m6)
-        self.assertTrue(res6["errors"])
+        self.assertNotEqual(m5["island_probe"]["device_key"],
+                            m1["island_probe"]["device_key"])
 
 
 if __name__ == "__main__":

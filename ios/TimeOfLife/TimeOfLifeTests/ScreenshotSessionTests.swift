@@ -494,11 +494,6 @@ struct ScreenshotSessionTests {
         // App-clock durations ride the ack for the runner phase breakdown.
         #expect((state.appDurationsMS?["seed"] ?? -1) >= 0)
         #expect((state.appDurationsMS?["validation"] ?? -1) >= 0)
-        // Phase timings ride the ack for the runner phase breakdown
-        // (per-command app_durations_ms, archived separately from the
-        // runner's own monotonic phases — the clocks never mix).
-        #expect((state.appDurationsMS?["seed"] ?? -1) >= 0)
-        #expect((state.appDurationsMS?["validation"] ?? -1) >= 0)
         #expect((state.appDurationsMS?["mount_wait"] ?? -1) >= 0)
         #expect((state.appDurationsMS?["settle"] ?? -1) >= 0)
         // Seed evidence: committed counts + pinned totals in the ack.
@@ -542,7 +537,12 @@ struct ScreenshotSessionTests {
         }
         #expect(!code.isEmpty)
         #expect(!FileManager.default.fileExists(atPath: queue.path))
-        #expect(try CaptureStateWriter.read(from: docs).status != "ready" || controller.transcript.count == 1)
+        let terminalState = try CaptureStateWriter.read(from: docs)
+        // Exact contract (not a disjunction): a corrupt publication fails
+        // closed as invalid, and the refused seq never reaches the
+        // transcript.
+        #expect(terminalState.status == "invalid")
+        #expect(controller.transcript.count == 1)
         // End-of-session: a later valid command is refused without a file touch.
         try envelope(frame: "insights", seq: 1).write(to: queue)
         let refused = await controller.drainOne()
@@ -552,6 +552,36 @@ struct ScreenshotSessionTests {
         }
         #expect(refusedCode == code)
         #expect(FileManager.default.fileExists(atPath: queue.path))
+        #expect(controller.transcript.count == 1)
+    }
+
+    @Test("refused command acks bind the rejected identity, not the last accepted")
+    func rejectedAckBindsRejectedIdentity() async throws {
+        let docs = try temporaryDocuments()
+        let controller = fastController(documents: docs)
+        let initial = try ScreenshotSessionEnvelopeLoader.parse(data: envelope(frame: "track-running", seq: 0))
+        _ = await controller.start(initial: initial)
+        // Gap refusal: seq 2 while seq 1 is expected (bad-seq). The
+        // terminal ack must carry THIS command's seq/frame/hash so the
+        // runner — which only accepts the ack for the command it is
+        // waiting for — observes the failure instead of timing out on a
+        // stale last-accepted identity.
+        try publish(docs, frame: "history", seq: 2)
+        let drained = await controller.drainOne()
+        guard case let .failed(code) = drained else {
+            Issue.record("expected failure, got \(drained)")
+            return
+        }
+        #expect(code == "bad-seq")
+        let state = try CaptureStateWriter.read(from: docs)
+        #expect(state.status == "failure")
+        #expect(state.seq == 2)
+        #expect(state.frame == "history")
+        let rejected = try ScreenshotSessionEnvelopeLoader.parse(data: envelope(frame: "history", seq: 2))
+        #expect(state.requestSHA256 == rejected.requestSHA256)
+        #expect(state.sessionNonce == nonce)
+        // The accepted transcript is unchanged: the refused command was
+        // never validated.
         #expect(controller.transcript.count == 1)
     }
 
@@ -569,10 +599,13 @@ struct ScreenshotSessionTests {
         #expect(controller.transcript.count == 1)
         task.cancel()
         await task.value
-        // Published after cancellation: never drained.
+        // Published after cancellation: never drained. No sleep: the
+        // watcher task already returned, so nothing can claim afterwards —
+        // the proof is the untouched queue file, not an arbitrary delay.
         try publish(docs, frame: "insights", seq: 1)
-        try await Task.sleep(nanoseconds: 300_000_000)
         #expect(controller.transcript.count == 1)
+        let queue = try ScreenshotSessionPaths.queueURL(documents: docs, nonce: nonce)
+        #expect(FileManager.default.fileExists(atPath: queue.path))
     }
 
     // MARK: - 4.5 one real-time anchor per session

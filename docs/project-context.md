@@ -60,7 +60,7 @@ Do not claim these are done. The following remain open (leftovers live in `docs/
 - **Kafka** — deferred (S1 names it but auth MVP doesn't need an MQ). **Rate-limit store** is in-memory; swap for Redis before multi-instance deploy.
 - **SwiftUI snapshot / on-device keychain tests** — manual smoke checklist in `README.md`.
 
-### Screenshot capture (active change `optimize-app-screenshot-workflow` — session pipeline wired; pilot + expansion gates green; CI acceptance open)
+### Screenshot capture (active change `optimize-app-screenshot-workflow` — session pipeline wired; pilot + expansion gates green; single-pass decision; acceptance = downloadable output)
 
 The `Screenshot` configuration is Release-optimized, simulator-only
 (`SCREENSHOT_CAPTURE` condition; distinct bundle identities + capture-only
@@ -73,21 +73,28 @@ through `LocalStore`; capture never touches production accounts, Keychain, or
 network (fail-closed). The wired pipeline (`app-screenshots.yml`): early input
 validation → one verified arm64 build (tar + digest manifest, Xcode 27.1 /
 iOS 27.0) → one worker per selected device (`max-parallel: 5`, boot/install
-once, locales sequential r1/r2 with pinned + real-time sessions via
+once, locales sequential single automated pass with pinned + real-time sessions via
 `run-session` / `run_device_worker.py`) → per-locale artifacts → panels + ZIP.
-Frame commands are fully identity/hash-bound (v2 envelope, golden fixtures,
+Owner decision 2026-11-04: ONE automated pass per device-locale (no r2, no
+automatic pass comparison); manual reruns when needed with human visual
+inspection (existing session/run identity machinery, new run identity per
+rerun; no new pass selector, no legacy branches). Frame commands are fully identity/hash-bound (v2 envelope, golden fixtures,
 transcript in every ack, combined cleanup receipts); non-English/iPad runs
 require paired `--approval` + `--retained-dir` flags validated against the
 retained `approval-pilot27-r2.json` (no bypass, no fabrication); CI legs run
 under `LIFIO_CAPTURE_CI=1` (`ci_approval_bypass:true` — technical gate, never
 approval). The English 7-frame iOS 27 pilot stays owner-approved (archived
 `pilot27-r2`); the session re-capture + 6-pair expansion are audited with
-frozen hashes; LA frames stay pending until genuine pixels and owner approvals
+frozen hashes (historical two-pass counts valid, superseded as acceptance);
+LA frames stay pending until genuine pixels and owner approvals
 (archived 5.4/6.6/9.4) are untouched — captured never implies approved. Lineup:
-18PM 1320×2868 + iPhone 17 1206×2622 + M4 iPad 2064×2752. No sub-20-minute
-claim until cold + warm full-CI runs measure it (8.1/8.2/8.3/8.6 remain open;
-shared-artifact local install proof, legacy removal, and local verification pass;
-oversubscription is proven by a unit queue model, not real CI contention). Storyboard:
+18PM 1320×2868 + iPhone 17 1206×2622 + M4 iPad 2064×2752. Twenty minutes is
+aspirational, not a hard gate (owner accepts ~22min vs 70+); acceptance
+requires successful downloadable output with truthful status (8.3 + §9 open;
+8.1/8.2 retired — cancelled, not run; old runs failed, no fabricated
+acceptance; shared-artifact local install proof, legacy removal, and local
+verification pass; oversubscription is proven by a unit queue model, not real
+CI contention). Storyboard:
 `Design/SCREENSHOTS.md`; operator runbook: `docs/screenshot-capture.md`. Do
 not present capture tooling as a production feature.
 

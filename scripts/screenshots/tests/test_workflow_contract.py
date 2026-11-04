@@ -89,6 +89,26 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertIn("validate_slices", body)
         self.assertIn("parse_lipo_archs", body)
 
+    def test_extension_hash_bound_to_named_appex(self):
+        # bug/medium (review 3355): extension_sha256 was taken from the
+        # first .appex of a sorted glob while verify_app_structure
+        # checks the exact expected appex and ignores other PlugIns
+        # members — an extra .appex sorting first made the manifest
+        # attest the wrong extension while the structure check passed
+        # (reproduced with an AAAHelper.appex fixture). Both the build
+        # packaging and the worker re-hash bind to SCREENSHOT_APPEX_NAME.
+        body = text()
+        self.assertNotIn('*.appex', body)
+        self.assertNotIn("appexes[0]", body)
+        build_seg = body.split("Inspect slices and package")[1].split(
+            "Upload build artifact")[0]
+        self.assertIn("SCREENSHOT_APPEX_NAME", build_seg)
+        worker_seg = body.split("\n  screenshots:\n")[1].split(
+            "\n  panels:\n")[0]
+        verify_seg = worker_seg.split("Verify build artifact")[1].split(
+            "Resolve device catalog")[0]
+        self.assertIn("SCREENSHOT_APPEX_NAME", verify_seg)
+
     def test_dependency_cache_correct(self):
         # 6.3: dependency cache key covers lockfile + toolchain/SDK/arch/
         # config; a cold miss rebuilds (never skips, never substitutes a
@@ -132,10 +152,10 @@ class WorkflowContractTests(unittest.TestCase):
         )
 
     def test_worker_uses_run_device_worker(self):
-        # 6.5: one owned simulator/install per worker; locales run
-        # sequentially with r1/r2 and both session domains inside
-        # run_device_worker.py (actual CLI, lease-gated, auditable CI
-        # flag). Exactly one create/boot/install per worker.
+        # 6.5/9.1: one owned simulator/install per worker; locales run
+        # sequentially with a SINGLE automated pass and both session
+        # domains inside run_device_worker.py (actual CLI, lease-gated,
+        # auditable CI flag). Exactly one create/boot/install per worker.
         body = text()
         seg = body.split("\n  screenshots:\n")[1].split("\n  panels:\n")[0]
         self.assertIn("run_device_worker.py", seg)
@@ -146,6 +166,16 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertEqual(seg.count("simctl create"), 1)
         self.assertEqual(seg.count("simctl install"), 1)
         self.assertIn('simctl boot "$UDID"', seg)
+
+    def test_single_pass_no_automatic_comparison(self):
+        # 9.1/9.2: one automated pass per locale — no r1/r2 sequencing
+        # language in the worker steps and no automatic comparison
+        # invocation; human inspection across manual reruns replaces it.
+        body = text()
+        seg = body.split("\n  screenshots:\n")[1].split("\n  panels:\n")[0]
+        self.assertNotIn("r1/r2", seg)
+        self.assertNotIn("finalize-two-runs", seg)
+        self.assertNotIn("both passes", seg)
 
     def test_no_per_frame_cli(self):
         # Session architecture replaced per-frame verbs: the worker job
@@ -159,7 +189,7 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertNotIn("record-pending-frame", seg)
 
     def test_five_locale_uploads_always(self):
-        # 6.6: independent per-locale artifacts (both passes +
+        # 6.6/9.3: independent per-locale artifacts (single pass +
         # diagnostics) upload even on worker failure; failed/unattempted
         # pairs stay listed instead of claimed complete.
         body = text()
@@ -223,8 +253,20 @@ class WorkflowContractTests(unittest.TestCase):
         # records blocked cells.
         body = text()
         seg = body.split("\n  panels:\n")[1].split("runs-on:")[0]
-        self.assertIn('if: "!cancelled()"', seg)
+        self.assertIn('if: "!cancelled()', seg)
         self.assertIn("needs: [validate, screenshots]", body)
+
+    def test_panels_skipped_when_upstream_skipped(self):
+        # bug/low (review 3464): job-level `if: "!cancelled()"` alone
+        # runs panels even when validate/build failed and screenshots
+        # was skipped — both download-artifact steps then fail opaquely
+        # on zero artifacts. The job runs on red workers (result
+        # failure, proven by 41817895686 step-level resilience) but
+        # skips cleanly when there is nothing to package.
+        body = text()
+        seg = body.split("\n  panels:\n")[1].split("runs-on:")[0]
+        self.assertIn('if: "!cancelled()', seg)
+        self.assertIn("needs.screenshots.result != 'skipped'", seg)
 
     def test_binary_guard_inspects_tracked_content(self):
         # bug/medium: git status on a fresh checkout can never see

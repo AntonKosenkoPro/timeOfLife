@@ -11,6 +11,8 @@ import http.server
 import io
 import json
 import os
+import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -78,10 +80,6 @@ def attested_probe(device: str, run_id: str,
     }
 
 
-def _req_sha(run_id: str, frame: str) -> str:
-    return hashlib.sha256(f"req-{run_id}-{frame}".encode()).hexdigest()
-
-
 def _domain_of(frame: str) -> str:
     return "pinned" if frame in APP_FRAMES else "realtime"
 
@@ -146,7 +144,8 @@ def write_manifest(path: Path, frames_dir: Path, run_id: str,
                    canvas: tuple[int, int], frames: tuple[str, ...],
                    ci_approval_bypass: bool | None = None,
                    device: str = "iphone69",
-                   la_capture: str = "genuine") -> None:
+                   la_capture: str = "genuine",
+                   language: str = "en") -> None:
     """Session-valid manifest + frame records + receipts (+ iPad probe).
 
     la_capture: "genuine" (external-lock-screen with window/observation
@@ -154,21 +153,38 @@ def write_manifest(path: Path, frames_dir: Path, run_id: str,
     PNG files must already exist in frames_dir; their hashes are bound.
     Frame record JSONs and session receipts are written alongside so the
     shared session_evidence validator passes strictly.
+    Provenance: manifest carries top-level `locale` (B-field, coordinated
+    via main; assumed name `locale`) and run_dir/requests holds one
+    session envelope per frame whose inner request payload carries the
+    same locale with hash binding (request_sha256 == sha256(request_json)
+    == frame record request_sha256). Matrix selection enforces all locale
+    claims unanimous == cell language; explicit single-render paths
+    bypass selection (retained fixtures preserved).
     """
     run_dir = path.parent
     sessions_dir = run_dir / "sessions"
     sessions_dir.mkdir(parents=True, exist_ok=True)
+    req_dir = run_dir / "requests"
+    req_dir.mkdir(parents=True, exist_ok=True)
     # Per-domain seq counters (pinned 0..n, realtime 0..m).
     seq_counters = {"pinned": 0, "realtime": 0}
     recs = []
     transcripts: dict[str, list[dict]] = {}
+    envelopes: list[tuple[str, str, int, str, str, str]] = []
     for frame in frames:
         png = frames_dir / f"{frame}.png"
         sha_png = hashlib.sha256(png.read_bytes()).hexdigest()
         domain = _domain_of(frame)
         seq = seq_counters[domain]
         seq_counters[domain] += 1
-        sha_req = _req_sha(run_id, frame)
+        nonce = _nonce_of(frame)
+        mode = ("app-clock-pinned" if domain == "pinned"
+                else "live-activity-realtime")
+        payload = {"frame": frame, "locale": language, "run_id": run_id}
+        request_json = (json.dumps(payload, sort_keys=True,
+                                   separators=(",", ":"),
+                                   ensure_ascii=False) + "\n")
+        sha_req = hashlib.sha256(request_json.encode("utf-8")).hexdigest()
         rec: dict = {
             "schema_version": 1, "frame": frame,
             "mode": ("app-clock-pinned" if domain == "pinned"
@@ -208,6 +224,7 @@ def write_manifest(path: Path, frames_dir: Path, run_id: str,
         transcripts.setdefault(nonce, []).append(
             {"seq": seq, "frame": frame, "request_sha256": sha_req,
              "request_semantic_sha256": "b" * 64})
+        envelopes.append((frame, nonce, seq, mode, sha_req, request_json))
     for nonce, transcript in transcripts.items():
         domain = ("pinned" if nonce == NONCE_PINNED else "realtime")
         receipt = {
@@ -226,6 +243,17 @@ def write_manifest(path: Path, frames_dir: Path, run_id: str,
         }
         (sessions_dir / f"{nonce}.receipt.json").write_text(
             json.dumps(receipt, sort_keys=True), encoding="utf-8")
+    for frame, nonce, seq, mode, sha_req, request_json in envelopes:
+        domain = _domain_of(frame)
+        env = {
+            "schema_version": 1, "run_id": run_id,
+            "session_nonce": nonce, "session_domain": domain,
+            "seq": seq, "frame": frame, "mode": mode,
+            "request_sha256": sha_req, "request_json": request_json,
+        }
+        (req_dir /
+         f"session-{nonce}-{seq}-{frame}.envelope.json").write_text(
+            json.dumps(env, sort_keys=True), encoding="utf-8")
     if device == "ipad13":
         probe = attested_probe(device, run_id, canvas)
         (sessions_dir / "island-probe.json").write_text(
@@ -234,6 +262,7 @@ def write_manifest(path: Path, frames_dir: Path, run_id: str,
         "schema_version": 1, "run_id": run_id, "status": "complete",
         "deck_version": "en-austin-1", "treatment": "light-v1",
         "geometry": {"width": canvas[0], "height": canvas[1]},
+        "locale": language,
         "frames": recs}
     if device == "ipad13":
         # Producer-faithful N/A metadata (run_manifest.assemble shape):
@@ -248,7 +277,14 @@ def write_manifest(path: Path, frames_dir: Path, run_id: str,
 def make_run(shots: Path, device: str, language: str, run_id: str,
              canvas: tuple[int, int], colors: dict,
              ci_approval_bypass: bool | None = None,
-             la_capture: str = "genuine") -> None:
+             la_capture: str = "genuine",
+             provenance_locale: str | None = None) -> None:
+    """Create a synthetic run; provenance locale defaults to the path language.
+
+    Pass provenance_locale != language to forge a cross-locale run (path
+    claims one language, request archives + manifest claim another) for
+    the real-renderer negative case.
+    """
     run_dir = shots / device / language / "runs" / run_id
     frames_dir = run_dir / "frames"
     frames_dir.mkdir(parents=True, exist_ok=True)
@@ -260,7 +296,8 @@ def make_run(shots: Path, device: str, language: str, run_id: str,
     write_manifest(run_dir / "run-manifest.json", frames_dir, run_id,
                    canvas, tuple(frames),
                    ci_approval_bypass=ci_approval_bypass,
-                   device=device, la_capture=la_capture)
+                   device=device, la_capture=la_capture,
+                   language=(provenance_locale or language))
 
 
 def make_bezel_69_bytes() -> bytes:
@@ -466,11 +503,16 @@ class RenderMatrixTests(unittest.TestCase):
             self.assertEqual(recipe["canvas"], {"width": 1206,
                                                 "height": 2622})
 
-    def test_matrix_63_r2_fallback(self):
+    def test_matrix_single_fresh_run_id_renders(self):
+        # Single-pass (owner decision 2026-11-04): the run identity is a
+        # fresh invocation ID, no longer guaranteed to be
+        # <device>-<language>-r1. Exactly one selected manifest renders
+        # regardless of its name; device binding still enforced.
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             shots = root / "shots"
-            make_run(shots, "iphone63", "en", "iphone63-en-r2",
+            fresh = "single-20261104-abc123"
+            make_run(shots, "iphone63", "en", fresh,
                      (1206, 2622), FRAME_COLORS_69)
             bezels = root / "bezels"
             write_bezels(bezels)
@@ -483,8 +525,351 @@ class RenderMatrixTests(unittest.TestCase):
             self.assertEqual(proc.returncode, 0, proc.stderr)
             manifest = json.loads(
                 (out / "matrix-manifest.json").read_text(encoding="utf-8"))
-            self.assertEqual(manifest["cells"][0]["run_id"],
-                             "iphone63-en-r2")
+            self.assertEqual(manifest["status"], "complete")
+            self.assertEqual(manifest["cells"][0]["run_id"], fresh)
+            self.assertEqual(
+                len(list((out / "iphone63" / "en").glob(
+                    "panel-*-en-1206x2622.png"))), 5)
+
+    def test_matrix_ambiguous_two_runs_blocked(self):
+        # Single-pass: two manifests (legacy r1+r2, or two fresh IDs) are
+        # ambiguous — the cell blocks, never picks/merges. No r2 fallback.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            shots = root / "shots"
+            make_run(shots, "iphone63", "en", "iphone63-en-r1",
+                     (1206, 2622), FRAME_COLORS_69)
+            make_run(shots, "iphone63", "en", "iphone63-en-r2",
+                     (1206, 2622), FRAME_COLORS_69)
+            bezels = root / "bezels"
+            write_bezels(bezels)
+            out = root / "out"
+            proc = run_panels(
+                "--render-matrix", "--shots-dir", str(shots),
+                "--bezels-dir", str(bezels), "--out", str(out),
+                "--devices", '["iphone63"]',
+                "--languages", '["en"]')
+            self.assertEqual(proc.returncode, 2)
+            self.assertIn("ambiguous", proc.stderr.lower())
+            manifest = json.loads(
+                (out / "matrix-manifest.json").read_text(encoding="utf-8"))
+            self.assertEqual(manifest["cells"][0]["status"], "blocked")
+            self.assertIn("ambiguous",
+                          manifest["cells"][0]["reason"].lower())
+            self.assertEqual(
+                list((out / "iphone63" / "en").glob("panel-*.png"))
+                if (out / "iphone63" / "en").exists() else [], [])
+
+    def test_matrix_status_pointer_selects_single(self):
+        # Canonical status pointer (device-worker per-pass
+        # <device>-<language>-*.status.json) selects among multiple
+        # manifests; without it the same layout is ambiguous-blocked
+        # (proven above). Selection is explicit, never a fallback pick.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            shots = root / "shots"
+            make_run(shots, "iphone69", "en", "iphone69-en-r1",
+                     (1320, 2868), FRAME_COLORS_69)
+            fresh = "single-20261104-xyz789"
+            make_run(shots, "iphone69", "en", fresh,
+                     (1320, 2868), FRAME_COLORS_69)
+            cell = shots / "iphone69" / "en"
+            (cell / "iphone69-en-r1.status.json").write_text(
+                json.dumps({"schema_version": 1, "device": "iphone69",
+                            "locale": "en", "pass": "r1", "status": "ok",
+                            "reason": "", "run_id": fresh}),
+                encoding="utf-8")
+            bezels = root / "bezels"
+            write_bezels(bezels)
+            out = root / "out"
+            proc = run_panels(
+                "--render-matrix", "--shots-dir", str(shots),
+                "--bezels-dir", str(bezels), "--out", str(out),
+                "--devices", '["iphone69"]',
+                "--languages", '["en"]')
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            manifest = json.loads(
+                (out / "matrix-manifest.json").read_text(encoding="utf-8"))
+            self.assertEqual(manifest["cells"][0]["status"], "rendered")
+            self.assertEqual(manifest["cells"][0]["run_id"], fresh)
+
+    def test_matrix_malformed_pointer_blocks(self):
+        # Fail-closed pointers: a present but malformed status pointer must
+        # block even when exactly one manifest exists (no fallback render).
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            shots = root / "shots"
+            make_run(shots, "iphone69", "en", "only-run",
+                     (1320, 2868), FRAME_COLORS_69)
+            (shots / "iphone69" / "en" /
+             "iphone69-en-r1.status.json").write_text(
+                "{not json", encoding="utf-8")
+            bezels = root / "bezels"
+            write_bezels(bezels)
+            out = root / "out"
+            proc = run_panels(
+                "--render-matrix", "--shots-dir", str(shots),
+                "--bezels-dir", str(bezels), "--out", str(out),
+                "--devices", '["iphone69"]',
+                "--languages", '["en"]')
+            self.assertEqual(proc.returncode, 2)
+            manifest = json.loads(
+                (out / "matrix-manifest.json").read_text(encoding="utf-8"))
+            self.assertEqual(manifest["cells"][0]["status"], "blocked")
+            self.assertIn("pointer",
+                          manifest["cells"][0]["reason"].lower())
+
+    def test_matrix_symlink_pointer_blocks(self):
+        # Symlinked pointers escape the owned cell; refuse, never follow.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            shots = root / "shots"
+            make_run(shots, "iphone69", "en", "only-run",
+                     (1320, 2868), FRAME_COLORS_69)
+            cell = shots / "iphone69" / "en"
+            (cell / "real-status.json").write_text(
+                json.dumps({"schema_version": 1, "device": "iphone69",
+                            "locale": "en", "pass": "r1", "status": "ok",
+                            "reason": "", "run_id": "only-run"}),
+                encoding="utf-8")
+            (cell / "iphone69-en-r1.status.json").symlink_to(
+                cell / "real-status.json")
+            bezels = root / "bezels"
+            write_bezels(bezels)
+            out = root / "out"
+            proc = run_panels(
+                "--render-matrix", "--shots-dir", str(shots),
+                "--bezels-dir", str(bezels), "--out", str(out),
+                "--devices", '["iphone69"]',
+                "--languages", '["en"]')
+            self.assertEqual(proc.returncode, 2)
+            manifest = json.loads(
+                (out / "matrix-manifest.json").read_text(encoding="utf-8"))
+            self.assertEqual(manifest["cells"][0]["status"], "blocked")
+            self.assertIn("pointer",
+                          manifest["cells"][0]["reason"].lower())
+
+    def test_matrix_mismatched_pointer_blocks(self):
+        # A pointer declaring another cell's identity must block, even with
+        # a unique manifest present (no silent fallback render).
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            shots = root / "shots"
+            make_run(shots, "iphone69", "en", "only-run",
+                     (1320, 2868), FRAME_COLORS_69)
+            (shots / "iphone69" / "en" /
+             "iphone69-en-r1.status.json").write_text(
+                json.dumps({"schema_version": 1, "device": "iphone63",
+                            "locale": "en", "pass": "r1", "status": "ok",
+                            "reason": "", "run_id": "only-run"}),
+                encoding="utf-8")
+            bezels = root / "bezels"
+            write_bezels(bezels)
+            out = root / "out"
+            proc = run_panels(
+                "--render-matrix", "--shots-dir", str(shots),
+                "--bezels-dir", str(bezels), "--out", str(out),
+                "--devices", '["iphone69"]',
+                "--languages", '["en"]')
+            self.assertEqual(proc.returncode, 2)
+            manifest = json.loads(
+                (out / "matrix-manifest.json").read_text(encoding="utf-8"))
+            self.assertEqual(manifest["cells"][0]["status"], "blocked")
+            self.assertIn("pointer",
+                          manifest["cells"][0]["reason"].lower())
+
+    def test_matrix_bad_runid_pointer_blocks(self):
+        # A pointer carrying an unsafe run_id must block (no traversal,
+        # no fallback to the lone manifest).
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            shots = root / "shots"
+            make_run(shots, "iphone69", "en", "only-run",
+                     (1320, 2868), FRAME_COLORS_69)
+            (shots / "iphone69" / "en" /
+             "iphone69-en-r1.status.json").write_text(
+                json.dumps({"schema_version": 1, "device": "iphone69",
+                            "locale": "en", "pass": "r1", "status": "ok",
+                            "reason": "", "run_id": "../escape"}),
+                encoding="utf-8")
+            bezels = root / "bezels"
+            write_bezels(bezels)
+            out = root / "out"
+            proc = run_panels(
+                "--render-matrix", "--shots-dir", str(shots),
+                "--bezels-dir", str(bezels), "--out", str(out),
+                "--devices", '["iphone69"]',
+                "--languages", '["en"]')
+            self.assertEqual(proc.returncode, 2)
+            manifest = json.loads(
+                (out / "matrix-manifest.json").read_text(encoding="utf-8"))
+            self.assertEqual(manifest["cells"][0]["status"], "blocked")
+            self.assertIn("pointer",
+                          manifest["cells"][0]["reason"].lower())
+
+    def test_matrix_ambiguous_pointers_block(self):
+        # Two valid pointers selecting different runs are ambiguous: block,
+        # never pick one.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            shots = root / "shots"
+            make_run(shots, "iphone69", "en", "run-a",
+                     (1320, 2868), FRAME_COLORS_69)
+            make_run(shots, "iphone69", "en", "run-b",
+                     (1320, 2868), FRAME_COLORS_69)
+            cell = shots / "iphone69" / "en"
+            (cell / "iphone69-en-r1.status.json").write_text(
+                json.dumps({"schema_version": 1, "device": "iphone69",
+                            "locale": "en", "pass": "r1", "status": "ok",
+                            "reason": "", "run_id": "run-a"}),
+                encoding="utf-8")
+            (cell / "iphone69-en-r2.status.json").write_text(
+                json.dumps({"schema_version": 1, "device": "iphone69",
+                            "locale": "en", "pass": "r2", "status": "ok",
+                            "reason": "", "run_id": "run-b"}),
+                encoding="utf-8")
+            bezels = root / "bezels"
+            write_bezels(bezels)
+            out = root / "out"
+            proc = run_panels(
+                "--render-matrix", "--shots-dir", str(shots),
+                "--bezels-dir", str(bezels), "--out", str(out),
+                "--devices", '["iphone69"]',
+                "--languages", '["en"]')
+            self.assertEqual(proc.returncode, 2)
+            manifest = json.loads(
+                (out / "matrix-manifest.json").read_text(encoding="utf-8"))
+            self.assertEqual(manifest["cells"][0]["status"], "blocked")
+            self.assertIn("ambiguous",
+                          manifest["cells"][0]["reason"].lower())
+
+    def test_matrix_cross_locale_blocked(self):
+        # Real-renderer locale binding: an en cell whose selected run
+        # carries ru locale provenance (manifest + hash-bound request
+        # archives) must block with a locale reason, never render ru art
+        # as en. Provenance is hash-bound: forged locale without matching
+        # frame hashes also blocks.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            shots = root / "shots"
+            make_run(shots, "iphone69", "en", "only-run",
+                     (1320, 2868), FRAME_COLORS_69,
+                     provenance_locale="ru")
+            bezels = root / "bezels"
+            write_bezels(bezels)
+            out = root / "out"
+            proc = run_panels(
+                "--render-matrix", "--shots-dir", str(shots),
+                "--bezels-dir", str(bezels), "--out", str(out),
+                "--devices", '["iphone69"]',
+                "--languages", '["en"]')
+            self.assertEqual(proc.returncode, 2)
+            manifest = json.loads(
+                (out / "matrix-manifest.json").read_text(encoding="utf-8"))
+            self.assertEqual(manifest["cells"][0]["status"], "blocked")
+            self.assertIn("locale",
+                          manifest["cells"][0]["reason"].lower())
+            self.assertEqual(
+                list((out / "iphone69" / "en").glob("panel-*.png"))
+                if (out / "iphone69" / "en").exists() else [], [])
+
+    def test_matrix_missing_locale_provenance_blocked(self):
+        # Fail-closed provenance: a run with no manifest locale and no
+        # request envelopes must block (locale never inferred from the
+        # directory or captions).
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            shots = root / "shots"
+            make_run(shots, "iphone69", "en", "only-run",
+                     (1320, 2868), FRAME_COLORS_69)
+            run_dir = shots / "iphone69" / "en" / "runs" / "only-run"
+            manifest_path = run_dir / "run-manifest.json"
+            obj = json.loads(manifest_path.read_text(encoding="utf-8"))
+            obj.pop("locale", None)
+            manifest_path.write_text(json.dumps(obj), encoding="utf-8")
+            shutil.rmtree(run_dir / "requests")
+            bezels = root / "bezels"
+            write_bezels(bezels)
+            out = root / "out"
+            proc = run_panels(
+                "--render-matrix", "--shots-dir", str(shots),
+                "--bezels-dir", str(bezels), "--out", str(out),
+                "--devices", '["iphone69"]',
+                "--languages", '["en"]')
+            self.assertEqual(proc.returncode, 2)
+            manifest = json.loads(
+                (out / "matrix-manifest.json").read_text(encoding="utf-8"))
+            self.assertEqual(manifest["cells"][0]["status"], "blocked")
+            self.assertIn("locale",
+                          manifest["cells"][0]["reason"].lower())
+
+    def test_matrix_device_mismatch_blocked(self):
+        # Declared device binding: a manifest whose frames declare a
+        # different device_key than the cell refuses cross-device use.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            shots = root / "shots"
+            make_run(shots, "iphone69", "en", "only-run",
+                     (1320, 2868), FRAME_COLORS_69)
+            run_dir = shots / "iphone69" / "en" / "runs" / "only-run"
+            manifest_path = run_dir / "run-manifest.json"
+            obj = json.loads(manifest_path.read_text(encoding="utf-8"))
+            for rec in obj.get("frames", []):
+                if isinstance(rec, dict):
+                    rec["device_key"] = "iphone63"
+            manifest_path.write_text(json.dumps(obj), encoding="utf-8")
+            for rec_path in (run_dir / "frames").glob("*.json"):
+                try:
+                    rec_obj = json.loads(
+                        rec_path.read_text(encoding="utf-8"))
+                except (OSError, ValueError):
+                    continue
+                if isinstance(rec_obj, dict) and "device_key" in rec_obj:
+                    rec_obj["device_key"] = "iphone63"
+                    rec_path.write_text(json.dumps(rec_obj, sort_keys=True),
+                                        encoding="utf-8")
+            bezels = root / "bezels"
+            write_bezels(bezels)
+            out = root / "out"
+            proc = run_panels(
+                "--render-matrix", "--shots-dir", str(shots),
+                "--bezels-dir", str(bezels), "--out", str(out),
+                "--devices", '["iphone69"]',
+                "--languages", '["en"]')
+            self.assertEqual(proc.returncode, 2)
+            manifest = json.loads(
+                (out / "matrix-manifest.json").read_text(encoding="utf-8"))
+            self.assertEqual(manifest["cells"][0]["status"], "blocked")
+            self.assertIn("device",
+                          manifest["cells"][0]["reason"].lower())
+
+    def test_matrix_run_id_mismatch_blocked(self):
+        # Declared run identity: manifest run_id must equal its directory
+        # name, else the selection is refused (no silent remap).
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            shots = root / "shots"
+            make_run(shots, "iphone69", "en", "only-run",
+                     (1320, 2868), FRAME_COLORS_69)
+            run_dir = shots / "iphone69" / "en" / "runs" / "only-run"
+            manifest_path = run_dir / "run-manifest.json"
+            obj = json.loads(manifest_path.read_text(encoding="utf-8"))
+            obj["run_id"] = "different-id"
+            manifest_path.write_text(json.dumps(obj), encoding="utf-8")
+            bezels = root / "bezels"
+            write_bezels(bezels)
+            out = root / "out"
+            proc = run_panels(
+                "--render-matrix", "--shots-dir", str(shots),
+                "--bezels-dir", str(bezels), "--out", str(out),
+                "--devices", '["iphone69"]',
+                "--languages", '["en"]')
+            self.assertEqual(proc.returncode, 2)
+            manifest = json.loads(
+                (out / "matrix-manifest.json").read_text(encoding="utf-8"))
+            self.assertEqual(manifest["cells"][0]["status"], "blocked")
+            self.assertIn("run_id",
+                          manifest["cells"][0]["reason"].lower())
 
     def test_matrix_63_missing_bezel_blocked(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -521,7 +906,7 @@ class RenderMatrixTests(unittest.TestCase):
                 "--bezels-dir", str(bezels), "--out", str(out),
                 "--devices", '["iphone69"]', "--languages", '["en"]')
             self.assertEqual(proc.returncode, 2)
-            self.assertIn("no r1/r2 run", proc.stderr)
+            self.assertIn("no run", proc.stderr)
 
     def test_matrix_missing_bezels_dir_invalid(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -1104,6 +1489,159 @@ class BundleReadmeTests(unittest.TestCase):
             self.assertIn("COMPLETE", text)
             self.assertIn("REVIEW SET ONLY", text)
             self.assertIn("approves nothing", text)
+
+    def test_readme_single_fresh_run_id_harvests(self):
+        # Single-pass README: a fresh invocation run ID harvests (no
+        # hardcoded <device>-<language>-r1 lookup, no r2 fallback).
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            shots = root / "shots"
+            fresh = "single-20261104-abc123"
+            make_run(shots, "iphone69", "en", fresh,
+                     (1320, 2868), FRAME_COLORS_69,
+                     ci_approval_bypass=False)
+            panels_dir = root / "panels"
+            panels_dir.mkdir()
+            out = root / "readme.md"
+            proc = run_readme(
+                "--panels-dir", str(panels_dir),
+                "--shots-dir", str(shots),
+                "--ios-runtime", "iOS 27.0",
+                "--devices", '["iphone69"]', "--languages", '["en"]',
+                "--out", str(out),
+                "--commit", "x", "--dirty", "false")
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            text = out.read_text(encoding="utf-8")
+            self.assertIn(fresh, text)
+            self.assertIn("en-austin-1", text)
+            self.assertNotIn("ambiguous", text.lower())
+
+    def test_readme_ambiguous_two_runs_marked(self):
+        # Single-pass README: multiple manifests never pick/merge — the
+        # deck row reads ambiguous (truthful handoff, never invented).
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            shots = root / "shots"
+            make_run(shots, "iphone69", "en", "iphone69-en-r1",
+                     (1320, 2868), FRAME_COLORS_69)
+            make_run(shots, "iphone69", "en", "iphone69-en-r2",
+                     (1320, 2868), FRAME_COLORS_69)
+            panels_dir = root / "panels"
+            panels_dir.mkdir()
+            out = root / "readme.md"
+            proc = run_readme(
+                "--panels-dir", str(panels_dir),
+                "--shots-dir", str(shots),
+                "--ios-runtime", "iOS 27.0",
+                "--devices", '["iphone69"]', "--languages", '["en"]',
+                "--out", str(out),
+                "--commit", "x", "--dirty", "false")
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            text = out.read_text(encoding="utf-8")
+            self.assertIn("ambiguous", text.lower())
+
+    def test_readme_matches_rendered_matrix_run_id(self):
+        # Shared selection: with two manifests + a pointer selecting the
+        # fresh run, the rendered matrix cell and the README deck row must
+        # report the SAME run_id (no divergence).
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            shots = root / "shots"
+            make_run(shots, "iphone69", "en", "iphone69-en-r1",
+                     (1320, 2868), FRAME_COLORS_69)
+            fresh = "single-20261104-xyz789"
+            make_run(shots, "iphone69", "en", fresh,
+                     (1320, 2868), FRAME_COLORS_69)
+            (shots / "iphone69" / "en" /
+             "iphone69-en-r1.status.json").write_text(
+                json.dumps({"schema_version": 1, "device": "iphone69",
+                            "locale": "en", "pass": "r1", "status": "ok",
+                            "reason": "", "run_id": fresh}),
+                encoding="utf-8")
+            bezels = root / "bezels"
+            write_bezels(bezels)
+            out = root / "out"
+            mproc = run_panels(
+                "--render-matrix", "--shots-dir", str(shots),
+                "--bezels-dir", str(bezels), "--out", str(out),
+                "--devices", '["iphone69"]', "--languages", '["en"]')
+            self.assertEqual(mproc.returncode, 0, mproc.stderr)
+            matrix = json.loads(
+                (out / "matrix-manifest.json").read_text(encoding="utf-8"))
+            self.assertEqual(matrix["cells"][0]["status"], "rendered")
+            panels_run = matrix["cells"][0]["run_id"]
+            self.assertEqual(panels_run, fresh)
+            panels_dir = root / "panels"
+            panels_dir.mkdir()
+            readme_out = root / "readme.md"
+            rproc = run_readme(
+                "--panels-dir", str(panels_dir),
+                "--shots-dir", str(shots),
+                "--ios-runtime", "iOS 27.0",
+                "--devices", '["iphone69"]', "--languages", '["en"]',
+                "--out", str(readme_out),
+                "--commit", "x", "--dirty", "false")
+            self.assertEqual(rproc.returncode, 0, rproc.stderr)
+            text = readme_out.read_text(encoding="utf-8")
+            m = re.search(r"\| iphone69 \| en \| ([^|]+) \|", text)
+            self.assertIsNotNone(m, text)
+            self.assertEqual(m.group(1).strip(), panels_run)
+
+    def test_readme_pointer_missing_manifest_marked(self):
+        # A pointer selecting an absent manifest blocks the README deck
+        # too (never harvests the lone unselected manifest).
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            shots = root / "shots"
+            make_run(shots, "iphone69", "en", "only-run",
+                     (1320, 2868), FRAME_COLORS_69)
+            (shots / "iphone69" / "en" /
+             "iphone69-en-r1.status.json").write_text(
+                json.dumps({"schema_version": 1, "device": "iphone69",
+                            "locale": "en", "pass": "r1", "status": "ok",
+                            "reason": "", "run_id": "ghost-run"}),
+                encoding="utf-8")
+            panels_dir = root / "panels"
+            panels_dir.mkdir()
+            out = root / "readme.md"
+            proc = run_readme(
+                "--panels-dir", str(panels_dir),
+                "--shots-dir", str(shots),
+                "--ios-runtime", "iOS 27.0",
+                "--devices", '["iphone69"]', "--languages", '["en"]',
+                "--out", str(out),
+                "--commit", "x", "--dirty", "false")
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            text = out.read_text(encoding="utf-8")
+            self.assertNotIn("| iphone69 | en | only-run |", text)
+            self.assertTrue(
+                "unreadable" in text.lower() or "ambiguous" in text.lower()
+                or "unverified" in text.lower(), text)
+
+    def test_readme_malformed_pointer_marked(self):
+        # A malformed pointer blocks README harvesting (fail-closed, never
+        # falls back to the lone manifest).
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            shots = root / "shots"
+            make_run(shots, "iphone69", "en", "only-run",
+                     (1320, 2868), FRAME_COLORS_69)
+            (shots / "iphone69" / "en" /
+             "iphone69-en-r1.status.json").write_text(
+                "{not json", encoding="utf-8")
+            panels_dir = root / "panels"
+            panels_dir.mkdir()
+            out = root / "readme.md"
+            proc = run_readme(
+                "--panels-dir", str(panels_dir),
+                "--shots-dir", str(shots),
+                "--ios-runtime", "iOS 27.0",
+                "--devices", '["iphone69"]', "--languages", '["en"]',
+                "--out", str(out),
+                "--commit", "x", "--dirty", "false")
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            text = out.read_text(encoding="utf-8")
+            self.assertNotIn("| iphone69 | en | only-run |", text)
 
 
 @unittest.skipUnless(HAS_PILLOW, "Pillow required")

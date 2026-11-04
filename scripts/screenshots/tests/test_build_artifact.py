@@ -685,6 +685,61 @@ class TarTests(unittest.TestCase):
             errs = ba.verify_extracted_modes(tar_path, dest)
             self.assertTrue(any("stowaway" in e for e in errs))
 
+    def test_special_files_fail_closed(self):
+        # FIFO/socket/device nodes are never hashed silently: a tampered
+        # bundle carrying one must raise, not verify clean.
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_p = Path(tmp)
+            app = make_fake_app(tmp_p)
+            fifo = app / "myfifo"
+            try:
+                os.mkfifo(fifo)
+            except (OSError, NotImplementedError) as exc:
+                self.skipTest(f"mkfifo unavailable: {exc}")
+            with self.assertRaises(ba.ArtifactError):
+                ba.resource_hashes(app)
+            fifo.unlink()
+            self.assertEqual(
+                ba.verify_hashes(
+                    app, *self._hashes_args(app)), [])
+
+    def _hashes_args(self, app: Path) -> tuple:
+        hashes = ba.resource_hashes(app)
+        return (hashes["files"], hashes["symlinks"])
+
+    def test_implicit_ancestors_not_reported_as_extra(self):
+        # A valid archive may store a file without its parent directory
+        # entries (safe_extract creates ancestors); those implicit dirs
+        # must not read as "unexpected extra", while truly foreign
+        # files AND dirs still fail.
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_p = Path(tmp)
+            tar_path = tmp_p / "implicit.tar.gz"
+            with tarfile.open(
+                    tar_path, "w:gz",
+                    format=tarfile.PAX_FORMAT) as tf:
+                info = tarfile.TarInfo(
+                    name="Top.app/nested/deep/file.txt")
+                info.size = len(b"hello")
+                info.mode = 0o644
+                tf.addfile(info, io.BytesIO(b"hello"))
+            dest = tmp_p / "out"
+            dest.mkdir()
+            self.assertTrue(ba.safe_extract(tar_path, dest))
+            self.assertEqual(
+                ba.verify_extracted_modes(tar_path, dest), [])
+            (dest / "Top.app" / "nested" / "deep"
+             / "stow.bin").write_bytes(b"x")
+            self.assertTrue(any(
+                "stow.bin" in e for e in ba.verify_extracted_modes(
+                    tar_path, dest)))
+            (dest / "Top.app" / "nested" / "deep"
+             / "stow.bin").unlink(missing_ok=True)
+            (dest / "Top.app" / "foreign-dir").mkdir()
+            self.assertTrue(any(
+                "foreign-dir" in e for e in ba.verify_extracted_modes(
+                    tar_path, dest)))
+
     def test_devices_installable(self):
         m = _manifest()
         self.assertEqual(ba.check_devices_installable(

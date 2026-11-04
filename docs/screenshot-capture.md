@@ -1,9 +1,11 @@
-# Screenshot capture runbook (2026-11-04 — session workflow wired; pilot gates green; CI acceptance pending 8.1/8.2/8.3/8.6)
+# Screenshot capture runbook (2026-11-04 — session workflow wired; single-pass decision; pilot gates green; acceptance = downloadable output, 20min aspirational)
 
 Session-based capture is WIRED in `.github/workflows/app-screenshots.yml`
 (`validate` → one verified arm64 build → device workers `max-parallel: 5` →
 panels + ZIP) and proven through the frozen 18PM pilot + 6-pair expansion
-captures (teardowns complete; see evidence below). Raw PNGs retained, manifests
+captures (teardowns complete; see evidence below). Owner decision 2026-11-04:
+SINGLE automated pass per device-locale (no r2, no automatic pass comparison);
+manual reruns when needed with human visual inspection. Raw PNGs retained, manifests
 read directly. The English pilot remains OWNER-APPROVED (archived pilot change,
 `runs/pilot27-r2`); expansion sets are captured-audited with final acceptance
 still pending. Sections marked **AGREED** record owner/spec
@@ -241,8 +243,10 @@ Pipeline topology (`app-screenshots.yml`): early input validation →
 one arm64-verified Screenshot build (tar + digest manifest, Xcode 27.1 /
 iOS 27.0) → one device worker per selected device (`max-parallel: 5`,
 `fail-fast: false`), each booting/installing once and running the selected
-locales sequentially (r1 then r2, pinned + real-time sessions) → per-locale
-`shots-<device>-<locale>` artifacts → panels + ZIP stage. CI bypass
+locales sequentially (SINGLE automated pass per locale, pinned + real-time sessions) → per-locale
+`shots-<device>-<locale>` artifacts → panels + ZIP stage. A manual rerun
+re-invokes the same single-pass workflow with a new run identity (existing
+session/run machinery; no new pass selector, no legacy branches). CI bypass
 (`LIFIO_CAPTURE_CI=1`, logged as `ci_approval_bypass:true`) is a technical
 gate, NEVER owner approval.
 
@@ -267,10 +271,10 @@ app renames/removes before execution); full identity/hash binding
 ack; combined app + runner-verified cleanup receipts gate finalization.
 Source/build/runtime identities: commit + dirty flag + Xcode/SDK + arm64 slices
 + app/appex hashes in every manifest. Local real-approval paired flags gate
-expansion scope; per-locale artifacts carry both passes, receipts, timings, and
-failed/unattempted statuses; raw shots + receipts ship in the ZIP alongside
+expansion scope; per-locale artifacts carry the single pass, receipts, timings, and
+failed/unattempted statuses (historical both-passes artifacts stay unchanged); raw shots + receipts ship in the ZIP alongside
 panels. Lineup: 18PM (1320×2868) + 17 (1206×2622) + M4 iPad (2064×2752).
-No sub-20-minute claim until cold + warm full-CI runs measure it (8.1/8.2/8.3 open; 8.6 rebase/review pending).
+Acceptance requires successful downloadable output with truthful status (8.3 open; 8.1/8.2 retired — cancelled, not run; old runs failed, no fabricated acceptance); 20 minutes is aspirational (owner accepts ~22min vs 70+), not a hard gate. Human visual inspection governs; 8.6 rebase/review pending.
 
 ## Legacy removal (8.5 DONE — Python + Swift removal verified; do not use removed verbs)
 
@@ -291,16 +295,16 @@ Operator guidance above uses session verbs only. Old
 receipts are never retrofitted with new keys. No shipping-compat branch is
 retained or promised.
 
-## Status 2026-11-04 (pilot + expansion gates green; CI acceptance open)
+## Status 2026-11-04 (pilot + expansion gates green; single-pass decision; acceptance = downloadable output)
 
-- §1 gates (1.1–1.4) done; protocol foundation (2.2–2.4), timing (2.1), session
+- §1 gates (1.1–1.4) done (1.3/two-pass baseline historically valid, superseded as acceptance); protocol foundation (2.2–2.4), timing (2.1), session
   batching (3.1–3.5), runner ownership/cleanup (4.1–4.4), real-time (4.5),
   N/A (4.6), isolation (4.7), pilot perf/visual/profile (5.1–5.3), expansion
   (5.4), shared-build/device-matrix (6.x, unit/structural + real local install
   proof), full verification (7.1–7.4), docs (8.4), legacy removal (8.5) done
-  with audit evidence.
-- Still open: cold + warm full-CI runtime acceptance (8.1/8.2), bundle
-  verification (8.3), final rebase + review (8.6).
+  with audit evidence (5.1/5.4 two-pass measurements valid historically; single-pass deltas pending in §9).
+- Still open: single-pass simplification + verification + acceptance (§9.1–9.6), bundle
+  verification (8.3), final rebase + review (8.6). 8.1/8.2 RETIRED (cancelled, not run; old runs failed; no fabricated acceptance).
 - Pends/owner gates unchanged: LA frames stay pending until genuine pixels;
   owner approvals 5.4/6.6/9.4 (archived pilot namespace) untouched — new sets
   are captured, never approved by analogy.

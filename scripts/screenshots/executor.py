@@ -18,8 +18,9 @@ capture path):
   capture windows and human observations. No fabrication, no OCR.
 - record_pending_frame: deterministic human-handoff stubs for LA states
   without genuine pixels yet (used internally by run_session).
-- finalize_run (session-receipt gated) / finalize_two_runs: assemble
-  manifests, re-verify evidence, semantic (never byte-equal) comparison.
+- finalize_run (session-receipt gated): assemble manifests, re-verify
+  evidence (single pass; no automatic pass comparison — human
+  inspection governs manual reruns via preserved semantic hashes).
 
 Cleanup note: simctl-side restore (appearance/content_size/status_bar) is
 implemented exactly from snapshots. Session cleanup is identity-checked
@@ -585,6 +586,65 @@ def _require_session_evidence(run_dir: Path, records: list[dict]) -> None:
             + "; ".join(errs[:5]))
 
 
+def _require_locale_binding(run_dir: Path, records: list[dict],
+                            run_id: str) -> str:
+    """Fail-closed run-locale binding from archived session commands.
+
+    Every archived session command envelope under run_dir/requests is
+    validated with the shared session parser (schema, exact-bytes hash,
+    outer/inner identity binding — no duplicated envelope logic), must
+    belong to this run, and must bind a frame record by (frame,
+    request_sha256). All bound locales must be unanimous; that single
+    locale is returned for the manifest `locale` field (exact key,
+    envelope-derived — never a free claim, never inferred from paths).
+    A missing archive, a rejected envelope, or divergent locales fails
+    closed (rerun via run-session).
+    """
+    req_dir = run_dir / "requests"
+    env_paths = sorted(req_dir.glob("session-*.envelope.json")) \
+        if req_dir.is_dir() else []
+    if not env_paths:
+        raise FrameError(
+            "no archived session command envelopes under requests/; "
+            "run locale unattested (rerun via run-session)")
+    pairs = {(r.get("frame"), r.get("request_sha256")) for r in records}
+    seen: set[str] = set()
+    for path in env_paths:
+        if path.is_symlink():
+            raise FrameError(
+                f"archived command {path.name} is a symlink; "
+                "refusing escape")
+        try:
+            env = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            raise FrameError(
+                f"archived command {path.name} unreadable: {exc}")
+        errs = sess.validate_envelope(env)
+        if errs:
+            raise FrameError(
+                f"archived command {path.name} rejected: {errs[0]}")
+        if env.get("run_id") != run_id:
+            raise FrameError(
+                f"archived command {path.name} run_id "
+                f"{env.get('run_id')!r} != run {run_id!r} (stale or "
+                "foreign command refused)")
+        try:
+            inner = sess.parse_envelope_payload(env)
+        except sess.SessionError as exc:
+            raise FrameError(
+                f"archived command {path.name} payload rejected: {exc}")
+        if (env.get("frame"), env.get("request_sha256")) not in pairs:
+            raise FrameError(
+                f"archived command {path.name} matches no frame record "
+                "(stale or foreign command refused)")
+        seen.add(inner.get("locale"))
+    if len(seen) != 1:
+        raise FrameError(
+            f"archived commands span locales {sorted(str(v) for v in seen)!r} "
+            "(cross-locale run refused)")
+    return next(iter(seen))
+
+
 def _session_ipad_records_or_raise(
     run_dir: Path, strict_err: FrameError
 ) -> tuple[list[dict], list[str]]:
@@ -722,6 +782,7 @@ def finalize_run(
             "legacy per-frame runs rejected: no session evidence "
             "(session_nonce/receipts); rerun via run-session")
     _require_session_evidence(run_dir, records)
+    run_locale = _require_locale_binding(run_dir, records, run_dir.name)
     pending: list[str] = []
     present_la = [f for f in req.LA_FRAMES if f not in na_frames]
     if "la-lock" not in present_la:
@@ -782,6 +843,11 @@ def finalize_run(
         na_frames=na_frames or None,
         island_probe=island_probe,
     )
+    # Manifest locale (exact coordinated key): bound above from the
+    # validated unanimous session envelopes — an envelope-derived
+    # claim, never a free string and never inferred from paths. The
+    # consumer requires it to equal the cell language.
+    manifest["locale"] = run_locale
     manifest["status"] = "needs-inspection" if pending else "complete"
     manifest["pending_evidence"] = pending
     app_prov = records[0].get("app_provenance")
@@ -810,6 +876,55 @@ SESSION_PENDING_REASON = (
 )
 
 
+def _classify_spawn(argv: Any) -> str:
+    """Semantic command category for the spawn trail (no raw argv kept).
+
+    Returns a fixed label such as "ui-appearance-query" or
+    "launch-cleanup" for known simctl shapes, else "simctl-unknown".
+    Only the label is recorded — raw argv, paths, nonces, launch
+    args, and stderr never enter persisted stats. The ephemeral scan
+    below is classification only, never stored.
+    """
+    try:
+        parts = list(argv)  # type: ignore[arg-type]
+    except TypeError:
+        return "simctl-unknown"
+    if len(parts) < 3 or parts[0] != "xcrun" or parts[1] != "simctl":
+        return "simctl-unknown"
+    verb = parts[2]
+    if verb == "list":
+        return "device-list"
+    if verb == "get_app_container":
+        return "get-app-container"
+    if verb == "status_bar":
+        sub = parts[4] if len(parts) > 4 else ""
+        if sub == "list":
+            return "status-bar-list"
+        if sub == "clear":
+            return "status-bar-clear"
+        return "status-bar-set"
+    if verb == "ui":
+        field = parts[4] if len(parts) > 4 else ""
+        mutating = len(parts) > 5
+        if field == "appearance":
+            return "ui-appearance-set" if mutating else "ui-appearance-query"
+        if field == "content_size":
+            return ("ui-content-size-set" if mutating
+                    else "ui-content-size-query")
+        return "simctl-unknown"
+    if verb == "launch":
+        for part in parts:
+            if isinstance(part, str) \
+                    and part.startswith("SCREENSHOT_CLEANUP="):
+                return "launch-cleanup"
+        return "launch-capture"
+    if verb == "io":
+        return "screenshot-export"
+    if verb == "terminate":
+        return "terminate-app"
+    return "simctl-unknown"
+
+
 def _counted(run: Callable, argv: list[str],
              stats: sess.PhaseStats | None) -> Any:
     """Run one simctl subprocess, counting it when stats are present.
@@ -822,16 +937,53 @@ def _counted(run: Callable, argv: list[str],
     60s, receipt claimed complete with 1 of 4 frames and no failures).
     Same convention as run_device_worker.call and preflight --execute.
     No timeout, deadline, or retry change here.
+
+    Every spawn also appends one bounded trail entry (semantic
+    category, active phase, start-relative-ms, duration-ms, outcome,
+    return code where available) on the runner monotonic clock,
+    including timeout/OSError events recorded in the finally path.
+    The failure message names the category only: exception reprs may
+    echo raw argv (paths, nonces, launch tokens), so they are never
+    interpolated. Counter meaning ("simctl_spawn" per successful
+    spawn) is unchanged.
     """
+    category = _classify_spawn(argv)
+    if stats is None:
+        try:
+            return run(argv)
+        except (subprocess.TimeoutExpired, OSError) as exc:
+            raise FrameError(
+                f"simctl spawn failed: {category} "
+                f"({type(exc).__name__})"
+            )
+    t_start = stats.now()
+    outcome = "ok"
+    rc: int | None = None
     try:
         proc = run(argv)
-    except (subprocess.TimeoutExpired, OSError) as exc:
+        raw_rc = getattr(proc, "returncode", None)
+        rc = raw_rc if isinstance(raw_rc, int) \
+            and not isinstance(raw_rc, bool) else None
+        return proc
+    except subprocess.TimeoutExpired as exc:
+        outcome = "timeout"
         raise FrameError(
-            f"simctl spawn failed: {' '.join(argv)} -> {exc!r:.300}"
+            f"simctl spawn failed: {category} ({type(exc).__name__})"
         )
-    if stats is not None:
-        stats.count("simctl_spawn")
-    return proc
+    except OSError as exc:
+        outcome = "oserror"
+        raise FrameError(
+            f"simctl spawn failed: {category} ({type(exc).__name__})"
+        )
+    finally:
+        t_end = stats.now()
+        try:
+            stats.note_spawn(category=category, outcome=outcome,
+                             t_start=t_start, t_end=t_end, rc=rc)
+        except sess.SessionError:
+            pass  # diagnostics never break fail-closed capture
+        if outcome == "ok":
+            stats.count("simctl_spawn")
 
 
 def _checked_session_run_args(device_key: str,
@@ -1259,10 +1411,13 @@ def run_session(
         # Owned-device preflight (all keys, both domains): the ACTUAL
         # simctl-reported model must match the requested catalog BEFORE
         # any capture. Resolved once per session here, alongside
-        # container/provenance — never per frame or command.
+        # container/provenance — never per frame or command. The raw
+        # run goes in with stats so the inner _read_device_entry
+        # records exactly one trail event/counter per spawn (a counted
+        # lambda here would double-record: outer plus inner _counted).
         try:
             model_proof = verify_owned_device(
-                lambda argv: _counted(run, argv, stats), udid,
+                run, udid,
                 device_key=device_key, geometry=geo, stats=stats)
         except FrameError as exc:
             raise FrameError(f"owned-device preflight: {exc}")
@@ -1572,8 +1727,21 @@ def run_session(
         }
         try:
             (run_dir / "sessions").mkdir(parents=True, exist_ok=True)
+            # Interim write is explicitly partial: probe, session
+            # record, lease release, and the final rewrite still lie
+            # ahead, so a kill in that window must never leave an
+            # on-disk "complete" for a status+transcript-only reader.
+            # The interim note lives on this copy only — final
+            # failures below never carry it. Transcript/stats stay for
+            # debug on kill.
+            interim = dict(
+                receipt, status="partial",
+                failures=[*failures,
+                          "interim: island probe, session record, and "
+                          "lease release still pending; final status "
+                          "lands on the rewrite below"])
             (run_dir / "sessions" / f"{nonce}.receipt.json").write_text(
-                json.dumps(receipt, indent=2, sort_keys=True) + "\n",
+                json.dumps(interim, indent=2, sort_keys=True) + "\n",
                 encoding="utf-8")
         except OSError as exc:
             failures.append(f"cannot persist session receipt: {exc}")
@@ -1584,8 +1752,11 @@ def run_session(
             # the session (partial receipt) — never a silent catalog claim.
             try:
                 stats.start("probe")
+                # Raw run with stats: the inner _read_device_entry
+                # records exactly one trail event/counter per spawn
+                # (a counted lambda here would double-record).
                 probe = probe_island_capability(
-                    lambda argv: _counted(run, argv, stats), udid,
+                    run, udid,
                     device_key=device_key, run_id=run_id,
                     session_nonce=nonce, geometry=geo, stats=stats)
                 stats.stop("probe")

@@ -1,16 +1,16 @@
 ## Purpose
 
-Produce repeatable App Store screenshot evidence efficiently under limited macOS runner capacity, without sacrificing native rendering, session isolation, or truthful capture and approval status.
+Produce repeatable App Store screenshot evidence efficiently under limited macOS runner capacity, without sacrificing native rendering, session isolation, or truthful capture and approval status. Each device-locale pair gets a SINGLE automated pass; human visual inspection governs and manual reruns replace automatic pass comparison (owner decision 2026-11-04).
 
 ## ADDED Requirements
 
 ### Requirement: Capture work is scheduled by device
 
-The workflow SHALL create exactly one capture worker per selected supported device, process the selected locales sequentially in the requested order on that worker, and run at most five capture workers concurrently. A worker SHALL use only its own simulator and SHALL reuse that simulator and app installation across its locales and passes. The workflow MUST validate non-empty, unique device and locale selections against supported catalogs before expensive macOS work, without evaluating input values as executable source. Its build, capture, and packaging stages SHALL share the five-macOS-job ceiling rather than treat each stage as having a separate quota.
+The workflow SHALL create exactly one capture worker per selected supported device, process the selected locales sequentially in the requested order on that worker with a SINGLE automated pass per locale, and run at most five capture workers concurrently. A worker SHALL use only its own simulator and SHALL reuse that simulator and app installation across its locales. The workflow MUST validate non-empty, unique device and locale selections against supported catalogs before expensive macOS work, without evaluating input values as executable source. Its build, capture, and packaging stages SHALL share the five-macOS-job ceiling rather than treat each stage as having a separate quota.
 
 #### Scenario: Default matrix uses three device workers
 - **WHEN** the operator selects `iphone69`, `iphone63`, and `ipad13` with all five locales
-- **THEN** three workers each process five locales and two passes per locale without creating separate locale jobs
+- **THEN** three workers each process five locales with one automated pass per locale without creating separate locale jobs
 - **AND** each worker creates, boots, installs on, and eventually deletes only its own simulator
 
 #### Scenario: More devices or less capacity are available
@@ -34,23 +34,23 @@ All workers in a run SHALL consume the same simulator-only, Release-optimized Sc
 #### Scenario: One binary serves all devices and locales
 - **WHEN** a default run builds the Screenshot artifact for the arm64 simulator fleet
 - **THEN** every worker records the same app and extension binary hashes and source commit
-- **AND** no worker rebuilds the app for a locale or pass
+- **AND** no worker rebuilds the app for a locale (single pass; manual reruns reuse the same shared-build flow)
 
 #### Scenario: Artifact or toolchain does not match
 - **WHEN** the received artifact has a mismatched digest, source commit, configuration, architecture, or toolchain
 - **THEN** that worker fails before installing or exporting screenshots and records the mismatch
 
-### Requirement: App screens share a fresh locale-pass session
+### Requirement: App screens share a fresh locale session (single automated pass)
 
-For each device-locale pair, the runner SHALL execute r1 and then r2 as independent fresh passes. Each pass SHALL have a stable device-locale-pass run identity and distinct fresh session identities for its pinned and real-time clock domains. Each pass SHALL capture Track running, Insights, History top, and Add entry in order within one pinned-clock app session, clean that session, and then execute the real-time session. The session SHALL seed its isolated fixture once, preserve its declared locale/calendar/timezone and fixture identity, and reset navigation, search, selection, and sheet state for each requested frame. Entering Add entry MUST NOT commit an entry or alter the fixture totals. Changing locale, starting the second pass, or switching between pinned and real-time clock domains MUST start a fresh process and isolated session.
+For each device-locale pair, the runner SHALL execute a SINGLE automated pass. Each pass SHALL have a stable device-locale run identity and distinct fresh session identities for its pinned and real-time clock domains. Each pass SHALL capture Track running, Insights, History top, and Add entry in order within one pinned-clock app session, clean that session, and then execute the real-time session. The session SHALL seed its isolated fixture once, preserve its declared locale/calendar/timezone and fixture identity, and reset navigation, search, selection, and sheet state for each requested frame. Entering Add entry MUST NOT commit an entry or alter the fixture totals. Changing locale or switching between pinned and real-time clock domains MUST start a fresh process and isolated session. A manual rerun WHEN needed SHALL re-invoke the same single-pass workflow with a new run identity using the existing session/run identity machinery — no new pass selector, no legacy on-disk branches.
 
 #### Scenario: Four frames reuse one fixture without state leakage
 - **WHEN** a fresh pinned-clock pass advances through the four app frames
 - **THEN** each frame shows the native requested surface with its declared inputs and independently checked totals
 - **AND** the fixture entry count and committed contents remain unchanged throughout the pass
 
-#### Scenario: Another locale or pass begins
-- **WHEN** the runner finishes one locale-pass session and starts a different locale or the second pass
+#### Scenario: Another locale begins or a manual rerun starts
+- **WHEN** the runner finishes one locale session and starts a different locale or a manual rerun of the same locale
 - **THEN** the previous session is cleaned before a new process and freshly seeded fixture begin
 - **AND** no localization, navigation, draft-form edits, or fixture state carries over
 
@@ -90,24 +90,24 @@ Before each export, the workflow MUST verify the current frame's request-bound s
 - **WHEN** exported dimensions differ from the selected native geometry or frame totals differ from the locale's independent pins
 - **THEN** the frame fails validation and cannot contribute to a complete set
 
-### Requirement: Two-pass comparison preserves semantic inputs
+### Requirement: SUPERSEDED — Two-pass comparison (replaced by human-inspected manual reruns; no automatic pass comparison)
 
-The runner SHALL compare both passes using frame-level semantic input identities, expected contents, and totals independently of volatile run/session identifiers and command counters. A change to locale, fixture, treatment, reference clock, frame, or geometry MUST remain detectable. Pixel variance SHALL remain reviewable evidence rather than be silently auto-approved or substituted for semantic validation.
+Automatic two-pass comparison SHALL NOT be required (owner decision 2026-11-04 supersedes the prior r1/r2 auto-comparison). The runner SHALL preserve semantic frame hashes (excluding volatile run/session identifiers and command counters) to support HUMAN comparison across manual reruns. A change to locale, fixture, treatment, reference clock, frame, or geometry MUST remain detectable via exact request-hash binding plus human visual inspection. Pixel variance SHALL remain reviewable evidence rather than be silently auto-approved or substituted for semantic validation. Historical two-pass evidence in `evidence/` remains valid as measurement and is superseded as acceptance — it is not rewritten.
 
-#### Scenario: Fresh session identifiers differ between passes
-- **WHEN** both passes use fresh session identities but identical semantic frame inputs and expected contents/totals
-- **THEN** the semantic comparison recognizes the same intended frame without requiring matching volatile identifiers or byte-identical screenshots
+#### Scenario: Manual rerun uses a fresh identity for the same semantic inputs
+- **WHEN** a manual rerun executes the same device-locale with a fresh run/session identity but identical semantic frame inputs and expected contents/totals
+- **THEN** human visual inspection compares the same intended frame using the preserved semantic hashes, without requiring matching volatile identifiers or byte-identical screenshots
 
-#### Scenario: A meaningful input changes between passes
+#### Scenario: A meaningful input changes between runs
 - **WHEN** a locale, fixture, treatment, clock, frame, geometry, or expected content/total differs
-- **THEN** two-pass validation rejects the mismatch even if volatile identifiers were excluded from comparison
+- **THEN** exact request-hash binding plus human inspection rejects the mismatch even if volatile identifiers were excluded from comparison
 
 ### Requirement: Live Activity evidence retains its clock and availability semantics
 
-Live Activity work SHALL use a separate real-time session with one activity identity and start anchor shared by that pass's applicable Lock Screen and Island states. Genuine frames MUST retain screenshot-hash-bound numeric timer validation within the existing two-second tolerance. When the capture environment cannot produce genuine system pixels, the workflow SHALL retain an explicit pending or blocked reason and SHALL NOT mark the set complete or approved. On a device without a Dynamic Island, those states SHALL be recorded as not applicable with a capability probe; the Lock Screen state remains required.
+Live Activity work SHALL use a separate real-time session with one activity identity and start anchor shared by that locale's applicable Lock Screen and Island states (single pass). Genuine frames MUST retain screenshot-hash-bound numeric timer validation within the existing two-second tolerance. When the capture environment cannot produce genuine system pixels, the workflow SHALL retain an explicit pending or blocked reason and SHALL NOT mark the set complete or approved. On a device without a Dynamic Island, those states SHALL be recorded as not applicable with a capability probe; the Lock Screen state remains required.
 
 #### Scenario: Three genuine system states are supplied
-- **WHEN** Lock Screen, compact Island, and expanded Island evidence is registered for one iPhone pass
+- **WHEN** Lock Screen, compact Island, and expanded Island evidence is registered for one iPhone locale (single pass)
 - **THEN** all three frames bind to the same real activity anchor and pass their own numeric and geometry checks
 - **AND** the real-time session does not reuse the pinned-clock app session
 
@@ -154,23 +154,23 @@ Session transport and fixture orchestration MUST remain available only in the si
 
 ### Requirement: Per-locale artifacts and evidence status survive worker batching
 
-The workflow SHALL retain independent artifacts for every attempted device-locale pair, including both passes, frame records, session cleanup receipts, timings, and failures. The packaging stage SHALL preserve the selected matrix, locale/device paths, exact runtime/build provenance, and captured-versus-approved distinctions in the ZIP manifest and README. It MUST distinguish a CI handoff/debug bundle with missing evidence from a complete App Store panel bundle; empty or blocked panel cells MUST NOT be hidden by a green packaging job.
+The workflow SHALL retain independent artifacts for every attempted device-locale pair, including the single pass, frame records, session cleanup receipts, timings, and failures. The packaging stage SHALL preserve the selected matrix, locale/device paths, exact runtime/build provenance, and captured-versus-approved distinctions in the ZIP manifest and README. It MUST distinguish a CI handoff/debug bundle with missing evidence from a complete App Store panel bundle; empty or blocked panel cells MUST NOT be hidden by a green packaging job.
 
 #### Scenario: One locale fails on a device worker
 - **WHEN** one locale fails but earlier locale captures exist
 - **THEN** those earlier artifacts remain downloadable independently and failed or unattempted pairs are listed explicitly
 - **AND** packaging records missing cells instead of claiming a full matrix
 
-### Requirement: Runtime claims are supported by complete timing evidence
+### Requirement: Runtime reporting is aspirational; downloadable output is required
 
-The optimization SHALL target less than 1,200 seconds from dispatch to final CI ZIP availability for the current default three-device, five-locale, two-pass workload. The acceptance capacity SHALL be declared as availability for one build job, then three overlapping device workers, then one packaging job, within the shared account ceiling; actual overlap and queueing MUST be reported. Acceptance MUST include a cold-cache full run and a warm-cache full run of the same implementation, with all selected work attempted and artifact/evidence status disclosed. Reports SHALL include queueing for every stage, build/cache, runtime download if any, boot/install, per-session and per-frame phases, packaging, observed concurrency, and known competing jobs (or an explicit unknown); queue/download time MUST NOT be subtracted from an end-to-end claim. Human evidence/approval time SHALL be identified separately, not presented as automated completion. Cache misses, reduced capacity, or expanded device matrices MUST NOT silently narrow the workload to meet the target.
+The optimization SHALL record 20 minutes (1,200 seconds) from dispatch to final CI ZIP availability as ASPIRATIONAL, not a hard gate, for the current default three-device, five-locale, single-pass workload (owner explicitly accepts ~22 minutes versus 70+). Acceptance REQUIRES successful downloadable output: every selected device-locale pair attempted with its single pass, per-locale artifacts preserved, and a panels/ZIP bundle with truthful pending/N-A/blocked status. The acceptance capacity SHALL be declared as availability for one build job, then three overlapping device workers, then one packaging job, within the shared account ceiling; actual overlap and queueing MUST be reported. Reports SHALL include queueing for every stage, build/cache, runtime download if any, boot/install, per-session and per-frame phases, packaging, observed concurrency, and known competing jobs (or an explicit unknown); queue/download time MUST NOT be subtracted from an end-to-end report. Human evidence/approval time SHALL be identified separately, not presented as automated completion. Prior cold-cache + warm-cache <1,200s hard gates are SUPERSEDED (old runs failed; no fabricated cold/warm/final-ZIP acceptance) — historical evidence counts stay valid and are not rewritten. Cache misses, reduced capacity, or expanded device matrices MUST NOT silently narrow the workload to meet the aspiration.
 
-#### Scenario: Cold and warm default runs meet the target
-- **WHEN** full cold-cache and warm-cache default runs each make their final CI ZIP available in less than 1,200 seconds
-- **THEN** the report includes both run URLs, exact commit/toolchain, cache status, capacity, all phase timings, and missing-evidence status
-- **AND** only the measured CI runtime target is marked achieved, without granting screenshot or panel approval
+#### Scenario: Single-pass default run produces downloadable output
+- **WHEN** a full default single-pass run makes its final CI ZIP available with all selected work attempted and artifact/evidence status disclosed
+- **THEN** the report includes the run URL, exact commit/toolchain, cache status, capacity, all phase timings, missing-evidence status, and the measured time versus the aspirational 20 minutes
+- **AND** only downloadable-output acceptance is marked achieved, without granting screenshot or panel approval
 
-#### Scenario: Queueing or execution exceeds the target
+#### Scenario: Execution exceeds the aspirational budget
 - **WHEN** the end-to-end elapsed time reaches or exceeds 1,200 seconds
-- **THEN** the runtime target is reported as unmet with the queue and execution breakdown
-- **AND** no frames, locales, passes, cleanup checks, or evidence requirements are dropped to produce a passing claim
+- **THEN** the aspiration is reported as unmet with the queue and execution breakdown, while downloadable-output acceptance still stands if all selected work was attempted with truthful status
+- **AND** no frames, locales, cleanup checks, or evidence requirements are dropped to produce a passing claim

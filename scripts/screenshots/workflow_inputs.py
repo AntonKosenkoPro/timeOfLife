@@ -31,11 +31,18 @@ DEVICE_CATALOG = {
 
 SUPPORTED_LOCALES = ("en", "ru", "zh-Hans", "es-419", "pt-BR")
 
+# Single automated pass per device-locale (owner decision 2026-11-04,
+# §9): the ONLY pass constant in the workflow helpers. Artifact/status
+# code and the device worker both read this (no duplicate tuple); a
+# manual rerun re-invokes the same single-pass flow with a fresh run
+# identity, never a second automatic pass.
+PASSES = ("r1",)
+
 DEFAULT_DEVICES = list(SUPPORTED_DEVICES)
 DEFAULT_LOCALES = list(SUPPORTED_LOCALES)
 DEFAULT_RUNTIME = "iOS 27.0"
 
-PASSES_PER_PAIR = 2
+PASSES_PER_PAIR = len(PASSES)
 
 RUNTIME_RE = re.compile(r"^iOS \d+\.\d+$")
 

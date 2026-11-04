@@ -2,8 +2,8 @@
 #
 # Device-affine session capture on macOS: one validated Ubuntu selection
 # job, one explicit arm64 Screenshot build with a verified artifact, one
-# capture worker per selected device (sequential locales, r1/r2, pinned +
-# realtime sessions via run_device_worker.py), then fast panels + zip on a
+# capture worker per selected device (sequential locales, single pass,
+# pinned + realtime sessions via run_device_worker.py), then fast panels + zip on a
 # separate job. Binaries never enter git — the only downloadables are the
 # `screenshot-build` and `shots-<device>-<locale>` artifacts attached to
 # the run, plus the final `lifio-screenshots` bundle.
@@ -279,11 +279,16 @@ jobs:
                   else bundle / "Contents" / "MacOS" / exe
 
           app_bin = exe_of(app)
-          appexes = sorted((app / "PlugIns").glob("*.appex"))
-          if not appexes:
-              print("::error::no .appex extension in the built app")
+          # Bind the attested hash to the EXACT expected capture
+          # extension: a sorted first-glob would attest whatever extra
+          # .appex sorts first while verify_app_structure (exact name,
+          # ignores other PlugIns members) still passes.
+          expected_appex = app / "PlugIns" / ba.SCREENSHOT_APPEX_NAME
+          if not expected_appex.is_dir():
+              print(f"::error::expected appex "
+                    f"{ba.SCREENSHOT_APPEX_NAME} missing in the built app")
               raise SystemExit(2)
-          ext_bin = exe_of(appexes[0])
+          ext_bin = exe_of(expected_appex)
           app_archs = ba.parse_lipo_archs(subprocess.check_output(
               ["lipo", "-archs", str(app_bin)], text=True))
           ext_archs = ba.parse_lipo_archs(subprocess.check_output(
@@ -293,7 +298,7 @@ jobs:
               for e in errs:
                   print(f"::error::{e}")
               raise SystemExit(2)
-          print(f"slices arm64-only: app + {appexes[0].name}")
+          print(f"slices arm64-only: app + {ba.SCREENSHOT_APPEX_NAME}")
 
           xcode_out = subprocess.check_output(["xcodebuild", "-version"],
                                               text=True)
@@ -381,8 +386,10 @@ jobs:
     name: capture (${{ matrix.device }})
     # 6.5: one worker per selected device (dynamic matrix from the
     # validated selection), at most five overlapping; each worker owns
-    # ONE simulator/install and runs its locales sequentially with r1/r2
-    # and both session domains inside run_device_worker.py.
+    # ONE simulator/install and runs its locales sequentially with a
+    # SINGLE automated pass per locale (manual reruns re-invoke this
+    # same flow with a fresh run identity) and both session domains
+    # inside run_device_worker.py.
     needs: [validate, build]
     runs-on: xcode-27
     timeout-minutes: 180
@@ -546,7 +553,14 @@ jobs:
           if ba.hash_file(exe_of(apps[0])) != manifest["app_sha256"]:
               print("::error::app Mach-O hash mismatch against the manifest")
               raise SystemExit(2)
-          appex = sorted((apps[0] / "PlugIns").glob("*.appex"))[0]
+          # Same exact-identity binding as the build packaging above:
+          # the worker re-hashes the manifest-claimed extension, never
+          # whatever extra .appex a sorted glob would find first.
+          appex = apps[0] / "PlugIns" / ba.SCREENSHOT_APPEX_NAME
+          if not appex.is_dir():
+              print(f"::error::expected appex "
+                    f"{ba.SCREENSHOT_APPEX_NAME} missing in the verified app")
+              raise SystemExit(2)
           if ba.hash_file(exe_of(appex)) != manifest["extension_sha256"]:
               print("::error::extension Mach-O hash mismatch "
                     "against the manifest")
@@ -633,9 +647,10 @@ jobs:
 
       - name: Capture locales
         run: |
-          # Sequential selected locales, r1/r2, pinned + realtime
-          # sessions inside one owned simulator/install. Per-locale
-          # artifacts (both passes, diagnostics, failed/unattempted
+          # Sequential selected locales, one automated pass each,
+          # pinned + realtime sessions inside one owned
+          # simulator/install. Per-locale artifacts (single pass,
+          # diagnostics, failed/unattempted statuses) land under
           # statuses) land under shots/<device>/<locale>; the device
           # summary lands at shots/<device>/worker-summary.json.
           mkdir -p "${RUNNER_TEMP}/shots"
@@ -761,7 +776,12 @@ jobs:
     # (warns, still zips+uploads) because CI la frames are
     # needs-inspection by design until the human handoff — only a
     # missing manifest fails the job.
-    if: "!cancelled()"
+    # Skipped upstream (validate/build failed, so screenshots never ran)
+    # is NOT packaging work: without the screenshots result guard this
+    # job would run on zero artifacts and fail opaquely in the download
+    # steps instead of skipping cleanly. Red workers (result failure)
+    # still package their partial bundle.
+    if: "!cancelled() && needs.screenshots.result != 'skipped'"
     runs-on: macos-15
     timeout-minutes: 30
     permissions:
@@ -907,7 +927,7 @@ jobs:
         # still downloadable; blocked cells stay blocked, never fabricated.
         if: "!cancelled()"
         # The delivered ZIP is self-contained: rendered panels plus the
-        # raw per-locale captures (both passes, frame records, receipts,
+        # raw per-locale captures (single pass, frame records, receipts,
         # statuses) plus the verified build manifest. Blocked source
         # cells stay blocked per the existing matrix policy (no new
         # render behavior); the bundle README still reports handoff

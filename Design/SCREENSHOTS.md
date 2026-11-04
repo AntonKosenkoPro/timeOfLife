@@ -2,11 +2,15 @@
 
 > Status (2026-11-04, change `optimize-app-screenshot-workflow`): session
 > pipeline WIRED (validate → one verified arm64 build → device workers max 5 →
-> panels + ZIP); English pilot still APPROVED (`pilot27-r2`); session re-capture
+> panels + ZIP); owner single-pass decision (ONE automated pass per
+> device-locale; manual reruns when needed, human visual inspection governs, no
+> automatic comparison); English pilot still APPROVED (`pilot27-r2`); session re-capture
 > + 6-pair expansion audited with frozen hashes (18PM + iPhone 17 + M4 iPad,
-> native geometries, honest LA-pending). CI runtime acceptance NOT measured
-> (no sub-20-minute claim); owner approvals for new sets NOT granted (captured
-> never implies approved). Montage deferred (built, external, NOT approved).
+> native geometries, honest LA-pending; two-pass counts historically valid,
+> superseded as acceptance). Acceptance = successful downloadable output with
+> truthful status; 20 minutes aspirational (owner accepts ~22min vs 70+), not a
+> hard gate (no fabricated cold/warm acceptance); owner approvals for new sets
+> NOT granted (captured never implies approved). Montage deferred (built, external, NOT approved).
 > Nothing here is a new production feature or a change to shipped UI.
 
 ## Story order (seven frames, native product views only)
@@ -51,9 +55,9 @@ Five locales (en, ru, zh-Hans, es-419, pt-BR) × three sizes:
   home probes; Lock banner required + present. Real-date iPad status bar
   accepted (no 9:41 override on iPad); centered-column layout accepted.
 
-Actual required raws per round: 5×7 + 10×5 = 85 (Island N/A is recorded,
-never fabricated); ×2 runs = 170 PNGs. es-419 app captures map to the
-Spanish (Mexico) Store listing. Every set: two successful runs, numeric (not
+Actual required raws per round (historical two-pass expansion measurement — valid, superseded as acceptance): 5×7 + 10×5 = 85 (Island N/A is recorded,
+never fabricated); ×2 runs = 170 PNGs. Single-pass workload is half that per run (85 PNGs per full default run); manual reruns when needed get a new run identity. es-419 app captures map to the
+Spanish (Mexico) Store listing. Every set: human visual inspection governs (no automatic pass comparison), numeric (not
 pixel) validation of dynamic timers, locale-by-locale clipping review
 (Spanish/Portuguese first — DONE 2026-10-30: no iPhone clipping in any
 locale/size; iPad Add-entry Notes peek/hidden split is an owner call at 6.6).
@@ -88,7 +92,7 @@ approval. The final fifteen-set manifest + review reports still need owner
 acceptance (6.6) — captured never implies approved. Tests passing never
 implies approval.
 
-## Implementation checklist (authoritative state: `openspec/changes/optimize-app-screenshot-workflow/tasks.md` — 37/41, open 8.1/8.2/8.3/8.6;
+## Implementation checklist (authoritative state: `openspec/changes/optimize-app-screenshot-workflow/tasks.md` — 41/45 active, 4 open (8.3/8.6/9.5/9.6; 8.1/8.2 retired — cancelled, not run; historical two-pass counts valid, not rewritten);
 items below are the archived pilot scope, retained for history; updated 2026-11-04)
 
 - [x] Screenshot configuration/scheme + simulator/physical-device gates (2.2; 2.1 explicit archive guard still open)

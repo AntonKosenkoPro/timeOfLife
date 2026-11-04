@@ -433,6 +433,9 @@ def resource_hashes(app_dir: Path) -> dict[str, dict[str, str]]:
                 symlinks.setdefault(rel, os.readlink(p))
             elif p.is_file():
                 files[rel] = hash_file(p)
+            else:
+                raise ArtifactError(
+                    f"unsupported special file in bundle: {rel!r}")
     return {"files": files, "symlinks": symlinks}
 
 
@@ -600,7 +603,7 @@ def list_tar_members(tar_path: Path) -> list[str]:
 
 def _within_dest(dest: Path, rel: PurePosixPath) -> Path:
     """Resolve rel under dest; raise when absolute/traversal/escaping."""
-    if rel.is_absolute() or rel.parts[:1] == ("/",):
+    if rel.is_absolute():
         raise ArtifactError(f"tar member {str(rel)!r} is absolute")
     if ".." in rel.parts:
         raise ArtifactError(f"tar member {str(rel)!r} traverses upward")
@@ -612,7 +615,7 @@ def _within_dest(dest: Path, rel: PurePosixPath) -> Path:
 
 
 def _ensure_parent_dirs(dest: Path, target: Path) -> None:
-    """Create ancestors without traversing planter symlinks or files."""
+    """Create ancestors without traversing planted symlinks or files."""
     try:
         parts = target.parent.relative_to(dest).parts
     except ValueError:
@@ -739,9 +742,10 @@ def verify_extracted_modes(tar_path: Path, dest_root: Path) -> list[str]:
     are never extracted, so they are skipped here — safe_extract
     already rejects those shapes. Extra on-disk files are reported:
     the destination must contain exactly the archive, nothing else.
+    Implicit ancestors created by safe_extract (a file archived
+    without its parent directory entries) are expected on disk, so
+    every member's ancestor prefixes count as seen.
     """
-    import tarfile
-
     dest_root = Path(dest_root)
     errs: list[str] = []
     seen: set[str] = set()
@@ -756,6 +760,12 @@ def verify_extracted_modes(tar_path: Path, dest_root: Path) -> list[str]:
             target = dest_root.joinpath(*rel.parts) if rel.parts \
                 else dest_root
             seen.add(str(target))
+            # Implicit ancestors (safe_extract creates them via
+            # _ensure_parent_dirs) must not read as extras: record every
+            # prefix so only truly foreign paths are reported, while
+            # foreign empty dirs are still caught (never a prefix here).
+            for i in range(1, len(rel.parts)):
+                seen.add(str(dest_root.joinpath(*rel.parts[:i])))
             if not os.path.lexists(target) or target.is_symlink():
                 errs.append(f"extracted member missing: {member.name!r}")
                 continue

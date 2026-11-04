@@ -414,8 +414,9 @@ targets:
     # Cross-language golden fixture mirror (task 2.3): byte-identical to
     # scripts/screenshots/tests/fixtures/session_envelope_golden.json at
     # build time (runner-owned source of truth; their suite guards equality).
-    # Kept at the target root: XcodeGen skips nested paths already covered
-    # by the sources directory glob.
+    # Explicit single declaration: the sources glob above would also place
+    # this file in Resources, and XcodeGen dedupes both to one membership
+    # (verified with 2.46.0) — keep it listed in exactly one place.
     resources:
       - TimeOfLifeTests/session_envelope_golden.json
     dependencies:

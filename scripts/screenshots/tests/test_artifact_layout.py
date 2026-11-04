@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Packaging bundle layout tests (task 6.6/8.3 helper proof).
+"""Packaging bundle layout tests (task 6.6/8.3 helper proof, single pass).
 
 The delivered ZIP must be self-contained: panels output, raw
-per-locale captures (both passes, frame records, receipts, statuses),
+per-locale captures (single pass, frame records, receipts, statuses),
 and the build manifest — with hashes, source status, and receipts
 intact after a zip round-trip. Tmpdirs + stdlib zipfile only (mirrors
 the workflow zip top-level names: panels, shots, build-manifest.json).
@@ -45,18 +45,19 @@ class BundleLayoutTests(unittest.TestCase):
         write(panels / "BUNDLE-README.md", b"# bundle\npending handoff\n")
         shots = root / "shots"
         for lang in ("en", "es-419"):
-            for run in ("r1", "r2"):
-                rid = f"iphone69-{lang}-{run}"
-                rdir = shots / "iphone69" / lang / "runs" / rid
-                write(rdir / "frames" / "track-running.png",
-                      f"PNG-{lang}-{run}".encode())
-                write(rdir / "frames" / "track-running.json", json.dumps(
-                    {"frame": "track-running",
-                     "screenshot_sha256": sha(
-                         rdir / "frames" / "track-running.png")}).encode())
-                write(rdir / "run-manifest.json", json.dumps(
-                    {"run_id": rid, "status": "needs-inspection",
-                     "pending_evidence": ["la-lock: handoff"]}).encode())
+            # single automated pass per pair (§9): exactly one run dir
+            # per clean pair output for the packaging harvest to discover
+            rid = f"iphone69-{lang}-r1"
+            rdir = shots / "iphone69" / lang / "runs" / rid
+            write(rdir / "frames" / "track-running.png",
+                  f"PNG-{lang}-r1".encode())
+            write(rdir / "frames" / "track-running.json", json.dumps(
+                {"frame": "track-running",
+                 "screenshot_sha256": sha(
+                     rdir / "frames" / "track-running.png")}).encode())
+            write(rdir / "run-manifest.json", json.dumps(
+                {"run_id": rid, "status": "needs-inspection",
+                 "pending_evidence": ["la-lock: handoff"]}).encode())
             write(shots / "iphone69" / lang
                   / f"iphone69-{lang}-r1.status.json",
                   json.dumps({"status": "ok"}).encode())

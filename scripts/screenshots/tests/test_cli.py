@@ -218,18 +218,25 @@ class CliTests(unittest.TestCase):
         self.assertEqual(proc.returncode, 2)
         self.assertIn("5.4", proc.stderr)
 
-    def test_plan_run_two_runs_en_only(self):
+    def test_plan_run_single_pass_en_only(self):
+        # Single-pass decision: the planner emits exactly one plan
+        # under the caller's run identity — no forced second pass.
+        with tempfile.TemporaryDirectory() as tmp:
+            proc = run("plan-run", "--request", str(HERE / "pilot_manifest.json"),
+                       "--device", "AAAA1111-2222-3333-4444-555566667777",
+                       "--out", tmp, "--run-id", "pilot")
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            plan = json.loads(proc.stdout)
+            self.assertEqual(len(plan["runs"]), 1)
+            self.assertEqual(len(plan["runs"][0]["steps"]), 7)
+
+    def test_plan_run_runs_selector_retired(self):
+        # The obsolete --runs selector fails closed (unrecognized
+        # argument) — there is no pass selector per the contract.
         with tempfile.TemporaryDirectory() as tmp:
             proc = run("plan-run", "--request", str(HERE / "pilot_manifest.json"),
                        "--device", "AAAA1111-2222-3333-4444-555566667777",
                        "--out", tmp, "--run-id", "pilot", "--runs", "2")
-            self.assertEqual(proc.returncode, 0, proc.stderr)
-            plan = json.loads(proc.stdout)
-            self.assertEqual(len(plan["runs"]), 2)
-            self.assertEqual(len(plan["runs"][0]["steps"]), 7)
-            proc = run("plan-run", "--request", str(HERE / "pilot_manifest.json"),
-                       "--device", "AAAA1111-2222-3333-4444-555566667777",
-                       "--out", tmp, "--run-id", "pilot", "--runs", "1")
             self.assertEqual(proc.returncode, 2)
 
     def test_plan_run_non_english_gated_by_approval(self):
@@ -251,7 +258,7 @@ class CliTests(unittest.TestCase):
             # blocked without approval
             proc = run("plan-run", "--request", bp,
                        "--device", "AAAA1111-2222-3333-4444-555566667777",
-                       "--out", tmp, "--run-id", "pilot-ru", "--runs", "2")
+                       "--out", tmp, "--run-id", "pilot-ru")
             self.assertEqual(proc.returncode, 2)
             self.assertIn("blocked", proc.stderr)
             # allowed with a valid 5.4 approval file
@@ -259,18 +266,18 @@ class CliTests(unittest.TestCase):
                 approval, ap_path = make_approval(retained)
                 proc = run("plan-run", "--request", bp,
                            "--device", "AAAA1111-2222-3333-4444-555566667777",
-                           "--out", tmp, "--run-id", "pilot-ru", "--runs", "2",
+                           "--out", tmp, "--run-id", "pilot-ru",
                            "--approval", ap_path, "--retained-dir", retained)
                 self.assertEqual(proc.returncode, 0, proc.stderr)
                 plan = json.loads(proc.stdout)
-                self.assertEqual(len(plan["runs"]), 2)
+                self.assertEqual(len(plan["runs"]), 1)
 
     def test_plan_run_ipad_geometry_gated_by_approval(self):
         with tempfile.TemporaryDirectory() as tmp:
             # non-pilot geometry blocked without approval
             proc = run("plan-run", "--request", str(HERE / "pilot_manifest.json"),
                        "--device", "AAAA1111-2222-3333-4444-555566667777",
-                       "--out", tmp, "--run-id", "pilot", "--runs", "2",
+                       "--out", tmp, "--run-id", "pilot",
                        "--geometry", "2064x2752")
             self.assertEqual(proc.returncode, 2)
             self.assertIn("blocked", proc.stderr)
@@ -278,7 +285,7 @@ class CliTests(unittest.TestCase):
                 approval, ap_path = make_approval(retained)
                 proc = run("plan-run", "--request", str(HERE / "pilot_manifest.json"),
                            "--device", "AAAA1111-2222-3333-4444-555566667777",
-                           "--out", tmp, "--run-id", "pilot", "--runs", "2",
+                           "--out", tmp, "--run-id", "pilot",
                            "--geometry", "2064x2752",
                            "--approval", ap_path, "--retained-dir", retained)
                 self.assertEqual(proc.returncode, 0, proc.stderr)
@@ -290,7 +297,7 @@ class CliTests(unittest.TestCase):
                 approval, ap_path = make_approval(retained)
                 proc = run("plan-run", "--request", str(HERE / "pilot_manifest.json"),
                            "--device", "AAAA1111-2222-3333-4444-555566667777",
-                           "--out", tmp, "--run-id", "pilot", "--runs", "2",
+                           "--out", tmp, "--run-id", "pilot",
                            "--geometry", "100x100",
                            "--approval", ap_path, "--retained-dir", retained)
                 self.assertEqual(proc.returncode, 2)
@@ -360,14 +367,14 @@ class CliTests(unittest.TestCase):
             # blocked without approval and without the CI flag
             proc = run("plan-run", "--request", bp,
                        "--device", "AAAA1111-2222-3333-4444-555566667777",
-                       "--out", tmp, "--run-id", "pilot-ru", "--runs", "2",
+                       "--out", tmp, "--run-id", "pilot-ru",
                        "--geometry", "2064x2752")
             self.assertEqual(proc.returncode, 2)
             self.assertIn("blocked", proc.stderr)
             # CI harness passes with the bypass and logs it in the plan
             proc = run("plan-run", "--request", bp,
                        "--device", "AAAA1111-2222-3333-4444-555566667777",
-                       "--out", tmp, "--run-id", "pilot-ru", "--runs", "2",
+                       "--out", tmp, "--run-id", "pilot-ru",
                        "--geometry", "2064x2752",
                        env_extra={"LIFIO_CAPTURE_CI": "1"})
             self.assertEqual(proc.returncode, 0, proc.stderr)
@@ -480,48 +487,19 @@ class CliTests(unittest.TestCase):
             # either way never a silent pass
             self.assertNotEqual(proc.returncode, 0)
 
-    def test_finalize_two_runs_cli(self):
-        def manifest(frames, totals, run_id):
-            return {"schema_version": 1, "run_id": run_id,
-                    "device_udid": "U", "deck_version": "en-austin-1",
-                    "treatment": "light-v1",
-                    "geometry": {"width": 1320, "height": 2868},
-                    "frames": frames, "status": "complete"}
-
-        def recs(shot="p" * 64, totals=None):
-            t = dict(PINNED_TOTALS) if totals is None else totals
-            return [{"frame": f, "request_sha256": "a" * 64,
-                     "request_semantic_sha256": "s" * 64,
-                     "screenshot_sha256": shot, "expected_totals": t}
-                    for f in ("track-running", "insights", "history",
-                              "add-entry", "la-lock", "la-compact",
-                              "la-expanded")]
-
+    def test_finalize_two_runs_retired_fails_closed(self):
+        # Single-pass decision 2026-11-04: the automatic two-run
+        # comparison verb is retired. Invoking it must fail closed
+        # (unknown subcommand, nonzero exit) — never run a comparison
+        # or claim a verdict. Human inspection governs manual reruns
+        # via the preserved per-record semantic hashes.
+        import run_manifest as rm
+        self.assertFalse(hasattr(rm, "compare_runs"))
         with tempfile.TemporaryDirectory() as tmp:
-            for suffix in ("-r1", "-r2"):
-                d = Path(tmp) / "runs" / ("pilot" + suffix)
-                d.mkdir(parents=True)
-                (d / "run-manifest.json").write_text(
-                    json.dumps(manifest(recs(), dict(PINNED_TOTALS), "pilot" + suffix)),
-                    encoding="utf-8")
-            proc = run("finalize-two-runs", "--out", tmp, "--run-id-base", "pilot")
-            self.assertEqual(proc.returncode, 0, proc.stderr)
-            verdict = json.loads(proc.stdout)
-            self.assertEqual(verdict["status"], "complete")
-            # png drift -> pending with explicit variance, never silent pass
-            d2 = Path(tmp) / "runs" / "pilot-r2" / "run-manifest.json"
-            m2 = json.loads(d2.read_text(encoding="utf-8"))
-            m2["frames"][0]["screenshot_sha256"] = "q" * 64
-            d2.write_text(json.dumps(m2), encoding="utf-8")
-            proc = run("finalize-two-runs", "--out", tmp, "--run-id-base", "pilot")
-            self.assertEqual(proc.returncode, 3)
-            verdict = json.loads(proc.stdout)
-            self.assertEqual(verdict["unreviewed_variance"], ["track-running"])
-            # totals drift -> hard failure
-            m2["frames"][1]["expected_totals"] = dict(PINNED_TOTALS, week_seconds=2)
-            d2.write_text(json.dumps(m2), encoding="utf-8")
-            proc = run("finalize-two-runs", "--out", tmp, "--run-id-base", "pilot")
-            self.assertEqual(proc.returncode, 2)
+            proc = run("finalize-two-runs", "--out", tmp,
+                       "--run-id-base", "pilot")
+            self.assertNotEqual(proc.returncode, 0)
+            self.assertIn("finalize-two-runs", proc.stderr)
 
 
 class RunSessionCliTests(unittest.TestCase):

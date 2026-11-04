@@ -12,8 +12,9 @@ Subcommands (validation/gate/execution CLI; nothing auto-approves):
   verify-la         validate human-supplied LA timer observation (±2s, hash-bound)
   verify-picker     require picker keyboard inspection artifact (hash+language bound)
   check-approval    hash/file-verified approval gate
-  plan-run          full 7-frame pilot plan for two runs (no device I/O;
-                    --geometry/--approval/--retained-dir gate expansion)
+  plan-run          single-pass 7-frame pilot plan (no device I/O;
+                    --geometry/--approval/--retained-dir gate expansion;
+                    no --runs selector per the single-pass contract)
   locale-totals     print the canonical pinned totals for one locale
   run-session       lease-gated composite owning one device lease for a
                     whole session domain (pinned XOR realtime); the only
@@ -27,7 +28,9 @@ Subcommands (validation/gate/execution CLI; nothing auto-approves):
                     (explicit session args verified, --request rejected).
   finalize-run      assemble run-manifest.json (complete|needs-inspection)
                     session-receipt gated; legacy per-frame runs rejected
-  finalize-two-runs semantic comparison of two runs (never byte-equal PNGs)
+                    (single pass; the retired finalize-two-runs automatic
+                    comparison verb fails closed — human inspection governs
+                    manual reruns via preserved semantic hashes)
 
 Real device/simulator operations are lease-gated: without
 LIFIO_CAPTURE_LEASE=1 the CLI only plans/validates and never spawns
@@ -52,7 +55,6 @@ import inspection as inspection_mod
 import output_guard as guard
 import preflight as preflight_mod
 import request_schema as req
-import run_manifest as manifest_mod
 import state_check as state_mod
 
 EXIT_OK = 0
@@ -348,20 +350,14 @@ def cmd_plan_run(args: argparse.Namespace) -> int:
             print(f"blocked: {e}", file=sys.stderr)
         return EXIT_INVALID
     try:
-        plans = [
-            preflight_mod.plan_run(
-                base, list(req.PILOT_FRAMES), args.device, str(out_root),
-                f"{args.run_id}-r{i+1}", geometry=geometry,
-            )
-            for i in range(args.runs)
-        ]
+        plan = preflight_mod.plan_run(
+            base, list(req.PILOT_FRAMES), args.device, str(out_root),
+            args.run_id, geometry=geometry,
+        )
     except ValueError as exc:
         print(f"invalid: {exc}", file=sys.stderr)
         return EXIT_INVALID
-    if args.runs != 2:
-        print("invalid: pilot requires exactly two full runs", file=sys.stderr)
-        return EXIT_INVALID
-    print(json.dumps({"runs": plans}, indent=2))
+    print(json.dumps({"runs": [plan]}, indent=2))
     return EXIT_OK
 
 
@@ -651,61 +647,13 @@ def cmd_finalize_run(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
-def cmd_finalize_two_runs(args: argparse.Namespace) -> int:
-    try:
-        out_root = guard.ensure_out_root(args.out)
-    except guard.GuardError as exc:
-        print(f"invalid: {exc}", file=sys.stderr)
-        return EXIT_INVALID
-    manifests = []
-    for suffix in ("-r1", "-r2"):
-        path = exec_mod.run_dir_for(
-            str(out_root), args.run_id_base + suffix) / "run-manifest.json"
-        try:
-            manifests.append(json.loads(path.read_text(encoding="utf-8")))
-        except (OSError, json.JSONDecodeError) as exc:
-            print(f"invalid: cannot read {path}: {exc}", file=sys.stderr)
-            return EXIT_INVALID
-    res = manifest_mod.compare_runs(manifests[0], manifests[1])
-    reviewed: set[str] = set()
-    if args.variance_review is not None:
-        try:
-            review = json.loads(Path(args.variance_review).read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError) as exc:
-            print(f"invalid: cannot read variance review: {exc}", file=sys.stderr)
-            return EXIT_INVALID
-        if not isinstance(review, dict):
-            print("invalid: variance review must be an object", file=sys.stderr)
-            return EXIT_INVALID
-        for frame, entry in review.items():
-            if not isinstance(entry, dict) or not entry.get("reviewer") or not entry.get("date"):
-                print(f"invalid: variance review for {frame!r} needs reviewer+date",
-                      file=sys.stderr)
-                return EXIT_INVALID
-            reviewed.add(frame)
-    unreviewed = [f for f in res["unreviewed_variance"] if f not in reviewed]
-    verdict = {
-        "run_id_base": args.run_id_base,
-        "errors": res["errors"],
-        "unreviewed_variance": unreviewed,
-        "reviewed_variance": sorted(reviewed & set(res["unreviewed_variance"])),
-        "provenance": [m.get("provenance") for m in manifests],
-        "status": "complete" if not res["errors"] and not unreviewed else (
-            "failed" if res["errors"] else "needs-inspection"),
-    }
-    print(json.dumps(verdict, indent=2, sort_keys=True))
-    if res["errors"]:
-        return EXIT_INVALID
-    return EXIT_OK if not unreviewed else EXIT_PENDING
-
-
 def cmd_run_session(args: argparse.Namespace) -> int:
     """Lease-gated composite owning one device lease for a whole session.
 
     Runs a single frozen-v2 domain (pinned XOR realtime): sequential
-    locales/passes and the two domains per pass are composed by the
-    workflow wrapper, which then calls the existing finalize-run and
-    finalize-two-runs. The device lock is held inside run_session across
+    locales and the two domains per locale are composed by the
+    workflow wrapper, which then calls the existing finalize-run.
+    The device lock is held inside run_session across
     all frame commands of this session (never pre-acquired here).
     """
     refused = _require_lease()
@@ -854,7 +802,6 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--device", required=True)
     p.add_argument("--out", required=True)
     p.add_argument("--run-id", required=True)
-    p.add_argument("--runs", type=int, default=2)
     p.add_argument("--geometry", required=False, default="1320x2868",
                    help="WxH; non-pilot matrix sizes require 5.4 ipad approval")
     p.add_argument("--approval", required=False, default=None,
@@ -897,12 +844,6 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--provenance", required=False, default=None,
                    help="JSON file {commit_base: str, dirty: bool}")
     p.set_defaults(fn=cmd_finalize_run)
-
-    p = sub.add_parser("finalize-two-runs")
-    p.add_argument("--out", required=True)
-    p.add_argument("--run-id-base", required=True)
-    p.add_argument("--variance-review", required=False, default=None)
-    p.set_defaults(fn=cmd_finalize_two_runs)
 
     p = sub.add_parser("run-session")
     p.add_argument("--device", required=True)

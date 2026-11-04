@@ -1,20 +1,20 @@
 ## Why
 
-The default App Store screenshot run took 78 minutes to finish captures under a five-macOS-job limit, repeatedly building the same binary and recreating a fixture session for every frame. Even after removing duplicate builds, the current capture work totals 25–28 minutes per device, so reaching the owner's under-20-minute workflow goal requires session-based capture as well as device-affine scheduling.
+The default App Store screenshot run took 78 minutes to finish captures under a five-macOS-job limit, repeatedly building the same binary and recreating a fixture session for every frame. Even after removing duplicate builds, the current capture work totals 25–28 minutes per device, so the owner accepted a session-based capture with device-affine scheduling plus a single automated pass per device-locale (owner decision 2026-11-04: one pass, manual reruns when needed — no automatic second pass, no automatic pass comparison). The 20-minute workflow target is recorded as aspirational, not a hard gate; acceptance requires successful downloadable output with truthful evidence status. The owner explicitly accepts ~22 minutes versus 70+.
 
 ## What Changes
 
 - Build one Release-optimized, simulator-only Screenshot app for the arm64 capture fleet and distribute a permission-preserving artifact with verified build provenance; reuse dependency/build caches without depending on a cache hit for correctness.
-- Replace the device × locale job matrix with one capture worker per selected device, at most five workers concurrently. Each worker boots and installs once, then processes the selected locales sequentially with two fresh passes per locale.
-- Capture Track → Insights → History top → Add entry in one fresh pinned-clock process per locale/pass, seeding once and validating the native screen, totals, and frame-bound readiness before every export. Keep locale and clock-domain changes at process boundaries.
-- Group Live Activity work in a separate real-time session per locale/pass with one activity anchor. Preserve genuine-evidence requirements, explicit pending/blocked handoffs, and probed iPad Island N/A states; do not turn placeholder images into successful captures.
+- Replace the device × locale job matrix with one capture worker per selected device, at most five workers concurrently. Each worker boots and installs once, then processes the selected locales sequentially with one fresh automated pass per locale (manual reruns when needed re-invoke the same single-pass workflow with a new run identity; no automatic r2, no new pass selector).
+- Capture Track → Insights → History top → Add entry in one fresh pinned-clock process per locale (single pass), seeding once and validating the native screen, totals, and frame-bound readiness before every export. Keep locale and clock-domain changes at process boundaries.
+- Group Live Activity work in a separate real-time session per locale (single pass) with one activity anchor. Preserve genuine-evidence requirements, explicit pending/blocked handoffs, and probed iPad Island N/A states; do not turn placeholder images into successful captures.
 - Move device locking, chrome snapshot/application/restoration, container lookup, and immutable binary provenance to owned-session scope. Retain per-frame request hashes, native geometry, screenshots, state checks, and fail-closed cleanup dependencies.
-- Add phase timing and command counters, a one-locale pilot benchmark before expansion, and cold/warm end-to-end acceptance against a 20-minute target. Report actual scheduling delays and missing evidence rather than hiding them.
+- Add phase timing and command counters, a one-locale pilot benchmark before expansion, and single-pass end-to-end acceptance requiring successful downloadable output with truthful evidence status; record 20 minutes as aspirational, not a hard gate (prior cold/warm <1,200s hard gates superseded — old runs failed, no fabricated acceptance). Report actual scheduling delays and missing evidence rather than hiding them. Human visual inspection governs; manual reruns replace automatic pass comparison.
 - **BREAKING (capture tooling only):** evolve capture request/state/session records in place for session identity, ordered frame commands, and session cleanup receipts; update the app, runner, finalizer, and tests together. No legacy on-disk protocol branches.
 
 ### Non-goals
 
-- No shipping UI, timer/auth/sync behavior, fixtures' content/totals, locale list, or two-pass guarantee changes; no Debug reuse or weaker Screenshot/Release isolation.
+- No shipping UI, timer/auth/sync behavior, fixtures' content/totals, or locale list changes; single-pass replaces the prior two-pass guarantee per owner decision 2026-11-04 (manual reruns + human visual inspection, no automatic comparison, existing session/run identity machinery reused, no legacy on-disk branches); no Debug reuse or weaker Screenshot/Release isolation.
 - No skipped database migrations, raw GRDB writes outside `LocalStore`, fake view-model validation, shorter system deadlines, relaxed Live Activity timer tolerance, or automatic visual approval.
 - No new simulator farm, larger paid runners, parallel simulators on a worker, landing montage, `web/` changes, App Store upload, or separate render-only dispatch feature.
 - No repair of unrelated archive/baseline drift and no claim that screenshot owner acceptances or genuine Live Activity automation are completed by this performance change.
@@ -23,7 +23,7 @@ The default App Store screenshot run took 78 minutes to finish captures under a 
 
 ### New Capabilities
 
-- `screenshot-capture-workflow`: device-affine scheduling, shared build provenance, sequenced session capture, evidence-preserving cleanup, and measured runtime acceptance.
+- `screenshot-capture-workflow`: device-affine scheduling, shared build provenance, single-pass sequenced session capture with human-inspected manual reruns, evidence-preserving cleanup, and downloadable-output acceptance with aspirational runtime reporting.
 
 ### Modified Capabilities
 
@@ -43,3 +43,4 @@ None. Existing `localization`, `live-activities`, `timer-capture-experience`, `h
 - Apple research: `/websites/developer_apple_xcode` — “Build settings ARCHS ONLY_ACTIVE_ARCH build only arm64 simulator while retaining release compiler optimization”; “Measure application launch performance with Instruments App Launch and signposts to separate database initialization from first rendered frame.” Pin the exact selected Xcode 27.x toolchain/runtime in provenance; the baseline used Xcode 27.1 with iOS 27.0. `ONLY_ACTIVE_ARCH` alone does not constrain a generic destination, so verify the produced slices explicitly.
 - Official artifact documentation confirms tar preserves executable permissions and cache misses must remain rebuildable: [upload-artifact](https://github.com/actions/upload-artifact#permission-loss), [dependency caching](https://docs.github.com/en/actions/concepts/workflows-and-actions/dependency-caching).
 - HIG research waived: no screen layout, interaction, or visual design is being redesigned; capture must still prove the existing native screens. New ActivityKit/GRDB API research waived for planning: reuse existing lifecycle and `LocalStore` methods, not new SDK/database APIs. Fetch applicable docs before any implementation that changes those calls. Reconfirm this research after the implementation rebase.
+- Revision 2026-11-04 (owner-approved single pass): one automated pass per device-locale; manual reruns when needed with human visual inspection; prior two-pass measurements in `evidence/` remain historically valid but are superseded as acceptance. Per-frame totals, native geometry, exact byte-hash binding, isolation, cleanup, provenance, honest LA/N-A, and owner approval are preserved unchanged.

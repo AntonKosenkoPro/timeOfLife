@@ -576,30 +576,61 @@ def build_cleanup_argv(udid: str, bid: str, run_id: str, sha: str, *,
                  session_domain=session_domain, final_seq=final_seq)
 
 
+# Spawn-trail bound: only the last N classified command events are
+# retained per session; older ones roll off with a truncation counter.
+SPAWN_TRAIL_CAP = 20
+SPAWN_OUTCOMES = ("ok", "timeout", "oserror")
+
+
 class PhaseStats:
-    """Monotonic runner timings + counters (task 2.1).
+    """Monotonic runner timings + counters + spawn trail (task 2.1).
 
     Runner phases use time.monotonic only. App-side durations (seed,
     validation, mount, settle) are recorded separately via
     note_app_duration and NEVER subtracted from runner phases: the two
     clocks live in different domains.
+
+    The spawn trail records the last SPAWN_TRAIL_CAP classified simctl
+    command events (semantic category only — never raw argv, paths,
+    nonces, launch args, or stderr) with the active phase,
+    start-relative-ms, duration-ms, outcome, and return code where
+    available. Older entries roll off with a truncation counter. It is
+    diagnostics only: timeouts, deadlines, retries, counters, and
+    receipt failure ordering are unchanged.
     """
 
     def __init__(self, clock=time.monotonic):
         self._clock = clock
+        self._t0 = clock()
         self._starts: dict[str, float] = {}
+        self._phase_stack: list[str] = []
         self.phases_ms: dict[str, float] = {}
         self.counters: dict[str, int] = {}
         self.app_durations_ms: dict[str, float] = {}
+        self.spawn_trail: list[dict[str, Any]] = []
+        self.spawn_dropped: int = 0
+
+    def now(self) -> float:
+        """Current runner-clock reading (seconds, monotonic domain)."""
+        return self._clock()
+
+    def current_phase(self) -> str | None:
+        """Innermost started-but-unstopped phase, or None outside one."""
+        return self._phase_stack[-1] if self._phase_stack else None
 
     def start(self, name: str) -> None:
         self._starts[name] = self._clock()
+        self._phase_stack.append(name)
 
     def stop(self, name: str) -> float:
         if name not in self._starts:
             raise SessionError(f"phase {name!r} was never started")
         elapsed_ms = (self._clock() - self._starts.pop(name)) * 1000.0
         self.phases_ms[name] = self.phases_ms.get(name, 0.0) + elapsed_ms
+        if name in self._phase_stack:
+            idx = len(self._phase_stack) - 1 - \
+                self._phase_stack[::-1].index(name)
+            self._phase_stack.pop(idx)
         return elapsed_ms
 
     def count(self, name: str, n: int = 1) -> None:
@@ -613,9 +644,55 @@ class PhaseStats:
             raise SessionError("app duration must be non-negative")
         self.app_durations_ms[name] = float(duration_ms)
 
+    def note_spawn(self, *, category: str, outcome: str,
+                   t_start: float, t_end: float,
+                   rc: int | None = None,
+                   phase: str | None = None) -> dict[str, Any]:
+        """Record one classified spawn event (runner clock only).
+
+        category is a semantic label (e.g. "ui-appearance-query",
+        "launch-cleanup") chosen by the caller — raw argv, paths,
+        nonces, launch args, and stderr are NEVER accepted here, so
+        they cannot leak into persisted stats. outcome is one of
+        "ok" | "timeout" | "oserror". t_start/t_end are runner-clock
+        readings (same domain as phases); skew clamps to 0.0 rather
+        than recording negatives. Only the last SPAWN_TRAIL_CAP
+        entries are retained; older ones roll off with spawn_dropped.
+        """
+        if not isinstance(category, str) or not category:
+            raise SessionError("spawn category must be a non-empty string")
+        if outcome not in SPAWN_OUTCOMES:
+            raise SessionError(
+                f"spawn outcome must be one of {list(SPAWN_OUTCOMES)}")
+        if not isinstance(t_start, (int, float)) or \
+                not isinstance(t_end, (int, float)):
+            raise SessionError("spawn clock readings must be numbers")
+        if rc is not None and (isinstance(rc, bool)
+                               or not isinstance(rc, int)):
+            raise SessionError("spawn rc must be an int or None")
+        start_rel_ms = max(0.0, (t_start - self._t0) * 1000.0)
+        duration_ms = max(0.0, (t_end - t_start) * 1000.0)
+        entry: dict[str, Any] = {
+            "category": category,
+            "phase": phase if phase is not None else (
+                self.current_phase() or "unknown"),
+            "start_rel_ms": float(start_rel_ms),
+            "duration_ms": float(duration_ms),
+            "outcome": outcome,
+            "rc": rc,
+        }
+        self.spawn_trail.append(entry)
+        overflow = len(self.spawn_trail) - SPAWN_TRAIL_CAP
+        if overflow > 0:
+            del self.spawn_trail[0:overflow]
+            self.spawn_dropped += overflow
+        return entry
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "phases_ms": dict(self.phases_ms),
             "counters": dict(self.counters),
             "app_durations_ms": dict(self.app_durations_ms),
+            "spawn_trail": [dict(e) for e in self.spawn_trail],
+            "spawn_dropped": self.spawn_dropped,
         }

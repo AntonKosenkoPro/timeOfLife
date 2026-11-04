@@ -16,16 +16,16 @@ The archived screenshot change remains the reference for decks, visual story, ge
 
 **Goals:**
 
-- Amortize launch, fixture initialization, simulator setup, and immutable provenance while keeping frame-level proof and two fresh passes.
+- Amortize launch, fixture initialization, simulator setup, and immutable provenance while keeping frame-level proof in a single fresh automated pass per device-locale (manual reruns when needed, no automatic second pass).
 - Make the number of capture workers follow the device catalog, not device × locale count, and operate correctly when the account supplies fewer than five slots.
-- Make cold/warm performance, incomplete output, and cleanup failure independently observable.
+- Make single-pass performance, incomplete output, and cleanup failure independently observable; the 20-minute budget stays aspirational (owner accepts ~22min vs 70+), while successful downloadable output with truthful status is required.
 
 **Non-Goals:**
 
 - No production navigation or data-flow refactor; new session control stays under `SCREENSHOT_CAPTURE` and simulator guards.
 - No schema fast path, alternate fixture database format, outbox bypass, or cached replacement for real view-model validation.
 - No automatic genuine Lock Screen/Island capture solution. Existing CI limitations and human handoff remain visible; this change optimizes their lifecycle, not their approval status.
-- No unconditional under-20-minute promise for unlimited devices, fewer available slots, human review, runtime downloads, or queued runs. Those durations remain reported and cannot be subtracted from an observed miss.
+- No unconditional under-20-minute promise for unlimited devices, fewer available slots, human review, runtime downloads, or queued runs. Those durations remain reported and cannot be subtracted from an observed miss. The 20-minute target is aspirational, not a hard gate; a full single-pass run must still produce successful downloadable output (per-locale artifacts + panels/ZIP with truthful status).
 
 ## Decisions
 
@@ -35,9 +35,9 @@ Validate input catalogs before expensive work. Defaults stay `iphone69`, `iphone
 
 ```text
 validated selection → shared Screenshot build
-                         ├─ iphone69: boot/install → locales, each r1 then r2
-                         ├─ iphone63: boot/install → locales, each r1 then r2
-                         └─ ipad13:   boot/install → locales, each r1 then r2
+                         ├─ iphone69: boot/install → locales, single pass each
+                         ├─ iphone63: boot/install → locales, single pass each
+                         └─ ipad13:   boot/install → locales, single pass each
                                       ↓
                         existing macOS panels + ZIP stage
 ```
@@ -56,25 +56,27 @@ Use dependency caches keyed by package lockfiles, toolchain/SDK, host architectu
 
 **Research:** `/websites/github_en_actions` artifact passing, immutable artifacts, cache-hit/miss behavior, and matrix max-parallel; `/websites/developer_apple_xcode` build-settings query cited in the proposal. Keep artifact action v4 and existing pinned tooling unless a separately justified update is needed.
 
-### 3. Use two process domains within each fresh locale/pass
+### 3. Use two process domains within each fresh locale (single pass)
 
-For each locale, run r1 and then r2. Each pass comprises:
+For each locale, run a SINGLE automated pass (owner decision 2026-11-04; no automatic r2 — a manual rerun re-invokes the same single-pass workflow with a new run identity when needed). Each pass comprises:
 
 1. **Pinned app session:** apply locale before mounting, open/migrate and seed one isolated store, then present Track → Insights → History top → Add entry sequentially.
 2. Clean the pinned session, restore its settings, and terminate it with verified receipts.
 3. **Real-time Live Activity session:** fresh process/store, real start anchor, one activity identity reused across the applicable system states; then end that activity and clean the session.
 
-Use a distinct session identity for each process domain, nested within the stable device-locale-pass run identity. Never change locale, reference clock, deck/treatment, geometry, or clock domain in an active process. No store crosses passes or locales. Default upper-bound session counts become 20 per device (ten pinned and ten real-time), versus 70 frame sessions; with one launch and one cleanup launch per session, 40 launches replace 140. These are structural counts, not promised elapsed-time savings.
+Use a distinct session identity for each process domain, nested within the stable device-locale run identity. Never change locale, reference clock, deck/treatment, geometry, or clock domain in an active process. No store crosses locales or manual reruns. Default upper-bound session counts become 10 per device (five pinned and five real-time for five locales), versus 70 frame sessions; with one launch and one cleanup launch per session, 20 launches replace 140. These are structural counts, not promised elapsed-time savings.
 
 All initialization still uses normal `LocalStore` opening/migrations and existing mutation methods. Within the four pinned frames, preserve the store but reconstruct/reset capture navigation and presentation state for the target frame. Re-read real Track/History/Insights inputs and independently validate totals on every transition. Add entry remains an uncommitted form; compare entry contents/counts and totals before/after it. Reuse the fixture, not stale view models or ready acknowledgements.
 
-**Alternative:** keep per-frame processes and only shorten polling. It retains almost all launch, seeding, and simulator-command cost. Sharing one process across all locales is rejected because native localization was already proven launch-sensitive. Combining pinned and real-time sessions would conflate clock domains.
+**Alternative:** keep per-frame processes and only shorten polling. It retains almost all launch, seeding, and simulator-command cost. Sharing one process across all locales is rejected because native localization was already proven launch-sensitive. Combining pinned and real-time sessions would conflate clock domains. A second automatic pass is rejected per owner decision 2026-11-04 — manual reruns reuse the existing run/session identity machinery with a new run identity, no new pass selector, no legacy on-disk branches.
 
 ### 4. Extend the existing atomic-file transport with ordered session commands
 
 Use capture-owned files under the app's Documents directory, not new sockets, URL schemes, or entitlements. The initial request declares a fresh session nonce, run/pass identity, immutable inputs, and the initial command. Later frame commands are written atomically to the active session's next-command file. Only one command is in flight. Restrict session identifiers and relative command paths to the owned namespace, rejecting traversal and symlink escape. Atomically claim/consume each published command before execution; re-observing its unchanged consumed record is a no-op, whereas a new publication of that same sequence is an explicit replay and fails closed.
 
-Each command/ack carries session nonce, run identity, monotonic sequence, frame, mode, and exact canonical request hash. Hash the canonical request payload; carry its digest in the outer command/ack envelope, avoiding a self-referential hash. Bind semantic frame hashes separately for r1/r2 comparison, excluding volatile session nonce/sequence/run identifiers. Tests must prove that different volatile identities do not disguise a changed locale, deck, clock, geometry, or frame input.
+A manual rerun is a fresh worker invocation carrying a fresh invocation/run identity — not a new pass selector and not a continuation of the prior run. Every status record carries the actual run identity it belongs to. Resolving the valid manifest/status for a run identity must select the unique record bound to that identity; falling back arbitrarily to another run's record (for example one prior pass versus another) is rejected. A manual rerun starts fresh output, and any ambiguity about which output belongs to the active run identity fails closed rather than merging or reusing stale results.
+
+Each command/ack carries session nonce, run identity, monotonic sequence, frame, mode, and exact canonical request hash. Hash the canonical request payload; carry its digest in the outer command/ack envelope, avoiding a self-referential hash. Keep semantic frame hashes (excluding volatile session nonce/sequence/run identifiers) to support human comparison across manual reruns — there is NO automatic r1/r2 comparison. Tests must prove that different volatile identities do not disguise a changed locale, deck, clock, geometry, or frame input.
 
 The app accepts only the next expected sequence and allowed story transition for that domain. It publishes preparing state before presenting a new frame. Invalid session inputs, duplicate/out-of-order commands, stale commands after cleanup, and mode changes fail closed; do not silently accept a previous ready file. The command watcher runs only during the owned capture session and is cancelled on cleanup/failure. Start with bounded short file polling and instrument its latency; preserve the existing failure deadlines.
 
@@ -108,7 +110,7 @@ Every frame records a dependency on its session receipt. Finalization checks the
 
 Start/re-anchor the real activity once in a real-time session. All applicable states share its activity ID and start instant, with separate capture times and hash-bound numeric observations (tolerance remains two seconds). Keep native geometry and Island mask rules. The app session identity must not be confused with the activity identity.
 
-CI currently cannot export genuine Lock Screen/Island system surfaces via its existing path. Preserve explicit pending evidence and independent frame records; grouping cannot invent genuine pixels or make that pass complete. On iPad, capability probes establish Island N/A without launching separate Island frame sessions or fabricating images; Lock Screen remains required. Keep probe evidence and the reason in both passes' manifests. Update finalization to understand N/A as explicitly scoped availability, not a generic skip.
+CI currently cannot export genuine Lock Screen/Island system surfaces via its existing path. Preserve explicit pending evidence and independent frame records; grouping cannot invent genuine pixels or make that pass complete. On iPad, capability probes establish Island N/A without launching separate Island frame sessions or fabricating images; Lock Screen remains required. Keep probe evidence and the reason in the single-pass manifest (historical two-pass manifests retain both passes' records unchanged — do not rewrite them). Update finalization to understand N/A as explicitly scoped availability, not a generic skip.
 
 Do not change panel approval policy to get a fast green job. A pending-evidence CI handoff/debug ZIP is distinct from a complete panel ZIP. If a panel cell is blocked by source status, retain that blocked cell and explain it in the manifest/README. Genuine automation and owner gates 5.4/6.6/9.4 remain outside this change; their wall time is not an automated-workflow benchmark.
 
@@ -122,21 +124,21 @@ If profiling still identifies fixture I/O as material, batch existing storage op
 
 ### 8. Preserve per-locale artifacts and truthful runtime accounting
 
-Keep separate `shots-<device>-<locale>` artifacts with both passes, session receipts, frame records, and timing data. Use supported-locale upload steps inside the device job (not new locale jobs), conditioned on selection and available diagnostics and executed on failure as well. The worker writes failed/unattempted status records before exit. The packaging stage retains the current locale/device layout, tool/runtime/timestamp README, source hashes, approved-versus-captured status, and missing matrix cells. Preserve the repository-secret Figma access and verified bezel export behavior; do not reintroduce environment scoping.
+Keep separate `shots-<device>-<locale>` artifacts with the single pass, session receipts, frame records, and timing data. Use supported-locale upload steps inside the device job (not new locale jobs), conditioned on selection and available diagnostics and executed on failure as well. The worker writes failed/unattempted status records before exit. The packaging stage retains the current locale/device layout, tool/runtime/timestamp README, source hashes, approved-versus-captured status, and missing matrix cells. Preserve the repository-secret Figma access and verified bezel export behavior; do not reintroduce environment scoping.
 
-Measure dispatch-to-final-CI-ZIP time, not cumulative job minutes or the interval between workflow attempts. Include queueing and artifact availability. Record exact Xcode/runtime/image, cache hits, selected workload, active capacity, and whether the ZIP is a handoff/debug bundle or a complete panel bundle. No new render-only dispatch is required here; existing same-commit failed-job reruns remain distinct attempts and cannot pick up new workflow code.
+Measure dispatch-to-final-CI-ZIP time, not cumulative job minutes or the interval between workflow attempts. Include queueing and artifact availability. Record exact Xcode/runtime/image, cache hits, selected workload, active capacity, and whether the ZIP is a handoff/debug bundle or a complete panel bundle. No new render-only dispatch is required here; existing same-commit failed-job reruns remain distinct attempts and cannot pick up new workflow code. A manual rerun is a fresh invocation of the same single-pass workflow with a new run identity — never an in-workflow automatic retry, never a legacy protocol branch.
 
-Acceptance defaults to three devices × five locales × two passes, with capacity for one build, then those three overlapping device workers, then one packaging job within the shared five-job ceiling. Record observed overlap and known competing jobs, or explicitly state when competitor visibility is unavailable. Run a cold dependency/build-cache case and a warm-cache case on the same implementation, both from fresh worker simulators; both need measured final CI ZIP time below 1,200 seconds. Report any capacity or runtime-download delay, including when it causes a miss. Expanded matrices get their own measured budget, never a silently reduced selection.
+Acceptance defaults to three devices × five locales × single pass, with capacity for one build, then those three overlapping device workers, then one packaging job within the shared five-job ceiling. Record observed overlap and known competing jobs, or explicitly state when competitor visibility is unavailable. Acceptance requires successful downloadable output (per-locale artifacts + panels/ZIP with truthful pending/N-A/blocked status); record full phase timings against the aspirational 20-minute budget. Prior cold-cache + warm-cache <1,200s hard gates are SUPERSEDED (old runs failed; no fabricated cold/warm/final-ZIP acceptance) — historical evidence counts stay valid and are not rewritten. Expanded matrices get their own measured budget, never a silently reduced selection.
 
-| Planning allocation | Target, not a measurement |
+| Planning allocation | Target, not a measurement (aspirational; owner accepts ~22min vs 70+) |
 | --- | ---: |
 | Shared build and distribution | ≤4 minutes |
-| Slowest device worker including boot/install and all locales/passes | ≤12 minutes |
+| Slowest device worker including boot/install and all locales, single pass | ≤6 minutes |
 | Panels/manifest/ZIP/upload | ≤1 minute |
 | Queueing/other margin | 2 minutes |
-| Total | ≤19 minutes, preserving margin below 20 |
+| Total | ≤13 minutes single-pass planning guide, preserving margin below the aspirational 20 (NOT a hard gate) |
 
-First benchmark one locale with both passes on a dedicated device. Aim for 2–2.5 capture minutes per locale, then test all three device shapes and locale sequencing. If the pilot misses, profile and revise the implementation before expanding; do not weaken evidence, shorten deadlines, drop passes, or mark the runtime task done based on a warm subset.
+First benchmark one locale single-pass on a dedicated device. Aim for ~1–1.5 capture minutes per locale (half the prior 2–2.5 two-pass guide; aspirational, not a gate), then test all three device shapes and locale sequencing. If the pilot misses the aspirational budget, profile, report actuals, and revise the implementation before expanding; do not weaken evidence, shorten deadlines, or mark the runtime task done without successful downloadable output. Human visual inspection governs; manual reruns replace automatic comparison. Do not mark the runtime task done based on a warm subset.
 
 ## Risks / Trade-offs
 
@@ -144,8 +146,8 @@ First benchmark one locale with both passes on a dedicated device. Aim for 2–2
 - **A stale file authorizes the next export** → nonce + sequence + exact request hash binding, one in-flight command, atomic writes, and replay/late-callback tests.
 - **Cleanup failure affects multiple frames/locales** → session receipt dependencies, immediate stop on contamination, partial-artifact upload, and failure injection at every lifecycle phase.
 - **A fast native screenshot is taken before presentation settles** → retain existing guard for initial batching, verify root revision/mounting, and require visual evidence before changing settlement.
-- **Fewer workers or more devices miss the deadline** → device-affine topology remains correct; publish actual queueing/capacity and record the target as unmet rather than changing scope.
-- **Cold build remains too slow** → arm64-only verification, normal package caching, and measured phase diagnostics; cold acceptance remains open if it cannot meet the target.
+- **Fewer workers or more devices miss the aspirational budget** → device-affine topology remains correct; publish actual queueing/capacity and record the aspiration as unmet rather than changing scope. Successful downloadable output is still required.
+- **Cold build remains too slow** → arm64-only verification, normal package caching, and measured phase diagnostics; cold/warm hard gates are superseded — report actuals against the aspirational budget instead.
 - **Missing genuine LA evidence produces an empty/partial panel matrix** → explicit handoff/debug designation and blocked-cell list; neither job success nor elapsed time grants approval.
 - **One shared build or a device failure has a larger failure domain** → verify the build before capture, retain each completed locale's artifact, and use existing same-commit job retry semantics without a new recovery service.
 
@@ -153,13 +155,13 @@ First benchmark one locale with both passes on a dedicated device. Aim for 2–2
 
 1. Rebase before implementation, reconfirm research, preserve the linked baseline measurements, and add timing/counter instrumentation plus negative regression tests before lifecycle changes.
 2. Evolve capture-only request/state/cleanup shapes, implement session command handling and the runner together, and update finalization/consumer tests. Preserve ordinary Release rejection and all storage/network isolation guards.
-3. Prove one-locale two-pass batching and failure cleanup against the existing independent frame path. Keep legacy code only temporarily during implementation comparison, not as a shipped protocol compatibility branch.
-4. Wire shared arm64 build transfer and device workers, update artifacts/panel consumers, and run cold/warm full acceptance. Diagnose misses instead of increasing a timeout or relaxing a contract.
+3. Prove one-locale single-pass batching and failure cleanup against the existing independent frame path (historical two-pass proof stays valid, superseded as acceptance). Keep legacy code only temporarily during implementation comparison, not as a shipped protocol compatibility branch.
+4. Wire shared arm64 build transfer and single-pass device workers, update artifacts/panel consumers, and run single-pass acceptance (successful downloadable output + truthful status; record timings against the aspirational 20min). Diagnose misses instead of increasing a timeout or relaxing a contract.
 5. Update operator/design/CI docs and the context's screenshot status, including the missing-baseline caveat and still-open approvals; remove obsolete per-frame CI orchestration and reconcile tasks honestly.
 
 Rollback is a normal source revert of the app/runner/workflow protocol change together, followed by rebuilding the Screenshot artifact. Do not replay new requests against old binaries, overwrite external evidence, reset user work, or roll back production data; shipping storage and APIs do not migrate in this change.
 
 ## Open Questions
 
-- The exact post-batching bottleneck and resulting cold/warm elapsed time are intentionally measured in the pilot, not assumed. This affects tuning, not the chosen topology or evidence contract.
+- The exact post-batching bottleneck and resulting single-pass elapsed time are intentionally measured in the pilot, not assumed. This affects tuning, not the chosen topology or evidence contract.
 - The concrete settled-presentation probe remains a gated refinement: retain the existing guard unless its replacement is proven. This does not block initial session batching or justify weaker ready semantics.

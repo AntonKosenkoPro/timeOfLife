@@ -809,6 +809,356 @@ class SessionCleanupSpawnTests(unittest.TestCase):
             self.assertTrue(receipt["runner_verified"]["lease_released"])
 
 
+class SpawnTrailSessionTests(unittest.TestCase):
+    """Per-spawn trail through run_session (diagnostics only).
+
+    Every simctl spawn appends one bounded entry (semantic category,
+    active phase, monotonic start-relative-ms/duration-ms, outcome,
+    rc) including timeout/OSError events; raw argv, paths, nonces,
+    launch args, and stderr never enter persisted stats. Timeouts,
+    deadlines, retries, counters, and receipt failure ordering are
+    unchanged — asserted alongside the trail below.
+    """
+
+    def _record_stats(self, run_dir, nonce):
+        rec = json.loads(
+            (run_dir / "sessions" / f"{nonce}.json")
+            .read_text(encoding="utf-8"))
+        return rec["stats"]
+
+    def test_appearance_timeout_leaves_classified_trail(self):
+        # iphone63/ru-r1 mirror: export verify hangs past the timeout.
+        nonce = "a6b6b9af2a38bacfb2bb70334df09eb1"
+        with tempfile.TemporaryDirectory() as tmp:
+            udid = f"UDID-hang-{os.getpid()}"
+            container = Path(tmp) / "container"
+            container.mkdir()
+            fake = _HangAppearanceFake(container, hang_at_query=2,
+                                       list_model=IPHONE63_MODEL)
+            run_dir = Path(tmp) / "runs" / "iphone63-ru-r1"
+            with self.assertRaises(ex.FrameError) as ctx:
+                ex.run_session(
+                    fake, udid, base_request("iphone63-ru-r1"), "pinned",
+                    run_dir, device_key="iphone63",
+                    pinned_totals=dict(PINNED), geometry=(1206, 2622),
+                    session_nonce=nonce,
+                    sleeper=ex.no_sleep, on_poll=fake.pump)
+            self.assertIn("simctl spawn failed", str(ctx.exception))
+            self.assertIn("ui-appearance-query", str(ctx.exception))
+            # Redacted failure message: no raw argv echo (paths, UDID,
+            # tokens) — TimeoutExpired reprs would leak argv, so the
+            # message names the category only.
+            for banned in (udid, nonce, "xcrun", "SCREENSHOT"):
+                self.assertNotIn(banned, str(ctx.exception))
+            stats = self._record_stats(run_dir, nonce)
+            trail = stats["spawn_trail"]
+            hits = [e for e in trail
+                    if e["category"] == "ui-appearance-query"
+                    and e["outcome"] == "timeout"]
+            self.assertEqual(len(hits), 1)
+            hit = hits[0]
+            self.assertEqual(hit["phase"], "export")
+            self.assertIsNone(hit["rc"])
+            self.assertGreaterEqual(hit["start_rel_ms"], 0)
+            self.assertGreaterEqual(hit["duration_ms"], 0)
+            self.assertEqual(
+                set(hit), {"category", "phase", "start_rel_ms",
+                           "duration_ms", "outcome", "rc"})
+            blob = json.dumps(stats)
+            for banned in ("xcrun", "SCREENSHOT", udid, nonce, "stderr"):
+                self.assertNotIn(banned, blob, banned)
+            # Fail-closed accounting unchanged: partial receipt naming
+            # the spawn failure, truncated transcript, lease released.
+            receipt = json.loads(
+                list((run_dir / "sessions").glob("*.receipt.json"))[0]
+                .read_text(encoding="utf-8"))
+            self.assertEqual(receipt["status"], "partial")
+            self.assertIn("simctl spawn failed", receipt["failures"][0])
+            self.assertEqual(len(receipt["transcript"]), 1)
+            self.assertTrue(receipt["runner_verified"]["lease_released"])
+
+    def test_appearance_oserror_at_snapshot_leaves_trail(self):
+        nonce = "b7c7c9ab3b49cbdbc3cc81445ea10fc2"
+        with tempfile.TemporaryDirectory() as tmp:
+            udid = f"UDID-snap-{os.getpid()}"
+            container = Path(tmp) / "container"
+            container.mkdir()
+            fake = _HangAppearanceFake(container, hang_at_query=1,
+                                       error_kind="oserror",
+                                       list_model=IPHONE63_MODEL)
+            run_dir = Path(tmp) / "runs" / "iphone63-ru-r1"
+            with self.assertRaises(ex.FrameError):
+                ex.run_session(
+                    fake, udid, base_request("iphone63-ru-r1"), "pinned",
+                    run_dir, device_key="iphone63",
+                    pinned_totals=dict(PINNED), geometry=(1206, 2622),
+                    session_nonce=nonce,
+                    sleeper=ex.no_sleep, on_poll=fake.pump)
+            stats = self._record_stats(run_dir, nonce)
+            hits = [e for e in stats["spawn_trail"]
+                    if e["category"] == "ui-appearance-query"
+                    and e["outcome"] == "oserror"]
+            self.assertEqual(len(hits), 1)
+            self.assertEqual(hits[0]["phase"], "chrome")
+            receipt = json.loads(
+                list((run_dir / "sessions").glob("*.receipt.json"))[0]
+                .read_text(encoding="utf-8"))
+            self.assertEqual(receipt["transcript"], [])
+
+    def test_cleanup_timeout_trail_preserves_prior_failure(self):
+        # Combined failure: seq-2 refuses, then cleanup launch hangs.
+        # The frame failure stays first; the spawn failure is appended;
+        # both are classified in the trail.
+        nonce = "c9d9e0f1a2b3c4d5e6f708192a3b4c5d"
+        with tempfile.TemporaryDirectory() as tmp:
+            udid = f"UDID-cleanup-prior-{os.getpid()}"
+            container = Path(tmp) / "container"
+            container.mkdir()
+            fake = _HangCleanupLaunchFake(
+                container, fail_frame_seq=2, png_size=(1206, 2622),
+                list_model=IPHONE63_MODEL)
+            run_dir = Path(tmp) / "runs" / "iphone63-ru-r1"
+            with self.assertRaises(ex.FrameError) as ctx:
+                ex.run_session(
+                    fake, udid, base_request("iphone63-ru-r1"), "pinned",
+                    run_dir, device_key="iphone63",
+                    pinned_totals=dict(PINNED), geometry=(1206, 2622),
+                    session_nonce=nonce,
+                    sleeper=ex.no_sleep, on_poll=fake.pump)
+            self.assertIn("seed_failed", str(ctx.exception))
+            stats = self._record_stats(run_dir, nonce)
+            hits = [e for e in stats["spawn_trail"]
+                    if e["category"] == "launch-cleanup"]
+            self.assertEqual(len(hits), 1)
+            self.assertEqual(hits[0]["outcome"], "timeout")
+            self.assertEqual(hits[0]["phase"], "cleanup")
+            self.assertIsNone(hits[0]["rc"])
+            receipt = json.loads(
+                list((run_dir / "sessions").glob("*.receipt.json"))[0]
+                .read_text(encoding="utf-8"))
+            self.assertIn("seed_failed", receipt["failures"][0])
+            self.assertIn("simctl spawn failed", receipt["failures"][1])
+            self.assertTrue(receipt["runner_verified"]["lease_released"])
+
+    def test_happy_path_trail_bounded_redacted_and_consistent(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            udid = f"UDID-pin-{os.getpid()}"
+            container = Path(tmp) / "container"
+            container.mkdir()
+            fake = SessionFakeSimctl(container)
+            run_dir = Path(tmp) / "runs" / "sess-run-r1"
+            summary = ex.run_session(
+                fake, udid, base_request(), "pinned", run_dir,
+                device_key="iphone69", pinned_totals=dict(PINNED),
+                geometry=(1320, 2868), session_nonce=NONCE,
+                sleeper=ex.no_sleep, on_poll=fake.pump)
+            self.assertEqual(summary["status"], "complete")
+            stats = summary["stats"]
+            trail = stats["spawn_trail"]
+            # Bound honored; every spawn accounted exactly once.
+            self.assertLessEqual(len(trail), sess.SPAWN_TRAIL_CAP)
+            self.assertEqual(len(trail) + stats["spawn_dropped"],
+                             stats["counters"]["simctl_spawn"])
+            # Counter meaning unchanged.
+            self.assertEqual(stats["counters"]["launch"], 1)
+            # Cleanup launch classified on the happy path too.
+            self.assertTrue(any(e["category"] == "launch-cleanup"
+                                and e["outcome"] == "ok" for e in trail))
+            for entry in trail:
+                self.assertEqual(
+                    set(entry), {"category", "phase", "start_rel_ms",
+                                 "duration_ms", "outcome", "rc"})
+                self.assertGreaterEqual(entry["duration_ms"], 0)
+                self.assertGreaterEqual(entry["start_rel_ms"], 0)
+            blob = json.dumps(stats)
+            for banned in ("xcrun", "SCREENSHOT", udid, NONCE,
+                           "request_json"):
+                self.assertNotIn(banned, blob, banned)
+
+    def test_classify_spawn_covers_known_shapes(self):
+        c = ex._classify_spawn
+        u = "UDID-1"
+        self.assertEqual(
+            c(["xcrun", "simctl", "list", "-j", "devices"]), "device-list")
+        self.assertEqual(
+            c(["xcrun", "simctl", "get_app_container", u, "b", "data"]),
+            "get-app-container")
+        self.assertEqual(
+            c(["xcrun", "simctl", "status_bar", u, "list"]),
+            "status-bar-list")
+        self.assertEqual(
+            c(["xcrun", "simctl", "ui", u, "appearance"]),
+            "ui-appearance-query")
+        self.assertEqual(
+            c(["xcrun", "simctl", "ui", u, "content_size"]),
+            "ui-content-size-query")
+        self.assertEqual(
+            c(["xcrun", "simctl", "ui", u, "appearance", "light"]),
+            "ui-appearance-set")
+        self.assertEqual(
+            c(["xcrun", "simctl", "launch", "--terminate-running-process",
+               u, "b"]), "launch-capture")
+        self.assertEqual(
+            c(["xcrun", "simctl", "launch", "--terminate-running-process",
+               u, "b", "SCREENSHOT_CLEANUP=r",
+               "SCREENSHOT_SESSION_NONCE=n"]), "launch-cleanup")
+        self.assertEqual(
+            c(["xcrun", "simctl", "io", u, "screenshot", "--type=png",
+               "/tmp/a.png"]), "screenshot-export")
+        self.assertEqual(
+            c(["xcrun", "simctl", "terminate", u, "b"]), "terminate-app")
+        self.assertEqual(c(["xcrun", "simctl", "bogus"]), "simctl-unknown")
+        self.assertEqual(c([]), "simctl-unknown")
+
+    def test_attestation_single_event_per_spawn(self):
+        # Inner contract: raw run + stats records exactly one trail
+        # event and one counter per simctl list spawn.
+        with tempfile.TemporaryDirectory() as tmp:
+            udid = f"UDID-attest-{os.getpid()}"
+            container = Path(tmp) / "container"
+            container.mkdir()
+            fake = SessionFakeSimctl(container)
+            fake(["xcrun", "simctl", "ui", udid, "appearance"])
+            stats = sess.PhaseStats()
+            stats.start("resolve")
+            proof = ex.verify_owned_device(
+                fake, udid, device_key="iphone69",
+                geometry=(1320, 2868), stats=stats)
+            stats.stop("resolve")
+            self.assertEqual(
+                proof["deviceTypeIdentifier"], IPHONE69_MODEL)
+            listed = [e for e in stats.spawn_trail
+                      if e["category"] == "device-list"]
+            self.assertEqual(len(listed), 1)
+            self.assertEqual(listed[0]["phase"], "resolve")
+            self.assertEqual(listed[0]["outcome"], "ok")
+            self.assertEqual(stats.counters["simctl_spawn"], 1)
+
+    def test_session_preflight_lists_once(self):
+        # Runner finding: run_session passed the counted lambda into
+        # verify_owned_device while _read_device_entry counted again
+        # with stats — one simctl list spawn produced 2 trail events
+        # and 2 counter increments. Exactly one must remain. (The cap
+        # is lifted here so the resolve-phase entry cannot roll off;
+        # cap behavior itself is pinned in test_session.)
+        from unittest import mock
+        with tempfile.TemporaryDirectory() as tmp:
+            udid = f"UDID-preflight-{os.getpid()}"
+            container = Path(tmp) / "container"
+            container.mkdir()
+            fake = SessionFakeSimctl(container)
+            run_dir = Path(tmp) / "runs" / "sess-run-r1"
+            with mock.patch.object(sess, "SPAWN_TRAIL_CAP", 500):
+                summary = ex.run_session(
+                    fake, udid, base_request(), "pinned", run_dir,
+                    device_key="iphone69", pinned_totals=dict(PINNED),
+                    geometry=(1320, 2868),
+                    session_nonce="d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4",
+                    sleeper=ex.no_sleep, on_poll=fake.pump)
+            self.assertEqual(summary["status"], "complete")
+            trail = summary["stats"]["spawn_trail"]
+            listed = [e for e in trail
+                      if e["category"] == "device-list"]
+            self.assertEqual(len(listed), 1)
+            self.assertEqual(listed[0]["phase"], "resolve")
+
+
+class _SimulatedCrash(Exception):
+    """Deterministic crash-window fault (kill after a write completes)."""
+
+
+class ReceiptWriterWindowTests(unittest.TestCase):
+    """The interim receipt must never read complete before the writer
+    finishes (probe, session record, lease release, final rewrite).
+
+    A weak reader checks status==complete + transcript only, so an
+    on-disk "complete" with lease_released:false (left by a kill in
+    the window) would register as genuine completion. The interim
+    write stays explicitly partial; only the final rewrite may claim
+    complete. Earlier PNGs keep their receipt dependency honest, and
+    the interim file keeps transcript/stats for debug on kill.
+    """
+
+    def _crash_after_first_receipt_write(self, tmp, udid, run_dir,
+                                         run_id, nonce):
+        from unittest import mock
+        real_write = Path.write_text
+        state = {"receipt_writes": 0}
+
+        def _faulting_write(self, *args, **kwargs):
+            out = real_write(self, *args, **kwargs)
+            if self.name.endswith(".receipt.json"):
+                state["receipt_writes"] += 1
+                if state["receipt_writes"] == 1:
+                    raise _SimulatedCrash(
+                        "kill after interim receipt write")
+            return out
+
+        container = Path(tmp) / "container"
+        container.mkdir()
+        fake = SessionFakeSimctl(container)
+        with mock.patch.object(Path, "write_text", _faulting_write):
+            with self.assertRaises(_SimulatedCrash):
+                ex.run_session(
+                    fake, udid, base_request(run_id), "pinned", run_dir,
+                    device_key="iphone69", pinned_totals=dict(PINNED),
+                    geometry=(1320, 2868), session_nonce=nonce,
+                    sleeper=ex.no_sleep, on_poll=fake.pump)
+        on_disk = json.loads(
+            (run_dir / "sessions" / f"{nonce}.receipt.json")
+            .read_text(encoding="utf-8"))
+        return on_disk
+
+    def test_crash_window_never_leaves_complete(self):
+        nonce = "e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5"
+        with tempfile.TemporaryDirectory() as tmp:
+            udid = f"UDID-crashwin-{os.getpid()}"
+            run_dir = Path(tmp) / "runs" / "sess-run-r1"
+            try:
+                on_disk = self._crash_after_first_receipt_write(
+                    tmp, udid, run_dir, "sess-run-r1", nonce)
+            finally:
+                lock = Path(tempfile.gettempdir()) / \
+                    f"lifio-capture-{udid}.lock"
+                try:
+                    lock.unlink(missing_ok=True)
+                except OSError:
+                    pass
+            # The killed writer left diagnostics but claimed nothing:
+            # explicitly partial, lease unreleased, transcript kept.
+            self.assertEqual(on_disk["status"], "partial")
+            self.assertFalse(
+                on_disk["runner_verified"]["lease_released"])
+            self.assertEqual([r["seq"] for r in on_disk["transcript"]],
+                             [0, 1, 2, 3])
+            self.assertTrue(any("interim" in f for f in on_disk["failures"]),
+                            on_disk["failures"])
+            # A status+transcript-only reader cannot mistake this for
+            # genuine completion.
+            self.assertNotEqual(on_disk["status"], "complete")
+
+    def test_clean_run_still_completes_without_interim_note(self):
+        # The interim note never leaks into the final receipt, and a
+        # clean run still claims complete exactly once, at the end.
+        with tempfile.TemporaryDirectory() as tmp:
+            udid = f"UDID-cleanfin-{os.getpid()}"
+            container = Path(tmp) / "container"
+            container.mkdir()
+            fake = SessionFakeSimctl(container)
+            run_dir = Path(tmp) / "runs" / "sess-run-r1"
+            summary = ex.run_session(
+                fake, udid, base_request(), "pinned", run_dir,
+                device_key="iphone69", pinned_totals=dict(PINNED),
+                geometry=(1320, 2868),
+                session_nonce="f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6",
+                sleeper=ex.no_sleep, on_poll=fake.pump)
+            self.assertEqual(summary["status"], "complete")
+            receipt = summary["receipt"]
+            self.assertEqual(receipt["status"], "complete")
+            self.assertEqual(receipt["failures"], [])
+            self.assertTrue(receipt["runner_verified"]["lease_released"])
+
+
 class SessionFinalizeGateTests(unittest.TestCase):
     def test_pending_honest_needs_inspection_not_fatal(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -2113,6 +2463,190 @@ class AckTranscriptTests(unittest.TestCase):
         errs = ex._ack_transcript_covers(
             self._ack_for(envs, sha_flip=1), envs)
         self.assertTrue(any("seq 1" in e for e in errs), errs)
+
+
+class CrossLocaleCellBindingTests(unittest.TestCase):
+    """Audit cell-locale binding: end-to-end PROOF plus producer fix.
+
+    The hole (proven pre-fix: a complete EN run copied under the ru
+    cell with run identities rewritten passed consumer selection AND
+    the evidence gate) is closed in two layers: the producer binds an
+    envelope-derived unanimous run locale at finalization, and the
+    consumer requires every provenance claim to equal the cell
+    language (C owner, enforced — the standing negative below drives
+    the real consumer selection read-only and pins the refusal).
+    """
+
+    def _complete_en_run(self, tmp: str):
+        udid = f"UDID-xloc-{os.getpid()}"
+        run_id = "sess-en-r1"
+        fake, run_dir, pinned, realtime = two_domain_run(tmp, udid, run_id)
+        gen = PendingToGenuineE2ETests()
+        base = base_request(run_id)
+        for seq, frame in enumerate(("la-lock", "la-compact",
+                                     "la-expanded")):
+            request, digest, state, png, op, sha = gen._genuine_inputs(
+                tmp, base, frame, seq)
+            pending_rec = next(r for r in realtime["frames"]
+                               if r["frame"] == frame)
+            self.assertEqual(digest, pending_rec["request_sha256"])
+            ex.record_external_frame(
+                run_dir=run_dir, frame=frame, png_src=str(png),
+                captured_at_iso="2026-10-30T10:12:34+00:00",
+                observation_path=str(op), state=state, request=request,
+                request_sha256=digest, pinned_totals=dict(PINNED),
+                device_udid=udid,
+                session_binding={"session_nonce": NONCE_RT,
+                                 "session_domain": "realtime",
+                                 "seq": seq})
+        manifest, pending = ex.finalize_run(run_dir, provenance=dict(PROV))
+        self.assertEqual(pending, [])
+        self.assertEqual(manifest["status"], "complete")
+        return run_dir
+
+    def _forge_ru_cell(self, tmp: str, run_dir: Path) -> Path:
+        cell = Path(tmp) / "shots" / "iphone69" / "ru"
+        dest = cell / "runs" / "sess-ru-r1"
+        shutil.copytree(run_dir, dest)
+
+        def _rewrite_run_id(obj):
+            # Every run_id FIELD at any depth (manifest frames included);
+            # request_json stays byte-intact (nothing rehashes it today).
+            if isinstance(obj, dict):
+                for key, val in obj.items():
+                    if key == "run_id" and val == "sess-en-r1":
+                        obj[key] = "sess-ru-r1"
+                    else:
+                        _rewrite_run_id(val)
+            elif isinstance(obj, list):
+                for val in obj:
+                    _rewrite_run_id(val)
+
+        for child in sorted(dest.rglob("*.json")):
+            try:
+                obj = json.loads(child.read_text(encoding="utf-8"))
+            except ValueError:
+                continue
+            before = json.dumps(obj, sort_keys=True)
+            _rewrite_run_id(obj)
+            if json.dumps(obj, sort_keys=True) != before:
+                child.write_text(json.dumps(obj, sort_keys=True) + "\n",
+                                 encoding="utf-8")
+        return cell
+
+    def test_cross_locale_copy_blocked_end_to_end(self):
+        # Standing cross-locale negative through the REAL consumer
+        # chain: a complete EN run copied under the ru cell with outer
+        # run identities rewritten. The consumer's strict locale
+        # binding (C owner) refuses it — the archived inner commands
+        # still bind the EN run identity, so provenance diverges and
+        # selection blocks before any pixel renders. EN pixels must
+        # never render under ru captions.
+        sys.path.insert(0, str(HERE.parent / "panels"))
+        import panels as panels_mod
+        import builder as panels_builder
+        with tempfile.TemporaryDirectory() as tmp:
+            run_dir = self._complete_en_run(tmp)
+            cell = self._forge_ru_cell(tmp, run_dir)
+            with self.assertRaises(panels_builder.BuilderError) as ctx:
+                panels_mod.find_matrix_run(cell, "iphone69", "ru")
+            self.assertIn("locale", str(ctx.exception).lower())
+
+    def test_producer_binds_run_locale(self):
+        # Producer integration proof: the manifest `locale` (exact
+        # coordinated key) equals the unanimous locale of the
+        # validated archived session envelopes — envelope-derived,
+        # never a free claim. The consumer requires it to equal the
+        # cell language.
+        import hashlib
+        with tempfile.TemporaryDirectory() as tmp:
+            run_dir = self._complete_en_run(tmp)
+            manifest = json.loads(
+                (run_dir / "run-manifest.json").read_text(encoding="utf-8"))
+            self.assertEqual(manifest.get("locale"), "en")
+            env_paths = sorted(
+                (run_dir / "requests").glob("session-*.envelope.json"))
+            self.assertTrue(env_paths)
+            for path in env_paths:
+                env = json.loads(path.read_text(encoding="utf-8"))
+                raw = env["request_json"]
+                self.assertEqual(
+                    hashlib.sha256(raw.encode("utf-8")).hexdigest(),
+                    env["request_sha256"])
+                inner = json.loads(raw)
+                self.assertEqual(inner.get("locale"), "en")
+                self.assertEqual(inner.get("locale"),
+                                 manifest.get("locale"))
+
+    def test_finalize_rejects_missing_request_archive(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            udid = f"UDID-noarch-{os.getpid()}"
+            _fake, run_dir, _p, _r = two_domain_run(tmp, udid)
+            shutil.rmtree(run_dir / "requests")
+            with self.assertRaises(ex.FrameError) as ctx:
+                ex.finalize_run(run_dir, provenance=dict(PROV))
+            self.assertIn("locale", str(ctx.exception).lower())
+
+    def test_finalize_rejects_tampered_envelope_bytes(self):
+        import hashlib
+        with tempfile.TemporaryDirectory() as tmp:
+            udid = f"UDID-tampenv-{os.getpid()}"
+            _fake, run_dir, _p, _r = two_domain_run(tmp, udid)
+            env_path = sorted(
+                (run_dir / "requests").glob("session-*.envelope.json"))[0]
+            env = json.loads(env_path.read_text(encoding="utf-8"))
+            raw = env["request_json"]
+            # Well-formed but different bytes (padding inside a string
+            # value): the exact-bytes hash must reject the tamper.
+            tampered = raw.replace('"Gym"', '"Gym "', 1)
+            self.assertNotEqual(tampered, raw)
+            self.assertNotEqual(
+                hashlib.sha256(tampered.encode("utf-8")).hexdigest(),
+                env["request_sha256"])
+            env["request_json"] = tampered
+            env_path.write_text(json.dumps(env, sort_keys=True) + "\n",
+                                encoding="utf-8")
+            with self.assertRaises(ex.FrameError) as ctx:
+                ex.finalize_run(run_dir, provenance=dict(PROV))
+            self.assertIn("mismatch", str(ctx.exception).lower())
+
+    def test_finalize_rejects_spanning_envelope_locale(self):
+        # A consistent-looking transplant: one envelope's inner locale
+        # plus its hash rebound to a matching record/transcript still
+        # spans locales against the unanimous run locale.
+        import hashlib
+        with tempfile.TemporaryDirectory() as tmp:
+            udid = f"UDID-spanloc-{os.getpid()}"
+            run_id = "sess-span-r1"
+            _fake, run_dir, _p, _r = two_domain_run(tmp, udid, run_id)
+            env_path = sorted(
+                (run_dir / "requests").glob("session-*.envelope.json"))[0]
+            env = json.loads(env_path.read_text(encoding="utf-8"))
+            inner = json.loads(env["request_json"])
+            inner["locale"] = "ru"
+            raw = json.dumps(inner, sort_keys=True, separators=(",", ":"),
+                             ensure_ascii=False) + "\n"
+            digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()
+            env["request_json"] = raw
+            env["request_sha256"] = digest
+            env_path.write_text(json.dumps(env, sort_keys=True) + "\n",
+                                encoding="utf-8")
+            frame = env["frame"]
+            rec_path = run_dir / "frames" / f"{frame}.json"
+            rec = json.loads(rec_path.read_text(encoding="utf-8"))
+            rec["request_sha256"] = digest
+            rec_path.write_text(json.dumps(rec, sort_keys=True) + "\n",
+                                encoding="utf-8")
+            rp = run_dir / "sessions" / f"{NONCE_P}.receipt.json"
+            receipt = json.loads(rp.read_text(encoding="utf-8"))
+            for row in receipt["transcript"]:
+                if row.get("frame") == frame:
+                    row["request_sha256"] = digest
+            rp.write_text(json.dumps(receipt, sort_keys=True) + "\n",
+                          encoding="utf-8")
+            with self.assertRaises(ex.FrameError) as ctx:
+                ex.finalize_run(run_dir, provenance=dict(PROV))
+            self.assertIn("locale", str(ctx.exception).lower())
 
 
 if __name__ == "__main__":

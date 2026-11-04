@@ -171,12 +171,21 @@ class SelectionSummaryTests(unittest.TestCase):
             '["en","ru","zh-Hans","es-419","pt-BR"]', "iOS 27.0")
         self.assertEqual(s["worker_count"], 3)
         self.assertEqual(s["pair_count"], 15)
-        self.assertEqual(s["pass_count"], 30)
+        # single automated pass per pair (§9): 15, not 30
+        self.assertEqual(s["pass_count"], 15)
 
     def test_subset_summary(self):
         s = wi.validate_selection('["iphone69"]', '["en","ru"]', "iOS 27.0")
         self.assertEqual((s["worker_count"], s["pair_count"], s["pass_count"]),
-                         (1, 2, 4))
+                         (1, 2, 2))
+
+    def test_single_pass_source(self):
+        # PASSES is the single central pass constant (§9): exactly
+        # ("r1",), shared by reference (no duplicate tuple), with the
+        # summary count derived from it.
+        self.assertEqual(wi.PASSES, ("r1",))
+        self.assertEqual(wi.PASSES_PER_PAIR, 1)
+        self.assertEqual(wi.PASSES_PER_PAIR, len(wi.PASSES))
 
     def test_island_flags(self):
         self.assertEqual(wi.island_for_device("iphone69"), 1)

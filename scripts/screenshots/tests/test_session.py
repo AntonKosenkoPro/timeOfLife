@@ -329,6 +329,115 @@ class TimingsTests(unittest.TestCase):
         self.assertNotIn("expected_totals", blob)
 
 
+class _TickClock:
+    """Deterministic monotonic fake clock (fixed step per reading)."""
+
+    def __init__(self, start=1000.0, step=0.01):
+        self.t = start
+        self.step = step
+
+    def __call__(self):
+        v = self.t
+        self.t += self.step
+        return v
+
+
+class SpawnTrailTests(unittest.TestCase):
+    def test_trail_caps_at_20_with_exact_truncation_count(self):
+        clock = _TickClock()
+        stats = sess.PhaseStats(clock=clock)
+        for i in range(25):
+            t0 = clock()
+            t1 = clock()
+            stats.note_spawn(category=f"cat-{i:02d}", outcome="ok",
+                             t_start=t0, t_end=t1, rc=0)
+        d = stats.to_dict()
+        self.assertEqual(len(d["spawn_trail"]), 20)
+        self.assertEqual(d["spawn_dropped"], 5)
+        # FIFO: oldest rolled off, newest retained in order.
+        self.assertEqual(d["spawn_trail"][0]["category"], "cat-05")
+        self.assertEqual(d["spawn_trail"][-1]["category"], "cat-24")
+        # Existing keys keep their meaning.
+        self.assertIn("phases_ms", d)
+        self.assertIn("counters", d)
+        self.assertIn("app_durations_ms", d)
+
+    def test_trail_records_phase_timing_outcome_and_rc(self):
+        clock = _TickClock()
+        stats = sess.PhaseStats(clock=clock)
+        stats.start("export")
+        t0 = clock()
+        t1 = clock()
+        entry = stats.note_spawn(category="ui-appearance-query",
+                                 outcome="timeout",
+                                 t_start=t0, t_end=t1, rc=None)
+        stats.stop("export")
+        self.assertEqual(entry["phase"], "export")
+        self.assertEqual(entry["outcome"], "timeout")
+        self.assertIsNone(entry["rc"])
+        self.assertGreaterEqual(entry["duration_ms"], 0)
+        self.assertGreaterEqual(entry["start_rel_ms"], 0)
+        # Outside any phase the label is explicit, never blank.
+        t0 = clock()
+        entry2 = stats.note_spawn(category="launch-cleanup",
+                                  outcome="oserror",
+                                  t_start=t0, t_end=t0, rc=None)
+        self.assertEqual(entry2["phase"], "unknown")
+
+    def test_trail_rejects_raw_argv_and_sensitive_shape(self):
+        import inspect
+        params = set(inspect.signature(sess.PhaseStats.note_spawn).parameters)
+        for banned in ("argv", "path", "nonce", "launch_args", "stderr",
+                       "request_json", "command"):
+            self.assertNotIn(banned, params, banned)
+        stats = sess.PhaseStats(clock=_TickClock())
+        with self.assertRaises(sess.SessionError):
+            stats.note_spawn(category=["xcrun", "simctl"], outcome="ok",
+                             t_start=1.0, t_end=2.0)
+        with self.assertRaises(sess.SessionError):
+            stats.note_spawn(category="", outcome="ok",
+                             t_start=1.0, t_end=2.0)
+        with self.assertRaises(sess.SessionError):
+            stats.note_spawn(category="ui-appearance-query",
+                             outcome="hang", t_start=1.0, t_end=2.0)
+        with self.assertRaises(sess.SessionError):
+            stats.note_spawn(category="ui-appearance-query", outcome="ok",
+                             t_start=1.0, t_end=2.0, rc=True)
+        t0 = 1000.0
+        stats.note_spawn(category="ui-appearance-query", outcome="ok",
+                         t_start=t0, t_end=t0 + 0.05, rc=0)
+        blob = json.dumps(stats.to_dict())
+        for banned in ("xcrun", "simctl", "UDID", "SCREENSHOT",
+                       "request_json", "expected_totals", "stderr"):
+            self.assertNotIn(banned, blob, banned)
+
+    def test_trail_uses_runner_clock_only_never_app_clock(self):
+        clock = _TickClock()
+        stats = sess.PhaseStats(clock=clock)
+        stats.note_app_duration("seed_ms", 1234)
+        t0 = clock()
+        t1 = clock()
+        entry = stats.note_spawn(category="launch-capture", outcome="ok",
+                                 t_start=t0, t_end=t1, rc=0)
+        # One step (0.01s) elapsed on the runner clock: exact up to
+        # float rounding, no cross-clock subtraction against the
+        # opaque app duration.
+        self.assertAlmostEqual(entry["duration_ms"], 10.0, places=6)
+        d = stats.to_dict()
+        self.assertEqual(d["app_durations_ms"]["seed_ms"], 1234)
+        self.assertNotIn("seed_ms", d["phases_ms"])
+        self.assertNotIn("seed", json.dumps(d["spawn_trail"]))
+
+    def test_trail_clamps_clock_skew_to_zero(self):
+        stats = sess.PhaseStats(clock=_TickClock())
+        entry = stats.note_spawn(category="device-list", outcome="ok",
+                                 t_start=2000.0, t_end=1999.0, rc=0)
+        self.assertEqual(entry["duration_ms"], 0.0)
+        entry2 = stats.note_spawn(category="device-list", outcome="ok",
+                                  t_start=500.0, t_end=500.0, rc=0)
+        self.assertEqual(entry2["start_rel_ms"], 0.0)
+
+
 class CleanupTokenTests(unittest.TestCase):
     def test_cleanup_argv_carries_session_tokens(self):
         argv = sess.build_cleanup_argv("UDID-1", rs.SCREENSHOT_BID, "sess-r1",

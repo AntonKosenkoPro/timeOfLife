@@ -310,9 +310,10 @@ def _check_probe_binding(probe: dict, by_frame: dict, receipts: dict,
     A catalog key or CLI flag alone is never sufficient: the probe must
     carry the actual simctl-reported model identifier (source simctl-list)
     mapping to no-island, and must join the run on run_id, device_key,
-    geometry, and the realtime session nonce. Both passes carry their own
-    probe explicitly (validators are per-run; cross-pass consistency lives
-    in run_manifest.compare_runs, volatile run_id/nonce excluded).
+    geometry, and the realtime session nonce. Validators are per-run;
+    each manual rerun carries its own probe explicitly (volatile
+    run_id/nonce excluded from human comparison; no automatic
+    cross-pass comparison gate remains).
     """
     import session as sess
 
