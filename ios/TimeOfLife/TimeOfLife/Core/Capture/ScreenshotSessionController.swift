@@ -197,6 +197,13 @@ final class ScreenshotSessionController: ObservableObject {
                 claimed = envelope
             }
         } catch let error as ScreenshotRequestError {
+            // Retryable transient: the queue file is kept for exactly this
+            // recoverable read-failure class, and the next poll re-reads
+            // it — the runner models unreadable state the same way behind
+            // its own poll deadline instead of failing the session on one
+            // bad read. Everything else (removed-file parse failures and
+            // structural errors) stays terminal.
+            if error.code == "unreadable-command" { return .empty }
             _ = terminal(status: Self.terminalStatus(for: error.code), error: error)
             return .failed(code: error.code)
         } catch {

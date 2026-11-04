@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
-"""Matrix render + bezel fetch + bundle README tests (hermetic).
+"""Matrix render + bezel stage + bundle README tests (hermetic).
 
-Stdlib unittest + Pillow; no device, no network (Figma HTTP is faked by
-monkeypatching the fetch module's thin wrappers). Synthetic capture runs
+Stdlib unittest + Pillow; no device, no network. Synthetic capture runs
 (frames + run manifests) and synthetic bezels are built in tmp dirs.
+Bezel staging tests inject a test release manifest (+sha pair) — the
+production pinned manifest hash is never weakened globally.
 """
 
 import hashlib
-import http.server
 import io
 import json
 import os
@@ -16,13 +16,12 @@ import shutil
 import subprocess
 import sys
 import tempfile
-import threading
 import unittest
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent.parent
 PANELS_CLI = str(HERE / "panels.py")
-FETCH_CLI = str(HERE / "fetch_bezel_assets.py")
+STAGE_CLI = str(HERE / "stage_bezel_assets.py")
 README_CLI = str(HERE / "write_bundle_readme.py")
 
 sys.path.insert(0, str(HERE))
@@ -61,12 +60,13 @@ NONCE_REALTIME = "fedcba9876543210fedcba9876543210"
 APP_FRAMES = ("track-running", "insights", "history", "add-entry")
 LA_FRAMES = ("la-lock", "la-compact", "la-expanded")
 IPAD_LOCK_COLOR = (110, 110, 150)
-# Attested iPad model — REAL catalog identifier (8GB variant only, not
-# the unsuffixed family name): the shared validator requires an exact
-# cataloged model. Name is operator-assigned evidence (presence, not
-# value); udid must equal the run's unanimous frame device_udid.
+# Attested iPad model — REAL catalog identifier (M5 12GB variant; the
+# shared validator requires an exact cataloged model — catalog owner
+# aligns SDK IDs separately). Name is operator-assigned evidence
+# (presence, not value); udid must equal the run's unanimous frame
+# device_udid.
 IPAD_MODEL_ID = ("com.apple.CoreSimulator.SimDeviceType."
-                 "iPad-Pro-13-inch-M4-8GB")
+                 "iPad-Pro-13-inch-M5-12GB")
 IPAD_MODEL_NAME = "shot-ci-ipad13"
 
 
@@ -133,13 +133,10 @@ def run_panels(*argv: str):
                           env=base_env())
 
 
-def run_fetch(*argv: str, extra_env: dict | None = None):
-    env = base_env()
-    env.pop("FIGMA_API_KEY", None)
-    env.update(extra_env or {})
-    return subprocess.run([sys.executable, FETCH_CLI, *argv],
+def run_stage(*argv: str):
+    return subprocess.run([sys.executable, STAGE_CLI, *argv],
                           capture_output=True, text=True, timeout=120,
-                          env=env)
+                          env=base_env())
 
 
 def run_readme(*argv: str):
@@ -382,6 +379,72 @@ def write_bezels(bezels: Path) -> None:
         make_bezel_63_bytes())
     (bezels / panels_builder.BEZEL_FILES["ipad13"]).write_bytes(
         make_bezel_ipad_bytes())
+
+
+def make_apple_profile_bytes(native: tuple[int, int],
+                             at: tuple[int, int],
+                             slot: tuple[int, int]) -> bytes:
+    """Synthetic Apple-profile bezel: exact native dims + exact cavity.
+
+    Sharp-corner transparent slot (no rounded corners, no pill) at the
+    exact pinned origin — passes the exact-profile verifiers, which pin
+    dimensions/slot/origin (never corner art). Frame is opaque.
+    """
+    nw, nh = native
+    im = Image.new("RGBA", (nw, nh), (20, 20, 20, 255))
+    # NOTE: PIL rectangles are endpoint-inclusive: far corner at+slot-1.
+    ImageDraw.Draw(im).rectangle(
+        [at[0], at[1], at[0] + slot[0] - 1, at[1] + slot[1] - 1],
+        fill=(0, 0, 0, 0))
+    buf = io.BytesIO()
+    im.save(buf, format="PNG")
+    return buf.getvalue()
+
+
+def write_stage_source(root: Path) -> tuple[Path, Path, str]:
+    """Synthetic release source dir + test manifest; returns (src, manifest, sha).
+
+    Test equivalent of the private release: 3 exact-profile PNGs under the
+    canonical release filenames plus a manifest carrying their TRUE hashes.
+    Callers pass the manifest + its sha via --manifest/--expected-manifest-sha
+    (test injection — the production pinned manifest hash stays strict).
+    """
+    src = root / "stage-src"
+    src.mkdir(parents=True, exist_ok=True)
+    profiles = (
+        (panels_builder.APPLE_SOURCE_69, "6.9"),
+        (panels_builder.APPLE_SOURCE_63, "6.3"),
+        (panels_builder.APPLE_SOURCE_IPAD, "ipad13"),
+    )
+    assets = []
+    for pins, _size in profiles:
+        data = make_apple_profile_bytes(tuple(pins["native"]),
+                                        tuple(pins["at"]),
+                                        tuple(pins["slot"]))
+        (src / pins["name"]).write_bytes(data)
+        assets.append({
+            "name": pins["name"],
+            "sha256": hashlib.sha256(data).hexdigest(),
+            "native": {"width": pins["native"][0],
+                       "height": pins["native"][1]},
+            "cavity_slot": {"x": pins["at"][0], "y": pins["at"][1],
+                            "width": pins["slot"][0],
+                            "height": pins["slot"][1]},
+            "orientation": "Portrait",
+            "model": pins["model"],
+            "color": pins["color"],
+        })
+    manifest = {
+        "release": panels_builder.APPLE_RELEASE,
+        "repo": panels_builder.APPLE_RELEASE_REPO,
+        "assets": assets,
+    }
+    manifest_path = root / "apple-bezels-manifest.json"
+    manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True),
+                             encoding="utf-8")
+    manifest_sha = hashlib.sha256(
+        manifest_path.read_bytes()).hexdigest()
+    return src, manifest_path, manifest_sha
 
 
 def write_captions(path: Path, locale: str, texts: dict) -> None:
@@ -1084,230 +1147,257 @@ class RenderMatrixTests(unittest.TestCase):
 
 
 @unittest.skipUnless(HAS_PILLOW, "Pillow required")
-class FetchBezelTests(unittest.TestCase):
-    """Hermetic Figma fakes: localhost HTTP, never api.figma.com."""
+@unittest.skipUnless(HAS_PILLOW, "Pillow required")
+class StageBezelTests(unittest.TestCase):
+    """Local staging: exact hash + geometry gates, no network, no Figma.
 
-    def start_fake_figma(self, meta: dict, blobs: dict) -> str:
-        """Serve one fake Figma REST base on localhost; returns the base.
+    Production strictness comes from the pinned manifest hash (baked
+    default); every test below injects its own manifest (+sha pair) via
+    --manifest/--expected-manifest-sha, so the production pin is never
+    weakened globally. Synthetic sources use the exact Apple profiles
+    (native dims + exact cavities), keeping geometry-code coverage real.
+    """
 
-        `meta`/`blobs` are read at request time, so callers may fill them
-        after learning the base URL (image URLs must point at this server).
-        """
+    def _stage(self, src: Path, out: Path, manifest: Path,
+               sha: str) -> "subprocess.CompletedProcess[str]":
+        return run_stage("--source-dir", str(src), "--out", str(out),
+                         "--manifest", str(manifest),
+                         "--expected-manifest-sha", sha)
 
-        class Handler(http.server.BaseHTTPRequestHandler):
-            def do_GET(self):  # noqa: N802
-                if self.path.startswith("/v1/images/"):
-                    body = json.dumps(meta).encode("utf-8")
-                    self.send_response(200)
-                    self.send_header("Content-Type", "application/json")
-                    self.send_header("Content-Length", str(len(body)))
-                    self.end_headers()
-                    self.wfile.write(body)
-                elif self.path in blobs:
-                    body = blobs[self.path]
-                    self.send_response(200)
-                    self.send_header("Content-Type", "image/png")
-                    self.send_header("Content-Length", str(len(body)))
-                    self.end_headers()
-                    self.wfile.write(body)
-                else:
-                    self.send_response(404)
-                    self.end_headers()
-
-            def log_message(self, *args):
-                pass
-
-        srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
-        thread = threading.Thread(target=srv.serve_forever, daemon=True)
-        thread.start()
-        self.addCleanup(srv.shutdown)
-        host, port = srv.server_address
-        return f"http://{host}:{port}/v1"
-
-    def fake_env(self, base: str) -> dict:
-        return {"FIGMA_API_KEY": "test-token", "FIGMA_API_BASE": base}
-
-    def test_missing_api_key_fails_closed(self):
+    def test_happy_path_stages_all_three(self):
         with tempfile.TemporaryDirectory() as tmp:
-            proc = run_fetch("--out", str(Path(tmp) / "bezels"),
-                             "--file-key", "F",
-                             "--iphone-node", "1:1", "--ipad-node", "2:2")
-            self.assertEqual(proc.returncode, 2)
-            self.assertIn("FIGMA_API_KEY", proc.stderr)
-
-    def test_missing_pin_fails_closed(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            proc = run_fetch("--out", str(Path(tmp) / "bezels"),
-                             extra_env={"FIGMA_API_KEY": "tok"})
-            self.assertEqual(proc.returncode, 2)
-            self.assertIn("unpinned", proc.stderr)
-
-    def test_partial_pin_names_iphone63(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            proc = run_fetch("--out", str(Path(tmp) / "bezels"),
-                             "--file-key", "F",
-                             "--iphone-node", "1:1",
-                             "--ipad-node", "2:2",
-                             extra_env={"FIGMA_API_KEY": "tok"})
-            self.assertEqual(proc.returncode, 2)
-            self.assertIn("unpinned", proc.stderr)
-            self.assertIn("FIGMA_IPHONE63_NODE_ID", proc.stderr)
-
-    def test_figma_error_fails_closed(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            base = self.start_fake_figma({"err": "Not found"}, {})
-            proc = run_fetch("--out", str(Path(tmp) / "bezels"),
-                             "--file-key", "F",
-                             "--iphone-node", "1:1",
-                             "--iphone63-node", "3:3",
-                             "--ipad-node", "2:2",
-                             extra_env=self.fake_env(base))
-            self.assertEqual(proc.returncode, 2)
-            self.assertIn("figma images error", proc.stderr)
-
-    def test_missing_node_image_fails_closed(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            base = self.start_fake_figma(
-                {"err": "", "images": {"1:1": None}}, {})
-            proc = run_fetch("--out", str(Path(tmp) / "bezels"),
-                             "--file-key", "F",
-                             "--iphone-node", "1:1",
-                             "--iphone63-node", "3:3",
-                             "--ipad-node", "2:2",
-                             extra_env=self.fake_env(base))
-            self.assertEqual(proc.returncode, 2)
-            self.assertIn("rendered no image", proc.stderr)
-
-    def test_missing_63_node_image_fails_closed(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            holder: dict = {}
-            base = self.start_fake_figma(holder, {
-                "/v1/img/iphone.png": make_bezel_69_bytes()})
-            holder.update({"err": "", "images": {
-                "1:1": f"{base}/img/iphone.png", "3:3": None}})
-            proc = run_fetch("--out", str(Path(tmp) / "bezels"),
-                             "--file-key", "F",
-                             "--iphone-node", "1:1",
-                             "--iphone63-node", "3:3",
-                             "--ipad-node", "2:2",
-                             extra_env=self.fake_env(base))
-            self.assertEqual(proc.returncode, 2)
-            self.assertIn("rendered no image", proc.stderr)
-            self.assertIn("3:3", proc.stderr)
-
-    def test_network_error_fails_closed(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            env = {"FIGMA_API_KEY": "tok",
-                   "FIGMA_API_BASE": "http://127.0.0.1:1/v1"}
-            proc = run_fetch("--out", str(Path(tmp) / "bezels"),
-                             "--file-key", "F",
-                             "--iphone-node", "1:1",
-                             "--iphone63-node", "3:3",
-                             "--ipad-node", "2:2",
-                             extra_env=env)
-            self.assertEqual(proc.returncode, 2)
-            self.assertIn("figma request failed", proc.stderr)
-
-    def test_happy_path_writes_verified_bezels(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            holder: dict = {}
-            base = self.start_fake_figma(holder, {
-                "/v1/img/iphone.png": make_bezel_69_bytes(),
-                "/v1/img/iphone63.png": make_bezel_63_bytes(),
-                "/v1/img/ipad.png": make_bezel_ipad_bytes()})
-            holder.update({"err": "", "images": {
-                "1:1": f"{base}/img/iphone.png",
-                "3:3": f"{base}/img/iphone63.png",
-                "2:2": f"{base}/img/ipad.png"}})
-            out = Path(tmp) / "bezels"
-            proc = run_fetch("--out", str(out),
-                             "--file-key", "F",
-                             "--iphone-node", "1:1",
-                             "--iphone63-node", "3:3",
-                             "--ipad-node", "2:2",
-                             extra_env=self.fake_env(base))
+            root = Path(tmp)
+            src, manifest, sha = write_stage_source(root)
+            out = root / "bezels"
+            proc = self._stage(src, out, manifest, sha)
             self.assertEqual(proc.returncode, 0, proc.stderr)
-            iphone = out / panels_builder.BEZEL_FILES["6.9"]
-            iphone63 = out / panels_builder.BEZEL_FILES["6.3"]
-            ipad = out / panels_builder.BEZEL_FILES["ipad13"]
-            self.assertTrue(iphone.is_file())
-            self.assertTrue(iphone63.is_file())
-            self.assertTrue(ipad.is_file())
-            panels_builder.verify_bezel_69(iphone)
-            info63 = panels_builder.verify_bezel_63(iphone63)
-            self.assertEqual(info63["screen_slot_px"], [805, 1749])
-            self.assertEqual(info63["screen_at_px"], [38, 26])
-            panels_builder.verify_bezel_ipad(ipad)
+            staged = {
+                "6.9": panels_builder.APPLE_SOURCE_69,
+                "6.3": panels_builder.APPLE_SOURCE_63,
+                "ipad13": panels_builder.APPLE_SOURCE_IPAD,
+            }
+            for size, pins in staged.items():
+                final = out / panels_builder.BEZEL_FILES[size]
+                self.assertTrue(final.is_file(), size)
+                self.assertEqual(
+                    hashlib.sha256(final.read_bytes()).hexdigest(),
+                    hashlib.sha256(
+                        (src / pins["name"]).read_bytes()).hexdigest(),
+                    size)
+            stage_manifest = json.loads(
+                (out / panels_builder.STAGE_MANIFEST_FILE).read_text(
+                    encoding="utf-8"))
+            self.assertEqual(stage_manifest["release"], "apple-bezels-v1")
+            self.assertEqual(stage_manifest["manifest_sha256"], sha)
+            self.assertEqual(len(stage_manifest["assets"]), 3)
+            self.assertFalse(list(out.glob("*.part")))
+            panels_builder.verify_bezel_69(
+                out / panels_builder.BEZEL_FILES["6.9"])
+            panels_builder.verify_bezel_63(
+                out / panels_builder.BEZEL_FILES["6.3"])
+            panels_builder.verify_bezel_ipad(
+                out / panels_builder.BEZEL_FILES["ipad13"])
 
-    def test_size_drift_fails_closed_without_partial(self):
-        bad = io.BytesIO()
-        Image.new("RGBA", (100, 100), (0, 0, 0, 255)).save(bad, format="PNG")
+    def test_manifest_hash_mismatch_blocks_before_use(self):
+        # The pinned manifest hash is checked BEFORE any metadata is
+        # used: a one-byte-drifted manifest stages nothing.
         with tempfile.TemporaryDirectory() as tmp:
-            holder = {}
-            base = self.start_fake_figma(holder, {
-                "/v1/img/iphone.png": bad.getvalue(),
-                "/v1/img/iphone63.png": bad.getvalue(),
-                "/v1/img/ipad.png": bad.getvalue()})
-            holder.update({"err": "", "images": {
-                "1:1": f"{base}/img/iphone.png",
-                "3:3": f"{base}/img/iphone63.png",
-                "2:2": f"{base}/img/ipad.png"}})
-            out = Path(tmp) / "bezels"
-            proc = run_fetch("--out", str(out),
-                             "--file-key", "F",
-                             "--iphone-node", "1:1",
-                             "--iphone63-node", "3:3",
-                             "--ipad-node", "2:2",
-                             extra_env=self.fake_env(base))
+            root = Path(tmp)
+            src, manifest, sha = write_stage_source(root)
+            manifest.write_bytes(manifest.read_bytes() + b" ")
+            out = root / "bezels"
+            proc = self._stage(src, out, manifest, sha)
             self.assertEqual(proc.returncode, 2)
-            self.assertIn("bezel verification failed", proc.stderr)
+            self.assertIn("manifest hash mismatch", proc.stderr)
+            self.assertFalse(list(out.glob("*.png"))
+                             if out.is_dir() else [])
+            self.assertFalse(list(out.glob("*.part"))
+                             if out.is_dir() else [])
+            self.assertFalse((out / panels_builder.STAGE_MANIFEST_FILE
+                              ).exists() if out.is_dir() else False)
+
+    def test_missing_manifest_blocks(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            src, _manifest, _sha = write_stage_source(root)
+            out = root / "bezels"
+            proc = self._stage(src, out, root / "no-manifest.json",
+                               "0" * 64)
+            self.assertEqual(proc.returncode, 2)
+            self.assertIn("not readable", proc.stderr)
+
+    def test_missing_source_dir_blocks(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _src, manifest, sha = write_stage_source(root)
+            out = root / "bezels"
+            proc = self._stage(root / "no-src", out, manifest, sha)
+            self.assertEqual(proc.returncode, 2)
+            self.assertIn("source dir not found", proc.stderr)
+
+    def test_missing_source_file_blocks(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            src, manifest, sha = write_stage_source(root)
+            (src / panels_builder.APPLE_ASSET_69).unlink()
+            out = root / "bezels"
+            proc = self._stage(src, out, manifest, sha)
+            self.assertEqual(proc.returncode, 2)
+            self.assertIn("missing", proc.stderr)
+            self.assertFalse(list(out.glob("*.png")))
+            self.assertFalse(list(out.glob("*.part")))
+
+    def test_tampered_bytes_blocked_without_partial(self):
+        # Tampered first asset: hash gate fires before geometry, nothing
+        # staged, no leftovers.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            src, manifest, sha = write_stage_source(root)
+            victim = src / panels_builder.APPLE_ASSET_69
+            raw = victim.read_bytes()
+            victim.write_bytes(raw[:-8] + b"\x00" * 8)
+            out = root / "bezels"
+            proc = self._stage(src, out, manifest, sha)
+            self.assertEqual(proc.returncode, 2)
+            self.assertIn("hash mismatch", proc.stderr)
             self.assertFalse(
                 (out / panels_builder.BEZEL_FILES["6.9"]).exists())
             self.assertFalse(list(out.glob("*.part")))
 
-    def test_ipad_landscape_drift_yields_partial_bundle(self):
-        """CI 41813403434/41776556435: Figma iPad node renders landscape.
-
-        The pinned iPad node renders 3000x2300 at scale 2 while the
-        owner-approved bezel is portrait 2300x3000. Fetch must fail
-        closed with the exact drift message, keep the two verified
-        iPhone bezels (no partial writes), and render-matrix over those
-        bezels must still render iPhone cells while blocking iPad cells
-        with an explicit reason — a partial handoff bundle, never
-        fabricated iPad panels and never a silent no-ZIP.
-        """
-
-        def landscape_ipad_bytes() -> bytes:
-            im = Image.new("RGBA", (3000, 2300), (200, 200, 200, 255))
-            ImageDraw.Draw(im).rectangle(
-                [118, 124, 118 + 2064, 124 + 2752], fill=(0, 0, 0, 0))
-            buf = io.BytesIO()
-            im.save(buf, format="PNG")
-            return buf.getvalue()
-
+    def test_wrong_orientation_blocked(self):
+        # Landscape bytes with a truthful manifest (true sha, landscape
+        # native dims): the hash gate passes, the profile gate refuses —
+        # orientation is never rotated into place.
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            holder: dict = {}
-            base = self.start_fake_figma(holder, {
-                "/v1/img/iphone.png": make_bezel_69_bytes(),
-                "/v1/img/iphone63.png": make_bezel_63_bytes(),
-                "/v1/img/ipad.png": landscape_ipad_bytes()})
-            holder.update({"err": "", "images": {
-                "1:1": f"{base}/img/iphone.png",
-                "3:3": f"{base}/img/iphone63.png",
-                "2:2": f"{base}/img/ipad.png"}})
+            src, manifest, _sha = write_stage_source(root)
+            bad = io.BytesIO()
+            Image.new("RGBA", (3000, 2300), (20, 20, 20, 255)).save(
+                bad, format="PNG")
+            obj = json.loads(manifest.read_text(encoding="utf-8"))
+            landscape = obj["assets"][2]
+            landscape["native"] = {"width": 3000, "height": 2300}
+            landscape["sha256"] = hashlib.sha256(
+                bad.getvalue()).hexdigest()
+            (src / landscape["name"]).write_bytes(bad.getvalue())
+            manifest.write_text(json.dumps(obj, indent=2, sort_keys=True),
+                                encoding="utf-8")
+            sha = hashlib.sha256(manifest.read_bytes()).hexdigest()
+            out = root / "bezels"
+            proc = self._stage(src, out, manifest, sha)
+            self.assertEqual(proc.returncode, 2)
+            self.assertIn("no pinned Apple source profile", proc.stderr)
+            self.assertFalse(list(out.glob("*.part")))
+
+    def test_cavity_drift_blocked(self):
+        # Right size, shifted cavity, truthful manifest (true sha): the
+        # exact-slot gate refuses without scaling or substituting art.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            src, manifest, _sha = write_stage_source(root)
+            pins = panels_builder.APPLE_SOURCE_69
+            nw, nh = tuple(pins["native"])
+            drift = Image.new("RGBA", (nw, nh), (20, 20, 20, 255))
+            ImageDraw.Draw(drift).rectangle(
+                [100, 100, 100 + pins["slot"][0], 100 + pins["slot"][1]],
+                fill=(0, 0, 0, 0))
+            buf = io.BytesIO()
+            drift.save(buf, format="PNG")
+            obj = json.loads(manifest.read_text(encoding="utf-8"))
+            obj["assets"][0]["sha256"] = hashlib.sha256(
+                buf.getvalue()).hexdigest()
+            (src / pins["name"]).write_bytes(buf.getvalue())
+            manifest.write_text(json.dumps(obj, indent=2, sort_keys=True),
+                                encoding="utf-8")
+            sha = hashlib.sha256(manifest.read_bytes()).hexdigest()
+            out = root / "bezels"
+            proc = self._stage(src, out, manifest, sha)
+            self.assertEqual(proc.returncode, 2)
+            self.assertIn("slot drift", proc.stderr)
+            self.assertFalse(
+                (out / panels_builder.BEZEL_FILES["6.9"]).exists())
+            self.assertFalse(list(out.glob("*.part")))
+
+    def test_malformed_manifest_blocks(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            src, manifest, sha = write_stage_source(root)
+            manifest.write_text("{not json", encoding="utf-8")
+            out = root / "bezels"
+            proc = self._stage(src, out, manifest, sha)
+            self.assertEqual(proc.returncode, 2)
+            self.assertIn("manifest", proc.stderr.lower())
+
+    def test_wrong_release_tag_blocks(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            src, manifest, _sha = write_stage_source(root)
+            obj = json.loads(manifest.read_text(encoding="utf-8"))
+            obj["release"] = "something-else-v9"
+            manifest.write_text(json.dumps(obj, indent=2, sort_keys=True),
+                                encoding="utf-8")
+            sha = hashlib.sha256(manifest.read_bytes()).hexdigest()
+            out = root / "bezels"
+            proc = self._stage(src, out, manifest, sha)
+            self.assertEqual(proc.returncode, 2)
+            self.assertIn("release", proc.stderr)
+            self.assertFalse(list(out.glob("*.png")))
+
+    def test_unsafe_asset_name_blocks(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            src, manifest, _sha = write_stage_source(root)
+            obj = json.loads(manifest.read_text(encoding="utf-8"))
+            obj["assets"][0]["name"] = "../escape.png"
+            manifest.write_text(json.dumps(obj, indent=2, sort_keys=True),
+                                encoding="utf-8")
+            sha = hashlib.sha256(manifest.read_bytes()).hexdigest()
+            out = root / "bezels"
+            proc = self._stage(src, out, manifest, sha)
+            self.assertEqual(proc.returncode, 2)
+            self.assertIn("unsafe", proc.stderr)
+
+    def test_symlink_source_blocks(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            src, manifest, sha = write_stage_source(root)
+            victim = src / panels_builder.APPLE_ASSET_69
+            raw = victim.read_bytes()
+            victim.unlink()
+            (src / "real.png").write_bytes(raw)
+            victim.symlink_to(src / "real.png")
+            out = root / "bezels"
+            proc = self._stage(src, out, manifest, sha)
+            self.assertEqual(proc.returncode, 2)
+            self.assertIn("symlink", proc.stderr)
+
+    def test_repo_out_rejected(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            src, manifest, sha = write_stage_source(root)
+            proc = self._stage(src, HERE / "stage-out", manifest, sha)
+            self.assertEqual(proc.returncode, 2)
+            self.assertIn("inside the repository", proc.stderr)
+
+    def test_bad_ipad_yields_partial_bundle(self):
+        """A bad iPad source blocks staging but keeps verified iPhones.
+
+        Mirrors the retired landscape-fetch partial bundle: successfully
+        staged bezels persist (no partial writes, no .part leftovers),
+        and render-matrix over them renders iPhone cells while blocking
+        the iPad cell with an explicit reason — a partial handoff
+        bundle, never fabricated iPad panels and never a silent no-ZIP.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            src, manifest, sha = write_stage_source(root)
+            victim = src / panels_builder.APPLE_ASSET_IPAD
+            raw = victim.read_bytes()
+            victim.write_bytes(raw[:-8] + b"\x00" * 8)
             bezels = root / "bezels"
-            fetch = run_fetch("--out", str(bezels),
-                              "--file-key", "F",
-                              "--iphone-node", "1:1",
-                              "--iphone63-node", "3:3",
-                              "--ipad-node", "2:2",
-                              extra_env=self.fake_env(base))
-            self.assertEqual(fetch.returncode, 2)
-            self.assertIn(
-                "bezel size drift (3000, 2300) != (2300, 3000)",
-                fetch.stderr)
-            self.assertIn("ipad13", fetch.stderr)
+            staged = self._stage(src, bezels, manifest, sha)
+            self.assertEqual(staged.returncode, 2)
+            self.assertIn("hash mismatch", staged.stderr)
             panels_builder.verify_bezel_69(
                 bezels / panels_builder.BEZEL_FILES["6.9"])
             panels_builder.verify_bezel_63(
@@ -1328,22 +1418,56 @@ class FetchBezelTests(unittest.TestCase):
                 "--devices", '["iphone69","ipad13"]',
                 "--languages", '["en"]')
             self.assertEqual(rendered.returncode, 2)
-            manifest = json.loads(
+            manifest_out = json.loads(
                 (out / "matrix-manifest.json").read_text(encoding="utf-8"))
-            self.assertEqual(manifest["status"], "incomplete")
-            self.assertEqual(manifest["counts"],
+            self.assertEqual(manifest_out["status"], "incomplete")
+            self.assertEqual(manifest_out["counts"],
                              {"blocked": 1, "cells": 2, "rendered": 1})
-            by_device = {c["device"]: c for c in manifest["cells"]}
+            by_device = {c["device"]: c for c in manifest_out["cells"]}
             self.assertEqual(by_device["iphone69"]["status"], "rendered")
-            self.assertEqual(len(list(
-                (out / "iphone69" / "en").glob(
-                    "panel-*-en-1320x2868.png"))), 5)
             self.assertEqual(by_device["ipad13"]["status"], "blocked")
             self.assertIn("missing bezel asset",
                           by_device["ipad13"]["reason"])
             self.assertEqual(
                 list((out / "ipad13").rglob("panel-*.png"))
                 if (out / "ipad13").exists() else [], [])
+
+    def test_staged_apple_bezels_render_matrix_green(self):
+        # End-to-end over staged Apple-profile art: one en cell per size
+        # renders complete (selection + evidence + selftests green).
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            src, manifest, sha = write_stage_source(root)
+            bezels = root / "bezels"
+            staged = self._stage(src, bezels, manifest, sha)
+            self.assertEqual(staged.returncode, 0, staged.stderr)
+            shots = root / "shots"
+            make_run(shots, "iphone69", "en", "iphone69-en-r1",
+                     (1320, 2868), FRAME_COLORS_69)
+            make_run(shots, "iphone63", "en", "iphone63-en-r1",
+                     (1206, 2622), FRAME_COLORS_69)
+            make_run(shots, "ipad13", "en", "ipad13-en-r1",
+                     (2064, 2752), FRAME_COLORS_IPAD)
+            out = root / "out"
+            proc = run_panels(
+                "--render-matrix", "--shots-dir", str(shots),
+                "--bezels-dir", str(bezels), "--out", str(out),
+                "--devices", '["iphone69","iphone63","ipad13"]',
+                "--languages", '["en"]')
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertIn("status=complete", proc.stdout)
+            matrix = json.loads(
+                (out / "matrix-manifest.json").read_text(encoding="utf-8"))
+            self.assertEqual(matrix["status"], "complete")
+            self.assertEqual(
+                len(list((out / "iphone69" / "en").glob(
+                    "panel-*-en-1320x2868.png"))), 5)
+            self.assertEqual(
+                len(list((out / "iphone63" / "en").glob(
+                    "panel-*-en-1206x2622.png"))), 5)
+            self.assertEqual(
+                len(list((out / "ipad13" / "en").glob(
+                    "panel-*-en-2064x2752.png"))), 4)
 
 
 class BundleReadmeTests(unittest.TestCase):
@@ -1381,8 +1505,8 @@ class BundleReadmeTests(unittest.TestCase):
                            "1320x2868"):
                 self.assertIn(needle, text)
 
-    def test_readme_inventories_bezel_fetch_log(self):
-        # Handoff/debug bundle: the bezel-fetch transcript travels in the
+    def test_readme_inventories_bezel_stage_log(self):
+        # Handoff/debug bundle: the bezel-stage transcript travels in the
         # ZIP, so the README file inventory must name it WITH its sha256
         # (evidence present, not merely mentioned in a blocked reason).
         with tempfile.TemporaryDirectory() as tmp:
@@ -1405,13 +1529,14 @@ class BundleReadmeTests(unittest.TestCase):
                 encoding="utf-8")
             Image.new("RGB", (8, 8)).save(
                 panels_dir / "iphone69" / "en" / "panel-track-en-8x8.png")
-            fetch_log = panels_dir / "bezel-fetch.log"
-            fetch_log.write_text(
-                "invalid: bezel verification failed (ipad13, "
-                "node '5456:18569'): bezel size drift (3000, 2300) != "
-                "(2300, 3000)\n", encoding="utf-8")
+            stage_log = panels_dir / "bezel-stage.json"
+            stage_log.write_text(
+                json.dumps({"schema_version": 1,
+                            "release": "apple-bezels-v1",
+                            "manifest_sha256": "0" * 64,
+                            "assets": []}), encoding="utf-8")
             digest = hashlib.sha256(
-                fetch_log.read_bytes()).hexdigest()
+                stage_log.read_bytes()).hexdigest()
             out = root / "bundle-readme.md"
             proc = run_readme(
                 "--panels-dir", str(panels_dir),
@@ -1424,7 +1549,7 @@ class BundleReadmeTests(unittest.TestCase):
             self.assertEqual(proc.returncode, 0, proc.stderr)
             text = out.read_text(encoding="utf-8")
             self.assertIn("HANDOFF", text)
-            self.assertIn(f"bezel-fetch.log {digest}", text)
+            self.assertIn(f"bezel-stage.json {digest}", text)
 
     def test_readme_unverified_deck_marked(self):
         with tempfile.TemporaryDirectory() as tmp:

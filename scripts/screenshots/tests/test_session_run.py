@@ -58,7 +58,7 @@ class SessionFakeSimctl:
                  fail_frame_seq=None, second_anchor_at=None,
                  cleanup_status="cleaned", drift_chrome_at=None,
                  list_model=("com.apple.CoreSimulator.SimDeviceType."
-                             "iPhone-18-Pro-Max"),
+                             "iPhone-17-Pro-Max"),
                  list_empty=False, list_malformed=False,
                  defer_ready=False, queue_flag="true", leave_queue=False,
                  app_status="ready", removed_session=True,
@@ -692,9 +692,9 @@ NONCE_P = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 NONCE_RT = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 PROV = {"commit_base": "c3e5911-test", "dirty": True}
 IPAD_MODEL = ("com.apple.CoreSimulator.SimDeviceType."
-              "iPad-Pro-13-inch-M4-8GB")
+              "iPad-Pro-13-inch-M5-12GB")
 IPHONE_MODEL = ("com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro-Max")
-IPHONE69_MODEL = ("com.apple.CoreSimulator.SimDeviceType.iPhone-18-Pro-Max")
+IPHONE69_MODEL = ("com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro-Max")
 IPHONE63_MODEL = ("com.apple.CoreSimulator.SimDeviceType.iPhone-17")
 LIST_MODEL_FOR_KEY = {"iphone69": IPHONE69_MODEL,
                       "iphone63": IPHONE63_MODEL, "ipad13": IPAD_MODEL}

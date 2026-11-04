@@ -219,7 +219,7 @@ class EvidenceValidatorTests(unittest.TestCase):
 
 
 PROBE_MODEL = ("com.apple.CoreSimulator.SimDeviceType."
-               "iPad-Pro-13-inch-M4-8GB")
+               "iPad-Pro-13-inch-M5-12GB")
 PROBE_MODEL_NAME = "shot-ci-ipad13"
 
 

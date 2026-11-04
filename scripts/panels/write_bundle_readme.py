@@ -204,11 +204,12 @@ def main(argv: list[str] | None = None) -> int:
     decks = {(d, lang): harvest_deck(shots_dir, d, lang)
              for d in devices for lang in languages}
     files: list[tuple[str, str]] = []
-    # bezel-fetch* carries the bezel-fetch transcript (success SHAs or the
-    # exact drift/secret/network failure) into the bundle inventory so a
+    # bezel-stage* carries the bezel-stage transcript (release, manifest
+    # SHA, per-asset hashes/geometry) into the bundle inventory so a
     # handoff/debug bundle names its bezel evidence next to the panels.
+    # bezel-fetch* is retained for older bundles only (fetcher retired).
     for pattern in ("panel-*.png", "*.recipe.json", "matrix-manifest.json",
-                    "bezel-fetch*"):
+                    "bezel-stage*", "bezel-fetch*"):
         for path in sorted(panels_dir.rglob(pattern)):
             try:
                 files.append((str(path.relative_to(panels_dir)),
@@ -265,14 +266,16 @@ def main(argv: list[str] | None = None) -> int:
         "",
         "## Devices",
         "",
-        "| device | panel size | canvas | island |",
-        "| --- | --- | --- | --- |",
+        "| device | panel size | canvas | island | model | color |",
+        "| --- | --- | --- | --- | --- | --- |",
     ]
     for d in devices:
         info = panels_builder.MATRIX_DEVICES[d]
         w, h = info["canvas"]
         lines.append(f"| {d} | {info['size']} | {w}x{h} | "
-                     f"{'yes' if info['island'] else 'no'} |")
+                     f"{'yes' if info['island'] else 'no'} | "
+                     f"{info.get('model', 'unknown')} | "
+                     f"{info.get('color', 'unknown')} |")
     lines += [
         "",
         "## Languages",

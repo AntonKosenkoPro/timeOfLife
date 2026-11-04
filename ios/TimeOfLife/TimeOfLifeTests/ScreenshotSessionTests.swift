@@ -10,9 +10,11 @@ import Testing
 /// bytes (never a Swift re-encoding) and parses them with the existing
 /// request loader. Claim = atomic rename of the queue file before execution;
 /// any new publication with an old seq is a replay even when bytes are
-/// identical (no mtime/inode heuristics).
+/// identical (no mtime/inode heuristics). Serialized: this suite shares one
+/// prepare() session directory per runID; path ops (seed listing, cleanup
+/// removal) must not interleave.
 @MainActor
-@Suite("Screenshot session protocol")
+@Suite("Screenshot session protocol", .serialized)
 struct ScreenshotSessionTests {
     private let nonce = "abcdef0123456789abcdef0123456789"
     private let otherNonce = "0123456789abcdef0123456789abcdef"
@@ -583,6 +585,38 @@ struct ScreenshotSessionTests {
         // The accepted transcript is unchanged: the refused command was
         // never validated.
         #expect(controller.transcript.count == 1)
+    }
+
+    @Test("unreadable queue is retried, never terminal")
+    func unreadableQueueRetries() async throws {
+        // Transient-read resilience: a queue read can fail while the file
+        // itself is intact (the claim path keeps the file for exactly this
+        // recoverable class; CI root cause unknown). An unreadable queue
+        // must NOT end the session — the next poll re-reads it — while
+        // structural errors stay terminal.
+        let docs = try temporaryDocuments()
+        let controller = fastController(documents: docs)
+        let initial = try ScreenshotSessionEnvelopeLoader.parse(data: envelope(frame: "track-running", seq: 0))
+        _ = await controller.start(initial: initial)
+        try publish(docs, frame: "insights", seq: 1)
+        let queue = try ScreenshotSessionPaths.queueURL(documents: docs, nonce: nonce)
+        try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: queue.path)
+        let spinning = await controller.drainOne()
+        try FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: queue.path)
+        guard case .empty = spinning else {
+            Issue.record("unreadable queue must stay retryable, got \(spinning)")
+            return
+        }
+        // Restored permissions: the retained command still claims and
+        // executes — nothing was consumed, refused, or terminalized.
+        let drained = await controller.drainOne()
+        guard case let .ready(frame, seq) = drained else {
+            Issue.record("expected ready after restore, got \(drained)")
+            return
+        }
+        #expect(frame == .insights)
+        #expect(seq == 1)
+        #expect(controller.transcript.count == 2)
     }
 
     @Test("cancellation stops the watcher without further commands")

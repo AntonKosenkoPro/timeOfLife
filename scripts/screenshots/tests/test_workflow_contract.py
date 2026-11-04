@@ -241,11 +241,13 @@ class WorkflowContractTests(unittest.TestCase):
 
     def test_no_new_secrets_or_environments(self):
         # No new ambient authority: the only secret stays the
-        # repo-scoped Figma key, and no environment: stage is added.
+        # repo-scoped private-asset key, bound step-scoped in exactly
+        # two steps (Ubuntu manifest preflight + panels fetch), and no
+        # environment: stage is added. (Figma key retired; §10.4.)
         body = text()
         self.assertNotIn("environment:", body)
-        self.assertEqual(body.count("secrets."), 1)
-        self.assertIn("secrets.FIGMA_API_KEY", body)
+        self.assertEqual(body.count("secrets."), 2)
+        self.assertEqual(body.count("secrets.APPLE_BEZELS_TOKEN"), 2)
 
     def test_panels_runs_when_workers_fail(self):
         # other/medium: one red device worker must not discard the whole
@@ -297,7 +299,8 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertNotIn("for cand in iphone69 iphone63 ipad13", seg)
 
     def test_pillow_before_bezel_fetch(self):
-        # bug/medium: fetch_bezel_assets needs Pillow installed first.
+        # The local stage helper verifies PNG geometry/alpha via the
+        # panel builder, so Pillow installs first in the fetch step.
         body = text()
         fetch_seg = body.split("Fetch Apple bezel assets")[1].split("Render panels")[0]
         self.assertIn('python3 -m pip install --break-system-packages "Pillow==13.0.0"', fetch_seg)
@@ -365,17 +368,19 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertIn('mkdir -p "$RUNNER_TEMP/bezels"', fetch)
         self.assertLess(
             fetch.index('mkdir -p "$RUNNER_TEMP/bezels"'),
-            fetch.index("FIGMA_API_KEY secret missing"),
+            fetch.index("APPLE_BEZELS_TOKEN secret missing"),
         )
         self.assertIn('tee "$RUNNER_TEMP/bezels/bezel-fetch.log"', fetch)
         self.assertIn('>"$RUNNER_TEMP/bezels/bezel-fetch.log" 2>&1', fetch)
         self.assertIn('exit "$rc"', fetch)
 
     def test_bezel_transcript_copied_loudly(self):
-        # The transcript copy into the bundle must never swallow failures:
-        # copy errors and missing log/dir warn explicitly; the bundle
-        # stays partial on evidence, never falsely complete, never
-        # silently short.
+        # The transcript copies into the bundle must never swallow
+        # failures: copy errors and missing log/dir warn explicitly;
+        # the bundle stays partial on evidence, never falsely complete,
+        # never silently short. Both the fetch log and the stage
+        # transcript (hashes/provenance evidence, never raw PNGs) are
+        # preserved.
         body = text()
         render = body.split("Render panels")[1].split(
             "Write README and zip")[0]
@@ -383,21 +388,110 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertIn("could not copy bezel-fetch.log", render)
         self.assertIn("no bezel-fetch.log to bundle", render)
         self.assertIn("no panels dir to receive bezel-fetch.log", render)
+        self.assertIn("bundled bezel-stage.json", render)
+        self.assertIn("could not copy bezel-stage.json", render)
+        self.assertIn("no bezel-stage.json to bundle", render)
+        self.assertIn("no panels dir to receive bezel-stage.json", render)
         self.assertNotIn("|| true", render)
 
-    def test_bezel_pins_and_scale_preserved(self):
-        # Owner-fixed Figma source: file key, all three node IDs, and
-        # --scale 2 (the pinned 980x2000/2300x3000 bezels verify at
-        # scale 2). A drifted source fails verification; pins are never
-        # edited to chase it, geometry never relaxed.
+    def test_apple_bezel_release_pins(self):
+        # §10.4 private-release delivery (Figma live fetch retired):
+        # explicit release tag + asset repo, the 3 canonical PNG names,
+        # the release manifest name, and the pinned manifest SHA passed
+        # explicitly to the local stage helper (hash-before-use: the
+        # helper trusts no manifest bytes before this SHA matches).
+        # A drifted source fails verification; pins are never edited to
+        # chase it, geometry never relaxed.
         body = text()
         fetch = body.split("Fetch Apple bezel assets")[1].split(
             "Render panels")[0]
-        self.assertIn("FIGMA_FILE_KEY: w8VjkUTV7f8AGiI7HXzKda", fetch)
-        self.assertIn('FIGMA_IPHONE_NODE_ID: "12887:20855"', fetch)
-        self.assertIn('FIGMA_IPHONE63_NODE_ID: "6316:14199"', fetch)
-        self.assertIn('FIGMA_IPAD_NODE_ID: "5456:18569"', fetch)
-        self.assertIn("--scale 2", fetch)
+        self.assertIn("gh release download apple-bezels-v1", fetch)
+        self.assertIn("--repo AntonKosenkoPro/lifio-design-assets", fetch)
+        self.assertIn('"iphone-17-pro-max-silver-portrait.png"', fetch)
+        self.assertIn('"iphone-17-white-portrait.png"', fetch)
+        self.assertIn('"ipad-pro-m5-13inch-silver-portrait.png"', fetch)
+        self.assertIn('"apple-bezels-manifest.json"', fetch)
+        self.assertIn("stage_bezel_assets.py", fetch)
+        # Stable stage-helper CLI (C-owner confirmed, verified against
+        # the actual file — not guessed): REQUIRED --manifest is never
+        # omitted; --source-dir/--out point at RUNNER_TEMP (never git,
+        # never the public ZIP).
+        self.assertIn("--source-dir", fetch)
+        self.assertIn("--out", fetch)
+        self.assertIn("--manifest", fetch)
+        self.assertIn(
+            "--expected-manifest-sha "
+            "\"a9b21ed835d7a231088e2a3249e8cfcc42b92162dfec3dcbc870c34ee6affaad\"",
+            fetch)
+        # Figma source fully retired: no file key, node pins, export
+        # scale, fetcher, or key reference remains anywhere.
+        self.assertNotIn("FIGMA", body)
+        self.assertNotIn("Figma", body)
+        self.assertNotIn("figma", body)
+        self.assertNotIn("fetch_bezel_assets", body)
+        self.assertNotIn("--scale 2", body)
+
+    def test_bezel_token_step_scoped(self):
+        # The private-release token lives ONLY in step envs (Ubuntu
+        # manifest preflight + panels fetch; `gh` reads it from the
+        # environment): step-scoped bindings, never echoed, never
+        # passed as a CLI flag, never exported upward.
+        body = text()
+        validate = body.split("\n  validate:\n")[1].split("\n  build:\n")[0]
+        fetch = body.split("Fetch Apple bezel assets")[1].split(
+            "Render panels")[0]
+        self.assertIn("GH_TOKEN: ${{ secrets.APPLE_BEZELS_TOKEN }}",
+                      validate)
+        self.assertIn("GH_TOKEN: ${{ secrets.APPLE_BEZELS_TOKEN }}", fetch)
+        self.assertEqual(body.count("GH_TOKEN:"), 2)
+        self.assertNotIn("--token", body)
+        self.assertNotIn("echo $GH_TOKEN", body)
+        self.assertNotIn('echo "$GH_TOKEN"', body)
+
+    def test_validate_preflights_bezel_manifest(self):
+        # §10.4 steering: the cheap Ubuntu gate runs AFTER selection
+        # validation and BEFORE any macOS work — manifest ONLY (no
+        # PNGs, no uploads), pinned SHA, fail-closed, stdlib lane.
+        # The panels job still verifies everything before staging;
+        # this gate only fails fast on bad credentials/drift.
+        body = text()
+        validate = body.split("\n  validate:\n")[1].split("\n  build:\n")[0]
+        self.assertLess(
+            validate.index("Validate device/locale/runtime selection"),
+            validate.index("Preflight private bezel manifest"),
+        )
+        self.assertIn("gh release download apple-bezels-v1", validate)
+        self.assertIn("--repo AntonKosenkoPro/lifio-design-assets",
+                      validate)
+        self.assertIn('"apple-bezels-manifest.json"', validate)
+        self.assertIn(
+            "a9b21ed835d7a231088e2a3249e8cfcc42b92162dfec3dcbc870c34ee6affaad",
+            validate)
+        for png in ("iphone-17-pro-max-silver-portrait.png",
+                    "iphone-17-white-portrait.png",
+                    "ipad-pro-m5-13inch-silver-portrait.png"):
+            self.assertNotIn(png, validate)
+        self.assertNotIn("upload-artifact", validate)
+        self.assertNotIn("continue-on-error", validate)
+        self.assertNotIn("|| true", validate)
+        self.assertIn("exit 2", validate)
+        self.assertNotIn("pip install", validate)
+        self.assertIn("sha256sum -c", validate)
+
+    def test_private_bezel_no_dmg_no_public_assets(self):
+        # No DMG/Sketch/design-service operations in CI, and raw bezels
+        # NEVER ship in the public bundle: the Write/Upload steps carry
+        # panels + build manifest + raw shots only (no bezels dir).
+        body = text()
+        fetch = body.split("Fetch Apple bezel assets")[1].split(
+            "Render panels")[0]
+        for token in (".dmg", "hdiutil", "Sketch", "sketch"):
+            self.assertNotIn(token, fetch)
+        write = body.split("- name: Write README and zip")[1].split(
+            "- name: Upload bundle")[0]
+        self.assertNotIn("bezels", write)
+        upload = body.split("- name: Upload bundle")[1]
+        self.assertNotIn("bezels", upload)
 
     def test_captions_dir_archive_fallback(self):
         # post-archive (2026-11-03): captions live under changes/archive,

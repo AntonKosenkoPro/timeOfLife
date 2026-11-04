@@ -88,9 +88,18 @@ approval). The English 7-frame iOS 27 pilot stays owner-approved (archived
 frozen hashes (historical two-pass counts valid, superseded as acceptance);
 LA frames stay pending until genuine pixels and owner approvals
 (archived 5.4/6.6/9.4) are untouched — captured never implies approved. Lineup:
-18PM 1320×2868 + iPhone 17 1206×2622 + M4 iPad 2064×2752. Twenty minutes is
+owner-provided portrait set — 17 Pro Max Silver / 17 White / iPad Pro 13 M5
+Silver (official Apple PNG device art, Figma live fetch retired; source identity pinned
+in tasks 10.1 with no upscaling/rotation necessary; native geometry
+kept only where SDK query verifies it for the actual models; delivery
+OWNER-DECIDED: private versioned release, `apple-bezels-v1` VERIFIED LIVE
+(manifest + asset hashes verified per tasks 10.4/10.1; `APPLE_BEZELS_TOKEN`
+CONFIGURED with authenticated CI read still to prove in 10.4; no public
+redistribution, no raw bezels in the public app ZIP). Panels device-art
+migration is pending under §10 (alpha-validated cavities, versioned templates,
+explicit new approval; renders are a review set until human approval). Twenty minutes is
 aspirational, not a hard gate (owner accepts ~22min vs 70+); acceptance
-requires successful downloadable output with truthful status (8.3 + §9 open;
+requires successful downloadable output with truthful status (8.3 + §9 + §10 open;
 8.1/8.2 retired — cancelled, not run; old runs failed, no fabricated
 acceptance; shared-artifact local install proof, legacy removal, and local
 verification pass; oversubscription is proven by a unit queue model, not real

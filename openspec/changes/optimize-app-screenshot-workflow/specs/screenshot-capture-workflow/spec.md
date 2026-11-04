@@ -161,6 +161,28 @@ The workflow SHALL retain independent artifacts for every attempted device-local
 - **THEN** those earlier artifacts remain downloadable independently and failed or unattempted pairs are listed explicitly
 - **AND** packaging records missing cells instead of claiming a full matrix
 
+### Requirement: Panels composite official Apple device art (no live fetch)
+
+Panels SHALL composite official Apple PNG device art whose source identity is resolved and pinned in tasks 10.1 (exact filenames, dimensions, SHA256, native alpha-cavity measurements), aligned to the owner-provided portrait set (17 Pro Max Silver, 17 White, iPad Pro 13 M5 Silver), delivered by the OWNER-DECIDED private versioned release (`AntonKosenkoPro/lifio-design-assets`, `apple-bezels-v1` — VERIFIED LIVE; manifest and asset hashes verified per tasks 10.4/10.1). The workflow SHALL verify exact hashes against the release manifest before any use, and SHALL NOT fetch device art from Figma or Sketch at runtime — "no live fetch" means no runtime design-service API dependency, not a zero-HTTP-download requirement; no API export and no DMG extraction run in CI. The workflow SHALL store no device-art binaries in any git history, SHALL ship no raw bezel files in the public app ZIP, and SHALL NOT publicly redistribute standalone artwork. Private internal storage rests on the Apple license with explicit user consent — no automatic legal clearance is claimed. CI SHALL present `APPLE_BEZELS_TOKEN` (fine-grained read-only Contents on the asset repo ONLY) stored as an Actions secret (the normal public-repo token MUST NOT be assumed to cross repositories; authenticated CI read remains to be proven — 10.4 stays PARTIAL until a workflow download/stage run executes). The workflow SHALL validate asset dimensions and screen cavities from the exact original PNG alpha with no silent scale/rotate. Native capture geometry (1320×2868, 1206×2622, 2064×2752) is KEPT only where the new models verify those dimensions via SDK query; model identifiers are queried, not guessed. Any template change SHALL be versioned and require explicit new owner approval — no historical approval transfers. Renders are a review set until human approval. Apple marketing artwork license constraints are noted as governing use; no invented rules are enforced.
+
+#### Scenario: Official originals pinned before any template validation
+- **WHEN** the assets worker resolves the official Apple original PNGs for the provided set
+- **THEN** exact filenames, dimensions, hashes, and cavity measurements are recorded and pinned in tasks 10.1 before template validation
+- **AND** chat-downscaled uploads are never pinned as sources
+
+#### Scenario: A cavity or dimension does not match the original alpha
+- **WHEN** a candidate asset's dimensions or screen cavity differ from the exact original PNG alpha
+- **THEN** template validation fails closed without scaling, rotating, or substituting artwork
+
+#### Scenario: A release asset fails manifest hash verification
+- **WHEN** a downloaded PNG or manifest hash differs from the pinned manifest
+- **THEN** panels fail closed before compositing, without using the mismatched asset
+
+#### Scenario: A new template version renders
+- **WHEN** panels render with a changed device-art template
+- **THEN** the output is labeled a review set tied to the new template version
+- **AND** no prior approval is carried over without explicit owner approval
+
 ### Requirement: Runtime reporting is aspirational; downloadable output is required
 
 The optimization SHALL record 20 minutes (1,200 seconds) from dispatch to final CI ZIP availability as ASPIRATIONAL, not a hard gate, for the current default three-device, five-locale, single-pass workload (owner explicitly accepts ~22 minutes versus 70+). Acceptance REQUIRES successful downloadable output: every selected device-locale pair attempted with its single pass, per-locale artifacts preserved, and a panels/ZIP bundle with truthful pending/N-A/blocked status. The acceptance capacity SHALL be declared as availability for one build job, then three overlapping device workers, then one packaging job, within the shared account ceiling; actual overlap and queueing MUST be reported. Reports SHALL include queueing for every stage, build/cache, runtime download if any, boot/install, per-session and per-frame phases, packaging, observed concurrency, and known competing jobs (or an explicit unknown); queue/download time MUST NOT be subtracted from an end-to-end report. Human evidence/approval time SHALL be identified separately, not presented as automated completion. Prior cold-cache + warm-cache <1,200s hard gates are SUPERSEDED (old runs failed; no fabricated cold/warm/final-ZIP acceptance) — historical evidence counts stay valid and are not rewritten. Cache misses, reduced capacity, or expanded device matrices MUST NOT silently narrow the workload to meet the aspiration.

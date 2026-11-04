@@ -86,12 +86,13 @@ def _nonce_of(frame: str) -> str:
     return NONCE_PINNED if frame in APP_FRAMES else NONCE_REALTIME
 
 
-# Attested iPad model — REAL catalog identifier (8GB variant only, not
-# the unsuffixed family name): the shared validator requires an exact
-# cataloged model. Name is operator-assigned evidence (presence, not
-# value); udid must equal the run's unanimous frame device_udid.
+# Attested iPad model — REAL catalog identifier (M5 12GB variant; the
+# shared validator requires an exact cataloged model — catalog owner
+# aligns SDK IDs separately). Name is operator-assigned evidence
+# (presence, not value); udid must equal the run's unanimous frame
+# device_udid.
 IPAD_MODEL_ID = ("com.apple.CoreSimulator.SimDeviceType."
-                 "iPad-Pro-13-inch-M4-8GB")
+                 "iPad-Pro-13-inch-M5-12GB")
 IPAD_MODEL_NAME = "shot-ci-ipad13"
 
 
@@ -264,6 +265,29 @@ def make_bezel_ipad(path: Path) -> None:
     im = Image.new("RGBA", (2300, 3000), (200, 200, 200, 255))
     d = ImageDraw.Draw(im)
     d.rectangle([118, 124, 118 + 2064, 124 + 2752], fill=(0, 0, 0, 0))
+    im.save(path)
+
+
+def make_bezel_69_apple(path: Path) -> None:
+    """Synthetic Apple-profile 6.9 bezel: exact 1470x3000 native dims with
+    the exact 1320x2868@(75,66) cavity (sharp corners — verifiers pin
+    dimensions/slot/origin, never corner art). NOTE: PIL rectangles are
+    endpoint-inclusive, so the far corner is at+slot-1."""
+    from PIL import Image, ImageDraw
+    im = Image.new("RGBA", (1470, 3000), (20, 20, 20, 255))
+    d = ImageDraw.Draw(im)
+    d.rectangle([75, 66, 75 + 1320 - 1, 66 + 2868 - 1], fill=(0, 0, 0, 0))
+    im.save(path)
+
+
+def make_bezel_63_apple(path: Path) -> None:
+    """Synthetic Apple-profile 6.3 bezel: exact 1350x2760 native dims with
+    the exact 1206x2622@(72,69) cavity — a 1:1 native paste, never
+    resampled."""
+    from PIL import Image, ImageDraw
+    im = Image.new("RGBA", (1350, 2760), (20, 20, 20, 255))
+    d = ImageDraw.Draw(im)
+    d.rectangle([72, 69, 72 + 1206 - 1, 69 + 2622 - 1], fill=(0, 0, 0, 0))
     im.save(path)
 
 
@@ -503,7 +527,9 @@ class BuilderUnitTests(unittest.TestCase):
                          panels_builder.TEMPLATE_69)
         self.assertEqual(panels_builder.MATRIX_DEVICES["iphone63"],
                          {"size": "6.3", "canvas": (1206, 2622),
-                          "island": True})
+                          "island": True, "model": "iPhone 17",
+                          "color": "White",
+                          "apple_asset": panels_builder.APPLE_ASSET_63})
 
     def test_matrix_catalog_matches_owner_lineup(self):
         # Owner lineup 2026-11-03: iphone69/iphone63/ipad13 only —
@@ -584,6 +610,184 @@ class BuilderUnitTests(unittest.TestCase):
                                               tuple(bezel.size))
             self.assertIn("cross-size art rejected", str(ctx.exception))
 
+    def test_verify_69_apple_profile_green(self):
+        # Official Apple 17 Pro Max art: exact native profile verifies with
+        # the pinned slot/origin/mask radius (hash gate lives in staging).
+        with tempfile.TemporaryDirectory() as tmp:
+            bezel = Path(tmp) / "apple-69.png"
+            make_bezel_69_apple(bezel)
+            info = panels_builder.verify_bezel_69(bezel)
+            self.assertEqual(info["profile"], "apple-17pm-v1")
+            self.assertEqual(info["size"], [1470, 3000])
+            self.assertEqual(info["screen_slot_px"], [1320, 2868])
+            self.assertEqual(info["screen_at_px"], [75, 66])
+            self.assertEqual(info["screen_mask_radius_px"], 192)
+
+    def test_verify_69_apple_rejects_landscape(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            bezel = Path(tmp) / "land.png"
+            Image.new("RGBA", (3000, 1470), (20, 20, 20, 255)).save(bezel)
+            with self.assertRaises(panels_builder.BuilderError) as ctx:
+                panels_builder.verify_bezel_69(bezel)
+            self.assertIn("size drift", str(ctx.exception))
+
+    def test_verify_69_apple_rejects_shifted_cavity(self):
+        # Right native size, wrong cavity origin: no silent substitution.
+        with tempfile.TemporaryDirectory() as tmp:
+            bezel = Path(tmp) / "shifted.png"
+            im = Image.new("RGBA", (1470, 3000), (20, 20, 20, 255))
+            ImageDraw.Draw(im).rectangle(
+                [100, 100, 100 + 1320, 100 + 2868], fill=(0, 0, 0, 0))
+            im.save(bezel)
+            with self.assertRaises(panels_builder.BuilderError) as ctx:
+                panels_builder.verify_bezel_69(bezel)
+            self.assertIn("slot drift", str(ctx.exception))
+
+    def test_verify_69_apple_rejects_opaque(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            bezel = Path(tmp) / "opaque.png"
+            Image.new("RGB", (1470, 3000), (10, 10, 10)).save(bezel)
+            with self.assertRaises(panels_builder.BuilderError):
+                panels_builder.verify_bezel_69(bezel)
+
+    def test_device_shot_69_rejects_unknown_size(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            bezel = Path(tmp) / "odd.png"
+            make_bezel_63(bezel)
+            loaded = panels_builder.load_bezel(bezel)
+            src = Image.new("RGB", (1320, 2868), (1, 2, 3))
+            with self.assertRaises(panels_builder.BuilderError) as ctx:
+                panels_builder.device_shot_69(src, loaded)
+            self.assertIn("unverified 6.9 bezel dimensions",
+                          str(ctx.exception))
+
+    def test_verify_63_apple_profile_green(self):
+        # Official Apple 17 art: exact profile verifies 1:1 (never
+        # resampled) with the pinned mask radius.
+        with tempfile.TemporaryDirectory() as tmp:
+            bezel = Path(tmp) / "apple-63.png"
+            make_bezel_63_apple(bezel)
+            info = panels_builder.verify_bezel_63(bezel)
+            self.assertEqual(info["profile"], "apple-17-v1")
+            self.assertEqual(info["size"], [1350, 2760])
+            self.assertEqual(info["screen_slot_px"], [1206, 2622])
+            self.assertEqual(info["screen_at_px"], [72, 69])
+            self.assertEqual(info["screen_mask_radius_px"], 190)
+
+    def test_verify_63_apple_rejects_shifted_cavity(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            bezel = Path(tmp) / "shifted.png"
+            im = Image.new("RGBA", (1350, 2760), (20, 20, 20, 255))
+            ImageDraw.Draw(im).rectangle(
+                [100, 100, 100 + 1206, 100 + 2622], fill=(0, 0, 0, 0))
+            im.save(bezel)
+            with self.assertRaises(panels_builder.BuilderError) as ctx:
+                panels_builder.verify_bezel_63(bezel)
+            self.assertIn("slot drift", str(ctx.exception))
+
+    def test_device_shot_63_apple_pastes_native_1_to_1(self):
+        # Apple 17 slot == canvas: the capture must land byte-identical
+        # (no LANCZOS resampling blur) under the bezel hole.
+        with tempfile.TemporaryDirectory() as tmp:
+            bezel_path = Path(tmp) / "apple-63.png"
+            make_bezel_63_apple(bezel_path)
+            bezel = panels_builder.load_bezel(bezel_path)
+            info = panels_builder.verify_bezel_63(bezel_path)
+            slot = tuple(info["screen_slot_px"])
+            at = tuple(info["screen_at_px"])
+            shot = Image.new("RGB", (1206, 2622), (70, 130, 180))
+            dev = panels_builder.device_shot_63(
+                shot, bezel, slot, at, tuple(bezel.size),
+                mask_r=int(info["screen_mask_radius_px"]))
+            self.assertEqual(dev.size, (1350, 2760))
+            pasted = dev.crop((at[0] + 400, at[1] + 400,
+                               at[0] + 500, at[1] + 500)).convert("RGB")
+            for px in list(pasted.getdata())[::997]:
+                self.assertEqual(tuple(px), (70, 130, 180))
+
+    def test_ipad_transparent_rgb_ignored(self):
+        # Official iPad art ships transparent WHITE while legacy fixtures
+        # use transparent BLACK: alpha-only composition must render
+        # byte-identical panels either way (RGB under alpha==0 ignored).
+        with tempfile.TemporaryDirectory() as tmp:
+            black = Path(tmp) / "black.png"
+            white = Path(tmp) / "white.png"
+            make_bezel_ipad(black)
+            im = Image.new("RGBA", (2300, 3000), (200, 200, 200, 255))
+            d = ImageDraw.Draw(im)
+            d.rectangle([118, 124, 118 + 2064, 124 + 2752],
+                        fill=(255, 255, 255, 0))
+            im.save(white)
+            panels_builder.verify_bezel_ipad(black)
+            panels_builder.verify_bezel_ipad(white)
+            raw = Image.new("RGB", (2064, 2752), (70, 130, 180))
+            dev_b = panels_builder.device_sheet_ipad(
+                raw, panels_builder.load_bezel(black))
+            dev_w = panels_builder.device_sheet_ipad(
+                raw, panels_builder.load_bezel(white))
+            self.assertEqual(dev_b.tobytes(), dev_w.tobytes())
+
+    def test_build_en69_apple_deterministic_selftest_green(self):
+        # New-art review template: deterministic build + structural
+        # selftest green on the Apple profile (no approval implied).
+        with tempfile.TemporaryDirectory() as tmp:
+            kit = make_kit_69(tmp)
+            apple = str(Path(tmp) / "apple-69.png")
+            make_bezel_69_apple(Path(apple))
+            caps_obj = panels_builder.load_captions(Path(kit["captions"]))
+            caps = panels_builder.validate_captions_for_locale(caps_obj, "en")
+            out1 = Path(kit["out"]) / "a"
+            out2 = Path(kit["out"]) / "b"
+            r1 = panels_builder.build_69(
+                "en", caps, "captions-v1", Path(kit["frames"]),
+                Path(kit["manifest"]), Path(apple), out1)
+            r2 = panels_builder.build_69(
+                "en", caps, "captions-v1", Path(kit["frames"]),
+                Path(kit["manifest"]), Path(apple), out2)
+            self.assertEqual(r1["bezel"]["profile"], "apple-17pm-v1")
+            self.assertEqual(r1["bezel"]["screen_slot_px"], [1320, 2868])
+            for name in r1["panels"]:
+                self.assertEqual((out1 / name).read_bytes(),
+                                 (out2 / name).read_bytes(),
+                                 f"non-deterministic {name}")
+                with Image.open(out1 / name) as probed:
+                    self.assertEqual(probed.size, (1320, 2868))
+            self.assertEqual(len(panels_builder.selftest_69(out1, r1)), 5)
+
+    def test_build_en63_apple_deterministic_selftest_green(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            kit = make_kit_63(tmp)
+            apple = str(Path(tmp) / "apple-63.png")
+            make_bezel_63_apple(Path(apple))
+            caps_obj = panels_builder.load_captions(Path(kit["captions"]))
+            caps = panels_builder.validate_captions_for_locale(caps_obj, "en")
+            out = Path(kit["out"]) / "a"
+            recipe = panels_builder.build_63(
+                "en", caps, "captions-v1", Path(kit["frames"]),
+                Path(kit["manifest"]), Path(apple), out)
+            self.assertEqual(recipe["bezel"]["profile"], "apple-17-v1")
+            self.assertEqual(recipe["bezel"]["screen_slot_px"], [1206, 2622])
+            self.assertEqual(len(panels_builder.selftest_63(out, recipe)), 5)
+
+    def test_check_template_refuses_new_art_profile(self):
+        # New review template version: refusal (no historical approval
+        # transfer, no auto-blessed goldens) — never a byte comparison.
+        with tempfile.TemporaryDirectory() as tmp:
+            kit = make_kit_69(tmp)
+            apple = str(Path(tmp) / "apple-69.png")
+            make_bezel_69_apple(Path(apple))
+            caps_obj = panels_builder.load_captions(Path(kit["captions"]))
+            caps = panels_builder.validate_captions_for_locale(caps_obj, "en")
+            out = Path(kit["out"]) / "a"
+            recipe = panels_builder.build_69(
+                "en", caps, "captions-v1", Path(kit["frames"]),
+                Path(kit["manifest"]), Path(apple), out)
+            with self.assertRaises(panels_builder.BuilderError) as ctx:
+                panels_builder.check_template(recipe, "en", "6.9")
+            self.assertIn("template mismatch", str(ctx.exception))
+            self.assertIn("no historical approval transfer",
+                          str(ctx.exception))
+
 
 @unittest.skipUnless(HAS_PILLOW, "Pillow required")
 class CliTests(unittest.TestCase):
@@ -615,6 +819,22 @@ class CliTests(unittest.TestCase):
                        "--bezel", kit["bezel"], "--check-template")
             self.assertEqual(proc.returncode, 2)
             self.assertIn("template mismatch", proc.stderr)
+
+    def test_cli_check_template_refuses_new_art_profile(self):
+        # New review template version: loud refusal (no approval transfer),
+        # never a byte comparison against historical goldens.
+        with tempfile.TemporaryDirectory() as tmp:
+            kit = make_kit_69(tmp)
+            apple = str(Path(tmp) / "apple-69.png")
+            make_bezel_69_apple(Path(apple))
+            proc = run("--locale", "en", "--size", "6.9",
+                       "--panels-dir", kit["out"], "--captions", kit["captions"],
+                       "--frames-dir", kit["frames"],
+                       "--run-manifest", kit["manifest"],
+                       "--bezel", apple, "--selftest", "--check-template")
+            self.assertEqual(proc.returncode, 2)
+            self.assertIn("template mismatch", proc.stderr)
+            self.assertIn("no historical approval transfer", proc.stderr)
 
     def test_cli_ipad_build_selftest_no_la(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -1,5 +1,14 @@
 # Handoff — optimize-app-screenshot-workflow (compaction checkpoint)
 
+## Private-Release checkpoint 2026-11-04 (sole-writer commit next; NO auth-success claim)
+
+- Private source `AntonKosenkoPro/lifio-design-assets`, live `apple-bezels-v1`: `https://github.com/AntonKosenkoPro/lifio-design-assets/releases/tag/apple-bezels-v1` — git text-only README+manifest, 3 PNGs Release-assets only (no PNG in git, no raw bezels in public ZIP, no Figma/API/DMG in CI).
+- Pins: manifest SHA256 `a9b21ed8…ffaaad` (full `a9b21ed835d7a231088e2a3249e8cfcc42b92162dfec3dcbc870c34ee6affaad`); assets `171f0a39…52792a` (17PM Silver 1470×3000), `fb93a0b6…7006a` (17 White 1350×2760), `0565de2d…074c4024` (M5 13" 2300×3000); cavities 1320×2868@(75,66)/1206×2622@(72,69)/2064×2752@(118,124) — staged 3/3 hash+geometry PASS (`/tmp/lifio-audit-1104-final`).
+- Secret `APPLE_BEZELS_TOKEN` (main-chosen): fine-grained read-only Contents on asset repo ONLY — CONFIGURED per owner, METADATA-verified via `gh secret list` 2026-11-04 (name+timestamp only, value never read); authenticated CI download NOT yet run — 10.4 stays PARTIAL, no false green; `GITHUB_TOKEN` still cannot cross repos, no copy from broad `gh auth`.
+- Independent tooling PASS (same audit dir, clean venv no PIL): screenshots **510 OK/1 skip**, panels **126 OK/3 skips**, contracts **51**, actionlint clean, strict `openspec validate` pass. iOS separate: Shot **1135/103**, Debug **1051/98**, lint **0/255**; 17PM declared-source (7113-dirty) 4 PNG native 1320×2868 + 2 receipts LA honest-pending; 17/M5 local capture blocked on legit missing approval pair — NO local bypass.
+- Round-1 ledger CORRECTED to **25 addressed/6 waived = 31** (3477 waived→fixed); existing GH thread replies updated by main after push. Unreadable-command fix retains file for next poll under existing HOST deadlines (no simctl retry, comments corrected); `.serialized` only fixture-path op isolation; exact CI test root UNKNOWN.
+- Tasks **42/49**, open **8.3/8.6/9.5/9.6/10.2/10.3/10.4** — await actual CI + human new-template approval; full CI must still prove 3-geom/multilingual/private-read/PUBLIC HANDOFF ZIP (no raw art). Diff scoped only (26 modified +1 new stager +1 deleted fetcher, no secrets values/binaries/unfamiliar work). Base `origin/main 009b0d25`, HEAD `7113ea92`.
+
 ## Current local PASS + pilot proof 2026-11-04 (cutover pending; NOT CI acceptance)
 
 - Checklist **41/45**, open **8.3/8.6/9.5/9.6** — remaining gates stay OPEN.

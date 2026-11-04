@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Store marketing panel builder (task 9.x): approved templates as code.
+"""Store marketing panel builder (tasks 9.x/10.x): approved templates as code.
 
 Promotion of the retained `panels/` builders into git (text only — no
 binaries). Three compositions are encoded here:
@@ -10,27 +10,34 @@ binaries). Three compositions are encoded here:
 - 6.3-inch iPhone (1206x2622), template v13 scaled: the SAME v13
   composition (same 5 panels, same LA stacking) with every layout constant
   derived per-axis from the 6.9 values (x * 1206/1320, y * 2622/2868;
-  derivation recorded in the recipe). The 6.3 bezel is NOT pinned to exact
-  pixels — it is structurally verified at fetch/render time (alpha slot
-  detection, canvas-aspect agreement, opaque frame). Review sets only:
-  no separate 6.3 owner approval exists, so `--check-template` refuses
-  6.3 and the 9.3 hold still applies.
+  derivation recorded in the recipe). Review sets only: no separate 6.3
+  owner approval exists, so `--check-template` refuses 6.3 and the 9.3
+  hold still applies. Non-Apple 6.3 bezels stay on the legacy structural
+  verification (alpha slot detection, canvas-aspect agreement, opaque
+  frame) — thresholds unchanged.
 - 13-inch iPad (2064x2752), template ipad-v1: four singles, headline TOP,
   silver-bezel device, NO LA panel (iPad has no Island presentations and
   the owner scoped LA out of the iPad set). Approved 2026-11-02
   (composition only).
 
-Owner lineup 2026-11-03: iPhone 6.9 (18 Pro Max), iPhone 6.3 (iPhone 17),
-iPad 13. The 6.5-inch device was DROPPED (Air pixels are 6.9-class; Apple
-auto-scales), so `--size 6.5` / device `iphone65` are unknown inputs and
-fail closed at the CLI catalog gate — no 6.5 composition ever existed.
+Owner lineup 2026-11-04: iPhone 17 Pro Max Silver, iPhone 17 White,
+iPad Pro 13-inch (M5) Silver — official Apple PNG device art delivered by
+the OWNER-DECIDED private versioned release
+(`AntonKosenkoPro/lifio-design-assets`, `apple-bezels-v1`: 3 individual
+PNGs + manifest, exact hash verification before use; no Figma/Sketch/API
+export or DMG extraction, no PNG in any git history, no public standalone
+redistribution). Headline/story/layout intent is preserved; renders on the
+new art are a NEW review template version (no historical approval
+transfer, no auto-approved frozen hash update — `--check-template`
+refuses the new-art profiles loudly instead of blessing new goldens).
 
 Rendering core is a behavior-preserving port of the retained
 `build_final_v13.py` (6.9) and `ipad/build_ipad_panels_v1.py` (iPad)
 lineages: same constants, same geometry, same fonts, same resampling,
-same PNG save defaults. With `--locale en --size 6.9` and the retained
-v13 sources, outputs MUST be byte-identical to the five approved v13
-PNGs (see EXPECTED_EN69; enforced by `--check-template`).
+same PNG save defaults. With `--locale en --size 6.9`, the legacy Figma
+profile, and the retained v13 sources, outputs MUST be byte-identical to
+the five approved v13 PNGs (see EXPECTED_EN69; enforced by
+`--check-template`, which stays pinned to the legacy profile only).
 
 Parametrization (locale/size/captions) changes ONLY the caption strings
 and the CJK font selection — never geometry, point sizes, or layout.
@@ -116,28 +123,92 @@ def _qy(v: int) -> int:
 
 # --- Matrix + bezel-asset contract (data only; rendering untouched) --------
 #
-# Canonical bezel filenames shared by fetch_bezel_assets.py (writer) and
+# Canonical staged filenames shared by stage_bezel_assets.py (writer) and
 # panels.py --render-matrix (reader). The PNG bytes themselves live in
-# external retention, never in git. The 6.9/iPad bezels are pinned to exact
-# pixels (owner Figma exports at scale 1); the 6.3 bezel (iPhone 17 Black,
-# FIGMA_IPHONE63_NODE_ID 6316:14199) is structurally verified instead —
-# its slot is measured from the alpha channel and must agree with the
-# 1206x2622 canvas aspect, so no pixel guess is baked in here.
+# external retention / the private versioned release, never in git.
+# Staged filenames are stable across the Figma→Apple migration so matrix
+# readers and existing tests keep working; only the verified artwork
+# behind them changes (see APPLE_* pins below).
 BEZEL_FILE_69 = "iphone-69-bezel.png"
 BEZEL_FILE_63 = "iphone-63-bezel.png"
 BEZEL_FILE_IPAD = "ipad-13-bezel.png"
 BEZEL_FILES = {"6.9": BEZEL_FILE_69, "6.3": BEZEL_FILE_63,
                "ipad13": BEZEL_FILE_IPAD}
 
+# Official Apple device-art pins (tasks 10.1; release apple-bezels-v1).
+# The release manifest is verified by exact SHA256 BEFORE any of its
+# metadata is used (see stage_bezel_assets.py); per-asset bytes are then
+# verified against the manifest SHA256 plus the native geometry/cavity
+# below. Never trust a downloaded manifest's mutable SHA claims, never
+# extract from DMGs, never call design-service APIs. Mask radii are
+# circle-fitted from the exact original alpha (17 Pro Max 192, 17 190 —
+# near-identical 3x corner units; iPad keeps the long-standing 56, whose
+# dims/cavity already fit the M5 art byte-for-byte in profile).
+APPLE_RELEASE = "apple-bezels-v1"
+APPLE_RELEASE_REPO = "AntonKosenkoPro/lifio-design-assets"
+APPLE_MANIFEST_NAME = "apple-bezels-manifest.json"
+APPLE_MANIFEST_SHA256 = (
+    "a9b21ed835d7a231088e2a3249e8cfcc42b92162dfec3dcbc870c34ee6affaad")
+APPLE_ASSET_69 = "iphone-17-pro-max-silver-portrait.png"
+APPLE_ASSET_63 = "iphone-17-white-portrait.png"
+APPLE_ASSET_IPAD = "ipad-pro-m5-13inch-silver-portrait.png"
+APPLE_SOURCE_69 = {
+    "name": APPLE_ASSET_69,
+    "sha256": "171f0a393dc89af4b7d72ba13fe0faa210adec904debcb1657abade46d52792a",
+    "native": (1470, 3000),
+    "slot": (1320, 2868),
+    "at": (75, 66),
+    "mask_r": 192,
+    "model": "iPhone 17 Pro Max",
+    "color": "Silver",
+    "profile": "apple-17pm-v1",
+}
+APPLE_SOURCE_63 = {
+    "name": APPLE_ASSET_63,
+    "sha256": "fb93a0b6e95e8c3c5ad923a8437e598746f5d4fa63ea971650172cb93727006a",
+    "native": (1350, 2760),
+    "slot": (1206, 2622),
+    "at": (72, 69),
+    "mask_r": 190,
+    "model": "iPhone 17",
+    "color": "White",
+    "profile": "apple-17-v1",
+}
+APPLE_SOURCE_IPAD = {
+    "name": APPLE_ASSET_IPAD,
+    "sha256": "0565de2da914c2b289074941c4c1d3ff04d2aad71d2ec27ec67a7876074c4024",
+    "native": (2300, 3000),
+    "slot": (2064, 2752),
+    "at": (118, 124),
+    "mask_r": 56,
+    "model": "iPad Pro (M5) 13-inch",
+    "color": "Silver",
+    "profile": "apple-m5-v1",
+}
+# Legacy Figma profile for the frozen v13 evidence path (retained
+# byte-identical fixtures only — never staged for new renders).
+LEGACY_BEZEL_PROFILE_69 = "figma-v13"
+STAGE_MANIFEST_FILE = "bezel-stage.json"
+
 # CI device keys (see the app-screenshots workflow device catalog) mapped
-# to the panel size contract. Owner lineup 2026-11-03: iphone69, iphone63,
-# ipad13 — iphone65 was dropped, so the catalog holds exactly these three.
+# to the panel size contract. Owner lineup 2026-11-04: iPhone 17 Pro Max
+# Silver (iphone69), iPhone 17 White (iphone63), iPad Pro 13-inch (M5)
+# Silver (ipad13) — iphone65 was dropped, so the catalog holds exactly
+# these three. Model/color/Apple-asset descriptions are informational
+# only (rendering keys stay size/canvas/island); actual SDK identifiers
+# are aligned by the source catalog owner separately, never guessed here.
 # Unknown keys stay BLOCKED at the catalog gate in panels.py (recorded,
 # never rendered, never stretched).
 MATRIX_DEVICES = {
-    "iphone69": {"size": "6.9", "canvas": (1320, 2868), "island": True},
-    "iphone63": {"size": "6.3", "canvas": (1206, 2622), "island": True},
-    "ipad13": {"size": "ipad13", "canvas": (2064, 2752), "island": False},
+    "iphone69": {"size": "6.9", "canvas": (1320, 2868), "island": True,
+                 "model": "iPhone 17 Pro Max", "color": "Silver",
+                 "apple_asset": APPLE_ASSET_69},
+    "iphone63": {"size": "6.3", "canvas": (1206, 2622), "island": True,
+                 "model": "iPhone 17", "color": "White",
+                 "apple_asset": APPLE_ASSET_63},
+    "ipad13": {"size": "ipad13", "canvas": (2064, 2752), "island": False,
+               "model": "iPad Pro (M5) 13-inch", "color": "Silver",
+               "apple_asset": APPLE_ASSET_IPAD},
 }
 
 ACCENT = (0x0A, 0x84, 0xFF)
@@ -695,24 +766,106 @@ def verify_sources(frames_dir: Path, manifest_path: Path,
     return ok, meta
 
 
+def _check_opaque_frame_strip(a, x0: int, y0: int, sw: int, sh: int,
+                              size: tuple[int, int]) -> None:
+    """Require opaque bezel frame beside the cavity (alpha-only samples).
+
+    Samples a vertical strip left of the cavity at mid-height and a
+    horizontal strip above it at quarter width — both clear of rounded
+    outer corners. Missing on both strips means no surrounding frame.
+    """
+    w, h = size
+    mid_y = y0 + sh // 2
+    strip_x = max(0, x0 // 2)
+    left_ok = any(
+        a.getpixel((strip_x, y)) == 255
+        for y in range(mid_y - 40, mid_y + 41, 4))
+    top_y = max(0, y0 // 2)
+    top_ok = any(
+        a.getpixel((x, top_y)) == 255
+        for x in range(w // 4 - 40, w // 4 + 41, 4))
+    if not (left_ok or top_ok):
+        raise BuilderError(
+            "bezel frame missing beside the slot "
+            f"(opaque frame not found near {(strip_x, mid_y)} or "
+            f"{(w // 4, top_y)})")
+
+
+def _check_cavity_interior_clear(a, x0: int, y0: int, sw: int, sh: int,
+                                 margin: int, what: str) -> None:
+    """Require the cavity interior (inside the mask margin) fully clear.
+
+    RGB is deliberately ignored — official art ships transparent WHITE in
+    some cavities and transparent BLACK in others; only alpha binds.
+    """
+    for y in range(y0 + margin, y0 + sh - margin, 7):
+        for x in range(x0 + margin, x0 + sw - margin, 11):
+            if a.getpixel((x, y)) != 0:
+                raise BuilderError(
+                    f"{what} cavity interior not transparent "
+                    f"(alpha {a.getpixel((x, y))} at {(x, y)}); refusing "
+                    "to render into an obstructed cavity")
+
+
 def verify_bezel_69(bezel_path: Path) -> dict:
+    """Exact-profile verification for the 6.9 iPhone bezel (two profiles).
+
+    Apple profile (`apple-17pm-v1`, tasks 10.x): exact 1470x3000 native
+    art, measured slot exactly 1320x2868@(75,66), clear interior, opaque
+    surrounding frame. Legacy Figma profile (`figma-v13`): the frozen
+    980x2000 / 880x1912@(50,44) thresholds, unchanged, for the retained
+    v13 byte-identical evidence path only. Anything else fails closed.
+    """
     if not bezel_path.is_file():
         raise BuilderError(f"missing bezel asset {bezel_path}")
     with Image.open(bezel_path) as im:
         size, bands, mode = tuple(im.size), im.getbands(), im.mode
-    if size != BEZEL69_NATIVE:
-        raise BuilderError(f"bezel size drift {size} != {BEZEL69_NATIVE}")
-    if "A" not in bands:
-        raise BuilderError("bezel must carry alpha (transparent screen)")
-    sw, sh = BEZEL69_SLOT
-    if (sw, sh) != (880, 1912):
-        raise BuilderError("screen slot drift")
-    if sw * CANVAS_69[1] != sh * CANVAS_69[0]:
-        raise BuilderError("screen slot aspect drift")
-    x, y = BEZEL69_AT
-    if x + sw > BEZEL69_NATIVE[0] or y + sh > BEZEL69_NATIVE[1]:
-        raise BuilderError("screen slot overflow")
-    return {"sha256": sha(bezel_path), "size": list(size), "mode": mode}
+        if "A" not in bands:
+            raise BuilderError(
+                "bezel must carry alpha (transparent screen)")
+        a = im.getchannel("A")
+        a.load()
+        extrema = a.getextrema()
+    if size == tuple(APPLE_SOURCE_69["native"]):
+        slot, at = tuple(APPLE_SOURCE_69["slot"]), tuple(APPLE_SOURCE_69["at"])
+        measured_slot, measured_at = detect_bezel_slot(bezel_path)
+        if tuple(measured_slot) != slot or tuple(measured_at) != at:
+            raise BuilderError(
+                f"bezel screen slot drift {measured_slot}@{measured_at} != "
+                f"pinned {slot}@{at}; no silent scale/rotate")
+        if slot[0] * CANVAS_69[1] != slot[1] * CANVAS_69[0]:
+            raise BuilderError("screen slot aspect drift vs canvas")
+        if at[0] + slot[0] > size[0] or at[1] + slot[1] > size[1]:
+            raise BuilderError("screen slot overflow")
+        with Image.open(bezel_path) as im:
+            a = im.getchannel("A")
+            a.load()
+            _check_cavity_interior_clear(
+                a, at[0], at[1], slot[0], slot[1],
+                APPLE_SOURCE_69["mask_r"], "apple-17pm-v1")
+            _check_opaque_frame_strip(a, at[0], at[1], slot[0], slot[1],
+                                      size)
+        return {"sha256": sha(bezel_path), "size": list(size), "mode": mode,
+                "profile": APPLE_SOURCE_69["profile"],
+                "screen_slot_px": list(slot), "screen_at_px": list(at),
+                "screen_mask_radius_px": APPLE_SOURCE_69["mask_r"]}
+    if size == BEZEL69_NATIVE:
+        sw, sh = BEZEL69_SLOT
+        if (sw, sh) != (880, 1912):
+            raise BuilderError("screen slot drift")
+        if sw * CANVAS_69[1] != sh * CANVAS_69[0]:
+            raise BuilderError("screen slot aspect drift")
+        x, y = BEZEL69_AT
+        if x + sw > BEZEL69_NATIVE[0] or y + sh > BEZEL69_NATIVE[1]:
+            raise BuilderError("screen slot overflow")
+        return {"sha256": sha(bezel_path), "size": list(size), "mode": mode,
+                "profile": LEGACY_BEZEL_PROFILE_69,
+                "screen_slot_px": list(BEZEL69_SLOT),
+                "screen_at_px": list(BEZEL69_AT),
+                "screen_mask_radius_px": BEZEL69_MASK_R}
+    raise BuilderError(
+        f"bezel size drift {size} != apple {tuple(APPLE_SOURCE_69['native'])} "
+        f"or legacy {BEZEL69_NATIVE}; no silent scale/rotate")
 
 
 def verify_bezel_ipad(bezel_path: Path) -> dict:
@@ -770,7 +923,9 @@ def detect_bezel_slot(bezel_path: Path) -> tuple[tuple[int, int],
     the centered pill). The two column runs must agree: a skewed or
     multi-cavity file fails loudly instead of rendering off-center art.
     Probed against the retained 6.9 bezel: returns exactly ((880, 1912),
-    (50, 44)).
+    (50, 44)). Against the official Apple art it returns the exact pinned
+    cavities: 17 Pro Max ((1320, 2868), (75, 66)), 17 ((1206, 2622),
+    (72, 69)), iPad M5 ((2064, 2752), (118, 124)).
     """
     with Image.open(bezel_path) as im:
         w, h = im.size
@@ -795,9 +950,68 @@ def detect_bezel_slot(bezel_path: Path) -> tuple[tuple[int, int],
 
 
 def verify_bezel_63(bezel_path: Path) -> dict:
-    """Structural verification for the 6.3 iPhone bezel (no pinned pixels).
+    """Verification for the 6.3 iPhone bezel (two profiles).
 
-    The Figma export size is NOT guessed here: the slot is measured via
+    Apple profile (`apple-17-v1`, tasks 10.x): exact 1350x2760 native
+    art with the measured slot exactly 1206x2622@(72,69) — a 1:1 native
+    paste, never resampled. Anything else portrait takes the legacy
+    structural path below (thresholds unchanged): the slot is measured
+    via detect_bezel_slot and must dominate the frame, agree with the
+    1206x2622 canvas aspect within 1%, and read >=97% clear; an opaque
+    frame must surround the slot. Landscape, opaque-only, undersized, or
+    aspect-drifted art fails closed on both paths.
+    """
+    if not bezel_path.is_file():
+        raise BuilderError(f"missing bezel asset {bezel_path}")
+    with Image.open(bezel_path) as im:
+        size = tuple(im.size)
+    if size == tuple(APPLE_SOURCE_63["native"]):
+        with Image.open(bezel_path) as im:
+            bands, mode = im.getbands(), im.mode
+            if "A" not in bands:
+                raise BuilderError(
+                    "bezel must carry alpha (transparent screen)")
+            a = im.getchannel("A")
+            a.load()
+            extrema = a.getextrema()
+        if extrema[1] != 255:
+            raise BuilderError("bezel frame missing (no opaque pixels)")
+        slot, at = tuple(APPLE_SOURCE_63["slot"]), tuple(APPLE_SOURCE_63["at"])
+        measured_slot, measured_at = detect_bezel_slot(bezel_path)
+        if tuple(measured_slot) != slot or tuple(measured_at) != at:
+            raise BuilderError(
+                f"bezel screen slot drift {measured_slot}@{measured_at} != "
+                f"pinned {slot}@{at}; no silent scale/rotate")
+        if at[0] + slot[0] > size[0] or at[1] + slot[1] > size[1]:
+            raise BuilderError("screen slot overflow")
+        with Image.open(bezel_path) as im:
+            a = im.getchannel("A")
+            a.load()
+            _check_cavity_interior_clear(
+                a, at[0], at[1], slot[0], slot[1],
+                APPLE_SOURCE_63["mask_r"], "apple-17-v1")
+            _check_opaque_frame_strip(a, at[0], at[1], slot[0], slot[1],
+                                      size)
+            slot_alpha = a.crop((at[0], at[1],
+                                 at[0] + slot[0], at[1] + slot[1]))
+            slot_alpha.load()
+            hist = slot_alpha.histogram()
+            clear_frac = hist[0] / sum(hist)
+        dev = abs(slot[0] * CANVAS_63[1] - slot[1] * CANVAS_63[0]) / (
+            slot[1] * CANVAS_63[0])
+        return {"sha256": sha(bezel_path), "size": list(size), "mode": mode,
+                "profile": APPLE_SOURCE_63["profile"],
+                "screen_slot_px": list(slot), "screen_at_px": list(at),
+                "screen_mask_radius_px": APPLE_SOURCE_63["mask_r"],
+                "slot_aspect_deviation": dev,
+                "slot_clear_fraction": clear_frac}
+    return _verify_bezel_63_structural(bezel_path)
+
+
+def _verify_bezel_63_structural(bezel_path: Path) -> dict:
+    """Structural verification for legacy 6.3 bezels (thresholds frozen).
+
+    The export size is NOT guessed here: the slot is measured via
     detect_bezel_slot and must dominate the frame, agree with the
     1206x2622 canvas aspect within 1%, and read >=97% clear (the slot
     holds the opaque Island pill plus antialiased edges — the retained
@@ -857,7 +1071,9 @@ def verify_bezel_63(bezel_path: Path) -> dict:
             f"bezel frame missing beside the slot "
             f"(left {left_px}, top {top_px})")
     return {"sha256": sha(bezel_path), "size": list(size), "mode": mode,
+            "profile": "structural-legacy",
             "screen_slot_px": [sw, sh], "screen_at_px": [x0, y0],
+            "screen_mask_radius_px": mask_r_63((sw, sh)),
             "slot_aspect_deviation": dev, "slot_clear_fraction": clear_frac}
 
 
@@ -871,18 +1087,47 @@ def load_bezel(bezel_path: Path) -> Image.Image:
 
 
 def device_shot_69(src: Image.Image, bezel: Image.Image) -> Image.Image:
+    """Composite one 1320x2868 capture into the 6.9 device art.
+
+    Legacy Figma profile (980x2000 bezel): the frozen v13 path — the
+    capture is LANCZOS-scaled to the 880x1912 slot, masked, and pasted at
+    (50, 44). Apple profile (1470x3000 native art): the capture is pasted
+    1:1 at the (75, 66) cavity with the measured mask radius — never
+    resampled, cropped, or rotated. Any other bezel size fails closed.
+    """
     if tuple(src.size) != CANVAS_69:
         raise BuilderError(
             f"cross-size art rejected: {src.size} vs canvas {CANVAS_69}")
-    shot = src.resize(BEZEL69_SLOT, Image.LANCZOS).convert("RGBA")
-    mask = Image.new("L", BEZEL69_SLOT, 0)
+    native, slot, at, mask_r = _shot_params_69(bezel)
+    if slot == CANVAS_69:
+        shot = src.convert("RGBA")
+    else:
+        shot = src.resize(slot, Image.LANCZOS).convert("RGBA")
+    mask = Image.new("L", slot, 0)
     ImageDraw.Draw(mask).rounded_rectangle(
-        [0, 0, *BEZEL69_SLOT], radius=BEZEL69_MASK_R, fill=255)
+        [0, 0, *slot], radius=mask_r, fill=255)
     shot.putalpha(mask)
-    dev = Image.new("RGBA", BEZEL69_NATIVE, (0, 0, 0, 0))
-    dev.paste(shot, BEZEL69_AT, shot)
+    dev = Image.new("RGBA", native, (0, 0, 0, 0))
+    dev.paste(shot, at, shot)
     dev.alpha_composite(bezel)
     return dev
+
+
+def _shot_params_69(bezel: Image.Image
+                    ) -> tuple[tuple[int, int], tuple[int, int],
+                               tuple[int, int], int]:
+    """(native, slot, at, mask_r) for a loaded 6.9 bezel by exact profile."""
+    size = tuple(bezel.size)
+    if size == tuple(APPLE_SOURCE_69["native"]):
+        return (tuple(APPLE_SOURCE_69["native"]),
+                tuple(APPLE_SOURCE_69["slot"]),
+                tuple(APPLE_SOURCE_69["at"]),
+                APPLE_SOURCE_69["mask_r"])
+    if size == BEZEL69_NATIVE:
+        return BEZEL69_NATIVE, BEZEL69_SLOT, BEZEL69_AT, BEZEL69_MASK_R
+    raise BuilderError(
+        f"unverified 6.9 bezel dimensions {size}; expected apple "
+        f"{tuple(APPLE_SOURCE_69['native'])} or legacy {BEZEL69_NATIVE}")
 
 
 def place_device_69(base: Image.Image, dev: Image.Image,
@@ -1106,9 +1351,12 @@ def build_69(locale: str, caps: dict, captions_version: str,
             "asset": bezel_path.name,
             "sha256": bezel_info["sha256"],
             "native_px": bezel_info["size"],
-            "screen_slot_px": list(BEZEL69_SLOT),
-            "screen_at_px": list(BEZEL69_AT),
-            "screen_mask_radius_px": BEZEL69_MASK_R,
+            "profile": bezel_info.get("profile", LEGACY_BEZEL_PROFILE_69),
+            "screen_slot_px": bezel_info.get("screen_slot_px",
+                                             list(BEZEL69_SLOT)),
+            "screen_at_px": bezel_info.get("screen_at_px", list(BEZEL69_AT)),
+            "screen_mask_radius_px": bezel_info.get("screen_mask_radius_px",
+                                                   BEZEL69_MASK_R),
         },
         "device_outer_width_px": DEVICE_W_69,
         "device_back_outer_width_px": DEVICE_BACK_W_69,
@@ -1162,14 +1410,27 @@ def mask_r_63(slot: tuple[int, int]) -> int:
 
 def device_shot_63(src: Image.Image, bezel: Image.Image,
                    slot: tuple[int, int], at: tuple[int, int],
-                   bezel_size: tuple[int, int]) -> Image.Image:
+                   bezel_size: tuple[int, int],
+                   mask_r: int | None = None) -> Image.Image:
+    """Composite one 1206x2622 capture into the 6.3 device art.
+
+    Apple profile (slot == canvas): 1:1 native paste, never resampled.
+    Legacy structural profile: LANCZOS-scaled to the measured slot (frozen
+    behavior). mask_r defaults to the legacy slot-derived radius; pass the
+    verifier's pinned radius for Apple art.
+    """
     if tuple(src.size) != CANVAS_63:
         raise BuilderError(
             f"cross-size art rejected: {src.size} vs canvas {CANVAS_63}")
-    shot = src.resize(slot, Image.LANCZOS).convert("RGBA")
+    if mask_r is None:
+        mask_r = mask_r_63(slot)
+    if tuple(src.size) == tuple(slot):
+        shot = src.convert("RGBA")
+    else:
+        shot = src.resize(slot, Image.LANCZOS).convert("RGBA")
     mask = Image.new("L", slot, 0)
     ImageDraw.Draw(mask).rounded_rectangle(
-        [0, 0, *slot], radius=mask_r_63(slot), fill=255)
+        [0, 0, *slot], radius=mask_r, fill=255)
     shot.putalpha(mask)
     dev = Image.new("RGBA", bezel_size, (0, 0, 0, 0))
     dev.paste(shot, at, shot)
@@ -1201,7 +1462,8 @@ def single_panel_top_63(src: Image.Image, bezel: Image.Image,
                         slot: tuple[int, int], at: tuple[int, int],
                         bezel_size: tuple[int, int], locale: str,
                         lines_cfg: list[tuple[str, int, bool, int]],
-                        force_top: int | None = None
+                        force_top: int | None = None,
+                        mask_r: int | None = None
                         ) -> tuple[Image.Image, dict]:
     base = Image.new("RGBA", CANVAS_63, ACCENT + (255,))
     h_h = headline_height_63(locale, lines_cfg)
@@ -1223,7 +1485,7 @@ def single_panel_top_63(src: Image.Image, bezel: Image.Image,
     draw_headline_63(base, locale, lines_cfg, hy0)
     box = (x0, y0, x0 + DEVICE_W_63, y0 + dev_h)
     out = place_device_63(base, device_shot_63(src, bezel, slot, at,
-                                              bezel_size), box)
+                                              bezel_size, mask_r), box)
     return out, {"headline_anchor": "top",
                  "headline_box": [hy0, hy1],
                  "shot_box": list(box)}
@@ -1233,7 +1495,8 @@ def la_panel_v11_63(lock: Image.Image, compact: Image.Image,
                     expanded: Image.Image, bezel: Image.Image,
                     slot: tuple[int, int], at: tuple[int, int],
                     bezel_size: tuple[int, int], locale: str,
-                    lines_cfg: list[tuple[str, int, bool, int]]
+                    lines_cfg: list[tuple[str, int, bool, int]],
+                    mask_r: int | None = None
                     ) -> tuple[Image.Image, dict]:
     """LA scaled-v11: same stacking as v13 (top lock bleed, center band,
     back compact behind front expanded) with per-axis scaled boxes; box
@@ -1279,11 +1542,11 @@ def la_panel_v11_63(lock: Image.Image, compact: Image.Image,
     text_top, text_bot = draw_headline_centered_63(base, locale, lines_cfg,
                                                    [hy0, hy1])
     out = place_device_63(base, device_shot_63(lock, bezel, slot, at,
-                                              bezel_size), top_box)
+                                              bezel_size, mask_r), top_box)
     out = place_device_63(out, device_shot_63(compact, bezel, slot, at,
-                                             bezel_size), back_box)
+                                             bezel_size, mask_r), back_box)
     out = place_device_63(out, device_shot_63(expanded, bezel, slot, at,
-                                             bezel_size), front_box)
+                                             bezel_size, mask_r), front_box)
     layout = {"headline_anchor": "center",
               "headline_box": [hy0, hy1],
               "headline_text_box": [text_top, text_bot],
@@ -1315,6 +1578,7 @@ def build_63(locale: str, caps: dict, captions_version: str,
     bezel_size = tuple(bezel.size)
     slot = tuple(bezel_info["screen_slot_px"])  # type: ignore[assignment]
     at = tuple(bezel_info["screen_at_px"])  # type: ignore[assignment]
+    mask_r = int(bezel_info["screen_mask_radius_px"])
     copy = copy_for_63(caps)
     raw = {k: Image.open(frames_dir / f"{k}.png") for k in NEEDED_FRAMES_69}
     panels: dict = {}
@@ -1328,7 +1592,7 @@ def build_63(locale: str, caps: dict, captions_version: str,
         for key, frame, hl, top in plan:
             img, layout = single_panel_top_63(raw[frame], bezel, slot, at,
                                               bezel_size, locale, hl,
-                                              force_top=top)
+                                              force_top=top, mask_r=mask_r)
             img = img.convert("RGB")
             if tuple(img.size) != CANVAS_63:
                 raise BuilderError(f"output size drift {key}: {img.size}")
@@ -1340,7 +1604,8 @@ def build_63(locale: str, caps: dict, captions_version: str,
 
         la_img, la_layout = la_panel_v11_63(raw["la-lock"], raw["la-compact"],
                                             raw["la-expanded"], bezel, slot,
-                                            at, bezel_size, locale, copy["la"])
+                                            at, bezel_size, locale, copy["la"],
+                                            mask_r=mask_r)
         la_img = la_img.convert("RGB")
         if tuple(la_img.size) != CANVAS_63:
             raise BuilderError(f"output size drift la: {la_img.size}")
@@ -1387,13 +1652,19 @@ def build_63(locale: str, caps: dict, captions_version: str,
             "asset": bezel_path.name,
             "sha256": bezel_info["sha256"],
             "native_px": bezel_info["size"],
+            "profile": bezel_info.get("profile", "structural-legacy"),
             "screen_slot_px": bezel_info["screen_slot_px"],
             "screen_at_px": bezel_info["screen_at_px"],
-            "screen_mask_radius_px": mask_r_63(tuple(bezel_info["screen_slot_px"])),
+            "screen_mask_radius_px": mask_r,
             "slot_aspect_deviation": bezel_info["slot_aspect_deviation"],
             "slot_clear_fraction": bezel_info["slot_clear_fraction"],
-            "node": "FIGMA_IPHONE63_NODE_ID (iPhone 17 Black 6316:14199); "
-                    "node binding is recorded at fetch time, not in pixels",
+            "source": ("apple-bezels-v1 release asset "
+                       + APPLE_SOURCE_63["name"]
+                       if bezel_info.get("profile")
+                       == APPLE_SOURCE_63["profile"] else
+                       "legacy structural bezel (thresholds frozen); "
+                       "node binding was recorded at fetch time, not in "
+                       "pixels"),
         },
         "device_outer_width_px": DEVICE_W_63,
         "device_back_outer_width_px": DEVICE_BACK_W_63,
@@ -1880,7 +2151,23 @@ def selftest_ipad(out_dir: Path, recipe: dict) -> list[str]:
 
 
 def check_template(recipe: dict, locale: str, size: str) -> list[str]:
-    """Byte-identical proof: output hashes MUST equal the approved set."""
+    """Byte-identical proof: output hashes MUST equal the approved set.
+
+    The approved sets are pinned to the legacy v13 device art ONLY. A
+    recipe composited with a new-version bezel profile (official Apple
+    art) is REFUSED here — review sets on new art are never
+    byte-compared against historical approvals and no new goldens are
+    blessed automatically; explicit owner approval mints new pins.
+    """
+    profile = recipe.get("bezel", {}).get("profile", "")
+    if profile and profile not in (LEGACY_BEZEL_PROFILE_69,
+                                   "structural-legacy"):
+        raise BuilderError(
+            f"template mismatch: bezel profile {profile!r} is a new review "
+            "template version with no owner approval (no historical approval "
+            "transfer, no auto-approved frozen hash update) — render is a "
+            "review set; explicit human approval required before any "
+            "byte-identical claim")
     expected = expected_for(locale, size)
     canvas = CANVAS_69 if size == "6.9" else CANVAS_IPAD
     mismatches = []

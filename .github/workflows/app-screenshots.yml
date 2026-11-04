@@ -19,8 +19,11 @@
 # - Panel rendering needs macOS Helvetica for byte-identical headlines, so
 #   the panels job also runs on macOS (fast: checkout + Pillow only).
 # - Apple bezel PNGs are NOT in git (no-binaries rule): the panels job
-#   fetches them from the Apple community Figma file with FIGMA_API_KEY
-#   (repo secret). Without the secret the panels job fails closed.
+#   downloads them from the PRIVATE lifio-design-assets release
+#   `apple-bezels-v1` with APPLE_BEZELS_TOKEN (repo secret, step-scoped
+#   GH_TOKEN only; live design-service fetch retired). Without the secret the
+#   panels job fails closed; the release manifest SHA is verified
+#   before any PNG is used, and raw bezels never enter the public ZIP.
 # - iOS runtime + Xcode on the runner are assumed; fail-fast checks stop
 #   the run with a clear message otherwise (the iOS 27 download fallback
 #   is retained).
@@ -99,6 +102,34 @@ jobs:
                 f"{summary['pair_count']} pairs, "
                 f"{summary['pass_count']} passes on {summary['runtime']}")
           PY
+
+      - name: Preflight private bezel manifest
+        # Cheap credential/digest gate on Ubuntu BEFORE any macOS work:
+        # downloads ONLY the release manifest (no PNGs, no uploads) and
+        # verifies its pinned SHA. A missing/invalid token or a drifted
+        # manifest fails the run here with a clear config error instead
+        # of burning build/capture minutes before the panels fetch
+        # fails. This is NOT a trust substitute: the panels job still
+        # downloads all assets and hash-verifies everything before
+        # staging. Stdlib lane: shell + sha256sum only, no Pillow.
+        env:
+          # Step-scoped read-only token for the PRIVATE asset repo only;
+          # never echoed, never passed on a command line.
+          GH_TOKEN: ${{ secrets.APPLE_BEZELS_TOKEN }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/bezels-preflight"
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::error::APPLE_BEZELS_TOKEN secret missing — cannot authenticate the private bezel release"
+            exit 2
+          fi
+          gh release download apple-bezels-v1 \
+            --repo AntonKosenkoPro/lifio-design-assets \
+            --pattern "apple-bezels-manifest.json" \
+            --dir "$RUNNER_TEMP/bezels-preflight" \
+            --clobber || { echo "::error::private-release manifest download failed"; exit 2; }
+          echo "a9b21ed835d7a231088e2a3249e8cfcc42b92162dfec3dcbc870c34ee6affaad  $RUNNER_TEMP/bezels-preflight/apple-bezels-manifest.json" | sha256sum -c - \
+            || { echo "::error::bezel manifest digest mismatch — refusing a drifted source"; exit 2; }
+          echo "bezel manifest preflight ok (auth + digest, manifest only)"
 
   build:
     name: build Screenshot (arm64)
@@ -841,27 +872,52 @@ jobs:
       - name: Fetch Apple bezel assets
         id: bezels
         env:
-          FIGMA_API_KEY: ${{ secrets.FIGMA_API_KEY }}
-          FIGMA_FILE_KEY: w8VjkUTV7f8AGiI7HXzKda
-          FIGMA_IPHONE_NODE_ID: "12887:20855"
-          FIGMA_IPHONE63_NODE_ID: "6316:14199"
-          FIGMA_IPAD_NODE_ID: "5456:18569"
+          # Step-scoped read-only token for the PRIVATE asset repo only
+          # (fine-grained Contents-read on lifio-design-assets, §10.4).
+          # `gh` reads it from the environment; it is never echoed,
+          # never passed on a command line, never stored anywhere.
+          GH_TOKEN: ${{ secrets.APPLE_BEZELS_TOKEN }}
         run: |
-          # The fetch transcript must exist for EVERY failure mode: later
+          # Private-release delivery (§10.4; live design-service fetch
+          # retired): the 3 canonical Apple PNGs + release manifest
+          # download from the private lifio-design-assets release
+          # `apple-bezels-v1` into RUNNER_TEMP (never git, never the
+          # public ZIP), then the local stage helper hash-verifies them
+          # (manifest SHA first, then per-asset SHA/geometry/alpha —
+          # local verification only: no design-service API, no
+          # disk-image extraction) and stages canonical bezels for
+          # panels --render-matrix.
+          # The transcript must exist for EVERY failure mode: later
           # steps still run (see `if: "!cancelled()"` below) and the ZIP
-          # carries bezel-fetch.log, so even a missing secret records its
+          # carries bezel-fetch.log, so even a missing token records its
           # non-secret reason here — never only in this step's console.
-          # Pins and --scale 2 are owner-fixed; a drifted source fails
-          # here, never by relaxing geometry downstream.
-          mkdir -p "$RUNNER_TEMP/bezels"
-          if [ -z "$FIGMA_API_KEY" ]; then
-            echo "invalid: FIGMA_API_KEY secret missing; bezel fetch refuses unauthenticated Figma access" | tee "$RUNNER_TEMP/bezels/bezel-fetch.log"
-            echo "::error::FIGMA_API_KEY secret missing"
+          # Raw PNGs NEVER enter the public bundle: only this log is
+          # copied into panels/; staged bezels stay in RUNNER_TEMP.
+          mkdir -p "$RUNNER_TEMP/bezels" "$RUNNER_TEMP/bezels-src"
+          if [ -z "$GH_TOKEN" ]; then
+            echo "invalid: APPLE_BEZELS_TOKEN secret missing; bezel fetch refuses unauthenticated private-release access" | tee "$RUNNER_TEMP/bezels/bezel-fetch.log"
+            echo "::error::APPLE_BEZELS_TOKEN secret missing"
             exit 2
           fi
           python3 -m pip install --break-system-packages "Pillow==13.0.0"
           set +e
-          python3 scripts/panels/fetch_bezel_assets.py --out "$RUNNER_TEMP/bezels" --scale 2 >"$RUNNER_TEMP/bezels/bezel-fetch.log" 2>&1
+          gh release download apple-bezels-v1 \
+            --repo AntonKosenkoPro/lifio-design-assets \
+            --pattern "iphone-17-pro-max-silver-portrait.png" \
+            --pattern "iphone-17-white-portrait.png" \
+            --pattern "ipad-pro-m5-13inch-silver-portrait.png" \
+            --pattern "apple-bezels-manifest.json" \
+            --dir "$RUNNER_TEMP/bezels-src" \
+            --clobber >"$RUNNER_TEMP/bezels/bezel-fetch.log" 2>&1
+          dl_rc=$?
+          if [ "$dl_rc" -ne 0 ]; then
+            echo "private-release download failed (exit $dl_rc)" >>"$RUNNER_TEMP/bezels/bezel-fetch.log"
+          fi
+          python3 scripts/panels/stage_bezel_assets.py \
+            --source-dir "$RUNNER_TEMP/bezels-src" \
+            --out "$RUNNER_TEMP/bezels" \
+            --manifest "$RUNNER_TEMP/bezels-src/apple-bezels-manifest.json" \
+            --expected-manifest-sha "a9b21ed835d7a231088e2a3249e8cfcc42b92162dfec3dcbc870c34ee6affaad" >>"$RUNNER_TEMP/bezels/bezel-fetch.log" 2>&1
           rc=$?
           set -e
           cat "$RUNNER_TEMP/bezels/bezel-fetch.log"
@@ -919,6 +975,21 @@ jobs:
             echo "::warning::no bezel-fetch.log to bundle (fetch step never wrote one) — bundle carries the matrix manifest only"
           else
             echo "::warning::no panels dir to receive bezel-fetch.log — bundle carries no rendered panels"
+          fi
+          # Same best-effort loud handling for the stage transcript:
+          # bezel-stage.json records the release tag, manifest SHA, and
+          # per-asset hashes/geometry/provenance (evidence only — never
+          # raw PNGs, which stay in RUNNER_TEMP and out of the ZIP).
+          if [ -f "$RUNNER_TEMP/bezels/bezel-stage.json" ] && [ -d "$RUNNER_TEMP/panels" ]; then
+            if cp "$RUNNER_TEMP/bezels/bezel-stage.json" "$RUNNER_TEMP/panels/bezel-stage.json"; then
+              echo "bundled bezel-stage.json"
+            else
+              echo "::warning::could not copy bezel-stage.json into the panels bundle (rc $?) — transcript stays in the fetch step's console log only; bundle carries the matrix manifest"
+            fi
+          elif [ ! -f "$RUNNER_TEMP/bezels/bezel-stage.json" ]; then
+            echo "::warning::no bezel-stage.json to bundle (stage step never wrote one) — bundle carries the matrix manifest only"
+          else
+            echo "::warning::no panels dir to receive bezel-stage.json — bundle carries no rendered panels"
           fi
 
       - name: Write README and zip

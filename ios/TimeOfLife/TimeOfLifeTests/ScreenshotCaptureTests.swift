@@ -7,9 +7,11 @@ import LifioLiveActivityCore
 
 /// Capture pipeline + isolation tests (tasks 2.5/3.2/4.3). Gated: they run
 /// under the TimeOfLife-Screenshot scheme, where the fixture and preparation
-/// code compile in. Debug builds compile this file to nothing.
+/// code compile in. Debug builds compile this file to nothing. Serialized:
+/// this suite shares one prepare() session directory per runID; path ops
+/// (isolation checks, container builds) must not interleave.
 @MainActor
-@Suite("Screenshot capture")
+@Suite("Screenshot capture", .serialized)
 struct ScreenshotCaptureTests {
 
     private func requestData(

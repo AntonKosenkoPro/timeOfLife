@@ -16,29 +16,84 @@ sys.path.insert(0, str(HERE))
 import workflow_inputs as wi
 
 
-def _panels_catalog():
-    """Read MATRIX_DEVICES/LOCALES from scripts/panels/builder.py as data.
+def _parse_panels_source(src: str) -> dict:
+    """Parse MATRIX_DEVICES keys + LOCALES from builder source as data.
 
-    The panels builder requires Pillow at import time, which the
-    ubuntu tooling-tests job intentionally lacks (stdlib-only lane;
-    Pillow installs live only in the macOS panels job). Parsing the
-    two catalog literals via ast keeps this parity gate stdlib-only
-    without executing the builder.
+    Keys-only minimization: MATRIX_DEVICES values are NEVER evaluated
+    (they legitimately reference static asset constants such as
+    APPLE_ASSET_69, which ast.literal_eval cannot resolve). Only the
+    dict keys are extracted, each required to be a non-empty string
+    literal; any dynamic shape (Name/JoinedStr/Call keys, ** unpacking,
+    non-Dict assignment) fails closed. LOCALES is a plain string
+    tuple/list literal evaluated for exact order. No import, no exec,
+    no Pillow.
     """
-    src = (HERE.parent / "panels" / "builder.py").read_text(
-        encoding="utf-8")
+    try:
+        tree = ast.parse(src)
+    except SyntaxError as exc:
+        raise AssertionError(f"panels builder source unparsable: {exc}")
     found: dict = {}
-    for node in ast.walk(ast.parse(src)):
+    for node in ast.walk(tree):
         if not isinstance(node, ast.Assign):
             continue
         for target in node.targets:
-            if isinstance(target, ast.Name) and target.id in (
-                    "MATRIX_DEVICES", "LOCALES"):
-                found[target.id] = ast.literal_eval(node.value)
+            if not (isinstance(target, ast.Name) and target.id in (
+                    "MATRIX_DEVICES", "LOCALES")):
+                continue
+            if target.id == "LOCALES":
+                try:
+                    val = ast.literal_eval(node.value)
+                except (ValueError, SyntaxError) as exc:
+                    raise AssertionError(
+                        f"panels LOCALES is not a literal: {exc}")
+                if not isinstance(val, (tuple, list)) or not val \
+                        or not all(isinstance(v, str) and v for v in val):
+                    raise AssertionError(
+                        "panels LOCALES must be a non-empty tuple/list "
+                        "of strings")
+                found[target.id] = tuple(val)
+            else:
+                if not isinstance(node.value, ast.Dict):
+                    raise AssertionError(
+                        "panels MATRIX_DEVICES must be a dict literal "
+                        "(dynamic shapes refused)")
+                keys: list = []
+                for k in node.value.keys:
+                    if k is None:
+                        raise AssertionError(
+                            "panels MATRIX_DEVICES uses ** unpacking "
+                            "(dynamic, refused)")
+                    if not (isinstance(k, ast.Constant)
+                            and isinstance(k.value, str) and k.value):
+                        raise AssertionError(
+                            "panels MATRIX_DEVICES has a non-literal key "
+                            f"{ast.dump(k)[:80]} (refused)")
+                    keys.append(k.value)
+                if not keys:
+                    raise AssertionError(
+                        "panels MATRIX_DEVICES must be non-empty")
+                if len(set(keys)) != len(keys):
+                    raise AssertionError(
+                        f"panels MATRIX_DEVICES has duplicate keys {keys}")
+                found[target.id] = set(keys)
     if set(found) != {"MATRIX_DEVICES", "LOCALES"}:
         raise AssertionError(
             "panels builder catalog literals not found (MATRIX_DEVICES/LOCALES)")
     return found
+
+
+def _panels_catalog():
+    """Read MATRIX_DEVICES keys + LOCALES from scripts/panels/builder.py.
+
+    The panels builder requires Pillow at import time, which the
+    ubuntu tooling-tests job intentionally lacks (stdlib-only lane;
+    Pillow installs live only in the macOS panels job). Parsing the
+    catalog via ast keeps this parity gate stdlib-only without
+    executing the builder and without evaluating asset values.
+    """
+    src = (HERE.parent / "panels" / "builder.py").read_text(
+        encoding="utf-8")
+    return _parse_panels_source(src)
 
 
 INJECTION_SHAPES = [
@@ -76,6 +131,57 @@ class DefaultCatalogTests(unittest.TestCase):
         self.assertEqual(wi.DEVICE_CATALOG["ipad13"]["geometry"], "2064x2752")
         self.assertEqual(wi.DEVICE_CATALOG["iphone69"]["island"], 1)
         self.assertEqual(wi.DEVICE_CATALOG["ipad13"]["island"], 0)
+        # Owner-provided portrait set (SDK-queried sim names, Xcode 27.1):
+        # 17 Pro Max / 17 / iPad Pro 13 M5. Keys and canvases preserved;
+        # canvases are NOT SDK-verified (devicetypes carry no dimensions).
+        self.assertEqual(wi.DEVICE_CATALOG["iphone69"]["sim"],
+                         "iPhone 17 Pro Max")
+        self.assertEqual(wi.DEVICE_CATALOG["iphone63"]["sim"], "iPhone 17")
+        self.assertEqual(wi.DEVICE_CATALOG["ipad13"]["sim"],
+                         "iPad Pro 13-inch (M5)")
+
+
+class PanelsCatalogParsingTests(unittest.TestCase):
+    def test_static_asset_names_accepted(self):
+        src = (HERE.parent / "panels" / "builder.py").read_text(
+            encoding="utf-8")
+        # Pin: the builder legitimately references static asset constants
+        # in MATRIX_DEVICES values; the keys-only parser must accept them.
+        self.assertIn("APPLE_ASSET_69", src)
+        parsed = _parse_panels_source(src)
+        self.assertEqual(parsed["MATRIX_DEVICES"],
+                         {"iphone69", "iphone63", "ipad13"})
+        self.assertEqual(parsed["LOCALES"],
+                         ("en", "ru", "zh-Hans", "es-419", "pt-BR"))
+
+    def test_wrong_key_detected(self):
+        src = ('MATRIX_DEVICES = {"iphone69": {"size": "6.9"},\n'
+               '                    "iphone65": {"size": "x"}}\n'
+               'LOCALES = ("en", "ru", "zh-Hans", "es-419", "pt-BR")\n')
+        parsed = _parse_panels_source(src)
+        self.assertIn("iphone65", parsed["MATRIX_DEVICES"])
+        self.assertNotEqual(set(parsed["MATRIX_DEVICES"]),
+                            set(wi.SUPPORTED_DEVICES))
+
+    def test_dynamic_keys_refused(self):
+        good_locales = 'LOCALES = ("en",)\n'
+        bad_sources = [
+            # Name key (variable, not a string literal).
+            'MATRIX_DEVICES = {SOME_VAR: {"size": "6.9"}}\n' + good_locales,
+            # JoinedStr key (f-string, dynamic).
+            'MATRIX_DEVICES = {f"iphone{i}": {"size": "6.9"}}\n'
+            + good_locales,
+            # ** unpacking (None key in ast.Dict).
+            'MATRIX_DEVICES = {**OTHER}\n' + good_locales,
+            # Non-Dict assignment (Call).
+            'MATRIX_DEVICES = make_devices()\n' + good_locales,
+            # Non-Dict assignment (Name alias).
+            'MATRIX_DEVICES = OTHER\n' + good_locales,
+        ]
+        for src in bad_sources:
+            with self.subTest(src=src.splitlines()[0][:40]):
+                with self.assertRaises(AssertionError):
+                    _parse_panels_source(src)
 
 
 class DeviceSelectionTests(unittest.TestCase):

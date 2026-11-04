@@ -273,7 +273,7 @@ Source/build/runtime identities: commit + dirty flag + Xcode/SDK + arm64 slices
 + app/appex hashes in every manifest. Local real-approval paired flags gate
 expansion scope; per-locale artifacts carry the single pass, receipts, timings, and
 failed/unattempted statuses (historical both-passes artifacts stay unchanged); raw shots + receipts ship in the ZIP alongside
-panels. Lineup: 18PM (1320×2868) + 17 (1206×2622) + M4 iPad (2064×2752).
+panels. Lineup: owner-provided portrait set — 17 Pro Max Silver / 17 White / iPad Pro 13 M5 Silver (official Apple PNG device art; Figma live fetch retired; source identity pinned in tasks 10.1 with no upscaling/rotation necessary; native capture geometry kept only where SDK query verifies it for the actual models). Delivery OWNER-DECIDED: private versioned release `AntonKosenkoPro/lifio-design-assets`, `apple-bezels-v1` VERIFIED LIVE (manifest + asset hashes verified per tasks 10.4/10.1; no PNG in git history, no raw bezels in the public app ZIP, no public redistribution; `APPLE_BEZELS_TOKEN` CONFIGURED (metadata-verified, value never read) with authenticated CI read still to prove in 10.4).
 Acceptance requires successful downloadable output with truthful status (8.3 open; 8.1/8.2 retired — cancelled, not run; old runs failed, no fabricated acceptance); 20 minutes is aspirational (owner accepts ~22min vs 70+), not a hard gate. Human visual inspection governs; 8.6 rebase/review pending.
 
 ## Legacy removal (8.5 DONE — Python + Swift removal verified; do not use removed verbs)
@@ -303,7 +303,7 @@ retained or promised.
   (5.4), shared-build/device-matrix (6.x, unit/structural + real local install
   proof), full verification (7.1–7.4), docs (8.4), legacy removal (8.5) done
   with audit evidence (5.1/5.4 two-pass measurements valid historically; single-pass deltas pending in §9).
-- Still open: single-pass simplification + verification + acceptance (§9.1–9.6), bundle
+- Still open: single-pass simplification + verification + acceptance (§9.1–9.6), official Apple device-art migration (§10.2–10.4; 10.1 source identity DONE), bundle
   verification (8.3), final rebase + review (8.6). 8.1/8.2 RETIRED (cancelled, not run; old runs failed; no fabricated acceptance).
 - Pends/owner gates unchanged: LA frames stay pending until genuine pixels;
   owner approvals 5.4/6.6/9.4 (archived pilot namespace) untouched — new sets

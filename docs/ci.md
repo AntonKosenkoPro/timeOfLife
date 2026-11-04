@@ -121,9 +121,15 @@ artifacts → panels + ZIP. Non-English/iPad runs require the paired
 (`ci_approval_bypass:true`) is a technical gate, never owner approval — and 20
 minutes is aspirational, not a hard gate (owner accepts ~22min vs 70+): acceptance
 requires successful downloadable output with truthful status (tasks
-8.3 + §9 open; 8.1/8.2 retired — cancelled, not run; old runs failed, no
+8.3 + §9 + §10 open; 8.1/8.2 retired — cancelled, not run; old runs failed, no
 fabricated acceptance; 6.x, 7.x + 8.5 done at unit/structural scope — no CI
-runtime claim yet). Operator
+runtime claim yet. Panels device art migrates to official Apple PNG assets
+(source identity pinned in tasks 10.1; Figma live fetch retired —
+see `FIGMA_API_KEY` retirement below; delivery OWNER-DECIDED: private versioned
+release `AntonKosenkoPro/lifio-design-assets`, `apple-bezels-v1` VERIFIED LIVE —
+manifest + asset hashes verified per tasks 10.4/10.1; `APPLE_BEZELS_TOKEN`
+CONFIGURED (metadata-verified, value never read) with authenticated CI read
+still to prove in 10.4, no public redistribution). Operator
 runbook: `docs/screenshot-capture.md`.
 
 ## Secrets checklist
@@ -147,7 +153,8 @@ Required secrets — GitHub Actions secrets (repo Settings → Secrets and varia
 | `SENTRY_PROJECT_RELEASE` | Xcode Cloud shared secret env (release project slug) | only when Sentry wired; absent = release upload skips |
 | `SENTRY_DSN` | Xcode Cloud shared secret env, threaded into the Cloud archive (the former `SENTRY_IOS_DSN` GitHub secret died with the removed `workflow_call` block) + backend deploy (rendered into VM `.env`) | only when Sentry wired; absent = shipped binary ships with reporting off |
 | `HC_PING_URL` | backend deploy (installs the every-minute dead-man's-switch cron pinger) | only when Healthchecks wired; absent = install skips with a warning |
-| `FIGMA_API_KEY` | app-screenshots panels job (Apple bezel fetch; without it the job fails closed) | only when rendering panels |
+| `FIGMA_API_KEY` | RETIRED — panels path migrates to official Apple PNG device art (§10); no Figma runtime fetch, no new Figma dependency (historical panels runs used it; old failures stand as recorded) | no (retired) |
+| `APPLE_BEZELS_TOKEN` (main-chosen name) | app-screenshots panels job (private release asset download from `AntonKosenkoPro/lifio-design-assets`; fine-grained read-only Contents on the asset repo ONLY — normal public-repo `GITHUB_TOKEN` cannot cross repos, no token copied from broad local `gh auth`) | CONFIGURED per owner statement, metadata-verified via `gh secret list` 2026-11-04 (value never read); authenticated CI read NOT yet verified (§10.4 PARTIAL) |
 
 Non-secret variables: `EMAIL_BACKEND`, `AWS_REGION`, `SES_FROM` (set as repository variables).
 

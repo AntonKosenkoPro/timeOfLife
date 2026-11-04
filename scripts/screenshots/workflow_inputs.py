@@ -21,11 +21,11 @@ import re
 SUPPORTED_DEVICES = ("iphone69", "iphone63", "ipad13")
 
 DEVICE_CATALOG = {
-    "iphone69": {"sim": "iPhone 18 Pro Max",
+    "iphone69": {"sim": "iPhone 17 Pro Max",
                  "geometry": "1320x2868", "island": 1},
     "iphone63": {"sim": "iPhone 17",
                  "geometry": "1206x2622", "island": 1},
-    "ipad13": {"sim": "iPad Pro 13-inch (M4)",
+    "ipad13": {"sim": "iPad Pro 13-inch (M5)",
                "geometry": "2064x2752", "island": 0},
 }
 

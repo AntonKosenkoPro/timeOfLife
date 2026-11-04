@@ -6,9 +6,11 @@ import Testing
 /// Negative coverage for tasks 3.1–3.4 that the session suite does not yet
 /// pin: isolation-guard injection, deterministic presentation resets,
 /// fixture-mutation rejection, and bounded mount failure. Real stores,
-/// real view models, no mocks.
+/// real view models, no mocks. Serialized: this suite shares one prepare()
+/// session directory per runID; path ops (seed listing, fixture mutation
+/// checks) must not interleave.
 @MainActor
-@Suite("Screenshot session resets")
+@Suite("Screenshot session resets", .serialized)
 struct ScreenshotSessionResetTests {
     private let nonce = "abcdef0123456789abcdef0123456789"
     // Distinct from the protocol suite's run ID: prepare() deletes and

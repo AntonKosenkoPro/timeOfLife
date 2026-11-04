@@ -627,13 +627,14 @@ class ModelCatalogTests(unittest.TestCase):
     P = "com.apple.CoreSimulator.SimDeviceType."
 
     def test_host_verified_identifiers(self):
-        # Exact host strings (read-only simctl list -j devicetypes).
-        self.assertTrue(sess.island_for_model(self.P + "iPhone-18-Pro-Max"))
-        self.assertTrue(sess.island_for_model(self.P + "iPhone-18-Pro"))
+        # Exact host strings (read-only simctl list -j devicetypes,
+        # Xcode 27.1: iPhone 17 Pro Max / iPhone 17 / M5 12GB+16GB).
+        self.assertTrue(sess.island_for_model(self.P + "iPhone-17-Pro-Max"))
+        self.assertTrue(sess.island_for_model(self.P + "iPhone-17-Pro"))
         self.assertTrue(sess.island_for_model(self.P + "iPhone-17"))
         self.assertTrue(sess.island_for_model("iPhone-Air"))
         self.assertFalse(sess.island_for_model(
-            self.P + "iPad-Pro-13-inch-M4-8GB"))
+            self.P + "iPad-Pro-13-inch-M5-12GB"))
         self.assertFalse(sess.island_for_model(self.P + "iPhone-16e"))
         self.assertFalse(sess.island_for_model(
             self.P + "iPhone-SE--2nd-generation-"))
@@ -649,12 +650,30 @@ class ModelCatalogTests(unittest.TestCase):
             sess.island_for_model(None)
 
     def test_catalog_model_exact_proof(self):
-        ipad = self.P + "iPad-Pro-13-inch-M4-8GB"
+        ipad = self.P + "iPad-Pro-13-inch-M5-12GB"
         self.assertEqual(
             sess.check_catalog_model("ipad13", ipad, "shot-ci-ipad13"), [])
         self.assertEqual(
             sess.check_catalog_model(
-                "ipad13", "iPad-Pro-13-inch-M4-8GB", "shot-ci-ipad13"), [])
+                "ipad13", "iPad-Pro-13-inch-M5-12GB", "shot-ci-ipad13"), [])
+        # Second M5 memory variant also attests ipad13.
+        ipad16 = self.P + "iPad-Pro-13-inch-M5-16GB"
+        self.assertEqual(
+            sess.check_catalog_model("ipad13", ipad16, "shot-ci-ipad13"), [])
+        # Retired M4 models cannot attest the new ipad13 matrix entry
+        # (no legacy branches, no aliases).
+        self.assertTrue(sess.check_catalog_model(
+            "ipad13", self.P + "iPad-Pro-13-inch-M4-8GB", "shot-ci-ipad13"))
+        self.assertTrue(sess.check_catalog_model(
+            "ipad13", self.P + "iPad-Pro-13-inch-M4-16GB", "shot-ci-ipad13"))
+        # Retired 18 Pro Max cannot attest the new iphone69 entry.
+        self.assertTrue(sess.check_catalog_model(
+            "iphone69", self.P + "iPhone-18-Pro-Max", "shot-ci-iphone69"))
+        # Current 17 Pro Max attests iphone69; 17 attests iphone63.
+        self.assertEqual(sess.check_catalog_model(
+            "iphone69", self.P + "iPhone-17-Pro-Max", "shot-ci-iphone69"), [])
+        self.assertEqual(sess.check_catalog_model(
+            "iphone63", self.P + "iPhone-17", "shot-ci-iphone63"), [])
         # Different iPad model, same geometry: cannot attest ipad13.
         air = self.P + "iPad-Air-11-inch-M4"
         self.assertTrue(sess.check_catalog_model(

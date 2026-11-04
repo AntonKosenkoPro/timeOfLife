@@ -38,7 +38,10 @@ Matrix layout out: <out>/<device>/<language>/panel-*.png + recipe, plus
   <out>/matrix-manifest.json (rendered/blocked per cell, never fabricated).
 
 Devices are CI catalog keys (iphone69/iphone63/ipad13); languages
-are JSON lists. Bezels come from fetch_bezel_assets.py (canonical names).
+are JSON lists. Bezels come from stage_bezel_assets.py (canonical names):
+official Apple PNGs (iPhone 17 Pro Max Silver, iPhone 17 White, iPad Pro
+13-inch (M5) Silver) staged from the private versioned release after exact
+manifest+asset hash verification — never Figma, never in git.
 Non-en captions resolve to <captions-dir>/<locale>.json (en falls back to
 the in-git captions_en.json); without a captions dir, non-en cells are
 BLOCKED (captions pending 9.2), never rendered with substituted copy.
@@ -46,14 +49,19 @@ BLOCKED (captions pending 9.2), never rendered with substituted copy.
 Required headline flags (the panel contract):
   --locale      en | ru | zh-Hans | es-419 | pt-BR
   --size        6.9 | 6.3 | ipad13
-                6.9    -> approved v13 composition (5 panels, LA-combined)
+                6.9    -> v13 composition (5 panels, LA-combined) on official
+                          Apple 17 Pro Max art; review sets only until the
+                          new-art template version is explicitly approved
+                          (9.3 hold still applies, no approval transfer)
                 6.3    -> v13 composition scaled to the 1206x2622 canvas
-                          (5 panels, LA-combined; review sets only — no
-                          separate 6.3 approval, 9.3 hold still applies)
-                ipad13 -> approved ipad-v1 composition (4 panels, no LA)
-                (owner lineup 2026-11-03: 6.9/6.3/iPad only; 6.5 dropped,
-                any other --size is an invalid choice, devices outside the
-                matrix catalog stay blocked, never rendered)
+                          (5 panels, LA-combined) on official Apple 17 art;
+                          review sets only — no separate 6.3 approval, 9.3
+                          hold still applies
+                ipad13 -> ipad-v1 composition (4 panels, no LA) on official
+                          Apple M5 iPad art
+                (owner lineup 2026-11-04: 17 Pro Max / 17 / M5 iPad only;
+                6.5 dropped, any other --size is an invalid choice, devices
+                outside the matrix catalog stay blocked, never rendered)
   --panels-dir  external output directory (must already exist; repository
                 paths are rejected — panel binaries stay outside git).
   --captions    captions JSON file (captions-v1 schema: locale, version,
@@ -68,15 +76,19 @@ Supporting inputs (explicit paths; no machine-specific defaults in git):
   --run-manifest  run-manifest.json: every required source is hash-verified
                   against it (fail-closed); geometry must equal the canvas
                   (no cross-size stretching); run status must be complete.
-  --bezel         device bezel PNG (iPhone bezel for 6.9, silver iPad bezel
-                  for ipad13; carries the transparent screen slot).
+  --bezel         device bezel PNG (official Apple art staged by
+                  stage_bezel_assets.py into canonical names; carries the
+                  transparent screen slot).
 
 Verification:
   --selftest       structural selftest on the built outputs (template
                    geometry, gaps, headline text, background/device probes).
   --check-template byte-identical proof for owner-approved EN compositions:
                    output hashes MUST equal the baked approved-template set
-                   (en/6.9 -> v13 hashes, en/ipad13 -> ipad-v1 hashes).
+                   (en/6.9 -> v13 hashes on the legacy Figma profile,
+                   en/ipad13 -> ipad-v1 hashes). New-art (Apple profile)
+                   recipes are refused loudly — review sets are never
+                   byte-compared against historical approvals.
 
 Exit codes: 0 built (and every requested check green); 2 invalid/blocked
 (bad flags, caption drift, source drift, template-gate refusal, fit
@@ -623,8 +635,8 @@ def render_matrix_cell(*, device: str, language: str, size: str,
     bezel_path = bezels_dir / panels_builder.BEZEL_FILES[size]
     if not bezel_path.is_file():
         raise panels_builder.BuilderError(
-            f"missing bezel asset {bezel_path}; fetch via "
-            "fetch_bezel_assets.py --out "
+            f"missing bezel asset {bezel_path}; stage via "
+            "stage_bezel_assets.py --source-dir <release-dir> --out "
             f"{bezels_dir}")
     caps_obj = panels_builder.load_captions(
         captions_for(language, captions_dir))
@@ -706,7 +718,7 @@ def cmd_render_matrix(args: argparse.Namespace) -> int:
     bezels_dir = Path(args.bezels_dir)
     if not bezels_dir.is_dir():
         print(f"invalid: bezels dir not found: {bezels_dir} "
-              "(fetch via fetch_bezel_assets.py)", file=sys.stderr)
+              "(stage via stage_bezel_assets.py)", file=sys.stderr)
         return EXIT_INVALID
     captions_dir = Path(args.captions_dir) if args.captions_dir else None
     if captions_dir is not None and not captions_dir.is_dir():
