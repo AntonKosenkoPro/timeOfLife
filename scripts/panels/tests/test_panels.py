@@ -61,6 +61,33 @@ OWNER_EN = {
     "add_entry": "All details you need.",
 }
 
+# Archived pilot captions (in-git 9.2 review inputs; the matrix --captions-dir).
+ARCHIVE_CAPTIONS_DIR = (HERE.parent.parent / "openspec" / "changes" /
+                        "archive" / "2026-11-03-app-store-screenshot-pilot" /
+                        "captions")
+
+PANEL_TEXT_KEY = {
+    "track": "track",
+    "insights": "insights",
+    "history": "history_primary",
+    "add-entry": "add_entry",
+    "la": "live_activity",
+}
+
+ALL_LOCALES = ("en", "ru", "zh-Hans", "es-419", "pt-BR")
+IPHONE_PANELS = ("track", "insights", "history", "add-entry", "la")
+IPAD_PANELS = ("track", "insights", "history", "add-entry")
+
+
+def archived_texts(locale: str) -> dict:
+    """Caption texts for a matrix locale (en: owner-fixed copy verbatim)."""
+    if locale == "en":
+        return dict(OWNER_EN)
+    obj = json.loads(
+        (ARCHIVE_CAPTIONS_DIR / f"{locale}.json").read_text(encoding="utf-8"))
+    return {k: obj["captions"][k]["text"]
+            for k in panels_builder.CAPTION_KEYS}
+
 FRAME_COLORS = {
     "track-running": (70, 130, 180),
     "insights": (90, 160, 90),
@@ -834,6 +861,188 @@ class BuilderUnitTests(unittest.TestCase):
                 panels_builder.check_template(recipe, "en", "6.9")
             self.assertIn("apple-18pm-v1", str(ctx.exception))
 
+    def test_pair_scales_pinned(self):
+        # Owner table 2026-11-05: iphone pair en 0.94 / ru 0.66 / es 0.93 /
+        # pt 0.97 / zh-Hans 1.0; ipad13 1.0 all locales.
+        for locale, want in (("en", 0.94), ("ru", 0.66), ("es-419", 0.93),
+                             ("pt-BR", 0.97), ("zh-Hans", 1.0)):
+            self.assertEqual(panels_builder.pair_scale("iphone", locale),
+                             want)
+        for locale in ALL_LOCALES:
+            self.assertEqual(panels_builder.pair_scale("ipad13", locale),
+                             1.0)
+        # Flooring, not rounding: 96pt en -> 90, ru -> 63.
+        self.assertEqual(panels_builder.scaled_size(96, "iphone", "en"), 90)
+        self.assertEqual(panels_builder.scaled_size(92, "iphone", "en"), 86)
+        self.assertEqual(panels_builder.scaled_size(96, "iphone", "ru"), 63)
+        self.assertEqual(panels_builder.scaled_size(92, "iphone", "ru"), 60)
+
+    def test_preferred_breaks_collapse_when_fits(self):
+        # Rule (1): joined text fitting max width renders ONE line even
+        # when the table holds two preferred lines (ru la, en insights).
+        from PIL import Image, ImageDraw
+        probe = ImageDraw.Draw(Image.new("RGB", (8, 8)))
+        cases = [
+            # (locale, pair, panel, size_pt, bold, max_w, want_nlines)
+            ("en", "iphone", "insights", 90, True, 1140, 1),
+            ("en", "iphone", "la", 86, True, 1140, 1),
+            ("ru", "iphone", "la", 60, True, 1140, 1),
+            ("ru", "iphone", "add-entry", 63, True, 1140, 1),
+            ("zh-Hans", "iphone", "track", 96, True, 1140, 1),
+            ("es-419", "ipad13", "insights", 96, True, 1820, 1),
+            ("en", "iphone", "track", 90, True, 1140, 2),
+            ("es-419", "iphone", "track", 89, True, 1140, 2),
+            ("pt-BR", "iphone", "la", 89, True, 1140, 2),
+            ("es-419", "ipad13", "track", 96, True, 1820, 2),
+        ]
+        texts = {loc: archived_texts(loc) for loc in ALL_LOCALES}
+        for locale, pair, panel, size, bold, max_w, want in cases:
+            text = texts[locale][PANEL_TEXT_KEY[panel]]
+            fnt = panels_builder.font_for(locale, size, bold)
+            lines = panels_builder.preferred_lines(
+                probe, locale, pair, panel, text, fnt, max_w)
+            self.assertEqual(len(lines), want,
+                             f"{locale}/{pair}/{panel}")
+            if want == 1:
+                self.assertEqual(lines, [text])
+            else:
+                want_lines = [ln.strip() for ln in
+                              panels_builder.BREAKS[
+                                  (panels_builder.locale_root(locale),
+                                   panel)]]
+                self.assertEqual(lines, want_lines)
+
+    def test_preferred_lines_honored_each_fits_width_70_combos(self):
+        # All 70 device-locale-panel combos (50 iPhone + 20 iPad, no iPad
+        # LA): preferred lines honored, every line fits its device width.
+        from PIL import Image, ImageDraw
+        probe = ImageDraw.Draw(Image.new("RGB", (8, 8)))
+        texts = {loc: archived_texts(loc) for loc in ALL_LOCALES}
+        combos = 0
+        for size, pair, max_w in (("6.9", "iphone", 1140),
+                                  ("6.3", "iphone", 1040),
+                                  ("ipad13", "ipad13", 1820)):
+            base = {"6.9": panels_builder.TYPE_69,
+                    "6.3": panels_builder.TYPE_63,
+                    "ipad13": panels_builder.TYPE_IPAD}[size]
+            panels = IPAD_PANELS if pair == "ipad13" else IPHONE_PANELS
+            for locale in ALL_LOCALES:
+                table = panels_builder.scale_type_table(base, pair, locale)
+                for panel in panels:
+                    size_pt, bold, _gap = table[panel][0]
+                    text = texts[locale][PANEL_TEXT_KEY[panel]]
+                    fnt = panels_builder.font_for(locale, size_pt, bold)
+                    lines = panels_builder.preferred_lines(
+                        probe, locale, pair, panel, text, fnt, max_w)
+                    for ln in lines:
+                        got = probe.textlength(ln, font=fnt)
+                        self.assertLessEqual(
+                            got, max_w,
+                            f"{size}/{locale}/{panel} line {ln!r} "
+                            f"{got:.0f}px > {max_w}px")
+                    joined_fits = (probe.textlength(text, font=fnt)
+                                   <= max_w)
+                    if joined_fits:
+                        self.assertEqual(lines, [text],
+                                         f"{size}/{locale}/{panel} must "
+                                         "collapse to one line")
+                    else:
+                        want = [ln.strip() for ln in panels_builder.BREAKS[
+                            (panels_builder.locale_root(locale), panel)]]
+                        self.assertEqual(lines, want,
+                                         f"{size}/{locale}/{panel} must "
+                                         "render preferred lines verbatim")
+                    combos += 1
+        self.assertEqual(combos, 70)
+
+    def _build_real_cell(self, root: str, size: str,
+                         locale: str) -> tuple[Path, dict]:
+        """Synthetic-frames cell rendered with the real matrix captions."""
+        cell = Path(root) / f"{size}-{locale}"
+        cell.mkdir(parents=True)
+        tmp = str(cell)
+        if size == "6.9":
+            kit = make_kit_69(tmp)
+        elif size == "6.3":
+            kit = make_kit_63(tmp)
+        else:
+            kit = make_kit_ipad(tmp)
+        texts = archived_texts(locale)
+        captions = make_captions(tmp, locale, texts=texts)
+        caps_obj = panels_builder.load_captions(Path(captions))
+        caps = panels_builder.validate_captions_for_locale(caps_obj, locale)
+        out = Path(kit["out"])
+        if size == "6.9":
+            recipe = panels_builder.build_69(
+                locale, caps, "captions-v1", Path(kit["frames"]),
+                Path(kit["manifest"]), Path(kit["bezel"]), out)
+            lines = panels_builder.selftest_69(out, recipe)
+        elif size == "6.3":
+            recipe = panels_builder.build_63(
+                locale, caps, "captions-v1", Path(kit["frames"]),
+                Path(kit["manifest"]), Path(kit["bezel"]), out)
+            lines = panels_builder.selftest_63(out, recipe)
+        else:
+            recipe = panels_builder.build_ipad(
+                locale, caps, "captions-v1", Path(kit["frames"]),
+                Path(kit["manifest"]), Path(kit["bezel"]), out)
+            lines = panels_builder.selftest_ipad(out, recipe)
+        self.assertTrue(lines, f"{size}/{locale} selftest empty")
+        return out, recipe
+
+    def test_la_band_210_all_10_iphone_cells(self):
+        # All 10 iPhone LA cells (2 sizes x 5 locales, real captions):
+        # headline text stays inside the owner band (69: h210, 63: h192).
+        with tempfile.TemporaryDirectory() as tmp:
+            checked = 0
+            for size in ("6.9", "6.3"):
+                canvas = (panels_builder.CANVAS_69 if size == "6.9"
+                          else panels_builder.CANVAS_63)
+                band = (panels_builder.HEADLINE_BOX_FIGMA if size == "6.9"
+                        else panels_builder.HEADLINE_BOX_63)
+                for locale in ALL_LOCALES:
+                    _out, recipe = self._build_real_cell(tmp, size, locale)
+                    name = panels_builder.panel_filename(
+                        "la", locale, canvas)
+                    p = recipe["panels"][name]
+                    self.assertEqual(p["headline_box"], band,
+                                     f"{size}/{locale} band drift")
+                    tt, tb = p["headline_text_box"]
+                    hy0, hy1 = p["headline_box"]
+                    self.assertGreaterEqual(tt, hy0)
+                    self.assertLessEqual(tb, hy1)
+                    checked += 1
+            self.assertEqual(checked, 10)
+
+    def test_single_gap_overflow_all_60_cells(self):
+        # All 60 single cells (4 panels x 5 locales x 3 sizes, real
+        # captions): headline/device gap holds, no bottom overflow.
+        with tempfile.TemporaryDirectory() as tmp:
+            checked = 0
+            for size, canvas, min_gap in (
+                    ("6.9", panels_builder.CANVAS_69,
+                     panels_builder.MIN_GAP_69),
+                    ("6.3", panels_builder.CANVAS_63,
+                     panels_builder.MIN_GAP_63),
+                    ("ipad13", panels_builder.CANVAS_IPAD,
+                     panels_builder.MIN_GAP_IPAD)):
+                for locale in ALL_LOCALES:
+                    _out, recipe = self._build_real_cell(tmp, size, locale)
+                    for panel in IPAD_PANELS:
+                        name = panels_builder.panel_filename(
+                            panel, locale, canvas)
+                        p = recipe["panels"][name]
+                        box = (p["shot_box"] if size != "ipad13"
+                               else p["device_box"])
+                        self.assertGreaterEqual(
+                            box[1] - p["headline_box"][1], min_gap,
+                            f"{size}/{locale}/{panel} gap")
+                        self.assertLessEqual(
+                            box[3], canvas[1],
+                            f"{size}/{locale}/{panel} overflow")
+                        checked += 1
+            self.assertEqual(checked, 60)
+
 
 @unittest.skipUnless(HAS_PILLOW, "Pillow required")
 class CliTests(unittest.TestCase):
@@ -1235,9 +1444,15 @@ class RetainedByteIdentical69Tests(unittest.TestCase):
                     panels_builder.CANVAS_69)
             self.assertIn("anchor", str(ctx.exception).lower())
 
-    def test_retained_en69_renderer_only_byte_identical(self):
+    def test_retained_en69_review_only_after_owner_breaks(self):
         """Historical pixels rendering only; NOT current session
         evidence/approval.
+
+        Owner-approved headline breaks + pair scales (2026-11-05, EN
+        layout change included) moved EN 6.9 off the frozen v13 bytes:
+        EN69 is REVIEW-ONLY — deterministic build + selftest green, while
+        check-template reports a mismatch (never byte-compared against
+        historical goldens, no auto-blessed hash update).
 
         Calls builder.build_69 directly with the shared evidence validator
         mocked to [] ONLY inside this test process (mock scope:
@@ -1269,15 +1484,16 @@ class RetainedByteIdentical69Tests(unittest.TestCase):
                 mismatches = panels_builder.check_template(
                     recipe, "en", "6.9")
             mocked.assert_called_once()
-            self.assertEqual(mismatches, [])
             self.assertEqual(len(lines), 5)
-            key_to_retained = {
-                "track": "panel-track-en-1320x2868-v13.png",
-                "insights": "panel-insights-en-1320x2868-v13.png",
-                "history": "panel-history-en-1320x2868-v13.png",
-                "add-entry": "panel-add-entry-en-1320x2868-v13.png",
-                "la": "panel-live-activities-en-1320x2868-v13.png",
-            }
+            # Review-only: the new approved EN layout no longer reproduces
+            # the frozen v13 bytes — the gate must report (not bless) this.
+            self.assertTrue(
+                mismatches,
+                "EN69 with owner-approved breaks/scales must mismatch the "
+                "frozen v13 goldens (review-only, never auto-approved)")
+            # The approved new EN layout on the retained pixels: insights
+            # collapses to one line at the 0.94 pair size, track keeps its
+            # preferred two lines.
             key_to_built = {
                 "track": "panel-track-en-1320x2868.png",
                 "insights": "panel-insights-en-1320x2868.png",
@@ -1285,15 +1501,8 @@ class RetainedByteIdentical69Tests(unittest.TestCase):
                 "add-entry": "panel-add-entry-en-1320x2868.png",
                 "la": "panel-live-activities-en-1320x2868.png",
             }
-            for key, want in panels_builder.EXPECTED_EN69.items():
-                built = Path(out) / key_to_built[key]
-                self.assertTrue(built.is_file(), key)
-                got = hashlib.sha256(built.read_bytes()).hexdigest()
-                self.assertEqual(got, want, f"{key} != approved v13 hash")
-                retained = RETAINED / "panels" / key_to_retained[key]
-                self.assertTrue(retained.is_file(), f"retained {key} missing")
-                self.assertEqual(built.read_bytes(), retained.read_bytes(),
-                                 f"{key} bytes differ from retained v13 file")
+            for key, built in key_to_built.items():
+                self.assertTrue((Path(out) / built).is_file(), key)
 
 
 @unittest.skipUnless(HAS_PILLOW and HAS_RETAINED_IPAD,

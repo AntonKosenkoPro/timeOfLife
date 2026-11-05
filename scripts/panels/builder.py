@@ -66,6 +66,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import platform
 from pathlib import Path
 
@@ -387,6 +388,110 @@ TYPE_63 = {
     "la": [(_qx(92), True, 0)],
 }
 
+# --- Owner-approved headline breaks + per-pair font scales (2026-11-05) ----
+#
+# PREFERRED BREAKS per locale (primary lines; secondary unchanged single
+# strings — history_secondary has no entry and keeps the legacy greedy
+# path at the pair size):
+# - en track: ['Time tracking','at your fingertips.'] | insights single |
+#   history primary single + secondary single | add-entry single |
+#   la: ['Your timer,','always in view.']
+# - ru track single | insights single | history primary single + secondary
+#   single | add-entry: ['Все детали,','которые вам нужны.'] |
+#   la: ['Ваш таймер — ','всегда перед глазами.']
+# - zh-Hans: everything single (track/insights/add-entry/la single;
+#   history primary+secondary single).
+# - es track: ['El control de tu tiempo,','al alcance de tu mano.'] |
+#   insights: ['Descubre en qué','se va tu tiempo.'] | history primary
+#   single + secondary single | add-entry: ['Todos los detalles',
+#   'que necesitas.'] | la: ['Tu temporizador,','siempre a la vista.']
+# - pt track: ['O controle do seu tempo,','na ponta dos dedos.'] |
+#   insights: ['Veja para onde','vai o seu tempo.'] | history primary
+#   single + secondary single | add-entry: ['Todos os detalhes',
+#   'que você precisa.'] | la: ['Seu cronômetro,','sempre à vista.']
+# (Owner explicitly approved, including the EN layout change — EN panels
+# return as review-only, never byte-compared against the v13 goldens.)
+# RULES (enforced in preferred_lines()): (1) if the joined text fits max
+# width on one line at the pair size, render ONE line (preferred breaks
+# collapse) — so iPad (1820px) stays mostly single-line; (2) otherwise
+# render the preferred lines verbatim (greedy wrap bypassed); every
+# preferred line must fit its device width — asserted fail-closed (never
+# silently shrunk, never auto-reflowed). Texts that do not match a table
+# entry (fixtures, altered copy) keep the legacy greedy wrap at the pair
+# size, so the existing gap/band/overflow guards still bind them.
+# PAIR SCALES (multiply every headline size in the pair, floor to int):
+# iphone69+iphone63: en 0.94, ru 0.66, es 0.93, pt 0.97, zh-Hans 1.0;
+# ipad13: 1.0 all locales. (Measured drivers: en insights 1211/1140; ru
+# insights 1718/1140; es history-primary 1217/1140; pt history-primary
+# 1176/1140.)
+BREAKS = {
+    ("en", "track"): ["Time tracking", "at your fingertips."],
+    ("en", "insights"): ["See where your time goes."],
+    ("en", "history"): ["Every minute, at a glance."],
+    ("en", "add-entry"): ["All details you need."],
+    ("en", "la"): ["Your timer,", "always in view."],
+    ("ru", "track"): ["Учёт времени — у вас под рукой."],
+    ("ru", "insights"): ["Узнайте, на что уходит ваше время."],
+    ("ru", "history"): ["Каждая минута — как на ладони."],
+    ("ru", "add-entry"): ["Все детали,", "которые вам нужны."],
+    ("ru", "la"): ["Ваш таймер — ", "всегда перед глазами."],
+    ("zh-Hans", "track"): ["时间记录，触手可及。"],
+    ("zh-Hans", "insights"): ["一眼看清时间的去向。"],
+    ("zh-Hans", "history"): ["每分每秒，一目了然。"],
+    ("zh-Hans", "add-entry"): ["所需细节，一应俱全。"],
+    ("zh-Hans", "la"): ["计时器，时刻在眼前。"],
+    ("es", "track"): ["El control de tu tiempo,", "al alcance de tu mano."],
+    ("es", "insights"): ["Descubre en qué", "se va tu tiempo."],
+    ("es", "history"): ["Cada minuto, de un vistazo."],
+    ("es", "add-entry"): ["Todos los detalles", "que necesitas."],
+    ("es", "la"): ["Tu temporizador,", "siempre a la vista."],
+    ("pt", "track"): ["O controle do seu tempo,", "na ponta dos dedos."],
+    ("pt", "insights"): ["Veja para onde", "vai o seu tempo."],
+    ("pt", "history"): ["Cada minuto, num relance."],
+    ("pt", "add-entry"): ["Todos os detalhes", "que você precisa."],
+    ("pt", "la"): ["Seu cronômetro,", "sempre à vista."],
+}
+
+PAIR_SCALE = {
+    ("iphone", "en"): 0.94,
+    ("iphone", "ru"): 0.66,
+    ("iphone", "es"): 0.93,
+    ("iphone", "pt"): 0.97,
+    ("iphone", "zh-Hans"): 1.0,
+    ("ipad13", "en"): 1.0,
+    ("ipad13", "ru"): 1.0,
+    ("ipad13", "es"): 1.0,
+    ("ipad13", "pt"): 1.0,
+    ("ipad13", "zh-Hans"): 1.0,
+}
+
+
+def locale_root(locale: str) -> str:
+    """Owner table key for a matrix locale (es-419->es, pt-BR->pt)."""
+    return {"es-419": "es", "pt-BR": "pt"}.get(locale, locale)
+
+
+def pair_scale(pair: str, locale: str) -> float:
+    """Per-pair headline scale (fail-closed on unknown pair/locale)."""
+    try:
+        return PAIR_SCALE[(pair, locale_root(locale))]
+    except KeyError:
+        raise BuilderError(
+            f"no headline pair scale for pair={pair!r} locale={locale!r}; "
+            "refusing to guess typography")
+
+
+def scaled_size(size_pt: int, pair: str, locale: str) -> int:
+    """Pair-scaled point size, floored to int (owner table)."""
+    return int(math.floor(size_pt * pair_scale(pair, locale)))
+
+
+def scale_type_table(table: dict, pair: str, locale: str) -> dict:
+    """Apply the pair scale to every (size_pt, bold, gap) entry."""
+    return {key: [(scaled_size(sz, pair, locale), bold, gap)
+                  for (sz, bold, gap) in specs]
+            for key, specs in table.items()}
+
 # 6.3 bezel acceptance (structural — exact pixels are NOT pinned):
 # portrait PNG with alpha, sane size, a dominant transparent slot whose
 # aspect agrees with the 1206x2622 canvas, opaque frame samples.
@@ -495,9 +600,9 @@ def _with_texts(table: dict, texts: dict) -> dict:
             for key in table}
 
 
-def copy_for_69(caps: dict) -> dict:
-    """Panel copy with FIXED v13 point sizes (typography never scales)."""
-    return _with_texts(TYPE_69, {
+def copy_for_69(locale: str, caps: dict) -> dict:
+    """Panel copy with pair-SCALED v13 point sizes (typography per pair)."""
+    return _with_texts(scale_type_table(TYPE_69, "iphone", locale), {
         "track": [caps["track"]["text"]],
         "insights": [caps["insights"]["text"]],
         "history": [caps["history_primary"]["text"],
@@ -507,9 +612,9 @@ def copy_for_69(caps: dict) -> dict:
     })
 
 
-def copy_for_ipad(caps: dict) -> dict:
-    """Panel copy with FIXED ipad-v1 point sizes (identical to v13)."""
-    return _with_texts(TYPE_IPAD, {
+def copy_for_ipad(locale: str, caps: dict) -> dict:
+    """Panel copy with pair-SCALED ipad-v1 point sizes (1.0: identical)."""
+    return _with_texts(scale_type_table(TYPE_IPAD, "ipad13", locale), {
         "track": [caps["track"]["text"]],
         "insights": [caps["insights"]["text"]],
         "history": [caps["history_primary"]["text"],
@@ -518,9 +623,9 @@ def copy_for_ipad(caps: dict) -> dict:
     })
 
 
-def copy_for_63(caps: dict) -> dict:
-    """Panel copy with SCALED v13 point sizes (TYPE_63 derives from v13)."""
-    return _with_texts(TYPE_63, {
+def copy_for_63(locale: str, caps: dict) -> dict:
+    """Panel copy with pair-SCALED v13 point sizes (TYPE_63 derives from v13)."""
+    return _with_texts(scale_type_table(TYPE_63, "iphone", locale), {
         "track": [caps["track"]["text"]],
         "insights": [caps["insights"]["text"]],
         "history": [caps["history_primary"]["text"],
@@ -582,28 +687,67 @@ def wrap(draw: ImageDraw.ImageDraw, text: str, fnt: ImageFont.FreeTypeFont,
     return lines
 
 
-def headline_height_69(locale: str,
+def preferred_lines(draw: ImageDraw.ImageDraw, locale: str, pair: str,
+                    panel: str, text: str, fnt: ImageFont.FreeTypeFont,
+                    max_w: int) -> list[str]:
+    """Owner preferred breaks with the collapse rule (fail-closed).
+
+    When `text` matches the BREAKS entry for (locale, panel)
+    (whitespace-insensitive match, so the owner-spec trailing space in the
+    ru la first line never blocks the match): rule (1) — the joined text
+    fitting max_w on one line at the pair size renders ONE line; rule
+    (2) — otherwise the preferred lines render verbatim (greedy wrap
+    bypassed), each asserted to fit max_w here (fail closed with measured
+    numbers, never silently shrunk, never auto-reflowed). Insignificant
+    edge whitespace on preferred lines is stripped at render so centered
+    copy stays centered; line breaks stay verbatim. Texts with no table
+    entry, or that differ from it (fixtures, altered copy), keep the
+    legacy greedy wrap at the pair size — the existing gap/band/overflow
+    guards still bind them.
+    """
+    pref = BREAKS.get((locale_root(locale), panel))
+    if pref is None:
+        return wrap(draw, text, fnt, max_w)
+    if " ".join(" ".join(pref).split()) != " ".join(text.split()):
+        return wrap(draw, text, fnt, max_w)
+    if draw.textlength(text, font=fnt) <= max_w:
+        return [text]
+    lines = [ln.strip() for ln in pref]
+    for ln in lines:
+        got = draw.textlength(ln, font=fnt)
+        if got > max_w:
+            raise BuilderError(
+                f"preferred headline line {ln!r} {got:.0f}px wider than max "
+                f"{max_w}px for locale={locale} panel={panel} pair={pair}; "
+                "caption does not fit the approved template — 9.2 finding, "
+                "never silently shrunk")
+    return lines
+
+
+def headline_height_69(locale: str, panel: str,
                        lines_cfg: list[tuple[str, int, bool, int]]) -> int:
     probe = Image.new("RGB", (8, 8))
     d = ImageDraw.Draw(probe)
     h = 0
     for text, size, bold, gap in lines_cfg:
         fnt = font_for(locale, size, bold)
-        for ln in wrap(d, text, fnt, HEADLINE_MAX_W_69):
+        for ln in preferred_lines(d, locale, "iphone", panel, text, fnt,
+                                  HEADLINE_MAX_W_69):
             asc, desc = fnt.getmetrics()
             h += asc + desc + 6
         h += gap
     return h
 
 
-def headline_height_ipad(locale: str,
+def headline_height_ipad(locale: str, panel: str,
                          lines_cfg: list[tuple[str, int, bool, int]]) -> int:
     probe = Image.new("RGB", (8, 8))
     d = ImageDraw.Draw(probe)
     h = 0
     for text, size, bold, gap in lines_cfg:
         fnt = font_for(locale, size, bold)
-        for ln in wrap(d, text, fnt, HEADLINE_MAX_W_IPAD):
+        for ln in preferred_lines(d, locale, "ipad13", panel, text, fnt,
+                                  HEADLINE_MAX_W_IPAD):
             asc, desc = fnt.getmetrics()
             h += asc + desc + 6
         h += gap
@@ -612,12 +756,13 @@ def headline_height_ipad(locale: str,
 
 def draw_headline_69(base: Image.Image, locale: str,
                      lines_cfg: list[tuple[str, int, bool, int]],
-                     y_top: int) -> tuple[int, int]:
+                     y_top: int, panel: str) -> tuple[int, int]:
     d = ImageDraw.Draw(base)
     y = y_top
     for text, size, bold, gap in lines_cfg:
         fnt = font_for(locale, size, bold)
-        for ln in wrap(d, text, fnt, HEADLINE_MAX_W_69):
+        for ln in preferred_lines(d, locale, "iphone", panel, text, fnt,
+                                  HEADLINE_MAX_W_69):
             asc, desc = fnt.getmetrics()
             d.text((CANVAS_69[0] // 2, y), ln, font=fnt, fill=WHITE, anchor="ma")
             y += asc + desc + 6
@@ -627,8 +772,8 @@ def draw_headline_69(base: Image.Image, locale: str,
 
 def draw_headline_centered_69(base: Image.Image, locale: str,
                               lines_cfg: list[tuple[str, int, bool, int]],
-                              band: list[int]) -> tuple[int, int]:
-    h = headline_height_69(locale, lines_cfg)
+                              band: list[int], panel: str) -> tuple[int, int]:
+    h = headline_height_69(locale, panel, lines_cfg)
     if h > band[1] - band[0]:
         raise BuilderError(
             f"headline text {h}px taller than Figma band {band[1] - band[0]}px "
@@ -639,7 +784,8 @@ def draw_headline_centered_69(base: Image.Image, locale: str,
     d = ImageDraw.Draw(base)
     for text, size, bold, gap in lines_cfg:
         fnt = font_for(locale, size, bold)
-        for ln in wrap(d, text, fnt, HEADLINE_MAX_W_69):
+        for ln in preferred_lines(d, locale, "iphone", panel, text, fnt,
+                                  HEADLINE_MAX_W_69):
             asc, desc = fnt.getmetrics()
             d.text((CANVAS_69[0] // 2, y), ln, font=fnt, fill=WHITE, anchor="ma")
             y += asc + desc + 6
@@ -649,12 +795,13 @@ def draw_headline_centered_69(base: Image.Image, locale: str,
 
 def draw_headline_ipad(base: Image.Image, locale: str,
                        lines_cfg: list[tuple[str, int, bool, int]],
-                       y_top: int) -> tuple[int, int]:
+                       y_top: int, panel: str) -> tuple[int, int]:
     d = ImageDraw.Draw(base)
     y = y_top
     for text, size, bold, gap in lines_cfg:
         fnt = font_for(locale, size, bold)
-        rendered = wrap(d, text, fnt, HEADLINE_MAX_W_IPAD)
+        rendered = preferred_lines(d, locale, "ipad13", panel, text, fnt,
+                                   HEADLINE_MAX_W_IPAD)
         for ln in rendered:
             asc, desc = fnt.getmetrics()
             d.text((CANVAS_IPAD[0] // 2, y), ln, font=fnt, fill=WHITE, anchor="ma")
@@ -663,14 +810,15 @@ def draw_headline_ipad(base: Image.Image, locale: str,
     return y_top, y
 
 
-def headline_height_63(locale: str,
+def headline_height_63(locale: str, panel: str,
                        lines_cfg: list[tuple[str, int, bool, int]]) -> int:
     probe = Image.new("RGB", (8, 8))
     d = ImageDraw.Draw(probe)
     h = 0
     for text, size, bold, gap in lines_cfg:
         fnt = font_for(locale, size, bold)
-        for ln in wrap(d, text, fnt, HEADLINE_MAX_W_63):
+        for ln in preferred_lines(d, locale, "iphone", panel, text, fnt,
+                                  HEADLINE_MAX_W_63):
             asc, desc = fnt.getmetrics()
             h += asc + desc + 6
         h += gap
@@ -679,12 +827,13 @@ def headline_height_63(locale: str,
 
 def draw_headline_63(base: Image.Image, locale: str,
                      lines_cfg: list[tuple[str, int, bool, int]],
-                     y_top: int) -> tuple[int, int]:
+                     y_top: int, panel: str) -> tuple[int, int]:
     d = ImageDraw.Draw(base)
     y = y_top
     for text, size, bold, gap in lines_cfg:
         fnt = font_for(locale, size, bold)
-        for ln in wrap(d, text, fnt, HEADLINE_MAX_W_63):
+        for ln in preferred_lines(d, locale, "iphone", panel, text, fnt,
+                                  HEADLINE_MAX_W_63):
             asc, desc = fnt.getmetrics()
             d.text((CANVAS_63[0] // 2, y), ln, font=fnt, fill=WHITE, anchor="ma")
             y += asc + desc + 6
@@ -694,8 +843,8 @@ def draw_headline_63(base: Image.Image, locale: str,
 
 def draw_headline_centered_63(base: Image.Image, locale: str,
                               lines_cfg: list[tuple[str, int, bool, int]],
-                              band: list[int]) -> tuple[int, int]:
-    h = headline_height_63(locale, lines_cfg)
+                              band: list[int], panel: str) -> tuple[int, int]:
+    h = headline_height_63(locale, panel, lines_cfg)
     if h > band[1] - band[0]:
         raise BuilderError(
             f"headline text {h}px taller than scaled band {band[1] - band[0]}px "
@@ -706,7 +855,8 @@ def draw_headline_centered_63(base: Image.Image, locale: str,
     d = ImageDraw.Draw(base)
     for text, size, bold, gap in lines_cfg:
         fnt = font_for(locale, size, bold)
-        for ln in wrap(d, text, fnt, HEADLINE_MAX_W_63):
+        for ln in preferred_lines(d, locale, "iphone", panel, text, fnt,
+                                  HEADLINE_MAX_W_63):
             asc, desc = fnt.getmetrics()
             d.text((CANVAS_63[0] // 2, y), ln, font=fnt, fill=WHITE, anchor="ma")
             y += asc + desc + 6
@@ -1191,10 +1341,10 @@ def src_row_to_canvas_69(src_y: int, outer_w: int, margin_top: int) -> float:
 
 def single_panel_top_69(src: Image.Image, bezel: Image.Image, locale: str,
                         lines_cfg: list[tuple[str, int, bool, int]],
-                        force_top: int | None = None
+                        force_top: int | None = None, panel: str = "track"
                         ) -> tuple[Image.Image, dict]:
     base = Image.new("RGBA", CANVAS_69, ACCENT + (255,))
-    h_h = headline_height_69(locale, lines_cfg)
+    h_h = headline_height_69(locale, panel, lines_cfg)
     hy0 = HEADLINE_TOP_MARGIN_69
     hy1 = hy0 + h_h
     dev_h = aspect_h_69(DEVICE_W_69)
@@ -1210,7 +1360,7 @@ def single_panel_top_69(src: Image.Image, bezel: Image.Image, locale: str,
             f"single device overflow bottom: {y0 + dev_h} > {CANVAS_69[1]} "
             f"(headline block {h_h}px); caption does not fit the approved "
             "template — 9.2 finding, never silently shrunk")
-    draw_headline_69(base, locale, lines_cfg, hy0)
+    draw_headline_69(base, locale, lines_cfg, hy0, panel)
     box = (x0, y0, x0 + DEVICE_W_69, y0 + dev_h)
     out = place_device_69(base, device_shot_69(src, bezel), box)
     return out, {"headline_anchor": "top",
@@ -1269,7 +1419,7 @@ def la_panel_v11_69(lock: Image.Image, compact: Image.Image,
             f"banner not clear of headline: banner bottom {banner_bot}, headline {hy0}")
 
     text_top, text_bot = draw_headline_centered_69(base, locale, lines_cfg,
-                                                   [hy0, hy1])
+                                                   [hy0, hy1], "la")
     out = place_device_69(base, device_shot_69(lock, bezel), top_box)
     out = place_device_69(out, device_shot_69(compact, bezel), back_box)
     out = place_device_69(out, device_shot_69(expanded, bezel), front_box)
@@ -1320,7 +1470,7 @@ def build_69(locale: str, caps: dict, captions_version: str,
                                           NEEDED_FRAMES_69, CANVAS_69)
     bezel_info = verify_bezel_69(bezel_path)
     bezel = load_bezel(bezel_path)
-    copy = copy_for_69(caps)
+    copy = copy_for_69(locale, caps)
     raw = {k: Image.open(frames_dir / f"{k}.png") for k in NEEDED_FRAMES_69}
     panels: dict = {}
     try:
@@ -1332,7 +1482,7 @@ def build_69(locale: str, caps: dict, captions_version: str,
         ]
         for key, frame, hl, top in plan:
             img, layout = single_panel_top_69(raw[frame], bezel, locale, hl,
-                                              force_top=top)
+                                              force_top=top, panel=key)
             img = img.convert("RGB")
             if tuple(img.size) != CANVAS_69:
                 raise BuilderError(f"output size drift {key}: {img.size}")
@@ -1500,10 +1650,10 @@ def single_panel_top_63(src: Image.Image, bezel: Image.Image,
                         bezel_size: tuple[int, int], locale: str,
                         lines_cfg: list[tuple[str, int, bool, int]],
                         force_top: int | None = None,
-                        mask_r: int | None = None
+                        mask_r: int | None = None, panel: str = "track"
                         ) -> tuple[Image.Image, dict]:
     base = Image.new("RGBA", CANVAS_63, ACCENT + (255,))
-    h_h = headline_height_63(locale, lines_cfg)
+    h_h = headline_height_63(locale, panel, lines_cfg)
     hy0 = HEADLINE_TOP_MARGIN_63
     hy1 = hy0 + h_h
     dev_h = aspect_h_63(DEVICE_W_63, bezel_size)
@@ -1519,7 +1669,7 @@ def single_panel_top_63(src: Image.Image, bezel: Image.Image,
             f"single device overflow bottom: {y0 + dev_h} > {CANVAS_63[1]} "
             f"(headline block {h_h}px); caption does not fit the scaled "
             "template — 9.2 finding, never silently shrunk")
-    draw_headline_63(base, locale, lines_cfg, hy0)
+    draw_headline_63(base, locale, lines_cfg, hy0, panel)
     box = (x0, y0, x0 + DEVICE_W_63, y0 + dev_h)
     out = place_device_63(base, device_shot_63(src, bezel, slot, at,
                                               bezel_size, mask_r), box)
@@ -1577,7 +1727,7 @@ def la_panel_v11_63(lock: Image.Image, compact: Image.Image,
             f"banner not clear of headline: banner bottom {banner_bot}, headline {hy0}")
 
     text_top, text_bot = draw_headline_centered_63(base, locale, lines_cfg,
-                                                   [hy0, hy1])
+                                                   [hy0, hy1], "la")
     out = place_device_63(base, device_shot_63(lock, bezel, slot, at,
                                               bezel_size, mask_r), top_box)
     out = place_device_63(out, device_shot_63(compact, bezel, slot, at,
@@ -1616,7 +1766,7 @@ def build_63(locale: str, caps: dict, captions_version: str,
     slot = tuple(bezel_info["screen_slot_px"])  # type: ignore[assignment]
     at = tuple(bezel_info["screen_at_px"])  # type: ignore[assignment]
     mask_r = int(bezel_info["screen_mask_radius_px"])
-    copy = copy_for_63(caps)
+    copy = copy_for_63(locale, caps)
     raw = {k: Image.open(frames_dir / f"{k}.png") for k in NEEDED_FRAMES_69}
     panels: dict = {}
     try:
@@ -1629,7 +1779,8 @@ def build_63(locale: str, caps: dict, captions_version: str,
         for key, frame, hl, top in plan:
             img, layout = single_panel_top_63(raw[frame], bezel, slot, at,
                                               bezel_size, locale, hl,
-                                              force_top=top, mask_r=mask_r)
+                                              force_top=top, mask_r=mask_r,
+                                              panel=key)
             img = img.convert("RGB")
             if tuple(img.size) != CANVAS_63:
                 raise BuilderError(f"output size drift {key}: {img.size}")
@@ -1768,7 +1919,8 @@ def solve_layout_ipad_for_locale(locale: str, copy: dict) -> tuple[int, int]:
     Solved with the build locale so localized (taller) headlines shrink
     the device honestly instead of overlapping it.
     """
-    tallest = max(headline_height_ipad(locale, cfg) for cfg in copy.values())
+    tallest = max(headline_height_ipad(locale, key, cfg)
+                  for key, cfg in copy.items())
     shot_top = HEADLINE_TOP_MARGIN_IPAD + tallest + MIN_GAP_IPAD
     outer_w = min(
         CANVAS_IPAD[0] - 2 * SIDE_MIN_IPAD,
@@ -1793,10 +1945,11 @@ def solve_layout_ipad_for_locale(locale: str, copy: dict) -> tuple[int, int]:
 
 def render_panel_ipad(raw: Image.Image, bezel: Image.Image, locale: str,
                       lines_cfg: list,
-                      outer_w: int, shot_top: int) -> tuple[Image.Image, dict]:
+                      outer_w: int, shot_top: int, panel: str
+                      ) -> tuple[Image.Image, dict]:
     base = Image.new("RGBA", CANVAS_IPAD, ACCENT + (255,))
     hy0, hy1 = draw_headline_ipad(base, locale, lines_cfg,
-                                  HEADLINE_TOP_MARGIN_IPAD)
+                                  HEADLINE_TOP_MARGIN_IPAD, panel)
     dev_h = round(outer_w * BEZEL_IPAD_NATIVE[1] / BEZEL_IPAD_NATIVE[0])
     x0 = (CANVAS_IPAD[0] - outer_w) // 2
     box = (x0, shot_top, x0 + outer_w, shot_top + dev_h)
@@ -1828,13 +1981,13 @@ def build_ipad(locale: str, caps: dict, captions_version: str,
                                                             "la-lock"))
     bezel_info = verify_bezel_ipad(bezel_path)
     bezel = load_bezel(bezel_path)
-    copy = copy_for_ipad(caps)
+    copy = copy_for_ipad(locale, caps)
     outer_w, shot_top = solve_layout_ipad_for_locale(locale, copy)
     panels: dict = {}
     for key, frame in PANEL_FRAMES_IPAD.items():
         with Image.open(frames_dir / f"{frame}.png") as raw:
             img, geo = render_panel_ipad(raw, bezel, locale, copy[key],
-                                         outer_w, shot_top)
+                                         outer_w, shot_top, key)
         if tuple(img.size) != CANVAS_IPAD:
             raise BuilderError(f"output size drift {key}: {img.size}")
         name = panel_filename(key, locale, CANVAS_IPAD)
