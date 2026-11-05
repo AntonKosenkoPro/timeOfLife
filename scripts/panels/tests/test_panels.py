@@ -862,20 +862,21 @@ class BuilderUnitTests(unittest.TestCase):
             self.assertIn("apple-18pm-v1", str(ctx.exception))
 
     def test_pair_scales_pinned(self):
-        # Owner table 2026-11-05: iphone pair en 0.94 / ru 0.66 / es 0.93 /
-        # pt 0.97 / zh-Hans 1.0; ipad13 1.0 all locales.
-        for locale, want in (("en", 0.94), ("ru", 0.66), ("es-419", 0.93),
+        # Owner table 2026-11-05 (ru single-liners per owner marks): iphone
+        # pair en 0.94 / ru 0.69 / es 0.93 / pt 0.97 / zh-Hans 1.0;
+        # ipad13 1.0 all locales.
+        for locale, want in (("en", 0.94), ("ru", 0.69), ("es-419", 0.93),
                              ("pt-BR", 0.97), ("zh-Hans", 1.0)):
             self.assertEqual(panels_builder.pair_scale("iphone", locale),
                              want)
         for locale in ALL_LOCALES:
             self.assertEqual(panels_builder.pair_scale("ipad13", locale),
                              1.0)
-        # Flooring, not rounding: 96pt en -> 90, ru -> 63.
+        # Flooring, not rounding: 96pt en -> 90, ru -> 66.
         self.assertEqual(panels_builder.scaled_size(96, "iphone", "en"), 90)
         self.assertEqual(panels_builder.scaled_size(92, "iphone", "en"), 86)
-        self.assertEqual(panels_builder.scaled_size(96, "iphone", "ru"), 63)
-        self.assertEqual(panels_builder.scaled_size(92, "iphone", "ru"), 60)
+        self.assertEqual(panels_builder.scaled_size(96, "iphone", "ru"), 66)
+        self.assertEqual(panels_builder.scaled_size(92, "iphone", "ru"), 63)
 
     def test_preferred_breaks_collapse_when_fits(self):
         # Rule (1): joined text fitting max width renders ONE line even

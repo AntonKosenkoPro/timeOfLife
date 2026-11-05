@@ -396,9 +396,10 @@ TYPE_63 = {
 # - en track: ['Time tracking','at your fingertips.'] | insights single |
 #   history primary single + secondary single | add-entry single |
 #   la: ['Your timer,','always in view.']
-# - ru track single | insights single | history primary single + secondary
-#   single | add-entry: ['Все детали,','которые вам нужны.'] |
-#   la: ['Ваш таймер — ','всегда перед глазами.']
+# - ru track: ['Учёт времени —','у вас под рукой.'] | insights single:
+#   ['Узнайте, куда уходит время.'] | history: ['Каждая минута как на
+#   ладони.'] + secondary single | add-entry: ['Все детали,',
+#   'которые вам нужны.'] | la: ['Ваш таймер — ','всегда перед глазами.']
 # - zh-Hans: everything single (track/insights/add-entry/la single;
 #   history primary+secondary single).
 # - es track: ['El control de tu tiempo,','al alcance de tu mano.'] |
@@ -420,9 +421,10 @@ TYPE_63 = {
 # entry (fixtures, altered copy) keep the legacy greedy wrap at the pair
 # size, so the existing gap/band/overflow guards still bind them.
 # PAIR SCALES (multiply every headline size in the pair, floor to int):
-# iphone69+iphone63: en 0.94, ru 0.66, es 0.93, pt 0.97, zh-Hans 1.0;
+# iphone69+iphone63: en 0.94, ru 0.69, es 0.93, pt 0.97, zh-Hans 1.0;
 # ipad13: 1.0 all locales. (Measured drivers: en insights 1211/1140; ru
-# insights 1718/1140; es history-primary 1217/1140; pt history-primary
+# insights 1289/1140 and history-primary 1332/1140 as owner single-liners
+# (0.884/0.856); es history-primary 1217/1140; pt history-primary
 # 1176/1140.)
 BREAKS = {
     ("en", "track"): ["Time tracking", "at your fingertips."],
@@ -430,9 +432,9 @@ BREAKS = {
     ("en", "history"): ["Every minute, at a glance."],
     ("en", "add-entry"): ["All details you need."],
     ("en", "la"): ["Your timer,", "always in view."],
-    ("ru", "track"): ["Учёт времени — у вас под рукой."],
-    ("ru", "insights"): ["Узнайте, на что уходит ваше время."],
-    ("ru", "history"): ["Каждая минута — как на ладони."],
+    ("ru", "track"): ["Учёт времени —", "у вас под рукой."],
+    ("ru", "insights"): ["Узнайте, куда уходит время."],
+    ("ru", "history"): ["Каждая минута как на ладони."],
     ("ru", "add-entry"): ["Все детали,", "которые вам нужны."],
     ("ru", "la"): ["Ваш таймер — ", "всегда перед глазами."],
     ("zh-Hans", "track"): ["时间记录，触手可及。"],
@@ -454,7 +456,7 @@ BREAKS = {
 
 PAIR_SCALE = {
     ("iphone", "en"): 0.94,
-    ("iphone", "ru"): 0.66,
+    ("iphone", "ru"): 0.69,
     ("iphone", "es"): 0.93,
     ("iphone", "pt"): 0.97,
     ("iphone", "zh-Hans"): 1.0,
