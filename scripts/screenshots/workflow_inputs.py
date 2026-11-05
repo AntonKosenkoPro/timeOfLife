@@ -21,7 +21,13 @@ import re
 SUPPORTED_DEVICES = ("iphone69", "iphone63", "ipad13")
 
 DEVICE_CATALOG = {
-    "iphone69": {"sim": "iPhone 17 Pro Max",
+    # Preinstalled-sim mapping (xcode-27-arm64 image, iOS 27.0: no
+    # `simctl create` — capture workers look up these exact device names
+    # under the requested runtime and fail closed on zero/multiple
+    # matches). Keys and geometry canvases preserved.
+    # PENDING (owner frame decision): 18 Pro Max captures are review
+    # material until the owner approves the frame/bezel pairing.
+    "iphone69": {"sim": "iPhone 18 Pro Max",
                  "geometry": "1320x2868", "island": 1},
     "iphone63": {"sim": "iPhone 17",
                  "geometry": "1206x2622", "island": 1},

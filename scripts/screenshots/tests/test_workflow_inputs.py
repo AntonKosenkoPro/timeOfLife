@@ -132,10 +132,13 @@ class DefaultCatalogTests(unittest.TestCase):
         self.assertEqual(wi.DEVICE_CATALOG["iphone69"]["island"], 1)
         self.assertEqual(wi.DEVICE_CATALOG["ipad13"]["island"], 0)
         # Owner-provided portrait set (SDK-queried sim names, Xcode 27.1):
-        # 17 Pro Max / 17 / iPad Pro 13 M5. Keys and canvases preserved;
-        # canvases are NOT SDK-verified (devicetypes carry no dimensions).
+        # 18 Pro Max / 17 / iPad Pro 13 M5 (preinstalled xcode-27 set).
+        # Keys and canvases preserved; canvases are NOT SDK-verified
+        # (devicetypes carry no dimensions — geometry proof is the
+        # fail-closed executor attestation on the booted sim, never the
+        # model name alone).
         self.assertEqual(wi.DEVICE_CATALOG["iphone69"]["sim"],
-                         "iPhone 17 Pro Max")
+                         "iPhone 18 Pro Max")
         self.assertEqual(wi.DEVICE_CATALOG["iphone63"]["sim"], "iPhone 17")
         self.assertEqual(wi.DEVICE_CATALOG["ipad13"]["sim"],
                          "iPad Pro 13-inch (M5)")

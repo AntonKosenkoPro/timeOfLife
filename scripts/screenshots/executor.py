@@ -15,7 +15,7 @@ capture path):
   (4 frames) and real-time (LA states, one anchor) domains.
 - record_external_frame: registers the genuine Lock Screen / Island PNGs
   produced externally (authored Argent flow after handoff) with their
-  capture windows and human observations. No fabrication, no OCR.
+  capture windows. No fabrication, no OCR.
 - record_pending_frame: deterministic human-handoff stubs for LA states
   without genuine pixels yet (used internally by run_session).
 - finalize_run (session-receipt gated): assemble manifests, re-verify
@@ -35,10 +35,13 @@ from __future__ import annotations
 import json
 import os
 import plistlib
+import re
 import shutil
+import struct
 import subprocess
 import sys
 import time
+import zlib
 from pathlib import Path
 from typing import Any, Callable
 
@@ -359,7 +362,6 @@ def record_external_frame(
     frame: str,
     png_src: str,
     captured_at_iso: str,
-    observation_path: str,
     state: dict,
     request: dict,
     request_sha256: str,
@@ -373,9 +375,10 @@ def record_external_frame(
 ) -> dict[str, Any]:
     """Register an externally produced PNG (genuine Lock Screen / Island capture).
 
-    No device I/O. Fails unless the PNG has native geometry, the state is
-    ready (with pin), and the human observation binds to the actual file
-    hash with wall time inside ±2s. `mask` documents the capture policy
+    No device I/O. Fails unless the PNG has native geometry and the state is
+    ready (with pin). The record carries capture_window
+    {started_at, captured_at_iso} only — there is no timer reading anywhere
+    in the pipeline. `mask` documents the capture policy
     the external producer must have used (None = per-frame default:
     --mask=black for la-compact/la-expanded, simctl default otherwise)
     and is recorded for audit, never inferred from pixels.
@@ -396,14 +399,20 @@ def record_external_frame(
     verdict, v_errs = sc.validate_state_dict(state, request, request_sha256, pinned_totals)
     if verdict != sc.OK:
         raise FrameError(f"state verdict {verdict}: {'; '.join(v_errs) or 'not ready'}")
-    try:
-        observation = json.loads(Path(observation_path).read_text(encoding="utf-8"))
-    except (OSError, ValueError) as exc:
-        raise FrameError(f"cannot read observation file: {exc}")
     la = state.get("live_activity")
-    errs = insp.verify_la_observation(la, str(src), captured_at_iso, observation)
-    if errs:
-        raise FrameError("; ".join(errs))
+    # Fail closed on the session anchor and timestamps: the state must
+    # carry the real anchor and both timestamps must parse as aware ISO.
+    if not isinstance(la, dict):
+        raise FrameError("state live_activity block is required before validation")
+    if not la.get("started_at"):
+        raise FrameError("state live_activity.started_at (real anchor) is required")
+    try:
+        capture_dt = insp.parse_aware_iso(captured_at_iso)
+        start_dt = insp.parse_aware_iso(la.get("started_at"))
+    except insp.InspectionError as exc:
+        raise FrameError(str(exc))
+    if (capture_dt - start_dt).total_seconds() < -1:
+        raise FrameError("capture timestamp predates the real start anchor")
     try:
         resolved_mask = pf.resolve_screenshot_mask(frame, mask)
     except ValueError as exc:
@@ -438,9 +447,7 @@ def record_external_frame(
         "capture_window": {
             "started_at": la.get("started_at"),
             "captured_at_iso": captured_at_iso,
-            "observed_elapsed_s": observation.get("observed_elapsed_s"),
         },
-        "observation_sha256": insp.sha256_file(observation_path),
         "screenshot_mask": resolved_mask or "default",
     }
     if session_binding is not None:
@@ -483,9 +490,9 @@ def record_pending_frame(
     (prepare leaves the capture app foregrounded; the island pill hides
     when the app is foreground), so `read_timer.py` would fail closed and
     abort the leg. This helper binds the exported PNG (hash + geometry,
-    like every other record) but carries NO `capture_window` /
-    `observation_sha256`, so `finalize_run` reports the frame as
-    needs-inspection ("human timer observation not registered") instead
+    like every other record) but carries NO `capture_window`,
+    so `finalize_run` reports the frame as
+    needs-inspection ("genuine pixels not registered") instead
     of failing. The genuine pixels arrive later via
     `record-external-frame`, which overwrites this stub record. `reason`
     is required so the handoff is never silent.
@@ -744,7 +751,7 @@ def finalize_run(
         if actual_sha != rec.get("screenshot_sha256"):
             raise FrameError(
                 f"screenshot for {rec['frame']!r} changed after capture "
-                "(tampered or stale observation binding)"
+                "(tampered capture binding)"
             )
         try:
             dims = insp.png_dimensions(str(png))
@@ -791,25 +798,22 @@ def finalize_run(
         raise FrameError("la-lock frame required; never not-applicable")
     for la_frame in present_la:
         la = next(r for r in records if r["frame"] == la_frame)
-        if "capture_window" not in la or "observation_sha256" not in la:
-            pending.append(f"{la_frame}: human timer observation not registered")
+        cw = la.get("capture_window")
+        # Pending only when no genuine pixels at all: a pending handoff
+        # stub (or any record without a genuine capture window) stays
+        # needs-inspection. Genuine LA is accepted on pixels + session
+        # binding alone — there is no timer reading to check.
+        if la.get("capture") != "external-lock-screen" \
+                or not isinstance(cw, dict) \
+                or "started_at" not in cw \
+                or "captured_at_iso" not in cw:
+            pending.append(f"{la_frame}: genuine pixels not registered")
             continue
-        cw = la["capture_window"]
         try:
-            wall = (
-                insp.parse_aware_iso(cw["captured_at_iso"])
-                - insp.parse_aware_iso(cw["started_at"])
-            ).total_seconds()
+            insp.parse_aware_iso(cw["captured_at_iso"])
+            insp.parse_aware_iso(cw["started_at"])
         except (insp.InspectionError, KeyError, TypeError) as exc:
             raise FrameError(f"{la_frame} capture window malformed: {exc}")
-        observed = cw.get("observed_elapsed_s")
-        if not insp.is_strict_nonneg_number(observed) or abs(
-            wall - float(observed)
-        ) > insp.LA_TOLERANCE_S:
-            raise FrameError(
-                f"{la_frame} registered observation no longer validates "
-                "against its capture window"
-            )
     # Session receipts were gated fatally above; no legacy per-frame
     # teardown files exist or are consulted (removed in task 8.5).
     if provenance is None:
@@ -1323,6 +1327,1270 @@ def _verify_session_presentation(run: Callable, udid: str) -> None:
             )
 
 
+# --- Live capture inside hold-open realtime sessions (genuine LA pixels) ---
+
+# Hold-open window: the session stays RUNNING with its verified anchor while
+# the live-capture driver runs the button dance, and no cleanup is issued
+# until the driver finishes explicitly (the stock auto-clean window is what
+# previously killed the activity mid-dance, ~13-17s). The bound equals the
+# existing CLEANUP deadline and stays under POLL: no deadline is increased,
+# and every driver failure fails closed through normal contamination.
+HOLD_OPEN_TIMEOUT_S = 60.0
+# Bounded simctl-export retry inside live steps only (the specified
+# HID-transition exception): initial attempt + 2 retries. The stock export
+# path keeps its no-retry semantics.
+LIVE_SHOT_ATTEMPTS = 3
+
+# Island regions pinned from LIVE headless pixels only (never scaled or
+# guessed). 1206x2622 idle pill spans x[415,790] y[42,151] (lock-screen
+# capture, zero bright content inside); the verdict box below adds margin.
+# 1320x2868 live pill spans x[392,976] y[45,150] (live-la-compact.png with
+# the activity RUNNING, app backgrounded via Home: dark_frac 0.81 with live
+# content in the box below); VOID probes (no live activity) and the lock
+# capture show dark_frac 0.00 in the same box, so the existing thresholds
+# separate honestly with no tuning change. Any other geometry is
+# unattested: no claim, never a pass.
+ISLAND_REGIONS: dict[tuple[int, int], tuple[int, int, int, int]] = {
+    (1206, 2622): (400, 805, 30, 165),
+    (1320, 2868): (400, 990, 35, 160),
+}
+PILL_DARK_FRAC_MIN = 0.40
+PILL_CONTENT_MIN = 200
+
+# Expanded-card band below the island (x0, x1, y0, y1): a genuine long-press
+# card renders here as a large dark mass, distinct from the compact pill
+# (band y0 sits below every island box y1 above). No-card baselines on
+# 1320x2868 (live compact Home: frac 0.06; VOID probes: 0.01) reject at the
+# threshold below; the 1206x2622 band is the proportional mirror (no genuine
+# 1206 expanded pixels exist) and is covered by synthetic tests only.
+EXPANDED_REGIONS: dict[tuple[int, int], tuple[int, int, int, int]] = {
+    (1206, 2622): (320, 886, 180, 594),
+    (1320, 2868): (350, 970, 180, 650),
+}
+EXPANDED_DARK_FRAC_MIN = 0.30
+EXPANDED_BRIGHT_MIN = 500
+# Settle after the single-finger long-press for the card animation (~1.5s;
+# the gesture-custom Up delayMs already holds the contact DOWN 800ms).
+EXPANDED_HOLD_SETTLE_S = 1.5
+# App-chrome probe band as a height fraction (avoids tab-bar/home-indicator
+# rows): the capture app's Timer screen is uniform near-white here (top
+# quantized bucket ~100% light on 1320x2868 track-running.png) while
+# SpringBoard wallpaper spreads across buckets (top bucket ~16%). A tap on
+# the pill that opens the app (instead of expanding) is rejected on these
+# pixels, never by eye.
+APP_CHROME_BAND_FRAC = (0.836, 0.906)
+APP_CHROME_SHARE_MIN = 0.90
+# Consent-sheet alert band as fractions of (width, height): a centered
+# system alert body (light, >=550px wide, >=200px tall on 1320x2868) with a
+# blue Allow-label cluster in its bottom half. Provisional geometry; every
+# tap is gated on detection plus post-tap disappearance, never blind.
+SHEET_BAND_FRAC = (0.136, 0.864, 0.348, 0.627)
+SHEET_BODY_MIN_W = 550
+SHEET_BODY_MIN_H = 200
+SHEET_LABEL_MIN_MASS = 300
+# Pixel-derived dismissal is capped at ONE tap: on failure record blocked
+# with the evidence and move on (lock pixels stay genuine regardless — do
+# not loop taps). The durable path is the XCUITest AX harness (interruption
+# monitor tapping Allow on the SpringBoard sheet), a separate iOS-owner
+# task; this probe only takes the cheap pixel win when it verifies.
+SHEET_DISMISSAL_MAX_TAPS = 1
+
+
+class HidBackend:
+    """Injectable HID/AX surface for live-capture steps (stdlib contract).
+
+    Production is ArgentHidBackend (argent-simulator-server one-shots,
+    headless-proven); tests inject scripted fakes. Coordinates for tap()
+    must come from find_allow_button over a real tree — never literals.
+    """
+
+    def press_button(self, button: str) -> None:
+        raise NotImplementedError
+
+    def tap(self, x: float, y: float) -> None:
+        raise NotImplementedError
+
+    def multitouch_hold(
+        self, x1: float, y1: float, x2: float, y2: float
+    ) -> None:
+        raise NotImplementedError
+
+    def long_press(self, x: float, y: float, duration_ms: int = 800) -> None:
+        raise NotImplementedError
+
+    def ax_dump(self) -> dict:
+        raise NotImplementedError
+
+
+class ArgentHidBackend(HidBackend):
+    """Production HID via argent one-shots (describe-backed consent grant).
+
+    - ax_dump shells ``argent run describe --udid <udid> --json`` (bounded
+      timeout: the shared runner's 60s, the existing CLEANUP scale) and
+      parses the text tree's AXButton lines into a describe-derived
+      document ``{"source", "buttons": [{role, label, center, frame}]}``.
+      Transport/parse failures raise FrameError (fail closed: the grant
+      loop records a blocker and taps nothing — never blind coordinates).
+    - tap shells ``argent run gesture-tap --udid <udid> --x <x> --y <y>``
+      with normalized [0,1] coordinates from find_allow_button over a real
+      describe document (proven on a headless scratch sim).
+    - long_press shells ``argent run gesture-custom --udid <udid>
+      --events-json '[{"type":"Down",...},{"type":"Up",...,"delayMs":800}]'``
+      (single-finger hold at the verified pill center; pilot precedent
+      800ms; bounded timeout: the shared runner's 60s, the existing
+      CLEANUP scale).
+    - press_button / multitouch_hold keep the argent-simulator-server
+      one-shots (universalhid_button / universalhid_multitouch), proven on
+      headless sims (no Simulator.app). multitouch_hold stays for compat
+      only; the expanded step uses long_press.
+    """
+
+    HID_BUTTONS = ("home", "power")
+
+    def __init__(self, udid: str, server: str = "argent-simulator-server",
+                 runner: Callable | None = None,
+                 argent: str = "argent") -> None:
+        if not isinstance(udid, str) or not udid:
+            raise FrameError("HID backend requires an explicit simulator UDID")
+        self._udid = udid
+        self._server = server
+        self._argent = argent
+        self._runner = runner or (lambda argv: subprocess.run(
+            argv, capture_output=True, text=True, timeout=60))
+
+    def _spawn(self, argv: list[str], what: str) -> None:
+        exe = shutil.which(self._server)
+        if exe is None:
+            raise FrameError(
+                f"HID {what} unavailable: {self._server!r} not on PATH "
+                "(no blind fallback)")
+        try:
+            proc = self._runner([exe] + argv)
+        except (subprocess.TimeoutExpired, OSError) as exc:
+            raise FrameError(
+                f"HID {what} spawn failed ({type(exc).__name__})")
+        if getattr(proc, "returncode", 1) != 0:
+            raise FrameError(
+                f"HID {what} failed "
+                f"rc={getattr(proc, 'returncode', '?')} "
+                f"stderr={getattr(proc, 'stderr', '')!r:.200}")
+
+    def _run_argent(self, argv: list[str], what: str) -> str:
+        """Run one `argent` CLI invocation; return stdout (fail closed)."""
+        exe = shutil.which(self._argent)
+        if exe is None:
+            raise FrameError(
+                f"HID {what} unavailable: {self._argent!r} not on PATH "
+                "(no blind fallback)")
+        try:
+            proc = self._runner([exe] + argv)
+        except (subprocess.TimeoutExpired, OSError) as exc:
+            raise FrameError(
+                f"HID {what} spawn failed ({type(exc).__name__})")
+        if getattr(proc, "returncode", 1) != 0:
+            raise FrameError(
+                f"HID {what} failed "
+                f"rc={getattr(proc, 'returncode', '?')} "
+                f"stderr={getattr(proc, 'stderr', '')!r:.200}")
+        return getattr(proc, "stdout", "") or ""
+
+    def press_button(self, button: str) -> None:
+        if not isinstance(button, str) \
+                or button.lower() not in self.HID_BUTTONS:
+            raise FrameError(
+                f"HID button {button!r} refused (capture role: "
+                f"{list(self.HID_BUTTONS)})")
+        self._spawn(["universalhid_button", "--id", self._udid,
+                     "--button", button], f"button {button}")
+
+    def tap(self, x: float, y: float) -> None:
+        for value in (x, y):
+            if isinstance(value, bool) or not isinstance(value, (int, float)) \
+                    or not 0.0 <= float(value) <= 1.0:
+                raise FrameError(
+                    f"HID tap coordinate {value!r} refused "
+                    "(normalized [0,1] from AX only)")
+        self._run_argent(["run", "gesture-tap", "--udid", self._udid,
+                          "--x", str(float(x)), "--y", str(float(y))],
+                         f"tap ({x}, {y})")
+
+    def multitouch_hold(
+        self, x1: float, y1: float, x2: float, y2: float
+    ) -> None:
+        """Two-finger hold (compat only; the expanded step no longer uses it).
+
+        Both contacts go DOWN together, hold ~1s server-side, then UP
+        together via universalhid_multitouch. Proven incapable for the
+        expanded card; kept so older callers fail honestly, never silently.
+        """
+        for value in (x1, y1, x2, y2):
+            if isinstance(value, bool) or not isinstance(value, (int, float)) \
+                    or not 0.0 <= float(value) <= 1.0:
+                raise FrameError(
+                    f"HID hold coordinate {value!r} refused "
+                    "(normalized [0,1] inside the verified pill box)")
+        self._spawn(["universalhid_multitouch", "--id", self._udid,
+                     "--x1", str(float(x1)), "--y1", str(float(y1)),
+                     "--x2", str(float(x2)), "--y2", str(float(y2))],
+                    f"multitouch-hold ({x1}, {y1}) ({x2}, {y2})")
+
+    def long_press(self, x: float, y: float,
+                   duration_ms: int = 800) -> None:
+        """Single-finger long-press for the expanded-card probe (never a tap).
+
+        Shells ``argent run gesture-custom`` with the Down/Up sequence
+        [{"type":"Down","x":cx,"y":cy},
+         {"type":"Up","x":cx,"y":cy,"delayMs":800}] at the verified pill
+        center (pilot precedent 800ms). A tap on the pill would open the
+        app's Timer screen instead of expanding, so the expanded step
+        calls only this (a tap here is a product bug, not a fallback).
+        """
+        for value in (x, y):
+            if isinstance(value, bool) or not isinstance(value, (int, float)) \
+                    or not 0.0 <= float(value) <= 1.0:
+                raise FrameError(
+                    f"HID long-press coordinate {value!r} refused "
+                    "(normalized [0,1] inside the verified pill box)")
+        if isinstance(duration_ms, bool) or not isinstance(duration_ms, int) \
+                or not 1 <= duration_ms <= 5000:
+            raise FrameError(
+                f"HID long-press duration {duration_ms!r} refused "
+                "(integer ms in [1, 5000])")
+        events = [{"type": "Down", "x": float(x), "y": float(y)},
+                  {"type": "Up", "x": float(x), "y": float(y),
+                   "delayMs": duration_ms}]
+        self._run_argent(["run", "gesture-custom", "--udid", self._udid,
+                          "--events-json", json.dumps(events)],
+                         f"long-press ({x}, {y})")
+
+    def ax_dump(self) -> dict:
+        """Describe the screen via `argent run describe` (fail closed).
+
+        Returns the describe-derived document ``{"source", "buttons"}``
+        consumed by find_allow_button / the consent grant loop. Any
+        transport or parse failure raises FrameError (the grant loop
+        records a blocker and taps nothing — positions only ever come
+        from describe output, never blind estimates).
+        """
+        out = self._run_argent(
+            ["run", "describe", "--udid", self._udid, "--json"], "describe")
+        try:
+            doc = json.loads(out)
+        except ValueError as exc:
+            raise FrameError(
+                f"HID describe output malformed ({exc}); failing closed "
+                "without tap")
+        return {"source": doc.get("source", "ax-service") if isinstance(
+            doc, dict) else "ax-service",
+            "buttons": parse_describe_document(doc)}
+
+
+def _is_unit(value: Any) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool) \
+        and 0.0 <= float(value) <= 1.0
+
+
+# Describe-backed consent parsing. `argent run describe --json` returns
+# {description, source} where description is a TEXT rendering — one line per
+# element with role, quoted label, optional id=/value= attrs, and a
+# normalized [0,1] frame (same space as gesture-tap). There is no
+# structured-output flag, so AXButton lines are regex-parsed with a strict
+# anchored grammar (observed shapes: `AXButton "Allow"  (x, y, w, h)`;
+# header/ROOT/non-button lines never match and are ignored, never guessed).
+_DESCRIBE_BUTTON_RE = re.compile(
+    r"^AXButton\s+"
+    r"(?:\"(?P<label>(?:[^\"\\]|\\.)*)\"\s*)?"
+    r"(?P<attrs>(?:[A-Za-z_]+=\"[^\"]*\"\s*)*)"
+    r"\(\s*(?P<x>[0-9]+(?:\.[0-9]+)?)\s*,"
+    r"\s*(?P<y>[0-9]+(?:\.[0-9]+)?)\s*,"
+    r"\s*(?P<w>[0-9]+(?:\.[0-9]+)?)\s*,"
+    r"\s*(?P<h>[0-9]+(?:\.[0-9]+)?)\s*\)\s*$")
+_DESCRIBE_VALUE_RE = re.compile(r"value=\"([^\"]*)\"")
+
+# Exact consent labels (casefolded, smart quotes normalized): the compact
+# sheet offers Allow / Don't Allow, the follow-up offers Always Allow.
+# Don't Allow is sheet EVIDENCE only — never tapped.
+_CONSENT_LABELS = frozenset({"allow", "always allow",
+                             "don't allow", "dont allow"})
+_CONSENT_TAPPABLE = ("allow", "always allow")
+
+# Bounded describe-guided taps in the grant loop (mirrors the
+# pixel-dismissal cap: verify after every tap, never loop taps).
+CONSENT_MAX_TAPS = 2
+
+
+def _normalize_consent_label(label: Any) -> str:
+    if not isinstance(label, str):
+        return ""
+    return label.strip().casefold().replace("\u2019", "'").replace(
+        "\u2018", "'")
+
+
+def parse_describe_buttons(description: str) -> list[dict[str, Any]]:
+    """Parse AXButton entries from a describe text tree (strict).
+
+    Returns [{role, label, center [x, y], frame [x, y, w, h]}] with the
+    tap center derived as frame.x + frame.width / 2 (the describe
+    header's own formula). Only exact-grammar lines parse; header, ROOT,
+    and non-button lines are ignored. Non-string input raises FrameError
+    (fail closed: no tree, no tap).
+    """
+    if not isinstance(description, str):
+        raise FrameError(
+            "describe output is not text; failing closed without tap")
+    buttons: list[dict[str, Any]] = []
+    for line in description.splitlines():
+        match = _DESCRIBE_BUTTON_RE.match(line.strip())
+        if match is None:
+            continue
+        label = match.group("label")
+        if label is None:
+            value = _DESCRIBE_VALUE_RE.search(match.group("attrs") or "")
+            label = value.group(1) if value else None
+        if label is None:
+            continue
+        try:
+            frame = [float(match.group(name))
+                     for name in ("x", "y", "w", "h")]
+        except ValueError:
+            continue
+        if any(not _is_unit(v) for v in frame):
+            continue
+        label = label.replace('\\"', '"').replace("\\\\", "\\").strip()
+        if not label:
+            continue
+        # Tap centers round to 1e-6 (device-identical; keeps records
+        # comparable by exact equality instead of float noise).
+        buttons.append({
+            "role": "AXButton",
+            "label": label,
+            "center": [round(frame[0] + frame[2] / 2, 6),
+                       round(frame[1] + frame[3] / 2, 6)],
+            "frame": frame,
+        })
+    return buttons
+
+
+def parse_describe_document(doc: Any) -> list[dict[str, Any]]:
+    """Extract consent buttons from a parsed describe --json document.
+
+    Requires the `description` text tree; a missing/non-string tree raises
+    FrameError (malformed output fails closed: unknown screen state never
+    grants and never taps).
+    """
+    if not isinstance(doc, dict):
+        raise FrameError(
+            "describe output is not an object; failing closed without tap")
+    description = doc.get("description")
+    if not isinstance(description, str) or not description.strip():
+        raise FrameError(
+            "describe document carries no text tree; failing closed "
+            "without tap")
+    return parse_describe_buttons(description)
+
+
+def collect_consent_buttons(tree: Any) -> list[tuple[str, str, float, float]]:
+    """Collect (normalized label, raw label, x, y) consent buttons.
+
+    Accepts legacy dict trees (label/title/name/text + x/y or a two-number
+    center, nested under children-style lists) AND describe-derived button
+    dicts (label + center pair or frame quad, center derived). Only exact
+    consent labels match — anything else is absent, never guessed.
+    """
+    hits: list[tuple[str, str, float, float]] = []
+
+    def walk(node: Any) -> None:
+        if isinstance(node, dict):
+            label: str | None = None
+            for key in ("label", "title", "name", "text"):
+                value = node.get(key)
+                if isinstance(value, str) and value.strip():
+                    label = value
+                    break
+            coords: tuple[float, float] | None = None
+            if _is_unit(node.get("x")) and _is_unit(node.get("y")):
+                coords = (float(node["x"]), float(node["y"]))
+            else:
+                center = node.get("center")
+                if isinstance(center, (list, tuple)) and len(center) == 2 \
+                        and _is_unit(center[0]) and _is_unit(center[1]):
+                    coords = (float(center[0]), float(center[1]))
+                else:
+                    frame = node.get("frame")
+                    if isinstance(frame, (list, tuple)) and len(frame) == 4 \
+                            and all(_is_unit(v) for v in frame):
+                        coords = (round(float(frame[0])
+                                        + float(frame[2]) / 2, 6),
+                                  round(float(frame[1])
+                                        + float(frame[3]) / 2, 6))
+            if isinstance(label, str) and coords is not None:
+                norm = _normalize_consent_label(label)
+                if norm in _CONSENT_LABELS:
+                    hits.append((norm, label.strip(), coords[0], coords[1]))
+            for value in node.values():
+                walk(value)
+        elif isinstance(node, (list, tuple)):
+            for value in node:
+                walk(value)
+
+    walk(tree)
+    return hits
+
+
+def find_consent_button(tree: Any, want: str) -> tuple[float, float] | None:
+    """Locate one exact consent label in a tree (describe or legacy)."""
+    norm_want = _normalize_consent_label(want)
+    for norm, _raw, x, y in collect_consent_buttons(tree):
+        if norm == norm_want:
+            return (x, y)
+    return None
+
+
+def find_allow_button(tree: Any) -> tuple[float, float] | None:
+    """Locate the consent Allow button in an AX tree (documented shapes).
+
+    Returns normalized (x, y) or None when no exact Allow match exists.
+    Accepts legacy dict trees (label|title|name|text + x/y or a two-number
+    center, nested anywhere under children-style lists) and
+    describe-derived button dicts (label + center pair or frame quad with
+    the center derived). Only an exact casefold 'allow' matches — anything
+    else is absent, never guessed.
+    """
+    return find_consent_button(tree, "allow")
+
+
+def grant_consent(
+    hid: HidBackend,
+    hid_count: Callable[[], None] = lambda: None,
+) -> dict[str, Any]:
+    """Describe-guided consent grant loop (consent phase of live capture).
+
+    describe → no consent buttons: outcome absent (proceed, zero taps).
+    Allow present: tap its describe-derived center via `argent run
+    gesture-tap`, re-describe (max CONSENT_MAX_TAPS tap rounds); an Always
+    Allow follow-up is tapped the same way, then re-verified. Verified
+    absence → outcome granted (coords + rounds recorded). A sheet that
+    persists past the bound, a sheet with no tappable Allow, or any
+    describe/tap FrameError → outcome failed-blocker (detail recorded,
+    taps so far kept) and the caller proceeds: lock/compact capture is
+    consent-independent and continues undisturbed. Taps never loop and
+    positions only ever come from describe output — blind or
+    pixel-estimated taps stay forbidden. Unexpected (non-FrameError)
+    exceptions propagate fail-closed.
+    """
+    taps: list[dict[str, Any]] = []
+    try:
+        tree = hid.ax_dump()
+        hid_count()
+        found = collect_consent_buttons(tree)
+
+        def prefer(
+            rows: list[tuple[str, str, float, float]]
+        ) -> tuple[str, str, float, float] | None:
+            for want in _CONSENT_TAPPABLE:
+                for row in rows:
+                    if row[0] == want:
+                        return row
+            return None
+
+        current = prefer(found)
+        if current is None:
+            if found:
+                return {"outcome": "failed-blocker",
+                        "blocker": "consent sheet without a tappable Allow "
+                                   "button; nothing tapped",
+                        "rounds": 0, "taps": taps}
+            return {"outcome": "absent", "rounds": 0, "taps": taps}
+        while current is not None and len(taps) < CONSENT_MAX_TAPS:
+            _norm, raw, x, y = current
+            hid.tap(x, y)
+            hid_count()
+            taps.append({"label": raw, "x": x, "y": y})
+            tree = hid.ax_dump()
+            hid_count()
+            current = prefer(collect_consent_buttons(tree))
+        if current is None:
+            return {"outcome": "granted", "rounds": len(taps), "taps": taps}
+        labels = sorted({row[1] for row in collect_consent_buttons(tree)})
+        return {"outcome": "failed-blocker",
+                "blocker": f"consent sheet persists after {len(taps)} "
+                           f"describe-guided taps ({', '.join(labels) or 'unlabeled'}); "
+                           "lock/compact capture continues, taps never loop",
+                "rounds": len(taps), "taps": taps}
+    except FrameError as exc:
+        return {"outcome": "failed-blocker", "blocker": str(exc)[:300],
+                "rounds": len(taps), "taps": taps}
+
+
+def decode_png_rgba_band(path: str, max_rows: int) -> tuple[int, int, bytes]:
+    """Decode the top band of an 8-bit RGB/RGBA non-interlaced PNG (stdlib).
+
+    Returns (width, height, raw RGBA bytes for rows [0, max_rows)).
+    Rows decode sequentially (filter state is row-local + previous row),
+    so stopping early is exact. Raises FrameError on any shape mismatch.
+    """
+    try:
+        blob = Path(path).read_bytes()
+    except OSError as exc:
+        raise FrameError(f"cannot read PNG for pixel verify: {exc}")
+    try:
+        if blob[:8] != b"\x89PNG\r\n\x1a\n":
+            raise ValueError("bad signature")
+        width, height, depth, ctype, comp, filt, inter = struct.unpack(
+            ">IIBBBBB", blob[16:29])
+        if (depth, comp, filt, inter) != (8, 0, 0, 0) \
+                or ctype not in (2, 6):
+            raise ValueError(f"unsupported PNG depth={depth} type={ctype}")
+        pos = 8
+        parts: list[bytes] = []
+        while pos < len(blob):
+            size = struct.unpack(">I", blob[pos:pos + 4])[0]
+            typ = blob[pos + 4:pos + 8]
+            if typ == b"IDAT":
+                parts.append(blob[pos + 8:pos + 8 + size])
+            elif typ == b"IEND":
+                break
+            pos += 12 + size
+        raw = zlib.decompress(b"".join(parts))
+        channels = 3 if ctype == 2 else 4
+        stride = width * channels
+        want = max(1, min(max_rows, height))
+        out = bytearray(want * width * 4)
+        prev = bytearray(stride)
+        out_off = 0
+        for row in range(want):
+            kind = raw[row * (stride + 1)]
+            line = bytearray(
+                raw[row * (stride + 1) + 1:(row + 1) * (stride + 1)])
+            if kind == 1:
+                for i in range(channels, stride):
+                    line[i] = (line[i] + line[i - channels]) & 255
+            elif kind == 2:
+                for i in range(stride):
+                    line[i] = (line[i] + prev[i]) & 255
+            elif kind == 3:
+                for i in range(stride):
+                    left = line[i - channels] if i >= channels else 0
+                    line[i] = (line[i] + ((left + prev[i]) >> 1)) & 255
+            elif kind == 4:
+                for i in range(stride):
+                    left = line[i - channels] if i >= channels else 0
+                    up = prev[i]
+                    up_left = prev[i - channels] if i >= channels else 0
+                    p = left + up - up_left
+                    pa, pb, pc = abs(p - left), abs(p - up), abs(p - up_left)
+                    pr = left if (pa <= pb and pa <= pc) \
+                        else (up if pb <= pc else up_left)
+                    line[i] = (line[i] + pr) & 255
+            elif kind != 0:
+                raise ValueError(f"unknown filter {kind}")
+            if channels == 3:
+                for col in range(width):
+                    out[out_off:out_off + 3] = \
+                        line[col * 3:col * 3 + 3]
+                    out[out_off + 3] = 255
+                    out_off += 4
+            else:
+                out[out_off:out_off + stride] = line
+                out_off += stride
+            prev = line
+        return width, height, bytes(out)
+    except (ValueError, struct.error, zlib.error, IndexError) as exc:
+        raise FrameError(f"pixel decode failed for {path!r}: {exc}")
+
+
+def island_verdict(png_path: str,
+                   geometry: tuple[int, int]) -> dict[str, Any]:
+    """Pixel verdict for a live Dynamic Island capture (no OCR).
+
+    Counts near-black mass (the pill) and bright content (timer/icon) in
+    the pinned region. live=True only when the mass AND live content both
+    verify; an idle pill, a missing pill, or an unattested geometry all
+    yield live=False with an honest reason — no pill means no island claim.
+    """
+    region = ISLAND_REGIONS.get((geometry[0], geometry[1]))
+    if region is None:
+        return {"live": False, "dark_frac": 0.0, "bright": 0,
+                "reason": f"island region unattested for "
+                          f"{(geometry[0], geometry[1])}; no island claim"}
+    x0, x1, y0, y1 = region
+    width, height, px = decode_png_rgba_band(png_path, y1 + 1)
+    if (width, height) != (geometry[0], geometry[1]):
+        raise FrameError(
+            f"pixel source geometry {(width, height)} != expected "
+            f"{(geometry[0], geometry[1])}")
+    dark = bright = total = 0
+    for y in range(y0, y1 + 1):
+        base = y * width * 4
+        for x in range(x0, x1 + 1):
+            off = base + x * 4
+            r, g, b = px[off], px[off + 1], px[off + 2]
+            total += 1
+            if r < 24 and g < 24 and b < 24:
+                dark += 1
+            if r > 150 or g > 150 or b > 150:
+                bright += 1
+    frac = dark / total if total else 0.0
+    verdict: dict[str, Any] = {"dark_frac": frac, "bright": bright,
+                               "live": False, "reason": ""}
+    if frac < PILL_DARK_FRAC_MIN:
+        verdict["reason"] = "no pill mass in island region; no island claim"
+    elif bright < PILL_CONTENT_MIN:
+        verdict["reason"] = \
+            "idle pill without live content; no island claim"
+    else:
+        verdict["live"] = True
+        verdict["reason"] = "live pill content verified"
+    return verdict
+
+
+def expanded_verdict(png_path: str,
+                     geometry: tuple[int, int]) -> dict[str, Any]:
+    """Pixel verdict for a long-press expanded card (no OCR).
+
+    Counts near-black mass in the card band below the island. expanded=True
+    only when the band carries a large dark mass AND bright card content;
+    a compact Home screen (wallpaper/icons: frac <=0.11 measured) yields
+    expanded=False — no card means no expanded claim.
+    """
+    region = EXPANDED_REGIONS.get((geometry[0], geometry[1]))
+    if region is None:
+        return {"expanded": False, "dark_frac": 0.0, "bright": 0,
+                "reason": f"expanded band unattested for "
+                          f"{(geometry[0], geometry[1])}; no expanded claim"}
+    x0, x1, y0, y1 = region
+    width, height, px = decode_png_rgba_band(png_path, y1 + 1)
+    if (width, height) != (geometry[0], geometry[1]):
+        raise FrameError(
+            f"pixel source geometry {(width, height)} != expected "
+            f"{(geometry[0], geometry[1])}")
+    dark = bright = total = 0
+    for y in range(y0, y1 + 1):
+        base = y * width * 4
+        for x in range(x0, x1 + 1):
+            off = base + x * 4
+            r, g, b = px[off], px[off + 1], px[off + 2]
+            total += 1
+            if r < 24 and g < 24 and b < 24:
+                dark += 1
+            if r > 150 or g > 150 or b > 150:
+                bright += 1
+    frac = dark / total if total else 0.0
+    out: dict[str, Any] = {"dark_frac": frac, "bright": bright,
+                           "expanded": False, "reason": ""}
+    if frac < EXPANDED_DARK_FRAC_MIN:
+        out["reason"] = "no card mass below the island; no expanded claim"
+    elif bright < EXPANDED_BRIGHT_MIN:
+        out["reason"] = "dark band without card content; no expanded claim"
+    else:
+        out["expanded"] = True
+        out["reason"] = "expanded card mass verified"
+    return out
+
+
+def app_foreground_verdict(png_path: str,
+                           geometry: tuple[int, int]) -> dict[str, Any]:
+    """Pixel guard against a tap that opened the app (never eyeball-only).
+
+    Samples the app-chrome probe band (below content, above tab-bar rows):
+    the capture app's Timer screen is uniform near-white there (top
+    quantized bucket ~100% light) while SpringBoard (wallpaper + icons)
+    spreads across buckets. app=True means the device shows app UI, so a
+    staged expanded card is refused (a tap opened the app; no expansion).
+    """
+    width, height, px = decode_png_rgba_band(png_path, geometry[1])
+    if (width, height) != (geometry[0], geometry[1]):
+        raise FrameError(
+            f"pixel source geometry {(width, height)} != expected "
+            f"{(geometry[0], geometry[1])}")
+    y0 = int(height * APP_CHROME_BAND_FRAC[0])
+    y1 = int(height * APP_CHROME_BAND_FRAC[1])
+    buckets: dict[tuple[int, int, int], int] = {}
+    total = 0
+    for y in range(y0, y1 + 1, 2):
+        base = y * width * 4
+        for x in range(0, width, 2):
+            off = base + x * 4
+            key = (px[off] // 32, px[off + 1] // 32, px[off + 2] // 32)
+            buckets[key] = buckets.get(key, 0) + 1
+            total += 1
+    if not total:
+        return {"app": False, "share": 0.0,
+                "reason": "empty probe band; no app claim"}
+    top_key = max(buckets, key=lambda k: buckets[k])
+    share = buckets[top_key] / total
+    light = top_key[0] >= 6 and top_key[1] >= 6 and top_key[2] >= 6
+    if light and share >= APP_CHROME_SHARE_MIN:
+        return {"app": True, "share": share,
+                "reason": "uniform near-white app chrome; app foregrounded"}
+    return {"app": False, "share": share,
+            "reason": "wallpaper variance; SpringBoard held"}
+
+
+def _is_blue_label(r: int, g: int, b: int) -> bool:
+    return b > 150 and r < 100 and g < 170
+
+
+def find_allow_centroid(png_path: str,
+                        geometry: tuple[int, int]) -> dict[str, Any]:
+    """Locate the Allow button centroid on a consent-sheet probe (pixels).
+
+    Finds a centered light alert body in the sheet band, then the largest
+    blue label cluster in its bottom half (system Allow blue). Returns
+    {"found": True, "x": nx, "y": ny, ...} with normalized coordinates
+    derived from THIS image, or {"found": False, ...} (absent/ambiguous:
+    no tap ships — an ambiguous sheet is never tapped blind).
+    """
+    width, height, px = decode_png_rgba_band(png_path, geometry[1])
+    if (width, height) != (geometry[0], geometry[1]):
+        raise FrameError(
+            f"pixel source geometry {(width, height)} != expected "
+            f"{(geometry[0], geometry[1])}")
+    fx0, fx1, fy0, fy1 = SHEET_BAND_FRAC
+    bx0, bx1 = int(width * fx0), int(width * fx1)
+    by0, by1 = int(height * fy0), int(height * fy1)
+    scale_w = width / 1320.0
+    min_w = max(200, int(SHEET_BODY_MIN_W * scale_w))
+    min_h = max(80, int(SHEET_BODY_MIN_H * (height / 2868.0)))
+    # Candidate body rows: each carries a light run >= min_w; keep the
+    # widest run's span per row, then the tallest overlapping stack.
+    spans: list[tuple[int, int, int]] = []
+    for y in range(by0, by1 + 1, 2):
+        base = y * width * 4
+        best: tuple[int, int] | None = None
+        run_s: int | None = None
+        for x in range(bx0, bx1 + 1):
+            off = base + x * 4
+            light = px[off] > 150 or px[off + 1] > 150 or px[off + 2] > 150
+            if light and run_s is None:
+                run_s = x
+            if not light and run_s is not None:
+                if x - run_s >= min_w and (
+                        best is None or x - run_s > best[1] - best[0]):
+                    best = (run_s, x - 1)
+                run_s = None
+        if run_s is not None and bx1 - run_s >= min_w and (
+                best is None or bx1 - run_s > best[1] - best[0]):
+            best = (run_s, bx1)
+        if best is not None:
+            spans.append((y, best[0], best[1]))
+    bodies: list[tuple[int, int, int, int]] = []
+    if spans:
+        cur = [spans[0][0], spans[0][0], spans[0][1], spans[0][2]]
+        for y, s, e in spans[1:]:
+            if y - cur[1] <= 4 and not (s > cur[3] or e < cur[2]):
+                cur[1] = y
+                cur[2], cur[3] = min(cur[2], s), max(cur[3], e)
+            else:
+                bodies.append((cur[0], cur[1], cur[2], cur[3]))
+                cur = [y, y, s, e]
+        bodies.append((cur[0], cur[1], cur[2], cur[3]))
+    cand = [b for b in bodies if b[1] - b[0] >= min_h]
+    if not cand:
+        return {"found": False,
+                "reason": "no alert body in sheet band; no consent tap"}
+    ty0, ty1, tx0, tx1 = cand[0]
+    mid = (ty0 + ty1) // 2
+    # Largest blue cluster in the body bottom half (stride-2 BFS).
+    seen = bytearray(width * height)
+    best_mass = 0
+    best_cx = best_cy = 0.0
+    for y in range(mid, ty1 + 1, 2):
+        base = y * width * 4
+        for x in range(tx0, tx1 + 1, 2):
+            idx = y * width + x
+            if seen[idx]:
+                continue
+            off = base + x * 4
+            if not _is_blue_label(px[off], px[off + 1], px[off + 2]):
+                continue
+            stack = [(x, y)]
+            seen[idx] = 1
+            mass = sx = sy = 0
+            while stack:
+                cx, cy = stack.pop()
+                mass += 1
+                sx += cx
+                sy += cy
+                for nx, ny in ((cx - 2, cy), (cx + 2, cy),
+                              (cx, cy - 2), (cx, cy + 2)):
+                    if nx < tx0 or nx > tx1 or ny < mid or ny > ty1:
+                        continue
+                    nidx = ny * width + nx
+                    if seen[nidx]:
+                        continue
+                    seen[nidx] = 1
+                    noff = ny * width * 4 + nx * 4
+                    if _is_blue_label(px[noff], px[noff + 1],
+                                      px[noff + 2]):
+                        stack.append((nx, ny))
+            if mass > best_mass:
+                best_mass = mass
+                best_cx = sx / mass / width
+                best_cy = sy / mass / height
+    if best_mass < SHEET_LABEL_MIN_MASS:
+        return {"found": False, "body": [ty0, ty1, tx0, tx1],
+                "reason": "alert body without Allow label mass; "
+                          "ambiguous sheet never tapped"}
+    return {"found": True, "x": best_cx, "y": best_cy,
+            "mass": best_mass, "body": [ty0, ty1, tx0, tx1],
+            "reason": "Allow label centroid from live probe pixels"}
+
+
+def _live_shot(
+    run: Callable,
+    udid: str,
+    dest: Path,
+    geometry: tuple[int, int],
+    *,
+    mask: str | None,
+    label: str,
+    stats: sess.PhaseStats | None,
+    interval_s: float,
+    sleeper: Callable[[float], None],
+    clock: Callable[[], float],
+    deadline: float,
+) -> tuple[str, str]:
+    """One simctl export with bounded spawn retry (no stability gate).
+
+    Live timers tick every second, so consecutive exports never hash
+    identically (E5 proof: a live pill re-renders constantly); settling is
+    handled by the caller's spacing plus content verdicts, never by hash
+    equality. Spawn failures retry within LIVE_SHOT_ATTEMPTS, geometry
+    mismatch fails immediately, and an expired hold window fails closed.
+    Returns (sha256, captured_at_iso).
+    """
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    for attempt in range(1, LIVE_SHOT_ATTEMPTS + 1):
+        if clock() >= deadline:
+            raise FrameError(
+                f"hold-open window expired during {label}; failing closed "
+                "without capture")
+        try:
+            proc = _counted(run, pf.screenshot_argv(udid, str(dest), mask),
+                            stats)
+        except FrameError:
+            # _counted raises FrameError only for spawn failures (hang /
+            # missing binary), never for rc: bounded retry, the specified
+            # HID-transition exception.
+            if attempt == LIVE_SHOT_ATTEMPTS:
+                raise FrameError(
+                    f"live {label} screenshot failed after {attempt} "
+                    "attempt(s); no pixels staged")
+            sleeper(interval_s)
+            continue
+        if getattr(proc, "returncode", 1) != 0:
+            if attempt == LIVE_SHOT_ATTEMPTS:
+                raise FrameError(
+                    f"live {label} screenshot failed "
+                    f"rc={getattr(proc, 'returncode', '?')}; "
+                    "no pixels staged")
+            sleeper(interval_s)
+            continue
+        try:
+            dims = insp.png_dimensions(str(dest))
+        except (insp.InspectionError, OSError) as exc:
+            if attempt == LIVE_SHOT_ATTEMPTS:
+                raise FrameError(
+                    f"live {label} screenshot unreadable ({exc}); "
+                    "no pixels staged")
+            sleeper(interval_s)
+            continue
+        if dims != (geometry[0], geometry[1]):
+            raise FrameError(
+                f"live {label} geometry {dims} != expected "
+                f"{(geometry[0], geometry[1])}; never stretch another "
+                "device's capture")
+        try:
+            sha = insp.sha256_file(str(dest))
+        except OSError as exc:
+            if attempt == LIVE_SHOT_ATTEMPTS:
+                raise FrameError(
+                    f"live {label} screenshot unreadable ({exc}); "
+                    "no pixels staged")
+            sleeper(interval_s)
+            continue
+        from datetime import datetime, timezone
+
+        return sha, datetime.now(timezone.utc).isoformat()
+    raise FrameError(
+        f"live {label} screenshot failed; no pixels staged")
+
+
+def run_live_capture(
+    *,
+    hid: HidBackend | None,
+    run: Callable,
+    udid: str,
+    geometry: tuple[int, int],
+    run_dir: Path,
+    anchor_id: str,
+    live_started_at: str,
+    timeout_s: float = HOLD_OPEN_TIMEOUT_S,
+    clock: Callable[[], float] = time.monotonic,
+    interval_s: float = POLL_INTERVAL_S,
+    sleeper: Callable[[float], None] = time.sleep,
+    stats: sess.PhaseStats | None = None,
+) -> dict[str, Any]:
+    """Hold-open live-capture driver: consent, compact re-probe, lock shot.
+
+    Runs while the realtime session stays RUNNING (lease held, no cleanup
+    yet) and returns the live-capture record; the caller persists it. The
+    driver stages genuine pixels + capture windows under run_dir/staging
+    but registers nothing: genuine registration happens later via
+    record-external-frame (no OCR, no fabricated
+    reading). Raises FrameError fail-closed; the session record keeps the
+    outcome for audit.
+    """
+    if hid is None:
+        raise FrameError("live capture requires an HID backend "
+                         "(no blind fallback)")
+    deadline = clock() + timeout_s
+
+    def hold_left(step: str) -> None:
+        if clock() >= deadline:
+            raise FrameError(
+                f"hold-open window expired before {step}; failing closed "
+                "without capture (cleanup still runs)")
+
+    def hid_count() -> None:
+        if stats is not None:
+            stats.count("hid_action")
+
+    staging = run_dir / "staging"
+    staging.mkdir(parents=True, exist_ok=True)
+
+    # Consent grant BEFORE any capture, wired into the pipeline: the
+    # describe-backed grant loop taps ONLY describe-derived Allow / Always
+    # Allow centers (verified absent after, bounded to CONSENT_MAX_TAPS
+    # taps), records granted coords + rounds, and degrades to a recorded
+    # failed-blocker — lock/compact capture continues undisturbed. Cloud
+    # runners start clean every run, so the one-time manual grant does not
+    # transfer; this phase re-grants honestly on every run. Two-phase
+    # timing: this foreground describe covers already-surfaced sheets + the
+    # absent fast-path, but the system sheet surfaces at LOCK time — after
+    # this describe already returned absent. The lock-phase re-grant below
+    # (after the power press, before any lock screenshot) reuses the same
+    # grant_consent helper. Bound: at most CONSENT_MAX_TAPS (2)
+    # describe-guided taps per phase, total taps ≤4 (foreground + lock);
+    # taps never loop and positions only ever come from describe output.
+    hold_left("consent grant")
+    consent_fg = grant_consent(hid, hid_count)
+
+    # Compact re-probe after grant: Home backgrounds the app so the island
+    # pill renders. Shots repeat (verdict-gated, bounded) until the pill
+    # verifies live: a transition frame or an undismissed prompt fails the
+    # verdict, never the session — no pill means no island claim and the
+    # stub stays honestly pending.
+    hold_left("compact re-probe")
+    hid.press_button("Home")
+    hid_count()
+    compact_dest = staging / "live-la-compact.png"
+    verdict: dict[str, Any] = {"live": False,
+                               "reason": "no compact shot staged"}
+    csha = ciso = ""
+    for _ in range(LIVE_SHOT_ATTEMPTS):
+        hold_left("compact re-probe")
+        sleeper(interval_s)
+        csha, ciso = _live_shot(
+            run, udid, compact_dest, geometry,
+            mask=pf.resolve_screenshot_mask("la-compact", None),
+            label="compact re-probe", stats=stats, interval_s=interval_s,
+            sleeper=sleeper, clock=clock, deadline=deadline)
+        if stats is not None:
+            stats.count("live_capture_shot")
+        verdict = island_verdict(str(compact_dest), geometry)
+        if verdict["live"]:
+            break
+
+    # Expanded hold-open probe (one genuine single-finger attempt): the
+    # device is still unlocked at Home with the activity RUNNING. The
+    # compact verdict above already screenshots Home; when it confirms the
+    # live pill, fire ONE single-finger long-press at the pill center via
+    # gesture-custom (Down/Up 800ms; never a tap — a tap would open the
+    # app's Timer screen instead of expanding), settle, screenshot, and
+    # stage staging/live-la-expanded.png ONLY when the post shot verifies
+    # as a genuine card: card-band mass below the island AND the island
+    # still present (a tap-opened app hides the pill) AND no uniform app
+    # chrome. Anything else records expanded_attempt {outcome: no-card}
+    # with pixel evidence and continues to lock undisturbed. The probe
+    # pixels stay at staging/live-la-expanded.attempt.png either way.
+    # Without a confirmed pre-hold pill no hold fires (a blind long-press
+    # could jiggle Home).
+    hold_left("expanded hold-open")
+    region = ISLAND_REGIONS.get((geometry[0], geometry[1]))
+    expanded: dict[str, Any] | None = None
+    expanded_attempt: dict[str, Any] | None = None
+    if region is None:
+        expanded_attempt = {
+            "outcome": "no-card",
+            "reason": f"island region unattested for "
+                      f"{(geometry[0], geometry[1])}; no blind hold fired",
+            "hold": None,
+            "pre_live": bool(verdict.get("live")),
+        }
+    elif not verdict.get("live"):
+        expanded_attempt = {
+            "outcome": "no-card",
+            "reason": f"pre-hold pill not live "
+                      f"({verdict.get('reason', '')}); no hold fired, "
+                      "Home left undisturbed",
+            "hold": None,
+            "pre_live": False,
+        }
+    else:
+        x0, x1, y0, y1 = region
+        cx = (x0 + x1) / 2 / geometry[0]
+        cy = (y0 + y1) / 2 / geometry[1]
+        hold_pts = {"x": cx, "y": cy, "duration_ms": 800}
+        hid.long_press(hold_pts["x"], hold_pts["y"],
+                       hold_pts["duration_ms"])
+        hid_count()
+        sleeper(EXPANDED_HOLD_SETTLE_S)
+        attempt_dest = staging / "live-la-expanded.attempt.png"
+        hold_left("expanded hold-open")
+        _, eiso = _live_shot(
+            run, udid, attempt_dest, geometry,
+            mask=pf.resolve_screenshot_mask("la-expanded", None),
+            label="expanded hold-open", stats=stats, interval_s=interval_s,
+            sleeper=sleeper, clock=clock, deadline=deadline)
+        if stats is not None:
+            stats.count("live_capture_shot")
+        everdict = expanded_verdict(str(attempt_dest), geometry)
+        post_island = island_verdict(str(attempt_dest), geometry)
+        post_app = app_foreground_verdict(str(attempt_dest), geometry)
+        island_held = post_island.get("dark_frac", 0.0) >= PILL_DARK_FRAC_MIN
+        if (bool(everdict.get("expanded")) and island_held
+                and not post_app.get("app")):
+            staged = staging / "live-la-expanded.png"
+            shutil.copyfile(attempt_dest, staged)
+            try:
+                staged_sha = insp.sha256_file(str(staged))
+            except OSError as exc:
+                raise FrameError(f"staged expanded unreadable: {exc}")
+            expanded = {
+                "screenshot": "staging/live-la-expanded.png",
+                "screenshot_sha256": staged_sha,
+                "probe": "staging/live-la-expanded.attempt.png",
+                "captured_at_iso": eiso,
+                "verdict": everdict,
+                "post_island_dark_frac": post_island.get("dark_frac"),
+                "post_app_share": post_app.get("share"),
+                "hold": hold_pts,
+            }
+        else:
+            why = []
+            if not everdict.get("expanded"):
+                why.append(everdict.get("reason", "no card mass"))
+            if not island_held:
+                why.append(
+                    "island pill hidden post-hold (a tap opens the app; "
+                    "expansion refused)")
+            if post_app.get("app"):
+                why.append(
+                    "uniform app chrome post-hold (Timer screen, not a "
+                    "card); expansion refused")
+            expanded_attempt = {
+                "outcome": "no-card",
+                "reason": "; ".join(why) or "no expanded claim",
+                "probe": "staging/live-la-expanded.attempt.png",
+                "captured_at_iso": eiso,
+                "verdict": everdict,
+                "post_island_dark_frac": post_island.get("dark_frac"),
+                "post_app_share": post_app.get("share"),
+                "hold": hold_pts,
+                "pre_live": True,
+            }
+
+    # Consent-sheet dismissal probe (pixel-derived, before lock): shoot the
+    # lock screen; if an Allow sheet is pixel-detected, tap ONLY its
+    # image-derived label centroid and re-shoot to verify it is gone (ONE
+    # attempt max). A persistent sheet records blocked honestly with the
+    # evidence and the run moves on — lock pixels stay genuine either way;
+    # sheet presence is just noted, taps never loop. No sheet (or ambiguous
+    # pixels) ships zero taps: location must come from the live image and
+    # verify after, never blind coordinates. Durable dismissal is the
+    # XCUITest AX harness (separate iOS-owner task).
+    hold_left("consent dismissal probe")
+    sleeper(interval_s)
+    probe_dest = staging / "live-lock-probe.png"
+    _, _ = _live_shot(
+        run, udid, probe_dest, geometry,
+        mask=pf.resolve_screenshot_mask("la-lock", None),
+        label="consent dismissal probe", stats=stats, interval_s=interval_s,
+        sleeper=sleeper, clock=clock, deadline=deadline)
+    if stats is not None:
+        stats.count("live_capture_shot")
+    dismissal: dict[str, Any] = {"outcome": "absent", "attempts": 0,
+                                 "tap": None,
+                                 "probe": "staging/live-lock-probe.png"}
+    for _ in range(SHEET_DISMISSAL_MAX_TAPS):
+        hold_left("consent dismissal")
+        found = find_allow_centroid(str(probe_dest), geometry)
+        if not found.get("found"):
+            dismissal["outcome"] = "dismissed" \
+                if dismissal["attempts"] else "absent"
+            dismissal["reason"] = found.get("reason", "")
+            break
+        hid.tap(float(found["x"]), float(found["y"]))
+        hid_count()
+        dismissal["attempts"] += 1
+        dismissal["tap"] = {"x": found["x"], "y": found["y"],
+                            "mass": found.get("mass")}
+        sleeper(interval_s)
+        hold_left("consent dismissal")
+        _, _ = _live_shot(
+            run, udid, probe_dest, geometry,
+            mask=pf.resolve_screenshot_mask("la-lock", None),
+            label="consent dismissal re-shot", stats=stats,
+            interval_s=interval_s, sleeper=sleeper, clock=clock,
+            deadline=deadline)
+        if stats is not None:
+            stats.count("live_capture_shot")
+    else:
+        hold_left("consent dismissal")
+        found = find_allow_centroid(str(probe_dest), geometry)
+        if found.get("found"):
+            dismissal["outcome"] = "blocked"
+            dismissal["reason"] = (
+                "consent dismissal blocked: sheet persists after 1 "
+                "pixel-derived tap with evidence; lock stays genuine, "
+                "presence noted (durable path: XCUITest AX harness)")
+        else:
+            dismissal["outcome"] = "dismissed"
+            dismissal["reason"] = found.get("reason", "")
+
+    # powerx2 lock + simctl screenshot with retry (spike pattern:
+    # delivery-redundant presses, ends locked either way). Two spaced
+    # exports, the later (more settled) one staged; lock content has no
+    # automated verdict (OCR is refused), so the human binds it later.
+    hold_left("lock capture")
+    hid.press_button("Power")
+    hid_count()
+    sleeper(interval_s)
+    hid.press_button("Power")
+    hid_count()
+    # Lock-phase consent re-grant (clean-sim timing fix): the sheet
+    # surfaces at LOCK time, after the foreground describe already returned
+    # absent — so the driver attempts granting again once locked, before
+    # any lock screenshot. Same grant_consent helper, same per-phase
+    # max-2-taps budget (total taps ≤4, foreground + lock); if granted at
+    # lock time, proceed to the lock screenshot (sheet gone → clean
+    # banner). The foreground attempt above is NOT moved (it covers
+    # already-surfaced sheets + the absent fast-path). The pixel-dismissal
+    # probe above stays as-is (its correct refusal stands). Only runs when
+    # the foreground phase was absent (0 taps): a foreground grant skips
+    # (sheet already gone, no extra HID), and a foreground failed-blocker
+    # skips in this revision (preserves the existing 2-tap bound for
+    # persisting sheets and keeps the loop tests green; a not-granted
+    # retry with total ≤4 is future work). The merged consent record keeps
+    # the foreground outcome/rounds/taps shape and adds phase
+    # ("foreground" when granted up front, "lock" when granted once
+    # locked, None when no grant) plus the per-phase foreground/lock
+    # details for audit.
+    hold_left("lock consent grant")
+    sleeper(interval_s)
+    if consent_fg.get("outcome") == "granted":
+        consent = dict(consent_fg)
+        consent["phase"] = "foreground"
+        consent["foreground"] = consent_fg
+        consent["lock"] = None
+    elif consent_fg.get("outcome") != "absent":
+        consent = dict(consent_fg)
+        consent["phase"] = None
+        consent["foreground"] = consent_fg
+        consent["lock"] = None
+    else:
+        consent_lock = grant_consent(hid, hid_count)
+        fg_taps = consent_fg.get("taps", [])
+        lock_taps = consent_lock.get("taps", [])
+        total_taps = list(fg_taps) + list(lock_taps)
+        if consent_lock.get("outcome") == "granted":
+            consent = {
+                "outcome": "granted",
+                "rounds": len(total_taps),
+                "taps": total_taps,
+                "phase": "lock",
+                "foreground": consent_fg,
+                "lock": consent_lock,
+            }
+        elif consent_lock.get("outcome") == "absent":
+            consent = {
+                "outcome": "absent",
+                "rounds": 0,
+                "taps": [],
+                "phase": None,
+                "foreground": consent_fg,
+                "lock": consent_lock,
+            }
+        else:
+            consent = {
+                "outcome": "failed-blocker",
+                "blocker": consent_lock.get("blocker", ""),
+                "rounds": len(total_taps),
+                "taps": total_taps,
+                "phase": None,
+                "foreground": consent_fg,
+                "lock": consent_lock,
+            }
+    lock_dest = staging / "live-la-lock.png"
+    lsha = liso = ""
+    for _ in range(2):
+        hold_left("lock capture")
+        sleeper(interval_s)
+        lsha, liso = _live_shot(
+            run, udid, lock_dest, geometry,
+            mask=pf.resolve_screenshot_mask("la-lock", None),
+            label="lock capture", stats=stats, interval_s=interval_s,
+            sleeper=sleeper, clock=clock, deadline=deadline)
+        if stats is not None:
+            stats.count("live_capture_shot")
+    if expanded is not None:
+        live_record: dict[str, Any] = {
+            "schema_version": 1,
+            "anchor": anchor_id,
+            "consent": consent,
+            "compact": {
+                "screenshot": "staging/live-la-compact.png",
+                "screenshot_sha256": csha,
+                "captured_at_iso": ciso,
+                "verdict": verdict,
+            },
+            "expanded": expanded,
+            "consent_dismissal": dismissal,
+            "lock": {
+                "screenshot": "staging/live-la-lock.png",
+                "screenshot_sha256": lsha,
+                "captured_at_iso": liso,
+                "capture_window": {"started_at": live_started_at,
+                                   "captured_at_iso": liso},
+            },
+        }
+    else:
+        live_record = {
+            "schema_version": 1,
+            "anchor": anchor_id,
+            "consent": consent,
+            "compact": {
+                "screenshot": "staging/live-la-compact.png",
+                "screenshot_sha256": csha,
+                "captured_at_iso": ciso,
+                "verdict": verdict,
+            },
+            "expanded_attempt": expanded_attempt or {"outcome": "no-card",
+                                                     "reason": "unset"},
+            "consent_dismissal": dismissal,
+            "lock": {
+                "screenshot": "staging/live-la-lock.png",
+                "screenshot_sha256": lsha,
+                "captured_at_iso": liso,
+                "capture_window": {"started_at": live_started_at,
+                                   "captured_at_iso": liso},
+            },
+        }
+    return live_record
+
+
 def run_session(
     run: Callable,
     udid: str,
@@ -1343,6 +2611,9 @@ def run_session(
     clock: Callable[[], float] = time.monotonic,
     on_poll: Callable[[], None] | None = None,
     stats: sess.PhaseStats | None = None,
+    hold_open: bool = False,
+    hid: HidBackend | None = None,
+    hold_timeout_s: float = HOLD_OPEN_TIMEOUT_S,
 ) -> dict[str, Any]:
     """Execute one frozen-v2 session domain (pinned XOR realtime).
 
@@ -1361,6 +2632,12 @@ def run_session(
     stats = stats if stats is not None else sess.PhaseStats(clock=clock)
     if domain not in sess.SESSION_DOMAINS:
         raise FrameError(f"unknown session_domain {domain!r}")
+    if hold_open and domain != "realtime":
+        raise FrameError("hold-open live capture is realtime-only "
+                         "(pinned sessions end immediately after export)")
+    if hold_open and hid is None:
+        raise FrameError("hold-open live capture requires an HID backend "
+                         "(buttons/AX taps; no blind fallback)")
     geo, island = _checked_session_run_args(device_key, geometry,
                                             island_available)
     frames = sess.frames_for_domain(domain, island_available=island)
@@ -1394,6 +2671,7 @@ def run_session(
         raise FrameError(f"cannot hold the device lease: {exc}")
     lease_released = False
     failures: list[str] = []
+    hold_record: dict[str, Any] = {"enabled": bool(hold_open)}
     envelopes: list[dict] = []
     acks: list[dict] = []
     frame_records: list[dict] = []
@@ -1517,6 +2795,20 @@ def run_session(
                     if isinstance(v, (int, float)):
                         stats.note_app_duration(f"{frame}.{k}", v)
             acks.append(ack)
+            # Per-frame ack archive: the device state file is last-wins,
+            # so persist each validated ack for later session-bound
+            # genuine registration (record-external-frame --state per
+            # frame; the surviving state alone only binds the last seq).
+            try:
+                states_dir = run_dir / "states"
+                states_dir.mkdir(parents=True, exist_ok=True)
+                (states_dir /
+                 f"session-{nonce}-{seq}-{frame}.ack.json").write_text(
+                    json.dumps(ack, sort_keys=True, separators=(",", ":"),
+                               ensure_ascii=False) + "\n",
+                    encoding="utf-8")
+            except OSError as exc:
+                raise FrameError(f"cannot archive session ack: {exc}")
             la = ack.get("live_activity")
             if isinstance(la, dict) and la.get("activity_id"):
                 anchor_ids.add(la["activity_id"])
@@ -1606,6 +2898,48 @@ def run_session(
             raise FrameError(
                 f"real-time session minted {len(anchor_ids)} activity "
                 "anchors; exactly one anchor per session")
+        if hold_open:
+            # Hold-open: the session stays RUNNING with its verified anchor
+            # while the live-capture driver runs the button dance (consent,
+            # Home/compact, powerx2/lock). No cleanup is issued until the
+            # driver finishes explicitly. Bounded by the hold window (at
+            # most the existing CLEANUP deadline, under POLL: no deadline
+            # increases); any driver failure fails closed through the
+            # normal contamination path (cleanup still runs below).
+            if len(anchor_ids) != 1:
+                raise FrameError(
+                    "hold-open live capture requires exactly one verified "
+                    "anchor before any capture; failing closed")
+            anchor_id = next(iter(anchor_ids))
+            live_started_at: str | None = None
+            for ack in acks:
+                live = ack.get("live_activity")
+                if isinstance(live, dict) and live.get("started_at"):
+                    live_started_at = live["started_at"]
+                    break
+            if not live_started_at:
+                raise FrameError(
+                    "hold-open live capture requires the anchor capture "
+                    "window (live_activity.started_at); failing closed")
+            stats.start("hold")
+            try:
+                live_record = run_live_capture(
+                    hid=hid, run=run, udid=udid, geometry=geo,
+                    run_dir=run_dir, anchor_id=anchor_id,
+                    live_started_at=live_started_at,
+                    timeout_s=hold_timeout_s, clock=clock,
+                    interval_s=interval_s, sleeper=sleeper, stats=stats)
+            finally:
+                try:
+                    stats.stop("hold")
+                except sess.SessionError:
+                    pass
+            (run_dir / "staging" / "live-capture.json").write_text(
+                json.dumps(live_record, indent=2, sort_keys=True) + "\n",
+                encoding="utf-8")
+            stats.count("live_capture")
+            hold_record.update({"anchor": anchor_id,
+                                "live_capture": "staging/live-capture.json"})
     except FrameError as exc:
         failures.append(str(exc))
     finally:
@@ -1787,6 +3121,7 @@ def run_session(
             "app_provenance": provenance,
             "device_model": model_proof,
             "anchor_ids": sorted(anchor_ids),
+            "hold_open": hold_record,
             "stats": stats.to_dict(),
             "status": "complete" if not failures else "partial",
         }
@@ -1843,7 +3178,7 @@ def _session_anchor(acks: list[dict]) -> str | None:
 def _session_filed_at_iso() -> str:
     """Filing timestamp for pending stubs (marker only, never evidence).
 
-    Pending stubs carry no observation binding; this stamp only marks when
+    Pending stubs carry no capture window; this stamp only marks when
     the placeholder was filed. Genuine replacement via
     record-external-frame supplies the real capture window. No clock math.
     """

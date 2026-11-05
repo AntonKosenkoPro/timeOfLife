@@ -99,7 +99,6 @@ class RemovedVerbsTests(unittest.TestCase):
                 "record-external-frame", "--out", tmp, "--run-id", "r1",
                 "--frame", "la-lock", "--png", "/nonexistent.png",
                 "--captured-at", "2026-10-30T10:12:34+00:00",
-                "--observation", "/nonexistent.json",
                 "--state", "/nonexistent.json",
                 "--request", str(HERE / "pilot_manifest.json"))
             self.assertEqual(proc.returncode, 2)

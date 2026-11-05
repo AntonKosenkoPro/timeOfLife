@@ -628,9 +628,12 @@ class ModelCatalogTests(unittest.TestCase):
 
     def test_host_verified_identifiers(self):
         # Exact host strings (read-only simctl list -j devicetypes,
-        # Xcode 27.1: iPhone 17 Pro Max / iPhone 17 / M5 12GB+16GB).
+        # Xcode 27.1: iPhone 18 Pro Max / iPhone 17 / M5 12GB+16GB;
+        # retired 17 Pro Max stays in the island table as evidence).
+        self.assertTrue(sess.island_for_model(self.P + "iPhone-18-Pro-Max"))
         self.assertTrue(sess.island_for_model(self.P + "iPhone-17-Pro-Max"))
         self.assertTrue(sess.island_for_model(self.P + "iPhone-17-Pro"))
+        self.assertTrue(sess.island_for_model(self.P + "iPhone-17"))
         self.assertTrue(sess.island_for_model(self.P + "iPhone-17"))
         self.assertTrue(sess.island_for_model("iPhone-Air"))
         self.assertFalse(sess.island_for_model(
@@ -666,14 +669,16 @@ class ModelCatalogTests(unittest.TestCase):
             "ipad13", self.P + "iPad-Pro-13-inch-M4-8GB", "shot-ci-ipad13"))
         self.assertTrue(sess.check_catalog_model(
             "ipad13", self.P + "iPad-Pro-13-inch-M4-16GB", "shot-ci-ipad13"))
-        # Retired 18 Pro Max cannot attest the new iphone69 entry.
+        # Retired 17 Pro Max cannot attest the iphone69 entry (old
+        # create-path model removed with the preinstalled-sim mapping;
+        # no legacy branches, no aliases).
         self.assertTrue(sess.check_catalog_model(
-            "iphone69", self.P + "iPhone-18-Pro-Max", "shot-ci-iphone69"))
-        # Current 17 Pro Max attests iphone69; 17 attests iphone63.
+            "iphone69", self.P + "iPhone-17-Pro-Max", "iPhone 18 Pro Max"))
+        # Current 18 Pro Max attests iphone69; 17 attests iphone63.
         self.assertEqual(sess.check_catalog_model(
-            "iphone69", self.P + "iPhone-17-Pro-Max", "shot-ci-iphone69"), [])
+            "iphone69", self.P + "iPhone-18-Pro-Max", "iPhone 18 Pro Max"), [])
         self.assertEqual(sess.check_catalog_model(
-            "iphone63", self.P + "iPhone-17", "shot-ci-iphone63"), [])
+            "iphone63", self.P + "iPhone-17", "iPhone 17"), [])
         # Different iPad model, same geometry: cannot attest ipad13.
         air = self.P + "iPad-Air-11-inch-M4"
         self.assertTrue(sess.check_catalog_model(

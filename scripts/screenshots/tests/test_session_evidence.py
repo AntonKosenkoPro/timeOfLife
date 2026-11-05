@@ -518,7 +518,7 @@ class PendingVsGenuineTests(unittest.TestCase):
             rec = frame_record("la-lock", sha, rs.MODE_REALTIME, 4,
                                extra={"capture": "external-lock-screen",
                                       "session_domain": "realtime"})
-            # No capture_window / observation_sha256: cannot be genuine.
+            # No capture_window: cannot be genuine.
             (run_dir / "frames" / "la-lock.json").write_text(
                 json.dumps(rec, sort_keys=True), encoding="utf-8")
             manifest["frames"].append(rec)
@@ -532,7 +532,7 @@ class PendingVsGenuineTests(unittest.TestCase):
 class ForgedManifestTests(unittest.TestCase):
     """Manifest-only invention must fail against untouched disk (audit R1).
 
-    A1: status flip only. A2: invented capture/window/observation coherent
+    A1: status flip only. A2: invented capture/window coherent
     in the manifest alone. Both must error; disk records/PNGs/receipts are
     never modified by these tests.
     """
@@ -569,9 +569,7 @@ class ForgedManifestTests(unittest.TestCase):
                     rec["capture"] = "external-lock-screen"
                     rec["capture_window"] = {
                         "started_at": "2026-10-30T10:00:00+00:00",
-                        "captured_at_iso": "2026-10-30T10:12:34+00:00",
-                        "observed_elapsed_s": 754}
-                    rec["observation_sha256"] = "0" * 64
+                        "captured_at_iso": "2026-10-30T10:12:34+00:00"}
                     rec.pop("pending_reason", None)
             manifest = dict(manifest, frames=frames, status="complete")
             errs = sev.validate_run_evidence(run_dir, manifest)
@@ -581,25 +579,6 @@ class ForgedManifestTests(unittest.TestCase):
                               .read_text(encoding="utf-8"))
             self.assertEqual(disk["capture"],
                              "external-lock-screen-pending")
-
-    def test_invented_window_duration_rejected(self):
-        # Self-consistent manifest invention with a mismatched duration:
-        # exact disk agreement fails first, and the numeric window check
-        # would fail it independently.
-        with tempfile.TemporaryDirectory() as tmp:
-            run_dir, manifest = self._full_run(tmp)
-            frames = [dict(r) for r in manifest["frames"]]
-            for rec in frames:
-                if rec["frame"] == "la-lock":
-                    rec["capture"] = "external-lock-screen"
-                    rec["capture_window"] = {
-                        "started_at": "2026-10-30T10:00:00+00:00",
-                        "captured_at_iso": "2026-10-30T10:12:34+00:00",
-                        "observed_elapsed_s": 100}
-                    rec["observation_sha256"] = "0" * 64
-                    rec.pop("pending_reason", None)
-            manifest = dict(manifest, frames=frames, status="complete")
-            self.assertTrue(sev.validate_run_evidence(run_dir, manifest))
 
     def test_narrow_subset_complete_still_checks_disk(self):
         # `complete` is a whole-manifest claim: a narrowed app-frames-only
@@ -616,7 +595,7 @@ class ForgedManifestTests(unittest.TestCase):
 
     def test_anchor_split_rejected(self):
         # Two genuine states with different start anchors: each window is
-        # numerically valid alone, but the session anchor must be one.
+        # well-formed alone, but the session anchor must be one.
         with tempfile.TemporaryDirectory() as tmp:
             run_dir, manifest = self._full_run(tmp)
             frames = [dict(r) for r in manifest["frames"]]
@@ -631,9 +610,7 @@ class ForgedManifestTests(unittest.TestCase):
                         "started_at": start,
                         "captured_at_iso": ("2026-10-30T10:12:34+00:00"
                                             if rec["frame"] == "la-lock"
-                                            else "2026-10-30T11:12:34+00:00"),
-                        "observed_elapsed_s": 754}
-                    rec["observation_sha256"] = "0" * 64
+                                            else "2026-10-30T11:12:34+00:00")}
                     rec.pop("pending_reason", None)
                     path = run_dir / "frames" / f"{rec['frame']}.json"
                     path.write_text(json.dumps(rec, sort_keys=True),

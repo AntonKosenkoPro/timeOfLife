@@ -7,8 +7,9 @@ Usage:
       [--expected-manifest-sha <hex>]
 
 Local-only staging for the OWNER-DECIDED private versioned release
-(`AntonKosenkoPro/lifio-design-assets`, `apple-bezels-v1`): the CI worker
-downloads the 3 canonical PNGs + manifest with `gh release download`
+(`AntonKosenkoPro/lifio-design-assets`, `apple-bezels-v2` — 4 release PNGs:
+18PM current plus 17PM retained for history — + manifest): the CI worker
+downloads the canonical PNGs + manifest with `gh release download`
 (auth handled outside this helper — a read-only APPLE_BEZELS_TOKEN secret,
 pending owner provisioning; never copy a token from local `gh auth`),
 then THIS helper verifies and stages them. No network, no Figma/Sketch
@@ -22,14 +23,20 @@ Trust order (fail-closed at each step):
    never disabled globally). Only after the hash matches is ANY manifest
    metadata (names, SHAs, dimensions, cavities) used. A downloaded
    manifest's mutable SHA claims are never trusted. Release/repo tags
-   must read exactly `apple-bezels-v1` / the pinned repo.
-2. Each source PNG (located by manifest `name` under --source-dir;
+   must read a pinned release (`apple-bezels-v2`; `apple-bezels-v1`
+   stays accepted for historical bundles already staged) / the pinned
+   repo.
+2. Manifest assets are grouped by staged size; a sole candidate stages
+   as-is, while competing same-geometry candidates resolve to the pinned
+   per-size preferred release file (18PM over 17PM) — competing
+   non-preferred candidates refuse (never picked or merged silently).
+3. Each source PNG (located by manifest `name` under --source-dir;
    originals stay read-only, never modified) is hashed and compared to
    its manifest SHA256 (tampered bytes refused), then geometry/alpha
    verified with the panel builder against the exact pinned Apple
    profile (native dimensions, measured screen slot, clear interior,
    opaque frame — no silent scale/rotate).
-3. Verified bytes are copied atomically (tmp `.part` + rename) to the
+4. Verified bytes are copied atomically (tmp `.part` + rename) to the
    canonical staged filenames shared with panels.py --render-matrix.
    Original filenames never leak into the render path.
 
@@ -112,10 +119,12 @@ def _load_verified_manifest(manifest_path: Path,
         raise StageError(f"release manifest malformed {manifest_path}: {exc}")
     if not isinstance(obj, dict):
         raise StageError("release manifest must contain a JSON object")
-    if obj.get("release") != panels_builder.APPLE_RELEASE:
+    if obj.get("release") not in (panels_builder.APPLE_RELEASE,
+                                    panels_builder.APPLE_RELEASE_V1):
         raise StageError(
-            f"release manifest release {obj.get('release')!r} != pinned "
-            f"{panels_builder.APPLE_RELEASE!r}; refusing to stage")
+            f"release manifest release {obj.get('release')!r} not in pinned "
+            f"{(panels_builder.APPLE_RELEASE_V1, panels_builder.APPLE_RELEASE)}; "
+            "refusing to stage")
     if obj.get("repo") != panels_builder.APPLE_RELEASE_REPO:
         raise StageError(
             f"release manifest repo {obj.get('repo')!r} != pinned "
@@ -268,7 +277,7 @@ def build_parser() -> argparse.ArgumentParser:
                     "(hash-verified before use)")
     ap.add_argument("--expected-manifest-sha", default=None,
                     help="pinned manifest SHA256 (default: baked "
-                         "apple-bezels-v1 pin; tests inject their own "
+                         "apple-bezels-v2 pin; tests inject their own "
                          "manifest+sha pair — production strictness is never "
                          "disabled globally)")
     return ap
@@ -296,9 +305,35 @@ def main(argv: list[str] | None = None) -> int:
     try:
         manifest = _load_verified_manifest(Path(args.manifest),
                                            expected_sha)
+        checked = [_check_asset_entry(entry)
+                   for entry in manifest["assets"]]
+        by_size: dict[str, list[dict]] = {}
+        for entry in checked:
+            by_size.setdefault(_map_size(entry), []).append(entry)
+        selected: list[tuple[str, dict]] = []
+        for size, _pins in _SIZE_MAP:
+            candidates = by_size.get(size, [])
+            if not candidates:
+                raise StageError(
+                    f"release manifest has no asset for size {size!r}; "
+                    "refusing to stage an incomplete set")
+            if len(candidates) == 1:
+                selected.append((size, candidates[0]))
+                continue
+            preferred = panels_builder.APPLE_PREFERRED_ASSET[size]
+            matches = [c for c in candidates if c["name"] == preferred]
+            if len(matches) == 1:
+                print(f"note: {size} selects preferred {preferred!r} over "
+                      f"{len(candidates) - 1} superseded candidate(s)")
+                selected.append((size, matches[0]))
+                continue
+            raise StageError(
+                f"release manifest lists {len(candidates)} competing assets "
+                f"for size {size!r} with no single preferred "
+                f"{preferred!r}; refusing to pick/merge")
         staged: list[dict] = []
-        for entry in manifest["assets"]:
-            staged.append(stage_asset(entry=_check_asset_entry(entry),
+        for size, entry in selected:
+            staged.append(stage_asset(entry=entry,
                                       source_dir=source_dir,
                                       out_dir=out_dir))
     except (StageError, panels_builder.BuilderError) as exc:
@@ -336,7 +371,7 @@ def main(argv: list[str] | None = None) -> int:
               file=sys.stderr)
         return EXIT_INVALID
     print(f"wrote {stage_path} release={manifest.get('release')} "
-          f"{len(staged)}/3 staged")
+          f"{len(staged)}/{len(_SIZE_MAP)} staged")
     return EXIT_OK
 
 

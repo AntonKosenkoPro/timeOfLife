@@ -445,6 +445,23 @@ targets:
         # the gate-absence tests keep verifying shipping behavior there.
         Screenshot:
           SWIFT_ACTIVE_COMPILATION_CONDITIONS: SCREENSHOT_CAPTURE
+  TimeOfLifeHoldUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - TimeOfLifeHoldUITests
+    dependencies:
+      - target: TimeOfLife
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.antonkosenko.timeoflifeapp.holduitests
+        TEST_TARGET_NAME: TimeOfLife
+        GENERATE_INFOPLIST_FILE: YES
+        SWIFT_TREAT_WARNINGS_AS_ERRORS: YES
+        GCC_TREAT_WARNINGS_AS_ERRORS: YES
+      configs:
+        Debug:
+          SWIFT_ACTIVE_COMPILATION_CONDITIONS: DEBUG
 schemes:
   TimeOfLife:
     build:
@@ -489,6 +506,28 @@ schemes:
       config: Screenshot
     archive:
       config: Screenshot
+  # Capture-only hold harness (GH #238): island long-press + consent
+  # Allow tap under XCUITest. Separate scheme so the Debug/Screenshot lanes
+  # never pick these tests up: they need an owned live sim and a RUNNING
+  # activity, and must stay runnable headless via
+  # `xcodebuild test -scheme TimeOfLife-HoldHarness` without touching CI.
+  TimeOfLife-HoldHarness:
+    build:
+      targets:
+        TimeOfLife: all
+        TimeOfLifeHoldUITests: [test]
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets:
+        - TimeOfLifeHoldUITests
+    profile:
+      config: Debug
+    analyze:
+      config: Debug
+    archive:
+      config: Debug
 packages:
   GRDB:
     url: https://github.com/groue/GRDB.swift

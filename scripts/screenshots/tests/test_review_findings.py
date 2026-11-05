@@ -127,50 +127,6 @@ class TotalsPinTests(unittest.TestCase):
 
 
 class LaBindingTests(unittest.TestCase):
-    def _png(self, tmp):
-        import struct
-        import zlib
-        p = Path(tmp) / "la.png"
-        ihdr = struct.pack(">IIBBBBB", 1320, 2868, 8, 2, 0, 0, 0)
-        p.write_bytes(b"\x89PNG\r\n\x1a\n" + struct.pack(">I", 13) + b"IHDR"
-                      + ihdr + struct.pack(">I", zlib.crc32(b"IHDR" + ihdr) & 0xFFFFFFFF))
-        return str(p)
-
-    def test_observation_without_sha_is_refused(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            png = self._png(tmp)
-            errs = insp.verify_la_observation(
-                {"started_at": "2026-10-30T10:00:00+00:00"},
-                png, "2026-10-30T10:12:34+00:00",
-                {"observed_elapsed_s": 754})
-            self.assertTrue(errs)
-
-    def test_naive_timestamps_rejected(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            png = self._png(tmp)
-            sha = insp.sha256_file(png)
-            obs = {"observed_elapsed_s": 754, "screenshot_sha256": sha}
-            errs = insp.verify_la_observation(
-                {"started_at": "2026-10-30T10:00:00"},
-                png, "2026-10-30T10:12:34+00:00", obs)
-            self.assertTrue(any("naive" in e.lower() for e in errs))
-            errs = insp.verify_la_observation(
-                {"started_at": "2026-10-30T10:00:00+00:00"},
-                png, "2026-10-30T10:12:34", obs)
-            self.assertTrue(any("naive" in e.lower() for e in errs))
-
-    def test_bool_and_nan_observed_rejected(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            png = self._png(tmp)
-            sha = insp.sha256_file(png)
-            for bad in (True, float("nan"), float("inf"), "754"):
-                with self.subTest(bad=repr(bad)):
-                    errs = insp.verify_la_observation(
-                        {"started_at": "2026-10-30T10:00:00+00:00"},
-                        png, "2026-10-30T10:12:34+00:00",
-                        {"observed_elapsed_s": bad, "screenshot_sha256": sha})
-                    self.assertTrue(errs)
-
     def test_canonical_la_keys(self):
         for la_frame in ("la-lock", "la-compact", "la-expanded"):
             request = framed_request(la_frame)

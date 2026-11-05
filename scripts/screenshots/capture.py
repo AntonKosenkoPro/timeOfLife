@@ -9,7 +9,6 @@ Subcommands (validation/gate/execution CLI; nothing auto-approves):
                     requires LIFIO_CAPTURE_LEASE=1 and touches one device)
   check-state       validate app capture-state.json against the request
                     (+ optional --pinned-totals; ready refused without a pin)
-  verify-la         validate human-supplied LA timer observation (±2s, hash-bound)
   verify-picker     require picker keyboard inspection artifact (hash+language bound)
   check-approval    hash/file-verified approval gate
   plan-run          single-pass 7-frame pilot plan (no device I/O;
@@ -23,7 +22,7 @@ Subcommands (validation/gate/execution CLI; nothing auto-approves):
                     the record-pending-frame verb)
   record-external-frame
                     register a genuine la-* PNG + capture window
-                    (no device I/O; observation-bound, no OCR).
+                    (no device I/O, no OCR).
                     Session stubs derive bindings from trusted disk
                     (explicit session args verified, --request rejected).
   finalize-run      assemble run-manifest.json (complete|needs-inspection)
@@ -241,41 +240,6 @@ def cmd_check_state(args: argparse.Namespace) -> int:
     return EXIT_INVALID
 
 
-def cmd_verify_la(args: argparse.Namespace) -> int:
-    try:
-        state = state_mod.load_state_file(args.state)
-    except state_mod.StateError as exc:
-        print(f"invalid: {exc}", file=sys.stderr)
-        return EXIT_INVALID
-    la = state.get("live_activity") if isinstance(state, dict) else None
-    if not isinstance(la, dict):
-        print("needs-inspection: live_activity block missing from state",
-              file=sys.stderr)
-        return EXIT_PENDING
-    observation = None
-    if args.observation is not None:
-        try:
-            observation = json.loads(Path(args.observation).read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError) as exc:
-            print(f"invalid: cannot read observation: {exc}", file=sys.stderr)
-            return EXIT_INVALID
-        if not isinstance(observation, dict):
-            print("invalid: observation file must contain a JSON object",
-                  file=sys.stderr)
-            return EXIT_INVALID
-    errs = inspection_mod.verify_la_observation(
-        la, args.screenshot, args.captured_at, observation,
-    )
-    if errs:
-        first = errs[0]
-        code = EXIT_PENDING if ("needs-inspection" in first or "missing" in first) else EXIT_INVALID
-        for e in errs:
-            print(f"failed: {e}", file=sys.stderr)
-        return code
-    print("la-observation-valid")
-    return EXIT_OK
-
-
 def cmd_verify_picker(args: argparse.Namespace) -> int:
     try:
         obj = _read_json(args.inspection)
@@ -461,9 +425,9 @@ def _cmd_record_external_session(args: argparse.Namespace, run_dir: Path,
     envelope; receipt coverage is required. Explicit session args are
     accepted only when strictly equal to the stub (stale/missing/foreign
     stubs rejected). --request is forbidden here (omit it; the envelope
-    is authoritative). The observation state file must pass the full
+    is authoritative). The live state file must pass the full
     session-ack validation (integer schema 2 and every binding plus
-    transcript and ready checks); --device/--geometry/--run-id must match
+    transcript and ready checks). --device/--geometry/--run-id must match
     the stub exactly (no re-keying). The validated state is archived per
     frame and its path stored on the export record, without weakening the
     fail-closed checks.
@@ -568,7 +532,7 @@ def _cmd_record_external_session(args: argparse.Namespace, run_dir: Path,
             run_dir=run_dir,
             frame=args.frame, png_src=args.png,
             captured_at_iso=args.captured_at,
-            observation_path=args.observation, state=state, request=inner,
+            state=state, request=inner,
             request_sha256=env["request_sha256"],
             pinned_totals=pin, expected_geometry=geometry,
             device_udid=args.device,
@@ -587,7 +551,7 @@ def _cmd_record_external_session(args: argparse.Namespace, run_dir: Path,
 
 
 def _archive_state_file(run_dir: Path, frame: str, src: str) -> str:
-    """Keep the validated observation state per frame (audit copy).
+    """Keep the validated live state per frame (audit copy).
 
     Returns the run-relative POSIX path stored on the export record. When
     the source already lives inside the run dir it is referenced as-is
@@ -655,7 +619,18 @@ def cmd_run_session(args: argparse.Namespace) -> int:
     workflow wrapper, which then calls the existing finalize-run.
     The device lock is held inside run_session across
     all frame commands of this session (never pre-acquired here).
+
+    With --hold-open (realtime only), the session stays RUNNING with its
+    verified anchor after the frame loop while the live-capture driver
+    runs the button dance (consent grant, Home/compact re-probe, powerx2
+    lock capture); the explicit session cleanup finishes it. Bounded by
+    the existing POLL/CLEANUP-scale hold window; no deadline increases.
     """
+    if args.hold_open and args.domain != "realtime":
+        print("invalid: --hold-open is realtime-only "
+              "(pinned sessions end immediately after export)",
+              file=sys.stderr)
+        return EXIT_INVALID
     refused = _require_lease()
     if refused is not None:
         return refused
@@ -705,12 +680,14 @@ def cmd_run_session(args: argparse.Namespace) -> int:
             return EXIT_INVALID
         island_available = island == "1"
     run_dir = exec_mod.run_dir_for(str(out_root), args.run_id)
+    hid = exec_mod.ArgentHidBackend(args.device) if args.hold_open else None
     try:
         summary = exec_mod.run_session(
             exec_mod.default_run, args.device, base, args.domain, run_dir,
             device_key=args.device_key, bid=args.bid, pinned_totals=pin,
             geometry=geometry, island_available=island_available,
             timeout_s=args.timeout, interval_s=args.interval,
+            hold_open=args.hold_open, hid=hid,
         )
     except exec_mod.FrameError as exc:
         print(f"failed: {exc}", file=sys.stderr)
@@ -777,13 +754,6 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--retained-dir", required=False, default=None)
     p.set_defaults(fn=cmd_check_state)
 
-    p = sub.add_parser("verify-la")
-    p.add_argument("--state", required=True)
-    p.add_argument("--screenshot", required=True)
-    p.add_argument("--captured-at", required=True)
-    p.add_argument("--observation", required=False, default=None)
-    p.set_defaults(fn=cmd_verify_la)
-
     p = sub.add_parser("verify-picker")
     p.add_argument("--inspection", required=True)
     p.add_argument("--screenshot", required=True)
@@ -815,7 +785,6 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--frame", required=True)
     p.add_argument("--png", required=True)
     p.add_argument("--captured-at", required=True)
-    p.add_argument("--observation", required=True)
     p.add_argument("--state", required=True)
     p.add_argument("--session-nonce", required=False, default=None,
                    help="session frames only; must match the trusted stub")
@@ -866,6 +835,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--retained-dir", required=False, default=None)
     p.add_argument("--timeout", type=float, default=exec_mod.POLL_TIMEOUT_S)
     p.add_argument("--interval", type=float, default=exec_mod.POLL_INTERVAL_S)
+    p.add_argument("--hold-open", action="store_true",
+                   help="realtime only: hold the session RUNNING with its "
+                        "verified anchor for the live-capture button dance "
+                        "(consent, compact re-probe, lock capture) before "
+                        "the explicit session cleanup")
     p.set_defaults(fn=cmd_run_session)
 
     p = sub.add_parser("locale-totals")

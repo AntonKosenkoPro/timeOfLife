@@ -138,6 +138,12 @@ def session_argv(capture_py: Path, *, device: str, device_key: str,
             "--out", str(out), "--run-id", run_id,
             "--geometry", geometry, "--pinned-totals", str(pinned_totals),
             "--island", island]
+    if domain == "realtime":
+        # Genuine-LA pipeline: hold-open live capture (consent grant +
+        # compact/expanded staging) runs inside the realtime session.
+        # Pinned sessions end immediately after export (CLI rejects
+        # --hold-open there), so the flag is realtime-only by construction.
+        argv += ["--hold-open"]
     if approval is not None or retained_dir is not None:
         # Callers pass both or neither (validated in execute); a lone
         # flag here would silently weaken the gate, so refuse instead.

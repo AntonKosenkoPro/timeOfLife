@@ -4,12 +4,12 @@
 Single chokepoint: validate_run_evidence(run_dir, manifest,
 required_frames=None) -> list[str]. Structural checks only (identity,
 transcript + combined host/app receipt, paths/symlinks, N/A probe,
-pending-vs-genuine presence); numeric LA tolerance stays in inspection.py
-and per-frame state checks stay in state_check.py — never duplicated here.
+pending-vs-genuine presence); per-frame state checks stay in
+state_check.py — never duplicated here.
 
 Fail closed everywhere: missing/partial receipts, uncovered transcripts,
 identity drift, symlink/traversal escape, fabricated N/A pixels, and
-genuine claims without observation binding are all errors. Honest pending
+genuine claims without a capture window are all errors. Honest pending
 handoff stubs are NOT errors (status stays needs-inspection downstream).
 """
 
@@ -133,8 +133,8 @@ def _check_shared_anchor(by_frame: dict, required: list[str],
     """One real-time anchor across the examined genuine states.
 
     All genuine (`external-lock-screen`) LA records under examination must
-    share one live-activity start instant: separate capture times and
-    observations are per-state, but the activity identity is per-session.
+    share one live-activity start instant: separate capture times
+    are per-state, but the activity identity is per-session.
     Pending stubs carry no window and are excluded; a single examined
     genuine state is trivially consistent (unity cannot be judged from
     one). Fabricated N/A island records never reach here (rejected
@@ -168,7 +168,7 @@ def _check_complete_status(run_dir: Path, manifest: dict, by_frame: dict,
     fails here. Manifest-only status flips (or invented genuine claims)
     fail even when every hash still matches: any filed frame whose DISK
     record is a pending stub, or claims genuine pixels without a bound
-    capture window + observation, blocks `complete`. Disk is the evidence;
+    capture window, blocks `complete`. Disk is the evidence;
     the manifest status only repeats it.
     """
     filed = {p.stem for p in (run_dir / "frames").glob("*.json")
@@ -186,8 +186,7 @@ def _check_complete_status(run_dir: Path, manifest: dict, by_frame: dict,
         elif obj.get("capture") == "external-lock-screen":
             cw = obj.get("capture_window")
             if not isinstance(cw, dict) or "captured_at_iso" not in cw \
-                    or "observed_elapsed_s" not in cw \
-                    or not obj.get("observation_sha256"):
+                    or "started_at" not in cw:
                 errs.append(f"{frame}: complete status without bound "
                             "genuine proof on disk")
 
@@ -406,7 +405,7 @@ def _check_frame_record(run_dir: Path, frame: str, rec: Any,
         errs.append(f"frame {frame!r} carries an unsafe session_nonce")
     # On-disk record file must agree with the manifest claim EXACTLY
     # (normalized dict equality over every key): any manifest-only
-    # invention — capture flip, invented window/observation, dropped
+    # invention — capture flip, invented window, dropped
     # pending_reason, re-keying — fails closed even when all binding
     # hashes still match. Disk is the evidence; the manifest only repeats
     # it.
@@ -451,7 +450,7 @@ def _check_frame_png(run_dir: Path, frame: str, rec: dict,
     actual = insp.sha256_file(str(png))
     if actual != rec.get("screenshot_sha256"):
         errs.append(f"screenshot for {frame!r} changed after capture "
-                    "(tampered or stale observation binding)")
+                    "(tampered capture binding)")
 
 
 def _check_genuine_binding(frame: str, rec: dict, errs: list[str]) -> None:
@@ -464,33 +463,18 @@ def _check_genuine_binding(frame: str, rec: dict, errs: list[str]) -> None:
     if capture == "external-lock-screen":
         cw = rec.get("capture_window")
         if not isinstance(cw, dict) or "captured_at_iso" not in cw \
-                or "observed_elapsed_s" not in cw:
+                or "started_at" not in cw:
             errs.append(f"{frame}: genuine claim without capture_window "
                         "binding")
             return
-        if not rec.get("observation_sha256"):
-            errs.append(f"{frame}: genuine claim without observation_sha256")
-            return
-        # Genuine observations are numerically re-validated here (wall
-        # elapsed vs observed within ±2s), not merely checked for
-        # presence: a self-consistent-looking invented window with a
-        # mismatched duration still fails.
+        # Window timestamps must parse; there is no timer reading to check.
         try:
-            wall = (insp.parse_aware_iso(cw["captured_at_iso"])
-                    - insp.parse_aware_iso(cw["started_at"])).total_seconds()
+            insp.parse_aware_iso(cw["captured_at_iso"])
+            insp.parse_aware_iso(cw["started_at"])
         except (insp.InspectionError, KeyError, TypeError) as exc:
             errs.append(f"{frame}: capture window malformed: {exc}")
             return
-        observed = cw.get("observed_elapsed_s")
-        if not insp.is_strict_nonneg_number(observed) or abs(
-                wall - float(observed)) > insp.LA_TOLERANCE_S:
-            errs.append(
-                f"{frame}: capture window observation {observed!r}s vs wall "
-                f"{wall:.1f}s exceeds tolerance (hash-bound evidence "
-                "required)")
         return
-    # Native captures need no observation binding here; the numeric LA
-    # tolerance for app-supplied observations stays in inspection.py.
 
 
 def _check_session_binding(run_dir: Path, frame: str, rec: dict,

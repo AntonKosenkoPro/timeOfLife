@@ -383,15 +383,18 @@ def write_bezels(bezels: Path) -> None:
 
 def make_apple_profile_bytes(native: tuple[int, int],
                              at: tuple[int, int],
-                             slot: tuple[int, int]) -> bytes:
+                             slot: tuple[int, int],
+                             frame_rgb: tuple[int, int, int] = (20, 20, 20)
+                             ) -> bytes:
     """Synthetic Apple-profile bezel: exact native dims + exact cavity.
 
     Sharp-corner transparent slot (no rounded corners, no pill) at the
     exact pinned origin — passes the exact-profile verifiers, which pin
-    dimensions/slot/origin (never corner art). Frame is opaque.
+    dimensions/slot/origin (never corner art). Frame RGB is alpha-only
+    evidence: verifiers ignore it, so variants stay interchangeable.
     """
     nw, nh = native
-    im = Image.new("RGBA", (nw, nh), (20, 20, 20, 255))
+    im = Image.new("RGBA", (nw, nh), frame_rgb + (255,))
     # NOTE: PIL rectangles are endpoint-inclusive: far corner at+slot-1.
     ImageDraw.Draw(im).rectangle(
         [at[0], at[1], at[0] + slot[0] - 1, at[1] + slot[1] - 1],
@@ -401,29 +404,21 @@ def make_apple_profile_bytes(native: tuple[int, int],
     return buf.getvalue()
 
 
-def write_stage_source(root: Path) -> tuple[Path, Path, str]:
-    """Synthetic release source dir + test manifest; returns (src, manifest, sha).
+def write_stage_manifest(root: Path, items: list, release: str | None = None,
+                       repo: str | None = None) -> tuple[Path, Path, str]:
+    """Write a synthetic release source dir + manifest from explicit items.
 
-    Test equivalent of the private release: 3 exact-profile PNGs under the
-    canonical release filenames plus a manifest carrying their TRUE hashes.
-    Callers pass the manifest + its sha via --manifest/--expected-manifest-sha
-    (test injection — the production pinned manifest hash stays strict).
+    items: (release_name, png_bytes, geometry_pins) per asset; geometry
+    (native/cavity/model/color) is taken from the pins dict while sha256
+    is the TRUE hash of the given bytes. Returns (src, manifest, sha).
     """
     src = root / "stage-src"
     src.mkdir(parents=True, exist_ok=True)
-    profiles = (
-        (panels_builder.APPLE_SOURCE_69, "6.9"),
-        (panels_builder.APPLE_SOURCE_63, "6.3"),
-        (panels_builder.APPLE_SOURCE_IPAD, "ipad13"),
-    )
     assets = []
-    for pins, _size in profiles:
-        data = make_apple_profile_bytes(tuple(pins["native"]),
-                                        tuple(pins["at"]),
-                                        tuple(pins["slot"]))
-        (src / pins["name"]).write_bytes(data)
+    for name, data, pins in items:
+        (src / name).write_bytes(data)
         assets.append({
-            "name": pins["name"],
+            "name": name,
             "sha256": hashlib.sha256(data).hexdigest(),
             "native": {"width": pins["native"][0],
                        "height": pins["native"][1]},
@@ -435,8 +430,8 @@ def write_stage_source(root: Path) -> tuple[Path, Path, str]:
             "color": pins["color"],
         })
     manifest = {
-        "release": panels_builder.APPLE_RELEASE,
-        "repo": panels_builder.APPLE_RELEASE_REPO,
+        "release": release or panels_builder.APPLE_RELEASE,
+        "repo": repo or panels_builder.APPLE_RELEASE_REPO,
         "assets": assets,
     }
     manifest_path = root / "apple-bezels-manifest.json"
@@ -445,6 +440,29 @@ def write_stage_source(root: Path) -> tuple[Path, Path, str]:
     manifest_sha = hashlib.sha256(
         manifest_path.read_bytes()).hexdigest()
     return src, manifest_path, manifest_sha
+
+
+def write_stage_source(root: Path) -> tuple[Path, Path, str]:
+    """Synthetic release source dir + test manifest; returns (src, manifest, sha).
+
+    Test equivalent of the private release: 3 exact-profile PNGs under the
+    canonical release filenames plus a manifest carrying their TRUE hashes.
+    Callers pass the manifest + its sha via --manifest/--expected-manifest-sha
+    (test injection — the production pinned manifest hash stays strict).
+    """
+    profiles = (
+        (panels_builder.APPLE_SOURCE_69, "6.9"),
+        (panels_builder.APPLE_SOURCE_63, "6.3"),
+        (panels_builder.APPLE_SOURCE_IPAD, "ipad13"),
+    )
+    items = []
+    for pins, _size in profiles:
+        items.append((pins["name"],
+                      make_apple_profile_bytes(tuple(pins["native"]),
+                                               tuple(pins["at"]),
+                                               tuple(pins["slot"])),
+                      pins))
+    return write_stage_manifest(root, items)
 
 
 def write_captions(path: Path, locale: str, texts: dict) -> None:
@@ -926,12 +944,12 @@ class RenderMatrixTests(unittest.TestCase):
             base = producer_harness.base_request(run_id)
             for seq, frame in enumerate(("la-lock", "la-compact",
                                          "la-expanded")):
-                request, digest, state, png, op, sha = \
+                request, digest, state, png, sha = \
                     gen._genuine_inputs(tmp, base, frame, seq)
                 producer_harness.ex.record_external_frame(
                     run_dir=run_dir, frame=frame, png_src=str(png),
                     captured_at_iso="2026-10-30T10:12:34+00:00",
-                    observation_path=str(op), state=state,
+                    state=state,
                     request=request, request_sha256=digest,
                     pinned_totals=dict(producer_harness.PINNED),
                     device_udid=udid,
@@ -1187,7 +1205,8 @@ class StageBezelTests(unittest.TestCase):
             stage_manifest = json.loads(
                 (out / panels_builder.STAGE_MANIFEST_FILE).read_text(
                     encoding="utf-8"))
-            self.assertEqual(stage_manifest["release"], "apple-bezels-v1")
+            self.assertEqual(stage_manifest["release"],
+                             panels_builder.APPLE_RELEASE)
             self.assertEqual(stage_manifest["manifest_sha256"], sha)
             self.assertEqual(len(stage_manifest["assets"]), 3)
             self.assertFalse(list(out.glob("*.part")))
@@ -1468,6 +1487,161 @@ class StageBezelTests(unittest.TestCase):
             self.assertEqual(
                 len(list((out / "ipad13" / "en").glob(
                     "panel-*-en-2064x2752.png"))), 4)
+
+    def _apple_items(self, extra_69=None):
+        """Standard 3 synthetic items plus an optional extra 6.9 asset.
+
+        extra_69: (release_name, png_bytes) staged alongside the 17PM
+        file — both map to size 6.9, exercising preferred selection.
+        """
+        std = [(p["name"],
+                make_apple_profile_bytes(tuple(p["native"]),
+                                         tuple(p["at"]),
+                                         tuple(p["slot"])), p)
+               for p in (panels_builder.APPLE_SOURCE_69,
+                         panels_builder.APPLE_SOURCE_63,
+                         panels_builder.APPLE_SOURCE_IPAD)]
+        if extra_69 is not None:
+            name, data = extra_69
+            std.append((name, data, panels_builder.APPLE_SOURCE_18PM))
+        return std
+
+    def test_v2_18pm_preferred_over_17pm(self):
+        # v2 carries the 17PM file for history next to the current 18PM
+        # file: the 6.9 frame stages the preferred 18PM bytes, never the
+        # superseded file and never a merge of both.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            pins18 = panels_builder.APPLE_SOURCE_18PM
+            extra = make_apple_profile_bytes(tuple(pins18["native"]),
+                                             tuple(pins18["at"]),
+                                             tuple(pins18["slot"]),
+                                             frame_rgb=(30, 30, 32))
+            items = self._apple_items(extra_69=(pins18["name"], extra))
+            src, manifest, sha = write_stage_manifest(root, items)
+            out = root / "bezels"
+            proc = self._stage(src, out, manifest, sha)
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertIn("selects preferred", proc.stdout)
+            final = out / panels_builder.BEZEL_FILES["6.9"]
+            self.assertEqual(final.read_bytes(), extra)
+            stage_manifest = json.loads(
+                (out / panels_builder.STAGE_MANIFEST_FILE).read_text(
+                    encoding="utf-8"))
+            by_file = {a["staged_file"]: a
+                       for a in stage_manifest["assets"]}
+            self.assertEqual(by_file["iphone-69-bezel.png"]["release_name"],
+                             pins18["name"])
+            self.assertEqual(len(stage_manifest["assets"]), 3)
+            self.assertFalse(list(out.glob("*.part")))
+
+    def test_v2_duplicate_without_preferred_refuses(self):
+        # Same-geometry candidates, none the pinned preferred file:
+        # refuse everything (fail-closed before any write), never pick one.
+        # NOTE: the standard 17PM-named file is itself non-preferred once
+        # 18PM is pinned preferred — three competing 6.9 files here.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            pins = panels_builder.APPLE_SOURCE_69
+            items = self._apple_items()[:1] + [
+                ("legacy-a.png",
+                 make_apple_profile_bytes(tuple(pins["native"]),
+                                          tuple(pins["at"]),
+                                          tuple(pins["slot"])), pins),
+                ("legacy-b.png",
+                 make_apple_profile_bytes(tuple(pins["native"]),
+                                          tuple(pins["at"]),
+                                          tuple(pins["slot"])), pins),
+            ]
+            src, manifest, sha = write_stage_manifest(root, items)
+            out = root / "bezels"
+            proc = self._stage(src, out, manifest, sha)
+            self.assertEqual(proc.returncode, 2)
+            self.assertIn("no single preferred", proc.stderr)
+            self.assertFalse(list(out.glob("*.png")))
+            self.assertFalse(list(out.glob("*.part")))
+
+    def test_v1_release_still_stages_with_explicit_sha(self):
+        # v1 stays supported for historical bundles already staged: an
+        # explicit v1-tagged manifest + its sha stages the 17PM file as
+        # the sole 6.9 candidate. New staging defaults to v2 (suite
+        # default), never to v1.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            std = [(p["name"],
+                    make_apple_profile_bytes(tuple(p["native"]),
+                                             tuple(p["at"]),
+                                             tuple(p["slot"])), p)
+                   for p in (panels_builder.APPLE_SOURCE_69,
+                             panels_builder.APPLE_SOURCE_63,
+                             panels_builder.APPLE_SOURCE_IPAD)]
+            src, manifest, sha = write_stage_manifest(
+                root, std, release=panels_builder.APPLE_RELEASE_V1)
+            out = root / "bezels"
+            proc = self._stage(src, out, manifest, sha)
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            final = out / panels_builder.BEZEL_FILES["6.9"]
+            self.assertTrue(final.is_file())
+            info = panels_builder.verify_bezel_69(final)
+            self.assertEqual(info["profile"], "apple-17pm-v1")
+            stage_manifest = json.loads(
+                (out / panels_builder.STAGE_MANIFEST_FILE).read_text(
+                    encoding="utf-8"))
+            self.assertEqual(
+                stage_manifest["release"], panels_builder.APPLE_RELEASE_V1)
+
+    def test_wrong_release_tag_refuses(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            std = [(p["name"],
+                    make_apple_profile_bytes(tuple(p["native"]),
+                                             tuple(p["at"]),
+                                             tuple(p["slot"])), p)
+                   for p in (panels_builder.APPLE_SOURCE_69,
+                             panels_builder.APPLE_SOURCE_63,
+                             panels_builder.APPLE_SOURCE_IPAD)]
+            src, manifest, sha = write_stage_manifest(
+                root, std, release="apple-bezels-v9")
+            out = root / "bezels"
+            proc = self._stage(src, out, manifest, sha)
+            self.assertEqual(proc.returncode, 2)
+            self.assertIn("not in pinned", proc.stderr)
+            self.assertFalse(list(out.glob("*.png")))
+            self.assertFalse(list(out.glob("*.part")))
+
+    def test_stage_real_v2_when_present(self):
+        # Real-file acceptance against the /tmp working-copy release dir
+        # (exact bytes, canonical names) with the BAKED v2 default — no
+        # sha override. Skips where the private bytes are absent; raw art
+        # is only ever read, never committed.
+        src = Path(os.environ.get("LIFIO_V2_BEZELS_DIR",
+                                  "/tmp/lifio-design-assets-v2"))
+        manifest = src / panels_builder.APPLE_MANIFEST_NAME
+        wanted = [panels_builder.APPLE_ASSET_18PM,
+                  panels_builder.APPLE_ASSET_63,
+                  panels_builder.APPLE_ASSET_IPAD]
+        if not manifest.is_file() or any(
+                not (src / name).is_file() for name in wanted):
+            self.skipTest("v2 working-copy bytes absent")
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "bezels"
+            proc = run_stage("--source-dir", str(src),
+                             "--out", str(out),
+                             "--manifest", str(manifest))
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            final = out / panels_builder.BEZEL_FILES["6.9"]
+            self.assertEqual(
+                hashlib.sha256(final.read_bytes()).hexdigest(),
+                panels_builder.APPLE_SOURCE_18PM["sha256"])
+            info = panels_builder.verify_bezel_69(final)
+            self.assertEqual(info["profile"], "apple-18pm-v1")
+            stage_manifest = json.loads(
+                (out / panels_builder.STAGE_MANIFEST_FILE).read_text(
+                    encoding="utf-8"))
+            self.assertEqual(stage_manifest["release"], "apple-bezels-v2")
+            self.assertEqual(
+                stage_manifest["manifest_sha256"],
+                panels_builder.APPLE_MANIFEST_SHA256)
 
 
 class BundleReadmeTests(unittest.TestCase):

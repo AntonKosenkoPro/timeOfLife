@@ -23,7 +23,7 @@
 #   NOT claimed until a CI render on this pool proves it.
 # - Apple bezel PNGs are NOT in git (no-binaries rule): the panels job
 #   downloads them from the PRIVATE lifio-design-assets release
-#   `apple-bezels-v1` with APPLE_BEZELS_TOKEN (repo secret, step-scoped
+#   `apple-bezels-v2` with APPLE_BEZELS_TOKEN (repo secret, step-scoped
 #   GH_TOKEN only; live design-service fetch retired). Without the secret the
 #   panels job fails closed; the release manifest SHA is verified
 #   before any PNG is used, and raw bezels never enter the public ZIP.
@@ -125,12 +125,12 @@ jobs:
             echo "::error::APPLE_BEZELS_TOKEN secret missing — cannot authenticate the private bezel release"
             exit 2
           fi
-          gh release download apple-bezels-v1 \
+          gh release download apple-bezels-v2 \
             --repo AntonKosenkoPro/lifio-design-assets \
             --pattern "apple-bezels-manifest.json" \
             --dir "$RUNNER_TEMP/bezels-preflight" \
             --clobber || { echo "::error::private-release manifest download failed"; exit 2; }
-          echo "a9b21ed835d7a231088e2a3249e8cfcc42b92162dfec3dcbc870c34ee6affaad  $RUNNER_TEMP/bezels-preflight/apple-bezels-manifest.json" | sha256sum -c - \
+          echo "c8d0ce9f2213872794a51960600755e668d9666f078cf7eb7b0ba6e5c28ae817  $RUNNER_TEMP/bezels-preflight/apple-bezels-manifest.json" | sha256sum -c - \
             || { echo "::error::bezel manifest digest mismatch — refusing a drifted source"; exit 2; }
           echo "bezel manifest preflight ok (auth + digest, manifest only)"
 
@@ -636,16 +636,68 @@ jobs:
               fh.write(f"sim={sim}\n")
           PY
 
-      - name: Create and boot simulator
+      - name: Find and boot preinstalled simulator
         id: sim
         env:
-          IOS_RUNTIME: ${{ needs.validate.outputs.runtime }}
+          # Matrix values come from validated workflow inputs: never
+          # interpolate them into Python/shell source (injection). The
+          # sim name comes from the single workflow_inputs catalog step.
           DEVICE_KEY: ${{ matrix.device }}
+          DEVICE_SIM: ${{ steps.catalog.outputs.sim }}
+          IOS_RUNTIME: ${{ needs.validate.outputs.runtime }}
         run: |
+          # Preinstalled-sim lookup (xcode-27-arm64 image pins iOS 27.0
+          # with iPhone 17 / iPhone 18 Pro Max / iPad Pro 13-inch (M5)):
+          # no per-run simulator creation — the exact device name under
+          # the exact requested runtime selects ONE preinstalled
+          # simulator. Zero matches or multiple matches fail closed
+          # (exit 2, naming the expected set); never pick arbitrarily.
+          # Same `udid` output contract as the retired create path
+          # (no legacy branch).
+          # PENDING (owner frame decision): 18 Pro Max captures are
+          # review material until the owner approves the frame/bezel
+          # pairing — this step invents no art and leaves
+          # staging/verification untouched (panels-side bezel set is
+          # panels-owner scope, not this step).
           RT="${IOS_RUNTIME// /-}"; RT="${RT//./-}"
-          UDID=$(xcrun simctl create "shot-ci-$DEVICE_KEY" \
-            "${{ steps.catalog.outputs.sim }}" \
-            "com.apple.CoreSimulator.SimRuntime.$RT")
+          export WANT_RUNTIME="com.apple.CoreSimulator.SimRuntime.$RT"
+          UDID=$(python3 - <<'PY'
+          import json
+          import os
+          import subprocess
+          want_name = os.environ["DEVICE_SIM"]
+          want_runtime = os.environ["WANT_RUNTIME"]
+          want_key = os.environ["DEVICE_KEY"]
+          want_runtime_name = os.environ["IOS_RUNTIME"]
+          raw = subprocess.check_output(
+              ["xcrun", "simctl", "list", "devices", "-j"], text=True)
+          try:
+              buckets = json.loads(raw)["devices"]
+          except (ValueError, KeyError, TypeError) as exc:
+              print(f"::error::simctl list devices -j malformed: {exc}")
+              raise SystemExit(2)
+          hits = [entry["udid"]
+                  for runtime_id, entries in buckets.items()
+                  if runtime_id == want_runtime
+                  for entry in entries
+                  if entry.get("name") == want_name
+                  and entry.get("udid")]
+          if not hits:
+              print(f"::error::no preinstalled simulator named "
+                    f"{want_name!r} on runtime {want_runtime_name!r} "
+                    f"for {want_key!r}; expected one of the pinned "
+                    f"xcode-27 set (iPhone 17 / iPhone 18 Pro Max / "
+                    f"iPad Pro 13-inch (M5))")
+              raise SystemExit(2)
+          if len(hits) != 1:
+              print(f"::error::{len(hits)} preinstalled simulators named "
+                    f"{want_name!r} on runtime {want_runtime_name!r}; "
+                    f"refusing to pick arbitrarily")
+              raise SystemExit(2)
+          print(hits[0])
+          PY
+          )
+          [ -n "$UDID" ] || { echo "::error::simulator lookup produced no UDID"; exit 2; }
           echo "udid=$UDID" >> "$GITHUB_OUTPUT"
           xcrun simctl boot "$UDID"
           xcrun simctl bootstatus "$UDID" -b
@@ -798,7 +850,16 @@ jobs:
 
       - name: Scoped simulator cleanup
         if: always()
-        run: xcrun simctl delete "${{ steps.sim.outputs.udid }}" || true
+        run: |
+          # Preinstalled sims are shared runner state: NEVER delete one
+          # (that would destroy the pinned set for later jobs). Release our
+          # lease with a shutdown; uninstall only our Screenshot app bundle
+          # (single-source bundle id, nothing else touched).
+          UDID="${{ steps.sim.outputs.udid }}"
+          [ -n "$UDID" ] || exit 0
+          BID=$(python3 -c "import sys; sys.path.insert(0, 'scripts/screenshots'); import build_artifact as ba; print(ba.SCREENSHOT_BUNDLE_ID)")
+          xcrun simctl uninstall "$UDID" "$BID" || true
+          xcrun simctl shutdown "$UDID" || true
 
   panels:
     name: panels + zip
@@ -884,9 +945,9 @@ jobs:
           GH_TOKEN: ${{ secrets.APPLE_BEZELS_TOKEN }}
         run: |
           # Private-release delivery (§10.4; live design-service fetch
-          # retired): the 3 canonical Apple PNGs + release manifest
+          # retired): the 4 canonical Apple PNGs + release manifest
           # download from the private lifio-design-assets release
-          # `apple-bezels-v1` into RUNNER_TEMP (never git, never the
+          # `apple-bezels-v2` into RUNNER_TEMP (never git, never the
           # public ZIP), then the local stage helper hash-verifies them
           # (manifest SHA first, then per-asset SHA/geometry/alpha —
           # local verification only: no design-service API, no
@@ -906,11 +967,12 @@ jobs:
           fi
           python3 -m pip install --break-system-packages "Pillow==13.0.0"
           set +e
-          gh release download apple-bezels-v1 \
+          gh release download apple-bezels-v2 \
             --repo AntonKosenkoPro/lifio-design-assets \
             --pattern "iphone-17-pro-max-silver-portrait.png" \
             --pattern "iphone-17-white-portrait.png" \
             --pattern "ipad-pro-m5-13inch-silver-portrait.png" \
+            --pattern "iphone-18-pro-max-silver-portrait.png" \
             --pattern "apple-bezels-manifest.json" \
             --dir "$RUNNER_TEMP/bezels-src" \
             --clobber >"$RUNNER_TEMP/bezels/bezel-fetch.log" 2>&1
@@ -922,7 +984,7 @@ jobs:
             --source-dir "$RUNNER_TEMP/bezels-src" \
             --out "$RUNNER_TEMP/bezels" \
             --manifest "$RUNNER_TEMP/bezels-src/apple-bezels-manifest.json" \
-            --expected-manifest-sha "a9b21ed835d7a231088e2a3249e8cfcc42b92162dfec3dcbc870c34ee6affaad" >>"$RUNNER_TEMP/bezels/bezel-fetch.log" 2>&1
+            --expected-manifest-sha "c8d0ce9f2213872794a51960600755e668d9666f078cf7eb7b0ba6e5c28ae817" >>"$RUNNER_TEMP/bezels/bezel-fetch.log" 2>&1
           rc=$?
           set -e
           cat "$RUNNER_TEMP/bezels/bezel-fetch.log"

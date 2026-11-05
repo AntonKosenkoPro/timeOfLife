@@ -42,20 +42,24 @@ NONCE_RE = re.compile(r"^[0-9a-f]{32}$")
 # deviceTypeIdentifier to be one of the cataloged models for the key — a
 # different model (even same family / same geometry) cannot attest the
 # key. Model identifiers below are the real host SimDeviceType strings
-# (read-only `simctl list -j devicetypes`, Xcode 27.1: iPhone 17 Pro Max,
-# iPhone 17, iPad Pro 13-inch (M5) 12GB + 16GB; the workflow boots by sim
-# name, so both M5 13-inch variants qualify). Geometry canvases
+# (read-only `simctl list -j devicetypes`, Xcode 27.1: iPhone 18 Pro Max,
+# iPhone 17, iPad Pro 13-inch (M5) 12GB + 16GB; the workflow looks up
+# preinstalled sims by exact device name + runtime, so both M5 13-inch
+# variants qualify). Geometry canvases
 # (1320x2868/1206x2622/2064x2752) are PRESERVED, not SDK-verified: the
 # devicetypes listing carries no dimension metadata, so native geometry
 # verification is delegated to a separate native sim-probe worker after
-# serialization — never claimed from the model name alone. Old 18 Pro Max
+# serialization — never claimed from the model name alone. Old 17 Pro Max
 # / M4 identifiers are NOT accepted here (no legacy branches, no aliases).
+# PENDING (owner frame decision): 18 Pro Max captures are review
+# material until the owner approves the frame/bezel pairing; this catalog
+# invents no art and leaves staging/verification untouched.
 DEVICE_CATALOG: dict[str, dict[str, Any]] = {
     "iphone69": {"geometry": (1320, 2868), "island": True,
-                 "sim": "iPhone 17 Pro Max",
+                 "sim": "iPhone 18 Pro Max",
                  "models": frozenset({
                      "com.apple.CoreSimulator.SimDeviceType."
-                     "iPhone-17-Pro-Max"})},
+                     "iPhone-18-Pro-Max"})},
     "iphone63": {"geometry": (1206, 2622), "island": True,
                  "sim": "iPhone 17",
                  "models": frozenset({
@@ -144,7 +148,7 @@ def check_catalog_model(device_key: Any, device_type_identifier: Any,
 
     The ACTUAL simctl-reported identifier must be one of the cataloged
     models for the requested key; the human name is carried evidence
-    (operator-assigned at `simctl create`, e.g. "shot-ci-ipad13", so its
+    (the preinstalled device name, e.g. "iPad Pro 13-inch (M5)", so its
     presence — not its value — is required). A different model, even same
     family and geometry, cannot attest the key. Never raises on input.
     """

@@ -20,16 +20,18 @@ binaries). Three compositions are encoded here:
   the owner scoped LA out of the iPad set). Approved 2026-11-02
   (composition only).
 
-Owner lineup 2026-11-04: iPhone 17 Pro Max Silver, iPhone 17 White,
-iPad Pro 13-inch (M5) Silver — official Apple PNG device art delivered by
-the OWNER-DECIDED private versioned release
-(`AntonKosenkoPro/lifio-design-assets`, `apple-bezels-v1`: 3 individual
-PNGs + manifest, exact hash verification before use; no Figma/Sketch/API
-export or DMG extraction, no PNG in any git history, no public standalone
-redistribution). Headline/story/layout intent is preserved; renders on the
-new art are a NEW review template version (no historical approval
-transfer, no auto-approved frozen hash update — `--check-template`
-refuses the new-art profiles loudly instead of blessing new goldens).
+Owner lineup: iPhone 18 Pro Max Silver (iphone69 frame), iPhone 17
+White, iPad Pro 13-inch (M5) Silver — official Apple PNG device art
+delivered by the OWNER-DECIDED private versioned release
+(`AntonKosenkoPro/lifio-design-assets`, `apple-bezels-v2`: 4 release PNGs
+— 18PM current plus 17PM retained for history — + manifest, exact hash
+verification before use; no Figma/Sketch/API export or DMG extraction, no
+PNG in any git history, no public standalone redistribution; v1 stays
+pinned for historical bundles already staged). Headline/story/layout
+intent is preserved; renders on the new art are a NEW review template
+version (no historical approval transfer, no auto-approved frozen hash
+update — `--check-template` refuses the new-art profiles loudly instead
+of blessing new goldens).
 
 Rendering core is a behavior-preserving port of the retained
 `build_final_v13.py` (6.9) and `ipad/build_ipad_panels_v1.py` (iPad)
@@ -135,21 +137,27 @@ BEZEL_FILE_IPAD = "ipad-13-bezel.png"
 BEZEL_FILES = {"6.9": BEZEL_FILE_69, "6.3": BEZEL_FILE_63,
                "ipad13": BEZEL_FILE_IPAD}
 
-# Official Apple device-art pins (tasks 10.1; release apple-bezels-v1).
+# Official Apple device-art pins (tasks 10.1; release apple-bezels-v2).
 # The release manifest is verified by exact SHA256 BEFORE any of its
 # metadata is used (see stage_bezel_assets.py); per-asset bytes are then
 # verified against the manifest SHA256 plus the native geometry/cavity
 # below. Never trust a downloaded manifest's mutable SHA claims, never
 # extract from DMGs, never call design-service APIs. Mask radii are
-# circle-fitted from the exact original alpha (17 Pro Max 192, 17 190 —
-# near-identical 3x corner units; iPad keeps the long-standing 56, whose
-# dims/cavity already fit the M5 art byte-for-byte in profile).
-APPLE_RELEASE = "apple-bezels-v1"
+# circle-fitted from the exact original alpha (17 Pro Max 192, 18 Pro Max
+# 192, 17 190 — near-identical 3x corner units; iPad keeps the
+# long-standing 56, whose dims/cavity already fit the M5 art byte-for-byte
+# in profile). v1 pins stay for historical bundles already staged — new
+# staging pins v2 (see APPLE_MANIFEST_SHA256 default in the stager).
+APPLE_RELEASE = "apple-bezels-v2"
+APPLE_RELEASE_V1 = "apple-bezels-v1"
 APPLE_RELEASE_REPO = "AntonKosenkoPro/lifio-design-assets"
 APPLE_MANIFEST_NAME = "apple-bezels-manifest.json"
 APPLE_MANIFEST_SHA256 = (
+    "c8d0ce9f2213872794a51960600755e668d9666f078cf7eb7b0ba6e5c28ae817")
+APPLE_MANIFEST_SHA256_V1 = (
     "a9b21ed835d7a231088e2a3249e8cfcc42b92162dfec3dcbc870c34ee6affaad")
 APPLE_ASSET_69 = "iphone-17-pro-max-silver-portrait.png"
+APPLE_ASSET_18PM = "iphone-18-pro-max-silver-portrait.png"
 APPLE_ASSET_63 = "iphone-17-white-portrait.png"
 APPLE_ASSET_IPAD = "ipad-pro-m5-13inch-silver-portrait.png"
 APPLE_SOURCE_69 = {
@@ -162,6 +170,17 @@ APPLE_SOURCE_69 = {
     "model": "iPhone 17 Pro Max",
     "color": "Silver",
     "profile": "apple-17pm-v1",
+}
+APPLE_SOURCE_18PM = {
+    "name": APPLE_ASSET_18PM,
+    "sha256": "6cb9e72efb88c172710d0388f63f51fad883c86895ee382fb402559c0315343d",
+    "native": (1470, 3000),
+    "slot": (1320, 2868),
+    "at": (75, 66),
+    "mask_r": 192,
+    "model": "iPhone 18 Pro Max",
+    "color": "Silver",
+    "profile": "apple-18pm-v1",
 }
 APPLE_SOURCE_63 = {
     "name": APPLE_ASSET_63,
@@ -185,24 +204,34 @@ APPLE_SOURCE_IPAD = {
     "color": "Silver",
     "profile": "apple-m5-v1",
 }
+# Per-size preferred release asset when one manifest lists several
+# same-geometry candidates (v2 carries the 17PM file for history next to
+# the current 18PM file). A sole candidate stages as-is (v1 manifests
+# keep working); competing non-preferred candidates refuse (never pick or
+# merge silently).
+APPLE_PREFERRED_ASSET = {
+    "6.9": APPLE_ASSET_18PM,
+    "6.3": APPLE_ASSET_63,
+    "ipad13": APPLE_ASSET_IPAD,
+}
 # Legacy Figma profile for the frozen v13 evidence path (retained
 # byte-identical fixtures only — never staged for new renders).
 LEGACY_BEZEL_PROFILE_69 = "figma-v13"
 STAGE_MANIFEST_FILE = "bezel-stage.json"
 
 # CI device keys (see the app-screenshots workflow device catalog) mapped
-# to the panel size contract. Owner lineup 2026-11-04: iPhone 17 Pro Max
-# Silver (iphone69), iPhone 17 White (iphone63), iPad Pro 13-inch (M5)
-# Silver (ipad13) — iphone65 was dropped, so the catalog holds exactly
-# these three. Model/color/Apple-asset descriptions are informational
+# to the panel size contract. Owner lineup: iPhone 18 Pro Max Silver
+# (iphone69), iPhone 17 White (iphone63), iPad Pro 13-inch (M5) Silver
+# (ipad13) — iphone65 was dropped, so the catalog holds exactly these
+# three. Model/color/Apple-asset descriptions are informational
 # only (rendering keys stay size/canvas/island); actual SDK identifiers
 # are aligned by the source catalog owner separately, never guessed here.
 # Unknown keys stay BLOCKED at the catalog gate in panels.py (recorded,
 # never rendered, never stretched).
 MATRIX_DEVICES = {
     "iphone69": {"size": "6.9", "canvas": (1320, 2868), "island": True,
-                 "model": "iPhone 17 Pro Max", "color": "Silver",
-                 "apple_asset": APPLE_ASSET_69},
+                 "model": "iPhone 18 Pro Max", "color": "Silver",
+                 "apple_asset": APPLE_ASSET_18PM},
     "iphone63": {"size": "6.3", "canvas": (1206, 2622), "island": True,
                  "model": "iPhone 17", "color": "White",
                  "apple_asset": APPLE_ASSET_63},
@@ -808,13 +837,17 @@ def _check_cavity_interior_clear(a, x0: int, y0: int, sw: int, sh: int,
 
 
 def verify_bezel_69(bezel_path: Path) -> dict:
-    """Exact-profile verification for the 6.9 iPhone bezel (two profiles).
+    """Exact-profile verification for the 6.9 iPhone bezel (new art + legacy).
 
-    Apple profile (`apple-17pm-v1`, tasks 10.x): exact 1470x3000 native
-    art, measured slot exactly 1320x2868@(75,66), clear interior, opaque
-    surrounding frame. Legacy Figma profile (`figma-v13`): the frozen
-    980x2000 / 880x1912@(50,44) thresholds, unchanged, for the retained
-    v13 byte-identical evidence path only. Anything else fails closed.
+    Apple profiles (tasks 10.x): exact 1470x3000 native art, measured slot
+    exactly 1320x2868@(75,66), clear interior, opaque surrounding frame.
+    The profile resolves by exact bytes — `apple-18pm-v1` for the pinned
+    18PM file, `apple-17pm-v1` for the pinned 17PM file (same slot,
+    pill art differs); geometry-matched unpinned art (synthetic fixtures
+    only) reports the 17PM lineage profile. Legacy Figma profile
+    (`figma-v13`): the frozen 980x2000 / 880x1912@(50,44) thresholds,
+    unchanged, for the retained v13 byte-identical evidence path only.
+    Anything else fails closed.
     """
     if not bezel_path.is_file():
         raise BuilderError(f"missing bezel asset {bezel_path}")
@@ -827,7 +860,11 @@ def verify_bezel_69(bezel_path: Path) -> dict:
         a.load()
         extrema = a.getextrema()
     if size == tuple(APPLE_SOURCE_69["native"]):
-        slot, at = tuple(APPLE_SOURCE_69["slot"]), tuple(APPLE_SOURCE_69["at"])
+        file_sha = sha(bezel_path)
+        pins = {APPLE_SOURCE_69["sha256"]: APPLE_SOURCE_69,
+                APPLE_SOURCE_18PM["sha256"]: APPLE_SOURCE_18PM}.get(
+                    file_sha, APPLE_SOURCE_69)
+        slot, at = tuple(pins["slot"]), tuple(pins["at"])
         measured_slot, measured_at = detect_bezel_slot(bezel_path)
         if tuple(measured_slot) != slot or tuple(measured_at) != at:
             raise BuilderError(
@@ -842,13 +879,13 @@ def verify_bezel_69(bezel_path: Path) -> dict:
             a.load()
             _check_cavity_interior_clear(
                 a, at[0], at[1], slot[0], slot[1],
-                APPLE_SOURCE_69["mask_r"], "apple-17pm-v1")
+                pins["mask_r"], pins["profile"])
             _check_opaque_frame_strip(a, at[0], at[1], slot[0], slot[1],
                                       size)
-        return {"sha256": sha(bezel_path), "size": list(size), "mode": mode,
-                "profile": APPLE_SOURCE_69["profile"],
+        return {"sha256": file_sha, "size": list(size), "mode": mode,
+                "profile": pins["profile"],
                 "screen_slot_px": list(slot), "screen_at_px": list(at),
-                "screen_mask_radius_px": APPLE_SOURCE_69["mask_r"]}
+                "screen_mask_radius_px": pins["mask_r"]}
     if size == BEZEL69_NATIVE:
         sw, sh = BEZEL69_SLOT
         if (sw, sh) != (880, 1912):
@@ -1658,8 +1695,10 @@ def build_63(locale: str, caps: dict, captions_version: str,
             "screen_mask_radius_px": mask_r,
             "slot_aspect_deviation": bezel_info["slot_aspect_deviation"],
             "slot_clear_fraction": bezel_info["slot_clear_fraction"],
-            "source": ("apple-bezels-v1 release asset "
+            "source": ("apple-bezels release asset "
                        + APPLE_SOURCE_63["name"]
+                       + " (exact-profile verification; staged by "
+                       "stage_bezel_assets.py)"
                        if bezel_info.get("profile")
                        == APPLE_SOURCE_63["profile"] else
                        "legacy structural bezel (thresholds frozen); "

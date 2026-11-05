@@ -182,6 +182,8 @@ class ArgvShapeTests(unittest.TestCase):
             self.assertEqual(
                 realtime[0][realtime[0].index("--run-id") + 1],
                 rid_for(loc="en"))
+            self.assertIn("--hold-open", realtime[0])
+            self.assertNotIn("--hold-open", argv)
 
     def test_ipad_island_zero_and_geometry(self):
         with tempfile.TemporaryDirectory() as tmp:

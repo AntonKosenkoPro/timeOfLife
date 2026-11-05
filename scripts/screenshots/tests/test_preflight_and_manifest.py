@@ -2,7 +2,7 @@
 """Preflight argv surface, restore policy, manifest stability, inspection.
 
 Asserts the runner emits ONLY confirmed simctl surfaces (no guessed
-locale/keyboard/global-prefs commands) and that human-observation gates
+locale/keyboard/global-prefs commands) and that inspection gates
 refuse final status until real evidence is supplied.
 """
 
@@ -272,38 +272,6 @@ class InspectionGateTests(unittest.TestCase):
             q.write_bytes(b"not a png")
             with self.assertRaises(insp.InspectionError):
                 insp.png_dimensions(str(q))
-
-    def test_la_missing_observation_stays_needs_inspection(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            p = Path(tmp) / "la.png"
-            write_png(p, 1320, 2868)
-            errs = insp.verify_la_observation(
-                {"started_at": "2026-10-30T10:00:00+00:00"},
-                str(p), "2026-10-30T10:12:34+00:00", None)
-            self.assertTrue(errs and "missing" in errs[0])
-
-    def test_la_valid_within_tolerance(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            p = Path(tmp) / "la.png"
-            write_png(p, 1320, 2868)
-            sha = insp.sha256_file(str(p))
-            errs = insp.verify_la_observation(
-                {"started_at": "2026-10-30T10:00:00+00:00"},
-                str(p), "2026-10-30T10:12:34+00:00",
-                {"observed_elapsed_s": 754, "screenshot_sha256": sha})
-            self.assertEqual(errs, [])
-
-    def test_la_calculated_value_not_accepted_as_observed(self):
-        # 754 passed while wall says 100s -> must fail, not silently pass
-        with tempfile.TemporaryDirectory() as tmp:
-            p = Path(tmp) / "la.png"
-            write_png(p, 1320, 2868)
-            sha = insp.sha256_file(str(p))
-            errs = insp.verify_la_observation(
-                {"started_at": "2026-10-30T10:00:00+00:00"},
-                str(p), "2026-10-30T10:01:40+00:00",
-                {"observed_elapsed_s": 754, "screenshot_sha256": sha})
-            self.assertTrue(errs)
 
     def test_picker_refuses_without_artifact(self):
         errs, _ = insp.verify_picker_inspection(

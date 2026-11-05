@@ -153,10 +153,11 @@ class WorkflowContractTests(unittest.TestCase):
         )
 
     def test_worker_uses_run_device_worker(self):
-        # 6.5/9.1: one owned simulator/install per worker; locales run
+        # 6.5/9.1: one leased preinstalled simulator per worker; locales run
         # sequentially with a SINGLE automated pass and both session
         # domains inside run_device_worker.py (actual CLI, lease-gated,
-        # auditable CI flag). Exactly one create/boot/install per worker.
+        # auditable CI flag). Exactly one lookup/boot/install per worker;
+        # no `simctl create` (preinstalled set, never minted per run).
         body = text()
         seg = body.split("\n  screenshots:\n")[1].split("\n  panels:\n")[0]
         self.assertIn("run_device_worker.py", seg)
@@ -164,7 +165,7 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertIn("--locales", seg)
         self.assertIn("LIFIO_CAPTURE_LEASE", seg)
         self.assertIn("LIFIO_CAPTURE_CI", seg)
-        self.assertEqual(seg.count("simctl create"), 1)
+        self.assertNotIn("simctl create", seg)
         self.assertEqual(seg.count("simctl install"), 1)
         self.assertIn('simctl boot "$UDID"', seg)
 
@@ -201,11 +202,16 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertIn("worker-summary.json", seg)
 
     def test_scoped_cleanup(self):
-        # Contamination never leaks simulators: each worker deletes only
-        # its own UDID on every exit path.
+        # Contamination never leaks simulators, and preinstalled sims are
+        # shared runner state: each worker shuts down ONLY its own UDID
+        # (plus our Screenshot bundle uninstall) on every exit path —
+        # NEVER `simctl delete` (that would destroy the pinned set).
         body = text()
         seg = body.split("\n  screenshots:\n")[1].split("\n  panels:\n")[0]
-        self.assertIn("simctl delete", seg)
+        self.assertNotIn("simctl delete", seg)
+        self.assertIn('simctl shutdown "$UDID"', seg)
+        self.assertIn("simctl uninstall", seg)
+        self.assertIn("SCREENSHOT_BUNDLE_ID", seg)
         self.assertIn("if: always()", seg)
 
     def test_pinned_xcodegen_install(self):
@@ -409,21 +415,23 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertNotIn("|| true", render)
 
     def test_apple_bezel_release_pins(self):
-        # §10.4 private-release delivery (Figma live fetch retired):
-        # explicit release tag + asset repo, the 3 canonical PNG names,
-        # the release manifest name, and the pinned manifest SHA passed
-        # explicitly to the local stage helper (hash-before-use: the
-        # helper trusts no manifest bytes before this SHA matches).
-        # A drifted source fails verification; pins are never edited to
-        # chase it, geometry never relaxed.
+        # §10.4 private-release delivery, v2 pin set (v1 now
+        # historical): explicit release tag + asset repo, the 4
+        # canonical PNG names, the release manifest name, and the
+        # pinned v2 manifest SHA passed explicitly to the local stage
+        # helper (hash-before-use: the helper trusts no manifest bytes
+        # before this SHA matches). A drifted source fails
+        # verification; pins are never edited to chase it, geometry
+        # never relaxed. No fallback to v1 — stale pins fail closed.
         body = text()
         fetch = body.split("Fetch Apple bezel assets")[1].split(
             "Render panels")[0]
-        self.assertIn("gh release download apple-bezels-v1", fetch)
+        self.assertIn("gh release download apple-bezels-v2", fetch)
         self.assertIn("--repo AntonKosenkoPro/lifio-design-assets", fetch)
         self.assertIn('"iphone-17-pro-max-silver-portrait.png"', fetch)
         self.assertIn('"iphone-17-white-portrait.png"', fetch)
         self.assertIn('"ipad-pro-m5-13inch-silver-portrait.png"', fetch)
+        self.assertIn('"iphone-18-pro-max-silver-portrait.png"', fetch)
         self.assertIn('"apple-bezels-manifest.json"', fetch)
         self.assertIn("stage_bezel_assets.py", fetch)
         # Stable stage-helper CLI (C-owner confirmed, verified against
@@ -435,8 +443,12 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertIn("--manifest", fetch)
         self.assertIn(
             "--expected-manifest-sha "
-            "\"a9b21ed835d7a231088e2a3249e8cfcc42b92162dfec3dcbc870c34ee6affaad\"",
+            "\"c8d0ce9f2213872794a51960600755e668d9666f078cf7eb7b0ba6e5c28ae817\"",
             fetch)
+        self.assertNotIn("apple-bezels-v1", body)
+        self.assertNotIn(
+            "a9b21ed835d7a231088e2a3249e8cfcc42b92162dfec3dcbc870c34ee6affaad",
+            body)
         # Figma source fully retired: no file key, node pins, export
         # scale, fetcher, or key reference remains anywhere.
         self.assertNotIn("FIGMA", body)
@@ -474,12 +486,12 @@ class WorkflowContractTests(unittest.TestCase):
             validate.index("Validate device/locale/runtime selection"),
             validate.index("Preflight private bezel manifest"),
         )
-        self.assertIn("gh release download apple-bezels-v1", validate)
+        self.assertIn("gh release download apple-bezels-v2", validate)
         self.assertIn("--repo AntonKosenkoPro/lifio-design-assets",
                       validate)
         self.assertIn('"apple-bezels-manifest.json"', validate)
         self.assertIn(
-            "a9b21ed835d7a231088e2a3249e8cfcc42b92162dfec3dcbc870c34ee6affaad",
+            "c8d0ce9f2213872794a51960600755e668d9666f078cf7eb7b0ba6e5c28ae817",
             validate)
         for png in ("iphone-17-pro-max-silver-portrait.png",
                     "iphone-17-white-portrait.png",
@@ -642,10 +654,52 @@ class WorkflowContractTests(unittest.TestCase):
 
     def test_catalog_from_single_helper(self):
         # Review: a hardcoded YAML device list drifts from the catalog
-        # as it grows; sim names resolve from workflow_inputs instead.
+        # as it grows; sim names resolve from workflow_inputs instead
+        # (preinstalled lookup reads DEVICE_SIM from the catalog step).
         body = text()
         self.assertIn("DEVICE_CATALOG", body)
+        self.assertIn("steps.catalog.outputs.sim", body)
         self.assertNotIn('"iPhone 18 Pro Max"', body)
+        self.assertNotIn('"iPhone 17 Pro Max"', body)
+        self.assertNotIn('"iPhone 17"', body)
+        self.assertNotIn('"iPad Pro 13-inch (M5)"', body)
+        self.assertNotIn("shot-ci-", body)
+
+    def test_preinstalled_lookup_fail_closed(self):
+        # Preinstalled-sim selection is exact name + requested runtime
+        # from `simctl list devices -j` (bucket key, never guessed);
+        # zero matches name the expected pinned set, multiple matches
+        # refuse to pick arbitrarily — both exit 2. Same `udid` output
+        # contract as the retired create path (old 17PM-create removed,
+        # no legacy branch).
+        body = text()
+        seg = body.split("\n  screenshots:\n")[1].split("\n  panels:\n")[0]
+        lookup = seg.split("Find and boot preinstalled simulator")[1].split(
+            "Install verified app")[0]
+        self.assertIn("simctl list devices", lookup)
+        self.assertIn("-j", lookup)
+        self.assertIn("WANT_RUNTIME", lookup)
+        self.assertIn("no preinstalled simulator named", lookup)
+        self.assertIn("refusing to pick arbitrarily", lookup)
+        self.assertGreaterEqual(lookup.count("SystemExit(2)"), 2)
+        self.assertIn('echo "udid=$UDID" >> "$GITHUB_OUTPUT"', lookup)
+        self.assertIn('simctl bootstatus "$UDID" -b', lookup)
+        self.assertNotIn("SimRuntime.iOS-27-0", lookup)
+
+    def test_bezel_mismatch_flagged_not_solved(self):
+        # Capture-side scope only (panels-side bezel set is panels-owner
+        # scope, pinned by their own tests): the worker step flags the
+        # pending owner frame decision — 18 Pro Max captures are review
+        # material until the frame/bezel pairing is approved — while this
+        # step invents no art and leaves staging/verification untouched
+        # (no rotation/scale, no new art here).
+        body = text()
+        seg = body.split("\n  screenshots:\n")[1].split("\n  panels:\n")[0]
+        lookup = seg.split("Find and boot preinstalled simulator")[1].split(
+            "Install verified app")[0]
+        self.assertIn("PENDING (owner frame decision)", lookup)
+        self.assertIn("review material", lookup)
+        self.assertIn("invents no art", lookup)
 
 
 if __name__ == "__main__":

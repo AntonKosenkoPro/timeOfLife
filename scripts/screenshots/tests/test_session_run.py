@@ -58,7 +58,7 @@ class SessionFakeSimctl:
                  fail_frame_seq=None, second_anchor_at=None,
                  cleanup_status="cleaned", drift_chrome_at=None,
                  list_model=("com.apple.CoreSimulator.SimDeviceType."
-                             "iPhone-17-Pro-Max"),
+                             "iPhone-18-Pro-Max"),
                  list_empty=False, list_malformed=False,
                  defer_ready=False, queue_flag="true", leave_queue=False,
                  app_status="ready", removed_session=True,
@@ -694,7 +694,7 @@ PROV = {"commit_base": "c3e5911-test", "dirty": True}
 IPAD_MODEL = ("com.apple.CoreSimulator.SimDeviceType."
               "iPad-Pro-13-inch-M5-12GB")
 IPHONE_MODEL = ("com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro-Max")
-IPHONE69_MODEL = ("com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro-Max")
+IPHONE69_MODEL = ("com.apple.CoreSimulator.SimDeviceType.iPhone-18-Pro-Max")
 IPHONE63_MODEL = ("com.apple.CoreSimulator.SimDeviceType.iPhone-17")
 LIST_MODEL_FOR_KEY = {"iphone69": IPHONE69_MODEL,
                       "iphone63": IPHONE63_MODEL, "ipad13": IPAD_MODEL}
@@ -1298,15 +1298,12 @@ class PendingToGenuineE2ETests(unittest.TestCase):
                            "bundle_id": rs.SCREENSHOT_BID},
                  "live_activity": dict(LA_BLOCK)}
         # A new render: same native geometry, different bytes (stand-in
-        # for new device pixels; the observation binds the new hash).
+        # for new device pixels).
         png = Path(tmp) / f"genuine-{frame}.png"
         write_png(png)
         png.write_bytes(png.read_bytes() + b"\x00")
         sha = insp.sha256_file(str(png))
-        obs = {"observed_elapsed_s": 754, "screenshot_sha256": sha}
-        op = Path(tmp) / f"obs-{frame}.json"
-        op.write_text(json.dumps(obs), encoding="utf-8")
-        return request, digest, state, png, op, sha
+        return request, digest, state, png, sha
 
     def test_pending_to_genuine_full_pass(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -1323,7 +1320,7 @@ class PendingToGenuineE2ETests(unittest.TestCase):
             base = base_request(run_id)
             for seq, frame in enumerate(("la-lock", "la-compact",
                                          "la-expanded")):
-                request, digest, state, png, op, sha = \
+                request, digest, state, png, sha = \
                     self._genuine_inputs(tmp, base, frame, seq)
                 # Same command the session executed: no stale request.
                 pending_rec = next(r for r in realtime["frames"]
@@ -1332,18 +1329,20 @@ class PendingToGenuineE2ETests(unittest.TestCase):
                 record = ex.record_external_frame(
                     run_dir=run_dir, frame=frame, png_src=str(png),
                     captured_at_iso="2026-10-30T10:12:34+00:00",
-                    observation_path=str(op), state=state, request=request,
+                    state=state, request=request,
                     request_sha256=digest, pinned_totals=dict(PINNED),
                     device_udid=udid,
                     session_binding={"session_nonce": NONCE_RT,
                                      "session_domain": "realtime",
                                      "seq": seq})
-                # New PNG hash, full tuple, own numeric observation.
+                # New PNG hash, full tuple, window-only record.
                 self.assertNotEqual(sha, stub_shas[frame])
                 self.assertEqual(record["screenshot_sha256"], sha)
                 self.assertEqual(record["capture"], "external-lock-screen")
-                self.assertEqual(
-                    record["capture_window"]["observed_elapsed_s"], 754)
+                self.assertEqual(record["capture_window"],
+                                 {"started_at": LA_BLOCK["started_at"],
+                                  "captured_at_iso":
+                                      "2026-10-30T10:12:34+00:00"})
                 self.assertEqual(record["session_nonce"], NONCE_RT)
                 self.assertEqual(record["seq"], seq)
             # Shared anchor across all three genuine states.
@@ -1373,54 +1372,15 @@ class PendingToGenuineE2ETests(unittest.TestCase):
             self.assertEqual(pending, [])
             self.assertEqual(manifest["status"], "complete")
 
-    def test_stale_or_mismatched_observation_rejected(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            udid = f"UDID-e2e-n-{os.getpid()}"
-            run_id = "sess-e2e-r2"
-            _fake, run_dir, _p, realtime = two_domain_run(tmp, udid, run_id)
-            base = base_request(run_id)
-            request, digest, state, png, op, sha = \
-                self._genuine_inputs(tmp, base, "la-lock", 0)
-            # Observation bound to the OLD stub render: stale, rejected.
-            stub_sha = next(r for r in realtime["frames"]
-                            if r["frame"] == "la-lock")["screenshot_sha256"]
-            stale = Path(tmp) / "stale.json"
-            stale.write_text(json.dumps(
-                {"observed_elapsed_s": 754,
-                 "screenshot_sha256": stub_sha}), encoding="utf-8")
-            with self.assertRaises(ex.FrameError):
-                ex.record_external_frame(
-                    run_dir=run_dir, frame="la-lock", png_src=str(png),
-                    captured_at_iso="2026-10-30T10:12:34+00:00",
-                    observation_path=str(stale), state=state, request=request,
-                    request_sha256=digest, pinned_totals=dict(PINNED),
-                    device_udid=udid,
-                    session_binding={"session_nonce": NONCE_RT,
-                                     "session_domain": "realtime", "seq": 0})
-            # Right render, wrong number: wall 754 vs observed 100.
-            bad = Path(tmp) / "bad.json"
-            bad.write_text(json.dumps(
-                {"observed_elapsed_s": 100,
-                 "screenshot_sha256": sha}), encoding="utf-8")
-            with self.assertRaises(ex.FrameError):
-                ex.record_external_frame(
-                    run_dir=run_dir, frame="la-lock", png_src=str(png),
-                    captured_at_iso="2026-10-30T10:12:34+00:00",
-                    observation_path=str(bad), state=state, request=request,
-                    request_sha256=digest, pinned_totals=dict(PINNED),
-                    device_udid=udid,
-                    session_binding={"session_nonce": NONCE_RT,
-                                     "session_domain": "realtime", "seq": 0})
 
-
-def ext_args(tmp, run_id, frame, png, captured_at, observation, state,
+def ext_args(tmp, run_id, frame, png, captured_at, state,
              geometry="1320x2868", device=None, **overrides):
     """argparse-like namespace for capture.cmd_record_external_frame."""
     import argparse
 
     ns = argparse.Namespace(
         out=tmp, run_id=run_id, frame=frame, png=png,
-        captured_at=captured_at, observation=observation, state=state,
+        captured_at=captured_at, state=state,
         request=None, pinned_totals=None, geometry=geometry,
         device=device, mask=None, approval=None, retained_dir=None,
         session_nonce=None, session_domain=None, seq=None, device_key=None)
@@ -1434,7 +1394,7 @@ def ext_args(tmp, run_id, frame, png, captured_at, observation, state,
 
 
 def genuine_kit(tmp, run_dir, run_id, frame, seq, anchor=None):
-    """Genuine PNG + observation + full v2 live state for one LA frame.
+    """Genuine PNG + full v2 live state for one LA frame.
 
     The state mirrors a real session ack: integer schema 2, full session
     identity bound to the trusted stub, and a transcript covering the
@@ -1447,9 +1407,6 @@ def genuine_kit(tmp, run_dir, run_id, frame, seq, anchor=None):
     write_png(png)
     png.write_bytes(png.read_bytes() + b"\x00")
     sha = insp.sha256_file(str(png))
-    op = Path(tmp) / f"cli-obs-{frame}.json"
-    op.write_text(json.dumps({"observed_elapsed_s": 754,
-                              "screenshot_sha256": sha}), encoding="utf-8")
     live = dict(LA_BLOCK if anchor is None else dict(LA_BLOCK,
                                                       activity_id=anchor))
     live.setdefault("request_acknowledged_at",
@@ -1470,7 +1427,7 @@ def genuine_kit(tmp, run_dir, run_id, frame, seq, anchor=None):
              "live_activity": live}
     sp = Path(tmp) / f"cli-state-{frame}.json"
     sp.write_text(json.dumps(state), encoding="utf-8")
-    return stub, str(png), str(op), str(sp), sha
+    return stub, str(png), str(sp), sha
 
 
 class CliSessionGenuineTests(unittest.TestCase):
@@ -1490,11 +1447,11 @@ class CliSessionGenuineTests(unittest.TestCase):
             anchors = set()
             for seq, frame in enumerate(("la-lock", "la-compact",
                                          "la-expanded")):
-                stub, png, op, sp, sha = genuine_kit(
+                stub, png, sp, sha = genuine_kit(
                     tmp, run_dir, run_id, frame, seq)
                 rc = cap_mod.cmd_record_external_frame(
                     ext_args(tmp, run_id, frame, png,
-                             "2026-10-30T10:12:34+00:00", op, sp,
+                             "2026-10-30T10:12:34+00:00", sp,
                              device=udid))
                 self.assertEqual(rc, 0)
                 rec = json.loads((run_dir / "frames" / f"{frame}.json")
@@ -1532,11 +1489,11 @@ class CliSessionGenuineTests(unittest.TestCase):
             udid = f"UDID-clim-{os.getpid()}"
             run_id = "sess-cli-r2"
             _fake, run_dir, _p, _r = two_domain_run(tmp, udid, run_id)
-            stub, png, op, sp, _sha = genuine_kit(
+            stub, png, sp, _sha = genuine_kit(
                 tmp, run_dir, run_id, "la-lock", 0)
             rc = cap_mod.cmd_record_external_frame(ext_args(
                 tmp, run_id, "la-lock", png, "2026-10-30T10:12:34+00:00",
-                op, sp, device=udid, session_nonce=NONCE_RT,
+                sp, device=udid, session_nonce=NONCE_RT,
                 session_domain="realtime", seq=0, device_key="iphone69"))
             self.assertEqual(rc, 0)
 
@@ -1562,7 +1519,7 @@ class CliSessionGenuineTests(unittest.TestCase):
             udid = f"UDID-clix-{os.getpid()}"
             run_id = "sess-cli-r3"
             _fake, run_dir, _p, _r = two_domain_run(tmp, udid, run_id)
-            stub, png, op, sp, _sha = genuine_kit(
+            stub, png, sp, _sha = genuine_kit(
                 tmp, run_dir, run_id, "la-lock", 0)
             before = self._snapshot_run(run_dir)
             for bad in ({"session_nonce": "f" * 32},
@@ -1575,7 +1532,7 @@ class CliSessionGenuineTests(unittest.TestCase):
                 kw.update(bad)
                 rc = cap_mod.cmd_record_external_frame(ext_args(
                     tmp, run_id, "la-lock", png,
-                    "2026-10-30T10:12:34+00:00", op, sp, **kw))
+                    "2026-10-30T10:12:34+00:00", sp, **kw))
                 self.assertEqual(rc, 2, bad)
                 # Stub, PNGs, and receipts untouched by rejected attempts.
                 self._assert_untouched(run_dir, before)
@@ -1587,7 +1544,7 @@ class CliSessionGenuineTests(unittest.TestCase):
             udid = f"UDID-clid-{os.getpid()}"
             run_id = "sess-cli-r6"
             _fake, run_dir, _p, _r = two_domain_run(tmp, udid, run_id)
-            stub, png, op, sp, _sha = genuine_kit(
+            stub, png, sp, _sha = genuine_kit(
                 tmp, run_dir, run_id, "la-lock", 0)
             before = self._snapshot_run(run_dir)
             for drop in ("schema_version", "session_nonce",
@@ -1598,7 +1555,7 @@ class CliSessionGenuineTests(unittest.TestCase):
                 variant.write_text(json.dumps(state), encoding="utf-8")
                 rc = cap_mod.cmd_record_external_frame(ext_args(
                     tmp, run_id, "la-lock", png,
-                    "2026-10-30T10:12:34+00:00", op, str(variant),
+                    "2026-10-30T10:12:34+00:00", str(variant),
                     device=udid))
                 self.assertEqual(rc, 2, drop)
             self._assert_untouched(run_dir, before)
@@ -1611,7 +1568,7 @@ class CliSessionGenuineTests(unittest.TestCase):
             udid = f"UDID-cliv-{os.getpid()}"
             run_id = "sess-cli-r7"
             _fake, run_dir, _p, _r = two_domain_run(tmp, udid, run_id)
-            stub, png, op, sp, _sha = genuine_kit(
+            stub, png, sp, _sha = genuine_kit(
                 tmp, run_dir, run_id, "la-lock", 0)
             state = json.loads(Path(sp).read_text(encoding="utf-8"))
             v1 = {k: v for k, v in state.items()
@@ -1624,7 +1581,7 @@ class CliSessionGenuineTests(unittest.TestCase):
             self.assertEqual(v1["frame"], "la-lock")
             rc = cap_mod.cmd_record_external_frame(ext_args(
                 tmp, run_id, "la-lock", png, "2026-10-30T10:12:34+00:00",
-                op, str(v1_path), device=udid))
+                str(v1_path), device=udid))
             self.assertEqual(rc, 2)
             self._assert_untouched(run_dir, self._snapshot_run(run_dir))
 
@@ -1645,11 +1602,11 @@ class CliSessionGenuineTests(unittest.TestCase):
             saved = env_a.read_bytes()
             try:
                 env_a.write_bytes(env_b.read_bytes())
-                stub, png, op, sp, _sha = genuine_kit(
+                stub, png, sp, _sha = genuine_kit(
                     tmp, run_a, "run-swap-a", "la-lock", 0)
                 rc = cap_mod.cmd_record_external_frame(ext_args(
                     tmp, "run-swap-a", "la-lock", png,
-                    "2026-10-30T10:12:34+00:00", op, sp, device=udid))
+                    "2026-10-30T10:12:34+00:00", sp, device=udid))
                 self.assertEqual(rc, 2)
                 # Mode mismatch: flipped outer mode breaks envelope binding.
                 env = json.loads(saved.decode("utf-8"))
@@ -1658,12 +1615,12 @@ class CliSessionGenuineTests(unittest.TestCase):
                     json.dumps(env, sort_keys=True).encode("utf-8") + b"\n")
                 rc = cap_mod.cmd_record_external_frame(ext_args(
                     tmp, "run-swap-a", "la-lock", png,
-                    "2026-10-30T10:12:34+00:00", op, sp, device=udid))
+                    "2026-10-30T10:12:34+00:00", sp, device=udid))
                 self.assertEqual(rc, 2)
             finally:
                 env_a.write_bytes(saved)
             # Transcript mismatch: a state whose transcript covers nothing.
-            stub, png, op, sp, _sha = genuine_kit(
+            stub, png, sp, _sha = genuine_kit(
                 tmp, run_a, "run-swap-a", "la-lock", 0)
             state = json.loads(Path(sp).read_text(encoding="utf-8"))
             state["transcript"] = []
@@ -1671,7 +1628,7 @@ class CliSessionGenuineTests(unittest.TestCase):
             sp_bad.write_text(json.dumps(state), encoding="utf-8")
             rc = cap_mod.cmd_record_external_frame(ext_args(
                 tmp, "run-swap-a", "la-lock", png,
-                "2026-10-30T10:12:34+00:00", op, str(sp_bad), device=udid))
+                "2026-10-30T10:12:34+00:00", str(sp_bad), device=udid))
             self.assertEqual(rc, 2)
 
     def test_cli_explicit_args_without_stub_rejected(self):
@@ -1681,7 +1638,7 @@ class CliSessionGenuineTests(unittest.TestCase):
             (out / "runs" / "r9" / "frames").mkdir(parents=True)
             rc = cap_mod.cmd_record_external_frame(ext_args(
                 str(out), "r9", "la-lock", "/nonexistent.png",
-                "2026-10-30T10:12:34+00:00", "/nonexistent.json",
+                "2026-10-30T10:12:34+00:00",
                 "/nonexistent.json", session_nonce=NONCE_RT))
             self.assertEqual(rc, 2)
 
@@ -1690,14 +1647,14 @@ class CliSessionGenuineTests(unittest.TestCase):
             udid = f"UDID-clif-{os.getpid()}"
             run_id = "sess-cli-r4"
             _fake, run_dir, _p, _r = two_domain_run(tmp, udid, run_id)
-            stub, png, op, sp, _sha = genuine_kit(
+            stub, png, sp, _sha = genuine_kit(
                 tmp, run_dir, run_id, "la-lock", 0)
             # State copied for ANOTHER frame: foreign, rejected.
-            _s2, _p2, _o2, sp_other, _h2 = genuine_kit(
+            _s2, _p2, sp_other, _h2 = genuine_kit(
                 tmp, run_dir, run_id, "la-compact", 1)
             rc = cap_mod.cmd_record_external_frame(ext_args(
                 tmp, run_id, "la-lock", png, "2026-10-30T10:12:34+00:00",
-                op, sp_other, device=udid))
+                sp_other, device=udid))
             self.assertEqual(rc, 2)
 
     def test_cli_missing_envelope_rejected(self):
@@ -1705,14 +1662,14 @@ class CliSessionGenuineTests(unittest.TestCase):
             udid = f"UDID-clie-{os.getpid()}"
             run_id = "sess-cli-r5"
             _fake, run_dir, _p, _r = two_domain_run(tmp, udid, run_id)
-            stub, png, op, sp, _sha = genuine_kit(
+            stub, png, sp, _sha = genuine_kit(
                 tmp, run_dir, run_id, "la-lock", 0)
             env_path = (run_dir / "requests" /
                         f"session-{NONCE_RT}-0-la-lock.envelope.json")
             env_path.unlink()
             rc = cap_mod.cmd_record_external_frame(ext_args(
                 tmp, run_id, "la-lock", png, "2026-10-30T10:12:34+00:00",
-                op, sp, device=udid))
+                sp, device=udid))
             self.assertEqual(rc, 2)
 
 
@@ -2485,7 +2442,7 @@ class CrossLocaleCellBindingTests(unittest.TestCase):
         base = base_request(run_id)
         for seq, frame in enumerate(("la-lock", "la-compact",
                                      "la-expanded")):
-            request, digest, state, png, op, sha = gen._genuine_inputs(
+            request, digest, state, png, sha = gen._genuine_inputs(
                 tmp, base, frame, seq)
             pending_rec = next(r for r in realtime["frames"]
                                if r["frame"] == frame)
@@ -2493,7 +2450,7 @@ class CrossLocaleCellBindingTests(unittest.TestCase):
             ex.record_external_frame(
                 run_dir=run_dir, frame=frame, png_src=str(png),
                 captured_at_iso="2026-10-30T10:12:34+00:00",
-                observation_path=str(op), state=state, request=request,
+                state=state, request=request,
                 request_sha256=digest, pinned_totals=dict(PINNED),
                 device_udid=udid,
                 session_binding={"session_nonce": NONCE_RT,

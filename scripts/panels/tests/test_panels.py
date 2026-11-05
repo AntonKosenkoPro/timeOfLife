@@ -33,6 +33,10 @@ RETAINED_RUN_IPAD = RETAINED / "runs" / "en-ipad13-g2-r2"
 RETAINED_BEZEL_69 = RETAINED / "assets" / "iphone-18pm-black-bezel.png"
 RETAINED_BEZEL_IPAD = RETAINED / "assets" / "ipad-13in-silver-bezel-portrait.png"
 
+V2_DIR = Path(os.environ.get("LIFIO_V2_BEZELS_DIR",
+                             "/tmp/lifio-design-assets-v2"))
+V2_18PM_BEZEL = V2_DIR / "iphone-18-pro-max-silver-portrait.png"
+HAS_V2_18PM = V2_18PM_BEZEL.is_file()
 HAS_RETAINED_69 = (
     (RETAINED_RUN_69 / "run-manifest.json").is_file()
     and (RETAINED_RUN_69 / "frames" / "track-running.png").is_file()
@@ -787,6 +791,48 @@ class BuilderUnitTests(unittest.TestCase):
             self.assertIn("template mismatch", str(ctx.exception))
             self.assertIn("no historical approval transfer",
                           str(ctx.exception))
+
+    def test_check_template_refuses_18pm_profile(self):
+        # The 18PM review profile is refused by name (no art needed —
+        # the guard reads the recipe label before any byte comparison).
+        with self.assertRaises(panels_builder.BuilderError) as ctx:
+            panels_builder.check_template(
+                {"bezel": {"profile": "apple-18pm-v1"}, "panels": {}},
+                "en", "6.9")
+        self.assertIn("apple-18pm-v1", str(ctx.exception))
+        self.assertIn("no historical approval transfer",
+                      str(ctx.exception))
+
+    @unittest.skipUnless(HAS_PILLOW and HAS_V2_18PM,
+                         "v2 18PM working-copy bytes required")
+    def test_real_18pm_verifies_renders_refuses(self):
+        # Real-file acceptance against the /tmp working copy (exact
+        # bytes, canonical name): exact profile resolves by SHA, the
+        # review build + selftest go green, check-template refuses.
+        # Raw art is only ever read here, never committed.
+        info = panels_builder.verify_bezel_69(V2_18PM_BEZEL)
+        self.assertEqual(info["profile"], "apple-18pm-v1")
+        self.assertEqual(info["sha256"],
+                         panels_builder.APPLE_SOURCE_18PM["sha256"])
+        self.assertEqual(info["screen_slot_px"], [1320, 2868])
+        self.assertEqual(info["screen_at_px"], [75, 66])
+        with Image.open(V2_18PM_BEZEL) as im:
+            # Documented quirk: no iCCP chunk (default sRGB) — accepted,
+            # color management never gates composition.
+            self.assertIsNone(im.info.get("icc_profile"))
+        with tempfile.TemporaryDirectory() as tmp:
+            kit = make_kit_69(tmp)
+            caps_obj = panels_builder.load_captions(Path(kit["captions"]))
+            caps = panels_builder.validate_captions_for_locale(caps_obj, "en")
+            out = Path(kit["out"]) / "real18"
+            recipe = panels_builder.build_69(
+                "en", caps, "captions-v1", Path(kit["frames"]),
+                Path(kit["manifest"]), V2_18PM_BEZEL, out)
+            self.assertEqual(recipe["bezel"]["profile"], "apple-18pm-v1")
+            self.assertEqual(len(panels_builder.selftest_69(out, recipe)), 5)
+            with self.assertRaises(panels_builder.BuilderError) as ctx:
+                panels_builder.check_template(recipe, "en", "6.9")
+            self.assertIn("apple-18pm-v1", str(ctx.exception))
 
 
 @unittest.skipUnless(HAS_PILLOW, "Pillow required")

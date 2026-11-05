@@ -151,34 +151,6 @@ class CliTests(unittest.TestCase):
                        "--pinned-totals", pin)
             self.assertEqual(proc.returncode, 3)
 
-    def test_verify_la_cli_binding(self):
-        import struct
-        import zlib
-        with tempfile.TemporaryDirectory() as tmp:
-            png = Path(tmp) / "la.png"
-            ihdr = struct.pack(">IIBBBBB", 1320, 2868, 8, 2, 0, 0, 0)
-            png.write_bytes(b"\x89PNG\r\n\x1a\n" + struct.pack(">I", 13)
-                            + b"IHDR" + ihdr
-                            + struct.pack(">I", zlib.crc32(b"IHDR" + ihdr) & 0xFFFFFFFF))
-            import hashlib
-            sha = hashlib.sha256(png.read_bytes()).hexdigest()
-            state = {"status": "ready", "live_activity": {
-                "activity_id": "a", "started_at": "2026-10-30T10:00:00+00:00",
-                "request_acknowledged_at": "2026-10-30T10:00:01+00:00"}}
-            sp = str(Path(tmp) / "state.json")
-            Path(sp).write_text(json.dumps(state), encoding="utf-8")
-            obs = {"observed_elapsed_s": 754, "screenshot_sha256": sha}
-            op = str(Path(tmp) / "obs.json")
-            Path(op).write_text(json.dumps(obs), encoding="utf-8")
-            proc = run("verify-la", "--state", sp, "--screenshot", str(png),
-                       "--captured-at", "2026-10-30T10:12:34+00:00",
-                       "--observation", op)
-            self.assertEqual(proc.returncode, 0, proc.stderr)
-            # missing observation stays pending, never a pass
-            proc = run("verify-la", "--state", sp, "--screenshot", str(png),
-                       "--captured-at", "2026-10-30T10:12:34+00:00")
-            self.assertEqual(proc.returncode, 3)
-
     def test_verify_picker_cli_binding(self):
         import struct
         import zlib
