@@ -1,5 +1,5 @@
 #!/bin/bash
-# Local full-bundle driver: devices x locales, strictly sequential.
+# Local full-bundle driver: devices x locales (--jobs parallel capable).
 # Owned sims only (prefix local-bundle-); shared sims never touched.
 # One owned simulator at a time: create -> boot -> install -> worker ->
 # genuine registration -> shutdown -> delete, per device in order.
@@ -7,21 +7,37 @@
 # Outputs under $OUT_ROOT (default /tmp/lifio-bundle; never git).
 # Usage: run_local_bundle.sh [--out DIR] [--devices k1,k2] [--locales JSON]
 #        [--skip-build]   (reuses the previous build under OUT/dd)
+#        [--jobs N]       (1..5 parallel devices; default 5. Leases are
+#        per-device and argent multiplexes across sims; keep 1 on small
+#        hosts, as parallel sims share CPU/RAM and timing-sensitive holds
+#        may flake under load.)
+#        [--keep-sims]    (reuse owned local-bundle-* sims across runs:
+#        erase + reboot instead of create/delete. Erase restores clean
+#        state so the consent prompt resurfaces; shared/preinstalled sims
+#        are never touched either way.)
 set -u
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
 OUT_ROOT=/tmp/lifio-bundle
 DEVICES="iphone69,iphone63,ipad13"
 LOCALES_JSON='["en","ru","zh-Hans","es-419","pt-BR"]'
 SKIP_BUILD=0
+JOBS=5
+KEEP_SIMS=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --out) OUT_ROOT="$2"; shift 2;;
     --devices) DEVICES="$2"; shift 2;;
     --locales) LOCALES_JSON="$2"; shift 2;;
     --skip-build) SKIP_BUILD=1; shift 1;;
+    --jobs) JOBS="$2"; shift 2;;
+    --keep-sims) KEEP_SIMS=1; shift 1;;
     *) echo "unknown flag $1 (see header)"; exit 2;;
   esac
 done
+case "$JOBS" in
+  1|2|3|4|5) ;;
+  *) echo "--jobs N must be 1..5"; exit 2;;
+esac
 SHOTS=$OUT_ROOT/shots
 LOGS=$OUT_ROOT/logs
 DD=$OUT_ROOT/dd
@@ -83,8 +99,25 @@ run_device() {
   dt=$(devtype_for "$key") || { log "device $key: unknown key, SKIP"; return 0; }
   name="local-bundle-$key"
   udid=""
-  udid=$(xcrun simctl create "$name" "$dt" "$RT_ID" 2>"$LOGS/$key-create.log") \
-    || { log "device $key: sim create FAILED, SKIP device"; return 0; }
+  created_here=0
+  if [ "$KEEP_SIMS" = 1 ]; then
+    udid=$(xcrun simctl list devices -j 2>/dev/null | python3 -c "
+import json, sys
+want = '$name'
+hits = [e['udid'] for b in json.load(sys.stdin)['devices'].values() for e in b if e.get('name') == want and e.get('udid')]
+print(hits[0] if len(hits) == 1 else '')")
+    if [ -n "$udid" ]; then
+      log "device $key: reusing owned sim $udid (erase+reboot)"
+      xcrun simctl shutdown "$udid" >/dev/null 2>&1 || true
+      xcrun simctl erase "$udid" >>"$LOGS/$key-boot.log" 2>&1 \
+        || { log "device $key: erase FAILED, falling back to create"; udid=""; }
+    fi
+  fi
+  if [ -z "$udid" ]; then
+    udid=$(xcrun simctl create "$name" "$dt" "$RT_ID" 2>"$LOGS/$key-create.log") \
+      || { log "device $key: sim create FAILED, SKIP device"; return 0; }
+    created_here=1
+  fi
   log "device $key: created $name $udid"
   echo "$udid" > "$OUT_ROOT/$key.udid"
   if [ "$udid" = "$SHARED_UDID" ]; then log "device $key: REFUSING shared UDID, abort device"; return 0; fi
@@ -110,7 +143,9 @@ run_device() {
   set -e
   log "device $key: genuine rc=$grc"
   xcrun simctl shutdown "$udid" >/dev/null 2>&1 || true
-  xcrun simctl delete "$udid" >/dev/null 2>&1 || log "device $key: delete FAILED (manual cleanup needed: $udid)"
+  if [ "$created_here" = 1 ] && [ "$KEEP_SIMS" != 1 ]; then
+    xcrun simctl delete "$udid" >/dev/null 2>&1 || log "device $key: delete FAILED (manual cleanup needed: $udid)"
+  fi
   log "=== device $key done (worker=$wrc genuine=$grc) ==="
 }
 
@@ -146,7 +181,16 @@ command -v gh >/dev/null 2>&1 || log "WARNING: gh CLI missing — bezel download
 [ -d "$APP" ] || { log "built app missing at $APP, abort bundle"; exit 2; }
 OLDIFS=$IFS; IFS=,
 # shellcheck disable=SC2162
-for d in $DEVICES; do run_device "$d"; done
+if [ "$JOBS" = 1 ]; then
+  for d in $DEVICES; do run_device "$d"; done
+else
+  log "parallel mode: up to $JOBS devices at once (leases per-device)"
+  for d in $DEVICES; do
+    run_device "$d" &
+    while [ "$(jobs -pr | wc -l)" -ge "$JOBS" ]; do sleep 5; done
+  done
+  wait
+fi
 IFS=$OLDIFS
 stage_bezels
 render_panels

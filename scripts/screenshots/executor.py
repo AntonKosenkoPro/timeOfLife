@@ -1643,6 +1643,14 @@ _CONSENT_TAPPABLE = ("allow", "always allow")
 # Bounded describe-guided taps in the grant loop (mirrors the
 # pixel-dismissal cap: verify after every tap, never loop taps).
 CONSENT_MAX_TAPS = 2
+# Late-sheet wait: under host load the consent sheet surfaces seconds
+# after the first describe (parallel proof: both describes clean while
+# the sheet appeared later at lock). Bounded settle-wait rounds before
+# declaring absent — still fail-closed, still zero blind taps.
+# Foreground uses 1 round (the sheet has never been observed there in any
+# run); lock uses 10 (every observed sheet surfaced at lock time).
+SHEET_WAIT_ROUNDS = 3
+LOCK_SHEET_WAIT_ROUNDS = 10
 
 
 def _normalize_consent_label(label: Any) -> str:
@@ -1790,10 +1798,14 @@ def grant_consent(
     hid_count: Callable[[], None] = lambda: None,
     clock: Callable[[], float] = time.monotonic,
     hid_ms: list | None = None,
+    sleeper: Callable[[float], None] | None = None,
+    interval_s: float = 2.0,
+    wait_rounds: int = SHEET_WAIT_ROUNDS,
 ) -> dict[str, Any]:
     """Describe-guided consent grant loop (consent phase of live capture).
 
-    describe → no consent buttons: outcome absent (proceed, zero taps).
+    describe → no consent buttons: settle-wait rounds, then outcome
+    absent (proceed, zero taps).
     Allow present: tap its describe-derived center via `argent run
     gesture-tap`, re-describe (max CONSENT_MAX_TAPS tap rounds); an Always
     Allow follow-up is tapped the same way, then re-verified. Verified
@@ -1806,6 +1818,13 @@ def grant_consent(
     pixel-estimated taps stay forbidden. Unexpected (non-FrameError)
     exceptions propagate fail-closed.
 
+    Late-sheet note (parallel proof): the sheet can surface seconds
+    after the first describe under host load, so an empty first tree
+    waits bounded settle rounds (wait_rounds × interval_s) before
+    resolving absent — still zero taps while waiting. Foreground waits
+    once (no sheet ever observed there); lock waits LOCK_SHEET_WAIT_ROUNDS
+    (every observed sheet surfaced at lock time).
+
     Cold-start note (run 42051429064): each describe site retries at most
     once on FrameError (DESCRIBE_MAX_RETRIES=1) with a per-attempt
     DESCRIBE_TIMEOUT_S=30s bound, so each describe op costs at most
@@ -1813,6 +1832,8 @@ def grant_consent(
     {"op", "ms"} to hid_ms (when given) for timing diagnosis.
     """
     taps: list[dict[str, Any]] = []
+    if sleeper is None:
+        sleeper = time.sleep
 
     def _note(op: str, t0: float) -> None:
         if hid_ms is not None:
@@ -1865,6 +1886,15 @@ def grant_consent(
             return None
 
         current = prefer(found)
+        waited = 0
+        while current is None and not found and waited < wait_rounds:
+            # No sheet yet — it may surface late under load. Bounded
+            # settle-wait, then re-describe; still zero taps.
+            sleeper(interval_s)
+            waited += 1
+            tree = _describe()
+            found = collect_consent_buttons(tree)
+            current = prefer(found)
         if current is None:
             if found:
                 return {"outcome": "failed-blocker",
@@ -2378,7 +2408,9 @@ def run_live_capture(
     # describe-guided taps per phase, total taps ≤4 (foreground + lock);
     # taps never loop and positions only ever come from describe output.
     hold_left("consent grant")
-    consent_fg = grant_consent(hid, hid_count, clock, hid_ms)
+    consent_fg = grant_consent(hid, hid_count, clock, hid_ms,
+                               sleeper=sleeper, interval_s=interval_s,
+                               wait_rounds=1)
 
     # Compact re-probe after grant: Home backgrounds the app so the island
     # pill renders. Shots repeat (verdict-gated, bounded) until the pill
@@ -2615,7 +2647,9 @@ def run_live_capture(
         consent["foreground"] = consent_fg
         consent["lock"] = None
     else:
-        consent_lock = grant_consent(hid, hid_count, clock, hid_ms)
+        consent_lock = grant_consent(hid, hid_count, clock, hid_ms,
+                                       sleeper=sleeper, interval_s=interval_s,
+                                       wait_rounds=LOCK_SHEET_WAIT_ROUNDS)
         fg_taps = consent_fg.get("taps", [])
         lock_taps = consent_lock.get("taps", [])
         total_taps = list(fg_taps) + list(lock_taps)

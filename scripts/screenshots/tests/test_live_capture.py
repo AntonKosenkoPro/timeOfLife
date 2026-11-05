@@ -508,6 +508,41 @@ class ConsentGateTests(unittest.TestCase):
                   + [("paint", paint_plain)] * 2)
         return live_run(tmp, hid, script, run_id=run_id)
 
+    def test_consent_sheet_surfaces_late_granted(self):
+        # Under host load the sheet surfaces seconds after the first
+        # describe: empty first tree waits bounded settle rounds (zero
+        # taps while waiting), then the sheet grants normally.
+        # Leading EMPTY_DOC is the pre-hold warm-up describe (discarded).
+        with tempfile.TemporaryDirectory() as tmp:
+            docs = [EMPTY_DOC, EMPTY_DOC,
+                    _desc_doc(("Allow", *ALLOW_XY),
+                              ("Don't Allow", 0.5, 0.9)), EMPTY_DOC]
+            hid = FakeHidBackend(ax_script=docs)
+            _fake, _hid, run_dir, summary, _udid = self._run(
+                tmp, hid, paint_live_pill, "live-consent-late")
+            self.assertEqual(summary["status"], "complete")
+            self.assertEqual([c for c in hid.calls if c[0] == "tap"],
+                             [("tap", *ALLOW_XY)])
+            rec = live_capture_record(run_dir)
+            self.assertEqual(rec["consent"]["outcome"], "granted")
+            self.assertTrue(
+                (run_dir / "staging" / "live-la-lock.png").is_file())
+
+    def test_consent_absent_waits_bounded_zero_taps(self):
+        # A truly absent sheet costs warmup(1) + foreground(1+1) +
+        # lock(1+LOCK_SHEET_WAIT_ROUNDS) describes, then resolves absent
+        # with zero taps.
+        with tempfile.TemporaryDirectory() as tmp:
+            hid = FakeHidBackend(ax_script=[EMPTY_DOC])
+            _fake, _hid, run_dir, summary, _udid = self._run(
+                tmp, hid, paint_live_pill, "live-consent-absent-wait")
+            self.assertEqual(summary["status"], "complete")
+            self.assertEqual([c for c in hid.calls if c[0] == "tap"], [])
+            n_ax = len([c for c in hid.calls if c[0] == "ax"])
+            self.assertEqual(n_ax, 1 + 2 + (1 + ex.LOCK_SHEET_WAIT_ROUNDS))
+            rec = live_capture_record(run_dir)
+            self.assertEqual(rec["consent"]["outcome"], "absent")
+
     def test_consent_granted_via_describe_allow(self):
         # Sheet -> one tap at the describe-derived Allow center -> re-describe
         # verifies absence. Don't Allow rides along as sheet evidence only.
@@ -1162,7 +1197,9 @@ class LockPhaseConsentTests(unittest.TestCase):
         # center; the tap fires after the Power lock, before lock pixels.
         # Leading EMPTY_DOC is the pre-hold warm-up describe (discarded).
         with tempfile.TemporaryDirectory() as tmp:
-            docs = [EMPTY_DOC, EMPTY_DOC,
+            # Foreground consumes 2 EMPTYs (1 + 1 wait round) before
+            # resolving absent, so the lock-time sheet needs padding.
+            docs = [EMPTY_DOC] + [EMPTY_DOC] * (1 + ex.SHEET_WAIT_ROUNDS) + [
                     _desc_doc(("Allow", *ALLOW_XY)), EMPTY_DOC]
             hid = FakeHidBackend(ax_script=docs)
             _fake, _hid, run_dir, summary, _udid = self._run_lock_phase(
@@ -1183,7 +1220,9 @@ class LockPhaseConsentTests(unittest.TestCase):
         # Foreground absent + lock granted: merged outcome granted,
         # phase lock, foreground/lock audit preserved, total ≤4.
         with tempfile.TemporaryDirectory() as tmp:
-            docs = [EMPTY_DOC, EMPTY_DOC,
+            # Foreground consumes 2 EMPTYs (1 + 1 wait round) before
+            # resolving absent, so the lock-time sheet needs padding.
+            docs = [EMPTY_DOC] + [EMPTY_DOC] * (1 + ex.SHEET_WAIT_ROUNDS) + [
                     _desc_doc(("Allow", *ALLOW_XY)), EMPTY_DOC]
             hid = FakeHidBackend(ax_script=docs)
             _fake, _hid, run_dir, summary, _udid = self._run_lock_phase(

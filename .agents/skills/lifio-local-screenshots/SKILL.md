@@ -27,12 +27,17 @@ approved or complete beyond the matrix manifest's own counts.
 ## 3. Full bundle (one command)
 
 ```bash
-scripts/screenshots/run_local_bundle.sh [--out DIR] [--devices k1,k2,...] [--locales JSON] [--skip-build]
+scripts/screenshots/run_local_bundle.sh [--out DIR] [--devices k1,k2,...] [--locales JSON] [--skip-build] [--jobs N]
 ```
 
 Defaults: all 3 devices (`iphone69,iphone63,ipad13`) × 5 locales
-(`en,ru,zh-Hans,es-419,pt-BR`), ~20 min. The driver, strictly sequential per
-device: verify devtypes → build Screenshot app → create/boot/install owned
+(`en,ru,zh-Hans,es-419,pt-BR`), `--jobs 5` (overlapping devices on separate
+owned sims with per-device leases; proven on a 10-core/32GB Mac — pass
+`--jobs 1` on smaller hosts, as parallel sims share CPU/RAM and
+timing-sensitive holds may flake under load). `--keep-sims` reuses owned
+`local-bundle-*` sims across runs (erase + reboot; clean state, no
+create/delete churn); without it sims are created and deleted per run. The
+driver: verify devtypes → build Screenshot app → create/boot/install owned
 sim (`local-bundle-<key>`) → `run_device_worker.py` (pinned + realtime
 hold-open sessions: argent describe-backed consent grant, compact/expanded
 island staging) → `register_genuine.py` (genuine registration, NO observation
