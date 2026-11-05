@@ -511,10 +511,10 @@ class RenderMatrixTests(unittest.TestCase):
             self.assertEqual(proc.returncode, 0, proc.stderr)
             self.assertIn("status=complete", proc.stdout)
             self.assertEqual(
-                len(list((out / "iphone69" / "en").glob(
+                len(list((out / "en" / "iphone69").glob(
                     "panel-*-en-1320x2868.png"))), 5)
             self.assertEqual(
-                len(list((out / "ipad13" / "en").glob(
+                len(list((out / "en" / "ipad13").glob(
                     "panel-*-en-2064x2752.png"))), 4)
             manifest = json.loads(
                 (out / "matrix-manifest.json").read_text(encoding="utf-8"))
@@ -542,7 +542,7 @@ class RenderMatrixTests(unittest.TestCase):
                 "--captions-dir", str(caps))
             self.assertEqual(proc.returncode, 0, proc.stderr)
             self.assertEqual(
-                len(list((out / "ipad13" / "ru").glob(
+                len(list((out / "ru" / "ipad13").glob(
                     "panel-*-ru-2064x2752.png"))), 4)
 
     def test_matrix_non_en_without_captions_dir_blocked(self):
@@ -602,7 +602,7 @@ class RenderMatrixTests(unittest.TestCase):
                 "--languages", '["en"]')
             self.assertEqual(proc.returncode, 0, proc.stderr)
             self.assertIn("status=complete", proc.stdout)
-            built = list((out / "iphone63" / "en").glob(
+            built = list((out / "en" / "iphone63").glob(
                 "panel-*-en-1206x2622.png"))
             self.assertEqual(len(built), 5)
             for png in built:
@@ -651,7 +651,7 @@ class RenderMatrixTests(unittest.TestCase):
             self.assertEqual(manifest["status"], "complete")
             self.assertEqual(manifest["cells"][0]["run_id"], fresh)
             self.assertEqual(
-                len(list((out / "iphone63" / "en").glob(
+                len(list((out / "en" / "iphone63").glob(
                     "panel-*-en-1206x2622.png"))), 5)
 
     def test_matrix_ambiguous_two_runs_blocked(self):
@@ -680,8 +680,8 @@ class RenderMatrixTests(unittest.TestCase):
             self.assertIn("ambiguous",
                           manifest["cells"][0]["reason"].lower())
             self.assertEqual(
-                list((out / "iphone63" / "en").glob("panel-*.png"))
-                if (out / "iphone63" / "en").exists() else [], [])
+                list((out / "en" / "iphone63").glob("panel-*.png"))
+                if (out / "en" / "iphone63").exists() else [], [])
 
     def test_matrix_status_pointer_selects_single(self):
         # Canonical status pointer (device-worker per-pass
@@ -893,8 +893,8 @@ class RenderMatrixTests(unittest.TestCase):
             self.assertIn("locale",
                           manifest["cells"][0]["reason"].lower())
             self.assertEqual(
-                list((out / "iphone69" / "en").glob("panel-*.png"))
-                if (out / "iphone69" / "en").exists() else [], [])
+                list((out / "en" / "iphone69").glob("panel-*.png"))
+                if (out / "en" / "iphone69").exists() else [], [])
 
     def test_matrix_missing_locale_provenance_blocked(self):
         # Fail-closed provenance: a run with no manifest locale and no
@@ -978,8 +978,8 @@ class RenderMatrixTests(unittest.TestCase):
             self.assertIn("locale",
                           manifest["cells"][0]["reason"].lower())
             self.assertEqual(
-                list((out / "iphone69" / "ru").glob("panel-*.png"))
-                if (out / "iphone69" / "ru").exists() else [], [])
+                list((out / "ru" / "iphone69").glob("panel-*.png"))
+                if (out / "ru" / "iphone69").exists() else [], [])
 
     def test_matrix_device_mismatch_blocked(self):
         # Declared device binding: a manifest whose frames declare a
@@ -1447,9 +1447,7 @@ class StageBezelTests(unittest.TestCase):
             self.assertEqual(by_device["ipad13"]["status"], "blocked")
             self.assertIn("missing bezel asset",
                           by_device["ipad13"]["reason"])
-            self.assertEqual(
-                list((out / "ipad13").rglob("panel-*.png"))
-                if (out / "ipad13").exists() else [], [])
+            self.assertFalse((out / "en" / "ipad13").exists())
 
     def test_staged_apple_bezels_render_matrix_green(self):
         # End-to-end over staged Apple-profile art: one en cell per size
@@ -1479,13 +1477,13 @@ class StageBezelTests(unittest.TestCase):
                 (out / "matrix-manifest.json").read_text(encoding="utf-8"))
             self.assertEqual(matrix["status"], "complete")
             self.assertEqual(
-                len(list((out / "iphone69" / "en").glob(
+                len(list((out / "en" / "iphone69").glob(
                     "panel-*-en-1320x2868.png"))), 5)
             self.assertEqual(
-                len(list((out / "iphone63" / "en").glob(
+                len(list((out / "en" / "iphone63").glob(
                     "panel-*-en-1206x2622.png"))), 5)
             self.assertEqual(
-                len(list((out / "ipad13" / "en").glob(
+                len(list((out / "en" / "ipad13").glob(
                     "panel-*-en-2064x2752.png"))), 4)
 
     def _apple_items(self, extra_69=None):

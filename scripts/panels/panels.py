@@ -642,7 +642,7 @@ def render_matrix_cell(*, device: str, language: str, size: str,
         captions_for(language, captions_dir))
     caps = panels_builder.validate_captions_for_locale(caps_obj, language)
     captions_version = str(caps_obj.get("version", "unknown"))
-    out_cell = out_root / device / language
+    out_cell = out_root / language / device
     out_cell.mkdir(parents=True, exist_ok=True)
     if size == "6.9":
         recipe = panels_builder.build_69(
