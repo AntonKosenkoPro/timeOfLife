@@ -1346,6 +1346,19 @@ HOLD_OPEN_TIMEOUT_S = 120.0  # = POLL scale. Was 60 (= CLEANUP), set
 # path keeps its no-retry semantics.
 LIVE_SHOT_ATTEMPTS = 3
 
+# Cold-start fix (run 42051429064 iphone69-en): the hold phase burned 135s
+# on 2 HID actions — both `argent run describe` calls hit 60s timeouts
+# back-to-back (cold ax-service daemon/tool-server on first attach),
+# expiring before the expanded hold. Locally warm describes take ~1-2s,
+# which is why this never reproduced locally.
+# (a) one pre-hold warm-up describe (outside the hold budget),
+# (b) describe 30s + at most one retry per describe site (<=60s per
+# describe op), (c) per-HID-op durations into stats["hid_ms"].
+# Hold budget unchanged at 120s.
+DESCRIBE_TIMEOUT_S = 30.0
+DESCRIBE_MAX_RETRIES = 1
+DESCRIBE_BUDGET_S = 60.0  # 2 x DESCRIBE_TIMEOUT_S per describe op
+
 # Island regions pinned from LIVE headless pixels only (never scaled or
 # guessed). 1206x2622 idle pill spans x[415,790] y[42,151] (lock-screen
 # capture, zero bright content inside); the verdict box below adds margin.
@@ -1437,11 +1450,12 @@ class ArgentHidBackend(HidBackend):
     """Production HID via argent one-shots (describe-backed consent grant).
 
     - ax_dump shells ``argent run describe --udid <udid> --json`` (bounded
-      timeout: the shared runner's 60s, the existing CLEANUP scale) and
-      parses the text tree's AXButton lines into a describe-derived
-      document ``{"source", "buttons": [{role, label, center, frame}]}``.
-      Transport/parse failures raise FrameError (fail closed: the grant
-      loop records a blocker and taps nothing — never blind coordinates).
+      timeout DESCRIBE_TIMEOUT_S=30s; run 42051429064 proved the prior 60s
+      stall on a cold daemon) and parses the text tree's AXButton lines
+      into a describe-derived document ``{"source", "buttons":
+      [{role, label, center, frame}]}``. Transport/parse failures raise
+      FrameError (fail closed: the grant loop records a blocker and taps
+      nothing — never blind coordinates).
     - tap shells ``argent run gesture-tap --udid <udid> --x <x> --y <y>``
       with normalized [0,1] coordinates from find_allow_button over a real
       describe document (proven on a headless scratch sim).
@@ -1449,7 +1463,7 @@ class ArgentHidBackend(HidBackend):
       --events-json '[{"type":"Down",...},{"type":"Up",...,"delayMs":1200}]'``
       (single-finger hold at the verified pill center; 1200ms after the
       800ms pilot flaked on the first Down; bounded timeout: the shared
-      runner's 60s, the existing CLEANUP scale).
+      HID runner's DESCRIBE_TIMEOUT_S).
     - press_button / multitouch_hold keep the argent-simulator-server
       one-shots (universalhid_button / universalhid_multitouch), proven on
       headless sims (no Simulator.app). multitouch_hold stays for compat
@@ -1467,7 +1481,8 @@ class ArgentHidBackend(HidBackend):
         self._server = server
         self._argent = argent
         self._runner = runner or (lambda argv: subprocess.run(
-            argv, capture_output=True, text=True, timeout=60))
+            argv, capture_output=True, text=True,
+            timeout=DESCRIBE_TIMEOUT_S))
 
     def _spawn(self, argv: list[str], what: str) -> None:
         exe = shutil.which(self._server)
@@ -1773,6 +1788,8 @@ def find_allow_button(tree: Any) -> tuple[float, float] | None:
 def grant_consent(
     hid: HidBackend,
     hid_count: Callable[[], None] = lambda: None,
+    clock: Callable[[], float] = time.monotonic,
+    hid_ms: list | None = None,
 ) -> dict[str, Any]:
     """Describe-guided consent grant loop (consent phase of live capture).
 
@@ -1788,11 +1805,54 @@ def grant_consent(
     positions only ever come from describe output — blind or
     pixel-estimated taps stay forbidden. Unexpected (non-FrameError)
     exceptions propagate fail-closed.
+
+    Cold-start note (run 42051429064): each describe site retries at most
+    once on FrameError (DESCRIBE_MAX_RETRIES=1) with a per-attempt
+    DESCRIBE_TIMEOUT_S=30s bound, so each describe op costs at most
+    DESCRIBE_BUDGET_S=60s. Every describe/tap attempt appends
+    {"op", "ms"} to hid_ms (when given) for timing diagnosis.
     """
     taps: list[dict[str, Any]] = []
-    try:
-        tree = hid.ax_dump()
+
+    def _note(op: str, t0: float) -> None:
+        if hid_ms is not None:
+            try:
+                ms = (clock() - t0) * 1000.0
+            except Exception:
+                ms = 0.0
+            hid_ms.append({"op": op, "ms": float(ms)})
+
+    def _describe() -> dict:
+        last: FrameError | None = None
+        for attempt in range(DESCRIBE_MAX_RETRIES + 1):
+            t0 = clock()
+            try:
+                tree = hid.ax_dump()
+            except FrameError as exc:
+                _note("describe", t0)
+                last = exc
+                if attempt < DESCRIBE_MAX_RETRIES:
+                    continue
+                raise
+            _note("describe", t0)
+            hid_count()
+            return tree
+        if last is not None:
+            raise last
+        raise FrameError("describe retry exhausted without result")
+
+    def _tap(x: float, y: float) -> None:
+        t0 = clock()
+        try:
+            hid.tap(x, y)
+        except FrameError:
+            _note("tap", t0)
+            raise
+        _note("tap", t0)
         hid_count()
+
+    try:
+        tree = _describe()
         found = collect_consent_buttons(tree)
 
         def prefer(
@@ -1814,11 +1874,9 @@ def grant_consent(
             return {"outcome": "absent", "rounds": 0, "taps": taps}
         while current is not None and len(taps) < CONSENT_MAX_TAPS:
             _norm, raw, x, y = current
-            hid.tap(x, y)
-            hid_count()
+            _tap(x, y)
             taps.append({"label": raw, "x": x, "y": y})
-            tree = hid.ax_dump()
-            hid_count()
+            tree = _describe()
             current = prefer(collect_consent_buttons(tree))
         if current is None:
             return {"outcome": "granted", "rounds": len(taps), "taps": taps}
@@ -2268,6 +2326,40 @@ def run_live_capture(
         if stats is not None:
             stats.count("hid_action")
 
+    # Per-HID-op durations (run 42051429064 diagnosis aid): every HID call
+    # below appends {"op", "ms"} on the runner clock. Stored on the shared
+    # stats object when present (dynamic attr; session.py untouched) so the
+    # session record/summary carry stats["hid_ms"].
+    hid_ms: list[dict[str, Any]] = []
+    if stats is not None:
+        _existing = getattr(stats, "hid_ms", None)
+        if isinstance(_existing, list):
+            hid_ms = _existing
+        else:
+            try:
+                stats.hid_ms = hid_ms  # type: ignore[attr-defined]
+            except AttributeError:
+                pass
+
+    def _hid(op: str, thunk: Callable[[], Any]) -> Any:
+        t0 = clock()
+        try:
+            out = thunk()
+        except FrameError:
+            try:
+                ms = (clock() - t0) * 1000.0
+            except Exception:
+                ms = 0.0
+            hid_ms.append({"op": op, "ms": float(ms)})
+            raise
+        try:
+            ms = (clock() - t0) * 1000.0
+        except Exception:
+            ms = 0.0
+        hid_ms.append({"op": op, "ms": float(ms)})
+        hid_count()
+        return out
+
     staging = run_dir / "staging"
     staging.mkdir(parents=True, exist_ok=True)
 
@@ -2286,7 +2378,7 @@ def run_live_capture(
     # describe-guided taps per phase, total taps ≤4 (foreground + lock);
     # taps never loop and positions only ever come from describe output.
     hold_left("consent grant")
-    consent_fg = grant_consent(hid, hid_count)
+    consent_fg = grant_consent(hid, hid_count, clock, hid_ms)
 
     # Compact re-probe after grant: Home backgrounds the app so the island
     # pill renders. Shots repeat (verdict-gated, bounded) until the pill
@@ -2294,8 +2386,7 @@ def run_live_capture(
     # verdict, never the session — no pill means no island claim and the
     # stub stays honestly pending.
     hold_left("compact re-probe")
-    hid.press_button("Home")
-    hid_count()
+    _hid("press_button", lambda: hid.press_button("Home"))
     compact_dest = staging / "live-la-compact.png"
     verdict: dict[str, Any] = {"live": False,
                                "reason": "no compact shot staged"}
@@ -2363,9 +2454,8 @@ def run_live_capture(
         attempt_dest = staging / "live-la-expanded.attempt.png"
         for attempt_idx in range(1, LIVE_SHOT_ATTEMPTS + 1):
             hold_left("expanded hold-open")
-            hid.long_press(hold_pts["x"], hold_pts["y"],
-                           hold_pts["duration_ms"])
-            hid_count()
+            _hid("long_press", lambda: hid.long_press(
+                hold_pts["x"], hold_pts["y"], hold_pts["duration_ms"]))
             sleeper(EXPANDED_HOLD_SETTLE_S)
             hold_left("expanded hold-open")
             _, eiso = _live_shot(
@@ -2458,8 +2548,8 @@ def run_live_capture(
                 if dismissal["attempts"] else "absent"
             dismissal["reason"] = found.get("reason", "")
             break
-        hid.tap(float(found["x"]), float(found["y"]))
-        hid_count()
+        _hid("tap", lambda: hid.tap(float(found["x"]),
+                                     float(found["y"])))
         dismissal["attempts"] += 1
         dismissal["tap"] = {"x": found["x"], "y": found["y"],
                             "mass": found.get("mass")}
@@ -2491,11 +2581,9 @@ def run_live_capture(
     # exports, the later (more settled) one staged; lock content has no
     # automated verdict (OCR is refused), so the human binds it later.
     hold_left("lock capture")
-    hid.press_button("Power")
-    hid_count()
+    _hid("press_button", lambda: hid.press_button("Power"))
     sleeper(interval_s)
-    hid.press_button("Power")
-    hid_count()
+    _hid("press_button", lambda: hid.press_button("Power"))
     # Lock-phase consent re-grant (clean-sim timing fix): the sheet
     # surfaces at LOCK time, after the foreground describe already returned
     # absent — so the driver attempts granting again once locked, before
@@ -2527,7 +2615,7 @@ def run_live_capture(
         consent["foreground"] = consent_fg
         consent["lock"] = None
     else:
-        consent_lock = grant_consent(hid, hid_count)
+        consent_lock = grant_consent(hid, hid_count, clock, hid_ms)
         fg_taps = consent_fg.get("taps", [])
         lock_taps = consent_lock.get("taps", [])
         total_taps = list(fg_taps) + list(lock_taps)
@@ -2656,6 +2744,17 @@ def run_session(
     complete; earlier exports are preserved and the receipt stays partial.
     """
     stats = stats if stats is not None else sess.PhaseStats(clock=clock)
+    # Per-HID-op durations live here (dynamic attr; session.py untouched).
+    # run_live_capture reuses the same list via stats.hid_ms when present.
+    hid_ms: list[dict[str, Any]] = []
+    _existing_hid = getattr(stats, "hid_ms", None)
+    if isinstance(_existing_hid, list):
+        hid_ms = _existing_hid
+    else:
+        try:
+            stats.hid_ms = hid_ms  # type: ignore[attr-defined]
+        except AttributeError:
+            pass
     if domain not in sess.SESSION_DOMAINS:
         raise FrameError(f"unknown session_domain {domain!r}")
     if hold_open and domain != "realtime":
@@ -2947,6 +3046,37 @@ def run_session(
                 raise FrameError(
                     "hold-open live capture requires the anchor capture "
                     "window (live_activity.started_at); failing closed")
+            # Cold-daemon warm-up (run 42051429064): one `argent run
+            # describe` AFTER launch/ready but BEFORE the hold phase
+            # starts — never inside the hold budget. Success warms the
+            # daemon and the result is discarded (log only). Failure is
+            # recorded honestly as warmup_failed with detail and the
+            # session continues (the hold driver still tries; its own
+            # timeouts still gate). Never aborts, never retries (one
+            # shot).
+            if hid is not None:
+                _wt0 = clock()
+                try:
+                    hid.ax_dump()
+                except FrameError as _wexc:
+                    try:
+                        _wms = (clock() - _wt0) * 1000.0
+                    except Exception:
+                        _wms = 0.0
+                    hid_ms.append({"op": "describe-warmup",
+                                   "ms": float(_wms)})
+                    hold_record["warmup"] = {
+                        "status": "warmup_failed",
+                        "detail": str(_wexc)[:300],
+                    }
+                else:
+                    try:
+                        _wms = (clock() - _wt0) * 1000.0
+                    except Exception:
+                        _wms = 0.0
+                    hid_ms.append({"op": "describe-warmup",
+                                   "ms": float(_wms)})
+                    hold_record["warmup"] = {"status": "ok"}
             stats.start("hold")
             try:
                 live_record = run_live_capture(
@@ -3148,7 +3278,7 @@ def run_session(
             "device_model": model_proof,
             "anchor_ids": sorted(anchor_ids),
             "hold_open": hold_record,
-            "stats": stats.to_dict(),
+            "stats": {**stats.to_dict(), "hid_ms": [dict(e) for e in hid_ms]},
             "status": "complete" if not failures else "partial",
         }
         try:
@@ -3186,7 +3316,7 @@ def run_session(
         "session_nonce": nonce,
         "frames": frame_records,
         "receipt": receipt,
-        "stats": stats.to_dict(),
+        "stats": {**stats.to_dict(), "hid_ms": [dict(e) for e in hid_ms]},
         "status": "complete",
     }
 

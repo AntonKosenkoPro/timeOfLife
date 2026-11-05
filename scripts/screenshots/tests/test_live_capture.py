@@ -158,10 +158,13 @@ class FakeHidBackend(ex.HidBackend):
       transport/parse failure model). Records calls.
     """
 
-    def __init__(self, ax="absent", ax_script=None):
+    def __init__(self, ax="absent", ax_script=None, tick=None,
+                 timeout_s=30.0):
         self.calls: list = []
         self._ax = {"label": "root", "children": []} if ax == "absent" else ax
         self._script = list(ax_script) if ax_script is not None else None
+        self._tick = tick
+        self._timeout_s = timeout_s
         self.locked = False
 
     def press_button(self, button):
@@ -185,6 +188,11 @@ class FakeHidBackend(ex.HidBackend):
             if len(self._script) > 1:
                 self._script.pop(0)
             if isinstance(doc, Exception):
+                if self._tick is not None:
+                    try:
+                        self._tick(float(self._timeout_s))
+                    except Exception:
+                        pass
                 raise doc
             return doc
         return self._ax
@@ -503,8 +511,10 @@ class ConsentGateTests(unittest.TestCase):
     def test_consent_granted_via_describe_allow(self):
         # Sheet -> one tap at the describe-derived Allow center -> re-describe
         # verifies absence. Don't Allow rides along as sheet evidence only.
+        # Leading EMPTY_DOC is the pre-hold warm-up describe (discarded).
         with tempfile.TemporaryDirectory() as tmp:
-            docs = [_desc_doc(("Allow", *ALLOW_XY),
+            docs = [EMPTY_DOC,
+                    _desc_doc(("Allow", *ALLOW_XY),
                               ("Don't Allow", 0.5, 0.9)), EMPTY_DOC]
             hid = FakeHidBackend(ax_script=docs)
             _fake, _hid, run_dir, summary, _udid = self._run(
@@ -527,8 +537,10 @@ class ConsentGateTests(unittest.TestCase):
     def test_consent_followup_always_allow_second_round(self):
         # Allow tap surfaces the follow-up; Always Allow is tapped in round
         # two and absence re-verified: granted with both coords recorded.
+        # Leading EMPTY_DOC is the pre-hold warm-up describe (discarded).
         with tempfile.TemporaryDirectory() as tmp:
-            docs = [_desc_doc(("Allow", *ALLOW_XY)),
+            docs = [EMPTY_DOC,
+                    _desc_doc(("Allow", *ALLOW_XY)),
                     _desc_doc(("Always Allow", *ALWAYS_XY)), EMPTY_DOC]
             hid = FakeHidBackend(ax_script=docs)
             _fake, _hid, run_dir, summary, _udid = self._run(
@@ -767,11 +779,14 @@ class ArgentHidBackendTests(unittest.TestCase):
 
     def test_grant_end_to_end_over_argent_transport(self):
         # Full hold-open realtime session against a scripted argent runner:
-        # describe serves the sheet then absence, gesture-tap + buttons +
-        # hold succeed, consent grants with the proven center recorded.
+        # warm-up describe (absent, discarded) then the sheet then
+        # absence, gesture-tap + buttons + hold succeed, consent grants
+        # with the proven center recorded.
         from unittest import mock
         seen: list = []
         payloads = [
+            {"description": "ROOT  AXGroup (0.000, 0.000, 1.000, 1.000)\n",
+             "source": "ax-service"},
             {"description": '  AXButton "Allow"  '
                             "(0.650, 0.790, 0.134, 0.042)\n"
                             '  AXButton "Don\'t Allow"  '
@@ -1145,8 +1160,10 @@ class LockPhaseConsentTests(unittest.TestCase):
     def test_lock_phase_grant_fires_on_scripted_lock_time_sheet(self):
         # Foreground absent, lock-time Allow tapped at describe-derived
         # center; the tap fires after the Power lock, before lock pixels.
+        # Leading EMPTY_DOC is the pre-hold warm-up describe (discarded).
         with tempfile.TemporaryDirectory() as tmp:
-            docs = [EMPTY_DOC, _desc_doc(("Allow", *ALLOW_XY)), EMPTY_DOC]
+            docs = [EMPTY_DOC, EMPTY_DOC,
+                    _desc_doc(("Allow", *ALLOW_XY)), EMPTY_DOC]
             hid = FakeHidBackend(ax_script=docs)
             _fake, _hid, run_dir, summary, _udid = self._run_lock_phase(
                 tmp, hid, "live-lockphase-1")
@@ -1166,7 +1183,8 @@ class LockPhaseConsentTests(unittest.TestCase):
         # Foreground absent + lock granted: merged outcome granted,
         # phase lock, foreground/lock audit preserved, total ≤4.
         with tempfile.TemporaryDirectory() as tmp:
-            docs = [EMPTY_DOC, _desc_doc(("Allow", *ALLOW_XY)), EMPTY_DOC]
+            docs = [EMPTY_DOC, EMPTY_DOC,
+                    _desc_doc(("Allow", *ALLOW_XY)), EMPTY_DOC]
             hid = FakeHidBackend(ax_script=docs)
             _fake, _hid, run_dir, summary, _udid = self._run_lock_phase(
                 tmp, hid, "live-lockphase-2")
@@ -1194,7 +1212,8 @@ class LockPhaseConsentTests(unittest.TestCase):
         # persisting foreground (2) + skipped lock (0) = 2.
         with tempfile.TemporaryDirectory() as tmp:
             hid = FakeHidBackend(
-                ax_script=[EMPTY_DOC, _desc_doc(("Allow", *ALLOW_XY))])
+                ax_script=[EMPTY_DOC, EMPTY_DOC,
+                           _desc_doc(("Allow", *ALLOW_XY))])
             _fake, _hid, run_dir, summary, _udid = self._run_lock_phase(
                 tmp, hid, "live-lockphase-3")
             self.assertEqual(summary["status"], "complete")
@@ -1205,7 +1224,8 @@ class LockPhaseConsentTests(unittest.TestCase):
             self.assertLessEqual(len(consent["taps"]), 4)
             self.assertEqual(len(consent["taps"]), 2)
         with tempfile.TemporaryDirectory() as tmp:
-            docs = [_desc_doc(("Allow", *ALLOW_XY),
+            docs = [EMPTY_DOC,
+                    _desc_doc(("Allow", *ALLOW_XY),
                               ("Don't Allow", 0.5, 0.9)), EMPTY_DOC]
             hid = FakeHidBackend(ax_script=docs)
             _fake, _hid, run_dir, summary, _udid = self._run_lock_phase(
@@ -1227,8 +1247,10 @@ class LockPhaseConsentTests(unittest.TestCase):
     def test_foreground_granted_skips_lock(self):
         # Already-surfaced sheet granted up front: no lock-phase HID,
         # phase foreground, tap before any Power (existing loop green).
+        # Leading EMPTY_DOC is the pre-hold warm-up describe (discarded).
         with tempfile.TemporaryDirectory() as tmp:
-            docs = [_desc_doc(("Allow", *ALLOW_XY),
+            docs = [EMPTY_DOC,
+                    _desc_doc(("Allow", *ALLOW_XY),
                               ("Don't Allow", 0.5, 0.9)), EMPTY_DOC]
             hid = FakeHidBackend(ax_script=docs)
             _fake, _hid, run_dir, summary, _udid = self._run_lock_phase(
@@ -1240,7 +1262,7 @@ class LockPhaseConsentTests(unittest.TestCase):
             self.assertEqual(consent["phase"], "foreground")
             self.assertIsNone(consent["lock"])
             self.assertEqual(len([c for c in hid.calls
-                                  if c[0] == "ax"]), 2)
+                                  if c[0] == "ax"]), 3)
             taps = [c for c in hid.calls if c[0] == "tap"]
             self.assertEqual(len(taps), 1)
             powers = [i for i, c in enumerate(hid.calls)
@@ -1264,7 +1286,7 @@ class LockPhaseConsentTests(unittest.TestCase):
             self.assertEqual(len([c for c in hid.calls
                                   if c[0] == "tap"]), 2)
             self.assertEqual(len([c for c in hid.calls
-                                  if c[0] == "ax"]), 3)
+                                  if c[0] == "ax"]), 4)
             self.assertTrue(
                 (run_dir / "staging" / "live-la-lock.png").is_file())
 
@@ -1472,6 +1494,148 @@ class PillVerifyTests(unittest.TestCase):
         found = ex.find_allow_button(frame_only)
         self.assertAlmostEqual(found[0], 0.717, places=9)
         self.assertAlmostEqual(found[1], 0.811, places=9)
+
+
+class ColdStartFixTests(unittest.TestCase):
+    """Run 42051429064 (iphone69-en) cold-start fix: warm-up + 30s describe
+    with one retry + hid_ms timings. No real sleeps; scripted clocks only.
+    """
+
+    def _session_record(self, run_dir):
+        return json.loads(
+            (run_dir / "sessions" / f"{NONCE_LIVE}.json")
+            .read_text(encoding="utf-8"))
+
+    def test_warmup_success_result_discarded_hold_proceeds(self):
+        # Warm-up describe carries an Allow sheet but is discarded: the
+        # consent phases see absent and the hold still completes. Proves
+        # the daemon call is issued pre-hold (first ax) with its result
+        # unused.
+        with tempfile.TemporaryDirectory() as tmp:
+            hid = FakeHidBackend(ax_script=[
+                _desc_doc(("Allow", *ALLOW_XY)),
+                EMPTY_DOC, EMPTY_DOC])
+            _fake, _hid, run_dir, summary, _udid = live_run(
+                tmp, hid, hold_script(paint_live_pill),
+                run_id="live-warm-1")
+            self.assertEqual(summary["status"], "complete")
+            rec = live_capture_record(run_dir)
+            self.assertEqual(rec["consent"]["outcome"], "absent")
+            self.assertEqual([c for c in hid.calls if c[0] == "tap"], [])
+            ax_idx = [i for i, c in enumerate(hid.calls) if c[0] == "ax"]
+            self.assertGreaterEqual(len(ax_idx), 3)
+            self.assertEqual(ax_idx[0], 0)
+            session_rec = self._session_record(run_dir)
+            self.assertEqual(
+                session_rec["hold_open"].get("warmup", {}).get("status"),
+                "ok")
+            hid_ms = summary["stats"].get("hid_ms", [])
+            warmups = [e for e in hid_ms if e["op"] == "describe-warmup"]
+            self.assertEqual(len(warmups), 1)
+            self.assertTrue(
+                (run_dir / "staging" / "live-la-lock.png").is_file())
+
+    def test_warmup_failure_recorded_session_continues(self):
+        # Cold-daemon warm-up timeout is recorded honestly and never
+        # aborts: the hold driver still tries and completes.
+        with tempfile.TemporaryDirectory() as tmp:
+            hid = FakeHidBackend(ax_script=[
+                ex.FrameError("HID describe spawn failed (TimeoutExpired)"),
+                EMPTY_DOC, EMPTY_DOC])
+            _fake, _hid, run_dir, summary, _udid = live_run(
+                tmp, hid, hold_script(paint_live_pill),
+                run_id="live-warm-2")
+            self.assertEqual(summary["status"], "complete")
+            session_rec = self._session_record(run_dir)
+            warmup = session_rec["hold_open"].get("warmup", {})
+            self.assertEqual(warmup.get("status"), "warmup_failed")
+            self.assertTrue(warmup.get("detail"))
+            rec = live_capture_record(run_dir)
+            self.assertEqual(rec["consent"]["outcome"], "absent")
+            self.assertTrue(
+                (run_dir / "staging" / "live-la-lock.png").is_file())
+
+    def test_describe_timeout_single_retry_success(self):
+        # Foreground initial describe times out once; the single retry
+        # serves Allow, the tap lands, absence verifies: granted with
+        # exactly one retry (4 ax total: warm-up + fail + retry + verify).
+        with tempfile.TemporaryDirectory() as tmp:
+            hid = FakeHidBackend(ax_script=[
+                EMPTY_DOC,
+                ex.FrameError("HID describe spawn failed (TimeoutExpired)"),
+                _desc_doc(("Allow", *ALLOW_XY)), EMPTY_DOC])
+            _fake, _hid, run_dir, summary, _udid = live_run(
+                tmp, hid, hold_script(paint_live_pill),
+                run_id="live-retry-1")
+            self.assertEqual(summary["status"], "complete")
+            rec = live_capture_record(run_dir)
+            consent = rec["consent"]
+            self.assertEqual(consent["outcome"], "granted")
+            self.assertEqual(consent["phase"], "foreground")
+            self.assertEqual(len(consent["taps"]), 1)
+            self.assertEqual((consent["taps"][0]["x"],
+                              consent["taps"][0]["y"]), ALLOW_XY)
+            self.assertEqual(len([c for c in hid.calls
+                                  if c[0] == "ax"]), 4)
+            self.assertTrue(
+                (run_dir / "staging" / "live-la-lock.png").is_file())
+
+    def test_double_timeout_failed_blocker_within_budget(self):
+        # Two back-to-back 30s describe timeouts in one phase degrade to
+        # failed-blocker (capture proceeds) with total describe budget
+        # <=60s. Scripted clock only: each timeout advances 30s, no real
+        # sleeps.
+        with tempfile.TemporaryDirectory() as tmp:
+            t = [1000.0]
+            clock = lambda: t[0]  # noqa: E731
+            tick = lambda s: t.__setitem__(0, t[0] + s)  # noqa: E731
+            hid = FakeHidBackend(
+                ax_script=[EMPTY_DOC,
+                           ex.FrameError("HID describe spawn failed "
+                                         "(TimeoutExpired)"),
+                           ex.FrameError("HID describe spawn failed "
+                                         "(TimeoutExpired)")],
+                tick=tick, timeout_s=ex.DESCRIBE_TIMEOUT_S)
+            _fake, _hid, run_dir, summary, _udid = live_run(
+                tmp, hid, hold_script(paint_live_pill),
+                run_id="live-retry-2", clock=clock,
+                hold_timeout_s=120.0)
+            self.assertEqual(summary["status"], "complete")
+            rec = live_capture_record(run_dir)
+            consent = rec["consent"]
+            self.assertEqual(consent["outcome"], "failed-blocker")
+            self.assertEqual(len(consent["taps"]), 0)
+            self.assertLessEqual(t[0] - 1000.0, ex.DESCRIBE_BUDGET_S + 1e-6)
+            hid_ms = summary["stats"].get("hid_ms", [])
+            describes = [e for e in hid_ms if e["op"] == "describe"]
+            self.assertEqual(len(describes), 2)
+            self.assertLessEqual(sum(e["ms"] for e in describes),
+                                 ex.DESCRIBE_BUDGET_S * 1000.0 + 1e-6)
+            self.assertTrue(
+                (run_dir / "staging" / "live-la-lock.png").is_file())
+
+    def test_hid_ms_present_for_every_hid_op(self):
+        # Every HID call in a complete hold leaves one {op, ms} entry:
+        # counts match the fake call log and cover all op families.
+        with tempfile.TemporaryDirectory() as tmp:
+            hid = FakeHidBackend(ax=None)
+            _fake, _hid, run_dir, summary, _udid = live_run(
+                tmp, hid, hold_script(paint_live_pill),
+                run_id="live-hidms-1")
+            self.assertEqual(summary["status"], "complete")
+            hid_ms = summary["stats"].get("hid_ms", [])
+            self.assertEqual(len(hid_ms), len(hid.calls))
+            for entry in hid_ms:
+                self.assertIn("op", entry)
+                self.assertIn("ms", entry)
+                self.assertGreaterEqual(entry["ms"], 0.0)
+            ops = {e["op"] for e in hid_ms}
+            self.assertIn("describe-warmup", ops)
+            self.assertIn("describe", ops)
+            self.assertIn("press_button", ops)
+            self.assertIn("long_press", ops)
+            session_rec = self._session_record(run_dir)
+            self.assertEqual(session_rec["stats"].get("hid_ms"), hid_ms)
 
 
 if __name__ == "__main__":
