@@ -1333,9 +1333,14 @@ def _verify_session_presentation(run: Callable, udid: str) -> None:
 # the live-capture driver runs the button dance, and no cleanup is issued
 # until the driver finishes explicitly (the stock auto-clean window is what
 # previously killed the activity mid-dance, ~13-17s). The bound equals the
-# existing CLEANUP deadline and stays under POLL: no deadline is increased,
-# and every driver failure fails closed through normal contamination.
-HOLD_OPEN_TIMEOUT_S = 60.0
+# existing POLL deadline; every driver failure fails closed through normal
+# contamination, and expiry still yields a partial receipt + cleanup +
+# lease release, never a hang.
+HOLD_OPEN_TIMEOUT_S = 120.0  # = POLL scale. Was 60 (= CLEANUP), set
+# unmeasured; CI run 42045831617 proved 60 insufficient with the driver
+# making steady progress (6 HID actions + 4 live shots in 60.6s on a
+# cold runner vs ~40s locally). Still bounded and fail-closed on
+# expiry (partial receipt + cleanup + lease release, never a hang).
 # Bounded simctl-export retry inside live steps only (the specified
 # HID-transition exception): initial attempt + 2 retries. The stock export
 # path keeps its no-retry semantics.
