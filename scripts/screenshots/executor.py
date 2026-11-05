@@ -1370,8 +1370,14 @@ EXPANDED_REGIONS: dict[tuple[int, int], tuple[int, int, int, int]] = {
 EXPANDED_DARK_FRAC_MIN = 0.30
 EXPANDED_BRIGHT_MIN = 500
 # Settle after the single-finger long-press for the card animation (~1.5s;
-# the gesture-custom Up delayMs already holds the contact DOWN 800ms).
+# the gesture-custom Up delayMs already holds the contact DOWN 1200ms).
 EXPANDED_HOLD_SETTLE_S = 1.5
+# Settle after Home before the first expanded Down (~1.0s; SpringBoard needs
+# a beat after backgrounding before the island pill accepts a long-press —
+# headless flake showed the first Down landing mid-transition with no card.
+# Bounded sleeper inside the existing HOLD_OPEN deadline (no deadline
+# increase); pre-settle + up-to-3 holds/settles stays ≤ ~15s added wall.
+EXPANDED_PRE_HOLD_SETTLE_S = 1.0
 # App-chrome probe band as a height fraction (avoids tab-bar/home-indicator
 # rows): the capture app's Timer screen is uniform near-white here (top
 # quantized bucket ~100% light on 1320x2868 track-running.png) while
@@ -1415,7 +1421,7 @@ class HidBackend:
     ) -> None:
         raise NotImplementedError
 
-    def long_press(self, x: float, y: float, duration_ms: int = 800) -> None:
+    def long_press(self, x: float, y: float, duration_ms: int = 1200) -> None:
         raise NotImplementedError
 
     def ax_dump(self) -> dict:
@@ -1435,10 +1441,10 @@ class ArgentHidBackend(HidBackend):
       with normalized [0,1] coordinates from find_allow_button over a real
       describe document (proven on a headless scratch sim).
     - long_press shells ``argent run gesture-custom --udid <udid>
-      --events-json '[{"type":"Down",...},{"type":"Up",...,"delayMs":800}]'``
-      (single-finger hold at the verified pill center; pilot precedent
-      800ms; bounded timeout: the shared runner's 60s, the existing
-      CLEANUP scale).
+      --events-json '[{"type":"Down",...},{"type":"Up",...,"delayMs":1200}]'``
+      (single-finger hold at the verified pill center; 1200ms after the
+      800ms pilot flaked on the first Down; bounded timeout: the shared
+      runner's 60s, the existing CLEANUP scale).
     - press_button / multitouch_hold keep the argent-simulator-server
       one-shots (universalhid_button / universalhid_multitouch), proven on
       headless sims (no Simulator.app). multitouch_hold stays for compat
@@ -1535,13 +1541,13 @@ class ArgentHidBackend(HidBackend):
                     f"multitouch-hold ({x1}, {y1}) ({x2}, {y2})")
 
     def long_press(self, x: float, y: float,
-                   duration_ms: int = 800) -> None:
+                   duration_ms: int = 1200) -> None:
         """Single-finger long-press for the expanded-card probe (never a tap).
 
         Shells ``argent run gesture-custom`` with the Down/Up sequence
         [{"type":"Down","x":cx,"y":cy},
-         {"type":"Up","x":cx,"y":cy,"delayMs":800}] at the verified pill
-        center (pilot precedent 800ms). A tap on the pill would open the
+         {"type":"Up","x":cx,"y":cy,"delayMs":1200}] at the verified pill
+        center (1200ms after the 800ms pilot flaked). A tap on the pill would open the
         app's Timer screen instead of expanding, so the expanded step
         calls only this (a tap here is a product bug, not a fallback).
         """
@@ -2303,18 +2309,22 @@ def run_live_capture(
         if verdict["live"]:
             break
 
-    # Expanded hold-open probe (one genuine single-finger attempt): the
-    # device is still unlocked at Home with the activity RUNNING. The
-    # compact verdict above already screenshots Home; when it confirms the
-    # live pill, fire ONE single-finger long-press at the pill center via
-    # gesture-custom (Down/Up 800ms; never a tap — a tap would open the
-    # app's Timer screen instead of expanding), settle, screenshot, and
-    # stage staging/live-la-expanded.png ONLY when the post shot verifies
-    # as a genuine card: card-band mass below the island AND the island
-    # still present (a tap-opened app hides the pill) AND no uniform app
-    # chrome. Anything else records expanded_attempt {outcome: no-card}
-    # with pixel evidence and continues to lock undisturbed. The probe
-    # pixels stay at staging/live-la-expanded.attempt.png either way.
+    # Expanded hold-open probe (verdict-gated, up to LIVE_SHOT_ATTEMPTS
+    # single-finger attempts): the device is still unlocked at Home with the
+    # activity RUNNING. The compact verdict above already screenshots Home;
+    # when it confirms the live pill, fire single-finger long-presses at the
+    # pill center via gesture-custom (Down/Up 1200ms; never a tap — a tap
+    # would open the app's Timer screen instead of expanding), settle,
+    # screenshot, and stage staging/live-la-expanded.png on the FIRST pass
+    # where the post shot verifies as a genuine card: card-band mass below
+    # the island AND the island still present (a tap-opened app hides the
+    # pill) AND no uniform app chrome. Each attempt reuses the
+    # LIVE_SHOT_ATTEMPTS pattern (attempt -> screenshot -> expanded_verdict
+    # + app-chrome guard); the last attempt PNG stays at
+    # staging/live-la-expanded.attempt.png as evidence when nothing passes.
+    # A short settle-wait after Home precedes the first Down (SpringBoard
+    # transition flake); pre-settle + up-to-3 holds/settles adds ≤ ~15s wall
+    # inside the existing HOLD_OPEN deadline (no deadline increase).
     # Without a confirmed pre-hold pill no hold fires (a blind long-press
     # could jiggle Home).
     hold_left("expanded hold-open")
@@ -2342,65 +2352,76 @@ def run_live_capture(
         x0, x1, y0, y1 = region
         cx = (x0 + x1) / 2 / geometry[0]
         cy = (y0 + y1) / 2 / geometry[1]
-        hold_pts = {"x": cx, "y": cy, "duration_ms": 800}
-        hid.long_press(hold_pts["x"], hold_pts["y"],
-                       hold_pts["duration_ms"])
-        hid_count()
-        sleeper(EXPANDED_HOLD_SETTLE_S)
-        attempt_dest = staging / "live-la-expanded.attempt.png"
+        hold_pts = {"x": cx, "y": cy, "duration_ms": 1200}
         hold_left("expanded hold-open")
-        _, eiso = _live_shot(
-            run, udid, attempt_dest, geometry,
-            mask=pf.resolve_screenshot_mask("la-expanded", None),
-            label="expanded hold-open", stats=stats, interval_s=interval_s,
-            sleeper=sleeper, clock=clock, deadline=deadline)
-        if stats is not None:
-            stats.count("live_capture_shot")
-        everdict = expanded_verdict(str(attempt_dest), geometry)
-        post_island = island_verdict(str(attempt_dest), geometry)
-        post_app = app_foreground_verdict(str(attempt_dest), geometry)
-        island_held = post_island.get("dark_frac", 0.0) >= PILL_DARK_FRAC_MIN
-        if (bool(everdict.get("expanded")) and island_held
-                and not post_app.get("app")):
-            staged = staging / "live-la-expanded.png"
-            shutil.copyfile(attempt_dest, staged)
-            try:
-                staged_sha = insp.sha256_file(str(staged))
-            except OSError as exc:
-                raise FrameError(f"staged expanded unreadable: {exc}")
-            expanded = {
-                "screenshot": "staging/live-la-expanded.png",
-                "screenshot_sha256": staged_sha,
-                "probe": "staging/live-la-expanded.attempt.png",
-                "captured_at_iso": eiso,
-                "verdict": everdict,
-                "post_island_dark_frac": post_island.get("dark_frac"),
-                "post_app_share": post_app.get("share"),
-                "hold": hold_pts,
-            }
-        else:
-            why = []
-            if not everdict.get("expanded"):
-                why.append(everdict.get("reason", "no card mass"))
-            if not island_held:
-                why.append(
-                    "island pill hidden post-hold (a tap opens the app; "
-                    "expansion refused)")
-            if post_app.get("app"):
-                why.append(
-                    "uniform app chrome post-hold (Timer screen, not a "
-                    "card); expansion refused")
-            expanded_attempt = {
-                "outcome": "no-card",
-                "reason": "; ".join(why) or "no expanded claim",
-                "probe": "staging/live-la-expanded.attempt.png",
-                "captured_at_iso": eiso,
-                "verdict": everdict,
-                "post_island_dark_frac": post_island.get("dark_frac"),
-                "post_app_share": post_app.get("share"),
-                "hold": hold_pts,
-                "pre_live": True,
-            }
+        sleeper(EXPANDED_PRE_HOLD_SETTLE_S)
+        attempt_dest = staging / "live-la-expanded.attempt.png"
+        for attempt_idx in range(1, LIVE_SHOT_ATTEMPTS + 1):
+            hold_left("expanded hold-open")
+            hid.long_press(hold_pts["x"], hold_pts["y"],
+                           hold_pts["duration_ms"])
+            hid_count()
+            sleeper(EXPANDED_HOLD_SETTLE_S)
+            hold_left("expanded hold-open")
+            _, eiso = _live_shot(
+                run, udid, attempt_dest, geometry,
+                mask=pf.resolve_screenshot_mask("la-expanded", None),
+                label="expanded hold-open", stats=stats,
+                interval_s=interval_s, sleeper=sleeper, clock=clock,
+                deadline=deadline)
+            if stats is not None:
+                stats.count("live_capture_shot")
+            everdict = expanded_verdict(str(attempt_dest), geometry)
+            post_island = island_verdict(str(attempt_dest), geometry)
+            post_app = app_foreground_verdict(str(attempt_dest), geometry)
+            island_held = post_island.get("dark_frac", 0.0) \
+                >= PILL_DARK_FRAC_MIN
+            if (bool(everdict.get("expanded")) and island_held
+                    and not post_app.get("app")):
+                staged = staging / "live-la-expanded.png"
+                shutil.copyfile(attempt_dest, staged)
+                try:
+                    staged_sha = insp.sha256_file(str(staged))
+                except OSError as exc:
+                    raise FrameError(f"staged expanded unreadable: {exc}")
+                expanded = {
+                    "screenshot": "staging/live-la-expanded.png",
+                    "screenshot_sha256": staged_sha,
+                    "probe": "staging/live-la-expanded.attempt.png",
+                    "captured_at_iso": eiso,
+                    "verdict": everdict,
+                    "post_island_dark_frac": post_island.get("dark_frac"),
+                    "post_app_share": post_app.get("share"),
+                    "hold": hold_pts,
+                    "attempts": attempt_idx,
+                }
+                break
+            if attempt_idx == LIVE_SHOT_ATTEMPTS:
+                why = []
+                if not everdict.get("expanded"):
+                    why.append(everdict.get("reason", "no card mass"))
+                if not island_held:
+                    why.append(
+                        "island pill hidden post-hold (a tap opens the app; "
+                        "expansion refused)")
+                if post_app.get("app"):
+                    why.append(
+                        "uniform app chrome post-hold (Timer screen, not a "
+                        "card); expansion refused")
+                expanded_attempt = {
+                    "outcome": "no-card",
+                    "reason": "; ".join(why) or "no expanded claim",
+                    "probe": "staging/live-la-expanded.attempt.png",
+                    "captured_at_iso": eiso,
+                    "verdict": everdict,
+                    "post_island_dark_frac": post_island.get("dark_frac"),
+                    "post_app_share": post_app.get("share"),
+                    "hold": hold_pts,
+                    "pre_live": True,
+                    "attempts": attempt_idx,
+                }
+            else:
+                sleeper(interval_s)
 
     # Consent-sheet dismissal probe (pixel-derived, before lock): shoot the
     # lock screen; if an Allow sheet is pixel-detected, tap ONLY its

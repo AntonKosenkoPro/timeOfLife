@@ -175,7 +175,7 @@ class FakeHidBackend(ex.HidBackend):
     def multitouch_hold(self, x1, y1, x2, y2):
         self.calls.append(("hold", x1, y1, x2, y2))
 
-    def long_press(self, x, y, duration_ms=800):
+    def long_press(self, x, y, duration_ms=1200):
         self.calls.append(("long-press", x, y, duration_ms))
 
     def ax_dump(self):
@@ -265,7 +265,12 @@ def live_capture_record(run_dir: Path) -> dict:
 
 
 def hold_script(compact_painter, lock_painter=None, expanded_painter=None):
-    """Full io queue: 3 stock + 1 compact + 1 expanded + 1 probe + 2 lock."""
+    """Full io queue: 3 stock + 1 compact + 1 expanded + 1 probe + 2 lock.
+
+    The expanded step retries verdict-gated up to 3 times; with a single
+    expanded slot the 2nd/3rd attempts fall back to plain (honest no-card)
+    unless the caller inlines extra expanded paints. Card tests pass on
+    the first attempt, so one slot suffices there."""
     lock_painter = lock_painter or paint_plain
     expanded_painter = expanded_painter or paint_plain
     return ([("paint", paint_plain)] * 3
@@ -441,15 +446,17 @@ class LockCaptureTests(unittest.TestCase):
             hid = FakeHidBackend(ax=None)
             script = ([("paint", paint_plain)] * 3
                       + [("paint", paint_live_pill)]
-                      + [("paint", paint_plain)] * 2
+                      + [("paint", paint_plain)] * 3
+                      + [("paint", paint_plain)]
                       + [("raise", subprocess.TimeoutExpired("simctl", 60))]
                       + [("paint", paint_plain)] * 2)
             fake, _hid, run_dir, summary, _udid = live_run(
                 tmp, hid, script, run_id="live-lock-2")
             self.assertEqual(summary["status"], "complete")
-            # 3 stock + 1 compact (live first try) + 1 expanded (no card)
-            # + 1 dismissal probe (absent) + 1 dropped + 2 lock.
-            self.assertEqual(len(fake.io_calls), 3 + 1 + 1 + 1 + 1 + 2)
+            # 3 stock + 1 compact (live first try) + 3 expanded (no card,
+            # verdict-gated) + 1 dismissal probe (absent) + 1 dropped
+            # + 2 lock.
+            self.assertEqual(len(fake.io_calls), 3 + 1 + 3 + 1 + 1 + 2)
             self.assertTrue(
                 (run_dir / "staging" / "live-la-lock.png").is_file())
 
@@ -461,7 +468,8 @@ class LockCaptureTests(unittest.TestCase):
             hid = FakeHidBackend(ax=None)
             script = ([("paint", paint_plain)] * 3
                       + [("paint", paint_live_pill)]
-                      + [("paint", paint_plain)] * 2
+                      + [("paint", paint_plain)] * 3
+                      + [("paint", paint_plain)]
                       + [("raise", subprocess.TimeoutExpired("simctl", 60))]
                       * 3)
             udid = f"UDID-lockex-{os.getpid()}"
@@ -730,7 +738,7 @@ class ArgentHidBackendTests(unittest.TestCase):
     def test_long_press_argv_pins_gesture_custom(self):
         # Scripted runner pins the exact `argent run gesture-custom`
         # invocation the expanded step uses: Down/Up at the pill center
-        # with delayMs 800 (pilot precedent), bounded runner timeout.
+        # with delayMs 1200 (800ms pilot flaked), bounded runner timeout.
         from unittest import mock
         seen: list = []
 
@@ -750,7 +758,7 @@ class ArgentHidBackendTests(unittest.TestCase):
         self.assertEqual(payload,
                          [{"type": "Down", "x": 0.5, "y": 0.035},
                           {"type": "Up", "x": 0.5, "y": 0.035,
-                           "delayMs": 800}])
+                           "delayMs": 1200}])
 
     def test_long_press_missing_binary_fails_closed(self):
         hid = ex.ArgentHidBackend("UDID-x", argent="definitely-missing-bin")
@@ -840,7 +848,7 @@ class ExpandedHoldTests(unittest.TestCase):
         # staged with pixel verification, and the hold is a gesture-custom
         # long-press at the pill center (never a tap — a tap would open
         # the app instead of expanding; never multitouch — proven
-        # incapable).
+        # incapable). First-attempt pass stages with attempts == 1.
         with tempfile.TemporaryDirectory() as tmp:
             hid = FakeHidBackend(ax=None)
             script = hold_script(paint_live_pill,
@@ -857,14 +865,15 @@ class ExpandedHoldTests(unittest.TestCase):
             presses = [c for c in hid.calls if c[0] == "long-press"]
             self.assertEqual(len(presses), 1)
             _, x, y, dur = presses[0]
-            self.assertEqual(dur, 800)
+            self.assertEqual(dur, 1200)
             px0, px1, py0, py1 = PILL_BOX
             self.assertGreaterEqual(x, px0 / GEO63[0])
             self.assertLessEqual(x, px1 / GEO63[0])
             self.assertGreaterEqual(y, py0 / GEO63[1])
             self.assertLessEqual(y, py1 / GEO63[1])
             self.assertEqual(rec["expanded"]["hold"],
-                             {"x": x, "y": y, "duration_ms": 800})
+                             {"x": x, "y": y, "duration_ms": 1200})
+            self.assertEqual(rec["expanded"].get("attempts"), 1)
             self.assertEqual([c for c in hid.calls if c[0] == "hold"], [])
             self.assertEqual([c for c in hid.calls if c[0] == "tap"], [])
             self.assertLess(hid.calls.index(presses[0]),
@@ -877,8 +886,9 @@ class ExpandedHoldTests(unittest.TestCase):
             self.assertTrue(rec["compact"]["verdict"]["live"])
 
     def test_no_card_no_staging_lock_undisturbed(self):
-        # Live pill + long-press with no card mass: no staging, honest
-        # no-card attempt recorded (probe kept), lock/compact undisturbed.
+        # Live pill + long-press with no card mass across all 3 verdict-gated
+        # attempts: no staging, honest no-card attempt recorded (last probe
+        # kept), lock/compact undisturbed.
         with tempfile.TemporaryDirectory() as tmp:
             hid = FakeHidBackend(ax=None)
             _fake, _hid, run_dir, summary, _udid = live_run(
@@ -894,9 +904,10 @@ class ExpandedHoldTests(unittest.TestCase):
             attempt = rec["expanded_attempt"]
             self.assertEqual(attempt["outcome"], "no-card")
             self.assertTrue(attempt["pre_live"])
-            self.assertEqual(attempt["hold"]["duration_ms"], 800)
+            self.assertEqual(attempt["hold"]["duration_ms"], 1200)
+            self.assertEqual(attempt.get("attempts"), 3)
             self.assertEqual(len([c for c in hid.calls
-                                  if c[0] == "long-press"]), 1)
+                                  if c[0] == "long-press"]), 3)
             self.assertEqual([c for c in hid.calls if c[0] == "hold"], [])
             self.assertTrue(
                 (run_dir / "staging" / "live-la-compact.png").is_file())
@@ -908,13 +919,13 @@ class ExpandedHoldTests(unittest.TestCase):
     def test_tap_opened_app_refused(self):
         # Pre-hold pill live, but post-hold pixels show uniform app chrome
         # with the pill hidden (the press behaved as a tap and opened the
-        # Timer screen): expansion refused on pixels, lock still genuine,
-        # nothing staged.
+        # Timer screen): expansion refused on pixels over all 3 attempts,
+        # lock still genuine, nothing staged.
         with tempfile.TemporaryDirectory() as tmp:
             hid = FakeHidBackend(ax=None)
             script = ([("paint", paint_plain)] * 3
                       + [("paint", paint_live_pill)]
-                      + [("paint", paint_app_screen)]
+                      + [("paint", paint_app_screen)] * 3
                       + [("paint", paint_plain)] * 3)
             _fake, _hid, run_dir, summary, _udid = live_run(
                 tmp, hid, script, run_id="live-exp-3")
@@ -924,8 +935,10 @@ class ExpandedHoldTests(unittest.TestCase):
             rec = live_capture_record(run_dir)
             self.assertEqual(rec["expanded_attempt"]["outcome"], "no-card")
             self.assertIn("app", rec["expanded_attempt"]["reason"])
+            self.assertEqual(rec["expanded_attempt"]["hold"]
+                             ["duration_ms"], 1200)
             self.assertEqual(len([c for c in hid.calls
-                                  if c[0] == "long-press"]), 1)
+                                  if c[0] == "long-press"]), 3)
             self.assertEqual([c for c in hid.calls if c[0] == "hold"], [])
             self.assertTrue(
                 (run_dir / "staging" / "live-la-lock.png").is_file())
@@ -956,6 +969,95 @@ class ExpandedHoldTests(unittest.TestCase):
             self.assertTrue(
                 (run_dir / "staging" / "live-la-lock.png").is_file())
 
+    def test_retry_succeeds_second_attempt(self):
+        # Flaky first Down (transition frame, no card) then a genuine card
+        # on the second verdict-gated attempt: staged on first pass with
+        # attempts == 2, both holds at 1200ms, lock/compact undisturbed.
+        with tempfile.TemporaryDirectory() as tmp:
+            hid = FakeHidBackend(ax=None)
+            script = ([("paint", paint_plain)] * 3
+                      + [("paint", paint_live_pill)]
+                      + [("paint", paint_plain)]
+                      + [("paint", paint_expanded_card)]
+                      + [("paint", paint_plain)]
+                      + [("paint", paint_plain)] * 2)
+            _fake, _hid, run_dir, summary, _udid = live_run(
+                tmp, hid, script, run_id="live-exp-5")
+            self.assertEqual(summary["status"], "complete")
+            staged = run_dir / "staging" / "live-la-expanded.png"
+            self.assertTrue(staged.is_file())
+            rec = live_capture_record(run_dir)
+            self.assertIn("expanded", rec)
+            self.assertTrue(rec["expanded"]["verdict"]["expanded"])
+            self.assertEqual(rec["expanded"].get("attempts"), 2)
+            presses = [c for c in hid.calls if c[0] == "long-press"]
+            self.assertEqual(len(presses), 2)
+            for _, x, y, dur in presses:
+                self.assertEqual(dur, 1200)
+                px0, px1, py0, py1 = PILL_BOX
+                self.assertGreaterEqual(x, px0 / GEO63[0])
+                self.assertLessEqual(x, px1 / GEO63[0])
+                self.assertGreaterEqual(y, py0 / GEO63[1])
+                self.assertLessEqual(y, py1 / GEO63[1])
+            self.assertEqual(rec["expanded"]["hold"]["duration_ms"], 1200)
+            self.assertTrue(
+                (run_dir / "staging" / "live-la-compact.png").is_file())
+            self.assertTrue(
+                (run_dir / "staging" / "live-la-lock.png").is_file())
+
+    def test_triple_miss_records_attempt_honestly(self):
+        # Three plain verdict-gated attempts, no card mass anywhere: no
+        # staging, the LAST attempt PNG kept as evidence with attempts == 3
+        # and the 1200ms hold recorded honestly.
+        with tempfile.TemporaryDirectory() as tmp:
+            hid = FakeHidBackend(ax=None)
+            script = ([("paint", paint_plain)] * 3
+                      + [("paint", paint_live_pill)]
+                      + [("paint", paint_plain)] * 3
+                      + [("paint", paint_plain)]
+                      + [("paint", paint_plain)] * 2)
+            _fake, _hid, run_dir, summary, _udid = live_run(
+                tmp, hid, script, run_id="live-exp-6")
+            self.assertEqual(summary["status"], "complete")
+            self.assertFalse(
+                (run_dir / "staging" / "live-la-expanded.png").is_file())
+            attempt_png = run_dir / "staging" / "live-la-expanded.attempt.png"
+            self.assertTrue(attempt_png.is_file())
+            rec = live_capture_record(run_dir)
+            self.assertNotIn("expanded", rec)
+            attempt = rec["expanded_attempt"]
+            self.assertEqual(attempt["outcome"], "no-card")
+            self.assertTrue(attempt["pre_live"])
+            self.assertEqual(attempt["hold"]["duration_ms"], 1200)
+            self.assertEqual(attempt.get("attempts"), 3)
+            self.assertEqual(attempt["probe"],
+                             "staging/live-la-expanded.attempt.png")
+            self.assertTrue(attempt["captured_at_iso"])
+            presses = [c for c in hid.calls if c[0] == "long-press"]
+            self.assertEqual(len(presses), 3)
+            self.assertTrue(all(p[3] == 1200 for p in presses))
+            self.assertTrue(
+                (run_dir / "staging" / "live-la-lock.png").is_file())
+
+    def test_hold_duration_carries_1200ms(self):
+        # Every expanded Down/Up in the verdict-gated loop carries 1200ms
+        # (800ms pilot flaked): single-pass and triple-miss agree.
+        with tempfile.TemporaryDirectory() as tmp:
+            hid = FakeHidBackend(ax=None)
+            script = hold_script(paint_live_pill,
+                                 expanded_painter=paint_expanded_card)
+            _fake, _hid, run_dir, summary, _udid = live_run(
+                tmp, hid, script, run_id="live-exp-7")
+            rec = live_capture_record(run_dir)
+            self.assertEqual(rec["expanded"]["hold"]["duration_ms"], 1200)
+        with tempfile.TemporaryDirectory() as tmp:
+            hid = FakeHidBackend(ax=None)
+            _fake, _hid, run_dir, summary, _udid = live_run(
+                tmp, hid, hold_script(paint_live_pill), run_id="live-exp-8")
+            rec = live_capture_record(run_dir)
+            self.assertEqual(rec["expanded_attempt"]["hold"]
+                             ["duration_ms"], 1200)
+
 
 class ConsentDismissalTests(unittest.TestCase):
     def test_sheet_absent_no_tap(self):
@@ -973,11 +1075,13 @@ class ConsentDismissalTests(unittest.TestCase):
     def test_sheet_dismissed_via_pixel_centroid(self):
         # The Allow tap point comes from the live probe image (label
         # centroid), verified by re-shot; lock capture stays genuine.
+        # Expanded takes up to 3 verdict-gated shots, so the sheet probe
+        # sits after 3 plain expanded attempts.
         with tempfile.TemporaryDirectory() as tmp:
             hid = FakeHidBackend(ax=None)
             script = ([("paint", paint_plain)] * 3
                       + [("paint", paint_live_pill)]
-                      + [("paint", paint_plain)]
+                      + [("paint", paint_plain)] * 3
                       + [("paint", paint_sheet)]
                       + [("paint", paint_plain)] * 3)
             _fake, _hid, run_dir, summary, _udid = live_run(
@@ -1000,11 +1104,13 @@ class ConsentDismissalTests(unittest.TestCase):
     def test_sheet_blocked_after_one_tap_lock_genuine(self):
         # One pixel-derived tap fails with evidence: blocked recorded
         # honestly (taps never loop), lock pixels still staged genuine.
+        # Expanded takes up to 3 verdict-gated shots, so the sheet probe
+        # sits after 3 plain expanded attempts.
         with tempfile.TemporaryDirectory() as tmp:
             hid = FakeHidBackend(ax=None)
             script = ([("paint", paint_plain)] * 3
                       + [("paint", paint_live_pill)]
-                      + [("paint", paint_plain)]
+                      + [("paint", paint_plain)] * 3
                       + [("paint", paint_sheet)] * 2
                       + [("paint", paint_plain)] * 3)
             _fake, _hid, run_dir, summary, _udid = live_run(
