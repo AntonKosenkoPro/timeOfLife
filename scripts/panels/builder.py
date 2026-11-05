@@ -325,7 +325,6 @@ REVIEW_STATUS = (
 # --- 6.9 / v13 geometry (verbatim from build_final_v13.py) -----------------
 
 HEADLINE_MAX_W_69 = 1140
-HEADLINE_TOP_MARGIN_69 = 168
 MIN_GAP_69 = 70
 
 BEZEL69_NATIVE = (980, 2000)
@@ -335,9 +334,6 @@ BEZEL69_MASK_R = 120
 
 DEVICE_W_69 = 1152
 DEVICE_BACK_W_69 = 992
-
-HISTORY_SHOT_TOP_69 = 444
-ADD_ENTRY_SHOT_TOP_69 = 444
 
 BANNER_SRC_TOP = 2270
 BANNER_SRC_BOTTOM = 2458
@@ -358,14 +354,10 @@ FRONT_BOX_FIGMA = [84, 1742, 1236, 4093]
 # stay pinned to the scaled derivation; the LA builder re-checks all
 # gap/overlap/bleed invariants on the derived boxes.
 HEADLINE_MAX_W_63 = _qx(HEADLINE_MAX_W_69)
-HEADLINE_TOP_MARGIN_63 = _qy(HEADLINE_TOP_MARGIN_69)
 MIN_GAP_63 = _qy(MIN_GAP_69)
 
 DEVICE_W_63 = _qx(DEVICE_W_69)
 DEVICE_BACK_W_63 = _qx(DEVICE_BACK_W_69)
-
-HISTORY_SHOT_TOP_63 = _qy(HISTORY_SHOT_TOP_69)
-ADD_ENTRY_SHOT_TOP_63 = _qy(ADD_ENTRY_SHOT_TOP_69)
 
 BANNER_SRC_TOP_63 = _qy(BANNER_SRC_TOP)
 BANNER_SRC_BOTTOM_63 = _qy(BANNER_SRC_BOTTOM)
@@ -517,9 +509,6 @@ CAVITY_SIZE = (2064, 2752)
 CAVITY_R = 56
 
 HEADLINE_MAX_W_IPAD = 1820
-HEADLINE_TOP_MARGIN_IPAD = 168
-MIN_GAP_IPAD = 70
-BOTTOM_MIN_IPAD = 40
 SIDE_MIN_IPAD = 96
 SHADOW_R_IPAD = 200
 SHADOW_BLUR_IPAD = 55
@@ -1343,29 +1332,31 @@ def src_row_to_canvas_69(src_y: int, outer_w: int, margin_top: int) -> float:
 
 def single_panel_top_69(src: Image.Image, bezel: Image.Image, locale: str,
                         lines_cfg: list[tuple[str, int, bool, int]],
-                        force_top: int | None = None, panel: str = "track"
+                        panel: str = "track"
                         ) -> tuple[Image.Image, dict]:
+    """Owner centered layout: device pads equal left/right/bottom; the
+    headline block is centered between the canvas top and the device top
+    (equal spacing above and below the title). LA keeps custom stacking."""
     base = Image.new("RGBA", CANVAS_69, ACCENT + (255,))
     h_h = headline_height_69(locale, panel, lines_cfg)
-    hy0 = HEADLINE_TOP_MARGIN_69
-    hy1 = hy0 + h_h
     dev_h = aspect_h_69(DEVICE_W_69)
     x0 = (CANVAS_69[0] - DEVICE_W_69) // 2
-    y0 = hy1 + MIN_GAP_69 if force_top is None else force_top
-    if y0 - hy1 < MIN_GAP_69:
+    y0 = CANVAS_69[1] - dev_h - x0
+    if y0 < 0:
         raise BuilderError(
-            f"headline/device overlap: shot top {y0} - headline bottom {hy1} "
-            f"= {y0 - hy1} < {MIN_GAP_69}; caption does not fit the approved "
-            "template — 9.2 finding, never silently shrunk")
-    if y0 + dev_h > CANVAS_69[1]:
+            f"device does not fit canvas with equal pads: {dev_h}px + "
+            f"{x0}px pad > {CANVAS_69[1]}")
+    if y0 - h_h < 0:
         raise BuilderError(
-            f"single device overflow bottom: {y0 + dev_h} > {CANVAS_69[1]} "
-            f"(headline block {h_h}px); caption does not fit the approved "
-            "template — 9.2 finding, never silently shrunk")
+            f"headline block {h_h}px taller than title region {y0}px; "
+            "caption does not fit the centered template — 9.2 finding, "
+            "never silently shrunk")
+    hy0 = (y0 - h_h) // 2
+    hy1 = hy0 + h_h
     draw_headline_69(base, locale, lines_cfg, hy0, panel)
     box = (x0, y0, x0 + DEVICE_W_69, y0 + dev_h)
     out = place_device_69(base, device_shot_69(src, bezel), box)
-    return out, {"headline_anchor": "top",
+    return out, {"headline_anchor": "centered",
                  "headline_box": [hy0, hy1],
                  "shot_box": list(box)}
 
@@ -1477,14 +1468,14 @@ def build_69(locale: str, caps: dict, captions_version: str,
     panels: dict = {}
     try:
         plan = [
-            ("track", "track-running", copy["track"], None),
-            ("insights", "insights", copy["insights"], None),
-            ("history", "history", copy["history"], HISTORY_SHOT_TOP_69),
-            ("add-entry", "add-entry", copy["add-entry"], ADD_ENTRY_SHOT_TOP_69),
+            ("track", "track-running", copy["track"]),
+            ("insights", "insights", copy["insights"]),
+            ("history", "history", copy["history"]),
+            ("add-entry", "add-entry", copy["add-entry"]),
         ]
-        for key, frame, hl, top in plan:
+        for key, frame, hl in plan:
             img, layout = single_panel_top_69(raw[frame], bezel, locale, hl,
-                                              force_top=top, panel=key)
+                                              panel=key)
             img = img.convert("RGB")
             if tuple(img.size) != CANVAS_69:
                 raise BuilderError(f"output size drift {key}: {img.size}")
@@ -1549,16 +1540,15 @@ def build_69(locale: str, caps: dict, captions_version: str,
         },
         "device_outer_width_px": DEVICE_W_69,
         "device_back_outer_width_px": DEVICE_BACK_W_69,
-        "headline_top_margin_px": HEADLINE_TOP_MARGIN_69,
-        "min_gap_px": MIN_GAP_69,
+        "layout_rule": "centered-title/equal-pads (owner order: device "
+                       "pads equal left/right/bottom; headline block "
+                       "centered between canvas top and device top)",
         "figma_geometry": {
             "device_top_box": TOP_BOX_FIGMA,
             "headline_box": HEADLINE_BOX_FIGMA,
             "device_back_box": BACK_BOX_FIGMA,
             "device_front_box": FRONT_BOX_FIGMA,
         },
-        "history_shot_top_override_px": HISTORY_SHOT_TOP_69,
-        "add_entry_shot_top_px": ADD_ENTRY_SHOT_TOP_69,
         "locale": locale,
         "captions_version": captions_version,
         "run_id": run_meta.get("run_id"),
@@ -1651,31 +1641,33 @@ def single_panel_top_63(src: Image.Image, bezel: Image.Image,
                         slot: tuple[int, int], at: tuple[int, int],
                         bezel_size: tuple[int, int], locale: str,
                         lines_cfg: list[tuple[str, int, bool, int]],
-                        force_top: int | None = None,
                         mask_r: int | None = None, panel: str = "track"
                         ) -> tuple[Image.Image, dict]:
+    """Owner centered layout, scaled geometry (same rule as 6.9)."""
     base = Image.new("RGBA", CANVAS_63, ACCENT + (255,))
     h_h = headline_height_63(locale, panel, lines_cfg)
-    hy0 = HEADLINE_TOP_MARGIN_63
-    hy1 = hy0 + h_h
     dev_h = aspect_h_63(DEVICE_W_63, bezel_size)
     x0 = (CANVAS_63[0] - DEVICE_W_63) // 2
-    y0 = hy1 + MIN_GAP_63 if force_top is None else force_top
-    if y0 - hy1 < MIN_GAP_63:
+    y0 = CANVAS_63[1] - dev_h - x0
+    if y0 < 0:
         raise BuilderError(
-            f"headline/device overlap: shot top {y0} - headline bottom {hy1} "
-            f"= {y0 - hy1} < {MIN_GAP_63}; caption does not fit the scaled "
-            "template — 9.2 finding, never silently shrunk")
-    if y0 + dev_h > CANVAS_63[1]:
+            f"device does not fit canvas with equal pads: {dev_h}px + "
+            f"{x0}px pad > {CANVAS_63[1]}")
+    if y0 - h_h < 0:
         raise BuilderError(
-            f"single device overflow bottom: {y0 + dev_h} > {CANVAS_63[1]} "
-            f"(headline block {h_h}px); caption does not fit the scaled "
-            "template — 9.2 finding, never silently shrunk")
+            f"headline block {h_h}px taller than title region {y0}px; "
+            "caption does not fit the centered template — 9.2 finding, "
+            "never silently shrunk")
+    hy0 = (y0 - h_h) // 2
+    hy1 = hy0 + h_h
     draw_headline_63(base, locale, lines_cfg, hy0, panel)
-    box = (x0, y0, x0 + DEVICE_W_63, y0 + dev_h)
+    # Symmetric box: (W - DEVICE_W_63) is odd, so x0 + DEVICE_W_63 would
+    # leave unequal sides; mirror the right edge instead (1px art fit,
+    # invisible) to keep the owner equal-pads rule exact.
+    box = (x0, y0, CANVAS_63[0] - x0, y0 + dev_h)
     out = place_device_63(base, device_shot_63(src, bezel, slot, at,
                                               bezel_size, mask_r), box)
-    return out, {"headline_anchor": "top",
+    return out, {"headline_anchor": "centered",
                  "headline_box": [hy0, hy1],
                  "shot_box": list(box)}
 
@@ -1773,15 +1765,15 @@ def build_63(locale: str, caps: dict, captions_version: str,
     panels: dict = {}
     try:
         plan = [
-            ("track", "track-running", copy["track"], None),
-            ("insights", "insights", copy["insights"], None),
-            ("history", "history", copy["history"], HISTORY_SHOT_TOP_63),
-            ("add-entry", "add-entry", copy["add-entry"], ADD_ENTRY_SHOT_TOP_63),
+            ("track", "track-running", copy["track"]),
+            ("insights", "insights", copy["insights"]),
+            ("history", "history", copy["history"]),
+            ("add-entry", "add-entry", copy["add-entry"]),
         ]
-        for key, frame, hl, top in plan:
+        for key, frame, hl in plan:
             img, layout = single_panel_top_63(raw[frame], bezel, slot, at,
                                               bezel_size, locale, hl,
-                                              force_top=top, mask_r=mask_r,
+                                              mask_r=mask_r,
                                               panel=key)
             img = img.convert("RGB")
             if tuple(img.size) != CANVAS_63:
@@ -1860,7 +1852,7 @@ def build_63(locale: str, caps: dict, captions_version: str,
         },
         "device_outer_width_px": DEVICE_W_63,
         "device_back_outer_width_px": DEVICE_BACK_W_63,
-        "headline_top_margin_px": HEADLINE_TOP_MARGIN_63,
+        "layout_rule": "centered-title/equal-pads (owner order)",
         "min_gap_px": MIN_GAP_63,
         "scaled_geometry": {
             "device_top_origin": TOP_BOX_63[:3],
@@ -1868,8 +1860,6 @@ def build_63(locale: str, caps: dict, captions_version: str,
             "device_back_origin": BACK_BOX_63[:3],
             "device_front_origin": FRONT_BOX_63[:3],
         },
-        "history_shot_top_override_px": HISTORY_SHOT_TOP_63,
-        "add_entry_shot_top_px": ADD_ENTRY_SHOT_TOP_63,
         "locale": locale,
         "captions_version": captions_version,
         "run_id": run_meta.get("run_id"),
@@ -1916,33 +1906,38 @@ def device_sheet_ipad(raw: Image.Image, bezel: Image.Image) -> Image.Image:
 
 
 def solve_layout_ipad_for_locale(locale: str, copy: dict) -> tuple[int, int]:
-    """Uniform (outer_w, shot_top) for all 4 panels.
+    """Uniform (outer_w, shot_top): device pads equal left/right/bottom;
+    each headline block is centered between the canvas top and the
+    device top by render_panel_ipad. Solved with the build locale so
+    the tallest headline still fits its title region (fail-closed).
 
-    Solved with the build locale so localized (taller) headlines shrink
-    the device honestly instead of overlapping it.
+    With side pad s = (W - ow)/2 and bottom pad = s: shot_top(ow) =
+    H - s - ow*ratio, decreasing in ow (ratio > 1/2), so the largest
+    fitting ow is floor((H - W/2 - tallest) / (ratio - 1/2)).
     """
     tallest = max(headline_height_ipad(locale, key, cfg)
                   for key, cfg in copy.items())
-    shot_top = HEADLINE_TOP_MARGIN_IPAD + tallest + MIN_GAP_IPAD
-    outer_w = min(
-        CANVAS_IPAD[0] - 2 * SIDE_MIN_IPAD,
-        (CANVAS_IPAD[1] - BOTTOM_MIN_IPAD - shot_top) * BEZEL_IPAD_NATIVE[0]
-        // BEZEL_IPAD_NATIVE[1],
-    )
-    if outer_w <= 0:
+    ratio = (BEZEL_IPAD_NATIVE[1] / BEZEL_IPAD_NATIVE[0])
+    ow = min(CANVAS_IPAD[0] - 2 * SIDE_MIN_IPAD,
+             int((CANVAS_IPAD[1] - CANVAS_IPAD[0] / 2 - tallest)
+                 // (ratio - 0.5)))
+    ow -= (CANVAS_IPAD[0] - ow) % 2  # keep side pads exactly equal
+    if ow <= 0:
         raise BuilderError(
             f"no room for device: tallest headline {tallest}px leaves "
-            f"shot_top {shot_top}; caption does not fit the approved "
+            "no title region; caption does not fit the centered "
             "template — 9.2 finding, never silently shrunk")
-    dev_h = round(outer_w * BEZEL_IPAD_NATIVE[1] / BEZEL_IPAD_NATIVE[0])
-    if not shot_top + dev_h + BOTTOM_MIN_IPAD <= CANVAS_IPAD[1]:
-        raise BuilderError(
-            f"device overflow bottom: shot_top {shot_top} + dev_h {dev_h} + "
-            f"margin {BOTTOM_MIN_IPAD} > {CANVAS_IPAD[1]}; caption does not "
-            "fit the approved template — 9.2 finding")
-    if not (CANVAS_IPAD[0] - outer_w) // 2 >= SIDE_MIN_IPAD:
+    dev_h = round(ow * ratio)
+    side = (CANVAS_IPAD[0] - ow) // 2
+    shot_top = CANVAS_IPAD[1] - side - dev_h
+    if not side >= SIDE_MIN_IPAD:
         raise BuilderError("device too wide for side margins")
-    return outer_w, shot_top
+    if not shot_top >= tallest:
+        raise BuilderError(
+            f"tallest headline {tallest}px exceeds title region "
+            f"{shot_top}px; caption does not fit the centered "
+            "template — 9.2 finding")
+    return ow, shot_top
 
 
 def render_panel_ipad(raw: Image.Image, bezel: Image.Image, locale: str,
@@ -1950,13 +1945,18 @@ def render_panel_ipad(raw: Image.Image, bezel: Image.Image, locale: str,
                       outer_w: int, shot_top: int, panel: str
                       ) -> tuple[Image.Image, dict]:
     base = Image.new("RGBA", CANVAS_IPAD, ACCENT + (255,))
-    hy0, hy1 = draw_headline_ipad(base, locale, lines_cfg,
-                                  HEADLINE_TOP_MARGIN_IPAD, panel)
+    h_h = headline_height_ipad(locale, panel, lines_cfg)
+    if shot_top - h_h < 0:
+        raise BuilderError(
+            f"headline block {h_h}px taller than title region "
+            f"{shot_top}px; caption does not fit the centered "
+            "template — 9.2 finding")
+    hy0 = (shot_top - h_h) // 2
+    hy1 = hy0 + h_h
+    draw_headline_ipad(base, locale, lines_cfg, hy0, panel)
     dev_h = round(outer_w * BEZEL_IPAD_NATIVE[1] / BEZEL_IPAD_NATIVE[0])
     x0 = (CANVAS_IPAD[0] - outer_w) // 2
     box = (x0, shot_top, x0 + outer_w, shot_top + dev_h)
-    if not shot_top - hy1 >= MIN_GAP_IPAD:
-        raise BuilderError("headline/device gap violated")
     card = Image.new("RGBA", CANVAS_IPAD, (0, 0, 0, 0))
     sh = Image.new("RGBA", CANVAS_IPAD, (0, 0, 0, 0))
     ImageDraw.Draw(sh).rounded_rectangle(box, radius=SHADOW_R_IPAD,
@@ -1966,7 +1966,7 @@ def render_panel_ipad(raw: Image.Image, bezel: Image.Image, locale: str,
         (box[2] - box[0], box[3] - box[1]), Image.LANCZOS)
     card.alpha_composite(fitted, (box[0], box[1]))
     out = Image.alpha_composite(base, card).convert("RGB")
-    return out, {"headline_anchor": "top", "headline_box": [hy0, hy1],
+    return out, {"headline_anchor": "centered", "headline_box": [hy0, hy1],
                  "device_box": list(box)}
 
 
@@ -2025,8 +2025,7 @@ def build_ipad(locale: str, caps: dict, captions_version: str,
             "mask_radius_px": CAVITY_R,
         },
         "device_layout": {"outer_width_px": outer_w, "shot_top_px": shot_top},
-        "headline_top_margin_px": HEADLINE_TOP_MARGIN_IPAD,
-        "min_gap_px": MIN_GAP_IPAD,
+        "layout_rule": "centered-title/equal-pads (owner order)",
         "locale": locale,
         "captions_version": captions_version,
         "run_id": run_meta.get("run_id"),
@@ -2079,18 +2078,21 @@ def selftest_69(out_dir: Path, recipe: dict) -> list[str]:
         name = panel_filename(key, recipe["locale"], CANVAS_69)
         p = recipe["panels"][name]
         box = p["shot_box"]
-        if p["headline_anchor"] != "top":
-            raise BuilderError(f"selftest: {name} headline must be TOP")
-        if p["headline_box"][0] != HEADLINE_TOP_MARGIN_69:
-            raise BuilderError(f"selftest: {name} headline top drift")
+        if p["headline_anchor"] != "centered":
+            raise BuilderError(f"selftest: {name} headline must be CENTERED")
+        hy0, hy1 = p["headline_box"]
+        # Owner rule: device pads equal left/right/bottom; title spacing
+        # equal to device and to upper boundary (off-by-one from flooring).
+        if not box[0] == CANVAS_69[0] - box[2]:
+            raise BuilderError(f"selftest: {name} side pads unequal {box}")
+        if not CANVAS_69[1] - box[3] == box[0]:
+            raise BuilderError(f"selftest: {name} pads unequal {box}")
+        if abs((box[1] - hy1) - hy0) > 1:
+            raise BuilderError(f"selftest: {name} title not centered")
         if box[2] - box[0] != DEVICE_W_69 != 1152:
             raise BuilderError(f"selftest: {name} width drift {box}")
         if box[3] - box[1] != aspect_h_69(DEVICE_W_69) != 2351:
             raise BuilderError(f"selftest: {name} aspect drift {box}")
-        if not box[1] - p["headline_box"][1] >= MIN_GAP_69:
-            raise BuilderError(f"selftest: {name} headline/device gap")
-        if not box[3] <= CANVAS_69[1]:
-            raise BuilderError(f"selftest: {name} overflow")
         with Image.open(out_dir / name) as im:
             rgb = im.convert("RGB")
         hy0, hy1 = p["headline_box"]
@@ -2206,17 +2208,18 @@ def selftest_63(out_dir: Path, recipe: dict) -> list[str]:
         name = panel_filename(key, recipe["locale"], CANVAS_63)
         p = recipe["panels"][name]
         box = p["shot_box"]
-        if p["headline_anchor"] != "top":
-            raise BuilderError(f"selftest: {name} headline must be TOP")
-        if p["headline_box"][0] != HEADLINE_TOP_MARGIN_63:
-            raise BuilderError(f"selftest: {name} headline top drift")
-        if box[2] - box[0] != DEVICE_W_63:
+        if p["headline_anchor"] != "centered":
+            raise BuilderError(f"selftest: {name} headline must be CENTERED")
+        hy0, hy1 = p["headline_box"]
+        if not box[0] == CANVAS_63[0] - box[2]:
+            raise BuilderError(f"selftest: {name} side pads unequal {box}")
+        if not CANVAS_63[1] - box[3] == box[0]:
+            raise BuilderError(f"selftest: {name} pads unequal {box}")
+        if abs((box[1] - hy1) - hy0) > 1:
+            raise BuilderError(f"selftest: {name} title not centered")
+        if abs((box[2] - box[0]) - DEVICE_W_63) > 1:
             raise BuilderError(f"selftest: {name} width drift {box}")
         expect_aspect(name, box, DEVICE_W_63)
-        if not box[1] - p["headline_box"][1] >= MIN_GAP_63:
-            raise BuilderError(f"selftest: {name} headline/device gap")
-        if not box[3] <= CANVAS_63[1]:
-            raise BuilderError(f"selftest: {name} overflow")
         with Image.open(out_dir / name) as im:
             rgb = im.convert("RGB")
         hy0, hy1 = p["headline_box"]
@@ -2319,15 +2322,16 @@ def selftest_ipad(out_dir: Path, recipe: dict) -> list[str]:
             raise BuilderError(f"selftest: {name} size drift {size}")
         if sha(out_dir / name) != p["sha256"]:
             raise BuilderError(f"selftest: {name} hash drift vs recipe")
-        if p["headline_anchor"] != "top":
-            raise BuilderError(f"selftest: {name} headline must be TOP")
+        if p["headline_anchor"] != "centered":
+            raise BuilderError(f"selftest: {name} headline must be CENTERED")
         box = p["device_box"]
-        if not box[1] - p["headline_box"][1] >= MIN_GAP_IPAD:
-            raise BuilderError(f"selftest: {name} headline/device gap")
-        if not box[3] + BOTTOM_MIN_IPAD <= CANVAS_IPAD[1]:
-            raise BuilderError(f"selftest: {name} bottom margin violated")
-        if not (CANVAS_IPAD[0] - (box[2] - box[0])) // 2 >= SIDE_MIN_IPAD:
-            raise BuilderError(f"selftest: {name} side margin violated")
+        hy0, hy1 = p["headline_box"]
+        if not box[0] == CANVAS_IPAD[0] - box[2]:
+            raise BuilderError(f"selftest: {name} side pads unequal {box}")
+        if not CANVAS_IPAD[1] - box[3] == box[0]:
+            raise BuilderError(f"selftest: {name} pads unequal {box}")
+        if abs((box[1] - hy1) - hy0) > 1:
+            raise BuilderError(f"selftest: {name} title not centered")
         with Image.open(out_dir / name) as im:
             rgb = im.convert("RGB")
         hy0, hy1 = p["headline_box"]

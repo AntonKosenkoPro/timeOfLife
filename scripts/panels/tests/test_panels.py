@@ -1015,18 +1015,17 @@ class BuilderUnitTests(unittest.TestCase):
                     checked += 1
             self.assertEqual(checked, 10)
 
-    def test_single_gap_overflow_all_60_cells(self):
+    def test_single_centered_equal_pads_all_60_cells(self):
         # All 60 single cells (4 panels x 5 locales x 3 sizes, real
-        # captions): headline/device gap holds, no bottom overflow.
+        # captions): owner centered rule — device pads equal
+        # left/right/bottom, title spacing equal to device and upper
+        # boundary (off-by-one from flooring).
         with tempfile.TemporaryDirectory() as tmp:
             checked = 0
-            for size, canvas, min_gap in (
-                    ("6.9", panels_builder.CANVAS_69,
-                     panels_builder.MIN_GAP_69),
-                    ("6.3", panels_builder.CANVAS_63,
-                     panels_builder.MIN_GAP_63),
-                    ("ipad13", panels_builder.CANVAS_IPAD,
-                     panels_builder.MIN_GAP_IPAD)):
+            for size, canvas in (
+                    ("6.9", panels_builder.CANVAS_69),
+                    ("6.3", panels_builder.CANVAS_63),
+                    ("ipad13", panels_builder.CANVAS_IPAD)):
                 for locale in ALL_LOCALES:
                     _out, recipe = self._build_real_cell(tmp, size, locale)
                     for panel in IPAD_PANELS:
@@ -1035,12 +1034,20 @@ class BuilderUnitTests(unittest.TestCase):
                         p = recipe["panels"][name]
                         box = (p["shot_box"] if size != "ipad13"
                                else p["device_box"])
-                        self.assertGreaterEqual(
-                            box[1] - p["headline_box"][1], min_gap,
-                            f"{size}/{locale}/{panel} gap")
+                        W, H = canvas
+                        self.assertEqual(
+                            p["headline_anchor"], "centered",
+                            f"{size}/{locale}/{panel} anchor")
+                        self.assertEqual(
+                            box[0], W - box[2],
+                            f"{size}/{locale}/{panel} side pads")
+                        self.assertEqual(
+                            H - box[3], box[0],
+                            f"{size}/{locale}/{panel} bottom pad")
+                        hy0, hy1 = p["headline_box"]
                         self.assertLessEqual(
-                            box[3], canvas[1],
-                            f"{size}/{locale}/{panel} overflow")
+                            abs((box[1] - hy1) - hy0), 1,
+                            f"{size}/{locale}/{panel} centering")
                         checked += 1
             self.assertEqual(checked, 60)
 
