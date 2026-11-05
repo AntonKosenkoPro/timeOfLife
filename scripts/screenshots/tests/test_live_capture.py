@@ -148,6 +148,21 @@ def paint_sheet(path: Path) -> None:
     _write_rgba_png(path, *GEO63, fn)
 
 
+def paint_lock_banner(path: Path) -> None:
+    """Wallpaper + red stop-button disc in the lock banner band
+    (relative rows 0.662H-0.697H, geometry-relative like the verdict)."""
+    w, h = GEO63
+    y0, y1 = int(0.662 * h), int(0.697 * h)
+    cy = (y0 + y1) // 2
+
+    def fn(x, y):
+        if (x - 300) ** 2 + (y - cy) ** 2 <= 40 ** 2:
+            return (255, 60, 60)
+        return (40 + (x % 60), 36 + (x % 50), 34 + (y % 44))
+
+    _write_rgba_png(path, w, h, fn)
+
+
 class FakeHidBackend(ex.HidBackend):
     """Scripted HID: legacy ax tree, scripted describe docs, or absent.
 
@@ -273,17 +288,18 @@ def live_capture_record(run_dir: Path) -> dict:
 
 
 def hold_script(compact_painter, lock_painter=None, expanded_painter=None):
-    """Full io queue: 3 stock + 1 compact + 1 expanded + 1 probe + 2 lock.
+    """Full io queue: 3 stock + 1 compact + 3 expanded + 1 probe + 2 lock.
 
-    The expanded step retries verdict-gated up to 3 times; with a single
-    expanded slot the 2nd/3rd attempts fall back to plain (honest no-card)
-    unless the caller inlines extra expanded paints. Card tests pass on
-    the first attempt, so one slot suffices there."""
-    lock_painter = lock_painter or paint_plain
+    Slot counts match maximum consumption (expanded retries verdict-gated
+    up to 3): no silent plain fallback inside the hold window. Card tests
+    pass on the first attempt; the extra expanded slots read plain
+    (honest no-card) unless the caller inlines card paints there."""
+    lock_painter = lock_painter or paint_lock_banner
     expanded_painter = expanded_painter or paint_plain
     return ([("paint", paint_plain)] * 3
             + [("paint", compact_painter)]
             + [("paint", expanded_painter)]
+            + [("paint", paint_plain)] * 2
             + [("paint", paint_plain)]
             + [("paint", lock_painter)] * 2)
 
@@ -435,7 +451,7 @@ class LockCaptureTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             hid = FakeHidBackend(ax=None)
             _fake, _hid, run_dir, summary, _udid = live_run(
-                tmp, hid, hold_script(paint_live_pill),
+                tmp, hid, hold_script(paint_live_pill, paint_lock_banner),
                 run_id="live-lock-1")
             self.assertEqual(summary["status"], "complete")
             lock_png = run_dir / "staging" / "live-la-lock.png"
@@ -457,7 +473,7 @@ class LockCaptureTests(unittest.TestCase):
                       + [("paint", paint_plain)] * 3
                       + [("paint", paint_plain)]
                       + [("raise", subprocess.TimeoutExpired("simctl", 60))]
-                      + [("paint", paint_plain)] * 2)
+                      + [("paint", paint_lock_banner)] * 2)
             fake, _hid, run_dir, summary, _udid = live_run(
                 tmp, hid, script, run_id="live-lock-2")
             self.assertEqual(summary["status"], "complete")
@@ -467,6 +483,43 @@ class LockCaptureTests(unittest.TestCase):
             self.assertEqual(len(fake.io_calls), 3 + 1 + 3 + 1 + 1 + 2)
             self.assertTrue(
                 (run_dir / "staging" / "live-la-lock.png").is_file())
+
+    def test_lock_blank_banner_records_attempt_never_genuine(self):
+        # Dead activity: banner-less lock shots are attempt evidence only.
+        # No live-la-lock.png is staged, the stub stays pending, and the
+        # session still completes (other frames unaffected).
+        with tempfile.TemporaryDirectory() as tmp:
+            hid = FakeHidBackend(ax=None)
+            _fake, _hid, run_dir, summary, _udid = live_run(
+                tmp, hid, hold_script(paint_live_pill, paint_plain),
+                run_id="live-lock-blank")
+            self.assertEqual(summary["status"], "complete")
+            staging = run_dir / "staging"
+            self.assertFalse((staging / "live-la-lock.png").is_file())
+            self.assertTrue(
+                (staging / "live-la-lock.attempt.png").is_file())
+            rec = live_capture_record(run_dir)
+            self.assertEqual(
+                (rec.get("lock_attempt") or {}).get("outcome"), "no-banner")
+            stub = json.loads(
+                (run_dir / "frames" / "la-lock.json").read_text(
+                    encoding="utf-8"))
+            self.assertEqual(stub["capture"],
+                             "external-lock-screen-pending")
+            self.assertNotIn("capture_window", stub)
+
+    def test_lock_banner_verdict_units(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            good = Path(tmp) / "banner.png"
+            paint_lock_banner(good)
+            verdict = ex.lock_banner_verdict(str(good), GEO63)
+            self.assertTrue(verdict["banner"])
+            self.assertGreaterEqual(verdict["red_frac"], 0.002)
+            blank = Path(tmp) / "blank.png"
+            paint_plain(blank)
+            verdict = ex.lock_banner_verdict(str(blank), GEO63)
+            self.assertFalse(verdict["banner"])
+            self.assertEqual(verdict["red_frac"], 0.0)
 
     def test_lock_spawn_exhaustion_fails_closed(self):
         # Every lock export drops past the runner surface: bounded retry
@@ -503,10 +556,9 @@ class LockCaptureTests(unittest.TestCase):
 
 class ConsentGateTests(unittest.TestCase):
     def _run(self, tmp, hid, compact_painter, run_id):
-        script = ([("paint", paint_plain)] * 3
-                  + [("paint", compact_painter)]
-                  + [("paint", paint_plain)] * 2)
-        return live_run(tmp, hid, script, run_id=run_id)
+        return live_run(tmp, hid,
+                        hold_script(compact_painter, paint_lock_banner),
+                        run_id=run_id)
 
     def test_consent_sheet_surfaces_late_granted(self):
         # Under host load the sheet surfaces seconds after the first
@@ -901,8 +953,11 @@ class ExpandedHoldTests(unittest.TestCase):
         # incapable). First-attempt pass stages with attempts == 1.
         with tempfile.TemporaryDirectory() as tmp:
             hid = FakeHidBackend(ax=None)
-            script = hold_script(paint_live_pill,
-                                 expanded_painter=paint_expanded_card)
+            script = ([("paint", paint_plain)] * 3
+                      + [("paint", paint_live_pill)]
+                      + [("paint", paint_expanded_card)]
+                      + [("paint", paint_plain)]
+                      + [("paint", paint_lock_banner)] * 2)
             _fake, _hid, run_dir, summary, _udid = live_run(
                 tmp, hid, script, run_id="live-exp-1")
             self.assertEqual(summary["status"], "complete")
@@ -976,7 +1031,8 @@ class ExpandedHoldTests(unittest.TestCase):
             script = ([("paint", paint_plain)] * 3
                       + [("paint", paint_live_pill)]
                       + [("paint", paint_app_screen)] * 3
-                      + [("paint", paint_plain)] * 3)
+                      + [("paint", paint_plain)]
+                      + [("paint", paint_lock_banner)] * 2)
             _fake, _hid, run_dir, summary, _udid = live_run(
                 tmp, hid, script, run_id="live-exp-3")
             self.assertEqual(summary["status"], "complete")
@@ -1001,7 +1057,8 @@ class ExpandedHoldTests(unittest.TestCase):
             hid = FakeHidBackend(ax=None)
             script = ([("paint", paint_plain)] * 3
                       + [("paint", paint_idle_pill)] * 3
-                      + [("paint", paint_plain)] * 3)
+                      + [("paint", paint_plain)]
+                      + [("paint", paint_lock_banner)] * 2)
             _fake, _hid, run_dir, summary, _udid = live_run(
                 tmp, hid, script, run_id="live-exp-4")
             self.assertEqual(summary["status"], "complete")
@@ -1030,7 +1087,7 @@ class ExpandedHoldTests(unittest.TestCase):
                       + [("paint", paint_plain)]
                       + [("paint", paint_expanded_card)]
                       + [("paint", paint_plain)]
-                      + [("paint", paint_plain)] * 2)
+                      + [("paint", paint_lock_banner)] * 2)
             _fake, _hid, run_dir, summary, _udid = live_run(
                 tmp, hid, script, run_id="live-exp-5")
             self.assertEqual(summary["status"], "complete")
@@ -1065,7 +1122,7 @@ class ExpandedHoldTests(unittest.TestCase):
                       + [("paint", paint_live_pill)]
                       + [("paint", paint_plain)] * 3
                       + [("paint", paint_plain)]
-                      + [("paint", paint_plain)] * 2)
+                      + [("paint", paint_lock_banner)] * 2)
             _fake, _hid, run_dir, summary, _udid = live_run(
                 tmp, hid, script, run_id="live-exp-6")
             self.assertEqual(summary["status"], "complete")
@@ -1133,7 +1190,8 @@ class ConsentDismissalTests(unittest.TestCase):
                       + [("paint", paint_live_pill)]
                       + [("paint", paint_plain)] * 3
                       + [("paint", paint_sheet)]
-                      + [("paint", paint_plain)] * 3)
+                      + [("paint", paint_plain)]
+                      + [("paint", paint_lock_banner)] * 2)
             _fake, _hid, run_dir, summary, _udid = live_run(
                 tmp, hid, script, run_id="live-sheet-2")
             self.assertEqual(summary["status"], "complete")
@@ -1162,7 +1220,8 @@ class ConsentDismissalTests(unittest.TestCase):
                       + [("paint", paint_live_pill)]
                       + [("paint", paint_plain)] * 3
                       + [("paint", paint_sheet)] * 2
-                      + [("paint", paint_plain)] * 3)
+                      + [("paint", paint_plain)]
+                      + [("paint", paint_lock_banner)] * 2)
             _fake, _hid, run_dir, summary, _udid = live_run(
                 tmp, hid, script, run_id="live-sheet-3")
             self.assertEqual(summary["status"], "complete")
@@ -1187,10 +1246,9 @@ class LockPhaseConsentTests(unittest.TestCase):
     """
 
     def _run_lock_phase(self, tmp, hid, run_id):
-        script = ([("paint", paint_plain)] * 3
-                  + [("paint", paint_live_pill)]
-                  + [("paint", paint_plain)] * 2)
-        return live_run(tmp, hid, script, run_id=run_id)
+        return live_run(tmp, hid,
+                        hold_script(paint_live_pill, paint_lock_banner),
+                        run_id=run_id)
 
     def test_lock_phase_grant_fires_on_scripted_lock_time_sheet(self):
         # Foreground absent, lock-time Allow tapped at describe-derived

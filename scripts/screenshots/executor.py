@@ -2087,6 +2087,48 @@ def expanded_verdict(png_path: str,
     return out
 
 
+LOCK_BANNER_MIN_RED = 0.002
+
+
+def lock_banner_verdict(png_path: str,
+                        geometry: tuple[int, int]) -> dict[str, Any]:
+    """Pixel verdict for a Lock Screen banner (no OCR).
+
+    Counts stop-button red mass in the banner band (relative rows
+    0.662H-0.697H, full width — geometry-relative, so every canvas is
+    attested). Calibrated: genuine lock banners measure 0.00745 on
+    1320x2868 (two independent runs), blank lock screens 0.0.
+    banner=True only above threshold; a blank lock records
+    lock_attempt and the stub stays pending — a banner-less shot is
+    never staged genuine.
+    """
+    width, height, px = decode_png_rgba_band(png_path, geometry[1])
+    if (width, height) != (geometry[0], geometry[1]):
+        raise FrameError(
+            f"pixel source geometry {(width, height)} != expected "
+            f"{(geometry[0], geometry[1])}")
+    y0 = int(0.662 * height)
+    y1 = int(0.697 * height)
+    red = total = 0
+    for y in range(y0, y1, 2):
+        base = y * width * 4
+        for x in range(0, width, 4):
+            off = base + x * 4
+            r, g, b = px[off], px[off + 1], px[off + 2]
+            total += 1
+            if r > 150 and g < 100 and b < 100:
+                red += 1
+    frac = red / total if total else 0.0
+    out: dict[str, Any] = {"red_frac": frac, "banner": False, "reason": ""}
+    if frac < LOCK_BANNER_MIN_RED:
+        out["reason"] = ("no banner stop-button mass on the lock screen; "
+                         "no banner claim")
+    else:
+        out["banner"] = True
+        out["reason"] = "lock banner stop-button mass verified"
+    return out
+
+
 def app_foreground_verdict(png_path: str,
                            geometry: tuple[int, int]) -> dict[str, Any]:
     """Pixel guard against a tap that opened the app (never eyeball-only).
@@ -2682,17 +2724,38 @@ def run_live_capture(
                 "lock": consent_lock,
             }
     lock_dest = staging / "live-la-lock.png"
+    lock_attempt_dest = staging / "live-la-lock.attempt.png"
     lsha = liso = ""
+    lock_attempt: dict[str, Any] | None = None
     for _ in range(2):
         hold_left("lock capture")
         sleeper(interval_s)
         lsha, liso = _live_shot(
-            run, udid, lock_dest, geometry,
+            run, udid, lock_attempt_dest, geometry,
             mask=pf.resolve_screenshot_mask("la-lock", None),
             label="lock capture", stats=stats, interval_s=interval_s,
             sleeper=sleeper, clock=clock, deadline=deadline)
         if stats is not None:
             stats.count("live_capture_shot")
+    # Banner gate: a lock shot without the activity banner (dead or
+    # never-presented activity) is attempt evidence, never staged
+    # genuine — the stub stays pending for a live rerun.
+    banner = lock_banner_verdict(str(lock_attempt_dest), geometry)
+    if banner.get("banner"):
+        shutil.copyfile(lock_attempt_dest, lock_dest)
+        try:
+            lsha = insp.sha256_file(str(lock_dest))
+        except OSError as exc:
+            raise FrameError(f"staged lock unreadable: {exc}")
+    else:
+        lock_attempt = {
+            "outcome": "no-banner",
+            "reason": banner.get("reason", "no banner claim"),
+            "probe": "staging/live-la-lock.attempt.png",
+            "captured_at_iso": liso,
+            "red_frac": banner.get("red_frac"),
+        }
+        lsha, liso = "", ""
     if expanded is not None:
         live_record: dict[str, Any] = {
             "schema_version": 1,
@@ -2706,6 +2769,7 @@ def run_live_capture(
             },
             "expanded": expanded,
             "consent_dismissal": dismissal,
+            "lock_attempt": lock_attempt,
             "lock": {
                 "screenshot": "staging/live-la-lock.png",
                 "screenshot_sha256": lsha,
@@ -2728,6 +2792,7 @@ def run_live_capture(
             "expanded_attempt": expanded_attempt or {"outcome": "no-card",
                                                      "reason": "unset"},
             "consent_dismissal": dismissal,
+            "lock_attempt": lock_attempt,
             "lock": {
                 "screenshot": "staging/live-la-lock.png",
                 "screenshot_sha256": lsha,

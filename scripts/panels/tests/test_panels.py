@@ -1066,9 +1066,11 @@ class CliTests(unittest.TestCase):
                        "--bezel", kit["bezel"], "--selftest")
             self.assertEqual(proc.returncode, 0, proc.stderr)
             self.assertIn("selftest green", proc.stdout)
-            for word in ("track", "insights", "history", "add-entry",
-                         "live-activities"):
-                matches = list(Path(kit["out"]).glob(f"panel-{word}-en-1320x2868.png"))
+            for word, num in (("track", "1"), ("insights", "4"),
+                              ("history", "3"), ("add-entry", "5"),
+                              ("live-activities", "2")):
+                matches = list(Path(kit["out"]).glob(
+                    f"panel-{num}-{word}-en-1320x2868.png"))
                 self.assertEqual(len(matches), 1, word)
             self.assertEqual(
                 len(list(Path(kit["out"]).glob("panels-en-1320x2868.recipe.json"))), 1)
@@ -1505,11 +1507,11 @@ class RetainedByteIdentical69Tests(unittest.TestCase):
             # collapses to one line at the 0.94 pair size, track keeps its
             # preferred two lines.
             key_to_built = {
-                "track": "panel-track-en-1320x2868.png",
-                "insights": "panel-insights-en-1320x2868.png",
-                "history": "panel-history-en-1320x2868.png",
-                "add-entry": "panel-add-entry-en-1320x2868.png",
-                "la": "panel-live-activities-en-1320x2868.png",
+                "track": "panel-1-track-en-1320x2868.png",
+                "insights": "panel-4-insights-en-1320x2868.png",
+                "history": "panel-3-history-en-1320x2868.png",
+                "add-entry": "panel-5-add-entry-en-1320x2868.png",
+                "la": "panel-2-live-activities-en-1320x2868.png",
             }
             for key, built in key_to_built.items():
                 self.assertTrue((Path(out) / built).is_file(), key)

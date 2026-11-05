@@ -1648,7 +1648,7 @@ class BundleReadmeTests(unittest.TestCase):
             root = Path(tmp)
             shots = make_shots_matrix(root)
             panels_dir = root / "panels"
-            (panels_dir / "iphone69" / "en").mkdir(parents=True)
+            (panels_dir / "en" / "iphone69").mkdir(parents=True)
             (panels_dir / "matrix-manifest.json").write_text(
                 json.dumps({
                     "schema_version": 1, "status": "complete",
@@ -1660,7 +1660,7 @@ class BundleReadmeTests(unittest.TestCase):
                                "panels": {"a.png": "abc"}}]}),
                 encoding="utf-8")
             Image.new("RGB", (8, 8)).save(
-                panels_dir / "iphone69" / "en" / "panel-track-en-8x8.png")
+                panels_dir / "en" / "iphone69" / "panel-track-en-8x8.png")
             out = root / "bundle-readme.md"
             proc = run_readme(
                 "--panels-dir", str(panels_dir),
@@ -1685,7 +1685,7 @@ class BundleReadmeTests(unittest.TestCase):
             root = Path(tmp)
             shots = make_shots_matrix(root)
             panels_dir = root / "panels"
-            (panels_dir / "iphone69" / "en").mkdir(parents=True)
+            (panels_dir / "en" / "iphone69").mkdir(parents=True)
             (panels_dir / "matrix-manifest.json").write_text(
                 json.dumps({
                     "schema_version": 1, "status": "incomplete",
@@ -1700,7 +1700,7 @@ class BundleReadmeTests(unittest.TestCase):
                                "reason": "missing bezel asset X"}]}),
                 encoding="utf-8")
             Image.new("RGB", (8, 8)).save(
-                panels_dir / "iphone69" / "en" / "panel-track-en-8x8.png")
+                panels_dir / "en" / "iphone69" / "panel-track-en-8x8.png")
             stage_log = panels_dir / "bezel-stage.json"
             stage_log.write_text(
                 json.dumps({"schema_version": 1,

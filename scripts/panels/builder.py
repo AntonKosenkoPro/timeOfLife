@@ -299,6 +299,16 @@ PANEL_FILE_WORD = {
     "la": "live-activities",
 }
 
+# Upload sort order (owner order): track 1, live-activities 2, history 3,
+# insights 4, add-entry ("Details") 5.
+PANEL_SORT_ORDER = {
+    "track": "1",
+    "la": "2",
+    "history": "3",
+    "insights": "4",
+    "add-entry": "5",
+}
+
 # Approved-template output hashes: EN builds from approved sources MUST
 # reproduce these exactly (byte-identical proof, enforced --check-template).
 EXPECTED_EN69 = {
@@ -1449,7 +1459,7 @@ def near_bg(px: tuple[int, ...]) -> bool:
 
 
 def panel_filename(key: str, locale: str, canvas: tuple[int, int]) -> str:
-    return (f"panel-{PANEL_FILE_WORD[key]}-{locale}-"
+    return (f"panel-{PANEL_SORT_ORDER[key]}-{PANEL_FILE_WORD[key]}-{locale}-"
             f"{canvas[0]}x{canvas[1]}.png")
 
 
