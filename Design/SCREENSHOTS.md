@@ -1,25 +1,23 @@
 # App Store Screenshots — Capture Storyboard
 
-> Status (2026-11-04, change `optimize-app-screenshot-workflow`): session
-> pipeline WIRED (validate → one verified arm64 build → device workers max 5 →
-> panels + ZIP); owner single-pass decision (ONE automated pass per
-> device-locale; manual reruns when needed, human visual inspection governs, no
-> automatic comparison); English pilot still APPROVED (`pilot27-r2`); session re-capture
+> Status (local-only; CI capture retired by owner decision — slow, unreliable,
+> expensive): local pipeline via the `lifio-local-screenshots` skill (one
+> verified arm64 build → owned sims sequential → panels + ZIP); owner
+> single-pass decision (ONE automated pass per device-locale; manual reruns
+> when needed, human visual inspection governs, no automatic comparison); English pilot still APPROVED (`pilot27-r2`); session re-capture
 > + 6-pair expansion audited with frozen hashes (18PM + iPhone 17 + M4 iPad,
 > native geometries, honest LA-pending; two-pass counts historically valid,
 > superseded as acceptance). Acceptance = successful downloadable output with
 > truthful status; 20 minutes aspirational (owner accepts ~22min vs 70+), not a
-> hard gate (no fabricated cold/warm acceptance); device art migrates to official
-> Apple PNG assets for the owner-provided portrait set (17 Pro Max Silver, 17
-> White, iPad Pro 13 M5 Silver — Figma live fetch retired, source identity pinned
-> in tasks 10.1 (filenames, dimensions, SHA256, native cavities; no
-> upscaling/rotation necessary; origins untouched); delivery OWNER-DECIDED:
-> private versioned release `AntonKosenkoPro/lifio-design-assets`, expected
-> `apple-bezels-v1` (3 PNGs + manifest, hash-verified before use; publication
-> VERIFIED LIVE, manifest + asset hashes verified per tasks 10.4/10.1;
-> `APPLE_BEZELS_TOKEN` CONFIGURED per owner statement, metadata-verified via
-> `gh secret list` 2026-11-04 (value never read); authenticated CI read NOT yet
-> verified — 10.4 stays PARTIAL until a workflow download/stage run executes);
+> hard gate (no fabricated cold/warm acceptance); full local bundle 15/15
+> complete (69 panels, review-only); device art is official Apple PNG assets
+> for the owner-provided portrait set (18 Pro Max Silver, 17 White, iPad Pro
+> 13 M5 Silver — Figma live fetch retired, source identity pinned in tasks
+> 10.1 (filenames, dimensions, SHA256, native cavities; no upscaling/rotation
+> necessary; origins untouched); delivery OWNER-DECIDED: private versioned
+> release `AntonKosenkoPro/lifio-design-assets` (`apple-bezels-v2` current,
+> hash-verified before use; local `gh release download` with
+> `APPLE_BEZELS_TOKEN`, value never read);
 > owner approvals for new sets
 > NOT granted (captured never implies approved; new template version needs
 > explicit new approval). Montage deferred (built, external, NOT approved).

@@ -7,7 +7,7 @@ device/pair/pass/domain still executes EXACTLY once — queued work is
 retained until a slot frees, never silently shrunk to fit capacity.
 
 What this is (read carefully before citing it anywhere):
-- A UNIT model of CI queueing: worker threads contend on a
+- A UNIT model of worker queueing: worker threads contend on a
   threading.Semaphore(capacity) with threading.Barrier rendezvous
   (deterministic overlap proof, NO sleeps, NO timing dependence).
   It is NOT real GitHub contention, NOT competitor visibility, and
@@ -23,12 +23,14 @@ What this is (read carefully before citing it anywhere):
 - The 6-device catalog is a TEMPORARY in-test patch of the supported
   future set (restored after each test); production catalogs are
   untouched. Locales stay (["en"]) and the runtime stays pinned.
-- max-parallel is READ from the actual workflow YAML (same stdlib text
-  technique as the contract suite — no YAML dependency, no second
-  hardcoded definition); the model capacity is min(available, yaml_max).
+- max-parallel comes from the LOCAL sequential driver constant below
+  (owner decision: capture runs locally, strictly sequential, one
+  simulator at a time — no CI matrix exists anymore); the model
+  capacity is min(available, LOCAL_SLOTS). Same stdlib technique as
+  before, no second hardcoded definition per test.
 
 Red-oracle note: test_truncation_mutation_detected feeds a 5-of-6
-mutated matrix through the same completeness check and asserts the gap
+mutated selection through the same completeness check and asserts the gap
 is DETECTED. That is the red demonstration for silent shrinking: had
 the worker (or selection) dropped a device, this is the failure the
 suite would show. It does not pretend an actual bug was reproduced.
@@ -50,8 +52,11 @@ import run_device_worker as rw
 import workflow_artifacts as wa
 import workflow_inputs as wi
 
-WORKFLOW = (HERE.parent.parent / ".github" / "workflows"
-            / "app-screenshots.yml")
+LOCAL_SLOTS = 1
+
+
+def local_max_parallel() -> int:
+    return LOCAL_SLOTS
 
 FUTURE_DEVICES = {
     # Temporary 6-device future catalog (production: 3). Geometries are
@@ -73,16 +78,8 @@ DOMAINS = ("pinned", "realtime")
 THREAD_TIMEOUT = 120.0
 
 
-def yaml_screenshots_segment() -> str:
-    body = WORKFLOW.read_text(encoding="utf-8")
-    return body.split("\n  screenshots:\n")[1].split("\n  panels:\n")[0]
-
-
-def yaml_max_parallel() -> int:
-    seg = yaml_screenshots_segment()
-    match = re.search(r"max-parallel:\s*(\d+)", seg)
-    assert match, "max-parallel missing from screenshots strategy"
-    return int(match.group(1))
+def local_max_parallel() -> int:
+    return LOCAL_SLOTS
 
 
 class SixDeviceCatalog(unittest.TestCase):
@@ -224,7 +221,7 @@ class FakeCIQueue:
     (explicit unit semantics for the cancel case); bounds still apply.
 
     Deliberately NOT proven here: simultaneity/overlap peaks (any
-    interleaving, serial included, is valid CI behavior) and anything
+    interleaving, serial included, is valid local behavior) and anything
     about real waiting time, contention, or competitor visibility.
     """
 
@@ -318,21 +315,13 @@ class OversubscribedWorkflowTests(SixDeviceCatalog):
         self.assertEqual(sel["worker_count"], 6)
         self.assertEqual(len(set(sel["devices"])), 6)
 
-    def test_yaml_matrix_contract_coupled(self):
-        # The ceiling comes from the live workflow file (same stdlib text
-        # technique as the contract suite), never a second hardcoded
-        # definition in this file.
-        seg = yaml_screenshots_segment()
-        ceiling = yaml_max_parallel()
-        self.assertEqual(ceiling, 5)
-        self.assertIn("fail-fast: false", seg)
-        self.assertRegex(
-            seg, r"device:\s*\$\{\{\s*fromJSON\(needs\.validate\.outputs\.devices\)\s*\}\}")
-        matrix_block = seg.split("matrix:")[1].split("env:")[0]
-        self.assertNotIn('"iphone', matrix_block)
+    def test_local_sequential_capacity_pinned(self):
+        # The local driver is strictly sequential (one simulator at a
+        # time, owner decision) — capacity is the local constant.
+        self.assertEqual(local_max_parallel(), 1)
 
     def _threaded_success(self, slots: int):
-        ceiling = yaml_max_parallel()
+        ceiling = local_max_parallel()
         capacity = min(slots, ceiling)
         with tempfile.TemporaryDirectory() as tmp:
             backend = FakeBackend()
@@ -348,7 +337,7 @@ class OversubscribedWorkflowTests(SixDeviceCatalog):
             # Bounds from the ledger replay (never above capacity,
             # back to zero): queued work waited for slots, it was not
             # dropped to fit them. Overlap peaks are NOT asserted: any
-            # interleaving, serial included, is valid CI behavior.
+            # interleaving, serial included, is valid local behavior.
             queue.audit_bounds(self)
             # No drop: every selected device started and completed once.
             self.assertEqual(sorted(started), sorted(SIX_DEVICES))
@@ -379,7 +368,7 @@ class OversubscribedWorkflowTests(SixDeviceCatalog):
         self._threaded_success(slots=3)
 
     def test_failed_device_does_not_drop_later(self):
-        ceiling = yaml_max_parallel()
+        ceiling = local_max_parallel()
         with tempfile.TemporaryDirectory() as tmp:
             backend = FakeBackend(fail={SIX_DEVICES[3]: "rc"})
             queue = FakeCIQueue(min(2, ceiling))
@@ -488,7 +477,7 @@ class OversubscribedWorkflowTests(SixDeviceCatalog):
                     self.assertEqual(rec["status"], wa.STATUS_OK, rec)
 
     def test_truncation_mutation_detected(self):
-        # Red oracle: had selection (or the matrix) silently shrunk the
+        # Red oracle: had selection silently shrunk the
         # six-device input to five, the completeness check below — the
         # same check the success tests apply to real worker output —
         # reports exactly the dropped device. This test passing proves

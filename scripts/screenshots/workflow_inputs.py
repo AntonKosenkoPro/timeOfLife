@@ -6,8 +6,8 @@ before expensive macOS work. Values are compared against fixed catalogs
 and never evaluated as executable source: injection-shaped inputs fail
 closed as unknown/malformed.
 
-Retained default catalog (matches `.github/workflows/app-screenshots.yml`
-device catalog step + `request_schema.KNOWN_LOCALES` + panels `LOCALES`):
+Retained default catalog (matches the local driver device set +
+`request_schema.KNOWN_LOCALES` + panels `LOCALES`):
 devices iphone69/iphone63/ipad13, five locales, runtime iOS 27.0
 (baseline toolchain Xcode 27.1 per evidence/baseline.md; no new external
 dependency, so no fresh ctx7 fetch was needed beyond evidence/research.md).

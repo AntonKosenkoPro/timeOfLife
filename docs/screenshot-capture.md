@@ -237,18 +237,23 @@ task 6.6 acceptance: PENDING.
   docs pass; 8.1/8.3/8.4 stay open (final verification, git-purity + external
   handoff, issue updates + PR-phase rebase).
 
-## Session workflow (WIRED 2026-11-04 — use this, not the per-frame flow above)
+## Local capture workflow (owner decision: CI capture retired — slow,
+unreliable, expensive; capture runs locally via the `lifio-local-screenshots`
+skill, one simulator at a time)
 
-Pipeline topology (`app-screenshots.yml`): early input validation →
-one arm64-verified Screenshot build (tar + digest manifest, Xcode 27.1 /
-iOS 27.0) → one device worker per selected device (`max-parallel: 5`,
-`fail-fast: false`), each booting/installing once and running the selected
-locales sequentially (SINGLE automated pass per locale, pinned + real-time sessions) → per-locale
-`shots-<device>-<locale>` artifacts → panels + ZIP stage. A manual rerun
-re-invokes the same single-pass workflow with a new run identity (existing
-session/run machinery; no new pass selector, no legacy branches). CI bypass
-(`LIFIO_CAPTURE_CI=1`, logged as `ci_approval_bypass:true`) is a technical
-gate, NEVER owner approval.
+Local pipeline topology (`scripts/screenshots/run_local_bundle.sh`, strictly
+sequential): early input validation → one arm64-verified Screenshot build
+(tar + digest manifest, Xcode 27.1 / iOS 27.0) → one owned simulator per
+selected device (created/booted/installed/captured/shutdown/deleted in turn;
+shared sims never touched), each running the selected locales sequentially
+(SINGLE automated pass per locale, pinned + real-time hold-open sessions with
+argent describe-backed consent grant and island long-press) → per-locale
+`shots/<device>/<locale>` → genuine registration (no observation gate —
+owner visual check governs) → finalize → panels matrix (`<locale>/<device>`)
++ ZIP. A manual rerun re-invokes the same single-pass flow with a new run
+identity (existing session/run machinery; no new pass selector, no legacy
+branches). Local bypass (`LIFIO_CAPTURE_CI=1`, logged as
+`ci_approval_bypass:true`) is a technical gate, NEVER owner approval.
 
 Final operator CLIs (verified `--help`; paths, not promises):
 
@@ -273,8 +278,8 @@ Source/build/runtime identities: commit + dirty flag + Xcode/SDK + arm64 slices
 + app/appex hashes in every manifest. Local real-approval paired flags gate
 expansion scope; per-locale artifacts carry the single pass, receipts, timings, and
 failed/unattempted statuses (historical both-passes artifacts stay unchanged); raw shots + receipts ship in the ZIP alongside
-panels. Lineup: owner-provided portrait set — 17 Pro Max Silver / 17 White / iPad Pro 13 M5 Silver (official Apple PNG device art; Figma live fetch retired; source identity pinned in tasks 10.1 with no upscaling/rotation necessary; native capture geometry kept only where SDK query verifies it for the actual models). Delivery OWNER-DECIDED: private versioned release `AntonKosenkoPro/lifio-design-assets`, `apple-bezels-v1` VERIFIED LIVE (manifest + asset hashes verified per tasks 10.4/10.1; no PNG in git history, no raw bezels in the public app ZIP, no public redistribution; `APPLE_BEZELS_TOKEN` CONFIGURED (metadata-verified, value never read) with authenticated CI read still to prove in 10.4).
-Acceptance requires successful downloadable output with truthful status (8.3 open; 8.1/8.2 retired — cancelled, not run; old runs failed, no fabricated acceptance); 20 minutes is aspirational (owner accepts ~22min vs 70+), not a hard gate. Human visual inspection governs; 8.6 rebase/review pending.
+panels. Lineup: owner-provided portrait set — 18 Pro Max Silver / 17 White / iPad Pro 13 M5 Silver (official Apple PNG device art; Figma live fetch retired; source identity pinned in tasks 10.1 with no upscaling/rotation necessary; native capture geometry kept only where SDK query verifies it for the actual models). Delivery OWNER-DECIDED: private versioned release `AntonKosenkoPro/lifio-design-assets`, `apple-bezels-v2` current (manifest + asset hashes verified; no PNG in git history, no raw bezels in the public app ZIP, no public redistribution; local download via `gh release download` with `APPLE_BEZELS_TOKEN`, value never read).
+Acceptance requires successful downloadable output with truthful status (8.3/9.5/9.6 proven at local scope 2026-11-05 — 15/15 complete, 69 panels; 8.1/8.2 retired — cancelled, not run; old CI runs failed, no fabricated acceptance); 20 minutes is aspirational (owner accepts ~22min vs 70+), not a hard gate. Human visual inspection governs; 8.6 rebase/review pending.
 
 ## Legacy removal (8.5 DONE — Python + Swift removal verified; do not use removed verbs)
 

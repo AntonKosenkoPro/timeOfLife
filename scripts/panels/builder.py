@@ -220,7 +220,7 @@ APPLE_PREFERRED_ASSET = {
 LEGACY_BEZEL_PROFILE_69 = "figma-v13"
 STAGE_MANIFEST_FILE = "bezel-stage.json"
 
-# CI device keys (see the app-screenshots workflow device catalog) mapped
+# Capture device keys (see the local driver device set) mapped
 # to the panel size contract. Owner lineup: iPhone 18 Pro Max Silver
 # (iphone69), iPhone 17 White (iphone63), iPad Pro 13-inch (M5) Silver
 # (ipad13) — iphone65 was dropped, so the catalog holds exactly these

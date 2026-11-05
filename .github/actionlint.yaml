@@ -1,9 +1,3 @@
 # actionlint configuration (static workflow checks, no CI behavior change).
 #
-# `xcode-27` is this repository's real macOS capture runner label (used by
-# .github/workflows/app-screenshots.yml); it is not a GitHub-hosted label,
-# so it is declared here instead of being silently ignored. No message
-# ignores: every other actionlint check stays at full strength.
-self-hosted-runner:
-  labels:
-    - xcode-27
+# No message ignores: every actionlint check stays at full strength.

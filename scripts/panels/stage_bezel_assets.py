@@ -8,9 +8,9 @@ Usage:
 
 Local-only staging for the OWNER-DECIDED private versioned release
 (`AntonKosenkoPro/lifio-design-assets`, `apple-bezels-v2` — 4 release PNGs:
-18PM current plus 17PM retained for history — + manifest): the CI worker
-downloads the canonical PNGs + manifest with `gh release download`
-(auth handled outside this helper — a read-only APPLE_BEZELS_TOKEN secret,
+18PM current plus 17PM retained for history — + manifest): the local
+driver downloads the canonical PNGs + manifest with `gh release download`
+(auth handled outside this helper — a read-only APPLE_BEZELS_TOKEN;
 pending owner provisioning; never copy a token from local `gh auth`),
 then THIS helper verifies and stages them. No network, no Figma/Sketch
 API, no DMG extraction here — those are retired, not reimplemented.

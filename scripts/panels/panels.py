@@ -37,7 +37,7 @@ Matrix layout in (capture-runner layout: <device>/<language>/runs/<run-id>/):
 Matrix layout out: <out>/<device>/<language>/panel-*.png + recipe, plus
   <out>/matrix-manifest.json (rendered/blocked per cell, never fabricated).
 
-Devices are CI catalog keys (iphone69/iphone63/ipad13); languages
+Devices are capture catalog keys (iphone69/iphone63/ipad13); languages
 are JSON lists. Bezels come from stage_bezel_assets.py (canonical names):
 official Apple PNGs (iPhone 17 Pro Max Silver, iPhone 17 White, iPad Pro
 13-inch (M5) Silver) staged from the private versioned release after exact

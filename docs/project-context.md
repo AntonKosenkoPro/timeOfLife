@@ -67,13 +67,16 @@ The `Screenshot` configuration is Release-optimized, simulator-only
 storage namespace; physical-device/archive use fails explicitly) with normal
 Debug/Release/archive routing untouched. **Clock-injection boundary:** only
 app-owned time (Track/History/Insights labels, elapsed, totals) is pinned;
-system-owned surfaces (Live Activity timers, status-bar chrome) stay real and
-are validated numerically, never frozen or retouched. All fixture writes go
+system-owned surfaces (Live Activity timers, status-bar chrome) stay real:
+genuine device pixels captured via hold-open sessions (argent consent grant
++ island long-press), registered without a numeric observation gate — owner
+visual inspection governs every panel before submission (no auto-approval). All fixture writes go
 through `LocalStore`; capture never touches production accounts, Keychain, or
-network (fail-closed). The wired pipeline (`app-screenshots.yml`): early input
+network (fail-closed). The local capture pipeline (run via the
+`lifio-local-screenshots` skill, one simulator at a time): early input
 validation → one verified arm64 build (tar + digest manifest, Xcode 27.1 /
-iOS 27.0) → one worker per selected device (`max-parallel: 5`, boot/install
-once, locales sequential single automated pass with pinned + real-time sessions via
+iOS 27.0) → one owned simulator per selected device (locales sequential
+single automated pass with pinned + real-time hold-open sessions via
 `run-session` / `run_device_worker.py`) → per-locale artifacts → panels + ZIP.
 Owner decision 2026-11-04: ONE automated pass per device-locale (no r2, no
 automatic pass comparison); manual reruns when needed with human visual
@@ -81,9 +84,9 @@ inspection (existing session/run identity machinery, new run identity per
 rerun; no new pass selector, no legacy branches). Frame commands are fully identity/hash-bound (v2 envelope, golden fixtures,
 transcript in every ack, combined cleanup receipts); non-English/iPad runs
 require paired `--approval` + `--retained-dir` flags validated against the
-retained `approval-pilot27-r2.json` (no bypass, no fabrication); CI legs run
-under `LIFIO_CAPTURE_CI=1` (`ci_approval_bypass:true` — technical gate, never
-approval). The English 7-frame iOS 27 pilot stays owner-approved (archived
+retained `approval-pilot27-r2.json` (no bypass, no fabrication); local runs
+without paired approvals log `LIFIO_CAPTURE_CI=1`
+(`ci_approval_bypass:true` — technical gate, never approval). The English 7-frame iOS 27 pilot stays owner-approved (archived
 `pilot27-r2`); the session re-capture + 6-pair expansion are audited with
 frozen hashes (historical two-pass counts valid, superseded as acceptance);
 LA frames stay pending until genuine pixels and owner approvals

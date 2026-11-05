@@ -76,11 +76,12 @@ jobs:
               echo "screenshot=false" >> "$GITHUB_OUTPUT"
             fi
             # The stdlib Python/shell tooling (scripts/screenshots/,
-            # scripts/panels/, the deny-screenshot guard) has no other CI
-            # entry point — app-screenshots.yml is workflow_dispatch-only —
-            # so a PR touching only the runner skips every lane without
-            # this. Lowercase paths never match the CamelCase patterns
-            # above, hence the explicit scripts/ alternative.
+            # scripts/panels/, the deny-screenshot guard) runs locally
+            # only (owner decision: no CI capture — slow, unreliable,
+            # expensive); it has no CI lane of its own, so a PR touching
+            # only the runner still needs tooling coverage — hence the
+            # explicit scripts/ alternative. Lowercase paths never match
+            # the CamelCase patterns above.
             if printf '%s\n' "$files" | grep -Eq '^(ios/|\.github/workflows/ios\.yml)|scripts/(screenshots|panels)/'; then
               echo "tooling=true" >> "$GITHUB_OUTPUT"
             else
@@ -259,7 +260,7 @@ jobs:
     # suites are stdlib-only and the guard test is POSIX sh. The panels
     # suites NEED macOS Helvetica (/System/Library/Fonts/Helvetica.ttc,
     # absent on Linux) for byte-identical headlines, so they run in the
-    # macOS panels-tests job below (same split as app-screenshots.yml) —
+    # macOS panels-tests job below (same tooling split as before) —
     # never here.
     if: github.event_name != 'pull_request' || needs.changes.outputs.tooling == 'true'
     runs-on: ubuntu-latest
