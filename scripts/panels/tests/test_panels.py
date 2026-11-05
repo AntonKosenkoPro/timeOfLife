@@ -877,6 +877,8 @@ class BuilderUnitTests(unittest.TestCase):
         self.assertEqual(panels_builder.scaled_size(92, "iphone", "en"), 86)
         self.assertEqual(panels_builder.scaled_size(96, "iphone", "ru"), 66)
         self.assertEqual(panels_builder.scaled_size(92, "iphone", "ru"), 63)
+        self.assertEqual(panels_builder.scaled_size(96, "ipad13", "en"), 64)
+        self.assertEqual(panels_builder.scaled_size(52, "ipad13", "en"), 52)
 
     def test_preferred_breaks_collapse_when_fits(self):
         # Rule (1): joined text fitting max width renders ONE line even

@@ -475,9 +475,17 @@ def pair_scale(pair: str, locale: str) -> float:
             "refusing to guess typography")
 
 
+IPAD_TITLE_MAX_PT = 64
+
+
 def scaled_size(size_pt: int, pair: str, locale: str) -> int:
-    """Pair-scaled point size, floored to int (owner table)."""
-    return int(math.floor(size_pt * pair_scale(pair, locale)))
+    """Pair-scaled point size, floored to int (owner table). iPad
+    titles are additionally capped (owner order: 96B reads too big
+    on the 2064px canvas)."""
+    scaled = int(math.floor(size_pt * pair_scale(pair, locale)))
+    if pair == "ipad13":
+        return min(scaled, IPAD_TITLE_MAX_PT)
+    return scaled
 
 
 def scale_type_table(table: dict, pair: str, locale: str) -> dict:
