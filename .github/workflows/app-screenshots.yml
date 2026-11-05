@@ -707,6 +707,22 @@ jobs:
           xcrun simctl install "${{ steps.sim.outputs.udid }}" \
             "${{ steps.verify.outputs.app }}"
 
+      - name: Set up Node for argent CLI
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install pinned argent CLI
+        # Genuine-LA pipeline shells `argent` (consent describe +
+        # grant taps, island long-press) and `argent-simulator-server`
+        # (button/multitouch one-shots) on PATH. Pinned 0.28.0, proven
+        # locally; proprietary tool, runtime install only, never
+        # bundled; no update without explicit owner approval.
+        run: |
+          npm install -g @swmansion/argent@0.28.0
+          argent --version
+          command -v argent-simulator-server
+
       - name: Write capture provenance
         # capture.py provenance shape ({commit_base, dirty}) is made
         # ONCE per worker run and forwarded to the device worker — it is
