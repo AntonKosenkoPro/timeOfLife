@@ -723,6 +723,27 @@ jobs:
           argent --version
           command -v argent-simulator-server
 
+      - name: Start argent tool-server (best effort)
+        # `argent run` spawns its own server per call and gives up if
+        # it is not listening within 15s — unwinnable on a cold runner
+        # (CI 42057656394: daemon cold start ate the spawn every time).
+        # A pre-started detached server is reused by later calls, moving
+        # cold start out of every capture timeout. Best effort: if the
+        # server never becomes healthy the capture still runs and the
+        # consent phase records failed-blocker honestly (never aborts).
+        run: |
+          argent server start --detach || true
+          for i in $(seq 1 24); do
+            if argent server status --json 2>/dev/null | grep -q '"healthy"\|"ok"\|running'; then
+              echo "tool-server healthy after ~$((i * 10))s"
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "::warning::argent tool-server not healthy after ~4min; capture proceeds without describe-backed consent"
+          argent server logs 2>/dev/null | tail -20 || true
+          exit 0
+
       - name: Write capture provenance
         # capture.py provenance shape ({commit_base, dirty}) is made
         # ONCE per worker run and forwarded to the device worker — it is
