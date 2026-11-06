@@ -78,7 +78,17 @@ func loadReviewAccess(cfg *Config) error {
 	// pasted duplicate must not couple them. JWTSecret, AccountStatusSecret,
 	// and both keyrings are loaded before this point, so the comparison is
 	// against the live values, not copies.
-	if subtleCompare(key, []byte(cfg.JWTSecret)) || subtleCompare(key, []byte(cfg.AccountStatusSecret)) {
+	// JWT_SECRET/ACCOUNT_STATUS_SECRET are raw strings (usually 64 hex
+	// chars) while key is decoded bytes: check both the configured
+	// REVIEW_CODE_KEY text and its decoded form, so a pasted duplicate is
+	// actually caught by the independence guarantee. The text comparison
+	// is case-sensitive because both values are consumed verbatim (the
+	// server secrets as raw HMAC bytes, the review key decoded) — hex that
+	// differs only in case is distinct key material there, not a coupling.
+	if subtleCompare(key, []byte(cfg.JWTSecret)) ||
+		subtleCompare(key, []byte(cfg.AccountStatusSecret)) ||
+		subtleCompare([]byte(keyHex), []byte(cfg.JWTSecret)) ||
+		subtleCompare([]byte(keyHex), []byte(cfg.AccountStatusSecret)) {
 		return invalidFieldError("REVIEW_CODE_KEY", "dedicated key independent of JWT_SECRET and ACCOUNT_STATUS_SECRET")
 	}
 	for _, ring := range []struct {

@@ -196,7 +196,10 @@ func readCode(r io.Reader) (string, error) {
 // where the platform supports it to close the check-then-open race on the
 // final component, and f.Chmod follows because the 0o600 creation mode only
 // applies to newly created files — a pre-existing world-readable file keeps
-// its old mode without it. The verifier is file content only — never
+// its old mode without it. Truncation runs after the Chmod (on the O_WRONLY
+// fd) so a chmod failure leaves the prior verifier intact instead of
+// destroying it, and still replaces stale (possibly longer) content before
+// the write. The verifier is file content only — never
 // printed, never logged.
 func writeProtected(path, content string) error {
 	if info, statErr := os.Lstat(path); statErr == nil {
@@ -206,7 +209,7 @@ func writeProtected(path, content string) error {
 	} else if !os.IsNotExist(statErr) {
 		return statErr
 	}
-	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC|oNofollow, 0o600)
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|oNofollow, 0o600)
 	if err != nil {
 		return err
 	}
@@ -214,6 +217,9 @@ func writeProtected(path, content string) error {
 	// The 0o600 mode argument only applies to newly created files: an
 	// existing file keeps its previous (possibly world-readable) mode.
 	if err := f.Chmod(0o600); err != nil {
+		return err
+	}
+	if err := f.Truncate(0); err != nil {
 		return err
 	}
 	if _, err := f.WriteString(content); err != nil {

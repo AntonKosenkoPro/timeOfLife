@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -343,8 +344,11 @@ func TestReviewAttempts_MigrationParity(t *testing.T) {
 	`).Scan(&colDefault); err != nil {
 		t.Fatalf("column check: %v", err)
 	}
-	// The migration's DEFAULT NOW() must survive the SQLite adapter.
-	if !colDefault.Valid || colDefault.String == "" {
-		t.Errorf("expected admitted_at to carry a default, got %+v", colDefault)
+	// The migration's DEFAULT NOW() must survive the SQLite adapter, which
+	// rewrites NOW() to (datetime('now')) (see sqliteReplacements): a bare
+	// non-empty check would still pass on a wrong default (e.g. a literal
+	// timestamp or an unconverted NOW()).
+	if !colDefault.Valid || !strings.Contains(strings.ToLower(colDefault.String), "datetime('now')") {
+		t.Errorf("expected admitted_at default to be adapted NOW(), got %+v", colDefault)
 	}
 }

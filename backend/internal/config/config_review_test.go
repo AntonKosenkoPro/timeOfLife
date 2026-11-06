@@ -180,13 +180,35 @@ func TestReviewAccess_KeyIndependentOfServerSecrets(t *testing.T) {
 		{"key equals jwt secret", func(t *testing.T) {
 			t.Setenv("JWT_SECRET", string(raw))
 		}, dupHex, "REVIEW_CODE_KEY"},
+		{"key equals jwt secret hex text", func(t *testing.T) {
+			t.Setenv("JWT_SECRET", dupHex)
+			t.Setenv("ACCOUNT_STATUS_SECRET", strings.Repeat("u", 32))
+			t.Setenv("REFRESH_RECOVERY_KEYS", strings.Repeat("aa", 32))
+		}, dupHex, "REVIEW_CODE_KEY"},
 		{"key equals account status secret", func(t *testing.T) {
 			t.Setenv("JWT_SECRET", strings.Repeat("t", 32))
 			t.Setenv("ACCOUNT_STATUS_SECRET", string(raw))
 		}, dupHex, "REVIEW_CODE_KEY"},
-		{"key equals recovery key", func(t *testing.T) {
-			t.Setenv("REFRESH_RECOVERY_KEYS", dupHex)
+		{"key equals account status secret hex text", func(t *testing.T) {
+			t.Setenv("JWT_SECRET", strings.Repeat("t", 32))
+			t.Setenv("ACCOUNT_STATUS_SECRET", dupHex)
+			t.Setenv("REFRESH_RECOVERY_KEYS", strings.Repeat("aa", 32))
 		}, dupHex, "REVIEW_CODE_KEY"},
+		{"key equals recovery key", func(t *testing.T) {
+			t.Setenv("JWT_SECRET", strings.Repeat("t", 32))
+			t.Setenv("ACCOUNT_STATUS_SECRET", strings.Repeat("u", 32))
+			t.Setenv("REFRESH_RECOVERY_KEYS", dupHex)
+		}, dupHex, "REFRESH_RECOVERY_KEYS"},
+		{"key equals apple token key", func(t *testing.T) {
+			t.Setenv("JWT_SECRET", strings.Repeat("t", 32))
+			t.Setenv("ACCOUNT_STATUS_SECRET", strings.Repeat("u", 32))
+			t.Setenv("REFRESH_RECOVERY_KEYS", strings.Repeat("aa", 32))
+			t.Setenv("APPLE_CLIENT_ID", "com.example.app")
+			t.Setenv("APPLE_TEAM_ID", "TEAMID1234")
+			t.Setenv("APPLE_KEY_ID", "KEYID12345")
+			t.Setenv("APPLE_PRIVATE_KEY", testApplePrivateKey(t))
+			t.Setenv("APPLE_TOKEN_KEYS", dupHex)
+		}, dupHex, "APPLE_TOKEN_KEYS"},
 	}
 	for _, tc := range cases {
 		baseReviewEnv(t)

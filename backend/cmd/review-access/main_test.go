@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -115,6 +116,9 @@ func TestVerifier_BadKeyFailsWithoutDisclosure(t *testing.T) {
 // existing symlink at --out is refused and the link target is never
 // truncated or followed.
 func TestWriteProtected_RefusesSymlink(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("os.Symlink requires SeCreateSymbolicLinkPrivilege on Windows; POSIX-only semantics")
+	}
 	dir := t.TempDir()
 	target := filepath.Join(dir, "target.hex")
 	if err := os.WriteFile(target, []byte("original"), 0o600); err != nil {
@@ -143,8 +147,13 @@ func TestWriteProtected_RefusesSymlink(t *testing.T) {
 // keeps neither stale content nor a world-readable mode: the 0o600 argument
 // only applies on creation, so an explicit Chmod must follow the open.
 func TestWriteProtected_ResetsExistingMode(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("FileMode.Perm only reports 0666/0444 on Windows; POSIX-only semantics")
+	}
 	path := filepath.Join(t.TempDir(), "verifier.hex")
-	if err := os.WriteFile(path, []byte("stale"), 0o644); err != nil {
+	// Stale content is longer than the replacement: without an explicit
+	// truncation after the mode is secured, the tail would survive.
+	if err := os.WriteFile(path, []byte("stale-stale-stale-content"), 0o644); err != nil {
 		t.Fatalf("write stale file: %v", err)
 	}
 	if err := writeProtected(path, "fresh\n"); err != nil {
