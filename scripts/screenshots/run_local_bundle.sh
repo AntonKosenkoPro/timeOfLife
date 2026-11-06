@@ -7,10 +7,10 @@
 # Outputs under $OUT_ROOT (default /tmp/lifio-bundle; never git).
 # Usage: run_local_bundle.sh [--out DIR] [--devices k1,k2] [--locales JSON]
 #        [--skip-build]   (reuses the previous build under OUT/dd)
-#        [--jobs N]       (1..5 parallel devices; default 5. Leases are
-#        per-device and argent multiplexes across sims; keep 1 on small
-#        hosts, as parallel sims share CPU/RAM and timing-sensitive holds
-#        may flake under load.)
+#        [--jobs N]       (default 1: strictly sequential. Parallel
+#        devices (2..5) share host CPU/RAM and tool-server cold start;
+#        proven flaky for genuine capture — use only for app-frame
+#        smoke, never when panels are expected.)
 #        [--keep-sims]    (reuse owned local-bundle-* sims across runs:
 #        erase + reboot instead of create/delete. Erase restores clean
 #        state so the consent prompt resurfaces; shared/preinstalled sims
@@ -21,7 +21,7 @@ OUT_ROOT=/tmp/lifio-bundle
 DEVICES="iphone69,iphone63,ipad13"
 LOCALES_JSON='["en","ru","zh-Hans","es-419","pt-BR"]'
 SKIP_BUILD=0
-JOBS=5
+JOBS=1
 KEEP_SIMS=0
 while [ $# -gt 0 ]; do
   case "$1" in
