@@ -2160,12 +2160,19 @@ LOCK_BANNER_MIN_RED = 0.002
 # Slim (provisional, pre-grant) banner rows as a fraction of height,
 # measured from genuine provisional pixels (1320x2868: y ~2170-2290).
 SLIM_BANNER_ROWS = (0.750, 0.800)
-# Bottom-strip banner rows: the steady-state lock presentation on the
-# current runtime sits lower than the pilot card band — measured Stop
-# mass rows 0.801-0.847 on 1320x2868 (two pre-authorized runs, valid
-# ticking timers, red_frac 0.06755 in this band). Same threshold as the
-# card band (blank screens read 0.0; 25x+ margin).
-STRIP_BANNER_ROWS = (0.800, 0.850)
+# Bottom-strip banner rows per canvas: the steady-state lock presentation
+# sits lower than the pilot card band, at a geometry-relative position
+# calibrated from genuine pixels per canvas — iPhone 1320x2868 Stop mass
+# rows 0.801-0.847 (two pre-authorized runs, red_frac 0.06755), iPhone
+# 1206x2622 same relative band (5/5 bundle cells staged), iPad 2064x2752
+# rows 0.888-0.919 (pre-authorized run, valid ticking timer). Same
+# threshold as the card band (blank screens read 0.0). Canvases without
+# a calibrated strip band stay card-only (fail closed, never guessed).
+STRIP_BANNER_ROWS: dict[tuple[int, int], tuple[float, float]] = {
+    (1320, 2868): (0.800, 0.850),
+    (1206, 2622): (0.800, 0.850),
+    (2064, 2752): (0.880, 0.925),
+}
 
 
 def lock_banner_verdict(png_path: str,
@@ -2173,11 +2180,11 @@ def lock_banner_verdict(png_path: str,
     """Pixel verdict for a Lock Screen banner (no OCR).
 
     Counts stop-button red mass in the full-banner band (relative rows
-    0.662H-0.697H, pilot card position) and the bottom-strip band
-    (relative rows 0.800H-0.850H, steady-state position on the current
-    runtime) — full width, geometry-relative, so every canvas is
-    attested. Calibrated: pilot cards measure 0.00745 on 1320x2868,
-    bottom strips 0.06755 (two independent pre-authorized runs);
+    0.662H-0.697H, pilot card position) and the per-canvas bottom-strip
+    band (steady-state position, calibrated from genuine pixels per
+    canvas — never guessed) — full width, geometry-relative, so every
+    canvas is attested. Calibrated: pilot cards measure 0.00745 on
+    1320x2868, bottom strips 0.06755 (iPhone) and ~0.02 (iPad);
     blank lock screens 0.0.
     banner=True above threshold in either band (presentation full-card
     or full-strip); a slim provisional banner (small bottom banner
@@ -2228,10 +2235,11 @@ def lock_banner_verdict(png_path: str,
         out["presentation"] = "full-card"
         out["reason"] = "lock banner stop-button mass verified"
         return out
-    strip = red_frac(int(STRIP_BANNER_ROWS[0] * height),
-                     int(STRIP_BANNER_ROWS[1] * height))
+    strip_rows = STRIP_BANNER_ROWS.get((width, height))
+    strip = red_frac(int(strip_rows[0] * height),
+                     int(strip_rows[1] * height)) if strip_rows else 0.0
     out["red_frac"] = strip
-    if strip >= LOCK_BANNER_MIN_RED:
+    if strip_rows is not None and strip >= LOCK_BANNER_MIN_RED:
         out["banner"] = True
         out["presentation"] = "full-strip"
         out["reason"] = "lock strip banner stop-button mass verified"

@@ -36,6 +36,7 @@ from test_session_run import (
 )
 
 GEO63 = (1206, 2622)
+GEOIPAD = (2064, 2752)
 NONCE_LIVE = "9" * 32
 
 # Island region pinned from live headless pixels (locked1.png, 1206x2622):
@@ -591,6 +592,40 @@ class LockCaptureTests(unittest.TestCase):
             self.assertTrue(verdict["banner"])
             self.assertEqual(verdict["presentation"], "full-strip")
             self.assertGreaterEqual(verdict["red_frac"], 0.002)
+
+    def test_lock_ipad_strip_banner_stages_genuine(self):
+        # iPad steady-state banner sits lower (Stop mass rows
+        # 0.888-0.919 on 2064x2752, pre-authorized run, valid timer):
+        # per-canvas strip band stages it genuine.
+        def ipad_strip(path: Path) -> None:
+            w, h = GEOIPAD
+            cy = int(0.905 * h)
+
+            def fn(x, y):
+                if (x - int(0.87 * w)) ** 2 + (y - cy) ** 2 <= 35 ** 2:
+                    return (255, 66, 69)
+                return (40 + (x % 60), 36 + (x % 50), 34 + (y % 44))
+
+            _write_rgba_png(path, w, h, fn)
+
+        def ipad_blank(path: Path) -> None:
+            w, h = GEOIPAD
+            _write_rgba_png(
+                path, w, h,
+                lambda x, y: (40 + (x % 60), 36 + (x % 50),
+                              34 + (y % 44)))
+
+        with tempfile.TemporaryDirectory() as tmp:
+            probe = Path(tmp) / "ipad-strip.png"
+            ipad_strip(probe)
+            verdict = ex.lock_banner_verdict(str(probe), GEOIPAD)
+            self.assertTrue(verdict["banner"])
+            self.assertEqual(verdict["presentation"], "full-strip")
+            blank = Path(tmp) / "ipad-blank.png"
+            ipad_blank(blank)
+            verdict = ex.lock_banner_verdict(str(blank), GEOIPAD)
+            self.assertFalse(verdict["banner"])
+            self.assertEqual(verdict["presentation"], "absent")
 
     def test_lock_promotion_stages_banner_after_grant(self):
         # Granted but banner not yet promoted (blank first exports):
