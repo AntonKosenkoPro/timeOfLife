@@ -245,7 +245,11 @@ Local pipeline topology (`scripts/screenshots/run_local_bundle.sh`, strictly
 sequential): early input validation → one arm64-verified Screenshot build
 (tar + digest manifest, Xcode 27.1 / iOS 27.0) → one owned simulator per
 selected device (created/booted/installed/captured/shutdown/deleted in turn;
-shared sims never touched), each running the selected locales sequentially
+shared sims never touched), each running a Live Activities pre-grant setup
+pass first (same realtime root envelope, launch, Home-background, lock,
+shared grant — auth BEFORE any activity starts, so banner timers tick
+instead of freezing as "MM:--" dashes; once per device, non-fatal, worker
+grant stays as fallback) and then the selected locales sequentially
 (SINGLE automated pass per locale, pinned + real-time hold-open sessions with
 argent describe-backed consent grant and island long-press) → per-locale
 `shots/<device>/<locale>` → genuine registration (no observation gate —
@@ -257,6 +261,13 @@ branches). Local bypass (`LIFIO_CAPTURE_CI=1`, logged as
 
 Final operator CLIs (verified `--help`; paths, not promises):
 
+- `python3 scripts/screenshots/capture.py pregrant --device UDID
+  --device-key iphone69|iphone63|ipad13 --geometry GEOxGEO [--locale en]
+  [--approval FILE --retained-dir DIR]`
+  (device-setup authorization: realtime root envelope, launch, anchor wait,
+  Home-background, lock, shared grant, terminate; prints the result record;
+  absent/granted/blocked all rc 0 — the worker grant stays as fallback;
+  infra failures rc 1, both non-fatal in the bundle driver.)
 - `python3 scripts/screenshots/capture.py run-session --device UDID
   --device-key iphone69|iphone63|ipad13 --request BASE --domain pinned|realtime
   --out PAIRROOT --run-id RID --geometry GEOxGEO --pinned-totals FILE
