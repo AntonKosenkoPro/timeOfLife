@@ -83,11 +83,14 @@ func runVerifier(args []string, stdin io.Reader) int {
 		}
 	}
 	if !auth.ValidUUIDShape(accountID) {
-		fmt.Fprintln(os.Stderr, "invalid --account-id: want UUID of the existing verified review account")
+		fmt.Fprintln(os.Stderr, "invalid --account-id: want lowercase UUID of the existing verified review account")
 		return 2
 	}
-	if !auth.ValidEmail(email) {
-		fmt.Fprintln(os.Stderr, "invalid --email: want canonical email of the existing verified review account")
+	// ValidEmail accepts mixed case, but the binding is stored verbatim and
+	// matched byte-exactly (config rejects non-lowercase too): fail fast
+	// here so the CLI cannot mint a verifier the server would never match.
+	if !auth.ValidEmail(email) || email != strings.ToLower(email) {
+		fmt.Fprintln(os.Stderr, "invalid --email: want canonical lowercase email of the existing verified review account")
 		return 2
 	}
 	if out == "" {
@@ -186,15 +189,33 @@ func readCode(r io.Reader) (string, error) {
 	return code, nil
 }
 
-// writeProtected writes content to path with owner-only permissions,
-// refusing to follow an existing non-regular file. The verifier is file
-// content only — never printed, never logged.
+// writeProtected writes content to path with owner-only permissions. A
+// pre-existing symlink (or any other non-regular file: device, fifo,
+// socket, directory) is refused before opening, so --out can never clobber
+// an arbitrary file through a link. The open additionally carries O_NOFOLLOW
+// where the platform supports it to close the check-then-open race on the
+// final component, and f.Chmod follows because the 0o600 creation mode only
+// applies to newly created files — a pre-existing world-readable file keeps
+// its old mode without it. The verifier is file content only — never
+// printed, never logged.
 func writeProtected(path, content string) error {
-	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
+	if info, statErr := os.Lstat(path); statErr == nil {
+		if !info.Mode().IsRegular() {
+			return errors.New("out path must be a regular file (symlinks/devices are refused)")
+		}
+	} else if !os.IsNotExist(statErr) {
+		return statErr
+	}
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC|oNofollow, 0o600)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = f.Close() }()
+	// The 0o600 mode argument only applies to newly created files: an
+	// existing file keeps its previous (possibly world-readable) mode.
+	if err := f.Chmod(0o600); err != nil {
+		return err
+	}
 	if _, err := f.WriteString(content); err != nil {
 		return err
 	}

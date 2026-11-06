@@ -29,8 +29,13 @@ func ValidEmail(email string) bool {
 	return accountEmailRegex.MatchString(email)
 }
 
-// ValidUUIDShape reports whether id has the textual 8-4-4-4-12 hex UUID
-// shape. It validates shape only, not version/variant.
+// ValidUUIDShape reports whether id has the canonical lowercase textual
+// 8-4-4-4-12 hex UUID shape. It validates shape only, not version/variant,
+// but letter case is significant: every producer in this system (SQLite
+// uuidV7, Postgres gen_random_uuid) emits lowercase, and every consumer
+// compares byte-exactly, so a non-lowercase value that passed shape
+// validation could never match at runtime. Rejecting here fails fast at
+// config/operator input instead of locking review login out silently.
 func ValidUUIDShape(id string) bool {
 	if len(id) != 36 {
 		return false
@@ -42,7 +47,7 @@ func ValidUUIDShape(id string) bool {
 			if c != '-' {
 				return false
 			}
-		case (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F'):
+		case (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'):
 		default:
 			return false
 		}

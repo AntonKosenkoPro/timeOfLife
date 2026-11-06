@@ -269,6 +269,46 @@ func TestReview_AppleAccountDenied(t *testing.T) {
 	}
 }
 
+// cutoffReviewStore wraps a Store to inject an Apple consent cutoff on the
+// lifecycle re-read. Production can never produce this state on the review
+// path (ApplyAppleConsentCutoff selects by apple_subject, and review
+// accounts are email-created with a nil subject — Apple-linked accounts are
+// rejected by the binding check), but the wrapper pins that the removed dead
+// Apple fence stays gone: a cutoff-bearing re-read must not deny review
+// login with invalid_apple_token.
+type cutoffReviewStore struct {
+	db.Store
+	cutoff time.Time
+}
+
+func (s cutoffReviewStore) GetUserByID(ctx context.Context, id string) (db.User, error) {
+	u, err := s.Store.GetUserByID(ctx, id)
+	if err != nil {
+		return u, err
+	}
+	u.AppleConsentCutoff = &s.cutoff
+	return u, nil
+}
+
+// TestReview_CutoffOnRereadDoesNotFence pins that the lifecycle re-check
+// guards only the deletion race: even a cutoff-bearing re-read still issues
+// the ordinary session, so review login can only ever fail with
+// invalid_otp, matching the documented 401 contract.
+func TestReview_CutoffOnRereadDoesNotFence(t *testing.T) {
+	inner := newTestStore(t)
+	user := mustCreateVerifiedUser(t, inner, "review-nofence@example.com")
+	cfg, code := reviewFixture(t, user)
+	h := newReviewHandler(t, cutoffReviewStore{Store: inner, cutoff: time.Now()}, nil, cfg)
+
+	w := verifyOTPWithDevice(t, h, user.Email, code, "device-nofence")
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if resp := decodeAuthResponse(t, w); resp.User.ID != user.ID {
+		t.Fatalf("expected session for review user, got %q", resp.User.ID)
+	}
+}
+
 // TestReview_UnverifiedOrMissingDenied pins eligibility: unverified and
 // missing accounts fail without issuing credentials or creating accounts.
 func TestReview_UnverifiedOrMissingDenied(t *testing.T) {

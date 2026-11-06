@@ -15,6 +15,10 @@ The server SHALL support at most one configured review account, disabled by defa
 - **WHEN** enabled review verification resolves a missing, unverified, Apple-created, or different-UUID account at the configured address
 - **THEN** authentication fails without issuing credentials, creating an account, or changing verification state
 
+#### Scenario: Non-canonical casing fails startup
+- **WHEN** enabled configuration carries a non-lowercase UUID or email
+- **THEN** startup fails without disclosing verification material (runtime matching is byte-exact, so only canonical lowercase bindings boot)
+
 #### Scenario: Another address or alias is used
 - **WHEN** the review code is supplied for an address other than the configured canonical email
 - **THEN** it grants no review-code authority and that address follows ordinary OTP behavior

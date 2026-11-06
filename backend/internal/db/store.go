@@ -339,7 +339,9 @@ type Store interface {
 	// denial appends nothing, so it cannot extend the window. A purged
 	// account races as ErrUserMissing (no admission, no session); any store
 	// failure is an error (fail closed — the caller must not authenticate).
-	ReserveReviewAttempt(ctx context.Context, userID string) (ReviewAdmission, error) // GetUserByID returns a user by their ID.
+	ReserveReviewAttempt(ctx context.Context, userID string) (ReviewAdmission, error)
+
+	// GetUserByID returns a user by their ID.
 	GetUserByID(ctx context.Context, userID string) (User, error)
 
 	// UpsertUserByAppleSubject upserts a user keyed by Apple's stable `sub`

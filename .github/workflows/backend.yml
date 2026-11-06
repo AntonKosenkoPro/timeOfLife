@@ -350,15 +350,37 @@ jobs:
             __review_email="$(review_trim "${REVIEW_ACCOUNT_EMAIL:-}")"
             [ -n "$__review_id" ] || { echo "::error::REVIEW_ACCOUNT_ID is empty (required when review access is enabled). Nothing deployed."; exit 1; }
             [ -n "$__review_email" ] || { echo "::error::REVIEW_ACCOUNT_EMAIL is empty (required when review access is enabled). Nothing deployed."; exit 1; }
-            printf '%s' "$__review_id" | grep -Eq '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$' \
-              || { echo "::error::REVIEW_ACCOUNT_ID is not a UUID. Nothing deployed."; exit 1; }
-            case "$__review_email" in
-              *"@"*.*) ;;
-              *) echo "::error::REVIEW_ACCOUNT_EMAIL is not an email address. Nothing deployed."; exit 1 ;;
-            esac
+            printf '%s' "$__review_id" | grep -Eq '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' \
+              || { echo "::error::REVIEW_ACCOUNT_ID is not a lowercase UUID. Nothing deployed."; exit 1; }
+            # Mirror the effective Go acceptance for the review binding, which
+            # is narrower than shell globs in three ways: net/mail structure
+            # + ASCII mailbox/dotted-domain with a 2+ letter TLD (rejects
+            # 1-char TLDs and spaces), no empty/dot-edge labels (rejects
+            # doubled dots and leading/trailing local dots, which the regex
+            # alone accepts but mail.ParseAddress refuses), and canonical
+            # lowercase throughout (config.Load rejects non-lowercase
+            # bindings because runtime matching is byte-exact). Anything
+            # passing here must boot; the previous *"@"*.* glob let all of
+            # these through into a boot crash-loop.
+            printf '%s' "$__review_email" | grep -Eq '^[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}$' \
+              || { echo "::error::REVIEW_ACCOUNT_EMAIL is not a canonical lowercase email address. Nothing deployed."; exit 1; }
+            __review_local="${__review_email%@*}"; __review_domain="${__review_email#*@}"
+            case "$__review_local" in ""|.*|*.|*..*) echo "::error::REVIEW_ACCOUNT_EMAIL is not a canonical lowercase email address. Nothing deployed."; exit 1 ;; esac
+            case "$__review_domain" in *..*) echo "::error::REVIEW_ACCOUNT_EMAIL is not a canonical lowercase email address. Nothing deployed."; exit 1 ;; esac
             validate_review_hex "${REVIEW_CODE_VERIFIER:-}" "REVIEW_CODE_VERIFIER" || exit 1
             validate_review_hex "${REVIEW_CODE_KEY:-}" "REVIEW_CODE_KEY" || exit 1
-            [ "${REVIEW_CODE_KEY}" != "${REVIEW_CODE_VERIFIER}" ] \
+            __review_verifier="$(review_trim "${REVIEW_CODE_VERIFIER:-}")"
+            __review_key="$(review_trim "${REVIEW_CODE_KEY:-}")"
+            # These land unquoted in the sourced VM .env: a padded value
+            # would source as `VAR=` + command, and the on-disk value would
+            # differ from what was validated here. Reject, don't trim.
+            if [ "$__review_id" != "${REVIEW_ACCOUNT_ID:-}" ] \
+              || [ "$__review_email" != "${REVIEW_ACCOUNT_EMAIL:-}" ] \
+              || [ "$__review_verifier" != "${REVIEW_CODE_VERIFIER:-}" ] \
+              || [ "$__review_key" != "${REVIEW_CODE_KEY:-}" ]; then
+              echo "::error::REVIEW_* values must not carry surrounding whitespace (written unquoted into the sourced VM .env). Nothing deployed."; exit 1
+            fi
+            [ "$__review_key" != "$__review_verifier" ] \
               || { echo "::error::REVIEW_CODE_KEY must be independent of REVIEW_CODE_VERIFIER. Nothing deployed."; exit 1; }
           fi
           echo "App Review access binding valid (enabled='${__review_enabled:-<empty>}')."

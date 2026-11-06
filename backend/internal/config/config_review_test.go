@@ -29,6 +29,15 @@ func baseReviewEnv(t *testing.T) {
 	t.Setenv("EMAIL_BACKEND", "console")
 	t.Setenv("REFRESH_RECOVERY_KEYS", testHexKey(t))
 	t.Setenv("ACCOUNT_STATUS_SECRET", strings.Repeat("a", 32))
+	// The all-or-nothing Apple block reads ambient APPLE_* state: clear all
+	// six names (mirroring config_test.go setAll) so these tests are
+	// hermetic under a developer shell with partial Apple provisioning.
+	for _, name := range []string{
+		"APPLE_CLIENT_ID", "APPLE_TEAM_ID", "APPLE_KEY_ID", "APPLE_PRIVATE_KEY",
+		"APPLE_TOKEN_KEYS", "APPLE_REDIRECT_URI",
+	} {
+		t.Setenv(name, "")
+	}
 	t.Setenv("REVIEW_ACCESS_ENABLED", "")
 	t.Setenv("REVIEW_ACCOUNT_ID", "")
 	t.Setenv("REVIEW_ACCOUNT_EMAIL", "")
@@ -118,8 +127,10 @@ func TestReviewAccess_MalformedEnabledFailsClosed(t *testing.T) {
 		verifier, key string
 	}{
 		{"bad uuid", "not-a-uuid", goodEmail, goodVerifier, goodKey},
+		{"uppercase uuid", "B2EA21EC-6B4B-4DA7-8668-A3A598A59711", goodEmail, goodVerifier, goodKey},
 		{"empty uuid", "", goodEmail, goodVerifier, goodKey},
 		{"bad email", goodID, "not-an-email", goodVerifier, goodKey},
+		{"uppercase email", goodID, "Review-Synthetic@Example.COM", goodVerifier, goodKey},
 		{"dot-edge email", goodID, ".a@example.com", goodVerifier, goodKey},
 		{"short verifier", goodID, goodEmail, "abcd", goodKey},
 		{"nonhex verifier", goodID, goodEmail, strings.Repeat("zz", 32), goodKey},
@@ -143,6 +154,56 @@ func TestReviewAccess_MalformedEnabledFailsClosed(t *testing.T) {
 			if secret != "" && strings.Contains(err.Error(), secret) {
 				t.Errorf("error for %s discloses secret material", tc.name)
 			}
+		}
+	}
+}
+
+// TestReviewAccess_KeyIndependentOfServerSecrets pins the dedicated-key
+// contract: REVIEW_CODE_KEY must not duplicate JWT_SECRET,
+// ACCOUNT_STATUS_SECRET, or any entry of the recovery/Apple keyrings, so
+// rotating those secrets can never change review login.
+func TestReviewAccess_KeyIndependentOfServerSecrets(t *testing.T) {
+	goodID := "b2ea21ec-6b4b-4da7-8668-a3a598a59711"
+	goodEmail := "review-synthetic@example.com"
+	verifier := testHexKey(t)
+
+	raw := []byte(strings.Repeat("s", 32)) // 32 bytes, like baseReviewEnv JWT/ACCOUNT_STATUS
+	dupHex := strings.Repeat("73", 32)     // hex of "s"*32
+
+	cases := []struct {
+		name      string
+		setupEnv  func(t *testing.T)
+		key       string
+		expectErr string
+	}{
+		{"key equals verifier", nil, verifier, "REVIEW_CODE_KEY"},
+		{"key equals jwt secret", func(t *testing.T) {
+			t.Setenv("JWT_SECRET", string(raw))
+		}, dupHex, "REVIEW_CODE_KEY"},
+		{"key equals account status secret", func(t *testing.T) {
+			t.Setenv("JWT_SECRET", strings.Repeat("t", 32))
+			t.Setenv("ACCOUNT_STATUS_SECRET", string(raw))
+		}, dupHex, "REVIEW_CODE_KEY"},
+		{"key equals recovery key", func(t *testing.T) {
+			t.Setenv("REFRESH_RECOVERY_KEYS", dupHex)
+		}, dupHex, "REVIEW_CODE_KEY"},
+	}
+	for _, tc := range cases {
+		baseReviewEnv(t)
+		if tc.setupEnv != nil {
+			tc.setupEnv(t)
+		}
+		enabledReviewEnv(t, goodID, goodEmail, verifier, tc.key)
+		_, err := Load()
+		if err == nil {
+			t.Errorf("%s: expected Load to fail", tc.name)
+			continue
+		}
+		if !strings.Contains(err.Error(), tc.expectErr) {
+			t.Errorf("%s: expected error naming %s, got %v", tc.name, tc.expectErr, err)
+		}
+		if strings.Contains(err.Error(), tc.key) || strings.Contains(err.Error(), verifier) {
+			t.Errorf("%s: error discloses secret material", tc.name)
 		}
 	}
 }

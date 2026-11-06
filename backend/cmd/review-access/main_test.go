@@ -71,6 +71,8 @@ func TestVerifier_InputErrorsAreRedacted(t *testing.T) {
 	}{
 		{"bad uuid", []string{"--account-id", "nope", "--email", mail, "--out", "x"}, "482916\n"},
 		{"bad email", []string{"--account-id", id, "--email", "nope", "--out", "x"}, "482916\n"},
+		{"uppercase uuid", []string{"--account-id", "B2EA21EC-6B4B-4DA7-8668-A3A598A59711", "--email", mail, "--out", "x"}, "482916\n"},
+		{"uppercase email", []string{"--account-id", id, "--email", "Review-Synthetic@Example.COM", "--out", "x"}, "482916\n"},
 		{"missing out", []string{"--account-id", id, "--email", mail}, "482916\n"},
 		{"short code", []string{"--account-id", id, "--email", mail, "--out", "x"}, "123\n"},
 		{"non-digit code", []string{"--account-id", id, "--email", mail, "--out", "x"}, "abcdef\n"},
@@ -106,6 +108,59 @@ func TestVerifier_BadKeyFailsWithoutDisclosure(t *testing.T) {
 	}
 	if _, err := os.Stat(out); !os.IsNotExist(err) {
 		t.Fatal("verifier file must not exist on key failure")
+	}
+}
+
+// TestWriteProtected_RefusesSymlink pins the secret-path contract: an
+// existing symlink at --out is refused and the link target is never
+// truncated or followed.
+func TestWriteProtected_RefusesSymlink(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "target.hex")
+	if err := os.WriteFile(target, []byte("original"), 0o600); err != nil {
+		t.Fatalf("write target: %v", err)
+	}
+	link := filepath.Join(dir, "verifier.hex")
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatalf("symlink: %v", err)
+	}
+	if err := writeProtected(link, "verifier-material\n"); err == nil {
+		t.Fatal("expected writeProtected to refuse a symlink")
+	}
+	raw, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatalf("read target: %v", err)
+	}
+	if string(raw) != "original" {
+		t.Fatal("symlink target must never be truncated by writeProtected")
+	}
+	if info, err := os.Lstat(link); err != nil || info.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("link must remain a symlink, stat err=%v", err)
+	}
+}
+
+// TestWriteProtected_ResetsExistingMode pins that a pre-existing --out file
+// keeps neither stale content nor a world-readable mode: the 0o600 argument
+// only applies on creation, so an explicit Chmod must follow the open.
+func TestWriteProtected_ResetsExistingMode(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "verifier.hex")
+	if err := os.WriteFile(path, []byte("stale"), 0o644); err != nil {
+		t.Fatalf("write stale file: %v", err)
+	}
+	if err := writeProtected(path, "fresh\n"); err != nil {
+		t.Fatalf("writeProtected: %v", err)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read output: %v", err)
+	}
+	if string(raw) != "fresh\n" {
+		t.Fatalf("expected replaced content, got %q", raw)
+	}
+	if info, err := os.Stat(path); err != nil {
+		t.Fatalf("stat output: %v", err)
+	} else if info.Mode().Perm() != 0o600 {
+		t.Errorf("expected owner-only output, got %o", info.Mode().Perm())
 	}
 }
 

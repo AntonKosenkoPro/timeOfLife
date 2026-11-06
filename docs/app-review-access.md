@@ -26,7 +26,9 @@ address — otherwise it fails with the ordinary `invalid_otp` and issues
 nothing:
 
 - The account with the configured immutable UUID exists at the configured
-  canonical email (byte-exact; aliases never match).
+  canonical email (byte-exact; aliases never match). Both identifiers must
+  be canonical lowercase — uppercase values fail startup instead of silently
+  never matching.
 - The account is verified and email-created (no Apple identity, never
   upserted or verified by this path).
 - The submitted code verifies against the keyed verifier (HMAC-SHA256 over
@@ -50,8 +52,8 @@ Nothing here is a real credential — every value below is a placeholder shape.
 
 ### 1. Choose the binding (before activation)
 
-- Confirm privately: the exact UUID and canonical email of the existing
-  verified email-created synthetic-data account, and that its content is
+- Confirm privately: the exact lowercase UUID and canonical lowercase email
+  of the existing verified email-created synthetic-data account, and that its content is
   synthetic and safe to share/mutate. No production or personal data.
 - Confirm the account's email provider state needs nothing (reviewers never
   touch the mailbox).

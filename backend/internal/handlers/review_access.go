@@ -124,12 +124,6 @@ func (h *Handler) verifyReviewOTP(w http.ResponseWriter, r *http.Request, device
 		writeError(w, http.StatusUnauthorized, "invalid_otp", "Invalid or expired code", nil)
 		return
 	}
-	if h.sessionCutByRevocation(nil, nil, current) {
-		h.logger.WarnContext(r.Context(), "review auth outcome", "outcome", "invalid")
-		writeError(w, http.StatusUnauthorized, "invalid_apple_token",
-			"This Apple authorization predates revocation. Re-authorize with Apple.", nil)
-		return
-	}
 
 	h.logger.InfoContext(r.Context(), "review auth outcome", "outcome", "success")
 	h.issueTokens(ctx, w, r, current, deviceID, time.Time{}, "")

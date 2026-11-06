@@ -282,6 +282,11 @@ paths:
                       message: Too many incorrect attempts. Request a new code.
         "429":
           description: Rate limited (5 req/min per IP+email; review-code evaluations additionally capped account-wide — see the endpoint description for Retry-After semantics)
+          headers:
+            Retry-After:
+              description: Seconds until account-wide review-code capacity returns (present on review-code throttling)
+              schema:
+                type: integer
           content:
             application/json:
               schema:

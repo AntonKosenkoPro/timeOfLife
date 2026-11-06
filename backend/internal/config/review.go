@@ -1,6 +1,7 @@
 package config
 
 import (
+	"crypto/subtle"
 	"encoding/hex"
 	"os"
 	"strconv"
@@ -11,12 +12,15 @@ import (
 
 // ReviewAccess carries the disabled-by-default App Review exception binding
 // (demo-account-access). When Enabled, exactly one existing verified
-// email-created account — identified by its immutable UUID AND canonical
-// email — may authenticate with a reusable keyed six-digit code through the
-// ordinary otp/request + otp/verify endpoints. Verifier is the 32-byte
-// HMAC-SHA256 digest over the binding (hex in REVIEW_CODE_VERIFIER); Key is
-// the independent dedicated 32-byte secret (hex in REVIEW_CODE_KEY). No
-// plaintext code ever enters configuration.
+// email-created account — identified by its immutable lowercase UUID AND
+// canonical lowercase email — may authenticate with a reusable keyed
+// six-digit code through the ordinary otp/request + otp/verify endpoints.
+// Verifier is the 32-byte HMAC-SHA256 digest over the binding (hex in
+// REVIEW_CODE_VERIFIER); Key is the independent dedicated 32-byte secret
+// (hex in REVIEW_CODE_KEY). No plaintext code ever enters configuration.
+// Case is significant everywhere: the binding is stored verbatim and matched
+// byte-exactly, so non-lowercase values are rejected at load instead of
+// locking review login out silently.
 type ReviewAccess struct {
 	Enabled      bool
 	AccountID    string
@@ -45,11 +49,15 @@ func loadReviewAccess(cfg *Config) error {
 
 	accountID := strings.TrimSpace(os.Getenv("REVIEW_ACCOUNT_ID"))
 	if !auth.ValidUUIDShape(accountID) {
-		return invalidFieldError("REVIEW_ACCOUNT_ID", "UUID of the existing verified review account")
+		return invalidFieldError("REVIEW_ACCOUNT_ID", "lowercase UUID of the existing verified review account")
 	}
 	accountEmail := strings.TrimSpace(os.Getenv("REVIEW_ACCOUNT_EMAIL"))
-	if !auth.ValidEmail(accountEmail) {
-		return invalidFieldError("REVIEW_ACCOUNT_EMAIL", "canonical email of the existing verified review account")
+	// ValidEmail accepts mixed case (the ordinary OTP path needs that), but
+	// runtime matching is byte-exact on the canonical lowercase address, so
+	// a non-lowercase binding would pass validation yet never match. Reject
+	// it here with a startup error, consistent with the operator CLI.
+	if !auth.ValidEmail(accountEmail) || accountEmail != strings.ToLower(accountEmail) {
+		return invalidFieldError("REVIEW_ACCOUNT_EMAIL", "canonical lowercase email of the existing verified review account")
 	}
 	verifierHex := strings.TrimSpace(os.Getenv("REVIEW_CODE_VERIFIER"))
 	verifier, err := decodeReviewSecret("REVIEW_CODE_VERIFIER", verifierHex)
@@ -63,6 +71,28 @@ func loadReviewAccess(cfg *Config) error {
 	}
 	if subtleCompare(verifier, key) {
 		return invalidFieldError("REVIEW_CODE_KEY", "dedicated key independent of the verifier")
+	}
+	// The dedicated key must be independent of every other configured
+	// secret (design): rotation of JWT, account-status, refresh-recovery,
+	// or Apple token material must never change review login, and a
+	// pasted duplicate must not couple them. JWTSecret, AccountStatusSecret,
+	// and both keyrings are loaded before this point, so the comparison is
+	// against the live values, not copies.
+	if subtleCompare(key, []byte(cfg.JWTSecret)) || subtleCompare(key, []byte(cfg.AccountStatusSecret)) {
+		return invalidFieldError("REVIEW_CODE_KEY", "dedicated key independent of JWT_SECRET and ACCOUNT_STATUS_SECRET")
+	}
+	for _, ring := range []struct {
+		name string
+		keys [][]byte
+	}{
+		{"REFRESH_RECOVERY_KEYS", cfg.RecoveryKeys},
+		{"APPLE_TOKEN_KEYS", cfg.AppleTokenKeys},
+	} {
+		for _, other := range ring.keys {
+			if subtleCompare(key, other) {
+				return invalidFieldError("REVIEW_CODE_KEY", "dedicated key independent of "+ring.name)
+			}
+		}
 	}
 
 	cfg.Review = ReviewAccess{
@@ -93,24 +123,13 @@ func decodeReviewSecret(name, raw string) ([]byte, error) {
 }
 
 func isZeroReviewSecret(secret []byte) bool {
-	for _, b := range secret {
-		if b != 0 {
-			return false
-		}
-	}
-	return true
+	return isZeroKey(secret)
 }
 
-// subtleCompare reports byte equality without branching on content. It is a
-// startup-time guard only (not a request-path comparison); using it keeps the
-// verifier/key independence check free of value-dependent timing.
+// subtleCompare reports byte equality in constant time. It delegates to the
+// vetted standard-library primitive (the same construction the request path
+// uses), keeping security-sensitive comparison logic in one form. It is a
+// startup-time guard only, not a request-path comparison.
 func subtleCompare(a, b []byte) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	var diff byte
-	for i := range a {
-		diff |= a[i] ^ b[i]
-	}
-	return diff == 0
+	return subtle.ConstantTimeCompare(a, b) == 1
 }

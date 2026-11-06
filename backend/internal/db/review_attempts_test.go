@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -344,5 +343,8 @@ func TestReviewAttempts_MigrationParity(t *testing.T) {
 	`).Scan(&colDefault); err != nil {
 		t.Fatalf("column check: %v", err)
 	}
-	_ = fmt.Sprint()
+	// The migration's DEFAULT NOW() must survive the SQLite adapter.
+	if !colDefault.Valid || colDefault.String == "" {
+		t.Errorf("expected admitted_at to carry a default, got %+v", colDefault)
+	}
 }
