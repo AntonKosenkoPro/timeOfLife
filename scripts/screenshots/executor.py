@@ -41,6 +41,7 @@ import struct
 import subprocess
 import sys
 import time
+import uuid
 import zlib
 from pathlib import Path
 from typing import Any, Callable
@@ -1418,6 +1419,16 @@ SHEET_LABEL_MIN_MASS = 300
 # monitor tapping Allow on the SpringBoard sheet), a separate iOS-owner
 # task; this probe only takes the cheap pixel win when it verifies.
 SHEET_DISMISSAL_MAX_TAPS = 1
+# Wake-tap point as fractions of (width, height): neutral lock-screen
+# wallpaper between the clock and the banner bands. A locked-but-inactive
+# display renders the banner timer as "MM:--" (dashes, owner finding) —
+# one tap wakes it to full active rendering before lock pixels count.
+# Chosen clear of every tappable: far from the Stop circle (x ~0.87),
+# above the banner bands (y < 0.75) and the Allow label row (y ~0.82);
+# on a persisting sheet it lands on inert modal body, never a button.
+# Not a consent tap (no AX target exists for wallpaper) — recorded in
+# the live record as lock_wake_taps, never merged into consent taps.
+WAKE_TAP_FRAC = (0.5, 0.70)
 
 
 class HidBackend:
@@ -1932,6 +1943,48 @@ def grant_consent(
                 "rounds": len(taps), "taps": taps}
 
 
+def merge_consent_phases(consent_fg: dict[str, Any],
+                         consent_lock: dict[str, Any]) -> dict[str, Any]:
+    """Merge foreground + lock grant phases into one consent record.
+
+    Single implementation for the run_live_capture lock-phase merge and
+    the pre-grant setup flow: granted at lock wins phase lock with
+    merged taps (total ≤4); absent at lock resolves absent with zero
+    taps; anything else is a failed-blocker carrying the lock detail.
+    The record keeps the per-phase foreground/lock audit shape.
+    """
+    fg_taps = consent_fg.get("taps", [])
+    lock_taps = consent_lock.get("taps", [])
+    total_taps = list(fg_taps) + list(lock_taps)
+    if consent_lock.get("outcome") == "granted":
+        return {
+            "outcome": "granted",
+            "rounds": len(total_taps),
+            "taps": total_taps,
+            "phase": "lock",
+            "foreground": consent_fg,
+            "lock": consent_lock,
+        }
+    if consent_lock.get("outcome") == "absent":
+        return {
+            "outcome": "absent",
+            "rounds": 0,
+            "taps": [],
+            "phase": None,
+            "foreground": consent_fg,
+            "lock": consent_lock,
+        }
+    return {
+        "outcome": "failed-blocker",
+        "blocker": consent_lock.get("blocker", ""),
+        "rounds": len(total_taps),
+        "taps": total_taps,
+        "phase": None,
+        "foreground": consent_fg,
+        "lock": consent_lock,
+    }
+
+
 def decode_png_rgba_band(path: str, max_rows: int) -> tuple[int, int, bytes]:
     """Decode the top band of an 8-bit RGB/RGBA non-interlaced PNG (stdlib).
 
@@ -2102,6 +2155,12 @@ LOCK_BANNER_MIN_RED = 0.002
 # Slim (provisional, pre-grant) banner rows as a fraction of height,
 # measured from genuine provisional pixels (1320x2868: y ~2170-2290).
 SLIM_BANNER_ROWS = (0.750, 0.800)
+# Bottom-strip banner rows: the steady-state lock presentation on the
+# current runtime sits lower than the pilot card band — measured Stop
+# mass rows 0.801-0.847 on 1320x2868 (two pre-authorized runs, valid
+# ticking timers, red_frac 0.06755 in this band). Same threshold as the
+# card band (blank screens read 0.0; 25x+ margin).
+STRIP_BANNER_ROWS = (0.800, 0.850)
 
 
 def lock_banner_verdict(png_path: str,
@@ -2109,13 +2168,19 @@ def lock_banner_verdict(png_path: str,
     """Pixel verdict for a Lock Screen banner (no OCR).
 
     Counts stop-button red mass in the full-banner band (relative rows
-    0.662H-0.697H, full width — geometry-relative, so every canvas is
-    attested). Calibrated: full banners measure 0.00745 on 1320x2868
-    (two independent runs), blank lock screens 0.0.
-    banner=True only above threshold; a slim provisional banner (small
-    bottom banner without the full presentation — pre-grant rendering)
-    records presentation=provisional and stays pending like a blank
-    one: only the full approved banner stages genuine.
+    0.662H-0.697H, pilot card position) and the bottom-strip band
+    (relative rows 0.800H-0.850H, steady-state position on the current
+    runtime) — full width, geometry-relative, so every canvas is
+    attested. Calibrated: pilot cards measure 0.00745 on 1320x2868,
+    bottom strips 0.06755 (two independent pre-authorized runs);
+    blank lock screens 0.0.
+    banner=True above threshold in either band (presentation full-card
+    or full-strip); a slim provisional banner (small bottom banner
+    without the full presentation — pre-grant rendering) records
+    presentation=provisional and stays pending like a blank one.
+    Digit content (ticking vs frozen) is invisible to a red-mass gate
+    by design — no OCR is refused — and stays the owner's visual check
+    (tasks 4.5: observation gate deleted, owner takes responsibility).
     """
     width, height, px = decode_png_rgba_band(png_path, geometry[1])
     if (width, height) != (geometry[0], geometry[1]):
@@ -2140,8 +2205,16 @@ def lock_banner_verdict(png_path: str,
                            "presentation": "absent", "reason": ""}
     if frac >= LOCK_BANNER_MIN_RED:
         out["banner"] = True
-        out["presentation"] = "full"
+        out["presentation"] = "full-card"
         out["reason"] = "lock banner stop-button mass verified"
+        return out
+    strip = red_frac(int(STRIP_BANNER_ROWS[0] * height),
+                     int(STRIP_BANNER_ROWS[1] * height))
+    out["red_frac"] = strip
+    if strip >= LOCK_BANNER_MIN_RED:
+        out["banner"] = True
+        out["presentation"] = "full-strip"
+        out["reason"] = "lock strip banner stop-button mass verified"
         return out
     slim = red_frac(int(SLIM_BANNER_ROWS[0] * height),
                     int(SLIM_BANNER_ROWS[1] * height))
@@ -2385,6 +2458,56 @@ def _live_shot(
         f"live {label} screenshot failed; no pixels staged")
 
 
+def hid_instruments(
+    stats: sess.PhaseStats | None,
+    clock: Callable[[], float],
+) -> tuple[list[dict[str, Any]], Callable[[], None],
+           Callable[[str, Callable[[], Any]], Any]]:
+    """Shared HID timing/counting instruments (run 42051429064 aid).
+
+    Returns (hid_ms, hid_count, wrap): every wrapped HID call appends
+    {"op", "ms"} on the runner clock. Stored on the shared stats object
+    when present (dynamic attr; session.py untouched) so session
+    records/summaries carry stats["hid_ms"]. Used by run_live_capture
+    and the pre-grant setup flow alike.
+    """
+    hid_ms: list[dict[str, Any]] = []
+    if stats is not None:
+        _existing = getattr(stats, "hid_ms", None)
+        if isinstance(_existing, list):
+            hid_ms = _existing
+        else:
+            try:
+                stats.hid_ms = hid_ms  # type: ignore[attr-defined]
+            except AttributeError:
+                pass
+
+    def hid_count() -> None:
+        if stats is not None:
+            stats.count("hid_action")
+
+    def wrap(op: str, thunk: Callable[[], Any]) -> Any:
+        t0 = clock()
+        try:
+            out = thunk()
+        except FrameError:
+            try:
+                ms = (clock() - t0) * 1000.0
+            except Exception:
+                ms = 0.0
+            hid_ms.append({"op": op, "ms": float(ms)})
+            raise
+        try:
+            ms = (clock() - t0) * 1000.0
+        except Exception:
+            ms = 0.0
+        hid_ms.append({"op": op, "ms": float(ms)})
+        hid_count()
+        return out
+
+    return hid_ms, hid_count, wrap
+
+
 def run_live_capture(
     *,
     hid: HidBackend | None,
@@ -2421,43 +2544,7 @@ def run_live_capture(
                 f"hold-open window expired before {step}; failing closed "
                 "without capture (cleanup still runs)")
 
-    def hid_count() -> None:
-        if stats is not None:
-            stats.count("hid_action")
-
-    # Per-HID-op durations (run 42051429064 diagnosis aid): every HID call
-    # below appends {"op", "ms"} on the runner clock. Stored on the shared
-    # stats object when present (dynamic attr; session.py untouched) so the
-    # session record/summary carry stats["hid_ms"].
-    hid_ms: list[dict[str, Any]] = []
-    if stats is not None:
-        _existing = getattr(stats, "hid_ms", None)
-        if isinstance(_existing, list):
-            hid_ms = _existing
-        else:
-            try:
-                stats.hid_ms = hid_ms  # type: ignore[attr-defined]
-            except AttributeError:
-                pass
-
-    def _hid(op: str, thunk: Callable[[], Any]) -> Any:
-        t0 = clock()
-        try:
-            out = thunk()
-        except FrameError:
-            try:
-                ms = (clock() - t0) * 1000.0
-            except Exception:
-                ms = 0.0
-            hid_ms.append({"op": op, "ms": float(ms)})
-            raise
-        try:
-            ms = (clock() - t0) * 1000.0
-        except Exception:
-            ms = 0.0
-        hid_ms.append({"op": op, "ms": float(ms)})
-        hid_count()
-        return out
+    hid_ms, hid_count, _hid = hid_instruments(stats, clock)
 
     staging = run_dir / "staging"
     staging.mkdir(parents=True, exist_ok=True)
@@ -2719,37 +2806,7 @@ def run_live_capture(
         consent_lock = grant_consent(hid, hid_count, clock, hid_ms,
                                        sleeper=sleeper, interval_s=interval_s,
                                        wait_rounds=LOCK_SHEET_WAIT_ROUNDS)
-        fg_taps = consent_fg.get("taps", [])
-        lock_taps = consent_lock.get("taps", [])
-        total_taps = list(fg_taps) + list(lock_taps)
-        if consent_lock.get("outcome") == "granted":
-            consent = {
-                "outcome": "granted",
-                "rounds": len(total_taps),
-                "taps": total_taps,
-                "phase": "lock",
-                "foreground": consent_fg,
-                "lock": consent_lock,
-            }
-        elif consent_lock.get("outcome") == "absent":
-            consent = {
-                "outcome": "absent",
-                "rounds": 0,
-                "taps": [],
-                "phase": None,
-                "foreground": consent_fg,
-                "lock": consent_lock,
-            }
-        else:
-            consent = {
-                "outcome": "failed-blocker",
-                "blocker": consent_lock.get("blocker", ""),
-                "rounds": len(total_taps),
-                "taps": total_taps,
-                "phase": None,
-                "foreground": consent_fg,
-                "lock": consent_lock,
-            }
+        consent = merge_consent_phases(consent_fg, consent_lock)
     # Pixel confirmation lands later (see banner gate below); until
     # then a grant means "sheet dismissed via Allow tap", unconfirmed.
     consent["confirmed"] = False
@@ -2758,11 +2815,24 @@ def run_live_capture(
     lsha = liso = ""
     lock_attempt: dict[str, Any] | None = None
     promotion: dict[str, Any] = {"attempted": False, "staged": False}
+    wakes: list[dict[str, Any]] = []
+
+    def _wake(label: str) -> None:
+        hold_left(label)
+        _hid("tap", lambda: hid.tap(*WAKE_TAP_FRAC))
+        wakes.append({"label": label, "x": WAKE_TAP_FRAC[0],
+                      "y": WAKE_TAP_FRAC[1]})
+        sleeper(interval_s)
+
     if list(consent.get("taps", [])):
         # A grant just fired: SpringBoard needs a beat to present the
         # banner/pill before any lock pixels count. One bounded settle.
         hold_left("post-grant settle")
         sleeper(interval_s)
+    # Wake tap: an inactive locked display renders "MM:--" dashes and a
+    # dimmed lock; one neutral tap wakes it to active rendering before
+    # the captures below (owner finding, screenshot-proven).
+    _wake("lock wake tap")
     for _ in range(2):
         hold_left("lock capture")
         sleeper(interval_s)
@@ -2815,6 +2885,9 @@ def run_live_capture(
                 promotion["merged_taps"] = len(merged)
                 hold_left("post-regrant settle")
                 sleeper(interval_s)
+            # Wake tap again: the relock left the display inactive; wake
+            # it before the promotion captures (same neutral point).
+            _wake("lock promotion wake tap")
             for _ in range(2):
                 hold_left("lock promotion capture")
                 sleeper(interval_s)
@@ -2873,6 +2946,7 @@ def run_live_capture(
             "consent_dismissal": dismissal,
             "lock_attempt": lock_attempt,
             "lock_promotion": promotion,
+            "lock_wake_taps": wakes,
             "lock": {
                 "screenshot": "staging/live-la-lock.png",
                 "screenshot_sha256": lsha,
@@ -2897,6 +2971,7 @@ def run_live_capture(
             "consent_dismissal": dismissal,
             "lock_attempt": lock_attempt,
             "lock_promotion": promotion,
+            "lock_wake_taps": wakes,
             "lock": {
                 "screenshot": "staging/live-la-lock.png",
                 "screenshot_sha256": lsha,
@@ -2906,6 +2981,119 @@ def run_live_capture(
             },
         }
     return live_record
+
+
+# Pre-grant startup dwell: app boot + request parse + Activity.request
+# before the lock/grant below. The waits inside grant_consent add more
+# dwell; total setup stays ~1min per device (once, not per locale).
+PREGRANT_STARTUP_SETTLE_S = 8.0
+
+
+def run_pregrant(
+    *,
+    run: Callable,
+    hid: HidBackend | None,
+    udid: str,
+    device_key: str,
+    geometry: tuple[int, int] | None = None,
+    locale: str = "en",
+    bid: str = req.SCREENSHOT_BID,
+    clock: Callable[[], float] = time.monotonic,
+    interval_s: float = POLL_INTERVAL_S,
+    sleeper: Callable[[float], None] = time.sleep,
+    stats: sess.PhaseStats | None = None,
+) -> dict[str, Any]:
+    """Device-setup Live Activities authorization (no capture, no session).
+
+    Authorization granted mid-run starts the activity degraded: the
+    banner timer freezes as "MM:--" dashes (screenshot-proven across
+    three identical fresh-sim runs), while sims authorized BEFORE the
+    activity starts tick valid time twice in a row. The system must
+    authorize before Activity.request, so this setup pass stages the
+    same realtime root envelope run_session stages, launches the app
+    so it requests the activity, locks, and taps the system sheet via
+    the same describe-guided grant_consent — once per device, before
+    any locale pass. No frames, no run identity, no harvested
+    artifacts: every device-locale keeps its single pass, and later
+    passes find the sheet absent with zero taps (the worker's own
+    grant path stays as fallback). Auth state is per-app, so one pass
+    covers all locales on the device.
+    """
+    if hid is None:
+        raise FrameError("pre-grant requires an HID backend "
+                         "(no blind fallback)")
+    geo, island = _checked_session_run_args(device_key, geometry, None)
+    try:
+        base = req.build_base_request(locale, geo)
+    except req.RequestError as exc:
+        raise FrameError(f"invalid pre-grant locale/geometry: {exc}")
+    frames = sess.frames_for_domain("realtime", island_available=island)
+    first = frames[0]
+    run_id = f"pregrant-{device_key}-{uuid.uuid4().hex[:12]}"
+    nonce = uuid.uuid4().hex
+    try:
+        payload = req.build_frame_request({**base, "run_id": run_id}, first)
+    except req.RequestError as exc:
+        raise FrameError(f"invalid pre-grant frame request: {exc}")
+    try:
+        env = sess.build_envelope(payload, run_id=run_id,
+                                  session_nonce=nonce,
+                                  session_domain="realtime", seq=0)
+    except sess.SessionError as exc:
+        raise FrameError(f"invalid pre-grant envelope: {exc}")
+    raw = (json.dumps(env, sort_keys=True, separators=(",", ":"),
+                      ensure_ascii=False).encode("utf-8") + b"\n")
+    hid_ms, hid_count, _hid = hid_instruments(stats, clock)
+    container = get_container_data(run, udid, bid)
+    docs = Path(container) / "Documents"
+    try:
+        docs.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        raise FrameError(f"cannot use container {docs}: {exc}")
+    try:
+        (docs / pf.REQUEST_FILENAME).write_bytes(raw)
+    except OSError as exc:
+        raise FrameError(f"cannot stage pre-grant request in {docs}: {exc}")
+    clear_owned_state(docs)
+    try:
+        (docs / pf.CLEANUP_FILENAME).unlink(missing_ok=True)
+    except OSError as exc:
+        raise FrameError(f"cannot clear owned cleanup file: {exc}")
+    launch_capture(run, udid, bid)
+    sleeper(PREGRANT_STARTUP_SETTLE_S)
+    consent_fg = grant_consent(hid, hid_count, clock, hid_ms,
+                               sleeper=sleeper, interval_s=interval_s,
+                               wait_rounds=1)
+    _hid("press_button", lambda: hid.press_button("Power"))
+    sleeper(interval_s)
+    _hid("press_button", lambda: hid.press_button("Power"))
+    sleeper(interval_s)
+    if consent_fg.get("outcome") == "granted":
+        consent = dict(consent_fg)
+        consent["phase"] = "foreground"
+        consent["foreground"] = consent_fg
+        consent["lock"] = None
+    elif consent_fg.get("outcome") != "absent":
+        consent = dict(consent_fg)
+        consent["phase"] = None
+        consent["foreground"] = consent_fg
+        consent["lock"] = None
+    else:
+        consent_lock = grant_consent(hid, hid_count, clock, hid_ms,
+                                     sleeper=sleeper, interval_s=interval_s,
+                                     wait_rounds=LOCK_SHEET_WAIT_ROUNDS)
+        consent = merge_consent_phases(consent_fg, consent_lock)
+    terminate_app(run, udid, bid)
+    return {
+        "schema_version": 1,
+        "device_key": device_key,
+        "locale": locale,
+        "geometry": {"width": geo[0], "height": geo[1]},
+        "consent": consent,
+        "run_id": run_id,
+        "session_nonce": nonce,
+        "staged_frame": first,
+    }
 
 
 def run_session(

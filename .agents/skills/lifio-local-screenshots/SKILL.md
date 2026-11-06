@@ -39,7 +39,10 @@ panels are expected. `--keep-sims` reuses owned `local-bundle-*` sims
 across runs (erase + reboot; clean state, no create/delete churn); without
 it sims are created and deleted per run. The
 driver: verify devtypes → build Screenshot app → create/boot/install owned
-sim (`local-bundle-<key>`) → `run_device_worker.py` (pinned + realtime
+sim (`local-bundle-<key>`) → Live Activities pre-grant setup (once per
+device: same realtime root envelope, launch, lock, shared grant — auth
+before any activity starts, so banners tick; non-fatal, worker grant
+stays as fallback) → `run_device_worker.py` (pinned + realtime
 hold-open sessions: argent describe-backed consent grant, compact/expanded
 island staging) → `register_genuine.py` (genuine registration, NO observation
 flag — owner visual check governs) → `finalize-run` → shutdown/delete sim.

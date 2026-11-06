@@ -696,6 +696,58 @@ def cmd_run_session(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
+def cmd_pregrant(args: argparse.Namespace) -> int:
+    """Lease-gated device-setup Live Activities authorization (no capture).
+
+    Stages the same realtime root envelope run_session stages, launches
+    the app so it requests the activity, locks, and taps the system
+    sheet via the same describe-guided grant — once per device, before
+    any locale pass. Prints the result record as JSON. Auth granted
+    mid-run freezes banner timers ("MM:--" dashes, screenshot-proven);
+    authorizing first keeps every locale pass live-ticking.
+
+    Never fails the device: absent/already-granted/blocked outcomes
+    return 0 (the worker's own grant path stays as fallback); only
+    invalid args/lease (2) and simctl-infra FrameErrors (1) are
+    nonzero, and the bundle driver treats even those as log+continue.
+    """
+    refused = _require_lease()
+    if refused is not None:
+        return refused
+    if not args.device or args.device == "booted":
+        print("invalid: explicit simulator UDID required (no 'booted' auto-pick)",
+              file=sys.stderr)
+        return EXIT_INVALID
+    if not args.device_key:
+        print("invalid: --device-key is required "
+              "(iphone69|iphone63|ipad13; validated against the catalog)",
+              file=sys.stderr)
+        return EXIT_INVALID
+    try:
+        geometry = req.parse_geometry(args.geometry)
+    except req.RequestError as exc:
+        print(f"invalid: {exc}", file=sys.stderr)
+        return EXIT_INVALID
+    blocked = _gate_or_block(
+        args.locale, geometry,
+        getattr(args, "approval", None), getattr(args, "retained_dir", None),
+    )
+    if blocked is not None:
+        return blocked
+    hid = exec_mod.ArgentHidBackend(args.device)
+    try:
+        record = exec_mod.run_pregrant(
+            run=exec_mod.default_run, hid=hid, udid=args.device,
+            device_key=args.device_key, geometry=geometry,
+            locale=args.locale, bid=args.bid, interval_s=args.interval,
+        )
+    except exec_mod.FrameError as exc:
+        print(f"failed: {exc}", file=sys.stderr)
+        return EXIT_INVALID
+    print(json.dumps(record, indent=2, sort_keys=True))
+    return EXIT_OK
+
+
 def cmd_locale_totals(args: argparse.Namespace) -> int:
     """Print the canonical pinned totals for one locale (no device I/O)."""
     try:
@@ -841,6 +893,23 @@ def build_parser() -> argparse.ArgumentParser:
                         "(consent, compact re-probe, lock capture) before "
                         "the explicit session cleanup")
     p.set_defaults(fn=cmd_run_session)
+
+    p = sub.add_parser("pregrant")
+    p.add_argument("--device", required=True)
+    p.add_argument("--device-key", required=True,
+                   help="catalog key (iphone69|iphone63|ipad13); geometry is "
+                        "validated against it")
+    p.add_argument("--geometry", required=False, default="1320x2868")
+    p.add_argument("--locale", required=False, default="en",
+                   choices=["en", "ru", "zh-Hans", "es-419", "pt-BR"],
+                   help="request locale for the setup envelope (auth is "
+                        "per-app, so one pass covers all locales)")
+    p.add_argument("--bid", required=False, default=req.SCREENSHOT_BID)
+    p.add_argument("--approval", required=False, default=None,
+                   help="5.4 approval file (required for non-English/iPad runs)")
+    p.add_argument("--retained-dir", required=False, default=None)
+    p.add_argument("--interval", type=float, default=exec_mod.POLL_INTERVAL_S)
+    p.set_defaults(fn=cmd_pregrant)
 
     p = sub.add_parser("locale-totals")
     p.add_argument("--locale", required=True,

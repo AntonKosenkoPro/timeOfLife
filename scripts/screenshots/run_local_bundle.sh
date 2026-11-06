@@ -141,6 +141,30 @@ print(hits[0] if len(hits) == 1 else '')")
   python3 -c "import subprocess,sys; subprocess.run(['argent','run','describe','--udid','$udid'], timeout=120)" \
     >"$LOGS/$key-warmup.log" 2>&1 \
     || log "device $key: transport warm-up rc!=0 (sessions still try; see $key-warmup.log)"
+  # Live Activities pre-grant (device setup, once — not per locale):
+  # auth granted mid-run freezes banner timers as "MM:--" dashes
+  # (screenshot-proven), while sims authorized BEFORE the activity
+  # starts tick valid time. Stages the same realtime root envelope,
+  # launches so the app requests the activity, locks, and taps the
+  # system sheet via the shared grant. Non-fatal by design: absent /
+  # already-granted / blocked all continue (the worker's own grant
+  # path stays as fallback); auth is per-app so one pass covers all
+  # locales on the device.
+  case "$key" in
+    iphone69) pregrant_geo="1320x2868";;
+    iphone63) pregrant_geo="1206x2622";;
+    ipad13) pregrant_geo="2064x2752";;
+    *) pregrant_geo="";;
+  esac
+  if [ -n "$pregrant_geo" ]; then
+    set +e
+    python3 "$REPO/scripts/screenshots/capture.py" pregrant \
+      --device "$udid" --device-key "$key" --geometry "$pregrant_geo" \
+      --locale en >"$LOGS/$key-pregrant.log" 2>&1
+    prc=$?
+    set -e
+    log "device $key: pre-grant rc=$prc (non-fatal; see $key-pregrant.log)"
+  fi
   log "device $key: installed, worker start"
   set +e
   python3 "$REPO/scripts/screenshots/run_device_worker.py" \

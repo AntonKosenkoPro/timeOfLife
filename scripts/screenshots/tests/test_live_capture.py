@@ -534,7 +534,7 @@ class LockCaptureTests(unittest.TestCase):
             paint_lock_banner(good)
             verdict = ex.lock_banner_verdict(str(good), GEO63)
             self.assertTrue(verdict["banner"])
-            self.assertEqual(verdict["presentation"], "full")
+            self.assertEqual(verdict["presentation"], "full-card")
             self.assertGreaterEqual(verdict["red_frac"], 0.002)
             blank = Path(tmp) / "blank.png"
             paint_plain(blank)
@@ -563,6 +563,29 @@ class LockCaptureTests(unittest.TestCase):
             verdict = ex.lock_banner_verdict(str(probe), GEO63)
             self.assertFalse(verdict["banner"])
             self.assertEqual(verdict["presentation"], "provisional")
+
+    def test_lock_strip_banner_stages_genuine(self):
+        # Steady-state bottom-strip banner (Stop mass rows 0.801-0.847 on
+        # 1320x2868, two pre-authorized runs, red_frac 0.06755): genuine
+        # full-strip, staged like the pilot card band.
+        with tempfile.TemporaryDirectory() as tmp:
+            w, h = GEO63
+            cy = int(0.825 * h)
+
+            def strip(path: Path) -> None:
+                def fn(x, y):
+                    if (x - 1000) ** 2 + (y - cy) ** 2 <= 40 ** 2:
+                        return (255, 66, 69)
+                    return (40 + (x % 60), 36 + (x % 50), 34 + (y % 44))
+
+                _write_rgba_png(path, w, h, fn)
+
+            probe = Path(tmp) / "strip.png"
+            strip(probe)
+            verdict = ex.lock_banner_verdict(str(probe), GEO63)
+            self.assertTrue(verdict["banner"])
+            self.assertEqual(verdict["presentation"], "full-strip")
+            self.assertGreaterEqual(verdict["red_frac"], 0.002)
 
     def test_lock_promotion_stages_banner_after_grant(self):
         # Granted but banner not yet promoted (blank first exports):
@@ -595,6 +618,9 @@ class LockCaptureTests(unittest.TestCase):
             buttons = [c for c in hid.calls if c[0] == "button"]
             self.assertIn(("button", "Home"), buttons)
             self.assertGreaterEqual(buttons.count(("button", "Power")), 2)
+            wakes = [c for c in hid.calls
+                     if c == ("tap", *ex.WAKE_TAP_FRAC)]
+            self.assertEqual(len(wakes), 2)
 
     def test_lock_promotion_regrant_merges_followup(self):
         # Always Allow follow-up surfaces after the relock: the
@@ -645,6 +671,36 @@ class LockCaptureTests(unittest.TestCase):
             promo = ((rec.get("lock_attempt") or {}).get("promotion")
                      or rec.get("lock_promotion") or {})
             self.assertFalse(promo.get("attempted"))
+            wakes = [c for c in hid.calls
+                     if c == ("tap", *ex.WAKE_TAP_FRAC)]
+            self.assertEqual(len(wakes), 1)
+
+    def test_wake_tap_neutral_and_ordered(self):
+        # Owner finding: inactive locked displays render "MM:--" dashes.
+        # One neutral tap wakes the display before lock pixels count:
+        # fixed wallpaper point clear of the Stop circle (x ~0.87),
+        # the banner bands (y >= 0.75) and the Allow row (y ~0.82);
+        # fires after the Power lock, recorded in the live record, never
+        # merged into consent taps.
+        self.assertEqual(ex.WAKE_TAP_FRAC, (0.5, 0.70))
+        x, y = ex.WAKE_TAP_FRAC
+        self.assertLess(x, 0.8)
+        self.assertLess(y, 0.75)
+        with tempfile.TemporaryDirectory() as tmp:
+            hid = FakeHidBackend(ax=None)
+            _fake, _hid, run_dir, summary, _udid = live_run(
+                tmp, hid, hold_script(paint_live_pill, paint_lock_banner),
+                run_id="live-wake-1")
+            self.assertEqual(summary["status"], "complete")
+            taps = [c for c in hid.calls if c[0] == "tap"]
+            self.assertEqual(taps, [("tap", 0.5, 0.70)])
+            powers = [i for i, c in enumerate(hid.calls)
+                      if c == ("button", "Power")]
+            self.assertGreater(hid.calls.index(taps[0]), powers[-1])
+            rec = live_capture_record(run_dir)
+            self.assertEqual(rec["lock_wake_taps"],
+                             [{"label": "lock wake tap", "x": 0.5, "y": 0.70}])
+            self.assertEqual(rec["consent"]["taps"], [])
 
     def test_lock_spawn_exhaustion_fails_closed(self):
         # Every lock export drops past the runner surface: bounded retry
@@ -679,6 +735,109 @@ class LockCaptureTests(unittest.TestCase):
             self.assertTrue(receipt["runner_verified"]["lease_released"])
 
 
+class PregrantTests(unittest.TestCase):
+    """Device-setup authorization (no capture, no session, no run id).
+
+    Stages the same realtime root envelope run_session stages, launches
+    so the app requests the activity, locks, and grants via the shared
+    grant_consent — once per device. Later locale passes find the sheet
+    absent (screenshot-proven: sims authorized before the activity
+    starts tick valid time; mid-run grants freeze "MM:--").
+    """
+
+    def _pregrant(self, tmp, hid, **kw):
+        container = Path(tmp) / "container"
+        container.mkdir(exist_ok=True)
+        fake = SessionFakeSimctl(container, la_block=dict(LA_BLOCK))
+        udid = f"UDID-pregrant-{os.getpid()}-{len(os.listdir(tmp))}"
+        rec = ex.run_pregrant(
+            run=fake, hid=hid, udid=udid, device_key="iphone63",
+            geometry=GEO63, interval_s=0.0, sleeper=ex.no_sleep, **kw)
+        return fake, hid, container, rec, udid
+
+    def _staged_envelope(self, container):
+        raw = (container / "Documents" / "capture-request.json").read_bytes()
+        return json.loads(raw.decode("utf-8"))
+
+    def test_pregrant_foreground_grant(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            docs = [_desc_doc(("Allow", *ALLOW_XY),
+                              ("Don't Allow", 0.5, 0.9)), EMPTY_DOC]
+            hid = FakeHidBackend(ax_script=docs)
+            fake, _hid, container, rec, _udid = self._pregrant(tmp, hid)
+            consent = rec["consent"]
+            self.assertEqual(consent["outcome"], "granted")
+            self.assertEqual(consent["phase"], "foreground")
+            self.assertEqual(len(consent["taps"]), 1)
+            self.assertIsNone(consent["lock"])
+            verbs = [c[2] for c in fake.calls if len(c) > 2]
+            self.assertIn("launch", verbs)
+            self.assertIn("terminate", verbs)
+            env = self._staged_envelope(container)
+            self.assertEqual(env["session_domain"], "realtime")
+            self.assertEqual(env["frame"], "la-lock")
+            self.assertEqual(env["seq"], 0)
+            self.assertTrue(env["run_id"].startswith("pregrant-iphone63-"))
+            self.assertEqual(rec["run_id"], env["run_id"])
+            self.assertEqual(rec["session_nonce"], env["session_nonce"])
+            self.assertEqual(rec["staged_frame"], "la-lock")
+
+    def test_pregrant_lock_phase_grant(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            docs = [EMPTY_DOC, EMPTY_DOC,
+                    _desc_doc(("Allow", *ALLOW_XY)), EMPTY_DOC]
+            hid = FakeHidBackend(ax_script=docs)
+            fake, _hid, container, rec, _udid = self._pregrant(tmp, hid)
+            consent = rec["consent"]
+            self.assertEqual(consent["outcome"], "granted")
+            self.assertEqual(consent["phase"], "lock")
+            self.assertEqual(len(consent["taps"]), 1)
+            powers = [c for c in hid.calls if c == ("button", "Power")]
+            self.assertEqual(len(powers), 2)
+            taps = [c for c in hid.calls if c[0] == "tap"]
+            self.assertEqual(taps, [("tap", *ALLOW_XY)])
+
+    def test_pregrant_absent_still_stages_and_terminates(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            hid = FakeHidBackend(ax=None)
+            fake, _hid, container, rec, _udid = self._pregrant(tmp, hid)
+            self.assertEqual(rec["consent"]["outcome"], "absent")
+            self.assertEqual(rec["consent"]["taps"], [])
+            verbs = [c[2] for c in fake.calls if len(c) > 2]
+            self.assertIn("launch", verbs)
+            self.assertIn("terminate", verbs)
+            env = self._staged_envelope(container)
+            self.assertEqual(env["session_domain"], "realtime")
+
+    def test_pregrant_launch_failure_raises(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            container = Path(tmp) / "container"
+            container.mkdir(exist_ok=True)
+            fake = SessionFakeSimctl(container, la_block=dict(LA_BLOCK),
+                                     fail_launch=True)
+            hid = FakeHidBackend(ax_script=[EMPTY_DOC])
+            with self.assertRaises(ex.FrameError):
+                ex.run_pregrant(
+                    run=fake, hid=hid, udid="UDID-x", device_key="iphone63",
+                    geometry=GEO63, interval_s=0.0, sleeper=ex.no_sleep)
+
+    def test_pregrant_rejects_unknown_device_and_missing_hid(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            container = Path(tmp) / "container"
+            container.mkdir(exist_ok=True)
+            fake = SessionFakeSimctl(container, la_block=dict(LA_BLOCK))
+            hid = FakeHidBackend(ax_script=[EMPTY_DOC])
+            with self.assertRaises(ex.FrameError):
+                ex.run_pregrant(
+                    run=fake, hid=hid, udid="UDID-x", device_key="nokia-1",
+                    geometry=GEO63, interval_s=0.0, sleeper=ex.no_sleep)
+            with self.assertRaises(ex.FrameError):
+                ex.run_pregrant(
+                    run=fake, hid=None, udid="UDID-x",
+                    device_key="iphone63", geometry=GEO63,
+                    interval_s=0.0, sleeper=ex.no_sleep)
+
+
 class ConsentGateTests(unittest.TestCase):
     def _run(self, tmp, hid, compact_painter, run_id):
         return live_run(tmp, hid,
@@ -699,7 +858,8 @@ class ConsentGateTests(unittest.TestCase):
                 tmp, hid, paint_live_pill, "live-consent-late")
             self.assertEqual(summary["status"], "complete")
             self.assertEqual([c for c in hid.calls if c[0] == "tap"],
-                             [("tap", *ALLOW_XY)])
+                             [("tap", *ALLOW_XY),
+                              ("tap", *ex.WAKE_TAP_FRAC)])
             rec = live_capture_record(run_dir)
             self.assertEqual(rec["consent"]["outcome"], "granted")
             self.assertTrue(
@@ -714,7 +874,8 @@ class ConsentGateTests(unittest.TestCase):
             _fake, _hid, run_dir, summary, _udid = self._run(
                 tmp, hid, paint_live_pill, "live-consent-absent-wait")
             self.assertEqual(summary["status"], "complete")
-            self.assertEqual([c for c in hid.calls if c[0] == "tap"], [])
+            self.assertEqual([c for c in hid.calls if c[0] == "tap"],
+                             [("tap", *ex.WAKE_TAP_FRAC)])
             n_ax = len([c for c in hid.calls if c[0] == "ax"])
             self.assertEqual(n_ax, 1 + 2 + (1 + ex.LOCK_SHEET_WAIT_ROUNDS))
             rec = live_capture_record(run_dir)
@@ -733,7 +894,8 @@ class ConsentGateTests(unittest.TestCase):
                 tmp, hid, paint_live_pill, "live-consent-1")
             self.assertEqual(summary["status"], "complete")
             self.assertEqual([c for c in hid.calls if c[0] == "tap"],
-                             [("tap", *ALLOW_XY)])
+                             [("tap", *ALLOW_XY),
+                              ("tap", *ex.WAKE_TAP_FRAC)])
             rec = live_capture_record(run_dir)
             consent = rec["consent"]
             self.assertEqual(consent["outcome"], "granted")
@@ -759,7 +921,8 @@ class ConsentGateTests(unittest.TestCase):
                 tmp, hid, paint_live_pill, "live-consent-5")
             self.assertEqual(summary["status"], "complete")
             self.assertEqual([c for c in hid.calls if c[0] == "tap"],
-                             [("tap", *ALLOW_XY), ("tap", *ALWAYS_XY)])
+                             [("tap", *ALLOW_XY), ("tap", *ALWAYS_XY),
+                              ("tap", *ex.WAKE_TAP_FRAC)])
             rec = live_capture_record(run_dir)
             consent = rec["consent"]
             self.assertEqual(consent["outcome"], "granted")
@@ -777,7 +940,8 @@ class ConsentGateTests(unittest.TestCase):
                 tmp, hid, paint_live_pill, "live-consent-6")
             self.assertEqual(summary["status"], "complete")
             self.assertEqual([c for c in hid.calls if c[0] == "tap"],
-                             [("tap", *ALLOW_XY), ("tap", *ALLOW_XY)])
+                             [("tap", *ALLOW_XY), ("tap", *ALLOW_XY),
+                              ("tap", *ex.WAKE_TAP_FRAC)])
             rec = live_capture_record(run_dir)
             consent = rec["consent"]
             self.assertEqual(consent["outcome"], "failed-blocker")
@@ -796,7 +960,8 @@ class ConsentGateTests(unittest.TestCase):
             _fake, _hid, run_dir, summary, _udid = self._run(
                 tmp, hid, paint_live_pill, "live-consent-7")
             self.assertEqual(summary["status"], "complete")
-            self.assertEqual([c for c in hid.calls if c[0] == "tap"], [])
+            self.assertEqual([c for c in hid.calls if c[0] == "tap"],
+                             [("tap", *ex.WAKE_TAP_FRAC)])
             rec = live_capture_record(run_dir)
             self.assertEqual(rec["consent"]["outcome"], "failed-blocker")
             self.assertTrue(
@@ -811,7 +976,8 @@ class ConsentGateTests(unittest.TestCase):
             _fake, _hid, run_dir, summary, _udid = self._run(
                 tmp, hid, paint_live_pill, "live-consent-8")
             self.assertEqual(summary["status"], "complete")
-            self.assertEqual([c for c in hid.calls if c[0] == "tap"], [])
+            self.assertEqual([c for c in hid.calls if c[0] == "tap"],
+                             [("tap", *ex.WAKE_TAP_FRAC)])
             rec = live_capture_record(run_dir)
             consent = rec["consent"]
             self.assertEqual(consent["outcome"], "failed-blocker")
@@ -826,7 +992,8 @@ class ConsentGateTests(unittest.TestCase):
             _fake, _hid, run_dir, summary, _udid = self._run(
                 tmp, hid, paint_live_pill, "live-consent-2")
             self.assertEqual(summary["status"], "complete")
-            self.assertEqual([c for c in hid.calls if c[0] == "tap"], [])
+            self.assertEqual([c for c in hid.calls if c[0] == "tap"],
+                             [("tap", *ex.WAKE_TAP_FRAC)])
             rec = live_capture_record(run_dir)
             self.assertEqual(rec["consent"]["outcome"], "absent")
 
@@ -1031,7 +1198,12 @@ class ArgentHidBackendTests(unittest.TestCase):
             self.assertEqual((consent["taps"][0]["x"],
                               consent["taps"][0]["y"]), (0.717, 0.811))
             gestures = [c for c in seen if c[1:3] == ["run", "gesture-tap"]]
-            self.assertEqual(len(gestures), 1)
+            self.assertEqual(len(gestures), 2)
+            wake = gestures[1]
+            self.assertEqual(
+                (wake[wake.index("--x") + 1], wake[wake.index("--y") + 1]),
+                (str(float(ex.WAKE_TAP_FRAC[0])),
+                 str(float(ex.WAKE_TAP_FRAC[1]))))
             self.assertTrue(rec["compact"]["verdict"]["live"])
             self.assertTrue(
                 (run_dir / "staging" / "live-la-lock.png").is_file())
@@ -1105,7 +1277,8 @@ class ExpandedHoldTests(unittest.TestCase):
                              {"x": x, "y": y, "duration_ms": 1200})
             self.assertEqual(rec["expanded"].get("attempts"), 1)
             self.assertEqual([c for c in hid.calls if c[0] == "hold"], [])
-            self.assertEqual([c for c in hid.calls if c[0] == "tap"], [])
+            self.assertEqual([c for c in hid.calls if c[0] == "tap"],
+                             [("tap", *ex.WAKE_TAP_FRAC)])
             self.assertLess(hid.calls.index(presses[0]),
                             hid.calls.index(("button", "Power")))
             # Lock/compact undisturbed by the staged card.
@@ -1302,7 +1475,8 @@ class ConsentDismissalTests(unittest.TestCase):
             rec = live_capture_record(run_dir)
             self.assertEqual(rec["consent_dismissal"]["outcome"], "absent")
             self.assertEqual(rec["consent_dismissal"]["attempts"], 0)
-            self.assertEqual([c for c in hid.calls if c[0] == "tap"], [])
+            self.assertEqual([c for c in hid.calls if c[0] == "tap"],
+                             [("tap", *ex.WAKE_TAP_FRAC)])
 
     def test_sheet_dismissed_via_pixel_centroid(self):
         # The Allow tap point comes from the live probe image (label
@@ -1325,7 +1499,8 @@ class ConsentDismissalTests(unittest.TestCase):
             self.assertEqual(dis["outcome"], "dismissed")
             self.assertEqual(dis["attempts"], 1)
             taps = [c for c in hid.calls if c[0] == "tap"]
-            self.assertEqual(len(taps), 1)
+            self.assertEqual(len(taps), 2)
+            self.assertEqual(taps[1], ("tap", *ex.WAKE_TAP_FRAC))
             lx0, lx1, ly0, ly1 = SHEET_LABEL
             self.assertAlmostEqual(taps[0][1], (lx0 + lx1) / 2 / GEO63[0],
                                    delta=0.02)
@@ -1355,7 +1530,7 @@ class ConsentDismissalTests(unittest.TestCase):
             self.assertEqual(dis["outcome"], "blocked")
             self.assertEqual(dis["attempts"], 1)
             self.assertEqual(len([c for c in hid.calls
-                                  if c[0] == "tap"]), 1)
+                                  if c[0] == "tap"]), 2)
             self.assertTrue(
                 (run_dir / "staging" / "live-la-lock.png").is_file())
 
@@ -1389,7 +1564,8 @@ class LockPhaseConsentTests(unittest.TestCase):
                 tmp, hid, "live-lockphase-1")
             self.assertEqual(summary["status"], "complete")
             taps = [c for c in hid.calls if c[0] == "tap"]
-            self.assertEqual(taps, [("tap", *ALLOW_XY)])
+            self.assertEqual(taps, [("tap", *ALLOW_XY),
+                                    ("tap", *ex.WAKE_TAP_FRAC)])
             powers = [i for i, c in enumerate(hid.calls)
                       if c == ("button", "Power")]
             self.assertEqual(len(powers), 2)
@@ -1486,7 +1662,8 @@ class LockPhaseConsentTests(unittest.TestCase):
             self.assertEqual(len([c for c in hid.calls
                                   if c[0] == "ax"]), 3)
             taps = [c for c in hid.calls if c[0] == "tap"]
-            self.assertEqual(len(taps), 1)
+            self.assertEqual(len(taps), 2)
+            self.assertEqual(taps[1], ("tap", *ex.WAKE_TAP_FRAC))
             powers = [i for i, c in enumerate(hid.calls)
                       if c == ("button", "Power")]
             self.assertLess(hid.calls.index(taps[0]), powers[0])
@@ -1506,7 +1683,7 @@ class LockPhaseConsentTests(unittest.TestCase):
             self.assertIsNone(consent["phase"])
             self.assertIsNone(consent["lock"])
             self.assertEqual(len([c for c in hid.calls
-                                  if c[0] == "tap"]), 2)
+                                  if c[0] == "tap"]), 3)
             self.assertEqual(len([c for c in hid.calls
                                   if c[0] == "ax"]), 4)
             self.assertTrue(
@@ -1743,7 +1920,8 @@ class ColdStartFixTests(unittest.TestCase):
             self.assertEqual(summary["status"], "complete")
             rec = live_capture_record(run_dir)
             self.assertEqual(rec["consent"]["outcome"], "absent")
-            self.assertEqual([c for c in hid.calls if c[0] == "tap"], [])
+            self.assertEqual([c for c in hid.calls if c[0] == "tap"],
+                             [("tap", *ex.WAKE_TAP_FRAC)])
             ax_idx = [i for i, c in enumerate(hid.calls) if c[0] == "ax"]
             self.assertGreaterEqual(len(ax_idx), 3)
             self.assertEqual(ax_idx[0], 0)
