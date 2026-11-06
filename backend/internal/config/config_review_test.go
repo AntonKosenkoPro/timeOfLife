@@ -230,6 +230,40 @@ func TestReviewAccess_KeyIndependentOfServerSecrets(t *testing.T) {
 	}
 }
 
+// TestReviewAccess_MixedCaseHexAsymmetry pins the intentional asymmetry:
+// a mixed-case-same-hex REVIEW_CODE_KEY loads successfully against the
+// single-value secrets (text compare is case-sensitive because both are
+// consumed verbatim; decoded compare is length-mismatched 32B vs 64-char),
+// while the same mixed-case duplicate in a keyring still fails
+// (Go hex-decodes entries before comparing, so case is insignificant).
+func TestReviewAccess_MixedCaseHexAsymmetry(t *testing.T) {
+	goodID := "b2ea21ec-6b4b-4da7-8668-a3a598a59711"
+	goodEmail := "review-synthetic@example.com"
+	lower := strings.Repeat("ab", 32) // 64 hex lower with letters so case matters
+	upper := strings.ToUpper(lower)
+	verifier := strings.Repeat("cd", 32)
+
+	baseReviewEnv(t)
+	t.Setenv("JWT_SECRET", lower)
+	t.Setenv("ACCOUNT_STATUS_SECRET", strings.Repeat("u", 32))
+	t.Setenv("REFRESH_RECOVERY_KEYS", strings.Repeat("aa", 32))
+	enabledReviewEnv(t, goodID, goodEmail, verifier, upper)
+	if _, err := Load(); err != nil {
+		t.Fatalf("mixed-case-same-hex key should load (intentional asymmetry), got: %v", err)
+	}
+
+	baseReviewEnv(t)
+	t.Setenv("JWT_SECRET", strings.Repeat("t", 32))
+	t.Setenv("ACCOUNT_STATUS_SECRET", strings.Repeat("u", 32))
+	t.Setenv("REFRESH_RECOVERY_KEYS", upper)
+	enabledReviewEnv(t, goodID, goodEmail, verifier, lower)
+	if _, err := Load(); err == nil {
+		t.Fatal("mixed-case keyring duplicate should fail (case-insensitive)")
+	} else if !strings.Contains(err.Error(), "REFRESH_RECOVERY_KEYS") {
+		t.Fatalf("expected REFRESH_RECOVERY_KEYS error, got: %v", err)
+	}
+}
+
 // TestReviewAccess_PartialConfigFailsFast pins that a partial enabled
 // binding (any field missing) fails startup instead of running half-bound.
 func TestReviewAccess_PartialConfigFailsFast(t *testing.T) {

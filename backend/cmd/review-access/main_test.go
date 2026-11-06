@@ -47,7 +47,10 @@ func TestVerifier_RoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("stat verifier output: %v", err)
 	}
-	if info.Mode().Perm() != 0o600 {
+	// POSIX-only: Windows reports 0666/0444 from the read-only attribute,
+	// never 0o600 (same rationale as the TestWriteProtected skips below;
+	// no Windows runner in CI to execute there — reasoning from os.Stat).
+	if runtime.GOOS != "windows" && info.Mode().Perm() != 0o600 {
 		t.Errorf("expected owner-only output, got %o", info.Mode().Perm())
 	}
 }
