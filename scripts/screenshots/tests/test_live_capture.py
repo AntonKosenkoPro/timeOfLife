@@ -460,6 +460,8 @@ class LockCaptureTests(unittest.TestCase):
             self.assertEqual(rec["lock"]["screenshot_sha256"],
                              __import__("inspection").sha256_file(
                                  str(lock_png)))
+            # Live pill + banner pixels confirm the pixels are real.
+            self.assertTrue(rec["consent"]["confirmed"])
             dims = __import__("inspection").png_dimensions(str(lock_png))
             self.assertEqual(dims, GEO63)
 
@@ -485,9 +487,11 @@ class LockCaptureTests(unittest.TestCase):
                 (run_dir / "staging" / "live-la-lock.png").is_file())
 
     def test_lock_blank_banner_records_attempt_never_genuine(self):
-        # Dead activity: banner-less lock shots are attempt evidence only.
-        # No live-la-lock.png is staged, the stub stays pending, and the
-        # session still completes (other frames unaffected).
+        # Dead lock shot: banner-less pixels are attempt evidence only.
+        # No live-la-lock.png is staged and the stub stays pending.
+        # Confirmation semantics: confirmed=True needs REAL pixels
+        # somewhere — here the compact pill is live, so the record
+        # confirms despite the blank lock.
         with tempfile.TemporaryDirectory() as tmp:
             hid = FakeHidBackend(ax=None)
             _fake, _hid, run_dir, summary, _udid = live_run(
@@ -507,6 +511,20 @@ class LockCaptureTests(unittest.TestCase):
             self.assertEqual(stub["capture"],
                              "external-lock-screen-pending")
             self.assertNotIn("capture_window", stub)
+            self.assertTrue(rec["consent"]["confirmed"])
+
+    def test_confirmed_false_without_any_live_pixels(self):
+        # No pill, no banner, no grant: nothing confirms anything.
+        with tempfile.TemporaryDirectory() as tmp:
+            hid = FakeHidBackend(ax=None)
+            _fake, _hid, run_dir, summary, _udid = live_run(
+                tmp, hid, hold_script(paint_plain, paint_plain),
+                run_id="live-lock-dark")
+            self.assertEqual(summary["status"], "complete")
+            rec = live_capture_record(run_dir)
+            self.assertFalse(rec["consent"]["confirmed"])
+            self.assertEqual(
+                (rec.get("lock_attempt") or {}).get("outcome"), "no-banner")
 
     def test_lock_banner_verdict_units(self):
         with tempfile.TemporaryDirectory() as tmp:

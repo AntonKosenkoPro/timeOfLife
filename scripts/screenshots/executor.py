@@ -1909,6 +1909,11 @@ def grant_consent(
             tree = _describe()
             current = prefer(collect_consent_buttons(tree))
         if current is None:
+            # Sheet gone after an Allow tap: outcome granted means
+            # "dismissed via an Allow tap" (absence-verified) — NOT
+            # authorization-confirmed. Only later pixels can confirm:
+            # run_live_capture sets confirmed=True when the compact pill
+            # verifies live or the lock banner verifies present.
             return {"outcome": "granted", "rounds": len(taps), "taps": taps}
         labels = sorted({row[1] for row in collect_consent_buttons(tree)})
         return {"outcome": "failed-blocker",
@@ -2723,10 +2728,18 @@ def run_live_capture(
                 "foreground": consent_fg,
                 "lock": consent_lock,
             }
+    # Pixel confirmation lands later (see banner gate below); until
+    # then a grant means "sheet dismissed via Allow tap", unconfirmed.
+    consent["confirmed"] = False
     lock_dest = staging / "live-la-lock.png"
     lock_attempt_dest = staging / "live-la-lock.attempt.png"
     lsha = liso = ""
     lock_attempt: dict[str, Any] | None = None
+    if list(consent.get("taps", [])):
+        # A grant just fired: SpringBoard needs a beat to present the
+        # banner/pill before any lock pixels count. One bounded settle.
+        hold_left("post-grant settle")
+        sleeper(interval_s)
     for _ in range(2):
         hold_left("lock capture")
         sleeper(interval_s)
@@ -2756,6 +2769,10 @@ def run_live_capture(
             "red_frac": banner.get("red_frac"),
         }
         lsha, liso = "", ""
+    # Pixel confirmation: a grant counts as confirmed only when activity
+    # UI actually rendered — live compact pill or verified lock banner.
+    if banner.get("banner") or verdict.get("live"):
+        consent["confirmed"] = True
     if expanded is not None:
         live_record: dict[str, Any] = {
             "schema_version": 1,
