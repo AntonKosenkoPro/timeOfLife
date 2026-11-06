@@ -121,8 +121,13 @@ print(hits[0] if len(hits) == 1 else '')")
   log "device $key: created $name $udid"
   echo "$udid" > "$OUT_ROOT/$key.udid"
   if [ "$udid" = "$SHARED_UDID" ]; then log "device $key: REFUSING shared UDID, abort device"; return 0; fi
-  xcrun simctl boot "$udid" >>"$LOGS/$key-boot.log" 2>&1 \
-    || { log "device $key: boot FAILED, delete+continue"; xcrun simctl delete "$udid" >/dev/null 2>&1; return 0; }
+  # Boot THROUGH argent (not simctl): argent applies pre-boot
+  # accessibility settings at boot, without which describe reads come
+  # back empty and consent can never grant (proven: argent-booted sims
+  # return full AX trees incl. system sheets; simctl-booted sims warn
+  # that pre-boot settings were never applied). Headless: no GUI window.
+  argent run boot-device --udid "$udid" --headless >>"$LOGS/$key-boot.log" 2>&1 \
+    || { log "device $key: argent boot FAILED, delete+continue"; xcrun simctl delete "$udid" >/dev/null 2>&1; return 0; }
   xcrun simctl bootstatus "$udid" -b >>"$LOGS/$key-boot.log" 2>&1 \
     || log "device $key: bootstatus rc!=0 (continue)"
   xcrun simctl install "$udid" "$APP" >>"$LOGS/$key-install.log" 2>&1 \
