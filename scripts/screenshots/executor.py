@@ -1906,6 +1906,12 @@ def grant_consent(
             _norm, raw, x, y = current
             _tap(x, y)
             taps.append({"label": raw, "x": x, "y": y})
+            # Settle before re-describing: the follow-up sheet (Always
+            # Allow) animates in seconds after the first tap — an instant
+            # re-describe races it, sees absence, and records a false
+            # granted while the follow-up sits unanswered (slim banner
+            # forever). One bounded settle closes the race.
+            sleeper(interval_s)
             tree = _describe()
             current = prefer(collect_consent_buttons(tree))
         if current is None:
