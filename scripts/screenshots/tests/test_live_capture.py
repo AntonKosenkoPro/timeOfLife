@@ -596,6 +596,35 @@ class LockCaptureTests(unittest.TestCase):
             self.assertIn(("button", "Home"), buttons)
             self.assertGreaterEqual(buttons.count(("button", "Power")), 2)
 
+    def test_lock_promotion_regrant_merges_followup(self):
+        # Always Allow follow-up surfaces after the relock: the
+        # promotion regrant taps it and merges into consent taps.
+        with tempfile.TemporaryDirectory() as tmp:
+            docs = ([EMPTY_DOC] + [EMPTY_DOC] * (1 + ex.SHEET_WAIT_ROUNDS)
+                    + [_desc_doc(("Allow", *ALLOW_XY)), EMPTY_DOC,
+                       _desc_doc(("Always Allow", *ALWAYS_XY)), EMPTY_DOC])
+            hid = FakeHidBackend(ax_script=docs)
+            script = ([("paint", paint_plain)] * 3
+                      + [("paint", paint_live_pill)]
+                      + [("paint", paint_plain)] * 3
+                      + [("paint", paint_plain)]
+                      + [("paint", paint_plain)] * 2
+                      + [("paint", paint_lock_banner)] * 2)
+            _fake, _hid, run_dir, summary, _udid = live_run(
+                tmp, hid, script, run_id="live-lock-regrant")
+            self.assertEqual(summary["status"], "complete")
+            self.assertTrue(
+                (run_dir / "staging" / "live-la-lock.png").is_file())
+            rec = live_capture_record(run_dir)
+            promo = rec.get("lock_promotion") or {}
+            self.assertTrue(promo.get("attempted"))
+            self.assertTrue(promo.get("staged"))
+            self.assertEqual((promo.get("regrant") or {}).get("outcome"),
+                             "granted")
+            labels = [t["label"] for t in rec["consent"]["taps"]]
+            self.assertIn("Allow", labels)
+            self.assertIn("Always Allow", labels)
+
     def test_lock_no_promotion_without_grant(self):
         # Blank lock with no grant (absent): no unlock-relock fires,
         # attempt evidence only with promotion.attempted False.

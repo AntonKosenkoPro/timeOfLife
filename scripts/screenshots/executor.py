@@ -2781,10 +2781,11 @@ def run_live_capture(
     # lock blank even with no sheet on warm sims): a just-granted
     # activity renders the island but SpringBoard hasn't promoted the
     # Lock banner before the two rapid exports. Force re-evaluation
-    # with an unlock-relock (Home then Power) + settle, then re-shoot
-    # verdict-gated (up to 2). Only when a grant fired (taps
-    # non-empty); absent/failed paths keep existing behavior. Bounded
-    # by the existing hold deadline, fail-closed on expiry.
+    # with an unlock-relock (Home then Power) + settle, then re-grant
+    # (the Always Allow follow-up surfaces late, after the relock),
+    # then re-shoot verdict-gated (up to 2). Only when a grant fired
+    # (taps non-empty); absent/failed paths keep existing behavior.
+    # Bounded by the existing hold deadline, fail-closed on expiry.
     if not banner.get("banner") and list(consent.get("taps", [])):
         promotion["attempted"] = True
         try:
@@ -2796,6 +2797,24 @@ def run_live_capture(
             sleeper(interval_s)
             hold_left("lock promotion settle")
             sleeper(interval_s)
+            hold_left("lock promotion regrant")
+            regrant = grant_consent(
+                hid, hid_count, clock, hid_ms, sleeper=sleeper,
+                interval_s=interval_s, wait_rounds=LOCK_SHEET_WAIT_ROUNDS)
+            promotion["regrant"] = {
+                "outcome": regrant.get("outcome"),
+                "taps": regrant.get("taps", []),
+                "rounds": regrant.get("rounds", 0),
+            }
+            if regrant.get("outcome") == "granted" and list(
+                    regrant.get("taps", [])):
+                merged = list(consent.get("taps", [])) + list(
+                    regrant.get("taps", []))
+                consent["taps"] = merged
+                consent["rounds"] = len(merged)
+                promotion["merged_taps"] = len(merged)
+                hold_left("post-regrant settle")
+                sleeper(interval_s)
             for _ in range(2):
                 hold_left("lock promotion capture")
                 sleeper(interval_s)
