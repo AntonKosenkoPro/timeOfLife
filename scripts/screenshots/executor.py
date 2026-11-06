@@ -2757,6 +2757,7 @@ def run_live_capture(
     lock_attempt_dest = staging / "live-la-lock.attempt.png"
     lsha = liso = ""
     lock_attempt: dict[str, Any] | None = None
+    promotion: dict[str, Any] = {"attempted": False, "staged": False}
     if list(consent.get("taps", [])):
         # A grant just fired: SpringBoard needs a beat to present the
         # banner/pill before any lock pixels count. One bounded settle.
@@ -2776,6 +2777,45 @@ def run_live_capture(
     # never-presented activity) is attempt evidence, never staged
     # genuine — the stub stays pending for a live rerun.
     banner = lock_banner_verdict(str(lock_attempt_dest), geometry)
+    # Promotion cycle (proven shape: compact live + expanded staged +
+    # lock blank even with no sheet on warm sims): a just-granted
+    # activity renders the island but SpringBoard hasn't promoted the
+    # Lock banner before the two rapid exports. Force re-evaluation
+    # with an unlock-relock (Home then Power) + settle, then re-shoot
+    # verdict-gated (up to 2). Only when a grant fired (taps
+    # non-empty); absent/failed paths keep existing behavior. Bounded
+    # by the existing hold deadline, fail-closed on expiry.
+    if not banner.get("banner") and list(consent.get("taps", [])):
+        promotion["attempted"] = True
+        try:
+            hold_left("lock promotion unlock")
+            _hid("press_button", lambda: hid.press_button("Home"))
+            sleeper(interval_s)
+            hold_left("lock promotion relock")
+            _hid("press_button", lambda: hid.press_button("Power"))
+            sleeper(interval_s)
+            hold_left("lock promotion settle")
+            sleeper(interval_s)
+            for _ in range(2):
+                hold_left("lock promotion capture")
+                sleeper(interval_s)
+                lsha, liso = _live_shot(
+                    run, udid, lock_attempt_dest, geometry,
+                    mask=pf.resolve_screenshot_mask("la-lock", None),
+                    label="lock promotion capture", stats=stats,
+                    interval_s=interval_s, sleeper=sleeper, clock=clock,
+                    deadline=deadline)
+                if stats is not None:
+                    stats.count("live_capture_shot")
+                banner = lock_banner_verdict(
+                    str(lock_attempt_dest), geometry)
+                if banner.get("banner"):
+                    break
+            promotion["staged"] = bool(banner.get("banner"))
+        except FrameError as exc:
+            if "expired" in str(exc):
+                raise
+            promotion["error"] = str(exc)[:200]
     if banner.get("banner"):
         shutil.copyfile(lock_attempt_dest, lock_dest)
         try:
@@ -2789,6 +2829,7 @@ def run_live_capture(
             "probe": "staging/live-la-lock.attempt.png",
             "captured_at_iso": liso,
             "red_frac": banner.get("red_frac"),
+            "promotion": promotion,
         }
         lsha, liso = "", ""
     # Pixel confirmation: a grant counts as confirmed only when
@@ -2812,6 +2853,7 @@ def run_live_capture(
             "expanded": expanded,
             "consent_dismissal": dismissal,
             "lock_attempt": lock_attempt,
+            "lock_promotion": promotion,
             "lock": {
                 "screenshot": "staging/live-la-lock.png",
                 "screenshot_sha256": lsha,
@@ -2835,6 +2877,7 @@ def run_live_capture(
                                                      "reason": "unset"},
             "consent_dismissal": dismissal,
             "lock_attempt": lock_attempt,
+            "lock_promotion": promotion,
             "lock": {
                 "screenshot": "staging/live-la-lock.png",
                 "screenshot_sha256": lsha,

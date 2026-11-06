@@ -564,6 +564,59 @@ class LockCaptureTests(unittest.TestCase):
             self.assertFalse(verdict["banner"])
             self.assertEqual(verdict["presentation"], "provisional")
 
+    def test_lock_promotion_stages_banner_after_grant(self):
+        # Granted but banner not yet promoted (blank first exports):
+        # unlock-relock forces SpringBoard re-evaluation, re-shoots
+        # stage the full banner. Only fires when taps non-empty.
+        with tempfile.TemporaryDirectory() as tmp:
+            docs = [EMPTY_DOC] + [EMPTY_DOC] * (1 + ex.SHEET_WAIT_ROUNDS) + [
+                    _desc_doc(("Allow", *ALLOW_XY)), EMPTY_DOC]
+            hid = FakeHidBackend(ax_script=docs)
+            script = ([("paint", paint_plain)] * 3
+                      + [("paint", paint_live_pill)]
+                      + [("paint", paint_plain)] * 3
+                      + [("paint", paint_plain)]
+                      + [("paint", paint_plain)] * 2
+                      + [("paint", paint_lock_banner)] * 2)
+            _fake, _hid, run_dir, summary, _udid = live_run(
+                tmp, hid, script, run_id="live-lock-promotion")
+            self.assertEqual(summary["status"], "complete")
+            # 3 stock + 1 compact + 3 expanded + 1 probe + 2 lock
+            # + 1 promotion capture (breaks on first full banner).
+            self.assertEqual(len(_fake.io_calls), 3 + 1 + 3 + 1 + 2 + 1)
+            self.assertTrue(
+                (run_dir / "staging" / "live-la-lock.png").is_file())
+            rec = live_capture_record(run_dir)
+            self.assertIsNone(rec.get("lock_attempt"))
+            promo = rec.get("lock_promotion") or {}
+            self.assertTrue(promo.get("attempted"))
+            self.assertTrue(promo.get("staged"))
+            self.assertTrue(rec["consent"]["confirmed"])
+            buttons = [c for c in hid.calls if c[0] == "button"]
+            self.assertIn(("button", "Home"), buttons)
+            self.assertGreaterEqual(buttons.count(("button", "Power")), 2)
+
+    def test_lock_no_promotion_without_grant(self):
+        # Blank lock with no grant (absent): no unlock-relock fires,
+        # attempt evidence only with promotion.attempted False.
+        with tempfile.TemporaryDirectory() as tmp:
+            hid = FakeHidBackend(ax=None)
+            script = ([("paint", paint_plain)] * 3
+                      + [("paint", paint_live_pill)]
+                      + [("paint", paint_plain)] * 3
+                      + [("paint", paint_plain)]
+                      + [("paint", paint_plain)] * 2)
+            _fake, _hid, run_dir, summary, _udid = live_run(
+                tmp, hid, script, run_id="live-lock-nopromo")
+            self.assertEqual(summary["status"], "complete")
+            self.assertEqual(len(_fake.io_calls), 3 + 1 + 3 + 1 + 2)
+            rec = live_capture_record(run_dir)
+            self.assertEqual(
+                (rec.get("lock_attempt") or {}).get("outcome"), "no-banner")
+            promo = ((rec.get("lock_attempt") or {}).get("promotion")
+                     or rec.get("lock_promotion") or {})
+            self.assertFalse(promo.get("attempted"))
+
     def test_lock_spawn_exhaustion_fails_closed(self):
         # Every lock export drops past the runner surface: bounded retry
         # exhausts into a named failure, the receipt stays partial, and
