@@ -489,9 +489,9 @@ class LockCaptureTests(unittest.TestCase):
     def test_lock_blank_banner_records_attempt_never_genuine(self):
         # Dead lock shot: banner-less pixels are attempt evidence only.
         # No live-la-lock.png is staged and the stub stays pending.
-        # Confirmation semantics: confirmed=True needs REAL pixels
-        # somewhere — here the compact pill is live, so the record
-        # confirms despite the blank lock.
+        # Confirmation semantics: only full-grant UI (verified banner or
+        # genuine card) confirms — a live pill alone is provisional and
+        # confirms nothing, so this record stays unconfirmed.
         with tempfile.TemporaryDirectory() as tmp:
             hid = FakeHidBackend(ax=None)
             _fake, _hid, run_dir, summary, _udid = live_run(
@@ -511,7 +511,9 @@ class LockCaptureTests(unittest.TestCase):
             self.assertEqual(stub["capture"],
                              "external-lock-screen-pending")
             self.assertNotIn("capture_window", stub)
-            self.assertTrue(rec["consent"]["confirmed"])
+            # Live pill alone is provisional: without a verified banner
+            # or genuine card this record stays unconfirmed.
+            self.assertFalse(rec["consent"]["confirmed"])
 
     def test_confirmed_false_without_any_live_pixels(self):
         # No pill, no banner, no grant: nothing confirms anything.
@@ -532,12 +534,35 @@ class LockCaptureTests(unittest.TestCase):
             paint_lock_banner(good)
             verdict = ex.lock_banner_verdict(str(good), GEO63)
             self.assertTrue(verdict["banner"])
+            self.assertEqual(verdict["presentation"], "full")
             self.assertGreaterEqual(verdict["red_frac"], 0.002)
             blank = Path(tmp) / "blank.png"
             paint_plain(blank)
             verdict = ex.lock_banner_verdict(str(blank), GEO63)
             self.assertFalse(verdict["banner"])
+            self.assertEqual(verdict["presentation"], "absent")
             self.assertEqual(verdict["red_frac"], 0.0)
+
+    def test_lock_provisional_banner_stays_pending(self):
+        # Slim pre-grant banner (small bottom banner, no full
+        # presentation): provisional, never staged genuine.
+        with tempfile.TemporaryDirectory() as tmp:
+            w, h = GEO63
+            cy = int(0.775 * h)
+
+            def slim(path: Path) -> None:
+                def fn(x, y):
+                    if (x - 1000) ** 2 + (y - cy) ** 2 <= 35 ** 2:
+                        return (255, 60, 60)
+                    return (40 + (x % 60), 36 + (x % 50), 34 + (y % 44))
+
+                _write_rgba_png(path, w, h, fn)
+
+            probe = Path(tmp) / "slim.png"
+            slim(probe)
+            verdict = ex.lock_banner_verdict(str(probe), GEO63)
+            self.assertFalse(verdict["banner"])
+            self.assertEqual(verdict["presentation"], "provisional")
 
     def test_lock_spawn_exhaustion_fails_closed(self):
         # Every lock export drops past the runner surface: bounded retry

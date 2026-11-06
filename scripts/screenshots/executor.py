@@ -2093,44 +2093,60 @@ def expanded_verdict(png_path: str,
 
 
 LOCK_BANNER_MIN_RED = 0.002
+# Slim (provisional, pre-grant) banner rows as a fraction of height,
+# measured from genuine provisional pixels (1320x2868: y ~2170-2290).
+SLIM_BANNER_ROWS = (0.750, 0.800)
 
 
 def lock_banner_verdict(png_path: str,
                         geometry: tuple[int, int]) -> dict[str, Any]:
     """Pixel verdict for a Lock Screen banner (no OCR).
 
-    Counts stop-button red mass in the banner band (relative rows
+    Counts stop-button red mass in the full-banner band (relative rows
     0.662H-0.697H, full width — geometry-relative, so every canvas is
-    attested). Calibrated: genuine lock banners measure 0.00745 on
-    1320x2868 (two independent runs), blank lock screens 0.0.
-    banner=True only above threshold; a blank lock records
-    lock_attempt and the stub stays pending — a banner-less shot is
-    never staged genuine.
+    attested). Calibrated: full banners measure 0.00745 on 1320x2868
+    (two independent runs), blank lock screens 0.0.
+    banner=True only above threshold; a slim provisional banner (small
+    bottom banner without the full presentation — pre-grant rendering)
+    records presentation=provisional and stays pending like a blank
+    one: only the full approved banner stages genuine.
     """
     width, height, px = decode_png_rgba_band(png_path, geometry[1])
     if (width, height) != (geometry[0], geometry[1]):
         raise FrameError(
             f"pixel source geometry {(width, height)} != expected "
             f"{(geometry[0], geometry[1])}")
-    y0 = int(0.662 * height)
-    y1 = int(0.697 * height)
-    red = total = 0
-    for y in range(y0, y1, 2):
-        base = y * width * 4
-        for x in range(0, width, 4):
-            off = base + x * 4
-            r, g, b = px[off], px[off + 1], px[off + 2]
-            total += 1
-            if r > 150 and g < 100 and b < 100:
-                red += 1
-    frac = red / total if total else 0.0
-    out: dict[str, Any] = {"red_frac": frac, "banner": False, "reason": ""}
-    if frac < LOCK_BANNER_MIN_RED:
+
+    def red_frac(y0: int, y1: int) -> float:
+        red = total = 0
+        for y in range(y0, y1, 2):
+            base = y * width * 4
+            for x in range(0, width, 4):
+                off = base + x * 4
+                r, g, b = px[off], px[off + 1], px[off + 2]
+                total += 1
+                if r > 150 and g < 100 and b < 100:
+                    red += 1
+        return red / total if total else 0.0
+
+    frac = red_frac(int(0.662 * height), int(0.697 * height))
+    out: dict[str, Any] = {"red_frac": frac, "banner": False,
+                           "presentation": "absent", "reason": ""}
+    if frac >= LOCK_BANNER_MIN_RED:
+        out["banner"] = True
+        out["presentation"] = "full"
+        out["reason"] = "lock banner stop-button mass verified"
+        return out
+    slim = red_frac(int(SLIM_BANNER_ROWS[0] * height),
+                    int(SLIM_BANNER_ROWS[1] * height))
+    out["red_frac"] = slim
+    if slim >= LOCK_BANNER_MIN_RED:
+        out["presentation"] = "provisional"
+        out["reason"] = ("slim provisional banner only (pre-grant "
+                         "rendering); no banner claim")
+    else:
         out["reason"] = ("no banner stop-button mass on the lock screen; "
                          "no banner claim")
-    else:
-        out["banner"] = True
-        out["reason"] = "lock banner stop-button mass verified"
     return out
 
 
@@ -2769,9 +2785,12 @@ def run_live_capture(
             "red_frac": banner.get("red_frac"),
         }
         lsha, liso = "", ""
-    # Pixel confirmation: a grant counts as confirmed only when activity
-    # UI actually rendered — live compact pill or verified lock banner.
-    if banner.get("banner") or verdict.get("live"):
+    # Pixel confirmation: a grant counts as confirmed only when
+    # full-grant UI actually rendered — verified lock banner or genuine
+    # expanded card. A live compact pill alone is provisional rendering
+    # (pre-grant activities show it) and confirms nothing.
+    if banner.get("banner") or (isinstance(expanded, dict)
+                                and expanded.get("screenshot")):
         consent["confirmed"] = True
     if expanded is not None:
         live_record: dict[str, Any] = {
