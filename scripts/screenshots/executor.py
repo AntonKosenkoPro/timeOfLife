@@ -2983,10 +2983,41 @@ def run_live_capture(
     return live_record
 
 
-# Pre-grant startup dwell: app boot + request parse + Activity.request
-# before the lock/grant below. The waits inside grant_consent add more
-# dwell; total setup stays ~1min per device (once, not per locale).
-PREGRANT_STARTUP_SETTLE_S = 8.0
+# Pre-grant activity-anchor wait: the staged envelope is processed
+# asynchronously — on a cold sim the app may take tens of seconds to
+# report its live_activity anchor. Bounded; on timeout the grant still
+# runs (a sheet may surface late), with the miss recorded.
+PREGRANT_ACTIVITY_TIMEOUT_S = 45.0
+
+
+def _await_pregrant_activity(
+    docs: Path,
+    *,
+    clock: Callable[[], float],
+    timeout_s: float,
+    interval_s: float,
+    sleeper: Callable[[float], None],
+) -> tuple[str | None, Any]:
+    """Poll the app state file for the live_activity anchor (bounded).
+
+    Returns (started_at_iso_or_None, last_seen_status). Never raises:
+    unreadable/missing/invalid files read as no-anchor-yet.
+    """
+    deadline = clock() + timeout_s
+    last_status: Any = None
+    while clock() < deadline:
+        try:
+            state = json.loads(
+                (docs / pf.STATE_FILENAME).read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            state = None
+        if isinstance(state, dict):
+            last_status = state.get("status")
+            live = state.get("live_activity")
+            if isinstance(live, dict) and live.get("started_at"):
+                return str(live["started_at"]), last_status
+        sleeper(interval_s)
+    return None, last_status
 
 
 def run_pregrant(
@@ -3002,6 +3033,7 @@ def run_pregrant(
     interval_s: float = POLL_INTERVAL_S,
     sleeper: Callable[[float], None] = time.sleep,
     stats: sess.PhaseStats | None = None,
+    activity_timeout_s: float = PREGRANT_ACTIVITY_TIMEOUT_S,
 ) -> dict[str, Any]:
     """Device-setup Live Activities authorization (no capture, no session).
 
@@ -3011,9 +3043,10 @@ def run_pregrant(
     activity starts tick valid time twice in a row. The system must
     authorize before Activity.request, so this setup pass stages the
     same realtime root envelope run_session stages, launches the app
-    so it requests the activity, locks, and taps the system sheet via
-    the same describe-guided grant_consent — once per device, before
-    any locale pass. No frames, no run identity, no harvested
+    so it requests the activity, waits for the live_activity anchor
+    (bounded; a grant still runs on timeout with the miss recorded),
+    locks, and taps the system sheet via the same describe-guided
+    grant_consent — once per device, before any locale pass. No frames, no run identity, no harvested
     artifacts: every device-locale keeps its single pass, and later
     passes find the sheet absent with zero taps (the worker's own
     grant path stays as fallback). Auth state is per-app, so one pass
@@ -3060,7 +3093,9 @@ def run_pregrant(
     except OSError as exc:
         raise FrameError(f"cannot clear owned cleanup file: {exc}")
     launch_capture(run, udid, bid)
-    sleeper(PREGRANT_STARTUP_SETTLE_S)
+    started_at, last_status = _await_pregrant_activity(
+        docs, clock=clock, timeout_s=activity_timeout_s,
+        interval_s=interval_s, sleeper=sleeper)
     consent_fg = grant_consent(hid, hid_count, clock, hid_ms,
                                sleeper=sleeper, interval_s=interval_s,
                                wait_rounds=1)
@@ -3093,6 +3128,8 @@ def run_pregrant(
         "run_id": run_id,
         "session_nonce": nonce,
         "staged_frame": first,
+        "activity_started_at": started_at,
+        "activity_status": last_status,
     }
 
 

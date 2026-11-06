@@ -809,6 +809,28 @@ class PregrantTests(unittest.TestCase):
             env = self._staged_envelope(container)
             self.assertEqual(env["session_domain"], "realtime")
 
+    def test_pregrant_activity_timeout_still_grants(self):
+        # Cold sim: the anchor never lands inside the bound — the grant
+        # still runs (a sheet may surface late) with the miss recorded.
+        with tempfile.TemporaryDirectory() as tmp:
+            container = Path(tmp) / "container"
+            container.mkdir(exist_ok=True)
+            fake = SessionFakeSimctl(container, la_block=dict(LA_BLOCK),
+                                     defer_ready=True)
+            docs = [_desc_doc(("Allow", *ALLOW_XY),
+                              ("Don't Allow", 0.5, 0.9)), EMPTY_DOC]
+            hid = FakeHidBackend(ax_script=docs)
+            rec = ex.run_pregrant(
+                run=fake, hid=hid, udid="UDID-x", device_key="iphone63",
+                geometry=GEO63, interval_s=0.0, sleeper=ex.no_sleep,
+                activity_timeout_s=0.05)
+            self.assertIsNone(rec["activity_started_at"])
+            self.assertEqual(rec["consent"]["outcome"], "granted")
+            self.assertEqual(rec["consent"]["phase"], "foreground")
+            verbs = [c[2] for c in fake.calls if len(c) > 2]
+            self.assertIn("launch", verbs)
+            self.assertIn("terminate", verbs)
+
     def test_pregrant_launch_failure_raises(self):
         with tempfile.TemporaryDirectory() as tmp:
             container = Path(tmp) / "container"
