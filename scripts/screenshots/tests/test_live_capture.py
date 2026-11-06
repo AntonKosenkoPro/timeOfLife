@@ -794,6 +794,7 @@ class PregrantTests(unittest.TestCase):
             self.assertEqual(len(consent["taps"]), 1)
             powers = [c for c in hid.calls if c == ("button", "Power")]
             self.assertEqual(len(powers), 2)
+            self.assertIn(("button", "Home"), hid.calls)
             taps = [c for c in hid.calls if c[0] == "tap"]
             self.assertEqual(taps, [("tap", *ALLOW_XY)])
 

@@ -3099,6 +3099,12 @@ def run_pregrant(
     consent_fg = grant_consent(hid, hid_count, clock, hid_ms,
                                sleeper=sleeper, interval_s=interval_s,
                                wait_rounds=1)
+    # Background the app before locking (worker order): the consent
+    # sheet has only ever surfaced with the requesting app backgrounded
+    # — locking with it foreground shows no sheet (screenshot-proven:
+    # anchor seen, outcome absent).
+    _hid("press_button", lambda: hid.press_button("Home"))
+    sleeper(interval_s)
     _hid("press_button", lambda: hid.press_button("Power"))
     sleeper(interval_s)
     _hid("press_button", lambda: hid.press_button("Power"))
