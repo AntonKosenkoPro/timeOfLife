@@ -11,6 +11,9 @@ info:
        and sends it via email (console in dev/test, AWS SES in production).
     2. **Verify OTP** — `POST /api/v1/auth/otp/verify` with the email and 6-digit code. On success,
        returns a JWT access token (15 min TTL) and an opaque refresh token.
+       When App Review access is enabled server-side, the single configured review
+       address instead accepts its reusable review code here (no expiry, no prior
+       request, ordinary device-bound sessions).
     3. **Refresh** — `POST /api/v1/auth/refresh` with the refresh token and `X-Device-Id`.
        Issues a new token pair within the sending device's refresh family and revokes the
        old token. Reuse of a revoked token revokes only that device's family — other
@@ -152,6 +155,12 @@ paths:
         created automatically if it does not exist. Always returns HTTP 202 to
         prevent user enumeration — a 202 response does NOT guarantee that an email
         was sent (internal errors are silently swallowed).
+        Review exception (demo-account-access): when review access is enabled
+        server-side, a well-formed request for the single configured review
+        address returns the same ordinary 202 without generating, persisting,
+        or sending an OTP, without creating an account, rotating any code, or
+        consuming attempt budgets — including when the expected review account
+        is missing or mismatched.
       tags:
         - Auth
       requestBody:
@@ -198,6 +207,15 @@ paths:
         Verifies the 6-digit OTP code for the given email. On success, marks the
         user as email-verified and returns a JWT access token + opaque refresh token.
         The refresh token is recorded against the `X-Device-Id` device's refresh family.
+        Review exception (demo-account-access): when review access is enabled
+        server-side, this endpoint accepts the configured reusable review code
+        for the single configured review address with no prior request, no
+        expiry, and no single-use consumption (repeated logins stay valid past
+        ordinary OTP TTL). Ordinary emailed codes never authorize the review
+        address while the exception is enabled. Review rejection reuses
+        `invalid_otp`; review throttling reuses `rate_limited` with a
+        `Retry-After` response header naming the seconds until account-wide
+        capacity returns.
       tags:
         - Auth
       parameters:
@@ -263,7 +281,7 @@ paths:
                       code: otp_attempts_exceeded
                       message: Too many incorrect attempts. Request a new code.
         "429":
-          description: Rate limited (5 req/min per IP+email)
+          description: Rate limited (5 req/min per IP+email; review-code evaluations additionally capped account-wide — see the endpoint description for Retry-After semantics)
           content:
             application/json:
               schema:

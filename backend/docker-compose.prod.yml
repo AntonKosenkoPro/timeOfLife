@@ -84,6 +84,16 @@ services:
       # Comma-separated IPs/CIDRs of reverse proxies allowed to set forwarded
       # IP headers for rate limiting. Empty = trust nobody.
       TRUSTED_PROXIES: ${TRUSTED_PROXIES:-}
+      # App Review access (demo-account-access). Disabled unless
+      # REVIEW_ACCESS_ENABLED is truthy; the full binding (account UUID +
+      # canonical email + 64-hex verifier + independent 64-hex key) is then
+      # required. Empty (default) keeps the exception off — review login is
+      # impossible and the ordinary OTP path is unchanged.
+      REVIEW_ACCESS_ENABLED: ${REVIEW_ACCESS_ENABLED:-}
+      REVIEW_ACCOUNT_ID: ${REVIEW_ACCOUNT_ID:-}
+      REVIEW_ACCOUNT_EMAIL: ${REVIEW_ACCOUNT_EMAIL:-}
+      REVIEW_CODE_VERIFIER: ${REVIEW_CODE_VERIFIER:-}
+      REVIEW_CODE_KEY: ${REVIEW_CODE_KEY:-}
     expose:
       - "8080"
 

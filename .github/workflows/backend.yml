@@ -513,6 +513,16 @@ jobs:
             # REFRESH_RECOVERY_KEYS (openssl rand -hex 32); rotate by
             # prepending, never by dropping keys backing pending jobs.
             APPLE_TOKEN_KEYS=${{ secrets.APPLE_TOKEN_KEYS }}
+            # App Review access (add-demo-account-access): disabled by
+            # default. REVIEW_ACCESS_ENABLED rides in vars (empty = off);
+            # the binding (account UUID + canonical email + 64-hex verifier
+            # + independent 64-hex key) rides in secrets and is validated
+            # below before services come up. Values are never echoed.
+            REVIEW_ACCESS_ENABLED=${{ vars.REVIEW_ACCESS_ENABLED }}
+            REVIEW_ACCOUNT_ID=${{ secrets.REVIEW_ACCOUNT_ID }}
+            REVIEW_ACCOUNT_EMAIL=${{ secrets.REVIEW_ACCOUNT_EMAIL }}
+            REVIEW_CODE_VERIFIER=${{ secrets.REVIEW_CODE_VERIFIER }}
+            REVIEW_CODE_KEY=${{ secrets.REVIEW_CODE_KEY }}
             ENVEOF
             chmod 600 .env
             # Rollback input guard FIRST of the write path (fail-closed layer
@@ -672,6 +682,45 @@ jobs:
               # shared with the REFRESH_RECOVERY_KEYS pre-flight above so the
               # two call sites cannot drift.
               validate_hex_keyring "$APPLE_TOKEN_KEYS" "APPLE_TOKEN_KEYS" || exit 1
+            fi
+            # App Review access (demo-account-access): disabled unless
+            # REVIEW_ACCESS_ENABLED is truthy (Go ParseBool vocabulary).
+            # A truthy-but-half-bound deploy fails here instead of
+            # crash-looping the fresh container at boot; a falsy value needs
+            # no binding. Values are never echoed (lengths/shapes only).
+            review_trim() { printf '%s' "$1" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//'; }
+            validate_review_hex() {
+              __r_value="$(printf '%s' "$1" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+              case "$__r_value" in
+                *[!0-9a-fA-F]*|"") echo "$2 must be 64 hex chars (generate with openssl rand -hex 32)"; return 1 ;;
+              esac
+              if [ "${#__r_value}" -ne 64 ]; then echo "$2 must be 64 hex chars (generate with openssl rand -hex 32)"; return 1; fi
+              case "$__r_value" in
+                0000000000000000000000000000000000000000000000000000000000000000) echo "$2 must not be the all-zero placeholder"; return 1 ;;
+              esac
+              return 0
+            }
+            __review_enabled="$(review_trim "${REVIEW_ACCESS_ENABLED:-}")"
+            case "$__review_enabled" in
+              ""|0|f|F|false|FALSE|False) __review_on=0 ;;
+              1|t|T|true|TRUE|True) __review_on=1 ;;
+              *) echo "REVIEW_ACCESS_ENABLED is not a boolean (0/1, true/false)"; exit 1 ;;
+            esac
+            if [ "$__review_on" -eq 1 ]; then
+              __review_id="$(review_trim "${REVIEW_ACCOUNT_ID:-}")"
+              __review_email="$(review_trim "${REVIEW_ACCOUNT_EMAIL:-}")"
+              [ -n "$__review_id" ] || { echo "REVIEW_ACCOUNT_ID is empty (required when review access is enabled)"; exit 1; }
+              [ -n "$__review_email" ] || { echo "REVIEW_ACCOUNT_EMAIL is empty (required when review access is enabled)"; exit 1; }
+              printf '%s' "$__review_id" | grep -Eq '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$' \
+                || { echo "REVIEW_ACCOUNT_ID is not a UUID"; exit 1; }
+              case "$__review_email" in
+                *"@"*.*) ;;
+                *) echo "REVIEW_ACCOUNT_EMAIL is not an email address"; exit 1 ;;
+              esac
+              validate_review_hex "${REVIEW_CODE_VERIFIER:-}" "REVIEW_CODE_VERIFIER" || exit 1
+              validate_review_hex "${REVIEW_CODE_KEY:-}" "REVIEW_CODE_KEY" || exit 1
+              [ "${REVIEW_CODE_KEY}" != "${REVIEW_CODE_VERIFIER}" ] \
+                || { echo "REVIEW_CODE_KEY must be independent of REVIEW_CODE_VERIFIER"; exit 1; }
             fi
 
             # Use the production compose file (local .env is read from this cwd).

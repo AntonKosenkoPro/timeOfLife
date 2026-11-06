@@ -95,6 +95,28 @@ type RotateResult struct {
 	SuccessorCreatedAt time.Time
 }
 
+// Review-code evaluation budgets (demo-account-access): at most
+// ReviewAccessShortLimit admissions in any rolling ReviewAccessShortWindow
+// and at most ReviewAccessLongLimit in any rolling ReviewAccessLongWindow,
+// per account. Both windows must have capacity; success, resends, restarts,
+// rotation, and toggles never clear retained history.
+const (
+	ReviewAccessShortWindow = 15 * time.Minute
+	ReviewAccessLongWindow  = 24 * time.Hour
+	ReviewAccessShortLimit  = 5
+	ReviewAccessLongLimit   = 20
+)
+
+// ReviewAdmission reports the outcome of one atomic review-code reservation.
+type ReviewAdmission struct {
+	// Admitted is true when the evaluation may proceed (consuming one unit
+	// of budget, correct or not).
+	Admitted bool
+	// RetryAfter is the ceiling in seconds until both windows have capacity
+	// again. Valid only when Admitted is false.
+	RetryAfter time.Duration
+}
+
 // CategoryTag is a denormalized category (id + name + icon) attached to an
 // entry in API responses. It is never written on its own.
 type CategoryTag struct {
@@ -299,13 +321,25 @@ type Store interface {
 	// FindRecoveryReceipt returns the pending receipt for an attempt hash,
 	// or ErrNotFound when the attempt was never accepted.
 	FindRecoveryReceipt(ctx context.Context, attemptHash string) (RecoveryReceipt, error)
-
 	// ConsumeRecoveryReceipt closes a pending receipt without revoking
 	// anything. Used when an expiry check rejects recovery: the receipt is
 	// dead from that moment, and closing it lets the opportunistic sweep
 	// reclaim the row once it is long past expiry.
 	ConsumeRecoveryReceipt(ctx context.Context, attemptHash string) error
-	// GetUserByID returns a user by their ID.
+
+	// ReserveReviewAttempt atomically reserves one review-code evaluation
+	// for an account (demo-account-access). The account row is locked first
+	// — matching the deletion/rotation lock order — then that account's
+	// history at/below now-24h is pruned and admissions strictly newer than
+	// now-15m and now-24h are counted against the short (5) and long (20)
+	// budgets. Below both budgets the attempt is recorded with authoritative
+	// store time and Admitted=true (success still consumes: nothing resets);
+	// at either budget the attempt is denied with Admitted=false and
+	// RetryAfter set to the ceiling until both windows have capacity. A
+	// denial appends nothing, so it cannot extend the window. A purged
+	// account races as ErrUserMissing (no admission, no session); any store
+	// failure is an error (fail closed — the caller must not authenticate).
+	ReserveReviewAttempt(ctx context.Context, userID string) (ReviewAdmission, error) // GetUserByID returns a user by their ID.
 	GetUserByID(ctx context.Context, userID string) (User, error)
 
 	// UpsertUserByAppleSubject upserts a user keyed by Apple's stable `sub`

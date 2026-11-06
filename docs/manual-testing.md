@@ -19,6 +19,20 @@ Prerequisites: Release build installed on the device (`Product → Destination �
 9. [ ] **Idempotent re-sign-in** — sign out, sign in with Apple again; same user (the same account file reattaches, no duplicate account or duplicate seeded categories).
 10. [ ] **Hide My Email attribution (email-OTP path)** — on Continue with Email, the system Hide My Email sheet attributes to Lifio (never a numeric PID); the saved alias label in Settings → Apple Account → iCloud → Hide My Email agrees. Requires the `webcredentials:antonkosenko.pro` association verified (`swcd`).
 
+## App Review access (normal screens, local/test backend)
+
+No Design/L10n changes are expected: the shipping six-digit field, 30-second resend cooldown, and `invalid_otp` / `rate_limited` error mapping are reused unchanged. Run against a **local/test backend with a synthetic review binding** (never production budgets or credentials). Prerequisites: backend running locally with the full `REVIEW_*` binding for a synthetic verified email-created account; the iOS app pointed at it (Debug config, `http://127.0.0.1:8080`).
+
+1. [ ] **Repeated login** — sign in with the review email + code on two devices/simulators; both land in the shell. Repeat after ordinary OTP TTL would have elapsed (10m); both succeed with no new request.
+2. [ ] **Resend changes nothing** — on the code screen, wait out the 30s cooldown and resend; the request returns 202, no new email arrives, and the same code still signs in.
+3. [ ] **Wrong code** — submit an incorrect code; the localized `invalid_otp` banner appears (all five locales if copy changed — none expected).
+4. [ ] **Throttled** — exhaust the budgets (5 quick attempts); the next verify returns `429 rate_limited` with the localized message and a `Retry-After` header; the app shows the rate-limited banner.
+5. [ ] **Two-device independence** — with both devices signed in, sign out on one; the other stays signed in with working sync.
+6. [ ] **Ordinary sync/isolation** — create entries on the review account, run "Sync now"; they appear on the relay for that account only. Sign in as a different account; no cross-account data is visible.
+7. [ ] **Deletion** — delete the review account from Profile → Account; the purge removes content, sessions, and attempt history. The same code no longer signs in (stays `invalid_otp`); re-registering the email creates a new UUID that the old code does not authorize.
+8. [ ] **Rotation/disablement** — after a verifier rotation, the old code fails and the new code works. After disablement, the address restores ordinary mailed OTP (request sends an email; the old review code fails).
+9. [ ] **Refresh revocation** — run the operator `revoke` command for the review UUID; the next refresh on every device fails and each device returns to the auth gate with local data intact (lock-not-wipe).
+
 ## Live Activities
 
 Live Activities need a real device with Dynamic Island (the simulator shows the Lock Screen banner only) and a signed-in account with at least one category. The "compact"/"minimal" faces below are system Live Activity presentations — unrelated to the removed in-app compact timer (History/Insights render no in-app timer surface since `remove-compact-timer`).

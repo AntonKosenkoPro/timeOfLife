@@ -98,6 +98,12 @@ type Config struct {
 	// authorization-code exchanges. It is sent only when set and must match
 	// the URI used in the native authorization request, if any.
 	AppleRedirectURI string
+	// Review carries the disabled-by-default App Review exception binding
+	// (demo-account-access): at most one configured verified email account
+	// authenticates with a reusable keyed six-digit code through the
+	// ordinary otp/request + otp/verify endpoints. Disabled deployments
+	// require none of the review variables and validate none of them.
+	Review ReviewAccess
 }
 
 // Load reads configuration from the environment (.env first, non-fatal if missing).
@@ -336,6 +342,10 @@ func Load() (*Config, error) {
 		if _, err := apple.ParsePrivateKey([]byte(cfg.ApplePrivateKey)); err != nil {
 			return nil, invalidFieldError("APPLE_PRIVATE_KEY", "valid PKCS#8 ECDSA P-256 PEM (.p8 contents)")
 		}
+	}
+
+	if err := loadReviewAccess(cfg); err != nil {
+		return nil, err
 	}
 
 	return cfg, nil
