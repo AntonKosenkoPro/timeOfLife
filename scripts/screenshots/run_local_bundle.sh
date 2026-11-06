@@ -127,6 +127,15 @@ print(hits[0] if len(hits) == 1 else '')")
     || log "device $key: bootstatus rc!=0 (continue)"
   xcrun simctl install "$udid" "$APP" >>"$LOGS/$key-install.log" 2>&1 \
     || { log "device $key: install FAILED, shutdown+delete+continue"; xcrun simctl shutdown "$udid" >/dev/null 2>&1; xcrun simctl delete "$udid" >/dev/null 2>&1; return 0; }
+  log "device $key: installed, warming argent transport"
+  # Host-level cold start (tool-server spawn + ax-service attach) costs
+  # tens of seconds on a busy host and must never burn hold budget:
+  # one sacrificial describe here (best effort, generous timeout),
+  # so in-session describes start warm. Failure is logged, never fatal.
+  # (No `timeout(1)` on macOS — bound via python stdlib instead.)
+  python3 -c "import subprocess,sys; subprocess.run(['argent','run','describe','--udid','$udid'], timeout=120)" \
+    >"$LOGS/$key-warmup.log" 2>&1 \
+    || log "device $key: transport warm-up rc!=0 (sessions still try; see $key-warmup.log)"
   log "device $key: installed, worker start"
   set +e
   python3 "$REPO/scripts/screenshots/run_device_worker.py" \
