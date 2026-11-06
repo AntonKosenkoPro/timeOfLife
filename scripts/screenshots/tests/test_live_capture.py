@@ -71,6 +71,11 @@ def paint_plain(path: Path, seed: int = 0) -> None:
                                   34 + ((y + seed) % 44)))
 
 
+def paint_black(path: Path) -> None:
+    """Sleeping display: near-black framebuffer (a tap never wakes iOS)."""
+    _write_rgba_png(path, *GEO63, lambda x, y: (0, 0, 0))
+
+
 def paint_idle_pill(path: Path) -> None:
     """Gradient + pure-black idle pill (no live content)."""
     x0, x1, y0, y1 = PILL_BOX
@@ -701,6 +706,50 @@ class LockCaptureTests(unittest.TestCase):
             self.assertEqual(rec["lock_wake_taps"],
                              [{"label": "lock wake tap", "x": 0.5, "y": 0.70}])
             self.assertEqual(rec["consent"]["taps"], [])
+
+    def test_lock_black_frame_reports_asleep(self):
+        # Sleeping display screenshots near-black: no banner, mean
+        # luminance below the awake floor (a tap never wakes iOS).
+        with tempfile.TemporaryDirectory() as tmp:
+            probe = Path(tmp) / "black.png"
+            paint_black(probe)
+            verdict = ex.lock_banner_verdict(str(probe), GEO63)
+            self.assertFalse(verdict["banner"])
+            self.assertEqual(verdict["presentation"], "absent")
+            self.assertLess(verdict["mean_luma"], ex.DISPLAY_AWAKE_LUMA_MIN)
+            plain = Path(tmp) / "plain.png"
+            paint_plain(plain)
+            awake = ex.lock_banner_verdict(str(plain), GEO63)
+            self.assertGreaterEqual(awake["mean_luma"],
+                                    ex.DISPLAY_AWAKE_LUMA_MIN)
+
+    def test_lock_asleep_wakes_via_power_and_stages(self):
+        # Black first-pass frames wake once via Power and reshoot once:
+        # banner on the reshoot stages genuine (iPad orb, screenshot-
+        # proven). No grant here, so no promotion — one wake only.
+        with tempfile.TemporaryDirectory() as tmp:
+            hid = FakeHidBackend(ax=None)
+            script = ([("paint", paint_plain)] * 3
+                      + [("paint", paint_live_pill)]
+                      + [("paint", paint_plain)] * 3
+                      + [("paint", paint_plain)]
+                      + [("paint", paint_black)] * 2
+                      + [("paint", paint_lock_banner)])
+            _fake, _hid, run_dir, summary, _udid = live_run(
+                tmp, hid, script, run_id="live-lock-wake")
+            self.assertEqual(summary["status"], "complete")
+            # 3 stock + 1 compact + 3 expanded + 1 probe + 2 lock
+            # + 1 wake reshoot.
+            self.assertEqual(len(_fake.io_calls), 3 + 1 + 3 + 1 + 2 + 1)
+            self.assertTrue(
+                (run_dir / "staging" / "live-la-lock.png").is_file())
+            rec = live_capture_record(run_dir)
+            self.assertIsNone(rec.get("lock_attempt"))
+            wake = rec.get("lock_display_wake") or {}
+            self.assertTrue(wake.get("fired"))
+            self.assertTrue(wake.get("recovered"))
+            powers = [c for c in hid.calls if c == ("button", "Power")]
+            self.assertEqual(len(powers), 3)
 
     def test_lock_spawn_exhaustion_fails_closed(self):
         # Every lock export drops past the runner surface: bounded retry

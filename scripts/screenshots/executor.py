@@ -1419,6 +1419,11 @@ SHEET_LABEL_MIN_MASS = 300
 # monitor tapping Allow on the SpringBoard sheet), a separate iOS-owner
 # task; this probe only takes the cheap pixel win when it verifies.
 SHEET_DISMISSAL_MAX_TAPS = 1
+# Display-asleep floor: mean frame luminance below this means the
+# display is asleep (near-black screenshot). Only a button press wakes
+# iOS — the wake tap cannot — so lock captures wake once via Power on
+# black, then reshoot once, all inside the hold deadline.
+DISPLAY_AWAKE_LUMA_MIN = 12.0
 # Wake-tap point as fractions of (width, height): neutral lock-screen
 # wallpaper between the clock and the banner bands. A locked-but-inactive
 # display renders the banner timer as "MM:--" (dashes, owner finding) —
@@ -2200,9 +2205,24 @@ def lock_banner_verdict(png_path: str,
                     red += 1
         return red / total if total else 0.0
 
+    # Mean display luminance over a coarse grid: a sleeping display
+    # screenshots near-black (a tap never wakes iOS — no tap-to-wake —
+    # only a button press does, so the driver wakes once on black).
+    luma_total = 0.0
+    luma_n = 0
+    for y in range(0, height, 8):
+        base = y * width * 4
+        for x in range(0, width, 8):
+            off = base + x * 4
+            luma_total += (0.299 * px[off] + 0.587 * px[off + 1]
+                           + 0.114 * px[off + 2])
+            luma_n += 1
+    mean_luma = luma_total / luma_n if luma_n else 0.0
+
     frac = red_frac(int(0.662 * height), int(0.697 * height))
     out: dict[str, Any] = {"red_frac": frac, "banner": False,
-                           "presentation": "absent", "reason": ""}
+                           "presentation": "absent", "reason": "",
+                           "mean_luma": mean_luma}
     if frac >= LOCK_BANNER_MIN_RED:
         out["banner"] = True
         out["presentation"] = "full-card"
@@ -2815,6 +2835,7 @@ def run_live_capture(
     lsha = liso = ""
     lock_attempt: dict[str, Any] | None = None
     promotion: dict[str, Any] = {"attempted": False, "staged": False}
+    display_wake: dict[str, Any] = {"fired": False, "recovered": False}
     wakes: list[dict[str, Any]] = []
 
     def _wake(label: str) -> None:
@@ -2833,16 +2854,48 @@ def run_live_capture(
     # dimmed lock; one neutral tap wakes it to active rendering before
     # the captures below (owner finding, screenshot-proven).
     _wake("lock wake tap")
-    for _ in range(2):
-        hold_left("lock capture")
-        sleeper(interval_s)
-        lsha, liso = _live_shot(
-            run, udid, lock_attempt_dest, geometry,
-            mask=pf.resolve_screenshot_mask("la-lock", None),
-            label="lock capture", stats=stats, interval_s=interval_s,
-            sleeper=sleeper, clock=clock, deadline=deadline)
-        if stats is not None:
-            stats.count("live_capture_shot")
+
+    def _lock_round(shots: int, label: str) -> tuple[str, str, dict]:
+        """Shoot `shots` lock exports; verdict the last frame.
+
+        A sleeping display screenshots near-black — and a tap never
+        wakes iOS, only a button press does — so a black frame wakes
+        once via Power and reshoots once, all inside the hold deadline.
+        Returns (sha256, captured_at_iso, banner_verdict).
+        """
+        sha = iso = ""
+        for _ in range(shots):
+            hold_left(label)
+            sleeper(interval_s)
+            sha, iso = _live_shot(
+                run, udid, lock_attempt_dest, geometry,
+                mask=pf.resolve_screenshot_mask("la-lock", None),
+                label=label, stats=stats, interval_s=interval_s,
+                sleeper=sleeper, clock=clock, deadline=deadline)
+            if stats is not None:
+                stats.count("live_capture_shot")
+        verdict = lock_banner_verdict(str(lock_attempt_dest), geometry)
+        if not verdict.get("banner") and verdict.get(
+                "mean_luma", DISPLAY_AWAKE_LUMA_MIN) < DISPLAY_AWAKE_LUMA_MIN:
+            hold_left("lock display wake")
+            _hid("press_button", lambda: hid.press_button("Power"))
+            display_wake["fired"] = True
+            sleeper(interval_s)
+            hold_left(label + " wake reshoot")
+            sleeper(interval_s)
+            sha, iso = _live_shot(
+                run, udid, lock_attempt_dest, geometry,
+                mask=pf.resolve_screenshot_mask("la-lock", None),
+                label=label + " wake reshoot", stats=stats,
+                interval_s=interval_s, sleeper=sleeper, clock=clock,
+                deadline=deadline)
+            if stats is not None:
+                stats.count("live_capture_shot")
+            verdict = lock_banner_verdict(str(lock_attempt_dest), geometry)
+            display_wake["recovered"] = bool(verdict.get("banner"))
+        return sha, iso, verdict
+
+    lsha, liso, banner = _lock_round(2, "lock capture")
     # Banner gate: a lock shot without the activity banner (dead or
     # never-presented activity) is attempt evidence, never staged
     # genuine — the stub stays pending for a live rerun.
@@ -2889,18 +2942,8 @@ def run_live_capture(
             # it before the promotion captures (same neutral point).
             _wake("lock promotion wake tap")
             for _ in range(2):
-                hold_left("lock promotion capture")
-                sleeper(interval_s)
-                lsha, liso = _live_shot(
-                    run, udid, lock_attempt_dest, geometry,
-                    mask=pf.resolve_screenshot_mask("la-lock", None),
-                    label="lock promotion capture", stats=stats,
-                    interval_s=interval_s, sleeper=sleeper, clock=clock,
-                    deadline=deadline)
-                if stats is not None:
-                    stats.count("live_capture_shot")
-                banner = lock_banner_verdict(
-                    str(lock_attempt_dest), geometry)
+                lsha, liso, banner = _lock_round(
+                    1, "lock promotion capture")
                 if banner.get("banner"):
                     break
             promotion["staged"] = bool(banner.get("banner"))
@@ -2922,6 +2965,7 @@ def run_live_capture(
             "captured_at_iso": liso,
             "red_frac": banner.get("red_frac"),
             "promotion": promotion,
+            "display_wake": display_wake,
         }
         lsha, liso = "", ""
     # Pixel confirmation: a grant counts as confirmed only when
@@ -2946,6 +2990,7 @@ def run_live_capture(
             "consent_dismissal": dismissal,
             "lock_attempt": lock_attempt,
             "lock_promotion": promotion,
+            "lock_display_wake": display_wake,
             "lock_wake_taps": wakes,
             "lock": {
                 "screenshot": "staging/live-la-lock.png",
@@ -2971,6 +3016,7 @@ def run_live_capture(
             "consent_dismissal": dismissal,
             "lock_attempt": lock_attempt,
             "lock_promotion": promotion,
+            "lock_display_wake": display_wake,
             "lock_wake_taps": wakes,
             "lock": {
                 "screenshot": "staging/live-la-lock.png",
