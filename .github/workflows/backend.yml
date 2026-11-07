@@ -309,6 +309,163 @@ jobs:
           fi
           echo "OTel/SaaS seam valid (OTEL_ENABLED='${OTEL_ENABLED:-<empty>}')."
 
+      - name: Validate App Review access binding
+        # Review binding (add-demo-account-access) is admin-controlled
+        # (vars/secrets), never operator-typed: safe to read via env.
+        # Validates on the runner BEFORE the SSH deploy writes the VM `.env`
+        # (a refused deploy must leave the on-disk `.env` untouched), and
+        # keeps the remote `script:` scalar under GitHub's 21000-char
+        # template limit (an overlong scalar fails validation with zero jobs).
+        # Vocabulary mirrors Go ParseBool exactly: empty or falsy = disabled
+        # (no binding needed); truthy requires the full binding (account UUID
+        # + email + 64-hex verifier + independent 64-hex key). Values are
+        # never echoed (lengths/shapes only).
+        env:
+          REVIEW_ACCESS_ENABLED: ${{ vars.REVIEW_ACCESS_ENABLED }}
+          REVIEW_ACCOUNT_ID: ${{ secrets.REVIEW_ACCOUNT_ID }}
+          REVIEW_ACCOUNT_EMAIL: ${{ secrets.REVIEW_ACCOUNT_EMAIL }}
+          REVIEW_CODE_VERIFIER: ${{ secrets.REVIEW_CODE_VERIFIER }}
+          REVIEW_CODE_KEY: ${{ secrets.REVIEW_CODE_KEY }}
+          # Independence references for the key-vs-server-secret gate below
+          # (mirrors loadReviewAccess): values are only compared, never echoed.
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
+          ACCOUNT_STATUS_SECRET: ${{ secrets.ACCOUNT_STATUS_SECRET }}
+          REFRESH_RECOVERY_KEYS: ${{ secrets.REFRESH_RECOVERY_KEYS }}
+          APPLE_TOKEN_KEYS: ${{ secrets.APPLE_TOKEN_KEYS }}
+        run: |
+          review_trim() { printf '%s' "$1" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//'; }
+          validate_review_hex() {
+            __r_value="$(printf '%s' "$1" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+            case "$__r_value" in
+              *[!0-9a-fA-F]*|"") echo "::error::$2 must be 64 hex chars (generate with openssl rand -hex 32). Nothing deployed."; return 1 ;;
+            esac
+            if [ "${#__r_value}" -ne 64 ]; then echo "::error::$2 must be 64 hex chars (generate with openssl rand -hex 32). Nothing deployed."; return 1; fi
+            case "$__r_value" in
+              0000000000000000000000000000000000000000000000000000000000000000) echo "::error::$2 must not be the all-zero placeholder. Nothing deployed."; return 1 ;;
+            esac
+            return 0
+          }
+          # Scans a comma-separated 64-hex keyring for the review key (never
+          # echoes values). Go hex-decodes every entry before comparing, so
+          # hex case is insignificant here; entries are edge-trimmed like
+          # ParseKeyring and empties are ignored. The normalized key arrives
+          # as an explicit argument (never caller scope): an empty key fails
+          # closed instead of silently matching nothing.
+          review_key_in_ring() {
+            __rk_ring="$1"; __rk_name="$2"; __rk_key_lc="${3:-}"
+            if [ -z "$__rk_key_lc" ]; then
+              echo "::error::review key missing for ${__rk_name} independence check. Nothing deployed."
+              return 1
+            fi
+            __rk_rest="${__rk_ring},"
+            while [ -n "$__rk_rest" ]; do
+              __rk_raw="${__rk_rest%%,*}"; __rk_rest="${__rk_rest#*,}"
+              __rk_edge="$(printf '%s' "$__rk_raw" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+              [ -z "$__rk_edge" ] && continue
+              if [ "$(printf '%s' "$__rk_edge" | tr 'A-F' 'a-f')" = "$__rk_key_lc" ]; then
+                echo "::error::REVIEW_CODE_KEY must be independent of ${__rk_name} (dedicated review key must not duplicate a server secret). Nothing deployed."
+                return 1
+              fi
+            done
+            return 0
+          }
+          __review_enabled="$(review_trim "${REVIEW_ACCESS_ENABLED:-}")"
+          # REVIEW_ACCESS_ENABLED rides unquoted in the sourced VM .env
+          # (OTEL precedent above): reject padded values unconditionally,
+          # before the enabled branch — a padded falsy would otherwise trim
+          # to false, skip this whole branch, and source as `VAR=` + command
+          # after the .env rewrite (fail-before-mutation violation).
+          if [ "$__review_enabled" != "${REVIEW_ACCESS_ENABLED:-}" ]; then
+            echo "::error::REVIEW_ACCESS_ENABLED must not carry surrounding whitespace (written unquoted into the sourced VM .env). Nothing deployed."; exit 1
+          fi
+          # Newline guard is unconditional: all REVIEW_* land verbatim on
+          # unquoted .env lines that the deploy sources with `set -a; . ./.env`
+          # even when review is disabled, so an interior newline executes as
+          # a command on the VM with review off. Reject first (same
+          # fail-closed guard as image_tag). grep -Eq anchors per line, so a
+          # multi-line value would match on line one and sail through shape
+          # checks — this wc -l check must stay ahead of them.
+          if [ "$(printf '%s' "${REVIEW_ACCOUNT_ID:-}${REVIEW_ACCOUNT_EMAIL:-}${REVIEW_CODE_VERIFIER:-}${REVIEW_CODE_KEY:-}" | wc -l)" -ne 0 ]; then
+            echo "::error::REVIEW_* values must not contain a newline. Nothing deployed."; exit 1
+          fi
+          case "$__review_enabled" in
+            ""|0|f|F|false|FALSE|False) __review_on=0 ;;
+            1|t|T|true|TRUE|True) __review_on=1 ;;
+            *) echo "::error::REVIEW_ACCESS_ENABLED is not a boolean (0/1, true/false). Nothing deployed."; exit 1 ;;
+          esac
+          if [ "$__review_on" -eq 1 ]; then
+            __review_id="$(review_trim "${REVIEW_ACCOUNT_ID:-}")"
+            __review_email="$(review_trim "${REVIEW_ACCOUNT_EMAIL:-}")"
+            [ -n "$__review_id" ] || { echo "::error::REVIEW_ACCOUNT_ID is empty (required when review access is enabled). Nothing deployed."; exit 1; }
+            [ -n "$__review_email" ] || { echo "::error::REVIEW_ACCOUNT_EMAIL is empty (required when review access is enabled). Nothing deployed."; exit 1; }
+            printf '%s' "$__review_id" | grep -Eq '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' \
+              || { echo "::error::REVIEW_ACCOUNT_ID is not a lowercase UUID. Nothing deployed."; exit 1; }
+            # Mirror the effective Go acceptance for the review binding, which
+            # is narrower than shell globs in three ways: net/mail structure
+            # + ASCII mailbox/dotted-domain with a 2+ letter TLD (rejects
+            # 1-char TLDs and spaces), no empty/dot-edge labels (rejects
+            # doubled dots and leading/trailing local dots, which the regex
+            # alone accepts but mail.ParseAddress refuses), and canonical
+            # lowercase throughout (config.Load rejects non-lowercase
+            # bindings because runtime matching is byte-exact). Anything
+            # passing here must boot; the previous *"@"*.* glob let all of
+            # these through into a boot crash-loop. Go additionally caps the
+            # address at 254 chars and rejects dot-edge domains (a@.b.com
+            # matches the regex yet mail.ParseAddress refuses it).
+            [ "${#__review_email}" -le 254 ] \
+              || { echo "::error::REVIEW_ACCOUNT_EMAIL is not a canonical lowercase email address (max 254 chars). Nothing deployed."; exit 1; }
+            printf '%s' "$__review_email" | grep -Eq '^[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}$' \
+              || { echo "::error::REVIEW_ACCOUNT_EMAIL is not a canonical lowercase email address. Nothing deployed."; exit 1; }
+            __review_local="${__review_email%@*}"; __review_domain="${__review_email#*@}"
+            case "$__review_local" in ""|.*|*.|*..*) echo "::error::REVIEW_ACCOUNT_EMAIL is not a canonical lowercase email address. Nothing deployed."; exit 1 ;; esac
+            case "$__review_domain" in ""|.*|*.|*..*) echo "::error::REVIEW_ACCOUNT_EMAIL is not a canonical lowercase email address. Nothing deployed."; exit 1 ;; esac
+            validate_review_hex "${REVIEW_CODE_VERIFIER:-}" "REVIEW_CODE_VERIFIER" || exit 1
+            validate_review_hex "${REVIEW_CODE_KEY:-}" "REVIEW_CODE_KEY" || exit 1
+            __review_verifier="$(review_trim "${REVIEW_CODE_VERIFIER:-}")"
+            __review_key="$(review_trim "${REVIEW_CODE_KEY:-}")"
+            # These land unquoted in the sourced VM .env: a padded value
+            # would source as `VAR=` + command, and the on-disk value would
+            # differ from what was validated here. Reject, don't trim.
+            # (REVIEW_ACCESS_ENABLED is held to the same rule by the
+            # unconditional guard above the enabled branch.)
+            if [ "$__review_id" != "${REVIEW_ACCOUNT_ID:-}" ] \
+              || [ "$__review_email" != "${REVIEW_ACCOUNT_EMAIL:-}" ] \
+              || [ "$__review_verifier" != "${REVIEW_CODE_VERIFIER:-}" ] \
+              || [ "$__review_key" != "${REVIEW_CODE_KEY:-}" ]; then
+              echo "::error::REVIEW_* values must not carry surrounding whitespace (written unquoted into the sourced VM .env). Nothing deployed."; exit 1
+            fi
+            # The dedicated key must be independent of every other configured
+            # secret (mirrors loadReviewAccess): a pasted duplicate would
+            # pass this gate yet crash-loop at boot. Hex is case-insensitive
+            # (Go compares decoded bytes), so the verifier comparison is
+            # case-normalized; the single-value secrets are compared as raw
+            # text exactly as config.Load reads them (Go does not trim them);
+            # keyrings are scanned per entry, edge-trimmed and
+            # case-normalized, because Go hex-decodes entries before
+            # comparing. Values are only compared, never echoed.
+            __review_key_lc="$(printf '%s' "$__review_key" | tr 'A-F' 'a-f')"
+            [ "$__review_key_lc" != "$(printf '%s' "$__review_verifier" | tr 'A-F' 'a-f')" ] \
+              || { echo "::error::REVIEW_CODE_KEY must be independent of REVIEW_CODE_VERIFIER. Nothing deployed."; exit 1; }
+            [ "$__review_key" != "${JWT_SECRET:-}" ] \
+              || { echo "::error::REVIEW_CODE_KEY must be independent of JWT_SECRET. Nothing deployed."; exit 1; }
+            [ "$__review_key" != "${ACCOUNT_STATUS_SECRET:-}" ] \
+              || { echo "::error::REVIEW_CODE_KEY must be independent of ACCOUNT_STATUS_SECRET. Nothing deployed."; exit 1; }
+            # Decoded-form: Go also compares the decoded 32 key bytes against
+            # the raw secret bytes (subtleCompare(key, []byte(JWTSecret))),
+            # so a 32-byte non-hex secret equal to the decoded key passes the
+            # text compares above yet crash-loops at boot. Hex-encode the raw
+            # secrets and compare against the normalized key. od needs -v:
+            # without it repeated bytes squeeze to a `*` line and the
+            # comparison silently passes. Values are only compared, never echoed.
+            [ "$__review_key_lc" != "$(printf '%s' "${JWT_SECRET:-}" | od -An -v -tx1 | tr -d ' \n')" ] \
+              || { echo "::error::REVIEW_CODE_KEY must be independent of JWT_SECRET. Nothing deployed."; exit 1; }
+            [ "$__review_key_lc" != "$(printf '%s' "${ACCOUNT_STATUS_SECRET:-}" | od -An -v -tx1 | tr -d ' \n')" ] \
+              || { echo "::error::REVIEW_CODE_KEY must be independent of ACCOUNT_STATUS_SECRET. Nothing deployed."; exit 1; }
+            review_key_in_ring "${REFRESH_RECOVERY_KEYS:-}" "REFRESH_RECOVERY_KEYS" "$__review_key_lc" || exit 1
+            review_key_in_ring "${APPLE_TOKEN_KEYS:-}" "APPLE_TOKEN_KEYS" "$__review_key_lc" || exit 1
+          fi
+          echo "App Review access binding valid (enabled='${__review_enabled:-<empty>}')."
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -513,6 +670,16 @@ jobs:
             # REFRESH_RECOVERY_KEYS (openssl rand -hex 32); rotate by
             # prepending, never by dropping keys backing pending jobs.
             APPLE_TOKEN_KEYS=${{ secrets.APPLE_TOKEN_KEYS }}
+            # App Review access (add-demo-account-access): disabled by
+            # default. REVIEW_ACCESS_ENABLED rides in vars (empty = off);
+            # the binding (account UUID + canonical email + 64-hex verifier
+            # + independent 64-hex key) rides in secrets, validated by the
+            # GH-side runner step before this SSH deploy runs.
+            REVIEW_ACCESS_ENABLED=${{ vars.REVIEW_ACCESS_ENABLED }}
+            REVIEW_ACCOUNT_ID=${{ secrets.REVIEW_ACCOUNT_ID }}
+            REVIEW_ACCOUNT_EMAIL=${{ secrets.REVIEW_ACCOUNT_EMAIL }}
+            REVIEW_CODE_VERIFIER=${{ secrets.REVIEW_CODE_VERIFIER }}
+            REVIEW_CODE_KEY=${{ secrets.REVIEW_CODE_KEY }}
             ENVEOF
             chmod 600 .env
             # Rollback input guard FIRST of the write path (fail-closed layer
@@ -673,6 +840,11 @@ jobs:
               # two call sites cannot drift.
               validate_hex_keyring "$APPLE_TOKEN_KEYS" "APPLE_TOKEN_KEYS" || exit 1
             fi
+            # App Review access binding is validated GH-side (runner step
+            # above) before this SSH deploy runs; values land here verbatim
+            # via the heredoc above, so no re-validation is needed inline
+            # (it would also push this script scalar over GitHub's
+            # 21000-char template limit).
 
             # Use the production compose file (local .env is read from this cwd).
             cp docker-compose.prod.yml docker-compose.yml

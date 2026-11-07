@@ -11,8 +11,6 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
-	"net/mail"
-	"regexp"
 	"strings"
 	"time"
 
@@ -47,6 +45,9 @@ type Handler struct {
 	appleTokenKeys  *recovery.Keyring
 	digestKey       []byte
 	appleClientID   string
+	// reviewAccess is the disabled-by-default App Review exception binding
+	// (demo-account-access). Zero value = disabled, ordinary behavior.
+	reviewAccess ReviewAccessConfig
 }
 
 // RateLimiterGroup holds the rate limiters used by the handlers.
@@ -387,24 +388,16 @@ type errorResponse struct {
 
 // ---------- Helpers ----------
 
-var emailRegex = regexp.MustCompile(`^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$`)
-
 // validateEmail reports whether email is an acceptable account identifier.
-// net/mail parses the address structure (RFC 5322); the legacy regex then
-// applies on top (ASCII mailbox, dotted domain with a 2+ letter TLD, max 254
-// chars). NOTE: the pair is an intersection — strictly narrower than the old
-// regex alone for inputs like ".a@example.com" or "a..b@example.com", which
-// now return 400. Pre-existing accounts with such addresses would be locked
-// out; confirmation tracked in #95.
+// The canonical rule lives in auth.ValidEmail (shared with config-time
+// review-binding validation); this wrapper keeps existing call sites stable.
+// NOTE: the canonical pair (net/mail structure + ASCII mailbox shape) is an
+// intersection — strictly narrower than the old regex alone for inputs like
+// ".a@example.com" or "a..b@example.com", which return 400. Pre-existing
+// accounts with such addresses would be locked out; confirmation tracked
+// in #95.
 func validateEmail(email string) bool {
-	if email == "" || len(email) > 254 {
-		return false
-	}
-	addr, err := mail.ParseAddress(email)
-	if err != nil || addr.Address != email {
-		return false
-	}
-	return emailRegex.MatchString(email)
+	return auth.ValidEmail(email)
 }
 
 func validateCode(code string) bool {
@@ -617,6 +610,14 @@ func (h *Handler) RequestOTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Review exception (demo-account-access): the enabled configured
+	// address returns the ordinary 202 without account upsert, OTP
+	// generation/persistence, email delivery, or budget consumption.
+	if h.isReviewAddress(req.Email) {
+		h.handleReviewRequest(w, r)
+		return
+	}
+
 	// Always return 202 to prevent user enumeration.
 	// Upsert user, generate OTP, send email — all best-effort.
 	user, err := h.store.UpsertUser(ctx, req.Email)
@@ -678,6 +679,14 @@ func (h *Handler) VerifyOTP(w http.ResponseWriter, r *http.Request) {
 	if h.rateLimiter.OTPVerify != nil && !h.rateLimiter.OTPVerify.Allow(rateKey) {
 		h.logger.WarnContext(r.Context(), "OTP verify rate limited", "ip", ip, "email", maskEmail(req.Email))
 		writeError(w, http.StatusTooManyRequests, "rate_limited", "Too many attempts. Please try again later.", nil)
+		return
+	}
+
+	// Review exception (demo-account-access): the enabled configured
+	// address authenticates with the reusable keyed code. Ordinary OTP
+	// records are never consulted on this branch — no fallback.
+	if h.isReviewAddress(req.Email) {
+		h.verifyReviewOTP(w, r, deviceID, req.Email, req.Code)
 		return
 	}
 

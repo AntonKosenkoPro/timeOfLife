@@ -3,6 +3,7 @@ package migrations
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -37,14 +38,11 @@ func TestMigrations_FilesOrderedSequential(t *testing.T) {
 			t.Errorf("files not in lexical order: %q before %q", files[i-1], f)
 		}
 	}
-	// Sequential from 001 with no gaps.
-	if len(files) >= 10 {
-		t.Fatalf("test only supports <10 migrations, got %d", len(files))
-	}
+	// Sequential from 001 with no gaps (three-digit zero-padded: 001, 002, ...).
 	for i := range files {
-		wantNum := [3]byte{'0', '0', byte('0' + i + 1)}
-		if got := files[i][:3]; got != string(wantNum[:]) {
-			t.Errorf("gap in sequence: position %d holds %q, want %q", i, files[i], string(wantNum[:]))
+		wantNum := fmt.Sprintf("%03d", i+1)
+		if got := files[i][:3]; got != wantNum {
+			t.Errorf("gap in sequence: position %d holds %q, want %q", i, files[i], wantNum)
 		}
 	}
 }

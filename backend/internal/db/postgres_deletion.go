@@ -395,6 +395,7 @@ func (s *PostgresStore) purgeUserOnce(ctx context.Context, userID, clientID stri
 		{"recovery receipts", `DELETE FROM refresh_recovery_receipts WHERE user_id = $1`},
 		{"refresh tokens", `DELETE FROM refresh_tokens WHERE user_id = $1`},
 		{"otp codes", `DELETE FROM otp_codes WHERE user_id = $1`},
+		{"review attempts", `DELETE FROM review_auth_attempts WHERE user_id = $1`},
 		{"entry-category joins", `DELETE FROM entry_categories WHERE entry_id IN (SELECT id FROM entries WHERE user_id = $1)`},
 		{"entries", `DELETE FROM entries WHERE user_id = $1`},
 		{"categories", `DELETE FROM categories WHERE user_id = $1`},

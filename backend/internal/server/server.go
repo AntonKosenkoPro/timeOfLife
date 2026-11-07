@@ -59,6 +59,9 @@ type Dependencies struct {
 	AppleDigestKey []byte
 	// AppleClientID is the Bundle ID referenced by revocation jobs.
 	AppleClientID string
+	// ReviewAccess carries the disabled-by-default App Review exception
+	// binding (demo-account-access). Zero value = disabled.
+	ReviewAccess config.ReviewAccess
 	// Version is the build identity stamped at build time via ldflags
 	// (-X main.version): the release tag on `backend/*` tagged builds,
 	// `main-<sha>` on main-branch and manual deploys. Empty
@@ -199,6 +202,22 @@ func NewDefaultDependencies(ctx context.Context, cfg *config.Config, store db.St
 		AppleTokenKeyring:  appleTokenKeyring,
 		AppleDigestKey:     digestKey,
 		AppleClientID:      cfg.AppleClientID,
+		ReviewAccess:       cfg.Review,
+	}
+}
+
+// reviewAccessConfig translates the loaded review binding into the handler
+// option struct. Disabled config yields the zero value (exception off).
+func reviewAccessConfig(cfg config.ReviewAccess) handlers.ReviewAccessConfig {
+	if !cfg.Enabled {
+		return handlers.ReviewAccessConfig{}
+	}
+	return handlers.ReviewAccessConfig{
+		Enabled:      true,
+		AccountID:    cfg.AccountID,
+		AccountEmail: cfg.AccountEmail,
+		Verifier:     cfg.Verifier,
+		Key:          cfg.Key,
 	}
 }
 
@@ -241,6 +260,7 @@ func New(deps Dependencies) *Server {
 			deps.AppleDigestKey,
 			deps.AppleClientID,
 		),
+		handlers.WithReviewAccess(reviewAccessConfig(deps.ReviewAccess)),
 	)
 
 	s := &Server{

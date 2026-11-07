@@ -290,6 +290,7 @@ func (s *SQLiteStore) PurgeUser(ctx context.Context, userID, clientID string, di
 		{"recovery receipts", `DELETE FROM refresh_recovery_receipts WHERE user_id = ?`},
 		{"refresh tokens", `DELETE FROM refresh_tokens WHERE user_id = ?`},
 		{"otp codes", `DELETE FROM otp_codes WHERE user_id = ?`},
+		{"review attempts", `DELETE FROM review_auth_attempts WHERE user_id = ?`},
 		{"entry-category joins", `DELETE FROM entry_categories WHERE entry_id IN (SELECT id FROM entries WHERE user_id = ?)`},
 		{"entries", `DELETE FROM entries WHERE user_id = ?`},
 		{"categories", `DELETE FROM categories WHERE user_id = ?`},
