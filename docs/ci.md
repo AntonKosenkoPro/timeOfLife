@@ -111,7 +111,7 @@ make test:cover    # coverage + per-function report
 ## App Store screenshots (local-only; CI capture retired by owner decision —
 slow, unreliable, expensive)
 
-Local session-based capture pipeline (change `optimize-app-screenshot-workflow`,
+Local session-based capture pipeline (baseline `screenshot-capture-workflow`, archived from change `optimize-app-screenshot-workflow`,
 run via the `lifio-local-screenshots` skill, one simulator at a time):
 early input validation → one verified arm64 Screenshot build (tar + digest
 manifest, Xcode 27.1 / iOS 27.0) → one owned simulator per selected device

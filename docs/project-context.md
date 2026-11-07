@@ -60,7 +60,7 @@ Do not claim these are done. The following remain open (leftovers live in `docs/
 - **Kafka** — deferred (S1 names it but auth MVP doesn't need an MQ). **Rate-limit store** is in-memory; swap for Redis before multi-instance deploy.
 - **SwiftUI snapshot / on-device keychain tests** — manual smoke checklist in `README.md`.
 
-### Screenshot capture (active change `optimize-app-screenshot-workflow` — session pipeline wired; pilot + expansion gates green; single-pass decision; acceptance = downloadable output)
+### Screenshot capture (baseline `screenshot-capture-workflow` — archived 2026-11-07 from change `optimize-app-screenshot-workflow`; session pipeline wired; single-pass decision; acceptance = downloadable output)
 
 The `Screenshot` configuration is Release-optimized, simulator-only
 (`SCREENSHOT_CAPTURE` condition; distinct bundle identities + capture-only
