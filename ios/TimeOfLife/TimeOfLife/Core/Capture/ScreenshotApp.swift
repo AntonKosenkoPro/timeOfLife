@@ -199,17 +199,27 @@ enum ScreenshotApp {
     /// (iOS 26+: request accepted, not yet presented) and a visible banner
     /// can read as `.stale`. Both are still on screen — only an explicit
     /// end clears them (a reboot never does). `.ended`/`.dismissed` are
-    /// already gone; `@unknown default` ends rather than leaks (still
-    /// scoped to capture-owned activities by the caller).
+    /// already gone; any other state (including `.pending` on newer SDKs
+    /// and future cases) ends rather than leaks (still scoped to
+    /// capture-owned activities by the caller).
+    ///
+    /// No `switch`: `.pending` exists only on newer SDKs (iOS 26+, Xcode 27+),
+    /// so a `case .pending` breaks older-Xcode compilation with "has no
+    /// member" and `if #available` cannot help (runtime-only — the symbol
+    /// must exist at compile time). A `switch` over the known cases plus
+    /// `@unknown default` still warns "must be exhaustive / add missing
+    /// case: '.pending'" on the new SDK. Equality checks need no
+    /// exhaustiveness and reference no new symbol, compiling everywhere
+    /// (see `pendingLiveAnchorEndable`, which decodes the state from Codable
+    /// JSON for the same reason).
     static func isEndableState(_ state: ActivityState) -> Bool {
-        switch state {
-        case .active, .stale:
-            return true
-        case .ended, .dismissed:
-            return false
-        @unknown default:
+        if state == .active || state == .stale {
             return true
         }
+        if state == .ended || state == .dismissed {
+            return false
+        }
+        return true
     }
 
     /// Capture-owned matching rule (fixture text only — never another

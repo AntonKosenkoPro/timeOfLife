@@ -108,6 +108,34 @@ make test:pg       # Optional PostgreSQL parity    (needs Docker; not currently 
 make test:cover    # coverage + per-function report
 ```
 
+## App Store screenshots (local-only; CI capture retired by owner decision —
+slow, unreliable, expensive)
+
+Local session-based capture pipeline (change `optimize-app-screenshot-workflow`,
+run via the `lifio-local-screenshots` skill, one simulator at a time):
+early input validation → one verified arm64 Screenshot build (tar + digest
+manifest, Xcode 27.1 / iOS 27.0) → one owned simulator per selected device
+(created/booted/installed/captured/shutdown/deleted in turn; shared sims
+never touched), locales sequential single pass with pinned + real-time
+hold-open sessions (argent describe-backed consent grant, island long-press)
+→ per-locale `shots/<device>/<locale>` → genuine registration (observation
+gate deleted — owner visual check governs) → finalize → panels matrix
+(`<locale>/<device>`) + ZIP. Non-English/iPad runs require the paired
+`--approval` + `--retained-dir` flags (hash-bound against the retained
+`approval-pilot27-r2.json`) unless the local bypass is honestly logged
+(`LIFIO_CAPTURE_CI=1` → `ci_approval_bypass:true` — technical gate, never
+owner approval); 20 minutes is aspirational, not a hard gate (owner accepts
+~22min vs 70+): acceptance requires successful downloadable output with
+truthful status (8.3/9.5/9.6 proven at local scope 2026-11-05 — 15/15
+complete, 69 panels; tasks 8.1/8.2 retired — cancelled, not run; old CI runs
+failed, no fabricated acceptance; 6.x, 7.x + 8.5 done — no CI runtime claim,
+by design. Panels device art is official Apple PNG assets (source identity
+pinned in tasks 10.1; Figma live fetch retired; delivery OWNER-DECIDED:
+private versioned release `AntonKosenkoPro/lifio-design-assets`,
+`apple-bezels-v2` current — manifest + asset hashes verified; `APPLE_BEZELS_TOKEN`
+for local `gh release download` (value never read); no public redistribution).
+Operator runbook: `docs/screenshot-capture.md`.
+
 ## Secrets checklist
 
 Required secrets — GitHub Actions secrets (repo Settings → Secrets and variables → Actions) plus Xcode Cloud shared secret env vars (App Store Connect; the Sentry rows below):
@@ -129,6 +157,8 @@ Required secrets — GitHub Actions secrets (repo Settings → Secrets and varia
 | `SENTRY_PROJECT_RELEASE` | Xcode Cloud shared secret env (release project slug) | only when Sentry wired; absent = release upload skips |
 | `SENTRY_DSN` | Xcode Cloud shared secret env, threaded into the Cloud archive (the former `SENTRY_IOS_DSN` GitHub secret died with the removed `workflow_call` block) + backend deploy (rendered into VM `.env`) | only when Sentry wired; absent = shipped binary ships with reporting off |
 | `HC_PING_URL` | backend deploy (installs the every-minute dead-man's-switch cron pinger) | only when Healthchecks wired; absent = install skips with a warning |
+| `FIGMA_API_KEY` | RETIRED — panels path migrates to official Apple PNG device art (§10); no Figma runtime fetch, no new Figma dependency (historical panels runs used it; old failures stand as recorded) | no (retired) |
+| `APPLE_BEZELS_TOKEN` (main-chosen name) | local driver panels render (private release asset download from `AntonKosenkoPro/lifio-design-assets`; fine-grained read-only Contents on the asset repo ONLY — normal public-repo `GITHUB_TOKEN` cannot cross repos, no token copied from broad local `gh auth`) | local `gh release download` use (value never read) |
 
 Non-secret variables: `EMAIL_BACKEND`, `AWS_REGION`, `SES_FROM` (set as repository variables).
 

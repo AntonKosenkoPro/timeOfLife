@@ -92,7 +92,8 @@ struct CaptureStateTests {
             requestSHA256: String(repeating: "b", count: 64),
             endedActivityIDs: ["act-1"],
             removedSession: true,
-            error: nil
+            error: nil,
+            removedSessionQueue: true
         )
         try CaptureCleanupWriter.write(ack, to: dir)
         #expect(try CaptureCleanupWriter.read(from: dir) == ack)
@@ -102,7 +103,8 @@ struct CaptureStateTests {
             requestSHA256: String(repeating: "b", count: 64),
             endedActivityIDs: [],
             removedSession: false,
-            error: CaptureStateFailure(code: "cleanup-mismatch", detail: "nope")
+            error: CaptureStateFailure(code: "cleanup-mismatch", detail: "nope"),
+            removedSessionQueue: false
         )
         try CaptureCleanupWriter.write(mismatch, to: dir)
         #expect(try CaptureCleanupWriter.read(from: dir) == mismatch)

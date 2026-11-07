@@ -7,9 +7,11 @@ import LifioLiveActivityCore
 
 /// Capture pipeline + isolation tests (tasks 2.5/3.2/4.3). Gated: they run
 /// under the TimeOfLife-Screenshot scheme, where the fixture and preparation
-/// code compile in. Debug builds compile this file to nothing.
+/// code compile in. Debug builds compile this file to nothing. Serialized:
+/// this suite shares one prepare() session directory per runID; path ops
+/// (isolation checks, container builds) must not interleave.
 @MainActor
-@Suite("Screenshot capture")
+@Suite("Screenshot capture", .serialized)
 struct ScreenshotCaptureTests {
 
     private func requestData(
@@ -29,7 +31,7 @@ struct ScreenshotCaptureTests {
             "week_rule": "locale-native",
             "reference_local_iso": "2026-10-20T09:41:00",
             "app_elapsed_s": 754,
-            "frames": ["track-running", "insights", "history", "add-entry", "live-activity"],
+            "frames": ["track-running", "insights", "history", "add-entry", "la-lock", "la-compact", "la-expanded"],
             "frame": frame,
             "mode": mode,
             "run_id": "test-run",
@@ -569,6 +571,8 @@ struct ScreenshotCaptureTests {
         #expect(ScreenshotLocale.overrideBundle() == nil)
     }
 
+    private static let cleanupNonce = "abcdef0123456789abcdef0123456789"
+
     private func priorState(runID: String, sha256: String) -> CaptureState {
         CaptureState(
             status: "ready",
@@ -582,7 +586,22 @@ struct ScreenshotCaptureTests {
             build: nil,
             clocks: nil,
             liveActivity: nil,
-            error: nil
+            error: nil,
+            sessionNonce: Self.cleanupNonce,
+            sessionDomain: "pinned",
+            seq: 0,
+            transcript: [ScreenshotSessionTranscriptEntry(seq: 0, frame: ScreenshotFrame.trackRunning.rawValue, requestSHA256: sha256, requestSemanticSHA256: String(repeating: "e", count: 64))],
+            appDurationsMS: nil
+        )
+    }
+
+    private func sessionInvocation(runID: String, sha256: String) -> ScreenshotCleanupInvocation {
+        ScreenshotCleanupInvocation(
+            runID: runID,
+            expectedSHA256: sha256,
+            sessionNonce: Self.cleanupNonce,
+            sessionDomain: "pinned",
+            finalSeq: 0
         )
     }
 
@@ -599,7 +618,7 @@ struct ScreenshotCaptureTests {
         try CaptureStateWriter.write(priorState(runID: "run-a", sha256: String(repeating: "a", count: 64)), to: documents)
         let ack = await ScreenshotCleanup.perform(
             documents: documents,
-            invocation: ScreenshotCleanupInvocation(runID: "run-a", expectedSHA256: String(repeating: "b", count: 64))
+            invocation: sessionInvocation(runID: "run-a", sha256: String(repeating: "b", count: 64))
         )
         #expect(ack.status == "mismatch")
         #expect(ack.endedActivityIDs.isEmpty)
@@ -614,7 +633,7 @@ struct ScreenshotCaptureTests {
         let documents = try temporaryDocuments()
         let ack = await ScreenshotCleanup.perform(
             documents: documents,
-            invocation: ScreenshotCleanupInvocation(runID: "run-a", expectedSHA256: String(repeating: "a", count: 64))
+            invocation: sessionInvocation(runID: "run-a", sha256: String(repeating: "a", count: 64))
         )
         #expect(ack.status == "failure")
         #expect(ack.error?.code == "no-prior-state")
@@ -634,10 +653,12 @@ struct ScreenshotCaptureTests {
 
         let ack = await ScreenshotCleanup.perform(
             documents: documents,
-            invocation: ScreenshotCleanupInvocation(runID: runID, expectedSHA256: sha)
+            invocation: sessionInvocation(runID: runID, sha256: sha)
         )
         #expect(ack.status == "cleaned")
         #expect(ack.removedSession == true)
+        #expect(ack.sessionNonce == Self.cleanupNonce)
+        #expect(ack.finalSeq == 0)
         #expect(!FileManager.default.fileExists(atPath: sessionDir.path))
         #expect(try CaptureCleanupWriter.read(from: documents) == ack)
     }

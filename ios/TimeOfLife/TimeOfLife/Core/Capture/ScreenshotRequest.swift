@@ -12,15 +12,11 @@ enum ScreenshotFrame: String, Codable, CaseIterable {
     case laLock = "la-lock"
     case laCompact = "la-compact"
     case laExpanded = "la-expanded"
-    /// Legacy single live-activity frame (pre-7-frame story): still accepted
-    /// so prior 5-frame requests validate, but the pilot uses the three la-*
-    /// frames above.
-    case liveActivity = "live-activity"
 
     /// Only the Live Activity frames use the real system timer; the first
     /// four pin the app-owned clock (design §3 vs §4).
     var requiresRealtimeMode: Bool {
-        self == .liveActivity || self == .laLock || self == .laCompact || self == .laExpanded
+        self == .laLock || self == .laCompact || self == .laExpanded
     }
 }
 
@@ -99,10 +95,30 @@ enum ScreenshotLaunchDetection: Equatable {
 /// A cleanup invocation: reset the named capture run after its frames are
 /// exported. The runner reads both values from the last `capture-state.json`;
 /// the app cross-checks them against that same file before touching
-/// anything (fail closed — never a blind/global clear).
+/// anything (fail closed — never a blind/global clear). Session cleanups
+/// additionally bind the session nonce/domain/final seq (protocol v2); the
+/// app cross-checks those against the persisted accepted transcript, since
+/// cleanup runs in a fresh process.
 struct ScreenshotCleanupInvocation: Equatable {
     let runID: String
     let expectedSHA256: String
+    let sessionNonce: String?
+    let sessionDomain: String?
+    let finalSeq: Int?
+
+    init(
+        runID: String,
+        expectedSHA256: String,
+        sessionNonce: String? = nil,
+        sessionDomain: String? = nil,
+        finalSeq: Int? = nil
+    ) {
+        self.runID = runID
+        self.expectedSHA256 = expectedSHA256
+        self.sessionNonce = sessionNonce
+        self.sessionDomain = sessionDomain
+        self.finalSeq = finalSeq
+    }
 }
 
 enum ScreenshotLaunch {
@@ -112,6 +128,12 @@ enum ScreenshotLaunch {
     static let forwardedCleanupToken = "SIMCTL_CHILD_SCREENSHOT_CLEANUP"
     static let cleanupSHAToken = "SCREENSHOT_CLEANUP_SHA"
     static let forwardedCleanupSHAToken = "SIMCTL_CHILD_SCREENSHOT_CLEANUP_SHA"
+    static let sessionNonceToken = "SCREENSHOT_SESSION_NONCE"
+    static let forwardedSessionNonceToken = "SIMCTL_CHILD_SCREENSHOT_SESSION_NONCE"
+    static let sessionDomainToken = "SCREENSHOT_SESSION_DOMAIN"
+    static let forwardedSessionDomainToken = "SIMCTL_CHILD_SCREENSHOT_SESSION_DOMAIN"
+    static let finalSeqToken = "SCREENSHOT_FINAL_SEQ"
+    static let forwardedFinalSeqToken = "SIMCTL_CHILD_SCREENSHOT_FINAL_SEQ"
 
     /// Mirrors `TimeOfLifeApp.uiTestingScreen` parsing (env first, then argv;
     /// both the plain and `SIMCTL_CHILD_`-forwarded forms).
@@ -140,16 +162,30 @@ enum ScreenshotLaunch {
         return .absent
     }
 
-    /// Cleanup invocation parsing (same grammar as capture detection). Both
-    /// values are required: a run ID without its request SHA never cleans
-    /// (fail closed — the SHA proves which run the runner means).
+    /// Cleanup invocation parsing (same grammar as capture detection). All
+    /// five values are required: session cleanups always bind the run, its
+    /// request SHA, and the session nonce/domain/final seq (protocol v2).
+    /// Anything less parses as no invocation — v1 roots and partial token
+    /// sets never clean (fail closed).
     static func detectCleanup(argv: [String], environment: [String: String]) -> ScreenshotCleanupInvocation? {
         guard let runID = value(for: [cleanupToken, forwardedCleanupToken], argv: argv, environment: environment),
-              let sha = value(for: [cleanupSHAToken, forwardedCleanupSHAToken], argv: argv, environment: environment)
+              let sha = value(for: [cleanupSHAToken, forwardedCleanupSHAToken], argv: argv, environment: environment),
+              let sessionNonce = value(for: [sessionNonceToken, forwardedSessionNonceToken], argv: argv, environment: environment),
+              !sessionNonce.isEmpty,
+              let sessionDomain = value(for: [sessionDomainToken, forwardedSessionDomainToken], argv: argv, environment: environment),
+              !sessionDomain.isEmpty,
+              let seqText = value(for: [finalSeqToken, forwardedFinalSeqToken], argv: argv, environment: environment),
+              let finalSeq = Int(seqText), finalSeq >= 0
         else {
             return nil
         }
-        return ScreenshotCleanupInvocation(runID: runID, expectedSHA256: sha)
+        return ScreenshotCleanupInvocation(
+            runID: runID,
+            expectedSHA256: sha,
+            sessionNonce: sessionNonce,
+            sessionDomain: sessionDomain,
+            finalSeq: finalSeq
+        )
     }
 
     private static func value(for keys: [String], argv: [String], environment: [String: String]) -> String? {

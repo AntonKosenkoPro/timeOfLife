@@ -1,15 +1,27 @@
 # App Store Screenshots — Capture Storyboard
 
-> Status: **English pilot APPROVED (task 5.4, 2026-10-30).** The 7-frame
-> iOS 27 set `runs/pilot27-r2` (deck `en-austin-1`, treatment `light-v1`,
-> 1320×2868, status `complete`) is owner-approved — Jan-1 Lock-Screen date
-> accepted as a disclosed artifact, device-local times accepted,
-> contact-sheet template approved. iPhone 6.9-inch expansion captured (4
-> non-en locales × 2 runs × 7 frames); 6.5-inch + iPad sets captured (5
-> frames each, Island states N/A by design — recorded, never fabricated).
-> Final fifteen-set acceptance (6.6) still pending — captured ≠ approved.
-> Montage deferred (built, retained externally, NOT approved). Nothing here
-> is a new production feature or a change to shipped UI.
+> Status (local-only; CI capture retired by owner decision — slow, unreliable,
+> expensive): local pipeline via the `lifio-local-screenshots` skill (one
+> verified arm64 build → owned sims sequential → panels + ZIP); owner
+> single-pass decision (ONE automated pass per device-locale; manual reruns
+> when needed, human visual inspection governs, no automatic comparison); English pilot still APPROVED (`pilot27-r2`); session re-capture
+> + 6-pair expansion audited with frozen hashes (18PM + iPhone 17 + M4 iPad,
+> native geometries, honest LA-pending; two-pass counts historically valid,
+> superseded as acceptance). Acceptance = successful downloadable output with
+> truthful status; 20 minutes aspirational (owner accepts ~22min vs 70+), not a
+> hard gate (no fabricated cold/warm acceptance); full local bundle 15/15
+> complete (69 panels, review-only); device art is official Apple PNG assets
+> for the owner-provided portrait set (18 Pro Max Silver, 17 White, iPad Pro
+> 13 M5 Silver — Figma live fetch retired, source identity pinned in tasks
+> 10.1 (filenames, dimensions, SHA256, native cavities; no upscaling/rotation
+> necessary; origins untouched); delivery OWNER-DECIDED: private versioned
+> release `AntonKosenkoPro/lifio-design-assets` (`apple-bezels-v2` current,
+> hash-verified before use; local `gh release download` with
+> `APPLE_BEZELS_TOKEN`, value never read);
+> owner approvals for new sets
+> NOT granted (captured never implies approved; new template version needs
+> explicit new approval). Montage deferred (built, external, NOT approved).
+> Nothing here is a new production feature or a change to shipped UI.
 
 ## Story order (seven frames, native product views only)
 
@@ -41,9 +53,9 @@ REMOVED, replaced by Add-entry; History MUST show the top viewport.
   `runs/pilot27-r2`); approval is tied to the `pilot27-r2` frame hashes
   recorded in task 5.4 / `approval-pilot27-r2.json`.
 
-## Capture matrix (expansion — English approved 5.4; 6.6 acceptance pending)
+## Capture matrix (expansion — English approved 5.4; 6.6 acceptance pending; panel art migrates per §10)
 
-Five locales (en, ru, zh-Hans, es-419, pt-BR) × three sizes:
+Five locales (en, ru, zh-Hans, es-419, pt-BR) × three sizes (historical capture geometry — kept for the new lineup only where SDK query verifies it for the actual models):
 
 - 6.9-inch iPhone 1320 × 2868 — 7 frames (full story incl. all 3 LA states).
 - 6.5-inch iPhone 1242 × 2688 — 5 frames (Island compact/expanded N/A by
@@ -53,12 +65,26 @@ Five locales (en, ru, zh-Hans, es-419, pt-BR) × three sizes:
   home probes; Lock banner required + present. Real-date iPad status bar
   accepted (no 9:41 override on iPad); centered-column layout accepted.
 
-Actual required raws per round: 5×7 + 10×5 = 85 (Island N/A is recorded,
-never fabricated); ×2 runs = 170 PNGs. es-419 app captures map to the
-Spanish (Mexico) Store listing. Every set: two successful runs, numeric (not
+Actual required raws per round (historical two-pass expansion measurement — valid, superseded as acceptance): 5×7 + 10×5 = 85 (Island N/A is recorded,
+never fabricated); ×2 runs = 170 PNGs. Single-pass workload is half that per run (85 PNGs per full default run); manual reruns when needed get a new run identity. es-419 app captures map to the
+Spanish (Mexico) Store listing. Every set: human visual inspection governs (no automatic pass comparison), numeric (not
 pixel) validation of dynamic timers, locale-by-locale clipping review
 (Spanish/Portuguese first — DONE 2026-10-30: no iPhone clipping in any
 locale/size; iPad Add-entry Notes peek/hidden split is an owner call at 6.6).
+Panel device art: official Apple PNG originals for the owner-provided portrait
+set (17 Pro Max Silver, 17 White, iPad Pro 13 M5 Silver) — source identity
+pinned in tasks 10.1 (no git binaries, no Figma/Sketch runtime fetch;
+cavities from the exact original PNG alpha, no silent scale/rotate, no
+upscaling/rotation necessary; owner uploads, possibly chat-downscaled, are not
+pinned sources and originals stay read-only and untouched). Delivery is
+OWNER-DECIDED: private versioned release `AntonKosenkoPro/lifio-design-assets`,
+`apple-bezels-v1` VERIFIED LIVE (manifest SHA + asset hashes verified per tasks
+10.4/10.1; git text-only README + manifest, PNGs as private Release assets only;
+no PNG in any git history, no raw bezel files in the public app ZIP, no Figma/Sketch/API export or DMG extraction in CI,
+no public standalone redistribution; `APPLE_BEZELS_TOKEN` read-only credential
+CONFIGURED (metadata-verified, value never read) with authenticated CI read
+still to prove in 10.4 (first workflow download/stage run not yet executed); private internal storage
+under Apple license with user consent, no automatic legal clearance).
 
 ## Live Activity frames (genuine system behavior, 3 states)
 
@@ -86,11 +112,13 @@ English pilot raw PNGs + text manifest are retained at the agreed external
 root (`/Users/antonkosenko/Pictures/LifioScreenshots/app-store-screenshot-pilot`),
 hashes verified, owner explicitly approved content, composition, and
 treatment tied to the `pilot27-r2` hashes. Changed frames require renewed
-approval. The final fifteen-set manifest + review reports still need owner
+approval; a changed device-art template is a new version requiring explicit new
+approval (no historical approval transfer). The final fifteen-set manifest + review reports still need owner
 acceptance (6.6) — captured never implies approved. Tests passing never
-implies approval.
+implies approval. Renders on new templates are a review set until human approval.
 
-## Implementation checklist (see tasks.md for the authoritative per-task state)
+## Implementation checklist (authoritative state: `openspec/changes/optimize-app-screenshot-workflow/tasks.md` — 42/49 active, 7 open (8.3/8.6/9.5/9.6/10.2/10.3/10.4; 8.1/8.2 retired — cancelled, not run; historical two-pass counts valid, not rewritten);
+items below are the archived pilot scope, retained for history; updated 2026-11-04)
 
 - [x] Screenshot configuration/scheme + simulator/physical-device gates (2.2; 2.1 explicit archive guard still open)
 - [x] Awaited capture composition + isolation from production state (2.3–2.5)

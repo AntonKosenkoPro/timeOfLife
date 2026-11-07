@@ -11,8 +11,9 @@ Records devices, runtime, timestamp, commit, and deck: device catalog
 (size/canvas/Island), the ios-runtime string verbatim, a UTC generation
 timestamp, the repo commit (+ dirty flag, auto-detected unless overridden),
 and per-set deck_version/treatment/run/status harvested from the shots-dir
-run manifests (sets without a readable r1/r2 manifest are marked
-unverified, never invented). Panel inventory comes from the matrix
+via the shared single-pass selector (sets without exactly one valid
+selected manifest are marked unverified/ambiguous/unreadable, never
+invented). Panel inventory comes from the matrix
 manifest when present, plus a sha256 file listing of the actual bundle
 bytes. Review status is REVIEW SET ONLY — writing this README approves
 nothing and claims no upload.
@@ -37,6 +38,7 @@ sys.path.insert(0, str(HERE.parent / "screenshots"))
 
 import builder as panels_builder
 import output_guard as guard
+import panels as panels_sel
 
 EXIT_OK = 0
 EXIT_INVALID = 2
@@ -73,30 +75,53 @@ def detect_commit() -> tuple[str, str]:
 
 def harvest_deck(shots_dir: Path, device: str,
                  language: str) -> dict[str, str]:
-    """Deck record for one set; unverified when no manifest reads."""
-    for run_id in (f"{device}-{language}-r1", f"{device}-{language}-r2"):
-        manifest = (shots_dir / device / language / "runs" / run_id
-                    / "run-manifest.json")
-        if not manifest.is_file():
-            continue
-        try:
-            obj = json.loads(manifest.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError, UnicodeDecodeError):
-            return {"run_id": run_id, "deck_version": "unreadable manifest",
-                    "treatment": "unreadable manifest", "status":
-                    "unreadable manifest", "ci_approval_bypass": "unreadable manifest"}
-        if not isinstance(obj, dict):
-            return {"run_id": run_id, "deck_version": "unreadable manifest",
-                    "treatment": "unreadable manifest", "status":
-                    "unreadable manifest", "ci_approval_bypass": "unreadable manifest"}
-        return {"run_id": run_id,
-                "deck_version": str(obj.get("deck_version", "unknown")),
-                "treatment": str(obj.get("treatment", "unknown")),
-                "status": str(obj.get("status", "unknown")),
-                "ci_approval_bypass": str(obj.get("ci_approval_bypass", "unknown"))}
-    return {"run_id": "none", "deck_version": "unverified",
-            "treatment": "unverified", "status": "unverified",
-            "ci_approval_bypass": "unverified"}
+    """Deck record for one set via the shared matrix selector.
+
+    Single-pass (owner decision 2026-11-04): matrix rendering and README
+    harvesting share ONE selector (panels.select_cell_run), so both report
+    the same selected run_id or the same blocked reason — never diverge
+    (pointer-selected fresh run renders in both; malformed/absent
+    selections block both). Zero manifests -> unverified; multiple or
+    pointer-ambiguous -> ambiguous (never picked/merged); unreadable,
+    binding-refused (device/run_id/locale), symlink-escape, or
+    pointer-invalid selections -> unreadable. No r1/r2 fallback. Exit
+    stays 0 (marks, never fabricates); matrix cells block via exit 2.
+    """
+    set_dir = shots_dir / device / language
+    try:
+        run_id, manifest = panels_sel.select_cell_run(
+            set_dir, device, language)
+    except panels_builder.BuilderError as exc:
+        msg = str(exc).lower()
+        if "ambiguous" in msg:
+            marker = f"ambiguous ({str(exc)[:160]})"
+            return {"run_id": marker, "deck_version": "ambiguous",
+                    "treatment": "ambiguous", "status": "ambiguous",
+                    "ci_approval_bypass": "ambiguous"}
+        if "no run under" in msg:
+            return {"run_id": "none", "deck_version": "unverified",
+                    "treatment": "unverified", "status": "unverified",
+                    "ci_approval_bypass": "unverified"}
+        return {"run_id": "unreadable selection",
+                "deck_version": "unreadable manifest",
+                "treatment": "unreadable manifest", "status":
+                "unreadable manifest", "ci_approval_bypass":
+                "unreadable manifest"}
+    try:
+        obj = json.loads(manifest.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, UnicodeDecodeError):
+        return {"run_id": run_id, "deck_version": "unreadable manifest",
+                "treatment": "unreadable manifest", "status":
+                "unreadable manifest", "ci_approval_bypass": "unreadable manifest"}
+    if not isinstance(obj, dict):
+        return {"run_id": run_id, "deck_version": "unreadable manifest",
+                "treatment": "unreadable manifest", "status":
+                "unreadable manifest", "ci_approval_bypass": "unreadable manifest"}
+    return {"run_id": run_id,
+            "deck_version": str(obj.get("deck_version", "unknown")),
+            "treatment": str(obj.get("treatment", "unknown")),
+            "status": str(obj.get("status", "unknown")),
+            "ci_approval_bypass": str(obj.get("ci_approval_bypass", "unknown"))}
 
 
 def parse_str_list(raw: str, name: str) -> list[str]:
@@ -179,7 +204,12 @@ def main(argv: list[str] | None = None) -> int:
     decks = {(d, lang): harvest_deck(shots_dir, d, lang)
              for d in devices for lang in languages}
     files: list[tuple[str, str]] = []
-    for pattern in ("panel-*.png", "*.recipe.json", "matrix-manifest.json"):
+    # bezel-stage* carries the bezel-stage transcript (release, manifest
+    # SHA, per-asset hashes/geometry) into the bundle inventory so a
+    # handoff/debug bundle names its bezel evidence next to the panels.
+    # bezel-fetch* is retained for older bundles only (fetcher retired).
+    for pattern in ("panel-*.png", "*.recipe.json", "matrix-manifest.json",
+                    "bezel-stage*", "bezel-fetch*"):
         for path in sorted(panels_dir.rglob(pattern)):
             try:
                 files.append((str(path.relative_to(panels_dir)),
@@ -236,14 +266,16 @@ def main(argv: list[str] | None = None) -> int:
         "",
         "## Devices",
         "",
-        "| device | panel size | canvas | island |",
-        "| --- | --- | --- | --- |",
+        "| device | panel size | canvas | island | model | color |",
+        "| --- | --- | --- | --- | --- | --- |",
     ]
     for d in devices:
         info = panels_builder.MATRIX_DEVICES[d]
         w, h = info["canvas"]
         lines.append(f"| {d} | {info['size']} | {w}x{h} | "
-                     f"{'yes' if info['island'] else 'no'} |")
+                     f"{'yes' if info['island'] else 'no'} | "
+                     f"{info.get('model', 'unknown')} | "
+                     f"{info.get('color', 'unknown')} |")
     lines += [
         "",
         "## Languages",
@@ -269,6 +301,18 @@ def main(argv: list[str] | None = None) -> int:
                   "- matrix-manifest.json status: "
                   f"{matrix.get('status', 'unknown')} ({counts})",
                   ""]
+        if matrix.get("status") == "complete":
+            lines += ["> COMPLETE MATRIX (review set) — every cell rendered, "
+                      "but this README approves nothing; owner gates "
+                      "5.4/6.6/9.4 still require explicit human approval "
+                      "before any upload or publication.",
+                      ""]
+        else:
+            lines += ["> CI HANDOFF/DEBUG BUNDLE — incomplete matrix: "
+                      "blocked cells below are pending evidence, not approved "
+                      "panels. This README approves nothing; owner gates "
+                      "5.4/6.6/9.4 still require explicit human approval.",
+                      ""]
         lines += ["| device | language | size | status | detail |",
                   "| --- | --- | --- | --- | --- |"]
         for cell in matrix["cells"]:

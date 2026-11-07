@@ -7,11 +7,48 @@ import Foundation
 extension HistoryViewModel {
     /// "Today" / "Yesterday" for the two most recent calendar days, then the
     /// device-locale regional date for older days (D3).
-    nonisolated static func dayLabel(for day: Date, now: Date, calendar: Calendar = .current) -> String {
+    ///
+    /// The explicit `locale` is a test seam (default `nil` preserves every
+    /// existing call): the runtime path always resolves through the capture
+    /// override below, matching `timeText`. It is honored only in
+    /// `SCREENSHOT_CAPTURE` builds; other configurations ignore it and
+    /// format with the ambient locale.
+    nonisolated static func dayLabel(
+        for day: Date,
+        now: Date,
+        calendar: Calendar = .current,
+        locale: Locale? = nil
+    ) -> String {
         switch dayDistance(from: day, to: now, calendar: calendar) {
         case 0: return L10n.historyDayToday.text
         case 1: return L10n.historyDayYesterday.text
         default:
+            #if SCREENSHOT_CAPTURE
+            // Capture override (predecessor-lag fix): the formatter below
+            // would otherwise keep the ambient/predecessor locale — setting
+            // the calendar alone never moves the locale (both stay process
+            // defaults). Per-call formatter like `timeText`, so the shared
+            // state below is never pinned to a request. Time-zone pairing
+            // is strict: an explicit locale (tests) pairs with the passed
+            // calendar's zone, never with a possibly stale global zone; the
+            // runtime path pairs the override with its own zone (same
+            // request either way).
+            let overrideLocale = locale ?? ScreenshotLocale.appLocale
+            if let overrideLocale {
+                let overrideTimeZone = locale == nil
+                    ? (ScreenshotLocale.appTimeZone ?? calendar.timeZone)
+                    : calendar.timeZone
+                return formatLock.withLock {
+                    let formatter = DateFormatter()
+                    formatter.dateStyle = .medium
+                    formatter.timeStyle = .none
+                    formatter.calendar = calendar
+                    formatter.locale = overrideLocale
+                    formatter.timeZone = overrideTimeZone
+                    return formatter.string(from: day)
+                }
+            }
+            #endif
             // Serialized (see formatLock): NSDateFormatter — including the
             // ICU data loading behind first use — is not thread-safe, and
             // these helpers are reachable from any thread. Live TestFlight
@@ -39,12 +76,36 @@ extension HistoryViewModel {
         for day: Date,
         now: Date,
         calendar: Calendar,
-        formatter: inout DateFormatter?
+        formatter: inout DateFormatter?,
+        locale: Locale? = nil
     ) -> String {
         switch dayDistance(from: day, to: now, calendar: calendar) {
         case 0: return L10n.historyDayToday.text
         case 1: return L10n.historyDayYesterday.text
         default:
+            #if SCREENSHOT_CAPTURE
+            // Same capture override as the one-shot overload above: without
+            // an explicit locale the reused formatter keeps the
+            // ambient/predecessor locale across sessions. The caller's box
+            // is deliberately bypassed here so a locale-pinned formatter
+            // can never leak into a later derivation. Time-zone pairing is
+            // strict like the one-shot overload above.
+            let overrideLocale = locale ?? ScreenshotLocale.appLocale
+            if let overrideLocale {
+                let overrideTimeZone = locale == nil
+                    ? (ScreenshotLocale.appTimeZone ?? calendar.timeZone)
+                    : calendar.timeZone
+                return formatLock.withLock {
+                    let formatter = DateFormatter()
+                    formatter.dateStyle = .medium
+                    formatter.timeStyle = .none
+                    formatter.calendar = calendar
+                    formatter.locale = overrideLocale
+                    formatter.timeZone = overrideTimeZone
+                    return formatter.string(from: day)
+                }
+            }
+            #endif
             let dateFormatter: DateFormatter
             if let reuse = formatter {
                 reuse.calendar = calendar

@@ -9,24 +9,27 @@ Subcommands (validation/gate/execution CLI; nothing auto-approves):
                     requires LIFIO_CAPTURE_LEASE=1 and touches one device)
   check-state       validate app capture-state.json against the request
                     (+ optional --pinned-totals; ready refused without a pin)
-  verify-la         validate human-supplied LA timer observation (±2s, hash-bound)
   verify-picker     require picker keyboard inspection artifact (hash+language bound)
   check-approval    hash/file-verified approval gate
-  plan-run          full 7-frame pilot plan for two runs (no device I/O;
-                    --geometry/--approval/--retained-dir gate expansion)
+  plan-run          single-pass 7-frame pilot plan (no device I/O;
+                    --geometry/--approval/--retained-dir gate expansion;
+                    no --runs selector per the single-pass contract)
   locale-totals     print the canonical pinned totals for one locale
-  prepare-frame     lease-gated: stage request, apply chrome, launch, poll ready
-  capture-app-frame lease-gated: native export for app-clock frames after ready
+  run-session       lease-gated composite owning one device lease for a
+                    whole session domain (pinned XOR realtime); the only
+                    capture path (task 8.5 removed the temporary v1
+                    per-frame verbs prepare/capture/teardown/run-frame and
+                    the record-pending-frame verb)
   record-external-frame
                     register a genuine la-* PNG + capture window
-                    (no device I/O; observation-bound, no OCR)
+                    (no device I/O, no OCR).
+                    Session stubs derive bindings from trusted disk
+                    (explicit session args verified, --request rejected).
   finalize-run      assemble run-manifest.json (complete|needs-inspection)
-  finalize-two-runs semantic comparison of two runs (never byte-equal PNGs)
-  teardown-frame    lease-gated: exact chrome restore + terminate from the
-                    frame's own session; persists a partial teardown record
-                    (app hook pending core)
-  run-frame         lease-gated composite holding one device lock across
-                    prepare -> capture (auto-teardown) for one app-clock frame
+                    session-receipt gated; legacy per-frame runs rejected
+                    (single pass; the retired finalize-two-runs automatic
+                    comparison verb fails closed — human inspection governs
+                    manual reruns via preserved semantic hashes)
 
 Real device/simulator operations are lease-gated: without
 LIFIO_CAPTURE_LEASE=1 the CLI only plans/validates and never spawns
@@ -51,7 +54,6 @@ import inspection as inspection_mod
 import output_guard as guard
 import preflight as preflight_mod
 import request_schema as req
-import run_manifest as manifest_mod
 import state_check as state_mod
 
 EXIT_OK = 0
@@ -238,41 +240,6 @@ def cmd_check_state(args: argparse.Namespace) -> int:
     return EXIT_INVALID
 
 
-def cmd_verify_la(args: argparse.Namespace) -> int:
-    try:
-        state = state_mod.load_state_file(args.state)
-    except state_mod.StateError as exc:
-        print(f"invalid: {exc}", file=sys.stderr)
-        return EXIT_INVALID
-    la = state.get("live_activity") if isinstance(state, dict) else None
-    if not isinstance(la, dict):
-        print("needs-inspection: live_activity block missing from state",
-              file=sys.stderr)
-        return EXIT_PENDING
-    observation = None
-    if args.observation is not None:
-        try:
-            observation = json.loads(Path(args.observation).read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError) as exc:
-            print(f"invalid: cannot read observation: {exc}", file=sys.stderr)
-            return EXIT_INVALID
-        if not isinstance(observation, dict):
-            print("invalid: observation file must contain a JSON object",
-                  file=sys.stderr)
-            return EXIT_INVALID
-    errs = inspection_mod.verify_la_observation(
-        la, args.screenshot, args.captured_at, observation,
-    )
-    if errs:
-        first = errs[0]
-        code = EXIT_PENDING if ("needs-inspection" in first or "missing" in first) else EXIT_INVALID
-        for e in errs:
-            print(f"failed: {e}", file=sys.stderr)
-        return code
-    print("la-observation-valid")
-    return EXIT_OK
-
-
 def cmd_verify_picker(args: argparse.Namespace) -> int:
     try:
         obj = _read_json(args.inspection)
@@ -347,31 +314,15 @@ def cmd_plan_run(args: argparse.Namespace) -> int:
             print(f"blocked: {e}", file=sys.stderr)
         return EXIT_INVALID
     try:
-        plans = [
-            preflight_mod.plan_run(
-                base, list(req.PILOT_FRAMES), args.device, str(out_root),
-                f"{args.run_id}-r{i+1}", geometry=geometry,
-            )
-            for i in range(args.runs)
-        ]
+        plan = preflight_mod.plan_run(
+            base, list(req.PILOT_FRAMES), args.device, str(out_root),
+            args.run_id, geometry=geometry,
+        )
     except ValueError as exc:
         print(f"invalid: {exc}", file=sys.stderr)
         return EXIT_INVALID
-    if args.runs != 2:
-        print("invalid: pilot requires exactly two full runs", file=sys.stderr)
-        return EXIT_INVALID
-    print(json.dumps({"runs": plans}, indent=2))
+    print(json.dumps({"runs": [plan]}, indent=2))
     return EXIT_OK
-
-
-def _release_lock(lock_path, run_id: str) -> bool:
-    """Release the device lock; False (with diagnostic) when it fails."""
-    try:
-        guard.release_lock(lock_path, run_id)
-    except guard.GuardError as exc:
-        print(f"failed: {exc}", file=sys.stderr)
-        return False
-    return True
 
 
 def _require_lease() -> int | None:
@@ -394,111 +345,132 @@ def _load_base_request(path: str) -> dict | None:
     return {k: v for k, v in base.items() if k not in ("frame", "mode")}
 
 
-def cmd_prepare_frame(args: argparse.Namespace) -> int:
-    refused = _require_lease()
-    if refused is not None:
-        return refused
-    if not args.device or args.device == "booted":
-        print("invalid: explicit simulator UDID required (no 'booted' auto-pick)",
-              file=sys.stderr)
-        return EXIT_INVALID
+def _load_frame_stub(run_dir: Path, frame: str) -> dict | None:
+    """Trusted on-disk session stub for (run, frame), if session-bound."""
     try:
-        out_root = guard.ensure_out_root(args.out)
-    except guard.GuardError as exc:
-        print(f"invalid: {exc}", file=sys.stderr)
-        return EXIT_INVALID
-    base = _load_base_request(args.request)
-    if base is None:
-        return EXIT_INVALID
-    blocked = _gate_or_block(
-        base.get("locale"), None,
-        getattr(args, "approval", None), getattr(args, "retained_dir", None),
-    )
-    if blocked is not None:
-        return blocked
-    try:
-        pin = _load_pin(args.pinned_totals)
-    except _Exit as e:
-        return e.code
-    try:
-        lock_path = guard.acquire_lock(args.device, args.run_id)
-    except guard.GuardError as exc:
-        print(f"invalid: {exc}", file=sys.stderr)
-        return EXIT_INVALID
-    try:
-        session = exec_mod.prepare_frame(
-            exec_mod.default_run, args.device, base, args.frame,
-            exec_mod.run_dir_for(str(out_root), args.run_id),
-            bid=args.bid, pinned_totals=pin,
-            timeout_s=args.timeout, interval_s=args.interval,
-        )
-    except exec_mod.FrameError as exc:
-        print(f"failed: {exc}", file=sys.stderr)
-        _release_lock(lock_path, args.run_id)
-        return EXIT_INVALID
-    if _release_lock(lock_path, args.run_id):
-        print(json.dumps(session, indent=2, sort_keys=True))
-        return EXIT_OK
-    return EXIT_INVALID
+        obj = json.loads(
+            (run_dir / "frames" / f"{frame}.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(obj, dict) or not obj.get("session_nonce"):
+        return None
+    return obj
 
 
-def cmd_capture_app_frame(args: argparse.Namespace) -> int:
-    refused = _require_lease()
-    if refused is not None:
-        return refused
-    if not args.device or args.device == "booted":
-        print("invalid: explicit simulator UDID required (no 'booted' auto-pick)",
-              file=sys.stderr)
-        return EXIT_INVALID
+def _verify_receipt_covers(run_dir: Path, stub: dict) -> str | None:
+    """Require a complete session receipt covering the stub command.
+
+    Returns an error string, or None when covered. A stub without a
+    complete covering receipt is stale or foreign: genuine evidence must
+    never register onto it.
+    """
+    nonce = stub.get("session_nonce")
     try:
-        out_root = guard.ensure_out_root(args.out)
-    except guard.GuardError as exc:
-        print(f"invalid: {exc}", file=sys.stderr)
-        return EXIT_INVALID
-    try:
-        geometry = req.parse_geometry(args.geometry)
-    except req.RequestError as exc:
-        print(f"invalid: {exc}", file=sys.stderr)
-        return EXIT_INVALID
-    blocked = _gate_or_block(
-        None, geometry,
-        getattr(args, "approval", None), getattr(args, "retained_dir", None),
-    )
-    if blocked is not None:
-        return blocked
-    try:
-        lock_path = guard.acquire_lock(args.device, args.run_id)
-    except guard.GuardError as exc:
-        print(f"invalid: {exc}", file=sys.stderr)
-        return EXIT_INVALID
-    try:
-        record = exec_mod.capture_app_frame(
-            exec_mod.default_run, args.device,
-            exec_mod.run_dir_for(str(out_root), args.run_id),
-            args.frame, expected_geometry=geometry,
-            mask=getattr(args, "mask", None),
-        )
-    except exec_mod.FrameError as exc:
-        print(f"failed: {exc}", file=sys.stderr)
-        _release_lock(lock_path, args.run_id)
-        return EXIT_INVALID
-    if _release_lock(lock_path, args.run_id):
-        print(json.dumps(record, indent=2, sort_keys=True))
-        return EXIT_OK
-    return EXIT_INVALID
+        receipt = json.loads(
+            (run_dir / "sessions" / f"{nonce}.receipt.json").read_text(
+                encoding="utf-8"))
+    except (OSError, ValueError):
+        return (f"no session receipt for nonce {nonce!r}; stub is stale "
+                "or foreign")
+    if not isinstance(receipt, dict):
+        return "session receipt must be a JSON object"
+    if receipt.get("status") != "complete":
+        return (f"session receipt {receipt.get('status')!r}; stub belongs "
+                "to a contaminated session")
+    covered = any(
+        isinstance(row, dict) and row.get("seq") == stub.get("seq")
+        and row.get("frame") == stub.get("frame")
+        and row.get("request_sha256") == stub.get("request_sha256")
+        for row in (receipt.get("transcript") or []))
+    if not covered:
+        return "stub command not covered by the session transcript"
+    return None
 
 
 def cmd_record_external_frame(args: argparse.Namespace) -> int:
+    """Genuine registration is session-stub-only (task 8.5).
+
+    The v1 file-args path is removed: without a trusted on-disk session
+    stub for (run, frame) there is nothing to register onto, with or
+    without explicit session args or --request.
+    """
     try:
         out_root = guard.ensure_out_root(args.out)
     except guard.GuardError as exc:
         print(f"invalid: {exc}", file=sys.stderr)
         return EXIT_INVALID
+    run_dir = exec_mod.run_dir_for(str(out_root), args.run_id)
+    stub = _load_frame_stub(run_dir, args.frame)
+    explicit = {
+        "session_nonce": getattr(args, "session_nonce", None),
+        "session_domain": getattr(args, "session_domain", None),
+        "seq": getattr(args, "seq", None),
+        "device_key": getattr(args, "device_key", None),
+    }
+    if stub is None:
+        print("invalid: no trusted on-disk session stub for "
+              f"{args.frame!r} in run {args.run_id!r} (stale, missing, "
+              "or foreign; v1 file-args registration removed)",
+              file=sys.stderr)
+        return EXIT_INVALID
+    return _cmd_record_external_session(args, run_dir, stub, explicit)
+
+
+def _cmd_record_external_session(args: argparse.Namespace, run_dir: Path,
+                                 stub: dict, explicit: dict) -> int:
+    """Session genuine registration from trusted stub bindings only.
+
+    No user-inventable metadata: nonce/domain/seq/device_key come from the
+    on-disk pending stub; the request payload comes from the staged
+    envelope; receipt coverage is required. Explicit session args are
+    accepted only when strictly equal to the stub (stale/missing/foreign
+    stubs rejected). --request is forbidden here (omit it; the envelope
+    is authoritative). The live state file must pass the full
+    session-ack validation (integer schema 2 and every binding plus
+    transcript and ready checks). --device/--geometry/--run-id must match
+    the stub exactly (no re-keying). The validated state is archived per
+    frame and its path stored on the export record, without weakening the
+    fail-closed checks.
+    """
+    import session as sess
+
+    for key, value in explicit.items():
+        if value is not None and value != stub.get(key):
+            print(f"invalid: explicit {key} {value!r} != trusted stub "
+                  f"{stub.get(key)!r} (stale or foreign)", file=sys.stderr)
+            return EXIT_INVALID
+    if getattr(args, "request", None):
+        print("invalid: --request is forbidden for session frames "
+              "(omit it; nonce/domain/seq/device_key derive from the "
+              "trusted stub and the payload from its staged envelope)",
+              file=sys.stderr)
+        return EXIT_INVALID
+    nonce = stub["session_nonce"]
     try:
-        request = req.load_request_file(args.request)
-        raw = Path(args.request).read_bytes()
-        state = state_mod.load_state_file(args.state)
-    except (req.RequestError, state_mod.StateError) as exc:
+        env = json.loads((run_dir / "requests" / f"session-{nonce}-"
+                          f"{stub['seq']}-{args.frame}.envelope.json")
+                         .read_bytes().decode("utf-8"))
+    except (OSError, ValueError, UnicodeError) as exc:
+        print(f"invalid: staged envelope unreadable: {exc}", file=sys.stderr)
+        return EXIT_INVALID
+    env_errs = sess.validate_envelope(env)
+    if env_errs:
+        print(f"invalid: staged envelope rejected: {env_errs[0]}",
+              file=sys.stderr)
+        return EXIT_INVALID
+    for key in ("run_id", "session_nonce", "session_domain", "seq",
+                "frame", "mode", "request_sha256"):
+        if env.get(key) != stub.get(key):
+            print(f"invalid: envelope {key} != trusted stub "
+                  "(stale or foreign command)", file=sys.stderr)
+            return EXIT_INVALID
+    receipt_err = _verify_receipt_covers(run_dir, stub)
+    if receipt_err is not None:
+        print(f"invalid: {receipt_err}", file=sys.stderr)
+        return EXIT_INVALID
+    try:
+        inner = sess.parse_envelope_payload(env)
+    except sess.SessionError as exc:
         print(f"invalid: {exc}", file=sys.stderr)
         return EXIT_INVALID
     try:
@@ -506,26 +478,70 @@ def cmd_record_external_frame(args: argparse.Namespace) -> int:
     except _Exit as e:
         return e.code
     try:
+        state = state_mod.load_state_file(args.state)
+    except state_mod.StateError as exc:
+        print(f"invalid: {exc}", file=sys.stderr)
+        return EXIT_INVALID
+    # Full-tuple state validation: integer schema 2 plus ALL of nonce,
+    # run, domain, seq, frame, mode, hash, and transcript coverage, plus
+    # the payload-level ready checks. A raw v1 state (no session
+    # identity) or any unsupported shape fails here even when its
+    # sha/frame happen to match — sha/frame alone are insufficient
+    # because the cross-session nonce is excluded from the payload hash.
+    verdict, verdict_errs = state_mod.validate_session_ack(state, env, pin)
+    if verdict != state_mod.OK:
+        print(f"invalid: live state rejected ({verdict}): "
+              f"{'; '.join(verdict_errs) or 'not ready'}", file=sys.stderr)
+        return EXIT_INVALID
+    # CLI-supplied provenance must match the trusted stub exactly:
+    # external registration can never re-key device, geometry, or run.
+    if args.device != stub.get("device_udid"):
+        print(f"invalid: --device {args.device!r} != trusted stub device "
+              f"{stub.get('device_udid')!r} (re-keying refused)",
+              file=sys.stderr)
+        return EXIT_INVALID
+    try:
         geometry = req.parse_geometry(args.geometry)
     except req.RequestError as exc:
         print(f"invalid: {exc}", file=sys.stderr)
         return EXIT_INVALID
+    stub_geo = stub.get("geometry") or {}
+    if (geometry[0], geometry[1]) != (stub_geo.get("width"),
+                                      stub_geo.get("height")):
+        print(f"invalid: --geometry {geometry[0]}x{geometry[1]} != "
+              f"trusted stub geometry (re-keying refused)", file=sys.stderr)
+        return EXIT_INVALID
+    if args.run_id != stub.get("run_id"):
+        print(f"invalid: --run-id {args.run_id!r} != trusted stub run "
+              f"{stub.get('run_id')!r} (stale or foreign)", file=sys.stderr)
+        return EXIT_INVALID
     blocked = _gate_or_block(
-        request.get("locale"), geometry,
+        inner.get("locale"), geometry,
         getattr(args, "approval", None), getattr(args, "retained_dir", None),
     )
     if blocked is not None:
         return blocked
+    try:
+        archived_rel = _archive_state_file(run_dir, args.frame, args.state)
+    except OSError as exc:
+        print(f"invalid: cannot archive trusted state: {exc}",
+              file=sys.stderr)
+        return EXIT_INVALID
     try:
         record = exec_mod.record_external_frame(
-            run_dir=exec_mod.run_dir_for(str(out_root), args.run_id),
+            run_dir=run_dir,
             frame=args.frame, png_src=args.png,
             captured_at_iso=args.captured_at,
-            observation_path=args.observation, state=state, request=request,
-            request_sha256=req.request_sha256_of_bytes(raw),
+            state=state, request=inner,
+            request_sha256=env["request_sha256"],
             pinned_totals=pin, expected_geometry=geometry,
             device_udid=args.device,
             mask=getattr(args, "mask", None),
+            session_binding={"session_nonce": stub["session_nonce"],
+                             "session_domain": stub["session_domain"],
+                             "seq": stub["seq"]},
+            device_key=stub.get("device_key"),
+            state_archive=archived_rel,
         )
     except exec_mod.FrameError as exc:
         print(f"failed: {exc}", file=sys.stderr)
@@ -534,50 +550,32 @@ def cmd_record_external_frame(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
-def cmd_record_pending_frame(args: argparse.Namespace) -> int:
+def _archive_state_file(run_dir: Path, frame: str, src: str) -> str:
+    """Keep the validated live state per frame (audit copy).
+
+    Returns the run-relative POSIX path stored on the export record. When
+    the source already lives inside the run dir it is referenced as-is
+    (never copied onto itself); otherwise its exact bytes are archived
+    under states/. Fail-closed checks that admitted the state are never
+    weakened by this bookkeeping.
+    """
+    dest_dir = run_dir / "states"
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    dest = dest_dir / f"{frame}.capture-state.json"
+    src_path = Path(src).expanduser()
     try:
-        out_root = guard.ensure_out_root(args.out)
-    except guard.GuardError as exc:
-        print(f"invalid: {exc}", file=sys.stderr)
-        return EXIT_INVALID
+        if src_path.resolve() == dest.resolve():
+            return str(dest.relative_to(run_dir).as_posix())
+    except OSError:
+        pass
     try:
-        request = req.load_request_file(args.request)
-        raw = Path(args.request).read_bytes()
-    except req.RequestError as exc:
-        print(f"invalid: {exc}", file=sys.stderr)
-        return EXIT_INVALID
-    try:
-        pin = _load_pin(args.pinned_totals)
-    except _Exit as e:
-        return e.code
-    try:
-        geometry = req.parse_geometry(args.geometry)
-    except req.RequestError as exc:
-        print(f"invalid: {exc}", file=sys.stderr)
-        return EXIT_INVALID
-    blocked = _gate_or_block(
-        request.get("locale"), geometry,
-        getattr(args, "approval", None), getattr(args, "retained_dir", None),
-    )
-    if blocked is not None:
-        return blocked
-    try:
-        record = exec_mod.record_pending_frame(
-            run_dir=exec_mod.run_dir_for(str(out_root), args.run_id),
-            frame=args.frame, png_src=args.png,
-            captured_at_iso=args.captured_at,
-            request=request,
-            request_sha256=req.request_sha256_of_bytes(raw),
-            reason=args.reason,
-            pinned_totals=pin, expected_geometry=geometry,
-            device_udid=args.device,
-            mask=getattr(args, "mask", None),
-        )
-    except exec_mod.FrameError as exc:
-        print(f"failed: {exc}", file=sys.stderr)
-        return EXIT_INVALID
-    print(json.dumps(record, indent=2, sort_keys=True))
-    return EXIT_OK
+        if src_path.resolve().is_relative_to(run_dir.resolve()):
+            return str(src_path.resolve().relative_to(
+                run_dir.resolve()).as_posix())
+    except (OSError, ValueError):
+        pass
+    dest.write_bytes(src_path.read_bytes())
+    return str(dest.relative_to(run_dir).as_posix())
 
 
 def cmd_finalize_run(args: argparse.Namespace) -> int:
@@ -613,55 +611,26 @@ def cmd_finalize_run(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
-def cmd_finalize_two_runs(args: argparse.Namespace) -> int:
-    try:
-        out_root = guard.ensure_out_root(args.out)
-    except guard.GuardError as exc:
-        print(f"invalid: {exc}", file=sys.stderr)
-        return EXIT_INVALID
-    manifests = []
-    for suffix in ("-r1", "-r2"):
-        path = exec_mod.run_dir_for(
-            str(out_root), args.run_id_base + suffix) / "run-manifest.json"
-        try:
-            manifests.append(json.loads(path.read_text(encoding="utf-8")))
-        except (OSError, json.JSONDecodeError) as exc:
-            print(f"invalid: cannot read {path}: {exc}", file=sys.stderr)
-            return EXIT_INVALID
-    res = manifest_mod.compare_runs(manifests[0], manifests[1])
-    reviewed: set[str] = set()
-    if args.variance_review is not None:
-        try:
-            review = json.loads(Path(args.variance_review).read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError) as exc:
-            print(f"invalid: cannot read variance review: {exc}", file=sys.stderr)
-            return EXIT_INVALID
-        if not isinstance(review, dict):
-            print("invalid: variance review must be an object", file=sys.stderr)
-            return EXIT_INVALID
-        for frame, entry in review.items():
-            if not isinstance(entry, dict) or not entry.get("reviewer") or not entry.get("date"):
-                print(f"invalid: variance review for {frame!r} needs reviewer+date",
-                      file=sys.stderr)
-                return EXIT_INVALID
-            reviewed.add(frame)
-    unreviewed = [f for f in res["unreviewed_variance"] if f not in reviewed]
-    verdict = {
-        "run_id_base": args.run_id_base,
-        "errors": res["errors"],
-        "unreviewed_variance": unreviewed,
-        "reviewed_variance": sorted(reviewed & set(res["unreviewed_variance"])),
-        "provenance": [m.get("provenance") for m in manifests],
-        "status": "complete" if not res["errors"] and not unreviewed else (
-            "failed" if res["errors"] else "needs-inspection"),
-    }
-    print(json.dumps(verdict, indent=2, sort_keys=True))
-    if res["errors"]:
-        return EXIT_INVALID
-    return EXIT_OK if not unreviewed else EXIT_PENDING
+def cmd_run_session(args: argparse.Namespace) -> int:
+    """Lease-gated composite owning one device lease for a whole session.
 
+    Runs a single frozen-v2 domain (pinned XOR realtime): sequential
+    locales and the two domains per locale are composed by the
+    workflow wrapper, which then calls the existing finalize-run.
+    The device lock is held inside run_session across
+    all frame commands of this session (never pre-acquired here).
 
-def cmd_teardown_frame(args: argparse.Namespace) -> int:
+    With --hold-open (realtime only), the session stays RUNNING with its
+    verified anchor after the frame loop while the live-capture driver
+    runs the button dance (consent grant, Home/compact re-probe, powerx2
+    lock capture); the explicit session cleanup finishes it. Bounded by
+    the existing POLL/CLEANUP-scale hold window; no deadline increases.
+    """
+    if args.hold_open and args.domain != "realtime":
+        print("invalid: --hold-open is realtime-only "
+              "(pinned sessions end immediately after export)",
+              file=sys.stderr)
+        return EXIT_INVALID
     refused = _require_lease()
     if refused is not None:
         return refused
@@ -669,49 +638,10 @@ def cmd_teardown_frame(args: argparse.Namespace) -> int:
         print("invalid: explicit simulator UDID required (no 'booted' auto-pick)",
               file=sys.stderr)
         return EXIT_INVALID
-    try:
-        out_root = guard.ensure_out_root(args.out)
-    except guard.GuardError as exc:
-        print(f"invalid: {exc}", file=sys.stderr)
-        return EXIT_INVALID
-    try:
-        lock_path = guard.acquire_lock(args.device, args.run_id)
-    except guard.GuardError as exc:
-        print(f"invalid: {exc}", file=sys.stderr)
-        return EXIT_INVALID
-    try:
-        record = exec_mod.teardown_frame(
-            exec_mod.default_run, args.device,
-            exec_mod.run_dir_for(str(out_root), args.run_id),
-            args.frame, bid=args.bid,
-        )
-    except exec_mod.FrameError as exc:
-        print(f"failed: {exc}", file=sys.stderr)
-        _release_lock(lock_path, args.run_id)
-        return EXIT_INVALID
-    ok = _release_lock(lock_path, args.run_id)
-    print(json.dumps(record, indent=2, sort_keys=True))
-    if record.get("status") != "partial":
-        for f in record.get("failures", []):
-            print(f"failed: {f}", file=sys.stderr)
-        return EXIT_INVALID
-    return EXIT_OK if ok else EXIT_INVALID
-
-
-def cmd_run_frame(args: argparse.Namespace) -> int:
-    """Composite holding one device lock across prepare/capture/teardown."""
-    refused = _require_lease()
-    if refused is not None:
-        return refused
-    if not args.device or args.device == "booted":
-        print("invalid: explicit simulator UDID required (no 'booted' auto-pick)",
+    if not args.device_key:
+        print("invalid: --device-key is required "
+              "(iphone69|iphone63|ipad13; validated against the catalog)",
               file=sys.stderr)
-        return EXIT_INVALID
-    if args.frame in req.LA_FRAMES:
-        print("invalid: run-frame serves app-clock frames only; "
-              "la-* frames use prepare-frame + record-external-frame (or "
-              "record-pending-frame for the CI human handoff) + "
-              "teardown-frame", file=sys.stderr)
         return EXIT_INVALID
     try:
         out_root = guard.ensure_out_root(args.out)
@@ -725,6 +655,11 @@ def cmd_run_frame(args: argparse.Namespace) -> int:
         pin = _load_pin(args.pinned_totals)
     except _Exit as e:
         return e.code
+    if pin is None:
+        print("invalid: --pinned-totals is required for session capture "
+              "(ready refused without an independently pinned dictionary)",
+              file=sys.stderr)
+        return EXIT_INVALID
     try:
         geometry = req.parse_geometry(args.geometry)
     except req.RequestError as exc:
@@ -736,32 +671,81 @@ def cmd_run_frame(args: argparse.Namespace) -> int:
     )
     if blocked is not None:
         return blocked
+    island = getattr(args, "island", None)
+    island_available = None
+    if island is not None:
+        if island not in ("1", "0"):
+            print("invalid: --island must be '1' or '0' when given",
+                  file=sys.stderr)
+            return EXIT_INVALID
+        island_available = island == "1"
     run_dir = exec_mod.run_dir_for(str(out_root), args.run_id)
+    hid = exec_mod.ArgentHidBackend(args.device) if args.hold_open else None
     try:
-        lock_path = guard.acquire_lock(args.device, args.run_id)
-    except guard.GuardError as exc:
-        print(f"invalid: {exc}", file=sys.stderr)
-        return EXIT_INVALID
-    code = EXIT_OK
-    try:
-        exec_mod.prepare_frame(
-            exec_mod.default_run, args.device, base, args.frame, run_dir,
-            bid=args.bid, pinned_totals=pin,
+        summary = exec_mod.run_session(
+            exec_mod.default_run, args.device, base, args.domain, run_dir,
+            device_key=args.device_key, bid=args.bid, pinned_totals=pin,
+            geometry=geometry, island_available=island_available,
             timeout_s=args.timeout, interval_s=args.interval,
-        )
-        record = exec_mod.capture_app_frame(
-            exec_mod.default_run, args.device, run_dir, args.frame,
-            expected_geometry=geometry, auto_teardown=True, bid=args.bid,
-            mask=getattr(args, "mask", None),
+            hold_open=args.hold_open, hid=hid,
         )
     except exec_mod.FrameError as exc:
         print(f"failed: {exc}", file=sys.stderr)
-        code = EXIT_INVALID
-    else:
-        print(json.dumps(record, indent=2, sort_keys=True))
-    if not _release_lock(lock_path, args.run_id):
-        code = EXIT_INVALID
-    return code
+        return EXIT_INVALID
+    print(json.dumps(summary, indent=2, sort_keys=True))
+    return EXIT_OK
+
+
+def cmd_pregrant(args: argparse.Namespace) -> int:
+    """Lease-gated device-setup Live Activities authorization (no capture).
+
+    Stages the same realtime root envelope run_session stages, launches
+    the app so it requests the activity, locks, and taps the system
+    sheet via the same describe-guided grant — once per device, before
+    any locale pass. Prints the result record as JSON. Auth granted
+    mid-run freezes banner timers ("MM:--" dashes, screenshot-proven);
+    authorizing first keeps every locale pass live-ticking.
+
+    Never fails the device: absent/already-granted/blocked outcomes
+    return 0 (the worker's own grant path stays as fallback); only
+    invalid args/lease (2) and simctl-infra FrameErrors (1) are
+    nonzero, and the bundle driver treats even those as log+continue.
+    """
+    refused = _require_lease()
+    if refused is not None:
+        return refused
+    if not args.device or args.device == "booted":
+        print("invalid: explicit simulator UDID required (no 'booted' auto-pick)",
+              file=sys.stderr)
+        return EXIT_INVALID
+    if not args.device_key:
+        print("invalid: --device-key is required "
+              "(iphone69|iphone63|ipad13; validated against the catalog)",
+              file=sys.stderr)
+        return EXIT_INVALID
+    try:
+        geometry = req.parse_geometry(args.geometry)
+    except req.RequestError as exc:
+        print(f"invalid: {exc}", file=sys.stderr)
+        return EXIT_INVALID
+    blocked = _gate_or_block(
+        args.locale, geometry,
+        getattr(args, "approval", None), getattr(args, "retained_dir", None),
+    )
+    if blocked is not None:
+        return blocked
+    hid = exec_mod.ArgentHidBackend(args.device)
+    try:
+        record = exec_mod.run_pregrant(
+            run=exec_mod.default_run, hid=hid, udid=args.device,
+            device_key=args.device_key, geometry=geometry,
+            locale=args.locale, bid=args.bid, interval_s=args.interval,
+        )
+    except exec_mod.FrameError as exc:
+        print(f"failed: {exc}", file=sys.stderr)
+        return EXIT_INVALID
+    print(json.dumps(record, indent=2, sort_keys=True))
+    return EXIT_OK
 
 
 def cmd_locale_totals(args: argparse.Namespace) -> int:
@@ -822,13 +806,6 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--retained-dir", required=False, default=None)
     p.set_defaults(fn=cmd_check_state)
 
-    p = sub.add_parser("verify-la")
-    p.add_argument("--state", required=True)
-    p.add_argument("--screenshot", required=True)
-    p.add_argument("--captured-at", required=True)
-    p.add_argument("--observation", required=False, default=None)
-    p.set_defaults(fn=cmd_verify_la)
-
     p = sub.add_parser("verify-picker")
     p.add_argument("--inspection", required=True)
     p.add_argument("--screenshot", required=True)
@@ -847,7 +824,6 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--device", required=True)
     p.add_argument("--out", required=True)
     p.add_argument("--run-id", required=True)
-    p.add_argument("--runs", type=int, default=2)
     p.add_argument("--geometry", required=False, default="1320x2868",
                    help="WxH; non-pilot matrix sizes require 5.4 ipad approval")
     p.add_argument("--approval", required=False, default=None,
@@ -855,45 +831,22 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--retained-dir", required=False, default=None)
     p.set_defaults(fn=cmd_plan_run)
 
-    p = sub.add_parser("prepare-frame")
-    p.add_argument("--device", required=True)
-    p.add_argument("--request", required=True, help="base request (pilot_manifest.json)")
-    p.add_argument("--frame", required=True)
-    p.add_argument("--out", required=True)
-    p.add_argument("--run-id", required=True)
-    p.add_argument("--bid", required=False, default=req.SCREENSHOT_BID)
-    p.add_argument("--pinned-totals", required=False, default=None)
-    p.add_argument("--approval", required=False, default=None,
-                   help="5.4 approval file (required for non-English requests)")
-    p.add_argument("--retained-dir", required=False, default=None)
-    p.add_argument("--timeout", type=float, default=exec_mod.POLL_TIMEOUT_S)
-    p.add_argument("--interval", type=float, default=exec_mod.POLL_INTERVAL_S)
-    p.set_defaults(fn=cmd_prepare_frame)
-
-    p = sub.add_parser("capture-app-frame")
-    p.add_argument("--device", required=True)
-    p.add_argument("--out", required=True)
-    p.add_argument("--run-id", required=True)
-    p.add_argument("--frame", required=True)
-    p.add_argument("--geometry", required=False, default="1320x2868")
-    p.add_argument("--mask", required=False, default=None,
-                   choices=["default", "black"],
-                   help="screenshot mask override (default: per-frame; "
-                        "island frames use --mask=black)")
-    p.add_argument("--approval", required=False, default=None,
-                   help="5.4 approval file (required for non-pilot geometries)")
-    p.add_argument("--retained-dir", required=False, default=None)
-    p.set_defaults(fn=cmd_capture_app_frame)
-
     p = sub.add_parser("record-external-frame")
     p.add_argument("--out", required=True)
     p.add_argument("--run-id", required=True)
     p.add_argument("--frame", required=True)
     p.add_argument("--png", required=True)
     p.add_argument("--captured-at", required=True)
-    p.add_argument("--observation", required=True)
     p.add_argument("--state", required=True)
-    p.add_argument("--request", required=True)
+    p.add_argument("--session-nonce", required=False, default=None,
+                   help="session frames only; must match the trusted stub")
+    p.add_argument("--session-domain", required=False, default=None,
+                   choices=["pinned", "realtime"],
+                   help="session frames only; must match the trusted stub")
+    p.add_argument("--seq", required=False, default=None, type=int,
+                   help="session frames only; must match the trusted stub")
+    p.add_argument("--device-key", required=False, default=None,
+                   help="session frames only; must match the trusted stub")
     p.add_argument("--pinned-totals", required=False, default=None)
     p.add_argument("--geometry", required=False, default="1320x2868")
     p.add_argument("--device", required=False, default="unknown")
@@ -906,28 +859,6 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--retained-dir", required=False, default=None)
     p.set_defaults(fn=cmd_record_external_frame)
 
-    p = sub.add_parser("record-pending-frame")
-    p.add_argument("--out", required=True)
-    p.add_argument("--run-id", required=True)
-    p.add_argument("--frame", required=True)
-    p.add_argument("--png", required=True)
-    p.add_argument("--captured-at", required=True)
-    p.add_argument("--request", required=True)
-    p.add_argument("--pinned-totals", required=False, default=None)
-    p.add_argument("--geometry", required=False, default="1320x2868")
-    p.add_argument("--device", required=False, default="unknown")
-    p.add_argument("--reason", required=True,
-                   help="why genuine pixels are a human handoff "
-                        "(recorded on the stub, never silent)")
-    p.add_argument("--mask", required=False, default=None,
-                   choices=["default", "black"],
-                   help="external capture mask policy (default: per-frame; "
-                        "la-compact/la-expanded require --mask=black)")
-    p.add_argument("--approval", required=False, default=None,
-                   help="5.4 approval file (required for non-English/iPad frames)")
-    p.add_argument("--retained-dir", required=False, default=None)
-    p.set_defaults(fn=cmd_record_pending_frame)
-
     p = sub.add_parser("finalize-run")
     p.add_argument("--out", required=True)
     p.add_argument("--run-id", required=True)
@@ -935,38 +866,50 @@ def build_parser() -> argparse.ArgumentParser:
                    help="JSON file {commit_base: str, dirty: bool}")
     p.set_defaults(fn=cmd_finalize_run)
 
-    p = sub.add_parser("finalize-two-runs")
-    p.add_argument("--out", required=True)
-    p.add_argument("--run-id-base", required=True)
-    p.add_argument("--variance-review", required=False, default=None)
-    p.set_defaults(fn=cmd_finalize_two_runs)
-
-    p = sub.add_parser("teardown-frame")
+    p = sub.add_parser("run-session")
     p.add_argument("--device", required=True)
+    p.add_argument("--device-key", required=True,
+                   help="catalog key (iphone69|iphone63|ipad13); geometry and "
+                        "island expectation are validated against it")
+    p.add_argument("--request", required=True, help="base request file")
+    p.add_argument("--domain", required=True,
+                   choices=["pinned", "realtime"])
     p.add_argument("--out", required=True)
     p.add_argument("--run-id", required=True)
-    p.add_argument("--frame", required=True)
-    p.add_argument("--bid", required=False, default=req.SCREENSHOT_BID)
-    p.set_defaults(fn=cmd_teardown_frame)
-
-    p = sub.add_parser("run-frame")
-    p.add_argument("--device", required=True)
-    p.add_argument("--request", required=True, help="base request (pilot_manifest.json)")
-    p.add_argument("--frame", required=True)
-    p.add_argument("--out", required=True)
-    p.add_argument("--run-id", required=True)
-    p.add_argument("--bid", required=False, default=req.SCREENSHOT_BID)
-    p.add_argument("--pinned-totals", required=False, default=None)
     p.add_argument("--geometry", required=False, default="1320x2868")
+    p.add_argument("--pinned-totals", required=True)
+    p.add_argument("--island", required=False, default=None,
+                   choices=["1", "0"],
+                   help="explicit island token; must agree with --device-key")
+    p.add_argument("--bid", required=False, default=req.SCREENSHOT_BID)
     p.add_argument("--approval", required=False, default=None,
-                   help="5.4 approval file (required for non-English/iPad frames)")
+                   help="5.4 approval file (required for non-English/iPad runs)")
     p.add_argument("--retained-dir", required=False, default=None)
-    p.add_argument("--mask", required=False, default=None,
-                   choices=["default", "black"],
-                   help="screenshot mask override (default: per-frame)")
     p.add_argument("--timeout", type=float, default=exec_mod.POLL_TIMEOUT_S)
     p.add_argument("--interval", type=float, default=exec_mod.POLL_INTERVAL_S)
-    p.set_defaults(fn=cmd_run_frame)
+    p.add_argument("--hold-open", action="store_true",
+                   help="realtime only: hold the session RUNNING with its "
+                        "verified anchor for the live-capture button dance "
+                        "(consent, compact re-probe, lock capture) before "
+                        "the explicit session cleanup")
+    p.set_defaults(fn=cmd_run_session)
+
+    p = sub.add_parser("pregrant")
+    p.add_argument("--device", required=True)
+    p.add_argument("--device-key", required=True,
+                   help="catalog key (iphone69|iphone63|ipad13); geometry is "
+                        "validated against it")
+    p.add_argument("--geometry", required=False, default="1320x2868")
+    p.add_argument("--locale", required=False, default="en",
+                   choices=["en", "ru", "zh-Hans", "es-419", "pt-BR"],
+                   help="request locale for the setup envelope (auth is "
+                        "per-app, so one pass covers all locales)")
+    p.add_argument("--bid", required=False, default=req.SCREENSHOT_BID)
+    p.add_argument("--approval", required=False, default=None,
+                   help="5.4 approval file (required for non-English/iPad runs)")
+    p.add_argument("--retained-dir", required=False, default=None)
+    p.add_argument("--interval", type=float, default=exec_mod.POLL_INTERVAL_S)
+    p.set_defaults(fn=cmd_pregrant)
 
     p = sub.add_parser("locale-totals")
     p.add_argument("--locale", required=True,

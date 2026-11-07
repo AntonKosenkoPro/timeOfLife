@@ -127,50 +127,6 @@ class TotalsPinTests(unittest.TestCase):
 
 
 class LaBindingTests(unittest.TestCase):
-    def _png(self, tmp):
-        import struct
-        import zlib
-        p = Path(tmp) / "la.png"
-        ihdr = struct.pack(">IIBBBBB", 1320, 2868, 8, 2, 0, 0, 0)
-        p.write_bytes(b"\x89PNG\r\n\x1a\n" + struct.pack(">I", 13) + b"IHDR"
-                      + ihdr + struct.pack(">I", zlib.crc32(b"IHDR" + ihdr) & 0xFFFFFFFF))
-        return str(p)
-
-    def test_observation_without_sha_is_refused(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            png = self._png(tmp)
-            errs = insp.verify_la_observation(
-                {"started_at": "2026-10-30T10:00:00+00:00"},
-                png, "2026-10-30T10:12:34+00:00",
-                {"observed_elapsed_s": 754})
-            self.assertTrue(errs)
-
-    def test_naive_timestamps_rejected(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            png = self._png(tmp)
-            sha = insp.sha256_file(png)
-            obs = {"observed_elapsed_s": 754, "screenshot_sha256": sha}
-            errs = insp.verify_la_observation(
-                {"started_at": "2026-10-30T10:00:00"},
-                png, "2026-10-30T10:12:34+00:00", obs)
-            self.assertTrue(any("naive" in e.lower() for e in errs))
-            errs = insp.verify_la_observation(
-                {"started_at": "2026-10-30T10:00:00+00:00"},
-                png, "2026-10-30T10:12:34", obs)
-            self.assertTrue(any("naive" in e.lower() for e in errs))
-
-    def test_bool_and_nan_observed_rejected(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            png = self._png(tmp)
-            sha = insp.sha256_file(png)
-            for bad in (True, float("nan"), float("inf"), "754"):
-                with self.subTest(bad=repr(bad)):
-                    errs = insp.verify_la_observation(
-                        {"started_at": "2026-10-30T10:00:00+00:00"},
-                        png, "2026-10-30T10:12:34+00:00",
-                        {"observed_elapsed_s": bad, "screenshot_sha256": sha})
-                    self.assertTrue(errs)
-
     def test_canonical_la_keys(self):
         for la_frame in ("la-lock", "la-compact", "la-expanded"):
             request = framed_request(la_frame)
@@ -315,17 +271,32 @@ class SemanticCompareTests(unittest.TestCase):
                 "request_semantic_sha256": sem, "screenshot_sha256": shot,
                 "expected_totals": dict(PINNED_TOTALS)}
 
-    def test_same_semantic_different_run_id_has_no_errors(self):
+    def test_automatic_comparison_removed(self):
+        # Single-pass decision: the automatic gate is retired, not
+        # relaxed — no compare entry point may remain importable.
+        self.assertFalse(hasattr(rm, "compare_runs"))
+        self.assertFalse(hasattr(rm, "_compare_probes"))
+
+    def test_same_semantic_different_run_id_stays_human_readable(self):
+        # Retained negative coverage at the record level: distinct
+        # volatile run identities ("r1"/"r2" labels only) share the
+        # semantic projection while exact hashes differ — a human can
+        # compare reruns; nothing here auto-passes anything.
         recs1 = [self._rec(f) for f in rs.PILOT_FRAMES]
         recs2 = [self._rec(f, req_sha="b" * 64) for f in rs.PILOT_FRAMES]
         m1 = rm.assemble_run_manifest("r1", "U", "en-austin-1", "light-v1",
                                       (1320, 2868), recs1)
         m2 = rm.assemble_run_manifest("r2", "U", "en-austin-1", "light-v1",
                                       (1320, 2868), recs2)
-        res = rm.compare_runs(m1, m2)
-        self.assertEqual(res["errors"], [])
+        for a, b in zip(m1["frames"], m2["frames"]):
+            self.assertEqual(a["request_semantic_sha256"],
+                             b["request_semantic_sha256"])
+            self.assertNotEqual(a["request_sha256"], b["request_sha256"])
 
-    def test_png_drift_is_variance_not_error(self):
+    def test_png_drift_stays_reviewable_variance(self):
+        # Screenshot drift stays a visible per-record hash difference
+        # for human review — reviewable variance, never auto-approved
+        # stable and never silently merged.
         recs1 = [self._rec(f) for f in rs.PILOT_FRAMES]
         recs2 = [self._rec(f, req_sha="b" * 64) for f in rs.PILOT_FRAMES]
         recs2[0] = dict(recs2[0])
@@ -334,11 +305,12 @@ class SemanticCompareTests(unittest.TestCase):
                                       (1320, 2868), recs1)
         m2 = rm.assemble_run_manifest("r2", "U", "en-austin-1", "light-v1",
                                       (1320, 2868), recs2)
-        res = rm.compare_runs(m1, m2)
-        self.assertEqual(res["errors"], [])
-        self.assertIn("track-running", res["unreviewed_variance"])
+        self.assertNotEqual(m1["frames"][0]["screenshot_sha256"],
+                            m2["frames"][0]["screenshot_sha256"])
+        self.assertEqual(m1["frames"][0]["expected_totals"],
+                         m2["frames"][0]["expected_totals"])
 
-    def test_totals_drift_is_error(self):
+    def test_totals_drift_stays_visible(self):
         recs1 = [self._rec(f) for f in rs.PILOT_FRAMES]
         recs2 = [self._rec(f, req_sha="b" * 64) for f in rs.PILOT_FRAMES]
         recs2[1] = dict(recs2[1])
@@ -347,8 +319,9 @@ class SemanticCompareTests(unittest.TestCase):
                                       (1320, 2868), recs1)
         m2 = rm.assemble_run_manifest("r2", "U", "en-austin-1", "light-v1",
                                       (1320, 2868), recs2)
-        res = rm.compare_runs(m1, m2)
-        self.assertTrue(any("insights" in e for e in res["errors"]))
+        self.assertEqual(m1["frames"][1]["frame"], "insights")
+        self.assertNotEqual(m1["frames"][1]["expected_totals"],
+                            m2["frames"][1]["expected_totals"])
 
 
 if __name__ == "__main__":

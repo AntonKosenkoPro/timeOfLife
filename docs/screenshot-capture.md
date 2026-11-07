@@ -1,4 +1,17 @@
-# Screenshot capture runbook (2026-10-30 — English pilot 5.4-APPROVED; 6.6 pending)
+# Screenshot capture runbook (2026-11-04 — session workflow wired; single-pass decision; pilot gates green; acceptance = downloadable output, 20min aspirational)
+
+Session-based capture is WIRED in `.github/workflows/app-screenshots.yml`
+(`validate` → one verified arm64 build → device workers `max-parallel: 5` →
+panels + ZIP) and proven through the frozen 18PM pilot + 6-pair expansion
+captures (teardowns complete; see evidence below). Owner decision 2026-11-04:
+SINGLE automated pass per device-locale (no r2, no automatic pass comparison);
+manual reruns when needed with human visual inspection. Raw PNGs retained, manifests
+read directly. The English pilot remains OWNER-APPROVED (archived pilot change,
+`runs/pilot27-r2`); expansion sets are captured-audited with final acceptance
+still pending. Sections marked **AGREED** record owner/spec
+decisions that are stable. Do not treat captured-but-unaccepted sets as approved —
+see `openspec/changes/optimize-app-screenshot-workflow/` for the authoritative
+proposal/design/tasks/specs.
 
 Initial draft from agreed interfaces, revised as implementation landed. The runner
 has an executable CLI (`scripts/screenshots/capture.py`) proven through the
@@ -223,3 +236,91 @@ task 6.6 acceptance: PENDING.
   runner/evidence extension stay open per tasks.md. Task 8.2 closes with this
   docs pass; 8.1/8.3/8.4 stay open (final verification, git-purity + external
   handoff, issue updates + PR-phase rebase).
+
+## Local capture workflow (owner decision: CI capture retired — slow,
+unreliable, expensive; capture runs locally via the `lifio-local-screenshots`
+skill, one simulator at a time)
+
+Local pipeline topology (`scripts/screenshots/run_local_bundle.sh`, strictly
+sequential): early input validation → one arm64-verified Screenshot build
+(tar + digest manifest, Xcode 27.1 / iOS 27.0) → one owned simulator per
+selected device (created/booted/installed/captured/shutdown/deleted in turn;
+shared sims never touched), each running a Live Activities pre-grant setup
+pass first (same realtime root envelope, launch, Home-background, lock,
+shared grant — auth BEFORE any activity starts, so banner timers tick
+instead of freezing as "MM:--" dashes; once per device, non-fatal, worker
+grant stays as fallback) and then the selected locales sequentially
+(SINGLE automated pass per locale, pinned + real-time hold-open sessions with
+argent describe-backed consent grant and island long-press) → per-locale
+`shots/<device>/<locale>` → genuine registration (no observation gate —
+owner visual check governs) → finalize → panels matrix (`<locale>/<device>`)
++ ZIP. A manual rerun re-invokes the same single-pass flow with a new run
+identity (existing session/run machinery; no new pass selector, no legacy
+branches). Local bypass (`LIFIO_CAPTURE_CI=1`, logged as
+`ci_approval_bypass:true`) is a technical gate, NEVER owner approval.
+
+Final operator CLIs (verified `--help`; paths, not promises):
+
+- `python3 scripts/screenshots/capture.py pregrant --device UDID
+  --device-key iphone69|iphone63|ipad13 --geometry GEOxGEO [--locale en]
+  [--approval FILE --retained-dir DIR]`
+  (device-setup authorization: realtime root envelope, launch, anchor wait,
+  Home-background, lock, shared grant, terminate; prints the result record;
+  absent/granted/blocked all rc 0 — the worker grant stays as fallback;
+  infra failures rc 1, both non-fatal in the bundle driver.)
+- `python3 scripts/screenshots/capture.py run-session --device UDID
+  --device-key iphone69|iphone63|ipad13 --request BASE --domain pinned|realtime
+  --out PAIRROOT --run-id RID --geometry GEOxGEO --pinned-totals FILE
+  [--island 1|0] [--approval FILE --retained-dir DIR]`
+  (`--approval` + `--retained-dir` pair is REQUIRED for non-English/iPad runs;
+  validated hash-bound against `approval-pilot27-r2.json` — no auto-bypass,
+  no fabricated approval, retained originals never mutated.)
+- `python3 scripts/screenshots/run_device_worker.py --device-key KEY --device UDID
+  --locales '["en",...]' --out SHOTSROOT [...]`
+  (`--out` is the shots ROOT: per-locale `shots/<dev>/<locale>`, device summary
+  at `shots/<dev>`; the YAML worker owns simctl, this loop never touches it.)
+
+v2 file transport: `Documents/capture-request.json` (seq 0) then
+`Documents/capture-sessions/<nonce>/command.json` (atomic same-dir publish,
+app renames/removes before execution); full identity/hash binding
+(run/session-nonce/domain/seq/frame/mode/request_sha256); transcript in every
+ack; combined app + runner-verified cleanup receipts gate finalization.
+Source/build/runtime identities: commit + dirty flag + Xcode/SDK + arm64 slices
++ app/appex hashes in every manifest. Local real-approval paired flags gate
+expansion scope; per-locale artifacts carry the single pass, receipts, timings, and
+failed/unattempted statuses (historical both-passes artifacts stay unchanged); raw shots + receipts ship in the ZIP alongside
+panels. Lineup: owner-provided portrait set — 18 Pro Max Silver / 17 White / iPad Pro 13 M5 Silver (official Apple PNG device art; Figma live fetch retired; source identity pinned in tasks 10.1 with no upscaling/rotation necessary; native capture geometry kept only where SDK query verifies it for the actual models). Delivery OWNER-DECIDED: private versioned release `AntonKosenkoPro/lifio-design-assets`, `apple-bezels-v2` current (manifest + asset hashes verified; no PNG in git history, no raw bezels in the public app ZIP, no public redistribution; local download via `gh release download` with `APPLE_BEZELS_TOKEN`, value never read).
+Acceptance requires successful downloadable output with truthful status (8.3/9.5/9.6 proven at local scope 2026-11-05 — 15/15 complete, 69 panels; 8.1/8.2 retired — cancelled, not run; old CI runs failed, no fabricated acceptance); 20 minutes is aspirational (owner accepts ~22min vs 70+), not a hard gate. Human visual inspection governs; 8.6 rebase/review pending.
+
+## Legacy removal (8.5 DONE — Python + Swift removal verified; do not use removed verbs)
+
+Python removal DONE (owner-reported 450 OK, `test_executor.py` deleted with its
+51 cases mapped to session cases; per-frame CLI verbs `run-frame`/`prepare-frame`/
+`teardown-frame` removed — verified absent from `capture.py`; v1 runtime defs,
+finalize fallback, and external file args removed): final Python surface is the
+session verbs (`run-session`, `finalize-run`, `finalize-two-runs`,
+`record-external-frame` for genuine registration) plus live utilities
+(`validate-request`, `write-request`, `make-request`, `preflight`,
+`check-state`, `verify-la`, `verify-picker`, `check-approval`, `plan-run`,
+`locale-totals`) operating on the canonical inner schema-1 payload.
+(`executor.record_pending_frame` remains as an internal pending-path helper,
+not a CLI verb.) Swift removal (old per-frame app paths, incl. the
+`ScreenshotCaptureFlow.swift` deletion) is DONE — verified by Screenshot
+1132/103 + Debug 1051/98 suites, strict OpenSpec valid, legacy-removal 3/3.
+Operator guidance above uses session verbs only. Old
+receipts are never retrofitted with new keys. No shipping-compat branch is
+retained or promised.
+
+## Status 2026-11-04 (pilot + expansion gates green; single-pass decision; acceptance = downloadable output)
+
+- §1 gates (1.1–1.4) done (1.3/two-pass baseline historically valid, superseded as acceptance); protocol foundation (2.2–2.4), timing (2.1), session
+  batching (3.1–3.5), runner ownership/cleanup (4.1–4.4), real-time (4.5),
+  N/A (4.6), isolation (4.7), pilot perf/visual/profile (5.1–5.3), expansion
+  (5.4), shared-build/device-matrix (6.x, unit/structural + real local install
+  proof), full verification (7.1–7.4), docs (8.4), legacy removal (8.5) done
+  with audit evidence (5.1/5.4 two-pass measurements valid historically; single-pass deltas pending in §9).
+- Still open: single-pass simplification + verification + acceptance (§9.1–9.6), official Apple device-art migration (§10.2–10.4; 10.1 source identity DONE), bundle
+  verification (8.3), final rebase + review (8.6). 8.1/8.2 RETIRED (cancelled, not run; old runs failed; no fabricated acceptance).
+- Pends/owner gates unchanged: LA frames stay pending until genuine pixels;
+  owner approvals 5.4/6.6/9.4 (archived pilot namespace) untouched — new sets
+  are captured, never approved by analogy.

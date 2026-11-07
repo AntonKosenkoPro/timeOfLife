@@ -1,21 +1,11 @@
 #!/usr/bin/env python3
-"""Human-inspection gates: no fabricated observations, fail until supplied.
+"""Picker-keyboard inspection gate: no fabricated proof, fail until supplied.
 
-Two rules with teeth:
-1. Live-Activity timer: the runner NEVER derives the observed timer from
-   elapsed arithmetic or OCR. A human (or a future documented OCR step)
-   supplies an observation record ``{"observed_elapsed_s",
-   "screenshot_sha256"}`` read from the actual render; the sha MUST equal
-   the actual PNG hash or the observation is bound to a different render.
-   verify_la() checks |capture_at - started_at - observed| <= 2s.
-   Timestamps must be timezone-aware ISO (naive input is refused, never
-   silently assumed UTC). Numerics must be finite, non-negative, and never
-   bool/NaN/inf.
-2. Picker keyboard: intent flags (software_visible:true) are not proof.
-   verify_picker() requires the actual capture file (hash-bound),
-   an observed language equal to the request's keyboard language,
-   keyboard_visible=true from inspection, docked presentation, and a
-   non-empty evidence artifact (hashed into the returned evidence record).
+One rule with teeth: intent flags (software_visible:true) are not proof.
+verify_picker() requires the actual capture file (hash-bound),
+an observed language equal to the request's keyboard language,
+keyboard_visible=true from inspection, docked presentation, and a
+non-empty evidence artifact (hashed into the returned evidence record).
 
 Refuse final status until the artifact fields are provided.
 """
@@ -23,12 +13,9 @@ Refuse final status until the artifact fields are provided.
 from __future__ import annotations
 
 import hashlib
-import math
 from datetime import datetime
 from pathlib import Path
 from typing import Any
-
-LA_TOLERANCE_S = 2.0
 
 
 class InspectionError(ValueError):
@@ -41,16 +28,6 @@ def sha256_file(path: str) -> str:
         for chunk in iter(lambda: fh.read(1024 * 64), b""):
             h.update(chunk)
     return h.hexdigest()
-
-
-def is_strict_nonneg_number(v: Any) -> bool:
-    """Finite non-negative int/float; bool/NaN/inf/str rejected."""
-    return (
-        isinstance(v, (int, float))
-        and not isinstance(v, bool)
-        and math.isfinite(v)
-        and v >= 0
-    )
 
 
 def png_dimensions(path: str) -> tuple[int, int]:
@@ -84,55 +61,6 @@ def parse_aware_iso(value: Any) -> datetime:
             f"naive timestamp {value!r} refused: supply a timezone-aware ISO value"
         )
     return dt
-
-
-def verify_la_observation(
-    state_live_activity: dict,
-    screenshot_path: str,
-    screenshot_captured_at_iso: str,
-    observation: dict | None,
-) -> list[str]:
-    """Validate a human-supplied LA timer reading. Empty list = pass.
-
-    ``observation`` must be ``{"observed_elapsed_s": <strict number>,
-    "screenshot_sha256": <actual PNG hash>}``. Missing observation keeps
-    the frame in needs-inspection (pending), never a silent pass.
-    """
-    if not isinstance(observation, dict):
-        return ["live-activity observation is missing: frame stays needs-inspection"]
-    observed = observation.get("observed_elapsed_s")
-    if not is_strict_nonneg_number(observed):
-        return [
-            "observed_elapsed_s must be a finite non-negative number "
-            "(bool/NaN/inf rejected) read from the actual render"
-        ]
-    if not Path(screenshot_path).is_file():
-        return [f"screenshot file not found: {screenshot_path}"]
-    actual_sha = sha256_file(screenshot_path)
-    claimed_sha = observation.get("screenshot_sha256")
-    if not claimed_sha:
-        return ["observation.screenshot_sha256 is required: no binding by default"]
-    if claimed_sha != actual_sha:
-        return ["screenshot hash mismatch: observation is bound to a different render"]
-    if not isinstance(state_live_activity, dict):
-        return ["state live_activity block is required before validation"]
-    started = state_live_activity.get("started_at")
-    if not started:
-        return ["state live_activity.started_at (real anchor) is required"]
-    try:
-        capture_dt = parse_aware_iso(screenshot_captured_at_iso)
-        start_dt = parse_aware_iso(started)
-    except InspectionError as exc:
-        return [str(exc)]
-    wall_elapsed = (capture_dt - start_dt).total_seconds()
-    if wall_elapsed < -1:
-        return ["capture timestamp predates the real start anchor"]
-    if abs(wall_elapsed - float(observed)) > LA_TOLERANCE_S:
-        return [
-            f"observed {observed}s vs wall {wall_elapsed:.1f}s "
-            f"exceeds ±{LA_TOLERANCE_S:.0f}s tolerance"
-        ]
-    return []
 
 
 def verify_picker_inspection(

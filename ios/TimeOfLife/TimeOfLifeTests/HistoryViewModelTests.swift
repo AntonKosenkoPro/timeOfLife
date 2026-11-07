@@ -527,13 +527,25 @@ struct HistoryViewModelTests {
         // itself (unobservable from tests — it lives inside uninstrumented
         // Foundation). The reference below is intentionally built after the
         // wave so it cannot warm up ICU first-use.
+        // Hermetic locale: sibling capture suites hold a process-global
+        // ScreenshotLocale override at arbitrary suspension points, which
+        // the locale-less overload below would read. The explicit locale
+        // takes the override-proof branch, so this test cannot observe
+        // globals (nil outside SCREENSHOT_CAPTURE, where no override
+        // exists and the parameter would otherwise pin a non-ambient
+        // locale). Contention through the shared lock is unchanged.
+        #if SCREENSHOT_CAPTURE
+        let hermeticLocale: Locale? = Locale(identifier: "en_US")
+        #else
+        let hermeticLocale: Locale? = nil
+        #endif
         let calendar = Calendar(identifier: .gregorian)
         let day = Self.date("2026-08-31 10:00", calendar: calendar)
         let now = Self.date("2026-09-03 15:00", calendar: calendar)
         let pairs = await withTaskGroup(of: (String, String).self, returning: [(String, String)].self) { group in
             for _ in 0 ..< 64 {
                 group.addTask {
-                    (HistoryViewModel.dayLabel(for: day, now: now, calendar: calendar),
+                    (HistoryViewModel.dayLabel(for: day, now: now, calendar: calendar, locale: hermeticLocale),
                      HistoryViewModel.timeText(for: day))
                 }
             }
@@ -546,6 +558,7 @@ struct HistoryViewModelTests {
             reference.dateStyle = .medium
             reference.timeStyle = .none
             reference.calendar = calendar
+            reference.locale = hermeticLocale
             return reference.string(from: day)
         }()
         for (label, time) in pairs {

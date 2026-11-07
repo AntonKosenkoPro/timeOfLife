@@ -127,13 +127,19 @@ def launch_argv(udid: str, bid: str = SCREENSHOT_BID) -> list[str]:
     ] + LAUNCH_ARGV
 
 
-def cleanup_launch_argv(udid: str, bid: str, run_id: str, sha: str) -> list[str]:
+def cleanup_launch_argv(udid: str, bid: str, run_id: str, sha: str,
+                         session_nonce: str | None = None,
+                         session_domain: str | None = None,
+                         final_seq: int | None = None) -> list[str]:
     """Exact app-hook tokens (ScreenshotRequest screenshotToken grammar).
 
     `KEY=value` argv form; the app verifies both against the last
-    capture-state.json before touching anything.
+    capture-state.json before touching anything. Session tokens (frozen v2)
+    are appended only when all three are given; the app validates them
+    against the persisted accepted transcript (cleanup runs in a new
+    process). Callers without a session keep the exact legacy argv.
     """
-    return [
+    argv = [
         "xcrun",
         "simctl",
         "launch",
@@ -143,6 +149,19 @@ def cleanup_launch_argv(udid: str, bid: str, run_id: str, sha: str) -> list[str]
         f"SCREENSHOT_CLEANUP={run_id}",
         f"SCREENSHOT_CLEANUP_SHA={sha}",
     ]
+    session_tokens = [session_nonce, session_domain, final_seq]
+    if any(t is not None for t in session_tokens):
+        if session_nonce is None or session_domain is None \
+                or final_seq is None:
+            raise ValueError(
+                "session cleanup tokens must be given together "
+                "(nonce+domain+final_seq) or not at all")
+        argv += [
+            f"SCREENSHOT_SESSION_NONCE={session_nonce}",
+            f"SCREENSHOT_SESSION_DOMAIN={session_domain}",
+            f"SCREENSHOT_FINAL_SEQ={final_seq}",
+        ]
+    return argv
 
 
 def screenshot_argv(

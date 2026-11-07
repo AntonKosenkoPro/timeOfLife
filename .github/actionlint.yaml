@@ -1,0 +1,3 @@
+# actionlint configuration (static workflow checks, no CI behavior change).
+#
+# No message ignores: every actionlint check stays at full strength.
