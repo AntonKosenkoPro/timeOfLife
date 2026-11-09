@@ -134,7 +134,7 @@ jobs:
             if (overridden.length > 0) {
               core.notice(`duplicate /review params are ignored (first occurrence wins): ${overridden.join(' ')}`);
             }
-            let effort = (params.effort || 'medium').toLowerCase();
+            let effort = (params.effort || 'low').toLowerCase();
             if (!['low', 'medium', 'high'].includes(effort)) return fail(`Invalid effort '${params.effort}'.`);
             let budget;
             {
@@ -193,9 +193,8 @@ jobs:
           review_task_timeout: '15'
           # Don't hammer Ollama Cloud rate limits.
           review_concurrency: '4'
-          # Review effort medium (deeper per-file rounds; low was benchmarked
-          # fastest without recall loss on small diffs — tune back if medium
-          # proves wasteful there). Overridable per-run via `/review effort=low`.
+          # Default review effort low (one per-file round).
+          # Overridable per-run via `/review effort=medium` or `effort=high`.
           effort: ${{ env.EFFORT }}
           # Bound paid-provider spend: generous runaway guard (fail-open —
           # over-budget files report failed(budget) but partial results still
