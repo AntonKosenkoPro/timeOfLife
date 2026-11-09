@@ -314,10 +314,23 @@ final class SyncController: ObservableObject {
     /// same-account guarded (it deactivates first on a mismatch), so this
     /// cannot resurrect another account's cycle — and the resume path is
     /// what converges a suspended-aborted activation cycle, which `trigger`
-    /// alone would refuse while `.inactive`.
+    /// alone would refuse while `.inactive`. Pre-bind (no account ever
+    /// bound) is a no-op: the bind path owns activation after
+    /// `prepareAccountStore`, and activating now would run a cycle against
+    /// an unbound store (`notBound` → `.error` that blocks the post-bind
+    /// `activate`). A resume landing while the previous cycle is still
+    /// unwinding (its suspension abort has not yet cleared `cycleTask`)
+    /// re-invokes after it settles instead of dropping the retry that
+    /// `trigger` refuses while the handle is live.
     func resume(userID: String) {
         if status == .inactive {
+            guard boundUserID != nil else { return }
             activate(userID: userID)
+        } else if let inFlight = cycleTask {
+            Task { [weak self] in
+                await inFlight.value
+                self?.resume(userID: userID)
+            }
         } else {
             trigger(userID: userID)
         }

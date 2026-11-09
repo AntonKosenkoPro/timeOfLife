@@ -1,3 +1,4 @@
+// swiftlint:disable file_length
 import Testing
 import Foundation
 import GRDB
@@ -345,5 +346,101 @@ struct SuspensionReloadTests {
         await service.endOrphanedActivities(knownDurationSeconds: 60)
         await service.endOrphanedActivities()
         #expect(fake.orphanEnds.isEmpty)
+    }
+}
+
+/// Bounds on the suspension-classified retry (review round 1 #3/#11): a
+/// persistent suspension-classified failure while the policy reads resumed
+/// must return with the last good snapshot (stale preserved for the resume
+/// re-trigger), not spin `loadIfNeeded` forever. Serialized + MainActor:
+/// the policy is process-global, so only one such suite runs at a time and
+/// no parallel suspender can move the generation mid-test.
+@MainActor
+@Suite("Suspension retry bounds", .serialized)
+struct SuspensionRetryBoundsTests {
+
+    private func temporaryStoreURL() -> URL {
+        URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent(UUID().uuidString)
+            .appendingPathComponent(LocalStore.databaseFileName(userID: "bounds-u1"))
+    }
+
+    private func seedEntry(in store: LocalStore) async throws {
+        let startedAt = Date(timeIntervalSince1970: 1_700_000_000)
+        _ = try await store.createEntry(TimeEntry(
+            id: UUID().uuidString,
+            activityText: "Gym",
+            startedAt: startedAt,
+            endedAt: startedAt.addingTimeInterval(600),
+            durationSeconds: 600,
+            categoryIDs: [],
+            notes: "",
+            createdAt: startedAt,
+            updatedAt: startedAt
+        ))
+    }
+
+    /// Runs `loadIfNeeded` with a 5s cap: `true` when it returned, `false`
+    /// on timeout (the unbounded-loop regression would hang here).
+    private func loadPromptly(_ vm: HistoryViewModel) async -> Bool {
+        await withTaskGroup(of: Bool.self) { group in
+            group.addTask { await vm.loadIfNeeded(); return true }
+            group.addTask {
+                try? await Task.sleep(nanoseconds: 5_000_000_000)
+                return false
+            }
+            let first = await group.next() ?? false
+            group.cancelAll()
+            return first
+        }
+    }
+
+    private func loadPromptly(_ vm: InsightsViewModel) async -> Bool {
+        await withTaskGroup(of: Bool.self) { group in
+            group.addTask { await vm.loadIfNeeded(); return true }
+            group.addTask {
+                try? await Task.sleep(nanoseconds: 5_000_000_000)
+                return false
+            }
+            let first = await group.next() ?? false
+            group.cancelAll()
+            return first
+        }
+    }
+
+    @Test("History bounds persistent suspension failure while resumed")
+    func historyBoundsPersistentSuspensionFailure() async throws {
+        // swiftlint:disable:next force_try
+        let store = try! LocalStore(url: temporaryStoreURL(), userID: "bounds-u1")
+        try await seedEntry(in: store)
+        let vm = HistoryViewModel(store: store, undoBuffer: UndoBufferStore(store: store))
+        await vm.loadIfNeeded()
+        #expect(vm.dayGroups.flatMap(\.entries).count == 1)
+        if DatabaseSuspension.shared.isSuspended {
+            DatabaseSuspension.shared.noteResumed()
+        }
+        vm.loadEntriesOverride = { throw LocalStore.LocalStoreError.suspended }
+        defer { vm.loadEntriesOverride = nil }
+        vm.invalidate()
+        #expect(await loadPromptly(vm), "History loadIfNeeded did not return within 5s — unbounded suspension retry")
+        #expect(vm.dayGroups.flatMap(\.entries).count == 1)
+    }
+
+    @Test("Insights bounds persistent suspension failure while resumed")
+    func insightsBoundsPersistentSuspensionFailure() async throws {
+        // swiftlint:disable:next force_try
+        let store = try! LocalStore(url: temporaryStoreURL(), userID: "bounds-u1")
+        try await seedEntry(in: store)
+        let vm = InsightsViewModel(store: store)
+        await vm.loadIfNeeded()
+        #expect(vm.breakdown(period: .all, lens: .activity).totalSeconds == 600)
+        if DatabaseSuspension.shared.isSuspended {
+            DatabaseSuspension.shared.noteResumed()
+        }
+        vm.loadEntriesOverride = { throw LocalStore.LocalStoreError.suspended }
+        defer { vm.loadEntriesOverride = nil }
+        vm.invalidate()
+        #expect(await loadPromptly(vm), "Insights loadIfNeeded did not return within 5s — unbounded suspension retry")
+        #expect(vm.breakdown(period: .all, lens: .activity).totalSeconds == 600)
     }
 }

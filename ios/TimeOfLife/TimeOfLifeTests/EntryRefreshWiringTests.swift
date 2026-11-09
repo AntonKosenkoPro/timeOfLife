@@ -197,12 +197,15 @@ struct EntryRefreshWiringTests {
         #expect(vm.dayGroups.isEmpty)
 
         // The stop commits while the app is suspended (no observer runs);
-        // the foreground return delivers on the private center and reloads
-        // through the real subscription path (this test's empty-state
-        // counterpart to historyPostedForegroundReloads below).
+        // the foreground return delivers the resume signal on the private
+        // center and reloads through the real subscription path (this
+        // test's empty-state counterpart to historyPostedForegroundReloads
+        // below). Production posts didResume synchronously from the
+        // foreground transition, so the VM subscribes to the resume signal
+        // only — one trigger per foreground return, not two.
         let runStart = now.addingTimeInterval(-600)
         try await commitStop(service: service, text: "Background run", startedAt: runStart, duration: 600)
-        center.post(name: UIApplication.willEnterForegroundNotification, object: nil)
+        center.post(name: DatabaseSuspension.didResumeNotification, object: nil)
 
         #expect(await waitForHistoryTexts(vm, ["Background run"]))
     }
@@ -454,10 +457,11 @@ struct EntryRefreshWiringTests {
         await vm.loadIfNeeded()
 
         // The stop commits while the app is suspended (no delivery); the
-        // foreground return delivers and reloads.
+        // foreground return delivers the resume signal and reloads (the VM
+        // owns the didResume subscription only — see observeExternalReload).
         let runStart = now.addingTimeInterval(-600)
         try await commitStop(service: service, text: "Background run", startedAt: runStart, duration: 600)
-        center.post(name: UIApplication.willEnterForegroundNotification, object: nil)
+        center.post(name: DatabaseSuspension.didResumeNotification, object: nil)
 
         #expect(await waitForHistoryTexts(vm, ["Background run", "Earlier"]))
     }
@@ -494,7 +498,7 @@ struct EntryRefreshWiringTests {
 
         let runStart = now.addingTimeInterval(-600)
         try await commitStop(service: service, text: "Background run", startedAt: runStart, duration: 600)
-        center.post(name: UIApplication.willEnterForegroundNotification, object: nil)
+        center.post(name: DatabaseSuspension.didResumeNotification, object: nil)
 
         #expect(await waitForInsightsTotal(vm, 660, calendar: calendar))
     }

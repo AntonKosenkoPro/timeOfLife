@@ -25,8 +25,12 @@ final class InsightsViewModel: ObservableObject {
     /// / foreground / sync-cycle exit) race on every visible-tab save. A call
     /// arriving mid-load awaits `inFlightLoad` (see `loadIfNeeded`) instead
     /// of returning with a stale snapshot no later appear retries.
-    private var inFlightLoad: Task<Void, Never>?
+    private var inFlightLoad: Task<Bool, Never>?
     private var needsReload = true
+    /// Counts `invalidate()` calls so `loadIfNeeded` can tell a concurrent
+    /// invalidation (genuine new work — must retry) from a persistent
+    /// suspension-classified failure with no progress (must not spin).
+    private var invalidateVersion = 0
     /// Whether the owning tab is currently on screen. Event-driven reloads
     /// only fetch while visible: an off-screen event invalidates (so the
     /// next appear reloads) but must not clear `needsReload`, or a later
@@ -40,6 +44,11 @@ final class InsightsViewModel: ObservableObject {
     /// + reload deterministically (TrackViewModel.stopGate precedent).
     /// Debug/Screenshot-only so no Release caller can suspend a load.
     var loadGate: (@Sendable () async -> Void)?
+    /// Test-only loader override (nil in production): when set, `load()`
+    /// fetches through this instead of the store, so tests can simulate a
+    /// persistent suspension-classified failure while the policy reads
+    /// resumed — proving `loadIfNeeded` bounds its retry instead of spinning.
+    var loadEntriesOverride: (@Sendable () async throws -> ([TimeEntry], [Category]))?
 #endif
     private var snapshot = Snapshot()
 
@@ -57,30 +66,48 @@ final class InsightsViewModel: ObservableObject {
 
     /// Reloads entries, activities, and categories. A failure keeps the last
     /// good snapshot: a mirror-only screen must not blank on a transient
-    /// failure (committed-only totals would otherwise read as zero).
-    func load() async {
+    /// failure (committed-only totals would otherwise read as zero). Returns
+    /// whether the failure was suspension-classified so `loadIfNeeded` can
+    /// bound its retry.
+    @discardableResult
+    func load() async -> Bool {
         isLoading = true
         defer {
             isLoading = false
             hasLoaded = true
         }
         do {
-            let entries = try await store.entries()
-            let categories = try await store.categories()
+            let entries: [TimeEntry]
+            let categories: [Category]
+            #if DEBUG || SCREENSHOT_CAPTURE
+            if let loadEntriesOverride {
+                let result = try await loadEntriesOverride()
+                entries = result.0
+                categories = result.1
+            } else {
+                entries = try await store.entries()
+                categories = try await store.categories()
+            }
+            #else
+            entries = try await store.entries()
+            categories = try await store.categories()
+            #endif
             #if DEBUG || SCREENSHOT_CAPTURE
             if let loadGate { await loadGate() }
             #endif
             snapshot = Snapshot(entries: entries, categories: categories)
             hasCommittedAllTime = entries.contains { $0.endedAt != nil }
+            return false
         } catch {
             // Suspension refusal keeps the last good snapshot AND stays
             // stale: the resume re-trigger converges instead of a transient
             // failure zeroing committed totals (same philosophy as above).
             if DatabaseSuspension.isSuspensionError(error) {
                 needsReload = true
-                return
+                return true
             }
             // Keep the last good snapshot (same philosophy as History load).
+            return false
         }
     }
 
@@ -100,7 +127,7 @@ final class InsightsViewModel: ObservableObject {
     func loadIfNeeded() async {
         while true {
             if let inFlightLoad {
-                await inFlightLoad.value
+                _ = await inFlightLoad.value
             }
             // Fail-fast while suspended (fix-database-suspension-kill):
             // without this the loop would spin — every refused load
@@ -109,15 +136,29 @@ final class InsightsViewModel: ObservableObject {
             // retries with access guaranteed.
             guard needsReload, !DatabaseSuspension.shared.isSuspended else { return }
             needsReload = false
+            let generationBefore = DatabaseSuspension.shared.generation
+            let invalidationsBefore = invalidateVersion
             let load = Task { await self.load() }
             inFlightLoad = load
-            await load.value
+            let suspendedFailure = await load.value
+            // Bound the suspension retry (review round 1, same as
+            // HistoryViewModel): retry only on real progress (a policy
+            // transition or a concurrent invalidate); otherwise keep stale
+            // and return for the resume re-trigger.
+            if suspendedFailure,
+               needsReload,
+               !DatabaseSuspension.shared.isSuspended,
+               DatabaseSuspension.shared.generation == generationBefore,
+               invalidateVersion == invalidationsBefore {
+                break
+            }
         }
     }
 
     /// Marks the data stale so the next Insights appear reloads it.
     func invalidate() {
         needsReload = true
+        invalidateVersion &+= 1
     }
 
     /// Tracks tab visibility for the event-driven reload gate. Called from
@@ -138,15 +179,10 @@ final class InsightsViewModel: ObservableObject {
                 Task { @MainActor [weak self] in await self?.handleExternalReload() }
             }
             .store(in: &reloadCancellables)
-        notifications.publisher(for: UIApplication.willEnterForegroundNotification)
-            .sink { [weak self] _ in
-                Task { @MainActor [weak self] in await self?.handleExternalReload() }
-            }
-            .store(in: &reloadCancellables)
-        // Resume re-trigger (fix-database-suspension-kill): the foreground
-        // handler above can race ahead of the queue resume and fail silent
-        // (stale flag preserved); this reruns the same guarded sequence
-        // with resumable access guaranteed.
+        // Single foreground path (review round 1, HistoryViewModel mirror):
+        // `didResumeNotification` follows every foreground return, so a
+        // foreground subscription here would double each return (two
+        // invalidates → two full loads). The resume signal owns the reload.
         notifications.publisher(for: DatabaseSuspension.didResumeNotification)
             .sink { [weak self] _ in
                 Task { @MainActor [weak self] in await self?.handleExternalReload() }

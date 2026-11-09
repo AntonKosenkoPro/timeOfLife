@@ -9,7 +9,7 @@ import Foundation
 /// temporary-file store; suspends via the production policy. Every test
 /// resumes in a `defer` so neighbors never observe a parked policy.
 @MainActor
-@Suite("SyncController suspension")
+@Suite("SyncController suspension", .serialized)
 struct SyncControllerSuspensionTests {
 
     private func makeContext() -> (store: LocalStore, mock: MockCatalogRepository, controller: SyncController) {
@@ -39,6 +39,7 @@ struct SyncControllerSuspensionTests {
             }
             return
         }
+        Issue.record("cycle did not settle within 2s; later expectations may be vacuous")
     }
 
     @Test("trigger while suspended starts no cycle")
@@ -119,6 +120,65 @@ struct SyncControllerSuspensionTests {
         await waitUntilNotSyncing(controller)
         #expect(isIdle(controller.status))
         #expect(try await store.outboxRows().isEmpty)
+    }
+
+    @Test("pre-bind resume stays inactive instead of erroring on an unbound store")
+    func preBindResumeStaysInactive() async {
+        // Review round 1 #5: `resume` while no account file is bound must
+        // not `activate` a cycle — the first store touch would throw
+        // `notBound` (not a suspension error), surfacing `.error` that then
+        // blocks the post-bind `activate`. The bind path owns activation.
+        let store = LocalStore()
+        let mock = MockCatalogRepository()
+        let controller = SyncController(
+            store: store,
+            remote: mock,
+            connectivity: MockConnectivity(connected: true)
+        ) { "u1" }
+        controller.resume(userID: "u1")
+        await waitUntilNotSyncing(controller)
+        if case .error = controller.status {
+            Issue.record("pre-bind resume surfaced .error instead of staying inactive")
+        }
+        #expect(controller.status == .inactive)
+        #expect(mock.calls.isEmpty)
+    }
+
+    @Test("resume during an in-flight cycle retries after it settles")
+    func resumeDuringInflightCycleChains() async {
+        // Review round 1 #7: a resume landing while the previous cycle still
+        // holds `cycleTask` must not drop the retry — `trigger` refuses
+        // while the handle is live, so `resume` re-invokes after it settles.
+        let (_, mock, controller) = makeContext()
+        mock.fetchEntryPageHandler = { _, _ in
+            try? await Task.sleep(nanoseconds: 300_000_000)
+            return EntryPage(entries: [], nextCursor: nil)
+        }
+        controller.activate(userID: "u1")
+        var live = false
+        for _ in 0..<100 {
+            if controller.isCycleLive { live = true; break }
+            try? await Task.sleep(nanoseconds: 10_000_000)
+        }
+        guard live else {
+            Issue.record("first cycle never went live")
+            return
+        }
+        mock.clearLog()
+        controller.resume(userID: "u1")
+        let deadline = Date().addingTimeInterval(5)
+        var pulls = 0
+        while Date() < deadline {
+            pulls = mock.fetchedEntryPageCursors.count
+            if pulls >= 2 { break }
+            try? await Task.sleep(nanoseconds: 20_000_000)
+        }
+        if pulls < 2 {
+            Issue.record("chained retry never started; pulls=\(pulls)")
+            return
+        }
+        await waitUntilNotSyncing(controller)
+        #expect(isIdle(controller.status))
     }
 
     @Test("syncNow while suspended starts no cycle and keeps status")
