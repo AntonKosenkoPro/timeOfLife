@@ -123,7 +123,7 @@ struct DatabaseSuspensionTests {
 /// may fan out from reap entry. Baseline sync triggers stay
 /// foreground/connectivity/manual/pull-only.
 @MainActor
-@Suite("Background access window")
+@Suite("Background access window", .serialized)
 struct BackgroundAccessWindowTests {
 
     /// Lock-guarded delivery counter (repo `SignOutBox` precedent: Swift 6

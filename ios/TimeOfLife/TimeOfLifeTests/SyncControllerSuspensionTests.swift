@@ -1,5 +1,6 @@
 import Testing
 import Foundation
+import Combine
 @testable import TimeOfLife
 
 /// Sync cycles across suspension (fix-database-suspension-kill): no cycle
@@ -43,14 +44,31 @@ struct SyncControllerSuspensionTests {
     }
 
     @Test("trigger while suspended starts no cycle")
-    func triggerWhileSuspendedStartsNoCycle() async {
+    func triggerWhileSuspendedStartsNoCycle() async throws {
         let (_, mock, controller) = makeContext()
         controller.activate(userID: "u1")
         await waitUntilNotSyncing(controller)
         mock.clearLog()
         DatabaseSuspension.shared.noteSuspended()
         defer { resumeIfNeeded() }
+        // Cross-suite isolation precondition (suite-local `.serialized`
+        // does not stop a parallel suite from resuming the shared policy
+        // at an `await`): without this, a neighbor's `noteResumed` between
+        // the suspend above and the trigger below would let a real cycle
+        // start — or make the no-cycle assertions pass for the wrong
+        // reason. Fails explicitly instead of going vacuous.
+        try #require(DatabaseSuspension.shared.isSuspended)
         controller.trigger(userID: "u1")
+        // Deterministic leak check (review round 2 O): `trigger` stamps
+        // `cycleRunning` synchronously on the same MainActor turn, so
+        // reading `isCycleLive` here — with no `await` between the trigger
+        // and the read — observes a leaked cycle before it can abort and
+        // hide itself. The old post-sleep `.syncing` sample was vacuous: a
+        // guard-less cycle aborts on its first store touch (before any
+        // remote call) and restores `.idle`, so both the status sample and
+        // `mock.calls.isEmpty` still passed (proven by red-teaming the guard
+        // removal against the old assertion).
+        #expect(!controller.isCycleLive)
         try? await Task.sleep(nanoseconds: 100_000_000)
         if case .syncing = controller.status {
             Issue.record("cycle started while suspended")
@@ -76,6 +94,7 @@ struct SyncControllerSuspensionTests {
         // its first store touch — no timing dependence.
         DatabaseSuspension.shared.noteSuspended()
         defer { resumeIfNeeded() }
+        try #require(DatabaseSuspension.shared.isSuspended)
         controller.activate(userID: "u1")
         await waitUntilNotSyncing(controller)
         if case .error = controller.status {
@@ -110,6 +129,7 @@ struct SyncControllerSuspensionTests {
         ))
         DatabaseSuspension.shared.noteSuspended()
         defer { resumeIfNeeded() }
+        try #require(DatabaseSuspension.shared.isSuspended)
         controller.activate(userID: "u1")
         await waitUntilNotSyncing(controller)
         #expect(!isIdle(controller.status))
@@ -182,7 +202,7 @@ struct SyncControllerSuspensionTests {
     }
 
     @Test("syncNow while suspended starts no cycle and keeps status")
-    func syncNowWhileSuspendedStartsNoCycle() async {
+    func syncNowWhileSuspendedStartsNoCycle() async throws {
         // UI/sync review 3: manual sync is user-initiated foreground work;
         // while suspended it must fail closed with no cycle, no status
         // churn, and no remote calls — the resume trigger owns the retry.
@@ -191,9 +211,27 @@ struct SyncControllerSuspensionTests {
         await waitUntilNotSyncing(controller)
         #expect(isIdle(controller.status))
         mock.clearLog()
+        // Deterministic leak check (review round 2 P): the `$status` sink
+        // observes every status transition, so a guard-less cycle cannot
+        // hide its transient `.syncing` between the `await` and the check.
+        // Without the suspension guard this cycle starts, publishes
+        // `.syncing`, aborts on its first store touch (before any remote
+        // call), and restores `.idle` — so the old post-`await` assertions
+        // (`.idle` + `mock.calls.isEmpty`) passed vacuously (proven by
+        // red-teaming the guard removal against the old assertion).
+        // (`CategoryEditorDeleteTests` precedent: `$`-publisher sink from a
+        // `@MainActor` test with `defer` cancel + `withExtendedLifetime`.)
+        var sawSyncing = false
+        let cancellable = controller.$status.sink { status in
+            if case .syncing = status { sawSyncing = true }
+        }
+        defer { cancellable.cancel() }
         DatabaseSuspension.shared.noteSuspended()
         defer { resumeIfNeeded() }
+        try #require(DatabaseSuspension.shared.isSuspended)
         await controller.syncNow(userID: "u1")
+        withExtendedLifetime(cancellable) {}
+        #expect(!sawSyncing)
         #expect(isIdle(controller.status))
         #expect(mock.calls.isEmpty)
         DatabaseSuspension.shared.noteResumed()

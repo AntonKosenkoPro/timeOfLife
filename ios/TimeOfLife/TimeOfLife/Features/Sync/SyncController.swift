@@ -325,11 +325,33 @@ final class SyncController: ObservableObject {
     func resume(userID: String) {
         if status == .inactive {
             guard boundUserID != nil else { return }
+            // Entry-guard parity with `trigger`/`syncNow`: a resume landing
+            // while execution is unavailable must not start a doomed cycle
+            // (it would only abort on the first store touch), and a fenced
+            // account must not be activated at all — the next trigger after
+            // the fence lifts owns the cycle.
+            guard !DatabaseSuspension.shared.isSuspended else { return }
+            guard !isDeletionFenced(userID: userID) else { return }
             activate(userID: userID)
         } else if let inFlight = cycleTask {
+            // A resume landing while the previous cycle is still unwinding
+            // (its suspension abort has not yet cleared `cycleTask`)
+            // re-invokes after it settles instead of dropping the retry that
+            // `trigger` refuses while the handle is live. Bounded: the
+            // re-invocation is a `trigger` (which never chains again), not a
+            // `resume` — several foreground returns during one long cycle
+            // therefore queue at most one extra cycle instead of one per
+            // return. The `.inactive` park (a suspended-aborted activation
+            // cycle) still rebinds through `resume`, which `trigger` would
+            // refuse.
             Task { [weak self] in
                 await inFlight.value
-                self?.resume(userID: userID)
+                guard let self else { return }
+                if self.status == .inactive {
+                    self.resume(userID: userID)
+                } else {
+                    self.trigger(userID: userID)
+                }
             }
         } else {
             trigger(userID: userID)
@@ -408,23 +430,27 @@ final class SyncController: ObservableObject {
         // Snapshot the outbox depth and note the gap since the last success
         // (the offline-duration signal for offline-skipped cycles).
         let spanStart = Date()
-        let depthBefore = await outboxDepthForTelemetry(fallback: 0)
-        let gapSinceLastCycle = lastCycleEndAt.map { max(0, Int(spanStart.timeIntervalSince($0) * 1_000)) } ?? 0
         guard let userID = boundUserID else {
             Self.logger.error("sync cycle skipped: no bound account")
             status = .inactive
-            await recordSpan(outcome: .aborted, start: spanStart, offlineDurationMs: 0, depthBefore: depthBefore, depthAfter: depthBefore)
+            await recordSpan(outcome: .aborted, start: spanStart, offlineDurationMs: 0, depthBefore: 0, depthAfter: 0)
             return
         }
         activeCycleUserID = userID
         // Deletion fence at cycle entry: an account whose deletion outcome
         // is unresolved (or whose cleanup is removing it) runs no drain and
         // no pull. Park as `.inactive` (aborted-cycle discipline) so the
-        // release path can `activate` exactly one sync owner again.
+        // release path can `activate` exactly one sync owner again. Checked
+        // BEFORE the telemetry outbox-depth read below: a fenced account
+        // must incur no store read at all from this path (the read is
+        // telemetry-only and skipped when telemetry is unwired, but wired
+        // production would otherwise touch the store for a refused cycle).
         if refuseWhenFenced(userID: userID, generation: generation) {
-            await recordSpan(outcome: .aborted, start: spanStart, offlineDurationMs: 0, depthBefore: depthBefore, depthAfter: depthBefore)
+            await recordSpan(outcome: .aborted, start: spanStart, offlineDurationMs: 0, depthBefore: 0, depthAfter: 0)
             return
         }
+        let depthBefore = await outboxDepthForTelemetry(fallback: 0)
+        let gapSinceLastCycle = lastCycleEndAt.map { max(0, Int(spanStart.timeIntervalSince($0) * 1_000)) } ?? 0
         guard connectivity.isConnected else {
             Self.logger.error("sync cycle skipped: offline")
             status = .error("offline")

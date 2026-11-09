@@ -176,7 +176,22 @@ struct LocalStoreSuspensionTests {
         resume()
         // The new account binds a different file with none of the old rows;
         // resumption never reopens the dormant account or moves writes over.
-        try await store.openAccount(userID: "suspend-b")
+        // `openAccount` resolves the production App Group path (not the
+        // temp directory above), so the id is unique per run and the file
+        // (+ journals) is removed synchronously afterwards: otherwise the
+        // shared container keeps `lifio_suspend-b.db` across runs and the
+        // emptiness assertion below depends on a file this suite does not
+        // own (contrast `failedCrossAccountOpenUnbinds`, which removes its
+        // production-path file in a `defer`).
+        let otherID = "suspend-b-\(UUID().uuidString.lowercased())"
+        let prodURL = LocalStore.databaseURL(userID: otherID)
+        defer {
+            try? FileManager.default.removeItem(at: prodURL)
+            for ext in ["-wal", "-shm"] {
+                try? FileManager.default.removeItem(at: URL(fileURLWithPath: prodURL.path + ext))
+            }
+        }
+        try await store.openAccount(userID: otherID)
         #expect(try await store.categories().isEmpty)
     }
 
@@ -238,7 +253,7 @@ struct LocalStoreSuspensionTests {
 /// last good snapshot, stay stale for the resume re-trigger — never blank
 /// committed data or surface a failure banner for a transient transition.
 @MainActor
-@Suite("Suspension reloads")
+@Suite("Suspension reloads", .serialized)
 struct SuspensionReloadTests {
 
     private func temporaryStoreURL() -> URL {

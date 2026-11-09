@@ -179,9 +179,15 @@ actor LocalStore {
             // binding: wiping it here would strand a healthy same-account
             // bind `notBound`, or destroy it under a racing switch. Only
             // genuine bind failures (invalid/different account,
-            // migration/disk errors) take the unbound-on-failure path.
-            if let storeError = error as? LocalStoreError, storeError == .suspended {
-                throw storeError
+            // migration/disk errors) take the unbound-on-failure path. The
+            // shared helper classifies both shapes: the typed `.suspended`
+            // pre-check above, and a GRDB `SQLITE_ABORT`/`SQLITE_INTERRUPT`
+            // from `openQueue` when a suspend lands after the guard (the
+            // reapplied park makes the marker/migrate reads throw) — that
+            // error is never the typed refusal, but it is equally transient
+            // and must not wipe a healthy binding.
+            if DatabaseSuspension.isSuspensionError(error) {
+                throw error
             }
             dbQueue = nil
             boundURL = nil

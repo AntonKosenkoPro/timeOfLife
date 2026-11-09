@@ -80,26 +80,38 @@ struct RootView: View {
                     container.syncController.resume(userID: sessionUserID())
                 }
             }
-            .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
+            // Single foreground path (fix-database-suspension-kill):
+            // `DatabaseSuspension` posts `didResumeNotification`
+            // synchronously from its own `willEnterForeground` observer, so
+            // a foreground subscription here alongside the resume one would
+            // run both handlers for every return: the first `resume` starts
+            // a cycle and the second chains a redundant second full cycle
+            // (double pull/drain plus a second orphaned-activities sweep).
+            // The resume signal implies a foreground return and carries
+            // resumable access (a foreground read that raced ahead of the
+            // queue resume fails silent and retries here), so it owns the
+            // foreground trigger alone — sync resume, orphan reap, and bind
+            // retry together.
+            .onReceive(NotificationCenter.default.publisher(for: DatabaseSuspension.didResumeNotification)) { _ in
                 // Foregrounding never touches the undo buffer (buffered
                 // deletions stay restorable until their push succeeds).
-                if case .signedIn = session.state {
-                    container.syncController.resume(userID: sessionUserID())
+                if case let .signedIn(current) = session.state {
+                    container.syncController.resume(userID: current.id)
                     // Island Stop while suspended: the Darwin signal may
                     // have been missed, so reap here too (the entry-recency
                     // heuristic resolves Saved-vs-silent; live-activities D8).
                     Task { await container.timerService.endOrphanedActivities() }
-                }
-            }
-            .onReceive(NotificationCenter.default.publisher(for: DatabaseSuspension.didResumeNotification)) { _ in
-                // Resume re-trigger (fix-database-suspension-kill): the
-                // foreground handler above can race ahead of the queue resume
-                // and fail silent; this reruns it with resumable access
-                // guaranteed, and retries a bind the suspension refused.
-                if case let .signedIn(current) = session.state {
-                    container.syncController.resume(userID: current.id)
-                    Task { await container.timerService.endOrphanedActivities() }
-                    if boundUserID == nil {
+                    // Bind retry, gated on a suspension-classified refusal:
+                    // `boundUserID` is also nil while `beginSignIn` is still
+                    // in flight (restarting it here would cancel the live
+                    // prepare and redo the deletion-coordinator resume) and
+                    // after a genuine bind failure (which would rerun
+                    // cleanup on every foreground). An in-flight bind holds
+                    // no error and a genuine failure is not
+                    // suspension-classified, so only a refused bind retries.
+                    if boundUserID == nil,
+                       let openError = container.localStoreOpenError,
+                       DatabaseSuspension.isSuspensionError(openError) {
                         beginSignIn(userID: current.id)
                     }
                 }
