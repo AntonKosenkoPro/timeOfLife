@@ -64,7 +64,7 @@ struct RootView: View {
                 // converges sync on verified credentials.
                 await container.authService.restoreSession()
                 if case .signedIn = session.state {
-                    container.syncController.trigger(userID: sessionUserID())
+                    container.syncController.resume(userID: sessionUserID())
                 }
             }
             .onChange(of: session.state) { _, newState in
@@ -77,18 +77,31 @@ struct RootView: View {
             }
             .onChange(of: container.connectivity.isConnected) { _, connected in
                 if connected, case .signedIn = session.state {
-                    container.syncController.trigger(userID: sessionUserID())
+                    container.syncController.resume(userID: sessionUserID())
                 }
             }
             .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
                 // Foregrounding never touches the undo buffer (buffered
                 // deletions stay restorable until their push succeeds).
                 if case .signedIn = session.state {
-                    container.syncController.trigger(userID: sessionUserID())
+                    container.syncController.resume(userID: sessionUserID())
                     // Island Stop while suspended: the Darwin signal may
                     // have been missed, so reap here too (the entry-recency
                     // heuristic resolves Saved-vs-silent; live-activities D8).
                     Task { await container.timerService.endOrphanedActivities() }
+                }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: DatabaseSuspension.didResumeNotification)) { _ in
+                // Resume re-trigger (fix-database-suspension-kill): the
+                // foreground handler above can race ahead of the queue resume
+                // and fail silent; this reruns it with resumable access
+                // guaranteed, and retries a bind the suspension refused.
+                if case let .signedIn(current) = session.state {
+                    container.syncController.resume(userID: current.id)
+                    Task { await container.timerService.endOrphanedActivities() }
+                    if boundUserID == nil {
+                        beginSignIn(userID: current.id)
+                    }
                 }
             }
     }

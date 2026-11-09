@@ -16,7 +16,7 @@ Current scope: **auth MVP** (passwordless email-OTP or Sign in with Apple, per-d
 
 ## Contribute
 
-Start here: [`CONTRIBUTING.md`](CONTRIBUTING.md) (quickstart, environment, driving AI agents, checks & CI, releases). Manual device checklists (Sign in with Apple, Live Activities): [`docs/manual-testing.md`](docs/manual-testing.md).
+Start here: [`CONTRIBUTING.md`](CONTRIBUTING.md) (quickstart, environment, driving AI agents, checks & CI, releases). Manual device checklists (Sign in with Apple, Live Activities, database suspension safety): [`docs/manual-testing.md`](docs/manual-testing.md).
 
 | Doc | What it's for |
 |---|---|

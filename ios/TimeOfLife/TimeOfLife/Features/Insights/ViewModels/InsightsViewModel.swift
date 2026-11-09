@@ -73,6 +73,13 @@ final class InsightsViewModel: ObservableObject {
             snapshot = Snapshot(entries: entries, categories: categories)
             hasCommittedAllTime = entries.contains { $0.endedAt != nil }
         } catch {
+            // Suspension refusal keeps the last good snapshot AND stays
+            // stale: the resume re-trigger converges instead of a transient
+            // failure zeroing committed totals (same philosophy as above).
+            if DatabaseSuspension.isSuspensionError(error) {
+                needsReload = true
+                return
+            }
             // Keep the last good snapshot (same philosophy as History load).
         }
     }
@@ -95,7 +102,12 @@ final class InsightsViewModel: ObservableObject {
             if let inFlightLoad {
                 await inFlightLoad.value
             }
-            guard needsReload else { return }
+            // Fail-fast while suspended (fix-database-suspension-kill):
+            // without this the loop would spin — every refused load
+            // re-marks the snapshot stale and the next iteration retries
+            // immediately. Keep the stale flag; the resume re-trigger
+            // retries with access guaranteed.
+            guard needsReload, !DatabaseSuspension.shared.isSuspended else { return }
             needsReload = false
             let load = Task { await self.load() }
             inFlightLoad = load
@@ -127,6 +139,15 @@ final class InsightsViewModel: ObservableObject {
             }
             .store(in: &reloadCancellables)
         notifications.publisher(for: UIApplication.willEnterForegroundNotification)
+            .sink { [weak self] _ in
+                Task { @MainActor [weak self] in await self?.handleExternalReload() }
+            }
+            .store(in: &reloadCancellables)
+        // Resume re-trigger (fix-database-suspension-kill): the foreground
+        // handler above can race ahead of the queue resume and fail silent
+        // (stale flag preserved); this reruns the same guarded sequence
+        // with resumable access guaranteed.
+        notifications.publisher(for: DatabaseSuspension.didResumeNotification)
             .sink { [weak self] _ in
                 Task { @MainActor [weak self] in await self?.handleExternalReload() }
             }

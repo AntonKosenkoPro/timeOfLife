@@ -88,6 +88,13 @@ struct AppShellView: View {
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
             Task { await reloadTrack() }
         }
+        // Resume re-trigger (fix-database-suspension-kill): the foreground
+        // handler above can race ahead of the queue resume and fail silent
+        // (stale flag preserved); this reruns the same serialized reload
+        // with resumable access guaranteed.
+        .onReceive(NotificationCenter.default.publisher(for: DatabaseSuspension.didResumeNotification)) { _ in
+            Task { await reloadTrack() }
+        }
         // Live Activity tap: a bumped counter selects Track without
         // disturbing per-tab push state. `filter { $0 > 0 }` (not
         // `dropFirst`): on a terminated cold open `onOpenURL` bumps the
