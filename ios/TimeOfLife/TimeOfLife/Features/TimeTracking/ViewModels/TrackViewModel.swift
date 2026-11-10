@@ -145,6 +145,13 @@ final class TrackViewModel: ObservableObject {
             }
         } catch {
             markSettled()
+            if DatabaseSuspension.isSuspensionError(error) {
+                // Fail-fast suspension refusal: keep the last good snapshot
+                // and stay stale so the resume re-trigger reloads instead
+                // of surfacing a failure banner for a transient transition.
+                needsReload = true
+                return
+            }
             errorMessage = L10n.text(in: .default, code: "error.unknown")
         }
     }
@@ -228,7 +235,10 @@ final class TrackViewModel: ObservableObject {
         if let inFlightLoad {
             await inFlightLoad.value
         }
-        guard needsReload else { return }
+        // Fail-fast while suspended (fix-database-suspension-kill): starting
+        // a load now would only refuse on the first store touch. Keep the
+        // stale flag — the resume re-trigger retries with access guaranteed.
+        guard needsReload, !DatabaseSuspension.shared.isSuspended else { return }
         needsReload = false
         let load = Task { await self.load() }
         inFlightLoad = load

@@ -61,6 +61,17 @@ enum BackgroundReapScheduler {
     /// Part-A funnel and reports whether the run is still ongoing (draft
     /// present → re-arm the chain; otherwise the chain ends with no
     /// reschedule and the next Start re-arms it).
+    ///
+    /// Suspension bracketing (fix-database-suspension-kill): the handler
+    /// resumes the database on entry (a resumed-process launch inherits
+    /// parked queues), runs the funnel, then re-parks only while it still
+    /// owns the window. Expiration preempts first — posting the suspension
+    /// interrupts any in-flight store read, which then fails closed (an
+    /// interrupted read is never treated as "no draft") — completes exactly
+    /// once, and never re-arms. Both paths park only for their own
+    /// generation, so a stale expiration cannot re-suspend queues after a
+    /// newer foreground resume. No `UIApplication` time is asserted here:
+    /// the task owns only its system-granted BG window.
     static func register(reap: @escaping @Sendable () async -> Bool) {
         #if targetEnvironment(simulator)
         // No real wakes exist here — and registering in a test runner
@@ -69,12 +80,44 @@ enum BackgroundReapScheduler {
         return
         #else
         BGTaskScheduler.shared.register(forTaskWithIdentifier: taskIdentifier, using: nil) { task in
+            // Granted-window entry (not a foreground return): park the
+            // generation first, then resume the queues WITHOUT the
+            // app-level foreground signal — reap entry must not fan out
+            // into sync triggers, binds, or UI reloads.
+            let generation = DatabaseSuspension.shared.resumeForBackgroundTask()
             let completion = TaskCompletion(task)
-            task.expirationHandler = { completion.complete(success: false) }
+            task.expirationHandler = {
+                // Winning the completion race is what grants the park: a
+                // stale expiration after the body finished (or after a
+                // foreground resume bumped the generation) ends nothing,
+                // re-arms nothing, and re-suspends nothing. The park runs
+                // BEFORE the completion is reported: the system may suspend
+                // the process as soon as `setTaskCompleted` returns, so any
+                // work after it can be lost — and the park is the
+                // safety-critical action here (it is what prevents queues
+                // being held across suspension).
+                if completion.claim() {
+                    DatabaseSuspension.shared.suspendIfGeneration(generation)
+                    completion.finish(success: false)
+                }
+            }
             Task {
                 let ongoing = await reap()
-                if ongoing { scheduleReapCheck() }
-                completion.complete(success: true)
+                // Losing the race to expiry means the expiration path above
+                // already parked and completed: do not re-arm, do not park.
+                // The re-arm and the park run BEFORE the completion is
+                // reported (Apple's documented pattern is to submit the next
+                // request before marking the current task complete): the OS
+                // may suspend/terminate the process as soon as
+                // `setTaskCompleted` returns, which would drop the reap chain
+                // while a draft is still live and leave queues resumed
+                // across suspension (the 0xdead10cc exposure this change
+                // targets).
+                if completion.claim() {
+                    if ongoing { scheduleReapCheck() }
+                    DatabaseSuspension.shared.suspendIfGeneration(generation)
+                    completion.finish(success: true)
+                }
             }
         }
         #endif
@@ -86,6 +129,11 @@ enum BackgroundReapScheduler {
 /// expiration handler from double-completing a finished task. The task
 /// reference is weak to break the task → expirationHandler → box → task
 /// retain cycle (the system holds the task for the duration anyway).
+/// `claim` reports whether the caller won the race, so only the winner
+/// parks queues or re-arms the chain; `finish` reports the completion to
+/// the system and must run LAST, after every other effect (the OS may
+/// suspend the process as soon as `setTaskCompleted` returns, so parking
+/// or re-arming after it can be lost).
 private final class TaskCompletion: @unchecked Sendable {
     private weak var task: BGTask?
     private let lock = NSLock()
@@ -95,11 +143,20 @@ private final class TaskCompletion: @unchecked Sendable {
         self.task = task
     }
 
-    func complete(success: Bool) {
+    /// Atomically takes the single completion right. Returns false when the
+    /// other path already won (or already finished) — the caller must then
+    /// do nothing: no park, no re-arm, no completion call.
+    func claim() -> Bool {
         lock.lock()
         defer { lock.unlock() }
-        guard !done else { return }
+        guard !done else { return false }
         done = true
+        return true
+    }
+
+    /// Reports the task outcome to the system. Call exactly once, only
+    /// after winning `claim()`, and only after the park/re-arm effects.
+    func finish(success: Bool) {
         task?.setTaskCompleted(success: success)
     }
 }

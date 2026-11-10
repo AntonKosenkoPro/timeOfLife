@@ -98,6 +98,10 @@ final class AppContainer: ObservableObject {
             authService: authService
         )
         registerReapCheck()
+        // Starts the database lifecycle policy (fix-database-suspension-kill):
+        // `init` runs on foreground and background launches alike, so this
+        // covers both. Idempotent; safe in tests and previews.
+        DatabaseSuspension.shared.start()
     }
 
     /// Registers the background reap check (live-activities BG chain): a
@@ -106,6 +110,15 @@ final class AppContainer: ObservableObject {
     /// the orphan-reap funnel (which resolves Saved-vs-silent itself) and
     /// re-arms only while a draft is still live — a finished run ends the
     /// chain, and the next Start re-arms it.
+    ///
+    /// Suspension bracketing (fix-database-suspension-kill): the handler
+    /// resumes the database on entry (a resumed-process launch inherits
+    /// parked queues), works, then re-parks only while it still owns the
+    /// window. Expiration preempts via the suspension post (interrupting
+    /// any in-flight store read, which then fails closed as "no draft" is
+    /// never inferred from an error), completes exactly once, and never
+    /// re-arms. The generation guard keeps a stale expiration from
+    /// re-suspending queues after a newer foreground resume.
     private func registerReapCheck() {
         BackgroundReapScheduler.register { [weak self] in
             guard let self else { return false }

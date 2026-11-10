@@ -84,6 +84,11 @@ actor LocalStore {
         /// the only reachable surface while signed out, and it neither reads
         /// nor writes tracker data.
         case notBound
+        /// Safe execution is unavailable (the app is suspended or a
+        /// background execution window ended). Fails fast WITHOUT acquiring
+        /// a file/SQLite lock (0xdead10cc); callers treat this as transient
+        /// stale-retry, never as data loss or blank-screen cause.
+        case suspended
         /// The user id contains characters unsafe for a database file name.
         case invalidUserID
         /// The database file on disk is bound to a different account than
@@ -150,7 +155,18 @@ actor LocalStore {
     func openAccount(userID: String) throws {
         do {
             let sanitized = try Self.sanitizedUserID(userID)
+            // Idempotent same-account bind is a no-op touching no file and
+            // acquiring no lock: it must stay one while suspended instead
+            // of hitting the refusal below, whose catch-all would wipe the
+            // healthy binding and strand the account `notBound` on resume.
             if boundUserID == sanitized, dbQueue != nil { return }
+            // Fail-closed binding while execution is unavailable: opening a
+            // queue now would run migrations against an unparked connection
+            // (a fresh queue misses prior suspend posts), so refuse before
+            // touching the file. The caller retries after resume.
+            guard !DatabaseSuspension.shared.isSuspended else {
+                throw LocalStoreError.suspended
+            }
             let url = Self.databaseURL(userID: sanitized)
             let (queue, boundID) = try Self.openQueue(url: url, userID: sanitized)
             self.dbQueue = queue
@@ -159,6 +175,20 @@ actor LocalStore {
             self.lastBoundURL = url
             undoPushInFlight = false
         } catch {
+            // A transient suspension refusal preserves the existing
+            // binding: wiping it here would strand a healthy same-account
+            // bind `notBound`, or destroy it under a racing switch. Only
+            // genuine bind failures (invalid/different account,
+            // migration/disk errors) take the unbound-on-failure path. The
+            // shared helper classifies both shapes: the typed `.suspended`
+            // pre-check above, and a GRDB `SQLITE_ABORT`/`SQLITE_INTERRUPT`
+            // from `openQueue` when a suspend lands after the guard (the
+            // reapplied park makes the marker/migrate reads throw) — that
+            // error is never the typed refusal, but it is equally transient
+            // and must not wipe a healthy binding.
+            if DatabaseSuspension.isSuspensionError(error) {
+                throw error
+            }
             dbQueue = nil
             boundURL = nil
             boundUserID = nil
@@ -317,6 +347,13 @@ actor LocalStore {
     /// crash between entry-save and draft-clear is reconciled on next
     /// contact (draft present → run resumes; entry-recency heuristic),
     /// identically in-app and in the intent.
+    ///
+    /// Suspension safety (fix-database-suspension-kill): the queue observes
+    /// the suspension notifications so an overlapping suspend preempts
+    /// in-flight work via `sqlite3_interrupt` and new lock acquisition fails
+    /// fast — the process never holds a file/SQLite lock at suspension
+    /// (0xdead10cc). A queue created after the suspend post inherits the
+    /// current policy immediately, closing the bind-races-background race.
     private static func makeDatabaseQueue(at url: URL) throws -> DatabaseQueue {
         let directory = url.deletingLastPathComponent()
         try FileManager.default.createDirectory(
@@ -325,12 +362,14 @@ actor LocalStore {
             attributes: nil
         )
         var configuration = Configuration()
+        configuration.observesSuspensionNotifications = true
         configuration.prepareDatabase { db in
             // Foreign keys are enforced so a delete of a category or entry
             // cascades to its join rows, mirroring the backend relay.
             try db.execute(sql: "PRAGMA foreign_keys = ON")
         }
         let queue = try DatabaseQueue(path: url.path, configuration: configuration)
+        DatabaseSuspension.shared.reapplyIfSuspended()
         // Lock-screen surfaces (Stop intent) run with a locked keybag: the
         // db must stay readable/writable after first unlock (device finding:
         // locked Stop no-op'd with "store or draft unavailable"). Journals
@@ -364,10 +403,15 @@ actor LocalStore {
 
     /// The active account's database queue, or `notBound` before any account
     /// file is opened. This is the single guard point: an unbound store
-    /// (signed out) can never touch a database file.
+    /// (signed out) can never touch a database file, and a suspended store
+    /// fails fast with `suspended` instead of acquiring a lock that iOS
+    /// would kill the process for holding (0xdead10cc).
     private var queue: DatabaseQueue {
         get throws {
             guard let dbQueue else { throw LocalStoreError.notBound }
+            guard !DatabaseSuspension.shared.isSuspended else {
+                throw LocalStoreError.suspended
+            }
             return dbQueue
         }
     }

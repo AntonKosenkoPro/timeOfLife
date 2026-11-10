@@ -23,8 +23,21 @@ import UIKit
 /// The mid-load tests pin the dropped-reload race the serialized
 /// `loadIfNeeded` closes.
 @MainActor
-@Suite("Entry Refresh Wiring (remove-compact-timer)")
+@Suite("Entry Refresh Wiring (remove-compact-timer)", .serialized)
 struct EntryRefreshWiringTests {
+
+    /// Cross-suite policy isolation: `History`/`Insights` loads fail fast
+    /// while the process-global `DatabaseSuspension.shared` reads suspended,
+    /// and the suspension suites flip that singleton from parallel
+    /// executions. Every test in this suite assumes resumable access, so
+    /// each one starts resumed (a fresh suite instance runs before every
+    /// test); suspension suites restore the resumed state in their defers,
+    /// so this only repairs a policy a neighbor parked mid-flight.
+    init() {
+        if DatabaseSuspension.shared.isSuspended {
+            DatabaseSuspension.shared.noteResumed()
+        }
+    }
 
     private func makeStore() throws -> LocalStore {
         try LocalStore(url: URL(fileURLWithPath: NSTemporaryDirectory())
@@ -197,12 +210,15 @@ struct EntryRefreshWiringTests {
         #expect(vm.dayGroups.isEmpty)
 
         // The stop commits while the app is suspended (no observer runs);
-        // the foreground return delivers on the private center and reloads
-        // through the real subscription path (this test's empty-state
-        // counterpart to historyPostedForegroundReloads below).
+        // the foreground return delivers the resume signal on the private
+        // center and reloads through the real subscription path (this
+        // test's empty-state counterpart to historyPostedForegroundReloads
+        // below). Production posts didResume synchronously from the
+        // foreground transition, so the VM subscribes to the resume signal
+        // only — one trigger per foreground return, not two.
         let runStart = now.addingTimeInterval(-600)
         try await commitStop(service: service, text: "Background run", startedAt: runStart, duration: 600)
-        center.post(name: UIApplication.willEnterForegroundNotification, object: nil)
+        center.post(name: DatabaseSuspension.didResumeNotification, object: nil)
 
         #expect(await waitForHistoryTexts(vm, ["Background run"]))
     }
@@ -454,13 +470,71 @@ struct EntryRefreshWiringTests {
         await vm.loadIfNeeded()
 
         // The stop commits while the app is suspended (no delivery); the
-        // foreground return delivers and reloads.
+        // foreground return delivers the resume signal and reloads (the VM
+        // owns the didResume subscription only — see observeExternalReload).
         let runStart = now.addingTimeInterval(-600)
         try await commitStop(service: service, text: "Background run", startedAt: runStart, duration: 600)
-        center.post(name: UIApplication.willEnterForegroundNotification, object: nil)
+        center.post(name: DatabaseSuspension.didResumeNotification, object: nil)
 
         #expect(await waitForHistoryTexts(vm, ["Background run", "Earlier"]))
     }
+
+#if DEBUG || SCREENSHOT_CAPTURE
+    @Test("foreground posts exactly one resume that reloads once")
+    func foregroundRelayDeliversSingleReload() async throws {
+        // Production relay lock (fix-database-suspension-kill): the VMs own
+        // the `didResume` subscription only, and `DatabaseSuspension`
+        // derives that signal from the real `willEnterForeground`
+        // notification — so one foreground return must drive exactly one
+        // reload. Posts the REAL foreground notification on `.default`
+        // after `start()` and counts loads through the override hook: a
+        // doubled subscription (foreground + resume) would invalidate twice
+        // and load twice.
+        DatabaseSuspension.shared.start()
+        if DatabaseSuspension.shared.isSuspended {
+            DatabaseSuspension.shared.noteResumed()
+        }
+        let calendar = mondayCalendar()
+        let now = Self.date("2026-09-03 15:00", calendar: calendar)
+        let store = try makeStore()
+        let service = TimerService(store: store)
+        try await seedEarlier(store, now: now)
+        let vm = HistoryViewModel(
+            store: store,
+            undoBuffer: UndoBufferStore(store: store),
+            now: { now },
+            notifications: .default
+        )
+        vm.setVisible(true)
+        await vm.loadIfNeeded()
+        #expect(vm.dayGroups.flatMap(\.entries).map(\.id) == ["e1"])
+        let runStart = now.addingTimeInterval(-600)
+        try await commitStop(service: service, text: "Background run", startedAt: runStart, duration: 600)
+        // Lock-guarded counter (`BackgroundAccessWindowTests.DidResumeBox`
+        // precedent): the override hook is `@Sendable`, so a plain captured
+        // `var` is rejected in Swift 6 language mode.
+        final class LoadCounter: @unchecked Sendable {
+            private let lock = NSLock()
+            private var count = 0
+            var value: Int {
+                lock.lock(); defer { lock.unlock() }
+                return count
+            }
+            func increment() {
+                lock.lock(); count += 1; lock.unlock()
+            }
+        }
+        let counter = LoadCounter()
+        vm.loadEntriesOverride = {
+            counter.increment()
+            return (try await store.entries(), try await store.categories())
+        }
+        defer { vm.loadEntriesOverride = nil }
+        NotificationCenter.default.post(name: UIApplication.willEnterForegroundNotification, object: nil)
+        #expect(await waitForHistoryTexts(vm, ["Background run", "Earlier"]))
+        #expect(counter.value == 1)
+    }
+#endif
 
     @Test("Insights reloads on the posted external-stop notification")
     func insightsPostedExternalStopReloads() async throws {
@@ -494,7 +568,7 @@ struct EntryRefreshWiringTests {
 
         let runStart = now.addingTimeInterval(-600)
         try await commitStop(service: service, text: "Background run", startedAt: runStart, duration: 600)
-        center.post(name: UIApplication.willEnterForegroundNotification, object: nil)
+        center.post(name: DatabaseSuspension.didResumeNotification, object: nil)
 
         #expect(await waitForInsightsTotal(vm, 660, calendar: calendar))
     }

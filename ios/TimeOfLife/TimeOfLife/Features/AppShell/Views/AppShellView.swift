@@ -81,11 +81,21 @@ struct AppShellView: View {
         .onReceive(vm.$selectedTab.dropFirst().filter { $0 == .track }) { _ in
             Task { await reloadTrack() }
         }
-        // Foreground return never re-appears the visible tab: reconcile here
-        // too, or a background save leaves the Track timer ticking until
-        // the next tab switch (device finding — draft gone, in-memory run
-        // stale). Serialized reload, same as the tab-return path.
-        .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
+        // Foreground return never re-appears the visible tab: reconcile
+        // here too, or a background save leaves the Track timer ticking
+        // until the next tab switch (device finding — draft gone,
+        // in-memory run stale). Single foreground path
+        // (fix-database-suspension-kill): `DatabaseSuspension` posts
+        // `didResumeNotification` synchronously from its own
+        // `willEnterForeground` observer, so a foreground subscription here
+        // would double every return (two invalidates → two full
+        // `loadSnapshot` queries — the duplication the History/Insights
+        // change removed). The resume signal implies a foreground return
+        // and carries resumable access (a read that raced ahead of the
+        // queue resume fails silent with the stale flag preserved and
+        // retries here), so it owns the reload alone. Serialized reload,
+        // same as the tab-return path.
+        .onReceive(NotificationCenter.default.publisher(for: DatabaseSuspension.didResumeNotification)) { _ in
             Task { await reloadTrack() }
         }
         // Live Activity tap: a bumped counter selects Track without

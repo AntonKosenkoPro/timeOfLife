@@ -44,3 +44,13 @@ Live Activities need a real device with Dynamic Island (the simulator shows the 
 5. [ ] **Minimal face** — with music (or another Live Activity) active, the timer collapses to the icon-only minimal face without layout breakage.
 6. [ ] **Lock Screen banner** — lock the device while running; the banner shows icon + name + ticking elapsed + Stop.
 7. [ ] **Dismissal delay** — confirm the Saved card lingers long enough to read but never minutes; record the final seconds in the change's spec delta (task 5.1).
+
+## Database suspension safety (real device)
+
+Regression target: `RUNNINGBOARD 0xdead10cc` (file/SQLite lock held during suspension), observed in TestFlight 0.2.8 (152–153). Simulator lifecycle tests cover lock coordination, not the OS-enforced device kill. Use synthetic data and a test account; record device/OS/build, timestamps, and results in the change evidence. Run without a debugger attached, which can change suspension behavior.
+
+1. [ ] **Reload overlap** — with enough synthetic entries to exercise Track/History loads, start sync, immediately go Home or lock the phone, leave it backgrounded, then return. Repeat with the timer running and stopped; check for new `0xdead10cc` reports in device diagnostics/Xcode Organizer.
+2. [ ] **Durable state** — confirm the running timer resumes with its original start, saved entries remain present, and pending changes sync once. Separately, while offline, verify a buffered deletion remains undoable after background/foreground (backgrounding itself must not commit it; an existing successful sync push still may).
+3. [ ] **Background cleanup** — when the system actually grants the existing Live Activity cleanup task, verify it finishes or expires without retaining a database lock or fabricating a Saved card. If the OS does not grant a run, record this check as not exercised, not passed.
+4. [ ] **Account isolation** — background/return, sign out, and sign in as another test account; no prior account content appears and returning to the original account preserves its draft/outbox.
+5. [ ] **Cold return** — terminate and relaunch after backgrounding; verify persisted state and Live Activity Stop-link handling remain correct. Cold launch may commit buffered deletions under the existing undo contract; simple backgrounding must not.

@@ -289,6 +289,11 @@ final class SyncController: ObservableObject {
     /// advanced, so it is a no-op round-trip.
     func syncNow(userID: String) async {
         guard isBound(to: userID), status != .inactive, !isDeletionFenced(userID: userID) else { return }
+        // Fail-fast while execution is unavailable (trigger parity): a
+        // manual cycle started now would only abort on the first store
+        // touch. The resume re-trigger owns the retry, preserving manual
+        // error semantics for genuine failures.
+        guard !DatabaseSuspension.shared.isSuspended else { return }
         if let inFlight = cycleTask {
             await inFlight.value
             return
@@ -303,9 +308,63 @@ final class SyncController: ObservableObject {
         await task.value
     }
 
+    /// Foreground-resume entry point (fix-database-suspension-kill).
+    /// Rebinds when a suspension parked the controller `.inactive`,
+    /// otherwise triggers a delta cycle. `activate` is idempotent and
+    /// same-account guarded (it deactivates first on a mismatch), so this
+    /// cannot resurrect another account's cycle — and the resume path is
+    /// what converges a suspended-aborted activation cycle, which `trigger`
+    /// alone would refuse while `.inactive`. Pre-bind (no account ever
+    /// bound) is a no-op: the bind path owns activation after
+    /// `prepareAccountStore`, and activating now would run a cycle against
+    /// an unbound store (`notBound` → `.error` that blocks the post-bind
+    /// `activate`). A resume landing while the previous cycle is still
+    /// unwinding (its suspension abort has not yet cleared `cycleTask`)
+    /// re-invokes after it settles instead of dropping the retry that
+    /// `trigger` refuses while the handle is live.
+    func resume(userID: String) {
+        if status == .inactive {
+            guard boundUserID != nil else { return }
+            // Entry-guard parity with `trigger`/`syncNow`: a resume landing
+            // while execution is unavailable must not start a doomed cycle
+            // (it would only abort on the first store touch), and a fenced
+            // account must not be activated at all — the next trigger after
+            // the fence lifts owns the cycle.
+            guard !DatabaseSuspension.shared.isSuspended else { return }
+            guard !isDeletionFenced(userID: userID) else { return }
+            activate(userID: userID)
+        } else if let inFlight = cycleTask {
+            // A resume landing while the previous cycle is still unwinding
+            // (its suspension abort has not yet cleared `cycleTask`)
+            // re-invokes after it settles instead of dropping the retry that
+            // `trigger` refuses while the handle is live. Bounded: the
+            // re-invocation is a `trigger` (which never chains again), not a
+            // `resume` — several foreground returns during one long cycle
+            // therefore queue at most one extra cycle instead of one per
+            // return. The `.inactive` park (a suspended-aborted activation
+            // cycle) still rebinds through `resume`, which `trigger` would
+            // refuse.
+            Task { [weak self] in
+                await inFlight.value
+                guard let self else { return }
+                if self.status == .inactive {
+                    self.resume(userID: userID)
+                } else {
+                    self.trigger(userID: userID)
+                }
+            }
+        } else {
+            trigger(userID: userID)
+        }
+    }
+
     /// Foreground / connectivity-restored trigger.
     func trigger(userID: String) {
         guard isBound(to: userID), status != .inactive, !isDeletionFenced(userID: userID) else { return }
+        // Fail-fast while execution is unavailable: starting a cycle now
+        // would only abort on the first store touch. The resume re-trigger
+        // (RootView did-resume subscription) starts the real cycle.
+        guard !DatabaseSuspension.shared.isSuspended else { return }
         guard cycleTask == nil else { return }
         cycleGeneration += 1
         let generation = cycleGeneration
@@ -371,23 +430,27 @@ final class SyncController: ObservableObject {
         // Snapshot the outbox depth and note the gap since the last success
         // (the offline-duration signal for offline-skipped cycles).
         let spanStart = Date()
-        let depthBefore = await outboxDepthForTelemetry(fallback: 0)
-        let gapSinceLastCycle = lastCycleEndAt.map { max(0, Int(spanStart.timeIntervalSince($0) * 1_000)) } ?? 0
         guard let userID = boundUserID else {
             Self.logger.error("sync cycle skipped: no bound account")
             status = .inactive
-            await recordSpan(outcome: .aborted, start: spanStart, offlineDurationMs: 0, depthBefore: depthBefore, depthAfter: depthBefore)
+            await recordSpan(outcome: .aborted, start: spanStart, offlineDurationMs: 0, depthBefore: 0, depthAfter: 0)
             return
         }
         activeCycleUserID = userID
         // Deletion fence at cycle entry: an account whose deletion outcome
         // is unresolved (or whose cleanup is removing it) runs no drain and
         // no pull. Park as `.inactive` (aborted-cycle discipline) so the
-        // release path can `activate` exactly one sync owner again.
+        // release path can `activate` exactly one sync owner again. Checked
+        // BEFORE the telemetry outbox-depth read below: a fenced account
+        // must incur no store read at all from this path (the read is
+        // telemetry-only and skipped when telemetry is unwired, but wired
+        // production would otherwise touch the store for a refused cycle).
         if refuseWhenFenced(userID: userID, generation: generation) {
-            await recordSpan(outcome: .aborted, start: spanStart, offlineDurationMs: 0, depthBefore: depthBefore, depthAfter: depthBefore)
+            await recordSpan(outcome: .aborted, start: spanStart, offlineDurationMs: 0, depthBefore: 0, depthAfter: 0)
             return
         }
+        let depthBefore = await outboxDepthForTelemetry(fallback: 0)
+        let gapSinceLastCycle = lastCycleEndAt.map { max(0, Int(spanStart.timeIntervalSince($0) * 1_000)) } ?? 0
         guard connectivity.isConnected else {
             Self.logger.error("sync cycle skipped: offline")
             status = .error("offline")
@@ -395,6 +458,11 @@ final class SyncController: ObservableObject {
             await recordSpan(outcome: .offline, start: spanStart, offlineDurationMs: gapSinceLastCycle, depthBefore: depthBefore, depthAfter: depthBefore)
             return
         }
+        // Entry status restored when a suspension aborts the cycle below:
+        // unlike a real failure (`.error`) or an account change
+        // (`.inactive`), a transient suspension leaves sync triggerable
+        // with no user-visible error. Captured before `.syncing` overwrites.
+        let entryStatus = status
         status = .syncing
         Self.logger.info("sync cycle start firstSync=\(firstSync)")
         do {
@@ -409,7 +477,12 @@ final class SyncController: ObservableObject {
             await recordSpan(outcome: .aborted, start: spanStart, offlineDurationMs: 0, depthBefore: depthBefore, depthAfter: depthBefore)
             finishAbortedCycle(userID: userID, generation: generation)
         } catch {
-            await finishFailedCycle(error, userID: userID, generation: generation, spanStart: spanStart, depthBefore: depthBefore)
+            if DatabaseSuspension.isSuspensionError(error) {
+                await recordSpan(outcome: .aborted, start: spanStart, offlineDurationMs: 0, depthBefore: depthBefore, depthAfter: depthBefore)
+                finishSuspendedCycle(userID: userID, generation: generation, entryStatus: entryStatus)
+            } else {
+                await finishFailedCycle(error, userID: userID, generation: generation, spanStart: spanStart, depthBefore: depthBefore)
+            }
         }
     }
 
@@ -516,6 +589,22 @@ final class SyncController: ObservableObject {
         Self.logger.info("sync cycle aborted: account changed mid-cycle")
         if cycleGeneration == generation, boundUserID == userID {
             status = .inactive
+        }
+    }
+
+    /// Tail of a cycle aborted by suspension (0xdead10cc guard): the
+    /// in-flight store touch was refused or interrupted, and any partial
+    /// transaction rolled back. Same generation discipline as the other
+    /// tails, but restores the entry status instead of surfacing `.error`.
+    /// An entry `.syncing` means this cycle itself started from `activate`
+    /// (which stamps `.syncing` before the task hops): the cycle is over,
+    /// so it parks `.inactive` for the next `activate` rebind instead of
+    /// stranding a never-ending "syncing". The resume re-trigger starts the
+    /// real cycle, so suspension stays silent and triggerable either way.
+    private func finishSuspendedCycle(userID: String, generation: Int, entryStatus: SyncStatus) {
+        Self.logger.info("sync cycle suspended: transient, will retry after resume")
+        if cycleGeneration == generation, boundUserID == userID {
+            status = entryStatus == .syncing ? .inactive : entryStatus
         }
     }
 
