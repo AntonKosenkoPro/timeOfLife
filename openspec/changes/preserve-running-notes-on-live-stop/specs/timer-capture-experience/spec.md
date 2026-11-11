@@ -3,9 +3,9 @@
 ### Requirement: Running Track offers a recording-only notes button
 While a timer is running, the locked name row SHALL be paired with a trailing notes button that opens the shared Notes editor page bound to the running draft. The button SHALL be visible only while recording (running/error states with a persisted draft) and SHALL sit OUTSIDE the locked-name row as a standalone 44 pt `note.text` control at the screen's trailing padding beside the locked-name `FieldCard` — without changing the row height or moving the main action. The button's tint SHALL signal draft-notes presence (accent when non-empty, secondary when empty); no notes preview SHALL appear on Track. Saving on the editor page while recording SHALL rewrite only the running draft notes snapshot (persisted `timer_state`); cancelling SHALL leave the draft untouched. Notes edits SHALL never touch history until Stop.
 
-If Live Activity Stop arrives while this running-notes editor contains changes from its last confirmed notes, the app SHALL retain the edited text without delaying timer completion. Changes SHALL include clearing previous notes and SHALL exclude edits reverted to the confirmed text. Stop SHALL first save the completed entry using the confirmed notes. Only after successful completion SHALL the app explain that the timer has stopped and offer **Save Changes** and **Discard Changes** for the retained text. Save SHALL update only the notes of that exact completed entry, with an ordinary transactional sync update; discard SHALL leave its confirmed notes unchanged. Neither choice SHALL alter the entry's name, ordered categories, start, end, or duration, create a second entry, or restart the timer.
+If Live Activity Stop arrives while this running-notes editor contains changes from its last confirmed notes, the app SHALL retain the edited text without delaying timer completion. Changes SHALL include clearing previous notes and SHALL exclude edits reverted to the confirmed text. Stop SHALL first save the completed entry using the confirmed notes. Only after successful completion SHALL the app explain that the timer has stopped and offer **Review Notes** and **Discard Changes** for the retained text. Review SHALL show the retained, editable text without validating or writing it. Only ✓ in that editor SHALL validate and save the reviewed notes to that exact completed entry, with an ordinary transactional sync update. X or normal back navigation from review, or Discard Changes in the prompt, SHALL abandon the unconfirmed edits and leave the entry's confirmed notes unchanged. Reviewing, saving, or discarding SHALL NOT alter the entry's name, ordered categories, start, end, or duration, create a second entry, or restart the timer.
 
-The retained text SHALL remain available across the normal saved-state reset, background/foreground transitions, and recoverable notes-save failures. Starting another run SHALL remain unavailable until this running-notes resolution is completed or invalidated. Implicit prompt dismissal SHALL NOT discard text or undo Stop. Notes validation SHALL retain the existing 2000-scalar bound without truncation and allow correction/retry against the completed entry. A missing/deleted target SHALL NOT be recreated. Account teardown SHALL invalidate the pending session; an old callback SHALL NOT write to another account, store generation, or replacement timer. Unconfirmed text SHALL remain process-local; termination SHALL NOT imply durable recovery. Ordinary running-editor cancel/save behavior and History/manual-entry notes editing SHALL otherwise remain unchanged.
+The retained text SHALL remain available across the normal saved-state reset, background/foreground transitions, and recoverable notes-save failures. Starting another run SHALL remain unavailable until this running-notes resolution is completed or invalidated. Implicit prompt dismissal SHALL NOT discard text or undo Stop. The review editor SHALL reuse the existing 2000-scalar bound and validation on ✓ without truncation, allowing correction/retry against the completed entry rather than introducing a separate prompt-save path. A missing/deleted target SHALL NOT be recreated. Account teardown SHALL invalidate the pending session; an old callback SHALL NOT write to another account, store generation, or replacement timer. Unconfirmed text SHALL remain process-local; termination SHALL NOT imply durable recovery. Ordinary running-editor cancel/save behavior and History/manual-entry notes editing SHALL otherwise remain unchanged.
 
 #### Scenario: Notes button visible only while recording
 - **WHEN** a timer is running
@@ -29,10 +29,14 @@ The retained text SHALL remain available across the normal saved-state reset, ba
 
 #### Scenario: Dirty running notes are offered only after successful Stop
 - **WHEN** Live Activity Stop is handled while the running-notes editor contains unconfirmed text different from its confirmed notes
-- **THEN** the entry first completes with its confirmed notes, the edited text remains available, and only then the app offers to save or discard those changes while stating that the timer has stopped
+- **THEN** the entry first completes with its confirmed notes, the edited text remains available, and only then the app offers Review Notes or Discard Changes while stating that the timer has stopped
 
-#### Scenario: Saving changes targets only the completed entry
-- **WHEN** the user chooses Save Changes with valid retained text after Stop succeeds
+#### Scenario: Review opens retained text without saving
+- **WHEN** the user chooses Review Notes after Stop succeeds
+- **THEN** the editor shows the unconfirmed text for review and further editing, no notes are validated or written by opening review, and the timer remains stopped
+
+#### Scenario: Confirming reviewed notes targets only the completed entry
+- **WHEN** the user taps ✓ with valid text in the post-stop review editor
 - **THEN** that exact completed entry's notes are updated locally and queued for sync, even if its original create has already synced
 - **AND** no other field, entry, or running draft changes, and the recorded end time is independent of the decision delay
 
@@ -40,9 +44,13 @@ The retained text SHALL remain available across the normal saved-state reset, ba
 - **WHEN** the user chooses Discard Changes after the completed entry was saved with previously confirmed notes
 - **THEN** only the unconfirmed edits are abandoned, the entry keeps those confirmed notes, and the timer remains stopped
 
+#### Scenario: Leaving review discards only unconfirmed changes
+- **WHEN** the user taps X or uses normal back navigation from the post-stop review editor
+- **THEN** the reviewed changes are discarded, the completed entry keeps its previously confirmed notes, and Track returns without restarting the timer
+
 #### Scenario: Clearing notes is an unconfirmed change
 - **WHEN** the user clears non-empty confirmed notes without confirming the edit before Live Activity Stop
-- **THEN** the app still offers the post-stop decision, Save Changes clears the completed entry's notes, and Discard Changes preserves its prior confirmed notes
+- **THEN** the app still offers the post-stop decision, reviewing then confirming the empty text with ✓ clears the completed entry's notes, and discarding preserves its prior confirmed notes
 
 #### Scenario: Clean or already confirmed notes do not prompt
 - **WHEN** Live Activity Stop succeeds and the editor text is unchanged, was edited then reverted, or was confirmed with ✓ before Stop
@@ -52,9 +60,9 @@ The retained text SHALL remain available across the normal saved-state reset, ba
 - **WHEN** the initial Stop cannot successfully save and clear the running draft
 - **THEN** the unconfirmed editor text remains available with the existing recoverable error behavior and no post-stop notes decision or false success is presented
 
-#### Scenario: Notes validation or persistence failure retains text
-- **WHEN** Save Changes encounters over-limit text or a failed/stale local update
-- **THEN** the edited text is not truncated or discarded, the timer stays stopped at its original end time, and correction/retry or explicit discard remains available
+#### Scenario: Review reuses existing notes validation and retains failed saves
+- **WHEN** ✓ in the post-stop review editor encounters over-limit text or a failed/stale local update
+- **THEN** the existing editor validation applies, the edited text is not truncated or discarded, the timer stays stopped at its original end time, and correction/retry via ✓ or explicit discard via X/back remains available
 - **AND** a missing or deleted target is not recreated and no replacement entry is chosen
 
 #### Scenario: Presentation and lifecycle do not silently discard pending changes

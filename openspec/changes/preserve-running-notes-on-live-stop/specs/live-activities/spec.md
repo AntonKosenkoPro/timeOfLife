@@ -1,9 +1,9 @@
 ## MODIFIED Requirements
 
 ### Requirement: Stop and return actions
-Tapping any face outside Stop SHALL deep-link to Track (`lifio://track`). The expanded Island and banner SHALL each offer Stop as a link to `lifio://track?stop=1`: tapping opens the app, which reloads its bound account's draft, stops and saves through the ordinary in-app path, and ends the activity with the Saved card. The app SHALL capture the end time when it handles the Stop request, before asynchronous reload/save work, and SHALL NOT defer stopping or extend that time while awaiting a notes decision. This SHALL work on the first tap after a terminated-app cold open; no draft means a graceful no-op. The normal Stop URL SHALL be available for shipped controls; there SHALL be no nil-URL intent fallback, independent extension entry writer, or external-stop signal needed to complete Stop. Compact and minimal faces SHALL offer no buttons (tap navigates only). Existing dimmed/inert rendering is unchanged.
+Tapping any face outside Stop SHALL deep-link to Track (`lifio://track`). The expanded Island and banner SHALL each offer Stop as a link to `lifio://track?stop=1`: tapping opens the app, which reloads its bound account's draft, stops and saves through the ordinary in-app path, and ends the activity with the Saved card. The app SHALL preserve existing Stop timing and SHALL NOT defer stopping or change the completed entry's end time while awaiting notes review or resolution. This SHALL work on the first tap after a terminated-app cold open; no draft means a graceful no-op. The normal Stop URL SHALL be available for shipped controls; there SHALL be no nil-URL intent fallback, independent extension entry writer, or external-stop signal needed to complete Stop. Compact and minimal faces SHALL offer no buttons (tap navigates only). Existing dimmed/inert rendering is unchanged.
 
-When Track's running-notes editor holds unconfirmed changes, Stop SHALL first complete with the confirmed notes, clear the running draft, and show the ordinary Saved result. Only after successful completion SHALL the main app offer to save or discard the retained changes against that exact completed entry, as defined by `timer-capture-experience`. This decision SHALL NOT block the Live Activity's normal ending/dismissal, create a second entry, restart the activity, or change the recorded duration. Clean/already-confirmed notes, terminated-app Stop without an in-memory editor, no-run no-ops, and failed/gated stops SHALL NOT produce this decision. Repeated delivery during one Stop/resolution operation SHALL NOT duplicate the entry or decision.
+When Track's running-notes editor holds unconfirmed changes, Stop SHALL first complete with the confirmed notes, clear the running draft, and show the ordinary Saved result. Only after successful completion SHALL the main app offer Review Notes or Discard Changes for the retained text, as defined by `timer-capture-experience`. Review SHALL open the text without writing; only the review editor's ✓ SHALL validate and save notes to that exact completed entry. This flow SHALL NOT block the Live Activity's normal ending/dismissal, create a second entry, restart the activity, or change the recorded duration. Clean/already-confirmed notes, terminated-app Stop without an in-memory editor, no-run no-ops, and failed/gated stops SHALL NOT produce this decision. Repeated delivery during one Stop/resolution operation SHALL NOT duplicate the entry or decision.
 
 #### Scenario: Tap returns to Track
 - **WHEN** the user taps the compact, minimal, expanded, or banner surface (outside Stop)
@@ -44,11 +44,11 @@ When Track's running-notes editor holds unconfirmed changes, Stop SHALL first co
 - **THEN** it follows the valid stop deep link; no fallback intent executes or writes an entry outside the app
 
 #### Scenario: Dirty notes never defer Stop or the Saved card
-- **WHEN** an expanded-Island or banner Stop is handled with unconfirmed running-note changes and the user waits before answering the subsequent decision
-- **THEN** the initial entry is already saved, its end time is the app-handled Stop-request time rather than the answer time, and the activity shows its normal Saved card and timed dismissal without waiting for that answer
+- **WHEN** an expanded-Island or banner Stop is handled with unconfirmed running-note changes and the user waits before reviewing or resolving those changes
+- **THEN** the initial entry is already saved using the existing Stop timing, its end time does not change with the review/decision delay, and the activity shows its normal Saved card and timed dismissal without waiting for resolution
 
 #### Scenario: Notes resolution does not end the activity again
-- **WHEN** the user later saves or discards changes, or retries a failed notes update
+- **WHEN** the user later reviews notes, saves via ✓, discards via the prompt or X/back, or retries a failed notes update
 - **THEN** no timer restarts, no second activity-ending event or Saved card is emitted, and the completed entry's end time and duration stay unchanged
 
 #### Scenario: Repeated Stop preserves one pending decision

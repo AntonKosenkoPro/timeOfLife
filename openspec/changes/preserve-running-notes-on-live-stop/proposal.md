@@ -1,14 +1,15 @@
 ## Why
 
-Live Activity Stop currently saves the running timer's confirmed notes but bypasses text still being edited on Track's notes page. Issue [#242](https://github.com/AntonKosenkoPro/timeOfLife/issues/242) needs to preserve those edits without delaying the recorded end time: stop first, then ask whether to attach the unsaved changes to the completed entry.
+Live Activity Stop currently saves the running timer's confirmed notes but bypasses text still being edited on Track's notes page. Issue [#242](https://github.com/AntonKosenkoPro/timeOfLife/issues/242) needs to preserve those edits: stop first, then let the user review the unsaved notes before deciding what to save to the completed entry.
+
+Existing behavior to preserve: Stop completes without waiting for a notes decision. Reviewing, editing, saving, or discarding notes must not delay Stop or change the entry's recorded end time. A new timestamp-capture strategy is out of scope.
 
 ## What Changes
 
-- Stop and save immediately when the app handles the Live Activity Stop request; capture the end time before asynchronous reload/save work, never when the notes decision is answered.
 - Retain unconfirmed changes from the running timer's notes editor before stopping, including edits that clear previously confirmed notes.
-- After a successful stop, ask **Save Changes** or **Discard Changes** only when that running-notes editor has changes. Explain that the timer has already stopped.
-- Save updates only the notes of the exact completed entry through LocalStore and the transactional outbox. Discard preserves that entry's last confirmed notes. Neither action changes its end time, restarts the timer, or creates another entry.
-- Preserve the pending text on validation or save failure so the user can correct/retry; prevent stale account/run identities and repeated Stop requests from targeting another entry.
+- After a successful stop, offer **Review Notes** or **Discard Changes** only when that running-notes editor has changes. Explain that the timer has already stopped; the prompt itself never saves notes.
+- Review shows the retained, editable text without writing anything. Only ✓ in that editor validates and saves notes to the exact completed entry through LocalStore and the transactional outbox. X/back or Discard Changes abandons only the unconfirmed edits, preserving that entry's last confirmed notes.
+- Reuse the notes editor's existing validation on ✓ rather than adding a separate prompt-save path. Preserve text on validation or save failure so the user can correct/retry; prevent stale account/run identities and repeated Stop requests from targeting another entry.
 - Keep starting another run unavailable while the post-stop notes decision is unresolved; the usual Saved confirmation itself is not extended.
 - Leave clean/already-confirmed notes, terminated-app Stop, normal editor X/✓/back behavior, and History/Log Time editing unchanged. There is no pre-stop confirmation, autosave of keystrokes, extension writer, or new backend endpoint.
 
