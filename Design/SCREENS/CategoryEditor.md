@@ -22,7 +22,7 @@ Full-height `.sheet` (no detents — closed or fully open). `ScrollView` → `VS
    - `autocapitalization`: `.sentences`
    - error: `vm.fieldErrors.name`
    - Focused on appear, after the sheet presentation settles (a short settle delay keeps keyboard-driven auto-scroll on final layout).
-3. `SectionHeader(L10n.categoryEditorIconLabel)` + `IconPickerGrid(options: CatalogIcon.renderableSymbols, selection: $vm.icon, accessibilityId: "CategoryEditorIcon")`. A valid synchronized icon unavailable on the current OS remains selected by raw value and is displayed with the `tag` fallback until the user changes it.
+3. `SectionHeader(L10n.categoryEditorIconLabel)` + `IconPickerGrid(options: CatalogIcon.pickerOptions(selected: vm.icon.rawValue), selection: $vm.icon, accessibilityId: "CategoryEditorIcon")`. The curated picker hides eight sports values from new selection; a selected supported icon that is hidden or unavailable on the current OS is appended once and remains selected by raw value, displayed with the `tag` fallback only when the OS cannot render it, until the user changes it.
 4. `ErrorBanner` if `vm.errorMessage != nil`:
    - `accessibilityId`: `CategoryEditorErrorBanner`
 5. Reserve matching the measured pinned bottom action bar height.
@@ -101,7 +101,7 @@ struct Category: Identifiable, Codable, Sendable {
 
 ### Implementation checklist
 
-- [x] All strings use `L10n.*` keys (EN + RU).
+- [x] All strings use `L10n.*` keys (all five supported locales).
 - [x] Accessibility identifiers: `CategoryEditorNameField`, `CategoryEditorIcon`, `CategoryEditorSaveButton`, `CategoryEditorCancelButton`, `CategoryEditorErrorBanner`, `CategoryEditorDeleteButton` (edit mode).
 - [x] Keyboard placement follows D13 (name upper, toolbar checkmark save, full-height sheet).
 - [x] Validation uses unified category-name messages (U2).

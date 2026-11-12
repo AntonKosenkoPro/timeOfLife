@@ -2,6 +2,15 @@
 
 Unit tests fake the Apple authorization (`AppleAuthorizationProviding`) and can't reach Apple's JWKS or the Dynamic Island, so the checklists below must be verified manually on a **real device**. Run them before any release that touches auth or Live Activities, and after the `release.yml verify` job is green — do not distribute the TestFlight build until both are green.
 
+## Category defaults
+
+Fresh-install only (already-seeded account files never gain the new starter).
+
+1. [ ] **Eight starters on first seeding** — fresh install, sign in; Manage Categories lists Work, Hobby, Sport, Education, Relax, Sleep, Entertainment, Food with `briefcase`, `paintbrush`, `figure.run`, `book`, `cup.and.saucer`, `bed.double`, `tv`, `fork.knife`. Switch device language across the five supported locales on a fresh install; starter names localize, icons stay the same.
+2. [ ] **Compact sports picker** — new category → sports choices are `figure.walk`, `figure.run`, `dumbbell`, `figure.yoga`, `figure.cycling`, `figure.swimming` (no `bicycle` duplicate, no other sports); food choices include `carrot`, child choices include `stroller` and `teddybear`.
+3. [ ] **Hidden selection survives editing** — sync a category with a hidden sports icon (e.g. `figure.soccer`), open it, change only the name, save; the stored icon is unchanged and renders its original glyph, not `tag`.
+4. [ ] **No backfill** — on a device whose file seeded before this change, sign in after upgrade; no Food category appears and surviving names/icons are unchanged.
+
 ## Sign in with Apple
 
 Apple's identity-token JWKS is only fetched for real with `APPLE_CLIENT_ID` configured (the entitlement has no effect in the simulator).
