@@ -1,3 +1,6 @@
+// swiftlint:disable file_length
+// (hosts the alert, both notes destinations, and the route-lifecycle
+// observers; splitting the shell view is future work, not this change.)
 import Combine
 import SwiftUI
 
@@ -74,6 +77,38 @@ struct AppShellView: View {
                 .accessibilityIdentifier("TabInsights")
         }
         .tint(Theme.accentPrimary)
+        // Post-stop notes decision (preserve-running-notes-on-live-stop):
+        // retained unconfirmed running-notes text offers Review Notes
+        // (non-destructive) or Discard Changes (destructive, system red).
+        // The prompt never saves; Review opens the retained editable text
+        // bound to the exact completed entry, Discard abandons only the
+        // unconfirmed edits. Attached at the shell level so it presents over
+        // pushed pages (existing alert modality also keeps Start
+        // inaccessible while the flow is presented — no Start lock is
+        // added). Placement and adaptive layout follow HIG/native alert
+        // conventions with no fixed position. Presentation derives from the
+        // retained session, not a transient flag: an implicit dismissal is
+        // not discard — the decision stays resumable.
+        .alert(
+            "\(L10n.notesStopDecisionTitle.text)",
+            isPresented: notesDecisionBinding,
+            presenting: trackVM.pendingReview
+        ) { _ in
+            Button(L10n.notesStopDecisionReview.text) {
+                trackVM.beginReview()
+                let editorOpen = vm.trackPath.contains { $0.isNotesEditor }
+                if !editorOpen {
+                    vm.trackPath.append(.notesReview)
+                }
+            }
+            .accessibilityIdentifier("NotesDecisionReviewButton")
+            Button(L10n.notesStopDecisionDiscard.text, role: .destructive) {
+                trackVM.discardPendingReview()
+            }
+            .accessibilityIdentifier("NotesDecisionDiscardButton")
+        } message: { _ in
+            Text(L10n.notesStopDecisionMessage.text)
+        }
         // TabView keeps mounted tabs alive, so Track's own `.task` runs only
         // on first appear: refresh recents + categories on every return, so
         // History edits are inherited and chip icons stay current.
@@ -117,11 +152,17 @@ struct AppShellView: View {
         // above — `dropFirst` loses a terminated cold open because the bump
         // happens before this subscription exists (device finding: first
         // Island tap only opened the app, second tap stopped).
+        //
+        // The stop is fenced to runs that predate the request
+        // (preserve-running-notes-on-live-stop): a stale duplicate link
+        // landing after a replacement run started must not stop the new run
+        // while the prior resolution is pending.
         .onReceive(navigation.$islandStopRequestID.filter { $0 > 0 }) { _ in
             vm.selectedTab = .track
             Task {
+                let requestTime = Date()
                 await reloadTrack()
-                await trackVM.stop()
+                await trackVM.stop(onlyIfStartedAtBefore: requestTime)
                 // The stop committed behind possibly-visible tabs: tell
                 // History/Insights to reload (same event the retired intent
                 // flow posted; the link flow is the only external stop now).
@@ -144,6 +185,18 @@ struct AppShellView: View {
         }
     }
 
+    /// Presents the post-stop notes decision while the retained session
+    /// needs one. The setter ignores dismissal: an implicit dismissal is
+    /// not discard — the session persists and the decision re-presents
+    /// (preserve-running-notes-on-live-stop). Action taps resolve the
+    /// session, which flips the getter and dismisses for real.
+    private var notesDecisionBinding: Binding<Bool> {
+        Binding(
+            get: { trackVM.pendingReview?.needsDecision ?? false },
+            set: { _ in }
+        )
+    }
+
     /// Serialized Track reload shared by the tab-return, Profile-exit, and
     /// sync-exit paths.
     @MainActor
@@ -162,6 +215,10 @@ struct AppShellView: View {
             TrackView(vm: trackVM) {
                 vm.trackPath.append(.namePicker(initialText: trackVM.nameDraft))
             } onOpenNotesEditor: {
+                // Capture the confirmed baseline before pushing: the page
+                // reports every keystroke back, so the stop path can tell an
+                // unconfirmed change (including a clear) from a revert.
+                trackVM.openRunningNotesEditor()
                 vm.trackPath.append(.notesEditor(
                     initialText: trackVM.state.draft?.notes ?? "",
                     entryName: trackVM.state.draft?.text ?? ""
@@ -198,10 +255,45 @@ struct AppShellView: View {
                         )
                     case let .notesEditor(initialText, entryName):
                         // The running notes editor for Track
-                        // (separate-notes-editor): ✓ writes back through the
-                        // owning tab's view model; X discards. Back cancels.
-                        NotesEditorPage(initialText: initialText, entryName: entryName) { notes in
-                            Task { await trackVM.updateDraftNotes(notes) }
+                        // (separate-notes-editor): pre-stop, ✓ writes back
+                        // through the owning tab's view model (dirty-tracked
+                        // for the post-stop decision); X discards. Post-stop
+                        // the same surface becomes the review editor: ✓
+                        // confirms to the exact completed entry and pops only
+                        // on success, so a failed write keeps the text open
+                        // for correction/retry. Input/✓ freeze while a stop
+                        // or a review write is in flight. Back cancels.
+                        NotesEditorPage(
+                            initialText: initialText,
+                            entryName: entryName,
+                            onTextChange: { trackVM.updateRunningNotesCurrent($0) },
+                            confirmReview: { notes in
+                                await trackVM.confirmNotesFromEditor(notes)
+                            },
+                            isInputDisabled: trackVM.runningNotesEdit?.frozen == true
+                                || trackVM.pendingReview?.phase == .savingReview
+                        )
+                    case .notesReview:
+                        // The pushed post-stop review surface
+                        // (preserve-running-notes-on-live-stop): shown only
+                        // when the running editor is no longer open (the open
+                        // editor page itself is the review surface otherwise).
+                        // Seeded with the retained text bound to the exact
+                        // completed entry; opening validates/writes nothing.
+                        // X/back discards the unconfirmed edits (the entry
+                        // keeps its confirmed notes).
+                        if let review = trackVM.pendingReview {
+                            NotesEditorPage(
+                                initialText: review.retainedText,
+                                entryName: review.entryName,
+                                onTextChange: nil,
+                                confirmReview: { notes in
+                                    await trackVM.confirmReviewedNotes(notes)
+                                },
+                                isInputDisabled: review.phase == .savingReview
+                            )
+                        } else {
+                            EmptyView()
                         }
                     case .entry:
                         EmptyView()
@@ -237,6 +329,16 @@ struct AppShellView: View {
         // Categories never touch a path value, so no spurious reloads.
         .onChange(of: vm.trackPath) { old, new in
             profilePoppedReload(old: old, new: new)
+            trackNotesRoutesChanged(old: old, new: new)
+        }
+        // A resolved/invalidated post-stop decision owns no surface: remove
+        // any stale running/review editor routes (a confirm success or a
+        // discard lands back on Track). Removals with no pending session
+        // are no-ops in the path observer above — no ping-pong.
+        .onChange(of: trackVM.pendingReview) { _, new in
+            if new == nil {
+                vm.trackPath.removeAll { $0.isNotesEditor || $0 == .notesReview }
+            }
         }
     }
 
@@ -324,6 +426,31 @@ struct AppShellView: View {
     private func profilePoppedReload(old: [ShellRoute], new: [ShellRoute]) {
         if AppShellViewModel.profileWasPopped(old: old, new: new) {
             Task { await reloadTrack() }
+        }
+    }
+
+    /// Running/review editor route lifecycle (preserve-running-notes-on-live-stop):
+    /// - The running editor popping with no pending decision abandons the
+    ///   tracked typing (ordinary running-editor cancel semantics).
+    /// - X/back from a review surface (the kept-open editor bound to review,
+    ///   or the pushed review page) discards the unconfirmed edits — the
+    ///   completed entry keeps its confirmed notes.
+    /// - A still-awaiting decision survives an editor pop (e.g. an implicit
+    ///   prompt dismissal gap): Review re-pushes the review page when the
+    ///   editor is gone.
+    private func trackNotesRoutesChanged(old: [ShellRoute], new: [ShellRoute]) {
+        switch AppShellViewModel.notesRouteEffect(
+            oldPath: old,
+            newPath: new,
+            hasPendingReview: trackVM.pendingReview != nil,
+            isReviewing: trackVM.pendingReview?.phase == .reviewing
+        ) {
+        case .editorClosed:
+            trackVM.runningNotesEditorClosed()
+        case .discardReview:
+            trackVM.discardPendingReview()
+        case .none:
+            break
         }
     }
 }

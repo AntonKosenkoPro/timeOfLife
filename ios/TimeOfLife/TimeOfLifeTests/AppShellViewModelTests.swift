@@ -120,6 +120,60 @@ struct AppShellViewModelTests {
         #expect(AppShellViewModel.isTabBarHidden(path: vm.insightsPath) == false)
     }
 
+    // MARK: - Post-stop notes route lifecycle (preserve-running-notes-on-live-stop)
+
+    private func editorRoute() -> ShellRoute {
+        .notesEditor(initialText: "dirty", entryName: "Gym")
+    }
+
+    @Test("popping the editor with no pending decision abandons typing")
+    func editorPopWithoutPendingClearsEdit() {
+        #expect(AppShellViewModel.notesRouteEffect(
+            oldPath: [editorRoute()], newPath: [],
+            hasPendingReview: false, isReviewing: false
+        ) == .editorClosed)
+    }
+
+    @Test("X/back from the kept-open review surface discards")
+    func editorPopWhileReviewingDiscards() {
+        #expect(AppShellViewModel.notesRouteEffect(
+            oldPath: [editorRoute()], newPath: [],
+            hasPendingReview: true, isReviewing: true
+        ) == .discardReview)
+    }
+
+    @Test("an awaiting decision survives an editor pop")
+    func editorPopWhileAwaitingKeepsDecision() {
+        #expect(AppShellViewModel.notesRouteEffect(
+            oldPath: [editorRoute()], newPath: [],
+            hasPendingReview: true, isReviewing: false
+        ) == .none)
+    }
+
+    @Test("popping the pushed review page discards")
+    func reviewPopDiscards() {
+        #expect(AppShellViewModel.notesRouteEffect(
+            oldPath: [.notesReview], newPath: [],
+            hasPendingReview: true, isReviewing: true
+        ) == .discardReview)
+        #expect(AppShellViewModel.notesRouteEffect(
+            oldPath: [.notesReview], newPath: [],
+            hasPendingReview: false, isReviewing: false
+        ) == .none)
+    }
+
+    @Test("pushes and unrelated pops have no session effect")
+    func pushesAndUnrelatedPopsHaveNoEffect() {
+        #expect(AppShellViewModel.notesRouteEffect(
+            oldPath: [], newPath: [editorRoute()],
+            hasPendingReview: false, isReviewing: false
+        ) == .none)
+        #expect(AppShellViewModel.notesRouteEffect(
+            oldPath: [.profile], newPath: [],
+            hasPendingReview: true, isReviewing: true
+        ) == .none)
+    }
+
     // MARK: - Helpers
 
     private func makeViewModel() -> AppShellViewModel {

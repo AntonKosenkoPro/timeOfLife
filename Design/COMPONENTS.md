@@ -1082,6 +1082,12 @@ Shared dedicated notes-editing page pushed from the entry-form Notes presenter a
 - Empty-state overlay: `.body`, `Theme.textSecondary`, hit-test-transparent, hidden from VoiceOver (the nav-bar title + live `<name> • <count>/2000` counter subtitle carry the accessible context).
 - Over-limit counter renders `Theme.danger`; ✓ stays enabled and an over-limit save shakes the subtitle with the error haptic instead of saving.
 
+### Post-stop review form (preserve-running-notes-on-live-stop)
+
+The same page doubles as the post-stop review surface for retained running-notes text. A second initializer carries only the plumbing this caller needs — live text reports (`onTextChange`, every keystroke, so the owner detects exact-text changes including clears), input freeze (`isInputDisabled`, stop flight or review write; X stays live), and an async confirm (`confirmReview`): ✓ awaits the write and pops only on success, so a failed write keeps the page (and its text) open for correction/retry. Review reuses the 2000-scalar counter, over-limit shake, and error haptic with no separate prompt-save path; the retained text never appears in system surfaces or logs. History and Log Time keep the sync form untouched (plain `onSave`).
+
+After a successful Stop with a dirty running-notes editor, Track offers a native decision alert — **Review Notes** (non-destructive) and **Discard Changes** (destructive role, system red; placement and adaptive layout follow HIG/native conventions, no fixed position). The prompt never saves: Review opens the retained editable text bound to the exact completed entry UUID (opening validates/writes nothing; only the review ✓ writes, notes-only through `LocalStore` + the ordinary outbox update), while Discard — or X/back from the review surface — abandons only the unconfirmed edits and keeps the confirmed notes. Starting another run stays inaccessible through the existing alert modality and notes navigation alone (no Start locks); the Saved confirmation and Start enablement run unchanged. An implicit prompt dismissal is not discard: the retained session persists and the decision re-presents.
+
 ---
 
 ## `UndoToast` (removed)

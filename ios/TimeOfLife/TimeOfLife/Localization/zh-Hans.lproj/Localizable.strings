@@ -228,6 +228,11 @@
 "notes.editorSubtitle" = "%@ • %d/2000";
 "notes.editorCounter" = "%d/2000";
 "notes.editorPlaceholder" = "亲爱的日记…";
+// Post-stop notes decision (preserve-running-notes-on-live-stop)
+"notes.stopDecisionTitle" = "计时器已停止";
+"notes.stopDecisionMessage" = "备注中有未存储的更改。存储前要查看吗？";
+"notes.stopDecisionReview" = "查看备注";
+"notes.stopDecisionDiscard" = "放弃更改";
 
 // Starter categories (category-management spec, seed requirement)
 "category.seed.work" = "工作";

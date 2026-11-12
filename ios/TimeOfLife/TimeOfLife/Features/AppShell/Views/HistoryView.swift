@@ -267,6 +267,10 @@ struct HistoryView: View {
                 // Unreachable: the Track notes route lives on the Track
                 // path only. Exhaustiveness, no behavior.
                 EmptyView()
+            case .notesReview:
+                // Unreachable: the post-stop review route lives on the
+                // Track path only. Exhaustiveness, no behavior.
+                EmptyView()
             case .categoryEditor:
                 // Unreachable: the Track category-editor route lives on the
                 // Track path only. Exhaustiveness, no behavior.

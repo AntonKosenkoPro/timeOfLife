@@ -27,11 +27,25 @@ enum ShellRoute: Hashable {
     case entry(TimeEntry)
     case namePicker(initialText: String)
     case notesEditor(initialText: String, entryName: String)
+    /// Post-stop notes review (preserve-running-notes-on-live-stop): pushed
+    /// only when the running editor is no longer open (the open editor page
+    /// itself is the review surface otherwise). Carries no payload — the
+    /// destination reads the retained text and entry identity from the
+    /// owning tab's view model, so the route itself stays a value
+    /// (namePicker precedent).
+    case notesReview
     /// Inline category creation from the running-tag row
     /// (inline-category-creation): create mode only, no payload — completions
     /// resolve at the destination from the owning tab's view model, so the
     /// route itself stays a value (namePicker precedent).
     case categoryEditor
+
+    /// Whether this route is the running-notes editor page (its pop without
+    /// a stop resolving it abandons the tracked typing).
+    var isNotesEditor: Bool {
+        if case .notesEditor = self { return true }
+        return false
+    }
 }
 
 /// View model for the app shell (app-shell spec): owns the selected
@@ -83,5 +97,45 @@ final class AppShellViewModel: ObservableObject {
     /// unit-tested, no view state involved.
     static func isTabBarHidden(path: [ShellRoute]) -> Bool {
         !path.isEmpty
+    }
+
+    /// Post-stop notes route lifecycle (preserve-running-notes-on-live-stop):
+    /// the effect of a track-path transition given the retained session
+    /// state. Pure function of the transition — unit-tested, no view state
+    /// involved; the shell applies the result to the owning tab view model.
+    enum TrackNotesRouteEffect: Equatable {
+        /// The running editor popped with no pending decision: abandon the
+        /// tracked typing (ordinary running-editor cancel semantics).
+        case editorClosed
+        /// X/back from a review surface, or the pushed review page popped:
+        /// discard the unconfirmed edits (the entry keeps confirmed notes).
+        case discardReview
+        case none
+    }
+
+    /// Maps a track-path transition to its session effect:
+    /// - the running editor popping with no pending decision abandons the
+    ///   tracked typing;
+    /// - X/back from a review surface (the kept-open editor bound to review,
+    ///   or the pushed review page) discards the unconfirmed edits;
+    /// - a still-awaiting decision survives an editor pop (Review re-pushes
+    ///   the review page when the editor is gone).
+    static func notesRouteEffect(
+        oldPath: [ShellRoute],
+        newPath: [ShellRoute],
+        hasPendingReview: Bool,
+        isReviewing: Bool
+    ) -> TrackNotesRouteEffect {
+        let hadEditor = oldPath.contains { $0.isNotesEditor }
+        let hasEditor = newPath.contains { $0.isNotesEditor }
+        if hadEditor, !hasEditor {
+            if hasPendingReview, isReviewing { return .discardReview }
+            if !hasPendingReview { return .editorClosed }
+            return .none
+        }
+        let hadReview = oldPath.contains(.notesReview)
+        let hasReview = newPath.contains(.notesReview)
+        if hadReview, !hasReview, hasPendingReview { return .discardReview }
+        return .none
     }
 }

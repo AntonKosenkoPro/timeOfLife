@@ -231,6 +231,7 @@ start, so a stale draft can never start.
   chip icons stay current.
 - Stop calculates elapsed time, saves the entry locally, emits success feedback,
   and returns to the ready state for the same text.
+- When the running-notes editor holds unconfirmed changes at Stop (exact-text difference from the last confirmed notes, including a clear), Stop still completes immediately with the confirmed notes and the recorded end time; only after success the app offers **Review Notes** / **Discard Changes** for the retained text. Review opens the retained editable text bound to the exact completed entry without writing; only the review ✓ validates and saves (notes-only, ordinary outbox update). Discard — or X/back from review — abandons only the unconfirmed edits. The retained text survives the saved-state reset, background/foreground, and failed-write retry; account teardown invalidates it.
 - Save errors preserve recoverable running state and appear in the reserved
   non-field-error region without a blocking loader; error text wraps fully and
   is never cut.
@@ -285,6 +286,8 @@ per-record state).
 - [ ] Start follows explicit selection and persists running state.
 - [ ] Running `Started HH:MM` caption opens the start editor; applying rewrites the draft start, restarts the ticker, and re-anchors the Live Activity (chips/icon unchanged).
 - [ ] Stop saves locally and preserves recoverable state on failure.
+- [ ] A dirty running-notes Stop offers Review Notes / Discard Changes after success (Discard is destructive/system-red with native HIG placement); Review binds the exact completed entry, never moves the end time, and retains text across saved reset, backgrounding, and failed-write retry.
+- [ ] No Start-disable state is added for the post-stop flow: Start inaccessibility relies on the existing alert modality and notes navigation; Saved timing and Start enablement are unchanged.
 - [ ] Return to Track to stop: History and Insights render no in-app running-timer surface and no replacement indicator; the saved entry appears after Stop through the normal reload flows.
 - [x] VoiceOver, Dynamic Type, Reduce Motion, light/dark, and iOS 18 are tested.
 - [ ] SwiftLint and warning-as-error builds pass.
@@ -302,6 +305,10 @@ Add English and Russian values, then add corresponding `L10n` cases:
 "timer.stopHint" = "Stops the timer and saves the entry";
 "timer.saved" = "Saved";
 "timer.recentsEmptyHint" = "Texts you track will appear here.";
+"notes.stopDecisionTitle" = "Timer stopped";
+"notes.stopDecisionMessage" = "You have unsaved note changes. Review them before saving?";
+"notes.stopDecisionReview" = "Review Notes";
+"notes.stopDecisionDiscard" = "Discard Changes";
 ```
 
 ## Capture behavior
