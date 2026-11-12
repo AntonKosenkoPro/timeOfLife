@@ -64,6 +64,69 @@ final class TrackViewModel: ObservableObject {
     var stopGate: (@Sendable () async -> Void)?
 #endif
 
+    /// The running-notes editing session (preserve-running-notes-on-live-stop
+    /// D2): lifted ownership of the running editor's baseline/current text,
+    /// bound to the run identity. Lives only while the running notes editor
+    /// is open (or a stop is resolving it); the editor closing without a
+    /// stop abandons the tracked typing (ordinary cancel semantics), while a
+    /// successful stop consumes it into `pendingReview` when dirty.
+    struct RunningNotesEdit: Equatable {
+        /// Last confirmed notes (at open / last ✓): dirty means exact-text
+        /// inequality against this baseline (clearing counts, reverting does
+        /// not), not non-empty content.
+        var baseline: String
+        /// Latest editor text (reported on every keystroke while open).
+        var current: String
+        /// Stop in flight: input/✓ frozen so the decision text cannot race
+        /// the receipt.
+        var frozen: Bool
+        /// Run identity: only this run's editor may move the text.
+        var runStartedAt: Date
+    }
+
+    /// A retained post-stop notes decision (preserve-running-notes-on-live-stop
+    /// D2–D4): the unconfirmed text bound to the exact completed entry UUID
+    /// (never the newest row), fenced by account/run/entry identity. The
+    /// prompt itself never saves; only the review editor's ✓ validates and
+    /// writes through the notes-only LocalStore path.
+    /// Review phase (one nesting level: beside the session, not inside it).
+    enum NotesReviewPhase: Equatable {
+        /// Decision offered (alert showing or resumable); nothing written.
+        case awaitingDecision
+        /// Review surface open; opening it neither validates nor writes.
+        case reviewing
+        /// Review write in flight: competing resolves disabled.
+        case savingReview
+    }
+
+    struct PendingNotesReview: Equatable {
+        var entryID: String
+        var entryName: String
+        var runStartedAt: Date
+        var endedAt: Date
+        var confirmedNotes: String
+        var retainedText: String
+        var accountUserID: String?
+        var phase: NotesReviewPhase
+
+        /// Whether the decision prompt should be presented (an implicit
+        /// dismissal is not discard: the session persists and the decision
+        /// stays resumable).
+        var needsDecision: Bool { phase == .awaitingDecision }
+    }
+
+    /// The lifted running-notes editing session, if the editor is open.
+    /// Settable for the same test-seeding reason as `state`.
+    @Published var runningNotesEdit: RunningNotesEdit?
+    /// The retained post-stop decision, if a dirty stop resolved to one.
+    /// Settable for the same test-seeding reason as `state`.
+    @Published var pendingReview: PendingNotesReview?
+    /// One completion identity per logical stop sequence: generated at the
+    /// first attempt and reused across `retryStop`, so a retried stop
+    /// replays the same entry id instead of saving a second entry.
+    /// Cleared on success, replacement runs, and external-stop reconciles.
+    @Published private(set) var pendingStopEntryID: String?
+
     init(
         service: TimerService,
         connectivity: Connectivity,
@@ -216,6 +279,14 @@ final class TrackViewModel: ObservableObject {
                 )
                 nameDraft = draft.activityText
                 startTicker(from: startedAt)
+                // The session's run identity follows the live run anchor: a
+                // restore converging on a moved anchor (e.g. an unpersisted
+                // backdate losing to the stored draft) keeps tracking the
+                // same run instead of going stale-quiet.
+                if var edit = runningNotesEdit {
+                    edit.runStartedAt = startedAt
+                    runningNotesEdit = edit
+                }
             }
         }
     }
@@ -276,6 +347,9 @@ final class TrackViewModel: ObservableObject {
     private func reconcileExternalStop(draft: TrackState.Draft) async {
         stopTicker()
         UIApplication.shared.isIdleTimerDisabled = false
+        // The run was completed through another path: its stop sequence is
+        // over — a later stop must mint a fresh completion identity.
+        pendingStopEntryID = nil
         elapsed = 0
         // Same grammar as scheduleSavedReset: a restart must not inherit
         // the previous run's notes (e.g. mid-run notes preserved in memory
@@ -371,6 +445,13 @@ final class TrackViewModel: ObservableObject {
     }
 
     private func beginRunning(draft: TrackState.Draft, startedAt: Date) {        state = .running(draft, startedAt: startedAt)
+        // A replacement run owns a fresh completion identity: the previous
+        // stop sequence (if any) must never lend its id to this run — and a
+        // still-pending notes decision belongs to the stopped run, never to
+        // this one.
+        pendingStopEntryID = nil
+        pendingReview = nil
+        runningNotesEdit = nil
         errorMessage = nil
         startTicker(from: startedAt)
         UIApplication.shared.isIdleTimerDisabled = true
@@ -475,11 +556,52 @@ final class TrackViewModel: ObservableObject {
         }
         do {
             try await service.updateTimerDraftNotes(notes)
+            // Keep the lifted baseline in step with the confirmed snapshot:
+            // a ✓-saved edit is no longer unconfirmed.
+            if var edit = runningNotesEdit, state.isRunning, state.startedAt == edit.runStartedAt {
+                edit.baseline = notes
+                edit.current = notes
+                runningNotesEdit = edit
+            }
         } catch {
             // Local persistence failure: keep the notes in memory so the
             // user can retry (recoverable error), like beginRunning.
             errorMessage = L10n.text(in: .default, code: "error.unknown")
         }
+    }
+
+    // MARK: - Running-notes session (preserve-running-notes-on-live-stop)
+
+    /// Captures the running editor's confirmed baseline when the notes page
+    /// opens (synchronous: no await precedes it, so a stop racing the push
+    /// still sees the session). Ordinary running-editor cancel/save
+    /// semantics otherwise unchanged; History/Log Time never call this.
+    func openRunningNotesEditor() {
+        guard state.isRunning, let draft = state.draft, let startedAt = state.startedAt else { return }
+        runningNotesEdit = RunningNotesEdit(
+            baseline: draft.notes,
+            current: draft.notes,
+            frozen: false,
+            runStartedAt: startedAt
+        )
+    }
+
+    /// Reports the editor's live text (every keystroke while open). Ignored
+    /// while the session is frozen (stop in flight — the decision text is
+    /// locked to the receipt) and from stale callbacks for another run.
+    func updateRunningNotesCurrent(_ text: String) {
+        guard var edit = runningNotesEdit, !edit.frozen else { return }
+        guard state.isRunning, state.startedAt == edit.runStartedAt else { return }
+        edit.current = text
+        runningNotesEdit = edit
+    }
+
+    /// The notes editor page closed (X / swipe-back) without a stop
+    /// resolving it: abandon the tracked typing (ordinary cancel semantics).
+    /// A pending post-stop review owns its retained text independently and
+    /// survives (the view decides whether to discard it).
+    func runningNotesEditorClosed() {
+        runningNotesEdit = nil
     }
 
     /// Backdates the running start (editable-running-start-time): resolves
@@ -504,6 +626,13 @@ final class TrackViewModel: ObservableObject {
         case .idle, .ready, .saving, .saved:
             return
         }
+        // The session's run identity follows the live run anchor: a backdate
+        // moves the run (same draft), so keystroke tracking and the later
+        // receipt check must use the resolved anchor, not the stale one.
+        if var edit = runningNotesEdit, state.isRunning, let anchor = state.startedAt {
+            edit.runStartedAt = anchor
+            runningNotesEdit = edit
+        }
         elapsed = max(0, now.timeIntervalSince(resolved))
         startTicker(from: resolved)
         Task {
@@ -517,36 +646,46 @@ final class TrackViewModel: ObservableObject {
 
     /// Stops the running timer and saves the completed entry locally with
     /// the final ordered categories, the final draft notes, and a single
-    /// outbox row.
-    func stop() async {
+    /// outbox row — then offers the retained unconfirmed running-notes text
+    /// (if any) for review against the exact completed entry. Stop completes
+    /// without waiting for the notes decision and later review/editing/
+    /// resolution never moves the recorded end time.
+    ///
+    /// - Parameter onlyIfStartedAtBefore: stale-duplicate guard for the
+    ///   Island-stop handler — a stop request raised before this run started
+    ///   (a replacement run begun while the link was in flight) must not
+    ///   stop it. Nil keeps the unconditional in-app/retry behavior.
+    func stop(onlyIfStartedAtBefore bound: Date? = nil) async {
         guard case let .running(draft, startedAt) = state else { return }
+        if let bound, startedAt > bound { return }
+        // Capture the decision text synchronously — before the first await —
+        // so in-flight keystrokes and the store pipeline cannot race the
+        // receipt, and freeze the session's input/✓ for the same reason.
+        let stoppingNotes = runningNotesEdit
+        if var edit = runningNotesEdit { edit.frozen = true; runningNotesEdit = edit }
         state = .saving(draft, startedAt: startedAt)
         stopTicker()
 #if DEBUG || SCREENSHOT_CAPTURE
         if let stopGate { await stopGate() }
 #endif
         do {
-            try await service.stopTimerDraft(
+            if pendingStopEntryID == nil {
+                pendingStopEntryID = await service.store.newRecordID()
+            }
+            let receipt = try await service.stopTimerDraft(
                 text: draft.text,
                 categoryIDs: draft.categoryIDs,
                 startedAt: startedAt,
                 endedAt: nowProvider(),
-                notes: draft.notes
+                notes: draft.notes,
+                entryID: pendingStopEntryID
             )
-            // A concurrent revive may have restarted the ticker mid-save
-            // (pre-revive-guard histories); it owns nothing now — kill it so
-            // the saved confirmation (and the ready state after it) freezes.
-            stopTicker()
-            let duration = max(0, nowProvider().timeIntervalSince(startedAt))
-            state = .saved(draft, duration: duration)
-            elapsed = duration
-            UIApplication.shared.isIdleTimerDisabled = false
-            Haptics.success()
-            scheduleSavedReset()
-            recents = (try? await storeRecents()) ?? recents
-            allNames = (try? await storeAllNames()) ?? allNames
+            await completeStop(draft: draft, startedAt: startedAt, receipt: receipt, stoppingNotes: stoppingNotes)
         } catch {
-            // Recoverable: preserve running state so elapsed time is not lost.
+            // Recoverable: preserve running state so elapsed time is not lost,
+            // unfreeze the session, and retain the unconfirmed text for the
+            // retry (no decision is offered — nothing completed).
+            if var edit = runningNotesEdit { edit.frozen = false; runningNotesEdit = edit }
             state = .error(draft, startedAt: startedAt)
             errorMessage = L10n.text(in: .default, code: "error.unknown")
             Haptics.error()
@@ -554,11 +693,157 @@ final class TrackViewModel: ObservableObject {
         }
     }
 
+    /// Applies a successful stop receipt: the saved confirmation, list
+    /// refreshes, and — when the running-notes editor held unconfirmed
+    /// changes — the retained post-stop decision.
+    private func completeStop(
+        draft: TrackState.Draft,
+        startedAt: Date,
+        receipt: TimerService.StopReceipt,
+        stoppingNotes: RunningNotesEdit?
+    ) async {
+        pendingStopEntryID = nil
+        runningNotesEdit = nil
+        // A concurrent revive may have restarted the ticker mid-save
+        // (pre-revive-guard histories); it owns nothing now — kill it so
+        // the saved confirmation (and the ready state after it) freezes.
+        stopTicker()
+        let duration = max(0, nowProvider().timeIntervalSince(startedAt))
+        state = .saved(draft, duration: duration)
+        elapsed = duration
+        UIApplication.shared.isIdleTimerDisabled = false
+        Haptics.success()
+        scheduleSavedReset()
+        recents = (try? await storeRecents()) ?? recents
+        allNames = (try? await storeAllNames()) ?? allNames
+        await beginPendingReviewIfDirty(
+            stoppingNotes: stoppingNotes,
+            receipt: receipt,
+            entryName: draft.text,
+            confirmedNotes: draft.notes
+        )
+    }
+
+    /// Retains the unconfirmed running-notes text against the exact completed
+    /// entry when the editor held changes at stop time. Clean sessions (no
+    /// editor, unchanged or already-confirmed text) resolve with no decision.
+    /// The account now must still own the receipt's file: a teardown between
+    /// open and stop invalidates the session instead of offering it.
+    private func beginPendingReviewIfDirty(
+        stoppingNotes: RunningNotesEdit?,
+        receipt: TimerService.StopReceipt,
+        entryName: String,
+        confirmedNotes: String
+    ) async {
+        guard let stopping = stoppingNotes,
+              stopping.current != confirmedNotes,
+              stopping.runStartedAt == receipt.runStartedAt,
+              await service.store.boundUserID == receipt.accountUserID
+        else { return }
+        pendingReview = PendingNotesReview(
+            entryID: receipt.entryID,
+            entryName: entryName,
+            runStartedAt: receipt.runStartedAt,
+            endedAt: receipt.endedAt,
+            confirmedNotes: confirmedNotes,
+            retainedText: stopping.current,
+            accountUserID: receipt.accountUserID,
+            phase: .awaitingDecision
+        )
+    }
+
     /// Retries Stop after a recoverable save failure.
     func retryStop() async {
         guard case let .error(draft, startedAt) = state else { return }
         state = .running(draft, startedAt: startedAt)
         await stop()
+    }
+
+    // MARK: - Post-stop notes resolution (preserve-running-notes-on-live-stop)
+
+    /// Unified editor ✓ entry: pre-stop saves the running draft; post-stop
+    /// confirms the reviewed text to the exact completed entry. Returns
+    /// whether the editor page should pop: a failed review write keeps the
+    /// page (and its text) open for correction/retry instead.
+    func confirmNotesFromEditor(_ notes: String) async -> Bool {
+        if pendingReview != nil {
+            return await confirmReviewedNotes(notes)
+        }
+        // Frozen (stop in flight): the decision text is already captured —
+        // popping is safe, writing would race the receipt.
+        if runningNotesEdit?.frozen == true { return true }
+        await updateDraftNotes(notes)
+        return true
+    }
+
+    /// Opens the retained text for review: Review shows the editable text
+    /// without validating or writing anything — only a later ✓ saves.
+    func beginReview() {
+        guard var review = pendingReview, review.phase == .awaitingDecision else { return }
+        review.phase = .reviewing
+        pendingReview = review
+    }
+
+    /// Validates (through the editor's existing 2000-scalar bound — the page
+    /// never calls this over the limit) and saves the reviewed notes to the
+    /// exact completed entry via the notes-only LocalStore path. Never
+    /// touches another field, entry, or the running draft; never recreates a
+    /// missing target. Returns true when resolved (the page should pop).
+    /// A failed write or a torn-down account retains the text (or
+    /// invalidates silently) — never a false success.
+    func confirmReviewedNotes(_ notes: String) async -> Bool {
+        guard var review = pendingReview, review.phase != .savingReview else { return false }
+        // Claim the write synchronously (no await precedes this): MainActor
+        // serialization makes a second concurrent ✓ see `.savingReview` and
+        // stand down — at most one successful notes resolution.
+        review.phase = .savingReview
+        pendingReview = review
+        guard await service.store.boundUserID == review.accountUserID else {
+            // Account teardown: invalidate — never write another account,
+            // store generation, or replacement run.
+            pendingReview = nil
+            runningNotesEdit = nil
+            return false
+        }
+        do {
+            let updated = try await service.updateEntryNotes(
+                id: review.entryID, notes: notes, now: nowProvider()
+            )
+            guard updated else {
+                // Missing target or stale write: retain the reviewed text for
+                // correction/retry via ✓ (or explicit discard via X/back).
+                review.retainedText = notes
+                review.phase = .reviewing
+                pendingReview = review
+                errorMessage = L10n.text(in: .default, code: "error.unknown")
+                Haptics.error()
+                return false
+            }
+            pendingReview = nil
+            runningNotesEdit = nil
+            Haptics.success()
+            // Ordinary entry-change invalidation so History/search/notes
+            // indicators converge after this ordinary update (the same event
+            // the Island-stop link posts on completion).
+            NotificationCenter.default.post(name: .timerStoppedExternally, object: nil)
+            return true
+        } catch {
+            review.retainedText = notes
+            review.phase = .reviewing
+            pendingReview = review
+            errorMessage = L10n.text(in: .default, code: "error.unknown")
+            Haptics.error()
+            return false
+        }
+    }
+
+    /// Abandons the retained text (prompt Discard Changes, or X/back from
+    /// the review surface): only the unconfirmed edits are abandoned — the
+    /// completed entry keeps its confirmed notes and the timer stays stopped.
+    /// An implicit prompt dismissal must NOT call this (retention, not discard).
+    func discardPendingReview() {
+        pendingReview = nil
+        runningNotesEdit = nil
     }
 
     // MARK: - Ticker

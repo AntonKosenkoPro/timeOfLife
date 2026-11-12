@@ -347,6 +347,8 @@ struct LogTimeView: View {
         // padding all push. No tap-away here — it would consume those
         // taps.
         NavigationLink {
+            // Copy-on-open X/✓ semantics (History/Log Time keep no review
+            // plumbing: the sync form owns ✓).
             NotesEditorPage(initialText: vm.notes, entryName: vm.name) { vm.notes = $0 }
         } label: {
                 VStack(alignment: .leading, spacing: Theme.spacingExtraSmall) {

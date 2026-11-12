@@ -1219,6 +1219,64 @@ actor LocalStore {
         }
     }
 
+    /// Atomically completes the running timer: inserts the entry with its
+    /// single outbox create row and clears the persisted running draft in
+    /// ONE transaction (preserve-running-notes-on-live-stop D2). Mirrors
+    /// `createEntry`'s nonthrowing contract so the caller must require an
+    /// actual created/idempotently-existing entry before issuing its success
+    /// receipt — a `.failure` keeps the draft for retry instead of falsely
+    /// succeeding. Idempotent on `id`: a replay (retry after the entry
+    /// committed) returns the existing committed record and still clears the
+    /// draft, without enqueueing a second outbox create.
+    @discardableResult
+    func stopRunningTimer(_ entry: TimeEntry) throws -> EntryMutation {
+        let trimmed = ActivityName.normalized(entry.activityText)
+        switch ActivityName.validate(trimmed) {
+        case .empty, .tooLong:
+            return .invalid(ActivityName.validate(trimmed))
+        case .valid:
+            break
+        }
+        return try queue.write { db in
+            if let row = try Row.fetchOne(db, sql: """
+                SELECT * FROM entries WHERE id = ?
+                """, arguments: [entry.id]) {
+                // Idempotent replay: the entry already committed. Clear the
+                // draft in the same transaction so a stop that committed the
+                // entry but never cleared converges here, and enqueue nothing
+                // (the create outbox row already exists).
+                try db.execute(sql: "DELETE FROM timer_state WHERE id = 'singleton'")
+                return .created(try Self.entry(from: row, db: db))
+            }
+            do {
+                try db.execute(
+                    sql: """
+                        INSERT INTO entries (id, activity_text, notes, started_at, ended_at, duration_seconds,
+                                             created_at, updated_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                    arguments: [
+                        entry.id, trimmed, entry.notes, entry.startedAt, entry.endedAt,
+                        entry.durationSeconds,
+                        entry.createdAt, entry.updatedAt,
+                    ]
+                )
+                try Self.replaceEntryCategories(db: db, entryID: entry.id, categoryIDs: entry.categoryIDs)
+            } catch let error as AssociationError {
+                throw error
+            } catch {
+                return .failure
+            }
+            try Self.enqueueOutbox(db: db, resource: "entry", recordID: entry.id,
+                                   op: "create", payload: entry)
+            try db.execute(sql: "DELETE FROM timer_state WHERE id = 'singleton'")
+            var saved = entry
+            saved.activityText = trimmed
+            saved.categoryIDs = Self.deduplicate(entry.categoryIDs)
+            return .created(saved)
+        }
+    }
+
     /// Applies a last-write-wins update to every entry-owned field (text,
     /// ordered categories, notes, timing). Returns false when stale.
     /// Strictly newer only (`<`, matching the relay): a replay carrying an
@@ -1251,6 +1309,48 @@ actor LocalStore {
             }
             try Self.enqueueOutbox(db: db, resource: "entry", recordID: entry.id,
                                    op: "update", payload: entry)
+            return true
+        }
+    }
+
+    /// Rewrites ONLY the notes of one exact existing entry (the post-stop
+    /// review path, preserve-running-notes-on-live-stop D4): preserves the
+    /// latest text, ordered categories, start, end, and duration, and
+    /// enqueues an ordinary outbox update (the create stays as-is, so a
+    /// still-queued create and an already-synced create converge alike).
+    /// Returns false when the target is missing (never recreated) or the
+    /// write is not strictly newer. Same-tick callers bump past the stored
+    /// version by one storage quantum (the `updateCategory` rule) so a
+    /// same-instant save still converges, without ever reporting false
+    /// success. Read-check-update runs in one transaction: the latest row
+    /// is re-read inside the write, so a concurrent unrelated edit merged
+    /// just before is preserved, never reverted.
+    @discardableResult
+    func updateEntryNotes(id: String, notes: String, now: Date = Date()) throws -> Bool {
+        let candidate = Self.storageQuantized(now)
+        return try queue.write { db in
+            guard let row = try Row.fetchOne(db, sql: """
+                SELECT * FROM entries WHERE id = ?
+                """, arguments: [id]) else { return false }
+            var latest = try Self.entry(from: row, db: db)
+            let stored = Self.storageQuantized(latest.updatedAt)
+            // Bump past the stored version by exactly one storage quantum
+            // (1 ms): strictly newer at the millisecond precision the
+            // relay's `updated_at < ?` compares, without future-dating the
+            // row (the `updateCategory` precedent).
+            let stamp = max(candidate, stored.addingTimeInterval(0.001))
+            try db.execute(
+                sql: """
+                    UPDATE entries SET notes = ?, updated_at = ?
+                    WHERE id = ? AND updated_at < ?
+                    """,
+                arguments: [notes, stamp, id, stamp]
+            )
+            guard db.changesCount > 0 else { return false }
+            latest.notes = notes
+            latest.updatedAt = stamp
+            try Self.enqueueOutbox(db: db, resource: "entry", recordID: id,
+                                   op: "update", payload: latest)
             return true
         }
     }

@@ -1,8 +1,8 @@
 import Foundation
 
 /// Compile-time-safe localization keys. Each case maps to a key in
-/// `Localizable.strings` (en + ru). The single test in `LocalizationTests`
-/// asserts every case resolves in both bundles.
+/// `Localizable.strings` (all five shipped locales). The single test in `LocalizationTests`
+/// asserts every case resolves in every bundle.
 enum L10n: String, CaseIterable {
     // App
     case appName = "app.name"
@@ -188,6 +188,12 @@ enum L10n: String, CaseIterable {
     // Expanded notes editor empty-state placeholder (change-expanded-notes-placeholder):
     // warm free-writing prompt, distinct from the collapsed `entry.notesPlaceholder`.
     case notesEditorPlaceholder = "notes.editorPlaceholder"
+    // Post-stop notes decision (preserve-running-notes-on-live-stop): the
+    // retained unconfirmed running-notes text is reviewed before saving.
+    case notesStopDecisionTitle = "notes.stopDecisionTitle"
+    case notesStopDecisionMessage = "notes.stopDecisionMessage"
+    case notesStopDecisionReview = "notes.stopDecisionReview"
+    case notesStopDecisionDiscard = "notes.stopDecisionDiscard"
 
     // Starter categories (category-management spec, seed requirement)
     case categorySeedWork = "category.seed.work"

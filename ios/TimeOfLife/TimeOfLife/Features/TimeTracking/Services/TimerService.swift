@@ -99,21 +99,67 @@ final class TimerService: ObservableObject {
         )
     }
 
-    /// Stops the running timer: saves the completed entry (with the draft's
-    /// final notes) in one transaction
-    /// with its single outbox row and clears the persisted running draft.
+    /// The receipt for one successfully completed stop
+    /// (preserve-running-notes-on-live-stop D1/D2): proves an actual
+    /// created/idempotently-existing entry with an atomically completed
+    /// entry/outbox/draft-clear transition. Only a receipt binds the
+    /// post-stop notes decision — a no-op, gated, or failed stop produces
+    /// none. Timing is authoritative: later notes review, editing, or
+    /// resolution never moves it.
+    struct StopReceipt: Equatable, Sendable {
+        /// The completed entry's UUID — the exact identity for later notes
+        /// updates (never the newest row or a timer name).
+        var entryID: String
+        /// The run's start anchor (replacement-run identity).
+        var runStartedAt: Date
+        /// The recorded end time (authoritative for review and writes).
+        var endedAt: Date
+        var durationSeconds: Int
+        /// The account file the entry landed in (fences later notes writes).
+        var accountUserID: String?
+    }
+
+    /// A stop that completed nothing (no entry created, no draft cleared).
+    /// The caller surfaces the existing recoverable error and keeps the
+    /// run retryable; the Live Activity is NOT ended (no false Saved card).
+    enum StopError: Error, Equatable {
+        /// The entry write produced no created/idempotently-existing record
+        /// (invalid text or a nonthrowing persistence failure).
+        case notCompleted
+    }
+
+    /// Stops the running timer: atomically saves the completed entry (with
+    /// the draft's final notes) in one transaction with its single outbox
+    /// row and clears the persisted running draft, then ends the Live
+    /// Activity with the Saved card (live-activities spec) — every Stop
+    /// path (Track, retry, Island link) flows through here, so this is the
+    /// single end call site. Returns the success receipt; throws (leaving
+    /// the draft for retry) when no entry was actually created.
+    /// `entryID` reuses one completion identity across retries of a single
+    /// logical stop (nil generates a fresh one); a replay of an already
+    /// committed id converges without a second entry or outbox row.
     /// Category ids that vanished mid-run (deleted elsewhere while timing)
     /// are pruned with the remainder kept — a stop never fails on a dead tag.
-    ///
-    /// Also ends the Live Activity with the Saved card (live-activities
-    /// spec) — every Stop path (Track, retry, Island link) flows through
-    /// here, so this is the single end call site.
-    func stopTimerDraft(text: String, categoryIDs: [String], startedAt: Date, endedAt: Date = Date(), notes: String = "") async throws {
+    @discardableResult
+    func stopTimerDraft(
+        text: String,
+        categoryIDs: [String],
+        startedAt: Date,
+        endedAt: Date = Date(),
+        notes: String = "",
+        entryID: String? = nil
+    ) async throws -> StopReceipt {
         let existing = Set(try await store.categories().map(\.id))
         let pruned = categoryIDs.filter { existing.contains($0) }
         let durationSeconds = Int(endedAt.timeIntervalSince(startedAt))
+        let stopEntryID: String
+        if let entryID {
+            stopEntryID = entryID
+        } else {
+            stopEntryID = await store.newRecordID()
+        }
         let entry = TimeEntry(
-            id: await store.newRecordID(),
+            id: stopEntryID,
             activityText: text,
             startedAt: startedAt,
             endedAt: endedAt,
@@ -121,10 +167,31 @@ final class TimerService: ObservableObject {
             categoryIDs: pruned,
             notes: notes
         )
-        try await store.createEntry(entry)
-        try await store.clearTimerDraft()
+        let mutation = try await store.stopRunningTimer(entry)
+        guard case let .created(saved) = mutation else {
+            throw StopError.notCompleted
+        }
         await liveActivities.runEnded(startedAt: startedAt, durationSeconds: durationSeconds)
         BackgroundReapScheduler.cancelReapCheck()
+        return StopReceipt(
+            entryID: saved.id,
+            // A replay converges on the already-committed row: its stored
+            // timing is authoritative, never the retry's fresh clock.
+            runStartedAt: saved.startedAt,
+            endedAt: saved.endedAt ?? endedAt,
+            durationSeconds: saved.durationSeconds ?? durationSeconds,
+            accountUserID: await store.boundUserID
+        )
+    }
+
+    /// Rewrites ONLY the notes of one exact existing entry (the post-stop
+    /// review confirm path): preserves the entry's latest other fields and
+    /// enqueues an ordinary outbox update. Returns false when the target is
+    /// missing (never recreated) or the write is not strictly newer — the
+    /// caller retains the reviewed text for correction/retry instead of
+    /// reporting success.
+    func updateEntryNotes(id: String, notes: String, now: Date = Date()) async throws -> Bool {
+        try await store.updateEntryNotes(id: id, notes: notes, now: now)
     }
 
     /// Discards the running draft WITHOUT saving an entry, ends live

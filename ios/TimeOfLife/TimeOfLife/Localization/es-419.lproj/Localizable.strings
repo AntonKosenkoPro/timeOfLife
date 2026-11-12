@@ -228,6 +228,11 @@
 "notes.editorSubtitle" = "%@ • %d/2000";
 "notes.editorCounter" = "%d/2000";
 "notes.editorPlaceholder" = "Querido diario...";
+// Post-stop notes decision (preserve-running-notes-on-live-stop)
+"notes.stopDecisionTitle" = "Temporizador detenido";
+"notes.stopDecisionMessage" = "Hay cambios sin guardar en la nota. ¿Revisarlos antes de guardar?";
+"notes.stopDecisionReview" = "Revisar nota";
+"notes.stopDecisionDiscard" = "Descartar cambios";
 
 // Starter categories (category-management spec, seed requirement)
 "category.seed.work" = "Trabajo";

@@ -231,6 +231,11 @@
 "notes.editorSubtitle" = "%@ • %d/2000";
 "notes.editorCounter" = "%d/2000";
 "notes.editorPlaceholder" = "Дорогой дневник...";
+// Post-stop notes decision (preserve-running-notes-on-live-stop)
+"notes.stopDecisionTitle" = "Таймер остановлен";
+"notes.stopDecisionMessage" = "Есть несохранённые изменения в заметке. Просмотрите их перед сохранением?";
+"notes.stopDecisionReview" = "Просмотреть заметку";
+"notes.stopDecisionDiscard" = "Отменить изменения";
 
 // Starter categories (category-management spec, seed requirement)
 "category.seed.work" = "Работа";

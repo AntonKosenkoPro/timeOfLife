@@ -215,6 +215,10 @@ For destructive confirmations that use `.confirmationDialog` or `.alert`, the ca
 
 All manage-screen delete flows should follow this pattern consistently.
 
+### Post-stop notes decision (no cancel, no reset-on-dismiss)
+
+The post-stop **Review Notes / Discard Changes** alert deliberately inverts the cleanup pattern above: an implicit dismissal (no action taken) is NOT discard. The decision prompt owns nothing — the retained session behind it does — so a dismissal without an action keeps the session and the decision re-presents (or resumes through the still-open editor). Only an explicit Discard Changes, X, or back navigation abandons the unconfirmed edits; only an explicit review ✓ writes. Review Notes doubles as the safe alternative (no separate Cancel button): it is non-destructive and opens the editable text without writing. Starting another run relies on the existing alert modality and notes navigation — no Start-disable state, guards, locks, timer states, or gesture interception exist for this flow.
+
 | Server response | Client action |
 |---|---|
 | 200/201 success | Apply locally, clear outbound queue entry |

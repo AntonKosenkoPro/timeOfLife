@@ -231,6 +231,11 @@
 "notes.editorSubtitle" = "%@ • %d/2000";
 "notes.editorCounter" = "%d/2000";
 "notes.editorPlaceholder" = "Dear diary...";
+// Post-stop notes decision (preserve-running-notes-on-live-stop)
+"notes.stopDecisionTitle" = "Timer stopped";
+"notes.stopDecisionMessage" = "You have unsaved note changes. Review them before saving?";
+"notes.stopDecisionReview" = "Review Notes";
+"notes.stopDecisionDiscard" = "Discard Changes";
 
 // Starter categories (category-management spec, seed requirement)
 "category.seed.work" = "Work";
