@@ -568,7 +568,15 @@ struct ScreenshotSessionTests {
         // runner — which only accepts the ack for the command it is
         // waiting for — observes the failure instead of timing out on a
         // stale last-accepted identity.
-        try publish(docs, frame: "history", seq: 2)
+        // Serialize once: payload() uses JSONSerialization without
+        // .sortedKeys, so a second envelope() call re-encodes the keys in
+        // a different order and hashes different bytes. The oracle must
+        // parse the exact published bytes (same precedent as
+        // outerMetadataDoesNotChangePayloadHash).
+        let published = try envelope(frame: "history", seq: 2)
+        let queue = try ScreenshotSessionPaths.queueURL(documents: docs, nonce: nonce)
+        try FileManager.default.createDirectory(at: queue.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try published.write(to: queue)
         let drained = await controller.drainOne()
         guard case let .failed(code) = drained else {
             Issue.record("expected failure, got \(drained)")
@@ -579,7 +587,7 @@ struct ScreenshotSessionTests {
         #expect(state.status == "failure")
         #expect(state.seq == 2)
         #expect(state.frame == "history")
-        let rejected = try ScreenshotSessionEnvelopeLoader.parse(data: envelope(frame: "history", seq: 2))
+        let rejected = try ScreenshotSessionEnvelopeLoader.parse(data: published)
         #expect(state.requestSHA256 == rejected.requestSHA256)
         #expect(state.sessionNonce == nonce)
         // The accepted transcript is unchanged: the refused command was
