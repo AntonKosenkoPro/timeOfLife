@@ -35,6 +35,7 @@ jobs:
     outputs:
       ios: ${{ steps.filter.outputs.ios }}
       screenshot: ${{ steps.filter.outputs.screenshot }}
+      panels: ${{ steps.filter.outputs.panels }}
       tooling: ${{ steps.filter.outputs.tooling }}
     steps:
       - uses: actions/checkout@v4
@@ -56,6 +57,7 @@ jobs:
           if [ "$EVENT" != "pull_request" ]; then
             echo "ios=true" >> "$GITHUB_OUTPUT"  # push path-filters already matched
             echo "screenshot=true" >> "$GITHUB_OUTPUT"
+            echo "panels=true" >> "$GITHUB_OUTPUT"
             echo "tooling=true" >> "$GITHUB_OUTPUT"
           elif { git cat-file -e "$BASE^{commit}" 2>/dev/null || git fetch origin "$BASE" 2>/dev/null; } \
             && files="$(git -c core.quotePath=false diff --name-only "$BASE...HEAD")"; then
@@ -64,25 +66,28 @@ jobs:
             else
               echo "ios=false" >> "$GITHUB_OUTPUT"
             fi
-            # The Screenshot test suite is slow (full run under a second
-            # build configuration), so PRs run it only when the diff
+            # The Screenshot suite is slow (full run under a second build
+            # configuration), so PRs build and test it only when the diff
             # touches capture/config/entitlement/xcconfig/LiveActivity
-            # paths. Detection failure falls to the outer else (both true
-            # — fail-open); the unconditional Screenshot BUILD in the lane
-            # still catches product breakage on every PR.
+            # paths. Detection failure falls to the outer else (all true
+            # — fail-open).
             if printf '%s\n' "$files" | grep -Eq '(Screenshot|Capture|LiveActivit|TimeOfLife/Configuration/|ios/TimeOfLife/project\.yml$|scripts/deny-screenshot|\.xcconfig$|\.entitlements$)'; then
               echo "screenshot=true" >> "$GITHUB_OUTPUT"
             else
               echo "screenshot=false" >> "$GITHUB_OUTPUT"
             fi
-            # The stdlib Python/shell tooling (scripts/screenshots/,
-            # scripts/panels/, the deny-screenshot guard) runs locally
-            # only (owner decision: no CI capture — slow, unreliable,
-            # expensive); it has no CI lane of its own, so a PR touching
-            # only the runner still needs tooling coverage — hence the
-            # explicit scripts/ alternative. Lowercase paths never match
-            # the CamelCase patterns above.
-            if printf '%s\n' "$files" | grep -Eq '^(ios/|\.github/workflows/ios\.yml)|scripts/(screenshots|panels)/'; then
+            # The stdlib Python/shell tooling runs locally only (owner
+            # decision: no CI capture — slow, unreliable, expensive).
+            # panels-tests covers scripts/panels/ (macOS Helvetica); the
+            # tooling-tests lane covers scripts/screenshots/ plus the
+            # deny-screenshot guard it executes. Neither watches ios/ —
+            # product changes don't re-run script suites.
+            if printf '%s\n' "$files" | grep -Eq '^scripts/panels/'; then
+              echo "panels=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "panels=false" >> "$GITHUB_OUTPUT"
+            fi
+            if printf '%s\n' "$files" | grep -Eq '^scripts/screenshots/|ios/TimeOfLife/scripts/deny-screenshot-install'; then
               echo "tooling=true" >> "$GITHUB_OUTPUT"
             else
               echo "tooling=false" >> "$GITHUB_OUTPUT"
@@ -90,6 +95,7 @@ jobs:
           else
             echo "ios=true" >> "$GITHUB_OUTPUT"
             echo "screenshot=true" >> "$GITHUB_OUTPUT"
+            echo "panels=true" >> "$GITHUB_OUTPUT"
             echo "tooling=true" >> "$GITHUB_OUTPUT"
           fi
 
@@ -200,11 +206,14 @@ jobs:
             build | xcpretty
 
       - name: Build Screenshot configuration
-        # Always built (generic destination, no simulator boot — seconds):
+        # Gated on changes.screenshot (same filter as the suite below):
         # the Screenshot config compiles product code with
-        # SCREENSHOT_CAPTURE, so product edits that break the capture
-        # composition (e.g. renamed view APIs referenced under the flag)
-        # fail here even on PRs that skip the slow suite below.
+        # SCREENSHOT_CAPTURE. Push to main always builds it; PRs build
+        # it only when the diff touches capture/config/entitlement/
+        # xcconfig/LiveActivity paths. Product edits outside those paths
+        # skip this build by design (cost control) — the Debug build
+        # above still guards them.
+        if: github.event_name != 'pull_request' || needs.changes.outputs.screenshot == 'true'
         working-directory: ios/TimeOfLife
         run: |
           set -o pipefail
@@ -240,8 +249,7 @@ jobs:
         # Slow (full simulator run under a second configuration), so PRs
         # run it only when the diff touches capture/config/entitlement/
         # xcconfig/LiveActivity paths (changes.screenshot); push to main
-        # always runs it. The Debug suite above stays unconditional, and
-        # the Screenshot BUILD above still guards product breakage.
+        # always runs it. The Debug suite above stays unconditional.
         if: github.event_name != 'pull_request' || needs.changes.outputs.screenshot == 'true'
         working-directory: ios/TimeOfLife
         run: |
@@ -256,12 +264,10 @@ jobs:
   tooling-tests:
     needs: [changes]
     # Push (path-filtered) always runs; PRs only when the diff touches
-    # ios/ or the scripts tooling. Ubuntu is enough: the screenshot runner
-    # suites are stdlib-only and the guard test is POSIX sh. The panels
-    # suites NEED macOS Helvetica (/System/Library/Fonts/Helvetica.ttc,
-    # absent on Linux) for byte-identical headlines, so they run in the
-    # macOS panels-tests job below (same tooling split as before) —
-    # never here.
+    # scripts/screenshots/ or the deny-screenshot guard it executes.
+    # Ubuntu is enough: the screenshot runner suites are stdlib-only
+    # and the guard test is POSIX sh. The panels suites run in the
+    # macOS panels-tests job below — never here.
     if: github.event_name != 'pull_request' || needs.changes.outputs.tooling == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -281,12 +287,11 @@ jobs:
   panels-tests:
     needs: [changes]
     # Push (path-filtered) always runs; PRs only when the diff touches
-    # ios/ or the scripts tooling (same gate as tooling-tests — the two
-    # jobs split that lane by OS). macOS is required: the panel builder
-    # renders headlines with /System/Library/Fonts/Helvetica.ttc, absent
-    # on Linux, and the byte-identical template proofs only mean
-    # something against that exact font.
-    if: github.event_name != 'pull_request' || needs.changes.outputs.tooling == 'true'
+    # scripts/panels/. macOS is required: the panel builder renders
+    # headlines with /System/Library/Fonts/Helvetica.ttc, absent on
+    # Linux, and the byte-identical template proofs only mean something
+    # against that exact font.
+    if: github.event_name != 'pull_request' || needs.changes.outputs.panels == 'true'
     runs-on: macos-15
     timeout-minutes: 10
     steps:
