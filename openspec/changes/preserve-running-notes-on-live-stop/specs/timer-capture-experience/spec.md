@@ -5,7 +5,7 @@ While a timer is running, the locked name row SHALL be paired with a trailing no
 
 If Live Activity Stop arrives while this running-notes editor contains changes from its last confirmed notes, the app SHALL retain the edited text without delaying timer completion. Changes SHALL include clearing previous notes and SHALL exclude edits reverted to the confirmed text. Stop SHALL first save the completed entry using the confirmed notes. Only after successful completion SHALL the app explain that the timer has stopped and offer **Review Notes** and **Discard Changes** for the retained text. Review SHALL show the retained, editable text without validating or writing it. Only ✓ in that editor SHALL validate and save the reviewed notes to that exact completed entry, with an ordinary transactional sync update. X or normal back navigation from review, or Discard Changes in the prompt, SHALL abandon the unconfirmed edits and leave the entry's confirmed notes unchanged. Reviewing, saving, or discarding SHALL NOT alter the entry's name, ordered categories, start, end, or duration, create a second entry, or restart the timer.
 
-Discard Changes SHALL use the native destructive role and its system-red presentation. In a horizontal two-button layout, Discard Changes SHALL be on the left and Review Notes SHALL be on the right. Native adaptive stacking for localized labels or accessibility text sizes SHALL remain available rather than forcing a fixed horizontal layout.
+Discard Changes SHALL use the native destructive role and its system-red presentation. Action placement and adaptive layout SHALL follow Apple's Human Interface Guidelines and native alert conventions, including layout direction and accessibility text sizing. The implementation SHALL NOT impose a fixed left/right position or replace the native alert to force custom action ordering.
 
 The retained text SHALL remain available across the normal saved-state reset, background/foreground transitions, and recoverable notes-save failures. Starting another run through Track SHALL remain inaccessible while the post-stop alert or its notes review editor is presented, relying only on existing alert modality and notes-editor navigation. The implementation MUST NOT introduce additional Start-disable flags, start guards, locks, timer-state transitions, or custom gesture/navigation interception solely to enforce this UI outcome. Existing Saved-confirmation timing and Start-button enablement SHALL remain unchanged. Implicit prompt dismissal SHALL NOT discard text or undo Stop. The review editor SHALL reuse the existing 2000-scalar bound and validation on ✓ without truncation, allowing correction/retry against the completed entry rather than introducing a separate prompt-save path. A missing/deleted target SHALL NOT be recreated. Account teardown SHALL invalidate the pending session; an old callback SHALL NOT write to another account, store generation, or replacement timer. Unconfirmed text SHALL remain process-local; termination SHALL NOT imply durable recovery. Ordinary running-editor cancel/save behavior and History/manual-entry notes editing SHALL otherwise remain unchanged.
 
@@ -46,10 +46,10 @@ The retained text SHALL remain available across the normal saved-state reset, ba
 - **WHEN** the user chooses Discard Changes after the completed entry was saved with previously confirmed notes
 - **THEN** only the unconfirmed edits are abandoned, the entry keeps those confirmed notes, and the timer remains stopped
 
-#### Scenario: Discard is visibly destructive and left of Review
-- **WHEN** the post-stop notes alert presents its two actions horizontally
-- **THEN** Discard Changes is marked destructive with the system-red presentation on the left, and non-destructive Review Notes is on the right
-- **AND** larger text or localized labels can use the native stacked layout without losing the destructive semantics
+#### Scenario: Discard is visibly destructive with platform-standard placement
+- **WHEN** the post-stop notes alert presents its actions
+- **THEN** Discard Changes uses the native destructive/system-red presentation, Review Notes is non-destructive, and placement follows HIG/native conventions without a fixed left/right override
+- **AND** localized labels, layout direction, and larger text retain the native adaptive layout without losing the destructive semantics
 
 #### Scenario: Leaving review discards only unconfirmed changes
 - **WHEN** the user taps X or uses normal back navigation from the post-stop review editor
