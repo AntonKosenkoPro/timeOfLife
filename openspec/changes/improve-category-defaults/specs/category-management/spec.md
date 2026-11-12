@@ -69,7 +69,7 @@ The new-selection picker SHALL show only supported symbols that render on the ru
 - **WHEN** the user enters a unique valid name, selects one of the 16 life-domains icons (e.g. `pawprint`, `washer`, `person.2`, `stethoscope`), and saves
 - **THEN** one category is created with the trimmed name and selected icon, and the icon renders in the category row, the picker, and first-position Recents chips and entry rows
 
-#### Scenario: Previously excluded symbols remain unselectable
+#### Scenario: Dropped candidates are not selectable
 - **WHEN** the user browses new icon choices on iOS 18
 - **THEN** the previously excluded `turtle` and bare `lamp` remain absent, while `lamp.table` remains present
 
