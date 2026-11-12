@@ -240,6 +240,7 @@
 "category.seed.relax" = "Relax";
 "category.seed.sleep" = "Sleep";
 "category.seed.entertainment" = "Entertainment";
+"category.seed.food" = "Food";
 
 // Undo (chip selection accessibility)
 "undo.selected" = "Selected";
@@ -304,6 +305,7 @@
 "catalogIcon.gamecontroller" = "Game controller";
 "catalogIcon.fork.knife" = "Fork and knife";
 "catalogIcon.cup.and.saucer" = "Cup and saucer";
+"catalogIcon.carrot" = "Carrot";
 "catalogIcon.bed.double" = "Bed";
 "catalogIcon.moon.stars" = "Moon and stars";
 "catalogIcon.moon.zzz" = "Sleeping moon";
@@ -337,6 +339,8 @@
 "catalogIcon.lamp.table" = "Table lamp";
 "catalogIcon.person.2" = "People";
 "catalogIcon.figure.and.child.holdinghands" = "Family";
+"catalogIcon.stroller" = "Stroller";
+"catalogIcon.teddybear" = "Teddy bear";
 "catalogIcon.stethoscope" = "Stethoscope";
 "catalogIcon.pill" = "Pill";
 "catalogIcon.tag" = "Tag";

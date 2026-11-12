@@ -197,6 +197,7 @@ enum L10n: String, CaseIterable {
     case categorySeedRelax = "category.seed.relax"
     case categorySeedSleep = "category.seed.sleep"
     case categorySeedEntertainment = "category.seed.entertainment"
+    case categorySeedFood = "category.seed.food"
 
     // Undo (chip selection accessibility; the category UndoToast is gone —
     // deletions undo through the system Undo confirmation instead)
@@ -294,7 +295,7 @@ extension String {
         return NSLocalizedString(key, comment: "")
     }
 
-    /// The seven localized starter category names in creation order (the
+    /// The eight localized starter category names in creation order (the
     /// single source for seeding; used by `RootView` and `TrackViewModel`).
     static var starterCategoryNames: [String] {
         [
@@ -305,6 +306,7 @@ extension String {
             L10n.categorySeedRelax.text,
             L10n.categorySeedSleep.text,
             L10n.categorySeedEntertainment.text,
+            L10n.categorySeedFood.text,
         ]
     }
 }
@@ -326,7 +328,8 @@ enum ErrorLocalization {
 extension L10n {
     /// Localized VoiceOver names for the closed CatalogIcon set. The dynamic
     /// key keeps the enum focused on user-facing copy while still requiring
-    /// every supported symbol to have EN/RU accessibility text.
+    /// every supported symbol to have accessibility text in all five
+    /// supported locales.
     static func catalogIconName(_ icon: CatalogIcon, in bundle: Bundle = .main) -> String {
         let key = "catalogIcon.\(icon.rawValue)"
         let value = NSLocalizedString(key, bundle: bundle, comment: "")

@@ -884,14 +884,14 @@ struct LocalStoreTests {
 struct LocalStoreSeedingTests {
 
     private let enNames = [
-        "Work", "Hobby", "Sport", "Education", "Relax", "Sleep", "Entertainment",
+        "Work", "Hobby", "Sport", "Education", "Relax", "Sleep", "Entertainment", "Food",
     ]
     private let ruNames = [
-        "Работа", "Хобби", "Спорт", "Образование", "Отдых", "Сон", "Развлечения",
+        "Работа", "Хобби", "Спорт", "Образование", "Отдых", "Сон", "Развлечения", "Еда",
     ]
     private let seedIcons = [
         "briefcase", "paintbrush", "figure.run", "book",
-        "cup.and.saucer", "bed.double", "tv",
+        "cup.and.saucer", "bed.double", "tv", "fork.knife",
     ]
 
     private func temporaryStoreURL() -> URL {
@@ -918,8 +918,8 @@ struct LocalStoreSeedingTests {
         try LocalStore(url: temporaryStoreURL(userID: userID ?? "u1", base: base), userID: userID)
     }
 
-    @Test("seeding creates exactly seven localized categories with their icons and outbox rows")
-    func seedsSevenCategories() async throws {
+    @Test("seeding creates exactly eight localized categories with their icons and outbox rows")
+    func seedsEightCategories() async throws {
         let store = try makeStore()
         let result = try await store.seedStarterCategoriesIfNeeded(names: enNames, now: Date(timeIntervalSinceReferenceDate: 5_000))
 
@@ -927,17 +927,17 @@ struct LocalStoreSeedingTests {
             Issue.record("expected seeded outcome")
             return
         }
-        #expect(seeded.count == 7)
+        #expect(seeded.count == 8)
         #expect(seeded.map(\.name) == enNames)
         #expect(seeded.map(\.icon) == seedIcons)
         #expect(seeded.allSatisfy { $0.createdAt == Date(timeIntervalSinceReferenceDate: 5_000) })
 
         let stored = try await store.categories()
-        #expect(stored.count == 7)
+        #expect(stored.count == 8)
         #expect(stored.map(\.name).sorted() == enNames.sorted())
 
         let rows = try await store.outboxRows()
-        #expect(rows.count == 7)
+        #expect(rows.count == 8)
         #expect(rows.allSatisfy { $0.resource == "category" && $0.op == "create" })
         #expect(try await store.categoryStartersSeeded())
     }
@@ -963,9 +963,9 @@ struct LocalStoreSeedingTests {
 
         #expect(second == .alreadySeeded)
         let stored = try await store.categories()
-        #expect(stored.count == 7)
+        #expect(stored.count == 8)
         let rows = try await store.outboxRows()
-        #expect(rows.count == 7)
+        #expect(rows.count == 8)
     }
 
     @Test("deleting every starter category does not re-seed")
@@ -1022,14 +1022,14 @@ struct LocalStoreSeedingTests {
             Issue.record("expected seeded outcome")
             return
         }
-        // Six inserted; the present name kept its identity and got no new row.
-        #expect(seeded.count == 6)
+        // Seven inserted; the present name kept its identity and got no new row.
+        #expect(seeded.count == 7)
         #expect(seeded.allSatisfy { $0.name != "Sport" })
         #expect(try await store.category(id: "server-sport")?.name == "Sport")
         let stored = try await store.categories()
-        #expect(stored.count == 7)
+        #expect(stored.count == 8)
         let rows = try await store.outboxRows()
-        #expect(rows.count == 7)
+        #expect(rows.count == 8)
         #expect(try await store.categoryStartersSeeded())
     }
 
@@ -1055,14 +1055,182 @@ struct LocalStoreSeedingTests {
         #expect(updated.name == "Renamed")
     }
 
-    @Test("seeding requires exactly seven names")
-    func seedingRequiresSevenNames() async throws {
+    @Test("seeding requires exactly eight names")
+    func seedingRequiresEightNames() async throws {
         let store = try makeStore()
         await #expect(throws: Error.self) {
             try await store.seedStarterCategoriesIfNeeded(names: ["Work"])
         }
+        await #expect(throws: Error.self) {
+            try await store.seedStarterCategoriesIfNeeded(names: enNames.dropLast())
+        }
         #expect(try await store.categories().isEmpty)
         #expect(!(try await store.categoryStartersSeeded()))
+    }
+
+    // MARK: - Pre-Food seven-starter upgrade boundary
+    // (improve-category-defaults: no backfill into already-seeded files)
+
+    /// The pre-Food starter names/icons, exactly as the previous seven-name
+    /// seeding wrote them.
+    private let legacyEnNames = [
+        "Work", "Hobby", "Sport", "Education", "Relax", "Sleep", "Entertainment",
+    ]
+    private let legacyIcons = [
+        "briefcase", "paintbrush", "figure.run", "book",
+        "cup.and.saucer", "bed.double", "tv",
+    ]
+    private let legacyRuNames = [
+        "Работа", "Хобби", "Спорт", "Образование", "Отдых", "Сон", "Развлечения",
+    ]
+
+    /// Writes the pre-Food seed marker directly, exactly as the previous
+    /// seven-name seeding did — so reopen tests exercise the real upgrade
+    /// boundary instead of the current eight-name seed path.
+    private func writeLegacySeedMarker(url: URL) throws {
+        try DatabaseQueue(path: url.path).write { db in
+            try db.execute(
+                sql: "INSERT INTO local_metadata (key, value) VALUES (?, ?)",
+                arguments: [LocalStore.categoryStartersSeededKey, "true"]
+            )
+        }
+    }
+
+    /// A pre-Food dataset: seven old starters plus the old marker.
+    private func makeLegacyStore(
+        names: [String]? = nil,
+        icons: [String]? = nil,
+        userID: String = "u1",
+        base: URL? = nil
+    ) async throws -> (LocalStore, URL) {
+        let resolvedBase = base ?? temporaryBaseDirectory()
+        let url = temporaryStoreURL(userID: userID, base: resolvedBase)
+        let store = try LocalStore(url: url, userID: userID)
+        for (index, name) in (names ?? legacyEnNames).enumerated() {
+            // The struct overload inserts directly (as the old seed did);
+            // `try` only surfaces file errors, never validation.
+            try await store.createCategory(Category(
+                id: "legacy-\(index)", name: name, icon: (icons ?? legacyIcons)[index]
+            ))
+        }
+        try writeLegacySeedMarker(url: url)
+        return (store, url)
+    }
+
+    @Test("a pre-Food seven-starter file with its old marker gains no Food on reopen")
+    func legacySevenStarterFileGainsNoFood() async throws {
+        let (_, url) = try await makeLegacyStore()
+
+        let reopened = try LocalStore(url: url, userID: "u1")
+        let result = try await reopened.seedStarterCategoriesIfNeeded(names: enNames)
+        #expect(result == .alreadySeeded)
+
+        let stored = try await reopened.categories()
+        #expect(stored.count == 7)
+        #expect(stored.map(\.name).sorted() == legacyEnNames.sorted())
+        #expect(stored.map(\.icon).sorted() == legacyIcons.sorted())
+        #expect(!stored.map(\.name).contains("Food"))
+        #expect(try await reopened.outboxRows().count == 7)
+    }
+
+    @Test("a pre-Food file with an edited and a deleted starter keeps those edits on reopen")
+    func legacySevenStarterFileKeepsEdits() async throws {
+        let (store, url) = try await makeLegacyStore()
+        // Rename Sport and delete Sleep before the upgrade reopen.
+        let stored = try await store.categories()
+        let sport = try #require(stored.first { $0.name == "Sport" })
+        let sleep = try #require(stored.first { $0.name == "Sleep" })
+        let renamed = try await store.updateCategory(
+            id: sport.id,
+            draft: CategoryDraft(name: "Gym", icon: .figureRun),
+            now: Date()
+        )
+        guard case .saved = renamed else {
+            Issue.record("expected rename to save")
+            return
+        }
+        try await store.deleteCategory(id: sleep.id)
+
+        let reopened = try LocalStore(url: url, userID: "u1")
+        let result = try await reopened.seedStarterCategoriesIfNeeded(names: enNames)
+        #expect(result == .alreadySeeded)
+        let names = try await reopened.categories().map(\.name)
+        #expect(names.sorted() == (legacyEnNames.filter { $0 != "Sport" && $0 != "Sleep" } + ["Gym"]).sorted())
+        #expect(!names.contains("Food"))
+    }
+
+    @Test("a marker-less pre-Food file seeds only the missing Food by name-skip")
+    func legacyMarkerlessFileSeedsOnlyMissingFood() async throws {
+        // Marker lost (erase-then-sync shape): seven old rows, no marker.
+        let base = temporaryBaseDirectory()
+        let url = temporaryStoreURL(userID: "u1", base: base)
+        let store = try LocalStore(url: url, userID: "u1")
+        for (index, name) in legacyEnNames.enumerated() {
+            try await store.createCategory(Category(
+                id: "legacy-\(index)", name: name, icon: legacyIcons[index]
+            ))
+        }
+
+        let reopened = try LocalStore(url: url, userID: "u1")
+        let result = try await reopened.seedStarterCategoriesIfNeeded(names: enNames)
+        guard case let .seeded(seeded) = result else {
+            Issue.record("expected seeded outcome, got \(result)")
+            return
+        }
+        // Collision skipping: only Food is new.
+        #expect(seeded.map(\.name) == ["Food"])
+        #expect(seeded.map(\.icon) == ["fork.knife"])
+        #expect(try await reopened.categories().count == 8)
+        #expect(try await reopened.categoryStartersSeeded())
+    }
+
+    @Test("a pre-Food file in another locale is not renamed or reseeded")
+    func legacySevenStarterFileIgnoresLocaleSwitch() async throws {
+        let (_, url) = try await makeLegacyStore(names: legacyRuNames)
+
+        let reopened = try LocalStore(url: url, userID: "u1")
+        let result = try await reopened.seedStarterCategoriesIfNeeded(names: enNames)
+        #expect(result == .alreadySeeded)
+        let stored = try await reopened.categories()
+        #expect(stored.count == 7)
+        #expect(stored.map(\.name).sorted() == legacyRuNames.sorted())
+    }
+
+    @Test("erasing a pre-Food file reseeds the eight-starter set")
+    func legacyFileEraseReseedsToEight() async throws {
+        let base = temporaryBaseDirectory()
+        let (store, _) = try await makeLegacyStore(base: base)
+        try await store.eraseAll()
+
+        let fresh = try LocalStore(
+            url: temporaryStoreURL(userID: "u1", base: base), userID: "u1"
+        )
+        let result = try await fresh.seedStarterCategoriesIfNeeded(names: enNames)
+        guard case let .seeded(seeded) = result else {
+            Issue.record("expected reseed after erase, got \(result)")
+            return
+        }
+        #expect(seeded.map(\.name) == enNames)
+        #expect(seeded.map(\.icon) == seedIcons)
+    }
+
+    @Test("a pre-Food file is isolated from a fresh account seeding eight")
+    func legacyFileIsolatedFromFreshAccount() async throws {
+        let base = temporaryBaseDirectory()
+        let (_, legacyURL) = try await makeLegacyStore(userID: "user-a", base: base)
+        let freshB = try LocalStore(
+            url: temporaryStoreURL(userID: "user-b", base: base), userID: "user-b"
+        )
+        let result = try await freshB.seedStarterCategoriesIfNeeded(names: enNames)
+        guard case .seeded = result else {
+            Issue.record("expected fresh account to seed")
+            return
+        }
+        #expect(try await freshB.categories().count == 8)
+
+        let legacyA = try LocalStore(url: legacyURL, userID: "user-a")
+        #expect(try await legacyA.categories().count == 7)
+        #expect(!(try await legacyA.categories().map(\.name).contains("Food")))
     }
 }
 
@@ -1874,7 +2042,7 @@ struct LocalStoreEntryUndoTests {
 struct LocalStoreAccountBoundTests {
 
     private let enNames = [
-        "Work", "Hobby", "Sport", "Education", "Relax", "Sleep", "Entertainment",
+        "Work", "Hobby", "Sport", "Education", "Relax", "Sleep", "Entertainment", "Food",
     ]
 
     private func temporaryBaseDirectory() -> URL {
@@ -1913,7 +2081,7 @@ struct LocalStoreAccountBoundTests {
         let reopened = try makeBoundStore(userID: "user-a", base: base)
         let replay = try await reopened.seedStarterCategoriesIfNeeded(names: enNames)
         #expect(replay == .alreadySeeded)
-        #expect(try await reopened.categories().count == 7)
+        #expect(try await reopened.categories().count == 8)
     }
 
     @Test("per-user isolation: two accounts never share rows or files")
@@ -2131,5 +2299,116 @@ struct LocalStoreAccountBoundTests {
         #expect(FileManager.default.fileExists(atPath: fileURL(userID: "user-a", base: base).path))
         let reopened = try makeBoundStore(userID: "user-a", base: base)
         #expect(try await reopened.categories().map(\.id) == ["cat-a"])
+    }
+}
+
+// MARK: - Hidden icon preservation (improve-category-defaults 3.3)
+
+/// Every sports value hidden from new selection stays a fully ordinary stored
+/// icon: name-only saves, reloads, and relay merges preserve it; only an
+/// explicit icon change replaces it. Both editor hosts (Profile sheet and
+/// inline push) share `CategoryEditorForm`, whose options come from
+/// `CatalogIcon.pickerOptions(selected:)` (pinned in `CatalogIconTests`).
+@Suite("Hidden Icon Preservation")
+struct HiddenIconPreservationTests {
+
+    private let hiddenIcons = [
+        "figure.strengthtraining", "figure.soccer", "figure.basketball",
+        "figure.tennis", "figure.gymnastics", "figure.mindandbody",
+        "figure.core.training", "bicycle",
+    ]
+
+    private func temporaryStoreURL() -> URL {
+        URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent(UUID().uuidString)
+            .appendingPathComponent(LocalStore.databaseFileName(userID: "u1"))
+    }
+
+    private func makeStore() throws -> LocalStore {
+        try LocalStore(url: temporaryStoreURL())
+    }
+
+    @Test("each hidden icon survives a name-only save and reload")
+    func hiddenIconsSurviveNameOnlySave() async throws {
+        let store = try makeStore()
+        var ids: [String] = []
+        for (index, icon) in hiddenIcons.enumerated() {
+            let id = "hidden-\(index)"
+            let outcome = try await store.createCategory(
+                draft: CategoryDraft(
+                    name: "Category \(index)",
+                    icon: CatalogIcon(validated: icon)
+                ),
+                id: id
+            )
+            guard case let .saved(created) = outcome else {
+                Issue.record("expected saved for \(icon), got \(outcome)")
+                return
+            }
+            #expect(created.icon == icon)
+            ids.append(id)
+        }
+        // Name-only edit: the draft carries the hidden icon through, so the
+        // stored raw value must not change.
+        for (index, id) in ids.enumerated() {
+            let outcome = try await store.updateCategory(
+                id: id,
+                draft: CategoryDraft(
+                    name: "Renamed \(index)",
+                    icon: CatalogIcon(validated: hiddenIcons[index])
+                )
+            )
+            guard case let .saved(updated) = outcome else {
+                Issue.record("expected saved for \(hiddenIcons[index]), got \(outcome)")
+                return
+            }
+            #expect(updated.icon == hiddenIcons[index])
+        }
+        // Reload: every stored raw value is intact.
+        let stored = try await store.categories()
+        #expect(stored.count == hiddenIcons.count)
+        for category in stored {
+            #expect(hiddenIcons.contains(category.icon), "\(category.icon) preserved")
+            #expect(category.name.hasPrefix("Renamed "))
+        }
+    }
+
+    @Test("relay merge preserves hidden icons without an outbox row")
+    func hiddenIconsSurviveMerge() async throws {
+        let store = try makeStore()
+        let now = Date(timeIntervalSinceReferenceDate: 30_000)
+        for (index, icon) in hiddenIcons.enumerated() {
+            try await store.mergeCategory(Category(
+                id: "merged-\(index)", name: "Merged \(index)", icon: icon,
+                createdAt: now, updatedAt: now
+            ))
+        }
+        let stored = try await store.categories()
+        #expect(stored.count == hiddenIcons.count)
+        #expect(Set(stored.map(\.icon)) == Set(hiddenIcons))
+        #expect(try await store.outboxRows().isEmpty, "merge writes no outbox rows")
+    }
+
+    @Test("an explicit icon change replaces a hidden selection")
+    func explicitReplacementChangesHiddenIcon() async throws {
+        let store = try makeStore()
+        let outcome = try await store.createCategory(
+            draft: CategoryDraft(name: "Gym", icon: CatalogIcon(validated: "figure.soccer")),
+            id: "gym"
+        )
+        guard case .saved = outcome else {
+            Issue.record("expected saved, got \(outcome)")
+            return
+        }
+        let replaced = try await store.updateCategory(
+            id: "gym",
+            draft: CategoryDraft(name: "Gym", icon: .dumbbell)
+        )
+        guard case let .saved(updated) = replaced else {
+            Issue.record("expected saved, got \(replaced)")
+            return
+        }
+        #expect(updated.icon == "dumbbell")
+        #expect(try await store.category(id: "gym")?.icon == "dumbbell")
     }
 }

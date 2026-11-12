@@ -39,6 +39,7 @@ enum LocalizationSnapshot {
         "category.nameTooLong",
         "category.seed.education",
         "category.seed.entertainment",
+        "category.seed.food",
         "category.seed.hobby",
         "category.seed.relax",
         "category.seed.sleep",

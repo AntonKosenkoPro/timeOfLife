@@ -16,7 +16,7 @@ struct TrackSyncReloadTests {
         let store = try LocalStore(url: temporaryStoreURL())
         _ = try await store.seedStarterCategoriesIfNeeded(names: String.starterCategoryNames)
         let seeded = try await store.categories()
-        #expect(seeded.count == 7)
+        #expect(seeded.count == 8)
         try await store.createEntry(makeEntry(
             id: "e1", text: "Gym", categoryIDs: [seeded[0].id]
         ))
@@ -26,7 +26,7 @@ struct TrackSyncReloadTests {
 
         #expect(vm.recents.map(\.text) == ["Gym"])
         #expect(vm.allNames.map(\.text) == ["Gym"])
-        #expect(vm.categories.count == 7)
+        #expect(vm.categories.count == 8)
         #expect(vm.errorMessage == nil)
     }
 
@@ -43,7 +43,7 @@ struct TrackSyncReloadTests {
             await group.waitForAll()
         }
 
-        #expect(vm.categories.count == 7)
+        #expect(vm.categories.count == 8)
     }
 
     @Test("invalidate forces the next loadIfNeeded to reload")
@@ -52,7 +52,7 @@ struct TrackSyncReloadTests {
         _ = try await store.seedStarterCategoriesIfNeeded(names: String.starterCategoryNames)
         let vm = TrackViewModel(service: TimerService(store: store), connectivity: MockConnectivity(connected: true))
         await vm.loadIfNeeded()
-        #expect(vm.categories.count == 7)
+        #expect(vm.categories.count == 8)
 
         vm.invalidate()
         try await store.createEntry(makeEntry(id: "e1", text: "Gym"))
