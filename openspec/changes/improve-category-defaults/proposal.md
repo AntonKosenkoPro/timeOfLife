@@ -5,9 +5,9 @@ The defaults omit Food, while the icon picker offers 14 sports choices but only 
 ## What Changes
 
 - Append Food (`fork.knife`) as the eighth starter category, localized at first seeding in all five supported languages. Apply only to newly initialized datasets; never backfill already-seeded account files.
-- Keep food choices to three: `fork.knife`, `cup.and.saucer`, and candidate `carrot`; keep child-specific choices to three: `figure.and.child.holdinghands`, candidate `stroller`, and candidate `teddybear`. Counts include existing symbols. Generic `person.2` remains unchanged.
-- Add at most those three new symbols, gated by iOS 18 renderability. If a candidate fails, document its omission; retain two food choices and at least two child choices, seeking a replacement decision only if that minimum cannot be met. Do not silently expand the shortlist.
-- Hide eight specialist/redundant sports choices from new selection. Keep walking, running, strength (`dumbbell`), yoga, cycling, and swimming. Preserve every existing accepted raw value, rendering, editing, and sync behavior; retain a hidden selected icon when editing its category.
+- Add exactly three icons: `carrot`, `stroller`, and `teddybear`. Food/drink choices become exactly three (`fork.knife`, `cup.and.saucer`, `carrot`); child-specific choices become exactly three (`figure.and.child.holdinghands`, `stroller`, `teddybear`). Counts include existing symbols. Generic `person.2` remains unchanged.
+- Verify all three new icons on iOS 18 as an acceptance check. If any fails, stop for an explicit decision; do not silently omit, substitute, or expand the agreed set.
+- Hide exactly seven sports icons from new selection: `figure.strengthtraining`, `figure.soccer`, `figure.basketball`, `figure.tennis`, `figure.gymnastics`, `figure.mindandbody`, and `figure.core.training`. Keep `figure.walk`, `figure.run`, `dumbbell`, `figure.yoga`, `figure.cycling`, `figure.swimming`, and `bicycle` visible where renderable. Preserve every existing accepted raw value, rendering, editing, and sync behavior; retain a hidden selected icon when editing its category.
 - Add Food and new icon accessibility names in `en`, `ru`, `zh-Hans`, `es-419`, and `pt-BR`. Update catalog mirrors and seed-count-dependent tests/fixtures together.
 
 Non-goals: backfill/reseed or rename existing data; remove accepted icons; migrate storage; add default child categories; redesign/group/search the picker; change category CRUD, undo, authentication, or sync algorithms.
@@ -20,7 +20,7 @@ None.
 
 ### Modified Capabilities
 
-- `category-management`: eight first-seeding starters, a bounded food/children icon expansion, and a curated picker distinct from the full accepted icon catalog.
+- `category-management`: eight first-seeding starters, exactly three new food/children icons, and a curated picker distinct from the full accepted icon catalog.
 
 ## Impact
 

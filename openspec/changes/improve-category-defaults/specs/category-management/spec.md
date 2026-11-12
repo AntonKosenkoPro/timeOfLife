@@ -43,11 +43,11 @@ Each category SHALL have a name that is non-empty after trimming surrounding whi
 - People + family: `person.2`, `figure.and.child.holdinghands`
 - Body + rest: `stethoscope`, `pill`
 
-The expansion SHALL be limited to the iOS 18-renderable subset of `carrot`, `stroller`, and `teddybear`, with at most three additions. New-selection food choices SHALL total two or three, including existing `fork.knife` and `cup.and.saucer`; child-specific choices SHALL total two or three, including existing `figure.and.child.holdinghands`. Generic `person.2` SHALL remain unchanged and SHALL NOT count toward the child-specific limit. A failing candidate SHALL NOT be shipped as an invisible choice or silently replaced with an unapproved symbol. If both child candidates fail, the catalog expansion SHALL NOT ship until an approved replacement decision updates this bounded shortlist and satisfies the minimum.
+The supported catalog SHALL add exactly three symbols: `carrot`, `stroller`, and `teddybear`, for exactly 66 accepted symbols. New-selection food choices SHALL be `fork.knife`, `cup.and.saucer`, and `carrot`; child-specific choices SHALL be `figure.and.child.holdinghands`, `stroller`, and `teddybear`. Each requested domain SHALL therefore contain exactly three choices including existing symbols. Generic `person.2` SHALL remain unchanged and SHALL NOT count toward the child-specific total. All three additions SHALL render on iOS 18. If verification of any addition fails, this expansion SHALL NOT ship until an explicit decision revises the agreed set; no icon SHALL be silently omitted or substituted.
 
 Category names SHALL be unique after trimming and case-insensitive comparison. Invalid input SHALL leave the persisted catalog unchanged and SHALL present one localized error for the affected field. Every supported symbol SHALL have a localized VoiceOver name in all five supported languages.
 
-The new-selection picker SHALL show only supported symbols that render on the running OS, excluding `figure.strengthtraining`, `figure.soccer`, `figure.basketball`, `figure.tennis`, `figure.gymnastics`, `figure.mindandbody`, `figure.core.training`, and `bicycle`. The six broad sports choices SHALL remain offered where renderable: `figure.walk`, `figure.run`, `dumbbell`, `figure.yoga`, `figure.cycling`, and `figure.swimming`. Hiding SHALL NOT affect validation, storage, synchronization, or display outside new selection. When editing a category, its currently selected supported icon SHALL remain represented even if hidden from new selection or unavailable on the OS. A supported icon that cannot render SHALL display as `tag` without changing the stored value; hiding alone SHALL NOT cause this fallback.
+The new-selection picker SHALL show only supported symbols that render on the running OS, excluding exactly seven sports symbols: `figure.strengthtraining`, `figure.soccer`, `figure.basketball`, `figure.tennis`, `figure.gymnastics`, `figure.mindandbody`, and `figure.core.training`. The seven retained sports choices SHALL remain offered where renderable: `figure.walk`, `figure.run`, `dumbbell`, `figure.yoga`, `figure.cycling`, `figure.swimming`, and `bicycle`. Hiding SHALL NOT affect validation, storage, synchronization, or display outside new selection. When editing a category, its currently selected supported icon SHALL remain represented even if hidden from new selection or unavailable on the OS. A supported icon that cannot render SHALL display as `tag` without changing the stored value; hiding alone SHALL NOT cause this fallback.
 
 #### Scenario: Create a valid category
 - **WHEN** the user enters a unique valid name, selects a supported icon, and saves
@@ -69,9 +69,9 @@ The new-selection picker SHALL show only supported symbols that render on the ru
 - **WHEN** the user enters a unique valid name, selects one of the 16 life-domains icons (e.g. `pawprint`, `washer`, `person.2`, `stethoscope`), and saves
 - **THEN** one category is created with the trimmed name and selected icon, and the icon renders in the category row, the picker, and first-position Recents chips and entry rows
 
-#### Scenario: Dropped candidates are not selectable
+#### Scenario: Previously excluded symbols remain unselectable
 - **WHEN** the user browses new icon choices on iOS 18
-- **THEN** `turtle`, bare `lamp`, and any new shortlist candidate that failed iOS 18 renderability validation are absent, while `lamp.table` remains present
+- **THEN** the previously excluded `turtle` and bare `lamp` remain absent, while `lamp.table` remains present
 
 #### Scenario: Existing icons are unchanged
 - **WHEN** a category saved before this change syncs or renders after it
@@ -87,10 +87,10 @@ The new-selection picker SHALL show only supported symbols that render on the ru
 
 #### Scenario: New sports choices are compact
 - **WHEN** a user creates a category and browses sports icon choices
-- **THEN** the eight hidden sports symbols are absent and the six retained broad choices are offered where renderable
+- **THEN** the seven hidden sports symbols are absent and the seven retained choices, including `bicycle`, are offered where renderable
 
 #### Scenario: A hidden selected icon survives editing
-- **WHEN** the user opens a category with `figure.soccer` or `bicycle`, changes only its name, and saves
+- **WHEN** the user opens a category with `figure.soccer` or `figure.tennis`, changes only its name, and saves
 - **THEN** the current icon is represented in the editor and its stored raw value is preserved locally and by the relay
 - **AND** it displays its original glyph wherever renderable, not `tag` merely because it is hidden
 
@@ -102,6 +102,10 @@ The new-selection picker SHALL show only supported symbols that render on the ru
 - **WHEN** the user edits or views a synchronized category with a supported but unavailable symbol
 - **THEN** it is represented with `tag` while preserving its stored raw value unless the user explicitly selects another icon
 
-#### Scenario: Newly admitted symbols sync successfully
-- **WHEN** a category uses a new shortlist symbol that passed iOS 18 validation and is saved offline then synchronized
+#### Scenario: The three new icons are available on iOS 18
+- **WHEN** the user browses food/drink and child-specific choices on iOS 18
+- **THEN** `carrot`, `stroller`, and `teddybear` are available and each domain contains its three specified choices
+
+#### Scenario: New symbols sync successfully
+- **WHEN** a category uses `carrot`, `stroller`, or `teddybear` and is saved offline then synchronized
 - **THEN** both client and relay accept the identical raw value and synchronization preserves it
