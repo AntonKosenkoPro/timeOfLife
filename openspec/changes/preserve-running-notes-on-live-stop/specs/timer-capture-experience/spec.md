@@ -5,7 +5,7 @@ While a timer is running, the locked name row SHALL be paired with a trailing no
 
 If Live Activity Stop arrives while this running-notes editor contains changes from its last confirmed notes, the app SHALL retain the edited text without delaying timer completion. Changes SHALL include clearing previous notes and SHALL exclude edits reverted to the confirmed text. Stop SHALL first save the completed entry using the confirmed notes. Only after successful completion SHALL the app explain that the timer has stopped and offer **Review Notes** and **Discard Changes** for the retained text. Review SHALL show the retained, editable text without validating or writing it. Only ✓ in that editor SHALL validate and save the reviewed notes to that exact completed entry, with an ordinary transactional sync update. X or normal back navigation from review, or Discard Changes in the prompt, SHALL abandon the unconfirmed edits and leave the entry's confirmed notes unchanged. Reviewing, saving, or discarding SHALL NOT alter the entry's name, ordered categories, start, end, or duration, create a second entry, or restart the timer.
 
-The retained text SHALL remain available across the normal saved-state reset, background/foreground transitions, and recoverable notes-save failures. Starting another run SHALL remain unavailable until this running-notes resolution is completed or invalidated. Implicit prompt dismissal SHALL NOT discard text or undo Stop. The review editor SHALL reuse the existing 2000-scalar bound and validation on ✓ without truncation, allowing correction/retry against the completed entry rather than introducing a separate prompt-save path. A missing/deleted target SHALL NOT be recreated. Account teardown SHALL invalidate the pending session; an old callback SHALL NOT write to another account, store generation, or replacement timer. Unconfirmed text SHALL remain process-local; termination SHALL NOT imply durable recovery. Ordinary running-editor cancel/save behavior and History/manual-entry notes editing SHALL otherwise remain unchanged.
+The retained text SHALL remain available across the normal saved-state reset, background/foreground transitions, and recoverable notes-save failures. Starting another run through Track SHALL remain inaccessible while the post-stop alert or its notes review editor is presented, relying only on existing alert modality and notes-editor navigation. The implementation MUST NOT introduce additional Start-disable flags, start guards, locks, timer-state transitions, or custom gesture/navigation interception solely to enforce this UI outcome. Existing Saved-confirmation timing and Start-button enablement SHALL remain unchanged. Implicit prompt dismissal SHALL NOT discard text or undo Stop. The review editor SHALL reuse the existing 2000-scalar bound and validation on ✓ without truncation, allowing correction/retry against the completed entry rather than introducing a separate prompt-save path. A missing/deleted target SHALL NOT be recreated. Account teardown SHALL invalidate the pending session; an old callback SHALL NOT write to another account, store generation, or replacement timer. Unconfirmed text SHALL remain process-local; termination SHALL NOT imply durable recovery. Ordinary running-editor cancel/save behavior and History/manual-entry notes editing SHALL otherwise remain unchanged.
 
 #### Scenario: Notes button visible only while recording
 - **WHEN** a timer is running
@@ -67,7 +67,12 @@ The retained text SHALL remain available across the normal saved-state reset, ba
 
 #### Scenario: Presentation and lifecycle do not silently discard pending changes
 - **WHEN** the saved-state confirmation resets, the prompt is implicitly dismissed, or the app backgrounds and returns while resolution is pending
-- **THEN** the text remains available for that same completed entry, starting another run remains unavailable, and resuming the decision does not stop or save the timer again
+- **THEN** the text remains available for that same completed entry, ordinary alert/editor presentation boundaries apply without an additional Start lock, and resuming the decision does not stop or save the timer again
+
+#### Scenario: Existing presentation provides the Start restriction
+- **WHEN** the post-stop alert or its notes review editor is presented over Track
+- **THEN** Start is inaccessible through the normal modal/navigation UI, without additional Start-disable state, guards, locks, or timer-state transitions
+- **AND** the underlying Saved confirmation and Start-button enablement follow their existing behavior rather than waiting for notes resolution
 
 #### Scenario: Account teardown invalidates deferred actions
 - **WHEN** the pending session's account or active-store generation is torn down before a notes action completes
@@ -76,30 +81,3 @@ The retained text SHALL remain available across the normal saved-state reset, ba
 #### Scenario: Other notes editing retains its existing behavior
 - **WHEN** the user edits notes in History or Log Time, or cancels the running-notes page without an external Stop
 - **THEN** the existing copy-on-open save/cancel behavior applies without this post-stop decision
-
-### Requirement: Stop saves with stable local feedback
-Stopping a running timer SHALL save the completed entry locally, communicate success without a blocking loader, and retain the entered text in the ready state for an optional later restart. While the saved confirmation is showing, the Start button SHALL render disabled (dimmed, non-interactive) since starting is not possible until the state settles back to ready; it SHALL re-enable with the return to ready unless the running-notes post-stop resolution remains pending. In that scoped case, Start SHALL remain unavailable until the resolution is completed or invalidated; the confirmation's normal reset schedule SHALL NOT be prolonged by the notes decision. Editing the name while the saved confirmation is showing SHALL return to ready for the new text at once, ending the confirmation early, without discarding any pending notes resolution. When the persisted running draft is gone but Track still holds a `.running` state (the timer ended through another existing path, including an external stop), Track SHALL reconcile on next load: stop the elapsed ticker, re-enable the idle timer, reset elapsed to zero, and return to `.ready` for the same text — or `.idle` when nothing was entered — instead of counting elapsed time forever.
-
-#### Scenario: Successful stop
-- **WHEN** the user activates Stop on a running timer
-- **THEN** the app persists the completed entry, clears running state, emits a success haptic, briefly confirms the saved duration, and returns to the ready numeric timer for the same text
-
-#### Scenario: Save failure
-- **WHEN** the local store cannot save the completed entry
-- **THEN** the app preserves recoverable running state and presents a localized non-field error without silently losing elapsed time
-
-#### Scenario: External stop reconciles Track
-- **WHEN** Track holds a running state whose persisted draft no longer exists because the timer ended through another existing path
-- **THEN** Track leaves the running state on next load: the ticker stops, elapsed resets to zero, and the screen shows the ready timer for the same text (or idle when empty)
-
-#### Scenario: Start is disabled during the saved confirmation
-- **WHEN** the saved confirmation is showing after a stop
-- **THEN** the Start button renders dimmed and ignores taps; it re-enables when the state settles back to ready unless a running-notes post-stop resolution is still pending
-
-#### Scenario: Edit during the saved confirmation returns to ready
-- **WHEN** the user edits the name while the saved confirmation is showing
-- **THEN** the screen returns to ready for the new text at once, ending the confirmation early instead of waiting out the window, without losing any pending notes resolution
-
-#### Scenario: Notes resolution does not extend the Saved confirmation
-- **WHEN** the normal Saved confirmation finishes before the running-notes decision is answered
-- **THEN** Track reaches ready on its normal schedule but Start remains unavailable until the notes resolution is completed or invalidated

@@ -10,7 +10,7 @@ Existing behavior to preserve: Stop completes without waiting for a notes decisi
 - After a successful stop, offer **Review Notes** or **Discard Changes** only when that running-notes editor has changes. Explain that the timer has already stopped; the prompt itself never saves notes.
 - Review shows the retained, editable text without writing anything. Only ✓ in that editor validates and saves notes to the exact completed entry through LocalStore and the transactional outbox. X/back or Discard Changes abandons only the unconfirmed edits, preserving that entry's last confirmed notes.
 - Reuse the notes editor's existing validation on ✓ rather than adding a separate prompt-save path. Preserve text on validation or save failure so the user can correct/retry; prevent stale account/run identities and repeated Stop requests from targeting another entry.
-- Keep starting another run unavailable while the post-stop notes decision is unresolved; the usual Saved confirmation itself is not extended.
+- Keep starting another run inaccessible through the existing modal alert and notes-editor navigation while the post-stop notes flow is presented. This is a UI outcome, not a new timer restriction: do not introduce extra Start-disable flags, guards, locks, or timer-state transitions to enforce it. The usual Saved confirmation and Start-button behavior remain unchanged.
 - Leave clean/already-confirmed notes, terminated-app Stop, normal editor X/✓/back behavior, and History/Log Time editing unchanged. There is no pre-stop confirmation, autosave of keystrokes, extension writer, or new backend endpoint.
 
 ## Capabilities
