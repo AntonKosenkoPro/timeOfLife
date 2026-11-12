@@ -82,7 +82,7 @@ extension CatalogIcon {
     /// All catalog symbols as their SF Symbol names.
     static var allSymbols: [String] { allCases.map(\.rawValue) }
 
-    /// Symbols hidden from new selection (category-management): the six
+    /// Symbols hidden from new selection (category-management): the seven
     /// redundant sports choices plus `bicycle` (covered by `figure.cycling`).
     /// Hidden values stay fully accepted, valid, renderable, and syncable —
     /// hiding only removes them from the new-category picker.
