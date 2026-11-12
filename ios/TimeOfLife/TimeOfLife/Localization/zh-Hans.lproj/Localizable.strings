@@ -237,6 +237,7 @@
 "category.seed.relax" = "休闲";
 "category.seed.sleep" = "睡眠";
 "category.seed.entertainment" = "娱乐";
+"category.seed.food" = "美食";
 
 // Undo (chip selection accessibility)
 "undo.selected" = "已选中";
@@ -301,6 +302,7 @@
 "catalogIcon.gamecontroller" = "游戏手柄";
 "catalogIcon.fork.knife" = "刀叉";
 "catalogIcon.cup.and.saucer" = "杯碟";
+"catalogIcon.carrot" = "胡萝卜";
 "catalogIcon.bed.double" = "床";
 "catalogIcon.moon.stars" = "月亮和星星";
 "catalogIcon.moon.zzz" = "熟睡的月亮";
@@ -334,6 +336,8 @@
 "catalogIcon.lamp.table" = "台灯";
 "catalogIcon.person.2" = "两人";
 "catalogIcon.figure.and.child.holdinghands" = "家庭";
+"catalogIcon.stroller" = "婴儿车";
+"catalogIcon.teddybear" = "泰迪熊";
 "catalogIcon.stethoscope" = "听诊器";
 "catalogIcon.pill" = "药片";
 "catalogIcon.tag" = "标签";

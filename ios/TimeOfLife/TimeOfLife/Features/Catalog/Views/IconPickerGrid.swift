@@ -1,10 +1,12 @@
 import SwiftUI
 
 /// Selectable grid of the supported catalog SF Symbols for categories
-/// (F2/U1, Design/COMPONENTS.md `IconPickerGrid`). Only catalog symbols that
-/// can render on the running OS are shown (category-management D1); a valid
-/// synchronized symbol that cannot render is displayed as `tag` elsewhere
-/// without changing the stored value.
+/// (F2/U1, Design/COMPONENTS.md `IconPickerGrid`). Callers pass the curated
+/// picker set (`CatalogIcon.pickerOptions(selected:)`), which excludes the
+/// hidden sports values from new selection; a valid selected symbol that is
+/// hidden or unavailable on this OS is appended once and displayed with the
+/// `tag` fallback only when the OS cannot render it — the stored raw value
+/// never changes except through an explicit icon choice.
 struct IconPickerGrid: View {
     let options: [String]
     @Binding var selection: String
@@ -60,7 +62,7 @@ private struct IconPickerGridPreview: View {
 
     var body: some View {
         IconPickerGrid(
-            options: CatalogIcon.renderableSymbols,
+            options: CatalogIcon.pickerSymbols,
             selection: $selection,
             accessibilityId: "PreviewIconPicker"
         )

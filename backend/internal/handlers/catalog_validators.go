@@ -42,6 +42,7 @@ var validIcons = map[string]bool{
 	"books": true, "graduationcap": true,
 	"desktopcomputer": true, "keyboard": true,
 	"gamecontroller": true, "fork.knife": true, "cup.and.saucer": true,
+	"carrot":     true,
 	"bed.double": true, "moon.stars": true, "moon.zzz": true,
 	"film": true, "music.note": true, "guitar": true, "camera": true,
 	"tv": true, "musicalnotes": true,
@@ -52,6 +53,7 @@ var validIcons = map[string]bool{
 	"washer": true, "dryer": true, "dishwasher": true, "refrigerator": true,
 	"sofa": true, "shower": true, "lamp.table": true,
 	"person.2": true, "figure.and.child.holdinghands": true,
+	"stroller": true, "teddybear": true,
 	"stethoscope": true, "pill": true,
 	"tag": true,
 }

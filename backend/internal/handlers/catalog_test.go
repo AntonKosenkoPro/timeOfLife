@@ -130,6 +130,80 @@ func TestCreateCategory_InvalidIcon(t *testing.T) {
 	}
 }
 
+// NewAndHiddenIcons is the additive icon set from improve-category-defaults:
+// the three new symbols plus every sports value hidden from iOS new
+// selection. All stay fully accepted on the relay.
+var newAndHiddenIcons = []string{
+	"carrot", "stroller", "teddybear",
+	"figure.strengthtraining", "figure.soccer", "figure.basketball",
+	"figure.tennis", "figure.gymnastics", "figure.mindandbody",
+	"figure.core.training", "bicycle",
+}
+
+// TestCreateCategory_NewAndHiddenIcons pins additive acceptance: every new
+// and hidden sports value is accepted on create.
+func TestCreateCategory_NewAndHiddenIcons(t *testing.T) {
+	h, _, _, tok := newCatalogHandler(t)
+
+	for _, icon := range newAndHiddenIcons {
+		w := serve(h, jsonReq(t, "POST", "/api/v1/categories", tok, map[string]any{
+			"id": v7(), "name": "cat " + icon, "icon": icon,
+		}))
+		if w.Code != http.StatusCreated {
+			t.Errorf("icon %q: expected 201, got %d (body=%s)", icon, w.Code, w.Body.String())
+			continue
+		}
+		var c struct {
+			Icon string `json:"icon"`
+		}
+		decodeBody(t, w, &c)
+		if c.Icon != icon {
+			t.Errorf("icon %q: expected stored %q, got %q", icon, icon, c.Icon)
+		}
+	}
+}
+
+// TestUpdateCategory_NewAndHiddenIcons pins icon updates to every new and
+// hidden sports value, and retains unsupported-icon rejection on update.
+func TestUpdateCategory_NewAndHiddenIcons(t *testing.T) {
+	h, _, _, tok := newCatalogHandler(t)
+	catID := createCategoryHelper(t, h, tok, "Gym", "dumbbell")
+
+	// Chain each patch from the previously stored version (+2s): the relay
+	// applies strictly-newer LWW at second precision, so two patches in the
+	// same wall second would conflict.
+	last := time.Now().Add(2 * time.Second).UTC()
+	for _, icon := range newAndHiddenIcons {
+		w := serve(h, jsonReq(t, "PATCH", "/api/v1/categories/"+catID, tok, map[string]any{
+			"icon": icon, "updated_at": last.Format(time.RFC3339Nano),
+		}))
+		if w.Code != http.StatusOK {
+			t.Errorf("update icon %q: expected 200, got %d (body=%s)", icon, w.Code, w.Body.String())
+			continue
+		}
+		var c struct {
+			Icon      string `json:"icon"`
+			UpdatedAt string `json:"updated_at"`
+		}
+		decodeBody(t, w, &c)
+		if c.Icon != icon {
+			t.Errorf("update icon %q: expected stored %q, got %q", icon, icon, c.Icon)
+		}
+		stored, ok := parseRFC3339(c.UpdatedAt)
+		if !ok {
+			t.Fatalf("update icon %q: unparseable updated_at %q", icon, c.UpdatedAt)
+		}
+		last = stored.Add(2 * time.Second)
+	}
+
+	w := serve(h, jsonReq(t, "PATCH", "/api/v1/categories/"+catID, tok, map[string]any{
+		"icon": "not-an-icon", "updated_at": last.Format(time.RFC3339Nano),
+	}))
+	if w.Code != http.StatusUnprocessableEntity {
+		t.Errorf("update unsupported icon: expected 422, got %d (body=%s)", w.Code, w.Body.String())
+	}
+}
+
 // createCategoryHelper creates a category and returns its id.
 func createCategoryHelper(t *testing.T, h *Handler, tok, name, icon string) string {
 	t.Helper()

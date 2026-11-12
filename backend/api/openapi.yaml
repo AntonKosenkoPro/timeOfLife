@@ -1893,6 +1893,7 @@ components:
         - gamecontroller
         - fork.knife
         - cup.and.saucer
+        - carrot
         - bed.double
         - moon.stars
         - moon.zzz
@@ -1926,6 +1927,8 @@ components:
         - lamp.table
         - person.2
         - figure.and.child.holdinghands
+        - stroller
+        - teddybear
         - stethoscope
         - pill
         - tag

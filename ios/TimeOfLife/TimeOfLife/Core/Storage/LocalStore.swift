@@ -634,7 +634,7 @@ actor LocalStore {
         let icon: CatalogIcon
     }
 
-    /// The seven starter category icons in creation order
+    /// The eight starter category icons in creation order
     /// (category-management spec, seed requirement). Names are supplied by
     /// the composition root in the active supported language.
     static let starterCategoryIcons: [CatalogIcon] = [
@@ -645,6 +645,7 @@ actor LocalStore {
         .cupAndSaucer,   // Relax
         .bedDouble,      // Sleep
         .tv,             // Entertainment
+        .forkKnife,      // Food
     ]
 
     /// The outcome of `seedStarterCategoriesIfNeeded`.
@@ -663,7 +664,7 @@ actor LocalStore {
     /// Creates the starter category set exactly once per account file
     /// (local-first-store spec, starter seeding is per-account-file;
     /// category-management D2). One transaction checks the
-    /// `category_starters_seeded` marker, inserts all seven ordinary
+    /// `category_starters_seeded` marker, inserts all eight ordinary
     /// categories, creates their category-create outbox rows, and writes the
     /// marker. Each account's file is seeded independently — opening one
     /// account's file never seeds, modifies, or resets another account's
@@ -678,7 +679,7 @@ actor LocalStore {
     /// the dataset seedless with no error.
     ///
     /// - Parameters:
-    ///   - names: The seven localized starter names in the active supported
+    ///   - names: The eight localized starter names in the active supported
     ///     language, in `starterCategoryIcons` order. Materialized once at
     ///     creation; records are not renamed when the locale changes.
     ///   - now: Creation timestamp (injectable for tests; quantized to

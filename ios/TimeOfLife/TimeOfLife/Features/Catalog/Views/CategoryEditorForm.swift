@@ -184,15 +184,14 @@ struct CategoryEditorForm: View {
         }
     }
 
-    /// Keeps a valid synchronized icon visible in the picker even when the
-    /// current OS cannot render it. The cell displays the `tag` fallback while
-    /// preserving the stored raw value until the user explicitly changes it.
+    /// Options for the shared editor: the renderable curated picker set,
+    /// plus the currently selected supported symbol appended once when it is
+    /// hidden from new selection or unavailable on this OS. A hidden selected
+    /// symbol keeps its original glyph where renderable; only genuine OS
+    /// unavailability displays the `tag` fallback, and only an explicit icon
+    /// change mutates the stored value (name-only edits preserve it).
     private var iconOptions: [String] {
-        let selected = vm.icon.rawValue
-        guard CatalogIcon.canRender(selected) || !CatalogIcon.allSymbols.contains(selected) else {
-            return CatalogIcon.renderableSymbols + [selected]
-        }
-        return CatalogIcon.renderableSymbols
+        CatalogIcon.pickerOptions(selected: vm.icon.rawValue)
     }
 }
 

@@ -240,6 +240,7 @@
 "category.seed.relax" = "Отдых";
 "category.seed.sleep" = "Сон";
 "category.seed.entertainment" = "Развлечения";
+"category.seed.food" = "Еда";
 
 // Undo (chip selection accessibility)
 "undo.selected" = "Выбрано";
@@ -304,6 +305,7 @@
 "catalogIcon.gamecontroller" = "Игровой контроллер";
 "catalogIcon.fork.knife" = "Вилка и нож";
 "catalogIcon.cup.and.saucer" = "Чашка и блюдце";
+"catalogIcon.carrot" = "Морковь";
 "catalogIcon.bed.double" = "Кровать";
 "catalogIcon.moon.stars" = "Луна и звёзды";
 "catalogIcon.moon.zzz" = "Спящая луна";
@@ -337,6 +339,8 @@
 "catalogIcon.lamp.table" = "Настольная лампа";
 "catalogIcon.person.2" = "Люди";
 "catalogIcon.figure.and.child.holdinghands" = "Семья";
+"catalogIcon.stroller" = "Коляска";
+"catalogIcon.teddybear" = "Плюшевый мишка";
 "catalogIcon.stethoscope" = "Стетоскоп";
 "catalogIcon.pill" = "Таблетка";
 "catalogIcon.tag" = "Тег";
