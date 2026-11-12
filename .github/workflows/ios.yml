@@ -66,28 +66,60 @@ jobs:
             else
               echo "ios=false" >> "$GITHUB_OUTPUT"
             fi
-            # The Screenshot suite is slow (full run under a second build
-            # configuration), so PRs build and test it only when the diff
-            # touches capture/config/entitlement/xcconfig/LiveActivity
-            # paths. Detection failure falls to the outer else (all true
+            # The Screenshot build + suite cost ~4 min (measured 4m00s on
+            # PR #250 run 43171912084 — a full second build configuration),
+            # so PRs run them only when the diff touches capture/config/
+            # entitlement/xcconfig/LiveActivity paths — or when any changed
+            # file present in the worktree contains SCREENSHOT_CAPTURE
+            # (content-aware fallback below: Debug does NOT compile
+            # `#if SCREENSHOT_CAPTURE`-only code, only the Screenshot config
+            # defines the flag — project.yml — so a product edit outside the
+            # path list can still break the capture build). The fallback is
+            # FAIL-OPEN: deleted/missing files and grep errors resolve to
+            # true. Detection failure falls to the outer else (all true
             # — fail-open).
             if printf '%s\n' "$files" | grep -Eq '(Screenshot|Capture|LiveActivit|TimeOfLife/Configuration/|ios/TimeOfLife/project\.yml$|scripts/deny-screenshot|\.xcconfig$|\.entitlements$)'; then
+              echo "screenshot=true" >> "$GITHUB_OUTPUT"
+            elif printf '%s\n' "$files" | {
+              # Content-aware fallback: true if any changed file present in
+              # the worktree contains the flag. Deleted/renamed files are
+              # missing from the worktree — unprovable absence resolves to
+              # true. grep status 1 is a clean non-match (keep scanning);
+              # status >1 is a real error — fail open. while-IFS-read keeps
+              # filenames with spaces intact (no word splitting).
+              while IFS= read -r f; do
+                [ -n "$f" ] || continue
+                if [ ! -f "$f" ]; then exit 0; fi
+                rc=0
+                grep -q 'SCREENSHOT_CAPTURE' "$f" 2>/dev/null || rc=$?
+                if [ "$rc" -eq 0 ]; then exit 0; fi
+                if [ "$rc" -gt 1 ]; then exit 0; fi
+              done
+              exit 1
+            }; then
               echo "screenshot=true" >> "$GITHUB_OUTPUT"
             else
               echo "screenshot=false" >> "$GITHUB_OUTPUT"
             fi
             # The stdlib Python/shell tooling runs locally only (owner
             # decision: no CI capture — slow, unreliable, expensive).
-            # panels-tests covers scripts/panels/ (macOS Helvetica); the
-            # tooling-tests lane covers scripts/screenshots/ plus the
-            # deny-screenshot guard it executes. Neither watches ios/ —
-            # product changes don't re-run script suites.
-            if printf '%s\n' "$files" | grep -Eq '^scripts/panels/'; then
+            # panels-tests and tooling-tests OVERLAP on both scripts/panels/
+            # and scripts/screenshots/ by design — the coupling is proven:
+            # scripts/panels/{panels,write_bundle_readme,stage_bezel_assets}.py
+            # put scripts/screenshots on sys.path and `import output_guard`
+            # (panels.py:110-114), and scripts/screenshots/tests/
+            # test_workflow_inputs.py reads scripts/panels/builder.py
+            # (:86-94) to pin the MATRIX_DEVICES/LOCALES catalog. A change
+            # confined to one directory still runs both suites.
+            # tooling-tests additionally covers the deny-screenshot install
+            # guard it executes. Neither watches ios/ — product changes
+            # don't re-run script suites.
+            if printf '%s\n' "$files" | grep -Eq '^scripts/(panels|screenshots)/'; then
               echo "panels=true" >> "$GITHUB_OUTPUT"
             else
               echo "panels=false" >> "$GITHUB_OUTPUT"
             fi
-            if printf '%s\n' "$files" | grep -Eq '^scripts/screenshots/|ios/TimeOfLife/scripts/deny-screenshot-install'; then
+            if printf '%s\n' "$files" | grep -Eq '^scripts/(panels|screenshots)/|ios/TimeOfLife/scripts/deny-screenshot-install'; then
               echo "tooling=true" >> "$GITHUB_OUTPUT"
             else
               echo "tooling=false" >> "$GITHUB_OUTPUT"
@@ -206,13 +238,18 @@ jobs:
             build | xcpretty
 
       - name: Build Screenshot configuration
-        # Gated on changes.screenshot (same filter as the suite below):
-        # the Screenshot config compiles product code with
-        # SCREENSHOT_CAPTURE. Push to main always builds it; PRs build
-        # it only when the diff touches capture/config/entitlement/
-        # xcconfig/LiveActivity paths. Product edits outside those paths
-        # skip this build by design (cost control) — the Debug build
-        # above still guards them.
+        # Gated on changes.screenshot (same filter as the slow suite
+        # below): the Screenshot config compiles product code with
+        # SCREENSHOT_CAPTURE, which the Debug build above does NOT
+        # compile (only the Screenshot config defines the flag — see
+        # project.yml). Push to main always builds it; PRs build it when
+        # the diff touches capture/config/entitlement/xcconfig/
+        # LiveActivity paths, or when any changed file contains
+        # SCREENSHOT_CAPTURE (content-aware fallback in the changes job
+        # — catches product edits outside the path list that still break
+        # capture-only code). Costs ~4 min (measured 4m00s on PR #250 run
+        # 43171912084), so it stays gated rather than unconditional; the
+        # slow TEST suite below stays gated the same way.
         if: github.event_name != 'pull_request' || needs.changes.outputs.screenshot == 'true'
         working-directory: ios/TimeOfLife
         run: |
