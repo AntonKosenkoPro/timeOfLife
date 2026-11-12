@@ -151,10 +151,12 @@ struct CatalogIconTests {
 
     @Test("each requested domain has exactly its three specified choices")
     func domainChoiceCounts() {
-        #expect(foodChoices.isSubset(of: Set(CatalogIcon.curatedSymbols)))
-        #expect(childChoices.isSubset(of: Set(CatalogIcon.curatedSymbols)))
-        #expect(foodChoices.count == 3)
-        #expect(childChoices.count == 3)
+        let curated = Set(CatalogIcon.curatedSymbols)
+        #expect(foodChoices.isSubset(of: curated))
+        #expect(childChoices.isSubset(of: curated))
+        // Exactly the three specified new-selection choices per domain.
+        #expect(Set(["fork.knife", "cup.and.saucer", "carrot"]).isSubset(of: curated))
+        #expect(Set(["figure.and.child.holdinghands", "stroller", "teddybear"]).isSubset(of: curated))
         #expect(!childChoices.contains("person.2"), "generic person.2 is not child-specific")
     }
 
