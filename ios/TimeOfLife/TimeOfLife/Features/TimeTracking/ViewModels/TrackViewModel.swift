@@ -279,6 +279,14 @@ final class TrackViewModel: ObservableObject {
                 )
                 nameDraft = draft.activityText
                 startTicker(from: startedAt)
+                // The session's run identity follows the live run anchor: a
+                // restore converging on a moved anchor (e.g. an unpersisted
+                // backdate losing to the stored draft) keeps tracking the
+                // same run instead of going stale-quiet.
+                if var edit = runningNotesEdit {
+                    edit.runStartedAt = startedAt
+                    runningNotesEdit = edit
+                }
             }
         }
     }
@@ -617,6 +625,13 @@ final class TrackViewModel: ObservableObject {
             state = .error(draft, startedAt: resolved)
         case .idle, .ready, .saving, .saved:
             return
+        }
+        // The session's run identity follows the live run anchor: a backdate
+        // moves the run (same draft), so keystroke tracking and the later
+        // receipt check must use the resolved anchor, not the stale one.
+        if var edit = runningNotesEdit, state.isRunning, let anchor = state.startedAt {
+            edit.runStartedAt = anchor
+            runningNotesEdit = edit
         }
         elapsed = max(0, now.timeIntervalSince(resolved))
         startTicker(from: resolved)

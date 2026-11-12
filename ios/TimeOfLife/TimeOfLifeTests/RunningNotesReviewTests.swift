@@ -551,6 +551,26 @@ struct RunningNotesReviewTests {
         #expect(resolved.updatedAt > tick, "the notes update needs an updatedAt strictly later at wire precision")
     }
 
+    @Test("a mid-run backdate keeps dirty tracking on the moved run")
+    func backdateKeepsDirtyTrackingOnMovedRun() async throws {
+        let vm = makeViewModel()
+        let store = vm.service.store
+        let startedAt = Date(timeIntervalSince1970: 1_600_000_000)
+        try await store.saveTimerDraft(activityText: "Gym", categoryIDs: [], startedAt: startedAt, notes: "confirmed")
+        vm.state = .running(TrackState.Draft(text: "Gym", notes: "confirmed"), startedAt: startedAt)
+        vm.openRunningNotesEditor()
+        // Backdate the run, then type: the session identity must follow the
+        // moved anchor or the later receipt check would drop the decision.
+        vm.updateDraftStartedAt(startedAt.addingTimeInterval(-600))
+        vm.updateRunningNotesCurrent("dirty after backdate")
+
+        await vm.stop()
+
+        let review = try #require(vm.pendingReview)
+        #expect(review.retainedText == "dirty after backdate")
+        #expect(review.runStartedAt <= startedAt)
+    }
+
     /// Sendable posted-flag for the default-center invalidation test (the
     /// observer closure cannot actor-hop). Lock-guarded after the
     /// `AppContainer+UITesting` `NSLock` precedent.

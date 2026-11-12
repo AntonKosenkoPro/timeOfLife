@@ -147,7 +147,7 @@ struct AppShellViewModelTests {
         #expect(AppShellViewModel.notesRouteEffect(
             oldPath: [editorRoute()], newPath: [],
             hasPendingReview: true, isReviewing: false
-        ) == .none)
+        ) == .noEffect)
     }
 
     @Test("popping the pushed review page discards")
@@ -159,7 +159,7 @@ struct AppShellViewModelTests {
         #expect(AppShellViewModel.notesRouteEffect(
             oldPath: [.notesReview], newPath: [],
             hasPendingReview: false, isReviewing: false
-        ) == .none)
+        ) == .noEffect)
     }
 
     @Test("pushes and unrelated pops have no session effect")
@@ -167,11 +167,11 @@ struct AppShellViewModelTests {
         #expect(AppShellViewModel.notesRouteEffect(
             oldPath: [], newPath: [editorRoute()],
             hasPendingReview: false, isReviewing: false
-        ) == .none)
+        ) == .noEffect)
         #expect(AppShellViewModel.notesRouteEffect(
             oldPath: [.profile], newPath: [],
             hasPendingReview: true, isReviewing: true
-        ) == .none)
+        ) == .noEffect)
     }
 
     // MARK: - Helpers

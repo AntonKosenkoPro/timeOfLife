@@ -449,7 +449,7 @@ struct AppShellView: View {
             trackVM.runningNotesEditorClosed()
         case .discardReview:
             trackVM.discardPendingReview()
-        case .none:
+        case .noEffect:
             break
         }
     }

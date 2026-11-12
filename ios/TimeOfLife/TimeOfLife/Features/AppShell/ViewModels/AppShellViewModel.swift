@@ -110,7 +110,8 @@ final class AppShellViewModel: ObservableObject {
         /// X/back from a review surface, or the pushed review page popped:
         /// discard the unconfirmed edits (the entry keeps confirmed notes).
         case discardReview
-        case none
+        /// No session effect for this transition.
+        case noEffect
     }
 
     /// Maps a track-path transition to its session effect:
@@ -131,11 +132,11 @@ final class AppShellViewModel: ObservableObject {
         if hadEditor, !hasEditor {
             if hasPendingReview, isReviewing { return .discardReview }
             if !hasPendingReview { return .editorClosed }
-            return .none
+            return .noEffect
         }
         let hadReview = oldPath.contains(.notesReview)
         let hasReview = newPath.contains(.notesReview)
         if hadReview, !hasReview, hasPendingReview { return .discardReview }
-        return .none
+        return .noEffect
     }
 }
