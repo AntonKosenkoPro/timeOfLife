@@ -24,7 +24,7 @@ Keep all existing `CatalogIcon` cases and localized names. Introduce a separatel
 
 | Sports selectable for new categories | Hidden only from new selection |
 |---|---|
-| `figure.walk`, `figure.run`, `dumbbell`, `figure.yoga`, `figure.cycling`, `figure.swimming`, `bicycle` | `figure.strengthtraining`, `figure.soccer`, `figure.basketball`, `figure.tennis`, `figure.gymnastics`, `figure.mindandbody`, `figure.core.training` |
+| `figure.walk`, `figure.run`, `dumbbell`, `figure.yoga`, `figure.cycling`, `figure.swimming` | `figure.strengthtraining`, `figure.soccer`, `figure.basketball`, `figure.tennis`, `figure.gymnastics`, `figure.mindandbody`, `figure.core.training`, `bicycle` |
 
 Generalize the editor's existing selected-value passthrough: if a supported selected symbol is absent from curated options, include it once. Saving a name-only edit must preserve it. A hidden symbol uses its original glyph if renderable; only genuine OS unavailability uses the existing `tag` visual fallback. Selecting a different icon is the only icon-changing action. All category editor entry points share this policy.
 
@@ -39,7 +39,7 @@ Alternative rejected: deleting enum/validator members would break relay writes a
 
 The decision is to add `carrot`, `stroller`, and `teddybear`, giving exactly three choices per requested domain including existing icons. Generic `person.2` remains a people icon, outside the child-specific count. Run the existing `CatalogIcon.canRender` check on an actual iOS 18 simulator for all three additions before catalog edits. This is an acceptance gate, not permission to vary the scope: if any icon fails, record the evidence and stop for an explicit decision. Never silently omit or substitute an icon. None of the three has been runtime-verified in this proposal.
 
-The accepted catalog becomes exactly 66 symbols (63 existing plus three additions); the curated picker set contains 59 before OS renderability filtering (66 minus seven hidden sports values). `bicycle` remains selectable. Keep all mirrors and tests pinned to that exact accepted set. Preserve dynamic `catalogIcon.<rawValue>` VoiceOver keys for every old value and add all three new symbols in five locales. Do not add separate `L10n` enum cases for dynamic icon keys; Food's seed key does need one and localization snapshot coverage.
+The accepted catalog becomes exactly 66 symbols (63 existing plus three additions); the curated picker set contains 58 before OS renderability filtering (66 minus eight hidden sports values). `figure.cycling` represents cycling; `bicycle` is hidden as a redundant new-selection choice, not removed from the accepted catalog. Keep all mirrors and tests pinned to that exact accepted set. Preserve dynamic `catalogIcon.<rawValue>` VoiceOver keys for every old value and add all three new symbols in five locales. Do not add separate `L10n` enum cases for dynamic icon keys; Food's seed key does need one and localization snapshot coverage.
 
 ### 4. Preserve capture fixtures without expanding the screenshot project
 

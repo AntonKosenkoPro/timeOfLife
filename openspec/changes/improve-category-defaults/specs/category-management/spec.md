@@ -47,7 +47,7 @@ The supported catalog SHALL add exactly three symbols: `carrot`, `stroller`, and
 
 Category names SHALL be unique after trimming and case-insensitive comparison. Invalid input SHALL leave the persisted catalog unchanged and SHALL present one localized error for the affected field. Every supported symbol SHALL have a localized VoiceOver name in all five supported languages.
 
-The new-selection picker SHALL show only supported symbols that render on the running OS, excluding exactly seven sports symbols: `figure.strengthtraining`, `figure.soccer`, `figure.basketball`, `figure.tennis`, `figure.gymnastics`, `figure.mindandbody`, and `figure.core.training`. The seven retained sports choices SHALL remain offered where renderable: `figure.walk`, `figure.run`, `dumbbell`, `figure.yoga`, `figure.cycling`, `figure.swimming`, and `bicycle`. Hiding SHALL NOT affect validation, storage, synchronization, or display outside new selection. When editing a category, its currently selected supported icon SHALL remain represented even if hidden from new selection or unavailable on the OS. A supported icon that cannot render SHALL display as `tag` without changing the stored value; hiding alone SHALL NOT cause this fallback.
+The new-selection picker SHALL show only supported symbols that render on the running OS, excluding exactly eight sports symbols: `figure.strengthtraining`, `figure.soccer`, `figure.basketball`, `figure.tennis`, `figure.gymnastics`, `figure.mindandbody`, `figure.core.training`, and `bicycle`. The six retained sports choices SHALL remain offered where renderable: `figure.walk`, `figure.run`, `dumbbell`, `figure.yoga`, `figure.cycling`, and `figure.swimming`. Hiding SHALL NOT affect validation, storage, synchronization, or display outside new selection. When editing a category, its currently selected supported icon SHALL remain represented even if hidden from new selection or unavailable on the OS. A supported icon that cannot render SHALL display as `tag` without changing the stored value; hiding alone SHALL NOT cause this fallback.
 
 #### Scenario: Create a valid category
 - **WHEN** the user enters a unique valid name, selects a supported icon, and saves
@@ -87,10 +87,10 @@ The new-selection picker SHALL show only supported symbols that render on the ru
 
 #### Scenario: New sports choices are compact
 - **WHEN** a user creates a category and browses sports icon choices
-- **THEN** the seven hidden sports symbols are absent and the seven retained choices, including `bicycle`, are offered where renderable
+- **THEN** the eight hidden sports symbols, including `bicycle`, are absent and the six retained choices, including `figure.cycling`, are offered where renderable
 
 #### Scenario: A hidden selected icon survives editing
-- **WHEN** the user opens a category with `figure.soccer` or `figure.tennis`, changes only its name, and saves
+- **WHEN** the user opens a category with `figure.soccer` or `bicycle`, changes only its name, and saves
 - **THEN** the current icon is represented in the editor and its stored raw value is preserved locally and by the relay
 - **AND** it displays its original glyph wherever renderable, not `tag` merely because it is hidden
 
