@@ -91,6 +91,13 @@ jobs:
               # worktree (deleted/renamed) resolve via their BASE revision:
               # true iff `git show "$BASE:$f"` contains the flag; any git
               # error (never existed at base, odd paths) resolves to true.
+              # Removal direction: a still-present file whose worktree copy
+              # MISSES also resolves against BASE — removing `#if
+              # SCREENSHOT_CAPTURE` code can break unchanged flag-only
+              # callers the worktree grep can no longer see, so the miss is
+              # true iff the base revision holds the flag (any git-show
+              # error → true: fail-open, a missing base object must never
+              # read as "safe to skip").
               # grep status 1 is a clean non-match (keep scanning);
               # status >1 is a real error — fail open. while-IFS-read keeps
               # filenames with spaces intact (no word splitting).
@@ -111,6 +118,15 @@ jobs:
                 grep -q 'SCREENSHOT_CAPTURE' "$f" 2>/dev/null || rc=$?
                 if [ "$rc" -eq 0 ]; then exit 0; fi
                 if [ "$rc" -gt 1 ]; then exit 0; fi
+                # Removal direction: the flag may have been REMOVED from
+                # this still-present file — a clean worktree miss also
+                # checks BASE (true iff it holds the flag; any git-show
+                # error → true — fail-open, never "safe to skip").
+                base_content="$(git show "$BASE:$f" 2>/dev/null)" || exit 0
+                brc=0
+                printf '%s' "$base_content" | grep -q 'SCREENSHOT_CAPTURE' 2>/dev/null || brc=$?
+                if [ "$brc" -eq 0 ]; then exit 0; fi
+                if [ "$brc" -gt 1 ]; then exit 0; fi
               done
               exit 1
             }; then
