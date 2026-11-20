@@ -100,7 +100,9 @@ extension CatalogIcon {
     }
 
     /// The symbols offered for a new category on the running OS: the curated
-    /// set minus symbols the OS cannot render.
+    /// set minus symbols the OS cannot render. This is the product-curation
+    /// layer (curatedSymbols) combined with the OS-capability probe
+    /// (canRender); it backs every production picker caller.
     static var pickerSymbols: [String] {
         curatedSymbols.filter(Self.canRender)
     }
@@ -108,6 +110,9 @@ extension CatalogIcon {
     /// The catalog symbols that can render on the running OS. Some catalog
     /// symbols are unavailable on older supported OS versions; the picker
     /// hides them so the user only ever chooses a renderable symbol.
+    /// This is the raw OS-capability probe over the full catalog, kept
+    /// separate from product curation (curatedSymbols) so tests pin OS
+    /// renderability independently of which symbols the picker offers.
     static var renderableSymbols: [String] {
         allSymbols.filter(Self.canRender)
     }

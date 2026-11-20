@@ -152,12 +152,19 @@ struct CatalogIconTests {
     @Test("each requested domain has exactly its three specified choices")
     func domainChoiceCounts() {
         let curated = Set(CatalogIcon.curatedSymbols)
-        #expect(foodChoices.isSubset(of: curated))
-        #expect(childChoices.isSubset(of: curated))
-        // Exactly the three specified new-selection choices per domain.
-        #expect(Set(["fork.knife", "cup.and.saucer", "carrot"]).isSubset(of: curated))
-        #expect(Set(["figure.and.child.holdinghands", "stroller", "teddybear"]).isSubset(of: curated))
-        #expect(!childChoices.contains("person.2"), "generic person.2 is not child-specific")
+        // Filter the curated set per domain and compare exactly: subset
+        // checks alone would still pass if extra domain icons entered the
+        // curated set, and literals compared against each other prove nothing
+        // about the implementation.
+        let foodUniverse: Set<String> = ["fork.knife", "cup.and.saucer", "carrot"]
+        #expect(curated.intersection(foodUniverse) == foodChoices)
+        let childFamily = curated.filter {
+            $0.contains("child") || $0 == "stroller" || $0 == "teddybear"
+        }
+        #expect(childFamily == childChoices, "exactly the three child-specific choices")
+        // Generic person.2 stays offered for new selection; it is
+        // family-adjacent, not one of the child-specific choices.
+        #expect(curated.contains("person.2"))
     }
 
     @Test("picker options append a hidden or unavailable selection exactly once")

@@ -1087,6 +1087,7 @@ struct LocalStoreSeedingTests {
     /// Writes the pre-Food seed marker directly, exactly as the previous
     /// seven-name seeding did — so reopen tests exercise the real upgrade
     /// boundary instead of the current eight-name seed path.
+    /// Fixture-only: app mutation paths stay behind LocalStore.
     private func writeLegacySeedMarker(url: URL) throws {
         try DatabaseQueue(path: url.path).write { db in
             try db.execute(

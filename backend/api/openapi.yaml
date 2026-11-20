@@ -1862,9 +1862,14 @@ components:
         The supported SF Symbol catalog for category icons. This enum is the
         machine-readable canonical list; the Go `validIcons` set and the iOS
         `CatalogIcon` type mirror it, and `Design/TOKENS.md` documents the
-        same set. The icon picker hides catalog symbols unavailable on the
-        running OS; a valid synchronized symbol that cannot render is
-        displayed as `tag` without changing the stored value.
+        same set. Eight accepted sports values (`figure.strengthtraining`,
+        `figure.soccer`, `figure.basketball`, `figure.tennis`,
+        `figure.gymnastics`, `figure.mindandbody`, `figure.core.training`,
+        `bicycle`) stay accepted, renderable, and syncable but are hidden
+        from new-category selection. The icon picker hides catalog symbols
+        unavailable on the running OS; a valid synchronized symbol that
+        cannot render is displayed as `tag` without changing the stored
+        value.
       enum:
         - clock
         - laptopcomputer
