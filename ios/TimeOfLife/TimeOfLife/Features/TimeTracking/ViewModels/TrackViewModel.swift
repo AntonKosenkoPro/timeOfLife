@@ -15,7 +15,7 @@ final class TrackViewModel: ObservableObject {
     @Published var errorMessage: String?
     /// The name-field draft (trimmed at Start; a draft, never committed).
     @Published var nameDraft = ""
-    /// The 12 exact-text recents (newest first, first-category icon data).
+    /// The 10 exact-text recents (newest first, first-category icon data).
     /// Settable for the same test-seeding reason as `state`.
     @Published var recents: [ExactName] = []
     /// Every committed exact-text name, newest first, uncapped — the source
@@ -25,11 +25,12 @@ final class TrackViewModel: ObservableObject {
     @Published var allNames: [ExactName] = []
     /// Recents cap (timer-capture-experience): single source of truth,
     /// consumed by `storeRecents`, the `RecentActivitiesChips` default,
-    /// and the test helpers — the compiler carries the invariant, not
-    /// comments. Lives on the view model (not the view) so the
-    /// persistence query never resolves domain policy through UI types.
+    /// the `RecentsFitPolicy` candidate clamp, and the test helpers — the
+    /// compiler carries the invariant, not comments. Lives on the view model
+    /// (not the view) so the persistence query never resolves domain policy
+    /// through UI types.
     /// `nonisolated` so the `nonisolated` slice helper can default to it.
-    nonisolated static let recentsLimit = 12
+    nonisolated static let recentsLimit = 10
     /// The id→Category map used to resolve recents chip icons (design D5).
     @Published private(set) var categories: [String: Category] = [:]
 

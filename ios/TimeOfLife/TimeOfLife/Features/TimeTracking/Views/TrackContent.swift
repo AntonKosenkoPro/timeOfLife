@@ -24,7 +24,8 @@ struct TrackContent: View {
     /// Finite host geometry for the adaptive chip budget: the outer
     /// `ScrollView` offers unbounded height, so the budget is measured here,
     /// outside it, and passed down. Zero until the first layout pass — the
-    /// budget stays nil (fixed 4-row cap) until the viewport is measured.
+    /// budget stays nil (bounded provisional one-row Recents layout) until
+    /// the viewport is measured.
     @State private var measuredViewportHeight: CGFloat = 0
     @State private var measuredTopHeight: CGFloat = 0
     @State private var measuredNameHeight: CGFloat = 0
@@ -95,10 +96,13 @@ struct TrackContent: View {
     /// Finite chip budget: the host viewport minus everything that must stay
     /// put — the top flow, the name control, the main action, one caption
     /// row, the two `spacingLarge` gaps around the action, the caption gap,
-    /// and the tab-bar margin. The chip viewport renders
-    /// `min(4-row cap, budget)`, so compact phones shrink to fewer rows with
-    /// internal scroll while the timer, name, Stop, and tab-bar clearance
-    /// hold. Nil until the viewport measures (fixed cap on first paint).
+    /// and the tab-bar margin. The Recents fit policy mounts only the
+    /// newest-first prefix that fits this budget (falling back to the newest
+    /// five with internal scroll), so compact phones show fewer chips with
+    /// internal scroll instead of fighting page gestures, while the timer,
+    /// name, Stop, and tab-bar clearance hold. The running `TagSelector`
+    /// keeps its own `min(4-row cap, budget)` clamp. Nil until the viewport
+    /// measures (bounded provisional one-row Recents layout on first paint).
     private var chipAvailableHeight: CGFloat? {
         guard measuredViewportHeight > 0 else { return nil }
         let fixed = measuredTopHeight + measuredNameHeight + measuredActionHeight
