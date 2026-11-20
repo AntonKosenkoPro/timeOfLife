@@ -1,12 +1,17 @@
+// swiftlint:disable file_length
+// (view + fit-plan wiring + off-screen measurement pass + previews form one
+// unit; splitting would scatter the plan inputs across files.)
 import SwiftUI
 
 /// The Track Recents chip flow (timer-capture-experience spec,
-/// design D5). Presents up to twelve most-recently-used exact entry texts as
-/// a wrapping flow of chips with 44 pt tap targets; the flow hugs its rows
-/// up to a four-row budget measured against the host, and overflow scrolls
-/// internally on the chip axis, so the Track page footprint never grows for
-/// Recents overflow and compact phones shrink the viewport instead of
-/// sliding under the tab bar.
+/// design D5). Presents up to ten most-recently-used exact entry texts as
+/// a wrapping flow of chips with 44 pt tap targets. The view mounts only the
+/// fitting newest-first prefix: when five or more candidates fit the finite
+/// host budget it renders that prefix as a plain (non-scrolling) flow, and
+/// only a smaller fitting set falls back to offering the newest five through
+/// an internally scrolling viewport — so Recents overflow alone never grows
+/// the Track page and never fights page gestures. Omitted candidates are
+/// never mounted: no invisible interactive or accessibility overflow.
 ///
 /// Each chip shows the icon of the first category of that exact text's
 /// newest committed entry (first by stored position, resolved through the
@@ -16,15 +21,22 @@ import SwiftUI
 /// same non-color-only selected treatment as `TagSelector` (fill + contrast,
 /// no checkmark, so chips stay compact). Chips wrap via the shared
 /// `FlowLayout` with equal `Theme.spacingSmall` gaps.
+///
+/// Fitting reuses the actual rendered chip sizes: an off-screen measurement
+/// pass lays the full candidate set out at the same container width (same
+/// fonts, icon slots, and selected presentation), non-interactive and
+/// accessibility-hidden, and the pure `RecentsFitPolicy` packs those sizes
+/// with the shared `FlowPacking` arithmetic — the same greedy packing the
+/// visible `FlowLayout` uses for placement.
 struct RecentActivitiesChips: View {
     let recents: [ExactName]
     let categories: [String: Category]
     let selectedText: String?
     let onSelect: (ExactName) -> Void
-    /// Finite host budget for the viewport (Track): the host viewport minus
+    /// Finite host budget for the chip area (Track): the host viewport minus
     /// the measured siblings, gaps, and tab-bar margin (see `TrackContent`).
-    /// Same adaptive contract as `TagSelector` — `min(4-row cap, budget)`
-    /// floored at one row; nil keeps the fixed 4-row cap.
+    /// Nil (or non-positive/non-finite) keeps a bounded provisional one-row
+    /// layout until the viewport measures.
     let availableHeight: CGFloat?
 
     init(
@@ -45,13 +57,23 @@ struct RecentActivitiesChips: View {
     private var dynamicTypeSize
 
     /// Scroll-edge state for the viewport dividers (shared `ChipViewport`
-    /// math — same clamp and fade contract as the tag selector).
+    /// math — same clamp and fade contract as the tag selector). Only
+    /// meaningful in the scrolling presentation; reset whenever the offered
+    /// set or viewport changes.
     @State private var edges = ChipViewport.Edges()
+
+    /// Measured container width (background reader): 0 until the first
+    /// layout pass.
+    @State private var containerWidth: CGFloat = 0
+
+    /// Rendered chip sizes from the off-screen measurement pass, keyed by
+    /// exact text. Empty until the pass reports.
+    @State private var measuredSizes: [String: CGSize] = [:]
 
     /// The capped, most-recently-used-first slice (the store already sorts
     /// by the text's newest `started_at`; the cap is
     /// `TrackViewModel.recentsLimit`).
-    private var capped: [ExactName] { Self.recents(from: recents) }
+    private var candidates: [ExactName] { Self.recents(from: recents) }
 
     /// The capped, most-recently-used-first slice of the given recents.
     /// Pure (no view state), so `nonisolated` like `EntryRow.accessibilityLabel`.
@@ -62,9 +84,52 @@ struct RecentActivitiesChips: View {
         Array(recents.prefix(limit))
     }
 
+    /// Measured sizes in candidate order, or nil while the measurement pass
+    /// has not reported every candidate (partial sizes would flap the plan).
+    private var readySizes: [CGSize]? {
+        guard containerWidth.isFinite, containerWidth > 0, !candidates.isEmpty else { return nil }
+        var sizes: [CGSize] = []
+        sizes.reserveCapacity(candidates.count)
+        for candidate in candidates {
+            guard let size = measuredSizes[candidate.text] else { return nil }
+            sizes.append(size)
+        }
+        return sizes
+    }
+
+    /// The mounting plan for this pass: measured fit, or the bounded
+    /// provisional fallback while measuring.
+    private var effectivePlan: RecentsFitPolicy.Plan {
+        guard let sizes = readySizes else {
+            return RecentsFitPolicy.provisional(
+                candidateCount: candidates.count,
+                rowHeight: chipRowHeight
+            )
+        }
+        return RecentsFitPolicy.plan(
+            itemSizes: sizes,
+            containerWidth: containerWidth,
+            spacing: Theme.spacingSmall,
+            budget: availableHeight,
+            rowHeight: chipRowHeight
+        )
+    }
+
+    /// The newest-first prefix actually mounted this pass.
+    private var offered: [ExactName] {
+        Array(candidates.prefix(effectivePlan.offered))
+    }
+
+    /// Identity for the scrolling viewport: resets the scroll offset and
+    /// edge state when the offered set or viewport changes.
+    private var offeredIdentifier: String {
+        offered.map(\.text).joined(separator: "\u{1F}")
+            + "|\(effectivePlan.viewport ?? -1)"
+    }
+
     /// Chip row height: subheadline line height at the environment's Dynamic
     /// Type size plus uniform padding, floored at the 44 pt target so the
-    /// clamp holds under Dynamic Type.
+    /// floor holds under Dynamic Type.
     private var chipRowHeight: CGFloat {
         let lineHeight = UIFont.preferredFont(
             forTextStyle: .subheadline,
@@ -74,30 +139,56 @@ struct RecentActivitiesChips: View {
     }
 
     var body: some View {
-        // Zero-layout edge hairlines: overlays on the ScrollView's outer
-        // frame (not VStack siblings, never scrolled content), so the
-        // viewport total stays within the measured host budget as the top
-        // hairline fades in — top fades in once chips scroll under it,
-        // bottom fades out at the content end, both hidden when everything
-        // fits. The viewport hugs content up to the measured host budget
-        // (four rows max) and scrolls internally beyond it — never pushing
-        // siblings or the page.
-        ScrollView(.vertical) {
-            flow
-                // Content inset carries the border clearance (same as
-                // `TagSelector`): when the catalog fits, `fixedSize` hugs
-                // the content height, so frame slack alone never
-                // materializes. 1 pt top/bottom keeps the chip strokes
-                // fully visible.
-                .padding(.vertical, ChipViewport.borderBleed / 2)
+        Group {
+            if effectivePlan.scrolling {
+                scrollingFlow
+            } else {
+                staticFlow
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .frame(maxHeight: ChipViewport.viewportHeight(
-            rowHeight: chipRowHeight,
-            spacing: Theme.spacingSmall,
-            availableHeight: availableHeight
-        ))
+        .background(measureBackground)
+    }
+
+    /// The fitting-prefix presentation: a plain wrapping flow with no scroll
+    /// view, so it never owns gestures and never fights page scrolling.
+    private var staticFlow: some View {
+        FlowLayout(spacing: Theme.spacingSmall) {
+            ForEach(offered) { recent in
+                chip(recent)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// The newest-five fallback presentation: hugs its offered content up to
+    /// the planned viewport and scrolls internally beyond it — never pushing
+    /// siblings or the page. Zero-layout edge hairlines overlay the
+    /// ScrollView's outer frame (not VStack siblings, never scrolled
+    /// content), so the viewport total stays within the measured host budget
+    /// as the top hairline fades in — top fades in once chips scroll under
+    /// it, bottom fades out at the content end, both hidden when everything
+    /// fits.
+    private var scrollingFlow: some View {
+        ScrollView(.vertical) {
+            FlowLayout(spacing: Theme.spacingSmall) {
+                ForEach(offered) { recent in
+                    chip(recent)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            // Content inset carries the border clearance (same as
+            // `TagSelector`): when the offered set fits, `fixedSize` hugs
+            // the content height, so frame slack alone never
+            // materializes. 1 pt top/bottom keeps the chip strokes
+            // fully visible.
+            .padding(.vertical, ChipViewport.borderBleed / 2)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxHeight: effectivePlan.viewport)
         .fixedSize(horizontal: false, vertical: true)
+        .id(offeredIdentifier)
+        .onChange(of: offeredIdentifier) { edges = ChipViewport.Edges() }
         .onScrollGeometryChange(for: ChipViewport.Edges.self, of: { geometry in
             ChipViewport.edges(
                 offsetY: geometry.contentOffset.y,
@@ -129,14 +220,43 @@ struct RecentActivitiesChips: View {
         .animation(.easeInOut(duration: 0.2), value: edges)
     }
 
-    /// The chip flow: hugged by `fixedSize` up to the available slack above.
-    private var flow: some View {
-        FlowLayout(spacing: Theme.spacingSmall) {
-            ForEach(capped) { recent in
-                chip(recent)
+    /// Width capture plus the off-screen measurement pass: lays the full
+    /// candidate set out at the container width with the real chip views
+    /// (same fonts, icon slots, selected presentation), reporting each
+    /// chip's rendered size. Non-interactive and accessibility-hidden, and
+    /// a background so it never contributes to layout.
+    private var measureBackground: some View {
+        GeometryReader { proxy in
+            ZStack(alignment: .topLeading) {
+                Color.clear
+                if proxy.size.width > 0 {
+                    FlowLayout(spacing: Theme.spacingSmall) {
+                        ForEach(candidates) { recent in
+                            chip(recent)
+                                .background {
+                                    GeometryReader { chipProxy in
+                                        Color.clear.preference(
+                                            key: ChipSizesKey.self,
+                                            value: [recent.text: chipProxy.size]
+                                        )
+                                    }
+                                }
+                        }
+                    }
+                    .frame(width: proxy.size.width, alignment: .leading)
+                }
             }
+            .opacity(0)
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
+            .preference(key: ChipAreaWidthKey.self, value: proxy.size.width)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .onPreferenceChange(ChipAreaWidthKey.self) {
+            if containerWidth != $0 { containerWidth = $0 }
+        }
+        .onPreferenceChange(ChipSizesKey.self) {
+            if measuredSizes != $0 { measuredSizes = $0 }
+        }
     }
 
     /// A trait collection matching the SwiftUI environment's effective
@@ -209,6 +329,23 @@ struct RecentActivitiesChips: View {
     }
 }
 
+/// Container width reported by the Recents background reader.
+private struct ChipAreaWidthKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
+    }
+}
+
+/// Rendered chip sizes from the off-screen measurement pass, keyed by exact
+/// text. Later reports win per key so re-measurement converges.
+private struct ChipSizesKey: PreferenceKey {
+    static let defaultValue: [String: CGSize] = [:]
+    static func reduce(value: inout [String: CGSize], nextValue: () -> [String: CGSize]) {
+        value.merge(nextValue()) { _, new in new }
+    }
+}
+
 extension DynamicTypeSize {
     /// The `UIContentSizeCategory` equivalent of the environment's Dynamic
     /// Type size, used to build a measurement trait collection.
@@ -254,13 +391,13 @@ extension DynamicTypeSize {
     .background(Theme.backgroundPrimary)
 }
 
-#Preview("Recents — Twelve, overflow scrolls internally") {
+#Preview("Recents — Ten, fit prefix without scrolling") {
     let categories = [
         Category(id: "c1", name: "Work", icon: "laptopcomputer"),
         Category(id: "c2", name: "Study", icon: "book"),
         Category(id: "c3", name: "Sport", icon: "figure.run")
     ]
-    let recents = (0..<12).map { index in
+    let recents = (0..<10).map { index in
         let categorized = index < 6
         return ExactName(
             text: "Entry number \(index)",
