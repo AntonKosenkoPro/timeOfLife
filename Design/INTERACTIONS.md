@@ -246,7 +246,7 @@ U8. Applies to Manage Categories and the Track Recents area.
 
 ## Recency ordering
 
-Timer Recents are up-to-12 exact texts computed on-device from committed entries (`GROUP BY activity_text`, newest `started_at` wins per group). No manual drag-reorder at MVP. The Manage Categories list is name-ordered.
+Timer Recents are up-to-10 exact texts computed on-device from committed entries (`GROUP BY activity_text`, newest `started_at` wins per group). No manual drag-reorder at MVP. The Manage Categories list is name-ordered. Only the fitting newest-first prefix is mounted (all when fitting, otherwise the newest five through internal scroll); omitted names stay available in the uncapped name picker.
 
 ## Text and category semantics
 

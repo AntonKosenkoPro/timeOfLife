@@ -471,10 +471,11 @@ TagSelector(
 
 ## `RecentActivitiesChips`
 
-The Track Recents chip flow (D2/D3/D4): a wrapping flow of at most twelve
-most-recently-used exact entry texts with 44 pt tap targets; chips wrap onto
-additional rows inside a fixed-height area (three chip rows) with its own
-vertical scroll and never require horizontal scrolling. A single tap fills the
+The Track Recents chip flow (D2/D3/D4, fit-track-recents): a wrapping flow of at most ten
+most-recently-used exact entry texts with 44 pt tap targets; only the fitting newest-first
+prefix is mounted — five or more fitting chips render as a plain non-scrolling flow, while a
+smaller fit falls back to the newest five through an internally scrolling viewport — with its own
+vertical scroll only in that fallback and never requiring horizontal scrolling. A single tap fills the
 name field with that exact text plus its newest entry's ordered categories
 without starting timing. There is no activity entity — chips represent entry
 texts, never activities. (The type name is kept for code continuity.)
@@ -495,14 +496,18 @@ struct RecentActivitiesChips: View {
 - Wrapping flow of content-sized chips, left-aligned, equal `Theme.spacingSmall`
   gaps between chips and rows, laid out by the shared `FlowLayout`
   (same greedy packing as `TagSelector`).
-- Cap of twelve, most-recently-used first (`recents.prefix(12)`; the store
-  already sorts by each text's newest `started_at`). The flow sits in an
-  adaptive viewport (hug content, clamp at up to 4 rows of available
-  height, scroll internally) with the same 1 pt top/bottom scroll-content
-  padding plus matching +2 pt max cap as `TagSelector` (`ChipViewport`
-  contract, including `borderBleed`), so small sets stay compact, short
-  viewports show fewer rows with internal scroll, and overflow never grows
-  the page or slides under the tab bar.
+- Cap of ten, most-recently-used first (`recents.prefix(10)`; the store
+  already sorts by each text's newest `started_at`). The view mounts only the
+  fitting newest-first prefix measured from the actual rendered chip sizes at
+  the current width (`RecentsFitPolicy` over the shared `FlowPacking`
+  arithmetic — the same greedy packing the visible `FlowLayout` uses): all
+  candidates when they fit (no scroll, even below five), the fitting prefix
+  of at least five without scroll, otherwise the newest five (all available
+  when fewer exist) scrolling internally only when that set overflows. Omitted
+  chips are never mounted — no invisible interactive or accessibility
+  overflow. An off-screen measurement pass (same chip views, non-interactive,
+  accessibility-hidden, background-laid-out) supplies the sizes; missing
+  geometry keeps a bounded provisional one-row layout.
 - Edge-aware `Theme.hairline` dividers (same contract as `TagSelector`):
   top fades in once scrolled, bottom fades out at the content end, both
   hidden when everything fits. Dividers render as `.overlay` on the capped
@@ -538,6 +543,12 @@ struct RecentActivitiesChips: View {
 - Each chip's tap target is at least 44×44 pt (`Theme.minTapArea`) in every
   presentation (icon, no-icon, selected).
 - Recents are hidden while a timer is running.
+- Only the policy-offered prefix is mounted: the fitting prefix (five or
+  more, or all candidates when they fit) renders as a plain non-scrolling
+  flow; the newest-five fallback scrolls internally only when it overflows.
+  Omitted chips are never mounted, so they stay out of hit testing and the
+  accessibility tree; the scroll viewport resets when the offered set or
+  budget changes.
 - Category names are never shown on chips; the prepared-text chip and the
   running tag selector remain category-name-free (D16 revision).
 
@@ -556,9 +567,21 @@ struct RecentActivitiesChips: View {
 RecentActivitiesChips(
     recents: vm.recents,
     categories: vm.categoryMap,
-    selectedText: state.text
+    selectedText: state.text,
+    availableHeight: chipAvailableHeight
 ) { vm.prefill(from: $0) }
 ```
+
+### Fit policy (`RecentsFitPolicy`)
+
+Pure newest-prefix selection over the measured chip sizes (unit-tested,
+no view state): counts chips, never rows, never skips a newer chip for an
+older one. `C == N` → all `N` without scroll; `C >= 5` → the fitting prefix
+without scroll; otherwise the newest five (all available when fewer exist),
+scrolling only when that set overflows. Missing geometry → bounded
+provisional one-row plan. Row packing itself lives in the shared pure
+`FlowPacking` (also backing `FlowLayout` placement), beside — never
+replacing — the `ChipViewport` row clamp the running `TagSelector` keeps.
 
 ---
 
@@ -1004,7 +1027,7 @@ SectionHeader(
 
 ## `FlowLayout`
 
-Greedy wrapping flow (`Layout` protocol) shared by `TagSelector` and `RecentActivitiesChips`. Packs content-sized chips left-aligned with uniform `Theme.spacingSmall` gaps between chips and rows; a chip wider than the container renders at container width.
+Greedy wrapping flow (`Layout` protocol) shared by `TagSelector` and `RecentActivitiesChips`. Packs content-sized chips left-aligned with uniform `Theme.spacingSmall` gaps between chips and rows; a chip wider than the container renders at container width. Row assignment lives in the pure `FlowPacking` enum (same source the Recents fit policy packs with), so fitting and placement can never disagree.
 
 ### Signature
 

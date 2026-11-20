@@ -9,20 +9,20 @@ struct RecentActivitiesChipsTests {
         ExactName(text: id, categoryIDs: [], firstCategoryID: nil)
     }
 
-    @Test("caps at twelve recents, preserving the input order")
-    func capsAtTwelve() {
+    @Test("caps at ten recents, preserving the input order")
+    func capsAtTen() {
         let recents = (0..<14).map { recent("a\($0)") }
         let capped = RecentActivitiesChips.recents(from: recents)
-        #expect(capped.count == 12)
-        #expect(capped.map(\.text) == (0..<12).map { "a\($0)" })
+        #expect(capped.count == 10)
+        #expect(capped.map(\.text) == (0..<10).map { "a\($0)" })
     }
 
     @Test("omits the oldest recents beyond the cap")
     func omitsOldestBeyondCap() {
-        let recents = (0..<13).map { recent("a\($0)") }
+        let recents = (0..<11).map { recent("a\($0)") }
         let capped = RecentActivitiesChips.recents(from: recents)
-        #expect(!capped.map(\.text).contains("a12"))
-        #expect(capped.last?.text == "a11")
+        #expect(!capped.map(\.text).contains("a10"))
+        #expect(capped.last?.text == "a9")
     }
 
     @Test("returns all recents when fewer than the cap")
