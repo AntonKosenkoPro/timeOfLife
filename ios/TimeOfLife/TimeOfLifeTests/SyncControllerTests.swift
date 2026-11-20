@@ -373,7 +373,7 @@ struct SyncControllerTests {
         // First-sync with starter outbox rows: the relay has NO categories yet.
         mock.categoriesResult = []
         let seeded = try await store.seedStarterCategoriesIfNeeded(
-            names: ["Work", "Hobby", "Sport", "Education", "Relax", "Sleep", "Entertainment"]
+            names: ["Work", "Hobby", "Sport", "Education", "Relax", "Sleep", "Entertainment", "Food"]
         )
         guard case let .seeded(starterCategories) = seeded else {
             Issue.record("expected seeded")
@@ -387,7 +387,7 @@ struct SyncControllerTests {
         let stored = try await store.categories()
         #expect(Set(stored.map(\.id)) == starterIDs)
         // Their create outbox rows were drained but the categories remain.
-        #expect(stored.count == 7)
+        #expect(stored.count == 8)
     }
 
     @Test("clean local categories absent from the relay snapshot are removed")

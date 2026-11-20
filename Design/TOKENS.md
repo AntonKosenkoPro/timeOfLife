@@ -109,6 +109,7 @@ Allowed set for category icons (F2); default is `tag`. This is the documented mi
 | `gamecontroller` | Entertainment / games |
 | `fork.knife` | Eat / cooking |
 | `cup.and.saucer` | Eat / drink |
+| `carrot` | Eat / food |
 | `bed.double` | Sleep / rest |
 | `moon.stars` | Sleep / night |
 | `moon.zzz` | Sleep / rest |
@@ -142,9 +143,13 @@ Allowed set for category icons (F2); default is `tag`. This is the documented mi
 | `lamp.table` | Home / lighting |
 | `person.2` | Family / people |
 | `figure.and.child.holdinghands` | Family / parenting |
+| `stroller` | Family / baby |
+| `teddybear` | Family / child |
 | `stethoscope` | Body / health |
 | `pill` | Body / medication |
 | `tag` | Category marker |
+
+The accepted set is exactly these 66 symbols. Eight sports values (`figure.strengthtraining`, `figure.soccer`, `figure.basketball`, `figure.tennis`, `figure.gymnastics`, `figure.mindandbody`, `figure.core.training`, `bicycle`) are hidden from new selection only — they remain accepted, renderable, and syncable, and editing a category with a hidden-selected icon retains it (selected-value passthrough). Food/drink choices are `fork.knife`, `cup.and.saucer`, `carrot`; child-specific choices are `figure.and.child.holdinghands`, `stroller`, `teddybear` (generic `person.2` is not counted). New-selection options come from `CatalogIcon.pickerOptions(selected:)`; see `Design/COMPONENTS.md` (`IconPickerGrid`).
 
 ### Management icons
 

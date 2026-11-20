@@ -2,7 +2,7 @@
 
 Implements F2/F6/U8/R1/R3 of `Requirements/FURPS/Activity_Catalog_and_Categories.md`. Full CRUD surface for category tags, reached from Profile by the signed-in user (sign-in is the mandatory launch gate; there is no signed-out use).
 
-A separate Manage Categories screen (per the user's decision) for category tag CRUD. The screen lists all categories, lets the user create/edit them, and seeds 7 localized defaults on first run (F6). Deletion lives in the category editor and is undoable until the app restarts via the system Undo confirmation (R3); conflicts with the server resolve by last-write-wins (R2).
+A separate Manage Categories screen (per the user's decision) for category tag CRUD. The screen lists all categories, lets the user create/edit them, and seeds 8 localized defaults on first run (F6). Deletion lives in the category editor and is undoable until the app restarts via the system Undo confirmation (R3); conflicts with the server resolve by last-write-wins (R2).
 
 **Default categories (F6):**
 
@@ -15,8 +15,9 @@ A separate Manage Categories screen (per the user's decision) for category tag C
 | Relax | `cup.and.saucer` |
 | Sleep | `bed.double` |
 | Entertainment | `tv` |
+| Food | `fork.knife` |
 
-Seeded once per local dataset by the `category_starters_seeded` marker. Deleting all Categories does not reseed; Erase local data clears the marker so a genuinely new dataset receives the set again. Localized names use `L10n` (EN + RU), and Categories have a validated catalog icon.
+Seeded once per local dataset by the `category_starters_seeded` marker. Deleting all Categories does not reseed; Erase local data clears the marker so a genuinely new dataset receives the set again. Localized names use `L10n` (all five supported languages), and Categories have a validated catalog icon. Already-seeded datasets never gain Food through an upgrade — seeding only runs once per file.
 
 ---
 
@@ -49,7 +50,7 @@ N/A — the screen is a list with no text input; editors are handled in the `Cat
 - Toolbar `+` → `CategoryEditor` create mode (sheet, D21). On create conflict (409 `category_exists`, case-insensitive name collision) re-map local refs to the surviving id and proceed (R2); in the editor surface `L10n.errorCategoryExists`.
 - **Offline (R1):** list renders from the local store; create/edit/delete are queued locally and synced when connectivity returns. Disable no control here — list reads and optimistic mutations are offline-safe.
 - **Conflict (R2):** on a stale local edit, show the inline `ErrorBanner` (`L10n.errorConflict`) and prefill the editor with the latest local/server-adopted version. No field-level merge at MVP.
-- **Seeding (F6):** on first local-dataset setup, seed 7 localized categories — Work, Hobby, Sport, Education, Relax, Sleep, Entertainment — with their catalog icons via ordinary outbox-backed Category creates. Seeds are first-class records: editable, icon-selectable, and deletable like any user-created category. Seeding is **idempotent** through the persisted `category_starters_seeded` marker.
+- **Seeding (F6):** on first local-dataset setup, seed 8 localized categories — Work, Hobby, Sport, Education, Relax, Sleep, Entertainment, Food — with their catalog icons via ordinary outbox-backed Category creates. Seeds are first-class records: editable, icon-selectable, and deletable like any user-created category. Seeding is **idempotent** through the persisted `category_starters_seeded` marker.
 
 ### Delete flow
 
@@ -90,14 +91,14 @@ struct Category: Identifiable, Codable, Sendable {
 
 ### Implementation checklist
 
-- [x] All strings use `L10n.*` keys (EN + RU), including icon VoiceOver names.
+- [x] All strings use `L10n.*` keys (all five supported locales), including icon VoiceOver names.
 - [x] List has `accessibilityIdentifier("ManageCategoriesList")`.
 - [x] Add button has `accessibilityIdentifier("ManageCategoriesAddButton")`.
 - [x] Rows use `CategoryRow` with `CategoryRow(<id>)` identifiers (per `COMPONENTS.md`).
 - [x] Category editor Delete button has `accessibilityIdentifier("CategoryEditorDeleteButton")`.
 - [x] Undo is the system Undo confirmation only (no toast component).
 - [x] Category delete is tag-only — the deletion transaction removes joins; entries and timer state are unaffected.
-- [x] Category icons use the validated `CatalogIcon` set with a renderable picker and fallback display.
+- [x] Category icons use the validated `CatalogIcon` set (66 symbols) with a curated renderable picker and fallback display: eight sports values are hidden from new selection but retained when already selected.
 - [x] Seeding runs once and is idempotent (`category_starters_seeded` marker); seeds are editable/deletable.
 - [x] Offline queue handles create/edit/delete; stale edits adopt the latest persisted version.
 - [ ] Screen previews exist for light/dark and EN/RU.
@@ -133,6 +134,7 @@ Add to `en.lproj/Localizable.strings` and `ru.lproj/Localizable.strings`, then t
 "category.seed.relax" = "Relax";
 "category.seed.sleep" = "Sleep";
 "category.seed.entertainment" = "Entertainment";
+"category.seed.food" = "Food";
 ```
 
 Russian:
@@ -161,4 +163,7 @@ Russian:
 "category.seed.relax" = "Отдых";
 "category.seed.sleep" = "Сон";
 "category.seed.entertainment" = "Развлечения";
+"category.seed.food" = "Еда";
 ```
+
+Seed names ship in all five supported locales (`en`, `ru`, `zh-Hans`, `es-419`, `pt-BR`); the two blocks above show `en`/`ru` only.

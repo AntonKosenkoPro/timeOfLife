@@ -359,7 +359,7 @@ struct IconPickerGrid: View {
 }
 ```
 
-**Callers should pass `CatalogIcon.renderableSymbols` (plus a currently selected valid raw value when it is unavailable on the running OS).** The cell renders the `tag` fallback for an unavailable but valid synchronized symbol and never changes the stored raw value.
+**Callers should pass `CatalogIcon.pickerOptions(selected:)`** — the renderable curated set plus the currently selected supported value appended once when it is hidden from new selection or unavailable on the running OS. A hidden selected symbol keeps its original glyph where renderable; only genuine OS unavailability uses the `tag` fallback. The cell renders the `tag` fallback for an unavailable but valid synchronized symbol and never changes the stored raw value.
 
 ### Visual
 
@@ -376,7 +376,7 @@ struct IconPickerGrid: View {
 
 ### Requirements
 
-- `options` is the renderable subset of the allowed category SF Symbols set (F2/U1); `selection` is the chosen raw symbol name. A valid unavailable selection may be included so it remains visible and editable.
+- `options` is the curated renderable subset of the allowed category SF Symbols set minus the eight hidden sports values (F2/U1); `selection` is the chosen raw symbol name. A valid hidden or unavailable selection is appended once so it remains visible and editable.
 - Each cell `accessibilityIdentifier("\(accessibilityId)Cell(\(symbol))")` and a localized semantic icon label.
 - Min tap area 44 — matches the cell size exactly.
 - Tapping a cell sets `selection` to that symbol.
@@ -385,7 +385,7 @@ struct IconPickerGrid: View {
 
 ```swift
 IconPickerGrid(
-    options: CatalogIcon.renderableSymbols,
+    options: CatalogIcon.pickerOptions(selected: vm.icon.rawValue),
     selection: $vm.icon,
     accessibilityId: "CategoryEditorIcon"
 )
