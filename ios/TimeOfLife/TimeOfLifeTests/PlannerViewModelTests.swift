@@ -2,6 +2,26 @@ import Testing
 import Foundation
 @testable import TimeOfLife
 
+/// Lock-guarded sample sink for the 6.7 enabled-state stability test: the
+/// sampler task runs on the MainActor alongside the mutation under test and
+/// records (`isMutating`, `canInteract`) pairs without a data race.
+private final class EnabledStateSamples: @unchecked Sendable {
+    private let lock = NSLock()
+    private var samples: [(mutating: Bool, interactive: Bool)] = []
+
+    func append(mutating: Bool, interactive: Bool) {
+        lock.lock()
+        defer { lock.unlock() }
+        samples.append((mutating, interactive))
+    }
+
+    var all: [(mutating: Bool, interactive: Bool)] {
+        lock.lock()
+        defer { lock.unlock() }
+        return samples
+    }
+}
+
 /// Day-planner view model (day-planner spec D4/D6): serialized actions,
 /// loading/empty/failure states, durable-write feedback, preserved failed
 /// input, retry, and account-generation fencing. Reads never ride the launch
@@ -131,6 +151,48 @@ struct PlannerViewModelTests {
         #expect(vm.inputText.isEmpty)
     }
 
+    @Test("enabled state stays stable across in-flight writes")
+    func enabledStateStableDuringMutation() async throws {
+        // 6.7 regression (device repro 2026-11-23): every save flipped
+        // `isMutating`, which flipped `canInteract`, which flipped
+        // `.disabled()` on the Add button and every row — resigning the add
+        // field's first responder and dropping the keyboard on every save.
+        // The gate is now phase-based only; writes serialize on the
+        // `isMutating` guards without touching enabled state.
+        let (vm, _) = try makeViewModel()
+        await vm.open()
+        #expect(vm.canInteract)
+        let box = EnabledStateSamples()
+        let sampler = Task { @MainActor in
+            while !Task.isCancelled {
+                box.append(mutating: vm.isMutating, interactive: vm.canInteract)
+                await Task.yield()
+            }
+        }
+        await Task.yield()
+        vm.inputText = "Gym"
+        await vm.add()
+        await vm.toggle(vm.tasks[0])
+        await vm.confirmRemoval(vm.tasks[0])
+        sampler.cancel()
+        await sampler.value
+        let samples = box.all
+        #expect(!samples.isEmpty)
+        // The sampler observed at least one in-flight write …
+        #expect(samples.contains { $0.mutating })
+        // … and enabled state never churned during any of them.
+        #expect(samples.allSatisfy { $0.interactive })
+    }
+
+    @Test("enabled state follows the load snapshot, not transient writes")
+    func enabledStateFollowsLoadSnapshot() async throws {
+        let (vm, _) = try makeViewModel()
+        // Before open there is no usable snapshot: actions stay disabled.
+        #expect(!vm.canInteract)
+        await vm.open()
+        #expect(vm.canInteract)
+    }
+
     @Test("toggle flips completion without reordering")
     func toggleKeepsOrder() async throws {
         let (vm, _) = try makeViewModel()
@@ -201,9 +263,11 @@ struct PlannerViewModelTests {
             }
             await vm.open()
             // The last snapshot (empty on first open) stands with a retry
-            // path — never a cleared list presented as success.
+            // path — never a cleared list presented as success. With no
+            // usable snapshot, task actions stay disabled (6.7 phase gate).
             #expect(vm.phase == .failed)
             #expect(vm.tasks.isEmpty)
+            #expect(!vm.canInteract)
             #expect(vm.errorMessage != nil)
             DatabaseSuspension.shared.noteResumed()
             await vm.retry()

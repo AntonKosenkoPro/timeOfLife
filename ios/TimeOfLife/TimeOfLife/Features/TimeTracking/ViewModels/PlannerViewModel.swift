@@ -33,8 +33,11 @@ final class PlannerViewModel: ObservableObject {
     @Published var inputText = ""
     /// The latest validation or persistence failure, if any.
     @Published private(set) var errorMessage: String?
-    /// A write is in flight: all task actions disable until it settles, so
-    /// duplicate taps cannot fork concurrent writes.
+    /// A write is in flight. Writes serialize on this flag (`add`, `toggle`,
+    /// and `confirmRemoval` ignore re-entrant taps while it is set), but the
+    /// flag never touches the UI's enabled state: flipping `.disabled()`
+    /// mid-save churns the hierarchy and resigns the add field's first
+    /// responder, dropping the keyboard on every save (6.7).
     @Published private(set) var isMutating = false
     /// The task awaiting confirmed removal (one destructive confirmation
     /// naming its text; cancel preserves it).
@@ -59,12 +62,15 @@ final class PlannerViewModel: ObservableObject {
         self.nowProvider = now
     }
 
-    /// Whether a task-name selection may prepare Track right now. The caller
-    /// (the sheet) rechecks Track running/saving state at execution time;
-    /// this gate covers the planner side: a settled load with no write in
-    /// flight and a bound account.
+    /// Whether task actions (Add, checkbox, selection) are available. This
+    /// is phase-based only — a settled load, or a load that still holds a
+    /// usable snapshot — and deliberately ignores `isMutating`: transient
+    /// writes must not flip row/Add-button enabled state, or the hierarchy
+    /// churn resigns the add field and drops the keyboard mid-save (6.7).
+    /// Duplicate taps during a write stay safe: the mutation guards
+    /// serialize them without touching this gate.
     var canInteract: Bool {
-        phase != .loading && !isMutating
+        phase == .loaded || !tasks.isEmpty
     }
 
     /// The account this generation is bound to (nil until opened). Read by

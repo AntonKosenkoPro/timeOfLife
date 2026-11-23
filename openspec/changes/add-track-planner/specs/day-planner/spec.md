@@ -26,6 +26,10 @@ The planner SHALL support adding trimmed, non-empty names of at most 60 characte
 - **WHEN** a task is added while the checklist is displayed
 - **THEN** the new row appears without moving already-visible rows, scrolling the list, or resizing the sheet; the add field keeps its position and focus
 
+#### Scenario: Focus holds across save
+- **WHEN** a task is added, checked, or removed while the add field holds keyboard focus
+- **THEN** row and Add-button enabled state stays stable through the write and focus remains in the field without dismissing the keyboard
+
 #### Scenario: Add an existing name
 - **WHEN** the user adds valid text that matches a task or previously tracked name
 - **THEN** a new independent unfinished task is durably created, without category inheritance, a time entry, or a timer change
