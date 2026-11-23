@@ -46,9 +46,11 @@ categories, or changing the running timer.
 - Add row (pinned above the list): plain `TextField`
   (`L10n.plannerAddPlaceholder`, `PlannerAddField`) + explicit Add button
   (`L10n.plannerAddButton`, `PlannerAddButton`). Opening for browsing does
-  not focus the keyboard. Successful Add clears the field; failed Add
-  preserves the input with an accessible explanation. Native keyboard
-  dismissal; the content expands for editing/large text.
+  not focus the keyboard. Submitting via Enter or Add creates the task,
+  clears the field, and keeps keyboard focus for the next task; failed Adds
+  preserve both the input and focus. Only explicit Done or system
+  dismissal resigns focus. Native keyboard dismissal; the content expands
+  for editing/large text.
 - Checklist (`List(.plain)`, `PlannerTaskList`, no Recents-derived item
   cap): one `ChecklistRow` per task (see `COMPONENTS.md`), creation order
   including checked rows.
@@ -78,17 +80,28 @@ categories, or changing the running timer.
 - `TrackViewModel.selectPlannerTask(_:)` fills the exact normalized text
   with empty categories/notes and returns success; the sheet dismisses only
   on success. Never calls `syncReadyFromDraft` (that would inherit the exact
-  recents match's categories). No timer/entry writes before Start; no
-  completion linkage on Start/Stop; the pending notes-review session is never
+  recents match's categories). No timer/entry writes before Start; Start
+  never completes a task; the pending notes-review session is never
   stolen or altered.
+- **Stop completes the matching task** (timer-capture-experience delta):
+  after a successful stop, at most the oldest unfinished task whose
+  normalized text exactly equals the stopped run's text becomes completed,
+  stamped with the receipt's recorded end time. One task per Stop; Stop with
+  no unfinished exact-text match changes no task and still saves its entry
+  through the unchanged Stop receipt path. The planner call is a narrow
+  post-save side effect — entry save, Stop receipt, and Live Activity
+  behavior are untouched, and a failed completion (suspension, account loss)
+  leaves the task unfinished without failing the stop.
 
 ### Removal contract (outside shared Undo)
 
 - Per-task Remove (swipe action + context menu, never full-swipe) stages
   `pendingRemoval`; one destructive confirmation (`L10n.plannerRemoveTitle`)
-  names the task text (`String(format: plannerRemoveMessage, text)`);
-  Cancel preserves it. Confirmed removal is permanent-local: no relay
-  operation, no outbox row, no entry/category undo-buffer participation.
+  names the task text verbatim through the localized format string
+  (`String(format: plannerRemoveMessage, text)` — no manual `\u` escapes;
+  real quote characters live in the `.strings` files). Cancel preserves it.
+  Confirmed removal is permanent-local: no relay operation, no outbox row,
+  no entry/category undo-buffer participation.
   Document the distinction wherever removal copy appears.
 
 ### Implementation checklist
@@ -106,8 +119,13 @@ categories, or changing the running timer.
 - [x] No Track layout changes; no `TrackSnapshot` planner reads; no pushed
   route; no History/Insights entry point.
 - [x] Selection disabled while running/saving/error; management usable while
-  running; no category prefill, suggestions, reorder, queued-next, or
-  completion linkage.
+  running; no category prefill, suggestions, reorder, queued-next. Start
+  never completes; Stop completes at most the oldest unfinished exact-text
+  match with the receipt's end time, one per Stop, as a post-save side
+  effect that leaves the receipt/entry/Live Activity path unchanged.
+- [x] Removal confirmation names the task verbatim through localized format
+  strings (no manual unicode escapes); row text truncates to one line with
+  the full name in the accessibility label.
 - [x] Local-day cleanup is injectable-calendar/idempotent; suspension keeps
   the last snapshot with retry; account switches fence at the store
   (`expectedUserID`) and VM generation levels.

@@ -1130,7 +1130,7 @@ struct PlannerTaskRow: View {
 
 ### Visual
 
-- `HStack(spacing: Theme.spacingSmall)`: a checkbox button (22 pt `checkmark.square.fill` / `square` glyph, `Theme.accentPrimary` when checked else `Theme.textSecondary`) beside a full-width leading-aligned `.body` text button (`Theme.textPrimary`; `strikethrough` when completed — completion never relies on color alone).
+- `HStack(spacing: Theme.spacingSmall)`: a checkbox button (22 pt `checkmark.square.fill` / `square` glyph, `Theme.accentPrimary` when checked else `Theme.textSecondary`) beside a full-width leading-aligned `.body` text button (`Theme.textPrimary`; `strikethrough` when completed — completion never relies on color alone). Long names truncate to one line (`lineLimit(1)`); the full name stays in the button's accessibility label.
 - Both controls own a 44 pt minimum hit region with `Rectangle` content shapes; the row background is `Theme.backgroundPrimary`.
 - Removal rides `swipeActions(edge: .trailing, allowsFullSwipe: false)` (destructive) plus an equivalent `contextMenu` item; the destructive tap only stages a confirmation — nothing is deleted until the named confirm succeeds.
 
@@ -1145,7 +1145,7 @@ struct PlannerTaskRow: View {
 
 ### Accessibility
 
-- Checkbox and text are separate accessible elements with separate actions: the checkbox label reads `"<text>, <Completed|Not completed>"` (`L10n.plannerToggle*`); the text button label is the task text with a hint naming the Track consequence (`L10n.plannerSelectHint` formatted with the text).
+- Checkbox and text are separate accessible elements with separate actions: the checkbox label reads `"<text>, <Completed|Not completed>"` (`L10n.plannerToggle*`); the text button truncates to one line with the full task text as its accessibility label plus a hint naming the Track consequence (`L10n.plannerSelectHint` formatted with the text).
 - Stable per-task identifiers: `PlannerTaskToggle_<id>` and `PlannerTaskSelect_<id>` (persisted UUIDs, stable across launches); removal `PlannerTaskRemove_<id>`.
 - Completed state is announced as text and struck through, never color-only.
 

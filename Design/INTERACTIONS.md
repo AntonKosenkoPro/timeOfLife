@@ -198,6 +198,19 @@ capture. The rules that keep it from leaking into timing:
   Recents inheritance path, never writes a timer draft, never creates an
   entry, and never toggles completion. Start stays a separate explicit
   action and preserves the empty preparation.
+- **Enter keeps focus:** submitting via Enter or Add creates the task,
+  clears the field, and keeps keyboard focus for the next task; failed Adds
+  preserve both text and focus. Only explicit Done or system dismissal
+  resigns focus. Browsing opens without focus, unchanged.
+- **Stop completes the matching task:** after a successful stop, at most the
+  oldest unfinished task whose normalized text exactly equals the stopped
+  run's text becomes completed (one per Stop, stamped with the stop time).
+  No-match stops change nothing and save normally; Start never completes.
+  The planner call is a post-save side effect — the Stop receipt, entry
+  save, and Live Activity path are unchanged.
+- **Verbatim removal:** the destructive confirmation names the task text
+  verbatim through localized format strings (no manual unicode escapes);
+  visual truncation keeps the full name in the accessibility label.
 - **Guards rechecked at execution:** name selection is disabled while
   running, in a recoverable running error, or saving — and the sheet
   re-verifies running/saving state plus the bound account immediately before
