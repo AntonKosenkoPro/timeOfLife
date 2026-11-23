@@ -1,3 +1,4 @@
+// swiftlint:disable file_length
 import Testing
 import Foundation
 import GRDB
@@ -58,7 +59,15 @@ struct PlannerTaskStoreTests {
         // A second store on the same file re-runs the additive migrator.
         let second = try LocalStore(url: url, userID: "planner-remigrate")
         let tasks = try await second.plannerTasks(expectedUserID: "planner-remigrate")
-        #expect(tasks == [task])
+        #expect(tasks.count == 1)
+        #expect(tasks[0].id == task.id)
+        #expect(tasks[0].text == task.text)
+        #expect(tasks[0].completedAt == task.completedAt)
+        // Exact `Date` equality is asserted through a window, not `==`: the
+        // insert returns the in-memory quantized stamp while the second
+        // store reads the row back through millisecond-serialized storage,
+        // which can differ by a final floating-point ulp.
+        #expect(abs(tasks[0].createdAt.timeIntervalSince(task.createdAt)) < 1)
         #expect(try await second.category(id: "c1") == storedCategory)
     }
 
@@ -327,6 +336,96 @@ struct PlannerTaskStoreTests {
         await signedIn.closeAccount()
         let returned = try LocalStore(url: url, userID: "planner-retain")
         #expect(try await returned.plannerTasks(expectedUserID: "planner-retain").count == 1)
+    }
+
+    // MARK: - Stop-completes-match (timer-capture-experience delta)
+
+    @Test("stop completion completes the oldest unfinished exact-text match only")
+    func stopCompletionOldestFirst() async throws {
+        let store = try makeStore()
+        let first = try await store.addPlannerTask(text: "Gym", expectedUserID: "planner-u1")
+        let second = try await store.addPlannerTask(text: "Gym", expectedUserID: "planner-u1")
+        let other = try await store.addPlannerTask(text: "Read", expectedUserID: "planner-u1")
+        let stopTime = Date()
+        let completed = try await store.completeOldestMatchingPlannerTask(
+            text: "Gym", expectedUserID: "planner-u1", now: stopTime)
+        #expect(completed?.id == first.id)
+        // Stamped with the stop time, asserted through a window (not exact
+        // `Date` equality): storage round-trips millisecond-serialized
+        // dates, which can differ from the in-memory value by one ulp.
+        if let stamped = completed?.completedAt {
+            #expect(abs(stamped.timeIntervalSince(stopTime)) < 1)
+        } else {
+            Issue.record("expected a completion timestamp")
+        }
+        let rows = try await store.plannerTasks(expectedUserID: "planner-u1")
+        #expect(rows.first { $0.id == second.id }?.isCompleted == false)
+        #expect(rows.first { $0.id == other.id }?.isCompleted == false)
+        // A second call completes the next oldest duplicate, one per call.
+        let next = try await store.completeOldestMatchingPlannerTask(
+            text: "Gym", expectedUserID: "planner-u1", now: stopTime)
+        #expect(next?.id == second.id)
+        // No unfinished match left: returns nil and changes nothing.
+        #expect(try await store.completeOldestMatchingPlannerTask(
+            text: "Gym", expectedUserID: "planner-u1", now: stopTime) == nil)
+        #expect(try await store.outboxRowCount() == 0)
+    }
+
+    @Test("stop completion ignores already-completed rows and near matches")
+    func stopCompletionSkipsCompletedAndNearMatches() async throws {
+        let store = try makeStore()
+        let done = try await store.addPlannerTask(text: "Gym", expectedUserID: "planner-u1")
+        let checkTime = Date()
+        _ = try await store.setPlannerTaskCompleted(
+            id: done.id, completed: true, expectedUserID: "planner-u1")
+        let stopTime = Date()
+        // Only an already-completed exact match exists: no-no-op change.
+        #expect(try await store.completeOldestMatchingPlannerTask(
+            text: "Gym", expectedUserID: "planner-u1", now: stopTime) == nil)
+        let reread = try await store.plannerTasks(expectedUserID: "planner-u1").first
+        #expect(reread?.isCompleted == true)
+        // The original completion stamp is untouched (window, not `==`:
+        // millisecond-serialized storage can differ by one ulp).
+        if let stamped = reread?.completedAt {
+            #expect(stamped >= checkTime.addingTimeInterval(-1))
+            #expect(stamped <= Date().addingTimeInterval(1))
+        } else {
+            Issue.record("expected the retained completion timestamp")
+        }
+        // Case, whitespace, and substring variants are not exact matches.
+        _ = try await store.addPlannerTask(text: "GYM", expectedUserID: "planner-u1")
+        #expect(try await store.completeOldestMatchingPlannerTask(
+            text: "Gym", expectedUserID: "planner-u1", now: stopTime) == nil)
+        #expect(try await store.completeOldestMatchingPlannerTask(
+            text: "Gy", expectedUserID: "planner-u1", now: stopTime) == nil)
+        #expect(try await store.completeOldestMatchingPlannerTask(
+            text: "Nomatch", expectedUserID: "planner-u1", now: stopTime) == nil)
+        #expect(try await store.outboxRowCount() == 0)
+    }
+
+    @Test("stop completion is account-fenced and defers on suspension")
+    func stopCompletionFencingAndSuspension() async throws {
+        let store = try makeStore(userID: "planner-a")
+        let task = try await store.addPlannerTask(text: "Gym", expectedUserID: "planner-a")
+        await #expect(throws: LocalStore.LocalStoreError.accountMismatch) {
+            try await store.completeOldestMatchingPlannerTask(
+                text: "Gym", expectedUserID: "planner-b")
+        }
+        #expect(try await store.plannerTasks(expectedUserID: "planner-a")
+            .first { $0.id == task.id }?.isCompleted == false)
+        DatabaseSuspension.shared.noteSuspended()
+        defer {
+            if DatabaseSuspension.shared.isSuspended {
+                DatabaseSuspension.shared.noteResumed()
+            }
+        }
+        await #expect(throws: LocalStore.LocalStoreError.suspended) {
+            try await store.completeOldestMatchingPlannerTask(
+                text: "Gym", expectedUserID: "planner-a")
+        }
+        DatabaseSuspension.shared.noteResumed()
+        #expect(try await store.plannerTasks(expectedUserID: "planner-a")
+            .first { $0.id == task.id }?.isCompleted == false)
     }
 
     @Test("eraseAll removes the account file with its planner rows")

@@ -252,6 +252,35 @@ struct LocalizationTests {
         }
     }
 
+    /// Planner removal/selection copy (day-planner 6.3): the task name
+    /// interpolates through localized format strings with no manual unicode
+    /// escapes, and tricky names render verbatim in every locale.
+    @Test("planner confirmations render task names verbatim in every locale")
+    func plannerNamesRenderVerbatim() throws {
+        let trickyNames = [
+            "Say \"hi\" & 'bye'",
+            "Gym 🏋️ mañana",
+            String(repeating: "L", count: 60),
+            "晨跑三十分鐘慢跑",
+            "«quoted» “task” — done?",
+        ]
+        for locale in Self.allLocales {
+            let bundle = try bundle(for: locale)
+            for key in ["planner.removeMessage", "planner.selectHint"] {
+                let format = NSLocalizedString(key, bundle: bundle, comment: "")
+                #expect(!format.contains("\\u"), "manual escape in \(key) (\(locale))")
+                #expect(!format.contains("\\U"), "manual escape in \(key) (\(locale))")
+                #expect(format.components(separatedBy: "%@").count == 2,
+                        "single slot in \(key) (\(locale))")
+                for name in trickyNames {
+                    let rendered = String(format: format, name)
+                    #expect(rendered.contains(name),
+                            "verbatim name in \(key) (\(locale)): \(rendered)")
+                }
+            }
+        }
+    }
+
     // MARK: - L10n enum allCases matches strings files
 
     /// Sorted-keys snapshot of the `L10n` contract (values live in

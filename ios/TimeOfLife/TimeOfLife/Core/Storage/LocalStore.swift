@@ -2346,6 +2346,40 @@ actor LocalStore {
         }
     }
 
+    /// Completes at most the oldest unfinished task whose text exactly
+    /// equals `text` (timer-capture-experience Stop rule): one row per Stop,
+    /// stamped with the stop time. Stored task text is already normalized
+    /// (shared `ActivityName` rules) and the stopped run's draft text is
+    /// normalized the same way, so a plain `=` comparison is the specified
+    /// case-sensitive exact-text match (`Gym` ≠ `GYM`). No unfinished
+    /// exact-text match (or a missing table row) changes nothing and returns
+    /// nil. Already-completed rows are never touched. Local-only: no outbox
+    /// row, no undo snapshot. Runs in one transaction with the
+    /// expected-account check, so a cross-account Stop never completes
+    /// another account's task.
+    @discardableResult
+    func completeOldestMatchingPlannerTask(
+        text: String,
+        expectedUserID: String?,
+        now: Date = Date()
+    ) throws -> PlannerTask? {
+        let queue = try queue
+        try requirePlannerAccount(expectedUserID)
+        let stamped = Self.storageQuantized(now)
+        return try queue.write { db in
+            guard var task = try PlannerTask.fetchOne(db, sql: """
+                SELECT * FROM planner_tasks
+                WHERE text = ? AND completed_at IS NULL
+                ORDER BY created_at ASC, id ASC LIMIT 1
+                """, arguments: [text]) else {
+                return nil
+            }
+            task.completedAt = stamped
+            try task.update(db)
+            return task
+        }
+    }
+
     /// Permanently removes one task locally (no relay operation, no shared
     /// undo-buffer participation). Returns whether a row was removed. Never
     /// touches any prepared/running/saved time data.

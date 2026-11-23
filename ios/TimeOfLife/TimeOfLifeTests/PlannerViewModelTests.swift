@@ -77,6 +77,31 @@ struct PlannerViewModelTests {
         #expect(vm.errorMessage == nil)
     }
 
+    @Test("consecutive adds keep the sheet interactive for rapid entry")
+    func consecutiveAddsStayInteractive() async throws {
+        // The automatable half of the Enter-keeps-focus rule (the SwiftUI
+        // FocusState half needs a device): after every submit — success or
+        // failure — the sheet stays loaded and interactive for the next
+        // task instead of stalling in a failed or mutating state.
+        let (vm, _) = try makeViewModel()
+        await vm.open()
+        vm.inputText = "Gym"
+        await vm.add()
+        #expect(vm.phase == .loaded)
+        #expect(vm.canInteract)
+        #expect(vm.errorMessage == nil)
+        vm.inputText = "   "
+        await vm.add()
+        #expect(vm.phase == .loaded)
+        #expect(vm.canInteract)
+        #expect(vm.inputText == "   ")
+        vm.inputText = "Read"
+        await vm.add()
+        #expect(vm.tasks.map(\.text) == ["Gym", "Read"])
+        #expect(vm.phase == .loaded)
+        #expect(vm.canInteract)
+    }
+
     @Test("toggle flips completion without reordering")
     func toggleKeepsOrder() async throws {
         let (vm, _) = try makeViewModel()

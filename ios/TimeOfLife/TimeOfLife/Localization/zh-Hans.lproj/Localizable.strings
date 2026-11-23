@@ -248,10 +248,10 @@
 "planner.validationTooLong" = "任务名称最多 60 个字符。";
 "planner.toggle.completed" = "已完成";
 "planner.toggle.notCompleted" = "未完成";
-"planner.selectHint" = "将\u201c%@\u201d选为计时名称。";
+"planner.selectHint" = "将“%@”选为计时名称。";
 "planner.removeLabel" = "删除";
 "planner.removeTitle" = "删除任务？";
-"planner.removeMessage" = "从今日任务中删除\u201c%@\u201d？此操作无法撤销。";
+"planner.removeMessage" = "从今日任务中删除“%@”？此操作无法撤销。";
 "planner.removeConfirm" = "删除";
 "planner.removeCancel" = "取消";
 

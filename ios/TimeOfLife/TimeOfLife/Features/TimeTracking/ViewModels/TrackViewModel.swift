@@ -703,6 +703,7 @@ final class TrackViewModel: ObservableObject {
                 entryID: pendingStopEntryID
             )
             await completeStop(draft: draft, startedAt: startedAt, receipt: receipt, stoppingNotes: stoppingNotes)
+            await completeMatchingPlannerTask(text: draft.text, stopTime: receipt.endedAt)
         } catch {
             // Recoverable: preserve running state so elapsed time is not lost,
             // unfreeze the session, and retain the unconfirmed text for the
@@ -744,6 +745,21 @@ final class TrackViewModel: ObservableObject {
             entryName: draft.text,
             confirmedNotes: draft.notes
         )
+    }
+
+    /// Narrow Stop-completes-match side effect (timer-capture-experience
+    /// delta, day-planner D3): after a successful stop, completes at most
+    /// the oldest unfinished planner task whose normalized text exactly
+    /// equals the stopped run's text, stamped with the receipt's recorded
+    /// end time. Runs strictly after the stop receipt is applied — never
+    /// before, never instead of — so the entry save, Stop receipt, and Live
+    /// Activity behavior are unchanged. Failures (suspension, account loss)
+    /// leave the task unfinished without failing the stop or surfacing an
+    /// error: Start never completes, and a no-match stop changes nothing.
+    private func completeMatchingPlannerTask(text: String, stopTime: Date) async {
+        let expected = await service.store.boundUserID
+        _ = try? await service.store.completeOldestMatchingPlannerTask(
+            text: text, expectedUserID: expected, now: stopTime)
     }
 
     /// Retains the unconfirmed running-notes text against the exact completed

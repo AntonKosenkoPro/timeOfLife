@@ -122,11 +122,13 @@ struct PlannerSelectionTests {
         #expect(vm.state == .ready(TrackState.Draft(text: "Gym", categoryIDs: ["c1"])))
     }
 
-    @Test("stopping never completes the planner task or links to it")
-    func stopLeavesTaskUncompleted() async throws {
-        let vm = makeViewModel()
+    @Test("stop completes the oldest matching unfinished task with the stop time")
+    func stopCompletesOldestMatch() async throws {
+        let fixed = Date()
+        let vm = makeViewModel(now: fixed)
         let store = vm.service.store
-        let task = try await store.addPlannerTask(text: "Gym", expectedUserID: "sel-u1")
+        let first = try await store.addPlannerTask(text: "Gym", expectedUserID: "sel-u1")
+        let second = try await store.addPlannerTask(text: "Gym", expectedUserID: "sel-u1")
         #expect(vm.selectPlannerTask("Gym"))
         vm.start()
         await vm.stop()
@@ -135,9 +137,92 @@ struct PlannerSelectionTests {
             return
         }
         let surviving = try await store.plannerTasks(expectedUserID: "sel-u1")
-        #expect(surviving.count == 1)
-        #expect(surviving[0].id == task.id)
-        #expect(!surviving[0].isCompleted)
+        #expect(surviving.count == 2)
+        let completed = surviving.first { $0.id == first.id }
+        let untouched = surviving.first { $0.id == second.id }
+        #expect(completed?.isCompleted == true)
+        #expect(untouched?.isCompleted == false)
+        // The completion is stamped with the stop time: the fixed clock
+        // stops the run at `fixed`, so the task carries that instant. A
+        // one-second window (not exact `Date` equality): the stop pipeline
+        // round-trips the end time through entry storage, whose
+        // millisecond serialization can differ from the in-memory value by
+        // a final floating-point ulp.
+        #expect(completed?.completedAt != nil)
+        if let stamped = completed?.completedAt {
+            #expect(abs(stamped.timeIntervalSince(fixed)) < 1)
+        }
+    }
+
+    @Test("a second stop completes the next oldest duplicate, one per stop")
+    func stopsCompleteDuplicatesOneByOne() async throws {
+        let vm = makeViewModel()
+        let store = vm.service.store
+        let first = try await store.addPlannerTask(text: "Gym", expectedUserID: "sel-u1")
+        let second = try await store.addPlannerTask(text: "Gym", expectedUserID: "sel-u1")
+        #expect(vm.selectPlannerTask("Gym"))
+        vm.start()
+        await vm.stop()
+        #expect(vm.selectPlannerTask("Gym"))
+        vm.start()
+        await vm.stop()
+        let surviving = try await store.plannerTasks(expectedUserID: "sel-u1")
+        #expect(surviving.first { $0.id == first.id }?.isCompleted == true)
+        #expect(surviving.first { $0.id == second.id }?.isCompleted == true)
+    }
+
+    @Test("stop without an unfinished exact-text match changes no task")
+    func stopWithoutMatchChangesNothing() async throws {
+        let vm = makeViewModel()
+        let store = vm.service.store
+        let completed = try await store.addPlannerTask(text: "Gym", expectedUserID: "sel-u1")
+        _ = try await store.setPlannerTaskCompleted(
+            id: completed.id, completed: true, expectedUserID: "sel-u1")
+        let other = try await store.addPlannerTask(text: "Read", expectedUserID: "sel-u1")
+        #expect(vm.selectPlannerTask("Gym"))
+        vm.start()
+        await vm.stop()
+        guard case .saved = vm.state else {
+            Issue.record("expected saved state")
+            return
+        }
+        // The already-completed Gym row and the non-matching Read row are
+        // untouched, and the entry still saved through the normal receipt.
+        let surviving = try await store.plannerTasks(expectedUserID: "sel-u1")
+        #expect(surviving.first { $0.id == completed.id }?.isCompleted == true)
+        #expect(surviving.first { $0.id == other.id }?.isCompleted == false)
+        #expect(!(try await store.entries()).isEmpty)
+    }
+
+    @Test("stop matching is case-sensitive like entries")
+    func stopMatchIsCaseSensitive() async throws {
+        let vm = makeViewModel()
+        let store = vm.service.store
+        let upper = try await store.addPlannerTask(text: "GYM", expectedUserID: "sel-u1")
+        #expect(vm.selectPlannerTask("Gym"))
+        vm.start()
+        await vm.stop()
+        guard case .saved = vm.state else {
+            Issue.record("expected saved state")
+            return
+        }
+        #expect(try await store.plannerTasks(expectedUserID: "sel-u1")
+            .first { $0.id == upper.id }?.isCompleted == false)
+    }
+
+    @Test("start never completes a matching task")
+    func startLeavesTasksUncompleted() async throws {
+        let vm = makeViewModel()
+        let store = vm.service.store
+        let task = try await store.addPlannerTask(text: "Gym", expectedUserID: "sel-u1")
+        #expect(vm.selectPlannerTask("Gym"))
+        vm.start()
+        guard case .running = vm.state else {
+            Issue.record("expected running state")
+            return
+        }
+        #expect(try await store.plannerTasks(expectedUserID: "sel-u1")
+            .first { $0.id == task.id }?.isCompleted == false)
     }
 
     @Test("task removal and cleanup never change the prepared or running name")

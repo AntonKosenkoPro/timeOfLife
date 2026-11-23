@@ -251,10 +251,10 @@
 "planner.validationTooLong" = "Task names can be at most 60 characters.";
 "planner.toggle.completed" = "Completed";
 "planner.toggle.notCompleted" = "Not completed";
-"planner.selectHint" = "Selects \u201c%@\u201d as the Track name.";
+"planner.selectHint" = "Selects “%@” as the Track name.";
 "planner.removeLabel" = "Remove";
 "planner.removeTitle" = "Remove task?";
-"planner.removeMessage" = "Remove \u201c%@\u201d from today's tasks? This cannot be undone.";
+"planner.removeMessage" = "Remove “%@” from today's tasks? This cannot be undone.";
 "planner.removeConfirm" = "Remove";
 "planner.removeCancel" = "Cancel";
 

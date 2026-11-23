@@ -248,10 +248,10 @@
 "planner.validationTooLong" = "El nombre puede tener 60 caracteres como máximo.";
 "planner.toggle.completed" = "Completada";
 "planner.toggle.notCompleted" = "Sin completar";
-"planner.selectHint" = "Selecciona \u201c%@\u201d como nombre del temporizador.";
+"planner.selectHint" = "Selecciona “%@” como nombre del temporizador.";
 "planner.removeLabel" = "Eliminar";
 "planner.removeTitle" = "¿Eliminar la tarea?";
-"planner.removeMessage" = "¿Eliminar \u201c%@\u201d de las tareas de hoy? Esta acción no se puede deshacer.";
+"planner.removeMessage" = "¿Eliminar “%@” de las tareas de hoy? Esta acción no se puede deshacer.";
 "planner.removeConfirm" = "Eliminar";
 "planner.removeCancel" = "Cancelar";
 

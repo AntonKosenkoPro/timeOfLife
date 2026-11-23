@@ -18,6 +18,11 @@ struct PlannerSheet: View {
     @StateObject private var plannerVM: PlannerViewModel
     @Environment(\.dismiss)
     private var dismiss
+    /// The add field's keyboard focus (day-planner Enter rule): browsing
+    /// opens WITHOUT focus; submitting via Enter/Add restores focus to the
+    /// field for the next task, on success and on failure alike. Only
+    /// explicit Done or system dismissal resigns it.
+    @FocusState private var addFieldFocused: Bool
 
     init(store: LocalStore, trackVM: TrackViewModel, calendar: Calendar = .current) {
         _plannerVM = StateObject(wrappedValue: PlannerViewModel(store: store, calendar: calendar))
@@ -95,21 +100,23 @@ struct PlannerSheet: View {
     // MARK: - Add row
 
     /// Plain-text input plus an explicit Add action. Successful Adds clear
-    /// the field; failed Adds preserve the input with an accessible
-    /// explanation. Management stays usable while a run is active — only
-    /// name selection locks during runs.
+    /// the field and failed Adds preserve the input with an accessible
+    /// explanation; both restore keyboard focus to the field for the next
+    /// task (only Done/swipe dismissal resigns it). Management stays
+    /// usable while a run is active — only name selection locks during runs.
     private var addRow: some View {
         VStack(alignment: .leading, spacing: Theme.spacingExtraSmall) {
             HStack(spacing: Theme.spacingSmall) {
                 TextField(L10n.plannerAddPlaceholder.text, text: $plannerVM.inputText)
                     .textInputAutocapitalization(.sentences)
                     .disableAutocorrection(false)
+                    .focused($addFieldFocused)
                     .frame(minHeight: Theme.minTapArea)
                     .accessibilityIdentifier("PlannerAddField")
                     .accessibilityLabel(L10n.plannerAddPlaceholder.text)
-                    .onSubmit { Task { await plannerVM.add() } }
+                    .onSubmit { Task { await submitAdd() } }
                 Button(L10n.plannerAddButton.text) {
-                    Task { await plannerVM.add() }
+                    Task { await submitAdd() }
                 }
                 .frame(minHeight: Theme.minTapArea)
                 .disabled(!plannerVM.canInteract)
@@ -190,6 +197,15 @@ struct PlannerSheet: View {
         }
     }
 
+    /// Submits the add field and keeps keyboard focus in it for the next
+    /// task: a successful Add clears the field and a failed Add preserves
+    /// the input (PlannerViewModel owns both), and either way the field
+    /// stays focused until explicit Done or system dismissal.
+    private func submitAdd() async {
+        await plannerVM.add()
+        addFieldFocused = true
+    }
+
     /// Prepares the task's name on Track with empty categories/notes and
     /// dismisses on success. Rechecks running/saving AND the bound account
     /// at execution time (not just at presentation time): a stale sheet
@@ -236,12 +252,14 @@ private struct PlannerTaskRow: View {
                     .foregroundStyle(Theme.textPrimary)
                     .strikethrough(task.isCompleted)
                     .multilineTextAlignment(.leading)
+                    .lineLimit(1)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .frame(minHeight: Theme.minTapArea)
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .disabled(selectionDisabled || actionsDisabled)
+            .accessibilityLabel(task.text)
             .accessibilityHint(String(format: L10n.plannerSelectHint.text, task.text))
             .accessibilityIdentifier("PlannerTaskSelect_\(task.id)")
         }

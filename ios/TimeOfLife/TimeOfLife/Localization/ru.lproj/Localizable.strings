@@ -251,10 +251,10 @@
 "planner.validationTooLong" = "Название задачи — не более 60 символов.";
 "planner.toggle.completed" = "Выполнено";
 "planner.toggle.notCompleted" = "Не выполнено";
-"planner.selectHint" = "Выбирает \u00ab%@\u00bb как название трека.";
+"planner.selectHint" = "Выбирает «%@» как название трека.";
 "planner.removeLabel" = "Удалить";
 "planner.removeTitle" = "Удалить задачу?";
-"planner.removeMessage" = "Удалить \u00ab%@\u00bb из задач на сегодня? Это действие нельзя отменить.";
+"planner.removeMessage" = "Удалить «%@» из задач на сегодня? Это действие нельзя отменить.";
 "planner.removeConfirm" = "Удалить";
 "planner.removeCancel" = "Отмена";
 
