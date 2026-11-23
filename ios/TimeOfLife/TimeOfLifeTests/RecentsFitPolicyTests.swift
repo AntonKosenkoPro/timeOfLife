@@ -39,7 +39,7 @@ struct RecentsFitPolicyCountsTests {
                 itemSizes: columnSizes(count), containerWidth: 10_000, spacing: fitSpacing,
                 budget: 100_000, rowHeight: fitRow
             )
-            #expect(plan.offered == min(count, 10), "count \(count)")
+            #expect(plan.offered == min(count, RecentsFitPolicy.maxCandidates), "count \(count)")
             #expect(plan.scrolling == false, "count \(count)")
             #expect(plan.viewport == nil, "count \(count)")
         }
@@ -319,12 +319,12 @@ struct FlowPackingTests {
                 budget: budget,
                 rowHeight: 44
             )
-            #expect(plan.offered >= 0 && plan.offered <= min(count, 10))
+            #expect(plan.offered >= 0 && plan.offered <= min(count, RecentsFitPolicy.maxCandidates))
             if plan.scrolling {
                 #expect(plan.viewport != nil)
                 // Scrolling only ever mounts the newest-five fallback (or
                 // all candidates when fewer exist) — never a longer prefix.
-                #expect(plan.offered == min(RecentsFitPolicy.fallbackCount, min(count, 10)))
+                #expect(plan.offered == min(RecentsFitPolicy.fallbackCount, min(count, RecentsFitPolicy.maxCandidates)))
             } else {
                 #expect(plan.viewport == nil)
                 // The mounted newest-first prefix genuinely fits: repacking

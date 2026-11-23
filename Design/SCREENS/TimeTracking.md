@@ -321,7 +321,7 @@ Add English and Russian values, then add corresponding `L10n` cases:
 ## Capture behavior
 
 Recents are computed on-device from committed entries and ranked by newest
-`started_at` per exact text, capped at twelve. Each chip contains the exact
+`started_at` per exact text, capped at ten. Each chip contains the exact
 text and, when the entry has Categories, the icon of the first-position
 Category — never a Category name. Category icons belong in Manage
 Categories, the entry form, and Insights; on Track they

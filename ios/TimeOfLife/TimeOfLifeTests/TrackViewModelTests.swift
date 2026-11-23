@@ -485,6 +485,35 @@ struct TrackViewModelTests {
         #expect(draft.categoryIDs == ["c1"])
     }
 
+    @Test("typing a name ranked beyond the chip cap still inherits its categories")
+    func typingBeyondChipCapInherits() async throws {
+        let vm = makeViewModel()
+        let store = vm.service.store
+        try await store.createCategory(Category(id: "c1", name: "Sport", icon: CatalogIcon.briefcase.rawValue))
+        // Eleven distinct names: Name0 is the oldest, so the ten-newest chip
+        // cap omits it while the uncapped picker still suggests it.
+        let base = Date()
+        for index in 0..<11 {
+            try await store.createEntry(makeEntry(
+                id: "e\(index)",
+                text: "Name\(index)",
+                categoryIDs: index == 0 ? ["c1"] : [],
+                startedAt: base.addingTimeInterval(TimeInterval(index))
+            ))
+        }
+        vm.recents = try await storeRecents(store)
+        vm.allNames = try await store.allActivityNames().map(ExactName.init(storeRecent:))
+        #expect(vm.recents.count == TrackViewModel.recentsLimit)
+        #expect(!vm.recents.contains { $0.text == "Name0" })
+        #expect(vm.allNames.contains { $0.text == "Name0" })
+
+        // The Done-keyboard path (AppShellView onCompleteText): typed text
+        // resolves through syncReadyFromDraft, not the chip tap.
+        vm.nameDraft = "Name0"
+        vm.syncReadyFromDraft()
+        #expect(vm.state == .ready(TrackState.Draft(text: "Name0", categoryIDs: ["c1"])))
+    }
+
     @Test("start is immediate: ready transitions to running on the tap")
     func startIsImmediate() async {
         let vm = makeViewModel()

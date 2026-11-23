@@ -173,6 +173,15 @@ struct RecentActivitiesChips: View {
                 stickyPlan = (candidates.count, resolvedPlan)
             }
         }
+        // Dynamic Type changes every chip size (subheadline font, icon slot,
+        // row height): drop the text-keyed measurements and the retained plan
+        // so the gap falls back to the bounded provisional instead of serving
+        // a stale fit. Clearing measurements alone is not enough — the sticky
+        // plan would still serve the old prefix until the pass re-reports.
+        .onChange(of: dynamicTypeSize) {
+            measuredSizes = [:]
+            stickyPlan = nil
+        }
         // The static/scrolling branches are distinct subtrees: a fresh
         // scrolling insertion never fires its own onChange, so the edge
         // dividers reset on the transition itself (and on appear below).

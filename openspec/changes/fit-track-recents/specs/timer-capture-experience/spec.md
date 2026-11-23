@@ -79,6 +79,10 @@ Both chip groups SHALL carry the same border clearance: 1 pt top/bottom content 
 - **WHEN** the user taps a Recents chip
 - **THEN** the name field fills with that exact text plus its newest entry's ordered categories, the ready numeric timer appears, and no timer starts and no entry is created
 
+#### Scenario: Typed exact match beyond the cap inherits
+- **WHEN** the user types a name that exactly matches a committed entry ranked beyond the ten Recents candidates (suggested by the uncapped name picker, confirmed via the keyboard)
+- **THEN** the ready draft inherits that entry's ordered categories, exactly as a chip tap would — the candidate cap limits only chip display, never category inheritance
+
 #### Scenario: Timing hides Recents
 - **WHEN** a timer is running
 - **THEN** Recents is not presented and its occupied height is preserved so the main action does not move
@@ -94,3 +98,18 @@ Both chip groups SHALL carry the same border clearance: 1 pt top/bottom content 
 #### Scenario: Fresh reinstall shows categories on first paint
 - **WHEN** the user signs in on a reinstall with an empty account file and the shell mounts after seeding
 - **THEN** the first Track paint already carries the starter categories and the name picker suggests seeded names, with recents filling in as the first sync lands
+
+### Requirement: Plain-text name capture
+Track SHALL capture the entry name as plain trimmed text with no catalog, no search sheet, and no quick-create. The idle screen SHALL show a plain-text name field plus the exact-match recents chips (the candidate cap is governed by the capped wrapping chip flow requirement above, not restated here). Start SHALL be enabled only when the trimmed text is non-empty. Typing a name that exactly matches a recent SHALL NOT start anything until Start is activated.
+
+#### Scenario: Type a new name
+- **WHEN** the user types a trimmed non-empty name with no exact recent match
+- **THEN** Start becomes enabled and no catalog record is created
+
+#### Scenario: Empty text cannot start
+- **WHEN** the name field holds only whitespace
+- **THEN** Start stays disabled with no error text
+
+#### Scenario: Exact text identity
+- **WHEN** the trimmed text differs from an existing recent only by letter case (e.g. `Gym` vs `GYM`)
+- **THEN** the two are treated as different names with separate recents and separate inherited categories

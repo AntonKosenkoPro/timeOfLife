@@ -393,7 +393,8 @@ final class TrackViewModel: ObservableObject {
             elapsed = 0
             return
         }
-        let inherited = recents.first { $0.text == trimmed }?.categoryIDs ?? []
+        let inherited = (recents.first { $0.text == trimmed }
+            ?? allNames.first { $0.text == trimmed })?.categoryIDs ?? []
         let draft = TrackState.Draft(text: trimmed, categoryIDs: inherited)
         if state != .ready(draft) {
             state = .ready(draft)
