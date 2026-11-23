@@ -72,11 +72,19 @@ struct RecentActivitiesChips: View {
 
     /// Last fully-measured plan, retained across transient measurement gaps
     /// (a newly arrived candidate the off-screen pass has not reported yet,
-    /// a transient zero width). Reused only for the same candidate count so
-    /// a stale count can never mount — without it, one unmeasured text
-    /// discards the measured fit for all candidates and the view flashes
-    /// from a fitting static flow into the provisional scroller for a frame.
-    @State private var stickyPlan: (candidateCount: Int, plan: RecentsFitPolicy.Plan)?
+    /// a transient zero width). Reused only for the same candidate count,
+    /// container width, and host budget — geometry can change during a nil-
+    /// measurement window, and a count-only key would serve a stale larger-
+    /// budget plan into unclamped static flow. Without retention, one
+    /// unmeasured text discards the measured fit for all candidates and the
+    /// view flashes from a fitting static flow into the provisional scroller
+    /// for a frame.
+    @State private var stickyPlan: (
+        candidateCount: Int,
+        containerWidth: CGFloat,
+        budget: CGFloat?,
+        plan: RecentsFitPolicy.Plan
+    )?
 
     /// The capped, most-recently-used-first slice (the store already sorts
     /// by the text's newest `started_at`; the cap is
@@ -114,7 +122,8 @@ struct RecentActivitiesChips: View {
             containerWidth: containerWidth,
             spacing: Theme.spacingSmall,
             budget: availableHeight,
-            rowHeight: chipRowHeight
+            rowHeight: chipRowHeight,
+            maxCandidates: TrackViewModel.recentsLimit
         )
     }
 
@@ -125,12 +134,16 @@ struct RecentActivitiesChips: View {
         if let resolvedPlan {
             return resolvedPlan
         }
-        if let stickyPlan, stickyPlan.candidateCount == candidates.count {
+        if let stickyPlan,
+           stickyPlan.candidateCount == candidates.count,
+           stickyPlan.containerWidth == containerWidth,
+           stickyPlan.budget == availableHeight {
             return stickyPlan.plan
         }
         return RecentsFitPolicy.provisional(
             candidateCount: candidates.count,
-            rowHeight: chipRowHeight
+            rowHeight: chipRowHeight,
+            maxCandidates: TrackViewModel.recentsLimit
         )
     }
 
@@ -170,7 +183,7 @@ struct RecentActivitiesChips: View {
         .background(measureBackground)
         .onChange(of: resolvedPlan) {
             if let resolvedPlan {
-                stickyPlan = (candidates.count, resolvedPlan)
+                stickyPlan = (candidates.count, containerWidth, availableHeight, resolvedPlan)
             }
         }
         // Dynamic Type changes every chip size (subheadline font, icon slot,

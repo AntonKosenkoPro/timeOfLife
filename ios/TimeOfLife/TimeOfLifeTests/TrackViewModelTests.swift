@@ -618,7 +618,7 @@ struct TrackViewModelTests {
             ))
         }
         await vm.load()
-        #expect(vm.recents.count == 10)
+        #expect(vm.recents.count == TrackViewModel.recentsLimit)
         #expect(vm.recents.first?.text == "Text13")
         #expect(vm.allNames.count == 14)
         #expect(vm.allNames.first?.text == "Text13")

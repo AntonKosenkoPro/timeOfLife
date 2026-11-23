@@ -15,11 +15,6 @@ import Foundation
 /// Omitted chips are never mounted, so they cannot stay tappable or
 /// VoiceOver-discoverable.
 enum RecentsFitPolicy {
-    /// Track's exact-text candidate cap. Mirrors `TrackViewModel.recentsLimit`
-    /// (the single persistence knob); the policy clamps defensively so a
-    /// longer input can never leak extra mounted chips.
-    static var maxCandidates: Int { TrackViewModel.recentsLimit }
-
     /// Fallback offer size when fewer than five candidates fit.
     static let fallbackCount = 5
 
@@ -46,7 +41,15 @@ enum RecentsFitPolicy {
     /// unmeasured width): at most the fallback five in a one-row viewport.
     /// The viewport hugs smaller content (`fixedSize` in the view), so small
     /// sets never reserve dead space while measuring.
-    nonisolated static func provisional(candidateCount: Int, rowHeight: CGFloat) -> Plan {
+    /// - Parameter maxCandidates: Track's exact-text candidate cap, passed in
+    ///   by the view call site (which reads `TrackViewModel.recentsLimit`).
+    ///   Threaded as a parameter — never read off the `@MainActor` view
+    ///   model — so the policy stays a pure, `nonisolated` Models-layer unit.
+    nonisolated static func provisional(
+        candidateCount: Int,
+        rowHeight: CGFloat,
+        maxCandidates: Int
+    ) -> Plan {
         let total = min(max(0, candidateCount), maxCandidates)
         guard total > 0 else { return Plan(offered: 0, scrolling: false, viewport: nil) }
         return Plan(
@@ -65,12 +68,15 @@ enum RecentsFitPolicy {
     ///   deductions the viewport uses: caption, gaps, clearance, safe area).
     ///   Nil, non-positive, or non-finite values are a measurement state.
     /// - Parameter rowHeight: one chip row at the active text size.
+    /// - Parameter maxCandidates: Track's exact-text candidate cap, passed in
+    ///   by the view call site (see `provisional`).
     nonisolated static func plan(
         itemSizes: [CGSize],
         containerWidth: CGFloat,
         spacing: CGFloat,
         budget: CGFloat?,
-        rowHeight: CGFloat
+        rowHeight: CGFloat,
+        maxCandidates: Int
     ) -> Plan {
         let floor = floorHeight(rowHeight: rowHeight)
         let total = min(itemSizes.count, maxCandidates)
@@ -78,7 +84,7 @@ enum RecentsFitPolicy {
         guard containerWidth.isFinite, containerWidth > 0,
               let budget, budget.isFinite, budget > 0
         else {
-            return provisional(candidateCount: itemSizes.count, rowHeight: rowHeight)
+            return provisional(candidateCount: itemSizes.count, rowHeight: rowHeight, maxCandidates: maxCandidates)
         }
         let sizes = Array(itemSizes.prefix(total))
         let contentBudget = max(0, budget - ChipViewport.borderBleed)

@@ -11,18 +11,18 @@ struct RecentActivitiesChipsTests {
 
     @Test("caps at ten recents, preserving the input order")
     func capsAtTen() {
-        let recents = (0..<14).map { recent("a\($0)") }
+        let recents = (0..<(TrackViewModel.recentsLimit + 4)).map { recent("a\($0)") }
         let capped = RecentActivitiesChips.recents(from: recents)
-        #expect(capped.count == 10)
-        #expect(capped.map(\.text) == (0..<10).map { "a\($0)" })
+        #expect(capped.count == TrackViewModel.recentsLimit)
+        #expect(capped.map(\.text) == (0..<TrackViewModel.recentsLimit).map { "a\($0)" })
     }
 
     @Test("omits the oldest recents beyond the cap")
     func omitsOldestBeyondCap() {
-        let recents = (0..<11).map { recent("a\($0)") }
+        let recents = (0...(TrackViewModel.recentsLimit)).map { recent("a\($0)") }
         let capped = RecentActivitiesChips.recents(from: recents)
-        #expect(!capped.map(\.text).contains("a10"))
-        #expect(capped.last?.text == "a9")
+        #expect(!capped.map(\.text).contains("a\(TrackViewModel.recentsLimit)"))
+        #expect(capped.last?.text == "a\(TrackViewModel.recentsLimit - 1)")
     }
 
     @Test("returns all recents when fewer than the cap")

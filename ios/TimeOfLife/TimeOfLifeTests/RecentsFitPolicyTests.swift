@@ -1,3 +1,4 @@
+// swiftlint:disable file_length
 import Testing
 import Foundation
 @testable import TimeOfLife
@@ -27,7 +28,8 @@ struct RecentsFitPolicyCountsTests {
     func zeroCandidates() {
         let plan = RecentsFitPolicy.plan(
             itemSizes: [], containerWidth: fitWidth, spacing: fitSpacing,
-            budget: 1000, rowHeight: fitRow
+            budget: 1000, rowHeight: fitRow,
+            maxCandidates: 10
         )
         #expect(plan == RecentsFitPolicy.Plan(offered: 0, scrolling: false, viewport: nil))
     }
@@ -37,9 +39,10 @@ struct RecentsFitPolicyCountsTests {
         for count in 1...12 {
             let plan = RecentsFitPolicy.plan(
                 itemSizes: columnSizes(count), containerWidth: 10_000, spacing: fitSpacing,
-                budget: 100_000, rowHeight: fitRow
+                budget: 100_000, rowHeight: fitRow,
+                maxCandidates: 10
             )
-            #expect(plan.offered == min(count, RecentsFitPolicy.maxCandidates), "count \(count)")
+            #expect(plan.offered == min(count, 10), "count \(count)")
             #expect(plan.scrolling == false, "count \(count)")
             #expect(plan.viewport == nil, "count \(count)")
         }
@@ -50,7 +53,8 @@ struct RecentsFitPolicyCountsTests {
         for count in 1...4 {
             let plan = RecentsFitPolicy.plan(
                 itemSizes: columnSizes(count), containerWidth: fitWidth, spacing: fitSpacing,
-                budget: budgetForRows(count), rowHeight: fitRow
+                budget: budgetForRows(count), rowHeight: fitRow,
+                maxCandidates: 10
             )
             #expect(plan.offered == count, "count \(count)")
             #expect(plan.scrolling == false, "count \(count)")
@@ -61,7 +65,8 @@ struct RecentsFitPolicyCountsTests {
     func fewerThanFiveOverflow() {
         let plan = RecentsFitPolicy.plan(
             itemSizes: columnSizes(3), containerWidth: fitWidth, spacing: fitSpacing,
-            budget: ChipViewport.borderBleed, rowHeight: fitRow
+            budget: ChipViewport.borderBleed, rowHeight: fitRow,
+            maxCandidates: 10
         )
         #expect(plan.offered == 3)
         #expect(plan.scrolling == true)
@@ -72,7 +77,8 @@ struct RecentsFitPolicyCountsTests {
     func tenCandidatesFourFit() {
         let plan = RecentsFitPolicy.plan(
             itemSizes: columnSizes(10), containerWidth: fitWidth, spacing: fitSpacing,
-            budget: budgetForRows(4), rowHeight: fitRow
+            budget: budgetForRows(4), rowHeight: fitRow,
+            maxCandidates: 10
         )
         #expect(plan.offered == 5)
         #expect(plan.scrolling == true)
@@ -97,7 +103,8 @@ struct RecentsFitPolicyFitsTests {
         for (fitting, offered, scrolling) in cases {
             let plan = RecentsFitPolicy.plan(
                 itemSizes: columnSizes(10), containerWidth: fitWidth, spacing: fitSpacing,
-                budget: budgetForRows(fitting), rowHeight: fitRow
+                budget: budgetForRows(fitting), rowHeight: fitRow,
+                maxCandidates: 10
             )
             #expect(plan.offered == offered, "fitting \(fitting)")
             #expect(plan.scrolling == scrolling, "fitting \(fitting)")
@@ -114,7 +121,8 @@ struct RecentsFitPolicyFitsTests {
         let sizes = Array(repeating: CGSize(width: 46, height: 44), count: 5)
         let plan = RecentsFitPolicy.plan(
             itemSizes: sizes, containerWidth: 5 * 46 + 4 * 8, spacing: fitSpacing,
-            budget: 45, rowHeight: fitRow
+            budget: 45, rowHeight: fitRow,
+            maxCandidates: 10
         )
         #expect(plan.offered == 5)
         #expect(plan.scrolling == false)
@@ -136,7 +144,8 @@ struct RecentsFitPolicyFitsTests {
         let content = 5 * 44 + 4 * 8
         let plan = RecentsFitPolicy.plan(
             itemSizes: sizes, containerWidth: fitWidth, spacing: fitSpacing,
-            budget: CGFloat(content) + ChipViewport.borderBleed, rowHeight: fitRow
+            budget: CGFloat(content) + ChipViewport.borderBleed, rowHeight: fitRow,
+            maxCandidates: 10
         )
         #expect(plan.offered == 10)
         #expect(plan.scrolling == false)
@@ -148,7 +157,8 @@ struct RecentsFitPolicyFitsTests {
         let content = 5 * 44 + 4 * 8
         let plan = RecentsFitPolicy.plan(
             itemSizes: sizes, containerWidth: fitWidth, spacing: fitSpacing,
-            budget: CGFloat(content) + ChipViewport.borderBleed - 0.1, rowHeight: fitRow
+            budget: CGFloat(content) + ChipViewport.borderBleed - 0.1, rowHeight: fitRow,
+            maxCandidates: 10
         )
         #expect(plan.offered == 8)
         #expect(plan.scrolling == false)
@@ -189,7 +199,8 @@ struct FlowPackingTests {
         #expect(fitting == 1)
         let plan = RecentsFitPolicy.plan(
             itemSizes: sizes, containerWidth: 100, spacing: 8,
-            budget: 44 + ChipViewport.borderBleed, rowHeight: 44
+            budget: 44 + ChipViewport.borderBleed, rowHeight: 44,
+            maxCandidates: 10
         )
         // One fits (< 5): offer the newest five — the long newer chip stays
         // first, nothing is skipped for a shorter older chip.
@@ -206,12 +217,14 @@ struct FlowPackingTests {
         #expect(rows.count == 1)
         #expect(rows[0].height == 60)
         #expect(FlowPacking.totalHeight(rows: rows, spacing: 8) == 60)
-        // A taller chip growing its row shrinks the fitting prefix.
+        // A taller chip growing its row shrinks the fitting prefix — but the
+        // trailing row still contributes the item-by-item prefix that fits:
+        // the 44pt first chip fits the 59pt budget on its own.
         let fittingTall = FlowPacking.fittingPrefixCount(
             itemSizes: [CGSize(width: 40, height: 44), CGSize(width: 40, height: 60)],
             maxWidth: 100, spacing: 8, budget: 59
         )
-        #expect(fittingTall == 0)
+        #expect(fittingTall == 1)
         let fittingExact = FlowPacking.fittingPrefixCount(
             itemSizes: [CGSize(width: 40, height: 44), CGSize(width: 40, height: 60)],
             maxWidth: 100, spacing: 8, budget: 60
@@ -250,7 +263,8 @@ struct FlowPackingTests {
         #expect(RecentsFitPolicy.floorHeight(rowHeight: 60) == 62)
         let plan = RecentsFitPolicy.plan(
             itemSizes: columnSizes(10, height: 60), containerWidth: fitWidth, spacing: fitSpacing,
-            budget: budgetForRows(5, height: 44), rowHeight: 60
+            budget: budgetForRows(5, height: 44), rowHeight: 60,
+            maxCandidates: 10
         )
         // Five 44pt rows of budget fit only three 60pt rows (< 5 → fallback).
         #expect(plan.offered == 5)
@@ -264,7 +278,8 @@ struct FlowPackingTests {
         for budget in badBudgets {
             let plan = RecentsFitPolicy.plan(
                 itemSizes: sizes, containerWidth: fitWidth, spacing: fitSpacing,
-                budget: budget, rowHeight: fitRow
+                budget: budget, rowHeight: fitRow,
+                maxCandidates: 10
             )
             #expect(plan.offered == 5, "budget \(String(describing: budget))")
             #expect(plan.scrolling == true, "budget \(String(describing: budget))")
@@ -274,7 +289,8 @@ struct FlowPackingTests {
         for width in badWidths {
             let plan = RecentsFitPolicy.plan(
                 itemSizes: sizes, containerWidth: width, spacing: fitSpacing,
-                budget: 1000, rowHeight: fitRow
+                budget: 1000, rowHeight: fitRow,
+                maxCandidates: 10
             )
             #expect(plan.offered == 5, "width \(width)")
             #expect(plan.scrolling == true, "width \(width)")
@@ -317,32 +333,86 @@ struct FlowPackingTests {
                 containerWidth: width,
                 spacing: 8,
                 budget: budget,
-                rowHeight: 44
+                rowHeight: 44,
+                maxCandidates: 10
             )
-            #expect(plan.offered >= 0 && plan.offered <= min(count, RecentsFitPolicy.maxCandidates))
+            let total = min(count, 10)
+            #expect(plan.offered >= 0 && plan.offered <= total)
             if plan.scrolling {
                 #expect(plan.viewport != nil)
                 // Scrolling only ever mounts the newest-five fallback (or
                 // all candidates when fewer exist) — never a longer prefix.
-                #expect(plan.offered == min(RecentsFitPolicy.fallbackCount, min(count, RecentsFitPolicy.maxCandidates)))
+                #expect(plan.offered == min(RecentsFitPolicy.fallbackCount, total))
             } else {
                 #expect(plan.viewport == nil)
-                // The mounted newest-first prefix genuinely fits: repacking
-                // exactly the offered prefix fills the plan's budget (floor
-                // content when the one-row floor dominates, plus the policy
-                // tolerance), so substituting an older chip for a newer one
-                // — or skipping a newer chip — would fail here.
-                let floorContent = RecentsFitPolicy.floorHeight(rowHeight: 44)
-                    - ChipViewport.borderBleed
-                let fitBudget = max(max(0, budget - ChipViewport.borderBleed), floorContent) + 0.5
-                #expect(FlowPacking.fittingPrefixCount(
-                    itemSizes: Array(sizes.prefix(plan.offered)),
-                    maxWidth: width,
-                    spacing: 8,
-                    budget: fitBudget
-                ) == plan.offered)
+                // Maximality where defined: outside the all-fit (C == N)
+                // branch the next chip genuinely does not fit, so the
+                // mounted newest-first prefix is the largest fitting one —
+                // substituting an older chip for a newer one, or skipping a
+                // newer chip, would fail here. Skipped when offered == total
+                // (offered + 1 does not exist in the clamped set).
+                if plan.offered < total {
+                    let contentBudget = max(0, budget - ChipViewport.borderBleed)
+                    #expect(FlowPacking.fittingPrefixCount(
+                        itemSizes: Array(sizes.prefix(plan.offered + 1)),
+                        maxWidth: width,
+                        spacing: 8,
+                        budget: contentBudget
+                    ) == plan.offered)
+                }
             }
         }
+    }
+
+    @Test("a partially fitting trailing row contributes the items that fit")
+    func trailingRowGrowsItemByItem() {
+        // Two full 100pt rows, then a [30pt, 60pt] row (30 + 8 + 60 = 98):
+        // the whole third row needs 44 + 8 + 44 + 8 + 44 = 148pt, but the
+        // 30pt item (34pt tall) fits on its own at 44 + 8 + 44 + 8 + 34 =
+        // 138pt — so the largest fitting prefix is 3, not the 2 whole rows.
+        let sizes = [
+            CGSize(width: 100, height: 44),
+            CGSize(width: 100, height: 44),
+            CGSize(width: 30, height: 34),
+            CGSize(width: 60, height: 44),
+        ]
+        #expect(FlowPacking.fittingPrefixCount(
+            itemSizes: sizes, maxWidth: 100, spacing: 8, budget: 145
+        ) == 3)
+        #expect(FlowPacking.fittingPrefixCount(
+            itemSizes: sizes, maxWidth: 100, spacing: 8, budget: 138
+        ) == 3)
+        #expect(FlowPacking.fittingPrefixCount(
+            itemSizes: sizes, maxWidth: 100, spacing: 8, budget: 137
+        ) == 2)
+    }
+
+    @Test("the same candidate count resolves differently across geometries")
+    func sameCountDifferentGeometries() {
+        // Retention-key rationale: a count-only key would serve a stale
+        // larger-budget plan into unclamped static flow, so the view keys
+        // retention on count + width + budget. Ten identical chips fit eight
+        // static at one width but fall back to the scrolling five when
+        // narrower — and a shrunken budget moves the same width to fallback.
+        let sizes = Array(repeating: CGSize(width: 46, height: 44), count: 10)
+        let wide = RecentsFitPolicy.plan(
+            itemSizes: sizes, containerWidth: fitWidth, spacing: fitSpacing,
+            budget: budgetForRows(4), rowHeight: fitRow,
+            maxCandidates: 10
+        )
+        #expect(wide == RecentsFitPolicy.Plan(offered: 8, scrolling: false, viewport: nil))
+        let narrow = RecentsFitPolicy.plan(
+            itemSizes: sizes, containerWidth: 50, spacing: fitSpacing,
+            budget: budgetForRows(4), rowHeight: fitRow,
+            maxCandidates: 10
+        )
+        #expect(narrow.offered == 5 && narrow.scrolling == true)
+        let shrunk = RecentsFitPolicy.plan(
+            itemSizes: sizes, containerWidth: fitWidth, spacing: fitSpacing,
+            budget: budgetForRows(2), rowHeight: fitRow,
+            maxCandidates: 10
+        )
+        #expect(shrunk.offered == 5 && shrunk.scrolling == true)
     }
 
     @Test("empty packing is zero-sized with no rows")

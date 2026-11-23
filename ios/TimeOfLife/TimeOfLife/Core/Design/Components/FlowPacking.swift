@@ -91,8 +91,10 @@ enum FlowPacking {
 
     /// Largest newest-first prefix whose packed content height fits completely
     /// inside `budget`. Counts items, never skips a longer newer item to pack
-    /// an older shorter one. A non-finite or negative budget fits nothing;
-    /// an infinite budget fits everything.
+    /// an older shorter one. A trailing row that does not fit as a whole
+    /// still contributes the item-by-item prefix that fits, so the returned
+    /// count is the true largest fitting prefix. A non-finite or negative
+    /// budget fits nothing; an infinite budget fits everything.
     nonisolated static func fittingPrefixCount(
         itemSizes: [CGSize],
         maxWidth: CGFloat,
@@ -107,10 +109,25 @@ enum FlowPacking {
         var consumed: CGFloat = 0
         var count = 0
         for (index, row) in rows.enumerated() {
-            consumed += row.height + (index == 0 ? 0 : gap)
-            if consumed <= budget + 1e-6 {
+            let leading = index == 0 ? 0 : gap
+            if consumed + leading + row.height <= budget + 1e-6 {
+                consumed += leading + row.height
                 count += row.items.count
             } else {
+                // The row as a whole overflows: grow it item-by-item while
+                // the partial row (whose height is the max of the included
+                // items) still fits, then stop — later rows can only add
+                // height. Any prefix of a packed row fits the container
+                // width by greedy construction, so only height is rechecked.
+                var partialHeight: CGFloat = 0
+                for item in row.items {
+                    partialHeight = max(partialHeight, item.size.height)
+                    if consumed + leading + partialHeight <= budget + 1e-6 {
+                        count += 1
+                    } else {
+                        break
+                    }
+                }
                 break
             }
         }
