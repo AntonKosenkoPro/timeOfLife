@@ -193,17 +193,26 @@ struct PlannerSheet: View {
             }
             .listStyle(.plain)
             .scrollContentBackground(.hidden)
+            // 6.5: task-list updates (insert/remove/toggle) publish without
+            // animation so adding a row never shifts visible rows, scrolls
+            // the list, or resizes the sheet (LogTimeView `.animation(.none`
+            // precedent). Unrelated animations (error banner, transitions)
+            // are unaffected.
+            .animation(.none, value: plannerVM.tasks)
             .accessibilityIdentifier("PlannerTaskList")
         }
     }
 
     /// Submits the add field and keeps keyboard focus in it for the next
     /// task: a successful Add clears the field and a failed Add preserves
-    /// the input (PlannerViewModel owns both), and either way the field
-    /// stays focused until explicit Done or system dismissal.
+    /// the input (PlannerViewModel owns both). Focus is restored only when
+    /// it was actually lost — an unconditional re-assert in the same
+    /// transaction as the List row insertion scrolls the field into view
+    /// and shifts visible rows (6.5). Only explicit Done or system
+    /// dismissal resigns focus.
     private func submitAdd() async {
         await plannerVM.add()
-        addFieldFocused = true
+        if !addFieldFocused { addFieldFocused = true }
     }
 
     /// Prepares the task's name on Track with empty categories/notes and

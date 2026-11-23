@@ -102,6 +102,35 @@ struct PlannerViewModelTests {
         #expect(vm.canInteract)
     }
 
+    @Test("add appends without moving existing rows")
+    func addAppendsWithoutMovingExistingRows() async throws {
+        // 6.5 regression (device repro 2026-11-23): adding a task must not
+        // shift visible rows — the new row lands at the end in stable
+        // creation order while every previously published row keeps its
+        // position and identity, so no scroll-offset or row-position change
+        // is needed. The SwiftUI halves (conditional focus restore, no
+        // list-update animation) live in PlannerSheet; this pins the data
+        // contract they rely on.
+        let (vm, _) = try makeViewModel()
+        await vm.open()
+        for name in ["Alpha", "Beta", "Gamma"] {
+            vm.inputText = name
+            await vm.add()
+        }
+        let before = vm.tasks
+        #expect(before.map(\.text) == ["Alpha", "Beta", "Gamma"])
+        vm.inputText = "Delta"
+        await vm.add()
+        #expect(vm.tasks.count == before.count + 1)
+        #expect(Array(vm.tasks.prefix(before.count)) == before)
+        #expect(vm.tasks.last?.text == "Delta")
+        // Focus-retention still holds: the sheet stays loaded and ready
+        // for the next entry after the insertion.
+        #expect(vm.phase == .loaded)
+        #expect(vm.canInteract)
+        #expect(vm.inputText.isEmpty)
+    }
+
     @Test("toggle flips completion without reordering")
     func toggleKeepsOrder() async throws {
         let (vm, _) = try makeViewModel()
