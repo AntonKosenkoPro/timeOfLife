@@ -1,5 +1,6 @@
 import Testing
 import Foundation
+import SwiftUI
 @testable import TimeOfLife
 
 @Suite("RecentActivitiesChips.recents")
@@ -48,5 +49,33 @@ struct RecentActivitiesChipsTests {
     func customLimit() {
         let recents = (0..<4).map { recent("a\($0)") }
         #expect(RecentActivitiesChips.recents(from: recents, limit: 2).count == 2)
+    }
+}
+
+@Suite("RecentActivitiesChips.ChipSizes")
+struct ChipSizesTests {
+    @Test("byte-identical sizes at a new generation compare unequal, so the preference refires after a DT clear")
+    func generationBumpRefiresIdenticalSizes() {
+        let sizes = ["a": CGSize(width: 100, height: 44)]
+        let before = ChipSizes(generation: .large, sizes: sizes)
+        let after = ChipSizes(generation: .xLarge, sizes: sizes)
+        #expect(before != after)
+    }
+
+    @Test("reduce merges per-key sizes and adopts the latest generation")
+    func reduceMergesAndAdoptsGeneration() {
+        var value = ChipSizes(generation: .large, sizes: ["a": CGSize(width: 100, height: 44)])
+        let next = ChipSizes(generation: .xLarge, sizes: ["b": CGSize(width: 120, height: 44)])
+        ChipSizesKey.reduce(value: &value) { next }
+        #expect(value.sizes == ["a": CGSize(width: 100, height: 44), "b": CGSize(width: 120, height: 44)])
+        #expect(value.generation == .xLarge)
+    }
+
+    @Test("reduce lets later reports win per key")
+    func reduceLaterWinsPerKey() {
+        var value = ChipSizes(generation: .large, sizes: ["a": CGSize(width: 100, height: 44)])
+        let next = ChipSizes(generation: .large, sizes: ["a": CGSize(width: 110, height: 44)])
+        ChipSizesKey.reduce(value: &value) { next }
+        #expect(value.sizes == ["a": CGSize(width: 110, height: 44)])
     }
 }

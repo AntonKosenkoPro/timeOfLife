@@ -191,6 +191,10 @@ struct RecentActivitiesChips: View {
         // so the gap falls back to the bounded provisional instead of serving
         // a stale fit. Clearing measurements alone is not enough — the sticky
         // plan would still serve the old prefix until the pass re-reports.
+        // Repopulation is guaranteed: each report carries the active Dynamic
+        // Type size (`ChipSizes.generation`), so the reduced preference value
+        // changes on every invalidation even when the re-measured sizes are
+        // byte-identical, and `onPreferenceChange` refires to re-deliver them.
         .onChange(of: dynamicTypeSize) {
             measuredSizes = [:]
             stickyPlan = nil
@@ -294,7 +298,10 @@ struct RecentActivitiesChips: View {
                                     GeometryReader { chipProxy in
                                         Color.clear.preference(
                                             key: ChipSizesKey.self,
-                                            value: [recent.text: chipProxy.size]
+                                            value: ChipSizes(
+                                                generation: dynamicTypeSize,
+                                                sizes: [recent.text: chipProxy.size]
+                                            )
                                         )
                                     }
                                 }
@@ -312,7 +319,7 @@ struct RecentActivitiesChips: View {
             if containerWidth != $0 { containerWidth = $0 }
         }
         .onPreferenceChange(ChipSizesKey.self) {
-            if measuredSizes != $0 { measuredSizes = $0 }
+            if measuredSizes != $0.sizes { measuredSizes = $0.sizes }
         }
     }
 
@@ -394,12 +401,29 @@ private struct ChipAreaWidthKey: PreferenceKey {
     }
 }
 
+/// Rendered chip sizes from the off-screen measurement pass, tagged with
+/// the Dynamic Type size they were measured at. The generation tag makes the
+/// preference value change on every Dynamic Type invalidation even when the
+/// re-measured sizes are byte-identical (heights floored at
+/// `Theme.minTapArea`, widths container-clamped): `onPreferenceChange` fires
+/// only when the reduced value changes, so a bare `[String: CGSize]` payload
+/// would never refire after the Dynamic Type clear and the view would stay
+/// pinned to the provisional one-row scroller. Internal (not private) for
+/// the generation unit test — no view-level harness exists.
+struct ChipSizes: Equatable {
+    var generation: DynamicTypeSize
+    var sizes: [String: CGSize]
+}
+
 /// Rendered chip sizes from the off-screen measurement pass, keyed by exact
-/// text. Later reports win per key so re-measurement converges.
-private struct ChipSizesKey: PreferenceKey {
-    static let defaultValue: [String: CGSize] = [:]
-    static func reduce(value: inout [String: CGSize], nextValue: () -> [String: CGSize]) {
-        value.merge(nextValue()) { _, new in new }
+/// text. Later reports win per key so re-measurement converges; the latest
+/// generation wins (uniform within a pass).
+struct ChipSizesKey: PreferenceKey {
+    static let defaultValue = ChipSizes(generation: .large, sizes: [:])
+    static func reduce(value: inout ChipSizes, nextValue: () -> ChipSizes) {
+        let next = nextValue()
+        value.generation = next.generation
+        value.sizes.merge(next.sizes) { _, new in new }
     }
 }
 

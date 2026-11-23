@@ -34,15 +34,16 @@ struct RecentsFitPolicyCountsTests {
         #expect(plan == RecentsFitPolicy.Plan(offered: 0, scrolling: false, viewport: nil))
     }
 
-    @Test("candidate counts 1 through 12 clamp at the ten cap when all fit")
+    @Test("candidate counts through cap + 2 clamp at the cap when all fit")
     func countsClampAtTen() {
-        for count in 1...12 {
+        let cap = TrackViewModel.recentsLimit
+        for count in 1...(cap + 2) {
             let plan = RecentsFitPolicy.plan(
                 itemSizes: columnSizes(count), containerWidth: 10_000, spacing: fitSpacing,
                 budget: 100_000, rowHeight: fitRow,
-                maxCandidates: 10
+                maxCandidates: cap
             )
-            #expect(plan.offered == min(count, 10), "count \(count)")
+            #expect(plan.offered == min(count, cap), "count \(count)")
             #expect(plan.scrolling == false, "count \(count)")
             #expect(plan.viewport == nil, "count \(count)")
         }
