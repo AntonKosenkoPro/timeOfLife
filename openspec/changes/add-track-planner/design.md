@@ -8,9 +8,9 @@ The active account owns one database file. All mutations pass through `Core/Stor
 
 ## Goals / Non-Goals
 
-**Goals:** Keep planning off Track's layout and launch critical path; make planner state durable but device-local; make name selection incapable of starting/switching timing or inheriting metadata; define daily cleanup without depending on background execution.
+**Goals:** Keep planning off Track's layout and launch critical path; make planner state durable but device-local; make name selection incapable of starting/switching timing or inheriting metadata; complete the matching task on Stop under a narrow exact-text rule; define daily cleanup without depending on background execution.
 
-**Non-Goals:** No changes to sync, timer persistence, entry shapes, Stop/review behavior, undo supersession for entries/categories, or the widget extension. No speculative order/category fields for Stage 2.
+**Non-Goals:** No changes to sync, timer persistence, entry shapes, Stop entry-save/review serialization, undo supersession for entries/categories, or the widget extension. No speculative order/category fields for Stage 2.
 
 ## Decisions
 
@@ -18,7 +18,7 @@ The active account owns one database file. All mutations pass through `Core/Stor
 
 Add a checklist-symbol button immediately before Profile in the Track-root trailing toolbar, with a localized accessibility label. Present a sheet containing its own lightweight planner view model. Keep the existing shell tab/navigation paths and Track layout unchanged; do not add a pushed planner route or extend `TrackSnapshot`.
 
-Use a system sheet with medium/large detents on iPhone, a visible grabber, a title such as “Today's tasks,” and a trailing Done action. Let the system adapt on iPad and in compact height. A scrollable list has no Recents-derived 12-item cap. Opening for browsing does not focus the keyboard. A plain add field and explicit Add action allow repeated additions; successful Add clears the field, failures preserve it. Use native keyboard dismissal and expand as needed for editing/large text. Swipe dismissal discards only unsubmitted field text; committed task changes are already saved.
+Use a system sheet with medium/large detents on iPhone, a visible grabber, a title such as “Today's tasks,” and a trailing Done action. Let the system adapt on iPad and in compact height. A scrollable list has no Recents-derived 12-item cap. Opening for browsing does not focus the keyboard. A plain add field and explicit Add action allow repeated additions; successful Add clears the field and keeps keyboard focus for the next task, failures preserve both text and focus. Only explicit Done or system dismissal dismisses the keyboard. Opening for browsing does not focus the keyboard. Use native keyboard dismissal and expand as needed for editing/large text. Swipe dismissal discards only unsubmitted field text; committed task changes are already saved.
 
 Rows retain creation order, including checked rows, to avoid moving a checkbox target during interaction. A checkbox toggles completion; the separate text button selects the name. Completed rows remain selectable when timing is stopped. Keep checkbox and selection accessibility actions distinct.
 
@@ -40,9 +40,9 @@ Introduce a small synchronous MainActor planner-selection operation alongside th
 
 Disable only task-name selection while running/saving; allow add/check/uncheck/removal during a run. Disable all task actions while their required load/write is unresolved or the account/store is unavailable; serialize writes to avoid duplicate taps. Follow the existing Recents behavior for a settled saved-confirmation state. Do not steal a pending notes-review presentation or alter its continuation.
 
-Starting/stopping a run does not check a task. Removing, checking, or overnight-pruning a task never modifies a prepared name, running draft, saved entry, or Live Activity. There is no inferred link by matching text.
+Starting a run never checks a task. Stopping a run completes at most the oldest unfinished task whose normalized text exactly equals the stopped run's text (timestamped with the stop); Stop with no unfinished exact-text match changes no task and still saves its entry through the unchanged Stop receipt path. Removing, checking, or overnight-pruning a task never modifies a prepared name, running draft, saved entry, or Live Activity. There is no inferred link by matching text except this single Stop-completes-match rule.
 
-Alternative: reusing Recents selection leaks categories; queue-next/stop-and-switch adds a new timer state machine. Both are outside Stage 1.
+Alternative: reusing Recents selection leaks categories; queue-next/stop-and-switch adds a new timer state machine. Both are outside Stage 1. Completing all duplicates per Stop was rejected (one-by-one preserves user control); completing only planner-started runs was rejected (manual entry of the same name should still close the loop).
 
 ### 4. “Overnight” means an idempotent local-day cutoff
 
@@ -56,7 +56,7 @@ Alternative: scheduled background cleanup cannot guarantee midnight execution. D
 
 ### 5. Minimal removal, independent of time-entry Undo
 
-Provide a per-task Remove action with one destructive confirmation naming the task. Cancel makes no changes. Successful removal is permanent locally, with no relay operation or shared undo-buffer participation. This avoids new cross-resource supersession semantics for an unsynced checklist; document the distinction in the sheet/design and preserve entry/category Undo unchanged. Renaming/editing tasks is deferred; remove and add corrects text in Stage 1.
+Provide a per-task Remove action with one destructive confirmation naming the task verbatim with proper locale quotes and no escape sequences; visual truncation for layout keeps the full name in the accessibility label. Cancel makes no changes. Successful removal is permanent locally, with no relay operation or shared undo-buffer participation. This avoids new cross-resource supersession semantics for an unsynced checklist; document the distinction in the sheet/design and preserve entry/category Undo unchanged. Renaming/editing tasks is deferred; remove and add corrects text in Stage 1.
 
 This is a proposal default for human review, alongside creation order and duplicate allowance. Completion itself is immediately reversible by unchecking before overnight cleanup.
 
@@ -85,7 +85,8 @@ No cloud/service setup research is applicable: there is no backend, network, dep
 - [Day change or travel surprises] → Specify current-device cutoff, no task archive, no background promise; test DST, offsets, midnight, and multi-day absence.
 - [Stale sheet writes cross an account switch] → Store-level expected-account checks plus UI generation invalidation; test switches during pending operations.
 - [Cleanup while suspended] → Use existing suspension errors/resume retry; never wake or resume the database merely for the planner.
-- [Category inheritance or Stop/review regression] → Dedicated preparation path and exact-name-with-existing-categories regression; no Stop changes or task linkage.
+- [Category inheritance or Stop/review regression] → Dedicated preparation path and exact-name-with-existing-categories regression; Stop entry-save/review serialization unchanged, planner completion attached as a narrow post-save side effect with oldest-match tests; no Stop-pipeline changes or task linkage beyond this rule.
+- [Removal confirmation misrendering] → Interpolate the task name through localized format strings (no manual `\u` escapes); regression-test quotes/emoji/long names in all five locales with layout truncation plus full-name accessibility labels.
 - [Plain removal has no shared shake Undo] → Confirm it explicitly and document the planner exception; leave existing entry/category Undo behavior unchanged.
 
 ## Migration Plan

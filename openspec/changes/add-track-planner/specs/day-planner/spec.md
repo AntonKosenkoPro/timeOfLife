@@ -16,7 +16,11 @@ The planner SHALL open as a separate sheet from Track, with a title, explicit di
 - **THEN** tasks remain reachable through scrolling/expansion without clipping controls or imposing Recents' item cap
 
 ### Requirement: Tasks have explicit plain-text creation and stable identity
-The planner SHALL support adding trimmed, non-empty names of at most 60 characters through a plain input and explicit Add action. Invalid input SHALL NOT create a task. Each task SHALL have independent identity; duplicate text SHALL be allowed. Tasks SHALL display oldest-created first with a stable identity tie-breaker, and checking/unchecking SHALL NOT reorder them. Stage 1 SHALL offer no name suggestions, category input, scheduled dates, or manual reordering.
+The planner SHALL support adding trimmed, non-empty names of at most 60 characters through a plain input and explicit Add action. Submitting via Enter or the Add action SHALL create the task, clear the input, and keep keyboard focus ready for the next task; only explicit Done or system dismissal SHALL dismiss the keyboard. Invalid input SHALL NOT create a task and SHALL preserve the submitted text and focus. Each task SHALL have independent identity; duplicate text SHALL be allowed. Tasks SHALL display oldest-created first with a stable identity tie-breaker, and checking/unchecking SHALL NOT reorder them. Stage 1 SHALL offer no name suggestions, category input, scheduled dates, or manual reordering.
+
+#### Scenario: Rapid entry via Enter
+- **WHEN** the user types a valid name and presses Enter
+- **THEN** the task is durably created, the field clears, and focus remains in the field for the next task without dismissing the keyboard
 
 #### Scenario: Add an existing name
 - **WHEN** the user adds valid text that matches a task or previously tracked name
@@ -26,20 +30,32 @@ The planner SHALL support adding trimmed, non-empty names of at most 60 characte
 - **WHEN** the input is blank after trimming or exceeds 60 characters
 - **THEN** Add cannot persist it and accessible validation feedback explains the invalid input
 
-### Requirement: Completion and removal are independent of recorded time
-Each task SHALL expose a separate manual checkbox. Checking SHALL record completion; unchecking SHALL clear it. Starting or stopping timing SHALL NOT change completion. A task SHALL offer confirmed permanent local removal naming its text. Cancellation SHALL preserve the task; removal SHALL NOT participate in entry/category shake-to-undo or change any prepared/running/saved time data. Renaming tasks is outside Stage 1.
+### Requirement: Completion is manual or Stop-triggered, never Start-triggered
+Each task SHALL expose a separate manual checkbox. Checking SHALL record completion; unchecking SHALL clear it. Starting timing SHALL NOT change completion. Stopping a run SHALL complete the oldest unfinished task whose normalized text exactly equals the stopped run's text, completing at most one task per Stop; when no unfinished exact-text match exists, Stop SHALL change no task. A task SHALL offer confirmed permanent local removal naming its text verbatim with proper locale quotes and no escape sequences; visual truncation for layout SHALL keep the full name in the accessibility label. Cancellation SHALL preserve the task; removal SHALL NOT participate in entry/category shake-to-undo or change any prepared/running/saved time data. Renaming tasks is outside Stage 1.
 
 #### Scenario: Check during timing
 - **WHEN** a timer is running and the user checks or unchecks a task
 - **THEN** only that task's completion changes and the running timer's name, categories, notes, and timestamps remain unchanged
 
-#### Scenario: Timing is not completion
-- **WHEN** the user selects, starts, and stops timing a task's name
-- **THEN** the task remains in its manually chosen completion state
+#### Scenario: Stop completes the matching task
+- **WHEN** the user stops a run whose text exactly matches an unfinished planner task
+- **THEN** the oldest such task becomes completed with the stop time, at most one task changes, and already-completed or non-matching tasks are untouched
+
+#### Scenario: Stop without a match
+- **WHEN** the user stops a run with no unfinished exact-text planner match
+- **THEN** no task changes completion and the stop still saves its entry normally
+
+#### Scenario: Start is not completion
+- **WHEN** the user selects and starts timing a task's name
+- **THEN** the task remains in its manually chosen completion state until it is manually checked or its run stops
 
 #### Scenario: Confirm or cancel removal
 - **WHEN** the user requests removal
-- **THEN** one destructive confirmation identifies the task; Cancel keeps it and confirmation removes only that task without altering the existing entry/category Undo buffer
+- **THEN** one destructive confirmation identifies the task verbatim (proper locale quotes, no literal `\u` escapes; full name in the accessibility label when visually truncated); Cancel keeps it and confirmation removes only that task without altering the existing entry/category Undo buffer
+
+#### Scenario: Quoted and special-character names render verbatim
+- **WHEN** the task name contains quotes, emoji, or locale-specific characters
+- **THEN** the removal confirmation renders the exact name with no escape sequences or substitutions in every supported locale
 
 ### Requirement: Unfinished tasks carry forward and older completed tasks expire
 Unfinished tasks SHALL persist across local calendar days. At reconciliation, completed tasks with a completion timestamp strictly earlier than the start of the current device-local calendar day SHALL be permanently removed. Tasks completed during the current day SHALL remain available to uncheck. Reconciliation SHALL occur on sheet open, on active-account foreground/resume when storage is usable, and at local-day changes while the sheet is open and active. Clock/time-zone changes SHALL re-evaluate the current local boundary. No background midnight execution or daily archive SHALL be promised.

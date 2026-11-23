@@ -17,3 +17,14 @@ Planner name-selection controls SHALL be disabled while Track is running, in a r
 #### Scenario: State changes after sheet opens
 - **WHEN** timing begins or saving is in progress after the planner was opened
 - **THEN** a task-name action cannot overwrite the timer or prepare a queued next task, while permitted checklist operations still work
+
+### Requirement: Stopping completes the matching planner task
+Stopping a run SHALL complete at most the oldest unfinished planner task whose normalized text exactly equals the stopped run's text, timestamped with the stop. Start SHALL never complete a task. Stop with no unfinished exact-text match SHALL change no task and SHALL still save its entry normally; Live Activity and entry-save behavior SHALL remain unchanged.
+
+#### Scenario: Stop completes oldest duplicate first
+- **WHEN** two unfinished planner tasks share the stopped run's exact text
+- **THEN** only the oldest-created task becomes completed and the newer duplicate stays unfinished
+
+#### Scenario: Stop leaves non-matching and completed tasks alone
+- **WHEN** the stopped run matches no unfinished task, or only matches already-completed tasks
+- **THEN** planner completion does not change and the entry saves with its normal Stop receipt
