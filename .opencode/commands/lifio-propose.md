@@ -1,5 +1,5 @@
 ---
-model: openai/gpt-6.1-sol#high
+model: openai/gpt-6.2-sol#high
 description: "Propose a change and open a proposal PR (Lifio-owned wrapper; survives openspec update)"
 ---
 

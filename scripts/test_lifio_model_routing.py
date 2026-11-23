@@ -19,8 +19,8 @@ COMMANDS = REPO / ".opencode" / "commands"
 
 # wrapper -> (expected model, expected skill id)
 WRAPPERS = {
-    "lifio-explore": ("openai/gpt-6.1-sol#high", "openspec-explore"),
-    "lifio-propose": ("openai/gpt-6.1-sol#high", "openspec-propose"),
+    "lifio-explore": ("openai/gpt-6.2-sol#high", "openspec-explore"),
+    "lifio-propose": ("openai/gpt-6.2-sol#high", "openspec-propose"),
     "lifio-apply": ("opencode-go/muse-spark-1.3-contributor#xhigh", "openspec-apply-change"),
     "lifio-archive": ("opencode-go/muse-spark-1.3-contributor#xhigh", "openspec-archive-change"),
     "lifio-pr": ("opencode-go/muse-spark-1.3-contributor#xhigh", "process-pr"),
