@@ -233,6 +233,27 @@
 "notes.stopDecisionMessage" = "Hay cambios sin guardar en la nota. ¿Revisarlos antes de guardar?";
 "notes.stopDecisionReview" = "Revisar nota";
 "notes.stopDecisionDiscard" = "Descartar cambios";
+// Day planner (add-track-planner Stage 1)
+"planner.buttonLabel" = "Tareas de hoy";
+"planner.title" = "Tareas de hoy";
+"planner.done" = "Listo";
+"planner.addPlaceholder" = "Agregar una tarea";
+"planner.addButton" = "Agregar";
+"planner.loading" = "Cargando tareas…";
+"planner.emptyTitle" = "Aún no hay tareas";
+"planner.emptySubtitle" = "Agrega lo que planeas registrar hoy.";
+"planner.loadError" = "No se pudieron cargar las tareas.";
+"planner.retry" = "Reintentar";
+"planner.validationEmpty" = "Escribe el nombre de la tarea.";
+"planner.validationTooLong" = "El nombre puede tener 60 caracteres como máximo.";
+"planner.toggle.completed" = "Completada";
+"planner.toggle.notCompleted" = "Sin completar";
+"planner.selectHint" = "Selecciona \u201c%@\u201d como nombre del temporizador.";
+"planner.removeLabel" = "Eliminar";
+"planner.removeTitle" = "¿Eliminar la tarea?";
+"planner.removeMessage" = "¿Eliminar \u201c%@\u201d de las tareas de hoy? Esta acción no se puede deshacer.";
+"planner.removeConfirm" = "Eliminar";
+"planner.removeCancel" = "Cancelar";
 
 // Starter categories (category-management spec, seed requirement)
 "category.seed.work" = "Trabajo";

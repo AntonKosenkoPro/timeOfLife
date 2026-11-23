@@ -173,6 +173,27 @@ name push row plus the dedicated picker page (see `SCREENS/NamePicker.md`):
   draft holds notes); mid-run notes saves rewrite the draft notes snapshot
   only, and Stop commits the entry with the final notes.
 
+### Day planner (separate sheet, Stage 1)
+
+Planning lives outside the Track layout in `PlannerSheet` (full spec:
+`SCREENS/PlannerSheet.md`) — Recents and the timer composition are
+unchanged. The Track-root toolbar carries a checklist button (`checklist`
+symbol, `PlannerButton`, before Profile) opening the sheet; it stays
+available while a run is active but is disabled until the account's Track
+state is ready.
+
+- Tapping a task's name prepares the exact normalized text with EMPTY
+  categories and notes via `TrackViewModel.selectPlannerTask(_:)` and
+  dismisses the sheet on success. It never calls `syncReadyFromDraft`, so
+  an exact historical match keeps its categories only through the
+  Recents/picker paths — never here.
+- Name selection is disabled while running, in a recoverable running error,
+  or saving (rechecked at execution, not just presentation); add/check/
+  uncheck/remove stay live during a run.
+- Starting/stopping timing never checks a task; removing, checking, or
+  overnight cleanup never changes any prepared/running/saved name; the
+  pending notes-review session is never stolen or altered.
+
 ### Text and Category relationship
 
 - **Text** is the exact identity being timed and is required for an entry.
@@ -283,6 +304,9 @@ per-record state).
 - [ ] Numeric readout is centered, fixed, and `.monospacedDigit()`.
 - [ ] Recents chips expose exact texts only.
 - [ ] Recents chips show the first-position Category's icon only; no names.
+- [ ] Track toolbar carries the planner checklist button (`PlannerButton`)
+  opening the sheet; selection prepares text-only drafts (empty
+  categories/notes) and never inherits Recents categories.
 - [ ] Start follows explicit selection and persists running state.
 - [ ] Running `Started HH:MM` caption opens the start editor; applying rewrites the draft start, restarts the ticker, and re-anchors the Live Activity (chips/icon unchanged).
 - [ ] Stop saves locally and preserves recoverable state on failure.

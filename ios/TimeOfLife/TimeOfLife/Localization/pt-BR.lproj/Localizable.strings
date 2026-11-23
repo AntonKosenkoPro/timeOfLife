@@ -233,6 +233,27 @@
 "notes.stopDecisionMessage" = "Há alterações não salvas na nota. Revisá-las antes de salvar?";
 "notes.stopDecisionReview" = "Revisar nota";
 "notes.stopDecisionDiscard" = "Descartar alterações";
+// Day planner (add-track-planner Stage 1)
+"planner.buttonLabel" = "Tarefas de hoje";
+"planner.title" = "Tarefas de hoje";
+"planner.done" = "OK";
+"planner.addPlaceholder" = "Adicionar uma tarefa";
+"planner.addButton" = "Adicionar";
+"planner.loading" = "Carregando tarefas…";
+"planner.emptyTitle" = "Nenhuma tarefa ainda";
+"planner.emptySubtitle" = "Adicione o que você planeja registrar hoje.";
+"planner.loadError" = "Não foi possível carregar as tarefas.";
+"planner.retry" = "Tentar de novo";
+"planner.validationEmpty" = "Digite o nome da tarefa.";
+"planner.validationTooLong" = "O nome pode ter no máximo 60 caracteres.";
+"planner.toggle.completed" = "Concluída";
+"planner.toggle.notCompleted" = "Não concluída";
+"planner.selectHint" = "Seleciona \u201c%@\u201d como nome do cronômetro.";
+"planner.removeLabel" = "Remover";
+"planner.removeTitle" = "Remover tarefa?";
+"planner.removeMessage" = "Remover \u201c%@\u201d das tarefas de hoje? Esta ação não pode ser desfeita.";
+"planner.removeConfirm" = "Remover";
+"planner.removeCancel" = "Cancelar";
 
 // Starter categories (category-management spec, seed requirement)
 "category.seed.work" = "Trabalho";

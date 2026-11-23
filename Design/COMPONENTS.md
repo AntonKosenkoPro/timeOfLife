@@ -1109,3 +1109,47 @@ After a successful Stop with a dirty running-notes editor, Track offers a native
 
 > **Removed** by `remove-activities-layer`: no activity detail sheet. No implementation, no call sites.
 
+---
+
+## `ChecklistRow`
+
+One account-local checklist row (day-planner Stage 1; used by `PlannerSheet`). A manual checkbox plus a text action that must stay independent: toggling completion never selects anything, and selecting never toggles completion. Rows keep creation order (checked rows included) so a checkbox target never moves during interaction.
+
+### Signature
+
+```swift
+struct PlannerTaskRow: View {
+    let task: PlannerTask
+    let selectionDisabled: Bool
+    let actionsDisabled: Bool
+    let onToggle: () -> Void
+    let onSelect: () -> Void
+    let onRemove: () -> Void
+}
+```
+
+### Visual
+
+- `HStack(spacing: Theme.spacingSmall)`: a checkbox button (22 pt `checkmark.square.fill` / `square` glyph, `Theme.accentPrimary` when checked else `Theme.textSecondary`) beside a full-width leading-aligned `.body` text button (`Theme.textPrimary`; `strikethrough` when completed — completion never relies on color alone).
+- Both controls own a 44 pt minimum hit region with `Rectangle` content shapes; the row background is `Theme.backgroundPrimary`.
+- Removal rides `swipeActions(edge: .trailing, allowsFullSwipe: false)` (destructive) plus an equivalent `contextMenu` item; the destructive tap only stages a confirmation — nothing is deleted until the named confirm succeeds.
+
+### States
+
+| State | Visual |
+|---|---|
+| Not completed | Empty square; plain text; selection enabled when timing is stopped |
+| Completed | Filled checkmark + struck text; remains selectable when timing is stopped |
+| Actions disabled (loading/mutating) | Both buttons inert; the last snapshot stays visible |
+| Name selection disabled (running/saving/error) | Checkbox, Add, and removal stay live; only the text button is inert |
+
+### Accessibility
+
+- Checkbox and text are separate accessible elements with separate actions: the checkbox label reads `"<text>, <Completed|Not completed>"` (`L10n.plannerToggle*`); the text button label is the task text with a hint naming the Track consequence (`L10n.plannerSelectHint` formatted with the text).
+- Stable per-task identifiers: `PlannerTaskToggle_<id>` and `PlannerTaskSelect_<id>` (persisted UUIDs, stable across launches); removal `PlannerTaskRemove_<id>`.
+- Completed state is announced as text and struck through, never color-only.
+
+### Usage
+
+- Use for local-only checklists whose selection must not inherit metadata or start work. Do not reuse for entry/category rows — those join the shared undo buffer and the relay outbox, while checklist removal is permanent-local with its own named destructive confirm.
+

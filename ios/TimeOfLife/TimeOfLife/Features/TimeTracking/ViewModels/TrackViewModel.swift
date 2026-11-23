@@ -413,6 +413,28 @@ final class TrackViewModel: ObservableObject {
         Haptics.selection()
     }
 
+    /// Selects a planner task by name (day-planner spec D3): prepares the exact
+    /// normalized text with EMPTY categories and notes, without starting
+    /// timing, creating an entry, or changing the task's completion. Never
+    /// calls `syncReadyFromDraft` (that would inherit the exact recents
+    /// match's categories). An exact historical match keeps its categories
+    /// only through the Recents/name-picker paths — never here.
+    ///
+    /// Returns whether the preparation applied. Fails closed while running,
+    /// in a recoverable running error, or saving (rechecked here at
+    /// execution time, not just at presentation time), and on invalid text.
+    /// Never touches the pending notes-review session or its continuation.
+    @discardableResult
+    func selectPlannerTask(_ text: String) -> Bool {
+        guard !state.isRunning, !state.isSaving else { return false }
+        guard case .valid(let normalized) = ActivityName.validate(text) else { return false }
+        nameDraft = normalized
+        state = .ready(TrackState.Draft(text: normalized, categoryIDs: [], notes: ""))
+        elapsed = 0
+        Haptics.selection()
+        return true
+    }
+
     /// Starts the prepared name (timer-capture-experience spec); typing or
     /// chip selection alone never starts timing. Start is gated on the
     /// trimmed text being non-empty. A committed `.ready` draft starts

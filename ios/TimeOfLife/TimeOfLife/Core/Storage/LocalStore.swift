@@ -595,6 +595,21 @@ actor LocalStore {
             // rows) so a restart cannot trip on undecodable payloads.
             try Self.dropActivityUndoRows(db)
         }
+        migrator.registerMigration("v3") { db in
+            // Stage 1 day-planner tasks (day-planner spec D2): account-local,
+            // device-local checklist rows in the active account file. No task
+            // references entries, categories, the outbox, or the undo buffer;
+            // duplicate text is allowed (no unique index on `text`), and
+            // completion derives from the nullable `completed_at` timestamp.
+            // Rows sort oldest-created first with the id tie-breaker at the
+            // query layer.
+            try db.create(table: "planner_tasks") { t in
+                t.column("id", .text).primaryKey()
+                t.column("text", .text).notNull()
+                t.column("created_at", .datetime).notNull()
+                t.column("completed_at", .datetime)
+            }
+        }
         return migrator
     }
 
@@ -2245,6 +2260,151 @@ actor LocalStore {
             try db.execute(sql: "DELETE FROM undo_buffer WHERE id = ?", arguments: [bufferID])
             return entry
         }
+    }
+
+    // MARK: - Planner tasks (day-planner spec D2, local-only)
+
+    /// Rejects stale planner operations that crossed an account change: the
+    /// expected identity is captured by the caller (the sheet's account
+    /// generation) and re-validated here, inside the serialized store
+    /// operation, before any read or write. A mismatch never touches another
+    /// account's rows — it fails with `accountMismatch` for a caller-side
+    /// retry/dismiss. Call after acquiring `queue` (which already enforces
+    /// the bound + suspension guards).
+    private func requirePlannerAccount(_ expectedUserID: String?) throws {
+        guard let boundUserID, boundUserID == expectedUserID else {
+            throw LocalStoreError.accountMismatch
+        }
+    }
+
+    /// All planner tasks, oldest-created first with the id tie-breaker
+    /// (checking never reorders). Local-only: never enqueues outbox rows or
+    /// touches the undo buffer or sync cursors.
+    func plannerTasks(expectedUserID: String?) throws -> [PlannerTask] {
+        let queue = try queue
+        try requirePlannerAccount(expectedUserID)
+        return try queue.read { db in
+            try PlannerTask.fetchAll(db, sql: """
+                SELECT * FROM planner_tasks ORDER BY created_at ASC, id ASC
+                """)
+        }
+    }
+
+    /// Validates (shared `ActivityName` rules: trimmed non-empty, at most 60
+    /// characters) and durably creates one independent task. Duplicate text
+    /// is allowed — every call mints a fresh UUID v7 identity. Local-only:
+    /// no outbox row, no undo snapshot. Throws
+    /// `PlannerTaskValidationError` on invalid input (nothing is written).
+    @discardableResult
+    func addPlannerTask(
+        text: String,
+        expectedUserID: String?,
+        now: Date = Date()
+    ) throws -> PlannerTask {
+        switch ActivityName.validate(text) {
+        case .valid(let normalized):
+            let stamped = Self.storageQuantized(now)
+            let task = PlannerTask(
+                id: recordIDGenerator.newID(),
+                text: normalized,
+                createdAt: stamped,
+                completedAt: nil
+            )
+            let queue = try queue
+            try requirePlannerAccount(expectedUserID)
+            try queue.write { db in
+                try task.insert(db)
+            }
+            return task
+        case .empty:
+            throw PlannerTaskValidationError.empty
+        case .tooLong:
+            throw PlannerTaskValidationError.tooLong
+        }
+    }
+
+    /// Records (`completed: true`, stamping a new completion time) or clears
+    /// (`completed: false`) one task's completion without reordering it.
+    /// Returns the updated task, or nil when the id no longer exists.
+    /// Local-only: no outbox row, no undo snapshot.
+    @discardableResult
+    func setPlannerTaskCompleted(
+        id: String,
+        completed: Bool,
+        expectedUserID: String?,
+        now: Date = Date()
+    ) throws -> PlannerTask? {
+        let queue = try queue
+        try requirePlannerAccount(expectedUserID)
+        return try queue.write { db in
+            guard var task = try PlannerTask.fetchOne(db, key: id) else {
+                return nil
+            }
+            task.completedAt = completed ? Self.storageQuantized(now) : nil
+            try task.update(db)
+            return task
+        }
+    }
+
+    /// Permanently removes one task locally (no relay operation, no shared
+    /// undo-buffer participation). Returns whether a row was removed. Never
+    /// touches any prepared/running/saved time data.
+    @discardableResult
+    func removePlannerTask(id: String, expectedUserID: String?) throws -> Bool {
+        let queue = try queue
+        try requirePlannerAccount(expectedUserID)
+        return try queue.write { db in
+            try db.execute(sql: "DELETE FROM planner_tasks WHERE id = ?", arguments: [id])
+            return db.changesCount > 0
+        }
+    }
+
+    /// Deletes completed tasks whose completion is strictly earlier than
+    /// `cutoff` (the current device-local start of day). Idempotent:
+    /// re-running with the same cutoff removes nothing further. Unfinished
+    /// rows and rows completed exactly at the cutoff are retained. One
+    /// transaction — a suspension failure rolls everything back and reports
+    /// nothing as cleaned. Returns the number of rows removed.
+    @discardableResult
+    func prunePlannerTasks(
+        completedBefore cutoff: Date,
+        expectedUserID: String?
+    ) throws -> Int {
+        let queue = try queue
+        try requirePlannerAccount(expectedUserID)
+        return try queue.write { db in
+            try Self.deletePlannerTasks(completedBefore: cutoff, in: db)
+        }
+    }
+
+    /// Atomically prunes eligible completed tasks and returns the remaining
+    /// checklist in stable order (day-planner reconciliation): the caller
+    /// publishes the returned rows only after durable success, so an
+    /// interrupted cleanup is never shown as completed.
+    func reconciledPlannerTasks(
+        pruningBefore cutoff: Date,
+        expectedUserID: String?
+    ) throws -> [PlannerTask] {
+        let queue = try queue
+        try requirePlannerAccount(expectedUserID)
+        return try queue.write { db in
+            try Self.deletePlannerTasks(completedBefore: cutoff, in: db)
+            return try PlannerTask.fetchAll(db, sql: """
+                SELECT * FROM planner_tasks ORDER BY created_at ASC, id ASC
+                """)
+        }
+    }
+
+    /// Deletes planner rows with non-null `completed_at` strictly earlier
+    /// than `cutoff`. Strict `<` (never `<=`): a completion exactly at the
+    /// local day boundary is retained.
+    @discardableResult
+    private static func deletePlannerTasks(completedBefore cutoff: Date, in db: Database) throws -> Int {
+        try db.execute(
+            sql: "DELETE FROM planner_tasks WHERE completed_at IS NOT NULL AND completed_at < ?",
+            arguments: [cutoff]
+        )
+        return db.changesCount
     }
 
     // MARK: - Erase local data (destructive, per-account Settings action)

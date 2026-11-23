@@ -236,6 +236,27 @@
 "notes.stopDecisionMessage" = "Есть несохранённые изменения в заметке. Просмотрите их перед сохранением?";
 "notes.stopDecisionReview" = "Просмотреть заметку";
 "notes.stopDecisionDiscard" = "Отменить изменения";
+// Day planner (add-track-planner Stage 1)
+"planner.buttonLabel" = "Задачи на сегодня";
+"planner.title" = "Задачи на сегодня";
+"planner.done" = "Готово";
+"planner.addPlaceholder" = "Добавить задачу";
+"planner.addButton" = "Добавить";
+"planner.loading" = "Загрузка задач…";
+"planner.emptyTitle" = "Задач пока нет";
+"planner.emptySubtitle" = "Добавьте то, что планируете отслеживать сегодня.";
+"planner.loadError" = "Не удалось загрузить задачи.";
+"planner.retry" = "Повторить";
+"planner.validationEmpty" = "Введите название задачи.";
+"planner.validationTooLong" = "Название задачи — не более 60 символов.";
+"planner.toggle.completed" = "Выполнено";
+"planner.toggle.notCompleted" = "Не выполнено";
+"planner.selectHint" = "Выбирает \u00ab%@\u00bb как название трека.";
+"planner.removeLabel" = "Удалить";
+"planner.removeTitle" = "Удалить задачу?";
+"planner.removeMessage" = "Удалить \u00ab%@\u00bb из задач на сегодня? Это действие нельзя отменить.";
+"planner.removeConfirm" = "Удалить";
+"planner.removeCancel" = "Отмена";
 
 // Starter categories (category-management spec, seed requirement)
 "category.seed.work" = "Работа";

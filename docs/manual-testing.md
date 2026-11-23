@@ -55,6 +55,21 @@ Live Activities need a real device with Dynamic Island (the simulator shows the 
 6. [ ] **Lock Screen banner** — lock the device while running; the banner shows icon + name + ticking elapsed + Stop.
 7. [ ] **Dismissal delay** — confirm the Saved card lingers long enough to read but never minutes; record the final seconds in the change's spec delta (task 5.1).
 
+## Day planner (Stage 1, `add-track-planner`)
+
+Unit tests cover storage/CRUD/cleanup guards and selection behavior on the simulator; the checklist below needs a real device (VoiceOver, Dynamic Type, iPad layout, local-day rollover, account switching).
+
+Prerequisites: build with the change on the device, signed in as a test account.
+
+1. [ ] **Sheet open/dismiss** — from Track, tap the checklist button (beside Profile). The sheet opens at half height with grabber, `Today's tasks` title, and Done; expanding, swipe-dismissal, and Done all return to Track with the prepared name, running timer, and history unchanged. Browsing never starts timing.
+2. [ ] **Add/check/select** — add a task (including a duplicate name and an over-long name, which must explain itself and keep the input); check/uncheck it (row stays in place); tap its name to prepare Track with empty categories/notes, then Start and verify no categories are inherited. While a timer runs, management stays usable but name selection is inert.
+3. [ ] **Removal** — request removal: one destructive confirm names the task; Cancel keeps it; confirming removes only that row with no shake-to-undo offer and no prepared/running/saved change.
+4. [ ] **Keyboard/long-list/large-text/iPad** — with the keyboard open, the field and Add stay reachable; a long list scrolls without clipping; at accessibility text sizes and on iPad (adaptive detents) controls keep 44 pt targets and independent VoiceOver actions (checkbox vs name) with announced completion.
+5. [ ] **Local-day rollover** — check a task, advance the device past local midnight (or travel time zones), then open/resume the sheet: prior-day completed tasks are gone, unfinished and today-completed rows stay, and no entries were created or deleted.
+6. [ ] **Offline/relaunch** — go offline, manage tasks, terminate and relaunch: the checklist persists with no relay traffic. Sign out and back in as the same account: tasks return.
+7. [ ] **Account switch** — sign in as a second test account with the sheet open (or with pending work): no first-account content appears and no write crosses accounts. Explicit per-account erasure removes only that account's tasks; the other account's checklist is untouched.
+8. [ ] **Suspension retry** — background the app mid-write (or lock during reconciliation): the sheet keeps the last snapshot with a retry path instead of a cleared list or a false success.
+
 ## Database suspension safety (real device)
 
 Regression target: `RUNNINGBOARD 0xdead10cc` (file/SQLite lock held during suspension), observed in TestFlight 0.2.8 (152–153). Simulator lifecycle tests cover lock coordination, not the OS-enforced device kill. Use synthetic data and a test account; record device/OS/build, timestamps, and results in the change evidence. Run without a debugger attached, which can change suspension behavior.

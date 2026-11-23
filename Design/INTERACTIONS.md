@@ -188,6 +188,32 @@ sheet, no quick-create, and no catalog:
 - **Running lock:** the name cannot be edited while running. The shared ordered tag selector stays live (select-only, zero allowed); toggles rewrite the draft snapshot only and never touch committed entries.
 - **Validation:** Start is gated on trimmed non-empty text (≤ 60 chars); invalid input keeps Start disabled with localized guidance, never a blocking alert.
 
+### Day planner (add-track-planner Stage 1)
+
+Planning is a separate Track sheet (`SCREENS/PlannerSheet.md`), not inline
+capture. The rules that keep it from leaking into timing:
+
+- **Text-only preparation:** tapping a task's name fills the exact
+  normalized text with EMPTY categories and notes. It never calls the
+  Recents inheritance path, never writes a timer draft, never creates an
+  entry, and never toggles completion. Start stays a separate explicit
+  action and preserves the empty preparation.
+- **Guards rechecked at execution:** name selection is disabled while
+  running, in a recoverable running error, or saving — and the sheet
+  re-verifies running/saving state plus the bound account immediately before
+  preparing, so a stale sheet cannot overwrite another account's name.
+  Add/check/uncheck/remove stay live during a run.
+- **Local-day cleanup:** unfinished tasks carry forward; at each
+  reconciliation (sheet open, foreground/resume, local-day change while
+  open) completed rows strictly earlier than the current device-local start
+  of day are pruned in one transaction. A suspended store keeps the last
+  snapshot with retry instead of claiming success. No background task, no
+  midnight timer, no archive.
+- **Removal outside shared Undo:** confirmed task removal is permanent-local
+  — no relay operation, no outbox row, no entry/category undo-buffer
+  participation (see the planner exception below). Completion itself is
+  immediately reversible by unchecking before overnight cleanup.
+
 ## Delete confirmation (F10 / U5)
 
 Decision D18 (as superseded). The confirm pattern depends on what is being deleted.
@@ -195,6 +221,7 @@ Decision D18 (as superseded). The confirm pattern depends on what is being delet
 - **Entry:** single destructive confirm naming the entry text → undo flow. There is no cascade and no scope choice.
 - Destructive buttons use `role: .destructive` / `Theme.danger` tint.
 - **Category:** single destructive confirm; the category's tag is removed from all entries (join cascade), entries themselves are unaffected — state this clearly in the confirm copy.
+- **Planner task (day-planner exception):** single destructive confirm naming the task text → permanent local removal. Planner removal deliberately does NOT join the entry/category shake-to-undo buffer (unsynced rows have no relay convergence to protect, and sharing the buffer would add cross-resource supersession semantics for local-only data); completion itself stays reversible by unchecking before overnight cleanup.
 
 ## Sync conflict (last-write-wins)
 

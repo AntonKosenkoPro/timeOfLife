@@ -30,6 +30,9 @@ struct AppShellView: View {
     /// button; the sheet itself stays in `HistoryView`, which owns the
     /// refresh.
     @State private var isHistoryLogTimeActive = false
+    /// Presents the day-planner sheet from the Track root only
+    /// (add-track-planner Stage 1): browsing never touches Track state.
+    @State private var isPlannerPresented = false
     /// Whether the History search query currently hides the bottom tab
     /// bar (history-search spec, design D4): mirrored up from
     /// `HistoryView` as the blank vs non-blank query state changes.
@@ -230,9 +233,15 @@ struct AppShellView: View {
                 .navigationBarTitleDisplayMode(.inline)
                 .modifier(ShellToolbar(
                     showsLogTime: false,
+                    showsPlanner: true,
+                    plannerEnabled: trackVM.firstLoadSettled,
                     onLogTime: {},
+                    onPlanner: { isPlannerPresented = true },
                     onProfile: { vm.openProfile() }
                 ))
+                .sheet(isPresented: $isPlannerPresented) {
+                    PlannerSheet(store: container.localStore, trackVM: trackVM)
+                }
                 .navigationDestination(for: ShellRoute.self) { route in
                     switch route {
                     case .profile:
@@ -362,7 +371,10 @@ struct AppShellView: View {
             .navigationBarTitleDisplayMode(.inline)
             .modifier(ShellToolbar(
                 showsLogTime: true,
+                showsPlanner: false,
+                plannerEnabled: false,
                 onLogTime: { isHistoryLogTimeActive = true },
+                onPlanner: {},
                 onProfile: { vm.openProfile() }
             ))
         }
@@ -394,7 +406,10 @@ struct AppShellView: View {
             .navigationBarTitleDisplayMode(.inline)
             .modifier(ShellToolbar(
                 showsLogTime: false,
+                showsPlanner: false,
+                plannerEnabled: false,
                 onLogTime: {},
+                onPlanner: {},
                 onProfile: { vm.openProfile() }
             ))
             .navigationDestination(for: ShellRoute.self) { route in
@@ -456,10 +471,19 @@ struct AppShellView: View {
 }
 
 /// The shell's navigation-bar scope (app-shell spec + manual-entry spec):
-/// the Profile button on every tab, plus the Log Time [+] on History only.
+/// the Profile button on every tab, the Log Time [+] on History only, and
+/// the day-planner checklist button on the Track root only
+/// (add-track-planner Stage 1, immediately before Profile).
 private struct ShellToolbar: ViewModifier {
     let showsLogTime: Bool
+    /// Whether the Track-root planner button is present (never on
+    /// History/Insights — the planner opens no pushed route there).
+    let showsPlanner: Bool
+    /// The planner button never acts before the account's Track state is
+    /// ready (app-shell delta): the launch-gate snapshot gates it.
+    let plannerEnabled: Bool
     let onLogTime: () -> Void
+    let onPlanner: () -> Void
     let onProfile: () -> Void
 
     func body(content: Content) -> some View {
@@ -471,6 +495,16 @@ private struct ShellToolbar: ViewModifier {
                     }
                     .accessibilityLabel(L10n.historyLogTime.text)
                     .accessibilityIdentifier("HistoryLogTimeButton")
+                }
+            }
+            if showsPlanner {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button(action: onPlanner) {
+                        Image(systemName: "checklist")
+                    }
+                    .disabled(!plannerEnabled)
+                    .accessibilityLabel(L10n.plannerButtonLabel.text)
+                    .accessibilityIdentifier("PlannerButton")
                 }
             }
             ToolbarItem(placement: .navigationBarTrailing) {

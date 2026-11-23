@@ -33,7 +33,7 @@ Profile (pushed page, top-trailing person control on every tab; signed-in only â
    - Track â€” `Label(L10n.tabTrack, systemImage: "timer")`, `accessibilityIdentifier("TabTrack")`.
    - History â€” `Label(L10n.tabHistory, systemImage: "clock.arrow.circlepath")`, `accessibilityIdentifier("TabHistory")`.
    - Insights â€” `Label(L10n.tabInsights, systemImage: "chart.line.uptrend.xyaxis")`, `accessibilityIdentifier("TabInsights")`.
-2. Each tab root carries the top-trailing person control (`ProfileButton`) pushing the Profile page.
+2. Each tab root carries the top-trailing person control (`ProfileButton`) pushing the Profile page. The Track root additionally carries the day-planner checklist button (`PlannerButton`, `checklist` symbol, immediately before Profile) opening the planner sheet (full spec: `SCREENS/PlannerSheet.md`); History and Insights carry no planner control.
 3. History and Insights render no in-app running-timer surface and reserve no space for one: while a timer runs, its only in-app surface is Track's full numeric timer. Select Track to inspect or stop the run. Tab navigation never stops, restarts, or alters the running timer.
 4. There is no global offline banner. Offline surfaces via the History pull-to-refresh inline notice and the Profile sync status.
 
@@ -56,6 +56,7 @@ Profile (pushed page, top-trailing person control on every tab; signed-in only â
 - [ ] All colors use `Theme.*` tokens.
 - [ ] All strings use `L10n.*` keys in English and Russian.
 - [ ] Tab items and Profile button have stable identifiers.
+- [ ] The Track-root planner button (`PlannerButton`) opens the planner sheet without adding a pushed route, tab, or History/Insights control; it stays available during a run and is disabled until Track state is ready.
 - [ ] History and Insights render no in-app running-timer surface and reserve no timer-only space.
 - [ ] Profile is a pushed page, not a tab.
 - [ ] VoiceOver, Dynamic Type, Reduce Motion, light/dark, and iOS 18 are tested.

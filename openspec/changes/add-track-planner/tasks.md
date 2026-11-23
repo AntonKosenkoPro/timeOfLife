@@ -1,33 +1,33 @@
 ## 1. Research and implementation gate
 
-- [ ] 1.1 Obtain human proposal approval before implementation; reuse this worktree/branch/PR, fetch and rebase onto `origin/main`, and recheck the active notes/Stop change for overlap.
-- [ ] 1.2 Re-confirm the 2026-11-20 research bundle in `design.md`: topic/HIG `/websites/developer_apple_design_human-interface-guidelines`, Apple sheet API `/websites/developer_apple_swiftui` (iOS 18 SDK via Xcode 16+), and atomic writes `/groue/grdb.swift` against the repo-resolved version. Record any changed constraints; fetch current Foundation/lifecycle docs before introducing notification/calendar APIs. Keep cloud/ActivityKit waiver reasons explicit.
-- [ ] 1.3 Recheck `Requirements/FURPS/{Common,Timetracking,Activity_Catalog_and_Categories}.md`; document the local-only planner/outbox exception and text-only selection without changing Recents inheritance or entry/category Undo.
+- [x] 1.1 Obtain human proposal approval before implementation; reuse this worktree/branch/PR, fetch and rebase onto `origin/main`, and recheck the active notes/Stop change for overlap.
+- [x] 1.2 Re-confirm the 2026-11-20 research bundle in `design.md`: topic/HIG `/websites/developer_apple_design_human-interface-guidelines`, Apple sheet API `/websites/developer_apple_swiftui` (iOS 18 SDK via Xcode 16+), and atomic writes `/groue/grdb.swift` against the repo-resolved version. Record any changed constraints; fetch current Foundation/lifecycle docs before introducing notification/calendar APIs. Keep cloud/ActivityKit waiver reasons explicit.
+- [x] 1.3 Recheck `Requirements/FURPS/{Common,Timetracking,Activity_Catalog_and_Categories}.md`; document the local-only planner/outbox exception and text-only selection without changing Recents inheritance or entry/category Undo.
 
 ## 2. Account-local model and storage
 
-- [ ] 2.1 Add the minimal task model and additive `LocalStore` migration (`id`, validated text, creation/completion timestamps), with stable creation ordering and duplicate-text support; add fresh/migrated-file tests.
-- [ ] 2.2 Add transactional planner load/prune/create/check/uncheck/remove methods through `LocalStore`, with expected-account checks inside the store and existing suspension guards. Test persistence, validation, rollback, and zero outbox/undo/cursor changes.
-- [ ] 2.3 Implement injectable local-day cleanup: strictly prior-day completed rows only, retaining unfinished/current-day rows. Test exact midnight, uncheck/recheck, DST short/long days, multiple inactive days, time-zone/clock changes, and idempotent retry.
-- [ ] 2.4 Verify sign-out/re-login retention, independent duplicate tasks, account-switch races, and `eraseAll`/active/dormant account-file cleanup without cross-account effects or relay restoration.
+- [x] 2.1 Add the minimal task model and additive `LocalStore` migration (`id`, validated text, creation/completion timestamps), with stable creation ordering and duplicate-text support; add fresh/migrated-file tests.
+- [x] 2.2 Add transactional planner load/prune/create/check/uncheck/remove methods through `LocalStore`, with expected-account checks inside the store and existing suspension guards. Test persistence, validation, rollback, and zero outbox/undo/cursor changes.
+- [x] 2.3 Implement injectable local-day cleanup: strictly prior-day completed rows only, retaining unfinished/current-day rows. Test exact midnight, uncheck/recheck, DST short/long days, multiple inactive days, time-zone/clock changes, and idempotent retry.
+- [x] 2.4 Verify sign-out/re-login retention, independent duplicate tasks, account-switch races, and `eraseAll`/active/dormant account-file cleanup without cross-account effects or relay restoration.
 
 ## 3. Sheet state and timer integration
 
-- [ ] 3.1 Add a lazily loaded planner view model with serialized actions, loading/empty/failure states, durable-write feedback, preserved failed-Add input, retry, and account-generation invalidation. Keep planner reads out of the launch `TrackSnapshot`.
-- [ ] 3.2 Add safe foreground/resume/open reconciliation and a day-boundary trigger only while the sheet is open/active; re-evaluate time-context changes. Test suspension/resume retries and that no new background task, hidden-sheet midnight timer, or extension writer is introduced.
-- [ ] 3.3 Add the dedicated text-only Track preparation operation and successful-selection dismissal. Test exact-name historical category matches, empty categories/notes through Start, unchanged Recents/name-picker behavior, no timer/entry writes before Start, and no completion linkage on Start/Stop.
-- [ ] 3.4 Test running/recoverable-error/saving selection guards, eligibility rechecks, stale-account selection, completed-task selection, unchanged prepared/running names after task removal/cleanup, and coexistence with the existing start editor and notes Review/Discard presentation.
+- [x] 3.1 Add a lazily loaded planner view model with serialized actions, loading/empty/failure states, durable-write feedback, preserved failed-Add input, retry, and account-generation invalidation. Keep planner reads out of the launch `TrackSnapshot`.
+- [x] 3.2 Add safe foreground/resume/open reconciliation and a day-boundary trigger only while the sheet is open/active; re-evaluate time-context changes. Test suspension/resume retries and that no new background task, hidden-sheet midnight timer, or extension writer is introduced.
+- [x] 3.3 Add the dedicated text-only Track preparation operation and successful-selection dismissal. Test exact-name historical category matches, empty categories/notes through Start, unchanged Recents/name-picker behavior, no timer/entry writes before Start, and no completion linkage on Start/Stop.
+- [x] 3.4 Test running/recoverable-error/saving selection guards, eligibility rechecks, stale-account selection, completed-task selection, unchanged prepared/running names after task removal/cleanup, and coexistence with the existing start editor and notes Review/Discard presentation.
 
 ## 4. Planner UI and localization
 
-- [ ] 4.1 Add the Track-only toolbar button beside Profile and system sheet with adaptive medium/large presentation, Done/grabber/system dismissal, and a scrollable checklist; preserve the Track layout, other tabs, and navigation paths.
-- [ ] 4.2 Add plain-text Add input, separate row checkbox/name actions, stable ordering, and named destructive Remove confirmation. Keep checklist management usable while running and disable only unavailable actions; no suggestions, category prefill, rename, reorder, or queued-next behavior.
-- [ ] 4.3 Add all planner/validation/confirmation/error strings to `en`, `ru`, `zh-Hans`, `es-419`, `pt-BR` and `L10n`/localization tests; use Theme-only styling, 44pt targets, Dynamic Type, independent VoiceOver actions/state, and stable per-task IDs.
+- [x] 4.1 Add the Track-only toolbar button beside Profile and system sheet with adaptive medium/large presentation, Done/grabber/system dismissal, and a scrollable checklist; preserve the Track layout, other tabs, and navigation paths.
+- [x] 4.2 Add plain-text Add input, separate row checkbox/name actions, stable ordering, and named destructive Remove confirmation. Keep checklist management usable while running and disable only unavailable actions; no suggestions, category prefill, rename, reorder, or queued-next behavior.
+- [x] 4.3 Add all planner/validation/confirmation/error strings to `en`, `ru`, `zh-Hans`, `es-419`, `pt-BR` and `L10n`/localization tests; use Theme-only styling, 44pt targets, Dynamic Type, independent VoiceOver actions/state, and stable per-task IDs.
 
 ## 5. Documentation and acceptance verification
 
-- [ ] 5.1 Define reusable checklist controls in `Design/COMPONENTS.md` first, then document `Design/SCREENS/PlannerSheet.md` and the Track/AppShell entry points with implementation checklists. Update relevant `Design/INTERACTIONS.md`/`DECISIONS.md` rules for text-only preparation, local-day cleanup, and planner removal outside shared Undo.
-- [ ] 5.2 Update FURPS, `docs/project-context.md`, README as applicable, and `docs/manual-testing.md` with device-local/account-erasure limits and truthful midnight behavior. Leave baseline specs and OpenAPI untouched; verify the backend/sync diff stays empty.
-- [ ] 5.3 Run backend verification (`gofmt`, `go vet`, `golangci-lint`, build, full `go test`) and iOS verification (XcodeGen if needed, strict SwiftLint, warning-as-error build, full simulator suite per `docs/ios-test-loop.md`) on separate agents in parallel. Serialize all Xcode builds/generation/simulator use.
+- [x] 5.1 Define reusable checklist controls in `Design/COMPONENTS.md` first, then document `Design/SCREENS/PlannerSheet.md` and the Track/AppShell entry points with implementation checklists. Update relevant `Design/INTERACTIONS.md`/`DECISIONS.md` rules for text-only preparation, local-day cleanup, and planner removal outside shared Undo.
+- [x] 5.2 Update FURPS, `docs/project-context.md`, README as applicable, and `docs/manual-testing.md` with device-local/account-erasure limits and truthful midnight behavior. Leave baseline specs and OpenAPI untouched; verify the backend/sync diff stays empty.
+- [x] 5.3 Run backend verification (`gofmt`, `go vet`, `golangci-lint`, build, full `go test`) and iOS verification (XcodeGen if needed, strict SwiftLint, warning-as-error build, full simulator suite per `docs/ios-test-loop.md`) on separate agents in parallel. Serialize all Xcode builds/generation/simulator use.
 - [ ] 5.4 Run UI acceptance for sheet open/add/check/uncheck/select/dismiss, running checklist management, confirmed removal, keyboard/long-list/large-text/iPad layouts, VoiceOver, local-day rollover, offline/relaunch, account switching, and suspension retry. Preserve evidence outside git; do not imply UI verification from unit tests.
 - [ ] 5.5 Rebase again on fresh `origin/main`, rerun affected verification and `openspec validate --all --strict`, update completed tasks truthfully, and hand the same PR to `/lifio-pr`. No automatic merge or archive; issue #254 remains open for Stage 2.

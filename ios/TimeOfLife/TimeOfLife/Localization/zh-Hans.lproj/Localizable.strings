@@ -233,6 +233,27 @@
 "notes.stopDecisionMessage" = "备注中有未存储的更改。存储前要查看吗？";
 "notes.stopDecisionReview" = "查看备注";
 "notes.stopDecisionDiscard" = "放弃更改";
+// Day planner (add-track-planner Stage 1)
+"planner.buttonLabel" = "今日任务";
+"planner.title" = "今日任务";
+"planner.done" = "完成";
+"planner.addPlaceholder" = "添加任务";
+"planner.addButton" = "添加";
+"planner.loading" = "正在加载任务…";
+"planner.emptyTitle" = "还没有任务";
+"planner.emptySubtitle" = "添加今天计划记录的内容。";
+"planner.loadError" = "无法加载任务。";
+"planner.retry" = "重试";
+"planner.validationEmpty" = "请输入任务名称。";
+"planner.validationTooLong" = "任务名称最多 60 个字符。";
+"planner.toggle.completed" = "已完成";
+"planner.toggle.notCompleted" = "未完成";
+"planner.selectHint" = "将\u201c%@\u201d选为计时名称。";
+"planner.removeLabel" = "删除";
+"planner.removeTitle" = "删除任务？";
+"planner.removeMessage" = "从今日任务中删除\u201c%@\u201d？此操作无法撤销。";
+"planner.removeConfirm" = "删除";
+"planner.removeCancel" = "取消";
 
 // Starter categories (category-management spec, seed requirement)
 "category.seed.work" = "工作";

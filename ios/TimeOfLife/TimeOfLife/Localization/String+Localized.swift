@@ -195,6 +195,28 @@ enum L10n: String, CaseIterable {
     case notesStopDecisionReview = "notes.stopDecisionReview"
     case notesStopDecisionDiscard = "notes.stopDecisionDiscard"
 
+    // Day planner (add-track-planner Stage 1): the Track checklist sheet.
+    case plannerButtonLabel = "planner.buttonLabel"
+    case plannerTitle = "planner.title"
+    case plannerDone = "planner.done"
+    case plannerAddPlaceholder = "planner.addPlaceholder"
+    case plannerAddButton = "planner.addButton"
+    case plannerLoading = "planner.loading"
+    case plannerEmptyTitle = "planner.emptyTitle"
+    case plannerEmptySubtitle = "planner.emptySubtitle"
+    case plannerLoadError = "planner.loadError"
+    case plannerRetry = "planner.retry"
+    case plannerValidationEmpty = "planner.validationEmpty"
+    case plannerValidationTooLong = "planner.validationTooLong"
+    case plannerToggleCompleted = "planner.toggle.completed"
+    case plannerToggleNotCompleted = "planner.toggle.notCompleted"
+    case plannerSelectHint = "planner.selectHint"
+    case plannerRemoveLabel = "planner.removeLabel"
+    case plannerRemoveTitle = "planner.removeTitle"
+    case plannerRemoveMessage = "planner.removeMessage"
+    case plannerRemoveConfirm = "planner.removeConfirm"
+    case plannerRemoveCancel = "planner.removeCancel"
+
     // Starter categories (category-management spec, seed requirement)
     case categorySeedWork = "category.seed.work"
     case categorySeedHobby = "category.seed.hobby"
