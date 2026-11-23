@@ -343,7 +343,7 @@ extension AppContainer {
     /// zh-token → id.
     private static func seedZhFitCategories(into store: LocalStore) async -> [String: String] {
         var catID: [String: String] = [:]
-        let tokens = ["工作", "爱好", "运动", "学习", "休闲", "睡眠", "娱乐"]
+        let tokens = ["工作", "爱好", "运动", "学习", "休闲", "睡眠", "娱乐", "美食"]
         let starterNames = String.starterCategoryNames
         assert(tokens.count == starterNames.count)
         assert(starterNames.count == LocalStore.starterCategoryIcons.count)

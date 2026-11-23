@@ -52,7 +52,7 @@ struct SignInLifecycleTests {
         #expect(container.localStoreOpenError == nil)
         #expect(await container.localStore.boundUserID == userID)
         #expect(try await container.localStore.categoryStartersSeeded())
-        #expect(try await container.localStore.categories().count == 7)
+        #expect(try await container.localStore.categories().count == 8)
     }
 
     @Test("Track first load after prepare sees starter categories")
@@ -68,7 +68,7 @@ struct SignInLifecycleTests {
 
         await vm.load()
 
-        #expect(vm.categories.count == 7, "first paint after prepare carries the seed")
+        #expect(vm.categories.count == 8, "first paint after prepare carries the seed")
         #expect(vm.errorMessage == nil)
     }
 
@@ -89,10 +89,10 @@ struct SignInLifecycleTests {
         let userID = uniqueUserID()
         defer { removeAccountFile(userID: userID) }
 
-        // Six names instead of seven: the seed throws invalidNameCount.
+        // Seven names instead of eight: the seed throws invalidNameCount.
         let ready = await container.prepareAccountStore(
             userID: userID,
-            seedNames: Array(String.starterCategoryNames.prefix(6))
+            seedNames: Array(String.starterCategoryNames.prefix(7))
         )
 
         #expect(!ready, "no reveal when the seed fails")
