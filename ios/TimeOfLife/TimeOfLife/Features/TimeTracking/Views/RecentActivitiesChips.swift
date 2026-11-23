@@ -70,6 +70,14 @@ struct RecentActivitiesChips: View {
     /// exact text. Empty until the pass reports.
     @State private var measuredSizes: [String: CGSize] = [:]
 
+    /// Last fully-measured plan, retained across transient measurement gaps
+    /// (a newly arrived candidate the off-screen pass has not reported yet,
+    /// a transient zero width). Reused only for the same candidate count so
+    /// a stale count can never mount — without it, one unmeasured text
+    /// discards the measured fit for all candidates and the view flashes
+    /// from a fitting static flow into the provisional scroller for a frame.
+    @State private var stickyPlan: (candidateCount: Int, plan: RecentsFitPolicy.Plan)?
+
     /// The capped, most-recently-used-first slice (the store already sorts
     /// by the text's newest `started_at`; the cap is
     /// `TrackViewModel.recentsLimit`).
@@ -97,15 +105,10 @@ struct RecentActivitiesChips: View {
         return sizes
     }
 
-    /// The mounting plan for this pass: measured fit, or the bounded
-    /// provisional fallback while measuring.
-    private var effectivePlan: RecentsFitPolicy.Plan {
-        guard let sizes = readySizes else {
-            return RecentsFitPolicy.provisional(
-                candidateCount: candidates.count,
-                rowHeight: chipRowHeight
-            )
-        }
+    /// Measured fit when every candidate has reported, else nil while the
+    /// measurement pass has not caught up.
+    private var resolvedPlan: RecentsFitPolicy.Plan? {
+        guard let sizes = readySizes else { return nil }
         return RecentsFitPolicy.plan(
             itemSizes: sizes,
             containerWidth: containerWidth,
@@ -115,16 +118,33 @@ struct RecentActivitiesChips: View {
         )
     }
 
+    /// The mounting plan for this pass: measured fit, the retained plan
+    /// across a transient measurement gap, or the bounded provisional
+    /// fallback while measuring.
+    private var effectivePlan: RecentsFitPolicy.Plan {
+        if let resolvedPlan {
+            return resolvedPlan
+        }
+        if let stickyPlan, stickyPlan.candidateCount == candidates.count {
+            return stickyPlan.plan
+        }
+        return RecentsFitPolicy.provisional(
+            candidateCount: candidates.count,
+            rowHeight: chipRowHeight
+        )
+    }
+
     /// The newest-first prefix actually mounted this pass.
     private var offered: [ExactName] {
         Array(candidates.prefix(effectivePlan.offered))
     }
 
-    /// Identity for the scrolling viewport: resets the scroll offset and
-    /// edge state when the offered set or viewport changes.
+    /// Identity for the scrolling viewport: the offered texts only, so a
+    /// viewport-only change (host budget) keeps the scroll offset instead of
+    /// recreating the scroller. Edge dividers reset on appear and on the
+    /// static/scrolling transition (see `body`), not here.
     private var offeredIdentifier: String {
         offered.map(\.text).joined(separator: "\u{1F}")
-            + "|\(effectivePlan.viewport ?? -1)"
     }
 
     /// Chip row height: subheadline line height at the environment's Dynamic
@@ -148,6 +168,17 @@ struct RecentActivitiesChips: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(measureBackground)
+        .onChange(of: resolvedPlan) {
+            if let resolvedPlan {
+                stickyPlan = (candidates.count, resolvedPlan)
+            }
+        }
+        // The static/scrolling branches are distinct subtrees: a fresh
+        // scrolling insertion never fires its own onChange, so the edge
+        // dividers reset on the transition itself (and on appear below).
+        .onChange(of: effectivePlan.scrolling) {
+            edges = ChipViewport.Edges()
+        }
     }
 
     /// The fitting-prefix presentation: a plain wrapping flow with no scroll
@@ -188,6 +219,10 @@ struct RecentActivitiesChips: View {
         .frame(maxHeight: effectivePlan.viewport)
         .fixedSize(horizontal: false, vertical: true)
         .id(offeredIdentifier)
+        // A recreated scroller (new offered texts) and a fresh static →
+        // scrolling insertion both start at offset zero, so the dividers
+        // restart from the top edge; geometry updates correct them after.
+        .onAppear { edges = ChipViewport.Edges() }
         .onChange(of: offeredIdentifier) { edges = ChipViewport.Edges() }
         .onScrollGeometryChange(for: ChipViewport.Edges.self, of: { geometry in
             ChipViewport.edges(
@@ -385,7 +420,8 @@ extension DynamicTypeSize {
     return RecentActivitiesChips(
         recents: recents,
         categories: Dictionary(uniqueKeysWithValues: categories.map { ($0.id, $0) }),
-        selectedText: "Deep work"
+        selectedText: "Deep work",
+        availableHeight: 400
     ) { _ in }
     .padding()
     .background(Theme.backgroundPrimary)
@@ -408,7 +444,8 @@ extension DynamicTypeSize {
     return RecentActivitiesChips(
         recents: recents,
         categories: Dictionary(uniqueKeysWithValues: categories.map { ($0.id, $0) }),
-        selectedText: "Entry number 0"
+        selectedText: "Entry number 0",
+        availableHeight: 400
     ) { _ in }
     .padding()
     .background(Theme.backgroundPrimary)

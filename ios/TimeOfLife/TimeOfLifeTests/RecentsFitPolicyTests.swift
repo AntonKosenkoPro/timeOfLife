@@ -105,6 +105,30 @@ struct RecentsFitPolicyFitsTests {
         }
     }
 
+    @Test("newest five offered but fitting one row still mounts statically")
+    func fiveOfferedOneRowFloor() {
+        // Five 46pt chips pack into a single 44pt row. A 45pt budget fits
+        // none of them by content, yet the offered set fits the one-row
+        // floor — so the newest-five fallback mounts statically instead of
+        // scrolling (the `offeredHeight + bleed <= viewport + 0.5` branch).
+        let sizes = Array(repeating: CGSize(width: 46, height: 44), count: 5)
+        let plan = RecentsFitPolicy.plan(
+            itemSizes: sizes, containerWidth: 5 * 46 + 4 * 8, spacing: fitSpacing,
+            budget: 45, rowHeight: fitRow
+        )
+        #expect(plan.offered == 5)
+        #expect(plan.scrolling == false)
+        #expect(plan.viewport == nil)
+    }
+
+    @Test("floor clamps a sub-tap-target row up to the tap target")
+    func floorClampsBelowTapTarget() {
+        #expect(
+            RecentsFitPolicy.floorHeight(rowHeight: 20)
+                == Theme.minTapArea + ChipViewport.borderBleed
+        )
+    }
+
     @Test("a multi-column fit offers the whole fitting prefix without scroll")
     func multiColumnFit() {
         // Two 46pt chips per 100pt row: ten chips pack into five rows.
@@ -286,18 +310,37 @@ struct FlowPackingTests {
             }
             let widths: [CGFloat] = [0, 50, 100, 320, .nan, .infinity]
             let budgets: [CGFloat] = [0, 10, 46, 100, 358, 10_000]
+            let width = widths[next(widths.count)]
+            let budget = budgets[next(budgets.count)]
             let plan = RecentsFitPolicy.plan(
                 itemSizes: sizes,
-                containerWidth: widths[next(widths.count)],
+                containerWidth: width,
                 spacing: 8,
-                budget: budgets[next(budgets.count)],
+                budget: budget,
                 rowHeight: 44
             )
             #expect(plan.offered >= 0 && plan.offered <= min(count, 10))
             if plan.scrolling {
                 #expect(plan.viewport != nil)
+                // Scrolling only ever mounts the newest-five fallback (or
+                // all candidates when fewer exist) — never a longer prefix.
+                #expect(plan.offered == min(RecentsFitPolicy.fallbackCount, min(count, 10)))
             } else {
                 #expect(plan.viewport == nil)
+                // The mounted newest-first prefix genuinely fits: repacking
+                // exactly the offered prefix fills the plan's budget (floor
+                // content when the one-row floor dominates, plus the policy
+                // tolerance), so substituting an older chip for a newer one
+                // — or skipping a newer chip — would fail here.
+                let floorContent = RecentsFitPolicy.floorHeight(rowHeight: 44)
+                    - ChipViewport.borderBleed
+                let fitBudget = max(max(0, budget - ChipViewport.borderBleed), floorContent) + 0.5
+                #expect(FlowPacking.fittingPrefixCount(
+                    itemSizes: Array(sizes.prefix(plan.offered)),
+                    maxWidth: width,
+                    spacing: 8,
+                    budget: fitBudget
+                ) == plan.offered)
             }
         }
     }
