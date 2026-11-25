@@ -35,3 +35,8 @@
 - [x] 6.1 Keep the keyboard and composer focus perfectly still across submit (no resign/reopen cycle of any duration); diagnose the actual first-responder resignation, fix, add a regression test that fails on any resign flicker, and re-verify repeated Return.
 - [x] 6.2 Add localized `Suggestions` and `Tasks` section headers (Mail-style split) in all five locales + `L10n`; the `Tasks` header persists whenever the list is shown; re-check VoiceOver ordering and Reduce Motion.
 - [ ] 6.3 Run `swiftlint lint --strict`, warning-free build, full simulator suite, and `openspec validate --all --strict` green (all green in-sim); rebuild Release, reinstall on the device, and verify still keyboard/focus plus headers — DEVICE BLOCKED 2026-11-25: Tony's iPhone 17 (UDID 00008150-0019185901E3401C) `unavailable`, last seen 21:43; Release device build is warning-free and ready to install on next unlock.
+
+## 7. Prevent the Return resign
+
+- [ ] 7.1 Replace the composer with a UIKit-backed field that submits on Return while declining the default resign; keep Theme styling, VoiceOver, and all existing composer behaviors; add a regression test proving no keyboard-hide/first-responder loss across submit at any round-trip latency.
+- [ ] 7.2 Run `swiftlint lint --strict`, warning-free build, full simulator suite, and `openspec validate --all --strict` green; rebuild Release, reinstall on the device, and verify the keyboard stays perfectly still.
