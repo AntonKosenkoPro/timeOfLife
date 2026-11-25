@@ -103,30 +103,20 @@ struct PlannerView: View {
     // MARK: - Composer (stable keyboard, in-list suggestions)
 
     /// The persistent inline field: Return appends one task, clears the
-    /// draft, and focus never leaves — the next-tick hold in `onSubmit`
-    /// defeats the Return-dispatch resign before the keyboard can animate,
-    /// with the view model's `composerFocusRequests` as the backstop for
-    /// steals later in the round-trip. The composer never unmounts and no
-    /// layout jumps.
+    /// draft, and focus never leaves — the UIKit-backed field declines the
+    /// Return default resign at dispatch (day-planner 7.1), so the keyboard
+    /// never animates away no matter how slow the store/reload round-trip
+    /// is. The composer never unmounts and no layout jumps.
     private var composer: some View {
         HStack(spacing: Theme.spacingSmall) {
-            TextField(L10n.plannerComposerPlaceholder.text, text: $vm.draft)
-                .focused($composerFocused)
-                .textInputAutocapitalization(.sentences)
-                .autocorrectionDisabled(false)
-                .submitLabel(.done)
-                .onSubmit {
-                    // 6.1: the Return dispatch resigns the field (submitLabel
-                    // .done default) — re-focus on the NEXT TICK, not after
-                    // the round-trip, so the keyboard never animates away no
-                    // matter how slow the store/reload is (device DBs make
-                    // the 5.2 after-round-trip re-assert visibly flicker).
-                    // The view-model generation stays as the backstop for
-                    // steals later in the round-trip.
-                    Task { await vm.submit() }
-                    DispatchQueue.main.async { composerFocused = true }
-                }
-                .accessibilityIdentifier("PlannerComposerField")
+            PlannerComposerField(
+                text: $vm.draft,
+                placeholder: L10n.plannerComposerPlaceholder.text,
+                focused: $composerFocused,
+                accessibilityIdentifier: "PlannerComposerField"
+            ) {
+                Task { await vm.submit() }
+            }
             Button(L10n.plannerAdd.text) {
                 Task { await vm.submit() }
             }
@@ -135,12 +125,6 @@ struct PlannerView: View {
         }
         .padding(.horizontal, Theme.screenHorizontalPadding)
         .padding(.vertical, Theme.spacingSmall)
-        // The save round-trip (store write + snapshot reload + suggestions
-        // section mount/unmount) must not steal input: every successful
-        // submit bumps the generation and focus is re-asserted here.
-        .onChange(of: vm.composerFocusRequests) { _, _ in
-            composerFocused = true
-        }
     }
 
     private var emptyHint: some View {

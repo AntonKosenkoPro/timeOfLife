@@ -1,6 +1,5 @@
 import Foundation
 import Combine
-import UIKit
 
 /// The Today planner view model (day-planner spec): an inline composer over
 /// a reorderable checklist projected from one ordered backlog. Today is the
@@ -20,13 +19,6 @@ final class PlannerViewModel: ObservableObject {
     /// The inline composer draft. Survives reloads; cleared only by a
     /// successful submission.
     @Published var draft = ""
-    /// Focus-request generation for the composer: bumped once per
-    /// successful submit, after the store write and snapshot reload settle.
-    /// The view observes this and re-asserts input focus, so the composer
-    /// keeps focus (and the keyboard stays open) across the round-trip even
-    /// though clearing the draft unmounts the suggestions section. Invalid
-    /// or failed submissions bump nothing and keep the draft.
-    @Published private(set) var composerFocusRequests = 0
     /// The inline rename draft, bound to the row being renamed.
     @Published var editText = ""
     /// The task currently renamed inline, or nil.
@@ -138,9 +130,10 @@ final class PlannerViewModel: ObservableObject {
 
     /// Submits the composer (Return or the accessible Add affordance):
     /// appends one task after the existing Today rows, clears the draft,
-    /// reloads, and requests composer focus (see `composerFocusRequests`)
-    /// so repeated Returns never dismiss the keyboard. An invalid or failed
-    /// submission appends nothing, requests no focus, and keeps the draft.
+    /// and reloads. The field never resigns across this round-trip: the
+    /// UIKit-backed composer suppresses the Return default resign at
+    /// dispatch, so no refocusing is needed afterwards. An invalid or failed
+    /// submission appends nothing and keeps the draft.
     func submit() async {
         let trimmed = ActivityName.normalized(draft)
         guard case .valid = ActivityName.validate(trimmed) else { return }
@@ -164,7 +157,6 @@ final class PlannerViewModel: ObservableObject {
             draft = ""
             invalidate()
             await loadIfNeeded()
-            composerFocusRequests += 1
         } catch {
             errorMessage = L10n.text(in: .default, code: "error.unknown")
         }

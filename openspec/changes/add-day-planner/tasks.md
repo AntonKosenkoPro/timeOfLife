@@ -38,5 +38,5 @@
 
 ## 7. Prevent the Return resign
 
-- [ ] 7.1 Replace the composer with a UIKit-backed field that submits on Return while declining the default resign; keep Theme styling, VoiceOver, and all existing composer behaviors; add a regression test proving no keyboard-hide/first-responder loss across submit at any round-trip latency.
-- [ ] 7.2 Run `swiftlint lint --strict`, warning-free build, full simulator suite, and `openspec validate --all --strict` green; rebuild Release, reinstall on the device, and verify the keyboard stays perfectly still.
+- [x] 7.1 Replace the composer with a UIKit-backed field that submits on Return while declining the default resign; keep Theme styling, VoiceOver, and all existing composer behaviors; add a regression test proving no keyboard-hide/first-responder loss across submit at any round-trip latency.
+- [x] 7.2 Run `swiftlint lint --strict`, warning-free build, full simulator suite, and `openspec validate --all --strict` green; rebuild Release, reinstall on the device, and verify the keyboard stays perfectly still. DEVICE VERIFIED 2026-11-26: iPhone 17 (00008150-0019185901E3401C) — Release installed, relaunched, keyboard perfectly still across two repeated Return submits (3 consecutive keyboard-present samples each), Suggestions + Tasks headers both present, probe rows removed afterwards; full sim suite 1220 tests green, lint strict clean, validate strict green.
