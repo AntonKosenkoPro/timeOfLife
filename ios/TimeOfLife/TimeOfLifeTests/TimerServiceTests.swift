@@ -281,7 +281,7 @@ struct TimerServiceTests {
         #expect(!receipt.entryID.isEmpty)
         let entries = try await store.entries()
         #expect(entries.first?.activityText == "Read")
-        let completed = try await #require(try await store.plannerTask(id: "task-1"))
+        let completed = try #require(try await store.plannerTask(id: "task-1"))
         #expect(completed.name == "Read books")
         #expect(completed.completedOn == PlannerCivilDate.today())
     }

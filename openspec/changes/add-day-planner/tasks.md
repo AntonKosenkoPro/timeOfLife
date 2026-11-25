@@ -18,6 +18,6 @@
 
 ## 4. Verification and documentation
 
-- [ ] 4.1 Exercise repeated Return with software/hardware keyboards, stable layout on compact screens and large Dynamic Type, VoiceOver reorder, and unchanged Start/Stop frames. Record cold-open Live Activity Stop acceptance from the Island/banner on a supported device.
-- [ ] 4.2 Update the relevant FURPS rows, `Design/README.md`, `Design/SCREENS/`, interaction/decision docs as applicable, `docs/project-context.md`, `README.md`, and the manual testing guidance; reconcile the shipped OpenAPI contract.
-- [ ] 4.3 Run backend format, vet, lint, build and full tests plus iOS project generation, strict lint, warning-free build and full simulator tests, in parallel on separate agents. Re-run affected checks after rebasing and run `openspec validate --all --strict`.
+- [x] 4.1 Exercise repeated Return with software/hardware keyboards, stable layout on compact screens and large Dynamic Type, VoiceOver reorder, and unchanged Start/Stop frames. Record cold-open Live Activity Stop acceptance from the Island/banner on a supported device.
+- [x] 4.2 Update the relevant FURPS rows, `Design/README.md`, `Design/SCREENS/`, interaction/decision docs as applicable, `docs/project-context.md`, `README.md`, and the manual testing guidance; reconcile the shipped OpenAPI contract.
+- [x] 4.3 Run backend format, vet, lint, build and full tests plus iOS project generation, strict lint, warning-free build and full simulator tests, in parallel on separate agents. Re-run affected checks after rebasing and run `openspec validate --all --strict`.

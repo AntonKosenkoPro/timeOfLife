@@ -1132,3 +1132,29 @@ After a successful Stop with a dirty running-notes editor, Track offers a native
 
 > **Removed** by `remove-activities-layer`: no activity detail sheet. No implementation, no call sites.
 
+
+## `PlannerProgressControl` (add-day-planner)
+
+The compact Track toolbar entry opening the Today planner. Purely
+presentational — the projection is owned by `PlannerViewModel`, shared
+with the pushed `PlannerView` so both read one snapshot.
+
+### Signature
+
+```swift
+struct PlannerProgressControl: View {
+    let snapshot: PlannerToday.Snapshot
+    let onOpen: () -> Void
+}
+```
+
+### Visual
+
+- A toolbar `Button` with a `list.bullet` icon and `done/total` numerals
+  (`.monospacedDigit()`), e.g. `2/5`.
+- `accessibilityLabel`: `L10n.plannerProgressLabel` (`%1$d of %2$d` per
+  locale — no plurals by construction); `accessibilityIdentifier`:
+  `PlannerProgressControl`.
+- Lives in the navigation chrome (Track leading toolbar item), so counts
+  and timer state never shift the numeric readout or Start/Stop. Entry
+  point exists even when the list is empty; usable while timing.

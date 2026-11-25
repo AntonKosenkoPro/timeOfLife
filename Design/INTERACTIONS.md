@@ -152,7 +152,7 @@ History has one always-visible inline native search field on its root (drawer, p
 
 ## Undo flow (catalog deletions)
 
-R3 / U6 / U7; decisions D17 + `unify-catalog-deletion`. Applies to entry and category deletions, all confirmed from their editing forms (entry form, category editor — no list swipes, no toasts).
+R3 / U6 / U7; decisions D17 + `unify-catalog-deletion`. Applies to entry and category deletions, all confirmed from their editing forms (entry form, category editor — no list swipes, no toasts), and to planner-task deletions, confirmed by swipe-to-delete on the Today list (same buffer, same system prompt, same supersession across all three surfaces).
 
 - A deletion is **not** committed to the local store or pushed to sync immediately. It enters the client-side **durable undo buffer** and stays restorable until the app restarts; a cold launch commits whatever is still buffered.
 - No `UndoToast` is shown. Undo is the DEFAULT system Undo confirmation only: shaking on the presenting surface shows the system prompt, and confirming restores exactly the most recent buffered deletion (registrations are cleared-then-single).

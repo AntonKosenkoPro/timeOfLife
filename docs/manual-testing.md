@@ -42,6 +42,18 @@ No Design/L10n changes are expected: the shipping six-digit field, 30-second res
 8. [ ] **Rotation/disablement** — after a verifier rotation, the old code fails and the new code works. After disablement, the address restores ordinary mailed OTP (request sends an email; the old review code fails).
 9. [ ] **Refresh revocation** — run the operator `revoke` command for the review UUID; the next refresh on every device fails and each device returns to the auth gate with local data intact (lock-not-wipe).
 
+## Today planner
+
+Simulator covers layout, sync convergence, and the linked Stop path; the items below need fingers, keyboards, and a real Island.
+
+1. [ ] **Repeated Return** — with software and hardware keyboards, submit several task names in a row; each appends in order, the draft clears, focus and the keyboard stay, and the composer never moves.
+2. [ ] **Compact screens** — on a small phone (e.g. SE) with the keyboard open, the composer, first rows, and the toolbar progress stay reachable; the Track readout and Start/Stop never shift when counts change.
+3. [ ] **Large Dynamic Type** — at the largest accessibility sizes, Today rows, the composer, and the progress control stay readable and tappable (44 pt targets); scrolling the list never moves the composer.
+4. [ ] **VoiceOver reorder** — with VoiceOver on, enter edit mode and reorder tasks via the rotor; order persists across relaunch and syncs to a second device in the same order.
+5. [ ] **Start/Stop frames unchanged** — start and stop linked and ordinary timers on Track; the numeric readout, name row, tag selector, and Start/Stop keep their exact frames (the planner adds toolbar chrome only).
+6. [ ] **Two-device convergence** — add/reorder/complete tasks offline on two devices, then sync both; both show the same rows in the same order with both additions and all independent field edits.
+7. [ ] **Linked cold-open Live Activity Stop** — start a task from Today, terminate the app, then Stop from the Island or Lock Screen banner; the app cold-opens, saves the entry, completes exactly that task once, and shows the ordinary Saved card. (Unit + simulator tests cover the path; the Island/banner tap itself is device-only.)
+
 ## Live Activities
 
 Live Activities need a real device with Dynamic Island (the simulator shows the Lock Screen banner only) and a signed-in account with at least one category. The "compact"/"minimal" faces below are system Live Activity presentations — unrelated to the removed in-app compact timer (History/Insights render no in-app timer surface since `remove-compact-timer`).

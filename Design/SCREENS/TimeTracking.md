@@ -243,6 +243,12 @@ start, so a stale draft can never start.
 - A running timer remains visible above the tab bar on History and Insights;
   its Stop action saves in place.
 - Profile owns sign-out and account/sync controls rather than the Track toolbar.
+- Today planner entry (add-day-planner): the Track navigation chrome holds a
+  compact progress control (`done/total` + list icon) opening
+  `SCREENS/TodayPlanner.md` in the Track navigation stack — no tab-shell
+  change, no timer-geometry change. Linked runs stop through the ordinary
+  path (the Stop control is unchanged; the draft's task id completes
+  atomically with the entry save).
 - Dynamic Type keeps the readout, entry text, and Start/Stop action readable;
   the adaptive spacers and central separator collapse before any content is
   clipped or unreachable.
