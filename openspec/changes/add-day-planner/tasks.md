@@ -32,6 +32,6 @@
 
 ## 6. Second device-feedback round
 
-- [ ] 6.1 Keep the keyboard and composer focus perfectly still across submit (no resign/reopen cycle of any duration); diagnose the actual first-responder resignation, fix, add a regression test that fails on any resign flicker, and re-verify repeated Return.
+- [x] 6.1 Keep the keyboard and composer focus perfectly still across submit (no resign/reopen cycle of any duration); diagnose the actual first-responder resignation, fix, add a regression test that fails on any resign flicker, and re-verify repeated Return.
 - [ ] 6.2 Add localized `Suggestions` and `Tasks` section headers (Mail-style split) in all five locales + `L10n`; the `Tasks` header persists whenever the list is shown; re-check VoiceOver ordering and Reduce Motion.
 - [ ] 6.3 Run `swiftlint lint --strict`, warning-free build, full simulator suite, and `openspec validate --all --strict` green; rebuild Release, reinstall on the device, and verify still keyboard/focus plus headers.
