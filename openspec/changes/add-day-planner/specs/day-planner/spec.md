@@ -18,7 +18,7 @@ The planner SHALL show all unfinished tasks and tasks completed on the current l
 
 ### Requirement: Planned tasks are an independently editable checklist
 
-A task SHALL have a trimmed, valid timer name as its only user-entered field. Tasks with identical names SHALL have separate identities. The user SHALL be able to rename, reorder, complete, reopen, and delete visible tasks offline. New tasks SHALL append after existing Today rows. Completing or reopening a task SHALL keep its position and SHALL NOT start, stop, create, or modify a timer or time entry.
+A task SHALL have a trimmed, valid timer name as its only user-entered field. Tasks with identical names SHALL have separate identities. The user SHALL be able to rename, reorder, complete, reopen, and delete visible tasks offline. New tasks SHALL append after existing Today rows. Completing or reopening a task SHALL keep its position and SHALL NOT start, stop, create, or modify a timer or time entry. Completing or reopening a task SHALL NOT change the row's height or move sibling rows.
 
 #### Scenario: Two tasks use the same name
 - **WHEN** the user adds two tasks with the same valid name, then edits or removes one
@@ -28,13 +28,25 @@ A task SHALL have a trimmed, valid timer name as its only user-entered field. Ta
 - **WHEN** the user reopens a task that was completed by Stop
 - **THEN** the task becomes unfinished at its existing position, and the saved entry is unchanged
 
+#### Scenario: Toggle keeps the list still
+- **WHEN** the user completes or reopens a task
+- **THEN** the row keeps its exact height (the Start affordance slot is preserved in both states) and no other row moves
+
 ### Requirement: The composer supports repeated adds without dismissing the keyboard
 
-The Today page SHALL use one inline composer with the task list and a bounded area for matching, newest-first Recents drawn from committed entries. Recents selection SHALL only fill the composer with the exact suggested text. Return on a valid draft SHALL append one task, clear the composer, and keep the input focused and the keyboard open without a layout jump. Invalid or failed submission SHALL NOT append a row or discard the draft. Row changes SHALL use non-disruptive feedback and respect Reduce Motion.
+The Today page SHALL use one inline composer fixed above a single task list surface. Matching newest-first Recents drawn from committed entries SHALL appear as rows in a suggestions section at the top of that same list while the draft is non-empty — never as a separate mounting region — so the composer keeps its exact frame whether suggestions show or not. Recents selection SHALL only fill the composer with the exact suggested text. Return on a valid draft SHALL append one task, clear the composer, and keep the input focused with the keyboard open. Invalid or failed submission SHALL NOT append a row or discard the draft. Row changes SHALL use non-disruptive feedback and respect Reduce Motion.
 
 #### Scenario: Add consecutive tasks
 - **WHEN** the user adds a valid task with Return and then types and submits the next name
-- **THEN** both tasks append in submission order and the keyboard remains available without dismissing and reopening or moving the composer
+- **THEN** both tasks append in submission order, the composer keeps input focus, and the keyboard never dismisses or reopens between submissions
+
+#### Scenario: Focus survives the save round-trip
+- **WHEN** the user submits a valid draft
+- **THEN** the draft clears and the same field stays focused through the store write and snapshot reload; no list, suggestion, or empty-state change steals focus
+
+#### Scenario: Suggestions refine inside the list
+- **WHEN** the user types a non-empty draft with matching Recents
+- **THEN** the matches appear as rows in the suggestions section of the same list below the unmoved composer, and each keystroke only swaps rows inside that surface
 
 #### Scenario: Fill from a matching Recent
 - **WHEN** the user taps a matching Recent while composing

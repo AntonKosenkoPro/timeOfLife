@@ -21,3 +21,11 @@
 - [x] 4.1 Exercise repeated Return with software/hardware keyboards, stable layout on compact screens and large Dynamic Type, VoiceOver reorder, and unchanged Start/Stop frames. Record cold-open Live Activity Stop acceptance from the Island/banner on a supported device.
 - [x] 4.2 Update the relevant FURPS rows, `Design/README.md`, `Design/SCREENS/`, interaction/decision docs as applicable, `docs/project-context.md`, `README.md`, and the manual testing guidance; reconcile the shipped OpenAPI contract.
 - [x] 4.3 Run backend format, vet, lint, build and full tests plus iOS project generation, strict lint, warning-free build and full simulator tests, in parallel on separate agents. Re-run affected checks after rebasing and run `openspec validate --all --strict`.
+
+## 5. Device-feedback fixes
+
+- [ ] 5.1 Render the `checklist` system symbol beside the Track progress count; verify in all five locales, Dynamic Type, and VoiceOver.
+- [ ] 5.2 Retain composer focus across the submit round-trip (store write, snapshot reload, suggestions mount/unmount); add a regression test that fails when focus is lost and re-verify repeated Return with software/hardware keyboards.
+- [ ] 5.3 Preserve the Start affordance slot so completed and open rows share one exact height; add a regression test that toggling completion moves no sibling row.
+- [ ] 5.4 Move suggestions into the task list surface as a top section (no separate mounting region), with match highlight and stable composer frame; re-check Reduce Motion and VoiceOver ordering.
+- [ ] 5.5 Run `swiftlint lint --strict`, warning-free build, full simulator suite, and `openspec validate --all --strict` green.

@@ -2,7 +2,7 @@
 
 ### Requirement: Track opens Today and shows its task count
 
-Track SHALL offer a compact, accessible progress control that opens the Today planner in the Track navigation stack without adding a tab. The control SHALL report done and total counts from the same Today projection, with an entry point even when the list is empty. It SHALL remain usable while timing and SHALL NOT shift the numeric readout or Start/Stop when counts or timer state change. Stop's label, visual role, and position SHALL remain unchanged for planner-linked timers; there SHALL be no separate Track completion control.
+Track SHALL offer a compact, accessible progress control that opens the Today planner in the Track navigation stack without adding a tab. The control SHALL report done and total counts from the same Today projection, with an entry point even when the list is empty. It SHALL remain usable while timing and SHALL NOT shift the numeric readout or Start/Stop when counts or timer state change. Stop's label, visual role, and position SHALL remain unchanged for planner-linked timers; there SHALL be no separate Track completion control. The control SHALL render the `checklist` system symbol beside the done/total count.
 
 #### Scenario: Progress changes on the existing Track screen
 - **WHEN** a task is completed, reopened, or updated by sync
