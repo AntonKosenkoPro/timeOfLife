@@ -5,8 +5,8 @@
 
 ## 2. Relay and persistence
 
-- [ ] 2.1 Add PostgreSQL/SQLite planner state, per-account revision allocation, deduplication receipts, deletion markers, indexes, and account purge coverage; verify additive deploy and rollback compatibility.
-- [ ] 2.2 Implement authenticated planner write and change-feed handlers. Add contract and dual-store tests for same-account isolation, independent fields, conflicting reorders, lost responses, delayed create after delete, purge, and a writer racing page boundaries.
+- [x] 2.1 Add PostgreSQL/SQLite planner state, per-account revision allocation, deduplication receipts, deletion markers, indexes, and account purge coverage; verify additive deploy and rollback compatibility.
+- [x] 2.2 Implement authenticated planner write and change-feed handlers. Add contract and dual-store tests for same-account isolation, independent fields, conflicting reorders, lost responses, delayed create after delete, purge, and a writer racing page boundaries.
 - [ ] 2.3 Add account-file migration, planner CRUD and durable undo via `LocalStore`, a shared Today/progress projection, and ordered position allocation. Test duplicate names, rollover without writes, completed-row filtering/position, date changes, and account rebinding.
 - [ ] 2.4 Integrate planner cursor/outbox/pull/drain in the iOS client with pending field intent overlays, terminal deletes, and graceful behavior against an older relay. Test resumed pulls, offline edits from two devices, Stop vs remote delete, and unaffected entry/category sync.
 

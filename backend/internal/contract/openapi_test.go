@@ -41,6 +41,8 @@ var canonicalErrorCodes = []string{
 	"not_found",
 	"conflict",
 	"category_exists",
+	"planner_conflict",
+	"planner_gone",
 	"validation_error",
 }
 
@@ -56,6 +58,8 @@ var bearerProtectedPaths = []string{
 	"/api/v1/entries",
 	"/api/v1/entries/recents",
 	"/api/v1/entries/{id}",
+	"/api/v1/planner/operations",
+	"/api/v1/planner/feed",
 }
 
 type rawSpec struct {
@@ -273,6 +277,7 @@ func TestSpec_IdempotentPostsDocument200And201(t *testing.T) {
 	for _, path := range []string{
 		"/api/v1/categories",
 		"/api/v1/entries",
+		"/api/v1/planner/operations",
 	} {
 		post, ok := s.Paths[path]["post"]
 		if !ok {
@@ -782,5 +787,109 @@ func TestSpec_HealthReportsBuildIdentity(t *testing.T) {
 	}
 	if mt.Schema.Type != "object" {
 		t.Errorf("GET /health schema must be type object, got %q", mt.Schema.Type)
+	}
+}
+
+// Day planner (add-day-planner): POST /planner/operations applies one
+// field-specific mutation (201 first accept, 200 lost-response replay, 404
+// unknown id, 409 live-id create collision, 410 terminal delete, 422
+// validation); GET /planner/feed pages revision-ordered changes with a
+// committed watermark. The intent enum, operation request, task, and feed
+// schemas carry the shared position-key fixtures and civil-date rules.
+func TestSpec_PlannerContractDocumented(t *testing.T) {
+	s := loadSpec(t)
+
+	post, ok := s.Paths["/api/v1/planner/operations"]["post"]
+	if !ok {
+		t.Fatal("expected POST /api/v1/planner/operations")
+	}
+	if !requiresAuth(post) {
+		t.Error("POST /api/v1/planner/operations must require BearerAuth")
+	}
+	for _, want := range []string{"200", "201", "400", "401", "404", "409", "410", "422", "500"} {
+		if _, ok := post.Responses[want]; !ok {
+			t.Errorf("POST /api/v1/planner/operations must document %s", want)
+		}
+	}
+	if got := post.OperationID; got != "applyPlannerOperation" {
+		t.Errorf("unexpected operationId %q", got)
+	}
+
+	get, ok := s.Paths["/api/v1/planner/feed"]["get"]
+	if !ok {
+		t.Fatal("expected GET /api/v1/planner/feed")
+	}
+	if !requiresAuth(get) {
+		t.Error("GET /api/v1/planner/feed must require BearerAuth")
+	}
+	for _, want := range []string{"200", "401", "422", "500"} {
+		if _, ok := get.Responses[want]; !ok {
+			t.Errorf("GET /api/v1/planner/feed must document %s", want)
+		}
+	}
+	params := map[string]rawParameter{}
+	for _, p := range get.Parameters {
+		params[p.Name] = p
+	}
+	after, ok := params["after_revision"]
+	if !ok {
+		t.Error("GET /api/v1/planner/feed must document after_revision")
+	} else if after.Schema.Minimum == nil || *after.Schema.Minimum != 0 {
+		t.Errorf("after_revision must pin minimum 0, got %+v", after.Schema)
+	}
+	limit, ok := params["limit"]
+	if !ok {
+		t.Error("GET /api/v1/planner/feed must document limit")
+	} else if limit.Schema.Minimum == nil || *limit.Schema.Minimum != 1 ||
+		limit.Schema.Maximum == nil || *limit.Schema.Maximum != 200 ||
+		limit.Schema.Default != 50 {
+		t.Errorf("feed limit must pin minimum 1 / maximum 200 / default 50, got %+v", limit.Schema)
+	}
+
+	intent, ok := s.Components.Schemas["PlannerIntent"]
+	if !ok {
+		t.Fatal("expected PlannerIntent schema")
+	}
+	if len(intent.Enum) != 6 {
+		t.Errorf("PlannerIntent must declare the 6 field-specific intents, got %v", intent.Enum)
+	}
+
+	req, ok := s.Components.Schemas["PlannerOperationRequest"]
+	if !ok {
+		t.Fatal("expected PlannerOperationRequest schema")
+	}
+	required := map[string]bool{}
+	for _, r := range req.Required {
+		if name, ok := r.(string); ok {
+			required[name] = true
+		}
+	}
+	for _, field := range []string{"operation_id", "task_id", "intent"} {
+		if !required[field] {
+			t.Errorf("PlannerOperationRequest must require %q", field)
+		}
+		if _, ok := req.Properties[field]; !ok {
+			t.Errorf("PlannerOperationRequest must document %q", field)
+		}
+	}
+
+	task, ok := s.Components.Schemas["PlannerTask"]
+	if !ok {
+		t.Fatal("expected PlannerTask schema")
+	}
+	for _, field := range []string{"id", "name", "position_key", "revision", "updated_at", "deleted"} {
+		if _, ok := task.Properties[field]; !ok {
+			t.Errorf("PlannerTask must document %q", field)
+		}
+	}
+
+	feed, ok := s.Components.Schemas["PlannerFeedResponse"]
+	if !ok {
+		t.Fatal("expected PlannerFeedResponse schema")
+	}
+	for _, field := range []string{"changes", "watermark_revision"} {
+		if _, ok := feed.Properties[field]; !ok {
+			t.Errorf("PlannerFeedResponse must document %q", field)
+		}
 	}
 }

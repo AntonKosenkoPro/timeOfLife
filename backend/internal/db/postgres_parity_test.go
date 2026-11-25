@@ -42,7 +42,7 @@ func newParityStore(t *testing.T) *PostgresStore {
 	// leftover job digest would fence the next test's signup), so they are
 	// truncated explicitly.
 	if _, err := store.DB().Exec(ctx, `
-		TRUNCATE entry_categories, entries, categories,
+		TRUNCATE entry_categories, entries, categories, planner_tasks, planner_seq, planner_receipts,
 		         refresh_recovery_receipts, refresh_tokens, otp_codes, users,
 		         apple_vault, apple_revocation_jobs, apple_notifications_seen RESTART IDENTITY CASCADE
 	`); err != nil {

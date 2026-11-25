@@ -400,6 +400,9 @@ func (s *PostgresStore) purgeUserOnce(ctx context.Context, userID, clientID stri
 		{"entries", `DELETE FROM entries WHERE user_id = $1`},
 		{"categories", `DELETE FROM categories WHERE user_id = $1`},
 		{"tombstones", `DELETE FROM tombstones WHERE user_id = $1`},
+		{"planner receipts", `DELETE FROM planner_receipts WHERE user_id = $1`},
+		{"planner tasks", `DELETE FROM planner_tasks WHERE user_id = $1`},
+		{"planner sequence", `DELETE FROM planner_seq WHERE user_id = $1`},
 	} {
 		if _, err := tx.Exec(ctx, stmt.sql, userID); err != nil {
 			return res, fmt.Errorf("purge user %s: %w", stmt.name, err)
