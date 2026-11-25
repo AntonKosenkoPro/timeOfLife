@@ -349,3 +349,14 @@
 "catalogIcon.stethoscope" = "Stethoscope";
 "catalogIcon.pill" = "Pill";
 "catalogIcon.tag" = "Tag";
+
+// Day planner (add-day-planner)
+"planner.title" = "Today";
+"planner.progressLabel" = "Done %1$d of %2$d";
+"planner.emptyHint" = "Tasks you add show up here until done.";
+"planner.composerPlaceholder" = "Add a task";
+"planner.add" = "Add";
+"planner.rename" = "Rename";
+"planner.markDone" = "Mark done";
+"planner.reopen" = "Reopen";
+"planner.timerActive" = "Timer running";

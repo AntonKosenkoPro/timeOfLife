@@ -347,3 +347,14 @@
 "catalogIcon.pill" = "Remédio";
 "catalogIcon.tag" = "Etiqueta";
 "profile.versionInternalSuffix" = "Internal";
+
+// Day planner (add-day-planner)
+"planner.title" = "Hoje";
+"planner.progressLabel" = "Concluído %1$d de %2$d";
+"planner.emptyHint" = "As tarefas adicionadas aparecem aqui até serem concluídas.";
+"planner.composerPlaceholder" = "Adicionar uma tarefa";
+"planner.add" = "Adicionar";
+"planner.rename" = "Renomear";
+"planner.markDone" = "Marcar como concluída";
+"planner.reopen" = "Reabrir";
+"planner.timerActive" = "Cronômetro em execução";

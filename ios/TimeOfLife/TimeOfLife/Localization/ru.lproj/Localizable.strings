@@ -349,3 +349,14 @@
 "catalogIcon.stethoscope" = "Стетоскоп";
 "catalogIcon.pill" = "Таблетка";
 "catalogIcon.tag" = "Тег";
+
+// Day planner (add-day-planner)
+"planner.title" = "Сегодня";
+"planner.progressLabel" = "Готово %1$d из %2$d";
+"planner.emptyHint" = "Добавленные задачи будут здесь, пока не выполните их.";
+"planner.composerPlaceholder" = "Добавить задачу";
+"planner.add" = "Добавить";
+"planner.rename" = "Переименовать";
+"planner.markDone" = "Отметить выполненной";
+"planner.reopen" = "Вернуть";
+"planner.timerActive" = "Таймер идёт";

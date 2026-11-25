@@ -2104,6 +2104,12 @@ struct SyncControllerTests {
         func deleteEntry(id: String) async throws {
             try await inner.deleteEntry(id: id)
         }
+        func applyPlannerOperation(_ op: PlannerOperationPayload) async throws {
+            try await inner.applyPlannerOperation(op)
+        }
+        func fetchPlannerFeed(afterRevision: Int64, limit: Int) async throws -> PlannerFeedPage {
+            try await inner.fetchPlannerFeed(afterRevision: afterRevision, limit: limit)
+        }
     }
 
     private func makeEntry(

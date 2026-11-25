@@ -26,6 +26,13 @@ import os
 /// pull/merge/remap/parent-heal and no activity tombstones. Tombstones and
 /// delete-wins are scoped to entries and categories only. In-progress drafts
 /// never enter the outbox, so nothing about the running timer is synced.
+///
+/// Planner tasks (day-planner) sync through their own relay surface: field-
+/// specific outbox operations (`planner_task` rows) push to
+/// `POST /planner/operations`, and a revision-ordered change feed
+/// (`GET /planner/feed`) pulls with a per-account revision cursor. Planner
+/// deletes are terminal markers — never `/deletions` tombstones — and
+/// delete-wins over pending field intents.
 @MainActor
 final class SyncController: ObservableObject {
     /// Sync status surfaced in Settings (sync-client spec).
@@ -107,6 +114,14 @@ final class SyncController: ObservableObject {
     /// generation fix (deactivate → re-activate race) and the pre-close
     /// shutdown wait.
     var isCycleLive: Bool { cycleRunning }
+
+    /// Whether the relay in this cycle proved pre-planner (no
+    /// `/planner/feed` route): planner rows stay queued and ordinary
+    /// entry/category sync continues. Reset by every planner-feed pull
+    /// (which always runs before the buffered-deletion push and the
+    /// drain), so a rolled-back relay degrades one cycle at a time and a
+    /// later upgrade just starts working.
+    private var plannerRelayUnavailable = false
 
     /// Accounts with an unresolved or cleaning deletion lifecycle
     /// (account-deletion spec). While fenced, triggers and manual syncs for
@@ -508,6 +523,13 @@ final class SyncController: ObservableObject {
         try await guardedStage(userID: userID) {
             try await self.applyTombstones(userID: userID)
         }
+        // Planner deletions apply BEFORE the drain: a relay-deleted task
+        // drops its superseded pending rows here instead of pushing doomed
+        // operations; pending local intents stay visible until the relay
+        // acknowledges or supersedes them.
+        try await guardedStage(userID: userID) {
+            try await self.pullPlannerFeed(userID: userID)
+        }
         try await guardedStage(userID: userID) {
             try await self.pushBufferedDeletions(userID: userID)
         }
@@ -517,6 +539,10 @@ final class SyncController: ObservableObject {
         if !firstSync {
             try await guardedStage(userID: userID) {
                 try await self.pull(modifiedSince: nil, userID: userID)
+            }
+            // Picks up the drain's own acknowledgements.
+            try await guardedStage(userID: userID) {
+                try await self.pullPlannerFeed(userID: userID)
             }
         }
     }
@@ -959,6 +985,42 @@ final class SyncController: ObservableObject {
         }
     }
 
+    // MARK: - Planner feed (day-planner, revision-ordered)
+
+    /// Planner feed page size: the relay maximum, so a pull converges in
+    /// the fewest round-trips. Correctness never depends on it — the loop
+    /// terminates on `hasMore`, and every applied page persists its cursor
+    /// atomically, so a resumed pull replays from the cursor without gaps.
+    private static let plannerFeedLimit = 200
+
+    /// Pulls the relay planner feed and applies it page by page. A 404
+    /// means a pre-planner relay (no `/planner/feed` route): the planner
+    /// pull is skipped statelessly and ordinary entry/category sync
+    /// continues with planner rows left queued — and the drain skips them
+    /// too via `plannerRelayUnavailable`.
+    private func pullPlannerFeed(userID: String) async throws {
+        plannerRelayUnavailable = false
+        var after = try await store.plannerRevisionCursor()
+        while true {
+            let page: PlannerFeedPage
+            do {
+                page = try await remote.fetchPlannerFeed(afterRevision: after, limit: Self.plannerFeedLimit)
+            } catch let error as APIError where error.code == "not_found" || error.code == "http_404" {
+                Self.logger.info("sync planner feed unsupported by relay; skipping")
+                plannerRelayUnavailable = true
+                return
+            }
+            // Mid-stage swap: the fetch above ran under the old session —
+            // abort before applying any page into the (now foreign) file.
+            try requireSameAccount(userID)
+            let maxRevision = page.changes.map(\.revision).max() ?? after
+            try await store.applyPlannerPage(changes: page.changes, cursor: max(maxRevision, after))
+            Self.currentSpanCounts?.pulled += page.changes.count
+            after = max(maxRevision, after)
+            guard page.hasMore else { break }
+        }
+    }
+
     // MARK: - Outbox drain (idempotent replay, D2)
 
     /// Pushes buffered (undoable) deletions to the relay before the drain
@@ -979,7 +1041,14 @@ final class SyncController: ObservableObject {
                 // Mid-stage swap aborts before the next buffer commits: no
                 // further DELETE goes out under the new session's token.
                 try requireSameAccount(userID)
-                for deletion in pending where deletion.bufferID == bufferID {
+                let records = pending.filter { $0.bufferID == bufferID }
+                if plannerRelayUnavailable,
+                   records.contains(where: { $0.resource == LocalStore.plannerResource }) {
+                    // Pre-planner relay: leave the whole row buffered for a
+                    // capable relay instead of pushing half of it.
+                    continue
+                }
+                for deletion in records {
                     // Per-item abort: a swap during the previous push costs at
                     // most that one in-flight DELETE.
                     try requireSameAccount(userID)
@@ -989,12 +1058,20 @@ final class SyncController: ObservableObject {
                             try await remote.deleteEntry(id: deletion.recordID)
                         case "category":
                             try await remote.deleteCategory(id: deletion.recordID)
+                        case LocalStore.plannerResource:
+                            try await remote.applyPlannerOperation(PlannerOperationPayload(
+                                operationID: await store.newRecordID(),
+                                taskID: deletion.recordID,
+                                intent: PlannerIntent.delete.rawValue
+                            ))
                         default:
                             Self.logger.error("sync ignores unknown buffered resource \(deletion.resource, privacy: .public)")
                             throw SyncError.unknownOutboxOp(deletion.resource, "delete")
                         }
-                    } catch let error as APIError where error.code == "not_found" {
+                    } catch let error as APIError where error.code == "not_found" || error.code == "planner_gone" {
                         // Already gone on the relay — converged, nothing to do.
+                        // (`planner_gone` is the terminal planner marker: a
+                        // buffered delete against it is already converged.)
                         Self.logger.info("sync buffered delete 404-as-success \(deletion.resource, privacy: .public) \(deletion.recordID, privacy: .public)")
                     }
                 }
@@ -1040,6 +1117,11 @@ final class SyncController: ObservableObject {
             // drain is still iterating the initial snapshot. Always push the
             // current persisted payload rather than a stale in-memory copy.
             guard var row = try await store.outboxRow(id: queuedRow.id) else {
+                continue
+            }
+            // Pre-planner relay: planner rows stay queued for a capable
+            // relay while ordinary entry/category rows drain normally.
+            if row.resource == LocalStore.plannerResource, plannerRelayUnavailable {
                 continue
             }
             // Stale updates for locally-missing records (updates superseded
@@ -1093,6 +1175,9 @@ final class SyncController: ObservableObject {
     /// Resolves one failed push. Returns true when the row is resolved and
     /// the drain may continue; false rethrows the original error loudly.
     private func resolvePushError(_ row: OutboxRow, error: APIError) async throws -> Bool {
+        if let handled = try await resolvePlannerPushError(row, error: error) {
+            return handled
+        }
         switch error.code {
         case "conflict", "category_exists":
             try await resolveConflict(row, code: error.code ?? "", details: error.details)
@@ -1120,16 +1205,19 @@ final class SyncController: ObservableObject {
     }
 
     /// Drain ordering rank: categories push before entries so `POST /entries`
-    /// never references a category the relay has not seen yet. Unknown
-    /// resources drain last so the push path still rejects them loudly.
+    /// never references a category the relay has not seen yet; planner rows
+    /// drain after both. Unknown resources drain last so the push path
+    /// still rejects them loudly.
     private static func drainRank(_ resource: String) -> Int {
         switch resource {
         case "category":
             return 0
         case "entry":
             return 1
-        default:
+        case LocalStore.plannerResource:
             return 2
+        default:
+            return 3
         }
     }
 
@@ -1235,6 +1323,19 @@ final class SyncController: ObservableObject {
             try await remote.updateEntry(entry)
         case ("entry", "delete"):
             try await remote.deleteEntry(id: row.recordID)
+        case ("planner_task", "create"), ("planner_task", "update"):
+            let op = try decodePayload(row, as: PlannerOperationPayload.self)
+            try await remote.applyPlannerOperation(op)
+        case ("planner_task", "delete"):
+            // A committed outbox delete (cold-launch commit of a buffered
+            // deletion): the operation id is minted per attempt — deletes
+            // are idempotent by nature (a second delete is a replay-safe
+            // no-op, never a duplicate effect).
+            try await remote.applyPlannerOperation(PlannerOperationPayload(
+                operationID: await store.newRecordID(),
+                taskID: row.recordID,
+                intent: PlannerIntent.delete.rawValue
+            ))
         default:
             throw SyncError.unknownOutboxOp(row.resource, row.op)
         }
@@ -1249,6 +1350,8 @@ final class SyncController: ObservableObject {
             return try await store.category(id: row.recordID) == nil
         case "entry":
             return try await store.entry(id: row.recordID) == nil
+        case LocalStore.plannerResource:
+            return try await store.plannerTask(id: row.recordID) == nil
         default:
             return false
         }
@@ -1267,7 +1370,13 @@ final class SyncController: ObservableObject {
     /// - entry/category update + `not_found`: re-post the full local row as
     ///   a create (idempotent; queued updates PATCH normally afterward).
     /// - entry/category create + 404: impossible per routes: returns false.
+    /// - planner create/update + `not_found`: re-post the live local task
+    ///   as a create (new operation id) and retry once; a locally-missing
+    ///   task drops its row (nothing left to push).
     private func resurrectAndRetry(_ row: OutboxRow) async throws -> Bool {
+        if row.resource == LocalStore.plannerResource {
+            return try await repushPlannerAsCreate(row)
+        }
         switch (row.resource, row.op) {
         case ("entry", "update"), ("category", "update"):
             return try await repushRecordAsCreate(row)
@@ -1309,6 +1418,91 @@ final class SyncController: ObservableObject {
         try await store.removeOutboxRow(id: row.id)
         Self.currentSpanCounts?.pushed += 1
         return true
+    }
+
+    /// Re-posts a live local planner task as a create (new operation id)
+    /// after a `not_found` on a field operation the relay never saw. A
+    /// locally-missing task drops its row (nothing left to push). A create
+    /// that races into a `planner_conflict` adopts the relay version
+    /// instead; anything else rethrows loudly with the row still queued.
+    private func repushPlannerAsCreate(_ row: OutboxRow) async throws -> Bool {
+        guard let task = try await store.plannerTask(id: row.recordID) else {
+            try await store.removeOutboxRow(id: row.id)
+            return true
+        }
+        do {
+            try await remote.applyPlannerOperation(PlannerOperationPayload(
+                operationID: await store.newRecordID(),
+                taskID: task.id,
+                intent: PlannerIntent.create.rawValue,
+                name: task.name,
+                positionKey: task.positionKey
+            ))
+        } catch let error as APIError where error.code == "planner_conflict" {
+            return try await adoptPlannerConflict(row, details: error.details)
+        } catch {
+            return false
+        }
+        try await store.removeOutboxRow(id: row.id)
+        Self.currentSpanCounts?.pushed += 1
+        return true
+    }
+
+    /// Adopts the relay's current task after a 409 `planner_conflict`: the
+    /// server version (string-valued details, no follow-up fetch) replaces
+    /// the local row and supersedes pending create/update rows — a pending
+    /// DELETE still converges the relay on drain, so delete-wins is checked
+    /// first and skips adoption. Returns whether the row was resolved.
+    private func adoptPlannerConflict(_ row: OutboxRow, details: [String: String]) async throws -> Bool {
+        Self.currentSpanCounts?.conflicts += 1
+        if details["deleted"] == "true" {
+            try await store.convergePlannerTaskDeleted(id: row.recordID)
+            return true
+        }
+        guard let name = details["name"],
+              let positionKey = details["position_key"],
+              PlannerPositionKey.validate(positionKey),
+              let updatedAtString = details["updated_at"],
+              let updatedAt = WireDate.parse(updatedAtString),
+              let createdAtString = details["created_at"],
+              let createdAt = WireDate.parse(createdAtString)
+        else {
+            return false
+        }
+        let completedOn = details["completed_on"].flatMap { $0.isEmpty ? nil : $0 }
+        try await store.adoptPlannerTask(PlannerTask(
+            id: row.recordID,
+            name: name,
+            positionKey: positionKey,
+            completedOn: completedOn,
+            createdAt: createdAt,
+            updatedAt: updatedAt
+        ))
+        Self.currentSpanCounts?.pulled += 1
+        return true
+    }
+
+    /// Resolves a failed planner push. Returns nil when the row is not a
+    /// planner row (the caller falls through to the entry/category rules).
+    private func resolvePlannerPushError(_ row: OutboxRow, error: APIError) async throws -> Bool? {
+        guard row.resource == LocalStore.plannerResource else { return nil }
+        switch error.code {
+        case "planner_conflict":
+            return try await adoptPlannerConflict(row, details: error.details)
+        case "planner_gone":
+            // Terminal relay delete: converge locally — drop every pending
+            // row for the task and remove it. Retrying is futile.
+            try await store.convergePlannerTaskDeleted(id: row.recordID)
+            return true
+        case "http_404":
+            // Pre-planner relay (no `/planner/operations` route): leave the
+            // row queued and skip the remaining planner rows this drain.
+            plannerRelayUnavailable = true
+            Self.logger.info("sync planner operations unsupported by relay; leaving planner rows queued")
+            return true
+        default:
+            return nil
+        }
     }
 
     /// Resolves a push conflict per the sync-client spec:

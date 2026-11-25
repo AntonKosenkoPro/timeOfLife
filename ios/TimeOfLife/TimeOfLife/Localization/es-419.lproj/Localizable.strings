@@ -347,3 +347,14 @@
 "catalogIcon.pill" = "Pastilla";
 "catalogIcon.tag" = "Etiqueta";
 "profile.versionInternalSuffix" = "Internal";
+
+// Day planner (add-day-planner)
+"planner.title" = "Hoy";
+"planner.progressLabel" = "Completado %1$d de %2$d";
+"planner.emptyHint" = "Las tareas que agregues aparecen aquí hasta completarlas.";
+"planner.composerPlaceholder" = "Agregar una tarea";
+"planner.add" = "Agregar";
+"planner.rename" = "Renombrar";
+"planner.markDone" = "Marcar como hecha";
+"planner.reopen" = "Reabrir";
+"planner.timerActive" = "Temporizador en marcha";

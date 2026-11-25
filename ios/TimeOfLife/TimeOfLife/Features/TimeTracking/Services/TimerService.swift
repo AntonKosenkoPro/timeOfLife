@@ -33,8 +33,12 @@ final class TimerService: ObservableObject {
     /// Also mirrors the run on the Live Activity (live-activities spec):
     /// the singleton guard inside makes rewrites (mid-run retags, crash
     /// relaunches with the same text) safe no-ops.
-    func startTimerDraft(text: String, categoryIDs: [String], notes: String = "", startedAt: Date = Date()) async throws {
-        try await store.saveTimerDraft(activityText: text, categoryIDs: categoryIDs, startedAt: startedAt, notes: notes)
+    ///
+    /// `plannerTaskID` carries a one-tap Start link (day-planner D3); nil
+    /// (the ordinary path) preserves an existing link instead of clearing
+    /// it, so mid-run rewrites never detach a linked run.
+    func startTimerDraft(text: String, categoryIDs: [String], notes: String = "", startedAt: Date = Date(), plannerTaskID: String? = nil) async throws {
+        try await store.saveTimerDraft(activityText: text, categoryIDs: categoryIDs, startedAt: startedAt, notes: notes, plannerTaskID: plannerTaskID)
         await liveActivities.runStarted(
             text: text,
             iconSymbol: firstIconSymbol(for: categoryIDs),
@@ -42,6 +46,31 @@ final class TimerService: ObservableObject {
             categoryChips: categoryChips(for: categoryIDs)
         )
         BackgroundReapScheduler.scheduleReapCheck()
+    }
+
+    /// Starts a planner task in one tap (day-planner D4): atomically claims
+    /// the running draft for the task, or reports false when a run is
+    /// already active, pending, or awaiting a Stop retry — a second Start
+    /// never replaces anything at the mutation boundary. The caller stays
+    /// usable (no navigation, no error banner) on false; only a real
+    /// persistence failure throws.
+    func startLinkedTask(name: String, categoryIDs: [String], taskID: String, startedAt: Date) async throws -> Bool {
+        let claimed = try await store.claimTimerDraft(
+            activityText: name,
+            categoryIDs: categoryIDs,
+            startedAt: startedAt,
+            notes: "",
+            plannerTaskID: taskID
+        )
+        guard claimed else { return false }
+        await liveActivities.runStarted(
+            text: ActivityName.normalized(name),
+            iconSymbol: firstIconSymbol(for: categoryIDs),
+            startedAt: startedAt,
+            categoryChips: categoryChips(for: categoryIDs)
+        )
+        BackgroundReapScheduler.scheduleReapCheck()
+        return true
     }
 
     /// Rewrites only the persisted running draft's live notes snapshot (a
@@ -158,6 +187,20 @@ final class TimerService: ObservableObject {
         } else {
             stopEntryID = await store.newRecordID()
         }
+        // The planner link rides the persisted draft (day-planner D3): when
+        // the stopping run started from a task, the same transaction saves
+        // the entry and completes exactly that task. Ordinary runs carry no
+        // link and stop exactly as before.
+        let plannerLink: LocalStore.PlannerStopLink?
+        if let taskID = try await store.timerDraft()?.plannerTaskID {
+            plannerLink = LocalStore.PlannerStopLink(
+                taskID: taskID,
+                operationID: await store.newRecordID(),
+                completedOn: PlannerCivilDate.today()
+            )
+        } else {
+            plannerLink = nil
+        }
         let entry = TimeEntry(
             id: stopEntryID,
             activityText: text,
@@ -167,7 +210,7 @@ final class TimerService: ObservableObject {
             categoryIDs: pruned,
             notes: notes
         )
-        let mutation = try await store.stopRunningTimer(entry)
+        let mutation = try await store.stopRunningTimer(entry, plannerLink: plannerLink)
         guard case let .created(saved) = mutation else {
             throw StopError.notCompleted
         }

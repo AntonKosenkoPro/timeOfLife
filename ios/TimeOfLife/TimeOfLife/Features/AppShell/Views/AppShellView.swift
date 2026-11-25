@@ -25,6 +25,10 @@ struct AppShellView: View {
     /// sync-exit reload below would be missed (HistoryView precedent).
     @EnvironmentObject var sync: SyncController
     @StateObject private var trackVM: TrackViewModel
+    /// The Today planner view model (add-day-planner): owned here (the
+    /// trackVM pattern) so the Track toolbar progress control and the
+    /// pushed Today page share one snapshot and one serialized reload.
+    @StateObject private var plannerVM: PlannerViewModel
     /// Presents the Log Time sheet from History (manual-entry spec). Owned
     /// here so the [+] lives in the same toolbar scope as the Profile
     /// button; the sheet itself stays in `HistoryView`, which owns the
@@ -57,6 +61,11 @@ struct AppShellView: View {
             }
             return trackVM
         }())
+        _plannerVM = StateObject(wrappedValue: PlannerViewModel(
+            store: container.localStore,
+            undoBuffer: container.undoBuffer,
+            timer: container.timerService
+        ))
     }
 
     var body: some View {
@@ -198,11 +207,14 @@ struct AppShellView: View {
     }
 
     /// Serialized Track reload shared by the tab-return, Profile-exit, and
-    /// sync-exit paths.
+    /// sync-exit paths. The planner snapshot reloads alongside (same three
+    /// paths keep the toolbar progress and Today converged).
     @MainActor
     private func reloadTrack() async {
         trackVM.invalidate()
         await trackVM.loadIfNeeded()
+        plannerVM.invalidate()
+        await plannerVM.loadIfNeeded()
     }
 
     /// Track tab: its own push state. Profile is a path value here, so
@@ -233,6 +245,18 @@ struct AppShellView: View {
                     onLogTime: {},
                     onProfile: { vm.openProfile() }
                 ))
+                // The compact Today progress control (day-planner): a
+                // toolbar entry in the navigation chrome — outside the
+                // timer's measured layout, so counts and timer state never
+                // shift the numeric readout or Start/Stop. Usable while
+                // timing and when the list is empty.
+                .toolbar {
+                    ToolbarItem(placement: .navigationBarLeading) {
+                        PlannerProgressControl(snapshot: plannerVM.snapshot) {
+                            vm.trackPath.append(.planner)
+                        }
+                    }
+                }
                 .navigationDestination(for: ShellRoute.self) { route in
                     switch route {
                     case .profile:
@@ -297,6 +321,16 @@ struct AppShellView: View {
                         }
                     case .entry:
                         EmptyView()
+                    case .planner:
+                        // The Today day-planner (add-day-planner): pushed
+                        // onto the Track stack from the toolbar progress
+                        // control (namePicker precedent — the route stays a
+                        // value, the destination reads the planner view
+                        // model). A successful one-tap Start pops back to
+                        // Track, where the linked run shows.
+                        PlannerView(vm: plannerVM) {
+                            vm.trackPath.removeAll { $0 == .planner }
+                        }
                     case .categoryEditor:
                         // Inline category creation from the running-tag row
                         // (inline-category-creation): create mode only.

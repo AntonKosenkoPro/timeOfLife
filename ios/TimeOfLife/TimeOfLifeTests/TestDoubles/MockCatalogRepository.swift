@@ -49,11 +49,16 @@ final class MockCatalogRepository: CatalogSending, @unchecked Sendable {
         _fetchedDeletionsSince = []
         _fetchedEntryPageCursors = []
         lock.unlock()
+        plannerFeedCallCount = 0
     }
 
     var categoriesResult: [Category] = []
     var entriesResult: [TimeEntry] = []
     var deletionsResult: [Deletion] = []
+    /// Pages served by `fetchPlannerFeed`, in call order. Each entry is one
+    /// page; the loop ends on the first page with `hasMore == false`. An
+    /// empty array serves one empty terminal page.
+    var plannerFeedPages: [PlannerFeedPage] = []
     /// Pages served by `fetchEntryPage` (nil = a single page of
     /// `entriesResult`). Page i is served for cursor "page-i" (nil = page 0);
     /// an unknown cursor ends the pull with an empty page.
@@ -78,6 +83,8 @@ final class MockCatalogRepository: CatalogSending, @unchecked Sendable {
     var createEntryHandler: ((TimeEntry) async throws -> Void)?
     var updateEntryHandler: ((TimeEntry) async throws -> Void)?
     var deleteEntryHandler: ((String) async throws -> Void)?
+    var applyPlannerOperationHandler: ((PlannerOperationPayload) async throws -> Void)?
+    var fetchPlannerFeedHandler: ((Int64, Int) async throws -> PlannerFeedPage)?
 
     private func record(_ method: String, _ resource: String, _ id: String? = nil) {
         lock.lock()
@@ -194,4 +201,22 @@ final class MockCatalogRepository: CatalogSending, @unchecked Sendable {
         record("deleteEntry", "entry", id)
         if let deleteEntryHandler { try await deleteEntryHandler(id) }
     }
+
+    func applyPlannerOperation(_ op: PlannerOperationPayload) async throws {
+        record("applyPlannerOperation", "planner_task", op.taskID)
+        if let applyPlannerOperationHandler { try await applyPlannerOperationHandler(op) }
+    }
+
+    func fetchPlannerFeed(afterRevision: Int64, limit: Int) async throws -> PlannerFeedPage {
+        record("fetchPlannerFeed", "planner_task")
+        if let fetchPlannerFeedHandler { return try await fetchPlannerFeedHandler(afterRevision, limit) }
+        guard !plannerFeedPages.isEmpty else {
+            return PlannerFeedPage(changes: [], watermarkRevision: afterRevision, hasMore: false)
+        }
+        let index = min(plannerFeedCallCount, plannerFeedPages.count - 1)
+        plannerFeedCallCount += 1
+        return plannerFeedPages[index]
+    }
+
+    private var plannerFeedCallCount = 0
 }

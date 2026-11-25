@@ -39,6 +39,11 @@ enum ShellRoute: Hashable {
     /// resolve at the destination from the owning tab's view model, so the
     /// route itself stays a value (namePicker precedent).
     case categoryEditor
+    /// The Today day-planner (add-day-planner): pushed onto the Track
+    /// navigation stack from the toolbar progress control. No payload — the
+    /// destination reads the owning tab's planner view model, so the route
+    /// itself stays a value (namePicker precedent).
+    case planner
 
     /// Whether this route is the running-notes editor page (its pop without
     /// a stop resolving it abandons the tracked typing).

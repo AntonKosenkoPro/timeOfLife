@@ -205,6 +205,17 @@ enum L10n: String, CaseIterable {
     case categorySeedEntertainment = "category.seed.entertainment"
     case categorySeedFood = "category.seed.food"
 
+    // Day planner (add-day-planner)
+    case plannerTitle = "planner.title"
+    case plannerProgressLabel = "planner.progressLabel"
+    case plannerEmptyHint = "planner.emptyHint"
+    case plannerComposerPlaceholder = "planner.composerPlaceholder"
+    case plannerAdd = "planner.add"
+    case plannerRename = "planner.rename"
+    case plannerMarkDone = "planner.markDone"
+    case plannerReopen = "planner.reopen"
+    case plannerTimerActive = "planner.timerActive"
+
     // Undo (chip selection accessibility; the category UndoToast is gone —
     // deletions undo through the system Undo confirmation instead)
     case undoSelected = "undo.selected"
