@@ -257,6 +257,7 @@ actor LocalStore {
             try migrator().migrate(queue)
             try healTimerStateNotesColumn(in: queue)
             try healDropRetiredProvenanceColumns(in: queue)
+            try healPlannerSchema(in: queue)
             return (queue, nil)
         }
         let sanitized = try sanitizedUserID(userID)
@@ -268,6 +269,7 @@ actor LocalStore {
         try migrator().migrate(queue)
         try healTimerStateNotesColumn(in: queue)
         try healDropRetiredProvenanceColumns(in: queue)
+        try healPlannerSchema(in: queue)
         if let existing = try boundUserMarker(in: queue), existing != sanitized {
             throw LocalStoreError.accountMismatch
         }
@@ -335,6 +337,51 @@ actor LocalStore {
         guard !columnNames.contains("notes") else { return }
         try queue.write { db in
             try db.execute(sql: "ALTER TABLE timer_state ADD COLUMN notes TEXT")
+        }
+    }
+
+    /// Forward-heals field files whose recorded v3 predates the planner
+    /// shape (day-planner follow-up fix): an in-place upgrade from an
+    /// intermediate build records "v3" without (all of) the planner
+    /// objects, so the shipped v3 migration is a no-op for them. A missing
+    /// `planner_tasks` — or one whose shape lacks a column current code
+    /// reads — makes `plannerTasks()` throw, so Today opens empty with the
+    /// generic error while Track keeps working (entry/draft reads never
+    /// touch the planner shape). Each statement converges one v3 object
+    /// and is a no-op where the converged shape already exists, mirroring
+    /// the shipped v3 definitions exactly. A present-but-incompatible
+    /// table is rebuilt: no reachable writer could have stored rows the
+    /// current code can read (every write references `position_key`), so
+    /// nothing readable is lost and the relay feed re-pulls planner state
+    /// on the next sync.
+    private static func healPlannerSchema(in queue: DatabaseQueue) throws {
+        let expectedColumns = ["id", "name", "position_key", "completed_on", "created_at", "updated_at"]
+        try queue.write { db in
+            let existing = try String.fetchAll(db, sql: "SELECT name FROM pragma_table_info('planner_tasks')")
+            if !Set(expectedColumns).isSubset(of: Set(existing)) {
+                try db.execute(sql: "DROP TABLE IF EXISTS planner_tasks")
+                try db.execute(sql: "DROP INDEX IF EXISTS index_planner_tasks_on_position")
+                try db.create(table: "planner_tasks") { t in
+                    t.column("id", .text).primaryKey()
+                    t.column("name", .text).notNull()
+                    t.column("position_key", .text).notNull()
+                    t.column("completed_on", .text)
+                    t.column("created_at", .datetime).notNull()
+                    t.column("updated_at", .datetime).notNull()
+                }
+                try db.execute(sql: """
+                    CREATE INDEX index_planner_tasks_on_position
+                    ON planner_tasks (position_key, id)
+                    """)
+            }
+            let syncColumns = try String.fetchAll(db, sql: "SELECT name FROM pragma_table_info('sync_state')")
+            if !syncColumns.contains("cursor_revision") {
+                try db.execute(sql: "ALTER TABLE sync_state ADD COLUMN cursor_revision INTEGER")
+            }
+            let timerColumns = try String.fetchAll(db, sql: "SELECT name FROM pragma_table_info('timer_state')")
+            if !timerColumns.contains("planner_task_id") {
+                try db.execute(sql: "ALTER TABLE timer_state ADD COLUMN planner_task_id TEXT")
+            }
         }
     }
 
