@@ -34,19 +34,19 @@ A task SHALL have a trimmed, valid timer name as its only user-entered field. Ta
 
 ### Requirement: The composer supports repeated adds without dismissing the keyboard
 
-The Today page SHALL use one inline composer fixed above a single task list surface. Matching newest-first Recents drawn from committed entries SHALL appear as rows in a suggestions section at the top of that same list while the draft is non-empty — never as a separate mounting region — so the composer keeps its exact frame whether suggestions show or not. Recents selection SHALL only fill the composer with the exact suggested text. Return on a valid draft SHALL append one task, clear the composer, and keep the input focused with the keyboard open. Invalid or failed submission SHALL NOT append a row or discard the draft. Row changes SHALL use non-disruptive feedback and respect Reduce Motion.
+The Today page SHALL use one inline composer fixed above a single task list surface. Matching newest-first Recents drawn from committed entries SHALL appear as rows in a suggestions section at the top of that same list while the draft is non-empty — never as a separate mounting region — so the composer keeps its exact frame whether suggestions show or not. The suggestions section SHALL carry a localized `Suggestions` header and the task rows a localized `Tasks` header, so the two groups read as distinct sections; the `Tasks` header SHALL be present whenever the task list is shown, with or without suggestions. Recents selection SHALL only fill the composer with the exact suggested text. Return on a valid draft SHALL append one task, clear the composer, and keep the input focused with the keyboard open. The field SHALL never resign first responder across a submit — no dismiss/reopen cycle of any duration. Invalid or failed submission SHALL NOT append a row or discard the draft. Row changes SHALL use non-disruptive feedback and respect Reduce Motion.
 
 #### Scenario: Add consecutive tasks
 - **WHEN** the user adds a valid task with Return and then types and submits the next name
-- **THEN** both tasks append in submission order, the composer keeps input focus, and the keyboard never dismisses or reopens between submissions
+- **THEN** both tasks append in submission order, the composer keeps input focus without resigning, and the keyboard stays still throughout — no dismiss/reopen cycle of any duration
 
 #### Scenario: Focus survives the save round-trip
 - **WHEN** the user submits a valid draft
-- **THEN** the draft clears and the same field stays focused through the store write and snapshot reload; no list, suggestion, or empty-state change steals focus
+- **THEN** the draft clears and the same field stays focused through the store write and snapshot reload without ever resigning first responder; no list, suggestion, or empty-state change steals focus, and a resign/reopen flicker of any duration fails this requirement
 
 #### Scenario: Suggestions refine inside the list
 - **WHEN** the user types a non-empty draft with matching Recents
-- **THEN** the matches appear as rows in the suggestions section of the same list below the unmoved composer, and each keystroke only swaps rows inside that surface
+- **THEN** the matches appear as rows under a localized `Suggestions` header in the same list below the unmoved composer, the task rows sit under a localized `Tasks` header, and each keystroke only swaps rows inside that surface
 
 #### Scenario: Fill from a matching Recent
 - **WHEN** the user taps a matching Recent while composing
