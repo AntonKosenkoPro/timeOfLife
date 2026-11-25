@@ -15,22 +15,9 @@ struct FlowLayout: Layout {
     /// Gap between subviews within a row and between rows.
     var spacing: CGFloat
 
-    /// One packed row: per-subview sizes measured under the clamped width,
-    /// so packing and placement agree even for width-dependent heights.
-    struct RowItem {
-        var index: Int
-        var size: CGSize
-    }
-
-    struct Row {
-        var items: [RowItem]
-        var width: CGFloat
-        var height: CGFloat
-    }
-
     struct Cache {
         var width: CGFloat?
-        var rows: [Row] = []
+        var rows: [FlowPacking.Row] = []
     }
 
     func makeCache(subviews: Subviews) -> Cache {
@@ -54,7 +41,7 @@ struct FlowLayout: Layout {
         subviews: Subviews,
         cache: inout Cache
     ) {
-        let rows: [Row]
+        let rows: [FlowPacking.Row]
         if cache.width == bounds.width, !cache.rows.isEmpty {
             rows = cache.rows
         } else {
@@ -78,43 +65,24 @@ struct FlowLayout: Layout {
     // MARK: - Packing
 
     /// Greedy row packing over ideal subview widths, with each row item's
-    /// height measured under its clamped width.
-    private func computeRows(maxWidth: CGFloat, subviews: Subviews) -> [Row] {
-        var rows: [Row] = []
-        var items: [RowItem] = []
-        var rowWidth: CGFloat = 0
-        var rowHeight: CGFloat = 0
+    /// height measured under its clamped width. Row assignment and sizing
+    /// delegate to the shared pure `FlowPacking` so placement and the Recents
+    /// fit policy can never disagree.
+    private func computeRows(maxWidth: CGFloat, subviews: Subviews) -> [FlowPacking.Row] {
+        var itemSizes: [CGSize] = []
+        itemSizes.reserveCapacity(subviews.count)
         for index in subviews.indices {
             let idealWidth = subviews[index].sizeThatFits(.unspecified).width
             let width = min(idealWidth, maxWidth)
             let height = subviews[index]
                 .sizeThatFits(ProposedViewSize(width: width, height: nil))
                 .height
-            let projected = rowWidth + (items.isEmpty ? 0 : spacing) + width
-            if items.isEmpty || projected <= maxWidth {
-                items.append(RowItem(index: index, size: CGSize(width: width, height: height)))
-                rowWidth = projected
-                rowHeight = max(rowHeight, height)
-            } else {
-                rows.append(Row(items: items, width: rowWidth, height: rowHeight))
-                items = [RowItem(index: index, size: CGSize(width: width, height: height))]
-                rowWidth = width
-                rowHeight = height
-            }
+            itemSizes.append(CGSize(width: width, height: height))
         }
-        if !items.isEmpty { rows.append(Row(items: items, width: rowWidth, height: rowHeight)) }
-        return rows
+        return FlowPacking.pack(itemSizes: itemSizes, maxWidth: maxWidth, spacing: spacing)
     }
 
-    private func totalSize(rows: [Row]) -> CGSize {
-        guard !rows.isEmpty else { return .zero }
-        var width: CGFloat = 0
-        var height: CGFloat = 0
-        for row in rows {
-            width = max(width, row.width)
-            height += row.height
-        }
-        height += spacing * CGFloat(rows.count - 1)
-        return CGSize(width: width, height: height)
+    private func totalSize(rows: [FlowPacking.Row]) -> CGSize {
+        FlowPacking.totalSize(rows: rows, spacing: spacing)
     }
 }

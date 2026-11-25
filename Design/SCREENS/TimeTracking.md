@@ -127,17 +127,22 @@ progress visualization.
 
 ### Recents
 
-- Wrapping chip flow of the most-recently-used exact texts, capped at twelve,
+- Wrapping chip flow of the most-recently-used exact texts, capped at ten,
   newest `started_at` first (`GROUP BY activity_text` over committed entries,
-  `id DESC` tiebreak); no horizontal scrolling. The chips live in an adaptive
-  viewport (hug content, clamp at up to 4 rows of available height with
-  1 pt top/bottom scroll-content padding plus matching +2 pt max cap,
-  internal scroll, shared `ChipViewport` contract), so small sets stay
-  compact, short viewports show fewer rows with internal scroll, and overflow
-  never grows the Track page or slides under the tab bar. Entire-page scroll
-  engages only as an accessibility fallback. Edge-aware hairline dividers fade in/out with the scroll
-  position (`ChipViewport` contract, shared with the tag selector); no
-  constant caption divider.
+  `id DESC` tiebreak); no horizontal scrolling. The view mounts only the
+  fitting newest-first prefix measured from the actual rendered chip sizes at
+  the current width and text size (`RecentsFitPolicy` over the shared
+  `FlowPacking` arithmetic): all candidates when they fit (no scroll, even
+  below five), the fitting prefix of five or more without scroll, otherwise
+  the newest five (all available when fewer exist) scrolling internally only
+  when that set overflows. Omitted chips are never mounted — no invisible
+  interactive or accessibility overflow. The chip area hugs its offered
+  content and never reserves empty chip rows; extra rows never grow the page
+  or slide under the tab bar. Entire-page scroll engages only as an
+  accessibility fallback when the core controls plus one usable chip row
+  cannot fit. Edge-aware hairline dividers fade in/out with the scroll
+  position (`ChipViewport` contract, shared with the tag selector) and only
+  exist in the scrolling fallback; no constant caption divider.
 - Each chip shows the icon of the first-position Category (first by the stored
   order) in a fixed symbol slot; categoryless entries render name-only
   chips with no icon and no placeholder glyph. Category names are never shown.
@@ -281,7 +286,9 @@ per-record state).
 - [ ] All strings use `L10n.*` keys in English and Russian.
 - [ ] Name field, tag selector, readout, and Start/Stop controls have stable identifiers.
 - [ ] Numeric readout is centered, fixed, and `.monospacedDigit()`.
-- [ ] Recents chips expose exact texts only.
+- [ ] Recents chips expose exact texts only; at most ten candidates, fitting
+  prefix mounted (five-or-more static, newest-five internal-scroll fallback);
+  omitted chips stay out of hit testing and VoiceOver.
 - [ ] Recents chips show the first-position Category's icon only; no names.
 - [ ] Start follows explicit selection and persists running state.
 - [ ] Running `Started HH:MM` caption opens the start editor; applying rewrites the draft start, restarts the ticker, and re-anchors the Live Activity (chips/icon unchanged).
@@ -314,7 +321,7 @@ Add English and Russian values, then add corresponding `L10n` cases:
 ## Capture behavior
 
 Recents are computed on-device from committed entries and ranked by newest
-`started_at` per exact text, capped at twelve. Each chip contains the exact
+`started_at` per exact text, capped at ten. Each chip contains the exact
 text and, when the entry has Categories, the icon of the first-position
 Category — never a Category name. Category icons belong in Manage
 Categories, the entry form, and Insights; on Track they
