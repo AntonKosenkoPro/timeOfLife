@@ -8,7 +8,7 @@ GitHub Actions carries the mandatory PR checks (Requirements S6); Xcode Cloud is
 Workflows and their scope (`ios.yml` carries the iOS PR lint/build/test bar with unfiltered `pull_request` + path-filtered `push`-to-`main` triggers; the tag-triggered Cloud Archive covers the signed Release build + TestFlight upload):
 
 - **`backend.yml`** — Go: gofmt, go vet, golangci-lint, race tests, OpenAPI contract gate, coverage gate, deploy
-- **`ios.yml`** — iOS: unfiltered `pull_request` + path-filtered `push`-to-`main`; xcodegen via `xcodegen generate`, SwiftLint `lint --strict`, warnings-as-errors build (per-target `SWIFT_TREAT_WARNINGS_AS_ERRORS`/`GCC_TREAT_WARNINGS_AS_ERRORS` — the Analyse bar, no separate analyzer step), unit tests. dSYMs for shipped builds come from Cloud's signed tag archives (`ci_post_xcodebuild.sh`), not from CI.
+- **`ios.yml`** — iOS: unfiltered `pull_request` + path-filtered `push`-to-`main`; `lint-build-test` (xcodegen via `xcodegen generate`, SwiftLint `lint --strict`, warnings-as-errors Debug build + Debug unit tests) plus parallel `screenshot-build-test` (Screenshot-config build + Screenshot unit tests, same `changes.screenshot` gate), warnings-as-errors per-target (`SWIFT_TREAT_WARNINGS_AS_ERRORS`/`GCC_TREAT_WARNINGS_AS_ERRORS` — the Analyse bar, no separate analyzer step). dSYMs for shipped builds come from Cloud's signed tag archives (`ci_post_xcodebuild.sh`), not from CI.
 
 ## Required gates (ruleset)
 
