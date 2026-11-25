@@ -49,6 +49,15 @@ info:
     - **Refresh TTL** — a device family's refresh tokens expire 7 days after issue;
       refresh attempts after that are rejected as unauthorized.
 
+    ## Planner
+    - Every planner mutation converges through `POST /api/v1/planner/operations`
+      (field-specific intents, immutable client operation ids, lost-response
+      replay) and a revision-ordered change feed at
+      `GET /api/v1/planner/feed` (committed watermark, resumable pages,
+      terminal delete markers). Position keys are exact decimals ordered
+      `(position_key, id)`; deletes win permanently. Planner state purges
+      with the account (`DELETE /api/v1/auth/account`).
+
     ## Account deletion (explicit, in-app)
     - **Delete** — `DELETE /api/v1/auth/account` with a Bearer access token
       and `X-Device-Id`. Self-only; purges the account and all associated
@@ -642,7 +651,8 @@ paths:
         authenticated account only — no request-selected user id exists. The
         purge removes the account identity and all associated operational
         relay rows (OTPs, all-device sessions and recovery receipts, entries,
-        joins, categories, tombstones, Apple-vault data) atomically.
+        joins, categories, tombstones, planner tasks/revisions/receipts,
+        Apple-vault data) atomically.
 
         Apple-created accounts additionally unlink Apple authorization:
         a stored revocable credential is revoked inline (204) or moved to a
@@ -1402,6 +1412,170 @@ paths:
         "500":
           $ref: "#/components/responses/InternalError"
 
+  # ---------- Planner (day planner) ----------
+
+  /api/v1/planner/operations:
+    post:
+      operationId: applyPlannerOperation
+      summary: Apply a planner task operation
+      description: |
+        Applies one field-specific planner mutation for the authenticated user
+        (Today day-planner). The relay serializes acceptance per account,
+        assigns a commit-ordered `revision` to every accepted operation, and
+        deduplicates on the immutable client `operation_id`: replaying an
+        accepted `operation_id` returns the stored result (HTTP 200 with the
+        same `revision`) without applying anything twice, so a lost response
+        is safe to retry verbatim.
+
+        Intents are field-specific: `create` sets the initial name and
+        position; `rename` sets only the name; `move` sets only the position
+        key; `complete` sets only the completion date; `reopen` clears it;
+        `delete` writes a terminal deletion marker. Concurrent operations on
+        different fields of the same task compose; concurrent operations on
+        the same field converge in relay acceptance (revision) order — the
+        latest accepted intent for a field wins.
+
+        A delete marker is terminal for its task id: any later operation on
+        a deleted task — including a delayed `create` for the same id —
+        answers 410 `planner_gone` and changes nothing. Only a local undo
+        that restores the task before its delete is pushed can bring it
+        back; the relay never resurrects. Operations on a task id the relay
+        never saw answer 404 `not_found`. A `create` whose task id is live
+        under a different `operation_id` answers 409 `planner_conflict`
+        with the server's current task in `details`.
+
+        Position keys (`position_key`) order tasks identically on every
+        device: the display order is `(position_key, id)` compared
+        byte-wise (`id` is the final tie-breaker). Keys are exact decimals —
+        a zero-padded 6-digit integer part with an optional fraction of up
+        to 32 digits and no trailing zeros (`^\d{6}(\.\d{1,32})?$`, e.g.
+        `500000`, `500000.5`, `499999`) — so byte-wise comparison equals
+        numeric comparison and `ORDER BY position_key` works directly.
+        Clients allocate keys without rewriting the list: the shared
+        fixtures are `empty → "500000"`; `append after "500000" →
+        "500001"`; `between "500000" and "500001" → "500000.5"`;
+        `between "500000" and "500000.5" → "500000.25"`;
+        `between "500000.5" and "500001" → "500000.75"`;
+        `prepend before "500000" → "499999"`. Concurrent inserts in the
+        same gap may allocate the same key; the `(key, id)` tie-break keeps
+        every device in the same order.
+      tags:
+        - Planner
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PlannerOperationRequest"
+      responses:
+        "201":
+          description: Operation accepted (first acceptance of this operation_id).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PlannerTask"
+        "200":
+          description: Idempotent replay — this operation_id was already accepted; the stored task state and its original revision are returned unchanged.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PlannerTask"
+        "400":
+          $ref: "#/components/responses/InvalidBody"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: |
+            409 conflict. `planner_conflict` — a `create` whose task id is
+            already live under a different operation; `details` carries the
+            server's current task.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error:
+                  code: planner_conflict
+                  message: A planner task with this id already exists.
+                  details:
+                    id: "019639f1-7a3b-7abc-9def-100000000010"
+                    name: "Read"
+                    position_key: "500000"
+                    revision: 7
+        "410":
+          description: |
+            Terminal delete — the task id carries a deletion marker.
+            Retrying or issuing any further operation for this id is
+            futile; converge by dropping the local copy.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error:
+                  code: planner_gone
+                  message: This planner task was deleted.
+        "422":
+          $ref: "#/components/responses/ValidationError"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/planner/feed:
+    get:
+      operationId: listPlannerFeed
+      summary: List planner changes in revision order
+      description: |
+        Returns the authenticated user's planner changes — creations, field
+        updates, and deletion markers — ordered by `revision` ascending. The
+        response fixes a committed upper watermark (`watermark_revision`)
+        at query time: only changes with `revision` strictly greater than
+        `after_revision` and at most the watermark are returned, so a pull
+        that stops after a committed page resumes with
+        `after_revision=<last seen revision>` without permanently skipping a
+        change that commits behind the cursor, and concurrent writers fall
+        into a later page. The feed carries removals and completed tasks,
+        not just the rows visible in Today; each page is applied with its
+        cursor atomically. `has_more` reports whether further pages remain
+        below the watermark.
+      tags:
+        - Planner
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: after_revision
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+          description: Return only changes with revision strictly greater than this value.
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 50
+      responses:
+        "200":
+          description: A page of planner changes in revision order.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PlannerFeedResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
 components:
   parameters:
     DeviceIdHeader:
@@ -1802,6 +1976,144 @@ components:
           description: Always "accepted"
       example:
         status: accepted
+
+    # ---------- Planner schemas ----------
+
+    PlannerIntent:
+      type: string
+      description: |
+        Field-specific planner mutation. `create` sets the initial name and
+        position; `rename` sets only the name; `move` sets only the position
+        key; `complete` sets only the completion date; `reopen` clears it;
+        `delete` writes a terminal deletion marker.
+      enum: [create, rename, move, complete, reopen, delete]
+
+    PlannerOperationRequest:
+      type: object
+      description: |
+        One planner mutation. `operation_id` is an immutable client UUID v7
+        naming one logical application (reused verbatim across retries of a
+        lost response); the relay stores it and replays return the stored
+        result. Only the intent's field is read — a `rename` carries no
+        position or completion, and a Stop-driven completion carries only
+        `completed_on`.
+      required:
+        - operation_id
+        - task_id
+        - intent
+      properties:
+        operation_id:
+          type: string
+          format: uuid
+          description: Client-generated UUID v7, immutable per logical application.
+        task_id:
+          type: string
+          format: uuid
+          description: Client-generated UUID v7 identifying the task across devices.
+        intent:
+          $ref: "#/components/schemas/PlannerIntent"
+        name:
+          type: string
+          minLength: 1
+          maxLength: 60
+          description: Trimmed task name; required for `create`/`rename`, ignored otherwise.
+        position_key:
+          type: string
+          minLength: 1
+          maxLength: 39
+          pattern: "^[0-9]{6}(\\.[0-9]*[1-9])?$"
+          description: |
+            Exact-decimal order key (zero-padded 6-digit integer, optional
+            fraction without trailing zeros); required for `create`/`move`,
+            ignored otherwise. Display order is `(position_key, id)`
+            byte-wise. Shared fixtures: empty → `500000`;
+            append after `500000` → `500001`;
+            between `500000` and `500001` → `500000.5`;
+            between `500000` and `500000.5` → `500000.25`;
+            between `500000.5` and `500001` → `500000.75`;
+            prepend before `500000` → `499999`.
+        completed_on:
+          type: string
+          format: date
+          description: |
+            Civil completion date (`YYYY-MM-DD`) captured on the device
+            performing the completion; synced as a date, never reinterpreted
+            in another time zone. Required for `complete`, ignored otherwise.
+      example:
+        operation_id: "019639f1-7a3b-7abc-9def-100000000011"
+        task_id: "019639f1-7a3b-7abc-9def-100000000010"
+        intent: create
+        name: "Read"
+        position_key: "500000"
+
+    PlannerTask:
+      type: object
+      description: |
+        Latest accepted state of one planner task. `revision` is the
+        commit-ordered per-account sequence number of the last accepted
+        operation on this task; `deleted` marks the terminal deletion
+        marker (converge by dropping the local copy — it never clears).
+        `completed_on` is the civil date recorded by the completing device.
+      required:
+        - id
+        - name
+        - position_key
+        - revision
+        - updated_at
+        - deleted
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+          maxLength: 60
+        position_key:
+          type: string
+          description: Exact-decimal order key; display order is `(position_key, id)` byte-wise.
+        completed_on:
+          type: string
+          format: date
+          nullable: true
+          description: Civil completion date, or null when open.
+        revision:
+          type: integer
+          minimum: 1
+          description: Commit-ordered per-account revision of the last accepted operation on this task.
+        updated_at:
+          type: string
+          format: date-time
+        deleted:
+          type: boolean
+          description: Terminal deletion marker; never clears once true.
+      example:
+        id: "019639f1-7a3b-7abc-9def-100000000010"
+        name: "Read"
+        position_key: "500000"
+        completed_on: null
+        revision: 7
+        updated_at: "2026-11-25T10:00:00Z"
+        deleted: false
+
+    PlannerFeedResponse:
+      type: object
+      description: One revision-ordered page of planner changes with its committed watermark.
+      required:
+        - changes
+        - watermark_revision
+      properties:
+        changes:
+          type: array
+          items:
+            $ref: "#/components/schemas/PlannerTask"
+        watermark_revision:
+          type: integer
+          minimum: 0
+          description: Committed upper revision bound fixed when the page was read.
+        has_more:
+          type: boolean
+          nullable: true
+          description: True when further pages remain below the watermark.
 
     # ---------- Error schemas ----------
 

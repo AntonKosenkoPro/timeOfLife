@@ -1,7 +1,7 @@
 ## 1. Research and contracts
 
-- [ ] 1.1 Reconfirm the ctx7 topic, HIG, iOS 18 SwiftUI, and PostgreSQL 15 research in `design.md` against the implementation base; record any revised evidence or waiver before coding.
-- [ ] 1.2 Define the OpenAPI planner operation and paginated feed schemas, retry/terminal-delete responses, validation, and shared position-key fixtures before wiring the relay and the iOS client.
+- [x] 1.1 Reconfirm the ctx7 topic, HIG, iOS 18 SwiftUI, and PostgreSQL 15 research in `design.md` against the implementation base; record any revised evidence or waiver before coding.
+- [x] 1.2 Define the OpenAPI planner operation and paginated feed schemas, retry/terminal-delete responses, validation, and shared position-key fixtures before wiring the relay and the iOS client.
 
 ## 2. Relay and persistence
 
