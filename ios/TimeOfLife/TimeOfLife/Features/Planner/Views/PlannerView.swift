@@ -168,30 +168,40 @@ struct PlannerView: View {
                     ForEach(vm.suggestions) { recent in
                         suggestionRow(recent)
                     }
+                } header: {
+                    Text(L10n.plannerSuggestions.text)
                 }
                 .accessibilityIdentifier("PlannerSuggestions")
             }
-            ForEach(vm.snapshot.tasks) { task in
-                PlannerTaskRow(
-                    task: task,
-                    timerActive: vm.timerActive,
-                    isRenaming: vm.editingTaskID == task.id,
-                    editText: $vm.editText,
-                    focusedRowID: $renamingRowID,
-                    onToggle: { Task { await vm.toggleComplete(task) } },
-                    onRenameTap: { vm.beginRename(task) },
-                    onRenameCommit: { Task { await vm.commitRename(task) } },
-                    onRenameCancel: {
-                        vm.cancelRename()
-                        renamingRowID = nil
-                    },
-                    onStart: {
-                        if await vm.startTask(task) { onStartActive() }
-                    }
-                )
+            // The task rows sit under their own header (Mail's Top
+            // Results/Suggestions split): it renders whenever this list
+            // shows, with or without suggestions above, so the two groups
+            // always read as distinct sections (VoiceOver document order).
+            Section {
+                ForEach(vm.snapshot.tasks) { task in
+                    PlannerTaskRow(
+                        task: task,
+                        timerActive: vm.timerActive,
+                        isRenaming: vm.editingTaskID == task.id,
+                        editText: $vm.editText,
+                        focusedRowID: $renamingRowID,
+                        onToggle: { Task { await vm.toggleComplete(task) } },
+                        onRenameTap: { vm.beginRename(task) },
+                        onRenameCommit: { Task { await vm.commitRename(task) } },
+                        onRenameCancel: {
+                            vm.cancelRename()
+                            renamingRowID = nil
+                        },
+                        onStart: {
+                            if await vm.startTask(task) { onStartActive() }
+                        }
+                    )
+                }
+                .onDelete { offsets in Task { await vm.delete(at: offsets) } }
+                .onMove { source, destination in Task { await vm.move(from: source, to: destination) } }
+            } header: {
+                Text(L10n.plannerTasks.text)
             }
-            .onDelete { offsets in Task { await vm.delete(at: offsets) } }
-            .onMove { source, destination in Task { await vm.move(from: source, to: destination) } }
         }
         .listStyle(.plain)
         .scrollContentBackground(.hidden)

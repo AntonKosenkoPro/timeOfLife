@@ -37,10 +37,10 @@ enum HoldHarnessFlow {
     /// prior run would otherwise make this a no-op attach with stale store
     /// state. Terminating never ends a live system activity — the island
     /// pill survives and the probe run reuses the same-text singleton.
-    static func launchApp() -> XCUIApplication {
+    static func launchApp(screen: String = "signedIn") -> XCUIApplication {
         let app = XCUIApplication()
         app.terminate()
-        app.launchEnvironment["UITEST_SCREEN"] = "signedIn"
+        app.launchEnvironment["UITEST_SCREEN"] = screen
         app.launch()
         return app
     }

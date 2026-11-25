@@ -90,6 +90,7 @@ extension AppContainer {
         seedHistoryIfNeeded(screen: screen, localStore: localStore)
         seedHistorySearchIfNeeded(screen: screen, localStore: localStore)
         seedTrackCategoriesIfNeeded(screen: screen, localStore: localStore)
+        seedPlannerHeadersIfNeeded(screen: screen, localStore: localStore)
         seedZhFitIfNeeded(screen: screen, localStore: localStore)
         seedDeletionEvidence(keychain: keychain)
     }
@@ -124,6 +125,15 @@ extension AppContainer {
             navigation.path = [.otpEntry(email: "user@example.com")]
         case "signedIn":
             // `RootView` renders the app shell (Track) when the session is signed in.
+            sessionStore.setSignedIn(CachedSession(
+                id: "ui-test", email: "user@example.com", emailVerified: true
+            ))
+            navigation.path = []
+        case "plannerHeaders":
+            // Day-planner header/stillness probe (add-day-planner §6): the
+            // signed-in shell plus one committed entry, so Today shows a
+            // suggestions section for the "Header" prefix. Seeded entry text
+            // is fixture copy, never user data.
             sessionStore.setSignedIn(CachedSession(
                 id: "ui-test", email: "user@example.com", emailVerified: true
             ))
@@ -227,6 +237,34 @@ extension AppContainer {
     private static func seedHistorySearchIfNeeded(screen: String, localStore: LocalStore) {
         guard screen == "historySearch" else { return }
         Task { await seedHistorySearchEntries(into: localStore) }
+    }
+
+    /// One committed entry for the `"plannerHeaders"` screen, so a "Header"
+    /// draft shows a suggestions section under its localized header. Same
+    /// degrade-to-empty policy as the History seeds: a failed seed leaves
+    /// Today without suggestions, and the probe fails loudly on the missing
+    /// header instead of guessing.
+    private static func seedPlannerHeadersIfNeeded(screen: String, localStore: LocalStore) {
+        guard screen == "plannerHeaders" else { return }
+        Task {
+            let calendar = Calendar(identifier: .gregorian)
+            let todayStart = calendar.startOfDay(for: Date())
+            let entry = TimeEntry(
+                id: "uitest-planner-suggestion",
+                activityText: "Header probe",
+                startedAt: calendar.date(byAdding: .minute, value: 600, to: todayStart)!,
+                endedAt: calendar.date(byAdding: .minute, value: 630, to: todayStart)!,
+                durationSeconds: 1800
+            )
+            do {
+                let result = try await localStore.createEntry(entry)
+                if case .failure = result {
+                    seedLogger.error("UITest seed: plannerHeaders entry failed")
+                }
+            } catch {
+                seedLogger.error("UITest seed: plannerHeaders entry threw: \(error.localizedDescription, privacy: .public)")
+            }
+        }
     }
 
     private static func seedHistorySearchEntries(into store: LocalStore) async {

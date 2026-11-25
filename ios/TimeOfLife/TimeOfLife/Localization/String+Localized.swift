@@ -215,6 +215,8 @@ enum L10n: String, CaseIterable {
     case plannerMarkDone = "planner.markDone"
     case plannerReopen = "planner.reopen"
     case plannerTimerActive = "planner.timerActive"
+    case plannerSuggestions = "planner.suggestions"
+    case plannerTasks = "planner.tasks"
 
     // Undo (chip selection accessibility; the category UndoToast is gone —
     // deletions undo through the system Undo confirmation instead)
