@@ -45,6 +45,40 @@ struct PlannerViewModelTests {
         #expect(vm.snapshot.tasks.map(\.name) == ["First", "Second"])
     }
 
+    // MARK: - Composer focus (5.2)
+
+    @Test("successful submit requests composer focus after the round-trip")
+    func submitRequestsFocus() async throws {
+        let (vm, _) = await makeContext()
+        await vm.loadIfNeeded()
+        #expect(vm.composerFocusRequests == 0)
+        vm.draft = "Read"
+        await vm.submit()
+        #expect(vm.draft.isEmpty)
+        #expect(vm.composerFocusRequests == 1)
+    }
+
+    @Test("invalid submit requests no composer focus")
+    func invalidSubmitNoFocus() async throws {
+        let (vm, _) = await makeContext()
+        await vm.loadIfNeeded()
+        vm.draft = "   "
+        await vm.submit()
+        #expect(vm.composerFocusRequests == 0)
+        #expect(vm.draft == "   ")
+    }
+
+    @Test("consecutive submits request focus each time")
+    func consecutiveSubmitsRequestFocus() async throws {
+        let (vm, _) = await makeContext()
+        await vm.loadIfNeeded()
+        vm.draft = "First"
+        await vm.submit()
+        vm.draft = "Second"
+        await vm.submit()
+        #expect(vm.composerFocusRequests == 2)
+    }
+
     @Test("suggestions filter newest-first and fill without submitting")
     func suggestionsFill() async throws {
         let (vm, store) = await makeContext()

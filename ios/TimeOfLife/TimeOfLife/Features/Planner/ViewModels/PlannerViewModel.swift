@@ -20,6 +20,13 @@ final class PlannerViewModel: ObservableObject {
     /// The inline composer draft. Survives reloads; cleared only by a
     /// successful submission.
     @Published var draft = ""
+    /// Focus-request generation for the composer: bumped once per
+    /// successful submit, after the store write and snapshot reload settle.
+    /// The view observes this and re-asserts input focus, so the composer
+    /// keeps focus (and the keyboard stays open) across the round-trip even
+    /// though clearing the draft unmounts the suggestions section. Invalid
+    /// or failed submissions bump nothing and keep the draft.
+    @Published private(set) var composerFocusRequests = 0
     /// The inline rename draft, bound to the row being renamed.
     @Published var editText = ""
     /// The task currently renamed inline, or nil.
@@ -103,11 +110,12 @@ final class PlannerViewModel: ObservableObject {
     // MARK: - Composer (fast repeated input)
 
     /// Suggestion pool size: the capped newest-first Recents drawn from
-    /// committed entries. Display is bounded separately (a fixed-height
-    /// region showing at most `suggestionDisplayCap`).
+    /// committed entries. Display is bounded separately (a top section of
+    /// the same task list showing at most `suggestionDisplayCap` rows).
     private static let suggestionPoolLimit = 10
-    /// Maximum suggestions rendered: the bounded region never resizes on
-    /// keystrokes, and the composer never moves.
+    /// Maximum suggestions rendered: rows in the list's top section, so
+    /// keystrokes only swap rows inside the list and the composer above
+    /// never moves.
     static let suggestionDisplayCap = 5
 
     /// Matching suggestions for the current draft: case-insensitive prefix
@@ -130,8 +138,9 @@ final class PlannerViewModel: ObservableObject {
 
     /// Submits the composer (Return or the accessible Add affordance):
     /// appends one task after the existing Today rows, clears the draft,
-    /// and keeps the field focused with the keyboard open. An invalid or
-    /// failed submission appends nothing and keeps the draft.
+    /// reloads, and requests composer focus (see `composerFocusRequests`)
+    /// so repeated Returns never dismiss the keyboard. An invalid or failed
+    /// submission appends nothing, requests no focus, and keeps the draft.
     func submit() async {
         let trimmed = ActivityName.normalized(draft)
         guard case .valid = ActivityName.validate(trimmed) else { return }
@@ -155,6 +164,7 @@ final class PlannerViewModel: ObservableObject {
             draft = ""
             invalidate()
             await loadIfNeeded()
+            composerFocusRequests += 1
         } catch {
             errorMessage = L10n.text(in: .default, code: "error.unknown")
         }

@@ -24,8 +24,8 @@
 
 ## 5. Device-feedback fixes
 
-- [ ] 5.1 Render the `checklist` system symbol beside the Track progress count; verify in all five locales, Dynamic Type, and VoiceOver.
-- [ ] 5.2 Retain composer focus across the submit round-trip (store write, snapshot reload, suggestions mount/unmount); add a regression test that fails when focus is lost and re-verify repeated Return with software/hardware keyboards.
-- [ ] 5.3 Preserve the Start affordance slot so completed and open rows share one exact height; add a regression test that toggling completion moves no sibling row.
-- [ ] 5.4 Move suggestions into the task list surface as a top section (no separate mounting region), with match highlight and stable composer frame; re-check Reduce Motion and VoiceOver ordering.
-- [ ] 5.5 Run `swiftlint lint --strict`, warning-free build, full simulator suite, and `openspec validate --all --strict` green.
+- [x] 5.1 Render the `checklist` system symbol beside the Track progress count; verify in all five locales, Dynamic Type, and VoiceOver.
+- [x] 5.2 Retain composer focus across the submit round-trip (store write, snapshot reload, suggestions mount/unmount); add a regression test that fails when focus is lost and re-verify repeated Return with software/hardware keyboards.
+- [x] 5.3 Preserve the Start affordance slot so completed and open rows share one exact height; add a regression test that toggling completion moves no sibling row.
+- [x] 5.4 Move suggestions into the task list surface as a top section (no separate mounting region), with match highlight and stable composer frame; re-check Reduce Motion and VoiceOver ordering.
+- [x] 5.5 Run `swiftlint lint --strict`, warning-free build, full simulator suite, and `openspec validate --all --strict` green.

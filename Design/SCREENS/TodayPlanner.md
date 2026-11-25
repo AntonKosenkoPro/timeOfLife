@@ -45,27 +45,33 @@ Top-to-bottom order:
    `onSubmit` → submit) plus an Add button (`L10n.plannerAdd`, disabled for
    blank drafts). `accessibilityIdentifier`s: `PlannerComposerField`,
    `PlannerAddButton`.
-3. Suggestions region (only while the draft is non-empty): at most
+3. Suggestions section at the top of the same `List` (only while the
+   draft is non-empty, never a separate mounting region): at most
    `suggestionDisplayCap` (5) newest-first Recents filtered by
-   case-insensitive prefix, in a fixed-height region that never resizes on
-   keystrokes. Tapping one fills the exact text only.
-   `accessibilityIdentifier`: `PlannerSuggestions`
-   (`PlannerSuggestion-<text>` per row).
+   case-insensitive prefix, each row rendering the matched prefix bold.
+   Tapping one fills the exact text only. `accessibilityIdentifier`:
+   `PlannerSuggestions` on the section (`PlannerSuggestion-<text>` per
+   row); VoiceOver order is document order (suggestions, then tasks).
 4. Timer-active caption (`L10n.plannerTimerActive`, secondary, caption
    case) while a run is active — Start buttons disable but the checklist
    stays fully usable.
-5. Empty hint (`L10n.plannerEmptyHint`) when the projection is empty, or
-   the checklist `List(.plain)` otherwise
-   (`accessibilityIdentifier`: `PlannerTaskList`).
+5. Empty hint (`L10n.plannerEmptyHint`) when the projection is empty and
+   there are no suggestions, or the single checklist `List(.plain)`
+   otherwise (`accessibilityIdentifier`: `PlannerTaskList`).
 
-The composer sits outside the `List`, so reloads never steal keyboard
-focus and scroll position is the list's own. Track geometry is untouched:
-the only Track change is the toolbar progress item.
+The composer sits outside the `List`, so its frame never moves; every
+successful submit bumps `composerFocusRequests` and the view re-asserts
+input focus, so reloads and the suggestions section mount/unmount never
+steal the keyboard. Scroll position is the list's own. Track geometry is
+untouched: the only Track change is the toolbar progress item.
 
 ### Rows
 
-Each row: completion toggle → name → one-tap Start (open tasks only,
-disabled while a run is active).
+Each row: completion toggle → name → Start affordance slot (always
+mounted in both states — completed rows hide it via
+`PlannerStartSlot.hiddenPreservingLayout`, preserving the exact row
+height so toggling completion moves no sibling; open-task taps Start
+unless a run is active).
 
 - Toggle: `circle` / `checkmark.circle.fill` (accent when done),
   `accessibilityLabel` `L10n.plannerMarkDone` / `L10n.plannerReopen`,
@@ -116,4 +122,6 @@ construction). `accessibilityIdentifier`: `PlannerProgressControl`.
 - [x] Strings in all five locales (`en`, `ru`, `zh-Hans`, `es-419`,
   `pt-BR`) + `L10n`; `Theme` colors only; no raw `Color` literals.
 - [x] `PlannerViewModelTests` (composer, suggestions, edits, moves,
-  delete/undo, Start guards, inheritance).
+  delete/undo, Start guards, inheritance) plus focus-request generations
+  (successful submits bump, invalid ones don't) and `PlannerRowLayoutTests`
+  (Start slot mounted-but-hidden when done; suggestion highlight split).

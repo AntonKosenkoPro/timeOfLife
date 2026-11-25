@@ -5,11 +5,13 @@ import SwiftUI
 /// plus completions on the current local civil date, in the shared order,
 /// with done/total counts from the same snapshot.
 ///
-/// Layout contract: the composer sits ABOVE the list in a fixed slot, so
-/// submitting never moves it and the keyboard stays open across repeated
-/// Returns; the suggestions region has a fixed height and never resizes on
-/// keystrokes; row changes apply without list-level motion (Reduce Motion
-/// safe by construction — no explicit animations).
+/// Layout contract: the composer sits ABOVE the list in a fixed slot and
+/// never unmounts, so submitting never moves it and the keyboard stays open
+/// across repeated Returns; matching Recents render as rows in a suggestions
+/// section at the top of that same list (never a separate mounting region),
+/// so each keystroke only swaps rows inside the list surface; row changes
+/// apply without list-level motion (Reduce Motion safe by construction —
+/// no explicit animations).
 struct PlannerView: View {
     @ObservedObject var vm: PlannerViewModel
     @EnvironmentObject var sync: SyncController
@@ -80,7 +82,6 @@ struct PlannerView: View {
     private var content: some View {
         VStack(spacing: 0) {
             composer
-            suggestionsRegion
             if vm.timerActive {
                 Text(L10n.plannerTimerActive.text)
                     .font(.caption)
@@ -90,7 +91,7 @@ struct PlannerView: View {
                     .padding(.vertical, Theme.spacingSmall)
                     .accessibilityIdentifier("PlannerTimerActiveCaption")
             }
-            if vm.snapshot.tasks.isEmpty {
+            if vm.snapshot.tasks.isEmpty && vm.suggestions.isEmpty {
                 emptyHint
             } else {
                 taskList
@@ -99,11 +100,12 @@ struct PlannerView: View {
         .background(Theme.backgroundPrimary.ignoresSafeArea())
     }
 
-    // MARK: - Composer (stable keyboard, capped suggestions)
+    // MARK: - Composer (stable keyboard, in-list suggestions)
 
     /// The persistent inline field: Return appends one task, clears the
-    /// draft, and keeps the input focused with the keyboard open — the
-    /// composer never moves and no layout jumps.
+    /// draft, and the view re-asserts focus from the view model's
+    /// `composerFocusRequests` once the save round-trip settles — the
+    /// composer never unmounts and no layout jumps.
     private var composer: some View {
         HStack(spacing: Theme.spacingSmall) {
             TextField(L10n.plannerComposerPlaceholder.text, text: $vm.draft)
@@ -121,40 +123,13 @@ struct PlannerView: View {
         }
         .padding(.horizontal, Theme.screenHorizontalPadding)
         .padding(.vertical, Theme.spacingSmall)
-    }
-
-    /// Bounded matching suggestions: newest-first Recents filtered by the
-    /// draft prefix, at most `suggestionDisplayCap`, in a fixed-height
-    /// region that never resizes on keystrokes. Tapping one fills the
-    /// composer with its exact text — no task is created, no timer starts.
-    /// The region mounts once the draft is non-empty (one appearance, then
-    /// a constant height) so an empty composer costs no space.
-    private var suggestionsRegion: some View {
-        Group {
-            if !vm.draft.isEmpty {
-                VStack(spacing: 0) {
-                    ForEach(vm.suggestions) { recent in
-                        Button {
-                            vm.fillFromSuggestion(recent)
-                            composerFocused = true
-                        } label: {
-                            Text(recent.activityText)
-                                .foregroundStyle(Theme.textPrimary)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityIdentifier("PlannerSuggestion-\(recent.activityText)")
-                    }
-                }
-                .frame(maxWidth: .infinity, minHeight: Self.suggestionRowHeight * CGFloat(PlannerViewModel.suggestionDisplayCap), alignment: .top)
-                .padding(.horizontal, Theme.screenHorizontalPadding)
-                .accessibilityIdentifier("PlannerSuggestions")
-            }
+        // The save round-trip (store write + snapshot reload + suggestions
+        // section mount/unmount) must not steal input: every successful
+        // submit bumps the generation and focus is re-asserted here.
+        .onChange(of: vm.composerFocusRequests) { _, _ in
+            composerFocused = true
         }
     }
-
-    private static let suggestionRowHeight: CGFloat = 28
 
     private var emptyHint: some View {
         Text(L10n.plannerEmptyHint.text)
@@ -167,10 +142,23 @@ struct PlannerView: View {
             .accessibilityIdentifier("PlannerEmptyHint")
     }
 
-    // MARK: - Checklist
+    // MARK: - Checklist (suggestions live in the same list)
 
     private var taskList: some View {
         List {
+            if !vm.suggestions.isEmpty {
+                // Suggestions are rows in a top section of this same list —
+                // never a separate mounting region — so the composer above
+                // keeps its exact frame whether they show or not. Tapping
+                // one fills the composer with its exact text: no task is
+                // created, no timer starts.
+                Section {
+                    ForEach(vm.suggestions) { recent in
+                        suggestionRow(recent)
+                    }
+                }
+                .accessibilityIdentifier("PlannerSuggestions")
+            }
             ForEach(vm.snapshot.tasks) { task in
                 PlannerTaskRow(
                     task: task,
@@ -212,6 +200,25 @@ struct PlannerView: View {
         .accessibilityIdentifier("PlannerTaskList")
     }
 
+    /// One suggestion row: tapping fills the composer with the exact text.
+    /// The matched prefix renders bold so the refinement is visible while
+    /// typing; VoiceOver reads the full text in list order (suggestions
+    /// first, then tasks — document order, no explicit sort needed).
+    private func suggestionRow(_ recent: RecentEntry) -> some View {
+        let parts = PlannerSuggestionHighlight.split(text: recent.activityText, draft: vm.draft)
+        return Button {
+            vm.fillFromSuggestion(recent)
+            composerFocused = true
+        } label: {
+            (Text(parts.match).bold() + Text(parts.rest))
+                .foregroundStyle(Theme.textPrimary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("PlannerSuggestion-\(recent.activityText)")
+    }
+
     private func reloadAndRegister() async {
         await vm.loadIfNeeded()
         await vm.registerSystemUndo(with: undoManager)
@@ -223,10 +230,11 @@ struct PlannerView: View {
     }
 }
 
-/// One planner row: completion toggle, inline-renameable name, and a
-/// one-tap Start for open tasks. Completed rows stay in position through
-/// their completion day. VoiceOver reads the name plus its state; reorder
-/// runs through the list's `onMove` (edit mode + rotor, never drag-only).
+/// One planner row: completion toggle, inline-renameable name, and the
+/// Start affordance slot (always mounted — see `PlannerStartSlot`).
+/// Completed rows stay in position through their completion day. VoiceOver
+/// reads the name plus its state; reorder runs through the list's `onMove`
+/// (edit mode + rotor, never drag-only).
 private struct PlannerTaskRow: View {
     let task: PlannerTask
     let timerActive: Bool
@@ -283,16 +291,62 @@ private struct PlannerTaskRow: View {
                 .accessibilityIdentifier("PlannerName-\(task.id)")
             }
 
-            if task.completedOn == nil {
-                Button(L10n.timerStart.text) {
-                    Task { await onStart() }
-                }
-                .buttonStyle(.bordered)
-                .disabled(timerActive)
-                .accessibilityIdentifier("PlannerStart-\(task.id)")
+            // The Start affordance slot stays mounted in both states
+            // (day-planner spec: toggle keeps the list still): completed
+            // rows hide it visually and from assistive tech while preserving
+            // its exact layout footprint, so open and completed rows share
+            // one height and no sibling moves. See `PlannerStartSlot`.
+            Button(L10n.timerStart.text) {
+                Task { await onStart() }
             }
+            .buttonStyle(.bordered)
+            .disabled(timerActive || task.completedOn != nil)
+            .opacity(PlannerStartSlot.slot(for: task).isHidden ? 0 : 1)
+            .accessibilityHidden(task.completedOn != nil)
+            .accessibilityIdentifier("PlannerStart-\(task.id)")
         }
         .listRowBackground(Theme.backgroundPrimary)
+    }
+}
+
+/// Start-affordance slot for a planner row (day-planner spec 5.3): both
+/// states mount the slot, so open and completed rows share one exact
+/// height and toggling completion moves no sibling row. The completed
+/// state hides the control visually (`.opacity(0)` preserves layout) and
+/// from assistive tech (`.accessibilityHidden`), and disables it so the
+/// invisible button never fires. Pinned by `PlannerRowLayoutTests` (the
+/// `ClearButtonVisibility` precedent — SwiftUI layout is not unit-testable,
+/// so the tests pin this helper and the row consumes it).
+enum PlannerStartSlot: Equatable {
+    /// Open task: the Start button shows and fires (unless a run is active).
+    case visible
+    /// Completed task: the slot stays mounted but hidden and inert.
+    case hiddenPreservingLayout
+
+    /// Whether the control hides while keeping its layout footprint.
+    var isHidden: Bool {
+        self == .hiddenPreservingLayout
+    }
+
+    static func slot(for task: PlannerTask) -> PlannerStartSlot {
+        task.completedOn == nil ? .visible : .hiddenPreservingLayout
+    }
+}
+
+/// Suggestion match highlight (day-planner spec 5.4): splits a suggestion's
+/// exact text into the draft's matched prefix (rendered bold) and the
+/// remainder. Matching mirrors the view model's prefix rule —
+/// case-insensitive over the normalized draft — so the highlight always
+/// covers exactly the filter match. Pinned by `PlannerRowLayoutTests`.
+enum PlannerSuggestionHighlight {
+    static func split(text: String, draft: String) -> (match: String, rest: String) {
+        let trimmed = ActivityName.normalized(draft)
+        guard !trimmed.isEmpty,
+              text.lowercased().hasPrefix(trimmed.lowercased()),
+              trimmed.count <= text.count
+        else { return ("", text) }
+        let end = text.index(text.startIndex, offsetBy: trimmed.count)
+        return (String(text[..<end]), String(text[end...]))
     }
 }
 
@@ -309,7 +363,7 @@ struct PlannerProgressControl: View {
     var body: some View {
         Button(action: onOpen) {
             HStack(spacing: 4) {
-                Image(systemName: "list.bullet")
+                Image(systemName: "checklist")
                 Text("\(snapshot.done)/\(snapshot.total)")
                     .monospacedDigit()
             }

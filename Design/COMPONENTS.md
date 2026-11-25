@@ -1150,7 +1150,7 @@ struct PlannerProgressControl: View {
 
 ### Visual
 
-- A toolbar `Button` with a `list.bullet` icon and `done/total` numerals
+- A toolbar `Button` with a `checklist` icon and `done/total` numerals
   (`.monospacedDigit()`), e.g. `2/5`.
 - `accessibilityLabel`: `L10n.plannerProgressLabel` (`%1$d of %2$d` per
   locale — no plurals by construction); `accessibilityIdentifier`:
