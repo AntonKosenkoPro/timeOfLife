@@ -1492,7 +1492,9 @@ paths:
           description: |
             409 conflict. `planner_conflict` — a `create` whose task id is
             already live under a different operation; `details` carries the
-            server's current task.
+            server's current task (string-valued: id, name, position_key,
+            revision, completed_on ("" when open), deleted, created_at,
+            updated_at), so the client can adopt it without a follow-up fetch.
           content:
             application/json:
               schema:
@@ -1505,7 +1507,11 @@ paths:
                     id: "019639f1-7a3b-7abc-9def-100000000010"
                     name: "Read"
                     position_key: "500000"
-                    revision: 7
+                    revision: "7"
+                    completed_on: ""
+                    deleted: "false"
+                    created_at: "2026-11-25T09:00:00Z"
+                    updated_at: "2026-11-25T10:00:00Z"
         "410":
           description: |
             Terminal delete — the task id carries a deletion marker.

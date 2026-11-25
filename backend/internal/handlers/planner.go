@@ -33,11 +33,15 @@ func (h *Handler) writePlannerStoreErr(w http.ResponseWriter, r *http.Request, e
 		writeError(w, http.StatusNotFound, codeNotFound, "Not found", nil)
 	case errors.Is(err, db.ErrPlannerConflict):
 		writeError(w, http.StatusConflict, codePlannerConflict,
-			"A planner task with this id already exists.", map[string]any{
+			"A planner task with this id already exists.", map[string]string{
 				"id":           task.ID,
 				"name":         task.Name,
 				"position_key": task.PositionKey,
-				"revision":     task.Revision,
+				"revision":     strconv.FormatInt(task.Revision, 10),
+				"completed_on": completedOnDetail(task.CompletedOn),
+				"deleted":      strconv.FormatBool(task.Deleted),
+				"created_at":   task.CreatedAt.UTC().Format(time.RFC3339Nano),
+				"updated_at":   task.UpdatedAt.UTC().Format(time.RFC3339Nano),
 			})
 	case errors.Is(err, db.ErrPlannerGone):
 		writeError(w, http.StatusGone, codePlannerGone,
@@ -144,6 +148,16 @@ func (h *Handler) ApplyPlannerOperation(w http.ResponseWriter, r *http.Request) 
 	h.logger.InfoContext(r.Context(), "planner operation applied", "userID", userID,
 		"taskID", task.ID, "intent", op.Intent, "revision", task.Revision, "created", isNew)
 	writeJSON(w, status, task)
+}
+
+// completedOnDetail renders the nullable civil completion date for the
+// string-only 409 details map (the iOS details decoder only represents
+// strings — numeric/bool values would decode as null).
+func completedOnDetail(completedOn *string) string {
+	if completedOn == nil {
+		return ""
+	}
+	return *completedOn
 }
 
 // validatePlannerIDs validates the two UUID fields under their own names
