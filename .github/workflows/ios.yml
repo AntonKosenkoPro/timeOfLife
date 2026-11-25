@@ -176,10 +176,10 @@ jobs:
     # still reports.
     if: github.event_name != 'pull_request' || needs.changes.outputs.ios == 'true'
     runs-on: macos-15
-    # Sized for TWO full simulator test invocations (Debug + Screenshot
-    # configurations): a single-test budget red-lines the lane on timeout
-    # rather than on a test failure.
-    timeout-minutes: 45
+    # Sized for ONE full simulator test invocation (Debug configuration).
+    # The Screenshot configuration lives in the parallel screenshot-build-test
+    # job below, so this lane no longer budgets for two configurations.
+    timeout-minutes: 30
     steps:
       # Full history + tags: the stamp harness asserts history-aware banding
       # (ancestor re-upload case needs HEAD~1) and enumerates tags per
@@ -275,32 +275,6 @@ jobs:
             -destination 'generic/platform=iOS Simulator' \
             build | xcpretty
 
-      - name: Build Screenshot configuration
-        # Gated on changes.screenshot (same filter as the slow suite
-        # below): the Screenshot config compiles product code with
-        # SCREENSHOT_CAPTURE, which the Debug build above does NOT
-        # compile (only the Screenshot config defines the flag — see
-        # project.yml). Push to main always builds it; PRs build it when
-        # the diff touches capture/config/entitlement/xcconfig/
-        # LiveActivity paths, or when any changed file contains
-        # SCREENSHOT_CAPTURE (content-aware fallback in the changes job
-        # — catches product edits outside the path list that still break
-        # capture-only code). Costs ~4 min (measured 4m00s on PR #250 run
-        # 43171912084), so it stays gated rather than unconditional; the
-        # slow TEST suite below stays gated the same way.
-        # Residual gap (accepted): capture-called product APIs that do NOT
-        # contain the token themselves (e.g. AppContainer.swift: 0
-        # occurrences, called by ScreenshotApp.swift:83) are NOT covered
-        # by the path list or the content fallback — kept gated by explicit
-        # user decision (round-2 finding 4 waived).
-        if: github.event_name != 'pull_request' || needs.changes.outputs.screenshot == 'true'
-        working-directory: ios/TimeOfLife
-        run: |
-          set -o pipefail
-          xcodebuild -scheme TimeOfLife-Screenshot \
-            -destination 'generic/platform=iOS Simulator' \
-            build | xcpretty
-
       - name: Resolve simulator destination
         id: sim
         working-directory: ios/TimeOfLife
@@ -320,17 +294,85 @@ jobs:
             -destination "platform=iOS Simulator,name=${{ steps.sim.outputs.name }},OS=latest" \
             test | xcpretty
 
+  screenshot-build-test:
+    needs: [changes]
+    # Split from lint-build-test: the Screenshot config compiles product code
+    # with SCREENSHOT_CAPTURE, which the Debug build above does NOT compile
+    # (only the Screenshot config defines the flag — see project.yml). Push
+    # to main always runs it; PRs run it when the diff touches
+    # capture/config/entitlement/xcconfig/LiveActivity paths, or when any
+    # changed file contains SCREENSHOT_CAPTURE (content-aware fallback in the
+    # changes job — catches product edits outside the path list that still
+    # break capture-only code). Costs ~4 min build (measured 4m00s on PR
+    # #250 run 43171912084) plus the slow TEST suite below, so it stays
+    # gated rather than unconditional. Runs in parallel with lint-build-test
+    # so the 31m05s combined lane on PR #253 (run 45630667389) splits into
+    # two shorter lanes instead of one 45-minute lane.
+    # Residual gap (accepted): capture-called product APIs that do NOT
+    # contain the token themselves (e.g. AppContainer.swift: 0
+    # occurrences, called by ScreenshotApp.swift:83) are NOT covered
+    # by the path list or the content fallback — kept gated by explicit
+    # user decision (round-2 finding 4 waived).
+    if: github.event_name != 'pull_request' || needs.changes.outputs.screenshot == 'true'
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install pinned xcodegen
+        # xcodegen-only (swiftlint stays in lint-build-test): the pin is
+        # fail-closed in ci_post_clone.sh (single source of truth). Same
+        # digest + prefix-tree install asserts as the main lane so the
+        # Screenshot generate cannot drift from the release gate.
+        run: |
+          XCODEGEN_PIN="$(grep -m1 '^XCODEGEN_PIN="' ios/TimeOfLife/ci_scripts/ci_post_clone.sh | cut -d'"' -f2 || true)"
+          [ -n "$XCODEGEN_PIN" ] || { echo "::error::cannot read XCODEGEN_PIN from ci_post_clone.sh — refusing to install an unpinned xcodegen"; exit 1; }
+          XCODEGEN_ZIP_SHA256="4d9e34b62172d645eed6457cac13fc222569974098ef4ee9c3368bedf0196806"
+          curl -fsSL --retry 5 --retry-delay 2 --retry-all-errors "https://github.com/yonaskolb/XcodeGen/releases/download/${XCODEGEN_PIN}/xcodegen.zip" -o "${RUNNER_TEMP}/xcodegen.zip"
+          echo "${XCODEGEN_ZIP_SHA256}  ${RUNNER_TEMP}/xcodegen.zip" | shasum -a 256 -c - || \
+            { echo "::error::xcodegen.zip digest mismatch for pin ${XCODEGEN_PIN} — if the pin was bumped, update XCODEGEN_ZIP_SHA256 (see docs/ci.md pin table)"; exit 1; }
+          rm -rf "${RUNNER_TEMP}/xcodegen" && mkdir -p "${RUNNER_TEMP}/xcodegen"
+          unzip -o -q "${RUNNER_TEMP}/xcodegen.zip" -d "${RUNNER_TEMP}/xcodegen"
+          BIN="$(find "${RUNNER_TEMP}/xcodegen" -path '*/bin/xcodegen' -type f -print -quit)"
+          [ -n "$BIN" ] || { echo "::error::xcodegen binary not found in release archive"; exit 1; }
+          XG_ROOT="$(dirname "$(dirname "$BIN")")"
+          [ -d "$XG_ROOT/share/xcodegen" ] || { echo "::error::xcodegen share/xcodegen presets missing from release archive"; exit 1; }
+          sudo install -m 755 "$BIN" /usr/local/bin/xcodegen
+          sudo rm -rf /usr/local/share/xcodegen
+          sudo mkdir -p /usr/local/share && sudo cp -R "$XG_ROOT/share/xcodegen" /usr/local/share/
+          test "$(/usr/local/bin/xcodegen --version | grep -m1 -o '[0-9][0-9.]*' | head -n1)" = "$XCODEGEN_PIN" || \
+            { echo "::error::xcodegen drift: got $(/usr/local/bin/xcodegen --version), want $XCODEGEN_PIN"; exit 1; }
+          echo "/usr/local/bin" >> "$GITHUB_PATH"
+
+      - name: Generate Xcode project
+        working-directory: ios/TimeOfLife
+        run: xcodegen generate
+
+      - name: Build Screenshot configuration
+        working-directory: ios/TimeOfLife
+        run: |
+          set -o pipefail
+          xcodebuild -scheme TimeOfLife-Screenshot \
+            -destination 'generic/platform=iOS Simulator' \
+            build | xcpretty
+
+      - name: Resolve simulator destination
+        id: sim
+        working-directory: ios/TimeOfLife
+        run: |
+          NAME=$(xcrun simctl list devices available -j | \
+            python3 -c 'import json,sys
+          ds=json.load(sys.stdin)["devices"]
+          print(next(d["name"] for rt in ds for d in ds[rt]
+                     if "iPhone" in d["name"] and d.get("isAvailable")))')
+          echo "name=$NAME" >> "$GITHUB_OUTPUT"
+
       - name: Test Screenshot configuration
         # The TimeOfLife-Screenshot scheme exists so the ~900 lines of
         # #if SCREENSHOT_CAPTURE tests (CaptureClockSeamTests,
         # ScreenshotCaptureTests, ScreenshotCleanupActivityTests, …) compile
         # to something and actually execute — under Debug they compile to
         # nothing and never run anywhere.
-        # Slow (full simulator run under a second configuration), so PRs
-        # run it only when the diff touches capture/config/entitlement/
-        # xcconfig/LiveActivity paths (changes.screenshot); push to main
-        # always runs it. The Debug suite above stays unconditional.
-        if: github.event_name != 'pull_request' || needs.changes.outputs.screenshot == 'true'
         working-directory: ios/TimeOfLife
         run: |
           set -o pipefail
@@ -388,7 +430,7 @@ jobs:
   # success-or-skip; a changes failure fails the gate (never green-unverified).
   ios-gate:
     if: always()
-    needs: [changes, lint-build-test, tooling-tests, panels-tests]
+    needs: [changes, lint-build-test, screenshot-build-test, tooling-tests, panels-tests]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -399,6 +441,10 @@ jobs:
           case "${{ needs.lint-build-test.result }}" in
             success|skipped) echo "lint-build-test ${{ needs.lint-build-test.result }} — gate green";;
             *) echo "::error::lint-build-test ${{ needs.lint-build-test.result }}"; exit 1;;
+          esac
+          case "${{ needs.screenshot-build-test.result }}" in
+            success|skipped) echo "screenshot-build-test ${{ needs.screenshot-build-test.result }} — gate green";;
+            *) echo "::error::screenshot-build-test ${{ needs.screenshot-build-test.result }}"; exit 1;;
           esac
           case "${{ needs.tooling-tests.result }}" in
             success|skipped) echo "tooling-tests ${{ needs.tooling-tests.result }} — gate green";;
