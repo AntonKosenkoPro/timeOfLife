@@ -34,7 +34,7 @@ A task SHALL have a trimmed, valid timer name as its only user-entered field. Ta
 
 ### Requirement: The composer supports repeated adds without dismissing the keyboard
 
-The Today page SHALL use one inline composer fixed at the bottom of the screen with a single task list surface above it. While the keyboard is open, a single horizontally scrollable line of recent-activity chips drawn from newest-first Recents SHALL sit fixed between the composer and the keyboard; typing filters the chips by prefix, and tapping a chip fills the composer with its exact text. Choosing a chip SHALL create no task and start no timer. Return on a valid draft SHALL append one task at the end of the list with an expanding insertion, clear the composer, and keep the input focused with the keyboard open. The field SHALL never resign first responder across a submit — no dismiss/reopen cycle of any duration. The composer SHALL suppress the Return key's default resign at dispatch (custom submit handling that never resigns), rather than restoring focus afterwards. Invalid or failed submission SHALL NOT append a row or discard the draft. Row changes SHALL use non-disruptive feedback and respect Reduce Motion.
+The Today page SHALL use one inline composer fixed at the bottom of the screen with a single task list surface above it. While the keyboard is open, a single horizontally scrollable line of recent-activity chips drawn from newest-first Recents SHALL sit fixed between the composer and the keyboard; typing filters the chips by prefix, and tapping a chip fills the composer with its exact text. Choosing a chip SHALL create no task and start no timer. Submitting a valid draft (keyboard Return key or the composer's Add accessibility action — there SHALL be no separate visible Add button) SHALL append one task at the end of the list with an expanding insertion, clear the composer, and keep the input focused with the keyboard open. When the draft matches no Recent, the chips line SHALL show a localized no-match placeholder instead of an empty strip. The field SHALL never resign first responder across a submit — no dismiss/reopen cycle of any duration. The composer SHALL suppress the Return key's default resign at dispatch (custom submit handling that never resigns), rather than restoring focus afterwards. Invalid or failed submission SHALL NOT append a row or discard the draft. Row changes SHALL use non-disruptive feedback and respect Reduce Motion.
 
 #### Scenario: Add consecutive tasks
 - **WHEN** the user adds a valid task with Return and then types and submits the next name
@@ -55,6 +55,10 @@ The Today page SHALL use one inline composer fixed at the bottom of the screen w
 #### Scenario: Fill from a chip
 - **WHEN** the user taps a chip
 - **THEN** its exact text fills the composer for editing or submission, no task is created, and no timer starts
+
+#### Scenario: No matches show a placeholder
+- **WHEN** the typed draft matches no Recent
+- **THEN** the chips line shows the localized no-match placeholder instead of an empty strip
 
 ### Requirement: An open task starts the existing timer
 
