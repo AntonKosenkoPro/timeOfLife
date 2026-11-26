@@ -14,15 +14,21 @@ import LifioLiveActivityCore
 final class TimerService: ObservableObject {
     let store: LocalStore
     private let liveActivities: LiveActivityControlling
+    /// Notification surface for the linked-stop commit event (day-planner
+    /// 14.2). Production uses `.default`; tests inject a private center so
+    /// global posts from parallel suites cannot reload VMs under test.
+    private let notifications: NotificationCenter
 
     init(
         store: LocalStore,
         liveActivities: LiveActivityControlling = LiveActivityService {
             UIApplication.shared.applicationState == .active
-        }
+        },
+        notifications: NotificationCenter = .default
     ) {
         self.store = store
         self.liveActivities = liveActivities
+        self.notifications = notifications
     }
 
     /// Starts (or rewrites) the persisted running draft for the given
@@ -213,6 +219,13 @@ final class TimerService: ObservableObject {
         let mutation = try await store.stopRunningTimer(entry, plannerLink: plannerLink)
         guard case let .created(saved) = mutation else {
             throw StopError.notCompleted
+        }
+        // A linked Stop may have completed the planner task in the same
+        // transaction: tell the planner projection to reload so the Track
+        // progress control refreshes in place (day-planner 14.2). Ordinary
+        // stops carry no link and post nothing.
+        if plannerLink != nil {
+            notifications.post(name: .plannerLinkedStopCommitted, object: nil)
         }
         await liveActivities.runEnded(startedAt: startedAt, durationSeconds: durationSeconds)
         BackgroundReapScheduler.cancelReapCheck()

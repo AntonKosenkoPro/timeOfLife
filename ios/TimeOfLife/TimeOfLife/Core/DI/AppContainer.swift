@@ -339,4 +339,11 @@ extension Notification.Name {
     /// tracker surfaces reload so no stale running state survives
     /// (live-activities D8; event-driven reload owned by remove-compact-timer).
     static let timerStoppedExternally = Notification.Name("timerStoppedExternally")
+
+    /// Posted (in-process) after a linked Stop commits (day-planner 14.2):
+    /// the run started from a planner task, so the Today projection may
+    /// have changed. The planner view model observes this and reloads, so
+    /// the Track progress control refreshes in place with no navigation.
+    /// Ordinary stops carry no link and post nothing.
+    static let plannerLinkedStopCommitted = Notification.Name("plannerLinkedStopCommitted")
 }

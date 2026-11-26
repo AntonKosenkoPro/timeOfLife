@@ -48,16 +48,37 @@ extension LocalStore {
         var completedOn: String
     }
 
-    /// Maps a `planner_tasks` row into a PlannerTask.
+    /// Maps a `planner_tasks` row into a PlannerTask. `category_ids` is
+    /// the ordered set as a comma-joined TEXT column (timer_state grammar);
+    /// NULL or empty decodes to no categories.
     private static func plannerTask(from row: Row) -> PlannerTask {
-        PlannerTask(
+        let joined: String? = row["category_ids"]
+        return PlannerTask(
             id: row["id"],
             name: row["name"],
             positionKey: row["position_key"],
             completedOn: row["completed_on"],
+            categoryIDs: plannerCategoryIDs(from: joined),
             createdAt: row["created_at"],
             updatedAt: row["updated_at"]
         )
+    }
+
+    /// Decodes a comma-joined ordered category set (the `timer_state`
+    /// grammar). UUIDs never contain a comma, so the split is lossless.
+    /// Internal (not private): the sync extension in
+    /// `LocalStorePlannerSync.swift` shares these helpers.
+    static func plannerCategoryIDs(from joined: String?) -> [String] {
+        guard let joined, !joined.isEmpty else { return [] }
+        return joined.split(separator: ",").map(String.init)
+    }
+
+    /// Encodes the ordered category set for storage, deduplicated
+    /// (category-management D5) with first-seen order preserved.
+    /// Internal (not private): the sync extension in
+    /// `LocalStorePlannerSync.swift` shares these helpers.
+    static func joinPlannerCategoryIDs(_ ids: [String]) -> String {
+        Self.deduplicate(ids).joined(separator: ",")
     }
 
     /// All planner tasks in the shared display order
@@ -84,8 +105,9 @@ extension LocalStore {
     /// Creates a planner task (appended at `positionKey`, allocated by the
     /// caller between its neighbors) plus its outbox create row in one
     /// transaction. Names follow the shared timer-name rule; identical
-    /// names are separate identities. Returns `.invalid` without writing
-    /// when the name is empty or too long.
+    /// names are separate identities. New tasks carry no categories —
+    /// the editor sheet tags them afterwards through the retag intent.
+    /// Returns `.invalid` without writing when the name is empty or too long.
     func createPlannerTask(
         id: String,
         name: String,
@@ -110,10 +132,10 @@ extension LocalStore {
             do {
                 try db.execute(
                     sql: """
-                        INSERT INTO planner_tasks (id, name, position_key, completed_on, created_at, updated_at)
-                        VALUES (?, ?, ?, NULL, ?, ?)
+                        INSERT INTO planner_tasks (id, name, category_ids, position_key, completed_on, created_at, updated_at)
+                        VALUES (?, ?, ?, ?, NULL, ?, ?)
                         """,
-                    arguments: [task.id, task.name, task.positionKey, task.createdAt, task.updatedAt]
+                    arguments: [task.id, task.name, Self.joinPlannerCategoryIDs(task.categoryIDs), task.positionKey, task.createdAt, task.updatedAt]
                 )
             } catch {
                 return .failure
@@ -151,6 +173,29 @@ extension LocalStore {
                                        operationID: operationID,
                                        taskID: task.id, intent: PlannerIntent.rename.rawValue,
                                        name: task.name
+                                   ))
+            return .saved(task)
+        }
+    }
+
+    /// Replaces a planner task's ordered category set plus its outbox row
+    /// in one transaction (the `retag` field intent — its own revision and
+    /// acceptance, like rename). A retag never changes the name, position,
+    /// completion, or any timer/entry. Unchanged sets enqueue nothing.
+    func retagPlannerTask(id: String, categoryIDs: [String], operationID: String, now: Date = Date()) throws -> PlannerMutation {
+        let stamped = Self.storageQuantized(now)
+        return try queue.write { db in
+            guard var task = try Self.fetchPlannerTask(db, id: id) else { return .missing }
+            let deduped = Self.deduplicate(categoryIDs)
+            guard task.categoryIDs != deduped else { return .saved(task) }
+            task.categoryIDs = deduped
+            task.updatedAt = stamped
+            try Self.writePlannerTask(db, task)
+            try Self.enqueueOutbox(db: db, resource: Self.plannerResource, recordID: task.id,
+                                   op: "update", payload: PlannerOperationPayload(
+                                       operationID: operationID,
+                                       taskID: task.id, intent: PlannerIntent.retag.rawValue,
+                                       categoryIDs: task.categoryIDs
                                    ))
             return .saved(task)
         }
@@ -289,10 +334,10 @@ extension LocalStore {
             let task = try JSONDecoder().decode(PlannerTask.self, from: record.data)
             try db.execute(
                 sql: """
-                    INSERT OR IGNORE INTO planner_tasks (id, name, position_key, completed_on, created_at, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?)
+                    INSERT OR IGNORE INTO planner_tasks (id, name, category_ids, position_key, completed_on, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
                     """,
-                arguments: [task.id, task.name, task.positionKey, task.completedOn, task.createdAt, task.updatedAt]
+                arguments: [task.id, task.name, Self.joinPlannerCategoryIDs(task.categoryIDs), task.positionKey, task.completedOn, task.createdAt, task.updatedAt]
             )
             try db.execute(sql: "DELETE FROM undo_buffer WHERE id = ?", arguments: [bufferID])
             return task
@@ -313,10 +358,10 @@ extension LocalStore {
         try db.execute(
             sql: """
                 UPDATE planner_tasks
-                SET name = ?, position_key = ?, completed_on = ?, updated_at = ?
+                SET name = ?, category_ids = ?, position_key = ?, completed_on = ?, updated_at = ?
                 WHERE id = ?
                 """,
-            arguments: [task.name, task.positionKey, task.completedOn, task.updatedAt, task.id]
+            arguments: [task.name, Self.joinPlannerCategoryIDs(task.categoryIDs), task.positionKey, task.completedOn, task.updatedAt, task.id]
         )
     }
 }

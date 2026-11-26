@@ -1,15 +1,20 @@
 import Foundation
 
-/// One day-planner task (day-planner spec): a name-only checklist row with an
-/// independent identity, an order key shared across devices, and a nullable
-/// civil completion date. Tasks with identical names have separate identities.
+/// One day-planner task (day-planner spec): a checklist row with an
+/// independent identity, a validated name, an optional ordered category set,
+/// an order key shared across devices, and a nullable civil completion date.
+/// Tasks with identical names have separate identities.
 /// Planner rows never feed History, Insights, or Recents; they are not
 /// entries, categories, or synced timer drafts.
 struct PlannerTask: Codable, Equatable, Identifiable, Sendable {
     /// Client-generated UUID v7, stable across devices.
     let id: String
-    /// Trimmed valid timer name (the only user-entered field).
+    /// Trimmed valid timer name (edited in the task editor sheet).
     var name: String
+    /// Optional ordered category set (edited in the task editor sheet;
+    /// empty when the task carries none — Start falls back to exact-text
+    /// Recents inheritance). Synced as its own field intent.
+    var categoryIDs: [String]
     /// Exact-decimal order key; display order is `(positionKey, id)`
     /// compared byte-wise (ASCII-only, so `String.<` agrees on all devices).
     var positionKey: String
@@ -22,6 +27,7 @@ struct PlannerTask: Codable, Equatable, Identifiable, Sendable {
 
     enum CodingKeys: String, CodingKey {
         case id, name
+        case categoryIDs = "category_ids"
         case positionKey = "position_key"
         case completedOn = "completed_on"
         case createdAt = "created_at"
@@ -33,6 +39,7 @@ struct PlannerTask: Codable, Equatable, Identifiable, Sendable {
         name: String,
         positionKey: String,
         completedOn: String? = nil,
+        categoryIDs: [String] = [],
         createdAt: Date = Date(),
         updatedAt: Date = Date()
     ) {
@@ -40,8 +47,22 @@ struct PlannerTask: Codable, Equatable, Identifiable, Sendable {
         self.name = name
         self.positionKey = positionKey
         self.completedOn = completedOn
+        self.categoryIDs = categoryIDs
         self.createdAt = createdAt
         self.updatedAt = updatedAt
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        name = try container.decode(String.self, forKey: .name)
+        // Pre-§14 relays omit the set: default to empty instead of failing
+        // the feed decode (the retag intent re-converges it).
+        categoryIDs = try container.decodeIfPresent([String].self, forKey: .categoryIDs) ?? []
+        positionKey = try container.decode(String.self, forKey: .positionKey)
+        completedOn = try container.decodeIfPresent(String.self, forKey: .completedOn)
+        createdAt = try container.decode(Date.self, forKey: .createdAt)
+        updatedAt = try container.decode(Date.self, forKey: .updatedAt)
     }
 }
 
@@ -56,6 +77,8 @@ struct PlannerOperationPayload: Codable, Equatable, Sendable {
     var name: String?
     var positionKey: String?
     var completedOn: String?
+    /// Ordered category set for `create` (initial) and `retag` (replace).
+    var categoryIDs: [String]?
 
     enum CodingKeys: String, CodingKey {
         case operationID = "operation_id"
@@ -63,12 +86,13 @@ struct PlannerOperationPayload: Codable, Equatable, Sendable {
         case intent, name
         case positionKey = "position_key"
         case completedOn = "completed_on"
+        case categoryIDs = "category_ids"
     }
 }
 
 /// Planner field intents (backend/api/openapi.yaml `PlannerIntent`).
 enum PlannerIntent: String, Sendable {
-    case create, rename, move, complete, reopen, delete
+    case create, rename, move, complete, reopen, delete, retag
 }
 
 /// Civil-date capture (day-planner spec D2): the writing device records the

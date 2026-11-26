@@ -22,14 +22,17 @@ Planner rows never feed History, Insights, or Recents.
    nothing shows the no-match placeholder in the chips line; the ×
    clears the draft without losing the keyboard.
 4. The user toggles a task done (it stays in position through its
-   completion day), renames it inline, drags it to a new position in edit
+   completion day), taps a task to edit it in the sheet (name plus
+   ordered categories), drags it to a new position in edit
    mode (VoiceOver rotor included), or swipes a Mail-style
    delete/complete pill (shake-to-undo restores deletes via the system
    Undo confirmation).
-5. The user taps Start on an open task when no timer is active: the exact
-   text goes through the ordinary category-inheritance rule and the run
-   starts on Track with that task linked. Stopping saves the entry and
-   completes exactly that task.
+5. The user taps Start on an open task when no timer is active: a task
+   holding categories starts with exactly those; a task without
+   categories falls back to the ordinary exact-text Recents inheritance.
+   The run starts on Track with that task linked. Stopping saves the
+   entry and completes exactly that task; the Track counts refresh in
+   place with no further navigation.
 
 ## Screen: PlannerView
 
@@ -97,10 +100,14 @@ unless a run is active).
   `accessibilityLabel` `L10n.plannerMarkDone` / `L10n.plannerReopen`,
   `PlannerToggle-<id>`. Completed names render secondary + strikethrough
   and stay in position through their completion day.
-- Name: tap renames inline (a `TextField` bound to the edit draft, Return
-  commits, × cancels per the Track clear-button grammar, focus loss
-  commits). Empty commits revert with no write.
-  (`PlannerRenameField-<id>`, `PlannerName-<id>`).
+- Name: tap opens the task editor sheet (Name + ordered Categories in
+  Log Time sheet grammar, reduced to those two fields; `L10n.plannerAdd`
+  precedent for the Add accessibility path does not apply here — the row
+  never renames inline). The sheet saves the name and the set as
+  independent field intents, so a name-only edit sends no categories and
+  a tag-only edit sends no name.
+  (`PlannerName-<id>`; sheet: `PlannerEditorNameField`,
+  `PlannerEditorCategories`, `PlannerEditorSaveButton`).
 - Start: bordered `L10n.timerStart` (the ordinary Start string — there is
   no separate Track completion control), `PlannerStart-<id>`. Hidden for
   completed rows.
@@ -121,12 +128,18 @@ unless a run is active).
 
 ### Progress control
 
-`PlannerProgressControl` (same file): a toolbar button with a list icon
-and `done/total` numerals. Reports the shared Today projection, offers an
+`PlannerProgressControl` (same file): a toolbar button with a dynamic
+checklist icon and `done/total` numerals. The icon follows completion:
+`checklist.unchecked` at 0 done (including the empty list),
+`checklist` while partially done, `checklist.checked` at N/N with N > 0
+(a runtime test resolves all three symbols — a missing symbol renders
+nothing). Reports the shared Today projection, offers an
 entry point even when the list is empty, stays usable while timing, and
 lives in the navigation chrome so the numeric readout and Start/Stop
 never move. The launch gate preloads the projection, so the control shows
-actual counts on first paint from warm local data (no 0/0 flash).
+actual counts on first paint from warm local data (no 0/0 flash). A
+linked Stop invalidates the projection, so the control refreshes in
+place with no further navigation.
 `accessibilityLabel`:
 `L10n.plannerProgressLabel` (`%1$d of %2$d` per locale, no plurals by
 construction). `accessibilityIdentifier`: `PlannerProgressControl`.
@@ -144,9 +157,17 @@ construction). `accessibilityIdentifier`: `PlannerProgressControl`.
   it, so Track shows actual counts on first paint from warm local data.
 - [x] Completing/reopening keeps position and never touches timers or
   entries; identical names stay independent.
-- [x] Start copies the name with exact-text category inheritance, persists
-  the task id via the claim-guarded draft, and pops to Track; a second
-  Start returns false with no replacement.
+- [x] The editor sheet edits the name and the ordered category set as
+  independent field intents (Log Time sheet grammar, same field
+  order/cards/validation); invalid saves keep the sheet open with the
+  draft intact.
+- [x] Start uses the task's categories when non-empty, else exact-text
+  Recents inheritance; persists the task id via the claim-guarded draft,
+  and pops to Track; a second Start returns false with no replacement.
+- [x] A linked Stop invalidates the planner projection, so the Track
+  counts refresh in place; ordinary Stop posts nothing and is unchanged.
+- [x] The progress icon follows completion (`checklist.unchecked` /
+  `checklist` / `checklist.checked`), resolved at runtime by test.
 - [x] Live Activity Stop uses the same store path (linked completion
   unchanged, cold open included).
 - [x] Strings in all five locales (`en`, `ru`, `zh-Hans`, `es-419`,

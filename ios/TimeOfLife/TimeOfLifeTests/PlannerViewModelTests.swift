@@ -148,24 +148,71 @@ struct PlannerViewModelTests {
         #expect(vm.snapshot.tasks.map(\.name) == ["B", "A"])
     }
 
-    @Test("rename keeps position and empty renames revert")
-    func renameKeepsPosition() async throws {
+    @Test("sheet edit renames and retags in place with no entry change")
+    func sheetEditRenamesAndRetags() async throws {
+        let (vm, store) = await makeContext(categories: [("c1", "Work"), ("c2", "Gym")])
+        await vm.loadIfNeeded()
+        vm.draft = "A"
+        await vm.submit()
+        let task = try #require(vm.snapshot.tasks.first)
+        vm.beginEdit(task)
+        vm.sheetName = "Zed"
+        vm.sheetCategoryIDs = ["c1", "c2"]
+        #expect(vm.isSheetSaveEnabled)
+        let closed = await vm.saveSheet()
+        #expect(closed)
+        #expect(vm.editingTask == nil)
+        #expect(vm.snapshot.tasks.map(\.name) == ["Zed"])
+        #expect(vm.snapshot.tasks.first?.categoryIDs == ["c1", "c2"])
+        // Position kept; no timer or entry touched.
+        #expect(try await store.plannerTask(id: task.id)?.positionKey == task.positionKey)
+        #expect(try await store.timerDraft() == nil)
+        #expect(try await store.recents(limit: 10).isEmpty)
+        // One field intent per changed field (alongside the create row).
+        let intents = try await store.outboxRows().compactMap { row -> String? in
+            guard let payload = row.payload?.data(using: .utf8) else { return nil }
+            return try? JSONDecoder().decode(PlannerOperationPayload.self, from: payload).intent
+        }.filter { $0 != PlannerIntent.create.rawValue }
+        #expect(intents.sorted() == ["rename", "retag"])
+    }
+
+    @Test("sheet tag-only edit sends no rename")
+    func sheetTagOnlyEditSendsNoRename() async throws {
+        let (vm, store) = await makeContext(categories: [("c1", "Work")])
+        await vm.loadIfNeeded()
+        vm.draft = "A"
+        await vm.submit()
+        let task = try #require(vm.snapshot.tasks.first)
+        let before = try await store.outboxRowCount()
+        vm.beginEdit(task)
+        vm.sheetName = task.name
+        vm.sheetCategoryIDs = ["c1"]
+        #expect(await vm.saveSheet())
+        #expect(vm.snapshot.tasks.first?.categoryIDs == ["c1"])
+        #expect(vm.snapshot.tasks.first?.name == "A")
+        let rows = try await store.outboxRows()
+        #expect(rows.count == before + 1)
+        let payload = try #require(rows.last?.payload?.data(using: .utf8))
+        let op = try JSONDecoder().decode(PlannerOperationPayload.self, from: payload)
+        #expect(op.intent == PlannerIntent.retag.rawValue)
+        #expect(op.categoryIDs == ["c1"])
+        #expect(op.name == nil)
+    }
+
+    @Test("sheet keeps invalid drafts open with no write")
+    func sheetSaveKeepsInvalidDraftOpen() async throws {
         let (vm, store) = await makeContext()
         await vm.loadIfNeeded()
         vm.draft = "A"
         await vm.submit()
         let task = try #require(vm.snapshot.tasks.first)
-        vm.beginRename(task)
-        vm.editText = "Zed"
-        await vm.commitRename(task)
-        #expect(vm.snapshot.tasks.map(\.name) == ["Zed"])
-        #expect(try await store.plannerTask(id: task.id)?.positionKey == task.positionKey)
-        // Empty commits revert with no write.
         let before = try await store.outboxRowCount()
-        vm.beginRename(try #require(vm.snapshot.tasks.first))
-        vm.editText = "   "
-        await vm.commitRename(try #require(vm.snapshot.tasks.first))
-        #expect(vm.snapshot.tasks.map(\.name) == ["Zed"])
+        vm.beginEdit(task)
+        vm.sheetName = "   "
+        #expect(vm.isSheetSaveEnabled == false)
+        #expect(await vm.saveSheet() == false)
+        #expect(vm.editingTask != nil)
+        #expect(vm.snapshot.tasks.map(\.name) == ["A"])
         #expect(try await store.outboxRowCount() == before)
     }
 
@@ -226,6 +273,35 @@ struct PlannerViewModelTests {
     }
 
     // MARK: - One-tap Start
+
+    @Test("start uses the task categories when present, else Recents fallback")
+    func startUsesTaskCategoriesOverRecents() async throws {
+        let (vm, store) = await makeContext(categories: [("c1", "Work"), ("c2", "Gym")])
+        await vm.loadIfNeeded()
+        // The same text exists in Recents with a different set: the task's
+        // own set must win, not the inherited one.
+        _ = try await store.createEntry(TimeEntry(
+            id: "e1", activityText: "Read",
+            startedAt: Date(timeIntervalSinceReferenceDate: 1_000),
+            endedAt: Date(timeIntervalSinceReferenceDate: 1_600), durationSeconds: 600,
+            categoryIDs: ["c1"]
+        ))
+        vm.invalidate()
+        await vm.loadIfNeeded()
+        vm.draft = "Read"
+        await vm.submit()
+        // Tag the task through the sheet (its own set differs from Recents).
+        var task = try #require(vm.snapshot.tasks.first)
+        vm.beginEdit(task)
+        vm.sheetCategoryIDs = ["c2"]
+        #expect(await vm.saveSheet())
+        task = try #require(vm.snapshot.tasks.first)
+        #expect(await vm.startTask(task))
+        let draft = try #require(try await store.timerDraft())
+        #expect(draft.activityText == "Read")
+        #expect(draft.categoryIDs == ["c2"])
+        #expect(draft.plannerTaskID == task.id)
+    }
 
     @Test("start copies the name and inherits exact-text categories")
     func startInherits() async throws {

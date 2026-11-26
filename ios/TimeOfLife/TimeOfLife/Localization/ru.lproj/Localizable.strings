@@ -356,7 +356,8 @@
 "planner.emptyHint" = "Добавленные задачи будут здесь, пока не выполните их.";
 "planner.composerPlaceholder" = "Добавить задачу";
 "planner.add" = "Добавить";
-"planner.rename" = "Переименовать";
+"planner.editorTitle" = "Изменить задачу";
+"planner.save" = "Сохранить";
 "planner.markDone" = "Отметить выполненной";
 "planner.reopen" = "Вернуть";
 "planner.noMatch" = "Нет совпадений";

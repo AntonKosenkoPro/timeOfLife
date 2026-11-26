@@ -23,7 +23,6 @@ struct PlannerView: View {
     /// Defaults to no-op for previews.
     var onStartActive: () -> Void = {}
     @FocusState private var composerFocused: Bool
-    @FocusState private var renamingRowID: String?
     /// Whether the software keyboard is open: the chips line mounts only
     /// then (day-planner 8.2), pinned just above it as the last slot.
     @State private var keyboardVisible = false
@@ -191,24 +190,18 @@ struct PlannerView: View {
         List {
             // The task rows carry no section header (day-planner 10.2):
             // a fresh row expands in at the top (see `PlannerRowInsertion`;
-            // opacity-only under Reduce Motion). Row swipes are Mail-style
-            // labeled pills with icon + text (day-planner 11.2):
-            // trailing-side delete into the durable undo buffer, leading-side
-            // complete/reopen with the toggle semantics — no behavior change.
+            // opacity-only under Reduce Motion). Row taps open the task
+            // editor sheet (day-planner 14.1) — the row never renames
+            // inline. Row swipes carry labeled pills with icon + text
+            // (day-planner 11.2): trailing-side delete into the durable
+            // undo buffer, leading-side complete/reopen with the toggle
+            // semantics — no behavior change.
             ForEach(Array(vm.snapshot.tasks.enumerated()), id: \.element.id) { index, task in
                 PlannerTaskRow(
                     task: task,
                     timerActive: vm.timerActive,
-                    isRenaming: vm.editingTaskID == task.id,
-                    editText: $vm.editText,
-                    focusedRowID: $renamingRowID,
                     onToggle: { Task { await vm.toggleComplete(task) } },
-                    onRenameTap: { vm.beginRename(task) },
-                    onRenameCommit: { Task { await vm.commitRename(task) } },
-                    onRenameCancel: {
-                        vm.cancelRename()
-                        renamingRowID = nil
-                    },
+                    onEdit: { vm.beginEdit(task) },
                     onStart: {
                         if await vm.startTask(task) { onStartActive() }
                     }
@@ -239,21 +232,13 @@ struct PlannerView: View {
         }
         .listStyle(.plain)
         .scrollContentBackground(.hidden)
-        .onChange(of: vm.editingTaskID) { _, id in
-            renamingRowID = id
-        }
-        // Focus left a rename field without committing (the user tapped
-        // elsewhere): commit instead of stranding a half-typed rename.
-        // Programmatic commits clear `editingTaskID` first, so this only
-        // fires for genuine focus loss.
-        .onChange(of: renamingRowID) { _, new in
-            if new == nil,
-               let id = vm.editingTaskID,
-               let task = vm.snapshot.tasks.first(where: { $0.id == id }) {
-                Task { await vm.commitRename(task) }
-            }
-        }
         .accessibilityIdentifier("PlannerTaskList")
+        // The task editor sheet (day-planner 14.1): Name + ordered
+        // Categories in Log Time sheet grammar. Tapping a row is the only
+        // entry point — the row itself never renames inline.
+        .sheet(item: $vm.editingTask) { _ in
+            PlannerTaskEditorSheet(vm: vm)
+        }
     }
 
     /// The chips line (day-planner 9.1, gap 10.2, placeholder 11.3): one

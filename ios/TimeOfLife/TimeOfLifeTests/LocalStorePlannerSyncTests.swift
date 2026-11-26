@@ -243,6 +243,45 @@ struct LocalStorePlannerSyncTests {
         #expect(try await store.plannerTask(id: task.id) == nil)
         #expect(try await store.plannerRevisionCursor() == 3)
     }
+
+    @Test("Feed pages carry the ordered set and delete wins over a pending retag")
+    func feedPageCarriesCategories() async throws {
+        let store = try makeStore()
+        let local = try await makeTask(store, name: "Local", key: "500000")
+        // A pending local retag stays visible when the feed carries an
+        // older remote state for the same task.
+        _ = try await store.retagPlannerTask(
+            id: local.id, categoryIDs: ["c-local"], operationID: UUID().uuidString
+        )
+        try await store.applyPlannerPage(changes: [
+            PlannerFeedChange(task: PlannerTask(
+                id: local.id, name: "Local", positionKey: "500000",
+                categoryIDs: ["c-remote"],
+                createdAt: local.createdAt, updatedAt: Date()
+            ), deleted: false, revision: 5),
+        ], cursor: 5)
+        #expect(try await store.plannerTask(id: local.id)?.categoryIDs == ["c-local"])
+        // A fresh tagged row merges with its set intact.
+        let remote = PlannerTask(
+            id: UUID().uuidString, name: "Remote",
+            positionKey: "500001", categoryIDs: ["c1", "c2"],
+            createdAt: Date(), updatedAt: Date()
+        )
+        try await store.applyPlannerPage(changes: [
+            PlannerFeedChange(task: remote, deleted: false, revision: 6),
+        ], cursor: 6)
+        #expect(try await store.plannerTask(id: remote.id)?.categoryIDs == ["c1", "c2"])
+        // A terminal marker wins over the pending retag: the row converges
+        // to deleted and the queued intent is dropped.
+        try await store.applyPlannerPage(changes: [
+            PlannerFeedChange(task: local, deleted: true, revision: 7),
+        ], cursor: 7)
+        #expect(try await store.plannerTask(id: local.id) == nil)
+        #expect(try await store.outboxRows().contains {
+            $0.resource == "planner_task" && $0.recordID == local.id && $0.op != "delete"
+        } == false)
+        #expect(try await store.plannerTask(id: remote.id)?.categoryIDs == ["c1", "c2"])
+    }
 }
 
 enum PlannerStoreSyncTestError: Error {

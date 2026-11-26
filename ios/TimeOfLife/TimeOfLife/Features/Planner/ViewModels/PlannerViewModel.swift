@@ -5,8 +5,9 @@ import Foundation
 import Combine
 import SwiftUI
 
-/// The Today planner view model (day-planner spec): an inline composer over
-/// a reorderable checklist projected from one ordered backlog. Today is the
+    /// The Today projection view model (day-planner spec): an inline composer over
+/// a reorderable checklist projected from one ordered backlog, with a task
+/// editor sheet for renaming and tagging. Today is the
 /// only view — unfinished tasks plus completions on the viewing device's
 /// current local civil date, in the shared `(positionKey, id)` order, with
 /// done/total counts from the same snapshot.
@@ -23,10 +24,14 @@ final class PlannerViewModel: ObservableObject {
     /// The inline composer draft. Survives reloads; cleared only by a
     /// successful submission.
     @Published var draft = ""
-    /// The inline rename draft, bound to the row being renamed.
-    @Published var editText = ""
-    /// The task currently renamed inline, or nil.
-    @Published var editingTaskID: String?
+    /// The task open in the editor sheet, or nil when the sheet is closed.
+    @Published var editingTask: PlannerTask?
+    /// The editor sheet's name draft, prefilled from the task.
+    @Published var sheetName = ""
+    /// The editor sheet's ordered category selection, prefilled from the task.
+    @Published var sheetCategoryIDs: [String] = []
+    /// The category catalog backing the sheet's TagSelector.
+    @Published var availableCategories: [Category] = []
     /// Whether a timer run is active (planner stays usable, but no task
     /// can start another run while one is active).
     @Published private(set) var timerActive = false
@@ -38,6 +43,11 @@ final class PlannerViewModel: ObservableObject {
     private let store: LocalStore
     private let undoBuffer: UndoBufferStore
     private let timer: TimerService
+    /// Notification surface for the linked-stop commit reload (day-planner
+    /// 14.2). Production uses `.default`; tests inject a private center so
+    /// global posts from parallel suites cannot reload this VM out from
+    /// under stale-snapshot assertions (History precedent).
+    private let notifications: NotificationCenter
     /// The UndoManager the current registration belongs to, held weakly so
     /// a dismissed surface never keeps it alive (entry/category precedent).
     private weak var registeredUndoManager: UndoManager?
@@ -53,10 +63,12 @@ final class PlannerViewModel: ObservableObject {
     /// publishes without animation.
     private var pendingInsertionID: String?
 
-    init(store: LocalStore, undoBuffer: UndoBufferStore, timer: TimerService) {
+    init(store: LocalStore, undoBuffer: UndoBufferStore, timer: TimerService, notifications: NotificationCenter = .default) {
         self.store = store
         self.undoBuffer = undoBuffer
         self.timer = timer
+        self.notifications = notifications
+        observeLinkedStop()
     }
 
     // MARK: - Loading (serialized, Track precedent)
@@ -76,9 +88,27 @@ final class PlannerViewModel: ObservableObject {
     }
 
     /// Marks the snapshot stale (tab-return, foreground return, sync exit,
-    /// undo, or a mutation that bypasses this view model).
+    /// undo, a linked Stop, or a mutation that bypasses this view model).
     func invalidate() {
         needsReload = true
+    }
+
+    /// Event-driven reload for linked Stops (day-planner 14.2): the Stop
+    /// path completes the task behind this view model, so the posted commit
+    /// invalidates the stale projection and the guarded load republishes
+    /// the new counts. Subscribed here — not in the view — so the real
+    /// notification path is unit-testable (History precedent).
+    private var linkedStopCancellables = Set<AnyCancellable>()
+
+    private func observeLinkedStop() {
+        notifications.publisher(for: .plannerLinkedStopCommitted)
+            .sink { [weak self] _ in
+                Task { @MainActor [weak self] in
+                    self?.invalidate()
+                    await self?.loadIfNeeded()
+                }
+            }
+            .store(in: &linkedStopCancellables)
     }
 
     /// The unguarded worker: one snapshot query batch whose results publish
@@ -106,9 +136,6 @@ final class PlannerViewModel: ObservableObject {
                 } else {
                     snapshot = projected
                 }
-            }
-            if editingTaskID != nil, !projected.tasks.contains(where: { $0.id == editingTaskID }) {
-                editingTaskID = nil
             }
         } catch {
             if DatabaseSuspension.isSuspensionError(error) {
@@ -254,34 +281,106 @@ final class PlannerViewModel: ObservableObject {
         }
     }
 
-    /// Begins an inline rename, prefilled with the task's exact name.
-    func beginRename(_ task: PlannerTask) {
-        editingTaskID = task.id
-        editText = task.name
+    // MARK: - Task editor sheet
+
+    /// Opens the editor sheet for a task, prefilling the name and ordered
+    /// category drafts from the snapshot copy. Tapping a row is the only
+    /// entry point — there is no inline renaming. Starts a fresh error
+    /// scope: a banner from an earlier surface must not greet the editor.
+    func beginEdit(_ task: PlannerTask) {
+        errorMessage = nil
+        editingTask = task
+        sheetName = task.name
+        sheetCategoryIDs = task.categoryIDs
     }
 
-    /// Cancels an inline rename without writing.
-    func cancelRename() {
-        editingTaskID = nil
+    /// Closes the editor sheet without writing.
+    func cancelEdit() {
+        editingTask = nil
     }
 
-    /// Commits an inline rename (Return). An empty result reverts to the
-    /// stored name with no write; anything else renames in place.
-    func commitRename(_ task: PlannerTask) async {
-        defer { editingTaskID = nil }
-        let trimmed = ActivityName.normalized(editText)
-        guard !trimmed.isEmpty, trimmed != task.name else { return }
-        guard case .valid = ActivityName.validate(trimmed) else { return }
+    /// Whether the sheet's Save confirm is enabled (Log Time validity-gate
+    /// grammar): the trimmed name must satisfy the shared timer-name rule.
+    /// Categories are optional — the set may be empty.
+    var isSheetSaveEnabled: Bool {
+        guard editingTask != nil else { return false }
+        guard case .valid = ActivityName.validate(ActivityName.normalized(sheetName)) else { return false }
+        return true
+    }
+
+    /// Saves the editor sheet: renames when the name changed and retags
+    /// when the ordered set changed — each as its own field intent, so a
+    /// name-only edit sends no categories and a tag-only edit sends no
+    /// name. Position, completion, and every timer/entry stay untouched.
+    /// An invalid name or a failed write keeps the sheet open with the
+    /// draft intact (Log Time save-failure grammar). Returns whether the
+    /// sheet closed.
+    func saveSheet() async -> Bool {
+        guard let task = editingTask else { return false }
+        let trimmed = ActivityName.normalized(sheetName)
+        guard case .valid = ActivityName.validate(trimmed) else { return false }
         do {
-            _ = try await store.renamePlannerTask(
-                id: task.id,
-                name: trimmed,
-                operationID: await store.newRecordID()
-            )
+            if trimmed != task.name {
+                let outcome = try await store.renamePlannerTask(
+                    id: task.id,
+                    name: trimmed,
+                    operationID: await store.newRecordID()
+                )
+                guard case .saved = outcome else {
+                    errorMessage = L10n.text(in: .default, code: "error.unknown")
+                    return false
+                }
+            }
+            if sheetCategoryIDs != task.categoryIDs {
+                let outcome = try await store.retagPlannerTask(
+                    id: task.id,
+                    categoryIDs: sheetCategoryIDs,
+                    operationID: await store.newRecordID()
+                )
+                guard case .saved = outcome else {
+                    errorMessage = L10n.text(in: .default, code: "error.unknown")
+                    return false
+                }
+            }
+            editingTask = nil
+            errorMessage = nil
             invalidate()
             await loadIfNeeded()
+            return true
         } catch {
             errorMessage = L10n.text(in: .default, code: "error.unknown")
+            return false
+        }
+    }
+
+    /// Loads the category catalog for the sheet's TagSelector (idempotent;
+    /// LogTimeViewModel precedent). Called on sheet open by the view.
+    func loadSheetCategoriesIfNeeded() async {
+        guard availableCategories.isEmpty else { return }
+        availableCategories = (try? await store.categories()) ?? []
+    }
+
+    /// Toggles a category on the sheet's ordered selection (TagSelector
+    /// parent owns order: toggling appends or removes, keeping the
+    /// selection order).
+    func toggleSheetCategory(_ categoryID: String) {
+        if let index = sheetCategoryIDs.firstIndex(of: categoryID) {
+            sheetCategoryIDs.remove(at: index)
+        } else {
+            sheetCategoryIDs.append(categoryID)
+        }
+    }
+
+    /// Attaches a freshly created category to the sheet draft and reloads
+    /// the options (LogTimeViewModel precedent: draft-only until save).
+    func attachSheetCategory(_ category: Category) async {
+        if !sheetCategoryIDs.contains(category.id) {
+            sheetCategoryIDs.append(category.id)
+        }
+        if let fresh = try? await store.categories() {
+            availableCategories = fresh
+        } else if !availableCategories.contains(where: { $0.id == category.id }) {
+            availableCategories.append(category)
         }
     }
 
@@ -388,19 +487,23 @@ final class PlannerViewModel: ObservableObject {
 
     // MARK: - One-tap Start (day-planner D4)
 
-    /// Starts an open task in one tap when no timer is active: the exact
-    /// text goes through the ordinary category-inheritance rule (the newest
-    /// committed entry with that exact text lends its ordered categories),
-    /// and the task's id rides the draft so Stop completes exactly it.
-    /// Returns false (staying usable, starting nothing) when a run is
-    /// active, saving, or awaiting a Stop retry — a second Start never
-    /// replaces a pending or active run at the store boundary. A task rename
-    /// never changes the locked timer name: the name is copied at Start.
+    /// Starts an open task in one tap when no timer is active: a task
+    /// holding categories starts with exactly those (sheet-assigned); a
+    /// task without categories falls back to the ordinary
+    /// exact-text category inheritance (the newest committed entry with
+    /// that exact text lends its ordered categories). The task's id rides
+    /// the draft so Stop completes exactly it. Returns false (staying
+    /// usable, starting nothing) when a run is active, saving, or awaiting
+    /// a Stop retry — a second Start never replaces a pending or active run
+    /// at the store boundary. A task rename never changes the locked timer
+    /// name: the name is copied at Start.
     func startTask(_ task: PlannerTask) async -> Bool {
         guard task.completedOn == nil else { return false }
         do {
             if try await store.timerDraft() != nil { return false }
-            let inherited = recents.first { $0.activityText == task.name }?.categoryIDs ?? []
+            let inherited = task.categoryIDs.isEmpty
+                ? recents.first { $0.activityText == task.name }?.categoryIDs ?? []
+                : task.categoryIDs
             return try await timer.startLinkedTask(
                 name: task.name,
                 categoryIDs: inherited,

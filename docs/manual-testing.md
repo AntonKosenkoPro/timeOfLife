@@ -56,6 +56,9 @@ Simulator covers layout, sync convergence, and the linked Stop path; the items b
 8. [ ] **Linked cold-open Live Activity Stop** — start a task from Today, terminate the app, then Stop from the Island or Lock Screen banner; the app cold-opens, saves the entry, completes exactly that task once, and shows the ordinary Saved card. (Unit + simulator tests cover the path; the Island/banner tap itself is device-only.)
 9. [ ] **Row swipes** — drag a row left and right: native Mail-style pills reveal (trailing delete, leading complete/reopen), tapping an action fires it, a deep swipe acts on release, and vertical scrolling still works; in edit mode the native delete/reorder own the rows.
 10. [ ] **Instant counts** — cold-open with warm planner data; Track shows the actual done/total counts on first paint with no 0/0 flash.
+11. [ ] **Task editor sheet** — tap a task row; the editor sheet opens with the Name and ordered Categories fields (Log Time card grammar). Rename + retag, save: the row updates in place with no entry change; saving an invalid name stays open. Tag a task, start it: the run carries exactly those tags; an untagged task still inherits exact-text Recents.
+12. [ ] **Live linked-Stop counts** — start a task from Today, Stop on Track; the toolbar control refreshes to the new done/total in place with no navigation, and the icon follows completion (unchecked at 0, checklist partial, checked at N/N).
+13. [ ] **Icon states** — with 0 done, some done, and all done (non-empty), the progress control shows `checklist.unchecked`, `checklist`, and `checklist.checked` respectively.
 
 ## Live Activities
 

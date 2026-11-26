@@ -47,7 +47,10 @@ extension LocalStore {
     ///   without recreating it);
     /// - otherwise the feed state is applied (live rows upserted, terminal
     ///   markers remove the local row and drop superseded pending
-    ///   create/update rows).
+    ///   create/update rows). Field intents compose per field on the relay
+    ///   (latest accepted intent per field wins); the page carries the
+    ///   latest full state per task, so a local retag queued behind a
+    ///   remote rename still converges on drain.
     func applyPlannerPage(changes: [PlannerFeedChange], cursor: Int64) throws {
         try queue.write { db in
             for change in changes {
@@ -69,16 +72,18 @@ extension LocalStore {
                 }
                 try db.execute(
                     sql: """
-                        INSERT INTO planner_tasks (id, name, position_key, completed_on, created_at, updated_at)
-                        VALUES (?, ?, ?, ?, ?, ?)
+                        INSERT INTO planner_tasks (id, name, category_ids, position_key, completed_on, created_at, updated_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?)
                         ON CONFLICT(id) DO UPDATE SET
                             name = excluded.name,
+                            category_ids = excluded.category_ids,
                             position_key = excluded.position_key,
                             completed_on = excluded.completed_on,
                             updated_at = excluded.updated_at
                         """,
                     arguments: [
-                        id, change.task.name, change.task.positionKey, change.task.completedOn,
+                        id, change.task.name, Self.joinPlannerCategoryIDs(change.task.categoryIDs),
+                        change.task.positionKey, change.task.completedOn,
                         change.task.createdAt, change.task.updatedAt,
                     ]
                 )
@@ -126,9 +131,10 @@ extension LocalStore {
     }
 
     /// Adopts the relay's current task after a 409 `planner_conflict`: the
-    /// server version replaces the local row and superseded pending
-    /// create/update rows are dropped (a pending DELETE still converges the
-    /// relay on drain — delete-wins is checked first and skips adoption).
+    /// server version (including its ordered category set) replaces the
+    /// local row and superseded pending create/update rows are dropped (a
+    /// pending DELETE still converges the relay on drain — delete-wins is
+    /// checked first and skips adoption).
     func adoptPlannerTask(_ task: PlannerTask) throws {
         try queue.write { db in
             if try Self.plannerLocallyDeleted(db, recordID: task.id) {
@@ -136,15 +142,16 @@ extension LocalStore {
             }
             try db.execute(
                 sql: """
-                    INSERT INTO planner_tasks (id, name, position_key, completed_on, created_at, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?)
+                    INSERT INTO planner_tasks (id, name, category_ids, position_key, completed_on, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(id) DO UPDATE SET
                         name = excluded.name,
+                        category_ids = excluded.category_ids,
                         position_key = excluded.position_key,
                         completed_on = excluded.completed_on,
                         updated_at = excluded.updated_at
                     """,
-                arguments: [task.id, task.name, task.positionKey, task.completedOn, task.createdAt, task.updatedAt]
+                arguments: [task.id, task.name, Self.joinPlannerCategoryIDs(task.categoryIDs), task.positionKey, task.completedOn, task.createdAt, task.updatedAt]
             )
             try Self.dropPendingPlannerIntent(db, recordID: task.id)
         }

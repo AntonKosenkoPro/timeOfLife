@@ -354,7 +354,8 @@
 "planner.emptyHint" = "Las tareas que agregues aparecen aquí hasta completarlas.";
 "planner.composerPlaceholder" = "Agregar una tarea";
 "planner.add" = "Agregar";
-"planner.rename" = "Renombrar";
+"planner.editorTitle" = "Editar tarea";
+"planner.save" = "Guardar";
 "planner.markDone" = "Marcar como hecha";
 "planner.reopen" = "Reabrir";
 "planner.noMatch" = "Sin coincidencias";

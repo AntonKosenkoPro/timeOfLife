@@ -356,7 +356,8 @@
 "planner.emptyHint" = "Tasks you add show up here until done.";
 "planner.composerPlaceholder" = "Add a task";
 "planner.add" = "Add";
-"planner.rename" = "Rename";
+"planner.editorTitle" = "Edit task";
+"planner.save" = "Save";
 "planner.markDone" = "Mark done";
 "planner.reopen" = "Reopen";
 "planner.noMatch" = "No matches";

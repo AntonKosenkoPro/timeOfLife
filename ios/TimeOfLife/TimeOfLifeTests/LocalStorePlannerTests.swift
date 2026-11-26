@@ -125,6 +125,56 @@ struct LocalStorePlannerTests {
         #expect(try await store.movePlannerTask(id: "nope", positionKey: "500001", operationID: UUID().uuidString) == .missing)
         #expect(try await store.completePlannerTask(id: "nope", completedOn: "2026-11-25", operationID: UUID().uuidString) == .missing)
         #expect(try await store.reopenPlannerTask(id: "nope", operationID: UUID().uuidString) == .missing)
+        #expect(try await store.retagPlannerTask(id: "nope", categoryIDs: ["c1"], operationID: UUID().uuidString) == .missing)
+    }
+
+    @Test("Retag replaces the ordered set with its own outbox intent")
+    func retagReplacesSet() async throws {
+        let store = try makeStore()
+        let task = try await makeTask(store, name: "Read", key: "500000")
+        // New tasks carry no categories.
+        #expect(task.categoryIDs.isEmpty)
+        #expect((try await store.plannerTask(id: task.id)?.categoryIDs ?? []).isEmpty)
+        let before = try await store.outboxRowCount()
+
+        let tagged = try await store.retagPlannerTask(
+            id: task.id, categoryIDs: ["c1", "c2"], operationID: UUID().uuidString
+        )
+        guard case let .saved(t1) = tagged else {
+            Issue.record("retag failed: \(tagged)"); return
+        }
+        #expect(t1.categoryIDs == ["c1", "c2"])
+        // The set survives the round trip; name and position are untouched.
+        #expect(try await store.plannerTask(id: task.id)?.categoryIDs == ["c1", "c2"])
+        #expect(try await store.plannerTask(id: task.id)?.name == "Read")
+        // Order is preserved (not sorted), duplicates collapse.
+        let reordered = try await store.retagPlannerTask(
+            id: task.id, categoryIDs: ["c2", "c1", "c2"], operationID: UUID().uuidString
+        )
+        guard case let .saved(t2) = reordered else {
+            Issue.record("retag failed: \(reordered)"); return
+        }
+        #expect(t2.categoryIDs == ["c2", "c1"])
+        // An empty set clears (full replace, not a merge).
+        let cleared = try await store.retagPlannerTask(
+            id: task.id, categoryIDs: [], operationID: UUID().uuidString
+        )
+        guard case let .saved(t3) = cleared else {
+            Issue.record("retag failed: \(cleared)"); return
+        }
+        #expect(t3.categoryIDs.isEmpty)
+        #expect(try await store.outboxRowCount() == before + 3)
+        // The queued payload carries the set under its own intent.
+        let rows = try await store.outboxRows()
+        let payloads = try rows.compactMap { $0.payload?.data(using: .utf8) }.map {
+            try JSONDecoder().decode(PlannerOperationPayload.self, from: $0)
+        }
+        let retags = payloads.filter { $0.intent == PlannerIntent.retag.rawValue }
+        #expect(retags.count == 3)
+        #expect(retags[0].categoryIDs == ["c1", "c2"])
+        #expect(retags[1].categoryIDs == ["c2", "c1"])
+        #expect((retags[2].categoryIDs ?? []).isEmpty)
+        #expect(retags.allSatisfy { $0.name == nil && $0.positionKey == nil && $0.completedOn == nil })
     }
 
     @Test("Unchanged writes enqueue nothing")
@@ -137,6 +187,8 @@ struct LocalStorePlannerTests {
         #expect(try await store.movePlannerTask(id: task.id, positionKey: "500000", operationID: UUID().uuidString)
             == .saved(try #require(try await store.plannerTask(id: task.id))))
         #expect(try await store.reopenPlannerTask(id: task.id, operationID: UUID().uuidString)
+            == .saved(try #require(try await store.plannerTask(id: task.id))))
+        #expect(try await store.retagPlannerTask(id: task.id, categoryIDs: [], operationID: UUID().uuidString)
             == .saved(try #require(try await store.plannerTask(id: task.id))))
         #expect(try await store.outboxRowCount() == before)
     }
@@ -168,6 +220,20 @@ struct LocalStorePlannerTests {
         let rows = try await store.outboxRows()
         #expect(rows.contains { $0.resource == "planner_task" && $0.recordID == task.id && $0.op == "delete" })
         #expect(try await store.plannerTask(id: task.id) == nil)
+    }
+
+    @Test("Undo restores the tagged set")
+    func undoRestoresCategories() async throws {
+        let store = try makeStore()
+        let task = try await makeTask(store, name: "Read", key: "500000")
+        _ = try await store.retagPlannerTask(
+            id: task.id, categoryIDs: ["c1", "c2"], operationID: UUID().uuidString
+        )
+        _ = try await store.deletePlannerTaskUndoable(id: task.id)
+        #expect(try await store.plannerTask(id: task.id) == nil)
+        let restored = try await store.undoPlannerTaskDeletion(bufferID: try await store.bufferedDeletions().first!.bufferID)
+        #expect(restored?.categoryIDs == ["c1", "c2"])
+        #expect(try await store.plannerTask(id: task.id)?.categoryIDs == ["c1", "c2"])
     }
 
     // MARK: - Projection

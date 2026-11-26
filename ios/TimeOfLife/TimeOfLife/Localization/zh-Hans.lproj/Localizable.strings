@@ -354,7 +354,8 @@
 "planner.emptyHint" = "添加的任务会显示在这里，直到完成。";
 "planner.composerPlaceholder" = "添加任务";
 "planner.add" = "添加";
-"planner.rename" = "重命名";
+"planner.editorTitle" = "编辑任务";
+"planner.save" = "保存";
 "planner.markDone" = "标记为已完成";
 "planner.reopen" = "重新打开";
 "planner.noMatch" = "无匹配项";

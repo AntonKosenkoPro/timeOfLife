@@ -364,6 +364,7 @@ actor LocalStore {
                 try db.create(table: "planner_tasks") { t in
                     t.column("id", .text).primaryKey()
                     t.column("name", .text).notNull()
+                    t.column("category_ids", .text).notNull().defaults(to: "")
                     t.column("position_key", .text).notNull()
                     t.column("completed_on", .text)
                     t.column("created_at", .datetime).notNull()
@@ -373,6 +374,11 @@ actor LocalStore {
                     CREATE INDEX index_planner_tasks_on_position
                     ON planner_tasks (position_key, id)
                     """)
+            } else if !existing.contains("category_ids") {
+                // §14 additive column: existing rows keep their tasks and
+                // converge to the empty set (the feed re-converges tagged
+                // rows on the next sync).
+                try db.execute(sql: "ALTER TABLE planner_tasks ADD COLUMN category_ids TEXT NOT NULL DEFAULT ''")
             }
             let syncColumns = try String.fetchAll(db, sql: "SELECT name FROM pragma_table_info('sync_state')")
             if !syncColumns.contains("cursor_revision") {
@@ -644,13 +650,16 @@ actor LocalStore {
         }
         migrator.registerMigration("v3") { db in
             // Day-planner tasks (add-day-planner): independent checklist
-            // rows with a shared exact-decimal order key and a nullable
-            // civil completion date. No deleted flag: terminal relay deletes
-            // remove the row (the marker lives on the relay and in the feed
-            // cursor, never locally).
+            // rows with a validated name, an optional ordered category set
+            // (comma-joined TEXT, empty when untagged), a shared
+            // exact-decimal order key and a nullable civil completion date.
+            // No deleted flag: terminal relay deletes remove the row (the
+            // marker lives on the relay and in the feed cursor, never
+            // locally).
             try db.create(table: "planner_tasks") { t in
                 t.column("id", .text).primaryKey()
                 t.column("name", .text).notNull()
+                t.column("category_ids", .text).notNull().defaults(to: "")
                 t.column("position_key", .text).notNull()
                 t.column("completed_on", .text)
                 t.column("created_at", .datetime).notNull()

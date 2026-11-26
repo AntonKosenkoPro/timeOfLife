@@ -179,6 +179,7 @@ struct SyncPlannerTests {
                 "position_key": "500007",
                 "revision": "4",
                 "completed_on": "2026-11-24",
+                "category_ids": "c1,c2",
                 "deleted": "false",
                 "created_at": "2026-11-24T09:00:00.000Z",
                 "updated_at": "2026-11-24T10:00:00.000Z",
@@ -193,6 +194,7 @@ struct SyncPlannerTests {
         #expect(adopted?.name == "Relay")
         #expect(adopted?.positionKey == "500007")
         #expect(adopted?.completedOn == "2026-11-24")
+        #expect(adopted?.categoryIDs == ["c1", "c2"])
         #expect(adopted?.updatedAt == WireDate.parse("2026-11-24T10:00:00.000Z"))
         // created_at is local-only (entries merge precedent): adoption keeps it.
         #expect(adopted?.createdAt == storedBefore?.createdAt)

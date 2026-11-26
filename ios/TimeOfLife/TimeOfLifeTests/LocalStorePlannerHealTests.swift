@@ -111,6 +111,58 @@ struct LocalStorePlannerHealTests {
         }
     }
 
+    /// Today converges the category column on a field file whose table
+    /// predates the §14 set (recorded v3, full §13 shape, no `category_ids`
+    /// column): the pre-existing task survives with an empty set — no
+    /// rebuild, no loss — and the converged shape accepts retags.
+    @Test("Today converges the category column on a pre-§14 field file")
+    func todayHealsMissingCategoryColumn() async throws {
+        let url = temporaryAccountURL(userID: "field-u3")
+        do {
+            let seed = try LocalStore(url: url, userID: "field-u3")
+            let created = try await seed.createPlannerTask(
+                id: "t1", name: "Read", positionKey: "500000", operationID: "op1"
+            )
+            guard case .saved = created else {
+                Issue.record("seed create failed: \(created)")
+                return
+            }
+        }
+        // Simulate the field condition: the §13 shape without the §14
+        // column (the app shipped and stored tasks through it).
+        try dropPlannerCategoryColumn(at: url)
+        // Reopen through the production seam (migrate + heals) and drive
+        // the exact Today load.
+        let reopened = try LocalStore(url: url, userID: "field-u3")
+        let vm = PlannerViewModel(
+            store: reopened,
+            undoBuffer: UndoBufferStore(store: reopened),
+            timer: TimerService(store: reopened)
+        )
+        await vm.load()
+        #expect(vm.errorMessage == nil)
+        #expect(vm.snapshot.total == 1)
+        #expect((try await reopened.plannerTask(id: "t1")?.categoryIDs ?? []).isEmpty)
+        // The converged shape accepts retags.
+        let retagged = try await reopened.retagPlannerTask(
+            id: "t1", categoryIDs: ["c1"], operationID: "op2"
+        )
+        guard case .saved = retagged else {
+            Issue.record("retag failed on the healed shape: \(retagged)")
+            return
+        }
+        #expect(try await reopened.plannerTask(id: "t1")?.categoryIDs == ["c1"])
+    }
+
+    /// Drops the §14 category column, reproducing a field file whose table
+    /// was created by the §13 shape.
+    private func dropPlannerCategoryColumn(at url: URL) throws {
+        let queue = try DatabaseQueue(path: url.path)
+        try queue.write { db in
+            try db.execute(sql: "ALTER TABLE planner_tasks DROP COLUMN category_ids")
+        }
+    }
+
     /// Removes every v3 planner object while keeping the recorded "v3"
     /// migration, reproducing a field file upgraded in place from an
     /// intermediate build whose v3 lacked the planner shape.

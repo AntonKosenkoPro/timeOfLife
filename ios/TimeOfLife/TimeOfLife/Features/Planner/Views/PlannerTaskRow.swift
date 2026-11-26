@@ -1,21 +1,17 @@
 import SwiftUI
 
-/// One planner row: completion toggle, inline-renameable name, and the
-/// Start affordance slot (always mounted — see `PlannerStartSlot`).
-/// Completed rows stay in position through their completion day. VoiceOver
-/// reads the name plus its state; reorder runs through the list's `onMove`
-/// (edit mode + rotor, never drag-only). A fresh row expands in at the top
-/// (see `PlannerRowInsertion`; opacity-only under Reduce Motion).
+/// One planner row: completion toggle, task name (tapping opens the task
+/// editor sheet), and the Start affordance slot (always mounted — see
+/// `PlannerStartSlot`). Completed rows stay in position through their
+/// completion day. VoiceOver reads the name plus its state; reorder runs
+/// through the list's `onMove` (edit mode + rotor, never drag-only). A
+/// fresh row expands in at the top (see `PlannerRowInsertion`;
+/// opacity-only under Reduce Motion).
 struct PlannerTaskRow: View {
     let task: PlannerTask
     let timerActive: Bool
-    let isRenaming: Bool
-    @Binding var editText: String
-    var focusedRowID: FocusState<String?>.Binding
     let onToggle: () -> Void
-    let onRenameTap: () -> Void
-    let onRenameCommit: () -> Void
-    let onRenameCancel: () -> Void
+    let onEdit: () -> Void
     let onStart: () async -> Void
     /// Under Reduce Motion the top-row insertion is opacity-only instead
     /// of expanding (day-planner 8.1).
@@ -33,38 +29,15 @@ struct PlannerTaskRow: View {
             .accessibilityLabel(task.completedOn == nil ? L10n.plannerMarkDone.text : L10n.plannerReopen.text)
             .accessibilityIdentifier("PlannerToggle-\(task.id)")
 
-            if isRenaming {
-                HStack(spacing: Theme.spacingSmall) {
-                    TextField("", text: $editText)
-                        .focused(focusedRowID, equals: task.id)
-                        .onSubmit(onRenameCommit)
-                        .submitLabel(.done)
-                        .foregroundStyle(Theme.textPrimary)
-                        .accessibilityLabel(L10n.plannerRename.text)
-                        .accessibilityIdentifier("PlannerRenameField-\(task.id)")
-                    // Cancels the rename (the Track clear-button grammar:
-                    // small dim trailing × while editing).
-                    Button(action: onRenameCancel) {
-                        Image(systemName: "xmark.circle.fill")
-                            .font(.system(size: 16))
-                            .foregroundStyle(Theme.textSecondary)
-                            .opacity(0.6)
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel(L10n.nameClear.text)
-                    .accessibilityIdentifier("PlannerRenameCancel-\(task.id)")
-                }
-            } else {
-                Button(action: onRenameTap) {
-                    Text(task.name)
-                        .foregroundStyle(task.completedOn == nil ? Theme.textPrimary : Theme.textSecondary)
-                        .strikethrough(task.completedOn != nil)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityIdentifier("PlannerName-\(task.id)")
+            Button(action: onEdit) {
+                Text(task.name)
+                    .foregroundStyle(task.completedOn == nil ? Theme.textPrimary : Theme.textSecondary)
+                    .strikethrough(task.completedOn != nil)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
             }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("PlannerName-\(task.id)")
 
             // The Start affordance slot stays mounted in both states
             // (day-planner spec: toggle keeps the list still): completed
