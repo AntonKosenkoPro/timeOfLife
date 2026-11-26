@@ -13,15 +13,19 @@ Planner rows never feed History, Insights, or Recents.
 1. The user sees the compact progress control (`done/total`) in Track's
    navigation chrome and taps it.
 2. Today pushes onto the Track navigation stack (no new tab).
-3. The user types in the inline composer and taps Return (or the Add
-   affordance): one task appends after the existing Today rows, the draft
+3. The user types in the inline composer and taps Return (or the
+   composer's Add accessibility action — there is no visible Add
+   button): one task appends after the existing Today rows, the draft
    clears, and the field keeps focus with the keyboard open for the next
    task. A matching Recent tap fills the exact text for editing or
-   submission — no task is created, no timer starts.
+   submission — no task is created, no timer starts. A draft matching
+   nothing shows the no-match placeholder in the chips line; the ×
+   clears the draft without losing the keyboard.
 4. The user toggles a task done (it stays in position through its
    completion day), renames it inline, drags it to a new position in edit
-   mode (VoiceOver rotor included), or swipes to delete (shake-to-undo
-   restores via the system Undo confirmation).
+   mode (VoiceOver rotor included), or swipes a Mail-style
+   delete/complete pill (shake-to-undo restores deletes via the system
+   Undo confirmation).
 5. The user taps Start on an open task when no timer is active: the exact
    text goes through the ordinary category-inheritance rule and the run
    starts on Track with that task linked. Stopping saves the entry and
@@ -39,31 +43,39 @@ Planner rows never feed History, Insights, or Recents.
 
 Top-to-bottom order:
 
-1. Navigation title: `L10n.plannerTitle` (`Today`), `.inline` display mode.
+1. Navigation title: `L10n.plannerTitle` (`Today`), `.inline` display mode,
+   with the running-timer notice (`L10n.plannerTimerActive`, secondary
+   caption) as a nav-bar subtitle under the title while a run is active
+   (`accessibilityIdentifier`: `PlannerTimerSubtitle`) — never an inline
+   caption in the list.
 2. Checklist `List(.plain)` (`accessibilityIdentifier`: `PlannerTaskList`):
    open and completed-Today rows in the shared order, no section header.
    Empty projection shows the empty hint (`L10n.plannerEmptyHint`) instead.
-3. Timer-active caption (`L10n.plannerTimerActive`, secondary, caption
-   case) while a run is active — Start buttons disable but the checklist
-   stays fully usable.
-4. Bottom-fixed composer card: the UIKit-backed inline field
+3. Bottom-fixed composer card: the UIKit-backed inline field
    (`PlannerComposerField`, `L10n.plannerComposerPlaceholder`) wrapped in
    the shared `FieldCard` chrome (secondary background against the
-   primary page, `minTapArea` minimum height) plus an Add button
-   (`L10n.plannerAdd`, disabled for blank drafts).
-   `accessibilityIdentifier`s: `PlannerComposerField`, `PlannerAddButton`.
+   primary page, `minTapArea` minimum height). No visible Add button:
+   Return submits, and the composer's Add accessibility action
+   (`L10n.plannerAdd`) keeps the VoiceOver submit path. A trailing clear
+   button (the Track × grammar — small dim trailing × while editing,
+   `accessibilityIdentifier`: `PlannerComposerClear`) empties the draft
+   without dismissing the keyboard or losing focus.
+   `accessibilityIdentifier`s: `PlannerComposerField`.
    Return submits without ever resigning first responder (no
    dismiss/reopen cycle of any duration); the composer never unmounts, so
    submitting never moves it and the keyboard stays open across repeated
    Returns.
-5. Chips line (`accessibilityIdentifier`: `PlannerChips`), only while the
+4. Chips line (`accessibilityIdentifier`: `PlannerChips`), only while the
    keyboard is open: a single horizontally scrollable row of at most
    `chipDisplayCap` newest-first Recents, prefix-filtered by the
-   draft (empty draft shows the full capped strip). Tapping one fills the
+   draft (empty draft shows the full capped strip; a draft matching
+   nothing shows the localized no-match placeholder,
+   `L10n.plannerNoMatch`, `accessibilityIdentifier`:
+   `PlannerChipsNoMatch`, instead of an empty strip). Tapping one fills the
    exact text only — no task is created, no timer starts. A
    `spacingSmall` breathing gap sits between the line and the keyboard;
    the slot holds one chip-row height while mounted (hidden prototype
-   when the filter matches nothing), so filter changes never move the
+   for a blank filter), so filter changes never move the
    composer or the list. VoiceOver order is document order (list, then
    composer, then chips), matching the visual layout.
 
@@ -92,8 +104,14 @@ unless a run is active).
 - Start: bordered `L10n.timerStart` (the ordinary Start string — there is
   no separate Track completion control), `PlannerStart-<id>`. Hidden for
   completed rows.
-- Delete: swipe-to-delete into the durable undo buffer (no outbox row
-  yet); shake restores through the DEFAULT system Undo confirmation
+- Swipes (Mail-style icon+text pills): trailing-side Delete
+  (`L10n.entryDeleteConfirm`, `trash`, danger tint, full-swipe deletes)
+  into the durable undo buffer (no outbox row yet); leading-side
+  complete/reopen (`L10n.plannerMarkDone` / `L10n.plannerReopen`,
+  `checkmark` / `arrow.uturn.backward`, accent tint) with the toggle
+  semantics — position kept, timers and entries untouched. Edit-mode
+  delete/reorder (`onDelete` / `onMove`) and shake-to-undo are unchanged:
+  shake restores through the DEFAULT system Undo confirmation
   (entry/category precedent, `L10n.entryDeleteConfirm` action name).
 - Reorder: the list's `onMove` in visible coordinates (EditButton in the
   trailing toolbar; VoiceOver rotor reorder, never drag-only). Moves

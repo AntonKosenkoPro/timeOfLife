@@ -357,4 +357,5 @@
 "planner.rename" = "重命名";
 "planner.markDone" = "标记为已完成";
 "planner.reopen" = "重新打开";
+"planner.noMatch" = "无匹配项";
 "planner.timerActive" = "计时器运行中";

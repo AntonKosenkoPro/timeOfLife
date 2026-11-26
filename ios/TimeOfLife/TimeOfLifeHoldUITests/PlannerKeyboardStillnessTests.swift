@@ -6,10 +6,15 @@ import XCTest
 /// scrollable chips line pinned between the bottom-fixed composer and the
 /// keyboard (visible only while the keyboard is open, floating with a
 /// breathing gap above it; empty draft shows the full capped strip,
-/// typing prefix-filters it, tapping a chip fills the composer without
-/// creating a task or starting a timer), no section header over the task
-/// rows, a bottom-fixed composer (contrasting card) with the list above
-/// it, and every submit appending at the end with an expanding insertion. Drives the REAL return-key path in a real
+/// typing prefix-filters it, a draft matching nothing shows the
+/// localized no-match placeholder instead of an empty strip, tapping a
+/// chip fills the composer without creating a task or starting a timer),
+/// no section header over the task rows, a bottom-fixed composer
+/// (contrasting card, no visible Add button — Return or the composer's
+/// Add accessibility action submits — plus a Track-grammar clear button
+/// that empties the draft without dismissing the keyboard), the
+/// running-timer notice as a nav-bar subtitle under the Today title, and
+/// every submit appending at the end with an expanding insertion. Drives the REAL return-key path in a real
 /// scene (unit hosts cannot dispatch `onSubmit`), then tight-polls
 /// software keyboard presence: any sample without a keyboard fails. A
 /// green run with a high sample count proves stillness; a red run
@@ -62,6 +67,9 @@ final class PlannerKeyboardStillnessTests: XCTestCase {
         try submitSecondTask(in: app, composer: composer)
         try assertNewestAtEnd(in: app)
         try assertComposerBelowList(in: app, composer: composer)
+        // Clear contract (day-planner 11.1): the × empties the draft with
+        // the keyboard still up.
+        try assertClearKeepsKeyboard(in: app, composer: composer)
     }
 
     /// Opens Today from Track and focuses the composer (keyboard up).
@@ -175,12 +183,18 @@ final class PlannerKeyboardStillnessTests: XCTestCase {
         )
     }
 
-    /// Submits a second task after the stillness poll (no polling: order
+    /// Submits a second task after the stillness poll (order
     /// only) and types it via the real keyboard path.
     private func submitSecondTask(in app: XCUIApplication, composer: XCUIElement) throws {
         // No committed entry matches this text, so no chip offers it: the
-        // typed draft submits as-is.
+        // chips line shows the localized no-match placeholder instead of
+        // an empty strip (day-planner 11.3), and the typed draft submits
+        // as-is.
         composer.typeText("Header sequel")
+        let noMatch = app.staticTexts["PlannerChipsNoMatch"]
+        guard noMatch.waitForExistence(timeout: HoldHarnessFlow.elementTimeout) else {
+            throw HoldHarnessError.blocker("PlannerChipsNoMatch missing for a draft matching nothing")
+        }
         for keyID in ["Done", "done", "Return", "return", "Send", "send"] {
             let key = app.keyboards.element.buttons[keyID]
             if key.exists {
@@ -189,6 +203,39 @@ final class PlannerKeyboardStillnessTests: XCTestCase {
             }
         }
         composer.typeText("\n")
+    }
+
+    /// The composer clear button (day-planner 11.1, Track × grammar)
+    /// empties the draft without dismissing the keyboard: the line falls
+    /// back to the full capped strip while the keyboard stays open.
+    private func assertClearKeepsKeyboard(in app: XCUIApplication, composer: XCUIElement) throws {
+        composer.typeText("Header sequel")
+        let clear = app.buttons["PlannerComposerClear"]
+        guard clear.waitForExistence(timeout: HoldHarnessFlow.elementTimeout) else {
+            // Diagnostic dump (day-planner 11.1 fails-first): distinguishes
+            // an empty draft (typing never landed) from a hidden clear
+            // button (visibility condition false) from an AX exposure gap.
+            let ids = app.buttons.allElementsBoundByIndex.map {
+                "\($0.identifier)[\($0.label)]"
+            }.joined(separator: "; ")
+            HoldHarnessFlow.attachNote(
+                "clear missing; composerValue=\(composer.value as? String ?? "nil") noMatchExists=\(app.staticTexts["PlannerChipsNoMatch"].exists) buttons=[\(ids)]",
+                named: "clear-missing",
+                to: self
+            )
+            throw HoldHarnessError.blocker("PlannerComposerClear missing while editing a non-empty draft")
+        }
+        clear.tap()
+        XCTAssertTrue(app.keyboards.element.exists, "keyboard dismissed by the composer clear button")
+        // A cleared field exposes its placeholder (or nothing) as its AX
+        // value — never the typed draft.
+        XCTAssertNotEqual(
+            composer.value as? String, "Header sequel",
+            "clear did not empty the draft (value=\(composer.value as? String ?? "nil"))"
+        )
+        guard app.buttons["PlannerChip-Header probe"].waitForExistence(timeout: HoldHarnessFlow.elementTimeout) else {
+            throw HoldHarnessError.blocker("full chips strip missing after clearing the draft")
+        }
     }
 
     /// The newest task sits at the end of the list (day-planner 9.1).

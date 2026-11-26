@@ -26,6 +26,11 @@ struct PlannerComposerField: UIViewRepresentable {
     /// Fired on Return INSTEAD of the default resign (the view submits the
     /// composer draft, as the old `onSubmit` did).
     let onReturn: () -> Void
+    /// UIKit editing-state mirror (day-planner 11.1): the `focused`
+    /// binding above only issues focus requests — it never observes
+    /// UIKit-side focus back, so reading it for visibility stays stale.
+    /// The delegate is ground truth for "while editing".
+    var onEditingChanged: (Bool) -> Void = { _ in }
 
     func makeCoordinator() -> Coordinator {
         Coordinator(self)
@@ -108,9 +113,20 @@ struct PlannerComposerField: UIViewRepresentable {
         /// relinquishes it — resigns arrive solely from the system, and the
         /// next update re-asserts (see `updateUIView`). No end-echo: writing
         /// `false` here would disarm that recovery and strand the field
-        /// unfocused after any steal.
+        /// unfocused after any steal. The UIKit editing state itself is
+        /// reported separately through `onEditingChanged` (the binding
+        /// never observes UIKit-side focus back, so it cannot drive
+        /// visibility).
         func textFieldDidBeginEditing(_ textField: UITextField) {
             parent.focused.wrappedValue = true
+            parent.onEditingChanged(true)
+        }
+
+        /// Mirrors UIKit-side resign into the editing state (visibility
+        /// only — the `focused` binding is deliberately left untouched so
+        /// the become-only recovery in `updateUIView` keeps working).
+        func textFieldDidEndEditing(_ textField: UITextField) {
+            parent.onEditingChanged(false)
         }
     }
 }

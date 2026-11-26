@@ -359,4 +359,5 @@
 "planner.rename" = "Переименовать";
 "planner.markDone" = "Отметить выполненной";
 "planner.reopen" = "Вернуть";
+"planner.noMatch" = "Нет совпадений";
 "planner.timerActive" = "Таймер идёт";

@@ -27,11 +27,29 @@ struct PlannerView: View {
     /// Whether the software keyboard is open: the chips line mounts only
     /// then (day-planner 8.2), pinned just above it as the last slot.
     @State private var keyboardVisible = false
+    /// UIKit editing state of the composer (day-planner 11.1): drives the
+    /// trailing clear button — the `composerFocused` flag only issues
+    /// focus requests and never observes UIKit-side focus back.
+    @State private var composerEditing = false
     var body: some View {
         content
-            .navigationTitle(L10n.plannerTitle.text)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                // Mail-style section subtitle (day-planner 11.1): the
+                // running-timer notice lives under the Today title in the
+                // nav bar — never as an inline caption in the list.
+                ToolbarItem(placement: .principal) {
+                    VStack(spacing: 0) {
+                        Text(L10n.plannerTitle.text)
+                            .font(.headline)
+                        if vm.timerActive {
+                            Text(L10n.plannerTimerActive.text)
+                                .font(.caption)
+                                .foregroundStyle(Theme.textSecondary)
+                                .accessibilityIdentifier("PlannerTimerSubtitle")
+                        }
+                    }
+                }
                 ToolbarItem(placement: .navigationBarTrailing) {
                     EditButton()
                         .accessibilityIdentifier("PlannerEditButton")
@@ -91,15 +109,6 @@ struct PlannerView: View {
             } else {
                 taskList
             }
-            if vm.timerActive {
-                Text(L10n.plannerTimerActive.text)
-                    .font(.caption)
-                    .foregroundStyle(Theme.textSecondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, Theme.screenHorizontalPadding)
-                    .padding(.vertical, Theme.spacingSmall)
-                    .accessibilityIdentifier("PlannerTimerActiveCaption")
-            }
             composer
             chipsLine
         }
@@ -122,29 +131,44 @@ struct PlannerView: View {
     /// clears the draft, and focus never leaves — the UIKit-backed field
     /// declines the Return default resign at dispatch (day-planner 7.1),
     /// so the keyboard never animates away no matter how slow the
-    /// store/reload round-trip is. The composer never unmounts and no
-    /// layout jumps. The field sits in the shared `FieldCard` chrome
-    /// (secondary background against the primary page, `minTapArea`
-    /// minimum height), so it reads as a card apart from the list; the
-    /// representable keeps its stable identity inside the card, so
-    /// first-responder survival is unchanged.
+    /// store/reload round-trip is. There is no visible Add button
+    /// (day-planner 11.1): submission runs through Return or the
+    /// composer's Add accessibility action, so VoiceOver retains a
+    /// submit path. A trailing clear button (the Track × grammar — small
+    /// dim trailing × while editing) empties the draft without
+    /// dismissing the keyboard or losing focus; its visibility follows
+    /// the UIKit editing state mirrored from the field delegate (ground
+    /// truth), not the `composerFocused` flag (which only issues focus
+    /// requests). The composer never
+    /// unmounts and no layout jumps. The field sits in the shared
+    /// `FieldCard` chrome (secondary background against the primary
+    /// page, `minTapArea` minimum height), so it reads as a card apart
+    /// from the list; the representable keeps its stable identity
+    /// inside the card, so first-responder survival is unchanged.
     private var composer: some View {
-        HStack(spacing: Theme.spacingSmall) {
-            FieldCard {
+        FieldCard {
+            HStack(spacing: Theme.spacingSmall) {
                 PlannerComposerField(
                     text: $vm.draft,
                     placeholder: L10n.plannerComposerPlaceholder.text,
                     focused: $composerFocused,
-                    accessibilityIdentifier: "PlannerComposerField"
-                ) {
+                    accessibilityIdentifier: "PlannerComposerField",
+                    onReturn: { Task { await vm.submit() } },
+                    onEditingChanged: { composerEditing = $0 }
+                )
+                .accessibilityAction(named: Text(L10n.plannerAdd.text)) {
                     Task { await vm.submit() }
                 }
+                if ClearButtonVisibility.shouldShow(isFocused: composerEditing, text: vm.draft) {
+                    ClearTextButton(
+                        action: {
+                            vm.draft = ""
+                            composerFocused = true
+                        },
+                        accessibilityId: "PlannerComposerClear"
+                    )
+                }
             }
-            Button(L10n.plannerAdd.text) {
-                Task { await vm.submit() }
-            }
-            .disabled(ActivityName.normalized(vm.draft).isEmpty)
-            .accessibilityIdentifier("PlannerAddButton")
         }
         .padding(.horizontal, Theme.screenHorizontalPadding)
         .padding(.vertical, Theme.spacingSmall)
@@ -167,8 +191,11 @@ struct PlannerView: View {
         List {
             // The task rows carry no section header (day-planner 10.2):
             // a fresh row expands in at the end (see `PlannerRowInsertion`;
-            // opacity-only under Reduce Motion).
-            ForEach(vm.snapshot.tasks) { task in
+            // opacity-only under Reduce Motion). Row swipes are Mail-style
+            // labeled pills with icon + text (day-planner 11.2):
+            // trailing-side delete into the durable undo buffer, leading-side
+            // complete/reopen with the toggle semantics — no behavior change.
+            ForEach(Array(vm.snapshot.tasks.enumerated()), id: \.element.id) { index, task in
                 PlannerTaskRow(
                     task: task,
                     timerActive: vm.timerActive,
@@ -186,6 +213,26 @@ struct PlannerView: View {
                         if await vm.startTask(task) { onStartActive() }
                     }
                 )
+                .swipeActions(edge: .trailing) {
+                    Button(role: .destructive) {
+                        Task { await vm.delete(at: IndexSet(integer: index)) }
+                    } label: {
+                        Label(L10n.entryDeleteConfirm.text, systemImage: "trash")
+                    }
+                    .tint(Theme.danger)
+                }
+                .swipeActions(edge: .leading) {
+                    Button {
+                        Task { await vm.toggleComplete(task) }
+                    } label: {
+                        if task.completedOn == nil {
+                            Label(L10n.plannerMarkDone.text, systemImage: "checkmark")
+                        } else {
+                            Label(L10n.plannerReopen.text, systemImage: "arrow.uturn.backward")
+                        }
+                    }
+                    .tint(Theme.accentPrimary)
+                }
             }
             .onDelete { offsets in Task { await vm.delete(at: offsets) } }
             .onMove { source, destination in Task { await vm.move(from: source, to: destination) } }
@@ -209,18 +256,21 @@ struct PlannerView: View {
         .accessibilityIdentifier("PlannerTaskList")
     }
 
-    /// The chips line (day-planner 9.1, gap 10.2): one horizontally
-    /// scrollable row of recent-activity chips pinned between the composer
-    /// and the keyboard — the last VStack slot, so the keyboard's safe-area
-    /// inset lands under it with a `spacingSmall` breathing gap, and the
-    /// chips never sit flush on the keyboard. Visible only while the
-    /// keyboard is open; an empty draft shows the full capped strip, typing
-    /// prefix-filters it, and tapping a chip fills the composer with its
-    /// exact text (no task created, no timer started). The slot stays
+    /// The chips line (day-planner 9.1, gap 10.2, placeholder 11.3): one
+    /// horizontally scrollable row of recent-activity chips pinned between
+    /// the composer and the keyboard — the last VStack slot, so the
+    /// keyboard's safe-area inset lands under it with a `spacingSmall`
+    /// breathing gap, and the chips never sit flush on the keyboard.
+    /// Visible only while the keyboard is open; an empty draft shows the
+    /// full capped strip, typing prefix-filters it, and tapping a chip
+    /// fills the composer with its exact text (no task created, no timer
+    /// started). A draft that matches nothing shows the localized
+    /// no-match placeholder instead of an empty strip. The slot stays
     /// mounted at one chip row while the keyboard is open even when the
-    /// filter matches nothing (a hidden prototype holds the row height),
-    /// so filter changes only swap chips inside the line and never move
-    /// the composer or the list above.
+    /// filter matches nothing (the placeholder — or a hidden prototype
+    /// for a blank filter — holds the row height), so filter changes
+    /// only swap chips inside the line and never move the composer or
+    /// the list above.
     ///
     /// VoiceOver follows the visual order — list, then the composer, then
     /// the chips line next to the keyboard — so swipe order always matches
@@ -233,16 +283,31 @@ struct PlannerView: View {
                         chip(recent)
                     }
                     if vm.chips.isEmpty {
-                        // Holds one chip row so the line never collapses:
-                        // identical text metrics, hidden from sight and
-                        // assistive tech.
-                        Text(" ")
-                            .font(.subheadline)
-                            .padding(.horizontal, Theme.spacingMedium)
-                            .padding(.vertical, 12)
-                            .frame(minHeight: Theme.minTapArea)
-                            .hidden()
-                            .accessibilityHidden(true)
+                        if vm.showsChipsNoMatch {
+                            // A non-blank draft with zero matches: the
+                            // localized placeholder holds the row (same
+                            // text metrics as a chip, no capsule — it is
+                            // not tappable).
+                            Text(L10n.plannerNoMatch.text)
+                                .font(.subheadline)
+                                .foregroundStyle(Theme.textSecondary)
+                                .lineLimit(1)
+                                .padding(.horizontal, Theme.spacingMedium)
+                                .padding(.vertical, 12)
+                                .frame(minHeight: Theme.minTapArea)
+                                .accessibilityIdentifier("PlannerChipsNoMatch")
+                        } else {
+                            // Holds one chip row so the line never collapses:
+                            // identical text metrics, hidden from sight and
+                            // assistive tech.
+                            Text(" ")
+                                .font(.subheadline)
+                                .padding(.horizontal, Theme.spacingMedium)
+                                .padding(.vertical, 12)
+                                .frame(minHeight: Theme.minTapArea)
+                                .hidden()
+                                .accessibilityHidden(true)
+                        }
                     }
                 }
                 .padding(.horizontal, Theme.screenHorizontalPadding)

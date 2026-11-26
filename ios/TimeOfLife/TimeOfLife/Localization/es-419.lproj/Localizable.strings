@@ -357,4 +357,5 @@
 "planner.rename" = "Renombrar";
 "planner.markDone" = "Marcar como hecha";
 "planner.reopen" = "Reabrir";
+"planner.noMatch" = "Sin coincidencias";
 "planner.timerActive" = "Temporizador en marcha";

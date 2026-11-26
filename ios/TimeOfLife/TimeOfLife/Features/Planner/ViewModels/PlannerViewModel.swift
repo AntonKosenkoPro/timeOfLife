@@ -146,6 +146,14 @@ final class PlannerViewModel: ObservableObject {
         draft = recent.activityText
     }
 
+    /// Whether the chips line shows the no-match placeholder (day-planner
+    /// 11.3): a non-blank draft that filters the Recent pool to nothing.
+    /// An empty or whitespace-only draft shows the full capped strip
+    /// instead — never this.
+    var showsChipsNoMatch: Bool {
+        !ActivityName.normalized(draft).isEmpty && chips.isEmpty
+    }
+
     /// Submits the composer (Return or the accessible Add affordance):
     /// appends one task after the existing Today rows, clears the draft,
     /// and reloads. The field never resigns across this round-trip: the

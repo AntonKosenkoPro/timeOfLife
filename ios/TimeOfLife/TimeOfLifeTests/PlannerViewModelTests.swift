@@ -98,6 +98,35 @@ struct PlannerViewModelTests {
         #expect(vm.chips.map(\.activityText) == (2...6).reversed().map { "Entry \($0)" })
     }
 
+    @Test("no-match draft shows the placeholder instead of an empty strip")
+    func noMatchDraftShowsPlaceholder() async throws {
+        let (vm, store) = await makeContext()
+        await vm.loadIfNeeded()
+        _ = try await store.createEntry(TimeEntry(
+            id: "e1", activityText: "Reading",
+            startedAt: Date(timeIntervalSinceReferenceDate: 1_000),
+            endedAt: Date(timeIntervalSinceReferenceDate: 1_600), durationSeconds: 600
+        ))
+        vm.invalidate()
+        await vm.loadIfNeeded()
+        // Empty draft: the full strip, never the placeholder.
+        vm.draft = ""
+        #expect(vm.chips.map(\.activityText) == ["Reading"])
+        #expect(vm.showsChipsNoMatch == false)
+        // Blank draft normalizes to empty: still the full strip.
+        vm.draft = "   "
+        #expect(vm.chips.map(\.activityText) == ["Reading"])
+        #expect(vm.showsChipsNoMatch == false)
+        // A matching prefix filters the strip without the placeholder.
+        vm.draft = "read"
+        #expect(vm.chips.map(\.activityText) == ["Reading"])
+        #expect(vm.showsChipsNoMatch == false)
+        // A draft matching nothing empties the strip and raises the flag.
+        vm.draft = "zzz"
+        #expect(vm.chips.isEmpty)
+        #expect(vm.showsChipsNoMatch)
+    }
+
     // MARK: - Checklist
 
     @Test("toggle completes in place and reopens at the same position")
