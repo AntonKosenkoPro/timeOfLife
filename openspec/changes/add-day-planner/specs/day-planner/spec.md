@@ -18,7 +18,7 @@ The planner SHALL show all unfinished tasks and tasks completed on the current l
 
 ### Requirement: Planned tasks are an independently editable checklist
 
-A task SHALL have a trimmed, valid timer name as its only user-entered field. Tasks with identical names SHALL have separate identities. The user SHALL be able to rename, reorder, complete, reopen, and delete visible tasks offline. New tasks SHALL prepend before existing Today rows. Completing or reopening a task SHALL keep its position and SHALL NOT start, stop, create, or modify a timer or time entry. Completing or reopening a task SHALL NOT change the row's height or move sibling rows.
+A task SHALL have a trimmed, valid timer name as its only user-entered field. Tasks with identical names SHALL have separate identities. The user SHALL be able to rename, reorder, complete, reopen, and delete visible tasks offline. New tasks SHALL append after existing Today rows. Completing or reopening a task SHALL keep its position and SHALL NOT start, stop, create, or modify a timer or time entry. Completing or reopening a task SHALL NOT change the row's height or move sibling rows.
 
 #### Scenario: Two tasks use the same name
 - **WHEN** the user adds two tasks with the same valid name, then edits or removes one
@@ -34,15 +34,15 @@ A task SHALL have a trimmed, valid timer name as its only user-entered field. Ta
 
 ### Requirement: The composer supports repeated adds without dismissing the keyboard
 
-The Today page SHALL use one inline composer fixed above a single task list surface. While the keyboard is open, a single horizontally scrollable line of recent-activity chips drawn from newest-first Recents SHALL sit fixed just above the keyboard; typing filters the chips by prefix, and tapping a chip fills the composer with its exact text. Choosing a chip SHALL create no task and start no timer. The task rows SHALL carry a localized `Tasks` header, present whenever the task list is shown. Return on a valid draft SHALL prepend one task at the top with an expanding insertion, clear the composer, and keep the input focused with the keyboard open. The field SHALL never resign first responder across a submit — no dismiss/reopen cycle of any duration. The composer SHALL suppress the Return key's default resign at dispatch (custom submit handling that never resigns), rather than restoring focus afterwards. Invalid or failed submission SHALL NOT append a row or discard the draft. Row changes SHALL use non-disruptive feedback and respect Reduce Motion.
+The Today page SHALL use one inline composer fixed at the bottom of the screen with a single task list surface above it. While the keyboard is open, a single horizontally scrollable line of recent-activity chips drawn from newest-first Recents SHALL sit fixed between the composer and the keyboard; typing filters the chips by prefix, and tapping a chip fills the composer with its exact text. Choosing a chip SHALL create no task and start no timer. The task rows SHALL carry a localized `Tasks` header, present whenever the task list is shown. Return on a valid draft SHALL append one task at the end of the list with an expanding insertion, clear the composer, and keep the input focused with the keyboard open. The field SHALL never resign first responder across a submit — no dismiss/reopen cycle of any duration. The composer SHALL suppress the Return key's default resign at dispatch (custom submit handling that never resigns), rather than restoring focus afterwards. Invalid or failed submission SHALL NOT append a row or discard the draft. Row changes SHALL use non-disruptive feedback and respect Reduce Motion.
 
 #### Scenario: Add consecutive tasks
 - **WHEN** the user adds a valid task with Return and then types and submits the next name
-- **THEN** each submitted task appears at the top in reverse submission order (latest first), the composer keeps input focus without resigning, and the keyboard stays still throughout — no dismiss/reopen cycle of any duration
+- **THEN** each submitted task appears at the end in submission order, the composer keeps input focus without resigning, and the keyboard stays still throughout — no dismiss/reopen cycle of any duration
 
-#### Scenario: New task expands in at the top
+#### Scenario: New task expands in at the end
 - **WHEN** the user submits a valid draft
-- **THEN** the new row expands from zero to full height at the top of the list; under Reduce Motion the insertion uses a non-expanding transition instead
+- **THEN** the new row expands from zero to full height at the end of the list; under Reduce Motion the insertion uses a non-expanding transition instead
 
 #### Scenario: Focus survives the save round-trip
 - **WHEN** the user submits a valid draft
@@ -50,7 +50,7 @@ The Today page SHALL use one inline composer fixed above a single task list surf
 
 #### Scenario: Chips filter as you type
 - **WHEN** the user types with the keyboard open
-- **THEN** the fixed chips line above the keyboard shows the prefix-filtered Recents, and an empty draft shows the full capped strip
+- **THEN** the fixed chips line between the composer and the keyboard shows the prefix-filtered Recents, and an empty draft shows the full capped strip
 
 #### Scenario: Fill from a chip
 - **WHEN** the user taps a chip
@@ -58,7 +58,11 @@ The Today page SHALL use one inline composer fixed above a single task list surf
 
 ### Requirement: An open task starts the existing timer
 
-Activating Start on an open task SHALL start that exact task in one tap when no timer is active and return to Track after a successful start. The existing Track name and exact-text category inheritance rules SHALL apply. While a run is active, saving, or awaiting a Stop retry, the planner SHALL remain usable except for starting another task. A task rename SHALL NOT change the locked timer name.
+Activating Start on an open task SHALL start that exact task in one tap when no timer is active and return to Track after a successful start. Returning to Track after a successful start SHALL present the running timer immediately, with no further navigation required. The existing Track name and exact-text category inheritance rules SHALL apply. While a run is active, saving, or awaiting a Stop retry, the planner SHALL remain usable except for starting another task. A task rename SHALL NOT change the locked timer name.
+
+#### Scenario: Track shows the running timer at once
+- **WHEN** the user starts an open task from the planner and returns to Track
+- **THEN** Track presents the running state for the started task immediately, with no extra navigation required
 
 #### Scenario: Start without replacing a timer
 - **WHEN** a task Start is invoked while another run is active
