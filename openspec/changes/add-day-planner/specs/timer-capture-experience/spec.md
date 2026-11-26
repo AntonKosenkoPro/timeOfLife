@@ -2,7 +2,7 @@
 
 ### Requirement: Track opens Today and shows its task count
 
-Track SHALL offer a compact, accessible progress control that opens the Today planner in the Track navigation stack without adding a tab. The control SHALL report done and total counts from the same Today projection, with an entry point even when the list is empty. Counts SHALL present actual values on first paint whenever the local account file already holds planner data — no 0/0 flash. It SHALL remain usable while timing and SHALL NOT shift the numeric readout or Start/Stop when counts or timer state change. Stop's label, visual role, and position SHALL remain unchanged for planner-linked timers; there SHALL be no separate Track completion control. The control SHALL render the `checklist` system symbol beside the done/total count.
+Track SHALL offer a compact, accessible progress control that opens the Today planner in the Track navigation stack without adding a tab. The control SHALL report done and total counts from the same Today projection, with an entry point even when the list is empty. Counts SHALL present actual values on first paint whenever the local account file already holds planner data — no 0/0 flash. The control SHALL render `checklist.unchecked` when nothing is done (including an empty list), `checklist` while partially done, and `checklist.checked` when every Today task is done (N/N with N > 0). It SHALL remain usable while timing and SHALL NOT shift the numeric readout or Start/Stop when counts or timer state change. Stop's label, visual role, and position SHALL remain unchanged for planner-linked timers; there SHALL be no separate Track completion control. The control SHALL render the `checklist` system symbol beside the done/total count.
 
 #### Scenario: Progress changes on the existing Track screen
 - **WHEN** a task is completed, reopened, or updated by sync
@@ -11,6 +11,14 @@ Track SHALL offer a compact, accessible progress control that opens the Today pl
 #### Scenario: Counts are instant on warm data
 - **WHEN** Track appears with a bound account file that already holds planner data
 - **THEN** the control shows the actual done/total counts on first presentation with no 0/0 flash
+
+#### Scenario: Linked Stop refreshes the count
+- **WHEN** a linked Stop completes a task
+- **THEN** the control updates to the new done/total counts without further navigation
+
+#### Scenario: Icon follows completion
+- **WHEN** Today holds no done tasks, some done tasks, or all tasks done (non-empty)
+- **THEN** the control renders `checklist.unchecked`, `checklist`, or `checklist.checked` respectively
 
 #### Scenario: Stop a planner-linked timer
 - **WHEN** the user stops a linked timer from Track

@@ -18,7 +18,7 @@ The planner SHALL show all unfinished tasks and tasks completed on the current l
 
 ### Requirement: Planned tasks are an independently editable checklist
 
-A task SHALL have a trimmed, valid timer name as its only user-entered field. Tasks with identical names SHALL have separate identities. The user SHALL be able to rename, reorder, complete, reopen, and delete visible tasks offline. New tasks SHALL prepend before existing Today rows. Completing or reopening a task SHALL keep its position and SHALL NOT start, stop, create, or modify a timer or time entry. Completing or reopening a task SHALL NOT change the row's height or move sibling rows.
+A task SHALL hold a trimmed, valid timer name and an optional ordered category set; both are edited in the task editor sheet. Tasks with identical names SHALL have separate identities. The user SHALL be able to rename, reorder, complete, reopen, and delete visible tasks offline. Tapping a task SHALL open the task editor sheet with Name and ordered Categories fields (Log Time sheet grammar, reduced to those two fields in that order); there SHALL be no inline renaming in the row. New tasks SHALL prepend before existing Today rows. Completing or reopening a task SHALL keep its position and SHALL NOT start, stop, create, or modify a timer or time entry. Completing or reopening a task SHALL NOT change the row's height or move sibling rows.
 
 #### Scenario: Two tasks use the same name
 - **WHEN** the user adds two tasks with the same valid name, then edits or removes one
@@ -27,6 +27,10 @@ A task SHALL have a trimmed, valid timer name as its only user-entered field. Ta
 #### Scenario: Reopen a task after logging time
 - **WHEN** the user reopens a task that was completed by Stop
 - **THEN** the task becomes unfinished at its existing position, and the saved entry is unchanged
+
+#### Scenario: Edit a task in the sheet
+- **WHEN** the user renames a task and changes its categories in the editor sheet and saves
+- **THEN** the task updates in place with the new name and category set, and no saved entry changes
 
 #### Scenario: Toggle keeps the list still
 - **WHEN** the user completes or reopens a task
@@ -62,7 +66,7 @@ The Today page SHALL use one inline composer fixed at the bottom of the screen w
 
 ### Requirement: An open task starts the existing timer
 
-Activating Start on an open task SHALL start that exact task in one tap when no timer is active and return to Track after a successful start. Returning to Track after a successful start SHALL present the running timer immediately, with no further navigation required. The existing Track name and exact-text category inheritance rules SHALL apply. While a run is active, saving, or awaiting a Stop retry, the planner SHALL remain usable except for starting another task. A task rename SHALL NOT change the locked timer name.
+Activating Start on an open task SHALL start that exact task in one tap when no timer is active and return to Track after a successful start. A task holding categories SHALL start with exactly those categories; a task without categories SHALL fall back to the existing exact-text Recents inheritance. Returning to Track after a successful start SHALL present the running timer immediately, with no further navigation required. The existing Track name and exact-text category inheritance rules SHALL apply. While a run is active, saving, or awaiting a Stop retry, the planner SHALL remain usable except for starting another task. A task rename SHALL NOT change the locked timer name.
 
 #### Scenario: Track shows the running timer at once
 - **WHEN** the user starts an open task from the planner and returns to Track
