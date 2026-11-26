@@ -2,11 +2,15 @@
 
 ### Requirement: Track opens Today and shows its task count
 
-Track SHALL offer a compact, accessible progress control that opens the Today planner in the Track navigation stack without adding a tab. The control SHALL report done and total counts from the same Today projection, with an entry point even when the list is empty. It SHALL remain usable while timing and SHALL NOT shift the numeric readout or Start/Stop when counts or timer state change. Stop's label, visual role, and position SHALL remain unchanged for planner-linked timers; there SHALL be no separate Track completion control. The control SHALL render the `checklist` system symbol beside the done/total count.
+Track SHALL offer a compact, accessible progress control that opens the Today planner in the Track navigation stack without adding a tab. The control SHALL report done and total counts from the same Today projection, with an entry point even when the list is empty. Counts SHALL present actual values on first paint whenever the local account file already holds planner data — no 0/0 flash. It SHALL remain usable while timing and SHALL NOT shift the numeric readout or Start/Stop when counts or timer state change. Stop's label, visual role, and position SHALL remain unchanged for planner-linked timers; there SHALL be no separate Track completion control. The control SHALL render the `checklist` system symbol beside the done/total count.
 
 #### Scenario: Progress changes on the existing Track screen
 - **WHEN** a task is completed, reopened, or updated by sync
 - **THEN** Track shows the updated Today count without moving the numeric readout or Start/Stop, and activating the count opens the same checklist
+
+#### Scenario: Counts are instant on warm data
+- **WHEN** Track appears with a bound account file that already holds planner data
+- **THEN** the control shows the actual done/total counts on first presentation with no 0/0 flash
 
 #### Scenario: Stop a planner-linked timer
 - **WHEN** the user stops a linked timer from Track
