@@ -850,8 +850,8 @@ func TestSpec_PlannerContractDocumented(t *testing.T) {
 	if !ok {
 		t.Fatal("expected PlannerIntent schema")
 	}
-	if len(intent.Enum) != 6 {
-		t.Errorf("PlannerIntent must declare the 6 field-specific intents, got %v", intent.Enum)
+	if len(intent.Enum) != 7 {
+		t.Errorf("PlannerIntent must declare the 7 field-specific intents, got %v", intent.Enum)
 	}
 
 	req, ok := s.Components.Schemas["PlannerOperationRequest"]
@@ -877,7 +877,7 @@ func TestSpec_PlannerContractDocumented(t *testing.T) {
 	if !ok {
 		t.Fatal("expected PlannerTask schema")
 	}
-	for _, field := range []string{"id", "name", "position_key", "revision", "updated_at", "deleted"} {
+	for _, field := range []string{"id", "name", "position_key", "category_ids", "revision", "updated_at", "deleted"} {
 		if _, ok := task.Properties[field]; !ok {
 			t.Errorf("PlannerTask must document %q", field)
 		}

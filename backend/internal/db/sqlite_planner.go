@@ -11,16 +11,18 @@ import (
 // ---------- SQLite planner ----------
 
 // scanPlannerTask scans one planner task row (without user_id) into a
-// PlannerTask. completed_on arrives as a civil-date TEXT (or NULL when open).
+// PlannerTask. completed_on arrives as a civil-date TEXT (or NULL when open);
+// category_ids arrives as a JSON array TEXT (or NULL on pre-012 rows).
 func scanPlannerTask(sc rowScanner, userID string) (PlannerTask, error) {
 	var (
 		t           PlannerTask
 		completedOn sql.NullString
+		categories  sql.NullString
 		createdAt   string
 		updatedAt   string
 		deleted     int64
 	)
-	if err := sc.Scan(&t.ID, &t.Name, &t.PositionKey, &completedOn, &t.Revision, &createdAt, &updatedAt, &deleted); err != nil {
+	if err := sc.Scan(&t.ID, &t.Name, &t.PositionKey, &completedOn, &categories, &t.Revision, &createdAt, &updatedAt, &deleted); err != nil {
 		return PlannerTask{}, err
 	}
 	t.UserID = userID
@@ -35,6 +37,7 @@ func scanPlannerTask(sc rowScanner, userID string) (PlannerTask, error) {
 		}
 		t.CompletedOn = &s
 	}
+	t.CategoryIDs = parsePlannerCategoryIDs(categories.String)
 	t.CreatedAt = parseTime(createdAt)
 	t.UpdatedAt = parseTime(updatedAt)
 	t.Deleted = deleted != 0
@@ -48,7 +51,7 @@ type sqlitePlannerQuerier interface {
 // sqliteGetPlannerTask reads one planner task row inside or outside a tx.
 func sqliteGetPlannerTask(ctx context.Context, q sqlitePlannerQuerier, userID, id string) (PlannerTask, error) {
 	t, err := scanPlannerTask(q.QueryRowContext(ctx, `
-		SELECT id, name, position_key, completed_on, revision, created_at, updated_at, deleted
+		SELECT id, name, position_key, completed_on, category_ids, revision, created_at, updated_at, deleted
 		FROM planner_tasks
 		WHERE user_id = ? AND id = ?
 	`, userID, id), userID)
@@ -158,9 +161,9 @@ func (s *SQLiteStore) ApplyPlannerOperation(ctx context.Context, userID string, 
 			return existing, false, fmt.Errorf("planner create: %w", ErrPlannerConflict)
 		}
 		if _, err := tx.ExecContext(ctx, `
-			INSERT INTO planner_tasks (user_id, id, name, position_key, completed_on, revision, created_at, updated_at, deleted)
-			VALUES (?, ?, ?, ?, NULL, ?, ?, ?, 0)
-		`, userID, op.TaskID, *op.Name, *op.PositionKey, next, now, now); err != nil {
+			INSERT INTO planner_tasks (user_id, id, name, position_key, completed_on, category_ids, revision, created_at, updated_at, deleted)
+			VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?, 0)
+		`, userID, op.TaskID, *op.Name, *op.PositionKey, encodePlannerCategoryIDs(op.CategoryIDs), next, now, now); err != nil {
 			if isUniqueViolation(err) {
 				// A concurrent create won the race after our receipt
 				// succeeded: the winner carries a different operation id
@@ -176,7 +179,7 @@ func (s *SQLiteStore) ApplyPlannerOperation(ctx context.Context, userID string, 
 			}
 			return PlannerTask{}, false, fmt.Errorf("planner create: %w", err)
 		}
-	case PlannerIntentRename, PlannerIntentMove, PlannerIntentComplete, PlannerIntentReopen:
+	case PlannerIntentRename, PlannerIntentMove, PlannerIntentComplete, PlannerIntentReopen, PlannerIntentRetag:
 		if !known {
 			return PlannerTask{}, false, fmt.Errorf("planner update: %w", ErrNotFound)
 		}
@@ -200,6 +203,11 @@ func (s *SQLiteStore) ApplyPlannerOperation(ctx context.Context, userID string, 
 				UPDATE planner_tasks SET completed_on = ?, revision = ?, updated_at = ?
 				WHERE user_id = ? AND id = ?
 			`, *op.CompletedOn, next, now, userID, op.TaskID)
+		case PlannerIntentRetag:
+			res, err = tx.ExecContext(ctx, `
+				UPDATE planner_tasks SET category_ids = ?, revision = ?, updated_at = ?
+				WHERE user_id = ? AND id = ?
+			`, encodePlannerCategoryIDs(op.CategoryIDs), next, now, userID, op.TaskID)
 		default: // PlannerIntentReopen
 			res, err = tx.ExecContext(ctx, `
 				UPDATE planner_tasks SET completed_on = NULL, revision = ?, updated_at = ?
@@ -284,7 +292,7 @@ func (s *SQLiteStore) ListPlannerFeed(ctx context.Context, userID string, afterR
 		wm = watermark.Int64
 	}
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, name, position_key, completed_on, revision, created_at, updated_at, deleted
+		SELECT id, name, position_key, completed_on, category_ids, revision, created_at, updated_at, deleted
 		FROM planner_tasks
 		WHERE user_id = ? AND revision > ? AND revision <= ?
 		ORDER BY revision ASC

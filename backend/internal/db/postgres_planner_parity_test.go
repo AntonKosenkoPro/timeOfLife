@@ -105,6 +105,56 @@ func TestPostgres_PlannerFeedAndCivilDate(t *testing.T) {
 	}
 }
 
+func TestPostgres_PlannerRetagParity(t *testing.T) {
+	store := newParityStore(t)
+	ctx := context.Background()
+	uid := parityPlannerUser(t, store, "pg-planner-retag@example.com")
+
+	// Create with an initial set, then retag: the ordered set round-trips
+	// the JSON TEXT column on Postgres exactly like SQLite.
+	catA, catB := uuidV7(), uuidV7()
+	name, key := "Read", "500000"
+	task, created, err := store.ApplyPlannerOperation(ctx, uid, PlannerOperation{
+		OperationID: uuidV7(), TaskID: uuidV7(), Intent: PlannerIntentCreate,
+		Name: &name, PositionKey: &key, CategoryIDs: []string{catA, catB},
+	})
+	if err != nil || !created {
+		t.Fatalf("create with categories: %+v %v %v", task, created, err)
+	}
+	if len(task.CategoryIDs) != 2 || task.CategoryIDs[0] != catA || task.CategoryIDs[1] != catB {
+		t.Fatalf("create must carry the initial set, got %+v", task)
+	}
+	retagged, _, err := store.ApplyPlannerOperation(ctx, uid, PlannerOperation{
+		OperationID: uuidV7(), TaskID: task.ID, Intent: PlannerIntentRetag,
+		CategoryIDs: []string{catB},
+	})
+	if err != nil {
+		t.Fatalf("retag: %v", err)
+	}
+	if retagged.Revision != 2 || len(retagged.CategoryIDs) != 1 || retagged.CategoryIDs[0] != catB {
+		t.Fatalf("retag must replace the set, got %+v", retagged)
+	}
+	tasks, wm, _, err := store.ListPlannerFeed(ctx, uid, 0, 50)
+	if err != nil {
+		t.Fatalf("feed: %v", err)
+	}
+	if wm != 2 || len(tasks) != 1 || len(tasks[0].CategoryIDs) != 1 || tasks[0].CategoryIDs[0] != catB {
+		t.Fatalf("feed must carry the retagged set, got wm=%d %+v", wm, tasks)
+	}
+	// A retag on the terminal marker is refused, like every field op.
+	if _, _, err := store.ApplyPlannerOperation(ctx, uid, PlannerOperation{
+		OperationID: uuidV7(), TaskID: task.ID, Intent: PlannerIntentDelete,
+	}); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+	if _, _, err := store.ApplyPlannerOperation(ctx, uid, PlannerOperation{
+		OperationID: uuidV7(), TaskID: task.ID, Intent: PlannerIntentRetag,
+		CategoryIDs: []string{catA},
+	}); !errors.Is(err, ErrPlannerGone) {
+		t.Fatalf("expected ErrPlannerGone for retag after delete, got %v", err)
+	}
+}
+
 func TestPostgres_PlannerPurgeCascades(t *testing.T) {
 	store := newParityStore(t)
 	ctx := context.Background()

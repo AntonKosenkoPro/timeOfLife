@@ -1,6 +1,7 @@
 package db
 
 import (
+	"encoding/json"
 	"fmt"
 	"math/big"
 	"regexp"
@@ -12,7 +13,8 @@ import (
 
 // Planner task intents. Each operation carries only its intent's field: a
 // rename sends no position or completion, and a Stop-driven completion sends
-// only the completion date.
+// only the completion date. `create` sets the initial name, position, and
+// optional categories; `retag` replaces the ordered category set.
 const (
 	PlannerIntentCreate   = "create"
 	PlannerIntentRename   = "rename"
@@ -20,11 +22,14 @@ const (
 	PlannerIntentComplete = "complete"
 	PlannerIntentReopen   = "reopen"
 	PlannerIntentDelete   = "delete"
+	PlannerIntentRetag    = "retag"
 )
 
 // PlannerTask is the latest accepted state of one planner task. CompletedOn
 // is the civil date (YYYY-MM-DD) recorded by the completing device, or nil
-// when open. Revision is the commit-ordered per-account sequence number of
+// when open. CategoryIDs is the optional ordered set of category ids used
+// at Start (empty when the task carries none — Recents fallback applies).
+// Revision is the commit-ordered per-account sequence number of
 // the last accepted operation on this task. Deleted marks the terminal
 // deletion marker — it never clears.
 type PlannerTask struct {
@@ -33,6 +38,7 @@ type PlannerTask struct {
 	Name        string    `json:"name"`
 	PositionKey string    `json:"position_key"`
 	CompletedOn *string   `json:"completed_on"`
+	CategoryIDs []string  `json:"category_ids"`
 	Revision    int64     `json:"revision"`
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
@@ -48,6 +54,44 @@ type PlannerOperation struct {
 	Name        *string
 	PositionKey *string
 	CompletedOn *string
+	CategoryIDs []string
+}
+
+// ---------- Planner category set ----------
+
+// encodePlannerCategoryIDs renders the ordered category set for storage (a
+// JSON array TEXT column on both dialects). Nil and empty both store as
+// `[]`, so reads never meet NULL.
+func encodePlannerCategoryIDs(ids []string) string {
+	if len(ids) == 0 {
+		return "[]"
+	}
+	raw, err := json.Marshal(ids)
+	if err != nil {
+		return "[]"
+	}
+	return string(raw)
+}
+
+// parsePlannerCategoryIDs decodes a stored category set. Blank, `[]`, and
+// malformed payloads all decode to an empty set — a corrupt set must never
+// fail the task read (the feed re-converges it).
+func parsePlannerCategoryIDs(raw string) []string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" || raw == "[]" {
+		return []string{}
+	}
+	var ids []string
+	if err := json.Unmarshal([]byte(raw), &ids); err != nil {
+		return []string{}
+	}
+	out := make([]string, 0, len(ids))
+	for _, id := range ids {
+		if id != "" {
+			out = append(out, id)
+		}
+	}
+	return out
 }
 
 // ---------- Position keys ----------

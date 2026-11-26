@@ -8,12 +8,13 @@ import (
 
 // plannerResp mirrors the PlannerTask response for test assertions.
 type plannerResp struct {
-	ID          string  `json:"id"`
-	Name        string  `json:"name"`
-	PositionKey string  `json:"position_key"`
-	CompletedOn *string `json:"completed_on"`
-	Revision    int64   `json:"revision"`
-	Deleted     bool    `json:"deleted"`
+	ID          string   `json:"id"`
+	Name        string   `json:"name"`
+	PositionKey string   `json:"position_key"`
+	CompletedOn *string  `json:"completed_on"`
+	CategoryIDs []string `json:"category_ids"`
+	Revision    int64    `json:"revision"`
+	Deleted     bool     `json:"deleted"`
 }
 
 // plannerOp posts one planner operation and returns the recorder.
@@ -39,6 +40,10 @@ func TestPlanner_CreateValidation(t *testing.T) {
 		{"create without key", map[string]any{"operation_id": v7(), "task_id": v7(), "intent": "create", "name": "Read"}, "position_key"},
 		{"create bad key", map[string]any{"operation_id": v7(), "task_id": v7(), "intent": "create", "name": "Read", "position_key": "abc"}, "position_key"},
 		{"create trailing-zero key", map[string]any{"operation_id": v7(), "task_id": v7(), "intent": "create", "name": "Read", "position_key": "500000.50"}, "position_key"},
+		{"create bad category id", map[string]any{"operation_id": v7(), "task_id": v7(), "intent": "create", "name": "Read", "position_key": "500000", "category_ids": []any{"nope"}}, "category_ids"},
+		{"retag without set", map[string]any{"operation_id": v7(), "task_id": v7(), "intent": "retag"}, "category_ids"},
+		{"retag bad category id", map[string]any{"operation_id": v7(), "task_id": v7(), "intent": "retag", "category_ids": []any{"nope"}}, "category_ids"},
+		{"retag blank category id", map[string]any{"operation_id": v7(), "task_id": v7(), "intent": "retag", "category_ids": []any{""}}, "category_ids"},
 		{"complete without date", map[string]any{"operation_id": v7(), "task_id": v7(), "intent": "complete"}, "completed_on"},
 		{"complete bad date", map[string]any{"operation_id": v7(), "task_id": v7(), "intent": "complete", "completed_on": "2026-02-30"}, "completed_on"},
 		{"complete datetime", map[string]any{"operation_id": v7(), "task_id": v7(), "intent": "complete", "completed_on": "2026-11-25T10:00:00Z"}, "completed_on"},
@@ -159,6 +164,109 @@ func TestPlanner_CreateCollision(t *testing.T) {
 	})
 	if w.Code != http.StatusConflict || errCode(t, w) != "planner_conflict" {
 		t.Fatalf("expected 409 planner_conflict, got %d (%s)", w.Code, w.Body.String())
+	}
+}
+
+func TestPlanner_RetagFlow(t *testing.T) {
+	h, _, _, tok := newCatalogHandler(t)
+	opID, taskID := v7(), v7()
+	catA, catB := v7(), v7()
+
+	// Create with an initial set: the response carries it.
+	w := plannerOp(t, h, tok, map[string]any{
+		"operation_id": opID, "task_id": taskID,
+		"intent": "create", "name": "Read", "position_key": "500000",
+		"category_ids": []any{catA, catB},
+	})
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create: expected 201, got %d (%s)", w.Code, w.Body.String())
+	}
+	var created plannerResp
+	decodeBody(t, w, &created)
+	if len(created.CategoryIDs) != 2 || created.CategoryIDs[0] != catA || created.CategoryIDs[1] != catB {
+		t.Fatalf("create must carry the initial set: %+v", created)
+	}
+	// A bare create defaults to the empty set.
+	w = plannerOp(t, h, tok, map[string]any{
+		"operation_id": v7(), "task_id": v7(),
+		"intent": "create", "name": "Plain", "position_key": "500001",
+	})
+	if w.Code != http.StatusCreated {
+		t.Fatalf("bare create: expected 201, got %d (%s)", w.Code, w.Body.String())
+	}
+	var plain plannerResp
+	decodeBody(t, w, &plain)
+	if len(plain.CategoryIDs) != 0 {
+		t.Fatalf("bare create must default to empty: %+v", plain)
+	}
+
+	// Retag replaces the set with its own revision; rename composes after.
+	w = plannerOp(t, h, tok, map[string]any{
+		"operation_id": v7(), "task_id": taskID,
+		"intent": "retag", "category_ids": []any{catB},
+	})
+	if w.Code != http.StatusCreated {
+		t.Fatalf("retag: expected 201, got %d (%s)", w.Code, w.Body.String())
+	}
+	var retagged plannerResp
+	decodeBody(t, w, &retagged)
+	if retagged.Revision != 3 || len(retagged.CategoryIDs) != 1 || retagged.CategoryIDs[0] != catB {
+		t.Fatalf("retag must replace the set: %+v", retagged)
+	}
+	if retagged.Name != "Read" {
+		t.Fatalf("retag must leave the name untouched: %+v", retagged)
+	}
+
+	// Retag after delete is terminally refused, like every other field op.
+	w = plannerOp(t, h, tok, map[string]any{
+		"operation_id": v7(), "task_id": taskID, "intent": "delete",
+	})
+	if w.Code != http.StatusCreated {
+		t.Fatalf("delete: expected 201, got %d (%s)", w.Code, w.Body.String())
+	}
+	w = plannerOp(t, h, tok, map[string]any{
+		"operation_id": v7(), "task_id": taskID,
+		"intent": "retag", "category_ids": []any{catA},
+	})
+	if w.Code != http.StatusGone || errCode(t, w) != "planner_gone" {
+		t.Fatalf("retag after delete: expected 410 planner_gone, got %d (%s)", w.Code, w.Body.String())
+	}
+}
+
+func TestPlanner_ConflictDetailsCarryCategories(t *testing.T) {
+	h, _, _, tok := newCatalogHandler(t)
+	taskID, catA := v7(), v7()
+
+	w := plannerOp(t, h, tok, map[string]any{
+		"operation_id": v7(), "task_id": taskID,
+		"intent": "create", "name": "Read", "position_key": "500000",
+		"category_ids": []any{catA},
+	})
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create: expected 201, got %d", w.Code)
+	}
+	// A racing create under a different operation id collides; the 409
+	// details carry the server's ordered set comma-joined so the device
+	// adopts it losslessly.
+	w = plannerOp(t, h, tok, map[string]any{
+		"operation_id": v7(), "task_id": taskID,
+		"intent": "create", "name": "Other", "position_key": "500001",
+	})
+	if w.Code != http.StatusConflict {
+		t.Fatalf("expected 409 planner_conflict, got %d (%s)", w.Code, w.Body.String())
+	}
+	var conflict struct {
+		Error struct {
+			Code    string            `json:"code"`
+			Details map[string]string `json:"details"`
+		} `json:"error"`
+	}
+	decodeBody(t, w, &conflict)
+	if conflict.Error.Code != "planner_conflict" {
+		t.Fatalf("expected planner_conflict, got %q", conflict.Error.Code)
+	}
+	if conflict.Error.Details["category_ids"] != catA {
+		t.Fatalf("409 details must carry the server set, got %v", conflict.Error.Details)
 	}
 }
 

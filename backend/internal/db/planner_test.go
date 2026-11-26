@@ -193,6 +193,105 @@ func TestPlanner_ConflictingRenamesConvergeInAcceptanceOrder(t *testing.T) {
 	}
 }
 
+func TestPlanner_RetagOwnRevision(t *testing.T) {
+	store := setupTestStore(t)
+	ctx := context.Background()
+	uid := plannerUser(t, store, "planner-retag@example.com")
+
+	// Create with an initial set: the response and the feed both carry it.
+	catA, catB, catC := uuidV7(), uuidV7(), uuidV7()
+	name, key := "Read", "500000"
+	created, isNew, err := store.ApplyPlannerOperation(ctx, uid, PlannerOperation{
+		OperationID: uuidV7(), TaskID: uuidV7(), Intent: PlannerIntentCreate,
+		Name: &name, PositionKey: &key, CategoryIDs: []string{catA, catB},
+	})
+	if err != nil || !isNew {
+		t.Fatalf("create with categories: %v %v", created, err)
+	}
+	if len(created.CategoryIDs) != 2 || created.CategoryIDs[0] != catA || created.CategoryIDs[1] != catB {
+		t.Fatalf("create must carry the initial set, got %+v", created)
+	}
+	// A bare create defaults to the empty set.
+	plain := plannerCreate(t, store, uid, "Plain", "500001")
+	if len(plain.CategoryIDs) != 0 {
+		t.Fatalf("bare create must default to empty, got %+v", plain)
+	}
+
+	// Retag replaces the ordered set with its own revision (per-account
+	// revision 3 — the bare create above consumed 2), leaving the
+	// name and position untouched.
+	retagged, _, err := store.ApplyPlannerOperation(ctx, uid, PlannerOperation{
+		OperationID: uuidV7(), TaskID: created.ID, Intent: PlannerIntentRetag,
+		CategoryIDs: []string{catC},
+	})
+	if err != nil {
+		t.Fatalf("retag: %v", err)
+	}
+	if retagged.Revision != 3 || len(retagged.CategoryIDs) != 1 || retagged.CategoryIDs[0] != catC {
+		t.Fatalf("retag must replace the set with its own revision, got %+v", retagged)
+	}
+	if retagged.Name != "Read" || retagged.PositionKey != "500000" {
+		t.Fatalf("retag must leave name and position untouched, got %+v", retagged)
+	}
+	// An empty retag clears the set (full replace, not a merge).
+	cleared, _, err := store.ApplyPlannerOperation(ctx, uid, PlannerOperation{
+		OperationID: uuidV7(), TaskID: created.ID, Intent: PlannerIntentRetag,
+		CategoryIDs: []string{},
+	})
+	if err != nil || len(cleared.CategoryIDs) != 0 || cleared.Revision != 4 {
+		t.Fatalf("empty retag must clear the set, got %+v %v", cleared, err)
+	}
+	// A later rename composes: the cleared set stays cleared.
+	newName := "Read books"
+	renamed, _, err := store.ApplyPlannerOperation(ctx, uid, PlannerOperation{
+		OperationID: uuidV7(), TaskID: created.ID, Intent: PlannerIntentRename, Name: &newName,
+	})
+	if err != nil || renamed.Name != newName || len(renamed.CategoryIDs) != 0 {
+		t.Fatalf("rename must compose with the retag, got %+v %v", renamed, err)
+	}
+	// The feed carries the latest set per task.
+	tasks, wm, _, err := store.ListPlannerFeed(ctx, uid, 0, 50)
+	if err != nil {
+		t.Fatalf("feed: %v", err)
+	}
+	if wm != 5 {
+		t.Fatalf("expected watermark 5, got %d", wm)
+	}
+	for _, task := range tasks {
+		if task.ID == created.ID && (len(task.CategoryIDs) != 0 || task.Name != "Read books") {
+			t.Fatalf("feed must carry the latest retag state, got %+v", task)
+		}
+	}
+}
+
+func TestPlanner_RetagTerminalAndUnknown(t *testing.T) {
+	store := setupTestStore(t)
+	ctx := context.Background()
+	uid := plannerUser(t, store, "planner-retag-terminal@example.com")
+
+	task := plannerCreate(t, store, uid, "Read", "500000")
+	if _, _, err := store.ApplyPlannerOperation(ctx, uid, PlannerOperation{
+		OperationID: uuidV7(), TaskID: task.ID, Intent: PlannerIntentDelete,
+	}); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+	// A retag on the terminal marker is terminally refused.
+	cat := uuidV7()
+	if _, _, err := store.ApplyPlannerOperation(ctx, uid, PlannerOperation{
+		OperationID: uuidV7(), TaskID: task.ID, Intent: PlannerIntentRetag,
+		CategoryIDs: []string{cat},
+	}); !errors.Is(err, ErrPlannerGone) {
+		t.Fatalf("expected ErrPlannerGone for retag after delete, got %v", err)
+	}
+	// Unknown ids are 404, not 410.
+	if _, _, err := store.ApplyPlannerOperation(ctx, uid, PlannerOperation{
+		OperationID: uuidV7(), TaskID: uuidV7(), Intent: PlannerIntentRetag,
+		CategoryIDs: []string{cat},
+	}); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("expected ErrNotFound for unknown retag, got %v", err)
+	}
+}
+
 func TestPlanner_DeleteIsTerminal(t *testing.T) {
 	store := setupTestStore(t)
 	ctx := context.Background()

@@ -1988,11 +1988,12 @@ components:
     PlannerIntent:
       type: string
       description: |
-        Field-specific planner mutation. `create` sets the initial name and
-        position; `rename` sets only the name; `move` sets only the position
-        key; `complete` sets only the completion date; `reopen` clears it;
-        `delete` writes a terminal deletion marker.
-      enum: [create, rename, move, complete, reopen, delete]
+        Field-specific planner mutation. `create` sets the initial name,
+        position, and optional categories; `rename` sets only the name;
+        `move` sets only the position key; `complete` sets only the
+        completion date; `reopen` clears it; `retag` replaces the ordered
+        category set; `delete` writes a terminal deletion marker.
+      enum: [create, rename, move, complete, reopen, delete, retag]
 
     PlannerOperationRequest:
       type: object
@@ -2045,12 +2046,24 @@ components:
             Civil completion date (`YYYY-MM-DD`) captured on the device
             performing the completion; synced as a date, never reinterpreted
             in another time zone. Required for `complete`, ignored otherwise.
+        category_ids:
+          type: array
+          items:
+            type: string
+            format: uuid
+          description: |
+            Ordered category tags for the task. Required for `retag` (a full
+            replace — an empty array clears the set); optional for `create`
+            (the initial set, defaulting to empty); ignored otherwise. Every
+            id must be a valid UUID; unknown ids are kept and pruned at Stop
+            (no catalog existence check, unlike entry `category_ids`).
       example:
         operation_id: "019639f1-7a3b-7abc-9def-100000000011"
         task_id: "019639f1-7a3b-7abc-9def-100000000010"
         intent: create
         name: "Read"
         position_key: "500000"
+        category_ids: []
 
     PlannerTask:
       type: object
@@ -2060,10 +2073,13 @@ components:
         operation on this task; `deleted` marks the terminal deletion
         marker (converge by dropping the local copy — it never clears).
         `completed_on` is the civil date recorded by the completing device.
+        `category_ids` is the ordered tag set used at Start (empty when the
+        task carries none — Recents fallback applies).
       required:
         - id
         - name
         - position_key
+        - category_ids
         - revision
         - updated_at
         - deleted
@@ -2082,6 +2098,12 @@ components:
           format: date
           nullable: true
           description: Civil completion date, or null when open.
+        category_ids:
+          type: array
+          items:
+            type: string
+            format: uuid
+          description: Ordered category tags for the task; empty when none.
         revision:
           type: integer
           minimum: 1
@@ -2097,6 +2119,7 @@ components:
         name: "Read"
         position_key: "500000"
         completed_on: null
+        category_ids: []
         revision: 7
         updated_at: "2026-11-25T10:00:00Z"
         deleted: false

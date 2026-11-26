@@ -13,13 +13,15 @@ import (
 // ---------- Postgres planner ----------
 
 // pgScanPlannerTask scans one planner task row (without user_id) into a
-// PlannerTask. completed_on arrives as a civil date (or NULL when open).
+// PlannerTask. completed_on arrives as a civil date (or NULL when open);
+// category_ids arrives as a JSON array TEXT (or NULL on pre-012 rows).
 func pgScanPlannerTask(sc pgxScanner, userID string) (PlannerTask, error) {
 	var (
 		t           PlannerTask
 		completedOn *time.Time
+		categories  *string
 	)
-	if err := sc.Scan(&t.ID, &t.Name, &t.PositionKey, &completedOn, &t.Revision, &t.CreatedAt, &t.UpdatedAt, &t.Deleted); err != nil {
+	if err := sc.Scan(&t.ID, &t.Name, &t.PositionKey, &completedOn, &categories, &t.Revision, &t.CreatedAt, &t.UpdatedAt, &t.Deleted); err != nil {
 		return PlannerTask{}, err
 	}
 	t.UserID = userID
@@ -27,6 +29,11 @@ func pgScanPlannerTask(sc pgxScanner, userID string) (PlannerTask, error) {
 		s := completedOn.Format("2006-01-02")
 		t.CompletedOn = &s
 	}
+	raw := ""
+	if categories != nil {
+		raw = *categories
+	}
+	t.CategoryIDs = parsePlannerCategoryIDs(raw)
 	return t, nil
 }
 
@@ -34,7 +41,7 @@ func (s *PostgresStore) pgGetPlannerTask(ctx context.Context, q interface {
 	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
 }, userID, id string) (PlannerTask, error) {
 	task, err := pgScanPlannerTask(q.QueryRow(ctx, `
-		SELECT id, name, position_key, completed_on, revision, created_at, updated_at, deleted
+		SELECT id, name, position_key, completed_on, category_ids, revision, created_at, updated_at, deleted
 		FROM planner_tasks
 		WHERE user_id = $1 AND id = $2
 	`, userID, id), userID)
@@ -146,9 +153,9 @@ func (s *PostgresStore) ApplyPlannerOperation(ctx context.Context, userID string
 			return existing, false, fmt.Errorf("planner create: %w", ErrPlannerConflict)
 		}
 		if _, err := tx.Exec(ctx, `
-			INSERT INTO planner_tasks (user_id, id, name, position_key, completed_on, revision, created_at, updated_at, deleted)
-			VALUES ($1, $2, $3, $4, NULL, $5, $6, $6, false)
-		`, userID, op.TaskID, *op.Name, *op.PositionKey, next, now); err != nil {
+			INSERT INTO planner_tasks (user_id, id, name, position_key, completed_on, category_ids, revision, created_at, updated_at, deleted)
+			VALUES ($1, $2, $3, $4, NULL, $5, $6, $7, $7, false)
+		`, userID, op.TaskID, *op.Name, *op.PositionKey, encodePlannerCategoryIDs(op.CategoryIDs), next, now); err != nil {
 			if pgIsUniqueViolation(err) {
 				// A concurrent create won the race after our receipt
 				// succeeded: the winner carries a different operation id
@@ -164,7 +171,7 @@ func (s *PostgresStore) ApplyPlannerOperation(ctx context.Context, userID string
 			}
 			return PlannerTask{}, false, fmt.Errorf("planner create: %w", err)
 		}
-	case PlannerIntentRename, PlannerIntentMove, PlannerIntentComplete, PlannerIntentReopen:
+	case PlannerIntentRename, PlannerIntentMove, PlannerIntentComplete, PlannerIntentReopen, PlannerIntentRetag:
 		if !known {
 			return PlannerTask{}, false, fmt.Errorf("planner update: %w", ErrNotFound)
 		}
@@ -181,6 +188,8 @@ func (s *PostgresStore) ApplyPlannerOperation(ctx context.Context, userID string
 			set, arg = "completed_on = $3", *op.CompletedOn
 		case PlannerIntentReopen:
 			set, arg = "completed_on = NULL", nil
+		case PlannerIntentRetag:
+			set, arg = "category_ids = $3", encodePlannerCategoryIDs(op.CategoryIDs)
 		}
 		var tag pgconn.CommandTag
 		if op.Intent == PlannerIntentReopen {
@@ -253,7 +262,7 @@ func (s *PostgresStore) ListPlannerFeed(ctx context.Context, userID string, afte
 		return nil, 0, false, fmt.Errorf("planner watermark: %w", err)
 	}
 	rows, err := s.pool.Query(ctx, `
-		SELECT id, name, position_key, completed_on, revision, created_at, updated_at, deleted
+		SELECT id, name, position_key, completed_on, category_ids, revision, created_at, updated_at, deleted
 		FROM planner_tasks
 		WHERE user_id = $1 AND revision > $2 AND revision <= $3
 		ORDER BY revision ASC

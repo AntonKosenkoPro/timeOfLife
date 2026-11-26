@@ -39,6 +39,10 @@ func (h *Handler) writePlannerStoreErr(w http.ResponseWriter, r *http.Request, e
 				"position_key": task.PositionKey,
 				"revision":     strconv.FormatInt(task.Revision, 10),
 				"completed_on": completedOnDetail(task.CompletedOn),
+				// The iOS details decoder only represents strings, so the
+				// ordered set travels comma-joined (UUIDs never contain a
+				// comma) and parses back losslessly.
+				"category_ids": strings.Join(task.CategoryIDs, ","),
 				"deleted":      strconv.FormatBool(task.Deleted),
 				"created_at":   task.CreatedAt.UTC().Format(time.RFC3339Nano),
 				"updated_at":   task.UpdatedAt.UTC().Format(time.RFC3339Nano),
@@ -52,12 +56,13 @@ func (h *Handler) writePlannerStoreErr(w http.ResponseWriter, r *http.Request, e
 }
 
 type plannerOperationReq struct {
-	OperationID string  `json:"operation_id"`
-	TaskID      string  `json:"task_id"`
-	Intent      string  `json:"intent"`
-	Name        *string `json:"name"`
-	PositionKey *string `json:"position_key"`
-	CompletedOn *string `json:"completed_on"`
+	OperationID string    `json:"operation_id"`
+	TaskID      string    `json:"task_id"`
+	Intent      string    `json:"intent"`
+	Name        *string   `json:"name"`
+	PositionKey *string   `json:"position_key"`
+	CompletedOn *string   `json:"completed_on"`
+	CategoryIDs *[]string `json:"category_ids"`
 }
 
 // validatePlannerDate reports whether s is a real civil calendar date
@@ -110,10 +115,16 @@ func (h *Handler) ApplyPlannerOperation(w http.ResponseWriter, r *http.Request) 
 		} else if !validatePlannerDate(*req.CompletedOn) {
 			errs.add("completed_on", "completed_on must be a valid civil date (YYYY-MM-DD)")
 		}
+	case db.PlannerIntentRetag:
+		if req.CategoryIDs == nil {
+			errs.add("category_ids", "category_ids is required")
+		} else {
+			validatePlannerCategoryIDs(*req.CategoryIDs, errs)
+		}
 	case db.PlannerIntentReopen, db.PlannerIntentDelete:
 		// No fields required; extras are ignored.
 	default:
-		errs.add("intent", "intent must be one of create, rename, move, complete, reopen, delete")
+		errs.add("intent", "intent must be one of create, rename, move, complete, reopen, delete, retag")
 	}
 	if req.PositionKey != nil && (req.Intent == db.PlannerIntentCreate || req.Intent == db.PlannerIntentMove) {
 		k := strings.TrimSpace(*req.PositionKey)
@@ -123,11 +134,21 @@ func (h *Handler) ApplyPlannerOperation(w http.ResponseWriter, r *http.Request) 
 			req.PositionKey = &k
 		}
 	}
+	// `create` accepts an optional initial category set (the repush path
+	// re-posts the live task with its tags); `retag` already validated its
+	// required set above. Anything else ignores extras.
+	if req.Intent == db.PlannerIntentCreate && req.CategoryIDs != nil {
+		validatePlannerCategoryIDs(*req.CategoryIDs, errs)
+	}
 	if !errs.ok() {
 		writeValidation(w, errs)
 		return
 	}
 
+	var categories []string
+	if req.CategoryIDs != nil {
+		categories = *req.CategoryIDs
+	}
 	op := db.PlannerOperation{
 		OperationID: strings.ToLower(req.OperationID),
 		TaskID:      strings.ToLower(req.TaskID),
@@ -135,6 +156,7 @@ func (h *Handler) ApplyPlannerOperation(w http.ResponseWriter, r *http.Request) 
 		Name:        req.Name,
 		PositionKey: req.PositionKey,
 		CompletedOn: req.CompletedOn,
+		CategoryIDs: categories,
 	}
 	task, isNew, err := h.store.ApplyPlannerOperation(r.Context(), userID, op)
 	if err != nil {
@@ -158,6 +180,18 @@ func completedOnDetail(completedOn *string) string {
 		return ""
 	}
 	return *completedOn
+}
+
+// validatePlannerCategoryIDs validates one ordered category set: every id
+// must be a UUID (the loose planner set keeps unknown ids — unlike entry
+// `category_ids`, no catalog existence check; Stop prunes dead tags).
+func validatePlannerCategoryIDs(ids []string, errs validationErrs) {
+	for _, id := range ids {
+		if strings.TrimSpace(id) == "" || !validateUUIDv7(id) {
+			errs.add("category_ids", "category_ids must be valid UUIDs")
+			return
+		}
+	}
 }
 
 // validatePlannerIDs validates the two UUID fields under their own names
