@@ -40,3 +40,9 @@
 
 - [x] 7.1 Replace the composer with a UIKit-backed field that submits on Return while declining the default resign; keep Theme styling, VoiceOver, and all existing composer behaviors; add a regression test proving no keyboard-hide/first-responder loss across submit at any round-trip latency.
 - [x] 7.2 Run `swiftlint lint --strict`, warning-free build, full simulator suite, and `openspec validate --all --strict` green; rebuild Release, reinstall on the device, and verify the keyboard stays perfectly still. DEVICE VERIFIED 2026-11-26: iPhone 17 (00008150-0019185901E3401C) — Release installed, relaunched, keyboard perfectly still across two repeated Return submits (3 consecutive keyboard-present samples each), Suggestions + Tasks headers both present, probe rows removed afterwards; full sim suite 1220 tests green, lint strict clean, validate strict green.
+
+## 8. New on top, chips above the keyboard
+
+- [ ] 8.1 Prepend new tasks before existing Today rows with an expanding insertion (opacity-only under Reduce Motion); add a regression test for top placement and the animation contract.
+- [ ] 8.2 Replace the suggestions section with a single horizontally scrollable chips line pinned just above the keyboard (visible only while the keyboard is open, filtered by typing, tap fills the composer); remove the now-unused `Suggestions` header string across all five locales + `L10n`; keep the persistent `Tasks` header; re-check VoiceOver ordering.
+- [ ] 8.3 Run `swiftlint lint --strict`, warning-free build, full simulator suite, and `openspec validate --all --strict` green; rebuild Release, reinstall on the device, and verify order, animation, and chips.

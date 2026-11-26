@@ -18,7 +18,7 @@ The planner SHALL show all unfinished tasks and tasks completed on the current l
 
 ### Requirement: Planned tasks are an independently editable checklist
 
-A task SHALL have a trimmed, valid timer name as its only user-entered field. Tasks with identical names SHALL have separate identities. The user SHALL be able to rename, reorder, complete, reopen, and delete visible tasks offline. New tasks SHALL append after existing Today rows. Completing or reopening a task SHALL keep its position and SHALL NOT start, stop, create, or modify a timer or time entry. Completing or reopening a task SHALL NOT change the row's height or move sibling rows.
+A task SHALL have a trimmed, valid timer name as its only user-entered field. Tasks with identical names SHALL have separate identities. The user SHALL be able to rename, reorder, complete, reopen, and delete visible tasks offline. New tasks SHALL prepend before existing Today rows. Completing or reopening a task SHALL keep its position and SHALL NOT start, stop, create, or modify a timer or time entry. Completing or reopening a task SHALL NOT change the row's height or move sibling rows.
 
 #### Scenario: Two tasks use the same name
 - **WHEN** the user adds two tasks with the same valid name, then edits or removes one
@@ -34,23 +34,27 @@ A task SHALL have a trimmed, valid timer name as its only user-entered field. Ta
 
 ### Requirement: The composer supports repeated adds without dismissing the keyboard
 
-The Today page SHALL use one inline composer fixed above a single task list surface. Matching newest-first Recents drawn from committed entries SHALL appear as rows in a suggestions section at the top of that same list while the draft is non-empty — never as a separate mounting region — so the composer keeps its exact frame whether suggestions show or not. The suggestions section SHALL carry a localized `Suggestions` header and the task rows a localized `Tasks` header, so the two groups read as distinct sections; the `Tasks` header SHALL be present whenever the task list is shown, with or without suggestions. Recents selection SHALL only fill the composer with the exact suggested text. Return on a valid draft SHALL append one task, clear the composer, and keep the input focused with the keyboard open. The field SHALL never resign first responder across a submit — no dismiss/reopen cycle of any duration. The composer SHALL suppress the Return key's default resign at dispatch (custom submit handling that never resigns), rather than restoring focus afterwards. Invalid or failed submission SHALL NOT append a row or discard the draft. Row changes SHALL use non-disruptive feedback and respect Reduce Motion.
+The Today page SHALL use one inline composer fixed above a single task list surface. While the keyboard is open, a single horizontally scrollable line of recent-activity chips drawn from newest-first Recents SHALL sit fixed just above the keyboard; typing filters the chips by prefix, and tapping a chip fills the composer with its exact text. Choosing a chip SHALL create no task and start no timer. The task rows SHALL carry a localized `Tasks` header, present whenever the task list is shown. Return on a valid draft SHALL prepend one task at the top with an expanding insertion, clear the composer, and keep the input focused with the keyboard open. The field SHALL never resign first responder across a submit — no dismiss/reopen cycle of any duration. The composer SHALL suppress the Return key's default resign at dispatch (custom submit handling that never resigns), rather than restoring focus afterwards. Invalid or failed submission SHALL NOT append a row or discard the draft. Row changes SHALL use non-disruptive feedback and respect Reduce Motion.
 
 #### Scenario: Add consecutive tasks
 - **WHEN** the user adds a valid task with Return and then types and submits the next name
-- **THEN** both tasks append in submission order, the composer keeps input focus without resigning, and the keyboard stays still throughout — no dismiss/reopen cycle of any duration
+- **THEN** each submitted task appears at the top in reverse submission order (latest first), the composer keeps input focus without resigning, and the keyboard stays still throughout — no dismiss/reopen cycle of any duration
+
+#### Scenario: New task expands in at the top
+- **WHEN** the user submits a valid draft
+- **THEN** the new row expands from zero to full height at the top of the list; under Reduce Motion the insertion uses a non-expanding transition instead
 
 #### Scenario: Focus survives the save round-trip
 - **WHEN** the user submits a valid draft
 - **THEN** the draft clears and the same field stays focused through the store write and snapshot reload without ever resigning first responder; no list, suggestion, or empty-state change steals focus, and a resign/reopen flicker of any duration fails this requirement. The resign is prevented at dispatch — the field never leaves first responder — never repaired by refocusing.
 
-#### Scenario: Suggestions refine inside the list
-- **WHEN** the user types a non-empty draft with matching Recents
-- **THEN** the matches appear as rows under a localized `Suggestions` header in the same list below the unmoved composer, the task rows sit under a localized `Tasks` header, and each keystroke only swaps rows inside that surface
+#### Scenario: Chips filter as you type
+- **WHEN** the user types with the keyboard open
+- **THEN** the fixed chips line above the keyboard shows the prefix-filtered Recents, and an empty draft shows the full capped strip
 
-#### Scenario: Fill from a matching Recent
-- **WHEN** the user taps a matching Recent while composing
-- **THEN** its exact text fills the draft for editing or submission, no task is created, and no timer starts
+#### Scenario: Fill from a chip
+- **WHEN** the user taps a chip
+- **THEN** its exact text fills the composer for editing or submission, no task is created, and no timer starts
 
 ### Requirement: An open task starts the existing timer
 
