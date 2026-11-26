@@ -1,3 +1,6 @@
+// swiftlint:disable file_length
+// (hosts the serialized reload, composer, checklist, undo, Start, and
+// gate-preload paths; splitting the VM is future work, not this change.)
 import Foundation
 import Combine
 import SwiftUI
@@ -11,7 +14,7 @@ import SwiftUI
 /// Reloads serialize like Track (`loadIfNeeded` + `invalidate`): tab-return,
 /// foreground return, and sync-cycle exit all funnel through the guarded
 /// load, and no-op reloads publish nothing. The composer draft survives
-/// every reload; an invalid or failed submission never appends a row and
+/// every reload; an invalid or failed submission never adds a row and
 /// never discards the draft.
 @MainActor
 final class PlannerViewModel: ObservableObject {
@@ -45,7 +48,7 @@ final class PlannerViewModel: ObservableObject {
     private var inFlightLoad: Task<Void, Never>?
     private var needsReload = true
     /// The id of a just-submitted task whose insertion the next `load()`
-    /// animates (day-planner 9.1: the fresh row expands in at the end).
+    /// animates (day-planner 12.2: the fresh row expands in at the top).
     /// Consumed by the first load after the submit; every other load
     /// publishes without animation.
     private var pendingInsertionID: String?
@@ -116,6 +119,41 @@ final class PlannerViewModel: ObservableObject {
         }
     }
 
+    // MARK: - Launch-gate preload (timer-capture-experience 12.3)
+
+    /// Resolves everything `load()` reads in one batch for the launch gate
+    /// (`RootView.beginSignIn`, steady-track-launch precedent): with warm
+    /// local data the shell mounts with actual Today counts instead of
+    /// painting 0/0 until the first tab-return, foreground return, or
+    /// sync-cycle exit reloads. Throws on an unbound store like `load()`.
+    static func preload(store: LocalStore) async throws -> PlannerToday.Preloaded {
+        let today = PlannerCivilDate.today()
+        let tasks = try await store.plannerTasks()
+        return PlannerToday.Preloaded(
+            today: today,
+            tasks: tasks,
+            recents: try await store.recents(limit: chipPoolLimit),
+            timerActive: try await store.timerDraft() != nil,
+            snapshot: PlannerToday.project(tasks: tasks, on: today)
+        )
+    }
+
+    /// Adopts a gate-preloaded bundle without re-querying: synchronous
+    /// single-commit assignments identical to `load()`'s, so a shell
+    /// mounted with it paints actual counts on its first commit. The
+    /// appear-time `loadIfNeeded` below would only re-resolve the identical
+    /// snapshot (a no-op publish), so the queries are skipped outright.
+    /// A later `invalidate()` reloads normally — tab-return, sync-exit,
+    /// and Today edits are unaffected.
+    func adopt(_ preloaded: PlannerToday.Preloaded) {
+        todayString = preloaded.today
+        tasks = preloaded.tasks
+        recents = preloaded.recents
+        timerActive = preloaded.timerActive
+        snapshot = preloaded.snapshot
+        needsReload = false
+    }
+
     // MARK: - Composer (fast repeated input)
 
     /// Chip pool size: the capped newest-first Recents drawn from
@@ -155,17 +193,17 @@ final class PlannerViewModel: ObservableObject {
     }
 
     /// Submits the composer (Return or the accessible Add affordance):
-    /// appends one task after the existing Today rows, clears the draft,
+    /// prepends one task before the existing Today rows, clears the draft,
     /// and reloads. The field never resigns across this round-trip: the
     /// UIKit-backed composer suppresses the Return default resign at
     /// dispatch, so no refocusing is needed afterwards. An invalid or failed
-    /// submission appends nothing and keeps the draft.
+    /// submission prepends nothing and keeps the draft.
     func submit() async {
         let trimmed = ActivityName.normalized(draft)
         guard case .valid = ActivityName.validate(trimmed) else { return }
         let visible = snapshot.tasks
-        let last = visible.last?.positionKey
-        guard let key = PlannerPositionKey.allocate(before: last, after: nil) else {
+        let first = visible.first?.positionKey
+        guard let key = PlannerPositionKey.allocate(before: nil, after: first) else {
             errorMessage = L10n.text(in: .default, code: "error.unknown")
             return
         }

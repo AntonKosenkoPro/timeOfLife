@@ -12,7 +12,7 @@ import SwiftUI
 /// chips line sits fixed between the composer and the keyboard (visible
 /// only while the keyboard is open), so each keystroke only swaps chips
 /// inside that fixed-height line and neither the composer nor the list
-/// moves; a fresh row expands in at the end (opacity-only under Reduce
+/// moves; a fresh row expands in at the top (opacity-only under Reduce
 /// Motion).
 struct PlannerView: View {
     @ObservedObject var vm: PlannerViewModel
@@ -127,7 +127,7 @@ struct PlannerView: View {
 
     // MARK: - Composer (bottom-fixed, chips between it and the keyboard)
 
-    /// The persistent inline field: Return appends one task at the end,
+    /// The persistent inline field: Return prepends one task at the top,
     /// clears the draft, and focus never leaves — the UIKit-backed field
     /// declines the Return default resign at dispatch (day-planner 7.1),
     /// so the keyboard never animates away no matter how slow the
@@ -190,7 +190,7 @@ struct PlannerView: View {
     private var taskList: some View {
         List {
             // The task rows carry no section header (day-planner 10.2):
-            // a fresh row expands in at the end (see `PlannerRowInsertion`;
+            // a fresh row expands in at the top (see `PlannerRowInsertion`;
             // opacity-only under Reduce Motion). Row swipes are Mail-style
             // labeled pills with icon + text (day-planner 11.2):
             // trailing-side delete into the durable undo buffer, leading-side
@@ -353,32 +353,5 @@ struct PlannerView: View {
     private func invalidateReloadAndRegister() async {
         vm.invalidate()
         await reloadAndRegister()
-    }
-}
-
-/// The compact Track progress control (timer-capture-experience spec): a
-/// toolbar entry opening Today in the Track navigation stack. It reports
-/// the same Today projection's done/total counts, offers an entry point
-/// even when the list is empty, stays usable while timing, and never
-/// moves the numeric readout or Start/Stop (it lives in the navigation
-/// chrome, outside the timer's measured layout).
-struct PlannerProgressControl: View {
-    let snapshot: PlannerToday.Snapshot
-    let onOpen: () -> Void
-
-    var body: some View {
-        Button(action: onOpen) {
-            HStack(spacing: 4) {
-                Image(systemName: "checklist")
-                Text("\(snapshot.done)/\(snapshot.total)")
-                    .monospacedDigit()
-            }
-        }
-        .accessibilityLabel(String(
-            format: L10n.plannerProgressLabel.text,
-            snapshot.done,
-            snapshot.total
-        ))
-        .accessibilityIdentifier("PlannerProgressControl")
     }
 }

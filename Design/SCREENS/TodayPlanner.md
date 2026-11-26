@@ -15,7 +15,7 @@ Planner rows never feed History, Insights, or Recents.
 2. Today pushes onto the Track navigation stack (no new tab).
 3. The user types in the inline composer and taps Return (or the
    composer's Add accessibility action — there is no visible Add
-   button): one task appends after the existing Today rows, the draft
+   button): one task prepends before the existing Today rows, the draft
    clears, and the field keeps focus with the keyboard open for the next
    task. A matching Recent tap fills the exact text for editing or
    submission — no task is created, no timer starts. A draft matching
@@ -125,7 +125,9 @@ unless a run is active).
 and `done/total` numerals. Reports the shared Today projection, offers an
 entry point even when the list is empty, stays usable while timing, and
 lives in the navigation chrome so the numeric readout and Start/Stop
-never move. `accessibilityLabel`:
+never move. The launch gate preloads the projection, so the control shows
+actual counts on first paint from warm local data (no 0/0 flash).
+`accessibilityLabel`:
 `L10n.plannerProgressLabel` (`%1$d of %2$d` per locale, no plurals by
 construction). `accessibilityIdentifier`: `PlannerProgressControl`.
 
@@ -135,9 +137,11 @@ construction). `accessibilityIdentifier`: `PlannerProgressControl`.
   Track precedent); tab-return, foreground return, time-zone change, and
   sync-cycle exit all funnel through it; no-op reloads publish nothing.
 - [x] Composer draft survives every reload; invalid/failed submissions
-  append nothing and keep the draft.
-- [x] New tasks append after the existing Today rows (allocate after the
-  last visible key); visible-neighbor moves never rewrite other rows.
+  add nothing and keep the draft.
+- [x] New tasks prepend before the existing Today rows (allocate before
+  the first visible key); visible-neighbor moves never rewrite other rows.
+- [x] The launch gate preloads the Today projection and the shell adopts
+  it, so Track shows actual counts on first paint from warm local data.
 - [x] Completing/reopening keeps position and never touches timers or
   entries; identical names stay independent.
 - [x] Start copies the name with exact-text category inheritance, persists

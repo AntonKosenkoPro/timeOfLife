@@ -251,7 +251,25 @@ struct PlannerFeedChange: Equatable, Sendable {
 /// shared `(positionKey, id)` order, with done/total counts from the same
 /// snapshot. Pure derivation — recompute on date/time-zone change and on
 /// foreground return; carry-forward needs no write.
+///
+/// The launch-gate preload bundle (timer-capture-experience 12.3):
+/// everything `PlannerViewModel.load()` reads, resolved together before
+/// first paint so Track counts never flash 0/0 on warm data.
 enum PlannerToday {
+    /// Launch-gate preload bundle (timer-capture-experience 12.3).
+    struct Preloaded: Sendable {
+        /// The civil date the snapshot was projected on.
+        var today: String
+        /// The full ordered backlog (feeds submit/move/delete coordinates).
+        var tasks: [PlannerTask]
+        /// The capped newest-first Recents pool backing the chips line.
+        var recents: [RecentEntry]
+        /// Whether a timer draft persisted (planner Start gating).
+        var timerActive: Bool
+        /// The projected Today snapshot Track paints.
+        var snapshot: Snapshot
+    }
+
     struct Snapshot: Equatable, Sendable {
         /// Visible rows in shared display order.
         var tasks: [PlannerTask]

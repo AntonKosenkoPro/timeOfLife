@@ -43,7 +43,7 @@ struct AppShellView: View {
     /// App-owned clock (screenshot-capture seam; production `.live`).
     private let clock: AppClock
 
-    init(vm: AppShellViewModel, container: AppContainer, trackSnapshot: TrackSnapshot? = nil, clock: AppClock = .live) {
+    init(vm: AppShellViewModel, container: AppContainer, trackSnapshot: TrackSnapshot? = nil, plannerSnapshot: PlannerToday.Preloaded? = nil, clock: AppClock = .live) {
         _vm = StateObject(wrappedValue: vm)
         self.clock = clock
         _trackVM = StateObject(wrappedValue: {
@@ -61,11 +61,21 @@ struct AppShellView: View {
             }
             return trackVM
         }())
-        _plannerVM = StateObject(wrappedValue: PlannerViewModel(
-            store: container.localStore,
-            undoBuffer: container.undoBuffer,
-            timer: container.timerService
-        ))
+        _plannerVM = StateObject(wrappedValue: {
+            let plannerVM = PlannerViewModel(
+                store: container.localStore,
+                undoBuffer: container.undoBuffer,
+                timer: container.timerService
+            )
+            // A gate-preloaded snapshot paints complete on the first commit
+            // instead of flashing 0/0 until the first reload
+            // (timer-capture-experience 12.3). Hosts without one load on
+            // appear as before.
+            if let plannerSnapshot {
+                plannerVM.adopt(plannerSnapshot)
+            }
+            return plannerVM
+        }())
     }
 
     var body: some View {

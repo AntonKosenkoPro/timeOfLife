@@ -46,7 +46,7 @@ No Design/L10n changes are expected: the shipping six-digit field, 30-second res
 
 Simulator covers layout, sync convergence, and the linked Stop path; the items below need fingers, keyboards, and a real Island.
 
-1. [ ] **Repeated Return** — with software and hardware keyboards, submit several task names in a row; each appends in order, the draft clears, focus and the keyboard stay, and the composer never moves.
+1. [ ] **Repeated Return** — with software and hardware keyboards, submit several task names in a row; each prepends on top (newest first), the draft clears, focus and the keyboard stay, and the composer never moves.
 2. [ ] **Compact screens** — on a small phone (e.g. SE) with the keyboard open, the composer, first rows, and the toolbar progress stay reachable; the Track readout and Start/Stop never shift when counts change.
 3. [ ] **Large Dynamic Type** — at the largest accessibility sizes, Today rows, the composer, and the progress control stay readable and tappable (44 pt targets); scrolling the list never moves the composer.
 4. [ ] **VoiceOver reorder** — with VoiceOver on, enter edit mode and reorder tasks via the rotor; order persists across relaunch and syncs to a second device in the same order.
@@ -54,6 +54,8 @@ Simulator covers layout, sync convergence, and the linked Stop path; the items b
 6. [ ] **Immediate running Track** — start a task from Today; Track presents the running timer at once with no further navigation.
 7. [ ] **Two-device convergence** — add/reorder/complete tasks offline on two devices, then sync both; both show the same rows in the same order with both additions and all independent field edits.
 8. [ ] **Linked cold-open Live Activity Stop** — start a task from Today, terminate the app, then Stop from the Island or Lock Screen banner; the app cold-opens, saves the entry, completes exactly that task once, and shows the ordinary Saved card. (Unit + simulator tests cover the path; the Island/banner tap itself is device-only.)
+9. [ ] **Row swipes** — drag a row left and right: native Mail-style pills reveal (trailing delete, leading complete/reopen), tapping an action fires it, a deep swipe acts on release, and vertical scrolling still works; in edit mode the native delete/reorder own the rows.
+10. [ ] **Instant counts** — cold-open with warm planner data; Track shows the actual done/total counts on first paint with no 0/0 flash.
 
 ## Live Activities
 

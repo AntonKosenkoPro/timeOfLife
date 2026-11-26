@@ -7,8 +7,8 @@ import Foundation
 struct PlannerViewModelTests {
     // MARK: - Composer
 
-    @Test("submit appends one task, clears the draft, and keeps order")
-    func submitAppends() async throws {
+    @Test("submit prepends one task, clears the draft, and keeps order")
+    func submitPrepends() async throws {
         let (vm, store) = await makeContext()
         await vm.loadIfNeeded()
         vm.draft = "Read"
@@ -20,7 +20,7 @@ struct PlannerViewModelTests {
         #expect(try await store.plannerTasks().count == 1)
     }
 
-    @Test("invalid submissions append nothing and keep the draft")
+    @Test("invalid submissions prepend nothing and keep the draft")
     func invalidSubmitKeepsDraft() async throws {
         let (vm, store) = await makeContext()
         await vm.loadIfNeeded()
@@ -33,7 +33,7 @@ struct PlannerViewModelTests {
         #expect(try await store.plannerTasks().isEmpty)
     }
 
-    @Test("consecutive Returns append in submission order")
+    @Test("consecutive Returns prepend in reverse submission order")
     func consecutiveSubmits() async throws {
         let (vm, _) = await makeContext()
         await vm.loadIfNeeded()
@@ -42,9 +42,9 @@ struct PlannerViewModelTests {
         vm.draft = "Second"
         await vm.submit()
         #expect(vm.draft.isEmpty)
-        #expect(vm.snapshot.tasks.map(\.name) == ["First", "Second"])
-        // The last row holds the largest key (the projection sorts by
-        // `(positionKey, id)`), so appending stays at the end after reloads.
+        #expect(vm.snapshot.tasks.map(\.name) == ["Second", "First"])
+        // The first row holds the smallest key (the projection sorts by
+        // `(positionKey, id)`), so prepending stays at the top after reloads.
         let keys = vm.snapshot.tasks.map(\.positionKey)
         #expect(keys == keys.sorted())
     }
@@ -137,15 +137,15 @@ struct PlannerViewModelTests {
         await vm.submit()
         vm.draft = "B"
         await vm.submit()
-        // Append order: "B" sits at the end.
-        #expect(vm.snapshot.tasks.map(\.name) == ["A", "B"])
+        // Prepend order: "B" sits at the top.
+        #expect(vm.snapshot.tasks.map(\.name) == ["B", "A"])
         let first = try #require(vm.snapshot.tasks.first)
         await vm.toggleComplete(first)
-        #expect(vm.snapshot.tasks.map(\.name) == ["A", "B"])
+        #expect(vm.snapshot.tasks.map(\.name) == ["B", "A"])
         #expect(vm.snapshot.done == 1)
         await vm.toggleComplete(try #require(vm.snapshot.tasks.first))
         #expect(vm.snapshot.done == 0)
-        #expect(vm.snapshot.tasks.map(\.name) == ["A", "B"])
+        #expect(vm.snapshot.tasks.map(\.name) == ["B", "A"])
     }
 
     @Test("rename keeps position and empty renames revert")
@@ -191,14 +191,14 @@ struct PlannerViewModelTests {
             vm.draft = name
             await vm.submit()
         }
-        // Append order: oldest first.
-        #expect(vm.snapshot.tasks.map(\.name) == ["A", "B", "C"])
+        // Prepend order: newest first.
+        #expect(vm.snapshot.tasks.map(\.name) == ["C", "B", "A"])
         let keysBefore = Dictionary(uniqueKeysWithValues: vm.snapshot.tasks.map { ($0.name, $0.positionKey) })
-        // Move A (index 0) to the end (index 3).
+        // Move C (index 0) to the end (index 3).
         await vm.move(from: IndexSet(integer: 0), to: 3)
-        #expect(vm.snapshot.tasks.map(\.name) == ["B", "C", "A"])
-        // B and C kept their keys; only A moved.
-        for task in vm.snapshot.tasks where task.name != "A" {
+        #expect(vm.snapshot.tasks.map(\.name) == ["B", "A", "C"])
+        // B and A kept their keys; only C moved.
+        for task in vm.snapshot.tasks where task.name != "C" {
             #expect(task.positionKey == keysBefore[task.name])
         }
         let moved = try #require(vm.snapshot.tasks.last)
@@ -213,15 +213,15 @@ struct PlannerViewModelTests {
         await vm.submit()
         vm.draft = "B"
         await vm.submit()
-        // Append order: "B" sits at the end.
-        #expect(vm.snapshot.tasks.map(\.name) == ["A", "B"])
+        // Prepend order: "B" sits at the top.
+        #expect(vm.snapshot.tasks.map(\.name) == ["B", "A"])
         let outboxBefore = try await store.outboxRowCount()
         await vm.delete(at: IndexSet(integer: 0))
-        #expect(vm.snapshot.tasks.map(\.name) == ["B"])
+        #expect(vm.snapshot.tasks.map(\.name) == ["A"])
         // Buffered: no outbox row yet.
         #expect(try await store.outboxRowCount() == outboxBefore)
         await vm.performUndo()
-        #expect(vm.snapshot.tasks.map(\.name) == ["A", "B"])
+        #expect(vm.snapshot.tasks.map(\.name) == ["B", "A"])
         #expect(try await store.outboxRowCount() == outboxBefore)
     }
 
@@ -257,12 +257,12 @@ struct PlannerViewModelTests {
         await vm.submit()
         vm.draft = "B"
         await vm.submit()
-        // Append order: the oldest ("A") sits first and starts first.
+        // Prepend order: the newest ("B") sits first and starts first.
         #expect(await vm.startTask(vm.snapshot.tasks[0]))
         // The second task's Start starts nothing and keeps the checklist usable.
         #expect(await vm.startTask(vm.snapshot.tasks[1]) == false)
         let draft = try #require(try await store.timerDraft())
-        #expect(draft.activityText == "A")
+        #expect(draft.activityText == "B")
         #expect(vm.snapshot.tasks.count == 2)
     }
 

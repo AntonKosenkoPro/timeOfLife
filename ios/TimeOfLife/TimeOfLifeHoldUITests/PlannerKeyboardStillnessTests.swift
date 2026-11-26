@@ -14,7 +14,7 @@ import XCTest
 /// Add accessibility action submits — plus a Track-grammar clear button
 /// that empties the draft without dismissing the keyboard), the
 /// running-timer notice as a nav-bar subtitle under the Today title, and
-/// every submit appending at the end with an expanding insertion. Drives the REAL return-key path in a real
+/// every submit prepending at the top with an expanding insertion. Drives the REAL return-key path in a real
 /// scene (unit hosts cannot dispatch `onSubmit`), then tight-polls
 /// software keyboard presence: any sample without a keyboard fails. A
 /// green run with a high sample count proves stillness; a red run
@@ -63,9 +63,9 @@ final class PlannerKeyboardStillnessTests: XCTestCase {
         )
         try assertSubmitLanded(in: app, composer: composer)
         XCTAssertTrue(app.keyboards.element.exists, "keyboard gone at settle after submit")
-        // Append contract (day-planner 9.1): a second submit lands at the end.
+        // Prepend contract (day-planner 12.2): a second submit lands at the top.
         try submitSecondTask(in: app, composer: composer)
-        try assertNewestAtEnd(in: app)
+        try assertNewestAtTop(in: app)
         try assertComposerBelowList(in: app, composer: composer)
         // Clear contract (day-planner 11.1): the × empties the draft with
         // the keyboard still up.
@@ -238,16 +238,16 @@ final class PlannerKeyboardStillnessTests: XCTestCase {
         }
     }
 
-    /// The newest task sits at the end of the list (day-planner 9.1).
-    private func assertNewestAtEnd(in app: XCUIApplication) throws {
+    /// The newest task sits at the top of the list (day-planner 12.2).
+    private func assertNewestAtTop(in app: XCUIApplication) throws {
         let rows = app.buttons.allElementsBoundByIndex
             .filter { $0.identifier.hasPrefix("PlannerName-") }
-        guard let last = rows.last else {
+        guard let first = rows.first else {
             throw HoldHarnessError.blocker("no task rows after the second submit")
         }
         XCTAssertEqual(
-            last.label, "Header sequel",
-            "newest task is not at the end (rows: \(rows.map { $0.label }))"
+            first.label, "Header sequel",
+            "newest task is not at the top (rows: \(rows.map { $0.label }))"
         )
     }
 
