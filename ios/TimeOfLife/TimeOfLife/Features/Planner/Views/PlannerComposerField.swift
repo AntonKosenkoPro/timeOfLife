@@ -9,11 +9,11 @@ import UIKit
 /// first at dispatch); `textFieldShouldReturn` returning `false` runs the
 /// custom submit without resigning.
 ///
-/// The same field instance survives draft-clear, suggestion section
-/// mount/unmount, and snapshot reload (stable representable identity —
-/// never re-created with `.id()`), so UIKit never drops first responder.
-/// Styling, placeholder, sentences autocapitalization, autocorrection,
-/// VoiceOver behavior, the suggestion fill path, and the
+/// The same field instance survives draft-clear, chips-line mount/unmount,
+/// and snapshot reload (stable representable identity — never re-created
+/// with `.id()`), so UIKit never drops first responder. Styling,
+/// placeholder, sentences autocapitalization, autocorrection,
+/// VoiceOver behavior, the chip fill path, and the
 /// invalid-submit-keeps-draft rule all match the SwiftUI field this
 /// replaces; focus intent still flows through the caller's `FocusState`.
 struct PlannerComposerField: UIViewRepresentable {
@@ -65,7 +65,7 @@ struct PlannerComposerField: UIViewRepresentable {
     }
 
     func updateUIView(_ uiView: UITextField, context: Context) {
-        // External writes only (submit clears the draft, a suggestion fills
+        // External writes only (submit clears the draft, a chip fills
         // it): never echo the in-flight keystroke back, so the cursor stays
         // put while typing.
         if uiView.text != text {
@@ -76,7 +76,7 @@ struct PlannerComposerField: UIViewRepresentable {
         }
         uiView.accessibilityIdentifier = accessibilityIdentifier
         // Become-only, mirroring SwiftUI `.focused`: the binding asserts
-        // focus (initial entry, suggestion tap) and the begin-echo keeps it
+        // focus (initial entry, chip tap) and the begin-echo keeps it
         // truthful, so any update while unfocused re-asserts. Resigns arrive
         // solely from the system — nothing here ever resigns.
         if focused.wrappedValue, !uiView.isFirstResponder {
@@ -104,7 +104,7 @@ struct PlannerComposerField: UIViewRepresentable {
         }
 
         /// Echoes focus INTO the binding only: the binding asserts focus
-        /// (initial entry, suggestion tap, steal recovery) but never
+        /// (initial entry, chip tap, steal recovery) but never
         /// relinquishes it — resigns arrive solely from the system, and the
         /// next update re-asserts (see `updateUIView`). No end-echo: writing
         /// `false` here would disarm that recovery and strand the field

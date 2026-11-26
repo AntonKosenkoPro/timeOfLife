@@ -7,8 +7,8 @@ import Foundation
 struct PlannerViewModelTests {
     // MARK: - Composer
 
-    @Test("submit appends one task, clears the draft, and keeps order")
-    func submitAppends() async throws {
+    @Test("submit prepends one task, clears the draft, and keeps order")
+    func submitPrepends() async throws {
         let (vm, store) = await makeContext()
         await vm.loadIfNeeded()
         vm.draft = "Read"
@@ -20,7 +20,7 @@ struct PlannerViewModelTests {
         #expect(try await store.plannerTasks().count == 1)
     }
 
-    @Test("invalid submissions append nothing and keep the draft")
+    @Test("invalid submissions prepend nothing and keep the draft")
     func invalidSubmitKeepsDraft() async throws {
         let (vm, store) = await makeContext()
         await vm.loadIfNeeded()
@@ -33,7 +33,7 @@ struct PlannerViewModelTests {
         #expect(try await store.plannerTasks().isEmpty)
     }
 
-    @Test("consecutive Returns append in submission order")
+    @Test("consecutive Returns prepend in reverse submission order")
     func consecutiveSubmits() async throws {
         let (vm, _) = await makeContext()
         await vm.loadIfNeeded()
@@ -42,16 +42,20 @@ struct PlannerViewModelTests {
         vm.draft = "Second"
         await vm.submit()
         #expect(vm.draft.isEmpty)
-        #expect(vm.snapshot.tasks.map(\.name) == ["First", "Second"])
+        #expect(vm.snapshot.tasks.map(\.name) == ["Second", "First"])
+        // The top row holds the smallest key (the projection sorts by
+        // `(positionKey, id)`), so prepending stays on top after reloads.
+        let keys = vm.snapshot.tasks.map(\.positionKey)
+        #expect(keys == keys.sorted())
     }
 
-    // MARK: - Suggestions (7.1: no focus bookkeeping — the field never resigns)
+    // MARK: - Chips (8.2: a single line above the keyboard — tap fills)
 
-    @Test("suggestions filter newest-first and fill without submitting")
-    func suggestionsFill() async throws {
+    @Test("chips filter newest-first and fill without submitting")
+    func chipsFill() async throws {
         let (vm, store) = await makeContext()
         await vm.loadIfNeeded()
-        // Committed entries feed the suggestion pool (local Recents).
+        // Committed entries feed the chip pool (local Recents).
         _ = try await store.createEntry(TimeEntry(
             id: "e1", activityText: "Reading",
             startedAt: Date(timeIntervalSinceReferenceDate: 1_000),
@@ -65,20 +69,33 @@ struct PlannerViewModelTests {
         vm.invalidate()
         await vm.loadIfNeeded()
         vm.draft = "read"
-        let suggestions = vm.suggestions
-        #expect(suggestions.map(\.activityText) == ["Read docs", "Reading"])
-        vm.fillFromSuggestion(suggestions[0])
+        let chips = vm.chips
+        #expect(chips.map(\.activityText) == ["Read docs", "Reading"])
+        vm.fillFromChip(chips[0])
         #expect(vm.draft == "Read docs")
         #expect(vm.snapshot.total == 0)
         #expect(try await store.plannerTasks().isEmpty)
     }
 
-    @Test("empty draft shows no suggestions")
-    func emptyDraftNoSuggestions() async throws {
-        let (vm, _) = await makeContext()
+    @Test("empty draft shows the full capped strip")
+    func emptyDraftShowsFullStrip() async throws {
+        let (vm, store) = await makeContext()
+        await vm.loadIfNeeded()
+        for index in 0..<7 {
+            _ = try await store.createEntry(TimeEntry(
+                id: "e\(index)", activityText: "Entry \(index)",
+                startedAt: Date(timeIntervalSinceReferenceDate: Double(1_000 + index * 100)),
+                endedAt: Date(timeIntervalSinceReferenceDate: Double(1_600 + index * 100)), durationSeconds: 600
+            ))
+        }
+        vm.invalidate()
         await vm.loadIfNeeded()
         vm.draft = ""
-        #expect(vm.suggestions.isEmpty)
+        // Newest-first, capped at the display cap even with no filter.
+        #expect(vm.chips.map(\.activityText) == (2...6).reversed().map { "Entry \($0)" })
+        #expect(vm.chips.count == PlannerViewModel.chipDisplayCap)
+        vm.draft = "   "
+        #expect(vm.chips.map(\.activityText) == (2...6).reversed().map { "Entry \($0)" })
     }
 
     // MARK: - Checklist
@@ -91,13 +108,15 @@ struct PlannerViewModelTests {
         await vm.submit()
         vm.draft = "B"
         await vm.submit()
+        // Prepend order: the newest ("B") sits on top.
+        #expect(vm.snapshot.tasks.map(\.name) == ["B", "A"])
         let first = try #require(vm.snapshot.tasks.first)
         await vm.toggleComplete(first)
-        #expect(vm.snapshot.tasks.map(\.name) == ["A", "B"])
+        #expect(vm.snapshot.tasks.map(\.name) == ["B", "A"])
         #expect(vm.snapshot.done == 1)
         await vm.toggleComplete(try #require(vm.snapshot.tasks.first))
         #expect(vm.snapshot.done == 0)
-        #expect(vm.snapshot.tasks.map(\.name) == ["A", "B"])
+        #expect(vm.snapshot.tasks.map(\.name) == ["B", "A"])
     }
 
     @Test("rename keeps position and empty renames revert")
@@ -143,12 +162,14 @@ struct PlannerViewModelTests {
             vm.draft = name
             await vm.submit()
         }
+        // Prepend order: newest on top.
+        #expect(vm.snapshot.tasks.map(\.name) == ["C", "B", "A"])
         let keysBefore = Dictionary(uniqueKeysWithValues: vm.snapshot.tasks.map { ($0.name, $0.positionKey) })
-        // Move C (index 2) to the top (index 0).
+        // Move A (index 2) to the top (index 0).
         await vm.move(from: IndexSet(integer: 2), to: 0)
-        #expect(vm.snapshot.tasks.map(\.name) == ["C", "A", "B"])
-        // A and B kept their keys; only C moved.
-        for task in vm.snapshot.tasks where task.name != "C" {
+        #expect(vm.snapshot.tasks.map(\.name) == ["A", "C", "B"])
+        // C and B kept their keys; only A moved.
+        for task in vm.snapshot.tasks where task.name != "A" {
             #expect(task.positionKey == keysBefore[task.name])
         }
         let moved = try #require(vm.snapshot.tasks.first)
@@ -163,13 +184,15 @@ struct PlannerViewModelTests {
         await vm.submit()
         vm.draft = "B"
         await vm.submit()
+        // Prepend order: newest on top.
+        #expect(vm.snapshot.tasks.map(\.name) == ["B", "A"])
         let outboxBefore = try await store.outboxRowCount()
         await vm.delete(at: IndexSet(integer: 0))
-        #expect(vm.snapshot.tasks.map(\.name) == ["B"])
+        #expect(vm.snapshot.tasks.map(\.name) == ["A"])
         // Buffered: no outbox row yet.
         #expect(try await store.outboxRowCount() == outboxBefore)
         await vm.performUndo()
-        #expect(vm.snapshot.tasks.map(\.name) == ["A", "B"])
+        #expect(vm.snapshot.tasks.map(\.name) == ["B", "A"])
         #expect(try await store.outboxRowCount() == outboxBefore)
     }
 
@@ -205,11 +228,12 @@ struct PlannerViewModelTests {
         await vm.submit()
         vm.draft = "B"
         await vm.submit()
+        // Prepend order: the newest ("B") sits on top and starts first.
         #expect(await vm.startTask(vm.snapshot.tasks[0]))
         // The second task's Start starts nothing and keeps the checklist usable.
         #expect(await vm.startTask(vm.snapshot.tasks[1]) == false)
         let draft = try #require(try await store.timerDraft())
-        #expect(draft.activityText == "A")
+        #expect(draft.activityText == "B")
         #expect(vm.snapshot.tasks.count == 2)
     }
 

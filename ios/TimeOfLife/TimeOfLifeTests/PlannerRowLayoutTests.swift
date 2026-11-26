@@ -3,12 +3,13 @@ import Foundation
 @testable import TimeOfLife
 
 /// Pins the day-planner single-surface invariants (change `add-day-planner`
-/// §5): open and completed rows share one exact height because the Start
-/// affordance slot stays mounted in both states, and suggestion rows split
-/// the matched prefix for highlight. The pure helpers below are consumed by
-/// `PlannerView` — SwiftUI layout itself is not unit-testable, so the tests
-/// pin the helpers (the `ClearButtonVisibility` precedent).
-@Suite("Planner row layout (day-planner 5.3/5.4)")
+/// §5/§8): open and completed rows share one exact height because the Start
+/// affordance slot stays mounted in both states, and a fresh row expands in
+/// at the top (opacity-only under Reduce Motion). The pure helpers below
+/// are consumed by `PlannerView` — SwiftUI layout itself is not
+/// unit-testable, so the tests pin the helpers (the `ClearButtonVisibility`
+/// precedent).
+@Suite("Planner row layout (day-planner 5.3/8.1)")
 struct PlannerRowLayoutTests {
 
     private func task(named name: String, completedOn: String? = nil) -> PlannerTask {
@@ -33,32 +34,15 @@ struct PlannerRowLayoutTests {
         #expect(slot.isHidden == true)
     }
 
-    // MARK: - Suggestion highlight (5.4)
+    // MARK: - Insertion transition (8.1)
 
-    @Test("highlight splits the matched prefix")
-    func highlightSplitsPrefix() {
-        let parts = PlannerSuggestionHighlight.split(text: "Reading", draft: "read")
-        #expect(parts.match == "Read")
-        #expect(parts.rest == "ing")
+    @Test("fresh rows expand outside Reduce Motion")
+    func insertionExpands() {
+        #expect(PlannerRowInsertion.expands(reduceMotion: false))
     }
 
-    @Test("highlight match is case-insensitive but keeps the original casing")
-    func highlightKeepsCasing() {
-        let parts = PlannerSuggestionHighlight.split(text: "Read docs", draft: "READ")
-        #expect(parts.match == "Read")
-        #expect(parts.rest == " docs")
-    }
-
-    @Test("non-matching text highlights nothing")
-    func nonMatchHighlightsNothing() {
-        let parts = PlannerSuggestionHighlight.split(text: "Gym", draft: "run")
-        #expect(parts.match.isEmpty)
-        #expect(parts.rest == "Gym")
-    }
-
-    @Test("blank draft highlights nothing")
-    func blankDraftHighlightsNothing() {
-        #expect(PlannerSuggestionHighlight.split(text: "Gym", draft: "").match.isEmpty)
-        #expect(PlannerSuggestionHighlight.split(text: "Gym", draft: "   ").rest == "Gym")
+    @Test("Reduce Motion insertions never expand")
+    func reduceMotionNeverExpands() {
+        #expect(!PlannerRowInsertion.expands(reduceMotion: true))
     }
 }

@@ -11,7 +11,7 @@ import UIKit
 /// hosts the REAL `PlannerView` in a key window and dispatches the REAL
 /// Return path (`UITextFieldDelegate.textFieldShouldReturn`, the same
 /// selector the keyboard's return key invokes), then observes the complete
-/// async round-trip (draft-clear → section mount/unmount → snapshot reload)
+/// async round-trip (draft-clear → chips-line swap → snapshot reload)
 /// with continuous first-responder sampling: ANY end-editing event — however
 /// brief, at ANY round-trip latency — fails. The 6.1 next-tick re-assertion
 /// fails this suite (it resigns at dispatch, then refocuses); the
@@ -42,7 +42,7 @@ struct PlannerComposerFocusTests {
         ctx.field.insertText("Read")
         await pump()
         #expect(ctx.vm.draft == "Read", "typing through the field must sync the draft")
-        #expect(ctx.vm.suggestions.map(\.activityText) == ["Read docs"])
+        #expect(ctx.vm.chips.map(\.activityText) == ["Read docs"])
         #expect(ctx.field.isFirstResponder, "keystroke-equivalent refresh stole focus")
         #expect(endCounter.resigns == 0, "refresh resigned the composer \(endCounter.resigns)x")
     }
@@ -109,7 +109,7 @@ struct PlannerComposerFocusTests {
     // MARK: - Helpers
 
     /// A hosted composer holding its window alive, with one seeded entry so
-    /// a draft shows the suggestions section that submit later unmounts.
+    /// a draft filters the chips line above the keyboard.
     private func makeHostedComposer() async throws -> HostedComposer {
         let (vm, store) = makeContext()
         _ = try await store.createEntry(TimeEntry(

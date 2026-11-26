@@ -1,5 +1,6 @@
 import Foundation
 import Combine
+import SwiftUI
 
 /// The Today planner view model (day-planner spec): an inline composer over
 /// a reorderable checklist projected from one ordered backlog. Today is the
@@ -43,6 +44,11 @@ final class PlannerViewModel: ObservableObject {
     private var todayString: String = PlannerCivilDate.today()
     private var inFlightLoad: Task<Void, Never>?
     private var needsReload = true
+    /// The id of a just-submitted task whose insertion the next `load()`
+    /// animates (day-planner 8.1: the fresh row expands in at the top).
+    /// Consumed by the first load after the submit; every other load
+    /// publishes without animation.
+    private var pendingInsertionID: String?
 
     init(store: LocalStore, undoBuffer: UndoBufferStore, timer: TimerService) {
         self.store = store
@@ -78,14 +84,25 @@ final class PlannerViewModel: ObservableObject {
         do {
             todayString = PlannerCivilDate.today()
             let fetched = try await store.plannerTasks()
-            let fetchedRecents = try await store.recents(limit: Self.suggestionPoolLimit)
+            let fetchedRecents = try await store.recents(limit: Self.chipPoolLimit)
             let draftExists = try await store.timerDraft() != nil
             let projected = PlannerToday.project(tasks: fetched, on: todayString)
             tasks = fetched
             recents = fetchedRecents
             timerActive = draftExists
+            // A submit-then-load round-trip animates only the fresh row's
+            // insertion (its `.transition` fires); every other load — tab
+            // return, sync exit, toggle, move, delete — publishes silently.
+            let insertedID = pendingInsertionID.flatMap { id in
+                projected.tasks.contains { $0.id == id } ? id : nil
+            }
+            pendingInsertionID = nil
             if projected != snapshot {
-                snapshot = projected
+                if insertedID != nil {
+                    withAnimation(.default) { snapshot = projected }
+                } else {
+                    snapshot = projected
+                }
             }
             if editingTaskID != nil, !projected.tasks.contains(where: { $0.id == editingTaskID }) {
                 editingTaskID = nil
@@ -101,51 +118,52 @@ final class PlannerViewModel: ObservableObject {
 
     // MARK: - Composer (fast repeated input)
 
-    /// Suggestion pool size: the capped newest-first Recents drawn from
-    /// committed entries. Display is bounded separately (a top section of
-    /// the same task list showing at most `suggestionDisplayCap` rows).
-    private static let suggestionPoolLimit = 10
-    /// Maximum suggestions rendered: rows in the list's top section, so
-    /// keystrokes only swap rows inside the list and the composer above
-    /// never moves.
-    static let suggestionDisplayCap = 5
+    /// Chip pool size: the capped newest-first Recents drawn from
+    /// committed entries. Display is bounded separately (a single chips
+    /// line above the keyboard showing at most `chipDisplayCap` chips).
+    private static let chipPoolLimit = 10
+    /// Maximum chips rendered: one horizontally scrollable line above the
+    /// keyboard, so keystrokes only swap chips inside that fixed-height
+    /// line and the composer and list above never move.
+    static let chipDisplayCap = 5
 
-    /// Matching suggestions for the current draft: case-insensitive prefix
-    /// matches over exact entry texts, newest-first, capped for display.
-    /// The composer shows suggestions only for a non-empty draft.
-    var suggestions: [RecentEntry] {
+    /// Matching chips for the current draft, newest-first: the full capped
+    /// strip for an empty draft, case-insensitive prefix matches over exact
+    /// entry texts while typing. Tapping a chip only fills the composer.
+    var chips: [RecentEntry] {
         let trimmed = ActivityName.normalized(draft)
-        guard !trimmed.isEmpty else { return [] }
+        guard !trimmed.isEmpty else { return Array(recents.prefix(Self.chipDisplayCap)) }
         let lowered = trimmed.lowercased()
         return Array(recents
             .filter { $0.activityText.lowercased().hasPrefix(lowered) }
-            .prefix(Self.suggestionDisplayCap))
+            .prefix(Self.chipDisplayCap))
     }
 
-    /// Fills the composer with a suggestion's exact text for editing or
+    /// Fills the composer with a chip's exact text for editing or
     /// submission. Creates no task, starts no timer.
-    func fillFromSuggestion(_ recent: RecentEntry) {
+    func fillFromChip(_ recent: RecentEntry) {
         draft = recent.activityText
     }
 
     /// Submits the composer (Return or the accessible Add affordance):
-    /// appends one task after the existing Today rows, clears the draft,
+    /// prepends one task before the existing Today rows, clears the draft,
     /// and reloads. The field never resigns across this round-trip: the
     /// UIKit-backed composer suppresses the Return default resign at
     /// dispatch, so no refocusing is needed afterwards. An invalid or failed
-    /// submission appends nothing and keeps the draft.
+    /// submission prepends nothing and keeps the draft.
     func submit() async {
         let trimmed = ActivityName.normalized(draft)
         guard case .valid = ActivityName.validate(trimmed) else { return }
         let visible = snapshot.tasks
-        let after = visible.last?.positionKey
-        guard let key = PlannerPositionKey.allocate(before: after, after: nil) else {
+        let first = visible.first?.positionKey
+        guard let key = PlannerPositionKey.allocate(before: nil, after: first) else {
             errorMessage = L10n.text(in: .default, code: "error.unknown")
             return
         }
         do {
+            let id = await store.newRecordID()
             let outcome = try await store.createPlannerTask(
-                id: await store.newRecordID(),
+                id: id,
                 name: trimmed,
                 positionKey: key,
                 operationID: await store.newRecordID()
@@ -155,6 +173,7 @@ final class PlannerViewModel: ObservableObject {
                 return
             }
             draft = ""
+            pendingInsertionID = id
             invalidate()
             await loadIfNeeded()
         } catch {

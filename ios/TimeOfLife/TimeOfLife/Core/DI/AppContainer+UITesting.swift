@@ -132,8 +132,8 @@ extension AppContainer {
         case "plannerHeaders":
             // Day-planner header/stillness probe (add-day-planner §6): the
             // signed-in shell plus one committed entry, so Today shows a
-            // suggestions section for the "Header" prefix. Seeded entry text
-            // is fixture copy, never user data.
+            // chip for the "Header" prefix in the chips line. Seeded entry
+            // text is fixture copy, never user data.
             sessionStore.setSignedIn(CachedSession(
                 id: "ui-test", email: "user@example.com", emailVerified: true
             ))
@@ -240,10 +240,10 @@ extension AppContainer {
     }
 
     /// One committed entry for the `"plannerHeaders"` screen, so a "Header"
-    /// draft shows a suggestions section under its localized header. Same
+    /// draft shows a chip in the chips line above the keyboard. Same
     /// degrade-to-empty policy as the History seeds: a failed seed leaves
-    /// Today without suggestions, and the probe fails loudly on the missing
-    /// header instead of guessing.
+    /// Today without chips, and the probe fails loudly on the missing
+    /// chip instead of guessing.
     private static func seedPlannerHeadersIfNeeded(screen: String, localStore: LocalStore) {
         guard screen == "plannerHeaders" else { return }
         Task {
