@@ -123,16 +123,22 @@ struct PlannerView: View {
     /// declines the Return default resign at dispatch (day-planner 7.1),
     /// so the keyboard never animates away no matter how slow the
     /// store/reload round-trip is. The composer never unmounts and no
-    /// layout jumps.
+    /// layout jumps. The field sits in the shared `FieldCard` chrome
+    /// (secondary background against the primary page, `minTapArea`
+    /// minimum height), so it reads as a card apart from the list; the
+    /// representable keeps its stable identity inside the card, so
+    /// first-responder survival is unchanged.
     private var composer: some View {
         HStack(spacing: Theme.spacingSmall) {
-            PlannerComposerField(
-                text: $vm.draft,
-                placeholder: L10n.plannerComposerPlaceholder.text,
-                focused: $composerFocused,
-                accessibilityIdentifier: "PlannerComposerField"
-            ) {
-                Task { await vm.submit() }
+            FieldCard {
+                PlannerComposerField(
+                    text: $vm.draft,
+                    placeholder: L10n.plannerComposerPlaceholder.text,
+                    focused: $composerFocused,
+                    accessibilityIdentifier: "PlannerComposerField"
+                ) {
+                    Task { await vm.submit() }
+                }
             }
             Button(L10n.plannerAdd.text) {
                 Task { await vm.submit() }
@@ -159,35 +165,30 @@ struct PlannerView: View {
 
     private var taskList: some View {
         List {
-            // The task rows sit under their own header: it renders whenever
-            // this list shows, so the group always reads as one section.
-            // A fresh row expands in at the end (see `PlannerRowInsertion`;
+            // The task rows carry no section header (day-planner 10.2):
+            // a fresh row expands in at the end (see `PlannerRowInsertion`;
             // opacity-only under Reduce Motion).
-            Section {
-                ForEach(vm.snapshot.tasks) { task in
-                    PlannerTaskRow(
-                        task: task,
-                        timerActive: vm.timerActive,
-                        isRenaming: vm.editingTaskID == task.id,
-                        editText: $vm.editText,
-                        focusedRowID: $renamingRowID,
-                        onToggle: { Task { await vm.toggleComplete(task) } },
-                        onRenameTap: { vm.beginRename(task) },
-                        onRenameCommit: { Task { await vm.commitRename(task) } },
-                        onRenameCancel: {
-                            vm.cancelRename()
-                            renamingRowID = nil
-                        },
-                        onStart: {
-                            if await vm.startTask(task) { onStartActive() }
-                        }
-                    )
-                }
-                .onDelete { offsets in Task { await vm.delete(at: offsets) } }
-                .onMove { source, destination in Task { await vm.move(from: source, to: destination) } }
-            } header: {
-                Text(L10n.plannerTasks.text)
+            ForEach(vm.snapshot.tasks) { task in
+                PlannerTaskRow(
+                    task: task,
+                    timerActive: vm.timerActive,
+                    isRenaming: vm.editingTaskID == task.id,
+                    editText: $vm.editText,
+                    focusedRowID: $renamingRowID,
+                    onToggle: { Task { await vm.toggleComplete(task) } },
+                    onRenameTap: { vm.beginRename(task) },
+                    onRenameCommit: { Task { await vm.commitRename(task) } },
+                    onRenameCancel: {
+                        vm.cancelRename()
+                        renamingRowID = nil
+                    },
+                    onStart: {
+                        if await vm.startTask(task) { onStartActive() }
+                    }
+                )
             }
+            .onDelete { offsets in Task { await vm.delete(at: offsets) } }
+            .onMove { source, destination in Task { await vm.move(from: source, to: destination) } }
         }
         .listStyle(.plain)
         .scrollContentBackground(.hidden)
@@ -208,17 +209,18 @@ struct PlannerView: View {
         .accessibilityIdentifier("PlannerTaskList")
     }
 
-    /// The chips line (day-planner 9.1): one horizontally scrollable row
-    /// of recent-activity chips pinned between the composer and the
-    /// keyboard — the last VStack slot, so the keyboard's safe-area inset
-    /// lands directly under it. Visible only while the keyboard is open;
-    /// an empty draft shows the full capped strip, typing prefix-filters
-    /// it, and tapping a chip fills the composer with its exact text (no
-    /// task created, no timer started). The slot stays mounted at one chip
-    /// row while the keyboard is open even when the filter matches nothing
-    /// (a hidden prototype holds the row height), so filter changes only
-    /// swap chips inside the line and never move the composer or the list
-    /// above.
+    /// The chips line (day-planner 9.1, gap 10.2): one horizontally
+    /// scrollable row of recent-activity chips pinned between the composer
+    /// and the keyboard — the last VStack slot, so the keyboard's safe-area
+    /// inset lands under it with a `spacingSmall` breathing gap, and the
+    /// chips never sit flush on the keyboard. Visible only while the
+    /// keyboard is open; an empty draft shows the full capped strip, typing
+    /// prefix-filters it, and tapping a chip fills the composer with its
+    /// exact text (no task created, no timer started). The slot stays
+    /// mounted at one chip row while the keyboard is open even when the
+    /// filter matches nothing (a hidden prototype holds the row height),
+    /// so filter changes only swap chips inside the line and never move
+    /// the composer or the list above.
     ///
     /// VoiceOver follows the visual order — list, then the composer, then
     /// the chips line next to the keyboard — so swipe order always matches
@@ -247,6 +249,10 @@ struct PlannerView: View {
                 .frame(minHeight: Theme.minTapArea)
             }
             .frame(minHeight: Theme.minTapArea)
+            // Breathing gap above the keyboard (day-planner 10.2): a
+            // spacing token, never a magic number. Constant while the line
+            // is mounted, so it never moves the composer or the list.
+            .padding(.bottom, Theme.spacingSmall)
             .accessibilityIdentifier("PlannerChips")
         }
     }

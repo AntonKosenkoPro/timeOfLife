@@ -1,15 +1,15 @@
 import XCTest
 
-/// Keyboard-stillness + chips-line probe for Today (day-planner 9.1):
+/// Keyboard-stillness + chips-line probe for Today (day-planner 10.2):
 /// the spec demands the composer NEVER resign across a submit — no
 /// dismiss/reopen flicker of any duration — a single horizontally
 /// scrollable chips line pinned between the bottom-fixed composer and the
-/// keyboard (visible only while the keyboard is open; empty draft shows
-/// the full capped strip, typing prefix-filters it, tapping a chip fills
-/// the composer without creating a task or starting a timer), a
-/// persistent localized `Tasks` header over the task rows, a bottom-fixed
-/// composer with the list above it, and every submit appending at the end
-/// with an expanding insertion. Drives the REAL return-key path in a real
+/// keyboard (visible only while the keyboard is open, floating with a
+/// breathing gap above it; empty draft shows the full capped strip,
+/// typing prefix-filters it, tapping a chip fills the composer without
+/// creating a task or starting a timer), no section header over the task
+/// rows, a bottom-fixed composer (contrasting card) with the list above
+/// it, and every submit appending at the end with an expanding insertion. Drives the REAL return-key path in a real
 /// scene (unit hosts cannot dispatch `onSubmit`), then tight-polls
 /// software keyboard presence: any sample without a keyboard fails. A
 /// green run with a high sample count proves stillness; a red run
@@ -83,8 +83,9 @@ final class PlannerKeyboardStillnessTests: XCTestCase {
     }
 
     /// The chips line shows while typing (keyboard open), with the seed
-    /// chip for the "Header" prefix; the task list is still empty, so the
-    /// Tasks header is absent and no task exists yet.
+    /// chip for the "Header" prefix; the task list is still empty, so no
+    /// task row exists yet — and the list carries no section header by
+    /// design (day-planner 10.2).
     private func assertChipWhileTyping(in app: XCUIApplication) throws {
         // The ScrollView's AX element type varies by OS; match by
         // identifier across every type.
@@ -94,10 +95,6 @@ final class PlannerKeyboardStillnessTests: XCTestCase {
         guard app.buttons["PlannerChip-Header probe"].waitForExistence(timeout: HoldHarnessFlow.elementTimeout) else {
             throw HoldHarnessError.blocker("seed chip missing for the Header prefix")
         }
-        XCTAssertFalse(
-            app.staticTexts["Tasks"].exists,
-            "Tasks header shows before any task exists"
-        )
         XCTAssertFalse(
             app.staticTexts["Suggestions"].exists,
             "retired Suggestions header still present"
@@ -124,9 +121,12 @@ final class PlannerKeyboardStillnessTests: XCTestCase {
             throw HoldHarnessError.blocker("seed chip never became hittable (frame=\(chip.frame))")
         }
         chip.tap()
-        // Tapping fills the composer: still no task, still no Tasks header.
-        XCTAssertFalse(
-            app.staticTexts["Tasks"].exists,
+        // Tapping fills the composer: still no task row (fill must not
+        // submit) — the list carries no section header by design.
+        XCTAssertNil(
+            app.buttons.allElementsBoundByIndex.first {
+                $0.identifier.hasPrefix("PlannerName-")
+            },
             "chip tap created a task (fill must not submit)"
         )
         for keyID in ["Done", "done", "Return", "return", "Send", "send"] {
@@ -154,9 +154,10 @@ final class PlannerKeyboardStillnessTests: XCTestCase {
         return (samples, misses)
     }
 
-    /// The submit must have landed (the probe task reads back under Tasks),
+    /// The submit must have landed (the probe task reads back as a row),
     /// the draft cleared (chips fall back to the full capped strip while
-    /// the keyboard stays open), and the Tasks header persisted.
+    /// the keyboard stays open). The task list carries no section header
+    /// by design (day-planner 10.2).
     private func assertSubmitLanded(in app: XCUIApplication, composer: XCUIElement) throws {
         // The name sits in a labelled row button, so match the button by
         // label — a staticTexts subscript matches identifiers, not labels.
@@ -168,7 +169,6 @@ final class PlannerKeyboardStillnessTests: XCTestCase {
             attachRowDump(in: app, composer: composer)
         }
         XCTAssertTrue(probeAppeared, "probe task 'Header probe' never appeared — submit did not land")
-        XCTAssertTrue(app.staticTexts["Tasks"].exists, "Tasks header missing after submit")
         XCTAssertTrue(
             chipsLine(in: app).exists,
             "chips line missing after submit (keyboard still open, empty draft shows the full strip)"

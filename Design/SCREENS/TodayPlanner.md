@@ -40,29 +40,37 @@ Planner rows never feed History, Insights, or Recents.
 Top-to-bottom order:
 
 1. Navigation title: `L10n.plannerTitle` (`Today`), `.inline` display mode.
-2. Inline composer (fixed slot above the list, so submitting never moves
-   it): a `TextField` (`L10n.plannerComposerPlaceholder`, `.submitLabel(.done)`,
-   `onSubmit` → submit) plus an Add button (`L10n.plannerAdd`, disabled for
-   blank drafts). `accessibilityIdentifier`s: `PlannerComposerField`,
-   `PlannerAddButton`.
-3. Suggestions section at the top of the same `List` (only while the
-   draft is non-empty, never a separate mounting region): at most
-   `suggestionDisplayCap` (5) newest-first Recents filtered by
-   case-insensitive prefix, each row rendering the matched prefix bold.
-   Tapping one fills the exact text only. `accessibilityIdentifier`:
-   `PlannerSuggestions` on the section (`PlannerSuggestion-<text>` per
-   row); VoiceOver order is document order (suggestions, then tasks).
-4. Timer-active caption (`L10n.plannerTimerActive`, secondary, caption
+2. Checklist `List(.plain)` (`accessibilityIdentifier`: `PlannerTaskList`):
+   open and completed-Today rows in the shared order, no section header.
+   Empty projection shows the empty hint (`L10n.plannerEmptyHint`) instead.
+3. Timer-active caption (`L10n.plannerTimerActive`, secondary, caption
    case) while a run is active — Start buttons disable but the checklist
    stays fully usable.
-5. Empty hint (`L10n.plannerEmptyHint`) when the projection is empty and
-   there are no suggestions, or the single checklist `List(.plain)`
-   otherwise (`accessibilityIdentifier`: `PlannerTaskList`).
+4. Bottom-fixed composer card: the UIKit-backed inline field
+   (`PlannerComposerField`, `L10n.plannerComposerPlaceholder`) wrapped in
+   the shared `FieldCard` chrome (secondary background against the
+   primary page, `minTapArea` minimum height) plus an Add button
+   (`L10n.plannerAdd`, disabled for blank drafts).
+   `accessibilityIdentifier`s: `PlannerComposerField`, `PlannerAddButton`.
+   Return submits without ever resigning first responder (no
+   dismiss/reopen cycle of any duration); the composer never unmounts, so
+   submitting never moves it and the keyboard stays open across repeated
+   Returns.
+5. Chips line (`accessibilityIdentifier`: `PlannerChips`), only while the
+   keyboard is open: a single horizontally scrollable row of at most
+   `chipDisplayCap` newest-first Recents, prefix-filtered by the
+   draft (empty draft shows the full capped strip). Tapping one fills the
+   exact text only — no task is created, no timer starts. A
+   `spacingSmall` breathing gap sits between the line and the keyboard;
+   the slot holds one chip-row height while mounted (hidden prototype
+   when the filter matches nothing), so filter changes never move the
+   composer or the list. VoiceOver order is document order (list, then
+   composer, then chips), matching the visual layout.
 
-The composer sits outside the `List`, so its frame never moves; every
-successful submit bumps `composerFocusRequests` and the view re-asserts
-input focus, so reloads and the suggestions section mount/unmount never
-steal the keyboard. Scroll position is the list's own. Track geometry is
+The composer sits outside the `List`, so its frame never moves; the
+UIKit field declines the Return resign at dispatch, so store writes,
+snapshot reloads, and the chips line mount/unmount never steal the
+keyboard. Scroll position is the list's own. Track geometry is
 untouched: the only Track change is the toolbar progress item.
 
 ### Rows
