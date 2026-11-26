@@ -1,18 +1,19 @@
 import SwiftUI
 
-/// The Today planner page (day-planner spec): one inline composer over the
-/// visible checklist. Today is the only planner view — unfinished tasks
-/// plus completions on the current local civil date, in the shared order,
-/// with done/total counts from the same snapshot.
+/// The Today planner page (day-planner spec): one inline composer fixed
+/// at the bottom with the visible checklist above it. Today is the only
+/// planner view — unfinished tasks plus completions on the current local
+/// civil date, in the shared order, with done/total counts from the same
+/// snapshot.
 ///
-/// Layout contract: the composer sits ABOVE the list in a fixed slot and
-/// never unmounts, so submitting never moves it and the keyboard stays
-/// open across repeated Returns; matching Recents render as a single
-/// horizontally scrollable chips line pinned just above the keyboard
-/// (the last slot, visible only while the keyboard is open), so each
-/// keystroke only swaps chips inside that fixed-height line and neither
-/// the composer nor the list moves; a fresh row expands in at the top
-/// (opacity-only under Reduce Motion).
+/// Layout contract: the composer sits in a bottom-fixed slot below the
+/// list and never unmounts, so submitting never moves it and the keyboard
+/// stays open across repeated Returns; a single horizontally scrollable
+/// chips line sits fixed between the composer and the keyboard (visible
+/// only while the keyboard is open), so each keystroke only swaps chips
+/// inside that fixed-height line and neither the composer nor the list
+/// moves; a fresh row expands in at the end (opacity-only under Reduce
+/// Motion).
 struct PlannerView: View {
     @ObservedObject var vm: PlannerViewModel
     @EnvironmentObject var sync: SyncController
@@ -85,7 +86,11 @@ struct PlannerView: View {
 
     private var content: some View {
         VStack(spacing: 0) {
-            composer
+            if vm.snapshot.tasks.isEmpty {
+                emptyHint
+            } else {
+                taskList
+            }
             if vm.timerActive {
                 Text(L10n.plannerTimerActive.text)
                     .font(.caption)
@@ -95,11 +100,7 @@ struct PlannerView: View {
                     .padding(.vertical, Theme.spacingSmall)
                     .accessibilityIdentifier("PlannerTimerActiveCaption")
             }
-            if vm.snapshot.tasks.isEmpty {
-                emptyHint
-            } else {
-                taskList
-            }
+            composer
             chipsLine
         }
         .background(Theme.backgroundPrimary.ignoresSafeArea())
@@ -115,13 +116,14 @@ struct PlannerView: View {
         }
     }
 
-    // MARK: - Composer (stable keyboard, chips above it)
+    // MARK: - Composer (bottom-fixed, chips between it and the keyboard)
 
-    /// The persistent inline field: Return prepends one task, clears the
-    /// draft, and focus never leaves — the UIKit-backed field declines the
-    /// Return default resign at dispatch (day-planner 7.1), so the keyboard
-    /// never animates away no matter how slow the store/reload round-trip
-    /// is. The composer never unmounts and no layout jumps.
+    /// The persistent inline field: Return appends one task at the end,
+    /// clears the draft, and focus never leaves — the UIKit-backed field
+    /// declines the Return default resign at dispatch (day-planner 7.1),
+    /// so the keyboard never animates away no matter how slow the
+    /// store/reload round-trip is. The composer never unmounts and no
+    /// layout jumps.
     private var composer: some View {
         HStack(spacing: Theme.spacingSmall) {
             PlannerComposerField(
@@ -153,13 +155,13 @@ struct PlannerView: View {
             .accessibilityIdentifier("PlannerEmptyHint")
     }
 
-    // MARK: - Checklist (chips live above the keyboard)
+    // MARK: - Checklist (chips live between composer and keyboard)
 
     private var taskList: some View {
         List {
             // The task rows sit under their own header: it renders whenever
             // this list shows, so the group always reads as one section.
-            // A fresh row expands in at the top (see `PlannerRowInsertion`;
+            // A fresh row expands in at the end (see `PlannerRowInsertion`;
             // opacity-only under Reduce Motion).
             Section {
                 ForEach(vm.snapshot.tasks) { task in
@@ -206,19 +208,21 @@ struct PlannerView: View {
         .accessibilityIdentifier("PlannerTaskList")
     }
 
-    /// The chips line (day-planner 8.2): one horizontally scrollable row
-    /// of recent-activity chips pinned just above the keyboard — the last
-    /// VStack slot, so the keyboard's safe-area inset lands directly under
-    /// it. Visible only while the keyboard is open; an empty draft shows
-    /// the full capped strip, typing prefix-filters it, and tapping a chip
-    /// fills the composer with its exact text (no task created, no timer
-    /// started). The slot stays mounted at one chip row while the keyboard
-    /// is open even when the filter matches nothing (a hidden prototype
-    /// holds the row height), so filter changes only swap chips inside the
-    /// line and never move the composer or the list above.
+    /// The chips line (day-planner 9.1): one horizontally scrollable row
+    /// of recent-activity chips pinned between the composer and the
+    /// keyboard — the last VStack slot, so the keyboard's safe-area inset
+    /// lands directly under it. Visible only while the keyboard is open;
+    /// an empty draft shows the full capped strip, typing prefix-filters
+    /// it, and tapping a chip fills the composer with its exact text (no
+    /// task created, no timer started). The slot stays mounted at one chip
+    /// row while the keyboard is open even when the filter matches nothing
+    /// (a hidden prototype holds the row height), so filter changes only
+    /// swap chips inside the line and never move the composer or the list
+    /// above.
     ///
-    /// VoiceOver follows the visual order — composer, list, then the chips
-    /// line next to the keyboard — so swipe order always matches the layout.
+    /// VoiceOver follows the visual order — list, then the composer, then
+    /// the chips line next to the keyboard — so swipe order always matches
+    /// the layout.
     @ViewBuilder private var chipsLine: some View {
         if keyboardVisible {
             ScrollView(.horizontal, showsIndicators: false) {

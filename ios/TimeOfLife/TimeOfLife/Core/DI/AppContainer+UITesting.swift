@@ -240,10 +240,10 @@ extension AppContainer {
     }
 
     /// One committed entry for the `"plannerHeaders"` screen, so a "Header"
-    /// draft shows a chip in the chips line above the keyboard. Same
-    /// degrade-to-empty policy as the History seeds: a failed seed leaves
-    /// Today without chips, and the probe fails loudly on the missing
-    /// chip instead of guessing.
+    /// draft shows a chip in the chips line between the composer and the
+    /// keyboard. Same degrade-to-empty policy as the History seeds: a
+    /// failed seed leaves Today without chips, and the probe fails loudly
+    /// on the missing chip instead of guessing.
     private static func seedPlannerHeadersIfNeeded(screen: String, localStore: LocalStore) {
         guard screen == "plannerHeaders" else { return }
         Task {

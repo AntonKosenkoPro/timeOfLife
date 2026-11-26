@@ -45,7 +45,7 @@ final class PlannerViewModel: ObservableObject {
     private var inFlightLoad: Task<Void, Never>?
     private var needsReload = true
     /// The id of a just-submitted task whose insertion the next `load()`
-    /// animates (day-planner 8.1: the fresh row expands in at the top).
+    /// animates (day-planner 9.1: the fresh row expands in at the end).
     /// Consumed by the first load after the submit; every other load
     /// publishes without animation.
     private var pendingInsertionID: String?
@@ -120,11 +120,12 @@ final class PlannerViewModel: ObservableObject {
 
     /// Chip pool size: the capped newest-first Recents drawn from
     /// committed entries. Display is bounded separately (a single chips
-    /// line above the keyboard showing at most `chipDisplayCap` chips).
+    /// line between the composer and the keyboard showing at most
+    /// `chipDisplayCap` chips).
     private static let chipPoolLimit = 10
-    /// Maximum chips rendered: one horizontally scrollable line above the
-    /// keyboard, so keystrokes only swap chips inside that fixed-height
-    /// line and the composer and list above never move.
+    /// Maximum chips rendered: one horizontally scrollable line between
+    /// the composer and the keyboard, so keystrokes only swap chips inside
+    /// that fixed-height line and the list above never moves.
     static let chipDisplayCap = 5
 
     /// Matching chips for the current draft, newest-first: the full capped
@@ -146,17 +147,17 @@ final class PlannerViewModel: ObservableObject {
     }
 
     /// Submits the composer (Return or the accessible Add affordance):
-    /// prepends one task before the existing Today rows, clears the draft,
+    /// appends one task after the existing Today rows, clears the draft,
     /// and reloads. The field never resigns across this round-trip: the
     /// UIKit-backed composer suppresses the Return default resign at
     /// dispatch, so no refocusing is needed afterwards. An invalid or failed
-    /// submission prepends nothing and keeps the draft.
+    /// submission appends nothing and keeps the draft.
     func submit() async {
         let trimmed = ActivityName.normalized(draft)
         guard case .valid = ActivityName.validate(trimmed) else { return }
         let visible = snapshot.tasks
-        let first = visible.first?.positionKey
-        guard let key = PlannerPositionKey.allocate(before: nil, after: first) else {
+        let last = visible.last?.positionKey
+        guard let key = PlannerPositionKey.allocate(before: last, after: nil) else {
             errorMessage = L10n.text(in: .default, code: "error.unknown")
             return
         }

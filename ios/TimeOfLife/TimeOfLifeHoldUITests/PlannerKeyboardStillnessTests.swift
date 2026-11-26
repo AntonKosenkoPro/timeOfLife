@@ -1,14 +1,15 @@
 import XCTest
 
-/// Keyboard-stillness + chips-line probe for Today (day-planner 8.1/8.2):
+/// Keyboard-stillness + chips-line probe for Today (day-planner 9.1):
 /// the spec demands the composer NEVER resign across a submit — no
 /// dismiss/reopen flicker of any duration — a single horizontally
-/// scrollable chips line pinned just above the keyboard (visible only
-/// while the keyboard is open; empty draft shows the full capped strip,
-/// typing prefix-filters it, tapping a chip fills the composer without
-/// creating a task or starting a timer), a persistent localized `Tasks`
-/// header over the task rows, and every submit prepending at the top with
-/// an expanding insertion. Drives the REAL return-key path in a real
+/// scrollable chips line pinned between the bottom-fixed composer and the
+/// keyboard (visible only while the keyboard is open; empty draft shows
+/// the full capped strip, typing prefix-filters it, tapping a chip fills
+/// the composer without creating a task or starting a timer), a
+/// persistent localized `Tasks` header over the task rows, a bottom-fixed
+/// composer with the list above it, and every submit appending at the end
+/// with an expanding insertion. Drives the REAL return-key path in a real
 /// scene (unit hosts cannot dispatch `onSubmit`), then tight-polls
 /// software keyboard presence: any sample without a keyboard fails. A
 /// green run with a high sample count proves stillness; a red run
@@ -57,9 +58,10 @@ final class PlannerKeyboardStillnessTests: XCTestCase {
         )
         try assertSubmitLanded(in: app, composer: composer)
         XCTAssertTrue(app.keyboards.element.exists, "keyboard gone at settle after submit")
-        // Prepend contract (day-planner 8.1): a second submit lands on top.
+        // Append contract (day-planner 9.1): a second submit lands at the end.
         try submitSecondTask(in: app, composer: composer)
-        try assertNewestOnTop(in: app)
+        try assertNewestAtEnd(in: app)
+        try assertComposerBelowList(in: app, composer: composer)
     }
 
     /// Opens Today from Track and focuses the composer (keyboard up).
@@ -189,16 +191,30 @@ final class PlannerKeyboardStillnessTests: XCTestCase {
         composer.typeText("\n")
     }
 
-    /// The newest task sits at the top of the list (day-planner 8.1).
-    private func assertNewestOnTop(in app: XCUIApplication) throws {
+    /// The newest task sits at the end of the list (day-planner 9.1).
+    private func assertNewestAtEnd(in app: XCUIApplication) throws {
         let rows = app.buttons.allElementsBoundByIndex
             .filter { $0.identifier.hasPrefix("PlannerName-") }
-        guard let first = rows.first else {
+        guard let last = rows.last else {
             throw HoldHarnessError.blocker("no task rows after the second submit")
         }
         XCTAssertEqual(
-            first.label, "Header sequel",
-            "newest task is not on top (rows: \(rows.map { $0.label }))"
+            last.label, "Header sequel",
+            "newest task is not at the end (rows: \(rows.map { $0.label }))"
+        )
+    }
+
+    /// The composer sits below the list (day-planner 9.1 bottom-fixed
+    /// entry): its top edge is at or below the last row's bottom edge.
+    private func assertComposerBelowList(in app: XCUIApplication, composer: XCUIElement) throws {
+        let rows = app.buttons.allElementsBoundByIndex
+            .filter { $0.identifier.hasPrefix("PlannerName-") }
+        guard let last = rows.last else {
+            throw HoldHarnessError.blocker("no task rows for the placement check")
+        }
+        XCTAssertGreaterThanOrEqual(
+            composer.frame.minY, last.frame.maxY,
+            "composer is not below the list (composerTop=\(composer.frame.minY) lastRowBottom=\(last.frame.maxY))"
         )
     }
 

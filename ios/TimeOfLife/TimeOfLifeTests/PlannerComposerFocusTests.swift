@@ -109,7 +109,7 @@ struct PlannerComposerFocusTests {
     // MARK: - Helpers
 
     /// A hosted composer holding its window alive, with one seeded entry so
-    /// a draft filters the chips line above the keyboard.
+    /// a draft filters the chips line between the composer and the keyboard.
     private func makeHostedComposer() async throws -> HostedComposer {
         let (vm, store) = makeContext()
         _ = try await store.createEntry(TimeEntry(

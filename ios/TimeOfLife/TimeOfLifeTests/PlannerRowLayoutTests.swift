@@ -3,13 +3,13 @@ import Foundation
 @testable import TimeOfLife
 
 /// Pins the day-planner single-surface invariants (change `add-day-planner`
-/// §5/§8): open and completed rows share one exact height because the Start
+/// §5/§9): open and completed rows share one exact height because the Start
 /// affordance slot stays mounted in both states, and a fresh row expands in
-/// at the top (opacity-only under Reduce Motion). The pure helpers below
+/// at the end (opacity-only under Reduce Motion). The pure helpers below
 /// are consumed by `PlannerView` — SwiftUI layout itself is not
 /// unit-testable, so the tests pin the helpers (the `ClearButtonVisibility`
 /// precedent).
-@Suite("Planner row layout (day-planner 5.3/8.1)")
+@Suite("Planner row layout (day-planner 5.3/9.1)")
 struct PlannerRowLayoutTests {
 
     private func task(named name: String, completedOn: String? = nil) -> PlannerTask {

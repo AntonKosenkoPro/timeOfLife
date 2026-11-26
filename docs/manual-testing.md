@@ -51,8 +51,9 @@ Simulator covers layout, sync convergence, and the linked Stop path; the items b
 3. [ ] **Large Dynamic Type** — at the largest accessibility sizes, Today rows, the composer, and the progress control stay readable and tappable (44 pt targets); scrolling the list never moves the composer.
 4. [ ] **VoiceOver reorder** — with VoiceOver on, enter edit mode and reorder tasks via the rotor; order persists across relaunch and syncs to a second device in the same order.
 5. [ ] **Start/Stop frames unchanged** — start and stop linked and ordinary timers on Track; the numeric readout, name row, tag selector, and Start/Stop keep their exact frames (the planner adds toolbar chrome only).
-6. [ ] **Two-device convergence** — add/reorder/complete tasks offline on two devices, then sync both; both show the same rows in the same order with both additions and all independent field edits.
-7. [ ] **Linked cold-open Live Activity Stop** — start a task from Today, terminate the app, then Stop from the Island or Lock Screen banner; the app cold-opens, saves the entry, completes exactly that task once, and shows the ordinary Saved card. (Unit + simulator tests cover the path; the Island/banner tap itself is device-only.)
+6. [ ] **Immediate running Track** — start a task from Today; Track presents the running timer at once with no further navigation.
+7. [ ] **Two-device convergence** — add/reorder/complete tasks offline on two devices, then sync both; both show the same rows in the same order with both additions and all independent field edits.
+8. [ ] **Linked cold-open Live Activity Stop** — start a task from Today, terminate the app, then Stop from the Island or Lock Screen banner; the app cold-opens, saves the entry, completes exactly that task once, and shows the ordinary Saved card. (Unit + simulator tests cover the path; the Island/banner tap itself is device-only.)
 
 ## Live Activities
 

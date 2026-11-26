@@ -4,7 +4,7 @@ import SwiftUI
 /// Start affordance slot (always mounted — see `PlannerStartSlot`).
 /// Completed rows stay in position through their completion day. VoiceOver
 /// reads the name plus its state; reorder runs through the list's `onMove`
-/// (edit mode + rotor, never drag-only). A fresh row expands in at the top
+/// (edit mode + rotor, never drag-only). A fresh row expands in at the end
 /// (see `PlannerRowInsertion`; opacity-only under Reduce Motion).
 struct PlannerTaskRow: View {
     let task: PlannerTask
@@ -81,7 +81,7 @@ struct PlannerTaskRow: View {
             .accessibilityIdentifier("PlannerStart-\(task.id)")
         }
         .listRowBackground(Theme.backgroundPrimary)
-        // Fresh rows expand in at the top (the submit round-trip wraps the
+        // Fresh rows expand in at the end (the submit round-trip wraps the
         // snapshot publish in `withAnimation`); only inserted rows carry a
         // transition, so toggles, moves, and reloads stay still.
         .transition(PlannerRowInsertion.transition(reduceMotion: reduceMotion))
@@ -112,12 +112,12 @@ enum PlannerStartSlot: Equatable {
     }
 }
 
-/// Top-row insertion transition (day-planner 8.1): a fresh task expands
-/// from zero to full height at the top of the list (scale from the top
-/// edge plus fade); under Reduce Motion the insertion is opacity-only (no
-/// expansion). Pinned by `PlannerRowLayoutTests` — SwiftUI transitions are
-/// not unit-testable, so the tests pin this helper (the `PlannerStartSlot`
-/// precedent).
+/// End insertion transition (day-planner 8.1, end placement 9.1): a fresh
+/// task expands from zero to full height at the end of the list (scale
+/// from the bottom edge plus fade); under Reduce Motion the insertion is
+/// opacity-only (no expansion). Pinned by `PlannerRowLayoutTests` —
+/// SwiftUI transitions are not unit-testable, so the tests pin this
+/// helper (the `PlannerStartSlot` precedent).
 enum PlannerRowInsertion {
     /// Whether a fresh row expands in (false under Reduce Motion).
     static func expands(reduceMotion: Bool) -> Bool { !reduceMotion }

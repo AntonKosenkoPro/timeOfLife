@@ -327,9 +327,13 @@ struct AppShellView: View {
                         // control (namePicker precedent — the route stays a
                         // value, the destination reads the planner view
                         // model). A successful one-tap Start pops back to
-                        // Track, where the linked run shows.
+                        // Track and reloads it, so the linked run presents
+                        // immediately (day-planner 9.2): the pop alone
+                        // would leave the settled idle snapshot on screen
+                        // until the next tab switch.
                         PlannerView(vm: plannerVM) {
                             vm.trackPath.removeAll { $0 == .planner }
+                            Task { await reloadTrack() }
                         }
                     case .categoryEditor:
                         // Inline category creation from the running-tag row
