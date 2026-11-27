@@ -18,7 +18,7 @@ The planner SHALL show all unfinished tasks and tasks completed on the current l
 
 ### Requirement: Planned tasks are an independently editable checklist
 
-A task SHALL hold a trimmed, valid timer name, an optional ordered category set, and optional notes; all three are edited in the task editor sheet. Task notes SHALL observe the same 2000-trimmed-rune bound as entry notes. Tasks with identical names SHALL have separate identities. The user SHALL be able to rename, reorder, complete, reopen, and delete visible tasks offline. Tapping a task SHALL open the task editor sheet with Name, Categories, and Notes fields (Log Time sheet grammar, reduced to those three fields in that order); there SHALL be no inline renaming in the row. New tasks SHALL prepend before existing Today rows. Completing or reopening a task SHALL keep its position and SHALL NOT start, stop, create, or modify a timer or time entry. Completing or reopening a task SHALL NOT change the row's height or move sibling rows.
+A task SHALL hold a trimmed, valid timer name, an optional ordered category set, and optional notes; all three are edited in the task editor sheet. Task notes SHALL observe the same 2000-trimmed-rune bound as entry notes. Tasks with identical names SHALL have separate identities. The user SHALL be able to rename, reorder, complete, reopen, and delete visible tasks offline. Tapping a task SHALL open the task editor sheet — the manual entry form with the Start and End cards omitted (same Name entry behavior, Categories, Notes, order, cards, validation, and save gate); there SHALL be no inline renaming in the row. New tasks SHALL prepend before existing Today rows. Completing or reopening a task SHALL keep its position and SHALL NOT start, stop, create, or modify a timer or time entry. Completing or reopening a task SHALL NOT change the row's height or move sibling rows. Each row SHALL show the task's ordered categories as small icon+name chips under the task name and a notes indicator when its notes are non-empty; the running task's row SHALL show a localized `In progress` label in the accent color instead of a Start button.
 
 #### Scenario: Two tasks use the same name
 - **WHEN** the user adds two tasks with the same valid name, then edits or removes one
@@ -46,7 +46,7 @@ A task SHALL hold a trimmed, valid timer name, an optional ordered category set,
 
 ### Requirement: The composer supports repeated adds without dismissing the keyboard
 
-The Today page SHALL use one inline composer fixed at the bottom of the screen with a single task list surface above it. While the keyboard is open, a single horizontally scrollable line of recent-activity chips drawn from newest-first Recents SHALL sit fixed between the composer and the keyboard; typing filters the chips by prefix, and tapping a chip fills the composer with its exact text. Choosing a chip SHALL create no task and start no timer. Submitting a valid draft (keyboard Return key or the composer's Add accessibility action — there SHALL be no separate visible Add button) SHALL prepend one task at the top of the list with an expanding insertion, clear the composer, and keep the input focused with the keyboard open. When the draft matches no Recent, the chips line SHALL show a localized no-match placeholder instead of an empty strip. The field SHALL never resign first responder across a submit — no dismiss/reopen cycle of any duration. The composer SHALL suppress the Return key's default resign at dispatch (custom submit handling that never resigns), rather than restoring focus afterwards. Invalid or failed submission SHALL NOT append a row or discard the draft. Row changes SHALL use non-disruptive feedback and respect Reduce Motion.
+The Today page SHALL use one inline composer fixed at the bottom of the screen with a single task list surface above it. While the keyboard is open, a single horizontally scrollable line of recent-activity chips drawn from newest-first Recents SHALL sit fixed between the composer and the keyboard; typing filters the chips by prefix; each chip shows its Recent's first category icon, and tapping a chip fills the composer with its exact text and stages that Recent's full category set for the created task. After a chip tap the line shows only the selected chip until the user types again; the staged set persists until the draft clears or another chip is tapped. Choosing a chip SHALL create no task and start no timer. Submitting a valid draft (keyboard Return key or the composer's Add accessibility action — there SHALL be no separate visible Add button) SHALL prepend one task at the top of the list with an expanding insertion, clear the composer, and keep the input focused with the keyboard open. When the draft matches no Recent, the chips line SHALL show a localized no-match placeholder instead of an empty strip. The field SHALL never resign first responder across a submit — no dismiss/reopen cycle of any duration. The composer SHALL suppress the Return key's default resign at dispatch (custom submit handling that never resigns), rather than restoring focus afterwards. Invalid or failed submission SHALL NOT append a row or discard the draft. Row changes SHALL use non-disruptive feedback and respect Reduce Motion.
 
 #### Scenario: Add consecutive tasks
 - **WHEN** the user adds a valid task with Return and then types and submits the next name
@@ -66,7 +66,11 @@ The Today page SHALL use one inline composer fixed at the bottom of the screen w
 
 #### Scenario: Fill from a chip
 - **WHEN** the user taps a chip
-- **THEN** its exact text fills the composer for editing or submission, no task is created, and no timer starts
+- **THEN** its exact text fills the composer and its full category set is staged; the line shows only the selected chip until typing resumes; no task is created, and no timer starts
+
+#### Scenario: Submit carries staged categories
+- **WHEN** the user submits a draft filled from a chip
+- **THEN** the created task carries the staged full category set
 
 #### Scenario: No matches show a placeholder
 - **WHEN** the typed draft matches no Recent
@@ -78,11 +82,15 @@ Activating Start on an open task SHALL start that exact task in one tap when no 
 
 #### Scenario: Track retag reaches the planner
 - **WHEN** the user toggles categories while the linked timer runs
-- **THEN** the planner task shows the same categories without further action
+- **THEN** the planner task shows the same categories in place without navigation
 
 #### Scenario: Planner edit reaches the running timer
 - **WHEN** the user saves category or notes changes on the running task in the editor sheet
-- **THEN** the running draft carries the same values with the ticker and locked name untouched
+- **THEN** the running draft carries the same values with the ticker and locked name untouched, and Track refreshes in place without navigation
+
+#### Scenario: Convergence is visible without navigating
+- **WHEN** categories or notes change on either side while both Today and Track are loaded
+- **THEN** each visible screen reflects the change in place without navigating away and back
 
 #### Scenario: Track shows the running timer at once
 - **WHEN** the user starts an open task from the planner and returns to Track
